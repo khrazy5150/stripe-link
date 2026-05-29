@@ -99,6 +99,14 @@ Example multi-price product shape:
 }
 ```
 
+Important reminder for the Product, Price, and Offer schema design:
+
+Stripe already has the primitives needed for this model. Use one canonical Product, such as Creatine Gummies, with one product ID. Attach multiple Prices to that same Product, such as `$39` for one bottle, `$67` for two bottles, `$89` for three bottles, and `$149` for six bottles. Each Stripe Price can carry metadata, for example `{ "bottles": 2, "discount_pct": 15 }`.
+
+Flash sale and upsell pricing should also be represented as additional prices on the same canonical product, not duplicate products. For example, an upsell price of `$27` can be represented as another price for the same product with local metadata such as `{ "context": "upsell" }`. The Offer document then controls which product ID, price ID, presentation context, eligibility rules, and checkout behavior are active. Stripe does not need to model the complexity; `stripe-link` owns that cleanly in local JSON. One product, multiple prices, no duplicate products.
+
+This likely means the local Offer object needs to become more explicit about selected price context, display context, and eligibility. Revisit this when implementing the Product, Price, and Offer schema vertical slice.
+
 ## Data Model Steps
 
 1. Inventory every DynamoDB table in `stripe-cart`: app config, Stripe keys, platform config, checkout sessions, orders, customers, invoices, notifications, refunds, services, fulfillers, appointments, tenant profiles, products, offers, landing pages, transactions, legal pages, custom domains.
