@@ -1,0 +1,66 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.juniorbay.com/stripe-link/RefundRequest.schema.json",
+  "title": "RefundRequest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "document_type", "tenant_id", "refund_request_id", "status", "customer", "order_id", "created_at"],
+  "properties": {
+    "schema_version": { "type": "string", "const": "2026-05-29" },
+    "document_type": { "type": "string", "const": "refund_request" },
+    "tenant_id": { "type": "string", "minLength": 1 },
+    "refund_request_id": { "type": "string", "minLength": 1 },
+    "status": {
+      "type": "string",
+      "enum": ["new", "manual_review", "approved", "rejected", "refunded", "closed"],
+      "default": "new"
+    },
+    "risk_level": {
+      "type": "string",
+      "enum": ["low", "medium", "high", "unknown"],
+      "default": "unknown"
+    },
+    "customer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["email"],
+      "properties": {
+        "customer_id": { "type": "string" },
+        "name": { "type": "string" },
+        "email": { "type": "string" },
+        "phone": { "type": "string" }
+      }
+    },
+    "order_id": { "type": "string" },
+    "invoice_id": { "type": "string" },
+    "page_id": { "type": "string" },
+    "offer_id": { "type": "string" },
+    "amount": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "currency": { "type": "string", "pattern": "^[a-z]{3}$" },
+        "requested_amount": { "type": "integer", "minimum": 0 },
+        "paid_amount": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "reason": { "type": "string" },
+    "policy_snapshot": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "Resolved refund policy shown to the customer when this request was submitted."
+    },
+    "handling": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "mode": { "type": "string", "enum": ["manual_review", "automatic_acknowledgement"] },
+        "sms_notification_sent": { "type": "boolean", "default": false },
+        "assigned_user_id": { "type": "string" }
+      }
+    },
+    "created_at": { "type": "integer", "minimum": 0 },
+    "updated_at": { "type": "integer", "minimum": 0 },
+    "resolved_at": { "type": ["integer", "null"], "minimum": 0 }
+  }
+}

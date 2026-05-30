@@ -13,8 +13,17 @@ Parameters:
   ProjectPrefix:
     Type: String
     Default: jb
-    AllowedPattern: '^[a-z][a-z0-9-]*$'
+    AllowedValues:
+      - jb
     Description: Prefix used to isolate stripe-link resources from stripe-cart.
+  StripeClientId:
+    Type: String
+    Default: ""
+    Description: Stripe Connect OAuth client ID.
+  StripeConnectRedirectUri:
+    Type: String
+    Default: ""
+    Description: Stripe Connect OAuth redirect URI.
 
 Globals:
   Function:
@@ -30,6 +39,13 @@ Globals:
         APP_CONFIG_TABLE: !Ref AppConfigTable
         STRIPE_KEYS_TABLE: !Ref StripeKeysTable
         PLATFORM_CONFIG_TABLE: !Ref PlatformConfigTable
+        SHIPPING_CONFIG_TABLE: !Ref ShippingConfigTable
+        TENANT_PROFILES_TABLE: !Ref TenantProfilesTable
+        USER_PREFERENCES_TABLE: !Ref UserPreferencesTable
+        USER_PROFILES_TABLE: !Ref UserProfilesTable
+        NOTIFICATIONS_TABLE: !Ref NotificationsTable
+        SERVICES_TABLE: !Ref ServicesTable
+        INVOICES_TABLE: !Ref InvoicesTable
         PRODUCTS_TABLE: !Ref ProductsTable
         OFFERS_TABLE: !Ref OffersTable
         PAGES_TABLE: !Ref PagesTable
@@ -47,6 +63,12 @@ Globals:
         PAGES_PREVIEW_BUCKET: !Ref PagesPreviewBucket
         MEDIA_BUCKET: !Ref MediaBucket
         TEMPLATES_BUCKET: !Ref TemplatesBucket
+        PAGES_DISTRIBUTION_ID: !Ref PagesDistribution
+        PAGES_DISTRIBUTION_DOMAIN: !GetAtt PagesDistribution.DomainName
+        PREVIEW_DISTRIBUTION_ID: !Ref PreviewDistribution
+        PREVIEW_DISTRIBUTION_DOMAIN: !GetAtt PreviewDistribution.DomainName
+        STRIPE_CLIENT_ID: !Ref StripeClientId
+        STRIPE_CONNECT_REDIRECT_URI: !Ref StripeConnectRedirectUri
     Tracing: Active
 
 Resources:
@@ -69,6 +91,474 @@ Resources:
           Properties:
             RestApiId: !Ref RestApi
             Path: /health
+            Method: GET
+
+  ManifestFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${ProjectPrefix}-manifest-${Environment}"
+      CodeUri: src/
+      Handler: handlers.manifest.lambda_handler
+      Description: Runtime manifest for stripe-link resource isolation checks.
+      Events:
+        Manifest:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /manifest
+            Method: GET
+
+  OfferResolveFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${ProjectPrefix}-offer-resolve-${Environment}"
+      CodeUri: src/
+      Handler: handlers.offers.resolve_handler
+      Description: Resolves an offer against canonical product and price JSON.
+      Events:
+        ResolveOffer:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /offers/resolve
+            Method: POST
+
+  ProductsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${ProjectPrefix}-products-api-${Environment}"
+      CodeUri: src/
+      Handler: handlers.products.handler
+      Description: JSON-first products API.
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ProductsTable
+      Events:
+        ProductsList:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /products
+            Method: GET
+        ProductsCreate:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /products
+            Method: POST
+        ProductsGet:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /products/{product_id}
+            Method: GET
+
+  OffersFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${ProjectPrefix}-offers-api-${Environment}"
+      CodeUri: src/
+      Handler: handlers.offers.handler
+      Description: JSON-first offers API.
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref OffersTable
+      Events:
+        OffersList:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /offers
+            Method: GET
+        OffersCreate:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /offers
+            Method: POST
+        OffersGet:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /offers/{offer_id}
+            Method: GET
+
+  PagesFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${ProjectPrefix}-pages-api-${Environment}"
+      CodeUri: src/
+      Handler: handlers.pages.handler
+      Description: JSON-first pages API.
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref PagesTable
+      Events:
+        PagesList:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /pages
+            Method: GET
+        PagesCreate:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /pages
+            Method: POST
+        PagesGet:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /pages/{page_id}
+            Method: GET
+
+  PageRenderFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${ProjectPrefix}-page-render-${Environment}"
+      CodeUri: src/
+      Handler: handlers.page_render.handler
+      Description: Renders page JSON, offer JSON, and product JSON into HTML.
+      Events:
+        PageRender:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /pages/render
+            Method: POST
+
+  RegistrationFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${ProjectPrefix}-registration-api-${Environment}"
+      CodeUri: src/
+      Handler: handlers.registration.handler
+      Description: Tenant registration and profile API.
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref TenantProfilesTable
+      Events:
+        RegisterTenant:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /register
+            Method: POST
+        GetTenant:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /tenants/{tenant_id}
+            Method: GET
+
+  StripeKeysFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${ProjectPrefix}-stripe-keys-api-${Environment}"
+      CodeUri: src/
+      Handler: handlers.stripe_keys.handler
+      Description: Tenant Stripe key metadata API.
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref StripeKeysTable
+      Events:
+        GetStripeKeys:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /stripe/keys
+            Method: GET
+        SaveStripeKeys:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /stripe/keys
+            Method: PUT
+
+  StripeConnectStartFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${ProjectPrefix}-stripe-connect-start-${Environment}"
+      CodeUri: src/
+      Handler: handlers.stripe_connect.start_handler
+      Description: Starts Stripe Connect OAuth.
+      Events:
+        StripeConnectStart:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /stripe/connect/start
+            Method: GET
+
+  StripeConnectStatusFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${ProjectPrefix}-stripe-connect-status-${Environment}"
+      CodeUri: src/
+      Handler: handlers.stripe_connect.status_handler
+      Description: Reads or updates tenant Stripe Connect status.
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref StripeKeysTable
+      Events:
+        GetStripeConnectStatus:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /stripe/connect/status
+            Method: GET
+        SaveStripeConnectStatus:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /stripe/connect/status
+            Method: PUT
+
+  ConfigFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${ProjectPrefix}-config-api-${Environment}"
+      CodeUri: src/
+      Handler: handlers.config.handler
+      Description: Tenant configuration API.
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref PlatformConfigTable
+      Events:
+        GetConfig:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /config
+            Method: GET
+        SaveConfig:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /config
+            Method: PUT
+
+  PreferencesFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${ProjectPrefix}-preferences-api-${Environment}"
+      CodeUri: src/
+      Handler: handlers.preferences.handler
+      Description: User preferences API.
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref UserPreferencesTable
+      Events:
+        GetPreferences:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /preferences
+            Method: GET
+        SavePreferences:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /preferences
+            Method: PUT
+
+  UserProfileFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${ProjectPrefix}-user-profile-api-${Environment}"
+      CodeUri: src/
+      Handler: handlers.profile.handler
+      Description: User profile API.
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref UserProfilesTable
+      Events:
+        GetProfile:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /profile
+            Method: GET
+        SaveProfile:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /profile
+            Method: PUT
+
+  NotificationsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${ProjectPrefix}-notifications-api-${Environment}"
+      CodeUri: src/
+      Handler: handlers.notifications.handler
+      Description: Notifications and refund request API.
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref NotificationsTable
+      Events:
+        GetNotifications:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /notifications
+            Method: GET
+        SaveNotification:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /notifications
+            Method: PUT
+        GetRefundRequests:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /notifications/refund-requests
+            Method: GET
+        SaveRefundRequest:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /notifications/refund-requests
+            Method: PUT
+
+  ShippingFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${ProjectPrefix}-shipping-api-${Environment}"
+      CodeUri: src/
+      Handler: handlers.shipping.handler
+      Description: Tenant shipping configuration API.
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ShippingConfigTable
+      Events:
+        GetShipping:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /shipping
+            Method: GET
+        SaveShipping:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /shipping
+            Method: PUT
+
+  CustomersFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${ProjectPrefix}-customers-api-${Environment}"
+      CodeUri: src/
+      Handler: handlers.customers.handler
+      Description: Customer management API.
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref CustomersTable
+      Events:
+        CustomersList:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /customers
+            Method: GET
+        CustomersSave:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /customers
+            Method: PUT
+        CustomersGet:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /customers/{customer_id}
+            Method: GET
+
+  ServicesFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${ProjectPrefix}-services-api-${Environment}"
+      CodeUri: src/
+      Handler: handlers.services.handler
+      Description: Service booking, fulfillers, availability, and appointments API.
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ServicesTable
+      Events:
+        ServicesList:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /services
+            Method: GET
+        ServicesSave:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /services
+            Method: PUT
+        ServicesGet:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /services/{service_id}
+            Method: GET
+        Fulfillers:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /services/fulfillers
+            Method: ANY
+        AvailabilityDefaults:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /services/availability/defaults
+            Method: ANY
+        AvailabilityExceptions:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /services/availability/exceptions
+            Method: ANY
+        Appointments:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /services/appointments
+            Method: ANY
+
+  InvoicesFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${ProjectPrefix}-invoices-api-${Environment}"
+      CodeUri: src/
+      Handler: handlers.invoices.handler
+      Description: Service and custom invoice API.
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref InvoicesTable
+      Events:
+        InvoicesList:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /invoices
+            Method: GET
+        InvoicesSave:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /invoices
+            Method: PUT
+        InvoicesGet:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /invoices/{invoice_id}
             Method: GET
 
   AppConfigTable:
@@ -116,6 +606,206 @@ Resources:
       KeySchema:
         - AttributeName: tenant_id
           KeyType: HASH
+
+  ShippingConfigTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "${ProjectPrefix}-shipping-config-${Environment}"
+      BillingMode: PAY_PER_REQUEST
+      SSESpecification:
+        SSEEnabled: true
+      AttributeDefinitions:
+        - AttributeName: tenant_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: tenant_id
+          KeyType: HASH
+
+  TenantProfilesTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "${ProjectPrefix}-tenant-profiles-${Environment}"
+      BillingMode: PAY_PER_REQUEST
+      SSESpecification:
+        SSEEnabled: true
+      AttributeDefinitions:
+        - AttributeName: PK
+          AttributeType: S
+        - AttributeName: SK
+          AttributeType: S
+        - AttributeName: GSI1PK
+          AttributeType: S
+        - AttributeName: GSI1SK
+          AttributeType: S
+      KeySchema:
+        - AttributeName: PK
+          KeyType: HASH
+        - AttributeName: SK
+          KeyType: RANGE
+      GlobalSecondaryIndexes:
+        - IndexName: GSI1
+          KeySchema:
+            - AttributeName: GSI1PK
+              KeyType: HASH
+            - AttributeName: GSI1SK
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+
+  UserPreferencesTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "${ProjectPrefix}-user-preferences-${Environment}"
+      BillingMode: PAY_PER_REQUEST
+      SSESpecification:
+        SSEEnabled: true
+      AttributeDefinitions:
+        - AttributeName: PK
+          AttributeType: S
+        - AttributeName: SK
+          AttributeType: S
+        - AttributeName: GSI1PK
+          AttributeType: S
+        - AttributeName: GSI1SK
+          AttributeType: S
+      KeySchema:
+        - AttributeName: PK
+          KeyType: HASH
+        - AttributeName: SK
+          KeyType: RANGE
+      GlobalSecondaryIndexes:
+        - IndexName: GSI1
+          KeySchema:
+            - AttributeName: GSI1PK
+              KeyType: HASH
+            - AttributeName: GSI1SK
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+
+  UserProfilesTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "${ProjectPrefix}-user-profiles-${Environment}"
+      BillingMode: PAY_PER_REQUEST
+      SSESpecification:
+        SSEEnabled: true
+      AttributeDefinitions:
+        - AttributeName: PK
+          AttributeType: S
+        - AttributeName: SK
+          AttributeType: S
+        - AttributeName: GSI1PK
+          AttributeType: S
+        - AttributeName: GSI1SK
+          AttributeType: S
+      KeySchema:
+        - AttributeName: PK
+          KeyType: HASH
+        - AttributeName: SK
+          KeyType: RANGE
+      GlobalSecondaryIndexes:
+        - IndexName: GSI1
+          KeySchema:
+            - AttributeName: GSI1PK
+              KeyType: HASH
+            - AttributeName: GSI1SK
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+
+  NotificationsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "${ProjectPrefix}-notifications-${Environment}"
+      BillingMode: PAY_PER_REQUEST
+      SSESpecification:
+        SSEEnabled: true
+      AttributeDefinitions:
+        - AttributeName: PK
+          AttributeType: S
+        - AttributeName: SK
+          AttributeType: S
+        - AttributeName: GSI1PK
+          AttributeType: S
+        - AttributeName: GSI1SK
+          AttributeType: S
+      KeySchema:
+        - AttributeName: PK
+          KeyType: HASH
+        - AttributeName: SK
+          KeyType: RANGE
+      GlobalSecondaryIndexes:
+        - IndexName: GSI1
+          KeySchema:
+            - AttributeName: GSI1PK
+              KeyType: HASH
+            - AttributeName: GSI1SK
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+
+  ServicesTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "${ProjectPrefix}-services-${Environment}"
+      BillingMode: PAY_PER_REQUEST
+      SSESpecification:
+        SSEEnabled: true
+      AttributeDefinitions:
+        - AttributeName: PK
+          AttributeType: S
+        - AttributeName: SK
+          AttributeType: S
+        - AttributeName: GSI1PK
+          AttributeType: S
+        - AttributeName: GSI1SK
+          AttributeType: S
+      KeySchema:
+        - AttributeName: PK
+          KeyType: HASH
+        - AttributeName: SK
+          KeyType: RANGE
+      GlobalSecondaryIndexes:
+        - IndexName: GSI1
+          KeySchema:
+            - AttributeName: GSI1PK
+              KeyType: HASH
+            - AttributeName: GSI1SK
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+
+  InvoicesTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "${ProjectPrefix}-invoices-${Environment}"
+      BillingMode: PAY_PER_REQUEST
+      SSESpecification:
+        SSEEnabled: true
+      AttributeDefinitions:
+        - AttributeName: PK
+          AttributeType: S
+        - AttributeName: SK
+          AttributeType: S
+        - AttributeName: GSI1PK
+          AttributeType: S
+        - AttributeName: GSI1SK
+          AttributeType: S
+      KeySchema:
+        - AttributeName: PK
+          KeyType: HASH
+        - AttributeName: SK
+          KeyType: RANGE
+      GlobalSecondaryIndexes:
+        - IndexName: GSI1
+          KeySchema:
+            - AttributeName: GSI1PK
+              KeyType: HASH
+            - AttributeName: GSI1SK
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
 
   ProductsTable:
     Type: AWS::DynamoDB::Table
@@ -398,6 +1088,134 @@ Resources:
       VersioningConfiguration:
         Status: Enabled
 
+  PagesOriginAccessControl:
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig:
+        Name: !Sub "${ProjectPrefix}-pages-oac-${Environment}"
+        Description: !Sub "OAC for ${ProjectPrefix} published pages ${Environment}"
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
+
+  PagesDistribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Enabled: true
+        Comment: !Sub "${ProjectPrefix} stripe-link published pages ${Environment}"
+        DefaultRootObject: index.html
+        HttpVersion: http2and3
+        PriceClass: PriceClass_100
+        Origins:
+          - Id: PagesS3Origin
+            DomainName: !GetAtt PagesBucket.RegionalDomainName
+            OriginAccessControlId: !Ref PagesOriginAccessControl
+            S3OriginConfig:
+              OriginAccessIdentity: ""
+        DefaultCacheBehavior:
+          TargetOriginId: PagesS3Origin
+          ViewerProtocolPolicy: redirect-to-https
+          AllowedMethods:
+            - GET
+            - HEAD
+            - OPTIONS
+          CachedMethods:
+            - GET
+            - HEAD
+          Compress: true
+          CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6
+        CustomErrorResponses:
+          - ErrorCode: 403
+            ResponseCode: 404
+            ResponsePagePath: /404.html
+            ErrorCachingMinTTL: 60
+          - ErrorCode: 404
+            ResponseCode: 404
+            ResponsePagePath: /404.html
+            ErrorCachingMinTTL: 60
+
+  PagesBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref PagesBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: AllowCloudFrontRead
+            Effect: Allow
+            Principal:
+              Service: cloudfront.amazonaws.com
+            Action: s3:GetObject
+            Resource: !Sub "${PagesBucket.Arn}/*"
+            Condition:
+              StringEquals:
+                AWS:SourceArn: !Sub "arn:aws:cloudfront::${AWS::AccountId}:distribution/${PagesDistribution}"
+
+  PreviewOriginAccessControl:
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig:
+        Name: !Sub "${ProjectPrefix}-pages-preview-oac-${Environment}"
+        Description: !Sub "OAC for ${ProjectPrefix} preview pages ${Environment}"
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
+
+  PreviewDistribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Enabled: true
+        Comment: !Sub "${ProjectPrefix} stripe-link preview pages ${Environment}"
+        DefaultRootObject: index.html
+        HttpVersion: http2and3
+        PriceClass: PriceClass_100
+        Origins:
+          - Id: PreviewS3Origin
+            DomainName: !GetAtt PagesPreviewBucket.RegionalDomainName
+            OriginAccessControlId: !Ref PreviewOriginAccessControl
+            S3OriginConfig:
+              OriginAccessIdentity: ""
+        DefaultCacheBehavior:
+          TargetOriginId: PreviewS3Origin
+          ViewerProtocolPolicy: redirect-to-https
+          AllowedMethods:
+            - GET
+            - HEAD
+            - OPTIONS
+          CachedMethods:
+            - GET
+            - HEAD
+          Compress: true
+          CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
+        CustomErrorResponses:
+          - ErrorCode: 403
+            ResponseCode: 404
+            ResponsePagePath: /404.html
+            ErrorCachingMinTTL: 0
+          - ErrorCode: 404
+            ResponseCode: 404
+            ResponsePagePath: /404.html
+            ErrorCachingMinTTL: 0
+
+  PagesPreviewBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref PagesPreviewBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: AllowCloudFrontRead
+            Effect: Allow
+            Principal:
+              Service: cloudfront.amazonaws.com
+            Action: s3:GetObject
+            Resource: !Sub "${PagesPreviewBucket.Arn}/*"
+            Condition:
+              StringEquals:
+                AWS:SourceArn: !Sub "arn:aws:cloudfront::${AWS::AccountId}:distribution/${PreviewDistribution}"
+
 Outputs:
   ApiUrl:
     Description: Base URL for the stripe-link API.
@@ -405,6 +1223,60 @@ Outputs:
   HealthUrl:
     Description: Health check endpoint.
     Value: !Sub "https://${RestApi}.execute-api.${AWS::Region}.amazonaws.com/${Environment}/health"
+  ManifestUrl:
+    Description: Runtime manifest endpoint.
+    Value: !Sub "https://${RestApi}.execute-api.${AWS::Region}.amazonaws.com/${Environment}/manifest"
+  OfferResolveUrl:
+    Description: Offer resolution endpoint.
+    Value: !Sub "https://${RestApi}.execute-api.${AWS::Region}.amazonaws.com/${Environment}/offers/resolve"
+  ProductsUrl:
+    Description: Products API endpoint.
+    Value: !Sub "https://${RestApi}.execute-api.${AWS::Region}.amazonaws.com/${Environment}/products"
+  OffersUrl:
+    Description: Offers API endpoint.
+    Value: !Sub "https://${RestApi}.execute-api.${AWS::Region}.amazonaws.com/${Environment}/offers"
+  PagesUrl:
+    Description: Pages API endpoint.
+    Value: !Sub "https://${RestApi}.execute-api.${AWS::Region}.amazonaws.com/${Environment}/pages"
+  PageRenderUrl:
+    Description: Page render endpoint.
+    Value: !Sub "https://${RestApi}.execute-api.${AWS::Region}.amazonaws.com/${Environment}/pages/render"
+  RegisterUrl:
+    Description: Tenant registration endpoint.
+    Value: !Sub "https://${RestApi}.execute-api.${AWS::Region}.amazonaws.com/${Environment}/register"
+  StripeKeysUrl:
+    Description: Stripe keys endpoint.
+    Value: !Sub "https://${RestApi}.execute-api.${AWS::Region}.amazonaws.com/${Environment}/stripe/keys"
+  StripeConnectStartUrl:
+    Description: Stripe Connect start endpoint.
+    Value: !Sub "https://${RestApi}.execute-api.${AWS::Region}.amazonaws.com/${Environment}/stripe/connect/start"
+  ConfigUrl:
+    Description: Tenant configuration endpoint.
+    Value: !Sub "https://${RestApi}.execute-api.${AWS::Region}.amazonaws.com/${Environment}/config"
+  PreferencesUrl:
+    Description: User preferences endpoint.
+    Value: !Sub "https://${RestApi}.execute-api.${AWS::Region}.amazonaws.com/${Environment}/preferences"
+  UserProfileUrl:
+    Description: User profile endpoint.
+    Value: !Sub "https://${RestApi}.execute-api.${AWS::Region}.amazonaws.com/${Environment}/profile"
+  NotificationsUrl:
+    Description: Notifications endpoint.
+    Value: !Sub "https://${RestApi}.execute-api.${AWS::Region}.amazonaws.com/${Environment}/notifications"
+  RefundRequestsUrl:
+    Description: Refund requests endpoint.
+    Value: !Sub "https://${RestApi}.execute-api.${AWS::Region}.amazonaws.com/${Environment}/notifications/refund-requests"
+  ShippingUrl:
+    Description: Shipping configuration endpoint.
+    Value: !Sub "https://${RestApi}.execute-api.${AWS::Region}.amazonaws.com/${Environment}/shipping"
+  CustomersUrl:
+    Description: Customers API endpoint.
+    Value: !Sub "https://${RestApi}.execute-api.${AWS::Region}.amazonaws.com/${Environment}/customers"
+  ServicesUrl:
+    Description: Services API endpoint.
+    Value: !Sub "https://${RestApi}.execute-api.${AWS::Region}.amazonaws.com/${Environment}/services"
+  InvoicesUrl:
+    Description: Invoices API endpoint.
+    Value: !Sub "https://${RestApi}.execute-api.${AWS::Region}.amazonaws.com/${Environment}/invoices"
   PagesBucketName:
     Description: Published pages bucket.
     Value: !Ref PagesBucket
@@ -417,3 +1289,84 @@ Outputs:
   TemplatesBucketName:
     Description: Template bucket.
     Value: !Ref TemplatesBucket
+  PagesDistributionId:
+    Description: CloudFront distribution ID for published pages.
+    Value: !Ref PagesDistribution
+  PagesDistributionDomainName:
+    Description: CloudFront distribution domain for published pages.
+    Value: !GetAtt PagesDistribution.DomainName
+  PreviewDistributionId:
+    Description: CloudFront distribution ID for preview pages.
+    Value: !Ref PreviewDistribution
+  PreviewDistributionDomainName:
+    Description: CloudFront distribution domain for preview pages.
+    Value: !GetAtt PreviewDistribution.DomainName
+  AppConfigTableName:
+    Description: App configuration table.
+    Value: !Ref AppConfigTable
+  StripeKeysTableName:
+    Description: Tenant Stripe keys table.
+    Value: !Ref StripeKeysTable
+  PlatformConfigTableName:
+    Description: Platform configuration table.
+    Value: !Ref PlatformConfigTable
+  TenantProfilesTableName:
+    Description: Tenant profiles table.
+    Value: !Ref TenantProfilesTable
+  UserPreferencesTableName:
+    Description: User preferences table.
+    Value: !Ref UserPreferencesTable
+  UserProfilesTableName:
+    Description: User profiles table.
+    Value: !Ref UserProfilesTable
+  NotificationsTableName:
+    Description: Notifications table.
+    Value: !Ref NotificationsTable
+  ServicesTableName:
+    Description: Services table.
+    Value: !Ref ServicesTable
+  InvoicesTableName:
+    Description: Invoices table.
+    Value: !Ref InvoicesTable
+  ShippingConfigTableName:
+    Description: Shipping configuration table.
+    Value: !Ref ShippingConfigTable
+  ProductsTableName:
+    Description: Products table.
+    Value: !Ref ProductsTable
+  OffersTableName:
+    Description: Offers table.
+    Value: !Ref OffersTable
+  PagesTableName:
+    Description: Pages table.
+    Value: !Ref PagesTable
+  CheckoutSessionsTableName:
+    Description: Checkout sessions table.
+    Value: !Ref CheckoutSessionsTable
+  OrdersTableName:
+    Description: Orders table.
+    Value: !Ref OrdersTable
+  CustomersTableName:
+    Description: Customers table.
+    Value: !Ref CustomersTable
+  DocumentEventsTableName:
+    Description: Document events table.
+    Value: !Ref DocumentEventsTable
+  RoutesTableName:
+    Description: Routes table.
+    Value: !Ref RoutesTable
+  TierPoliciesTableName:
+    Description: Tier policies table.
+    Value: !Ref TierPoliciesTable
+  MediaTableName:
+    Description: Media table.
+    Value: !Ref MediaTable
+  ThemesTableName:
+    Description: Themes table.
+    Value: !Ref ThemesTable
+  LegalPagesTableName:
+    Description: Legal pages table.
+    Value: !Ref LegalPagesTable
+  CustomDomainsTableName:
+    Description: Custom domains table.
+    Value: !Ref CustomDomainsTable

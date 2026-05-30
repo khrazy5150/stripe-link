@@ -1,0 +1,55 @@
+{
+  "schema_version": "2026-05-29",
+  "document_type": "shipping_config",
+  "tenant_id": "tenant_demo",
+  "enabled": false,
+  "test_mode": true,
+  "auto_fulfill_after_label_purchase": false,
+  "provider": {
+    "name": "mock",
+    "api_key_ref": "secretsmanager://jb-shipping-provider-api-key-dev",
+    "base_url": "https://shipping.example.test",
+    "connection_status": "untested"
+  },
+  "ship_from_address": {
+    "name": "Demo Supplements",
+    "street1": "123 Warehouse Way",
+    "street2": "",
+    "city": "Denver",
+    "state": "CO",
+    "postal_code": "80202",
+    "country": "US",
+    "phone": "+15551234567",
+    "email": "shipping@example.com"
+  },
+  "return_address": {
+    "name": "Demo Supplements Returns",
+    "street1": "123 Warehouse Way",
+    "street2": "",
+    "city": "Denver",
+    "state": "CO",
+    "postal_code": "80202",
+    "country": "US",
+    "phone": "+15551234567",
+    "email": "returns@example.com"
+  },
+  "default_parcel": {
+    "length": 10,
+    "width": 8,
+    "height": 4,
+    "weight": 16,
+    "distance_unit": "in",
+    "mass_unit": "oz"
+  },
+  "rate_options": {
+    "default_service_level": "ground",
+    "allowed_carriers": [],
+    "markup_amount": 0,
+    "free_shipping_threshold": 0
+  },
+  "label_options": {
+    "format": "pdf",
+    "size": "4x6"
+  },
+  "updated_at": 1780092000
+}

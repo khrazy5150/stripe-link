@@ -1,0 +1,80 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.stripe-link.local/Service.schema.json",
+  "title": "Service",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "document_type", "tenant_id", "service_id", "name", "duration_minutes", "price"],
+  "properties": {
+    "schema_version": { "type": "string" },
+    "document_type": { "const": "service" },
+    "tenant_id": { "type": "string" },
+    "service_id": { "type": "string" },
+    "name": { "type": "string" },
+    "description": { "type": "string" },
+    "duration_minutes": { "type": "integer", "minimum": 1 },
+    "price": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["currency", "unit_amount"],
+      "properties": {
+        "currency": { "type": "string" },
+        "unit_amount": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "location_mode": { "enum": ["onsite", "mobile", "virtual", "hybrid"] },
+    "linked_product": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "product_id": { "type": "string" },
+        "price_id": { "type": "string" }
+      }
+    },
+    "presentation": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "hero_image_url": { "type": "string" }
+      }
+    },
+    "booking_rules": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "check_in_required": { "type": "boolean" },
+        "check_in_window_start_minutes": { "type": "integer", "minimum": 0 },
+        "check_in_window_end_minutes": { "type": "integer", "minimum": 0 },
+        "check_in_label": { "type": "string" },
+        "completion_required": { "type": "boolean" },
+        "completion_label": { "type": "string" }
+      }
+    },
+    "default_fulfiller_id": { "type": "string" },
+    "allowed_fulfillers": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["fulfiller_id", "enabled"],
+        "properties": {
+          "fulfiller_id": { "type": "string" },
+          "enabled": { "type": "boolean" },
+          "tips_to_fulfiller": { "type": "boolean" },
+          "compensation_override": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "type": { "enum": ["use_fulfiller_default", "flat_fee", "percent"] },
+              "amount": { "type": "number", "minimum": 0 }
+            }
+          }
+        }
+      }
+    },
+    "active": { "type": "boolean" },
+    "metadata": { "type": "object" },
+    "created_at": { "type": "integer" },
+    "updated_at": { "type": "integer" }
+  }
+}

@@ -1,0 +1,222 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.juniorbay.com/stripe-link/Offer.schema.json",
+  "title": "Offer",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "document_type",
+    "tenant_id",
+    "offer_id",
+    "name",
+    "active",
+    "items",
+    "checkout"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "2026-05-29"
+    },
+    "document_type": {
+      "type": "string",
+      "const": "offer"
+    },
+    "tenant_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "offer_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1
+    },
+    "active": {
+      "type": "boolean"
+    },
+    "context": {
+      "type": "string",
+      "enum": ["standard", "sale", "flash_sale", "upsell", "downsell", "order_bump", "subscription"]
+    },
+    "items": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["product_id"],
+        "oneOf": [
+          {
+            "required": ["price_id", "quantity"]
+          },
+          {
+            "required": ["selectable_prices", "default_price_id"]
+          }
+        ],
+        "properties": {
+          "product_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "price_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "quantity": {
+            "type": "integer",
+            "minimum": 1,
+            "default": 1,
+            "description": "Checkout multiplier for the fixed price_id path. For selectable_prices, bundle quantity belongs on each selectable price option or the canonical Price."
+          },
+          "selectable_prices": {
+            "type": "array",
+            "minItems": 1,
+            "description": "Price options the customer can choose from for this product within one offer.",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["price_id"],
+              "properties": {
+                "price_id": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "quantity": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "label": {
+                  "type": "string"
+                },
+                "badge": {
+                  "type": "string"
+                },
+                "display_discount_pct": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 100,
+                  "description": "Offer-context display override only; pricing still comes from the selected Stripe Price."
+                }
+              }
+            }
+          },
+          "default_price_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "display_discount_pct": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 100,
+            "description": "Offer-context display override only; pricing still comes from the selected Stripe Price."
+          },
+          "display_label": {
+            "type": "string"
+          },
+          "presentation_context": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "eligibility": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "requires_prior_purchase": {
+          "type": "boolean",
+          "default": false
+        },
+        "allowed_price_contexts": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "starts_at": {
+          "type": ["integer", "null"],
+          "minimum": 0
+        },
+        "ends_at": {
+          "type": ["integer", "null"],
+          "minimum": 0
+        }
+      }
+    },
+    "presentation": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "Offer-level copy, badges, urgency, and display metadata. Page schemas will constrain this later."
+    },
+    "refund_policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Offer-level refund policy override or resolved policy derived from selected product policies.",
+      "required": ["source", "refund_window", "condition", "return_method", "short_label", "full_policy"],
+      "properties": {
+        "source": {
+          "type": "string",
+          "enum": ["product", "offer_override"]
+        },
+        "product_id": { "type": "string" },
+        "refund_window": {
+          "type": "string",
+          "enum": ["non_refundable", "72_hours", "7_days", "14_days", "30_days", "60_days", "custom"]
+        },
+        "condition": {
+          "type": "string",
+          "enum": ["any", "unused", "unopened", "defective_only", "not_downloaded", "custom"]
+        },
+        "return_method": {
+          "type": "string",
+          "enum": ["no_return_customer_keeps", "return_required", "digital_revoke_access", "custom"]
+        },
+        "short_label": { "type": "string" },
+        "full_policy": { "type": "string" }
+      }
+    },
+    "checkout": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode"],
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": ["payment", "subscription"]
+        },
+        "success_url": {
+          "type": "string"
+        },
+        "cancel_url": {
+          "type": "string"
+        },
+        "allow_promotion_codes": {
+          "type": "boolean",
+          "default": false
+        },
+        "shipping": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "metadata": {
+          "type": "object",
+          "additionalProperties": {
+            "type": ["string", "number", "integer", "boolean", "null"]
+          }
+        }
+      }
+    },
+    "created_at": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "updated_at": {
+      "type": "integer",
+      "minimum": 0
+    }
+  }
+}

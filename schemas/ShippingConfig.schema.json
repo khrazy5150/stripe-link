@@ -1,0 +1,96 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.juniorbay.com/stripe-link/ShippingConfig.schema.json",
+  "title": "ShippingConfig",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "document_type", "tenant_id", "provider", "ship_from_address", "return_address", "default_parcel"],
+  "properties": {
+    "schema_version": { "type": "string", "const": "2026-05-29" },
+    "document_type": { "type": "string", "const": "shipping_config" },
+    "tenant_id": { "type": "string", "minLength": 1 },
+    "enabled": { "type": "boolean", "default": false },
+    "test_mode": { "type": "boolean", "default": true },
+    "auto_fulfill_after_label_purchase": { "type": "boolean", "default": false },
+    "provider": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "enum": ["shippo", "easypost", "shipstation", "easyship", "mock"]
+        },
+        "api_key_ref": {
+          "type": "string",
+          "description": "Reference to the encrypted provider API key; never store raw API keys in this document."
+        },
+        "base_url": { "type": "string" },
+        "connection_status": {
+          "type": "string",
+          "enum": ["not_configured", "untested", "connected", "failed"],
+          "default": "not_configured"
+        },
+        "last_tested_at": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "ship_from_address": { "$ref": "#/$defs/address" },
+    "return_address": { "$ref": "#/$defs/address" },
+    "default_parcel": { "$ref": "#/$defs/parcel" },
+    "rate_options": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "default_service_level": { "type": "string" },
+        "allowed_carriers": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "markup_amount": { "type": "integer", "minimum": 0 },
+        "free_shipping_threshold": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "label_options": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "format": { "type": "string", "enum": ["pdf", "png", "zpl"], "default": "pdf" },
+        "size": { "type": "string", "enum": ["4x6", "8.5x11"], "default": "4x6" }
+      }
+    },
+    "updated_at": { "type": "integer", "minimum": 0 }
+  },
+  "$defs": {
+    "address": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "street1", "city", "state", "postal_code", "country"],
+      "properties": {
+        "name": { "type": "string" },
+        "company": { "type": "string" },
+        "street1": { "type": "string" },
+        "street2": { "type": "string" },
+        "city": { "type": "string" },
+        "state": { "type": "string" },
+        "postal_code": { "type": "string" },
+        "country": { "type": "string", "minLength": 2, "maxLength": 2 },
+        "phone": { "type": "string" },
+        "email": { "type": "string" },
+        "residential": { "type": "boolean", "default": false }
+      }
+    },
+    "parcel": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["length", "width", "height", "weight", "distance_unit", "mass_unit"],
+      "properties": {
+        "length": { "type": "number", "exclusiveMinimum": 0 },
+        "width": { "type": "number", "exclusiveMinimum": 0 },
+        "height": { "type": "number", "exclusiveMinimum": 0 },
+        "weight": { "type": "number", "exclusiveMinimum": 0 },
+        "distance_unit": { "type": "string", "enum": ["in", "cm"] },
+        "mass_unit": { "type": "string", "enum": ["oz", "lb", "g", "kg"] }
+      }
+    }
+  }
+}

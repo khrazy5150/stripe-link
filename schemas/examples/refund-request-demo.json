@@ -1,0 +1,37 @@
+{
+  "schema_version": "2026-05-29",
+  "document_type": "refund_request",
+  "tenant_id": "tenant_demo",
+  "refund_request_id": "refund_req_demo123",
+  "status": "manual_review",
+  "risk_level": "low",
+  "customer": {
+    "customer_id": "cus_demo123",
+    "name": "Demo Customer",
+    "email": "customer@example.com",
+    "phone": "+15551234567"
+  },
+  "order_id": "order_demo123",
+  "invoice_id": "inv_demo123",
+  "page_id": "page_demo123",
+  "offer_id": "offer_demo123",
+  "amount": {
+    "currency": "usd",
+    "requested_amount": 3900,
+    "paid_amount": 3900
+  },
+  "reason": "Customer requested a refund from the order confirmation page.",
+  "policy_snapshot": {
+    "source": "offer",
+    "short_label": "30-day money-back",
+    "full_policy": "Refunds are available within 30 days of delivery in unused condition."
+  },
+  "handling": {
+    "mode": "manual_review",
+    "sms_notification_sent": false,
+    "assigned_user_id": "owner@example.com"
+  },
+  "created_at": 1780092000,
+  "updated_at": 1780092000,
+  "resolved_at": null
+}

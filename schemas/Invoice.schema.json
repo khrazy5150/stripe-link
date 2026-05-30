@@ -1,0 +1,120 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.stripe-link.local/Invoice.schema.json",
+  "title": "Invoice",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "document_type", "tenant_id", "invoice_id", "status", "customer", "line_items", "amounts"],
+  "properties": {
+    "schema_version": { "type": "string" },
+    "document_type": { "const": "invoice" },
+    "tenant_id": { "type": "string" },
+    "invoice_id": { "type": "string" },
+    "stripe_invoice_id": { "type": "string" },
+    "stripe_customer_id": { "type": "string" },
+    "stripe_mode": { "enum": ["test", "live"] },
+    "status": { "enum": ["draft", "open", "paid", "void", "uncollectible", "deleted"] },
+    "collection_method": { "enum": ["send_invoice", "charge_automatically"] },
+    "customer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["email"],
+      "properties": {
+        "customer_id": { "type": "string" },
+        "name": { "type": "string" },
+        "email": { "type": "string" },
+        "phone": { "type": "string" },
+        "billing_address": { "type": ["object", "null"] },
+        "shipping_address": { "type": ["object", "null"] }
+      }
+    },
+    "description": { "type": "string" },
+    "presentation": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "hero_image_url": { "type": "string" },
+        "memo": { "type": "string" },
+        "footer": { "type": "string" }
+      }
+    },
+    "line_items": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["description", "quantity", "unit_amount"],
+        "properties": {
+          "line_item_id": { "type": "string" },
+          "type": { "enum": ["service", "product", "custom", "fee", "discount"] },
+          "description": { "type": "string" },
+          "quantity": { "type": "integer", "minimum": 1 },
+          "unit_amount": { "type": "integer" },
+          "amount": { "type": "integer" },
+          "currency": { "type": "string" },
+          "service_id": { "type": "string" },
+          "appointment_id": { "type": "string" },
+          "product_id": { "type": "string" },
+          "price_id": { "type": "string" },
+          "metadata": { "type": "object" }
+        }
+      }
+    },
+    "amounts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["currency", "subtotal", "total", "amount_due", "amount_paid"],
+      "properties": {
+        "currency": { "type": "string" },
+        "subtotal": { "type": "integer" },
+        "discount_total": { "type": "integer" },
+        "tax_total": { "type": "integer" },
+        "shipping_total": { "type": "integer" },
+        "total": { "type": "integer" },
+        "amount_due": { "type": "integer" },
+        "amount_paid": { "type": "integer" },
+        "amount_remaining": { "type": "integer" }
+      }
+    },
+    "payment": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "payment_intent_id": { "type": "string" },
+        "hosted_invoice_url": { "type": "string" },
+        "invoice_pdf_url": { "type": "string" },
+        "receipt_url": { "type": "string" },
+        "paid_at": { "type": ["integer", "null"] }
+      }
+    },
+    "delivery": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "days_until_due": { "type": "integer", "minimum": 0 },
+        "due_at": { "type": ["integer", "null"] },
+        "sent_at": { "type": ["integer", "null"] },
+        "last_resent_at": { "type": ["integer", "null"] },
+        "share_url": { "type": "string" },
+        "recipient_email": { "type": "string" },
+        "send_count": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "service_id": { "type": "string" },
+        "appointment_id": { "type": "string" },
+        "order_id": { "type": "string" },
+        "created_from": { "enum": ["dashboard", "appointment", "order", "api"] }
+      }
+    },
+    "metadata": { "type": "object" },
+    "created_at": { "type": "integer" },
+    "updated_at": { "type": "integer" },
+    "finalized_at": { "type": ["integer", "null"] },
+    "voided_at": { "type": ["integer", "null"] }
+  }
+}

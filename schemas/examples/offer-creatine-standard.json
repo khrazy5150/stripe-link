@@ -1,0 +1,64 @@
+{
+  "schema_version": "2026-05-29",
+  "document_type": "offer",
+  "tenant_id": "tenant_demo",
+  "offer_id": "offer_creatine_standard",
+  "name": "Creatine Gummies Standard Offer",
+  "active": true,
+  "context": "standard",
+  "items": [
+    {
+      "product_id": "prod_creatine_gummies",
+      "selectable_prices": [
+        {
+          "price_id": "price_1bottle",
+          "quantity": 1,
+          "label": "1 Bottle"
+        },
+        {
+          "price_id": "price_2bottle",
+          "quantity": 2,
+          "label": "2 Bottles",
+          "badge": "Most Popular",
+          "display_discount_pct": 15
+        },
+        {
+          "price_id": "price_3bottle",
+          "quantity": 3,
+          "label": "3 Bottles",
+          "display_discount_pct": 24
+        },
+        {
+          "price_id": "price_6bottle",
+          "quantity": 6,
+          "label": "6 Bottles",
+          "badge": "Best Value",
+          "display_discount_pct": 36
+        }
+      ],
+      "default_price_id": "price_2bottle",
+      "presentation_context": "primary"
+    }
+  ],
+  "eligibility": {
+    "requires_prior_purchase": false,
+    "allowed_price_contexts": ["standard"],
+    "starts_at": null,
+    "ends_at": null
+  },
+  "presentation": {
+    "headline": "Creatine Gummies",
+    "badge": "Most Popular",
+    "cta_label": "Buy Now"
+  },
+  "checkout": {
+    "mode": "payment",
+    "allow_promotion_codes": true,
+    "metadata": {
+      "offer_id": "offer_creatine_standard",
+      "context": "standard"
+    }
+  },
+  "created_at": 1780092000,
+  "updated_at": 1780092000
+}

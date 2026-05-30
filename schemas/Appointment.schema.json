@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.stripe-link.local/Appointment.schema.json",
+  "title": "Appointment",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "document_type", "tenant_id", "appointment_id", "service_id", "starts_at", "ends_at", "timezone", "status", "customer"],
+  "properties": {
+    "schema_version": { "type": "string" },
+    "document_type": { "const": "appointment" },
+    "tenant_id": { "type": "string" },
+    "appointment_id": { "type": "string" },
+    "service_id": { "type": "string" },
+    "service_name": { "type": "string" },
+    "starts_at": { "type": "string" },
+    "ends_at": { "type": "string" },
+    "timezone": { "type": "string" },
+    "status": { "enum": ["reserved", "booked", "paid", "checked_in", "completed", "canceled", "no_show"] },
+    "payment_status": { "enum": ["unpaid", "pending", "paid", "refunded"] },
+    "assigned_fulfiller_id": { "type": "string" },
+    "customer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["email"],
+      "properties": {
+        "customer_id": { "type": "string" },
+        "name": { "type": "string" },
+        "email": { "type": "string" },
+        "phone": { "type": "string" }
+      }
+    },
+    "price": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "currency": { "type": "string" },
+        "unit_amount": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "service_location": { "type": "object" },
+    "rule_snapshot": { "type": "object" },
+    "manage_token_ref": { "type": "string" },
+    "checked_in_at": { "type": ["string", "null"] },
+    "completed_at": { "type": ["string", "null"] },
+    "canceled_at": { "type": ["string", "null"] },
+    "created_at": { "type": "integer" },
+    "updated_at": { "type": "integer" }
+  }
+}

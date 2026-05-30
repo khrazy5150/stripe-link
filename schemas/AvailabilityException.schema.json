@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.stripe-link.local/AvailabilityException.schema.json",
+  "title": "AvailabilityException",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "document_type", "tenant_id", "exception_id", "starts_at", "ends_at", "type"],
+  "properties": {
+    "schema_version": { "type": "string" },
+    "document_type": { "const": "availability_exception" },
+    "tenant_id": { "type": "string" },
+    "exception_id": { "type": "string" },
+    "starts_at": { "type": "string" },
+    "ends_at": { "type": "string" },
+    "type": { "enum": ["block", "open"] },
+    "reason": { "type": "string" },
+    "fulfiller_scope": { "enum": ["all", "specific"] },
+    "fulfiller_id": { "type": "string" },
+    "created_at": { "type": "integer" },
+    "updated_at": { "type": "integer" }
+  }
+}

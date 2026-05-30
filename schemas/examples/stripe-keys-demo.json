@@ -1,0 +1,13 @@
+{
+  "schema_version": "2026-05-29",
+  "document_type": "stripe_keys",
+  "tenant_id": "tenant_demo",
+  "mode": "test",
+  "publishable_key": "pk_test_demo",
+  "secret_key_ref": "kms://stripe-link/tenant_demo/test",
+  "webhook_secret_ref": "kms://stripe-link/tenant_demo/test-webhook",
+  "connect_account_id": "acct_demo",
+  "connect_status": "connected",
+  "created_at": 1780092000,
+  "updated_at": 1780092000
+}

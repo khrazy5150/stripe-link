@@ -1,0 +1,45 @@
+{
+  "schema_version": "2026-05-29",
+  "document_type": "service",
+  "tenant_id": "tenant_demo",
+  "service_id": "svc_60_min_massage",
+  "name": "1 hour full body massage",
+  "description": "A 60 minute mobile massage appointment.",
+  "duration_minutes": 60,
+  "price": {
+    "currency": "usd",
+    "unit_amount": 12000
+  },
+  "location_mode": "mobile",
+  "linked_product": {
+    "product_id": "prod_massage",
+    "price_id": "price_massage_60"
+  },
+  "presentation": {
+    "hero_image_url": "https://images.juniorbay.com/icon/favicon.png"
+  },
+  "booking_rules": {
+    "check_in_required": false,
+    "check_in_window_start_minutes": 15,
+    "check_in_window_end_minutes": 5,
+    "check_in_label": "Ready on Site",
+    "completion_required": true,
+    "completion_label": "Done"
+  },
+  "default_fulfiller_id": "fulfiller_george_platinum",
+  "allowed_fulfillers": [
+    {
+      "fulfiller_id": "fulfiller_george_platinum",
+      "enabled": true,
+      "tips_to_fulfiller": true,
+      "compensation_override": {
+        "type": "use_fulfiller_default",
+        "amount": 0
+      }
+    }
+  ],
+  "active": true,
+  "metadata": {},
+  "created_at": 1780092000,
+  "updated_at": 1780092000
+}

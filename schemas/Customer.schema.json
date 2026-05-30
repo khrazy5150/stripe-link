@@ -1,0 +1,107 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.juniorbay.com/stripe-link/Customer.schema.json",
+  "title": "Customer",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "document_type", "tenant_id", "customer_id", "contact", "summary"],
+  "properties": {
+    "schema_version": { "type": "string", "const": "2026-05-29" },
+    "document_type": { "type": "string", "const": "customer" },
+    "tenant_id": { "type": "string", "minLength": 1 },
+    "customer_id": { "type": "string", "minLength": 1 },
+    "stripe_customer_id": { "type": "string" },
+    "contact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["email"],
+      "properties": {
+        "name": { "type": "string" },
+        "first_name": { "type": "string" },
+        "last_name": { "type": "string" },
+        "email": { "type": "string", "minLength": 3 },
+        "phone": { "type": "string" }
+      }
+    },
+    "shipping_address": {
+      "anyOf": [{ "$ref": "#/$defs/address" }, { "type": "null" }]
+    },
+    "billing_address": {
+      "anyOf": [{ "$ref": "#/$defs/address" }, { "type": "null" }]
+    },
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "total_orders": { "type": "integer", "minimum": 0, "default": 0 },
+        "total_spent": { "type": "integer", "minimum": 0, "default": 0 },
+        "currency": { "type": "string", "pattern": "^[a-z]{3}$", "default": "usd" },
+        "first_purchase_at": { "type": ["integer", "null"], "minimum": 0 },
+        "last_purchase_at": { "type": ["integer", "null"], "minimum": 0 },
+        "last_product_name": { "type": "string" }
+      }
+    },
+    "product_affinity": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["product_id", "quantity"],
+        "properties": {
+          "product_id": { "type": "string" },
+          "product_name": { "type": "string" },
+          "quantity": { "type": "integer", "minimum": 0 },
+          "last_purchased_at": { "type": ["integer", "null"], "minimum": 0 }
+        }
+      }
+    },
+    "transaction_history": {
+      "type": "array",
+      "description": "Recent transaction references for the customer detail modal. Full order/invoice data remains in order and invoice records.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["transaction_id", "type", "created_at"],
+        "properties": {
+          "transaction_id": { "type": "string" },
+          "type": { "type": "string", "enum": ["order", "invoice", "refund"] },
+          "order_id": { "type": "string" },
+          "invoice_id": { "type": "string" },
+          "refund_request_id": { "type": "string" },
+          "amount": { "type": "integer", "minimum": 0 },
+          "currency": { "type": "string", "pattern": "^[a-z]{3}$" },
+          "status": { "type": "string" },
+          "created_at": { "type": "integer", "minimum": 0 }
+        }
+      }
+    },
+    "tags": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "metadata": {
+      "type": "object",
+      "additionalProperties": {
+        "type": ["string", "number", "integer", "boolean", "null"]
+      }
+    },
+    "created_at": { "type": "integer", "minimum": 0 },
+    "updated_at": { "type": "integer", "minimum": 0 }
+  },
+  "$defs": {
+    "address": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string" },
+        "street1": { "type": "string" },
+        "street2": { "type": "string" },
+        "city": { "type": "string" },
+        "state": { "type": "string" },
+        "postal_code": { "type": "string" },
+        "country": { "type": "string", "minLength": 2, "maxLength": 2 },
+        "phone": { "type": "string" }
+      }
+    }
+  }
+}

@@ -1,0 +1,29 @@
+{
+  "schema_version": "2026-05-29",
+  "document_type": "tenant_profile",
+  "tenant_id": "tenant_demo",
+  "business_name": "Demo Supplements",
+  "owner_email": "owner@example.com",
+  "owner": {
+    "first_name": "John",
+    "last_name": "Doe",
+    "email": "owner@example.com",
+    "phone_number": "+1234567890",
+    "email_verified": false,
+    "phone_verified": false
+  },
+  "auth": {
+    "provider": "cognito",
+    "status": "pending_confirmation",
+    "confirmed_at": null
+  },
+  "support_email": "support@example.com",
+  "brand": {
+    "display_name": "Demo Supplements",
+    "primary_color": "#16a34a"
+  },
+  "billing_status": "trial",
+  "tier_id": "starter",
+  "created_at": 1780092000,
+  "updated_at": 1780092000
+}

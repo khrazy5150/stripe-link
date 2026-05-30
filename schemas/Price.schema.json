@@ -1,0 +1,121 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.juniorbay.com/stripe-link/Price.schema.json",
+  "title": "Price",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "price_id",
+    "product_id",
+    "active",
+    "currency",
+    "unit_amount",
+    "quantity",
+    "label"
+  ],
+  "properties": {
+    "price_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "previous_price_id": {
+      "type": ["string", "null"],
+      "description": "Optional lineage pointer when an archived Stripe Price is replaced."
+    },
+    "product_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "stripe_mode": {
+      "type": "string",
+      "enum": ["test", "live"]
+    },
+    "active": {
+      "type": "boolean"
+    },
+    "currency": {
+      "type": "string",
+      "pattern": "^[a-z]{3}$"
+    },
+    "unit_amount": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Customer-facing amount in the smallest currency unit."
+    },
+    "quantity": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Quantity represented by this Stripe Price, such as bottles in a bundle."
+    },
+    "label": {
+      "type": "string",
+      "minLength": 1
+    },
+    "badge": {
+      "type": "string"
+    },
+    "nickname": {
+      "type": "string"
+    },
+    "context": {
+      "type": "string",
+      "enum": ["standard", "sale", "flash_sale", "upsell", "downsell", "order_bump", "subscription"]
+    },
+    "discount_pct": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 100
+    },
+    "compare_at_unit_amount": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "recurring": {
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["interval"],
+          "properties": {
+            "interval": {
+              "type": "string",
+              "enum": ["day", "week", "month", "year"]
+            },
+            "interval_count": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1
+            },
+            "trial_period_days": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        }
+      ]
+    },
+    "fee_handling": {
+      "type": "string",
+      "enum": ["standard", "net_guaranteed"]
+    },
+    "gross_amount": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "metadata": {
+      "type": "object",
+      "additionalProperties": {
+        "type": ["string", "number", "integer", "boolean", "null"]
+      }
+    },
+    "created_at": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "updated_at": {
+      "type": "integer",
+      "minimum": 0
+    }
+  }
+}

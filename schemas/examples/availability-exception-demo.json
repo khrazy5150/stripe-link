@@ -1,0 +1,14 @@
+{
+  "schema_version": "2026-05-29",
+  "document_type": "availability_exception",
+  "tenant_id": "tenant_demo",
+  "exception_id": "avx_vacation_demo",
+  "starts_at": "2026-06-08T08:00:00-06:00",
+  "ends_at": "2026-06-12T18:00:00-06:00",
+  "type": "block",
+  "reason": "Vacation",
+  "fulfiller_scope": "all",
+  "fulfiller_id": "",
+  "created_at": 1780092000,
+  "updated_at": 1780092000
+}

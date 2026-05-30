@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.juniorbay.com/stripe-link/Notification.schema.json",
+  "title": "Notification",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "document_type", "tenant_id", "notification_id", "type", "title", "created_at"],
+  "properties": {
+    "schema_version": { "type": "string", "const": "2026-05-29" },
+    "document_type": { "type": "string", "const": "notification" },
+    "tenant_id": { "type": "string", "minLength": 1 },
+    "notification_id": { "type": "string", "minLength": 1 },
+    "user_id": {
+      "type": "string",
+      "description": "Optional recipient user. Omit for tenant-wide notifications."
+    },
+    "type": {
+      "type": "string",
+      "enum": ["paid_invoice", "refund_request", "order", "shipping", "system", "stripe_connect"]
+    },
+    "severity": {
+      "type": "string",
+      "enum": ["info", "success", "warning", "error"],
+      "default": "info"
+    },
+    "title": { "type": "string", "minLength": 1 },
+    "message": { "type": "string" },
+    "status": {
+      "type": "string",
+      "enum": ["unread", "read", "archived"],
+      "default": "unread"
+    },
+    "sort_priority": {
+      "type": "integer",
+      "description": "Higher priority notifications can be shown above same-timestamp records."
+    },
+    "related": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "invoice_id": { "type": "string" },
+        "order_id": { "type": "string" },
+        "refund_request_id": { "type": "string" },
+        "customer_id": { "type": "string" },
+        "page_id": { "type": "string" },
+        "offer_id": { "type": "string" }
+      }
+    },
+    "action": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "label": { "type": "string" },
+        "url": { "type": "string" },
+        "route": { "type": "string" }
+      }
+    },
+    "created_at": { "type": "integer", "minimum": 0 },
+    "read_at": { "type": ["integer", "null"], "minimum": 0 },
+    "archived_at": { "type": ["integer", "null"], "minimum": 0 }
+  }
+}

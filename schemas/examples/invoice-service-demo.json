@@ -1,0 +1,76 @@
+{
+  "schema_version": "2026-05-29",
+  "document_type": "invoice",
+  "tenant_id": "tenant_demo",
+  "invoice_id": "inv_local_demo123",
+  "stripe_invoice_id": "in_demo123",
+  "stripe_customer_id": "cus_demo123",
+  "stripe_mode": "test",
+  "status": "paid",
+  "collection_method": "send_invoice",
+  "customer": {
+    "customer_id": "cus_local_marco_rubio",
+    "name": "Marco Rubio",
+    "email": "mrubio@gmail.com",
+    "phone": "12135551212",
+    "billing_address": null,
+    "shipping_address": null
+  },
+  "description": "Service invoice for a massage appointment.",
+  "presentation": {
+    "hero_image_url": "https://images.juniorbay.com/icon/favicon.png",
+    "memo": "Thank you for your business.",
+    "footer": "Payment is due within 7 days."
+  },
+  "line_items": [
+    {
+      "line_item_id": "line_demo123",
+      "type": "service",
+      "description": "1 hour full body massage",
+      "quantity": 1,
+      "unit_amount": 100000,
+      "amount": 100000,
+      "currency": "usd",
+      "service_id": "svc_60_min_massage",
+      "appointment_id": "appt_demo123",
+      "metadata": {}
+    }
+  ],
+  "amounts": {
+    "currency": "usd",
+    "subtotal": 100000,
+    "discount_total": 0,
+    "tax_total": 0,
+    "shipping_total": 0,
+    "total": 100000,
+    "amount_due": 0,
+    "amount_paid": 100000,
+    "amount_remaining": 0
+  },
+  "payment": {
+    "payment_intent_id": "pi_demo123",
+    "hosted_invoice_url": "https://invoice.stripe.com/i/acct_demo/test_demo",
+    "invoice_pdf_url": "https://pay.stripe.com/invoice/demo/pdf",
+    "receipt_url": "",
+    "paid_at": 1774933858
+  },
+  "delivery": {
+    "days_until_due": 7,
+    "due_at": 1775538658,
+    "sent_at": 1774933858,
+    "last_resent_at": null,
+    "share_url": "https://invoice.stripe.com/i/acct_demo/test_demo",
+    "recipient_email": "mrubio@gmail.com",
+    "send_count": 1
+  },
+  "source": {
+    "service_id": "svc_60_min_massage",
+    "appointment_id": "appt_demo123",
+    "created_from": "dashboard"
+  },
+  "metadata": {},
+  "created_at": 1774933858,
+  "updated_at": 1774933858,
+  "finalized_at": 1774933858,
+  "voided_at": null
+}

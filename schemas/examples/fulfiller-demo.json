@@ -1,0 +1,30 @@
+{
+  "schema_version": "2026-05-29",
+  "document_type": "fulfiller",
+  "tenant_id": "tenant_demo",
+  "fulfiller_id": "fulfiller_george_platinum",
+  "first_name": "George",
+  "last_name": "Platinum",
+  "email": "georgep@gmail.com",
+  "phone": "+15551234567",
+  "display_name": "George Platinum",
+  "status": "active",
+  "compensation": {
+    "type": "flat_fee",
+    "amount": 6000,
+    "tips_to_fulfiller": true
+  },
+  "availability": {
+    "weekly_hours": [
+      { "day": "mon", "enabled": true, "start_time": "08:00", "end_time": "18:00" },
+      { "day": "tue", "enabled": true, "start_time": "08:00", "end_time": "18:00" },
+      { "day": "wed", "enabled": true, "start_time": "08:00", "end_time": "18:00" },
+      { "day": "thu", "enabled": true, "start_time": "08:00", "end_time": "18:00" },
+      { "day": "fri", "enabled": true, "start_time": "08:00", "end_time": "18:00" },
+      { "day": "sat", "enabled": false, "start_time": "08:00", "end_time": "18:00" },
+      { "day": "sun", "enabled": false, "start_time": "08:00", "end_time": "18:00" }
+    ]
+  },
+  "created_at": 1780092000,
+  "updated_at": 1780092000
+}

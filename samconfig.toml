@@ -1,0 +1,19 @@
+version = 0.1
+
+[dev.deploy.parameters]
+stack_name = "jb-stripe-link-stack-dev"
+region = "us-west-2"
+capabilities = "CAPABILITY_IAM"
+confirm_changeset = true
+resolve_s3 = true
+parameter_overrides = "Environment=dev ProjectPrefix=jb"
+tags = "Project=\"stripe-link\" Environment=\"dev\" ManagedBy=\"sam\""
+
+[prod.deploy.parameters]
+stack_name = "jb-stripe-link-stack-prod"
+region = "us-west-2"
+capabilities = "CAPABILITY_IAM"
+confirm_changeset = true
+resolve_s3 = true
+parameter_overrides = "Environment=prod ProjectPrefix=jb"
+tags = "Project=\"stripe-link\" Environment=\"prod\" ManagedBy=\"sam\""

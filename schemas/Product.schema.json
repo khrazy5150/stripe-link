@@ -1,0 +1,158 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.juniorbay.com/stripe-link/Product.schema.json",
+  "title": "Product",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "document_type",
+    "tenant_id",
+    "product_id",
+    "active",
+    "name",
+    "prices",
+    "default_price_id"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "2026-05-29"
+    },
+    "document_type": {
+      "type": "string",
+      "const": "product"
+    },
+    "tenant_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "product_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "stripe_mode": {
+      "type": "string",
+      "enum": ["test", "live"]
+    },
+    "active": {
+      "type": "boolean"
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1
+    },
+    "description": {
+      "type": "string"
+    },
+    "images": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "format": "uri"
+      },
+      "default": []
+    },
+    "prices": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "Price.schema.json"
+      }
+    },
+    "default_price_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "product_type": {
+      "type": "string"
+    },
+    "product_category": {
+      "type": "string"
+    },
+    "requires_shipping": {
+      "type": "boolean",
+      "default": true
+    },
+    "refund_policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Product-level refund policy. New products may copy this from the creating user's UserPreferences.authoring_defaults.refund_policies by product class.",
+      "required": ["source", "refund_window", "condition", "return_method", "short_label", "full_policy"],
+      "properties": {
+        "source": {
+          "type": "string",
+          "enum": ["user_preference_default", "tenant_default", "product_override"]
+        },
+        "refund_window": {
+          "type": "string",
+          "enum": ["non_refundable", "72_hours", "7_days", "14_days", "30_days", "60_days", "custom"]
+        },
+        "condition": {
+          "type": "string",
+          "enum": ["any", "unused", "unopened", "defective_only", "not_downloaded", "custom"]
+        },
+        "return_method": {
+          "type": "string",
+          "enum": ["no_return_customer_keeps", "return_required", "digital_revoke_access", "custom"]
+        },
+        "short_label": { "type": "string" },
+        "full_policy": { "type": "string" }
+      }
+    },
+    "package_dimensions": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "length": { "type": "number", "minimum": 0 },
+        "width": { "type": "number", "minimum": 0 },
+        "height": { "type": "number", "minimum": 0 },
+        "weight": { "type": "number", "minimum": 0 },
+        "unit": { "type": "string", "enum": ["in", "cm"] },
+        "weight_unit": { "type": "string", "enum": ["oz", "lb", "g", "kg"] }
+      }
+    },
+    "tags": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "default": []
+    },
+    "stripe_metadata": {
+      "type": "object",
+      "additionalProperties": {
+        "type": ["string", "number", "integer", "boolean", "null"]
+      }
+    },
+    "local_metadata": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "sync": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": ["pending", "success", "failed"]
+        },
+        "last_synced_at": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "error": {
+          "type": ["string", "null"]
+        }
+      }
+    },
+    "created_at": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "updated_at": {
+      "type": "integer",
+      "minimum": 0
+    }
+  }
+}

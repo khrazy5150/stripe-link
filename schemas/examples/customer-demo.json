@@ -1,0 +1,30 @@
+{
+  "schema_version": "2026-05-29",
+  "document_type": "customer",
+  "tenant_id": "tenant_demo",
+  "customer_id": "cus_local_marco_rubio",
+  "stripe_customer_id": "cus_demo_marco",
+  "contact": {
+    "name": "Marco Rubio",
+    "first_name": "Marco",
+    "last_name": "Rubio",
+    "email": "mrubio@gmail.com",
+    "phone": "12135551212"
+  },
+  "shipping_address": null,
+  "billing_address": null,
+  "summary": {
+    "total_orders": 0,
+    "total_spent": 0,
+    "currency": "usd",
+    "first_purchase_at": null,
+    "last_purchase_at": null,
+    "last_product_name": ""
+  },
+  "product_affinity": [],
+  "transaction_history": [],
+  "tags": [],
+  "metadata": {},
+  "created_at": 1780092000,
+  "updated_at": 1780092000
+}

@@ -81,9 +81,10 @@ Create schemas before rebuilding behavior. Every API and renderer should depend 
 9. Create `Theme.schema.json` for design tokens: colors, typography, spacing, radius, shadows, layout density, dark mode support, and component-level overrides.
 10. Create `Checkout.schema.json` for line items, customer data requirements, shipping/tax behavior, payment methods, success/cancel URLs, upsell routing, and Stripe session options.
 11. Create `TierPolicy.schema.json` for plan tiers, feature flags, max pages, max products, custom domains, templates, media/video, analytics, services, subscriptions, A/B testing, white label, and publish limits.
-12. Create `RuntimeEvent.schema.json` for editor changes, checkout events, page views, conversion events, Stripe webhook events, publish events, and audit events.
-13. Add schema examples for a minimal single-product page, a multi-price product page, a bundle page, an upsell flow, a SaaS paywall, a service booking page, and a mobile-native page definition.
-14. Add JSON Schema validation tests using a single validator in CI and Lambda runtime.
+12. Create `Experiment.schema.json` for A/B testing as its own document type with `experiment_id`, `tenant_id`, `status`, weighted variant page references, `winner_page_id`, and `experiment_url`.
+13. Create `RuntimeEvent.schema.json` for editor changes, checkout events, page views, conversion events, Stripe webhook events, publish events, and audit events.
+14. Add schema examples for a minimal single-product page, a multi-price product page, a bundle page, an upsell flow, a SaaS paywall, a service booking page, and a mobile-native page definition.
+15. Add JSON Schema validation tests using a single validator in CI and Lambda runtime.
 
 Example multi-price product shape:
 

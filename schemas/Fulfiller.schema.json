@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.stripe-link.local/Fulfiller.schema.json",
+  "title": "Fulfiller",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "document_type", "tenant_id", "fulfiller_id", "email", "display_name", "status", "compensation", "availability"],
+  "properties": {
+    "schema_version": { "type": "string" },
+    "document_type": { "const": "fulfiller" },
+    "tenant_id": { "type": "string" },
+    "fulfiller_id": { "type": "string" },
+    "first_name": { "type": "string" },
+    "last_name": { "type": "string" },
+    "email": { "type": "string" },
+    "phone": { "type": "string" },
+    "display_name": { "type": "string" },
+    "status": { "enum": ["active", "inactive", "invited"] },
+    "compensation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "amount"],
+      "properties": {
+        "type": { "enum": ["flat_fee", "percent", "hourly"] },
+        "amount": { "type": "number", "minimum": 0 },
+        "tips_to_fulfiller": { "type": "boolean" }
+      }
+    },
+    "availability": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "weekly_hours": { "$ref": "#/$defs/weekly_hours" }
+      }
+    },
+    "created_at": { "type": "integer" },
+    "updated_at": { "type": "integer" }
+  },
+  "$defs": {
+    "weekly_hours": {
+      "type": "array",
+      "minItems": 7,
+      "maxItems": 7,
+      "items": { "$ref": "#/$defs/day_hours" }
+    },
+    "day_hours": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["day", "enabled"],
+      "properties": {
+        "day": { "enum": ["mon", "tue", "wed", "thu", "fri", "sat", "sun"] },
+        "enabled": { "type": "boolean" },
+        "start_time": { "type": "string" },
+        "end_time": { "type": "string" }
+      }
+    }
+  }
+}

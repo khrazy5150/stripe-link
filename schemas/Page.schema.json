@@ -1,0 +1,189 @@
+  {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "https://schemas.juniorbay.com/stripe-link/Page.schema.json",
+    "title": "Page",
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "schema_version",
+      "document_type",
+      "tenant_id",
+      "page_id",
+      "name",
+      "route",
+      "offer_id",
+      "sections"
+    ],
+    "properties": {
+      "schema_version": {
+        "type": "string",
+        "const": "2026-05-29"
+      },
+      "document_type": {
+        "type": "string",
+        "const": "page"
+      },
+      "tenant_id": {
+        "type": "string",
+        "minLength": 1
+      },
+      "page_id": {
+        "type": "string",
+        "minLength": 1
+      },
+      "name": {
+        "type": "string",
+        "minLength": 1
+      },
+    "status": {
+      "type": "string",
+      "enum": ["draft", "preview", "published", "archived"],
+      "default": "draft"
+    },
+    "published_at": {
+      "type": ["integer", "null"],
+      "minimum": 0,
+      "description": "Timestamp when status moved to published. Kept separate from updated_at for audit history and rollback UI."
+    },
+      "route": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["slug"],
+        "properties": {
+          "slug": {
+            "type": "string",
+            "minLength": 1
+          },
+          "domain": {
+            "type": "string"
+          },
+          "short_code": {
+            "type": "string"
+          }
+        }
+      },
+      "seo": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "title": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "image": {
+            "type": "string"
+          }
+        }
+      },
+      "offer_id": {
+        "type": "string",
+        "minLength": 1
+      },
+    "theme": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "Theme token overrides. A dedicated Theme schema will tighten this later."
+    },
+    "post_checkout": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "upsell_page_id": {
+          "type": "string"
+        },
+        "success_url": {
+          "type": "string"
+        }
+      }
+    },
+    "analytics": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "google_tag_id": {
+          "type": "string"
+        },
+        "pixel_id": {
+          "type": "string"
+        }
+      }
+    },
+    "legal": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "terms_url": {
+          "type": "string"
+        },
+        "privacy_url": {
+          "type": "string"
+        },
+        "refund_url": {
+          "type": "string"
+        }
+      }
+    },
+    "refund_policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Customer-facing refund policy snapshot resolved from offer settings, which may derive from product settings originally seeded by user preferences.",
+      "required": ["source", "short_label", "full_policy"],
+      "properties": {
+        "source": {
+          "type": "string",
+          "enum": ["offer", "product", "user_preference_default", "manual_page_override"]
+        },
+        "offer_id": { "type": "string" },
+        "product_id": { "type": "string" },
+        "refund_window": {
+          "type": "string",
+          "enum": ["non_refundable", "72_hours", "7_days", "14_days", "30_days", "60_days", "custom"]
+        },
+        "condition": {
+          "type": "string",
+          "enum": ["any", "unused", "unopened", "defective_only", "not_downloaded", "custom"]
+        },
+        "return_method": {
+          "type": "string",
+          "enum": ["no_return_customer_keeps", "return_required", "digital_revoke_access", "custom"]
+        },
+        "short_label": { "type": "string" },
+        "full_policy": { "type": "string" }
+      }
+    },
+    "sections": {
+      "type": "array",
+      "minItems": 1,
+        "items": {
+          "type": "object",
+          "additionalProperties": true,
+          "required": ["id", "type"],
+          "properties": {
+            "id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "type": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      },
+      "revision": {
+        "type": "integer",
+        "minimum": 1,
+        "default": 1
+      },
+      "created_at": {
+        "type": "integer",
+        "minimum": 0
+      },
+      "updated_at": {
+        "type": "integer",
+        "minimum": 0
+      }
+    }
+  }

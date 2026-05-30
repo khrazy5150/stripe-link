@@ -1,0 +1,57 @@
+{
+  "schema_version": "2026-05-29",
+  "document_type": "page",
+  "tenant_id": "tenant_demo",
+  "page_id": "page_creatine_standard",
+  "name": "Creatine Gummies Checkout Page",
+  "status": "draft",
+  "published_at": null,
+  "route": {
+    "slug": "creatine-gummies"
+  },
+  "seo": {
+    "title": "Creatine Gummies",
+    "description": "Choose your Creatine Gummies bundle."
+  },
+  "offer_id": "offer_creatine_standard",
+  "theme": {
+    "color": {
+      "background": "#ffffff",
+      "text": "#111827",
+      "accent": "#16a34a"
+    }
+  },
+  "post_checkout": {
+    "upsell_page_id": "page_creatine_upsell"
+  },
+  "analytics": {
+    "google_tag_id": "G-DEMO1234",
+    "pixel_id": "1234567890"
+  },
+  "legal": {
+    "terms_url": "https://example.com/terms",
+    "privacy_url": "https://example.com/privacy",
+    "refund_url": "https://example.com/refunds"
+  },
+  "sections": [
+    {
+      "id": "hero",
+      "type": "hero",
+      "headline": "Creatine Gummies",
+      "subheadline": "Pick the bottle count that fits your routine."
+    },
+    {
+      "id": "offer-selector",
+      "type": "offer_price_selector",
+      "offer_id": "offer_creatine_standard"
+    },
+    {
+      "id": "checkout-cta",
+      "type": "checkout_cta",
+      "label": "Continue To Checkout"
+    }
+  ],
+  "revision": 1,
+  "created_at": 1780092000,
+  "updated_at": 1780092000
+}

@@ -1,0 +1,20 @@
+{
+  "schema_version": "2026-05-29",
+  "document_type": "notification",
+  "tenant_id": "tenant_demo",
+  "notification_id": "notif_paid_invoice_demo",
+  "type": "paid_invoice",
+  "severity": "success",
+  "title": "Invoice paid",
+  "message": "A customer paid invoice inv_demo123.",
+  "status": "unread",
+  "sort_priority": 10,
+  "related": {
+    "invoice_id": "inv_demo123",
+    "order_id": "order_demo123",
+    "customer_id": "cus_demo123"
+  },
+  "created_at": 1780092000,
+  "read_at": null,
+  "archived_at": null
+}

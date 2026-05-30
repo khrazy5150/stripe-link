@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.juniorbay.com/stripe-link/TenantProfile.schema.json",
+  "title": "TenantProfile",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "document_type", "tenant_id", "owner"],
+  "properties": {
+    "schema_version": { "type": "string", "const": "2026-05-29" },
+    "document_type": { "type": "string", "const": "tenant_profile" },
+    "tenant_id": { "type": "string", "minLength": 1 },
+    "business_name": { "type": "string" },
+    "owner_email": { "type": "string", "description": "Compatibility alias for owner.email." },
+    "owner": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["first_name", "last_name", "email"],
+      "properties": {
+        "first_name": { "type": "string", "minLength": 1 },
+        "last_name": { "type": "string", "minLength": 1 },
+        "email": { "type": "string", "minLength": 1 },
+        "phone_number": { "type": "string" },
+        "email_verified": { "type": "boolean", "default": false },
+        "phone_verified": { "type": "boolean", "default": false },
+        "cognito_username": { "type": "string" }
+      }
+    },
+    "auth": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "provider": { "type": "string", "enum": ["cognito", "local"], "default": "cognito" },
+        "status": { "type": "string", "enum": ["pending_confirmation", "confirmed", "disabled"], "default": "pending_confirmation" },
+        "confirmed_at": { "type": ["integer", "null"], "minimum": 0 }
+      }
+    },
+    "support_email": { "type": "string" },
+    "brand": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "display_name": { "type": "string" },
+        "logo_url": { "type": "string" },
+        "primary_color": { "type": "string" }
+      }
+    },
+    "billing_status": { "type": "string", "enum": ["trial", "active", "past_due", "suspended"], "default": "trial" },
+    "tier_id": { "type": "string", "default": "starter" },
+    "created_at": { "type": "integer", "minimum": 0 },
+    "updated_at": { "type": "integer", "minimum": 0 }
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.juniorbay.com/stripe-link/StripeKeys.schema.json",
+  "title": "StripeKeys",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "document_type", "tenant_id", "mode"],
+  "properties": {
+    "schema_version": { "type": "string", "const": "2026-05-29" },
+    "document_type": { "type": "string", "const": "stripe_keys" },
+    "tenant_id": { "type": "string", "minLength": 1 },
+    "mode": { "type": "string", "enum": ["test", "live"] },
+    "publishable_key": { "type": "string" },
+    "secret_key_ref": { "type": "string", "description": "Reference or wrapped/encrypted secret. Do not expose raw secret keys in read responses." },
+    "webhook_secret_ref": { "type": "string" },
+    "connect_account_id": { "type": "string" },
+    "connect_status": { "type": "string", "enum": ["not_connected", "pending", "connected", "restricted"], "default": "not_connected" },
+    "created_at": { "type": "integer", "minimum": 0 },
+    "updated_at": { "type": "integer", "minimum": 0 }
+  }
+}

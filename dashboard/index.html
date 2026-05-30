@@ -1,0 +1,903 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Stripe Link Admin</title>
+  <meta name="description" content="Stripe Link Admin Dashboard">
+  <link rel="icon" type="image/x-icon" href="https://images.juniorbay.com/icon/favicon.png">
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <section id="login-section" class="login-wrapper">
+    <div class="login-card">
+      <div class="login-header">
+        <div class="login-logo">
+          <img src="https://images.juniorbay.com/icon/favicon.png" alt="Junior Bay Logo">
+        </div>
+        <h1 class="login-title">Admin Login</h1>
+        <p class="login-subtitle">Enter your credentials to access the admin panel</p>
+      </div>
+
+      <div class="login-body login-content">
+        <div class="auth-tabs login-tabs">
+          <button class="auth-tab login-tab active" data-auth-tab="login" type="button">Login</button>
+          <button class="auth-tab login-tab" data-auth-tab="register" type="button">Register</button>
+          <button class="auth-tab login-tab" data-auth-tab="forgot" type="button">Forgot</button>
+        </div>
+
+        <div id="auth-login" class="auth-view login-view active">
+          <div class="form-group">
+            <label for="loginEmail" class="form-label">Email</label>
+            <input type="email" id="loginEmail" class="form-input with-icon" placeholder="admin@example.com" autocomplete="username" required>
+          </div>
+          <div class="form-group">
+            <label for="loginPass" class="form-label">Password</label>
+            <input type="password" id="loginPass" class="form-input" placeholder="Enter your password" autocomplete="current-password" required>
+          </div>
+          <button type="button" id="btnLogin" class="login-btn btn">Sign In</button>
+          <div id="loginMsg" class="mt-4"></div>
+        </div>
+
+        <div id="auth-register" class="auth-view login-view">
+          <div class="form-group">
+            <label for="regFirstName" class="form-label">First Name</label>
+            <input type="text" id="regFirstName" class="form-input" placeholder="John" required autocomplete="off">
+          </div>
+          <div class="form-group">
+            <label for="regLastName" class="form-label">Last Name</label>
+            <input type="text" id="regLastName" class="form-input" placeholder="Doe" required autocomplete="off">
+          </div>
+          <div class="form-group">
+            <label for="regEmail" class="form-label">Email</label>
+            <input type="email" id="regEmail" class="form-input with-icon" placeholder="john@example.com" required>
+          </div>
+          <div class="form-group">
+            <label for="regPhone" class="form-label">Phone Number</label>
+            <input type="tel" id="regPhone" class="form-input" placeholder="Phone" required>
+            <span class="form-text">Format: +1234567890 (include country code)</span>
+          </div>
+          <div class="form-group">
+            <label for="regPass" class="form-label">Password</label>
+            <input type="password" id="regPass" class="form-input" placeholder="Create a password" required>
+          </div>
+          <button type="button" id="btnRegister" class="login-btn btn">Create Account</button>
+
+          <div class="alert alert-info mt-4">
+            <div class="alert-content">After sign-up, check your email for the verification code.</div>
+          </div>
+
+          <h3 class="mt-4">Confirm Email</h3>
+          <div class="form-group">
+            <label for="confEmail" class="form-label">Email</label>
+            <input type="email" id="confEmail" class="form-input">
+          </div>
+          <div class="form-group">
+            <label for="confCode" class="form-label">Verification Code</label>
+            <input type="text" id="confCode" class="form-input" autocomplete="off">
+          </div>
+          <div class="flex gap-2">
+            <button type="button" id="btnConfirm" class="btn btn-primary">Confirm</button>
+            <button type="button" id="btnResend" class="btn btn-secondary">Resend</button>
+          </div>
+          <div id="regMsg" class="mt-4"></div>
+        </div>
+
+        <div id="auth-forgot" class="auth-view login-view">
+          <h3>Reset Password</h3>
+          <div class="form-group">
+            <label for="fpEmail" class="form-label">Email</label>
+            <input type="email" id="fpEmail" class="form-input with-icon" placeholder="Enter your email">
+          </div>
+          <button type="button" id="btnForgot" class="login-btn btn">Send Reset Code</button>
+
+          <h3 class="mt-4">Confirm New Password</h3>
+          <div class="form-group">
+            <label for="fpConfEmail" class="form-label">Email</label>
+            <input type="email" id="fpConfEmail" class="form-input with-icon">
+          </div>
+          <div class="form-group">
+            <label for="fpCode" class="form-label">Code</label>
+            <input type="text" id="fpCode" class="form-input" autocomplete="off">
+          </div>
+          <div class="form-group">
+            <label for="fpNewPass" class="form-label">New Password</label>
+            <input type="password" id="fpNewPass" class="form-input">
+          </div>
+          <button type="button" id="btnConfirmNew" class="btn">Set New Password</button>
+          <div id="fpMsg" class="mt-4"></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <div id="main-app" class="app-shell hidden">
+    <aside class="sidebar">
+      <div class="brand">
+        <strong>stripe-link</strong>
+        <span>JSON-first checkout</span>
+      </div>
+      <nav class="nav" aria-label="Dashboard">
+        <button class="nav-item active" data-view="registration">Registration</button>
+        <button class="nav-item" data-view="connect">Stripe Connect</button>
+        <button class="nav-item" data-view="keys">Stripe Keys</button>
+        <button class="nav-item" data-view="services">Services</button>
+        <button class="nav-item" data-view="notifications">Notifications</button>
+        <button class="nav-item" data-view="invoices">Invoices</button>
+        <button class="nav-item" data-view="shipping">Shipping</button>
+        <button class="nav-item" data-view="customers">Customers</button>
+        <button class="nav-item" data-view="config">Configuration</button>
+        <button class="nav-item" data-view="profile">Profile</button>
+        <button class="nav-item" data-view="preferences">Preferences</button>
+      </nav>
+    </aside>
+
+    <main class="content">
+      <header class="topbar">
+        <label>
+          API Base URL
+          <input id="apiBase" type="url" placeholder="https://.../dev">
+        </label>
+        <button id="saveApiBase" type="button">Save</button>
+      </header>
+
+      <section class="panel active" data-panel="registration">
+        <h1>Registration</h1>
+        <div class="summary-grid">
+          <div><span>Tenant</span><strong id="summaryTenant">-</strong></div>
+          <div><span>User</span><strong id="summaryUser">-</strong></div>
+          <div><span>Status</span><strong id="summaryStatus">pending</strong></div>
+        </div>
+      </section>
+
+      <section class="panel" data-panel="connect">
+        <h1>Stripe Connect</h1>
+        <form data-action="connect-start">
+          <div class="grid">
+            <label>Tenant ID<input name="tenant_id" required value="tenant_demo"></label>
+            <label>Mode<select name="mode"><option value="test">test</option><option value="live">live</option></select></label>
+          </div>
+          <button type="submit">Start Connect</button>
+        </form>
+        <form data-endpoint="/stripe/connect/status" data-method="PUT" data-payload="connect">
+          <div class="grid">
+            <label>Tenant ID<input name="tenant_id" required value="tenant_demo"></label>
+            <label>Mode<select name="mode"><option value="test">test</option><option value="live">live</option></select></label>
+            <label>Connect Account ID<input name="connect_account_id" placeholder="acct_..."></label>
+            <label>Status<select name="connect_status"><option>not_connected</option><option>pending</option><option>connected</option><option>restricted</option></select></label>
+          </div>
+          <button type="submit">Save Connect Status</button>
+        </form>
+      </section>
+
+      <section class="panel" data-panel="keys">
+        <h1>Stripe Keys</h1>
+        <form data-endpoint="/stripe/keys" data-method="PUT" data-payload="stripe_keys">
+          <div class="grid">
+            <label>Tenant ID<input name="tenant_id" required value="tenant_demo"></label>
+            <label>Mode<select name="mode"><option value="test">test</option><option value="live">live</option></select></label>
+            <label>Publishable Key<input name="publishable_key" placeholder="pk_test_..."></label>
+            <label>Secret Key Ref<input name="secret_key_ref" placeholder="kms://..."></label>
+            <label>Webhook Secret Ref<input name="webhook_secret_ref" placeholder="kms://..."></label>
+          </div>
+          <button type="submit">Save Stripe Keys</button>
+        </form>
+      </section>
+
+      <section class="panel" data-panel="services">
+        <h1>Services</h1>
+        <p>Configure services, fulfillers, availability, and appointments</p>
+        <div class="config-stack">
+          <section class="config-card">
+            <header>
+              <h2>Service Booking</h2>
+              <button type="button">Refresh</button>
+            </header>
+            <div class="config-card-body services-layout">
+              <form data-endpoint="/services" data-method="PUT" data-payload="service">
+                <section class="nested-card">
+                  <header><h3>Create Service</h3></header>
+                  <div class="config-card-body">
+                    <input name="tenant_id" type="hidden" value="tenant_demo">
+                    <div class="grid">
+                      <label>Name<input name="service_name" value="1 hour full body massage"></label>
+                      <label>Duration (minutes)<input name="service_duration" type="number" min="1" value="60"></label>
+                      <label>Price<input name="service_price" type="number" min="0" step="0.01" value="120.00"></label>
+                      <label>Location Mode<select name="service_location_mode"><option value="mobile">Mobile</option><option value="onsite">Onsite</option><option value="virtual">Virtual</option><option value="hybrid">Hybrid</option></select></label>
+                    </div>
+                    <label>Description<textarea name="service_description" rows="3">A 60 minute mobile massage appointment.</textarea></label>
+                    <div class="grid">
+                      <label>Default Fulfiller<input name="service_default_fulfiller_id" value="fulfiller_george_platinum"></label>
+                      <label>Linked Product<input name="service_product_id" placeholder="prod_..." value="prod_massage"></label>
+                      <label>Linked Price<input name="service_price_id" placeholder="price_..." value="price_massage_60"></label>
+                      <label>Hero Image URL<input name="service_hero_image_url" value="https://images.juniorbay.com/icon/favicon.png"></label>
+                    </div>
+                    <div class="grid">
+                      <label>Check-In Label<input name="service_check_in_label" value="Ready on Site"></label>
+                      <label>Completion Label<input name="service_completion_label" value="Done"></label>
+                      <label>Check-In Window Start<input name="service_check_in_start" type="number" min="0" value="15"></label>
+                      <label>Check-In Window End<input name="service_check_in_end" type="number" min="0" value="5"></label>
+                    </div>
+                    <div class="button-row left">
+                      <label class="switch-row"><input name="service_active" type="checkbox" checked><span>Active</span></label>
+                      <label class="switch-row"><input name="service_check_in_required" type="checkbox"><span>Check-in required</span></label>
+                      <label class="switch-row"><input name="service_completion_required" type="checkbox" checked><span>Completion required</span></label>
+                    </div>
+                    <h3>Allowed Fulfillers</h3>
+                    <div class="grid">
+                      <label>Fulfiller<input name="service_allowed_fulfiller_id" value="fulfiller_george_platinum"></label>
+                      <label>Override Type<select name="service_comp_override_type"><option value="use_fulfiller_default">Use fulfiller default</option><option value="flat_fee">Flat fee</option><option value="percent">Percent</option></select></label>
+                      <label>Override Amount<input name="service_comp_override_amount" type="number" min="0" step="0.01" value="0.00"></label>
+                    </div>
+                    <div class="button-row left">
+                      <label class="switch-row"><input name="service_tips_to_fulfiller" type="checkbox" checked><span>Tips go to fulfiller</span></label>
+                      <label class="switch-row"><input name="service_fulfiller_enabled" type="checkbox" checked><span>Enabled</span></label>
+                    </div>
+                    <button type="submit">Create Service</button>
+                  </div>
+                </section>
+              </form>
+
+              <section class="nested-card">
+                <header><h3>Services</h3></header>
+                <div class="table-shell service-table">
+                  <div class="table-row table-head"><span>Service</span><span>Duration</span><span>Price</span><span>Fulfiller</span><span>Status</span></div>
+                  <div class="table-row"><strong>1 hour full body massage</strong><span>60 min</span><span>$120.00</span><span>George Platinum</span><span>Active</span></div>
+                </div>
+              </section>
+            </div>
+          </section>
+
+          <div class="preference-grid">
+            <form data-endpoint="/services/fulfillers" data-method="PUT" data-payload="fulfiller">
+              <section class="config-card">
+                <header><h2>Fulfillers</h2></header>
+                <div class="config-card-body">
+                  <input name="tenant_id" type="hidden" value="tenant_demo">
+                  <div class="grid">
+                    <label>First Name<input name="fulfiller_first_name" value="George"></label>
+                    <label>Last Name<input name="fulfiller_last_name" value="Platinum"></label>
+                    <label>Email<input name="fulfiller_email" type="email" value="georgep@gmail.com"></label>
+                    <label>Phone<input name="fulfiller_phone" value="+15551234567"></label>
+                    <label>Display Name<input name="fulfiller_display_name" value="George Platinum"></label>
+                    <label>Status<select name="fulfiller_status"><option value="active">Active</option><option value="inactive">Inactive</option><option value="invited">Invited</option></select></label>
+                    <label>Compensation Type<select name="fulfiller_comp_type"><option value="flat_fee">Flat Fee</option><option value="percent">Percent</option><option value="hourly">Hourly</option></select></label>
+                    <label>Compensation Amount<input name="fulfiller_comp_amount" type="number" min="0" step="0.01" value="60.00"></label>
+                  </div>
+                  <label class="switch-row"><input name="fulfiller_tips" type="checkbox" checked><span>Tips go to fulfiller</span></label>
+                  <button type="submit">Add Fulfiller</button>
+                </div>
+              </section>
+            </form>
+
+            <form data-endpoint="/services/availability/defaults" data-method="PUT" data-payload="tenant_availability">
+              <section class="config-card">
+                <header><h2>Tenant Availability</h2></header>
+                <div class="config-card-body">
+                  <input name="tenant_id" type="hidden" value="tenant_demo">
+                  <div class="grid">
+                    <label>Timezone<input name="availability_timezone" value="America/Denver"></label>
+                    <label>Slot Interval (minutes)<input name="availability_slot_interval" type="number" min="1" value="30"></label>
+                    <label>Lead Time (minutes)<input name="availability_lead_time" type="number" min="0" value="60"></label>
+                    <label>Buffer After (minutes)<input name="availability_buffer_after" type="number" min="0" value="0"></label>
+                  </div>
+                  <button type="submit">Save Defaults</button>
+                </div>
+              </section>
+            </form>
+          </div>
+
+          <div class="preference-grid">
+            <form data-endpoint="/services/availability/exceptions" data-method="PUT" data-payload="availability_exception">
+              <section class="config-card">
+                <header><h2>Availability Exceptions</h2></header>
+                <div class="config-card-body">
+                  <input name="tenant_id" type="hidden" value="tenant_demo">
+                  <div class="grid">
+                    <label>Exception Start<input name="exception_start" type="datetime-local"></label>
+                    <label>Exception End<input name="exception_end" type="datetime-local"></label>
+                    <label>Type<select name="exception_type"><option value="block">Block</option><option value="open">Open</option></select></label>
+                    <label>Reason<input name="exception_reason" value="Vacation"></label>
+                    <label>Fulfiller Scope<select name="exception_fulfiller_scope"><option value="all">All fulfillers</option><option value="specific">Specific fulfiller</option></select></label>
+                    <label>Fulfiller ID<input name="exception_fulfiller_id" placeholder="fulfiller_..."></label>
+                  </div>
+                  <button type="submit">Add Exception</button>
+                </div>
+              </section>
+            </form>
+
+            <form data-endpoint="/services/appointments" data-method="PUT" data-payload="appointment">
+              <section class="config-card">
+                <header><h2>Appointments</h2></header>
+                <div class="config-card-body">
+                  <input name="tenant_id" type="hidden" value="tenant_demo">
+                  <div class="grid">
+                    <label>Service ID<input name="appointment_service_id" value="svc_60_min_massage"></label>
+                    <label>Start<input name="appointment_start" type="datetime-local"></label>
+                    <label>End<input name="appointment_end" type="datetime-local"></label>
+                    <label>Status<select name="appointment_status"><option value="booked">Booked</option><option value="paid">Paid</option><option value="checked_in">Checked in</option><option value="completed">Completed</option><option value="canceled">Canceled</option></select></label>
+                    <label>Customer Email<input name="appointment_customer_email" type="email" value="mrubio@gmail.com"></label>
+                    <label>Fulfiller ID<input name="appointment_fulfiller_id" value="fulfiller_george_platinum"></label>
+                  </div>
+                  <span class="empty-state bordered">Booked appointments will appear here.</span>
+                  <button type="submit">Create Appointment</button>
+                </div>
+              </section>
+            </form>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel" data-panel="notifications">
+        <h1>Notifications</h1>
+        <p>Newest paid invoice notifications first</p>
+        <div class="config-stack">
+          <section class="config-card">
+            <header>
+              <h2>Latest Alerts</h2>
+              <span class="field-note">Newest notifications first</span>
+            </header>
+            <div class="config-card-body">
+              <form data-endpoint="/notifications" data-method="PUT" data-payload="notification">
+                <input name="tenant_id" type="hidden" value="tenant_demo">
+                <div class="grid">
+                  <label>Title<input name="notification_title" value="Invoice paid"></label>
+                  <label>Type<select name="notification_type"><option value="paid_invoice">paid invoice</option><option value="order">order</option><option value="system">system</option></select></label>
+                </div>
+                <label>Message<input name="notification_message" value="A customer paid an invoice."></label>
+                <button type="submit">Create Alert</button>
+              </form>
+              <span class="empty-state">No notifications yet</span>
+            </div>
+          </section>
+
+          <section class="config-card">
+            <header>
+              <div>
+                <h2>Refund Requests</h2>
+                <p>0 requests • Newest requests first</p>
+              </div>
+              <div class="button-row">
+                <button type="button">Refresh</button>
+                <button type="button">Export CSV</button>
+              </div>
+            </header>
+            <div class="config-card-body">
+              <form data-endpoint="/notifications/refund-requests" data-method="PUT" data-payload="refund_request">
+                <input name="tenant_id" type="hidden" value="tenant_demo">
+                <div class="notification-filter-grid">
+                  <label>Status<select name="refund_status"><option value="manual_review">Manual review</option><option value="new">New</option><option value="approved">Approved</option><option value="rejected">Rejected</option><option value="refunded">Refunded</option></select></label>
+                  <label>Customer<input name="refund_customer" placeholder="Customer name or email" value="customer@example.com"></label>
+                  <label>Page or Offer<input name="refund_page_or_offer" placeholder="Page or offer" value="offer_demo123"></label>
+                  <label>Order ID<input name="refund_order_id" placeholder="Order ID" value="order_demo123"></label>
+                  <label>Risk<select name="refund_risk_level"><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option><option value="unknown">Unknown</option></select></label>
+                  <label>Start Date<input name="refund_start_date" type="date"></label>
+                  <label>End Date<input name="refund_end_date" type="date"></label>
+                </div>
+                <button type="submit">Create Refund Request</button>
+              </form>
+              <span class="empty-state bordered">No refund requests match these filters</span>
+            </div>
+          </section>
+        </div>
+      </section>
+
+      <section class="panel" data-panel="invoices">
+        <h1>Invoices</h1>
+        <p>Create, share, and resend service invoices</p>
+        <section class="config-card">
+          <header>
+            <h2>Service Invoices</h2>
+            <button type="button">Refresh</button>
+          </header>
+          <div class="config-card-body services-layout">
+            <form data-endpoint="/invoices" data-method="PUT" data-payload="invoice">
+              <section class="nested-card">
+                <header><h3>Create Invoice</h3></header>
+                <div class="config-card-body">
+                  <input name="tenant_id" type="hidden" value="tenant_demo">
+                  <label>Customer Name<input name="invoice_customer_name" value="Jane Doe"></label>
+                  <label>Customer Email<input name="invoice_customer_email" type="email" value="jane@example.com"></label>
+                  <label>Customer Phone<input name="invoice_customer_phone" value="+15551234567"></label>
+                  <label>Description<textarea name="invoice_description" rows="4" placeholder="Optional project notes">Service invoice.</textarea></label>
+                  <div class="grid">
+                    <label>Hero Image URL<input name="invoice_hero_image_url" value="https://images.juniorbay.com/icon/favicon.png"></label>
+                    <label>Days Until Due<input name="invoice_days_until_due" type="number" min="0" value="7"></label>
+                  </div>
+                  <h3>Line Items</h3>
+                  <div class="grid">
+                    <label>Description<input name="invoice_line_description" value="1 hour full body massage"></label>
+                    <label>Quantity<input name="invoice_line_quantity" type="number" min="1" value="1"></label>
+                    <label>Unit Amount<input name="invoice_line_unit_amount" type="number" min="0" step="0.01" value="120.00"></label>
+                    <label>Service ID<input name="invoice_service_id" value="svc_60_min_massage"></label>
+                  </div>
+                  <button type="submit">Create Invoice</button>
+                </div>
+              </section>
+            </form>
+
+            <section class="nested-card">
+              <header><h3>Existing Invoices</h3></header>
+              <div class="table-shell invoice-table">
+                <div class="table-row table-head"><span>Date</span><span>Customer</span><span>Amount</span><span>Status</span><span>Actions</span></div>
+                <div class="table-row"><span>3/31/2026</span><strong>Marco Rubio</strong><span>$1,000.00</span><span>paid</span><span>Share</span></div>
+                <div class="table-row muted-row"><span>3/30/2026</span><strong>Mark McGuire</strong><span>$500.00</span><span>paid</span><span>Resend</span></div>
+              </div>
+            </section>
+          </div>
+        </section>
+      </section>
+
+      <section class="panel" data-panel="shipping">
+        <h1>Shipping</h1>
+        <p>Configure shipping options and rates</p>
+        <form data-endpoint="/shipping" data-method="PUT" data-payload="shipping">
+          <section class="config-card">
+            <header>
+              <h2>Shipping Configuration</h2>
+              <div class="button-row">
+                <button type="button">Test Connection</button>
+                <button type="submit">Save Shipping</button>
+              </div>
+            </header>
+            <div class="config-card-body">
+              <input name="tenant_id" type="hidden" value="tenant_demo">
+              <div class="grid">
+                <label>Shipping Provider
+                  <select name="shipping_provider">
+                    <option value="mock">Mock / Test Provider</option>
+                    <option value="shippo">Shippo</option>
+                    <option value="easypost">EasyPost</option>
+                    <option value="shipstation">ShipStation</option>
+                    <option value="easyship">Easyship</option>
+                  </select>
+                </label>
+                <label>API Key<input name="shipping_api_key_ref" placeholder="Provider API key reference"></label>
+                <label>Base URL<input name="shipping_base_url" placeholder="Optional provider API URL"></label>
+              </div>
+              <div class="button-row left">
+                <label class="switch-row"><input name="shipping_enabled" type="checkbox"><span>Enable shipping provider</span></label>
+                <label class="switch-row"><input name="shipping_test_mode" type="checkbox" checked><span>Test mode</span></label>
+                <label class="switch-row"><input name="shipping_auto_fulfill" type="checkbox"><span>Auto-fulfill after label purchase</span></label>
+              </div>
+
+              <div class="preference-grid">
+                <section class="nested-card">
+                  <header><h3>Ship From Address</h3></header>
+                  <div class="config-card-body">
+                    <label>Name<input name="ship_from_name" placeholder="Sender or company name" value="Demo Supplements"></label>
+                    <label>Street<input name="ship_from_street1" placeholder="Street address" value="123 Warehouse Way"></label>
+                    <label>Apartment, suite, etc.<input name="ship_from_street2" placeholder="Apartment, suite, etc."></label>
+                    <div class="address-grid">
+                      <label>City<input name="ship_from_city" placeholder="City" value="Denver"></label>
+                      <label>State<input name="ship_from_state" placeholder="State" value="CO"></label>
+                      <label>ZIP<input name="ship_from_postal_code" placeholder="ZIP" value="80202"></label>
+                    </div>
+                    <div class="address-grid two">
+                      <label>Country<input name="ship_from_country" value="US"></label>
+                      <label>Phone<input name="ship_from_phone" placeholder="Phone" value="+15551234567"></label>
+                    </div>
+                    <label>Email<input name="ship_from_email" type="email" placeholder="Email" value="shipping@example.com"></label>
+                  </div>
+                </section>
+
+                <section class="nested-card">
+                  <header><h3>Return Address</h3></header>
+                  <div class="config-card-body">
+                    <label>Name<input name="return_name" placeholder="Return recipient or company" value="Demo Supplements Returns"></label>
+                    <label>Street<input name="return_street1" placeholder="Street address" value="123 Warehouse Way"></label>
+                    <label>Apartment, suite, etc.<input name="return_street2" placeholder="Apartment, suite, etc."></label>
+                    <div class="address-grid">
+                      <label>City<input name="return_city" placeholder="City" value="Denver"></label>
+                      <label>State<input name="return_state" placeholder="State" value="CO"></label>
+                      <label>ZIP<input name="return_postal_code" placeholder="ZIP" value="80202"></label>
+                    </div>
+                    <div class="address-grid two">
+                      <label>Country<input name="return_country" value="US"></label>
+                      <label>Phone<input name="return_phone" placeholder="Phone" value="+15551234567"></label>
+                    </div>
+                    <label>Email<input name="return_email" type="email" placeholder="Email" value="returns@example.com"></label>
+                  </div>
+                </section>
+              </div>
+
+              <section class="nested-card">
+                <header><h3>Default Parcel</h3></header>
+                <div class="config-card-body parcel-grid">
+                  <label>Length<input name="parcel_length" type="number" min="0.01" step="0.01" value="10"></label>
+                  <label>Width<input name="parcel_width" type="number" min="0.01" step="0.01" value="8"></label>
+                  <label>Height<input name="parcel_height" type="number" min="0.01" step="0.01" value="4"></label>
+                  <label>Weight<input name="parcel_weight" type="number" min="0.01" step="0.01" value="16"></label>
+                  <label>Distance Unit<select name="parcel_distance_unit"><option value="in">in</option><option value="cm">cm</option></select></label>
+                  <label>Mass Unit<select name="parcel_mass_unit"><option value="oz">oz</option><option value="lb">lb</option><option value="g">g</option><option value="kg">kg</option></select></label>
+                </div>
+              </section>
+            </div>
+          </section>
+        </form>
+      </section>
+
+      <section class="panel" data-panel="customers">
+        <h1>Customers</h1>
+        <p>View customer information</p>
+        <form data-endpoint="/customers" data-method="PUT" data-payload="customer">
+          <section class="config-card">
+            <header>
+              <h2>Customer Management</h2>
+              <button type="button">Refresh</button>
+            </header>
+            <div class="config-card-body">
+              <div class="summary-grid compact">
+                <div><span>Total Customers</span><strong>4</strong></div>
+              </div>
+              <input name="tenant_id" type="hidden" value="tenant_demo">
+              <div class="customer-filter-grid">
+                <label>Customer<input name="customer_search" placeholder="Search customer..." value="Marco Rubio"></label>
+                <label>Product<input name="product_search" placeholder="Search product..."></label>
+                <button type="button">Clear Filters</button>
+              </div>
+              <div class="table-shell">
+                <div class="table-row table-head">
+                  <span>Customer</span>
+                  <span>Email</span>
+                  <span>Phone</span>
+                  <span>Last Purchase</span>
+                  <span>Actions</span>
+                </div>
+                <div class="table-row">
+                  <strong>Marco Rubio</strong>
+                  <span>mrubio@gmail.com</span>
+                  <span>12135551212</span>
+                  <span>-</span>
+                  <button type="submit">View</button>
+                </div>
+                <div class="table-row muted-row">
+                  <strong>Mark McGuire</strong>
+                  <span>mjoe70@gmail.com</span>
+                  <span>+15551212</span>
+                  <span>-</span>
+                  <button type="button">View</button>
+                </div>
+              </div>
+              <div class="customer-detail-preview">
+                <header>
+                  <h2>Marco Rubio</h2>
+                  <span>Customer detail</span>
+                </header>
+                <div class="preference-grid">
+                  <section>
+                    <h3>Contact Information</h3>
+                    <label>Name<input name="customer_name" value="Marco Rubio"></label>
+                    <label>Email<input name="customer_email" type="email" value="mrubio@gmail.com"></label>
+                    <label>Phone<input name="customer_phone" value="12135551212"></label>
+                  </section>
+                  <section>
+                    <h3>Summary</h3>
+                    <label>Total Orders<input name="customer_total_orders" type="number" min="0" value="0"></label>
+                    <label>Total Spent<input name="customer_total_spent" type="number" min="0" value="0"></label>
+                    <label>Currency<input name="customer_currency" value="usd"></label>
+                  </section>
+                </div>
+                <section>
+                  <h3>Shipping Address</h3>
+                  <span class="field-note">Leave blank when no shipping address is available.</span>
+                </section>
+                <section>
+                  <h3>Transaction History</h3>
+                  <span class="field-note">No transactions recorded</span>
+                </section>
+              </div>
+            </div>
+          </section>
+        </form>
+      </section>
+
+      <section class="panel" data-panel="config">
+        <h1>Configuration</h1>
+        <form data-endpoint="/config" data-method="PUT" data-payload="config">
+          <div class="config-stack">
+            <section class="config-card">
+              <header>
+                <h2>Upsell Page Defaults</h2>
+                <button type="submit">Save</button>
+              </header>
+              <div class="config-card-body">
+                <p>Set default text for upsell pages. These will auto-populate when creating landing pages.</p>
+                <label>Headline<input name="upsell_headline" value="Wait! Before You Go..."></label>
+                <label>Subheadline<input name="upsell_subheadline" value="Exclusive One-Time Offer Just For You"></label>
+                <label>Accept Button Text<input name="upsell_accept_button_text" value="Yes, I'll Take This Deal for {{ upsell_price }}"></label>
+                <span class="field-note">Use {{ upsell_price }} to insert the product price</span>
+                <label>Decline Button Text<input name="upsell_decline_button_text" value="No, Thank You! Let's Move On"></label>
+              </div>
+            </section>
+
+            <section class="config-card">
+              <header>
+                <h2>Thank You Page Defaults</h2>
+                <button type="submit">Save</button>
+              </header>
+              <div class="config-card-body">
+                <p>Set default text for thank you pages. These will auto-populate when creating landing pages.</p>
+                <label>Headline<input name="thankyou_headline" value="Thank You for Your Purchase!"></label>
+                <label>Subtitle<input name="thankyou_subtitle" value="Your Order Has Been Confirmed!"></label>
+                <label>Message<textarea name="thankyou_message" rows="4">Look for an email from us with further details on your order.</textarea></label>
+              </div>
+            </section>
+
+            <section class="config-card">
+              <header>
+                <h2>Checkout Settings</h2>
+                <button type="submit">Save</button>
+              </header>
+              <div class="config-card-body">
+                <p>Configure checkout behavior for this tenant. Individual offers can override these settings.</p>
+                <label>Phone Number Collection</label>
+                <label class="switch-row">
+                  <input name="phone_number_collection_enabled" type="checkbox">
+                  <span>Enabled</span>
+                </label>
+                <span class="field-note">When enabled, customers will be asked to provide their phone number at checkout. Useful for physical products to send shipping notifications.</span>
+              </div>
+            </section>
+
+            <section class="config-card">
+              <header>
+                <div>
+                  <h2>Custom Domains</h2>
+                  <p>Connect your own domain to a Junior Bay landing page.</p>
+                </div>
+                <button type="button">Refresh</button>
+              </header>
+              <div class="config-card-body">
+                <div class="custom-domain-guided">
+                  <div>
+                    <h3>Set up your custom domain</h3>
+                    <p>Use a guided setup to connect a domain you already own to a published landing page.</p>
+                  </div>
+                  <button type="button">Set Up Custom Domain</button>
+                </div>
+                <details>
+                  <summary>Advanced setup</summary>
+                  <div class="grid mt-4">
+                    <label>Domain<input name="custom_domain_name" placeholder="store.example.com"></label>
+                    <label>Destination Page ID<input name="custom_domain_target_page_id" placeholder="page_..."></label>
+                  </div>
+                </details>
+                <div class="info-box">Tenant DNS records should point to <code>domains.jbay.be</code>.</div>
+                <div class="domain-list">
+                  <article class="domain-card">
+                    <header>
+                      <strong>store.coderbay.net</strong>
+                      <span class="status-pill">Active</span>
+                    </header>
+                    <p>Destination: page_92762c9ef151</p>
+                    <div class="dns-grid">
+                      <label>Type<input name="custom_domain_record_type" value="TXT"></label>
+                      <label>Name<input name="custom_domain_record_name" value="_acme-challenge.store.coderbay.net"></label>
+                      <label>Value<input name="custom_domain_record_value" value="9Wqu9Uikr6Zpgts763-mVVligYzI3ATfy7uZVOueFzQ"></label>
+                    </div>
+                  </article>
+                </div>
+              </div>
+            </section>
+
+            <section class="config-card">
+              <header>
+                <h2>System Configuration</h2>
+              </header>
+              <div class="config-card-body">
+                <p>System settings and preferences.</p>
+                <label>Tenant ID<input name="tenant_id" required value="tenant_demo"></label>
+                <label>Default Currency<input name="default_currency" value="usd"></label>
+                <label>API Endpoint<input name="api_endpoint" value="https://pisjx9wsu5.execute-api.us-west-2.amazonaws.com/prod"></label>
+                <label>Environment<input name="environment_label" value="Production"></label>
+              </div>
+            </section>
+
+            <section class="config-card">
+              <header>
+                <h2>Legal & Analytics</h2>
+                <button type="submit">Save</button>
+              </header>
+              <div class="grid config-card-body">
+                <label>Support Email<input name="support_email" value="support@example.com"></label>
+                <label>SMS Notification Phone<input name="sms_notification_phone" value="+1234567890"></label>
+                <label>Terms URL<input name="terms_url" type="url"></label>
+                <label>Privacy URL<input name="privacy_url" type="url"></label>
+                <label>Refund URL<input name="refund_url" type="url"></label>
+                <label>Google Tag ID<input name="google_tag_id" placeholder="G-..."></label>
+                <label>Meta Pixel ID<input name="pixel_id"></label>
+              </div>
+            </section>
+          </div>
+        </form>
+      </section>
+
+      <section class="panel" data-panel="preferences">
+        <h1>Preferences</h1>
+        <p>Manage your preferences</p>
+        <form data-endpoint="/preferences" data-method="PUT" data-payload="preferences">
+          <div class="config-stack">
+            <input name="tenant_id" type="hidden" value="tenant_demo">
+            <input name="user_id" type="hidden" value="owner@example.com">
+            <section class="config-card">
+              <header>
+                <h2>Custom Color Themes</h2>
+              </header>
+              <div class="config-card-body">
+                <p>Manage your saved custom color themes for landing pages. You can save up to 10 custom themes.</p>
+                <span class="empty-state">No custom themes saved yet.<br>Create custom themes from the Landing Pages editor using "Save as Theme".</span>
+              </div>
+            </section>
+
+            <section class="config-card">
+              <header>
+                <h2>Default Landing Page Template</h2>
+              </header>
+              <div class="config-card-body inline-controls">
+                <label>Choose your preferred template for new landing pages.
+                  <select name="default_template_id">
+                    <option value="socialite">Socialite</option>
+                    <option value="classic">Classic</option>
+                    <option value="minimal">Minimal</option>
+                  </select>
+                </label>
+                <button type="submit">Save</button>
+              </div>
+            </section>
+
+            <section class="config-card">
+              <header>
+                <h2>Refund Policy Defaults</h2>
+                <div class="button-row">
+                  <button type="button">Load Recommended Defaults</button>
+                  <button type="submit">Save</button>
+                </div>
+              </header>
+              <div class="config-card-body">
+                <p>Set your tenant-level defaults by product class. Products can inherit these or define a product-specific override.</p>
+                <div class="preference-grid">
+                  <section class="nested-card">
+                    <header><h3>Physical Products</h3></header>
+                    <div class="config-card-body">
+                      <div class="grid">
+                        <label>Refund Window<select name="physical_refund_window"><option value="30_days">30-day refunds</option><option value="14_days">14-day refunds</option><option value="7_days">7-day refunds</option></select></label>
+                        <label>Condition<select name="physical_condition"><option value="unused">Unused</option><option value="unopened">Unopened</option><option value="any">Any</option></select></label>
+                      </div>
+                      <label>Return Method<select name="physical_return_method"><option value="no_return_customer_keeps">No Return (Customer Keeps)</option><option value="return_required">Return Required</option></select></label>
+                      <label>Short Label<input name="physical_short_label" value="30-day money-back"></label>
+                      <label>Full Policy<textarea name="physical_full_policy" rows="4">Refunds are available within 30 days of delivery in unused condition.</textarea></label>
+                    </div>
+                  </section>
+
+                  <section class="nested-card">
+                    <header><h3>Digital Products</h3></header>
+                    <div class="config-card-body">
+                      <div class="grid">
+                        <label>Refund Window<select name="digital_refund_window"><option value="non_refundable">Non-refundable</option><option value="72_hours">72 hours (3 days)</option><option value="7_days">7-day refunds</option></select></label>
+                        <label>Return Method<select name="digital_return_method"><option value="no_return_customer_keeps">No Return (Customer Keeps)</option><option value="digital_revoke_access">Revoke Access</option></select></label>
+                      </div>
+                      <input name="digital_condition" type="hidden" value="any">
+                      <label>Short Label<input name="digital_short_label" value="Non-refundable"></label>
+                      <label>Full Policy<textarea name="digital_full_policy" rows="4">All sales are final and as such, no item can be returned, replaced, or refunded in full or in part.</textarea></label>
+                    </div>
+                  </section>
+
+                  <section class="nested-card">
+                    <header><h3>Subscriptions</h3></header>
+                    <div class="config-card-body">
+                      <div class="grid">
+                        <label>Refund Window<select name="subscription_refund_window"><option value="72_hours">72 hours (3 days)</option><option value="7_days">7-day refunds</option><option value="non_refundable">Non-refundable</option></select></label>
+                        <label>Condition<select name="subscription_condition"><option value="any">Any</option><option value="custom">Custom</option></select></label>
+                      </div>
+                      <label>Return Method<select name="subscription_return_method"><option value="no_return_customer_keeps">No Return (Customer Keeps)</option><option value="custom">Custom</option></select></label>
+                      <label>Short Label<input name="subscription_short_label" value="72 hours (3 days)"></label>
+                      <label>Full Policy<textarea name="subscription_full_policy" rows="4">Refunds are available within 3 days of delivery in any condition.</textarea></label>
+                    </div>
+                  </section>
+                </div>
+              </div>
+            </section>
+
+            <div class="preference-grid">
+              <section class="config-card">
+                <header>
+                  <h2>Return Address</h2>
+                  <button type="submit">Save</button>
+                </header>
+                <div class="config-card-body">
+                  <p>Used when refund requests need return shipping instructions.</p>
+                  <label>Return Address or Instructions<textarea name="return_instructions" rows="5" placeholder="Business name, street address, city, state, ZIP, and any return instructions"></textarea></label>
+                </div>
+              </section>
+
+              <section class="config-card">
+                <header>
+                  <h2>Refund Request Handling</h2>
+                </header>
+                <div class="config-card-body">
+                  <p>Choose whether refund requests wait for manual review or receive an automatic acknowledgement.</p>
+                  <label>Handling Mode<select name="refund_handling_mode"><option value="manual_review">Manual Review</option><option value="automatic_acknowledgement">Automatic Acknowledgement</option></select></label>
+                  <label>SMS Notifications<input name="refund_sms_phone" value="+12065654418"></label>
+                  <span class="field-note">Use E.164 format, for example +15551234567.</span>
+                  <label class="switch-row"><input name="refund_sms_enabled" type="checkbox"><span>Refund request SMS enabled</span></label>
+                </div>
+              </section>
+            </div>
+          </div>
+        </form>
+      </section>
+
+      <section class="panel" data-panel="profile">
+        <h1>Profile</h1>
+        <p>Manage your account settings and avatar</p>
+        <form data-endpoint="/profile" data-method="PUT" data-payload="profile">
+          <div class="config-stack">
+            <section class="config-card">
+              <header>
+                <h2>Profile Settings</h2>
+                <button type="submit">Save Profile</button>
+              </header>
+              <div class="config-card-body">
+                <label>Tenant ID<input name="tenant_id" required value="tenant_demo"></label>
+                <label>User ID<input name="user_id" required value="keithdecosta@gmail.com"></label>
+                <label>Display Name<input name="display_name" required placeholder="Enter your display name"></label>
+                <span class="field-note">This name will be shown in the header and other areas of the dashboard.</span>
+                <label>Email<input name="email" type="email" required value="keithdecosta@gmail.com"></label>
+                <span class="field-note">Email is managed through your Cognito account.</span>
+              </div>
+            </section>
+
+            <section class="config-card">
+              <header>
+                <h2>Change Password</h2>
+              </header>
+              <div class="config-card-body">
+                <label>Current Password<input name="current_password" type="password" placeholder="Enter current password" autocomplete="current-password"></label>
+                <label>New Password<input name="new_password" type="password" placeholder="Enter new password" autocomplete="new-password"></label>
+                <label>Confirm New Password<input name="confirm_password" type="password" placeholder="Confirm new password" autocomplete="new-password"></label>
+                <button type="button">Change Password</button>
+              </div>
+            </section>
+
+            <section class="config-card">
+              <header>
+                <h2>Profile Images</h2>
+              </header>
+              <div class="config-card-body">
+                <p>Upload profile images and select one as your avatar. The selected avatar will be displayed in the header.</p>
+                <div class="upload-dropzone">
+                  <strong>Upload</strong>
+                  <span>Click to upload or drag and drop</span>
+                  <small>PNG, JPG, WEBP up to 10MB (max 10 images)</small>
+                </div>
+                <span class="empty-state">No images uploaded yet. Upload your first profile image above.</span>
+              </div>
+            </section>
+
+            <section class="config-card">
+              <header>
+                <h2>Subscription</h2>
+                <button type="button" class="success-button">Activate Account</button>
+              </header>
+              <div class="config-card-body">
+                <p>Bring your store online today at the click of a button!</p>
+                <input name="role" type="hidden" value="user">
+                <input name="account_status" type="hidden" value="inactive">
+                <input name="tier_id" type="hidden" value="starter">
+              </div>
+            </section>
+          </div>
+        </form>
+      </section>
+
+      <section class="output">
+        <h2>Response</h2>
+        <pre id="output">{}</pre>
+      </section>
+    </main>
+  </div>
+
+  <script src="./app.js"></script>
+</body>
+</html>

@@ -1,0 +1,51 @@
+{
+  "schema_version": "2026-05-29",
+  "document_type": "user_preferences",
+  "tenant_id": "tenant_demo",
+  "user_id": "owner@example.com",
+  "theme": "system",
+  "default_stripe_mode": "test",
+  "sidebar_collapsed": false,
+  "dashboard_home": "dashboard",
+  "landing_pages": {
+    "default_template_id": "socialite",
+    "custom_color_themes": []
+  },
+  "authoring_defaults": {
+    "refund_policies": {
+      "physical": {
+        "refund_window": "30_days",
+        "condition": "unused",
+        "return_method": "no_return_customer_keeps",
+        "short_label": "30-day money-back",
+        "full_policy": "Refunds are available within 30 days of delivery in unused condition."
+      },
+      "digital": {
+        "refund_window": "non_refundable",
+        "condition": "any",
+        "return_method": "no_return_customer_keeps",
+        "short_label": "Non-refundable",
+        "full_policy": "All sales are final and as such, no item can be returned, replaced, or refunded in full or in part."
+      },
+      "subscription": {
+        "refund_window": "72_hours",
+        "condition": "any",
+        "return_method": "no_return_customer_keeps",
+        "short_label": "72 hours (3 days)",
+        "full_policy": "Refunds are available within 3 days of delivery in any condition."
+      }
+    },
+    "return_address": {
+      "instructions": "",
+      "updated_at": 1780092000
+    },
+    "refund_request_handling": {
+      "mode": "manual_review",
+      "sms_notifications": {
+        "enabled": false,
+        "phone_number": "+12065654418"
+      }
+    }
+  },
+  "updated_at": 1780092000
+}

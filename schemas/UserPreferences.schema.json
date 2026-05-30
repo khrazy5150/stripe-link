@@ -1,0 +1,109 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.juniorbay.com/stripe-link/UserPreferences.schema.json",
+  "title": "UserPreferences",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "document_type", "tenant_id", "user_id"],
+  "properties": {
+    "schema_version": { "type": "string", "const": "2026-05-29" },
+    "document_type": { "type": "string", "const": "user_preferences" },
+    "tenant_id": { "type": "string", "minLength": 1 },
+    "user_id": { "type": "string", "minLength": 1 },
+    "theme": { "type": "string", "enum": ["system", "light", "dark"], "default": "system" },
+    "default_stripe_mode": { "type": "string", "enum": ["test", "live"], "default": "test" },
+    "sidebar_collapsed": { "type": "boolean", "default": false },
+    "dashboard_home": { "type": "string", "default": "dashboard" },
+    "landing_pages": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "default_template_id": { "type": "string", "default": "socialite" },
+        "custom_color_themes": {
+          "type": "array",
+          "maxItems": 10,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["theme_id", "name", "tokens"],
+            "properties": {
+              "theme_id": { "type": "string" },
+              "name": { "type": "string" },
+              "tokens": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": ["string", "number", "integer", "boolean", "null"]
+                }
+              },
+              "created_at": { "type": "integer", "minimum": 0 },
+              "updated_at": { "type": "integer", "minimum": 0 }
+            }
+          }
+        }
+      }
+    },
+    "authoring_defaults": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Per-user defaults applied while creating or editing documents. These do not mutate existing tenant/product/page documents until copied into those documents.",
+      "properties": {
+        "refund_policies": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "physical": { "$ref": "#/$defs/refund_policy" },
+            "digital": { "$ref": "#/$defs/refund_policy" },
+            "subscription": { "$ref": "#/$defs/refund_policy" }
+          }
+        },
+        "return_address": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "instructions": { "type": "string" },
+            "updated_at": { "type": "integer", "minimum": 0 }
+          }
+        },
+        "refund_request_handling": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "mode": { "type": "string", "enum": ["manual_review", "automatic_acknowledgement"], "default": "manual_review" },
+            "sms_notifications": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "enabled": { "type": "boolean", "default": false },
+                "phone_number": { "type": "string" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "updated_at": { "type": "integer", "minimum": 0 }
+  },
+  "$defs": {
+    "refund_policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["refund_window", "condition", "return_method", "short_label", "full_policy"],
+      "properties": {
+        "refund_window": {
+          "type": "string",
+          "enum": ["non_refundable", "72_hours", "7_days", "14_days", "30_days", "60_days", "custom"]
+        },
+        "condition": {
+          "type": "string",
+          "enum": ["any", "unused", "unopened", "defective_only", "not_downloaded", "custom"]
+        },
+        "return_method": {
+          "type": "string",
+          "enum": ["no_return_customer_keeps", "return_required", "digital_revoke_access", "custom"]
+        },
+        "short_label": { "type": "string" },
+        "full_policy": { "type": "string" }
+      }
+    }
+  }
+}

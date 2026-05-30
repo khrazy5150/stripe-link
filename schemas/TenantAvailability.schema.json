@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.stripe-link.local/TenantAvailability.schema.json",
+  "title": "TenantAvailability",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "document_type", "tenant_id", "availability_id", "timezone", "slot_interval_minutes", "lead_time_minutes", "weekly_hours"],
+  "properties": {
+    "schema_version": { "type": "string" },
+    "document_type": { "const": "tenant_availability" },
+    "tenant_id": { "type": "string" },
+    "availability_id": { "const": "default" },
+    "timezone": { "type": "string" },
+    "slot_interval_minutes": { "type": "integer", "minimum": 1 },
+    "lead_time_minutes": { "type": "integer", "minimum": 0 },
+    "buffer_before_minutes": { "type": "integer", "minimum": 0 },
+    "buffer_after_minutes": { "type": "integer", "minimum": 0 },
+    "weekly_hours": { "$ref": "#/$defs/weekly_hours" },
+    "updated_at": { "type": "integer" }
+  },
+  "$defs": {
+    "weekly_hours": {
+      "type": "array",
+      "minItems": 7,
+      "maxItems": 7,
+      "items": { "$ref": "#/$defs/day_hours" }
+    },
+    "day_hours": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["day", "enabled"],
+      "properties": {
+        "day": { "enum": ["mon", "tue", "wed", "thu", "fri", "sat", "sun"] },
+        "enabled": { "type": "boolean" },
+        "start_time": { "type": "string" },
+        "end_time": { "type": "string" }
+      }
+    }
+  }
+}

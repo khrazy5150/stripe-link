@@ -1,0 +1,97 @@
+{
+  "schema_version": "2026-05-29",
+  "document_type": "tenant_config",
+  "tenant_id": "tenant_demo",
+  "default_currency": "usd",
+  "environment": "prod",
+  "system": {
+    "api_endpoint": "https://pisjx9wsu5.execute-api.us-west-2.amazonaws.com/prod",
+    "environment_label": "Production",
+    "dashboard_url": "https://app.juniorbay.com",
+    "checkout_base_url": "https://checkout.juniorbay.com"
+  },
+  "support": {
+    "email": "support@example.com",
+    "sms_notification_phone": "+1234567890"
+  },
+  "page_defaults": {
+    "upsell": {
+      "headline": "Wait! Before You Go...",
+      "subheadline": "Exclusive One-Time Offer Just For You",
+      "accept_button_text": "Yes, I'll Take This Deal for {{ upsell_price }}",
+      "decline_button_text": "No, Thank You! Let's Move On"
+    },
+    "thank_you": {
+      "headline": "Thank You for Your Purchase!",
+      "subtitle": "Your Order Has Been Confirmed!",
+      "message": "Look for an email from us with further details on your order."
+    }
+  },
+  "checkout": {
+    "phone_number_collection": {
+      "enabled": false,
+      "label": "Disabled",
+      "description": "When enabled, customers will be asked to provide their phone number at checkout. Useful for physical products to send shipping notifications."
+    }
+  },
+  "custom_domains": {
+    "enabled": true,
+    "live_only": true,
+    "dns_target": "domains.jbay.be",
+    "domains": [
+      {
+        "domain": "kjfitsmu-boxer-briefs-for-men.coderbay.net",
+        "apex_domain": "coderbay.net",
+        "registrar_provider": "",
+        "target_type": "landing_page",
+        "target_page_id": "page_92762c9ef151",
+        "status": "active",
+        "ssl_status": "active",
+        "validation_record": {
+          "type": "TXT",
+          "name": "_acme-challenge.kjfitsmu-boxer-briefs-for-men.coderbay.net",
+          "value": "TRpvtOdZV6p049RUmKZQMg5NFOI7LGGlKmkXEd1Zd0E"
+        },
+        "created_at": 1780092000,
+        "updated_at": 1780092000
+      },
+      {
+        "domain": "store.coderbay.net",
+        "apex_domain": "coderbay.net",
+        "registrar_provider": "",
+        "target_type": "landing_page",
+        "target_page_id": "page_92762c9ef151",
+        "status": "active",
+        "ssl_status": "active",
+        "validation_record": {
+          "type": "TXT",
+          "name": "_acme-challenge.store.coderbay.net",
+          "value": "9Wqu9Uikr6Zpgts763-mVVligYzI3ATfy7uZVOueFzQ"
+        },
+        "created_at": 1780092000,
+        "updated_at": 1780092000
+      }
+    ]
+  },
+  "legal_defaults": {
+    "terms_url": "https://example.com/terms",
+    "privacy_url": "https://example.com/privacy",
+    "refund_url": "https://example.com/refunds"
+  },
+  "analytics_defaults": {
+    "google_tag_id": "G-DEMO1234",
+    "pixel_id": "1234567890"
+  },
+  "developer_tools": {
+    "delete_test_data_enabled": false,
+    "stripe_test_cards_visible": false,
+    "stripe_test_cards": [
+      {
+        "label": "Visa",
+        "number": "4242424242424242",
+        "description": "Successful payment"
+      }
+    ]
+  },
+  "updated_at": 1780092000
+}
