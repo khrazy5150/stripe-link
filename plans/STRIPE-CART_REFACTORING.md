@@ -271,6 +271,13 @@ doc.state.sections[0].blocks[1].content.headline = "Updated offer";
 9. Add browser tests for dashboard edit, live preview update, autosave, validation, publish, and checkout launch.
 10. Add mobile adapter tests that prove web-only components fail gracefully.
 
+## Production Readiness Watchlist
+
+These items do not block the current development flow, but they should be resolved before production traffic or real merchant data.
+
+1. Replace tenant selection by `tenant_id` query parameter with authenticated tenant context once auth middleware is added. List endpoints should derive tenant scope from the caller/session/claims, not trust caller-provided query parameters.
+2. Attach a consumer to the `PagesTable` DynamoDB Stream before depending on page-change events for publishing, audit history, search indexing, cache invalidation, or collaboration workflows.
+
 ## Deployment Steps
 
 1. Create `template.yaml` for `stripe-link` with dev/prod environments and `jb-` naming defaults.

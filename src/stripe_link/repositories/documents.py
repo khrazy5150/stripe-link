@@ -15,6 +15,21 @@ def assert_jb_resource_name(name: str) -> None:
         raise ResourceIsolationError(f"Refusing to use non-jb resource '{name}'.")
 
 
+def _query_all_pages(table: Any, **query: Any) -> list[dict[str, Any]]:
+    items: list[dict[str, Any]] = []
+    request = dict(query)
+
+    while True:
+        response = table.query(**request)
+        items.extend(response.get("Items", []))
+
+        last_evaluated_key = response.get("LastEvaluatedKey")
+        if not last_evaluated_key:
+            return items
+
+        request["ExclusiveStartKey"] = last_evaluated_key
+
+
 class DynamoDocumentRepository:
     def __init__(
         self,
@@ -77,10 +92,11 @@ class DynamoDocumentRepository:
     def list_for_tenant(self, tenant_id: str) -> list[dict[str, Any]]:
         from boto3.dynamodb.conditions import Key
 
-        response = self.table.query(
+        items = _query_all_pages(
+            self.table,
             KeyConditionExpression=Key("PK").eq(f"TENANT#{tenant_id}") & Key("SK").begins_with(f"{self.sort_prefix}#")
         )
-        return [self._strip_keys(item) for item in response.get("Items", [])]
+        return [self._strip_keys(item) for item in items]
 
     def _strip_keys(self, item: dict[str, Any]) -> dict[str, Any]:
         return {
@@ -192,8 +208,7 @@ class TenantRangeRepository:
     def list_for_tenant(self, tenant_id: str) -> list[dict[str, Any]]:
         from boto3.dynamodb.conditions import Key
 
-        response = self.table.query(KeyConditionExpression=Key("tenant_id").eq(tenant_id))
-        return response.get("Items", [])
+        return _query_all_pages(self.table, KeyConditionExpression=Key("tenant_id").eq(tenant_id))
 
 
 def stripe_keys_repository(table: Any | None = None) -> SimpleKeyRepository:
