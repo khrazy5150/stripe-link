@@ -1,7 +1,17 @@
 const output = document.querySelector("#output");
 const apiBaseInput = document.querySelector("#apiBase");
+const mainApp = document.querySelector("#main-app");
+const environmentLabel = document.querySelector("#environmentLabel");
+const environmentToggle = document.querySelector("#environmentToggle");
 const savedApiBase = localStorage.getItem("stripeLinkApiBase") || "";
 apiBaseInput.value = savedApiBase;
+let currentEnvironment = localStorage.getItem("stripeLinkEnvironment") || "test";
+const appState = {
+  tenantId: localStorage.getItem("stripeLinkTenantId") || "tenant_demo",
+  userId: localStorage.getItem("stripeLinkUserId") || "keithdecosta@gmail.com",
+  session: null,
+};
+applyEnvironment(currentEnvironment);
 
 document.querySelectorAll("[data-auth-tab]").forEach((button) => {
   button.addEventListener("click", () => switchAuthTab(button.dataset.authTab));
@@ -81,6 +91,13 @@ document.querySelector("#btnConfirmNew").addEventListener("click", () => {
 document.querySelector("#saveApiBase").addEventListener("click", () => {
   localStorage.setItem("stripeLinkApiBase", apiBaseInput.value.trim());
   writeOutput({ saved_api_base: apiBaseInput.value.trim() });
+  loadPanelData(mainApp.dataset.view || "dashboard");
+});
+
+environmentToggle.addEventListener("click", () => {
+  currentEnvironment = currentEnvironment === "test" ? "live" : "test";
+  localStorage.setItem("stripeLinkEnvironment", currentEnvironment);
+  applyEnvironment(currentEnvironment);
 });
 
 document.querySelectorAll(".nav-item").forEach((button) => {
@@ -88,7 +105,10 @@ document.querySelectorAll(".nav-item").forEach((button) => {
     document.querySelectorAll(".nav-item").forEach((item) => item.classList.remove("active"));
     document.querySelectorAll(".panel").forEach((panel) => panel.classList.remove("active"));
     button.classList.add("active");
-    document.querySelector(`[data-panel="${button.dataset.view}"]`).classList.add("active");
+    const panel = document.querySelector(`[data-panel="${button.dataset.view}"]`);
+    if (panel) panel.classList.add("active");
+    mainApp.dataset.view = button.dataset.view;
+    loadPanelData(button.dataset.view);
   });
 });
 
@@ -106,14 +126,16 @@ document.querySelectorAll("form").forEach((form) => {
 
 async function startConnect(form) {
   const values = formValues(form);
-  const apiBase = apiBaseInput.value.trim();
-  const path = `/stripe/connect/start?tenant_id=${encodeURIComponent(values.tenant_id)}&mode=${encodeURIComponent(values.mode || "test")}`;
-  if (!apiBase) {
-    writeOutput({ error: "Set API Base URL before calling the API.", path });
+  if (!apiBaseInput.value.trim()) {
+    writeOutput({ error: "Set API Base URL before calling the API.", path: "/stripe/connect/start" });
     return;
   }
-  const response = await fetch(`${apiBase}${path}`);
-  const body = await response.json();
+  const body = await apiRequest("/stripe/connect/start", {
+    params: {
+      mode: values.mode || currentEnvironment,
+      tenant_id: values.tenant_id || appState.tenantId,
+    },
+  });
   writeOutput(body);
   if (body.connect_url) {
     window.open(body.connect_url, "_blank", "noopener,noreferrer");
@@ -121,20 +143,237 @@ async function startConnect(form) {
 }
 
 async function submitJsonForm(form) {
-  const apiBase = apiBaseInput.value.trim();
   const endpoint = form.dataset.endpoint;
   const method = form.dataset.method || "PUT";
   const payload = buildPayload(form.dataset.payload, formValues(form));
-  if (!apiBase) {
+  if (!apiBaseInput.value.trim()) {
     writeOutput({ error: "Set API Base URL before calling the API.", endpoint, payload });
     return;
   }
-  const response = await fetch(`${apiBase}${endpoint}`, {
+  const body = await apiRequest(endpoint, {
     method,
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
+    body: payload,
   });
-  writeOutput(await response.json());
+  writeOutput(body);
+  loadPanelData(mainApp.dataset.view || "dashboard");
+}
+
+async function apiRequest(path, options = {}) {
+  const apiBase = apiBaseInput.value.trim();
+  if (!apiBase) {
+    throw new Error("Set API Base URL before calling the API.");
+  }
+  const url = new URL(`${apiBase.replace(/\/$/, "")}${path}`);
+  const params = {
+    tenant_id: appState.tenantId,
+    ...(options.params || {}),
+  };
+  Object.entries(params).forEach(([key, value]) => {
+    if (value !== undefined && value !== null && value !== "") {
+      url.searchParams.set(key, value);
+    }
+  });
+  const response = await fetch(url.toString(), {
+    method: options.method || "GET",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Tenant-Id": appState.tenantId,
+      "X-Client-Id": appState.tenantId,
+      "X-Environment": currentEnvironment,
+      "X-Stripe-Mode": currentEnvironment,
+      ...(options.headers || {}),
+    },
+    body: options.body ? JSON.stringify(options.body) : undefined,
+  });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok && !(options.allowNotFound && response.status === 404)) {
+    throw new Error(body.message || body.error || `Request failed with ${response.status}`);
+  }
+  return body;
+}
+
+async function loadPanelData(view) {
+  if (!apiBaseInput.value.trim()) return;
+  try {
+    if (view === "dashboard") {
+      await loadDashboardData();
+      return;
+    }
+    const loaders = {
+      products: () => loadCollection("/products", "products"),
+      offers: () => loadCollection("/offers", "offers"),
+      "landing-pages": () => loadCollection("/pages", "pages"),
+      services: () => loadCollection("/services", "services"),
+      notifications: () => loadCollection("/notifications", "notifications"),
+      invoices: () => loadCollection("/invoices", "invoices"),
+      shipping: () => loadSingleton("/shipping", "shipping_config"),
+      customers: () => loadCollection("/customers", "customers"),
+      config: () => loadSingleton("/config", "config"),
+      profile: () => loadSingleton("/profile", "profile", { user_id: appState.userId }),
+      preferences: () => loadSingleton("/preferences", "preferences", { user_id: appState.userId }),
+      keys: () => loadStripeKeys(),
+      connect: () => loadSingleton("/stripe/connect/status", "stripe_connect"),
+      registration: () => loadRegistration(),
+    };
+    if (loaders[view]) await loaders[view]();
+  } catch (error) {
+    writeOutput({ error: error.message, view });
+  }
+}
+
+async function loadDashboardData() {
+  setDashboardLoading();
+  const [products, customers, invoices, notifications] = await Promise.all([
+    apiRequest("/products").catch(() => ({ products: [] })),
+    apiRequest("/customers").catch(() => ({ customers: [] })),
+    apiRequest("/invoices").catch(() => ({ invoices: [] })),
+    apiRequest("/notifications").catch(() => ({ notifications: [] })),
+  ]);
+  renderDashboard({
+    products: products.products || [],
+    customers: customers.customers || [],
+    invoices: invoices.invoices || [],
+    notifications: notifications.notifications || [],
+  });
+}
+
+async function loadCollection(path, key) {
+  const body = await apiRequest(path);
+  writeOutput(body);
+  const count = Array.isArray(body[key]) ? body[key].length : body.count;
+  if (count !== undefined) {
+    setPanelNote(key, `${count} ${key.replace("_", " ")} loaded from backend.`);
+  }
+}
+
+async function loadSingleton(path, key, params = {}) {
+  const body = await apiRequest(path, { params, allowNotFound: true });
+  writeOutput(body);
+  setPanelNote(key, body[key] ? `${key.replace("_", " ")} loaded from backend.` : `${key.replace("_", " ")} not found yet.`);
+}
+
+async function loadStripeKeys() {
+  const body = await apiRequest("/stripe/keys", { allowNotFound: true });
+  writeOutput(body);
+  renderStripeKeys(body.stripe_keys);
+  setPanelNote("stripe_keys", body.stripe_keys ? "Stripe keys loaded" : "No Stripe keys saved yet. Re-enter keys for this environment.");
+}
+
+async function loadRegistration() {
+  const body = await apiRequest(`/tenants/${encodeURIComponent(appState.tenantId)}`, { params: {}, allowNotFound: true });
+  writeOutput(body);
+  if (body.tenant) {
+    document.querySelector("#summaryTenant").textContent = body.tenant.tenant_id || appState.tenantId;
+    document.querySelector("#summaryStatus").textContent = body.tenant.billing_status || "active";
+  }
+}
+
+function setDashboardLoading() {
+  document.querySelector("#statOrdersValue").textContent = "--";
+  document.querySelector("#statRevenueValue").textContent = "--";
+  document.querySelector("#statCustomersValue").textContent = "--";
+  document.querySelector("#statProductsValue").textContent = "--";
+  document.querySelector("#recentOrdersRows").innerHTML = dashboardRow(["Loading", "Backend", "--", "Fetching invoices"]);
+  document.querySelector("#activityList").innerHTML = activityItem("Loading activity...", "Fetching notifications");
+}
+
+function renderDashboard(data) {
+  const paidInvoices = data.invoices.filter((invoice) => invoice.status === "paid" || Number(invoice.amounts?.amount_paid || 0) > 0);
+  const revenueCents = paidInvoices.reduce((sum, invoice) => sum + Number(invoice.amounts?.amount_paid || invoice.amounts?.total || 0), 0);
+  document.querySelector("#statOrdersValue").textContent = data.invoices.length;
+  document.querySelector("#statRevenueValue").textContent = formatCurrency(revenueCents);
+  document.querySelector("#statRevenueMeta").textContent = paidInvoices.length ? "From paid invoices" : "No paid invoices yet";
+  document.querySelector("#statCustomersValue").textContent = data.customers.length;
+  document.querySelector("#statProductsValue").textContent = data.products.length;
+
+  const recentInvoices = [...data.invoices].sort((a, b) => Number(b.created_at || 0) - Number(a.created_at || 0)).slice(0, 10);
+  document.querySelector("#recentOrdersRows").innerHTML = recentInvoices.length
+    ? recentInvoices.map((invoice) => dashboardRow([
+        formatDate(invoice.created_at),
+        invoice.customer?.name || invoice.customer?.email || "N/A",
+        formatCurrency(invoice.amounts?.total || invoice.amounts?.amount_due || 0),
+        invoice.line_items?.[0]?.description || invoice.description || invoice.invoice_id || "Invoice",
+      ])).join("")
+    : dashboardRow(["No invoices", "Backend returned 0", "--", "Create invoices to populate this table"], "muted-row");
+
+  const recentActivity = [...data.notifications].sort((a, b) => Number(b.created_at || 0) - Number(a.created_at || 0)).slice(0, 5);
+  document.querySelector("#activityList").innerHTML = recentActivity.length
+    ? recentActivity.map((notification) => activityItem(notification.title || notification.message || notification.type, formatDate(notification.created_at))).join("")
+    : activityItem("No recent activity", "Notifications endpoint returned 0 items");
+  writeOutput({
+    dashboard: {
+      products: data.products.length,
+      customers: data.customers.length,
+      invoices: data.invoices.length,
+      notifications: data.notifications.length,
+      revenue: revenueCents,
+    },
+  });
+}
+
+function dashboardRow(cells, className = "") {
+  return `<div class="dashboard-table-row ${className}">${cells.map((cell) => `<span>${escapeHtml(cell)}</span>`).join("")}</div>`;
+}
+
+function activityItem(title, time) {
+  return `<article class="activity-item"><span class="activity-dot"></span><div><strong>${escapeHtml(title || "Activity")}</strong><span>${escapeHtml(time || "")}</span></div></article>`;
+}
+
+function formatCurrency(cents, currency = "usd") {
+  return new Intl.NumberFormat("en-US", { style: "currency", currency: currency.toUpperCase() }).format(Number(cents || 0) / 100);
+}
+
+function formatDate(epochSeconds) {
+  if (!epochSeconds) return "N/A";
+  return new Intl.DateTimeFormat("en-US", { month: "short", day: "2-digit", year: "numeric" }).format(new Date(Number(epochSeconds) * 1000));
+}
+
+function setPanelNote(key, text) {
+  const note = document.querySelector(`[data-backend-note="${key}"]`);
+  if (note) note.textContent = text;
+}
+
+function renderStripeKeys(keys) {
+  updateWebhookEndpoints();
+  if (!keys) return;
+  const mode = keys.mode === "live" ? "live" : "test";
+  const publishableInput = document.querySelector(`[name='publishable_key_${mode}']`);
+  const secretInput = document.querySelector(`[name='secret_key_${mode}']`);
+  const webhookInput = document.querySelector(`[name='webhook_secret_${mode}']`);
+  if (publishableInput) publishableInput.value = keys.publishable_key || "";
+  if (secretInput) {
+    secretInput.value = "";
+    secretInput.placeholder = keys.secret_key_ref ? "Saved (hidden)" : `sk_${mode}_...`;
+  }
+  if (webhookInput) {
+    webhookInput.value = "";
+    webhookInput.placeholder = keys.webhook_secret_ref ? "Saved (hidden)" : `whsec_${mode}_...`;
+  }
+  const verifyMode = document.querySelector("[name='verify_mode']");
+  if (verifyMode) verifyMode.value = mode;
+}
+
+function updateWebhookEndpoints() {
+  const tenantId = encodeURIComponent(appState.tenantId || "tenant_demo");
+  const testEndpoint = document.querySelector("[name='webhook_endpoint_test']");
+  const liveEndpoint = document.querySelector("[name='webhook_endpoint_live']");
+  if (testEndpoint) testEndpoint.value = `https://api-dev.juniorbay.com/webhook/${tenantId}`;
+  if (liveEndpoint) liveEndpoint.value = `https://checkout.juniorbay.com/webhook/${tenantId}`;
+}
+
+function applyEnvironment(environment) {
+  const normalized = environment === "live" ? "live" : "test";
+  const theme = normalized === "live" ? "dark" : "light";
+  document.documentElement.dataset.theme = theme;
+  mainApp.dataset.theme = theme;
+  mainApp.dataset.environment = normalized;
+  environmentLabel.textContent = normalized === "live" ? "Live" : "Test";
+  environmentLabel.classList.toggle("live", normalized === "live");
+  document.querySelectorAll("[data-env-copy]").forEach((node) => {
+    node.textContent = normalized === "live" ? "Live" : "Test";
+  });
+  const verifyMode = document.querySelector("[name='verify_mode']");
+  if (verifyMode) verifyMode.value = normalized;
 }
 
 function formValues(form) {
@@ -170,14 +409,15 @@ function buildPayload(type, values) {
     };
   }
   if (type === "stripe_keys") {
+    const mode = currentEnvironment === "live" ? "live" : "test";
     return {
       schema_version: "2026-05-29",
       document_type: "stripe_keys",
       tenant_id: values.tenant_id,
-      mode: values.mode,
-      publishable_key: values.publishable_key,
-      secret_key_ref: values.secret_key_ref,
-      webhook_secret_ref: values.webhook_secret_ref,
+      mode,
+      publishable_key: values[`publishable_key_${mode}`],
+      secret_key_ref: values[`secret_key_${mode}`],
+      webhook_secret_ref: values[`webhook_secret_${mode}`],
       updated_at: now,
     };
   }
@@ -762,11 +1002,21 @@ function setAuthMessage(id, message, type = "info") {
 }
 
 function showApp(session) {
+  appState.session = session;
+  appState.tenantId = session.tenant_id || appState.tenantId;
+  appState.userId = session.email || appState.userId;
+  localStorage.setItem("stripeLinkTenantId", appState.tenantId);
+  localStorage.setItem("stripeLinkUserId", appState.userId);
   document.querySelector("#login-section").classList.add("hidden");
   document.querySelector("#main-app").classList.remove("hidden");
-  document.querySelector("#summaryTenant").textContent = session.tenant_id || "-";
-  document.querySelector("#summaryUser").textContent = session.email || "-";
+  document.querySelector("#summaryTenant").textContent = appState.tenantId || "-";
+  document.querySelector("#summaryUser").textContent = appState.userId || "-";
   document.querySelector("#summaryStatus").textContent = session.status || "active";
+  document.querySelectorAll("[name='tenant_id']").forEach((input) => {
+    input.value = appState.tenantId;
+  });
+  updateWebhookEndpoints();
+  loadPanelData(mainApp.dataset.view || "dashboard");
 }
 
 function writeOutput(value) {

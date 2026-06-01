@@ -111,37 +111,146 @@
     </div>
   </section>
 
-  <div id="main-app" class="app-shell hidden">
+  <div id="main-app" class="app-shell hidden" data-theme="light" data-view="dashboard">
     <aside class="sidebar">
       <div class="brand">
-        <strong>stripe-link</strong>
-        <span>JSON-first checkout</span>
+        <img src="https://images.juniorbay.com/icon/favicon.png" alt="" class="brand-icon">
+        <strong>Admin Panel</strong>
       </div>
       <nav class="nav" aria-label="Dashboard">
-        <button class="nav-item active" data-view="registration">Registration</button>
-        <button class="nav-item" data-view="connect">Stripe Connect</button>
-        <button class="nav-item" data-view="keys">Stripe Keys</button>
-        <button class="nav-item" data-view="services">Services</button>
-        <button class="nav-item" data-view="notifications">Notifications</button>
-        <button class="nav-item" data-view="invoices">Invoices</button>
-        <button class="nav-item" data-view="shipping">Shipping</button>
-        <button class="nav-item" data-view="customers">Customers</button>
-        <button class="nav-item" data-view="config">Configuration</button>
-        <button class="nav-item" data-view="profile">Profile</button>
-        <button class="nav-item" data-view="preferences">Preferences</button>
+        <span class="nav-section-title">Main</span>
+        <button class="nav-item active" data-view="dashboard"><span class="nav-icon"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"/></svg></span>Dashboard</button>
+        <button class="nav-item" data-view="keys"><span class="nav-icon"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z"/></svg></span>Stripe Keys</button>
+        <span class="nav-section-title">Catalog</span>
+        <button class="nav-item" data-view="products"><span class="nav-icon"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"/></svg></span>Products</button>
+        <button class="nav-item" data-view="offers"><span class="nav-icon"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v13m0-13V6a2 2 0 112 2h-2zm0 0V5.5A2.5 2.5 0 109.5 8H12zm-7 4h14M5 12a2 2 0 110-4h14a2 2 0 110 4M5 12v7a2 2 0 002 2h10a2 2 0 002-2v-7"/></svg></span>Offers</button>
+        <button class="nav-item" data-view="landing-pages"><span class="nav-icon"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.59 14.37a6 6 0 01-5.84 7.38v-4.8m5.84-2.58a14.98 14.98 0 006.16-12.12A14.98 14.98 0 009.631 8.41m5.96 5.96a14.926 14.926 0 01-5.841 2.58m-.119-8.54a6 6 0 00-7.381 5.84h4.8m2.581-5.84a14.927 14.927 0 00-2.58 5.84m2.699 2.7c-.103.021-.207.041-.311.06a15.09 15.09 0 01-2.448-2.448 14.9 14.9 0 01.06-.312m-2.24 2.39a4.493 4.493 0 00-1.757 4.306 4.493 4.493 0 004.306-1.758M16.5 9a1.5 1.5 0 11-3 0 1.5 1.5 0 013 0z"/></svg></span>Landing Pages</button>
+        <button class="nav-item" data-view="services"><span class="nav-icon"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 16l2 2 4-4"/></svg></span>Services</button>
+        <span class="nav-section-title">Orders</span>
+        <button class="nav-item" data-view="orders"><span class="nav-icon"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01"/></svg></span>Orders</button>
+        <button class="nav-item" data-view="notifications"><span class="nav-icon"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"/></svg></span>Notifications</button>
+        <button class="nav-item" data-view="invoices"><span class="nav-icon"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 8h10M7 12h10M7 16h6M9 4h6a2 2 0 012 2v12a2 2 0 01-2 2H9a2 2 0 01-2-2V6a2 2 0 012-2z"/></svg></span>Invoices</button>
+        <button class="nav-item" data-view="shipping"><span class="nav-icon"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.25 18.75a1.5 1.5 0 01-3 0m3 0a1.5 1.5 0 00-3 0m3 0h6m-9 0H3.375a1.125 1.125 0 01-1.125-1.125V14.25m17.25 4.5a1.5 1.5 0 01-3 0m3 0a1.5 1.5 0 00-3 0m3 0h1.125c.621 0 1.129-.504 1.09-1.124a17.902 17.902 0 00-3.213-9.193 2.056 2.056 0 00-1.58-.86H14.25M16.5 18.75h-2.25m0-11.177v-.958c0-.568-.422-1.048-.987-1.106a48.554 48.554 0 00-10.026 0 1.106 1.106 0 00-.987 1.106v7.635m12-6.677v6.677m0 4.5v-4.5m0 0h-12"/></svg></span>Shipping</button>
+        <button class="nav-item" data-view="customers"><span class="nav-icon"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19.128a9.38 9.38 0 002.625.372 9.337 9.337 0 004.121-.952 4.125 4.125 0 00-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 018.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0111.964-3.07M12 6.375a3.375 3.375 0 11-6.75 0 3.375 3.375 0 016.75 0zm8.25 2.25a2.625 2.625 0 11-5.25 0 2.625 2.625 0 015.25 0z"/></svg></span>Customers</button>
+        <span class="nav-section-title">Settings</span>
+        <button class="nav-item" data-view="connect"><span class="nav-icon"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg></span>Stripe Connect</button>
+        <button class="nav-item" data-view="registration"><span class="nav-icon"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 21a7 7 0 0114 0"/></svg></span>Registration</button>
+        <button class="nav-item" data-view="config"><span class="nav-icon"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg></span>Configuration</button>
+        <button class="nav-item" data-view="profile"><span class="nav-icon"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/></svg></span>Profile</button>
+        <button class="nav-item" data-view="preferences"><span class="nav-icon"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4"/></svg></span>Preferences</button>
       </nav>
     </aside>
 
-    <main class="content">
-      <header class="topbar">
-        <label>
-          API Base URL
-          <input id="apiBase" type="url" placeholder="https://.../dev">
-        </label>
-        <button id="saveApiBase" type="button">Save</button>
+    <div class="app-main">
+      <header class="app-header">
+        <button class="sidebar-toggle" type="button" aria-label="Toggle navigation">
+          <span></span>
+          <span></span>
+          <span></span>
+        </button>
+        <div class="header-actions">
+          <span class="mode-pill" id="environmentLabel">Test</span>
+          <button class="header-icon-button environment-toggle" id="environmentToggle" type="button" aria-label="Switch environment" title="Switch environment">
+            <svg class="icon" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
+          </button>
+          <button class="header-icon-button" type="button" aria-label="Notifications">
+            <svg class="icon" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"/></svg>
+          </button>
+          <div class="user-menu">
+            <span class="user-avatar">K</span>
+            <span class="user-info">
+              <strong>Keith De Costa</strong>
+              <span>user</span>
+            </span>
+          </div>
+        </div>
       </header>
 
-      <section class="panel active" data-panel="registration">
+      <main class="content">
+        <header class="topbar">
+          <label>
+            API Base URL
+            <input id="apiBase" type="url" placeholder="https://.../dev">
+          </label>
+          <button id="saveApiBase" type="button">Save</button>
+        </header>
+
+      <section class="panel dashboard-panel active" data-panel="dashboard">
+        <div class="page-header">
+          <h1>Dashboard</h1>
+          <p>Overview of your business metrics</p>
+        </div>
+
+        <div class="stats-grid">
+          <article class="stats-card">
+            <div class="stats-icon primary"><svg class="icon" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg></div>
+            <div class="stats-content">
+              <span class="stats-label">Total Orders</span>
+              <strong class="stats-value" id="statOrdersValue">--</strong>
+              <span class="stats-meta">Lifetime &bull; <span data-env-copy>Test</span></span>
+            </div>
+          </article>
+          <article class="stats-card">
+            <div class="stats-icon success"><svg class="icon" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg></div>
+            <div class="stats-content">
+              <span class="stats-label">Net Revenue</span>
+              <strong class="stats-value" id="statRevenueValue">--</strong>
+              <span class="stats-meta" id="statRevenueMeta">From paid invoices</span>
+            </div>
+          </article>
+          <article class="stats-card">
+            <div class="stats-icon warning"><svg class="icon" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"/></svg></div>
+            <div class="stats-content">
+              <span class="stats-label">Customers</span>
+              <strong class="stats-value" id="statCustomersValue">--</strong>
+              <span class="stats-meta">Lifetime &bull; <span data-env-copy>Test</span></span>
+            </div>
+          </article>
+          <article class="stats-card">
+            <div class="stats-icon danger"><svg class="icon" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"/></svg></div>
+            <div class="stats-content">
+              <span class="stats-label">Products</span>
+              <strong class="stats-value" id="statProductsValue">--</strong>
+              <span class="stats-meta">Lifetime &bull; <span data-env-copy>Test</span></span>
+            </div>
+          </article>
+        </div>
+
+        <div class="dashboard-grid">
+          <section class="dashboard-card recent-orders-card">
+            <header class="dashboard-card-header">
+              <h2>Recent Orders</h2>
+              <button type="button" class="secondary-action">View All</button>
+            </header>
+            <div class="dashboard-table">
+              <div class="dashboard-table-row table-head">
+                <span>Date</span>
+                <span>Customer</span>
+                <span>Amount</span>
+                <span>Product</span>
+              </div>
+              <div id="recentOrdersRows">
+                <div class="dashboard-table-row muted-row"><span>Set API Base URL</span><span>Waiting for backend</span><span>--</span><span>Invoices will appear here</span></div>
+              </div>
+            </div>
+          </section>
+
+          <section class="dashboard-card activity-card">
+            <header class="dashboard-card-header">
+              <h2>Recent Activity</h2>
+              <span class="activity-notification-dot"></span>
+            </header>
+            <div class="activity-list" id="activityList">
+              <article class="activity-item">
+                <span class="activity-dot"></span>
+                <div><strong>Set API Base URL to load activity</strong><span>Waiting for backend</span></div>
+              </article>
+            </div>
+          </section>
+        </div>
+      </section>
+
+      <section class="panel" data-panel="registration">
         <h1>Registration</h1>
         <div class="summary-grid">
           <div><span>Tenant</span><strong id="summaryTenant">-</strong></div>
@@ -171,17 +280,80 @@
       </section>
 
       <section class="panel" data-panel="keys">
-        <h1>Stripe Keys</h1>
-        <form data-endpoint="/stripe/keys" data-method="PUT" data-payload="stripe_keys">
-          <div class="grid">
-            <label>Tenant ID<input name="tenant_id" required value="tenant_demo"></label>
-            <label>Mode<select name="mode"><option value="test">test</option><option value="live">live</option></select></label>
-            <label>Publishable Key<input name="publishable_key" placeholder="pk_test_..."></label>
-            <label>Secret Key Ref<input name="secret_key_ref" placeholder="kms://..."></label>
-            <label>Webhook Secret Ref<input name="webhook_secret_ref" placeholder="kms://..."></label>
-          </div>
-          <button type="submit">Save Stripe Keys</button>
+        <div class="page-header">
+          <h1>Stripe Keys</h1>
+          <p>Manage your tenant Stripe API keys</p>
+        </div>
+        <form class="stripe-keys-form" data-endpoint="/stripe/keys" data-method="PUT" data-payload="stripe_keys">
+          <input name="tenant_id" type="hidden" value="tenant_demo">
+          <section class="dashboard-card stripe-keys-card">
+            <header class="dashboard-card-header">
+              <h2>Tenant Stripe Keys</h2>
+            </header>
+            <div class="stripe-keys-body">
+              <button type="submit" class="primary-action">Save Keys</button>
+
+              <div class="stripe-key-grid">
+                <section class="stripe-key-panel stripe-key-panel-test">
+                  <header><h3>Test Keys</h3></header>
+                  <div class="stripe-key-panel-body">
+                    <label>pk_test<input name="publishable_key_test" autocomplete="off" placeholder="pk_test_..."></label>
+                    <label>sk_test (plaintext)<input name="secret_key_test" type="password" autocomplete="new-password" placeholder="Saved (hidden)"></label>
+                    <label>wh_secret_test (auto-generated)<input name="webhook_secret_test" type="password" autocomplete="new-password" placeholder="Saved (hidden)"></label>
+                    <div class="webhook-row">
+                      <label>Webhook Endpoint (Test)<input name="webhook_endpoint_test" readonly value="https://api-dev.juniorbay.com/webhook/{tenant_id}"></label>
+                      <button type="button" class="secondary-action">Test this endpoint</button>
+                    </div>
+                  </div>
+                </section>
+
+                <section class="stripe-key-panel stripe-key-panel-live">
+                  <header><h3>Live Keys</h3></header>
+                  <div class="stripe-key-panel-body">
+                    <label>pk_live<input name="publishable_key_live" autocomplete="off" placeholder="pk_live_..."></label>
+                    <label>sk_live (plaintext)<input name="secret_key_live" type="password" autocomplete="new-password" placeholder="Saved (hidden)"></label>
+                    <label>wh_secret_live (auto-generated)<input name="webhook_secret_live" type="password" autocomplete="new-password" placeholder="Saved (hidden)"></label>
+                    <div class="webhook-row">
+                      <label>Webhook Endpoint (Live)<input name="webhook_endpoint_live" readonly value="https://checkout.juniorbay.com/webhook/{tenant_id}"></label>
+                      <button type="button" class="secondary-action">Test this endpoint</button>
+                    </div>
+                  </div>
+                </section>
+              </div>
+
+              <div class="verify-row">
+                <label>Verify Mode
+                  <select name="verify_mode">
+                    <option value="test">Test</option>
+                    <option value="live">Live</option>
+                  </select>
+                </label>
+                <button type="button" class="primary-action">Verify Webhook Secret</button>
+              </div>
+
+              <div class="keys-status-banner" data-backend-note="stripe_keys">Set API Base URL, then save new Stripe keys.</div>
+            </div>
+          </section>
         </form>
+      </section>
+      <section class="panel" data-panel="products">
+        <h1>Products</h1>
+        <p>Product management will appear here as the catalog API is connected.</p>
+      </section>
+
+      <section class="panel" data-panel="offers">
+        <h1>Offers</h1>
+        <p>Offer management will appear here as the catalog API is connected.</p>
+      </section>
+
+      <section class="panel" data-panel="landing-pages">
+        <h1>Landing Pages</h1>
+        <p>Landing page management will appear here as page publishing is connected.</p>
+      </section>
+
+      <section class="panel" data-panel="orders">
+        <h1>Orders</h1>
+        <p>Order management will appear here as checkout activity is connected.</p>
       </section>
 
       <section class="panel" data-panel="services">
@@ -355,7 +527,7 @@
             <header>
               <div>
                 <h2>Refund Requests</h2>
-                <p>0 requests • Newest requests first</p>
+                <p>0 requests &bull; Newest requests first</p>
               </div>
               <div class="button-row">
                 <button type="button">Refresh</button>
@@ -895,7 +1067,8 @@
         <h2>Response</h2>
         <pre id="output">{}</pre>
       </section>
-    </main>
+      </main>
+    </div>
   </div>
 
   <script src="./app.js"></script>
