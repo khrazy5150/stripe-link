@@ -16,7 +16,22 @@
   "offer_id": "offer_universal_bundle",
   "theme": {
     "template": "universal_bundle",
-    "preset": "techno-green"
+    "preset": "techno-green",
+    "fonts": {
+      "service": "system",
+      "body": {
+        "family": "system",
+        "fallback": "system"
+      },
+      "heading": {
+        "family": "system",
+        "fallback": "system"
+      },
+      "accent": {
+        "family": "system",
+        "fallback": "system"
+      }
+    }
   },
   "legal": {
     "terms_url": "https://example.com/terms",

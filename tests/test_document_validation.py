@@ -144,6 +144,24 @@ class DocumentValidationTests(unittest.TestCase):
         with self.assertRaisesRegex(DocumentValidationError, "theme.tokens"):
             validate_page_document(page)
 
+    def test_page_accepts_theme_fonts(self):
+        page = load_fixture("page-universal-bundle.json")
+        page["theme"]["fonts"] = {
+            "service": "junior-bay",
+            "body": {"family": "Inter", "fallback": "sans-serif"},
+            "heading": {"family": "Inter Tight", "fallback": "sans-serif"},
+            "accent": {"family": "JB Mono", "fallback": "monospace"},
+        }
+
+        validate_page_document(page)
+
+    def test_page_rejects_theme_font_injection(self):
+        page = load_fixture("page-universal-bundle.json")
+        page["theme"]["fonts"]["heading"]["family"] = "Inter;background:url(javascript:alert(1))"
+
+        with self.assertRaisesRegex(DocumentValidationError, "theme.fonts.heading.family"):
+            validate_page_document(page)
+
     def test_page_rejects_too_many_universal_bundle_badges(self):
         page = load_fixture("page-universal-bundle.json")
         badges = next(section for section in page["sections"] if section["type"] == "trust_badges")

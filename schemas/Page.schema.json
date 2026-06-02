@@ -119,6 +119,21 @@
           "type": "object",
           "description": "Universal Bundle CSS variable overrides. Keys map to renderer tokens such as background, card, brand, cta_from, savings_bg, and featured_badge_text.",
           "additionalProperties": { "$ref": "#/$defs/hexColor" }
+        },
+        "fonts": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Landing page font settings. Font families are resolved by the renderer into CSS variables so services such as Junior Bay can be integrated without changing template CSS.",
+          "properties": {
+            "service": {
+              "type": "string",
+              "enum": ["system", "junior-bay"],
+              "default": "system"
+            },
+            "body": { "$ref": "#/$defs/fontRole" },
+            "heading": { "$ref": "#/$defs/fontRole" },
+            "accent": { "$ref": "#/$defs/fontRole" }
+          }
         }
       }
     },
@@ -226,6 +241,21 @@
     "hexColor": {
       "type": "string",
       "pattern": "^#[0-9A-Fa-f]{6}$"
+    },
+    "fontRole": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "family": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9 ._-]{0,79}$"
+        },
+        "fallback": {
+          "type": "string",
+          "enum": ["system", "sans-serif", "serif", "monospace"],
+          "default": "system"
+        }
+      }
     }
   }
 }

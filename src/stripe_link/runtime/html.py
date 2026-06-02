@@ -14,6 +14,14 @@ CURRENCY_SYMBOLS = {
     "eur": "€",
     "gbp": "£",
 }
+SYSTEM_FONT_STACK = "-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Oxygen,Ubuntu,sans-serif"
+SYSTEM_MONO_FONT_STACK = "ui-monospace,SFMono-Regular,Menlo,monospace"
+FONT_FALLBACK_STACKS = {
+    "system": SYSTEM_FONT_STACK,
+    "sans-serif": "sans-serif",
+    "serif": "serif",
+    "monospace": "monospace",
+}
 
 UNIVERSAL_BUNDLE_THEME_PRESETS = {
     "techno-green": {
@@ -231,24 +239,24 @@ UNIVERSAL_BUNDLE_THEME_PRESETS = {
 SIMPLE_TEMPLATE_STYLES = [
     "    html{font-size:62.5%}",
     "    *{margin:0;padding:0;box-sizing:border-box}",
-    "    :root{--sl-background:var(--sl-theme-background);--sl-text:var(--sl-theme-text);--sl-accent:var(--sl-theme-accent);font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:var(--sl-text);background:var(--sl-background)}",
+    "    :root{--sl-background:var(--sl-theme-background);--sl-text:var(--sl-theme-text);--sl-accent:var(--sl-theme-accent);font-family:var(--sl-font-body);color:var(--sl-text);background:var(--sl-background)}",
     "    body{font-size:1.6rem;padding:3.2rem;display:flex;justify-content:center;background:var(--sl-background)}",
     "    main{width:min(96rem,100%);display:grid;gap:2.4rem}",
-    "    .sl-hero h1{font-size:4rem;line-height:1.05;margin:0 0 1rem}",
+    "    .sl-hero h1{font-family:var(--sl-font-heading);font-size:4rem;line-height:1.05;margin:0 0 1rem}",
     "    .sl-hero p{font-size:1.8rem;color:#4b5563;margin:0}",
     "    .sl-price-options{display:grid;grid-template-columns:repeat(auto-fit,minmax(15rem,1fr));gap:1.2rem}",
     "    .sl-price-option{border:1px solid #d1d5db;border-radius:0.8rem;padding:1.6rem;background:#fff}",
     "    .sl-price-option[data-default='true']{border-color:var(--sl-accent);box-shadow:0 0 0 1px var(--sl-accent)}",
-    "    .sl-badge{display:inline-block;font-size:1.2rem;font-weight:700;color:#166534;background:#dcfce7;padding:0.3rem 0.8rem;border-radius:99.9rem;margin-bottom:0.8rem}",
-    "    .sl-cta{display:inline-flex;align-items:center;justify-content:center;background:var(--sl-accent);color:#fff;border:0;border-radius:0.8rem;padding:1.4rem 1.8rem;font-weight:700;text-decoration:none}",
+    "    .sl-badge{display:inline-block;font-family:var(--sl-font-accent);font-size:1.2rem;font-weight:700;color:#166534;background:#dcfce7;padding:0.3rem 0.8rem;border-radius:99.9rem;margin-bottom:0.8rem}",
+    "    .sl-cta{display:inline-flex;align-items:center;justify-content:center;background:var(--sl-accent);color:#fff;border:0;border-radius:0.8rem;padding:1.4rem 1.8rem;font-family:var(--sl-font-accent);font-weight:700;text-decoration:none}",
     "    .sl-legal{display:flex;gap:1.2rem;flex-wrap:wrap;font-size:1.3rem;color:#6b7280}",
     "    .sl-legal a{color:inherit}",
 ]
 
 UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
-    "    html{font-size:62.5%}",
+    "    html{font-size:62.5%;-webkit-text-size-adjust:100%}",
     "    *{margin:0;padding:0;box-sizing:border-box}",
-    "    :root{--sl-background:var(--sl-theme-background);--sl-text:var(--sl-theme-text);--sl-accent:var(--sl-theme-accent);--sl-radius:1.6rem;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Oxygen,Ubuntu,sans-serif;color:var(--sl-text);background:var(--sl-background)}",
+    "    :root{--sl-background:var(--sl-theme-background);--sl-text:var(--sl-theme-text);--sl-accent:var(--sl-theme-accent);--sl-radius:1.6rem;font-family:var(--sl-font-body);color:var(--sl-text);background:var(--sl-background)}",
     "    body{font-size:1.6rem;line-height:1.5;background:var(--sl-background);color:var(--sl-text);padding-bottom:8rem}",
     "    main{width:100%;padding:0 0 12rem;display:grid;gap:1.6rem}",
     "    main > :not(.sl-countdown):not(.sl-checkout-cta){width:min(52rem,calc(100% - 3.2rem));margin-left:auto;margin-right:auto}",
@@ -257,52 +265,57 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     "    .sl-countdown[data-transparent='true']{background:color-mix(in srgb,var(--sl-countdown-bg,var(--sl-card)) 82%,transparent)}",
     "    .sl-countdown[data-marquee='true']{overflow:hidden;white-space:nowrap}",
     "    .sl-countdown[data-marquee='true'] .sl-countdown-content{display:inline-flex;align-items:center;gap:0.8rem;animation:sl-marquee 14s linear infinite}",
-    "    .sl-countdown time{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;background:color-mix(in srgb,var(--sl-countdown-text) 16%,transparent);border-radius:0.4rem;padding:0.3rem 0.7rem}",
+    "    .sl-countdown time{font-family:var(--sl-font-mono);background:color-mix(in srgb,var(--sl-countdown-text) 16%,transparent);border-radius:0.4rem;padding:0.3rem 0.7rem}",
     "    @keyframes sl-marquee{from{transform:translateX(100%)}to{transform:translateX(-100%)}}",
-    "    .sl-brand-label{display:flex;align-items:center;justify-content:center;gap:0.8rem;color:var(--sl-muted);font-size:1.3rem;font-weight:800;letter-spacing:0.08em;text-transform:uppercase;padding-top:1.6rem}",
+    "    .sl-brand-label{display:flex;align-items:center;justify-content:center;gap:0.8rem;color:var(--sl-muted);padding-top:1.6rem}",
     "    .sl-brand-label::before{content:'';width:1rem;height:1rem;border-radius:999px;background:var(--sl-brand);box-shadow:0 0 0.8rem var(--sl-brand)}",
+    "    .sl-brand-label h1{font-family:var(--sl-font-accent);font-size:1.3rem;font-weight:700;letter-spacing:0.08em;line-height:1.2;text-transform:uppercase;color:var(--sl-muted)}",
     "    .sl-seo-title{text-align:center}",
-    "    .sl-seo-title h1{font-size:clamp(2.4rem,5vw,3.2rem);line-height:1.15;color:var(--sl-headline)}",
-    "    .sl-headline{text-align:center;padding-top:0.2rem}",
-    "    .sl-headline h2{font-size:clamp(2.8rem,6vw,4rem);line-height:1.12;font-weight:900;color:var(--sl-headline);letter-spacing:0}",
+    "    .sl-seo-title h1{font-family:var(--sl-font-heading);font-size:clamp(2.4rem,5vw,3.2rem);line-height:1.2;color:var(--sl-headline)}",
+    "    .sl-headline{text-align:center;padding:0.8rem 0 0.4rem}",
+    "    .sl-headline h2{font-family:var(--sl-font-heading);font-size:clamp(2.4rem,5vw,3.2rem);line-height:1.2;font-weight:800;color:var(--sl-headline);letter-spacing:0}",
     "    .sl-subheadline{text-align:center}",
     "    .sl-subheadline p{font-size:1.5rem;line-height:1.55;color:var(--sl-muted);max-width:46rem;margin:0 auto}",
     "    .sl-hero-media{display:flex;justify-content:center;gap:1rem;overflow-x:auto;scroll-snap-type:x mandatory;padding-top:0.8rem}",
     "    .sl-hero-media img{flex:0 0 min(100%,52rem);width:min(100%,52rem);aspect-ratio:1/1;object-fit:cover;border-radius:var(--sl-radius);border:1px solid var(--sl-border);background:var(--sl-card);scroll-snap-align:center}",
     "    .sl-trust-badges{display:flex;flex-wrap:wrap;gap:0.8rem;justify-content:center}",
-    "    .sl-trust-badge{display:flex;align-items:center;gap:0.6rem;border:1px solid var(--sl-chip-border);background:var(--sl-chip-bg);color:var(--sl-chip-text);border-radius:999px;padding:0.8rem 1.4rem;font-size:1.2rem;font-weight:800}",
+    "    .sl-trust-badge{display:flex;align-items:center;gap:0.6rem;border:1px solid var(--sl-chip-border);background:var(--sl-chip-bg);color:var(--sl-chip-text);border-radius:999px;padding:0.8rem 1.4rem;font-family:var(--sl-font-accent);font-size:1.2rem;font-weight:800}",
     "    .sl-price-options{display:grid;grid-template-columns:1fr;gap:1.4rem;width:100%;margin:0 auto}",
-    "    .sl-price-option{position:relative;display:grid;grid-template-columns:10.4rem minmax(0,1fr) 2.8rem;gap:1.6rem;align-items:center;border:2px solid var(--sl-border);border-radius:var(--sl-radius);padding:1.6rem;background:var(--sl-card)}",
-    "    .sl-price-option.selected{border-color:var(--sl-brand);box-shadow:0 0 0 2px color-mix(in srgb,var(--sl-brand) 28%,transparent)}",
-    "    .sl-price-option input{width:2rem;height:2rem;accent-color:var(--sl-accent)}",
-    "    .sl-price-option img{width:10.4rem;aspect-ratio:1/1;object-fit:cover;border-radius:0.6rem;background:var(--sl-background)}",
-    "    .sl-price-copy{display:grid;gap:0.7rem}",
-    "    .sl-price-option strong{font-size:2rem;line-height:1.2}",
-    "    .sl-price-description{color:var(--sl-muted);line-height:1.45}",
-    "    .sl-price-row{display:flex;align-items:center;gap:1.2rem;flex-wrap:wrap}",
-    "    .sl-price-amount{font-size:2.4rem;font-weight:900;color:var(--sl-brand)}",
-    "    .sl-regular-price{color:var(--sl-muted);text-decoration:line-through;font-size:1.7rem}",
+    "    .sl-price-option{position:relative;display:grid;grid-template-columns:9rem minmax(0,1fr) 2.2rem;gap:1.4rem;align-items:center;border:2px solid var(--sl-border);border-radius:var(--sl-radius);padding:1.6rem 2rem;background:var(--sl-card)}",
+    "    .sl-price-option.selected{border-color:var(--sl-brand);box-shadow:0 0 0 3px color-mix(in srgb,var(--sl-brand) 13%,transparent)}",
+    "    .sl-price-option input{width:2.2rem;height:2.2rem;accent-color:var(--sl-accent)}",
+    "    .sl-price-option img{width:9rem;aspect-ratio:1/1;object-fit:contain;border-radius:0.8rem;background:var(--sl-background)}",
+    "    .sl-price-copy{display:grid;gap:0.4rem}",
+    "    .sl-price-option strong{font-family:var(--sl-font-heading);font-size:1.6rem;line-height:1.2;font-weight:600}",
+    "    .sl-price-description{color:var(--sl-muted);font-size:1.3rem;line-height:1.45}",
+    "    .sl-price-row{display:flex;align-items:center;gap:1rem;flex-wrap:wrap;margin-top:1rem}",
+    "    .sl-price-amount{font-family:var(--sl-font-accent);font-size:2rem;font-weight:700;color:var(--sl-brand)}",
+    "    .sl-regular-price{color:var(--sl-muted);text-decoration:line-through;font-size:1.4rem}",
     "    .sl-price-option[data-expired='true'] .sl-regular-price,.sl-price-option[data-expired='true'] .sl-savings{display:none}",
-    "    .sl-badge{display:inline-flex;width:max-content;font-size:1.2rem;font-weight:900;color:var(--sl-featured-badge-text);background:var(--sl-featured-badge-bg);padding:0.3rem 0.8rem;border-radius:999px}",
-    "    .sl-savings{font-size:1.3rem;font-weight:800;color:var(--sl-savings-text);background:var(--sl-savings-bg);border:1px solid var(--sl-savings-border);border-radius:999px;padding:0.25rem 0.7rem}",
-    "    .sl-content-blocks,.sl-faq{display:grid;gap:1rem}",
+    "    .sl-badge{display:inline-flex;width:max-content;font-family:var(--sl-font-accent);font-size:1.1rem;font-weight:700;color:var(--sl-featured-badge-text);background:var(--sl-featured-badge-bg);padding:0.4rem 1rem;border-radius:999px}",
+    "    .sl-savings{font-family:var(--sl-font-accent);font-size:1.1rem;font-weight:600;color:var(--sl-savings-text);background:var(--sl-savings-bg);border:1px solid var(--sl-savings-border);border-radius:1.2rem;padding:0.4rem 1rem}",
+    "    .sl-content-blocks{display:grid;gap:1rem}",
+    "    .sl-faq{display:grid;gap:1.2rem}",
     "    .sl-refund-policy{width:100%;border:1px solid var(--sl-border);background:var(--sl-card);border-radius:var(--sl-radius);overflow:hidden}",
-    "    .sl-refund-policy summary{list-style:none;cursor:pointer;padding:1.6rem 2rem;font-size:1.8rem;font-weight:900;display:flex;align-items:center;justify-content:space-between;gap:1.2rem}",
+    "    .sl-refund-policy summary{list-style:none;cursor:pointer;padding:1.6rem 2rem;font-family:var(--sl-font-heading);font-size:1.4rem;font-weight:600;display:flex;align-items:center;justify-content:space-between;gap:1.2rem}",
     "    .sl-refund-policy summary::-webkit-details-marker{display:none}",
-    "    .sl-refund-policy summary::after{content:'+';font-size:2rem;color:var(--sl-brand);transition:transform .2s}",
+    "    .sl-refund-policy summary::after{content:'+';font-size:1.8rem;color:var(--sl-brand);transition:transform .2s}",
     "    .sl-refund-policy[open] summary::after{transform:rotate(45deg)}",
-    "    .sl-refund-policy div{padding:0 2rem 1.8rem}",
-    "    .sl-refund-policy h2{font-size:1.5rem;margin-bottom:0.6rem}",
-    "    .sl-refund-policy p{color:var(--sl-muted);line-height:1.55;font-size:1.4rem}",
-    "    .sl-refund-policy-applies{font-weight:800;color:var(--sl-brand)}",
+    "    .sl-refund-policy-body{padding:0 2rem 2rem;display:grid;gap:1.4rem}",
+    "    .sl-refund-policy h2{font-family:var(--sl-font-heading);font-size:1.5rem;line-height:1.3;margin-top:0.6rem}",
+    "    .sl-refund-policy p{color:var(--sl-muted);line-height:1.6;font-size:1.4rem}",
+    "    .sl-refund-policy-applies{font-size:1.3rem;line-height:1.55;font-weight:700;color:var(--sl-brand)}",
+    "    .sl-refund-policy-copy{padding-left:2rem}",
+    "    .sl-refund-policy-return{padding-left:2rem;color:var(--sl-text)!important;font-weight:800}",
     "    .sl-content-block{display:grid;grid-template-columns:minmax(0,1fr) minmax(12rem,18rem);gap:1.2rem;align-items:center;border-top:1px solid var(--sl-border);padding-top:1.6rem}",
-    "    .sl-content-block h3{font-size:2.2rem;margin-bottom:0.6rem}",
-    "    .sl-content-block p,.sl-faq p{color:var(--sl-muted);line-height:1.55}",
+    "    .sl-content-block h3{font-family:var(--sl-font-heading);font-size:2rem;line-height:1.25;margin-bottom:0.8rem}",
+    "    .sl-content-block p{color:var(--sl-muted);font-size:1.5rem;line-height:1.6}",
     "    .sl-content-block img{width:100%;aspect-ratio:4/3;object-fit:cover;border-radius:0.8rem}",
-    "    .sl-faq details{border:1px solid var(--sl-border);background:var(--sl-card);border-radius:0.8rem;padding:1.2rem}",
-    "    .sl-faq summary{cursor:pointer;font-weight:900}",
+    "    .sl-faq details{border:1px solid var(--sl-border);background:var(--sl-card);border-radius:1.6rem;padding:0;overflow:hidden}",
+    "    .sl-faq summary{cursor:pointer;font-family:var(--sl-font-heading);font-size:1.4rem;font-weight:600;line-height:1.35;display:flex;align-items:center;justify-content:space-between;gap:1.2rem;padding:1.6rem 2rem}",
+    "    .sl-faq p{color:var(--sl-muted);font-size:1.4rem;line-height:1.6;padding:0 2rem 1.6rem}",
     "    .sl-checkout-cta{position:fixed;left:0;right:0;bottom:0;z-index:10;background:linear-gradient(transparent,var(--sl-background) 20%);padding:1.6rem;display:flex;justify-content:center}",
-    "    .sl-cta{display:inline-flex;width:min(52rem,100%);align-items:center;justify-content:center;background:linear-gradient(135deg,var(--sl-cta-from),var(--sl-cta-to));color:var(--sl-cta-text);border:0;border-radius:1rem;padding:1.5rem 1.8rem;font-size:1.7rem;font-weight:900;text-decoration:none}",
+    "    .sl-cta{display:inline-flex;width:min(52rem,100%);align-items:center;justify-content:center;background:linear-gradient(135deg,var(--sl-cta-from),var(--sl-cta-to));color:var(--sl-cta-text);border:0;border-radius:1rem;padding:1.5rem 1.8rem;font-family:var(--sl-font-accent);font-size:1.7rem;font-weight:900;text-decoration:none}",
     "    .sl-legal{display:flex;gap:1.2rem;flex-wrap:wrap;justify-content:center;text-align:center;font-size:1.3rem;color:var(--sl-muted);padding:2.4rem 0 0}",
     "    .sl-legal span{flex:0 0 100%}",
     "    .sl-legal a{color:inherit}",
@@ -356,6 +369,29 @@ def css_var_name(token_name: str) -> str:
     return token_name.replace("_", "-")
 
 
+def font_stack(page: dict[str, Any], role: str) -> str:
+    fonts = ((page.get("theme") or {}).get("fonts") or {})
+    font = fonts.get(role) if isinstance(fonts.get(role), dict) else {}
+    family = str(font.get("family") or "system")
+    fallback = str(font.get("fallback") or "system")
+    fallback_stack = FONT_FALLBACK_STACKS.get(fallback, SYSTEM_FONT_STACK)
+    if family == "system":
+        return fallback_stack if fallback != "monospace" else SYSTEM_MONO_FONT_STACK
+    css_family = f"'{family}'" if any(char.isspace() for char in family) else family
+    if css_family == fallback_stack:
+        return css_family
+    return f"{css_family},{fallback_stack}"
+
+
+def font_vars(page: dict[str, Any]) -> str:
+    return (
+        f"--sl-font-body:{font_stack(page, 'body')};"
+        f"--sl-font-heading:{font_stack(page, 'heading')};"
+        f"--sl-font-accent:{font_stack(page, 'accent')};"
+        f"--sl-font-mono:{SYSTEM_MONO_FONT_STACK}"
+    )
+
+
 def render_template_styles(page: dict[str, Any]) -> list[str]:
     template = template_name(page)
     try:
@@ -370,7 +406,7 @@ def render_template_styles(page: dict[str, Any]) -> list[str]:
             for key, value in tokens.items()
         )
         return [
-            f"    :root{{{token_vars};--sl-theme-background:{escape(tokens['background'])};--sl-theme-text:{escape(tokens['text'])};--sl-theme-accent:{escape(tokens['accent'])}}}",
+            f"    :root{{{token_vars};--sl-theme-background:{escape(tokens['background'])};--sl-theme-text:{escape(tokens['text'])};--sl-theme-accent:{escape(tokens['accent'])};{font_vars(page)}}}",
             *styles,
         ]
 
@@ -378,7 +414,7 @@ def render_template_styles(page: dict[str, Any]) -> list[str]:
     text = escape(theme_color(page, "text", "#111827"))
     accent = escape(theme_color(page, "accent", "#16a34a"))
     return [
-        f"    :root{{--sl-theme-background:{background};--sl-theme-text:{text};--sl-theme-accent:{accent}}}",
+        f"    :root{{--sl-theme-background:{background};--sl-theme-text:{text};--sl-theme-accent:{accent};{font_vars(page)}}}",
         *styles,
     ]
 
@@ -520,7 +556,7 @@ def render_brand_label(section: dict[str, Any], page: dict[str, Any]) -> str:
     label = escape(str(section.get("label") or (page.get("seo") or {}).get("title") or page.get("name") or ""))
     return "\n".join([
         f"    <section class=\"sl-brand-label\" data-section-id=\"{escape(str(section.get('id', 'brand-label')))}\" data-section-type=\"brand_label\">",
-        f"      <span>{label}</span>",
+        f"      <h1>{label}</h1>",
         "    </section>",
     ])
 
@@ -692,17 +728,35 @@ def render_refund_policy(
 
     short_label = escape(str(policy.get("short_label") or "Refund policy"))
     full_policy = escape(str(policy.get("full_policy") or ""))
+    return_note = escape(refund_policy_return_note(policy))
     applies_to = escape(", ".join(refund_policy_applies_to(offer, products_by_id)))
     return "\n".join([
         f"    <details class=\"sl-refund-policy\" data-section-id=\"{escape(str(section.get('id', 'refund-policy')))}\" data-section-type=\"refund_policy\">",
         f"      <summary>{short_label}</summary>",
-        "      <div>",
+        "      <div class=\"sl-refund-policy-body\">",
         f"        <h2>{escape(str(section.get('heading') or 'Refund Policy'))}</h2>",
         f"        <p class=\"sl-refund-policy-applies\">Applies to: {applies_to}</p>" if applies_to else "",
-        f"        <p>{full_policy}</p>" if full_policy else "",
+        f"        <p class=\"sl-refund-policy-copy\">{full_policy}</p>" if full_policy else "",
+        f"        <p class=\"sl-refund-policy-return\">{return_note}</p>" if return_note else "",
         "      </div>",
         "    </details>",
     ])
+
+
+def refund_policy_return_note(policy: dict[str, Any]) -> str:
+    explicit = policy.get("return_note")
+    if isinstance(explicit, str) and explicit:
+        return explicit
+
+    return_method = str(policy.get("return_method") or "").lower()
+    if "no return" in return_method or "customer keeps" in return_method or "no_return" in return_method:
+        return (
+            "This item doesn't need to be returned. The customer may keep the item "
+            "and dispose of it in a responsible way. The seller may still grant a refund."
+        )
+    if "return_required" in return_method or "return required" in return_method:
+        return "The customer must return the item according to the seller's return instructions before the refund is completed."
+    return ""
 
 
 def refund_policy_applies_to(offer: dict[str, Any], products_by_id: dict[str, dict[str, Any]]) -> list[str]:

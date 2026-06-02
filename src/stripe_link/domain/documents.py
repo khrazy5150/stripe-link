@@ -8,6 +8,7 @@ class DocumentValidationError(ValueError):
 
 SLUG_PATTERN = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 HEX_COLOR_PATTERN = re.compile(r"^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$")
+FONT_FAMILY_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 ._-]{0,79}$")
 SUPPORTED_PAGE_SECTION_TYPES = {
     "brand_label",
     "checkout_cta",
@@ -37,6 +38,8 @@ SUPPORTED_THEME_PRESETS = {
     "natural-calm",
     "cyber-pulse",
 }
+SUPPORTED_FONT_SERVICES = {"system", "junior-bay"}
+SUPPORTED_FONT_FALLBACKS = {"system", "sans-serif", "serif", "monospace"}
 
 
 def require_object(value: Any, label: str) -> dict[str, Any]:
@@ -321,6 +324,23 @@ def validate_page_document(document: dict[str, Any]) -> None:
             for key, value in tokens.items():
                 if not isinstance(key, str) or not isinstance(value, str) or not HEX_COLOR_PATTERN.match(value):
                     raise DocumentValidationError("Page theme.tokens values must be hex colors.")
+        fonts = theme.get("fonts")
+        if fonts is not None:
+            if not isinstance(fonts, dict):
+                raise DocumentValidationError("Page theme.fonts must be an object.")
+            if fonts.get("service") is not None:
+                require_enum(fonts, "service", SUPPORTED_FONT_SERVICES, "Page theme.fonts.service")
+            for role in ["body", "heading", "accent"]:
+                font = fonts.get(role)
+                if font is None:
+                    continue
+                if not isinstance(font, dict):
+                    raise DocumentValidationError(f"Page theme.fonts.{role} must be an object.")
+                family = font.get("family")
+                if family is not None and (not isinstance(family, str) or not FONT_FAMILY_PATTERN.match(family)):
+                    raise DocumentValidationError(f"Page theme.fonts.{role}.family must be a safe font family.")
+                if font.get("fallback") is not None:
+                    require_enum(font, "fallback", SUPPORTED_FONT_FALLBACKS, f"Page theme.fonts.{role}.fallback")
 
     sections = document.get("sections")
     if not isinstance(sections, list) or not sections:

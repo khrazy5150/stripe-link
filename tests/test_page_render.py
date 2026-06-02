@@ -27,6 +27,8 @@ class PageRenderTests(unittest.TestCase):
 
         self.assertIn("<h1>Creatine Gummies</h1>", html)
         self.assertIn("--sl-theme-accent:#16a34a", html)
+        self.assertIn("--sl-font-body:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Oxygen,Ubuntu,sans-serif", html)
+        self.assertIn("font-family:var(--sl-font-body)", html)
         self.assertIn("data-section-type=\"offer_price_selector\"", html)
         self.assertIn("data-price-id=\"price_1bottle\"", html)
         self.assertIn("data-price-id=\"price_6bottle\"", html)
@@ -59,14 +61,24 @@ class PageRenderTests(unittest.TestCase):
         self.assertIn("data-start-color=\"#dc2626\"", html)
         self.assertIn("data-end-color=\"#f97316\"", html)
         self.assertIn("data-countdown-display", html)
+        self.assertIn("--sl-font-body:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Oxygen,Ubuntu,sans-serif", html)
+        self.assertIn("--sl-font-heading:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Oxygen,Ubuntu,sans-serif", html)
+        self.assertIn("--sl-font-accent:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Oxygen,Ubuntu,sans-serif", html)
+        self.assertIn("font-family:var(--sl-font-body)", html)
+        self.assertIn("html{font-size:62.5%;-webkit-text-size-adjust:100%}", html)
         self.assertIn("main{width:100%;padding:0 0 12rem", html)
         self.assertIn("main > :not(.sl-countdown):not(.sl-checkout-cta){width:min(52rem,calc(100% - 3.2rem))", html)
         self.assertIn(".sl-countdown{width:100%", html)
+        self.assertIn(".sl-brand-label h1{font-family:var(--sl-font-accent);font-size:1.3rem", html)
+        self.assertIn(".sl-headline h2{font-family:var(--sl-font-heading);font-size:clamp(2.4rem,5vw,3.2rem)", html)
+        self.assertIn(".sl-price-option strong{font-family:var(--sl-font-heading);font-size:1.6rem", html)
+        self.assertIn(".sl-price-description{color:var(--sl-muted);font-size:1.3rem", html)
         self.assertIn("data-section-type=\"brand_label\"", html)
-        self.assertIn("<span>Creatine Gummies</span>", html)
+        self.assertIn("<h1>Creatine Gummies</h1>", html)
         self.assertIn("data-section-type=\"hero_media\"", html)
         self.assertIn("data-media-count=\"1\"", html)
         self.assertIn("images/universal-bundle/creatine_gummies_1.webp", html)
+        self.assertIn("<h2>Get Creatine Gummies Bundle Today</h2>", html)
         self.assertIn("Get Creatine Gummies Bundle Today", html)
         self.assertIn("data-section-type=\"trust_badges\"", html)
         self.assertIn("data-price-id=\"price_universal_triple\"", html)
@@ -81,10 +93,20 @@ class PageRenderTests(unittest.TestCase):
         self.assertIn("<details class=\"sl-refund-policy\"", html)
         self.assertIn("data-section-type=\"refund_policy\"", html)
         self.assertIn("<summary>30-day money-back</summary>", html)
+        self.assertIn("class=\"sl-refund-policy-body\"", html)
+        self.assertIn("class=\"sl-refund-policy-copy\"", html)
+        self.assertIn("class=\"sl-refund-policy-return\"", html)
+        self.assertIn(".sl-refund-policy-applies{font-size:1.3rem", html)
+        self.assertIn(".sl-refund-policy-return{padding-left:2rem", html)
         self.assertIn("Applies to: Creatine Gummies - Single Pack", html)
         self.assertIn("Physical items may be returned within 30 days", html)
+        self.assertIn("This item doesn&#x27;t need to be returned.", html)
         self.assertIn("data-section-type=\"content_block\"", html)
+        self.assertIn(".sl-content-block h3{font-family:var(--sl-font-heading);font-size:2rem", html)
+        self.assertIn(".sl-content-block p{color:var(--sl-muted);font-size:1.5rem", html)
         self.assertIn("data-section-type=\"faq\"", html)
+        self.assertIn(".sl-faq summary{cursor:pointer;font-family:var(--sl-font-heading);font-size:1.4rem", html)
+        self.assertIn(".sl-faq p{color:var(--sl-muted);font-size:1.4rem", html)
         self.assertIn("Get The Bundle - $69.42", html)
         self.assertIn("Terms of Service", html)
         self.assertIn("© 2026 All rights reserved.", html)
@@ -112,6 +134,24 @@ class PageRenderTests(unittest.TestCase):
         self.assertIn("--sl-card:#f8fafc", html)
         self.assertIn("--sl-brand:#0ea5e9", html)
         self.assertIn("--sl-cta-to:#0284c7", html)
+
+    def test_universal_bundle_theme_fonts_override_defaults(self):
+        page = load_fixture("page-universal-bundle.json")
+        offer = load_fixture("offer-universal-bundle.json")
+        product = load_fixture("product-universal-bundle.json")
+        page = copy.deepcopy(page)
+        page["theme"]["fonts"] = {
+            "service": "junior-bay",
+            "body": {"family": "Inter", "fallback": "sans-serif"},
+            "heading": {"family": "Inter Tight", "fallback": "sans-serif"},
+            "accent": {"family": "JB Mono", "fallback": "monospace"},
+        }
+
+        html = render_page(page, offer, {product["product_id"]: product})
+
+        self.assertIn("--sl-font-body:Inter,sans-serif", html)
+        self.assertIn("--sl-font-heading:'Inter Tight',sans-serif", html)
+        self.assertIn("--sl-font-accent:'JB Mono',monospace", html)
 
     def test_bundle_hero_media_uses_page_images_as_carousel_override(self):
         page = load_fixture("page-universal-bundle.json")
