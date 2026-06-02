@@ -83,8 +83,44 @@
       },
     "theme": {
       "type": "object",
-      "additionalProperties": true,
-      "description": "Theme token overrides. A dedicated Theme schema will tighten this later."
+      "additionalProperties": false,
+      "description": "Landing page template and color theme settings. Presets define the Universal Bundle base styles; tokens override individual CSS variables for tenant-saved themes.",
+      "properties": {
+        "template": {
+          "type": "string",
+          "enum": ["simple", "universal_bundle"]
+        },
+        "preset": {
+          "type": "string",
+          "enum": [
+            "techno-green",
+            "rose-minimalist",
+            "midnight-luxe",
+            "trust-blue",
+            "coral-sunrise",
+            "clean-slate",
+            "royal-velvet",
+            "fire-sale",
+            "natural-calm",
+            "cyber-pulse"
+          ]
+        },
+        "color": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Legacy simple-template color overrides.",
+          "properties": {
+            "background": { "$ref": "#/$defs/hexColor" },
+            "text": { "$ref": "#/$defs/hexColor" },
+            "accent": { "$ref": "#/$defs/hexColor" }
+          }
+        },
+        "tokens": {
+          "type": "object",
+          "description": "Universal Bundle CSS variable overrides. Keys map to renderer tokens such as background, card, brand, cta_from, savings_bg, and featured_badge_text.",
+          "additionalProperties": { "$ref": "#/$defs/hexColor" }
+        }
+      }
     },
     "post_checkout": {
       "type": "object",
@@ -184,6 +220,12 @@
       "updated_at": {
         "type": "integer",
         "minimum": 0
-      }
+    }
+  },
+  "$defs": {
+    "hexColor": {
+      "type": "string",
+      "pattern": "^#[0-9A-Fa-f]{6}$"
     }
   }
+}

@@ -1,0 +1,138 @@
+{
+  "schema_version": "2026-05-29",
+  "document_type": "page",
+  "tenant_id": "tenant_demo",
+  "page_id": "page_universal_bundle",
+  "name": "Creatine Gummies Checkout Page",
+  "status": "draft",
+  "published_at": null,
+  "route": {
+    "slug": "universal-bundle"
+  },
+  "seo": {
+    "title": "Creatine Gummies",
+    "description": "Choose the Creatine Gummies bundle that fits your routine."
+  },
+  "offer_id": "offer_universal_bundle",
+  "theme": {
+    "template": "universal_bundle",
+    "preset": "techno-green"
+  },
+  "legal": {
+    "terms_url": "https://example.com/terms",
+    "privacy_url": "https://example.com/privacy",
+    "refund_url": "https://example.com/refunds"
+  },
+  "sections": [
+    {
+      "id": "countdown",
+      "type": "countdown_timer",
+      "enabled": true,
+      "duration_minutes": 1,
+      "label": "Launch pricing ends in",
+      "start_text": "Offer expires in",
+      "end_text": "Offer expired",
+      "sticky": true,
+      "persistent": true,
+      "transparent": false,
+      "marquee": false,
+      "start_color": "#dc2626",
+      "end_color": "#f97316"
+    },
+    {
+      "id": "brand",
+      "type": "brand_label",
+      "enabled": true,
+      "label": "Creatine Gummies"
+    },
+    {
+      "id": "seo-title",
+      "type": "seo_title"
+    },
+    {
+      "id": "hero-media",
+      "type": "hero_media"
+    },
+    {
+      "id": "headline",
+      "type": "headline",
+      "text": "Choose your creatine gummies bundle."
+    },
+    {
+      "id": "subheadline",
+      "type": "subheadline",
+      "text": "5000 mg of creatine monohydrate per serving. Excellent for men and women after a workout for muscle growth and development."
+    },
+    {
+      "id": "trust-badges",
+      "type": "trust_badges",
+      "enabled": true,
+      "badges": [
+        {
+          "emoji": "✅",
+          "label": "Fast Checkout"
+        },
+        {
+          "emoji": "🔒",
+          "label": "30-Day Guarantee"
+        },
+        {
+          "emoji": "↩️",
+          "label": "Ships from USA"
+        }
+      ]
+    },
+    {
+      "id": "offer-selector",
+      "type": "offer_price_selector",
+      "offer_id": "offer_universal_bundle"
+    },
+    {
+      "id": "refund-policy",
+      "type": "refund_policy",
+      "heading": "Refund Policy"
+    },
+    {
+      "id": "content",
+      "type": "content_block",
+      "blocks": [
+        {
+          "title": "Creatine support without the mixing",
+          "text": "Each serving is designed for post-workout routines where customers want simple daily support.",
+          "image_url": "images/universal-bundle/creatine_gummies_1.webp"
+        },
+        {
+          "title": "Bundle savings are clear",
+          "text": "Every card shows the sale price, regular price, and savings badge so customers can compare value quickly."
+        }
+      ]
+    },
+    {
+      "id": "faq",
+      "type": "faq",
+      "items": [
+        {
+          "question": "Which pack is selected by default?",
+          "answer": "The Double Pack is selected by default because it balances value and quantity."
+        },
+        {
+          "question": "What price does the customer pay?",
+          "answer": "The sale price is the real checkout price. The regular price is displayed only as a struck-through comparison."
+        }
+      ]
+    },
+    {
+      "id": "checkout",
+      "type": "checkout_cta",
+      "label": "Get The Bundle"
+    },
+    {
+      "id": "legal",
+      "type": "legal_footer",
+      "copyright": "Copyright 2026 Universal Bundle Demo"
+    }
+  ],
+  "revision": 1,
+  "created_at": 1780092000,
+  "updated_at": 1780092000
+}

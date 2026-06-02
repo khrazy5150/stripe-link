@@ -1,4 +1,5 @@
 import json
+import copy
 import unittest
 from pathlib import Path
 
@@ -39,6 +40,89 @@ class PageRenderTests(unittest.TestCase):
         })
 
         self.assertIn("Continue To Checkout - $149.00", html)
+
+    def test_render_universal_bundle_template_sections(self):
+        page = load_fixture("page-universal-bundle.json")
+        offer = load_fixture("offer-universal-bundle.json")
+        product = load_fixture("product-universal-bundle.json")
+
+        html = render_page(page, offer, {product["product_id"]: product})
+
+        self.assertIn("--sl-background:#0b1220", html)
+        self.assertIn("--sl-card:#0f172a", html)
+        self.assertIn("--sl-brand:#22c55e", html)
+        self.assertIn("--sl-cta-from:#22c55e", html)
+        self.assertIn("data-section-type=\"countdown_timer\"", html)
+        self.assertIn("data-duration-minutes=\"1\"", html)
+        self.assertIn("data-persistent=\"true\"", html)
+        self.assertIn("data-sticky=\"true\"", html)
+        self.assertIn("data-start-color=\"#dc2626\"", html)
+        self.assertIn("data-end-color=\"#f97316\"", html)
+        self.assertIn("data-countdown-display", html)
+        self.assertIn("data-section-type=\"brand_label\"", html)
+        self.assertIn("<h1>Creatine Gummies</h1>", html)
+        self.assertIn("data-section-type=\"hero_media\"", html)
+        self.assertIn("data-media-count=\"1\"", html)
+        self.assertIn("images/universal-bundle/creatine_gummies_1.webp", html)
+        self.assertIn("Choose your creatine gummies bundle.", html)
+        self.assertIn("data-section-type=\"trust_badges\"", html)
+        self.assertIn("data-price-id=\"price_universal_triple\"", html)
+        self.assertIn("data-sale-amount=\"6942\"", html)
+        self.assertIn("data-regular-amount=\"9400\"", html)
+        self.assertIn("Single Pack", html)
+        self.assertIn("Double Pack", html)
+        self.assertIn("Triple Pack", html)
+        self.assertIn("$69.42", html)
+        self.assertIn("$94.00", html)
+        self.assertIn("Save 31%", html)
+        self.assertIn("data-section-type=\"refund_policy\"", html)
+        self.assertIn("30-day returns", html)
+        self.assertIn("Applies to: Creatine Gummies - Single Pack", html)
+        self.assertIn("Physical items may be returned within 30 days", html)
+        self.assertIn("data-section-type=\"content_block\"", html)
+        self.assertIn("data-section-type=\"faq\"", html)
+        self.assertIn("Get The Bundle - $69.42", html)
+        self.assertIn("Copyright 2026 Universal Bundle Demo", html)
+        self.assertIn("localStorage.setItem(storageKey, 'expired')", html)
+        self.assertIn("expireDiscounts()", html)
+        self.assertIn("selectCard(cards.find", html)
+
+    def test_universal_bundle_theme_tokens_override_preset(self):
+        page = load_fixture("page-universal-bundle.json")
+        offer = load_fixture("offer-universal-bundle.json")
+        product = load_fixture("product-universal-bundle.json")
+        page = copy.deepcopy(page)
+        page["theme"]["tokens"] = {
+            "background": "#ffffff",
+            "card": "#f8fafc",
+            "brand": "#0ea5e9",
+            "cta_from": "#0ea5e9",
+            "cta_to": "#0284c7",
+            "cta_text": "#ffffff",
+        }
+
+        html = render_page(page, offer, {product["product_id"]: product})
+
+        self.assertIn("--sl-background:#ffffff", html)
+        self.assertIn("--sl-card:#f8fafc", html)
+        self.assertIn("--sl-brand:#0ea5e9", html)
+        self.assertIn("--sl-cta-to:#0284c7", html)
+
+    def test_bundle_hero_media_uses_page_images_as_carousel_override(self):
+        page = load_fixture("page-universal-bundle.json")
+        offer = load_fixture("offer-universal-bundle.json")
+        product = load_fixture("product-universal-bundle.json")
+        page = copy.deepcopy(page)
+        hero_media = next(section for section in page["sections"] if section["type"] == "hero_media")
+        hero_media["images"] = [
+            "images/universal-bundle/creatine_gummies_1.webp",
+            "images/universal-bundle/creatine_gummies_2.webp",
+        ]
+
+        html = render_page(page, offer, {product["product_id"]: product})
+
+        self.assertIn("data-media-count=\"2\"", html)
+        self.assertIn("images/universal-bundle/creatine_gummies_2.webp", html)
 
     def test_render_page_uses_checkout_url_when_provided(self):
         html = render_page(

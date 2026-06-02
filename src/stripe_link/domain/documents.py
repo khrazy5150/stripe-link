@@ -8,8 +8,35 @@ class DocumentValidationError(ValueError):
 
 SLUG_PATTERN = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 HEX_COLOR_PATTERN = re.compile(r"^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$")
-SUPPORTED_PAGE_SECTION_TYPES = {"hero", "offer_price_selector", "checkout_cta"}
-SUPPORTED_PAGE_TEMPLATES = {"simple"}
+SUPPORTED_PAGE_SECTION_TYPES = {
+    "brand_label",
+    "checkout_cta",
+    "content_block",
+    "countdown_timer",
+    "faq",
+    "headline",
+    "hero",
+    "hero_media",
+    "legal_footer",
+    "offer_price_selector",
+    "refund_policy",
+    "seo_title",
+    "subheadline",
+    "trust_badges",
+}
+SUPPORTED_PAGE_TEMPLATES = {"simple", "universal_bundle"}
+SUPPORTED_THEME_PRESETS = {
+    "techno-green",
+    "rose-minimalist",
+    "midnight-luxe",
+    "trust-blue",
+    "coral-sunrise",
+    "clean-slate",
+    "royal-velvet",
+    "fire-sale",
+    "natural-calm",
+    "cyber-pulse",
+}
 
 
 def require_object(value: Any, label: str) -> dict[str, Any]:
@@ -74,6 +101,26 @@ def optional_string_list(document: dict[str, Any], field: str, label: str | None
         raise DocumentValidationError(f"{field_label} must be an array of strings.")
 
 
+def optional_limited_object_list(
+    document: dict[str, Any],
+    field: str,
+    limit: int,
+    label: str | None = None,
+) -> list[dict[str, Any]]:
+    value = document.get(field)
+    if value is None:
+        return []
+    field_label = label or field
+    if not isinstance(value, list):
+        raise DocumentValidationError(f"{field_label} must be an array.")
+    if len(value) > limit:
+        raise DocumentValidationError(f"{field_label} must include no more than {limit} item(s).")
+    for item in value:
+        if not isinstance(item, dict):
+            raise DocumentValidationError(f"Each {field_label} item must be an object.")
+    return value
+
+
 def require_document_fields(document: dict[str, Any], document_type: str, id_field: str) -> None:
     require_object(document, f"{document_type} document")
     for field in ["schema_version", "document_type", "tenant_id", id_field]:
@@ -105,6 +152,16 @@ def validate_product_document(document: dict[str, Any]) -> None:
         if ship_from is not None and not isinstance(ship_from, dict):
             raise DocumentValidationError("Product fulfillment.ship_from must be an object when provided.")
 
+    refund_policy = document.get("refund_policy")
+    if refund_policy is not None:
+        if not isinstance(refund_policy, dict):
+            raise DocumentValidationError("Product refund_policy must be an object.")
+        optional_string(refund_policy, "source", "Product refund_policy.source")
+        require_string(refund_policy, "short_label", "Product refund_policy.short_label")
+        require_string(refund_policy, "full_policy", "Product refund_policy.full_policy")
+        optional_string(refund_policy, "condition", "Product refund_policy.condition")
+        optional_string(refund_policy, "return_method", "Product refund_policy.return_method")
+
     prices = document.get("prices")
     if not isinstance(prices, list) or not prices:
         raise DocumentValidationError("Product prices must be a non-empty array.")
@@ -122,7 +179,10 @@ def validate_product_document(document: dict[str, Any]) -> None:
         optional_bool(price, "active", "price.active")
         optional_string(price, "context", "price.context")
         optional_string(price, "badge", "price.badge")
+        optional_string(price, "description", "price.description")
+        optional_string(price, "image_url", "price.image_url")
         optional_non_negative_int(price, "discount_pct", "price.discount_pct")
+        optional_non_negative_int(price, "regular_unit_amount", "price.regular_unit_amount")
         if len(price.get("currency", "")) != 3 or price.get("currency", "") != price.get("currency", "").lower():
             raise DocumentValidationError("price.currency must be a lowercase 3-letter currency code.")
         if price.get("stripe_mode") is not None:
@@ -146,6 +206,8 @@ def validate_offer_document(document: dict[str, Any]) -> None:
     require_string(document, "name")
     optional_bool(document, "active")
     optional_string(document, "context")
+    if document.get("offer_type") is not None:
+        require_enum(document, "offer_type", {"single-offer", "bundle", "listicle"}, "Offer offer_type")
 
     items = document.get("items")
     if not isinstance(items, list) or not items:
@@ -175,7 +237,10 @@ def validate_offer_document(document: dict[str, Any]) -> None:
                 require_positive_int(price, "quantity", "selectable price quantity")
                 require_string(price, "label", "selectable price label")
                 optional_string(price, "badge", "selectable price badge")
+                optional_string(price, "description", "selectable price description")
+                optional_string(price, "image_url", "selectable price image_url")
                 optional_non_negative_int(price, "display_discount_pct", "selectable price display_discount_pct")
+                optional_non_negative_int(price, "regular_unit_amount", "selectable price regular_unit_amount")
                 if price.get("price_id") in selectable_price_ids:
                     raise DocumentValidationError(f"Duplicate selectable price_id '{price.get('price_id')}'.")
                 selectable_price_ids.add(price.get("price_id"))
@@ -207,6 +272,7 @@ def validate_offer_document(document: dict[str, Any]) -> None:
         optional_string(presentation, "headline", "Offer presentation.headline")
         optional_string(presentation, "badge", "Offer presentation.badge")
         optional_string(presentation, "cta_label", "Offer presentation.cta_label")
+        optional_string(presentation, "hero_image_url", "Offer presentation.hero_image_url")
 
 
 def validate_page_document(document: dict[str, Any]) -> None:
@@ -237,6 +303,8 @@ def validate_page_document(document: dict[str, Any]) -> None:
             raise DocumentValidationError("Page theme must be an object.")
         if theme.get("template") is not None:
             require_enum(theme, "template", SUPPORTED_PAGE_TEMPLATES, "Page theme.template")
+        if theme.get("preset") is not None:
+            require_enum(theme, "preset", SUPPORTED_THEME_PRESETS, "Page theme.preset")
         color = theme.get("color")
         if color is not None:
             if not isinstance(color, dict):
@@ -246,6 +314,13 @@ def validate_page_document(document: dict[str, Any]) -> None:
                 if value is not None:
                     if not isinstance(value, str) or not HEX_COLOR_PATTERN.match(value):
                         raise DocumentValidationError(f"Page theme.color.{field} must be a hex color.")
+        tokens = theme.get("tokens")
+        if tokens is not None:
+            if not isinstance(tokens, dict):
+                raise DocumentValidationError("Page theme.tokens must be an object.")
+            for key, value in tokens.items():
+                if not isinstance(key, str) or not isinstance(value, str) or not HEX_COLOR_PATTERN.match(value):
+                    raise DocumentValidationError("Page theme.tokens values must be hex colors.")
 
     sections = document.get("sections")
     if not isinstance(sections, list) or not sections:
@@ -264,12 +339,57 @@ def validate_page_document(document: dict[str, Any]) -> None:
             optional_string(section, "subheadline", "Hero section subheadline")
             if not (section.get("headline") or section.get("subheadline")):
                 raise DocumentValidationError("Hero section requires headline or subheadline.")
+        elif section_type == "countdown_timer":
+            optional_bool(section, "enabled", "Countdown timer enabled")
+            optional_bool(section, "sticky", "Countdown timer sticky")
+            optional_bool(section, "persistent", "Countdown timer persistent")
+            optional_bool(section, "transparent", "Countdown timer transparent")
+            optional_bool(section, "marquee", "Countdown timer marquee")
+            if section.get("duration_minutes") is not None:
+                require_positive_int(section, "duration_minutes", "Countdown timer duration_minutes")
+            optional_string(section, "label", "Countdown timer label")
+            optional_string(section, "start_text", "Countdown timer start_text")
+            optional_string(section, "end_text", "Countdown timer end_text")
+            optional_string(section, "start_color", "Countdown timer start_color")
+            optional_string(section, "end_color", "Countdown timer end_color")
+        elif section_type == "seo_title":
+            optional_string(section, "label", "SEO title label")
+        elif section_type == "brand_label":
+            optional_bool(section, "enabled", "Brand label enabled")
+            optional_string(section, "label", "Brand label")
+        elif section_type == "hero_media":
+            optional_string_list(section, "images", "Hero media images")
+        elif section_type == "headline":
+            require_string(section, "text", "Headline text")
+        elif section_type == "subheadline":
+            require_string(section, "text", "Subheadline text")
+        elif section_type == "trust_badges":
+            optional_bool(section, "enabled", "Trust badges enabled")
+            badges = optional_limited_object_list(section, "badges", 3, "Trust badges")
+            for badge in badges:
+                optional_string(badge, "emoji", "Trust badge emoji")
+                require_string(badge, "label", "Trust badge label")
         elif section_type == "offer_price_selector":
             require_string(section, "offer_id", "Offer price selector offer_id")
             if section.get("offer_id") != document.get("offer_id"):
                 raise DocumentValidationError("Offer price selector offer_id must match page offer_id.")
+        elif section_type == "refund_policy":
+            optional_string(section, "heading", "Refund policy heading")
+        elif section_type == "faq":
+            items = optional_limited_object_list(section, "items", 10, "FAQ items")
+            for item in items:
+                require_string(item, "question", "FAQ question")
+                require_string(item, "answer", "FAQ answer")
+        elif section_type == "content_block":
+            blocks = optional_limited_object_list(section, "blocks", 10, "Content blocks")
+            for block in blocks:
+                require_string(block, "title", "Content block title")
+                require_string(block, "text", "Content block text")
+                optional_string(block, "image_url", "Content block image_url")
         elif section_type == "checkout_cta":
             optional_string(section, "label", "Checkout CTA label")
+        elif section_type == "legal_footer":
+            optional_string(section, "copyright", "Legal footer copyright")
 
     analytics = document.get("analytics")
     if analytics is not None:

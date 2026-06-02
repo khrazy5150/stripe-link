@@ -159,6 +159,16 @@ class PagePublishingTests(unittest.TestCase):
         ])
         self.assertEqual(result["invalidation"]["paths"], ["/published/tenant_demo/simple-coffee/index.html"])
         self.assertEqual(self.cloudfront.invalidations[0]["DistributionId"], "DIST123")
+        self.assertEqual(
+            self.cloudfront.invalidations[0]["InvalidationBatch"],
+            {
+                "Paths": {
+                    "Quantity": 1,
+                    "Items": ["/published/tenant_demo/simple-coffee/index.html"],
+                },
+                "CallerReference": "page_simple_coffee",
+            },
+        )
 
     def test_publish_page_document_rejects_missing_offer(self):
         missing_offers = FakeRepository("offer_id", [])

@@ -1,5 +1,4 @@
 import json
-import time
 from typing import Any
 
 from stripe_link.domain.documents import validate_offer_document, validate_page_document, validate_product_document
@@ -163,6 +162,7 @@ def publish_page_document(
         artifacts,
         cloudfront_client=cloudfront_client,
         distribution_id=pages_distribution_id,
+        page_id=str(page.get("page_id") or ""),
     )
 
     return {
@@ -179,6 +179,7 @@ def invalidate_published_artifact(
     *,
     cloudfront_client: Any | None,
     distribution_id: str,
+    page_id: str,
 ) -> dict[str, Any] | None:
     if not cloudfront_client or not distribution_id:
         return None
@@ -195,7 +196,7 @@ def invalidate_published_artifact(
                 "Quantity": 1,
                 "Items": [path],
             },
-            "CallerReference": f"page-publish-{published['key']}-{int(time.time() * 1000)}",
+            "CallerReference": page_id,
         },
     )
     return {

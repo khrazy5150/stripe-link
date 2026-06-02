@@ -1,0 +1,57 @@
+{
+  "schema_version": "2026-05-29",
+  "document_type": "offer",
+  "tenant_id": "tenant_demo",
+  "offer_id": "offer_universal_bundle",
+  "name": "Universal Bundle Offer",
+  "active": true,
+  "offer_type": "bundle",
+  "context": "standard",
+  "items": [
+    {
+      "product_id": "prod_universal_bundle",
+      "selectable_prices": [
+        {
+          "price_id": "price_universal_single",
+          "quantity": 1,
+          "label": "Single Pack",
+          "regular_unit_amount": 4900,
+          "display_discount_pct": 24
+        },
+        {
+          "price_id": "price_universal_double",
+          "quantity": 2,
+          "label": "Double Pack",
+          "badge": "Most Popular",
+          "regular_unit_amount": 9400,
+          "display_discount_pct": 26
+        },
+        {
+          "price_id": "price_universal_triple",
+          "quantity": 3,
+          "label": "Triple Pack",
+          "badge": "Best Value",
+          "regular_unit_amount": 14100,
+          "display_discount_pct": 31
+        }
+      ],
+      "default_price_id": "price_universal_double",
+      "presentation_context": "primary"
+    }
+  ],
+  "presentation": {
+    "headline": "Universal Bundle",
+    "badge": "Limited Run",
+    "cta_label": "Get The Bundle"
+  },
+  "checkout": {
+    "mode": "payment",
+    "allow_promotion_codes": true,
+    "metadata": {
+      "offer_id": "offer_universal_bundle",
+      "context": "standard"
+    }
+  },
+  "created_at": 1780092000,
+  "updated_at": 1780092000
+}

@@ -1,0 +1,81 @@
+{
+  "schema_version": "2026-05-29",
+  "document_type": "product",
+  "tenant_id": "tenant_demo",
+  "product_id": "prod_universal_bundle",
+  "stripe_mode": "test",
+  "active": true,
+  "name": "Creatine Gummies",
+  "description": "5000 mg of creatine monohydrate per serving. Excellent for men and women after a workout for muscle growth and development.",
+  "images": [
+    "images/universal-bundle/creatine_gummies_1.webp",
+    "images/universal-bundle/creatine_gummies_2.webp",
+    "images/universal-bundle/creatine_gummies_3.png"
+  ],
+  "prices": [
+    {
+      "price_id": "price_universal_single",
+      "product_id": "prod_universal_bundle",
+      "stripe_mode": "test",
+      "active": true,
+      "currency": "usd",
+      "unit_amount": 3709,
+      "regular_unit_amount": 4900,
+      "quantity": 1,
+      "label": "Single Pack",
+      "description": "5000 mg of creatine monohydrate per serving. Excellent for men and women after a workout for muscle growth and development.",
+      "image_url": "images/universal-bundle/creatine_gummies_1.webp",
+      "context": "standard",
+      "discount_pct": 24
+    },
+    {
+      "price_id": "price_universal_double",
+      "product_id": "prod_universal_bundle",
+      "stripe_mode": "test",
+      "active": true,
+      "currency": "usd",
+      "unit_amount": 6942,
+      "regular_unit_amount": 9400,
+      "quantity": 2,
+      "label": "Double Pack",
+      "description": "5000 mg of creatine monohydrate per serving. Excellent for men and women after a workout for muscle growth and development.",
+      "image_url": "images/universal-bundle/creatine_gummies_2.webp",
+      "badge": "Most Popular",
+      "context": "standard",
+      "discount_pct": 26
+    },
+    {
+      "price_id": "price_universal_triple",
+      "product_id": "prod_universal_bundle",
+      "stripe_mode": "test",
+      "active": true,
+      "currency": "usd",
+      "unit_amount": 9679,
+      "regular_unit_amount": 14100,
+      "quantity": 3,
+      "label": "Triple Pack",
+      "description": "5000 mg of creatine monohydrate per serving. Excellent for men and women after a workout for muscle growth and development.",
+      "image_url": "images/universal-bundle/creatine_gummies_3.png",
+      "badge": "Best Value",
+      "context": "standard",
+      "discount_pct": 31
+    }
+  ],
+  "default_price_id": "price_universal_double",
+  "product_type": "physical",
+  "product_category": "supplement",
+  "fulfillment": {
+    "requires_shipping": true,
+    "ship_from": null,
+    "weight_oz": null
+  },
+  "refund_policy": {
+    "source": "user_preferences.physical_products",
+    "short_label": "30-day returns",
+    "condition": "Unused",
+    "return_method": "No Return (Customer Keeps)",
+    "full_policy": "Physical items may be returned within 30 days in unused condition. Returns are accomplished with a return label that can be affixed to a package."
+  },
+  "created_at": 1780092000,
+  "updated_at": 1780092000
+}
