@@ -71,7 +71,7 @@
   },
   "refund_policy": {
     "source": "user_preferences.physical_products",
-    "short_label": "30-day returns",
+    "short_label": "30-day money-back",
     "condition": "Unused",
     "return_method": "No Return (Customer Keeps)",
     "full_policy": "Physical items may be returned within 30 days in unused condition. Returns are accomplished with a return label that can be affixed to a package."

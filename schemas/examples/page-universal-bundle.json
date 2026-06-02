@@ -46,17 +46,13 @@
       "label": "Creatine Gummies"
     },
     {
-      "id": "seo-title",
-      "type": "seo_title"
-    },
-    {
       "id": "hero-media",
       "type": "hero_media"
     },
     {
       "id": "headline",
       "type": "headline",
-      "text": "Choose your creatine gummies bundle."
+      "text": "Get Creatine Gummies Bundle Today"
     },
     {
       "id": "subheadline",
@@ -129,7 +125,7 @@
     {
       "id": "legal",
       "type": "legal_footer",
-      "copyright": "Copyright 2026 Universal Bundle Demo"
+      "copyright": "© 2026 All rights reserved."
     }
   ],
   "revision": 1,
