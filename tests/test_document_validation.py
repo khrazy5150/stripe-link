@@ -144,6 +144,19 @@ class DocumentValidationTests(unittest.TestCase):
         with self.assertRaisesRegex(DocumentValidationError, "theme.tokens"):
             validate_page_document(page)
 
+    def test_page_accepts_custom_favicon_url(self):
+        page = load_fixture("page-universal-bundle.json")
+        page["seo"]["favicon_url"] = "https://cdn.example.com/favicon.png"
+
+        validate_page_document(page)
+
+    def test_page_rejects_invalid_favicon_url(self):
+        page = load_fixture("page-universal-bundle.json")
+        page["seo"]["favicon_url"] = "javascript:alert(1)"
+
+        with self.assertRaisesRegex(DocumentValidationError, "seo.favicon_url"):
+            validate_page_document(page)
+
     def test_page_accepts_theme_fonts(self):
         page = load_fixture("page-universal-bundle.json")
         page["theme"]["fonts"] = {

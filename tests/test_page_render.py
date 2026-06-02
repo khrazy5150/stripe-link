@@ -27,6 +27,9 @@ class PageRenderTests(unittest.TestCase):
 
         self.assertIn("<h1>Creatine Gummies</h1>", html)
         self.assertIn("--sl-theme-accent:#16a34a", html)
+        self.assertIn("<link rel=\"icon\" href=\"https://images.juniorbay.com/icon/favicon.png\">", html)
+        self.assertIn("<link rel=\"shortcut icon\" href=\"https://images.juniorbay.com/icon/favicon.png\">", html)
+        self.assertIn("<link rel=\"apple-touch-icon\" href=\"https://images.juniorbay.com/icon/favicon.png\">", html)
         self.assertIn("--sl-font-body:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Oxygen,Ubuntu,sans-serif", html)
         self.assertIn("font-family:var(--sl-font-body)", html)
         self.assertIn("data-section-type=\"offer_price_selector\"", html)
@@ -43,10 +46,26 @@ class PageRenderTests(unittest.TestCase):
 
         self.assertIn("Continue To Checkout - $149.00", html)
 
+    def test_render_page_uses_custom_favicon_url(self):
+        page = copy.deepcopy(self.page)
+        page["seo"]["favicon_url"] = "https://cdn.example.com/favicon.png"
+
+        html = render_page(page, self.offer, self.products_by_id)
+
+        self.assertIn("<link rel=\"icon\" href=\"https://cdn.example.com/favicon.png\">", html)
+        self.assertIn("<link rel=\"shortcut icon\" href=\"https://cdn.example.com/favicon.png\">", html)
+        self.assertIn("<link rel=\"apple-touch-icon\" href=\"https://cdn.example.com/favicon.png\">", html)
+
     def test_render_universal_bundle_template_sections(self):
         page = load_fixture("page-universal-bundle.json")
         offer = load_fixture("offer-universal-bundle.json")
         product = load_fixture("product-universal-bundle.json")
+        page = copy.deepcopy(page)
+        page["theme"]["preset"] = "techno-green"
+        countdown = next(section for section in page["sections"] if section["type"] == "countdown_timer")
+        countdown["persistent"] = True
+        countdown.pop("start_color", None)
+        countdown.pop("end_color", None)
 
         html = render_page(page, offer, {product["product_id"]: product})
 
@@ -134,6 +153,23 @@ class PageRenderTests(unittest.TestCase):
         self.assertIn("--sl-card:#f8fafc", html)
         self.assertIn("--sl-brand:#0ea5e9", html)
         self.assertIn("--sl-cta-to:#0284c7", html)
+
+    def test_universal_bundle_countdown_defaults_to_cta_colors_for_non_techno_presets(self):
+        page = load_fixture("page-universal-bundle.json")
+        offer = load_fixture("offer-universal-bundle.json")
+        product = load_fixture("product-universal-bundle.json")
+        page = copy.deepcopy(page)
+        page["theme"]["preset"] = "rose-minimalist"
+        countdown = next(section for section in page["sections"] if section["type"] == "countdown_timer")
+        countdown.pop("start_color", None)
+        countdown.pop("end_color", None)
+
+        html = render_page(page, offer, {product["product_id"]: product})
+
+        self.assertIn("--sl-cta-from:#d63d76", html)
+        self.assertIn("--sl-cta-to:#c22d66", html)
+        self.assertIn("data-start-color=\"#d63d76\"", html)
+        self.assertIn("data-end-color=\"#c22d66\"", html)
 
     def test_universal_bundle_theme_fonts_override_defaults(self):
         page = load_fixture("page-universal-bundle.json")

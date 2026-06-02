@@ -74,6 +74,10 @@
           },
           "image": {
             "type": "string"
+          },
+          "favicon_url": {
+            "type": "string",
+            "description": "Optional favicon URL. When omitted, the renderer uses Junior Bay's default favicon."
           }
         }
       },

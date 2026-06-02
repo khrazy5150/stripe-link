@@ -9,6 +9,7 @@ class DocumentValidationError(ValueError):
 SLUG_PATTERN = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 HEX_COLOR_PATTERN = re.compile(r"^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$")
 FONT_FAMILY_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 ._-]{0,79}$")
+HTTP_URL_PATTERN = re.compile(r"^https?://[^\s\"'<>]+$")
 SUPPORTED_PAGE_SECTION_TYPES = {
     "brand_label",
     "checkout_cta",
@@ -299,6 +300,9 @@ def validate_page_document(document: dict[str, Any]) -> None:
             raise DocumentValidationError("Page seo must be an object.")
         optional_string(seo, "title", "Page seo.title")
         optional_string(seo, "description", "Page seo.description")
+        favicon_url = seo.get("favicon_url")
+        if favicon_url is not None and (not isinstance(favicon_url, str) or not HTTP_URL_PATTERN.match(favicon_url)):
+            raise DocumentValidationError("Page seo.favicon_url must be an HTTP(S) URL.")
 
     theme = document.get("theme")
     if theme is not None:

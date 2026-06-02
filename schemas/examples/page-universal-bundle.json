@@ -16,7 +16,7 @@
   "offer_id": "offer_universal_bundle",
   "theme": {
     "template": "universal_bundle",
-    "preset": "techno-green",
+    "preset": "natural-calm",
     "fonts": {
       "service": "system",
       "body": {
@@ -48,11 +48,9 @@
       "start_text": "Offer expires in",
       "end_text": "Offer expired",
       "sticky": true,
-      "persistent": true,
+      "persistent": false,
       "transparent": false,
-      "marquee": false,
-      "start_color": "#dc2626",
-      "end_color": "#f97316"
+      "marquee": false
     },
     {
       "id": "brand",

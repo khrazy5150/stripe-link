@@ -22,6 +22,7 @@ FONT_FALLBACK_STACKS = {
     "serif": "serif",
     "monospace": "monospace",
 }
+DEFAULT_FAVICON_URL = "https://images.juniorbay.com/icon/favicon.png"
 
 UNIVERSAL_BUNDLE_THEME_PRESETS = {
     "techno-green": {
@@ -437,6 +438,7 @@ def render_page(
     resolved_offer = resolve_offer(offer, products_by_id, selected_prices)
     title = escape((page.get("seo") or {}).get("title") or page.get("name") or "Checkout")
     description = escape((page.get("seo") or {}).get("description") or "")
+    favicon_tags = render_favicon_tags(page.get("seo") or {})
     styles = render_template_styles(page)
     body = "\n".join(
         render_section(section, page, offer, products_by_id, resolved_offer, checkout_url)
@@ -453,6 +455,7 @@ def render_page(
         "  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">",
         f"  <title>{title}</title>",
         f"  <meta name=\"description\" content=\"{description}\">" if description else "",
+        favicon_tags,
         "  <style>",
         *styles,
         "  </style>",
@@ -479,7 +482,7 @@ def render_section(
 ) -> str:
     section_type = section.get("type")
     if section_type == "countdown_timer":
-        return render_countdown_timer(section)
+        return render_countdown_timer(section, page)
     if section_type == "seo_title":
         return render_seo_title(section, page, products_by_id)
     if section_type == "brand_label":
@@ -517,14 +520,28 @@ def first_offer_product(offer: dict[str, Any], products_by_id: dict[str, dict[st
     return {}
 
 
-def render_countdown_timer(section: dict[str, Any]) -> str:
+def countdown_timer_colors(page: dict[str, Any], section: dict[str, Any]) -> tuple[str, str]:
+    if section.get("start_color") and section.get("end_color"):
+        return str(section["start_color"]), str(section["end_color"])
+
+    theme = page.get("theme") or {}
+    preset_name = str(theme.get("preset") or "techno-green")
+    if preset_name == "techno-green":
+        return "#dc2626", "#f97316"
+
+    tokens = theme_tokens(page)
+    return str(tokens.get("cta_from") or tokens["accent"]), str(tokens.get("cta_to") or tokens.get("cta_from") or tokens["accent"])
+
+
+def render_countdown_timer(section: dict[str, Any], page: dict[str, Any]) -> str:
     if section.get("enabled") is False:
         return ""
     duration = int(section.get("duration_minutes") or 0)
     label = escape(str(section.get("start_text") or section.get("label") or "Offer expires in"))
     end_text = escape(str(section.get("end_text") or "Offer expired"))
-    start_color = escape(str(section.get("start_color") or "#111827"))
-    end_color = escape(str(section.get("end_color") or "#ef4444"))
+    raw_start_color, raw_end_color = countdown_timer_colors(page, section)
+    start_color = escape(raw_start_color)
+    end_color = escape(raw_end_color)
     style = f"--sl-countdown-bg:{start_color};background:{start_color}"
     return "\n".join([
         f"    <section class=\"sl-countdown\" data-section-id=\"{escape(str(section.get('id', 'countdown')))}\" data-section-type=\"countdown_timer\" data-duration-minutes=\"{duration}\" data-persistent=\"{str(bool(section.get('persistent'))).lower()}\" data-sticky=\"{str(bool(section.get('sticky'))).lower()}\" data-transparent=\"{str(bool(section.get('transparent'))).lower()}\" data-marquee=\"{str(bool(section.get('marquee'))).lower()}\" data-start-text=\"{label}\" data-end-text=\"{end_text}\" data-start-color=\"{start_color}\" data-end-color=\"{end_color}\" style=\"{style}\">",
@@ -862,6 +879,15 @@ def render_analytics_tags(analytics: dict[str, Any]) -> str:
     if pixel_id:
         tags.append(f"  <meta name=\"sl-meta-pixel-id\" content=\"{escape(str(pixel_id))}\">")
     return "\n".join(tags)
+
+
+def render_favicon_tags(seo: dict[str, Any]) -> str:
+    favicon_url = escape(str(seo.get("favicon_url") or DEFAULT_FAVICON_URL))
+    return "\n".join([
+        f"  <link rel=\"icon\" href=\"{favicon_url}\">",
+        f"  <link rel=\"shortcut icon\" href=\"{favicon_url}\">",
+        f"  <link rel=\"apple-touch-icon\" href=\"{favicon_url}\">",
+    ])
 
 
 def render_page_interactions_script(page: dict[str, Any]) -> str:
