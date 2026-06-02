@@ -250,8 +250,9 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     "    *{margin:0;padding:0;box-sizing:border-box}",
     "    :root{--sl-background:var(--sl-theme-background);--sl-text:var(--sl-theme-text);--sl-accent:var(--sl-theme-accent);--sl-radius:1.6rem;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Oxygen,Ubuntu,sans-serif;color:var(--sl-text);background:var(--sl-background)}",
     "    body{font-size:1.6rem;line-height:1.5;background:var(--sl-background);color:var(--sl-text);padding-bottom:8rem}",
-    "    main{width:min(52rem,100%);margin:0 auto;padding:0 1.6rem 12rem;display:grid;gap:1.6rem}",
-    "    .sl-countdown{width:100%;display:flex;align-items:center;justify-content:center;gap:0.8rem;background:var(--sl-countdown-bg,var(--sl-card));color:var(--sl-countdown-text);border-radius:0 0 1.2rem 1.2rem;padding:1.2rem 1.6rem;font-weight:800}",
+    "    main{width:100%;padding:0 0 12rem;display:grid;gap:1.6rem}",
+    "    main > :not(.sl-countdown):not(.sl-checkout-cta){width:min(52rem,calc(100% - 3.2rem));margin-left:auto;margin-right:auto}",
+    "    .sl-countdown{width:100%;display:flex;align-items:center;justify-content:center;gap:0.8rem;background:var(--sl-countdown-bg,var(--sl-card));color:var(--sl-countdown-text);border-radius:0;padding:1.2rem 1.6rem;font-weight:800}",
     "    .sl-countdown[data-sticky='true']{position:sticky;top:0;z-index:20}",
     "    .sl-countdown[data-transparent='true']{background:color-mix(in srgb,var(--sl-countdown-bg,var(--sl-card)) 82%,transparent)}",
     "    .sl-countdown[data-marquee='true']{overflow:hidden;white-space:nowrap}",
@@ -305,7 +306,7 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     "    .sl-legal{display:flex;gap:1.2rem;flex-wrap:wrap;justify-content:center;text-align:center;font-size:1.3rem;color:var(--sl-muted);padding:2.4rem 0 0}",
     "    .sl-legal span{flex:0 0 100%}",
     "    .sl-legal a{color:inherit}",
-    "    @media (max-width: 700px){main{padding-inline:1.2rem}.sl-price-option{grid-template-columns:8.8rem minmax(0,1fr) 2.4rem;gap:1rem;padding:1.2rem}.sl-price-option img{width:8.8rem}.sl-content-block{grid-template-columns:1fr}.sl-headline h2{font-size:3rem}}",
+    "    @media (max-width: 700px){.sl-price-option{grid-template-columns:8.8rem minmax(0,1fr) 2.4rem;gap:1rem;padding:1.2rem}.sl-price-option img{width:8.8rem}.sl-content-block{grid-template-columns:1fr}.sl-headline h2{font-size:3rem}}",
 ]
 
 TEMPLATE_STYLES = {
