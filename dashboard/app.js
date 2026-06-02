@@ -94,6 +94,42 @@ document.querySelector("#saveApiBase").addEventListener("click", () => {
   loadPanelData(mainApp.dataset.view || "dashboard");
 });
 
+document.querySelector("#btnLoadSimplePage")?.addEventListener("click", () => {
+  loadSimpleLandingExample();
+  renderLandingPreviewLocal();
+});
+
+document.querySelector("#btnRenderLandingPreview")?.addEventListener("click", () => {
+  renderLandingPreviewLocal();
+});
+
+document.querySelector("#btnRenderLandingBackend")?.addEventListener("click", async () => {
+  await renderLandingPreviewBackend();
+});
+
+document.querySelector("#btnSaveLandingDocuments")?.addEventListener("click", async () => {
+  await saveLandingDocuments();
+});
+
+document.querySelector("#btnToggleLandingForm")?.addEventListener("click", () => {
+  const body = document.querySelector("#landingFormBody");
+  const button = document.querySelector("#btnToggleLandingForm");
+  const hidden = body.classList.toggle("hidden");
+  button.textContent = hidden ? "Show Form" : "Hide Form";
+});
+
+document.querySelector("#btnDesktopPreview")?.addEventListener("click", () => {
+  setLandingPreviewSize("desktop");
+});
+
+document.querySelector("#btnMobilePreview")?.addEventListener("click", () => {
+  setLandingPreviewSize("mobile");
+});
+
+document.querySelector("#landingPageTestForm")?.addEventListener("input", () => {
+  renderLandingPreviewLocal();
+});
+
 environmentToggle.addEventListener("click", () => {
   currentEnvironment = currentEnvironment === "test" ? "live" : "test";
   localStorage.setItem("stripeLinkEnvironment", currentEnvironment);
@@ -257,6 +293,296 @@ async function loadStripeKeys() {
   writeOutput(body);
   renderStripeKeys(body.stripe_keys);
   setPanelNote("stripe_keys", body.stripe_keys ? "Stripe keys loaded" : "No Stripe keys saved yet. Re-enter keys for this environment.");
+}
+
+function loadSimpleLandingExample() {
+  const form = document.querySelector("#landingPageTestForm");
+  if (!form) return;
+  form.elements.tenant_id.value = appState.tenantId || "tenant_demo";
+  form.elements.page_title.value = "Simple Coffee";
+  form.elements.page_description.value = "A clean single-product checkout page for one bag of roasted coffee.";
+  form.elements.price_amount.value = "18.00";
+  form.elements.currency.value = "usd";
+  form.elements.status.value = "draft";
+  form.elements.slug.value = "simple-coffee";
+  form.elements.accent_color.value = "#15803d";
+  form.elements.checkout_url.value = "https://checkout.stripe.com/c/pay/demo";
+}
+
+function landingFormValues() {
+  const form = document.querySelector("#landingPageTestForm");
+  return form ? formValues(form) : {};
+}
+
+function buildLandingDocuments() {
+  const values = landingFormValues();
+  const now = Math.floor(Date.now() / 1000);
+  const tenantId = values.tenant_id || appState.tenantId || "tenant_demo";
+  const slugValue = pageSlug(values.slug || values.page_title || "simple page");
+  const idSuffix = slug(slugValue).replace(/_/g, "_");
+  const productId = `prod_${idSuffix}`;
+  const priceId = `price_${idSuffix}`;
+  const offerId = `offer_${idSuffix}`;
+  const pageId = `page_${idSuffix}`;
+  const unitAmount = Math.round(Number(values.price_amount || 0) * 100);
+  const currency = (values.currency || "usd").toLowerCase();
+
+  const product = {
+    schema_version: "2026-05-29",
+    document_type: "product",
+    tenant_id: tenantId,
+    product_id: productId,
+    stripe_mode: currentEnvironment === "live" ? "live" : "test",
+    active: true,
+    name: values.page_title || "Untitled Product",
+    description: values.page_description || "",
+    prices: [
+      {
+        price_id: priceId,
+        product_id: productId,
+        stripe_mode: currentEnvironment === "live" ? "live" : "test",
+        active: true,
+        currency,
+        unit_amount: unitAmount,
+        quantity: 1,
+        label: "One Item",
+        context: "standard",
+      },
+    ],
+    default_price_id: priceId,
+    product_type: "physical",
+    product_category: "simple",
+    fulfillment: {
+      requires_shipping: true,
+      ship_from: null,
+      weight_oz: null,
+    },
+    created_at: now,
+    updated_at: now,
+  };
+
+  const offer = {
+    schema_version: "2026-05-29",
+    document_type: "offer",
+    tenant_id: tenantId,
+    offer_id: offerId,
+    name: `${values.page_title || "Simple Product"} Offer`,
+    active: true,
+    context: "standard",
+    items: [
+      {
+        product_id: productId,
+        selectable_prices: [
+          {
+            price_id: priceId,
+            quantity: 1,
+            label: "One Item",
+          },
+        ],
+        default_price_id: priceId,
+        presentation_context: "primary",
+      },
+    ],
+    presentation: {
+      cta_label: "Buy Now",
+    },
+    checkout: {
+      mode: "payment",
+      allow_promotion_codes: false,
+      metadata: {
+        offer_id: offerId,
+        context: "standard",
+      },
+    },
+    created_at: now,
+    updated_at: now,
+  };
+
+  const page = {
+    schema_version: "2026-05-29",
+    document_type: "page",
+    tenant_id: tenantId,
+    page_id: pageId,
+    name: `${values.page_title || "Simple Product"} Checkout Page`,
+    status: values.status || "draft",
+    published_at: values.status === "published" ? now : null,
+    route: {
+      slug: slugValue,
+    },
+    seo: {
+      title: values.page_title || "Simple Product",
+      description: values.page_description || "",
+    },
+    offer_id: offerId,
+    checkout_url: values.checkout_url || "",
+    theme: {
+      template: "simple",
+      color: {
+        background: "#ffffff",
+        text: "#111827",
+        accent: values.accent_color || "#15803d",
+      },
+    },
+    sections: [
+      {
+        id: "hero",
+        type: "hero",
+        headline: values.page_title || "Simple Product",
+        subheadline: values.page_description || "",
+      },
+      {
+        id: "price",
+        type: "offer_price_selector",
+        offer_id: offerId,
+      },
+      {
+        id: "checkout",
+        type: "checkout_cta",
+        label: "Buy Now",
+      },
+    ],
+    revision: 1,
+    created_at: now,
+    updated_at: now,
+  };
+
+  return { product, offer, page, checkout_url: values.checkout_url || "" };
+}
+
+function renderLandingPreviewLocal() {
+  const documents = buildLandingDocuments();
+  const html = renderSimplePageHtml(documents);
+  setLandingPreviewHtml(html, "Local render");
+  writeOutput({
+    page_test: {
+      page: documents.page,
+      offer: documents.offer,
+      product: documents.product,
+      artifact_paths: {
+        preview: `preview/${documents.page.tenant_id}/${documents.page.page_id}/index.html`,
+        test: `test/${documents.page.tenant_id}/${documents.page.route.slug}/index.html`,
+        published: `published/${documents.page.tenant_id}/${documents.page.route.slug}/index.html`,
+      },
+    },
+  });
+}
+
+async function renderLandingPreviewBackend() {
+  if (!apiBaseInput.value.trim()) {
+    renderLandingPreviewLocal();
+    setPanelNote("pages", "Set API Base URL to render through /pages/render. Showing local preview.");
+    return;
+  }
+  try {
+    const documents = buildLandingDocuments();
+    const body = await apiRequest("/pages/render", {
+      method: "POST",
+      body: {
+        page: documents.page,
+        offer: documents.offer,
+        products: [documents.product],
+        checkout_url: documents.checkout_url,
+      },
+      params: {},
+    });
+    setLandingPreviewHtml(body.html || "", "Backend render");
+    writeOutput(body);
+    setPanelNote("pages", "Rendered through /pages/render.");
+  } catch (error) {
+    writeOutput({ error: error.message, action: "render_landing_preview" });
+    setPanelNote("pages", error.message);
+  }
+}
+
+async function saveLandingDocuments() {
+  if (!apiBaseInput.value.trim()) {
+    const documents = buildLandingDocuments();
+    writeOutput({
+      error: "Set API Base URL before saving.",
+      documents,
+    });
+    setPanelNote("pages", "Set API Base URL before saving documents.");
+    return;
+  }
+  try {
+    const documents = buildLandingDocuments();
+    const [productResult, offerResult, pageResult] = await Promise.all([
+      apiRequest("/products", { method: "POST", body: documents.product }),
+      apiRequest("/offers", { method: "POST", body: documents.offer }),
+      apiRequest("/pages", { method: "POST", body: documents.page }),
+    ]);
+    writeOutput({
+      product: productResult.product,
+      offer: offerResult.offer,
+      page: pageResult.page,
+      stream_pipeline: "PagesTable stream will render preview/test artifacts after page save.",
+    });
+    setPanelNote("pages", documents.page.status === "published"
+      ? "Saved. Stream should publish preview, test, and published artifacts."
+      : "Saved. Stream should publish preview and test artifacts.");
+  } catch (error) {
+    writeOutput({ error: error.message, action: "save_landing_documents" });
+    setPanelNote("pages", error.message);
+  }
+}
+
+function setLandingPreviewHtml(html, mode) {
+  const frame = document.querySelector("#landingPreviewFrame");
+  const label = document.querySelector("#landingPreviewMode");
+  if (label) label.textContent = mode;
+  if (frame) frame.srcdoc = html;
+}
+
+function setLandingPreviewSize(size) {
+  const wrapper = document.querySelector(".landing-preview-frame-wrap");
+  wrapper?.classList.toggle("mobile", size === "mobile");
+}
+
+function renderSimplePageHtml({ page, offer, product, checkout_url: checkoutUrl }) {
+  const price = product.prices[0];
+  const formattedPrice = formatCurrency(price.unit_amount, price.currency);
+  const accent = page.theme.color.accent;
+  const href = checkoutUrl || "#checkout";
+  return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>${escapeHtml(page.seo.title)}</title>
+  <style>
+    html{font-size:62.5%}
+    *{margin:0;padding:0;box-sizing:border-box}
+    body{font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#fff;color:#111827;font-size:1.6rem;padding:3.2rem}
+    main{width:min(96rem,100%);margin:0 auto;display:grid;gap:2.4rem}
+    h1{font-size:4rem;line-height:1.05;margin-bottom:1rem}
+    p{font-size:1.8rem;color:#4b5563}
+    .price{border:1px solid ${escapeHtml(accent)};box-shadow:0 0 0 1px ${escapeHtml(accent)};border-radius:.8rem;padding:1.6rem;background:#fff}
+    .cta{display:inline-flex;align-items:center;justify-content:center;background:${escapeHtml(accent)};color:#fff;border:0;border-radius:.8rem;padding:1.4rem 1.8rem;font-weight:800;text-decoration:none}
+  </style>
+</head>
+<body>
+  <main>
+    <section>
+      <h1>${escapeHtml(page.sections[0].headline)}</h1>
+      <p>${escapeHtml(page.sections[0].subheadline)}</p>
+    </section>
+    <section class="price">
+      <strong>${escapeHtml(offer.items[0].selectable_prices[0].label)}</strong>
+      <div>${escapeHtml(formattedPrice)}</div>
+    </section>
+    <section>
+      <a class="cta" href="${escapeHtml(href)}">${escapeHtml(page.sections[2].label)} - ${escapeHtml(formattedPrice)}</a>
+    </section>
+  </main>
+</body>
+</html>`;
+}
+
+function pageSlug(value) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "") || "simple-page";
 }
 
 async function loadRegistration() {
@@ -1031,3 +1357,6 @@ function escapeHtml(value) {
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
 }
+
+loadSimpleLandingExample();
+renderLandingPreviewLocal();

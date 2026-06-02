@@ -276,7 +276,8 @@ doc.state.sections[0].blocks[1].content.headline = "Updated offer";
 These items do not block the current development flow, but they should be resolved before production traffic or real merchant data.
 
 1. Replace tenant selection by `tenant_id` query parameter with authenticated tenant context once auth middleware is added. List endpoints should derive tenant scope from the caller/session/claims, not trust caller-provided query parameters.
-2. Attach a consumer to the `PagesTable` DynamoDB Stream before depending on page-change events for publishing, audit history, search indexing, cache invalidation, or collaboration workflows.
+2. Extend the `PagesTable` stream consumer beyond page HTML publishing when needed. It now renders preview, test, and published HTML artifacts, but future stream consumers or branches may still be needed for audit history, search indexing, cache invalidation, and collaboration workflows.
+3. Replace rendered checkout CTA placeholders such as `#checkout` with real checkout actions. The renderer or a checkout service needs to create or resolve a Stripe Checkout Session URL or Payment Link from `offer.checkout.mode`, the resolved `price_id`, tenant Stripe keys, and selected price context.
 
 ## Deployment Steps
 

@@ -1,0 +1,36 @@
+{
+  "schema_version": "2026-05-29",
+  "document_type": "offer",
+  "tenant_id": "tenant_demo",
+  "offer_id": "offer_simple_coffee",
+  "name": "Simple Coffee Offer",
+  "active": true,
+  "context": "standard",
+  "items": [
+    {
+      "product_id": "prod_simple_coffee",
+      "selectable_prices": [
+        {
+          "price_id": "price_simple_coffee",
+          "quantity": 1,
+          "label": "One Bag"
+        }
+      ],
+      "default_price_id": "price_simple_coffee",
+      "presentation_context": "primary"
+    }
+  ],
+  "presentation": {
+    "cta_label": "Buy Now"
+  },
+  "checkout": {
+    "mode": "payment",
+    "allow_promotion_codes": false,
+    "metadata": {
+      "offer_id": "offer_simple_coffee",
+      "context": "standard"
+    }
+  },
+  "created_at": 1780092000,
+  "updated_at": 1780092000
+}

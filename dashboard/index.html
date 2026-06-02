@@ -347,8 +347,85 @@
       </section>
 
       <section class="panel" data-panel="landing-pages">
-        <h1>Landing Pages</h1>
-        <p>Landing page management will appear here as page publishing is connected.</p>
+        <div class="landing-page-top">
+          <div>
+            <h1>Landing Pages</h1>
+            <p>Create and test JSON-first landing pages</p>
+          </div>
+          <button type="button" class="secondary-action" id="btnLoadSimplePage">Load Simple Example</button>
+        </div>
+
+        <div class="landing-page-workspace">
+          <section class="landing-editor-card">
+            <header>
+              <h2>Page Test</h2>
+              <button type="button" class="secondary-action" id="btnToggleLandingForm">Hide Form</button>
+            </header>
+            <div class="landing-editor-body" id="landingFormBody">
+              <form id="landingPageTestForm">
+                <input name="tenant_id" type="hidden" value="tenant_demo">
+                <div class="grid">
+                  <label>Product Title
+                    <input name="page_title" value="Simple Coffee">
+                  </label>
+                  <label>Price
+                    <input name="price_amount" type="number" min="0" step="0.01" value="18.00">
+                  </label>
+                  <label>Currency
+                    <select name="currency">
+                      <option value="usd">USD</option>
+                      <option value="eur">EUR</option>
+                      <option value="gbp">GBP</option>
+                      <option value="cad">CAD</option>
+                    </select>
+                  </label>
+                  <label>Status
+                    <select name="status">
+                      <option value="draft">Draft</option>
+                      <option value="published">Published</option>
+                    </select>
+                  </label>
+                </div>
+                <label>Description
+                  <textarea name="page_description" rows="3">A clean single-product checkout page for one bag of roasted coffee.</textarea>
+                </label>
+                <div class="grid">
+                  <label>Slug
+                    <input name="slug" value="simple-coffee">
+                  </label>
+                  <label>Accent Color
+                    <input name="accent_color" type="color" value="#15803d">
+                  </label>
+                  <label>Checkout URL
+                    <input name="checkout_url" value="https://checkout.stripe.com/c/pay/demo">
+                  </label>
+                </div>
+                <div class="button-row left">
+                  <button type="button" class="primary-action" id="btnRenderLandingPreview">Render Preview</button>
+                  <button type="button" class="secondary-action" id="btnRenderLandingBackend">Render via API</button>
+                  <button type="button" class="secondary-action" id="btnSaveLandingDocuments">Save Documents</button>
+                </div>
+              </form>
+              <div class="keys-status-banner" data-backend-note="pages">Local preview is ready. Set API Base URL to render or save through the backend.</div>
+            </div>
+          </section>
+
+          <section class="landing-preview-card">
+            <header>
+              <div>
+                <h2>Live Preview</h2>
+                <p id="landingPreviewMode">Local render</p>
+              </div>
+              <div class="preview-actions">
+                <button type="button" class="secondary-action" id="btnDesktopPreview">Desktop</button>
+                <button type="button" class="secondary-action" id="btnMobilePreview">Mobile</button>
+              </div>
+            </header>
+            <div class="landing-preview-frame-wrap">
+              <iframe id="landingPreviewFrame" title="Landing page preview" sandbox="allow-same-origin allow-popups allow-forms"></iframe>
+            </div>
+          </section>
+        </div>
       </section>
 
       <section class="panel" data-panel="orders">

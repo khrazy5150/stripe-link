@@ -1,0 +1,46 @@
+{
+  "schema_version": "2026-05-29",
+  "document_type": "page",
+  "tenant_id": "tenant_demo",
+  "page_id": "page_simple_coffee",
+  "name": "Simple Coffee Checkout Page",
+  "status": "draft",
+  "published_at": null,
+  "route": {
+    "slug": "simple-coffee"
+  },
+  "seo": {
+    "title": "Simple Coffee",
+    "description": "One product, one price, one clean checkout page."
+  },
+  "offer_id": "offer_simple_coffee",
+  "theme": {
+    "template": "simple",
+    "color": {
+      "background": "#ffffff",
+      "text": "#111827",
+      "accent": "#15803d"
+    }
+  },
+  "sections": [
+    {
+      "id": "hero",
+      "type": "hero",
+      "headline": "Simple Coffee",
+      "subheadline": "A clean single-product checkout page for one bag of roasted coffee."
+    },
+    {
+      "id": "price",
+      "type": "offer_price_selector",
+      "offer_id": "offer_simple_coffee"
+    },
+    {
+      "id": "checkout",
+      "type": "checkout_cta",
+      "label": "Buy Now"
+    }
+  ],
+  "revision": 1,
+  "created_at": 1780092000,
+  "updated_at": 1780092000
+}

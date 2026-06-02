@@ -1,8 +1,21 @@
+import re
 from typing import Any
 
 
 class DocumentValidationError(ValueError):
     pass
+
+
+SLUG_PATTERN = re.compile(r"^[a-z0-9][a-z0-9-]*$")
+HEX_COLOR_PATTERN = re.compile(r"^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$")
+SUPPORTED_PAGE_SECTION_TYPES = {"hero", "offer_price_selector", "checkout_cta"}
+SUPPORTED_PAGE_TEMPLATES = {"simple"}
+
+
+def require_object(value: Any, label: str) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        raise DocumentValidationError(f"{label} must be an object.")
+    return value
 
 
 def require_fields(document: dict[str, Any], fields: list[str]) -> None:
@@ -11,18 +24,87 @@ def require_fields(document: dict[str, Any], fields: list[str]) -> None:
         raise DocumentValidationError(f"Missing required field(s): {', '.join(missing)}.")
 
 
+def require_string(document: dict[str, Any], field: str, label: str | None = None) -> str:
+    value = document.get(field)
+    field_label = label or field
+    if not isinstance(value, str) or not value.strip():
+        raise DocumentValidationError(f"{field_label} must be a non-empty string.")
+    return value
+
+
+def optional_string(document: dict[str, Any], field: str, label: str | None = None) -> None:
+    value = document.get(field)
+    if value is not None and not isinstance(value, str):
+        raise DocumentValidationError(f"{label or field} must be a string.")
+
+
+def optional_bool(document: dict[str, Any], field: str, label: str | None = None) -> None:
+    value = document.get(field)
+    if value is not None and not isinstance(value, bool):
+        raise DocumentValidationError(f"{label or field} must be boolean.")
+
+
+def require_positive_int(document: dict[str, Any], field: str, label: str | None = None) -> int:
+    value = document.get(field)
+    field_label = label or field
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        raise DocumentValidationError(f"{field_label} must be a positive integer.")
+    return value
+
+
+def optional_non_negative_int(document: dict[str, Any], field: str, label: str | None = None) -> None:
+    value = document.get(field)
+    if value is not None and (isinstance(value, bool) or not isinstance(value, int) or value < 0):
+        raise DocumentValidationError(f"{label or field} must be a non-negative integer.")
+
+
+def require_enum(document: dict[str, Any], field: str, allowed: set[str], label: str | None = None) -> str:
+    value = require_string(document, field, label)
+    if value not in allowed:
+        raise DocumentValidationError(f"{label or field} must be one of: {', '.join(sorted(allowed))}.")
+    return value
+
+
+def optional_string_list(document: dict[str, Any], field: str, label: str | None = None) -> None:
+    value = document.get(field)
+    if value is None:
+        return
+    field_label = label or field
+    if not isinstance(value, list) or any(not isinstance(item, str) for item in value):
+        raise DocumentValidationError(f"{field_label} must be an array of strings.")
+
+
+def require_document_fields(document: dict[str, Any], document_type: str, id_field: str) -> None:
+    require_object(document, f"{document_type} document")
+    for field in ["schema_version", "document_type", "tenant_id", id_field]:
+        require_string(document, field)
+    if document.get("document_type") != document_type:
+        raise DocumentValidationError(f"{document_type.replace('_', ' ').title()} document_type must be '{document_type}'.")
+
+
 def validate_product_document(document: dict[str, Any]) -> None:
-    require_fields(document, [
-        "schema_version",
-        "document_type",
-        "tenant_id",
-        "product_id",
-        "name",
-        "prices",
-        "default_price_id",
-    ])
-    if document.get("document_type") != "product":
-        raise DocumentValidationError("Product document_type must be 'product'.")
+    require_document_fields(document, "product", "product_id")
+    require_string(document, "name")
+    require_string(document, "default_price_id")
+    optional_bool(document, "active")
+    if document.get("stripe_mode") is not None:
+        require_enum(document, "stripe_mode", {"test", "live"})
+    optional_string(document, "description")
+    optional_string(document, "product_type")
+    optional_string(document, "product_category")
+    optional_bool(document, "requires_shipping")
+    optional_string_list(document, "images")
+    optional_string_list(document, "tags")
+    fulfillment = document.get("fulfillment")
+    if fulfillment is not None:
+        if not isinstance(fulfillment, dict):
+            raise DocumentValidationError("Product fulfillment must be an object.")
+        optional_bool(fulfillment, "requires_shipping", "Product fulfillment.requires_shipping")
+        optional_non_negative_int(fulfillment, "weight_oz", "Product fulfillment.weight_oz")
+        ship_from = fulfillment.get("ship_from")
+        if ship_from is not None and not isinstance(ship_from, dict):
+            raise DocumentValidationError("Product fulfillment.ship_from must be an object when provided.")
+
     prices = document.get("prices")
     if not isinstance(prices, list) or not prices:
         raise DocumentValidationError("Product prices must be a non-empty array.")
@@ -33,13 +115,26 @@ def validate_product_document(document: dict[str, Any]) -> None:
     for price in prices:
         if not isinstance(price, dict):
             raise DocumentValidationError("Each product price must be an object.")
-        require_fields(price, ["price_id", "product_id", "currency", "unit_amount", "quantity", "label"])
+        for field in ["price_id", "product_id", "currency", "label"]:
+            require_string(price, field, f"price.{field}")
+        require_positive_int(price, "unit_amount", "price.unit_amount")
+        require_positive_int(price, "quantity", "price.quantity")
+        optional_bool(price, "active", "price.active")
+        optional_string(price, "context", "price.context")
+        optional_string(price, "badge", "price.badge")
+        optional_non_negative_int(price, "discount_pct", "price.discount_pct")
+        if len(price.get("currency", "")) != 3 or price.get("currency", "") != price.get("currency", "").lower():
+            raise DocumentValidationError("price.currency must be a lowercase 3-letter currency code.")
+        if price.get("stripe_mode") is not None:
+            require_enum(price, "stripe_mode", {"test", "live"}, "price.stripe_mode")
         if price.get("product_id") != product_id:
             raise DocumentValidationError(f"Price '{price.get('price_id')}' must belong to product '{product_id}'.")
         if product_mode and price.get("stripe_mode") and price.get("stripe_mode") != product_mode:
             raise DocumentValidationError(
                 f"Price '{price.get('price_id')}' stripe_mode must match product stripe_mode '{product_mode}'."
             )
+        if price.get("price_id") in price_ids:
+            raise DocumentValidationError(f"Duplicate product price_id '{price.get('price_id')}'.")
         price_ids.add(price.get("price_id"))
 
     if document.get("default_price_id") not in price_ids:
@@ -47,17 +142,11 @@ def validate_product_document(document: dict[str, Any]) -> None:
 
 
 def validate_offer_document(document: dict[str, Any]) -> None:
-    require_fields(document, [
-        "schema_version",
-        "document_type",
-        "tenant_id",
-        "offer_id",
-        "name",
-        "items",
-        "checkout",
-    ])
-    if document.get("document_type") != "offer":
-        raise DocumentValidationError("Offer document_type must be 'offer'.")
+    require_document_fields(document, "offer", "offer_id")
+    require_string(document, "name")
+    optional_bool(document, "active")
+    optional_string(document, "context")
+
     items = document.get("items")
     if not isinstance(items, list) or not items:
         raise DocumentValidationError("Offer items must be a non-empty array.")
@@ -65,52 +154,138 @@ def validate_offer_document(document: dict[str, Any]) -> None:
     for item in items:
         if not isinstance(item, dict):
             raise DocumentValidationError("Each offer item must be an object.")
-        require_fields(item, ["product_id"])
+        require_string(item, "product_id", "offer item product_id")
+        optional_string(item, "presentation_context", "offer item presentation_context")
         has_fixed_price = bool(item.get("price_id"))
         has_selectable_prices = bool(item.get("selectable_prices"))
         if has_fixed_price == has_selectable_prices:
             raise DocumentValidationError("Offer item must use either price_id or selectable_prices, but not both.")
-        if has_fixed_price and not item.get("quantity"):
-            raise DocumentValidationError("Fixed-price offer items require quantity.")
+        if has_fixed_price:
+            require_string(item, "price_id", "offer item price_id")
+            require_positive_int(item, "quantity", "offer item quantity")
         if has_selectable_prices:
-            selectable_price_ids = {
-                price.get("price_id")
-                for price in item.get("selectable_prices", [])
-                if isinstance(price, dict) and price.get("price_id")
-            }
+            selectable_prices = item.get("selectable_prices")
+            if not isinstance(selectable_prices, list) or not selectable_prices:
+                raise DocumentValidationError("selectable_prices must be a non-empty array.")
+            selectable_price_ids = set()
+            for price in selectable_prices:
+                if not isinstance(price, dict):
+                    raise DocumentValidationError("Each selectable price must be an object.")
+                require_string(price, "price_id", "selectable price price_id")
+                require_positive_int(price, "quantity", "selectable price quantity")
+                require_string(price, "label", "selectable price label")
+                optional_string(price, "badge", "selectable price badge")
+                optional_non_negative_int(price, "display_discount_pct", "selectable price display_discount_pct")
+                if price.get("price_id") in selectable_price_ids:
+                    raise DocumentValidationError(f"Duplicate selectable price_id '{price.get('price_id')}'.")
+                selectable_price_ids.add(price.get("price_id"))
             if not selectable_price_ids:
                 raise DocumentValidationError("selectable_prices must include at least one price_id.")
             if item.get("default_price_id") not in selectable_price_ids:
                 raise DocumentValidationError("default_price_id must reference one of selectable_prices.")
 
     checkout = document.get("checkout")
-    if not isinstance(checkout, dict) or not checkout.get("mode"):
-        raise DocumentValidationError("Offer checkout.mode is required.")
+    if not isinstance(checkout, dict):
+        raise DocumentValidationError("Offer checkout must be an object.")
+    require_enum(checkout, "mode", {"payment", "subscription", "setup"}, "Offer checkout.mode")
+    optional_bool(checkout, "allow_promotion_codes", "Offer checkout.allow_promotion_codes")
+    metadata = checkout.get("metadata")
+    if metadata is not None and not isinstance(metadata, dict):
+        raise DocumentValidationError("Offer checkout.metadata must be an object.")
+
+    eligibility = document.get("eligibility")
+    if eligibility is not None:
+        if not isinstance(eligibility, dict):
+            raise DocumentValidationError("Offer eligibility must be an object.")
+        optional_bool(eligibility, "requires_prior_purchase", "Offer eligibility.requires_prior_purchase")
+        optional_string_list(eligibility, "allowed_price_contexts", "Offer eligibility.allowed_price_contexts")
+
+    presentation = document.get("presentation")
+    if presentation is not None:
+        if not isinstance(presentation, dict):
+            raise DocumentValidationError("Offer presentation must be an object.")
+        optional_string(presentation, "headline", "Offer presentation.headline")
+        optional_string(presentation, "badge", "Offer presentation.badge")
+        optional_string(presentation, "cta_label", "Offer presentation.cta_label")
 
 
 def validate_page_document(document: dict[str, Any]) -> None:
-    require_fields(document, [
-        "schema_version",
-        "document_type",
-        "tenant_id",
-        "page_id",
-        "name",
-        "route",
-        "offer_id",
-        "sections",
-    ])
-    if document.get("document_type") != "page":
-        raise DocumentValidationError("Page document_type must be 'page'.")
+    require_document_fields(document, "page", "page_id")
+    require_string(document, "name")
+    require_string(document, "offer_id")
+    if document.get("status") is not None:
+        require_enum(document, "status", {"draft", "published", "archived"})
+    optional_non_negative_int(document, "revision")
+
     route = document.get("route")
     if not isinstance(route, dict) or not route.get("slug"):
         raise DocumentValidationError("Page route.slug is required.")
+    slug = require_string(route, "slug", "Page route.slug")
+    if not SLUG_PATTERN.match(slug):
+        raise DocumentValidationError("Page route.slug must contain only lowercase letters, numbers, and hyphens.")
+
+    seo = document.get("seo")
+    if seo is not None:
+        if not isinstance(seo, dict):
+            raise DocumentValidationError("Page seo must be an object.")
+        optional_string(seo, "title", "Page seo.title")
+        optional_string(seo, "description", "Page seo.description")
+
+    theme = document.get("theme")
+    if theme is not None:
+        if not isinstance(theme, dict):
+            raise DocumentValidationError("Page theme must be an object.")
+        if theme.get("template") is not None:
+            require_enum(theme, "template", SUPPORTED_PAGE_TEMPLATES, "Page theme.template")
+        color = theme.get("color")
+        if color is not None:
+            if not isinstance(color, dict):
+                raise DocumentValidationError("Page theme.color must be an object.")
+            for field in ["background", "text", "accent"]:
+                value = color.get(field)
+                if value is not None:
+                    if not isinstance(value, str) or not HEX_COLOR_PATTERN.match(value):
+                        raise DocumentValidationError(f"Page theme.color.{field} must be a hex color.")
+
     sections = document.get("sections")
     if not isinstance(sections, list) or not sections:
         raise DocumentValidationError("Page sections must be a non-empty array.")
+    section_ids = set()
     for section in sections:
         if not isinstance(section, dict):
             raise DocumentValidationError("Each page section must be an object.")
-        require_fields(section, ["id", "type"])
+        section_id = require_string(section, "id", "Page section id")
+        section_type = require_enum(section, "type", SUPPORTED_PAGE_SECTION_TYPES, "Page section type")
+        if section_id in section_ids:
+            raise DocumentValidationError(f"Duplicate page section id '{section_id}'.")
+        section_ids.add(section_id)
+        if section_type == "hero":
+            optional_string(section, "headline", "Hero section headline")
+            optional_string(section, "subheadline", "Hero section subheadline")
+            if not (section.get("headline") or section.get("subheadline")):
+                raise DocumentValidationError("Hero section requires headline or subheadline.")
+        elif section_type == "offer_price_selector":
+            require_string(section, "offer_id", "Offer price selector offer_id")
+            if section.get("offer_id") != document.get("offer_id"):
+                raise DocumentValidationError("Offer price selector offer_id must match page offer_id.")
+        elif section_type == "checkout_cta":
+            optional_string(section, "label", "Checkout CTA label")
+
+    analytics = document.get("analytics")
+    if analytics is not None:
+        if not isinstance(analytics, dict):
+            raise DocumentValidationError("Page analytics must be an object.")
+        optional_string(analytics, "google_tag_id", "Page analytics.google_tag_id")
+        optional_string(analytics, "pixel_id", "Page analytics.pixel_id")
+
+    legal = document.get("legal")
+    if legal is not None:
+        if not isinstance(legal, dict):
+            raise DocumentValidationError("Page legal must be an object.")
+        optional_string(legal, "terms_url", "Page legal.terms_url")
+        optional_string(legal, "privacy_url", "Page legal.privacy_url")
+        optional_string(legal, "refund_url", "Page legal.refund_url")
+
     refund_policy = document.get("refund_policy")
     if refund_policy is not None:
         if not isinstance(refund_policy, dict):

@@ -228,6 +228,39 @@ Resources:
             Path: /pages/render
             Method: POST
 
+  PagePublishFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${ProjectPrefix}-page-publish-${Environment}"
+      CodeUri: src/
+      Handler: handlers.page_publish.handler
+      Description: Renders page documents from the PagesTable stream into preview, test, and published page artifacts.
+      Timeout: 60
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref OffersTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref ProductsTable
+        - S3CrudPolicy:
+            BucketName: !Ref PagesBucket
+        - S3CrudPolicy:
+            BucketName: !Ref PagesPreviewBucket
+        - Statement:
+            Effect: Allow
+            Action:
+              - cloudfront:CreateInvalidation
+            Resource: !Sub "arn:aws:cloudfront::${AWS::AccountId}:distribution/${PagesDistribution}"
+      Events:
+        PagesChanged:
+          Type: DynamoDB
+          Properties:
+            Stream: !GetAtt PagesTable.StreamArn
+            StartingPosition: LATEST
+            BatchSize: 10
+            MaximumBatchingWindowInSeconds: 5
+            FunctionResponseTypes:
+              - ReportBatchItemFailures
+
   RegistrationFunction:
     Type: AWS::Serverless::Function
     Properties:
