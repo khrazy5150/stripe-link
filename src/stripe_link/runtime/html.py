@@ -268,58 +268,58 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     "    .sl-countdown[data-marquee='true'] .sl-countdown-content{display:inline-flex;align-items:center;gap:0.8rem;animation:sl-marquee 14s linear infinite}",
     "    .sl-countdown time{font-family:var(--sl-font-mono);background:color-mix(in srgb,var(--sl-countdown-text) 16%,transparent);border-radius:0.4rem;padding:0.3rem 0.7rem}",
     "    @keyframes sl-marquee{from{transform:translateX(100%)}to{transform:translateX(-100%)}}",
-    "    .sl-brand-label{display:flex;align-items:center;justify-content:center;gap:0.8rem;color:var(--sl-muted);padding-top:1.6rem}",
-    "    .sl-brand-label::before{content:'';width:1rem;height:1rem;border-radius:999px;background:var(--sl-brand);box-shadow:0 0 0.8rem var(--sl-brand)}",
-    "    .sl-brand-label h1{font-family:var(--sl-font-accent);font-size:1.3rem;font-weight:700;letter-spacing:0.08em;line-height:1.2;text-transform:uppercase;color:var(--sl-muted)}",
+    "    .sl-brand-label{display:flex;align-items:center;justify-content:center;gap:0.8rem;color:var(--sl-brand-label-text);padding-top:1.6rem}",
+    "    .sl-brand-label::before{content:'';width:1rem;height:1rem;border-radius:999px;background:var(--sl-brand-dot);box-shadow:0 0 0.8rem var(--sl-brand-dot)}",
+    "    .sl-brand-label h1{font-family:var(--sl-font-accent);font-size:1.3rem;font-weight:700;letter-spacing:0.08em;line-height:1.2;text-transform:uppercase;color:var(--sl-brand-label-text)}",
     "    .sl-seo-title{text-align:center}",
     "    .sl-seo-title h1{font-family:var(--sl-font-heading);font-size:clamp(2.4rem,5vw,3.2rem);line-height:1.2;color:var(--sl-headline)}",
     "    .sl-headline{text-align:center;padding:0.8rem 0 0.4rem}",
     "    .sl-headline h2{font-family:var(--sl-font-heading);font-size:clamp(2.4rem,5vw,3.2rem);line-height:1.2;font-weight:800;color:var(--sl-headline);letter-spacing:0}",
     "    .sl-subheadline{text-align:center}",
-    "    .sl-subheadline p{font-size:1.5rem;line-height:1.55;color:var(--sl-muted);max-width:46rem;margin:0 auto}",
+    "    .sl-subheadline p{font-size:1.5rem;line-height:1.55;color:var(--sl-subheadline-text);max-width:46rem;margin:0 auto}",
     "    .sl-hero-media{display:flex;justify-content:center;gap:1rem;overflow-x:auto;scroll-snap-type:x mandatory;padding-top:0.8rem}",
-    "    .sl-hero-media img{flex:0 0 min(100%,52rem);width:min(100%,52rem);aspect-ratio:1/1;object-fit:cover;border-radius:var(--sl-radius);border:1px solid var(--sl-border);background:var(--sl-card);scroll-snap-align:center}",
+    "    .sl-hero-media img{flex:0 0 min(100%,52rem);width:min(100%,52rem);aspect-ratio:1/1;object-fit:cover;border-radius:var(--sl-radius);border:1px solid var(--sl-hero-border);background:var(--sl-hero-bg);scroll-snap-align:center}",
     "    .sl-trust-badges{display:flex;flex-wrap:wrap;gap:0.8rem;justify-content:center}",
-    "    .sl-trust-badge{display:flex;align-items:center;gap:0.6rem;border:1px solid var(--sl-chip-border);background:var(--sl-chip-bg);color:var(--sl-chip-text);border-radius:999px;padding:0.8rem 1.4rem;font-family:var(--sl-font-accent);font-size:1.2rem;font-weight:800}",
+    "    .sl-trust-badge{display:flex;align-items:center;gap:0.6rem;border:1px solid var(--sl-trust-badge-border);background:var(--sl-trust-badge-bg);color:var(--sl-trust-badge-text);border-radius:999px;padding:0.8rem 1.4rem;font-family:var(--sl-font-accent);font-size:1.2rem;font-weight:800}",
     "    .sl-price-options{display:grid;grid-template-columns:1fr;gap:1.4rem;width:100%;margin:0 auto}",
-    "    .sl-price-option{position:relative;display:grid;grid-template-columns:9rem minmax(0,1fr) 2.2rem;gap:1.4rem;align-items:center;border:2px solid var(--sl-border);border-radius:var(--sl-radius);padding:1.6rem 2rem;background:var(--sl-card)}",
-    "    .sl-price-option.selected{border-color:var(--sl-brand);box-shadow:0 0 0 3px color-mix(in srgb,var(--sl-brand) 13%,transparent)}",
-    "    .sl-price-option input{width:2.2rem;height:2.2rem;accent-color:var(--sl-accent)}",
+    "    .sl-price-option{position:relative;display:grid;grid-template-columns:9rem minmax(0,1fr) 2.2rem;gap:1.4rem;align-items:center;border:2px solid var(--sl-price-card-border);border-radius:var(--sl-radius);padding:1.6rem 2rem;background:var(--sl-price-card-bg)}",
+    "    .sl-price-option.selected{border-color:var(--sl-price-card-selected-border);box-shadow:0 0 0 3px color-mix(in srgb,var(--sl-price-card-selected-border) 13%,transparent)}",
+    "    .sl-price-option input{width:2.2rem;height:2.2rem;accent-color:var(--sl-price-radio)}",
     "    .sl-price-option img{width:9rem;aspect-ratio:1/1;object-fit:contain;border-radius:0.8rem;background:var(--sl-background)}",
     "    .sl-price-copy{display:grid;gap:0.4rem}",
-    "    .sl-price-option strong{font-family:var(--sl-font-heading);font-size:1.6rem;line-height:1.2;font-weight:600}",
-    "    .sl-price-description{color:var(--sl-muted);font-size:1.3rem;line-height:1.45}",
+    "    .sl-price-option strong{font-family:var(--sl-font-heading);font-size:1.6rem;line-height:1.2;font-weight:600;color:var(--sl-price-title)}",
+    "    .sl-price-description{color:var(--sl-price-description);font-size:1.3rem;line-height:1.45}",
     "    .sl-price-row{display:flex;align-items:center;gap:1rem;flex-wrap:wrap;margin-top:1rem}",
-    "    .sl-price-amount{font-family:var(--sl-font-accent);font-size:2rem;font-weight:700;color:var(--sl-brand)}",
-    "    .sl-regular-price{color:var(--sl-muted);text-decoration:line-through;font-size:1.4rem}",
+    "    .sl-price-amount{font-family:var(--sl-font-accent);font-size:2rem;font-weight:700;color:var(--sl-price-amount)}",
+    "    .sl-regular-price{color:var(--sl-price-regular);text-decoration:line-through;font-size:1.4rem}",
     "    .sl-price-option[data-expired='true'] .sl-regular-price,.sl-price-option[data-expired='true'] .sl-savings{display:none}",
     "    .sl-badge{display:inline-flex;width:max-content;font-family:var(--sl-font-accent);font-size:1.1rem;font-weight:700;color:var(--sl-featured-badge-text);background:var(--sl-featured-badge-bg);padding:0.4rem 1rem;border-radius:999px}",
     "    .sl-savings{font-family:var(--sl-font-accent);font-size:1.1rem;font-weight:600;color:var(--sl-savings-text);background:var(--sl-savings-bg);border:1px solid var(--sl-savings-border);border-radius:1.2rem;padding:0.4rem 1rem}",
     "    .sl-content-blocks{display:grid;gap:1rem}",
     "    .sl-faq{display:grid;gap:1.2rem}",
-    "    .sl-refund-policy{width:100%;border:1px solid var(--sl-border);background:var(--sl-card);border-radius:var(--sl-radius);overflow:hidden}",
-    "    .sl-refund-policy summary{list-style:none;cursor:pointer;padding:1.6rem 2rem;font-family:var(--sl-font-heading);font-size:1.4rem;font-weight:600;display:flex;align-items:center;justify-content:space-between;gap:1.2rem}",
+    "    .sl-refund-policy{width:100%;border:1px solid var(--sl-refund-border);background:var(--sl-refund-bg);border-radius:var(--sl-radius);overflow:hidden}",
+    "    .sl-refund-policy summary{list-style:none;cursor:pointer;padding:1.6rem 2rem;font-family:var(--sl-font-heading);font-size:1.4rem;font-weight:600;color:var(--sl-refund-summary);display:flex;align-items:center;justify-content:space-between;gap:1.2rem}",
     "    .sl-refund-policy summary::-webkit-details-marker{display:none}",
-    "    .sl-refund-policy summary::after{content:'+';font-size:1.8rem;color:var(--sl-brand);transition:transform .2s}",
+    "    .sl-refund-policy summary::after{content:'+';font-size:1.8rem;color:var(--sl-refund-applies);transition:transform .2s}",
     "    .sl-refund-policy[open] summary::after{transform:rotate(45deg)}",
     "    .sl-refund-policy-body{padding:0 2rem 2rem;display:grid;gap:1.4rem}",
-    "    .sl-refund-policy h2{font-family:var(--sl-font-heading);font-size:1.5rem;line-height:1.3;margin-top:0.6rem}",
-    "    .sl-refund-policy p{color:var(--sl-muted);line-height:1.6;font-size:1.4rem}",
-    "    .sl-refund-policy-applies{font-size:1.3rem;line-height:1.55;font-weight:700;color:var(--sl-brand)}",
+    "    .sl-refund-policy h2{font-family:var(--sl-font-heading);font-size:1.5rem;line-height:1.3;margin-top:0.6rem;color:var(--sl-refund-title)}",
+    "    .sl-refund-policy p{color:var(--sl-refund-text);line-height:1.6;font-size:1.4rem}",
+    "    .sl-refund-policy-applies{font-size:1.3rem;line-height:1.55;font-weight:700;color:var(--sl-refund-applies)}",
     "    .sl-refund-policy-copy{padding-left:2rem}",
-    "    .sl-refund-policy-return{padding-left:2rem;color:var(--sl-text)!important;font-weight:800}",
-    "    .sl-content-block{display:grid;grid-template-columns:minmax(0,1fr) minmax(12rem,18rem);gap:1.2rem;align-items:center;border-top:1px solid var(--sl-border);padding-top:1.6rem}",
-    "    .sl-content-block h3{font-family:var(--sl-font-heading);font-size:2rem;line-height:1.25;margin-bottom:0.8rem}",
-    "    .sl-content-block p{color:var(--sl-muted);font-size:1.5rem;line-height:1.6}",
+    "    .sl-refund-policy-return{padding-left:2rem;color:var(--sl-refund-return)!important;font-weight:800}",
+    "    .sl-content-block{display:grid;grid-template-columns:minmax(0,1fr) minmax(12rem,18rem);gap:1.2rem;align-items:center;border-top:1px solid var(--sl-content-border);padding-top:1.6rem}",
+    "    .sl-content-block h3{font-family:var(--sl-font-heading);font-size:2rem;line-height:1.25;margin-bottom:0.8rem;color:var(--sl-content-heading)}",
+    "    .sl-content-block p{color:var(--sl-content-text);font-size:1.5rem;line-height:1.6}",
     "    .sl-content-block img{width:100%;aspect-ratio:4/3;object-fit:cover;border-radius:0.8rem}",
-    "    .sl-faq details{border:1px solid var(--sl-border);background:var(--sl-card);border-radius:1.6rem;padding:0;overflow:hidden}",
-    "    .sl-faq summary{cursor:pointer;font-family:var(--sl-font-heading);font-size:1.4rem;font-weight:600;line-height:1.35;display:flex;align-items:center;justify-content:space-between;gap:1.2rem;padding:1.6rem 2rem}",
-    "    .sl-faq p{color:var(--sl-muted);font-size:1.4rem;line-height:1.6;padding:0 2rem 1.6rem}",
-    "    .sl-checkout-cta{position:fixed;left:0;right:0;bottom:0;z-index:10;background:linear-gradient(transparent,var(--sl-background) 20%);padding:1.6rem;display:flex;justify-content:center}",
+    "    .sl-faq details{border:1px solid var(--sl-faq-border);background:var(--sl-faq-bg);border-radius:1.6rem;padding:0;overflow:hidden}",
+    "    .sl-faq summary{cursor:pointer;font-family:var(--sl-font-heading);font-size:1.4rem;font-weight:600;line-height:1.35;color:var(--sl-faq-summary);display:flex;align-items:center;justify-content:space-between;gap:1.2rem;padding:1.6rem 2rem}",
+    "    .sl-faq p{color:var(--sl-faq-text);font-size:1.4rem;line-height:1.6;padding:0 2rem 1.6rem}",
+    "    .sl-checkout-cta{position:fixed;left:0;right:0;bottom:0;z-index:10;background:linear-gradient(transparent,var(--sl-cta-scrim) 20%);padding:1.6rem;display:flex;justify-content:center}",
     "    .sl-cta{display:inline-flex;width:min(52rem,100%);align-items:center;justify-content:center;background:linear-gradient(135deg,var(--sl-cta-from),var(--sl-cta-to));color:var(--sl-cta-text);border:0;border-radius:1rem;padding:1.5rem 1.8rem;font-family:var(--sl-font-accent);font-size:1.7rem;font-weight:900;text-decoration:none}",
-    "    .sl-legal{display:flex;gap:1.2rem;flex-wrap:wrap;justify-content:center;text-align:center;font-size:1.3rem;color:var(--sl-muted);padding:2.4rem 0 0}",
+    "    .sl-legal{display:flex;gap:1.2rem;flex-wrap:wrap;justify-content:center;text-align:center;font-size:1.3rem;color:var(--sl-legal-text);padding:2.4rem 0 0}",
     "    .sl-legal span{flex:0 0 100%}",
-    "    .sl-legal a{color:inherit}",
+    "    .sl-legal a{color:var(--sl-legal-link)}",
     "    @media (max-width: 700px){.sl-price-option{grid-template-columns:8.8rem minmax(0,1fr) 2.4rem;gap:1rem;padding:1.2rem}.sl-price-option img{width:8.8rem}.sl-content-block{grid-template-columns:1fr}.sl-headline h2{font-size:3rem}}",
 ]
 
@@ -362,7 +362,42 @@ def theme_tokens(page: dict[str, Any]) -> dict[str, str]:
         tokens["accent"] = legacy_color["accent"]
         tokens["brand"] = legacy_color["accent"]
     tokens.update(theme.get("tokens") or {})
+    tokens.setdefault("countdown_bg", tokens["cta_from"] if preset_name != "techno-green" else "#dc2626")
+    tokens.setdefault("countdown_end_bg", tokens["cta_to"] if preset_name != "techno-green" else "#f97316")
     tokens.setdefault("countdown_text", "#ffffff")
+    tokens.setdefault("brand_label_text", tokens["muted"])
+    tokens.setdefault("brand_dot", tokens["brand"])
+    tokens.setdefault("subheadline_text", tokens["muted"])
+    tokens.setdefault("hero_bg", tokens["card"])
+    tokens.setdefault("hero_border", tokens["border"])
+    tokens.setdefault("trust_badge_bg", tokens["chip_bg"])
+    tokens.setdefault("trust_badge_text", tokens["chip_text"])
+    tokens.setdefault("trust_badge_border", tokens["chip_border"])
+    tokens.setdefault("price_card_bg", tokens["card"])
+    tokens.setdefault("price_card_border", tokens["border"])
+    tokens.setdefault("price_card_selected_border", tokens["brand"])
+    tokens.setdefault("price_radio", tokens["accent"])
+    tokens.setdefault("price_title", tokens["text"])
+    tokens.setdefault("price_description", tokens["muted"])
+    tokens.setdefault("price_amount", tokens["brand"])
+    tokens.setdefault("price_regular", tokens["muted"])
+    tokens.setdefault("refund_bg", tokens["card"])
+    tokens.setdefault("refund_border", tokens["border"])
+    tokens.setdefault("refund_summary", tokens["text"])
+    tokens.setdefault("refund_title", tokens["text"])
+    tokens.setdefault("refund_text", tokens["muted"])
+    tokens.setdefault("refund_applies", tokens["brand"])
+    tokens.setdefault("refund_return", tokens["text"])
+    tokens.setdefault("content_heading", tokens["text"])
+    tokens.setdefault("content_text", tokens["muted"])
+    tokens.setdefault("content_border", tokens["border"])
+    tokens.setdefault("faq_bg", tokens["card"])
+    tokens.setdefault("faq_border", tokens["border"])
+    tokens.setdefault("faq_summary", tokens["text"])
+    tokens.setdefault("faq_text", tokens["muted"])
+    tokens.setdefault("legal_text", tokens["muted"])
+    tokens.setdefault("legal_link", tokens["muted"])
+    tokens.setdefault("cta_scrim", tokens["background"])
     return tokens
 
 
@@ -524,13 +559,8 @@ def countdown_timer_colors(page: dict[str, Any], section: dict[str, Any]) -> tup
     if section.get("start_color") and section.get("end_color"):
         return str(section["start_color"]), str(section["end_color"])
 
-    theme = page.get("theme") or {}
-    preset_name = str(theme.get("preset") or "techno-green")
-    if preset_name == "techno-green":
-        return "#dc2626", "#f97316"
-
     tokens = theme_tokens(page)
-    return str(tokens.get("cta_from") or tokens["accent"]), str(tokens.get("cta_to") or tokens.get("cta_from") or tokens["accent"])
+    return str(tokens["countdown_bg"]), str(tokens["countdown_end_bg"])
 
 
 def render_countdown_timer(section: dict[str, Any], page: dict[str, Any]) -> str:

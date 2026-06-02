@@ -31,8 +31,20 @@
               "name": { "type": "string" },
               "tokens": {
                 "type": "object",
-                "additionalProperties": {
-                  "type": ["string", "number", "integer", "boolean", "null"]
+                "additionalProperties": { "$ref": "#/$defs/hexColor" }
+              },
+              "fonts": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "service": {
+                    "type": "string",
+                    "enum": ["system", "junior-bay"],
+                    "default": "system"
+                  },
+                  "body": { "$ref": "#/$defs/fontRole" },
+                  "heading": { "$ref": "#/$defs/fontRole" },
+                  "accent": { "$ref": "#/$defs/fontRole" }
                 }
               },
               "created_at": { "type": "integer", "minimum": 0 },
@@ -84,6 +96,25 @@
     "updated_at": { "type": "integer", "minimum": 0 }
   },
   "$defs": {
+    "hexColor": {
+      "type": "string",
+      "pattern": "^#[0-9A-Fa-f]{6}$"
+    },
+    "fontRole": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "family": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9 ._-]{0,79}$"
+        },
+        "fallback": {
+          "type": "string",
+          "enum": ["system", "sans-serif", "serif", "monospace"],
+          "default": "system"
+        }
+      }
+    },
     "refund_policy": {
       "type": "object",
       "additionalProperties": false,

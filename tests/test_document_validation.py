@@ -1,6 +1,7 @@
 import copy
 import json
 import unittest
+from decimal import Decimal
 from pathlib import Path
 
 from stripe_link.domain.documents import (
@@ -8,6 +9,7 @@ from stripe_link.domain.documents import (
     validate_offer_document,
     validate_page_document,
     validate_product_document,
+    validate_user_preferences,
 )
 
 
@@ -34,6 +36,25 @@ class DocumentValidationTests(unittest.TestCase):
         validate_product_document(load_fixture("product-universal-bundle.json"))
         validate_offer_document(load_fixture("offer-universal-bundle.json"))
         validate_page_document(load_fixture("page-universal-bundle.json"))
+
+    def test_accepts_dynamodb_decimal_integer_fields(self):
+        product = load_fixture("product-universal-bundle.json")
+        offer = load_fixture("offer-universal-bundle.json")
+        for price in product["prices"]:
+            price["unit_amount"] = Decimal(price["unit_amount"])
+            price["quantity"] = Decimal(price["quantity"])
+            price["regular_unit_amount"] = Decimal(price["regular_unit_amount"])
+            price["discount_pct"] = Decimal(price["discount_pct"])
+        for item in offer["items"]:
+            if "quantity" in item:
+                item["quantity"] = Decimal(item["quantity"])
+            for price in item.get("selectable_prices", []):
+                price["quantity"] = Decimal(price["quantity"])
+                price["regular_unit_amount"] = Decimal(price["regular_unit_amount"])
+                price["display_discount_pct"] = Decimal(price["display_discount_pct"])
+
+        validate_product_document(product)
+        validate_offer_document(offer)
 
     def test_product_rejects_invalid_price_amount_type(self):
         product = copy.deepcopy(self.product)
@@ -174,6 +195,49 @@ class DocumentValidationTests(unittest.TestCase):
 
         with self.assertRaisesRegex(DocumentValidationError, "theme.fonts.heading.family"):
             validate_page_document(page)
+
+    def test_user_preferences_accepts_saved_theme_tokens_and_fonts(self):
+        preferences = load_fixture("user-preferences-demo.json")
+        preferences["landing_pages"]["custom_color_themes"] = [{
+            "theme_id": "theme_cyber_variant",
+            "name": "Cyber Variant",
+            "tokens": {
+                "background": "#0c0a1d",
+                "card": "#1e1b4b",
+                "cta_from": "#6366f1",
+                "faq_summary": "#eef2ff",
+            },
+            "fonts": {
+                "service": "junior-bay",
+                "body": {"family": "Inter", "fallback": "sans-serif"},
+                "heading": {"family": "Inter Tight", "fallback": "sans-serif"},
+            },
+        }]
+
+        validate_user_preferences(preferences)
+
+    def test_user_preferences_rejects_invalid_saved_theme_token(self):
+        preferences = load_fixture("user-preferences-demo.json")
+        preferences["landing_pages"]["custom_color_themes"] = [{
+            "theme_id": "theme_bad",
+            "name": "Bad Theme",
+            "tokens": {"background": "red;background:url(javascript:alert(1))"},
+        }]
+
+        with self.assertRaisesRegex(DocumentValidationError, "custom color theme tokens"):
+            validate_user_preferences(preferences)
+
+    def test_user_preferences_rejects_invalid_saved_theme_font(self):
+        preferences = load_fixture("user-preferences-demo.json")
+        preferences["landing_pages"]["custom_color_themes"] = [{
+            "theme_id": "theme_bad_font",
+            "name": "Bad Font Theme",
+            "tokens": {"background": "#0c0a1d"},
+            "fonts": {"heading": {"family": "Inter;background:url(javascript:alert(1))"}},
+        }]
+
+        with self.assertRaisesRegex(DocumentValidationError, "custom color theme fonts.heading.family"):
+            validate_user_preferences(preferences)
 
     def test_page_rejects_too_many_universal_bundle_badges(self):
         page = load_fixture("page-universal-bundle.json")

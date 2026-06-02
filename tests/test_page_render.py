@@ -73,6 +73,12 @@ class PageRenderTests(unittest.TestCase):
         self.assertIn("--sl-card:#0f172a", html)
         self.assertIn("--sl-brand:#22c55e", html)
         self.assertIn("--sl-cta-from:#22c55e", html)
+        self.assertIn("--sl-price-card-bg:#0f172a", html)
+        self.assertIn("--sl-subheadline-text:#cbd5e1", html)
+        self.assertIn("--sl-price-card-selected-border:#22c55e", html)
+        self.assertIn("--sl-refund-bg:#0f172a", html)
+        self.assertIn("--sl-faq-summary:#f8fafc", html)
+        self.assertIn("--sl-legal-link:#cbd5e1", html)
         self.assertIn("data-section-type=\"countdown_timer\"", html)
         self.assertIn("data-duration-minutes=\"1\"", html)
         self.assertIn("data-persistent=\"true\"", html)
@@ -91,7 +97,7 @@ class PageRenderTests(unittest.TestCase):
         self.assertIn(".sl-brand-label h1{font-family:var(--sl-font-accent);font-size:1.3rem", html)
         self.assertIn(".sl-headline h2{font-family:var(--sl-font-heading);font-size:clamp(2.4rem,5vw,3.2rem)", html)
         self.assertIn(".sl-price-option strong{font-family:var(--sl-font-heading);font-size:1.6rem", html)
-        self.assertIn(".sl-price-description{color:var(--sl-muted);font-size:1.3rem", html)
+        self.assertIn(".sl-price-description{color:var(--sl-price-description);font-size:1.3rem", html)
         self.assertIn("data-section-type=\"brand_label\"", html)
         self.assertIn("<h1>Creatine Gummies</h1>", html)
         self.assertIn("data-section-type=\"hero_media\"", html)
@@ -122,10 +128,10 @@ class PageRenderTests(unittest.TestCase):
         self.assertIn("This item doesn&#x27;t need to be returned.", html)
         self.assertIn("data-section-type=\"content_block\"", html)
         self.assertIn(".sl-content-block h3{font-family:var(--sl-font-heading);font-size:2rem", html)
-        self.assertIn(".sl-content-block p{color:var(--sl-muted);font-size:1.5rem", html)
+        self.assertIn(".sl-content-block p{color:var(--sl-content-text);font-size:1.5rem", html)
         self.assertIn("data-section-type=\"faq\"", html)
         self.assertIn(".sl-faq summary{cursor:pointer;font-family:var(--sl-font-heading);font-size:1.4rem", html)
-        self.assertIn(".sl-faq p{color:var(--sl-muted);font-size:1.4rem", html)
+        self.assertIn(".sl-faq p{color:var(--sl-faq-text);font-size:1.4rem", html)
         self.assertIn("Get The Bundle - $69.42", html)
         self.assertIn("Terms of Service", html)
         self.assertIn("© 2026 All rights reserved.", html)
@@ -153,6 +159,36 @@ class PageRenderTests(unittest.TestCase):
         self.assertIn("--sl-card:#f8fafc", html)
         self.assertIn("--sl-brand:#0ea5e9", html)
         self.assertIn("--sl-cta-to:#0284c7", html)
+
+    def test_universal_bundle_element_tokens_override_preset(self):
+        page = load_fixture("page-universal-bundle.json")
+        offer = load_fixture("offer-universal-bundle.json")
+        product = load_fixture("product-universal-bundle.json")
+        page = copy.deepcopy(page)
+        page["theme"]["tokens"] = {
+            "hero_border": "#111111",
+            "price_card_bg": "#222222",
+            "price_card_selected_border": "#333333",
+            "refund_applies": "#444444",
+            "faq_summary": "#555555",
+            "legal_link": "#666666",
+            "countdown_bg": "#777777",
+            "countdown_end_bg": "#888888",
+        }
+        countdown = next(section for section in page["sections"] if section["type"] == "countdown_timer")
+        countdown.pop("start_color", None)
+        countdown.pop("end_color", None)
+
+        html = render_page(page, offer, {product["product_id"]: product})
+
+        self.assertIn("--sl-hero-border:#111111", html)
+        self.assertIn("--sl-price-card-bg:#222222", html)
+        self.assertIn("--sl-price-card-selected-border:#333333", html)
+        self.assertIn("--sl-refund-applies:#444444", html)
+        self.assertIn("--sl-faq-summary:#555555", html)
+        self.assertIn("--sl-legal-link:#666666", html)
+        self.assertIn("data-start-color=\"#777777\"", html)
+        self.assertIn("data-end-color=\"#888888\"", html)
 
     def test_universal_bundle_countdown_defaults_to_cta_colors_for_non_techno_presets(self):
         page = load_fixture("page-universal-bundle.json")

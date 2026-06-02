@@ -31,6 +31,9 @@
         "family": "system",
         "fallback": "system"
       }
+    },
+    "tokens": {
+      "headline": "#a8329c"
     }
   },
   "legal": {

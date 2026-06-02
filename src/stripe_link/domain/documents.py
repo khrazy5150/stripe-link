@@ -1,4 +1,5 @@
 import re
+from decimal import Decimal
 from typing import Any
 
 
@@ -75,17 +76,51 @@ def optional_bool(document: dict[str, Any], field: str, label: str | None = None
         raise DocumentValidationError(f"{label or field} must be boolean.")
 
 
+def validate_font_settings(fonts: Any, label: str) -> None:
+    if fonts is None:
+        return
+    if not isinstance(fonts, dict):
+        raise DocumentValidationError(f"{label} must be an object.")
+    if fonts.get("service") is not None:
+        require_enum(fonts, "service", SUPPORTED_FONT_SERVICES, f"{label}.service")
+    for role in ["body", "heading", "accent"]:
+        font = fonts.get(role)
+        if font is None:
+            continue
+        if not isinstance(font, dict):
+            raise DocumentValidationError(f"{label}.{role} must be an object.")
+        family = font.get("family")
+        if family is not None and (not isinstance(family, str) or not FONT_FAMILY_PATTERN.match(family)):
+            raise DocumentValidationError(f"{label}.{role}.family must be a safe font family.")
+        if font.get("fallback") is not None:
+            require_enum(font, "fallback", SUPPORTED_FONT_FALLBACKS, f"{label}.{role}.fallback")
+
+
 def require_positive_int(document: dict[str, Any], field: str, label: str | None = None) -> int:
     value = document.get(field)
     field_label = label or field
-    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+    if isinstance(value, bool):
+        raise DocumentValidationError(f"{field_label} must be a positive integer.")
+    if isinstance(value, Decimal):
+        if value <= 0 or value != value.to_integral_value():
+            raise DocumentValidationError(f"{field_label} must be a positive integer.")
+        return int(value)
+    if not isinstance(value, int) or value <= 0:
         raise DocumentValidationError(f"{field_label} must be a positive integer.")
     return value
 
 
 def optional_non_negative_int(document: dict[str, Any], field: str, label: str | None = None) -> None:
     value = document.get(field)
-    if value is not None and (isinstance(value, bool) or not isinstance(value, int) or value < 0):
+    if value is None:
+        return
+    if isinstance(value, bool):
+        raise DocumentValidationError(f"{label or field} must be a non-negative integer.")
+    if isinstance(value, Decimal):
+        if value < 0 or value != value.to_integral_value():
+            raise DocumentValidationError(f"{label or field} must be a non-negative integer.")
+        return
+    if not isinstance(value, int) or value < 0:
         raise DocumentValidationError(f"{label or field} must be a non-negative integer.")
 
 
@@ -328,23 +363,7 @@ def validate_page_document(document: dict[str, Any]) -> None:
             for key, value in tokens.items():
                 if not isinstance(key, str) or not isinstance(value, str) or not HEX_COLOR_PATTERN.match(value):
                     raise DocumentValidationError("Page theme.tokens values must be hex colors.")
-        fonts = theme.get("fonts")
-        if fonts is not None:
-            if not isinstance(fonts, dict):
-                raise DocumentValidationError("Page theme.fonts must be an object.")
-            if fonts.get("service") is not None:
-                require_enum(fonts, "service", SUPPORTED_FONT_SERVICES, "Page theme.fonts.service")
-            for role in ["body", "heading", "accent"]:
-                font = fonts.get(role)
-                if font is None:
-                    continue
-                if not isinstance(font, dict):
-                    raise DocumentValidationError(f"Page theme.fonts.{role} must be an object.")
-                family = font.get("family")
-                if family is not None and (not isinstance(family, str) or not FONT_FAMILY_PATTERN.match(family)):
-                    raise DocumentValidationError(f"Page theme.fonts.{role}.family must be a safe font family.")
-                if font.get("fallback") is not None:
-                    require_enum(font, "fallback", SUPPORTED_FONT_FALLBACKS, f"Page theme.fonts.{role}.fallback")
+        validate_font_settings(theme.get("fonts"), "Page theme.fonts")
 
     sections = document.get("sections")
     if not isinstance(sections, list) or not sections:
@@ -511,6 +530,17 @@ def validate_user_preferences(document: dict[str, Any]) -> None:
             raise DocumentValidationError("User preferences landing_pages.custom_color_themes must be an array.")
         if len(custom_themes) > 10:
             raise DocumentValidationError("User preferences can include at most 10 custom color themes.")
+        for theme in custom_themes:
+            if not isinstance(theme, dict):
+                raise DocumentValidationError("Each user preferences custom color theme must be an object.")
+            require_fields(theme, ["theme_id", "name", "tokens"])
+            tokens = theme.get("tokens")
+            if not isinstance(tokens, dict):
+                raise DocumentValidationError("User preferences custom color theme tokens must be an object.")
+            for key, value in tokens.items():
+                if not isinstance(key, str) or not isinstance(value, str) or not HEX_COLOR_PATTERN.match(value):
+                    raise DocumentValidationError("User preferences custom color theme tokens values must be hex colors.")
+            validate_font_settings(theme.get("fonts"), "User preferences custom color theme fonts")
     authoring_defaults = document.get("authoring_defaults")
     if authoring_defaults is not None:
         if not isinstance(authoring_defaults, dict):
