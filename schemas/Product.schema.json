@@ -9,10 +9,15 @@
     "document_type",
     "tenant_id",
     "product_id",
+    "stripe_product_id",
+    "canonical",
     "active",
     "name",
     "prices",
-    "default_price_id"
+    "default_price_id",
+    "fulfillment",
+    "sync",
+    "tags"
   ],
   "properties": {
     "schema_version": {
@@ -31,9 +36,17 @@
       "type": "string",
       "minLength": 1
     },
+    "stripe_product_id": {
+      "type": ["string", "null"],
+      "description": "Stripe product ID after synchronization. Null for local products that have not synced yet."
+    },
     "stripe_mode": {
       "type": "string",
       "enum": ["test", "live"]
+    },
+    "canonical": {
+      "type": "boolean",
+      "description": "True only after this product shape is accepted as canonical by the API."
     },
     "active": {
       "type": "boolean"
@@ -47,22 +60,12 @@
     },
     "images": {
       "type": "array",
+      "description": "Canonical product imagery. Offer-specific bundle/composite presentation images can override this from Offer items.",
       "items": {
         "type": "string",
-        "format": "uri"
+        "format": "uri-reference"
       },
       "default": []
-    },
-    "prices": {
-      "type": "array",
-      "minItems": 1,
-      "items": {
-        "$ref": "Price.schema.json"
-      }
-    },
-    "default_price_id": {
-      "type": "string",
-      "minLength": 1
     },
     "product_type": {
       "type": "string"
@@ -70,19 +73,15 @@
     "product_category": {
       "type": "string"
     },
-    "requires_shipping": {
-      "type": "boolean",
-      "default": true
-    },
     "refund_policy": {
       "type": "object",
       "additionalProperties": false,
       "description": "Product-level refund policy. New products may copy this from the creating user's UserPreferences.authoring_defaults.refund_policies by product class.",
-      "required": ["source", "refund_window", "condition", "return_method", "short_label", "full_policy"],
+      "required": ["source", "short_label", "full_policy"],
       "properties": {
         "source": {
           "type": "string",
-          "enum": ["user_preference_default", "tenant_default", "product_override"]
+          "enum": ["user_preference_default", "tenant_default", "product_override", "user_preferences.physical_products"]
         },
         "refund_window": {
           "type": "string",
@@ -100,24 +99,51 @@
         "full_policy": { "type": "string" }
       }
     },
-    "package_dimensions": {
+    "variants": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "length": { "type": "number", "minimum": 0 },
-        "width": { "type": "number", "minimum": 0 },
-        "height": { "type": "number", "minimum": 0 },
-        "weight": { "type": "number", "minimum": 0 },
-        "unit": { "type": "string", "enum": ["in", "cm"] },
-        "weight_unit": { "type": "string", "enum": ["oz", "lb", "g", "kg"] }
+        "size_enabled": { "type": "boolean", "default": false },
+        "color_enabled": { "type": "boolean", "default": false },
+        "sizes": {
+          "type": "array",
+          "items": {
+            "oneOf": [
+              { "type": "string" },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "label": { "type": "string" },
+                  "description": { "type": "string" }
+                }
+              }
+            ]
+          },
+          "default": []
+        },
+        "colors": {
+          "type": "array",
+          "items": {
+            "oneOf": [
+              { "type": "string" },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "label": { "type": "string" },
+                  "hex_color": {
+                    "type": "string",
+                    "pattern": "^#[0-9a-fA-F]{6}$"
+                  },
+                  "description": { "type": "string" }
+                }
+              }
+            ]
+          },
+          "default": []
+        }
       }
-    },
-    "tags": {
-      "type": "array",
-      "items": {
-        "type": "string"
-      },
-      "default": []
     },
     "stripe_metadata": {
       "type": "object",
@@ -125,20 +151,59 @@
         "type": ["string", "number", "integer", "boolean", "null"]
       }
     },
-    "local_metadata": {
+    "prices": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "Price.schema.json"
+      }
+    },
+    "default_price_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "fulfillment": {
       "type": "object",
-      "additionalProperties": true
+      "additionalProperties": false,
+      "required": ["requires_shipping", "ship_from", "weight_lb", "dimensions"],
+      "properties": {
+        "requires_shipping": { "type": "boolean" },
+        "ship_from": {
+          "oneOf": [
+            { "type": "null" },
+            {
+              "type": "object",
+              "additionalProperties": true
+            }
+          ]
+        },
+        "weight_lb": {
+          "type": ["number", "null"],
+          "minimum": 0
+        },
+        "dimensions": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["length_in", "width_in", "height_in"],
+          "properties": {
+            "length_in": { "type": ["number", "null"], "minimum": 0 },
+            "width_in": { "type": ["number", "null"], "minimum": 0 },
+            "height_in": { "type": ["number", "null"], "minimum": 0 }
+          }
+        }
+      }
     },
     "sync": {
       "type": "object",
       "additionalProperties": false,
+      "required": ["status", "last_synced_at", "error"],
       "properties": {
         "status": {
-          "type": "string",
-          "enum": ["pending", "success", "failed"]
+          "type": ["string", "null"],
+          "enum": ["pending", "success", "failed", "not_applicable", null]
         },
         "last_synced_at": {
-          "type": "integer",
+          "type": ["integer", "null"],
           "minimum": 0
         },
         "error": {
@@ -153,6 +218,14 @@
     "updated_at": {
       "type": "integer",
       "minimum": 0
+    },
+    "tags": {
+      "type": "array",
+      "description": "Search and catalog tags. The dashboard auto-generates baseline tags from product name, product type, and category; tenants can add custom tags.",
+      "items": {
+        "type": "string"
+      },
+      "default": []
     }
   }
 }

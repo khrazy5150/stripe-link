@@ -24,6 +24,38 @@ Parameters:
     Type: String
     Default: ""
     Description: Stripe Connect OAuth redirect URI.
+  ApiCustomDomainName:
+    Type: String
+    Default: ""
+    Description: Optional API Gateway custom domain name, such as dev.juniorbay.com.
+  ApiCustomDomainCertificateArn:
+    Type: String
+    Default: ""
+    Description: Optional regional ACM certificate ARN for the API Gateway custom domain.
+  ApiCustomDomainHostedZoneName:
+    Type: String
+    Default: juniorbay.com.
+    Description: Route 53 hosted zone name used for the API custom domain alias record.
+  DashboardCustomDomainName:
+    Type: String
+    Default: ""
+    Description: Optional CloudFront custom domain name for the dashboard, such as dashboard.juniorbay.com.
+  DashboardCustomDomainCertificateArn:
+    Type: String
+    Default: ""
+    Description: Optional us-east-1 ACM certificate ARN for the dashboard CloudFront distribution.
+  DashboardCustomDomainHostedZoneName:
+    Type: String
+    Default: juniorbay.com.
+    Description: Route 53 hosted zone name used for the dashboard custom domain alias record.
+
+Conditions:
+  HasApiCustomDomain: !And
+    - !Not [!Equals [!Ref ApiCustomDomainName, ""]]
+    - !Not [!Equals [!Ref ApiCustomDomainCertificateArn, ""]]
+  HasDashboardCustomDomain: !And
+    - !Not [!Equals [!Ref DashboardCustomDomainName, ""]]
+    - !Not [!Equals [!Ref DashboardCustomDomainCertificateArn, ""]]
 
 Globals:
   Function:
@@ -63,6 +95,8 @@ Globals:
         PAGES_PREVIEW_BUCKET: !Ref PagesPreviewBucket
         MEDIA_BUCKET: !Ref MediaBucket
         TEMPLATES_BUCKET: !Ref TemplatesBucket
+        BILLING_CONFIG_BUCKET: !Ref ConfigBucket
+        BILLING_CONFIG_KEY: global_billing_config.json
         PAGES_DISTRIBUTION_ID: !Ref PagesDistribution
         PAGES_DISTRIBUTION_DOMAIN: !GetAtt PagesDistribution.DomainName
         PREVIEW_DISTRIBUTION_ID: !Ref PreviewDistribution
@@ -77,6 +111,36 @@ Resources:
     Properties:
       StageName: !Ref Environment
       EndpointConfiguration: REGIONAL
+
+  ApiCustomDomain:
+    Type: AWS::ApiGateway::DomainName
+    Condition: HasApiCustomDomain
+    Properties:
+      DomainName: !Ref ApiCustomDomainName
+      EndpointConfiguration:
+        Types:
+          - REGIONAL
+      RegionalCertificateArn: !Ref ApiCustomDomainCertificateArn
+      SecurityPolicy: TLS_1_2
+
+  ApiCustomDomainBasePathMapping:
+    Type: AWS::ApiGateway::BasePathMapping
+    Condition: HasApiCustomDomain
+    Properties:
+      DomainName: !Ref ApiCustomDomain
+      RestApiId: !Ref RestApi
+      Stage: !Ref Environment
+
+  ApiCustomDomainRecord:
+    Type: AWS::Route53::RecordSet
+    Condition: HasApiCustomDomain
+    Properties:
+      HostedZoneName: !Ref ApiCustomDomainHostedZoneName
+      Name: !Ref ApiCustomDomainName
+      Type: A
+      AliasTarget:
+        DNSName: !GetAtt ApiCustomDomain.RegionalDomainName
+        HostedZoneId: !GetAtt ApiCustomDomain.RegionalHostedZoneId
 
   HealthFunction:
     Type: AWS::Serverless::Function
@@ -108,6 +172,30 @@ Resources:
             Path: /manifest
             Method: GET
 
+  AppConfigFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${ProjectPrefix}-app-config-api-${Environment}"
+      CodeUri: src/
+      Handler: handlers.app_config.handler
+      Description: Environment-level app configuration API.
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref AppConfigTable
+      Events:
+        AppConfigGet:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /app-config/{config_key}
+            Method: GET
+        AppConfigPut:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /app-config/{config_key}
+            Method: PUT
+
   OfferResolveFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -122,6 +210,30 @@ Resources:
             RestApiId: !Ref RestApi
             Path: /offers/resolve
             Method: POST
+
+  PriceCalculationFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${ProjectPrefix}-prices-api-${Environment}"
+      CodeUri: src/
+      Handler: handlers.prices.handler
+      Description: Calculates customer-facing price amounts and fee breakdowns.
+      Policies:
+        - S3ReadPolicy:
+            BucketName: !Ref ConfigBucket
+      Events:
+        PriceCalculate:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /prices/calculate
+            Method: POST
+        PriceCalculateOptions:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /prices/calculate
+            Method: OPTIONS
 
   ProductsFunction:
     Type: AWS::Serverless::Function
@@ -146,12 +258,60 @@ Resources:
             RestApiId: !Ref RestApi
             Path: /products
             Method: POST
+        ProductsOptions:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /products
+            Method: OPTIONS
         ProductsGet:
           Type: Api
           Properties:
             RestApiId: !Ref RestApi
             Path: /products/{product_id}
             Method: GET
+        ProductOptions:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /products/{product_id}
+            Method: OPTIONS
+
+  UploadFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${ProjectPrefix}-upload-api-${Environment}"
+      CodeUri: src/
+      Handler: handlers.upload.handler
+      Description: Browser-safe proxy for product image upload presigning and status.
+      Environment:
+        Variables:
+          IMAGE_UPLOAD_API_BASE: https://dph4d1c6p8.execute-api.us-west-2.amazonaws.com/v3
+      Events:
+        UploadCreate:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /upload/multiple
+            Method: POST
+        UploadCreateOptions:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /upload/multiple
+            Method: OPTIONS
+        UploadStatus:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /upload/status/{image_id}
+            Method: GET
+        UploadStatusOptions:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /upload/status/{image_id}
+            Method: OPTIONS
 
   OffersFunction:
     Type: AWS::Serverless::Function
@@ -1121,6 +1281,24 @@ Resources:
       VersioningConfiguration:
         Status: Enabled
 
+  ConfigBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "${ProjectPrefix}-config-${Environment}-${AWS::AccountId}"
+      PublicAccessBlockConfiguration: *PrivateBucketAccess
+      BucketEncryption: *BucketEncryption
+      VersioningConfiguration:
+        Status: Enabled
+
+  DashboardBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "${ProjectPrefix}-dashboard-${Environment}-${AWS::AccountId}"
+      PublicAccessBlockConfiguration: *PrivateBucketAccess
+      BucketEncryption: *BucketEncryption
+      VersioningConfiguration:
+        Status: Enabled
+
   PagesOriginAccessControl:
     Type: AWS::CloudFront::OriginAccessControl
     Properties:
@@ -1249,16 +1427,108 @@ Resources:
               StringEquals:
                 AWS:SourceArn: !Sub "arn:aws:cloudfront::${AWS::AccountId}:distribution/${PreviewDistribution}"
 
+  DashboardOriginAccessControl:
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig:
+        Name: !Sub "${ProjectPrefix}-dashboard-oac-${Environment}"
+        Description: !Sub "OAC for ${ProjectPrefix} dashboard ${Environment}"
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
+
+  DashboardDistribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Enabled: true
+        Comment: !Sub "${ProjectPrefix} stripe-link dashboard ${Environment}"
+        DefaultRootObject: index.html
+        HttpVersion: http2and3
+        PriceClass: PriceClass_100
+        Aliases: !If
+          - HasDashboardCustomDomain
+          - - !Ref DashboardCustomDomainName
+          - !Ref AWS::NoValue
+        Origins:
+          - Id: DashboardS3Origin
+            DomainName: !GetAtt DashboardBucket.RegionalDomainName
+            OriginAccessControlId: !Ref DashboardOriginAccessControl
+            S3OriginConfig:
+              OriginAccessIdentity: ""
+        DefaultCacheBehavior:
+          TargetOriginId: DashboardS3Origin
+          ViewerProtocolPolicy: redirect-to-https
+          AllowedMethods:
+            - GET
+            - HEAD
+            - OPTIONS
+          CachedMethods:
+            - GET
+            - HEAD
+          Compress: true
+          CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
+        CustomErrorResponses:
+          - ErrorCode: 403
+            ResponseCode: 200
+            ResponsePagePath: /index.html
+            ErrorCachingMinTTL: 0
+          - ErrorCode: 404
+            ResponseCode: 200
+            ResponsePagePath: /index.html
+            ErrorCachingMinTTL: 0
+        ViewerCertificate: !If
+          - HasDashboardCustomDomain
+          - AcmCertificateArn: !Ref DashboardCustomDomainCertificateArn
+            SslSupportMethod: sni-only
+            MinimumProtocolVersion: TLSv1.2_2021
+          - CloudFrontDefaultCertificate: true
+
+  DashboardBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref DashboardBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: AllowCloudFrontRead
+            Effect: Allow
+            Principal:
+              Service: cloudfront.amazonaws.com
+            Action: s3:GetObject
+            Resource: !Sub "${DashboardBucket.Arn}/*"
+            Condition:
+              StringEquals:
+                AWS:SourceArn: !Sub "arn:aws:cloudfront::${AWS::AccountId}:distribution/${DashboardDistribution}"
+
+  DashboardCustomDomainRecord:
+    Type: AWS::Route53::RecordSet
+    Condition: HasDashboardCustomDomain
+    Properties:
+      HostedZoneName: !Ref DashboardCustomDomainHostedZoneName
+      Name: !Ref DashboardCustomDomainName
+      Type: A
+      AliasTarget:
+        DNSName: !GetAtt DashboardDistribution.DomainName
+        HostedZoneId: Z2FDTNDATAQYW2
+
 Outputs:
   ApiUrl:
     Description: Base URL for the stripe-link API.
     Value: !Sub "https://${RestApi}.execute-api.${AWS::Region}.amazonaws.com/${Environment}"
+  CustomApiUrl:
+    Condition: HasApiCustomDomain
+    Description: Custom domain base URL for the stripe-link API.
+    Value: !Sub "https://${ApiCustomDomainName}"
   HealthUrl:
     Description: Health check endpoint.
     Value: !Sub "https://${RestApi}.execute-api.${AWS::Region}.amazonaws.com/${Environment}/health"
   ManifestUrl:
     Description: Runtime manifest endpoint.
     Value: !Sub "https://${RestApi}.execute-api.${AWS::Region}.amazonaws.com/${Environment}/manifest"
+  AppConfigUrl:
+    Description: App configuration endpoint.
+    Value: !Sub "https://${RestApi}.execute-api.${AWS::Region}.amazonaws.com/${Environment}/app-config"
   OfferResolveUrl:
     Description: Offer resolution endpoint.
     Value: !Sub "https://${RestApi}.execute-api.${AWS::Region}.amazonaws.com/${Environment}/offers/resolve"
@@ -1322,6 +1592,12 @@ Outputs:
   TemplatesBucketName:
     Description: Template bucket.
     Value: !Ref TemplatesBucket
+  ConfigBucketName:
+    Description: Global config bucket.
+    Value: !Ref ConfigBucket
+  DashboardBucketName:
+    Description: Dashboard static asset bucket.
+    Value: !Ref DashboardBucket
   PagesDistributionId:
     Description: CloudFront distribution ID for published pages.
     Value: !Ref PagesDistribution
@@ -1334,6 +1610,18 @@ Outputs:
   PreviewDistributionDomainName:
     Description: CloudFront distribution domain for preview pages.
     Value: !GetAtt PreviewDistribution.DomainName
+  DashboardDistributionId:
+    Description: CloudFront distribution ID for the dashboard.
+    Value: !Ref DashboardDistribution
+  DashboardDistributionDomainName:
+    Description: CloudFront distribution domain for the dashboard.
+    Value: !GetAtt DashboardDistribution.DomainName
+  DashboardUrl:
+    Description: Dashboard URL.
+    Value: !If
+      - HasDashboardCustomDomain
+      - !Sub "https://${DashboardCustomDomainName}"
+      - !Sub "https://${DashboardDistribution.DomainName}"
   AppConfigTableName:
     Description: App configuration table.
     Value: !Ref AppConfigTable

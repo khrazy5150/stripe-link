@@ -27,7 +27,7 @@ def json_response(body: dict[str, Any], status_code: int = 200) -> dict[str, Any
         "headers": {
             "Content-Type": "application/json",
             "Access-Control-Allow-Origin": "*",
-            "Access-Control-Allow-Headers": "Content-Type,Authorization,X-Client-Id,X-Environment,X-Stripe-Mode",
+            "Access-Control-Allow-Headers": "Content-Type,Authorization,X-Tenant-Id,X-Client-Id,X-Environment,X-Stripe-Mode",
             "Access-Control-Allow-Methods": "OPTIONS,GET,POST,PUT,PATCH,DELETE",
         },
         "body": json.dumps(body, cls=JsonEncoder),

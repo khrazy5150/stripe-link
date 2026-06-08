@@ -95,6 +95,11 @@
                 "badge": {
                   "type": "string"
                 },
+                "image_url": {
+                  "type": "string",
+                  "format": "uri-reference",
+                  "description": "Offer-specific image override for this selectable price option, such as a 2-pack or 3-pack composite image."
+                },
                 "display_discount_pct": {
                   "type": "number",
                   "minimum": 0,
@@ -116,6 +121,11 @@
           },
           "display_label": {
             "type": "string"
+          },
+          "image_url": {
+            "type": "string",
+            "format": "uri-reference",
+            "description": "Offer-specific product presentation image override, such as a composite bundle image. Falls back to the product image when absent."
           },
           "presentation_context": {
             "type": "string"

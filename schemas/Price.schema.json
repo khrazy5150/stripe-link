@@ -9,14 +9,16 @@
     "product_id",
     "active",
     "currency",
-    "unit_amount",
-    "quantity",
-    "label"
+    "quantity"
   ],
   "properties": {
     "price_id": {
       "type": "string",
       "minLength": 1
+    },
+    "stripe_price_id": {
+      "type": ["string", "null"],
+      "description": "Stripe price ID after synchronization. Null for local prices that have not synced yet."
     },
     "previous_price_id": {
       "type": ["string", "null"],
@@ -40,35 +42,56 @@
     "unit_amount": {
       "type": "integer",
       "minimum": 0,
-      "description": "Customer-facing amount in the smallest currency unit."
+      "description": "Sale amount charged to the customer in the smallest currency unit."
+    },
+    "tenant_keyed_amount": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Amount entered by the tenant before fee-handling adjustments. For net_guaranteed prices, unit_amount is grossed up from this value."
+    },
+    "compare_at_unit_amount": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Higher reference amount shown as a struck-through regular price."
     },
     "quantity": {
       "type": "integer",
       "minimum": 1,
-      "description": "Quantity represented by this Stripe Price, such as bottles in a bundle."
-    },
-    "label": {
-      "type": "string",
-      "minLength": 1
+      "description": "Quantity represented by this Stripe Price, such as units in a bundle or sessions in a package."
     },
     "badge": {
       "type": "string"
     },
-    "nickname": {
+    "description": {
       "type": "string"
+    },
+    "image_url": {
+      "type": "string",
+      "format": "uri-reference"
     },
     "context": {
       "type": "string",
-      "enum": ["standard", "sale", "flash_sale", "upsell", "downsell", "order_bump", "subscription"]
+      "enum": ["standard", "sale", "flash_sale", "upsell", "downsell", "order_bump"]
     },
     "discount_pct": {
       "type": "number",
       "minimum": 0,
       "maximum": 100
     },
-    "compare_at_unit_amount": {
+    "pricing_model": {
+      "type": "string",
+      "enum": ["one_time", "recurring", "customer_chooses"],
+      "default": "one_time"
+    },
+    "min_amount": {
       "type": "integer",
-      "minimum": 0
+      "minimum": 0,
+      "description": "Minimum amount the customer can enter. Used when pricing_model is customer_chooses."
+    },
+    "suggested_amount": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Pre-filled suggested amount shown to the customer. Used when pricing_model is customer_chooses."
     },
     "recurring": {
       "oneOf": [
@@ -99,9 +122,28 @@
       "type": "string",
       "enum": ["standard", "net_guaranteed"]
     },
-    "gross_amount": {
-      "type": "integer",
-      "minimum": 0
+    "fee_breakdown": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tenant_keyed_amount", "stripe_fee", "platform_fee", "net_payout"],
+      "properties": {
+        "tenant_keyed_amount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "stripe_fee": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "platform_fee": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "net_payout": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
     },
     "metadata": {
       "type": "object",
@@ -117,5 +159,19 @@
       "type": "integer",
       "minimum": 0
     }
+  },
+  "if": {
+    "required": ["pricing_model"],
+    "properties": {
+      "pricing_model": { "const": "customer_chooses" }
+    }
+  },
+  "then": {
+    "properties": {
+      "unit_amount": { "minimum": 0 }
+    }
+  },
+  "else": {
+    "required": ["unit_amount"]
   }
 }

@@ -1,9 +1,11 @@
 import json
 import os
 import unittest
+from decimal import Decimal
 from pathlib import Path
 from unittest.mock import patch
 
+from handlers.app_config import handler as app_config_handler
 from handlers.config import handler as config_handler
 from handlers.customers import handler as customers_handler
 from handlers.invoices import handler as invoices_handler
@@ -15,7 +17,8 @@ from handlers.services import handler as services_handler
 from handlers.shipping import handler as shipping_handler
 from handlers.stripe_connect import start_handler, status_handler
 from handlers.stripe_keys import handler as stripe_keys_handler
-from tests.fakes import FakeDocumentRepository, FakeSimpleRepository
+from stripe_link.repositories.documents import dynamodb_safe_document
+from tests.fakes import FakeAppConfigRepository, FakeDocumentRepository, FakeSimpleRepository
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -27,6 +30,47 @@ def load_fixture(name: str):
 
 
 class AccountHandlerTests(unittest.TestCase):
+    def test_app_config_create_and_get_api_base_url(self):
+        repository = FakeAppConfigRepository()
+        document = load_fixture("app-config.json")
+
+        saved = app_config_handler({
+            "httpMethod": "PUT",
+            "pathParameters": {"config_key": "app_config"},
+            "body": json.dumps(document),
+        }, None, repository=repository)
+        fetched = app_config_handler({
+            "httpMethod": "GET",
+            "pathParameters": {"config_key": "app_config"},
+            "queryStringParameters": {"environment": "global"},
+        }, None, repository=repository)
+
+        self.assertEqual(saved["statusCode"], 201)
+        self.assertEqual(
+            json.loads(fetched["body"])["app_config"]["environments"]["dev"]["api_base_url"],
+            "https://dev.juniorbay.com",
+        )
+
+    def test_app_config_rejects_invalid_api_base_url(self):
+        repository = FakeAppConfigRepository()
+        document = load_fixture("app-config.json")
+        document["environments"]["dev"]["api_base_url"] = "dev.juniorbay.com"
+
+        response = app_config_handler({
+            "httpMethod": "PUT",
+            "pathParameters": {"config_key": "app_config"},
+            "body": json.dumps(document),
+        }, None, repository=repository)
+
+        self.assertEqual(response["statusCode"], 400)
+        self.assertEqual(json.loads(response["body"])["error"], "invalid_app_config")
+
+    def test_dynamodb_document_converts_float_values(self):
+        document = {"rate": 0.1}
+        item = dynamodb_safe_document(document)
+
+        self.assertEqual(item["rate"], Decimal("0.1"))
+
     def test_registration_create_and_get(self):
         repository = FakeDocumentRepository("tenant_id")
         tenant = load_fixture("tenant-profile-demo.json")

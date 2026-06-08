@@ -42,12 +42,60 @@ SUPPORTED_THEME_PRESETS = {
 }
 SUPPORTED_FONT_SERVICES = {"system", "junior-bay"}
 SUPPORTED_FONT_FALLBACKS = {"system", "sans-serif", "serif", "monospace"}
+SUPPORTED_APP_CONFIG_ENVIRONMENTS = {"dev", "prod"}
+SUPPORTED_PLATFORM_FEE_TIERS = {"basic", "standard", "pro"}
+SUPPORTED_PLATFORM_FEE_CLASSES = {"physical", "digital", "tip_jar"}
+SUPPORTED_STRIPE_FEE_RATE_TYPES = {"domestic_card", "international_card"}
+PRODUCT_FIELD_ORDER = [
+    "schema_version",
+    "document_type",
+    "tenant_id",
+    "product_id",
+    "stripe_product_id",
+    "stripe_mode",
+    "canonical",
+    "active",
+    "name",
+    "description",
+    "images",
+    "product_type",
+    "product_category",
+    "refund_policy",
+    "variants",
+    "stripe_metadata",
+    "prices",
+    "default_price_id",
+    "fulfillment",
+    "sync",
+    "created_at",
+    "updated_at",
+    "tags",
+]
 
 
 def require_object(value: Any, label: str) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise DocumentValidationError(f"{label} must be an object.")
     return value
+
+
+def order_product_document(document: dict[str, Any]) -> dict[str, Any]:
+    ordered: dict[str, Any] = {}
+    for field in PRODUCT_FIELD_ORDER:
+        if field in document:
+            ordered[field] = document[field]
+    for field, value in document.items():
+        if field not in ordered and field != "tags":
+            ordered[field] = value
+    if "tags" in document:
+        ordered["tags"] = document["tags"]
+    return ordered
+
+
+def product_stripe_sync_gate(document: dict[str, Any]) -> dict[str, str]:
+    if not document.get("canonical"):
+        return {"status": "skipped", "reason": "document not canonical"}
+    return {"status": "ready"}
 
 
 def require_fields(document: dict[str, Any], fields: list[str]) -> None:
@@ -124,6 +172,171 @@ def optional_non_negative_int(document: dict[str, Any], field: str, label: str |
         raise DocumentValidationError(f"{label or field} must be a non-negative integer.")
 
 
+def optional_non_negative_number(document: dict[str, Any], field: str, label: str | None = None) -> None:
+    value = document.get(field)
+    if value is None:
+        return
+    if isinstance(value, bool) or not isinstance(value, (int, float, Decimal)):
+        raise DocumentValidationError(f"{label or field} must be a non-negative number.")
+    if Decimal(str(value)) < 0:
+        raise DocumentValidationError(f"{label or field} must be a non-negative number.")
+
+
+def require_percent_number(document: dict[str, Any], field: str, label: str | None = None) -> None:
+    field_label = label or field
+    if field not in document:
+        raise DocumentValidationError(f"{field_label} must be provided.")
+    optional_non_negative_number(document, field, field_label)
+    if Decimal(str(document[field])) > 100:
+        raise DocumentValidationError(f"{field_label} must be no more than 100.")
+
+
+def require_fee_rate(document: dict[str, Any], field: str, label: str | None = None) -> None:
+    value = document.get(field)
+    field_label = label or field
+    if isinstance(value, bool) or not isinstance(value, (int, float, Decimal)):
+        raise DocumentValidationError(f"{field_label} must be a number between 0 and 1.")
+    if Decimal(str(value)) < 0 or Decimal(str(value)) > 1:
+        raise DocumentValidationError(f"{field_label} must be a number between 0 and 1.")
+
+
+def validate_price_fee_breakdown(breakdown: Any, label: str) -> None:
+    if breakdown is None:
+        return
+    if not isinstance(breakdown, dict):
+        raise DocumentValidationError(f"{label} must be an object.")
+    for field in ["tenant_keyed_amount", "stripe_fee", "platform_fee", "net_payout"]:
+        if field not in breakdown:
+            raise DocumentValidationError(f"{label}.{field} must be provided.")
+        optional_non_negative_int(breakdown, field, f"{label}.{field}")
+
+
+def validate_stripe_fee_schedule(schedule: Any, label: str) -> None:
+    if schedule is None:
+        return
+    if not isinstance(schedule, dict):
+        raise DocumentValidationError(f"{label} must be an object.")
+    if schedule.get("document_type") != "stripe_fee_schedule":
+        raise DocumentValidationError(f"{label}.document_type must be 'stripe_fee_schedule'.")
+    require_string(schedule, "effective_date", f"{label}.effective_date")
+    rates = schedule.get("rates")
+    if not isinstance(rates, dict):
+        raise DocumentValidationError(f"{label}.rates must be an object.")
+    for rate_name in sorted(SUPPORTED_STRIPE_FEE_RATE_TYPES):
+        rate = rates.get(rate_name)
+        if not isinstance(rate, dict):
+            raise DocumentValidationError(f"{label}.rates.{rate_name} must be an object.")
+        if "percentage" not in rate:
+            raise DocumentValidationError(f"{label}.rates.{rate_name}.percentage must be provided.")
+        optional_non_negative_number(rate, "percentage", f"{label}.rates.{rate_name}.percentage")
+        if Decimal(str(rate["percentage"])) > 100:
+            raise DocumentValidationError(f"{label}.rates.{rate_name}.percentage must be no more than 100.")
+        if "fixed_cents" not in rate:
+            raise DocumentValidationError(f"{label}.rates.{rate_name}.fixed_cents must be provided.")
+        optional_non_negative_int(rate, "fixed_cents", f"{label}.rates.{rate_name}.fixed_cents")
+
+
+def validate_global_billing_config(document: dict[str, Any]) -> None:
+    require_object(document, "Global billing config document")
+    require_fields(
+        document,
+        [
+            "schema_version",
+            "document_type",
+            "effective_date",
+            "canonical",
+            "platform_fees",
+            "payment_processing",
+            "created_at",
+            "updated_at",
+        ],
+    )
+    if document.get("document_type") != "global_billing_config":
+        raise DocumentValidationError("Global billing config document_type must be 'global_billing_config'.")
+    if document.get("canonical") is not True:
+        raise DocumentValidationError("Global billing config canonical must be true.")
+    require_string(document, "effective_date", "Global billing config effective_date")
+    optional_non_negative_int(document, "created_at", "Global billing config created_at")
+    optional_non_negative_int(document, "updated_at", "Global billing config updated_at")
+
+    platform_fees = require_object(document.get("platform_fees"), "Global billing config platform_fees")
+    if platform_fees.get("unit") != "percent":
+        raise DocumentValidationError("Global billing config platform_fees.unit must be 'percent'.")
+    tiers = require_object(platform_fees.get("tiers"), "Global billing config platform_fees.tiers")
+    for tier in sorted(SUPPORTED_PLATFORM_FEE_TIERS):
+        fee_tier = require_object(tiers.get(tier), f"Global billing config platform_fees.tiers.{tier}")
+        for fee_class in sorted(SUPPORTED_PLATFORM_FEE_CLASSES):
+            require_percent_number(
+                fee_tier,
+                fee_class,
+                f"Global billing config platform_fees.tiers.{tier}.{fee_class}",
+            )
+
+    payment_processing = require_object(
+        document.get("payment_processing"),
+        "Global billing config payment_processing",
+    )
+    schedules = require_object(
+        payment_processing.get("schedules"),
+        "Global billing config payment_processing.schedules",
+    )
+    if not schedules:
+        raise DocumentValidationError("Global billing config payment_processing.schedules must not be empty.")
+    for schedule_key, schedule in schedules.items():
+        if not isinstance(schedule_key, str) or not schedule_key:
+            raise DocumentValidationError("Global billing config payment_processing.schedules keys must be strings.")
+        schedule_doc = require_object(
+            schedule,
+            f"Global billing config payment_processing.schedules.{schedule_key}",
+        )
+        require_string(
+            schedule_doc,
+            "merchant_loc",
+            f"Global billing config payment_processing.schedules.{schedule_key}.merchant_loc",
+        )
+        require_string(
+            schedule_doc,
+            "settlement_currency",
+            f"Global billing config payment_processing.schedules.{schedule_key}.settlement_currency",
+        )
+        rates = require_object(
+            schedule_doc.get("rates"),
+            f"Global billing config payment_processing.schedules.{schedule_key}.rates",
+        )
+        if "domestic_card" not in rates:
+            raise DocumentValidationError(
+                f"Global billing config payment_processing.schedules.{schedule_key}.rates.domestic_card must be provided."
+            )
+        for rate_name, rate in rates.items():
+            if not isinstance(rate_name, str) or not rate_name:
+                raise DocumentValidationError(
+                    f"Global billing config payment_processing.schedules.{schedule_key}.rates keys must be strings."
+                )
+            rate_doc = require_object(
+                rate,
+                f"Global billing config payment_processing.schedules.{schedule_key}.rates.{rate_name}",
+            )
+            require_percent_number(
+                rate_doc,
+                "percentage",
+                f"Global billing config payment_processing.schedules.{schedule_key}.rates.{rate_name}.percentage",
+            )
+            if "fixed_cents" not in rate_doc:
+                raise DocumentValidationError(
+                    f"Global billing config payment_processing.schedules.{schedule_key}.rates.{rate_name}.fixed_cents must be provided."
+                )
+            optional_non_negative_int(
+                rate_doc,
+                "fixed_cents",
+                f"Global billing config payment_processing.schedules.{schedule_key}.rates.{rate_name}.fixed_cents",
+            )
+            require_string(
+                rate_doc,
+                "condition",
+                f"Global billing config payment_processing.schedules.{schedule_key}.rates.{rate_name}.condition",
+            )
+
+
 def require_enum(document: dict[str, Any], field: str, allowed: set[str], label: str | None = None) -> str:
     value = require_string(document, field, label)
     if value not in allowed:
@@ -172,24 +385,41 @@ def validate_product_document(document: dict[str, Any]) -> None:
     require_document_fields(document, "product", "product_id")
     require_string(document, "name")
     require_string(document, "default_price_id")
+    for legacy_field in ["requires_shipping", "package_dimensions", "local_metadata"]:
+        if legacy_field in document:
+            raise DocumentValidationError(f"Product {legacy_field} is no longer supported; use the canonical product shape.")
+    if "canonical" not in document:
+        raise DocumentValidationError("Product canonical must be provided.")
+    optional_bool(document, "canonical")
     optional_bool(document, "active")
+    optional_string(document, "stripe_product_id")
     if document.get("stripe_mode") is not None:
         require_enum(document, "stripe_mode", {"test", "live"})
     optional_string(document, "description")
     optional_string(document, "product_type")
     optional_string(document, "product_category")
-    optional_bool(document, "requires_shipping")
     optional_string_list(document, "images")
+    if "tags" not in document:
+        raise DocumentValidationError("Product tags must be provided.")
     optional_string_list(document, "tags")
     fulfillment = document.get("fulfillment")
-    if fulfillment is not None:
-        if not isinstance(fulfillment, dict):
-            raise DocumentValidationError("Product fulfillment must be an object.")
-        optional_bool(fulfillment, "requires_shipping", "Product fulfillment.requires_shipping")
-        optional_non_negative_int(fulfillment, "weight_oz", "Product fulfillment.weight_oz")
-        ship_from = fulfillment.get("ship_from")
-        if ship_from is not None and not isinstance(ship_from, dict):
-            raise DocumentValidationError("Product fulfillment.ship_from must be an object when provided.")
+    if not isinstance(fulfillment, dict):
+        raise DocumentValidationError("Product fulfillment must be an object.")
+    for field in ["requires_shipping", "ship_from", "weight_lb", "dimensions"]:
+        if field not in fulfillment:
+            raise DocumentValidationError(f"Product fulfillment.{field} must be provided.")
+    optional_bool(fulfillment, "requires_shipping", "Product fulfillment.requires_shipping")
+    optional_non_negative_number(fulfillment, "weight_lb", "Product fulfillment.weight_lb")
+    ship_from = fulfillment.get("ship_from")
+    if ship_from is not None and not isinstance(ship_from, dict):
+        raise DocumentValidationError("Product fulfillment.ship_from must be an object when provided.")
+    dimensions = fulfillment.get("dimensions")
+    if not isinstance(dimensions, dict):
+        raise DocumentValidationError("Product fulfillment.dimensions must be an object.")
+    for field in ["length_in", "width_in", "height_in"]:
+        if field not in dimensions:
+            raise DocumentValidationError(f"Product fulfillment.dimensions.{field} must be provided.")
+        optional_non_negative_number(dimensions, field, f"Product fulfillment.dimensions.{field}")
 
     refund_policy = document.get("refund_policy")
     if refund_policy is not None:
@@ -201,6 +431,15 @@ def validate_product_document(document: dict[str, Any]) -> None:
         optional_string(refund_policy, "condition", "Product refund_policy.condition")
         optional_string(refund_policy, "return_method", "Product refund_policy.return_method")
 
+    sync = document.get("sync")
+    if not isinstance(sync, dict):
+        raise DocumentValidationError("Product sync must be an object.")
+    sync_status = sync.get("status")
+    if sync_status is not None and sync_status not in {"pending", "success", "failed", "not_applicable"}:
+        raise DocumentValidationError("Product sync.status must be one of: failed, not_applicable, pending, success, or null.")
+    optional_non_negative_int(sync, "last_synced_at", "Product sync.last_synced_at")
+    optional_string(sync, "error", "Product sync.error")
+
     prices = document.get("prices")
     if not isinstance(prices, list) or not prices:
         raise DocumentValidationError("Product prices must be a non-empty array.")
@@ -211,17 +450,34 @@ def validate_product_document(document: dict[str, Any]) -> None:
     for price in prices:
         if not isinstance(price, dict):
             raise DocumentValidationError("Each product price must be an object.")
-        for field in ["price_id", "product_id", "currency", "label"]:
+        for field in ["price_id", "product_id", "currency"]:
             require_string(price, field, f"price.{field}")
-        require_positive_int(price, "unit_amount", "price.unit_amount")
+        optional_string(price, "stripe_price_id", "price.stripe_price_id")
+        pricing_model = price.setdefault("pricing_model", "one_time")
+        if pricing_model not in {"one_time", "recurring", "customer_chooses"}:
+            raise DocumentValidationError("price.pricing_model must be one of: customer_chooses, one_time, recurring.")
+        if pricing_model == "customer_chooses":
+            optional_non_negative_int(price, "unit_amount", "price.unit_amount")
+            optional_non_negative_int(price, "min_amount", "price.min_amount")
+            optional_non_negative_int(price, "suggested_amount", "price.suggested_amount")
+        else:
+            if price.get("unit_amount") is None:
+                raise DocumentValidationError("price.unit_amount must be provided unless pricing_model is customer_chooses.")
+            optional_non_negative_int(price, "unit_amount", "price.unit_amount")
         require_positive_int(price, "quantity", "price.quantity")
+        if "label" in price:
+            raise DocumentValidationError("price.label is no longer supported; labels belong on offer items.")
+        if "nickname" in price:
+            raise DocumentValidationError("price.nickname is no longer supported.")
         optional_bool(price, "active", "price.active")
         optional_string(price, "context", "price.context")
         optional_string(price, "badge", "price.badge")
         optional_string(price, "description", "price.description")
         optional_string(price, "image_url", "price.image_url")
         optional_non_negative_int(price, "discount_pct", "price.discount_pct")
-        optional_non_negative_int(price, "regular_unit_amount", "price.regular_unit_amount")
+        optional_non_negative_int(price, "compare_at_unit_amount", "price.compare_at_unit_amount")
+        optional_non_negative_int(price, "tenant_keyed_amount", "price.tenant_keyed_amount")
+        validate_price_fee_breakdown(price.get("fee_breakdown"), "price.fee_breakdown")
         if len(price.get("currency", "")) != 3 or price.get("currency", "") != price.get("currency", "").lower():
             raise DocumentValidationError("price.currency must be a lowercase 3-letter currency code.")
         if price.get("stripe_mode") is not None:
@@ -274,12 +530,11 @@ def validate_offer_document(document: dict[str, Any]) -> None:
                     raise DocumentValidationError("Each selectable price must be an object.")
                 require_string(price, "price_id", "selectable price price_id")
                 require_positive_int(price, "quantity", "selectable price quantity")
-                require_string(price, "label", "selectable price label")
+                optional_string(price, "label", "selectable price label")
                 optional_string(price, "badge", "selectable price badge")
                 optional_string(price, "description", "selectable price description")
                 optional_string(price, "image_url", "selectable price image_url")
                 optional_non_negative_int(price, "display_discount_pct", "selectable price display_discount_pct")
-                optional_non_negative_int(price, "regular_unit_amount", "selectable price regular_unit_amount")
                 if price.get("price_id") in selectable_price_ids:
                     raise DocumentValidationError(f"Duplicate selectable price_id '{price.get('price_id')}'.")
                 selectable_price_ids.add(price.get("price_id"))
@@ -515,6 +770,52 @@ def validate_tenant_config(document: dict[str, Any]) -> None:
             if not isinstance(domain, dict):
                 raise DocumentValidationError("Each custom domain must be an object.")
             require_fields(domain, ["domain", "target_page_id", "status"])
+
+
+def validate_app_config(document: dict[str, Any]) -> None:
+    require_object(document, "App config document")
+    require_fields(document, ["schema_version", "document_type", "config_key", "environment", "environments"])
+    if document.get("document_type") != "app_config":
+        raise DocumentValidationError("App config document_type must be 'app_config'.")
+    if document.get("config_key") != "app_config":
+        raise DocumentValidationError("App config config_key must be 'app_config'.")
+    if document.get("environment") != "global":
+        raise DocumentValidationError("App config environment must be 'global'.")
+    optional_non_negative_int(document, "created_at", "App config created_at")
+    optional_non_negative_int(document, "updated_at", "App config updated_at")
+    environments = document.get("environments")
+    if not isinstance(environments, dict):
+        raise DocumentValidationError("App config environments must be an object.")
+    for environment in sorted(SUPPORTED_APP_CONFIG_ENVIRONMENTS):
+        config = environments.get(environment)
+        if not isinstance(config, dict):
+            raise DocumentValidationError(f"App config environments.{environment} must be an object.")
+        for field in ["label", "api_base_url", "dashboard_url", "checkout_base_url"]:
+            require_string(config, field, f"App config environments.{environment}.{field}")
+        for field in ["api_base_url", "dashboard_url", "checkout_base_url", "pages_base_url", "favicon_url", "public_asset_base_url"]:
+            value = config.get(field)
+            if value is not None and (not isinstance(value, str) or not HTTP_URL_PATTERN.match(value)):
+                raise DocumentValidationError(f"App config environments.{environment}.{field} must be an HTTP URL.")
+        feature_flags = config.get("feature_flags")
+        if feature_flags is not None:
+            if not isinstance(feature_flags, dict):
+                raise DocumentValidationError(f"App config environments.{environment}.feature_flags must be an object.")
+            for key, value in feature_flags.items():
+                if not isinstance(key, str) or not isinstance(value, bool):
+                    raise DocumentValidationError(f"App config environments.{environment}.feature_flags values must be boolean.")
+    dashboard = document.get("dashboard")
+    if dashboard is not None:
+        if not isinstance(dashboard, dict):
+            raise DocumentValidationError("App config dashboard must be an object.")
+        optional_non_negative_int(dashboard, "display_order", "App config dashboard.display_order")
+        editable_sections = dashboard.get("editable_sections")
+        if editable_sections is not None and (
+            not isinstance(editable_sections, list) or any(not isinstance(item, str) for item in editable_sections)
+        ):
+            raise DocumentValidationError("App config dashboard.editable_sections must be an array of strings.")
+    metadata = document.get("metadata")
+    if metadata is not None and not isinstance(metadata, dict):
+        raise DocumentValidationError("App config metadata must be an object.")
 
 
 def validate_user_preferences(document: dict[str, Any]) -> None:

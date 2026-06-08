@@ -1,4 +1,5 @@
 import os
+from decimal import Decimal
 from typing import Any
 
 
@@ -166,6 +167,54 @@ class SimpleKeyRepository:
     def get(self, key_value: str) -> dict[str, Any] | None:
         response = self.table.get_item(Key={self.key_field: key_value})
         return response.get("Item")
+
+
+class AppConfigRepository:
+    def __init__(self, table_name: str, *, table: Any | None = None):
+        if not table_name:
+            raise RepositoryError("Table name is required.")
+        assert_jb_resource_name(table_name)
+        self.table_name = table_name
+        self._table = table
+
+    @property
+    def table(self):
+        if self._table is None:
+            import boto3
+
+            self._table = boto3.resource("dynamodb").Table(self.table_name)
+        return self._table
+
+    def put(self, document: dict[str, Any]) -> dict[str, Any]:
+        config_key = str(document.get("config_key") or "").strip()
+        environment = str(document.get("environment") or "").strip()
+        if not config_key:
+            raise RepositoryError("Document config_key is required.")
+        if not environment:
+            raise RepositoryError("Document environment is required.")
+        self.table.put_item(Item=dynamodb_safe_document(document))
+        return document
+
+    def get(self, config_key: str, environment: str) -> dict[str, Any] | None:
+        response = self.table.get_item(Key={"config_key": config_key, "environment": environment})
+        return response.get("Item")
+
+
+def app_config_repository(table: Any | None = None) -> AppConfigRepository:
+    return AppConfigRepository(
+        os.environ.get("APP_CONFIG_TABLE", ""),
+        table=table,
+    )
+
+
+def dynamodb_safe_document(value: Any) -> Any:
+    if isinstance(value, float):
+        return Decimal(str(value))
+    if isinstance(value, list):
+        return [dynamodb_safe_document(item) for item in value]
+    if isinstance(value, dict):
+        return {key: dynamodb_safe_document(item) for key, item in value.items()}
+    return value
 
 
 class TenantRangeRepository:

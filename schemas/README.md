@@ -11,7 +11,7 @@ The first domain slice covers Product, Price, and Offer because those contracts 
 
 Important separation:
 
-- `Price.quantity` describes the bundle represented by the Stripe Price, such as 3 bottles.
+- `Price.quantity` describes the bundle or package represented by the Stripe Price, such as 3 items or sessions.
 - `Offer.items[].quantity` describes how many of that selected Stripe Price to add to checkout.
 - `Offer.items[].selectable_prices` describes the customer-facing selector for one product in one offer.
 - `Offer.items[].display_discount_pct` and `selectable_prices[].display_discount_pct` are display overrides only. Stripe pricing still comes from the selected immutable Price.
@@ -48,3 +48,7 @@ Service booking is modeled as several related documents in the shared `jb-servic
 This keeps service catalog setup separate from appointment operations while still letting a checkout page sell a service through the same Product/Price primitives as physical or digital products.
 
 `Invoice.schema.json` stores local invoice state around Stripe invoices. Stripe remains the payment/invoice delivery primitive, while the local document stores customer snapshots, line items, presentation metadata, due/resend/share state, Stripe IDs/URLs, and source links back to services, appointments, orders, products, or custom dashboard-created work.
+
+`app-config.json` stores platform-level environment configuration in `jb-app-config-*`. It is a singleton document keyed as `config_key=app_config` and `environment=global`, with environment-specific values under `environments.dev` and `environments.prod`. Values such as `api_base_url` are shared system configuration that the dashboard can display or consume while tenant-owned settings continue to live in `TenantConfig.schema.json`.
+
+`global-billing-config.json` is the S3-backed platform billing document. It owns platform fee tiers and payment processing schedules used by `/prices/calculate`, allowing fee changes without redeploying Lambda code.

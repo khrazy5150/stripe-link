@@ -107,9 +107,26 @@
           <button type="button" id="btnConfirmNew" class="btn">Set New Password</button>
           <div id="fpMsg" class="mt-4"></div>
         </div>
+        </div>
       </div>
-    </div>
-  </section>
+
+      <div class="modal-backdrop hidden" id="leadIntentModal" role="dialog" aria-modal="true" aria-labelledby="leadIntentModalTitle">
+        <div class="product-modal lead-picker-modal">
+          <header class="product-modal-header">
+            <h2 id="leadIntentModalTitle">Choose Lead Capture</h2>
+            <button class="modal-close" type="button" id="btnCloseLeadIntentModal" aria-label="Close lead capture modal">×</button>
+          </header>
+          <div class="product-modal-body lead-picker-body">
+            <p class="lead-picker-intro">Choose what this lead-generation product should collect or trigger.</p>
+            <div class="lead-action-grid" id="leadActionGrid"></div>
+          </div>
+          <footer class="product-modal-footer">
+            <button class="secondary-action" type="button" id="btnCancelLeadIntentModal">Cancel</button>
+            <button class="primary-action" type="button" id="btnSelectLeadIntent">Use Selected Action</button>
+          </footer>
+        </div>
+      </div>
+      </section>
 
   <div id="main-app" class="app-shell hidden" data-theme="light" data-view="dashboard">
     <aside class="sidebar">
@@ -337,8 +354,214 @@
         </form>
       </section>
       <section class="panel" data-panel="products">
-        <h1>Products</h1>
-        <p>Product management will appear here as the catalog API is connected.</p>
+        <div class="products-list-view" id="productsListView">
+          <div class="product-page-top">
+            <div class="page-header">
+              <h1>Products</h1>
+              <p>Manage your Stripe products and pricing</p>
+            </div>
+          </div>
+
+          <section class="dashboard-card product-management-card">
+            <header class="dashboard-card-header">
+              <h2>Product Management</h2>
+              <div class="button-row">
+                <button id="btnLoadProductsUi" class="secondary-action" type="button">Load Products</button>
+                <button id="btnCreateProductUi" class="primary-action" type="button">+ Create New Product</button>
+              </div>
+            </header>
+            <div class="product-filter-bar">
+              <label>Search
+                <input type="search" placeholder="Name, ID...">
+              </label>
+              <label>Metadata Key
+                <input type="text" placeholder="e.g., category">
+              </label>
+              <label>Metadata Value
+                <input type="text" placeholder="Value">
+              </label>
+              <label>Status
+                <select>
+                  <option>Active</option>
+                  <option>Inactive</option>
+                  <option>All</option>
+                </select>
+              </label>
+              <div class="product-filter-actions">
+                <button type="button" class="primary-action">Apply</button>
+                <button type="button" class="secondary-action">Reset</button>
+              </div>
+            </div>
+            <div class="product-empty-state" data-backend-note="products">
+              Click "Load Products" or adjust your filters to see products.
+            </div>
+            <div class="product-table-wrap hidden" id="productsTableWrap">
+              <div class="product-card-list" id="productsTableRows"></div>
+            </div>
+          </section>
+        </div>
+
+        <div class="modal-backdrop hidden" id="productModal" role="dialog" aria-modal="true" aria-labelledby="productModalTitle">
+          <div class="product-modal">
+            <header class="product-modal-header">
+              <h2 id="productModalTitle">Create New Product</h2>
+              <button class="modal-close" type="button" id="btnCloseProductModal" aria-label="Close product modal">×</button>
+            </header>
+            <form id="productSchemaForm" class="product-modal-body">
+              <input name="tenant_id" type="hidden" value="tenant_demo">
+              <label>Product Name <span class="required">*</span>
+                <input name="product_name" placeholder="e.g. Premium Widget" required autocomplete="off">
+              </label>
+              <label>Description
+                <textarea name="description" rows="4" placeholder="Describe your product..."></textarea>
+              </label>
+              <label>Type
+                <select name="product_type">
+                  <option value="physical">Physical - Requires shipping</option>
+                  <option value="digital">Digital - No shipping</option>
+                  <option value="service">Service - Opens booking flow</option>
+                </select>
+                <span class="field-note">Determines fulfillment behavior and address collection at checkout.</span>
+              </label>
+              <label>Product Category
+                <select name="product_category">
+                  <option value="">Select a category</option>
+                </select>
+              </label>
+              <div class="modal-inline-grid">
+                <label>Enable Payment Gateway
+                  <select name="product_canonical">
+                    <option value="false" selected>No</option>
+                    <option value="true">Yes</option>
+                  </select>
+                  <span class="field-note">When enabled, this product can be synced to Stripe.</span>
+                </label>
+                <label>Intent
+                  <select name="product_intent">
+                    <option value="transactional" selected>I want a payment</option>
+                    <option value="lead_gen">I want to capture a lead</option>
+                  </select>
+                  <span class="field-note">Choose whether this product collects payment or captures lead information.</span>
+                </label>
+              </div>
+              <div class="warning-box hidden" id="productStripeWarning"></div>
+              <div class="lead-capture-summary hidden" id="leadCaptureSummary">
+                <div>
+                  <strong>Lead capture action</strong>
+                  <span id="leadCaptureSummaryText">Capture emails</span>
+                </div>
+                <button class="secondary-action" type="button" id="btnOpenLeadIntentModal">Choose action</button>
+              </div>
+              <label>Tags
+                <input name="product_tags" placeholder="e.g. workout, blueberry, bundle" autocomplete="off">
+                <span class="field-note">Auto tags from product name, type, and category are added on save. Use commas for custom tags.</span>
+              </label>
+              <section class="modal-form-section" data-transactional-section>
+                <div class="modal-pricing-card">
+                  <header>
+                    <div>
+                      <h3>Pricing</h3>
+                      <p>Product owns the canonical price list. Labels and bundle presentation are set in Offers.</p>
+                    </div>
+                  </header>
+                  <div id="productPriceRows"></div>
+                  <footer>
+                    <button type="button" class="secondary-action" id="btnAddProductPrice">+ Add another price</button>
+                  </footer>
+                </div>
+              </section>
+              <section class="modal-form-section" data-transactional-section>
+                <h3>Refund Policy</h3>
+                <label>Policy Source
+                  <select name="refund_source">
+                    <option value="user_preference_default">Use user preference default</option>
+                    <option value="tenant_default">Use tenant default</option>
+                    <option value="product_override">Override for this product</option>
+                  </select>
+                  <span class="field-note">Use inherited defaults for consistency, or override only when this product needs a different policy.</span>
+                </label>
+                <div class="refund-override-fields hidden" id="productRefundOverrideFields">
+                  <div class="refund-policy-grid">
+                    <label>Refund Window
+                      <select name="refund_window">
+                        <option value="non_refundable">Non-refundable</option>
+                        <option value="72_hours">72 hours (3 days)</option>
+                        <option value="7_days">7-day refunds</option>
+                        <option value="14_days">14-day refunds</option>
+                        <option value="30_days" selected>30-day refunds</option>
+                        <option value="60_days">60-day refunds</option>
+                        <option value="custom">Custom</option>
+                      </select>
+                    </label>
+                    <label>Condition
+                      <select name="refund_condition">
+                        <option value="any">Any</option>
+                        <option value="unused" selected>Unused</option>
+                        <option value="unopened">Unopened</option>
+                        <option value="defective_only">Defective only</option>
+                        <option value="not_downloaded">Not downloaded</option>
+                        <option value="custom">Custom</option>
+                      </select>
+                    </label>
+                    <label>Return Method
+                      <select name="refund_return_method">
+                        <option value="no_return_customer_keeps" selected>No Return (Customer Keeps)</option>
+                        <option value="return_required">Return Required</option>
+                        <option value="digital_revoke_access">Revoke Digital Access</option>
+                        <option value="custom">Custom</option>
+                      </select>
+                    </label>
+                  </div>
+                  <label>Short Label
+                    <input name="refund_short_label" value="30-day money-back">
+                  </label>
+                  <label>Full Policy
+                    <textarea name="refund_full_policy" rows="4">Refunds are available within 30 days of delivery in unused condition.</textarea>
+                  </label>
+                </div>
+              </section>
+              <div class="modal-divider" data-transactional-section></div>
+              <label class="switch-row variant-toggle" data-transactional-section><input name="product_active" type="checkbox" checked><span>Active</span></label>
+              <section class="modal-form-section" data-transactional-section>
+                <h3>Image URLs</h3>
+                <div class="info-box product-image-limit-banner"><strong>Image Limit:</strong> Maximum of 8 images allowed per product (Stripe restriction)</div>
+                <input id="productImageFileInput" type="file" accept="image/*" multiple hidden>
+                <div class="upload-dropzone product-upload-dropzone" id="productImageDropzone" role="button" tabindex="0">
+                  <strong>Click to upload or drag and drop</strong>
+                  <small>PNG, JPG, WEBP up to 10MB</small>
+                </div>
+                <div class="product-image-previews" id="productImagePreviews"></div>
+                <div class="upload-status" id="productUploadStatus"></div>
+                <label>Or paste image URLs (one per line)
+                  <textarea name="images" rows="3" placeholder="https://example.com/image1.jpg"></textarea>
+                </label>
+              </section>
+              <label class="switch-row variant-toggle" data-physical-only data-transactional-section><input name="enable_item_size" type="checkbox"><span><strong>Item Size</strong><small>Enable size variants, such as S, M, L, XL.</small></span></label>
+              <div class="variant-options hidden" id="itemSizeOptions" data-physical-only data-transactional-section>
+                <div class="variant-list" id="sizeVariantsContainer"></div>
+                <button type="button" class="secondary-action" id="btnAddSizeVariant">+ New Size</button>
+              </div>
+              <label class="switch-row variant-toggle" data-physical-only data-transactional-section><input name="enable_item_color" type="checkbox"><span><strong>Item Color</strong><small>Enable color variants, such as Black, White, Navy.</small></span></label>
+              <div class="variant-options hidden" id="itemColorOptions" data-physical-only data-transactional-section>
+                <div class="variant-list" id="colorVariantsContainer"></div>
+                <button type="button" class="secondary-action" id="btnAddColorVariant">+ New Color</button>
+              </div>
+              <section class="modal-form-section" data-physical-only data-transactional-section>
+                <h3>Package Dimensions (for physical products only)</h3>
+                <div class="modal-dimensions-grid">
+                  <label>Length (inches)<input name="package_length" type="number" min="0" step="0.1" value="10"></label>
+                  <label>Width (inches)<input name="package_width" type="number" min="0" step="0.1" value="8"></label>
+                  <label>Height (inches)<input name="package_height" type="number" min="0" step="0.1" value="4"></label>
+                  <label>Weight (pounds)<input name="package_weight" type="number" min="0" step="0.1" value="1"></label>
+                </div>
+              </section>
+            </form>
+            <footer class="product-modal-footer">
+              <button class="secondary-action" type="button" id="btnCancelProductModal">Cancel</button>
+              <button class="primary-action" type="button" id="btnSaveProductUi">Save Product</button>
+            </footer>
+          </div>
+        </div>
       </section>
 
       <section class="panel" data-panel="offers">
@@ -845,6 +1068,23 @@
         <h1>Configuration</h1>
         <form data-endpoint="/config" data-method="PUT" data-payload="config">
           <div class="config-stack">
+            <section class="config-card">
+              <header>
+                <div>
+                  <h2>App Configuration</h2>
+                  <p>Environment-level platform values loaded from app config.</p>
+                </div>
+                <button type="button" id="btnRefreshAppConfig">Refresh</button>
+              </header>
+              <div class="config-card-body">
+                <div class="grid">
+                  <label>Environment<input id="appConfigEnvironment" readonly value="dev"></label>
+                  <label>API Base URL<input id="appConfigApiBaseUrl" readonly placeholder="https://dev.juniorbay.com"></label>
+                </div>
+                <span class="field-note" id="appConfigStatus">App config is loaded from jb-app-config for the active dashboard environment.</span>
+              </div>
+            </section>
+
             <section class="config-card">
               <header>
                 <h2>Upsell Page Defaults</h2>

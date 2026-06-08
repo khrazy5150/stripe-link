@@ -19,6 +19,14 @@ class ProductHandlerTests(unittest.TestCase):
         self.repository = FakeDocumentRepository("product_id")
         self.product = load_fixture("product-creatine-gummies.json")
 
+    def test_options_returns_cors_headers(self):
+        response = handler({"httpMethod": "OPTIONS"}, None, repository=self.repository)
+
+        self.assertEqual(response["statusCode"], 200)
+        self.assertEqual(response["headers"]["Access-Control-Allow-Origin"], "*")
+        self.assertIn("X-Tenant-Id", response["headers"]["Access-Control-Allow-Headers"])
+        self.assertIn("POST", response["headers"]["Access-Control-Allow-Methods"])
+
     def test_create_product_persists_canonical_json(self):
         response = handler({
             "httpMethod": "POST",
@@ -27,8 +35,15 @@ class ProductHandlerTests(unittest.TestCase):
 
         self.assertEqual(response["statusCode"], 201)
         body = json.loads(response["body"])
-        self.assertEqual(body["product"]["product_id"], "prod_creatine_gummies")
-        self.assertEqual(self.repository.get("tenant_demo", "prod_creatine_gummies")["default_price_id"], "price_2bottle")
+        product = body["product"]
+        stored = self.repository.get("tenant_demo", "prod_creatine_gummies")
+        self.assertEqual(product["product_id"], "prod_creatine_gummies")
+        self.assertEqual(product["default_price_id"], "price_2bottle")
+        self.assertEqual(body["stripe_sync"], {"status": "skipped", "reason": "document not canonical"})
+        self.assertEqual(list(product)[:4], ["schema_version", "document_type", "tenant_id", "product_id"])
+        self.assertEqual(list(product)[-1], "tags")
+        self.assertEqual(list(stored)[-1], "tags")
+        self.assertEqual(stored["default_price_id"], "price_2bottle")
 
     def test_get_product_requires_tenant(self):
         response = handler({
@@ -52,8 +67,12 @@ class ProductHandlerTests(unittest.TestCase):
         }, None, repository=self.repository)
 
         self.assertEqual(get_response["statusCode"], 200)
-        self.assertEqual(json.loads(get_response["body"])["product"]["product_id"], "prod_creatine_gummies")
-        self.assertEqual(json.loads(list_response["body"])["products"][0]["product_id"], "prod_creatine_gummies")
+        get_product = json.loads(get_response["body"])["product"]
+        list_product = json.loads(list_response["body"])["products"][0]
+        self.assertEqual(get_product["product_id"], "prod_creatine_gummies")
+        self.assertEqual(list_product["product_id"], "prod_creatine_gummies")
+        self.assertEqual(list(get_product)[-1], "tags")
+        self.assertEqual(list(list_product)[-1], "tags")
 
     def test_create_product_rejects_mixed_stripe_modes(self):
         self.product["prices"][0]["stripe_mode"] = "live"

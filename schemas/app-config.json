@@ -1,0 +1,86 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.juniorbay.com/stripe-link/app-config.json",
+  "title": "AppConfig",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "document_type", "config_key", "environment", "environments"],
+  "properties": {
+    "schema_version": { "type": "string", "const": "2026-05-29" },
+    "document_type": { "type": "string", "const": "app_config" },
+    "config_key": {
+      "type": "string",
+      "const": "app_config",
+      "description": "Stable singleton config key used as the table partition key."
+    },
+    "environment": {
+      "type": "string",
+      "const": "global",
+      "description": "Singleton sort key. Per-environment values live in environments.dev/prod."
+    },
+    "environments": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["dev", "prod"],
+      "properties": {
+        "dev": { "$ref": "#/$defs/environmentConfig" },
+        "prod": { "$ref": "#/$defs/environmentConfig" }
+      }
+    },
+    "dashboard": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "display_order": { "type": "integer", "minimum": 0 },
+        "editable_sections": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "metadata": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "created_at": { "type": "integer", "minimum": 0 },
+    "updated_at": { "type": "integer", "minimum": 0 }
+  },
+  "$defs": {
+    "environmentConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["api_base_url", "dashboard_url", "checkout_base_url", "label"],
+      "properties": {
+        "label": { "type": "string" },
+        "api_base_url": {
+          "type": "string",
+          "pattern": "^https?://[^\\s\"'<>]+$"
+        },
+        "dashboard_url": {
+          "type": "string",
+          "pattern": "^https?://[^\\s\"'<>]+$"
+        },
+        "checkout_base_url": {
+          "type": "string",
+          "pattern": "^https?://[^\\s\"'<>]+$"
+        },
+        "pages_base_url": {
+          "type": "string",
+          "pattern": "^https?://[^\\s\"'<>]+$"
+        },
+        "favicon_url": {
+          "type": "string",
+          "pattern": "^https?://[^\\s\"'<>]+$"
+        },
+        "public_asset_base_url": {
+          "type": "string",
+          "pattern": "^https?://[^\\s\"'<>]+$"
+        },
+        "feature_flags": {
+          "type": "object",
+          "additionalProperties": { "type": "boolean" }
+        }
+      }
+    }
+  }
+}

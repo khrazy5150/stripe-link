@@ -15,7 +15,6 @@
           "price_id": "price_universal_single",
           "quantity": 1,
           "label": "Single Pack",
-          "regular_unit_amount": 4900,
           "display_discount_pct": 24
         },
         {
@@ -23,7 +22,6 @@
           "quantity": 2,
           "label": "Double Pack",
           "badge": "Most Popular",
-          "regular_unit_amount": 9400,
           "display_discount_pct": 26
         },
         {
@@ -31,7 +29,6 @@
           "quantity": 3,
           "label": "Triple Pack",
           "badge": "Best Value",
-          "regular_unit_amount": 14100,
           "display_discount_pct": 31
         }
       ],

@@ -6,7 +6,7 @@ region = "us-west-2"
 capabilities = "CAPABILITY_IAM"
 confirm_changeset = true
 resolve_s3 = true
-parameter_overrides = "Environment=dev ProjectPrefix=jb"
+parameter_overrides = "Environment=dev ProjectPrefix=jb ApiCustomDomainName=dev.juniorbay.com ApiCustomDomainCertificateArn=arn:aws:acm:us-west-2:150544707159:certificate/b40bb746-6e32-4a7d-8c24-b738cd1c359a ApiCustomDomainHostedZoneName=juniorbay.com."
 tags = "Project=\"stripe-link\" Environment=\"dev\" ManagedBy=\"sam\""
 
 [prod.deploy.parameters]

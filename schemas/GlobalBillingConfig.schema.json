@@ -1,0 +1,91 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.juniorbay.com/stripe-link/global-billing-config.json",
+  "title": "GlobalBillingConfig",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "document_type",
+    "effective_date",
+    "canonical",
+    "platform_fees",
+    "payment_processing",
+    "created_at",
+    "updated_at"
+  ],
+  "properties": {
+    "schema_version": { "type": "string", "const": "2026-06-04" },
+    "document_type": { "type": "string", "const": "global_billing_config" },
+    "effective_date": { "type": "string" },
+    "canonical": { "type": "boolean", "const": true },
+    "platform_fees": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["unit", "tiers"],
+      "properties": {
+        "unit": { "type": "string", "const": "percent" },
+        "tiers": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["basic", "standard", "pro"],
+          "properties": {
+            "basic": { "$ref": "#/$defs/platformFeeTier" },
+            "standard": { "$ref": "#/$defs/platformFeeTier" },
+            "pro": { "$ref": "#/$defs/platformFeeTier" }
+          }
+        }
+      }
+    },
+    "payment_processing": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schedules"],
+      "properties": {
+        "schedules": {
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": { "$ref": "#/$defs/paymentSchedule" }
+        }
+      }
+    },
+    "created_at": { "type": "integer", "minimum": 0 },
+    "updated_at": { "type": "integer", "minimum": 0 }
+  },
+  "$defs": {
+    "platformFeeTier": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["physical", "digital", "tip_jar"],
+      "properties": {
+        "physical": { "type": "number", "minimum": 0, "maximum": 100 },
+        "digital": { "type": "number", "minimum": 0, "maximum": 100 },
+        "tip_jar": { "type": "number", "minimum": 0, "maximum": 100 }
+      }
+    },
+    "paymentSchedule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["merchant_loc", "settlement_currency", "rates"],
+      "properties": {
+        "merchant_loc": { "type": "string", "minLength": 2 },
+        "settlement_currency": { "type": "string", "pattern": "^[A-Z]{3}$" },
+        "rates": {
+          "type": "object",
+          "required": ["domestic_card"],
+          "additionalProperties": { "$ref": "#/$defs/paymentRate" }
+        }
+      }
+    },
+    "paymentRate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["percentage", "fixed_cents", "condition"],
+      "properties": {
+        "percentage": { "type": "number", "minimum": 0, "maximum": 100 },
+        "fixed_cents": { "type": "integer", "minimum": 0 },
+        "condition": { "type": "string" }
+      }
+    }
+  }
+}

@@ -1,0 +1,42 @@
+{
+  "schema_version": "2026-05-29",
+  "document_type": "app_config",
+  "config_key": "app_config",
+  "environment": "global",
+  "environments": {
+    "dev": {
+      "label": "Test",
+      "api_base_url": "https://dev.juniorbay.com",
+      "dashboard_url": "https://dashboard-dev.juniorbay.com",
+      "checkout_base_url": "https://checkout-dev.juniorbay.com",
+      "pages_base_url": "https://pages-dev.juniorbay.com",
+      "favicon_url": "https://images.juniorbay.com/icon/favicon.png",
+      "public_asset_base_url": "https://images.juniorbay.com",
+      "feature_flags": {
+        "custom_api_domain": true,
+        "s3_page_publish": true
+      }
+    },
+    "prod": {
+      "label": "Live",
+      "api_base_url": "https://prod.juniorbay.com",
+      "dashboard_url": "https://dashboard.juniorbay.com",
+      "checkout_base_url": "https://checkout.juniorbay.com",
+      "pages_base_url": "https://pages.juniorbay.com",
+      "favicon_url": "https://images.juniorbay.com/icon/favicon.png",
+      "public_asset_base_url": "https://images.juniorbay.com",
+      "feature_flags": {
+        "custom_api_domain": true,
+        "s3_page_publish": true
+      }
+    }
+  },
+  "dashboard": {
+    "display_order": 10,
+    "editable_sections": ["environments"]
+  },
+  "metadata": {
+    "owner": "platform"
+  },
+  "updated_at": 1780358400
+}

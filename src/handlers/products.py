@@ -1,5 +1,10 @@
 from stripe_link.common import error_response, json_response, parse_json_body, path_params, query_params, tenant_id_from_event
-from stripe_link.domain.documents import DocumentValidationError, validate_product_document
+from stripe_link.domain.documents import (
+    DocumentValidationError,
+    order_product_document,
+    product_stripe_sync_gate,
+    validate_product_document,
+)
 from stripe_link.repositories.documents import RepositoryError, products_repository
 
 
@@ -22,8 +27,15 @@ def create_product(event, repository):
     try:
         document = parse_json_body(event)
         validate_product_document(document)
+        document = order_product_document(document)
         saved = repository.put(document)
-        return json_response({"product": saved}, status_code=201)
+        return json_response(
+            {
+                "product": order_product_document(saved),
+                "stripe_sync": product_stripe_sync_gate(saved),
+            },
+            status_code=201,
+        )
     except (DocumentValidationError, ValueError, RepositoryError) as exc:
         return error_response(str(exc), code="invalid_product")
 
@@ -35,11 +47,11 @@ def get_product(event, repository, product_id: str):
     product = repository.get(tenant_id, product_id)
     if not product:
         return error_response("Product not found.", status_code=404, code="not_found")
-    return json_response({"product": product})
+    return json_response({"product": order_product_document(product)})
 
 
 def list_products(event, repository):
     tenant_id = str(query_params(event).get("tenant_id") or "").strip() or tenant_id_from_event(event)
     if not tenant_id:
         return error_response("tenant_id is required.", code="missing_tenant")
-    return json_response({"products": repository.list_for_tenant(tenant_id)})
+    return json_response({"products": [order_product_document(product) for product in repository.list_for_tenant(tenant_id)]})

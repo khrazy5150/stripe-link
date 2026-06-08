@@ -708,18 +708,18 @@ def render_offer_price_selector(offer: dict[str, Any], products_by_id: dict[str,
         for option in item.get("selectable_prices") or []:
             price = find_price(product, option.get("price_id", ""))
             label = escape(str(option.get("label") or price.get("label") or "Option"))
-            badge = escape(str(option.get("badge") or price.get("badge") or ""))
+            badge = escape(str(option.get("badge") or ""))
             amount = int(price.get("unit_amount", 0))
             currency = str(price.get("currency") or "usd")
             default_attr = "true" if price.get("price_id") == default_price_id else "false"
             image_url = price_image(product, price, option)
             description = escape(str(option.get("description") or price.get("description") or product.get("description") or ""))
-            regular_unit_amount = option.get("regular_unit_amount") or price.get("regular_unit_amount")
+            compare_at_unit_amount = price.get("compare_at_unit_amount")
             savings_pct = option.get("display_discount_pct") or price.get("discount_pct")
-            if not savings_pct and regular_unit_amount:
-                savings_pct = discount_pct(amount, int(regular_unit_amount))
+            if not savings_pct and compare_at_unit_amount:
+                savings_pct = discount_pct(amount, int(compare_at_unit_amount))
             cards.append("\n".join([
-                f"      <article class=\"sl-price-option\" data-price-id=\"{escape(str(price.get('price_id', '')))}\" data-default=\"{default_attr}\" data-sale-amount=\"{amount}\" data-regular-amount=\"{int(regular_unit_amount) if regular_unit_amount else amount}\" data-currency=\"{escape(currency)}\" data-label=\"{label}\">",
+                f"      <article class=\"sl-price-option\" data-price-id=\"{escape(str(price.get('price_id', '')))}\" data-default=\"{default_attr}\" data-sale-amount=\"{amount}\" data-regular-amount=\"{int(compare_at_unit_amount) if compare_at_unit_amount else ''}\" data-currency=\"{escape(currency)}\" data-label=\"{label}\">",
                 f"        <img src=\"{escape(image_url)}\" alt=\"{escape(str(product.get('name') or label))}\">" if image_url else "",
                 "        <div class=\"sl-price-copy\">",
                 f"          <span class=\"sl-badge\">{badge}</span>" if badge else "",
@@ -727,7 +727,7 @@ def render_offer_price_selector(offer: dict[str, Any], products_by_id: dict[str,
                 f"          <p class=\"sl-price-description\">{description}</p>" if description else "",
                 "          <div class=\"sl-price-row\">",
                 f"            <span class=\"sl-price-amount\" data-price-amount>{escape(format_money(amount, currency))}</span>",
-                f"            <span class=\"sl-regular-price\">{escape(format_money(int(regular_unit_amount), currency))}</span>" if regular_unit_amount else "",
+                f"            <span class=\"sl-regular-price\">{escape(format_money(int(compare_at_unit_amount), currency))}</span>" if compare_at_unit_amount else "",
                 f"            <span class=\"sl-savings\">Save {int(savings_pct)}%</span>" if savings_pct else "",
                 "          </div>",
                 "        </div>",
@@ -757,10 +757,10 @@ def price_image(product: dict[str, Any], price: dict[str, Any], option: dict[str
     return first_image(product)
 
 
-def discount_pct(unit_amount: int, regular_unit_amount: int) -> int:
-    if regular_unit_amount <= 0 or unit_amount >= regular_unit_amount:
+def discount_pct(unit_amount: int, compare_at_unit_amount: int) -> int:
+    if compare_at_unit_amount <= 0 or unit_amount >= compare_at_unit_amount:
         return 0
-    return round((1 - (unit_amount / regular_unit_amount)) * 100)
+    return round((1 - (unit_amount / compare_at_unit_amount)) * 100)
 
 
 def render_refund_policy(

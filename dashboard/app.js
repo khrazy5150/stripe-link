@@ -3,15 +3,102 @@ const apiBaseInput = document.querySelector("#apiBase");
 const mainApp = document.querySelector("#main-app");
 const environmentLabel = document.querySelector("#environmentLabel");
 const environmentToggle = document.querySelector("#environmentToggle");
-const savedApiBase = localStorage.getItem("stripeLinkApiBase") || "";
-apiBaseInput.value = savedApiBase;
 let currentEnvironment = localStorage.getItem("stripeLinkEnvironment") || "test";
+const defaultApiBaseByEnvironment = {
+  test: "https://dev.juniorbay.com",
+  live: "https://prod.juniorbay.com",
+};
+const defaultPlatformFeeConfig = {
+  basic: {
+    physical: 0.10,
+    digital: 0.15,
+    "tip-jar": 0.05,
+  },
+  standard: {
+    physical: 0.08,
+    digital: 0.13,
+    "tip-jar": 0.04,
+  },
+  pro: {
+    physical: 0.05,
+    digital: 0.10,
+    "tip-jar": 0.02,
+  },
+};
+const STRIPE_PERCENT_FEE = 0.029;
+const STRIPE_FIXED_FEE_CENTS = 30;
+const SNOWFLAKE_ALPHABET = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+const SNOWFLAKE_EPOCH_MS = 1735689600000n;
+const SNOWFLAKE_WORKER_ID_KEY = "stripeLinkSnowflakeWorkerId";
+let snowflakeLastMs = 0n;
+let snowflakeSeq = 0n;
+apiBaseInput.value = configuredApiBase(currentEnvironment);
 const appState = {
   tenantId: localStorage.getItem("stripeLinkTenantId") || "tenant_demo",
   userId: localStorage.getItem("stripeLinkUserId") || "keithdecosta@gmail.com",
+  tenantPlan: localStorage.getItem("stripeLinkTenantPlan") || "basic",
+  platformFee: defaultPlatformFeeConfig,
   session: null,
+  products: [],
+  productUploadedImages: [],
+  leadCaptureAction: "capture_email",
+  priceCalculationCache: new Map(),
 };
 applyEnvironment(currentEnvironment);
+loadAppConfigApiBase(currentEnvironment);
+
+function toBase62(value) {
+  if (value === 0n) return "0";
+  let remaining = value;
+  let result = "";
+  const base = BigInt(SNOWFLAKE_ALPHABET.length);
+  while (remaining > 0n) {
+    result = SNOWFLAKE_ALPHABET[Number(remaining % base)] + result;
+    remaining /= base;
+  }
+  return result;
+}
+
+function dashboardWorkerId() {
+  const stored = sessionStorage.getItem(SNOWFLAKE_WORKER_ID_KEY);
+  if (stored && /^\d+$/.test(stored)) return BigInt(Number(stored) & 0x3ff);
+
+  let value = 1;
+  if (window.crypto?.getRandomValues) {
+    const bytes = new Uint32Array(1);
+    window.crypto.getRandomValues(bytes);
+    value = bytes[0] & 0x3ff;
+  }
+  sessionStorage.setItem(SNOWFLAKE_WORKER_ID_KEY, String(value));
+  return BigInt(value);
+}
+
+function generateSnowflakeId() {
+  const workerId = dashboardWorkerId();
+  let now = BigInt(Date.now());
+
+  if (now < snowflakeLastMs) {
+    const drift = snowflakeLastMs - now;
+    if (drift >= 50n) throw new Error(`Clock moved backwards. Rejecting ID generation for ${drift}ms.`);
+    while (now < snowflakeLastMs) now = BigInt(Date.now());
+  }
+
+  if (now === snowflakeLastMs) {
+    snowflakeSeq = (snowflakeSeq + 1n) & 0x1fffn;
+    while (snowflakeSeq === 0n && now <= snowflakeLastMs) now = BigInt(Date.now());
+  } else {
+    snowflakeSeq = 0n;
+  }
+
+  snowflakeLastMs = now;
+  const timePart = (now - SNOWFLAKE_EPOCH_MS) & 0x1ffffffffffn;
+  const value = (timePart << 23n) | (workerId << 13n) | snowflakeSeq;
+  return toBase62(value).padStart(11, "0");
+}
+
+function generateLocalId() {
+  return `local_${generateSnowflakeId()}`;
+}
 
 document.querySelectorAll("[data-auth-tab]").forEach((button) => {
   button.addEventListener("click", () => switchAuthTab(button.dataset.authTab));
@@ -89,8 +176,12 @@ document.querySelector("#btnConfirmNew").addEventListener("click", () => {
 });
 
 document.querySelector("#saveApiBase").addEventListener("click", () => {
-  localStorage.setItem("stripeLinkApiBase", apiBaseInput.value.trim());
-  writeOutput({ saved_api_base: apiBaseInput.value.trim() });
+  const apiBase = apiBaseInput.value.trim();
+  localStorage.setItem(apiBaseStorageKey(currentEnvironment), apiBase);
+  if (environmentKey(currentEnvironment) === "test") {
+    localStorage.setItem("stripeLinkApiBase", apiBase);
+  }
+  writeOutput({ saved_api_base: apiBase, environment: configEnvironment(currentEnvironment) });
   loadPanelData(mainApp.dataset.view || "dashboard");
 });
 
@@ -130,10 +221,177 @@ document.querySelector("#landingPageTestForm")?.addEventListener("input", () => 
   renderLandingPreviewLocal();
 });
 
+document.querySelector("#btnCreateProductUi")?.addEventListener("click", () => {
+  showProductForm();
+});
+
+document.querySelector("#productSchemaForm")?.addEventListener("input", () => {
+  if (!productIsLeadGen()) updateProductPricePreview();
+});
+
+document.querySelector("#productSchemaForm")?.addEventListener("change", async (event) => {
+  if (event.target?.name === "product_type") {
+    updateProductCategoryOptions();
+    updateProductFulfillmentVisibility();
+    resetProductRefundPolicyDefaults();
+    updateProductIntentVisibility();
+  }
+  if (event.target?.name === "product_intent") updateProductIntentVisibility();
+  if (event.target?.name === "product_canonical") await handleProductCanonicalChange();
+  if (event.target?.name === "refund_source") updateProductRefundPolicyVisibility();
+  if (["refund_window", "refund_condition", "refund_return_method"].includes(event.target?.name)) {
+    refreshProductRefundPolicyPreview();
+  }
+  if (["enable_item_size", "enable_item_color"].includes(event.target?.name)) {
+    updateProductVariantVisibility();
+  }
+  if (event.target?.dataset.priceField === "default") {
+    enforceSingleDefaultPrice(event.target);
+  }
+  if (!productIsLeadGen()) updateProductPricePreview();
+});
+
+document.querySelector("#productSchemaForm")?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  await saveProductFromForm();
+});
+
+document.querySelector("#btnAddProductPrice")?.addEventListener("click", () => {
+  addProductPriceRow();
+});
+
+document.querySelector("#productPriceRows")?.addEventListener("click", (event) => {
+  const contextHelpButton = event.target.closest("[data-toggle-context-help]");
+  if (contextHelpButton) {
+    const row = contextHelpButton.closest(".product-price-row");
+    const help = row?.querySelector("[data-price-context-help]");
+    if (!help) return;
+    const isHidden = help.classList.toggle("hidden");
+    contextHelpButton.setAttribute("aria-expanded", String(!isHidden));
+    return;
+  }
+
+  const removeButton = event.target.closest("[data-remove-price]");
+  if (!removeButton) return;
+  const row = removeButton.closest(".product-price-row");
+  row?.remove();
+  renumberProductPriceRows();
+  ensureProductDefaultPrice();
+  updateProductPricePreview();
+});
+
+document.querySelector("#btnAddSizeVariant")?.addEventListener("click", () => {
+  addProductVariantItem("size");
+});
+
+document.querySelector("#btnAddColorVariant")?.addEventListener("click", () => {
+  addProductVariantItem("color");
+});
+
+document.querySelector("#productSchemaForm")?.addEventListener("click", (event) => {
+  const removeButton = event.target.closest("[data-remove-variant]");
+  if (!removeButton) return;
+  removeButton.closest(".variant-item")?.remove();
+});
+
+document.querySelector("#productImageDropzone")?.addEventListener("click", () => {
+  document.querySelector("#productImageFileInput")?.click();
+});
+
+document.querySelector("#productImageDropzone")?.addEventListener("keydown", (event) => {
+  if (event.key === "Enter" || event.key === " ") {
+    event.preventDefault();
+    document.querySelector("#productImageFileInput")?.click();
+  }
+});
+
+document.querySelector("#productImageFileInput")?.addEventListener("change", async (event) => {
+  await handleProductImageFiles(Array.from(event.target.files || []));
+  event.target.value = "";
+});
+
+document.querySelector("#productImageDropzone")?.addEventListener("dragover", (event) => {
+  event.preventDefault();
+  event.currentTarget.classList.add("drag-over");
+});
+
+document.querySelector("#productImageDropzone")?.addEventListener("dragleave", (event) => {
+  event.currentTarget.classList.remove("drag-over");
+});
+
+document.querySelector("#productImageDropzone")?.addEventListener("drop", async (event) => {
+  event.preventDefault();
+  event.currentTarget.classList.remove("drag-over");
+  const files = Array.from(event.dataTransfer?.files || []).filter((file) => file.type.startsWith("image/"));
+  await handleProductImageFiles(files);
+});
+
+document.querySelector("#btnCloseProductModal")?.addEventListener("click", () => {
+  showProductList();
+});
+
+document.querySelector("#btnCancelProductModal")?.addEventListener("click", () => {
+  showProductList();
+});
+
+document.querySelector("#btnOpenLeadIntentModal")?.addEventListener("click", showLeadIntentModal);
+document.querySelector("#btnCloseLeadIntentModal")?.addEventListener("click", hideLeadIntentModal);
+document.querySelector("#btnCancelLeadIntentModal")?.addEventListener("click", hideLeadIntentModal);
+document.querySelector("#btnSelectLeadIntent")?.addEventListener("click", hideLeadIntentModal);
+document.querySelector("#leadActionGrid")?.addEventListener("click", (event) => {
+  const card = event.target.closest("[data-lead-action]");
+  if (card) selectLeadAction(card.dataset.leadAction);
+});
+
+document.querySelector("#btnLoadProductsUi")?.addEventListener("click", async () => {
+  await loadProducts();
+});
+
+document.querySelector("#btnSaveProductUi")?.addEventListener("click", async () => {
+  await saveProductFromForm();
+});
+
+document.querySelector("#btnResetProductUi")?.addEventListener("click", () => {
+  document.querySelector("#productSchemaForm")?.reset();
+  resetProductPriceRows();
+  resetProductImageUploads();
+  resetProductVariants();
+  resetProductLeadCapture();
+  resetProductRefundPolicyDefaults();
+  updateProductFulfillmentVisibility();
+  updateProductIntentVisibility();
+  if (!productIsLeadGen()) updateProductPricePreview();
+});
+
+async function saveProductFromForm() {
+  const form = document.querySelector("#productSchemaForm");
+  const productName = form?.elements.product_name?.value?.trim() || "";
+  if (!productName) {
+    setPanelNote("products", "Product name is required.");
+    return;
+  }
+  if (!productIsLeadGen()) {
+    try {
+      await calculateProductPricesForSave();
+    } catch (error) {
+      setPanelNote("products", `Can't calculate product prices: ${error.message}`);
+      return;
+    }
+  }
+  const product = buildProductDocumentFromForm();
+  await saveProduct(product);
+}
+
+document.querySelector("#btnRefreshAppConfig")?.addEventListener("click", async () => {
+  await loadAppConfigApiBase(currentEnvironment, { updatePanel: true });
+});
+
 environmentToggle.addEventListener("click", () => {
   currentEnvironment = currentEnvironment === "test" ? "live" : "test";
   localStorage.setItem("stripeLinkEnvironment", currentEnvironment);
   applyEnvironment(currentEnvironment);
+  apiBaseInput.value = configuredApiBase(currentEnvironment);
+  loadAppConfigApiBase(currentEnvironment, { updatePanel: mainApp.dataset.view === "config" });
 });
 
 document.querySelectorAll(".nav-item").forEach((button) => {
@@ -151,6 +409,9 @@ document.querySelectorAll(".nav-item").forEach((button) => {
 document.querySelectorAll("form").forEach((form) => {
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
+    if (form.id === "productSchemaForm") {
+      return;
+    }
     const action = form.dataset.action;
     if (action === "connect-start") {
       await startConnect(form);
@@ -236,7 +497,7 @@ async function loadPanelData(view) {
       return;
     }
     const loaders = {
-      products: () => loadCollection("/products", "products"),
+      products: () => prepareProductPanel(),
       offers: () => loadCollection("/offers", "offers"),
       "landing-pages": () => loadCollection("/pages", "pages"),
       services: () => loadCollection("/services", "services"),
@@ -244,7 +505,7 @@ async function loadPanelData(view) {
       invoices: () => loadCollection("/invoices", "invoices"),
       shipping: () => loadSingleton("/shipping", "shipping_config"),
       customers: () => loadCollection("/customers", "customers"),
-      config: () => loadSingleton("/config", "config"),
+      config: () => loadConfigurationData(),
       profile: () => loadSingleton("/profile", "profile", { user_id: appState.userId }),
       preferences: () => loadSingleton("/preferences", "preferences", { user_id: appState.userId }),
       keys: () => loadStripeKeys(),
@@ -279,6 +540,98 @@ async function loadCollection(path, key) {
   const count = Array.isArray(body[key]) ? body[key].length : body.count;
   if (count !== undefined) {
     setPanelNote(key, `${count} ${key.replace("_", " ")} loaded from backend.`);
+  }
+}
+
+async function loadConfigurationData() {
+  await Promise.all([
+    loadSingleton("/config", "config").catch((error) => writeOutput({ error: error.message, view: "config" })),
+    loadAppConfigApiBase(currentEnvironment, { updatePanel: true }),
+  ]);
+}
+
+function prepareProductPanel() {
+  renderProductTable();
+  if (!appState.products.length) {
+    setPanelNote("products", 'Click "Load Products" or adjust your filters to see products.');
+  }
+}
+
+async function loadProducts() {
+  const button = document.querySelector("#btnLoadProductsUi");
+  const originalText = button?.textContent || "Load Products";
+  if (button) {
+    button.disabled = true;
+    button.textContent = "Loading...";
+  }
+  if (!apiBaseInput.value.trim()) {
+    try {
+      renderProductTable();
+      setPanelNote("products", appState.products.length
+        ? `${appState.products.length} product${appState.products.length === 1 ? "" : "s"} loaded in this UI session.`
+        : 'Click "Load Products" or adjust your filters to see products.');
+      writeOutput({ products: appState.products, source: "local_ui_session" });
+      return;
+    } finally {
+      if (button) {
+        button.disabled = false;
+        button.textContent = originalText;
+      }
+    }
+  }
+  try {
+    const body = await apiRequest("/products");
+    appState.products = Array.isArray(body.products) ? body.products : [];
+    renderProductTable();
+    writeOutput(body);
+    setPanelNote("products", appState.products.length
+      ? `${appState.products.length} product${appState.products.length === 1 ? "" : "s"} loaded from backend.`
+      : 'Click "Load Products" or adjust your filters to see products.');
+  } catch (error) {
+    writeOutput({ error: error.message, action: "load_products" });
+    setPanelNote("products", error.message);
+  } finally {
+    if (button) {
+      button.disabled = false;
+      button.textContent = originalText;
+    }
+  }
+}
+
+async function saveProduct(product) {
+  const button = document.querySelector("#btnSaveProductUi");
+  const originalText = button?.textContent || "Save Product";
+  if (button) {
+    button.disabled = true;
+    button.textContent = "Saving...";
+  }
+  try {
+    if (!apiBaseInput.value.trim()) {
+      upsertLocalProduct(product);
+      renderProductTable();
+      showProductList();
+      writeOutput({ product, ui_only: true, next_step: "Set API Base URL to save products to the database." });
+      setPanelNote("products", `${product.name} was added to the local product table.`);
+      return;
+    }
+    const body = await apiRequest("/products", {
+      method: "POST",
+      body: product,
+    });
+    const savedProduct = body.product || product;
+    upsertLocalProduct(savedProduct);
+    renderProductTable();
+    showProductList();
+    writeOutput(body);
+    setPanelNote("products", `${savedProduct.name || product.name} was saved to the products database.`);
+  } catch (error) {
+    writeOutput({ error: error.message, action: "save_product", product });
+    setPanelNote("products", error.message);
+  } finally {
+    if (button) {
+      button.disabled = false;
+      button.textContent = originalText;
+    }
   }
 }
 
@@ -319,11 +672,10 @@ function buildLandingDocuments() {
   const now = Math.floor(Date.now() / 1000);
   const tenantId = values.tenant_id || appState.tenantId || "tenant_demo";
   const slugValue = pageSlug(values.slug || values.page_title || "simple page");
-  const idSuffix = slug(slugValue).replace(/_/g, "_");
-  const productId = `prod_${idSuffix}`;
-  const priceId = `price_${idSuffix}`;
-  const offerId = `offer_${idSuffix}`;
-  const pageId = `page_${idSuffix}`;
+  const productId = generateLocalId();
+  const priceId = generateLocalId();
+  const offerId = generateLocalId();
+  const pageId = generateLocalId();
   const unitAmount = Math.round(Number(values.price_amount || 0) * 100);
   const currency = (values.currency || "usd").toLowerCase();
 
@@ -538,6 +890,1085 @@ function setLandingPreviewSize(size) {
   wrapper?.classList.toggle("mobile", size === "mobile");
 }
 
+function showProductForm() {
+  const form = document.querySelector("#productSchemaForm");
+  form?.reset();
+  if (form?.elements.tenant_id) {
+    form.elements.tenant_id.value = appState.tenantId || "tenant_demo";
+  }
+  updateProductCategoryOptions();
+  resetProductPriceRows();
+  resetProductImageUploads();
+  resetProductVariants();
+  resetProductLeadCapture();
+  resetProductRefundPolicyDefaults();
+  updateProductFulfillmentVisibility();
+  updateProductRefundPolicyVisibility();
+  updateProductIntentVisibility();
+  document.querySelector("#productModal")?.classList.remove("hidden");
+  document.body.classList.add("modal-open");
+  if (!productIsLeadGen()) updateProductPricePreview();
+  setTimeout(() => document.querySelector("[name='product_name']")?.focus(), 0);
+}
+
+function showProductList() {
+  hideLeadIntentModal();
+  document.querySelector("#productModal")?.classList.add("hidden");
+  document.body.classList.remove("modal-open");
+}
+
+const productCategoryOptionsByType = {
+  physical: [
+    ["apparel", "Apparel"],
+    ["beauty_personal_care", "Beauty and Personal Care"],
+    ["books_printed_material", "Books and Printed Material"],
+    ["dietary_supplement", "Dietary Supplement"],
+    ["electronics", "Electronics"],
+    ["toys_games", "Toys and Games"],
+    ["other", "Other"],
+  ],
+  digital: [
+    ["course", "Course"],
+    ["digital_download", "Digital Download"],
+    ["membership", "Membership"],
+    ["software", "Software"],
+    ["other", "Other"],
+  ],
+  service: [
+    ["consulting", "Consulting"],
+    ["professional_services", "Professional Services"],
+    ["software_as_a_service", "Software As A Service (SAAS)"],
+    ["other", "Other"],
+  ],
+};
+
+function updateProductCategoryOptions() {
+  const form = document.querySelector("#productSchemaForm");
+  const select = form?.elements.product_category;
+  if (!form || !select) return;
+  const productType = form.elements.product_type?.value || "physical";
+  const categories = productCategoryOptionsByType[productType] || productCategoryOptionsByType.physical;
+  const previousValue = select.value;
+  select.innerHTML = '<option value="">Select a category</option>';
+  categories.forEach(([value, label]) => {
+    const option = document.createElement("option");
+    option.value = value;
+    option.textContent = label;
+    select.appendChild(option);
+  });
+  select.value = categories.some(([value]) => value === previousValue) ? previousValue : "";
+}
+
+const leadActionOptions = [
+  {
+    value: "capture_email",
+    title: "Capture emails",
+    description: "Collect email addresses for a list, waitlist, or downloadable resource.",
+    icon: "@",
+    color: "#3c81f7",
+  },
+  {
+    value: "capture_phone",
+    title: "Capture phone numbers",
+    description: "Collect phone numbers for calls, SMS follow-up, or appointment outreach.",
+    icon: "TEL",
+    color: "#14b8a6",
+  },
+  {
+    value: "capture_email_phone",
+    title: "Capture emails and phone numbers",
+    description: "Collect both primary contact channels from each lead.",
+    icon: "ID",
+    color: "#8b5cf6",
+  },
+  {
+    value: "call_number",
+    title: "Call a number",
+    description: "Send the visitor to a phone call action instead of checkout.",
+    icon: "CALL",
+    color: "#f97316",
+  },
+  {
+    value: "application",
+    title: "Create an application",
+    description: "Collect application details for review or approval.",
+    icon: "APP",
+    color: "#ec4899",
+  },
+  {
+    value: "custom",
+    title: "Custom lead flow",
+    description: "Reserve this product for a custom lead-generation workflow.",
+    icon: "*",
+    color: "#64748b",
+  },
+];
+
+function productIntentValue() {
+  return document.querySelector("#productSchemaForm")?.elements.product_intent?.value || "transactional";
+}
+
+function productIsLeadGen() {
+  return productIntentValue() === "lead_gen";
+}
+
+function leadActionDefinition(action) {
+  return leadActionOptions.find((option) => option.value === action) || leadActionOptions[0];
+}
+
+function setProductStripeWarning(message) {
+  const box = document.querySelector("#productStripeWarning");
+  if (!box) return;
+  box.textContent = message || "";
+  box.classList.toggle("hidden", !message);
+}
+
+function updateLeadCaptureSummary() {
+  const summary = document.querySelector("#leadCaptureSummary");
+  const text = document.querySelector("#leadCaptureSummaryText");
+  const definition = leadActionDefinition(appState.leadCaptureAction);
+  if (text) text.textContent = definition.title;
+  summary?.classList.toggle("hidden", !productIsLeadGen());
+}
+
+function renderLeadActionCards() {
+  const grid = document.querySelector("#leadActionGrid");
+  if (!grid) return;
+  grid.innerHTML = leadActionOptions.map((option) => `
+    <button class="lead-action-card" type="button" data-lead-action="${escapeHtml(option.value)}">
+      <span class="lead-action-selected" aria-hidden="true">✓</span>
+      <span class="lead-action-icon" style="background:${escapeHtml(option.color)}">${escapeHtml(option.icon)}</span>
+      <h3>${escapeHtml(option.title)}</h3>
+      <p>${escapeHtml(option.description)}</p>
+    </button>
+  `).join("");
+  updateLeadActionSelection();
+}
+
+function updateLeadActionSelection() {
+  document.querySelectorAll("[data-lead-action]").forEach((card) => {
+    card.classList.toggle("selected", card.dataset.leadAction === appState.leadCaptureAction);
+  });
+}
+
+function selectLeadAction(action) {
+  appState.leadCaptureAction = leadActionDefinition(action).value;
+  updateLeadActionSelection();
+  updateLeadCaptureSummary();
+}
+
+function resetProductLeadCapture() {
+  appState.leadCaptureAction = "capture_email";
+  updateLeadCaptureSummary();
+}
+
+function showLeadIntentModal() {
+  renderLeadActionCards();
+  document.querySelector("#leadIntentModal")?.classList.remove("hidden");
+}
+
+function hideLeadIntentModal() {
+  document.querySelector("#leadIntentModal")?.classList.add("hidden");
+}
+
+async function productStripeGatewayReady() {
+  try {
+    const status = await apiRequest("/stripe/connect/status", { allowNotFound: true });
+    if (status?.connected || status?.stripe_account_id || status?.account_id || status?.details_submitted) {
+      return true;
+    }
+  } catch (error) {
+    // Keep this check soft. Some local/API states may not expose connect status yet.
+  }
+  try {
+    const keys = await apiRequest("/stripe/keys", { allowNotFound: true });
+    return Boolean(keys?.stripe_keys?.publishable_key || keys?.publishable_key || keys?.configured || keys?.has_keys || keys?.has_secret_key);
+  } catch (error) {
+    return false;
+  }
+}
+
+async function handleProductCanonicalChange() {
+  const form = document.querySelector("#productSchemaForm");
+  if (!form) return;
+  if (form.elements.product_canonical?.value !== "true") {
+    setProductStripeWarning("");
+    return;
+  }
+  if (productIsLeadGen()) {
+    form.elements.product_canonical.value = "false";
+    setProductStripeWarning("");
+    return;
+  }
+  const ready = await productStripeGatewayReady();
+  if (!ready) {
+    form.elements.product_canonical.value = "false";
+    setProductStripeWarning("You must first have Stripe set up for this account before enabling the gateway.");
+    return;
+  }
+  setProductStripeWarning("");
+}
+
+function updateProductIntentVisibility() {
+  const form = document.querySelector("#productSchemaForm");
+  const isLeadGen = productIsLeadGen();
+  document.querySelectorAll("[data-transactional-section]").forEach((element) => {
+    element.classList.toggle("hidden", isLeadGen);
+  });
+  if (isLeadGen && form?.elements.product_canonical) {
+    form.elements.product_canonical.value = "false";
+    setProductStripeWarning("");
+  }
+  updateLeadCaptureSummary();
+  if (!isLeadGen) {
+    updateProductFulfillmentVisibility();
+    updateProductRefundPolicyVisibility();
+  }
+}
+
+function buildProductLeadCapture() {
+  const definition = leadActionDefinition(appState.leadCaptureAction);
+  const fieldsByAction = {
+    capture_email: [{ name: "email", type: "email", required: true }],
+    capture_phone: [{ name: "phone", type: "tel", required: true }],
+    capture_email_phone: [
+      { name: "email", type: "email", required: true },
+      { name: "phone", type: "tel", required: true },
+    ],
+    call_number: [{ name: "phone_target", type: "tel", required: true }],
+    application: [
+      { name: "email", type: "email", required: true },
+      { name: "application", type: "textarea", required: true },
+    ],
+    custom: [],
+  };
+  return {
+    action: definition.value,
+    title: definition.title,
+    description: definition.description,
+    fields: fieldsByAction[definition.value] || [],
+  };
+}
+
+function resetProductPriceRows() {
+  const container = document.querySelector("#productPriceRows");
+  if (!container) return;
+  container.innerHTML = productPriceRowHtml(0, { isDefault: true });
+  updateProductPricePreview();
+}
+
+function productPriceRowHtml(index, price = {}) {
+  const rowNumber = index + 1;
+  const priceId = price.priceId || generateLocalId();
+  const amount = price.amount ?? "0.00";
+  const compareAtAmount = price.compareAtAmount ?? "0.00";
+  const currency = (price.currency || "usd").toLowerCase();
+  const quantity = price.quantity || 1;
+  const pricingModel = price.pricingModel || "one_time";
+  const feeHandling = price.feeHandling || "standard";
+  const context = price.context || "standard";
+  const minAmount = price.minAmount ?? "0.00";
+  const suggestedAmount = price.suggestedAmount ?? "0.00";
+  return `<div class="modal-pricing-body product-price-row" data-price-index="${index}" data-price-id="${escapeHtml(priceId)}">
+    <div class="price-line-header">
+      <strong>Price ${rowNumber}</strong>
+      <div class="price-line-actions">
+        <label class="inline-check"><input data-price-field="default" type="checkbox" ${price.isDefault ? "checked" : ""}><span>Default price</span></label>
+        <button type="button" class="danger-action" data-remove-price ${index === 0 ? "disabled" : ""}>Remove</button>
+      </div>
+    </div>
+    <div class="modal-price-grid">
+      <label>Sales price<input data-price-field="amount" type="number" min="0" step="0.01" placeholder="0.00" value="${escapeHtml(amount)}"></label>
+      <label><span class="label-line">Regular price <button class="field-tooltip" type="button" data-tooltip="Optional. Shown as a struck-through reference price when it is higher than the sales price." aria-label="Regular price help">?</button></span><input data-price-field="compare_at_amount" type="number" min="0" step="0.01" placeholder="0.00" value="${escapeHtml(compareAtAmount)}"></label>
+      <label>Currency
+        <select data-price-field="currency">
+          ${["usd", "eur", "gbp", "cad"].map((code) => `<option value="${code}" ${code === currency ? "selected" : ""}>${code.toUpperCase()}</option>`).join("")}
+        </select>
+      </label>
+      <label>Quantity<input data-price-field="quantity" type="number" min="1" value="${escapeHtml(quantity)}"></label>
+    </div>
+    <div class="modal-pricing-options">
+      <fieldset>
+        <legend>Pricing model</legend>
+        ${radioOption(`pricing_model_${index}`, "one_time", "One-time", pricingModel)}
+        ${radioOption(`pricing_model_${index}`, "recurring", "Recurring", pricingModel)}
+        ${radioOption(`pricing_model_${index}`, "customer_chooses", "Customer chooses", pricingModel)}
+      </fieldset>
+      <fieldset>
+        <legend>Fee handling</legend>
+        ${radioOption(`fee_handling_${index}`, "standard", "Standard <span>fees deducted</span>", feeHandling)}
+        ${radioOption(`fee_handling_${index}`, "net_guaranteed", "Net-guaranteed <span>fees added on top</span>", feeHandling)}
+      </fieldset>
+    </div>
+    <label class="price-context-select">
+      <span class="label-line">Price context <button class="field-tooltip" type="button" data-toggle-context-help aria-expanded="false" aria-label="Price context help">?</button></span>
+      <select data-price-field="context">
+        ${priceContextOptions(context)}
+      </select>
+    </label>
+    <div class="price-context-help hidden" data-price-context-help>
+      <p>This option determines the context in which an offer is presented:</p>
+      <ul>
+        <li><strong>Standard:</strong> normal storefront / landing page price.</li>
+        <li><strong>Sale:</strong> discounted price that will be tagged as "sale" on the page.</li>
+        <li><strong>Flash sale:</strong> time-sensitive sale price paired with a countdown timer.</li>
+        <li><strong>Upsell:</strong> price offered after a purchase is successfully completed.</li>
+        <li><strong>Downsell:</strong> price offered after an upsell is declined.</li>
+        <li><strong>Order Bump:</strong> a relatively small add-on price shown during checkout.</li>
+      </ul>
+    </div>
+    <div class="customer-chooses-grid">
+      <label>Minimum amount<input data-price-field="min_amount" type="number" min="0" step="0.01" placeholder="0.00" value="${escapeHtml(minAmount)}"></label>
+      <label>Suggested amount<input data-price-field="suggested_amount" type="number" min="0" step="0.01" placeholder="0.00" value="${escapeHtml(suggestedAmount)}"></label>
+    </div>
+    <div class="price-preview"><span>Preview:</span><strong>$0.00</strong></div>
+  </div>`;
+}
+
+function radioOption(name, value, label, selectedValue) {
+  return `<label><input name="${name}" type="radio" value="${value}" ${value === selectedValue ? "checked" : ""}> ${label}</label>`;
+}
+
+function priceContextOptions(selectedValue) {
+  return [
+    ["standard", "Standard"],
+    ["sale", "Sale"],
+    ["flash_sale", "Flash sale"],
+    ["upsell", "Upsell"],
+    ["downsell", "Downsell"],
+    ["order_bump", "Order bump"],
+  ].map(([value, label]) => `<option value="${value}" ${value === selectedValue ? "selected" : ""}>${label}</option>`).join("");
+}
+
+function addProductPriceRow() {
+  const container = document.querySelector("#productPriceRows");
+  if (!container) return;
+  const index = container.querySelectorAll(".product-price-row").length;
+  container.insertAdjacentHTML("beforeend", productPriceRowHtml(index));
+  updateProductPricePreview();
+}
+
+function renumberProductPriceRows() {
+  document.querySelectorAll(".product-price-row").forEach((row, index) => {
+    row.dataset.priceIndex = String(index);
+    const title = row.querySelector(".price-line-header strong");
+    if (title) title.textContent = `Price ${index + 1}`;
+    const removeButton = row.querySelector("[data-remove-price]");
+    if (removeButton) removeButton.disabled = index === 0;
+    row.querySelectorAll("input[type='radio']").forEach((radio) => {
+      if (radio.name.startsWith("pricing_model_")) radio.name = `pricing_model_${index}`;
+      if (radio.name.startsWith("fee_handling_")) radio.name = `fee_handling_${index}`;
+    });
+  });
+}
+
+function priceFieldValue(row, field) {
+  return row.querySelector(`[data-price-field="${field}"]`)?.value || "";
+}
+
+function selectedPriceRadio(row, prefix, fallback) {
+  return row.querySelector(`input[name^="${prefix}_"]:checked`)?.value || fallback;
+}
+
+function productPriceRows() {
+  return Array.from(document.querySelectorAll(".product-price-row"));
+}
+
+function priceTenantKeyedAmount(row) {
+  const pricingModel = selectedPriceRadio(row, "pricing_model", "one_time");
+  return pricingModel === "customer_chooses"
+    ? moneyToCents(priceFieldValue(row, "suggested_amount")) || moneyToCents(priceFieldValue(row, "amount"))
+    : moneyToCents(priceFieldValue(row, "amount"));
+}
+
+function productPriceCalculationPayload(row) {
+  const pricingModel = selectedPriceRadio(row, "pricing_model", "one_time");
+  return {
+    tenant_id: appState.tenantId || "tenant_demo",
+    tenant_keyed_amount: priceTenantKeyedAmount(row),
+    currency: (priceFieldValue(row, "currency") || "usd").toLowerCase(),
+    product_type: document.querySelector("#productSchemaForm")?.elements.product_type?.value || "physical",
+    pricing_model: pricingModel,
+    fee_handling: selectedPriceRadio(row, "fee_handling", "standard"),
+    tenant_plan: appState.tenantPlan || "basic",
+    stripe_fee_type: "domestic_card",
+  };
+}
+
+async function calculateProductPrice(row) {
+  const payload = productPriceCalculationPayload(row);
+  const cacheKey = JSON.stringify(payload);
+  if (appState.priceCalculationCache.has(cacheKey)) {
+    return appState.priceCalculationCache.get(cacheKey);
+  }
+  const result = await apiRequest("/prices/calculate", {
+    method: "POST",
+    body: payload,
+  });
+  appState.priceCalculationCache.set(cacheKey, result);
+  return result;
+}
+
+async function calculateProductPricesForSave() {
+  await Promise.all(productPriceRows().map(async (row) => {
+    const calculation = await calculateProductPrice(row);
+    row.dataset.calculatedUnitAmount = String(calculation.unit_amount ?? "");
+    row.dataset.calculatedNetPayout = String(calculation.breakdown?.net_payout ?? "");
+    row.dataset.feeBreakdown = JSON.stringify(calculation.breakdown || {});
+  }));
+}
+
+function priceFeeBreakdown(row) {
+  if (!row.dataset.feeBreakdown) return null;
+  try {
+    const parsed = JSON.parse(row.dataset.feeBreakdown);
+    const requiredFields = ["tenant_keyed_amount", "stripe_fee", "platform_fee", "net_payout"];
+    if (!requiredFields.every((field) => Number.isFinite(Number(parsed[field])))) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function enforceSingleDefaultPrice(target) {
+  if (!target.checked) {
+    ensureProductDefaultPrice();
+    return;
+  }
+  document.querySelectorAll('[data-price-field="default"]').forEach((input) => {
+    if (input !== target) input.checked = false;
+  });
+}
+
+function ensureProductDefaultPrice() {
+  const defaults = Array.from(document.querySelectorAll('[data-price-field="default"]'));
+  if (!defaults.length) {
+    resetProductPriceRows();
+    return;
+  }
+  if (!defaults.some((input) => input.checked)) defaults[0].checked = true;
+}
+
+function buildProductPrices(productId) {
+  ensureProductDefaultPrice();
+  const rows = productPriceRows();
+  return rows.map((row, index) => {
+    const pricingModel = selectedPriceRadio(row, "pricing_model", "one_time");
+    const feeHandling = selectedPriceRadio(row, "fee_handling", "standard");
+    const productType = document.querySelector("#productSchemaForm")?.elements.product_type?.value || "physical";
+    const tenantKeyedAmount = priceTenantKeyedAmount(row);
+    const fallbackUnitAmount = feeHandling === "net_guaranteed"
+      ? netGuaranteedCustomerAmount(tenantKeyedAmount, platformFeeRate(productType, pricingModel))
+      : tenantKeyedAmount;
+    const calculatedUnitAmount = Number(row.dataset.calculatedUnitAmount);
+    const unitAmount = Number.isFinite(calculatedUnitAmount) ? calculatedUnitAmount : fallbackUnitAmount;
+    const quantity = Math.max(1, Number(priceFieldValue(row, "quantity") || 1));
+    const price = {
+      price_id: row.dataset.priceId || generateLocalId(),
+      stripe_price_id: null,
+      product_id: productId,
+      stripe_mode: currentEnvironment,
+      active: true,
+      currency: (priceFieldValue(row, "currency") || "usd").toLowerCase(),
+      quantity,
+      pricing_model: pricingModel,
+      fee_handling: feeHandling,
+      context: priceFieldValue(row, "context") || "standard",
+      tenant_keyed_amount: tenantKeyedAmount,
+      metadata: { items: String(quantity) },
+      is_default: Boolean(row.querySelector('[data-price-field="default"]')?.checked),
+    };
+    const feeBreakdown = priceFeeBreakdown(row);
+    if (feeBreakdown) price.fee_breakdown = feeBreakdown;
+    if (pricingModel !== "customer_chooses" || unitAmount > 0) price.unit_amount = unitAmount;
+    const compareAtAmount = moneyToCents(priceFieldValue(row, "compare_at_amount"));
+    if (compareAtAmount > 0) price.compare_at_unit_amount = compareAtAmount;
+    const minAmount = moneyToCents(priceFieldValue(row, "min_amount"));
+    const suggestedAmount = moneyToCents(priceFieldValue(row, "suggested_amount"));
+    if (pricingModel === "customer_chooses") {
+      price.min_amount = minAmount;
+      price.suggested_amount = suggestedAmount;
+    }
+    return price;
+  });
+}
+
+function updateProductFulfillmentVisibility() {
+  const form = document.querySelector("#productSchemaForm");
+  const isPhysical = !form || form.elements.product_type.value === "physical";
+  document.querySelectorAll("[data-physical-only]").forEach((element) => {
+    element.classList.toggle("hidden", !isPhysical);
+  });
+  if (!isPhysical && form) {
+    form.elements.enable_item_size.checked = false;
+    form.elements.enable_item_color.checked = false;
+    resetProductVariants();
+  }
+  updateProductVariantVisibility();
+}
+
+function updateProductRefundPolicyVisibility() {
+  const form = document.querySelector("#productSchemaForm");
+  const fields = document.querySelector("#productRefundOverrideFields");
+  if (!form || !fields) return;
+  fields.classList.toggle("hidden", form.elements.refund_source.value !== "product_override");
+  refreshProductRefundPolicyPreview();
+}
+
+function resetProductRefundPolicyDefaults() {
+  const form = document.querySelector("#productSchemaForm");
+  if (!form) return;
+  const productType = form.elements.product_type?.value || "physical";
+  const defaults = productRefundDefaults(productType);
+  if (form.elements.refund_window) form.elements.refund_window.value = defaults.refund_window;
+  if (form.elements.refund_condition) form.elements.refund_condition.value = defaults.condition;
+  if (form.elements.refund_return_method) form.elements.refund_return_method.value = defaults.return_method;
+  refreshProductRefundPolicyPreview();
+}
+
+function productRefundDefaults(productType) {
+  if (productType === "digital") {
+    return {
+      refund_window: "non_refundable",
+      condition: "not_downloaded",
+      return_method: "digital_revoke_access",
+    };
+  }
+  if (productType === "service") {
+    return {
+      refund_window: "72_hours",
+      condition: "any",
+      return_method: "no_return_customer_keeps",
+    };
+  }
+  return {
+    refund_window: "30_days",
+    condition: "unused",
+    return_method: "no_return_customer_keeps",
+  };
+}
+
+function refreshProductRefundPolicyPreview() {
+  const form = document.querySelector("#productSchemaForm");
+  if (!form) return;
+  const definition = productRefundPolicyDefinition(
+    form.elements.product_type?.value || "physical",
+    form.elements.refund_window?.value || "30_days",
+    form.elements.refund_condition?.value || "unused",
+    form.elements.refund_return_method?.value || "no_return_customer_keeps",
+  );
+  if (form.elements.refund_short_label) form.elements.refund_short_label.value = definition.short_label;
+  if (form.elements.refund_full_policy) form.elements.refund_full_policy.value = definition.full_policy;
+}
+
+function productRefundPolicyDefinition(productType, refundWindow, condition, returnMethod) {
+  const windowConfig = {
+    non_refundable: { label: "Non-refundable", days: null },
+    "72_hours": { label: "72 hours (3 days)", days: 3 },
+    "7_days": { label: "7-day money-back", days: 7 },
+    "14_days": { label: "14-day money-back", days: 14 },
+    "30_days": { label: "30-day money-back", days: 30 },
+    "60_days": { label: "60-day money-back", days: 60 },
+    custom: { label: "Custom refund policy", days: null },
+  }[refundWindow] || { label: "30-day money-back", days: 30 };
+  if (refundWindow === "non_refundable") {
+    return {
+      short_label: "Non-refundable",
+      full_policy: productType === "digital"
+        ? "All sales are final. Digital items cannot be returned, replaced, or refunded after access is delivered."
+        : "All sales are final and as such, no item can be returned, replaced, or refunded in full or in part.",
+    };
+  }
+  if (refundWindow === "custom") {
+    return {
+      short_label: "Custom refund policy",
+      full_policy: "This product uses a custom refund policy. Update this text before publishing.",
+    };
+  }
+  const conditionText = {
+    any: "any eligible",
+    unused: "unused",
+    unopened: "unopened",
+    defective_only: "defective",
+    not_downloaded: "not downloaded",
+    custom: "approved",
+  }[condition] || "unused";
+  const base = `Refunds are available within ${windowConfig.days} days of delivery in ${conditionText} condition.`;
+  const returnText = {
+    no_return_customer_keeps: "This item does not need to be returned. The customer may keep the item and dispose of it in a responsible way. The seller may still grant a refund.",
+    return_required: "A return is required before a refund is granted. Returns are accomplished with a return label that can be affixed to a package.",
+    digital_revoke_access: "Digital access may be revoked when the refund is approved.",
+    custom: "",
+  }[returnMethod] || "";
+  return {
+    short_label: windowConfig.label,
+    full_policy: [base, returnText].filter(Boolean).join("\n\n"),
+  };
+}
+
+function buildProductRefundPolicy(productType, values) {
+  const source = values.refund_source || "user_preference_default";
+  const defaults = productRefundDefaults(productType);
+  if (source !== "product_override") {
+    const inherited = productRefundPolicyDefinition(productType, defaults.refund_window, defaults.condition, defaults.return_method);
+    return {
+      source,
+      refund_window: defaults.refund_window,
+      condition: defaults.condition,
+      return_method: defaults.return_method,
+      short_label: inherited.short_label,
+      full_policy: inherited.full_policy,
+    };
+  }
+  const refundWindow = values.refund_window || defaults.refund_window;
+  const condition = values.refund_condition || defaults.condition;
+  const returnMethod = values.refund_return_method || defaults.return_method;
+  const generated = productRefundPolicyDefinition(productType, refundWindow, condition, returnMethod);
+  return {
+    source,
+    refund_window: refundWindow,
+    condition,
+    return_method: returnMethod,
+    short_label: values.refund_short_label || generated.short_label,
+    full_policy: values.refund_full_policy || generated.full_policy,
+  };
+}
+
+function updateProductVariantVisibility() {
+  const form = document.querySelector("#productSchemaForm");
+  if (!form) return;
+  const isPhysical = form.elements.product_type.value === "physical";
+  const sizeEnabled = isPhysical && Boolean(form.elements.enable_item_size?.checked);
+  const colorEnabled = isPhysical && Boolean(form.elements.enable_item_color?.checked);
+  document.querySelector("#itemSizeOptions")?.classList.toggle("hidden", !sizeEnabled);
+  document.querySelector("#itemColorOptions")?.classList.toggle("hidden", !colorEnabled);
+}
+
+function resetProductVariants() {
+  const form = document.querySelector("#productSchemaForm");
+  if (form?.elements.enable_item_size) form.elements.enable_item_size.checked = false;
+  if (form?.elements.enable_item_color) form.elements.enable_item_color.checked = false;
+  const sizeContainer = document.querySelector("#sizeVariantsContainer");
+  const colorContainer = document.querySelector("#colorVariantsContainer");
+  if (sizeContainer) sizeContainer.innerHTML = "";
+  if (colorContainer) colorContainer.innerHTML = "";
+  updateProductVariantVisibility();
+}
+
+function addProductVariantItem(type, variant = {}) {
+  const container = document.querySelector(type === "size" ? "#sizeVariantsContainer" : "#colorVariantsContainer");
+  if (!container) return;
+  const isColor = type === "color";
+  const labelPlaceholder = isColor ? "Black" : "S";
+  const descriptionPlaceholder = isColor ? "e.g., Jet black finish" : "e.g., Waist: 30-32in, Hips: 37-39in";
+  container.insertAdjacentHTML("beforeend", `
+    <div class="variant-item" data-variant-type="${type}">
+      <input class="variant-label-input" data-variant-field="label" placeholder="${labelPlaceholder}" value="${escapeHtml(variant.label || "")}" maxlength="${isColor ? 20 : 10}">
+      ${isColor ? `<input class="variant-color-preview" data-variant-field="hex_color" type="color" title="Click to pick color" value="${escapeHtml(variant.hex_color || "#000000")}">` : ""}
+      <input data-variant-field="description" placeholder="${descriptionPlaceholder}" value="${escapeHtml(variant.description || "")}">
+      <button type="button" class="btn-remove-variant" data-remove-variant aria-label="Remove ${type} variant">×</button>
+    </div>
+  `);
+  container.querySelector(".variant-item:last-child input")?.focus();
+}
+
+function getProductSizeVariants() {
+  return Array.from(document.querySelectorAll('#sizeVariantsContainer [data-variant-type="size"]'))
+    .map((row) => ({
+      label: row.querySelector('[data-variant-field="label"]')?.value.trim() || "",
+      description: row.querySelector('[data-variant-field="description"]')?.value.trim() || "",
+    }))
+    .filter((variant) => variant.label || variant.description);
+}
+
+function getProductColorVariants() {
+  return Array.from(document.querySelectorAll('#colorVariantsContainer [data-variant-type="color"]'))
+    .map((row) => ({
+      label: row.querySelector('[data-variant-field="label"]')?.value.trim() || "",
+      hex_color: row.querySelector('[data-variant-field="hex_color"]')?.value || "#000000",
+      description: row.querySelector('[data-variant-field="description"]')?.value.trim() || "",
+    }))
+    .filter((variant) => variant.label || variant.description);
+}
+
+function buildProductDocumentFromForm() {
+  const form = document.querySelector("#productSchemaForm");
+  const values = form ? formValues(form) : {};
+  const now = Math.floor(Date.now() / 1000);
+  const productId = values.product_id || generateLocalId();
+  const productType = values.product_type || "physical";
+  const prices = buildProductPrices(productId);
+  const defaultPrice = prices.find((price) => price.is_default) || prices[0];
+  prices.forEach((price) => delete price.is_default);
+  const images = uniqueStrings([...appState.productUploadedImages, ...lines(values.images)]);
+  const isPhysical = productType === "physical";
+  const sizeEnabled = isPhysical && Boolean(values.enable_item_size);
+  const colorEnabled = isPhysical && Boolean(values.enable_item_color);
+  const tags = buildProductTags(values);
+  return {
+    schema_version: "2026-05-29",
+    document_type: "product",
+    tenant_id: values.tenant_id || appState.tenantId || "tenant_demo",
+    product_id: productId,
+    stripe_product_id: null,
+    stripe_mode: currentEnvironment,
+    canonical: false,
+    active: Boolean(values.product_active),
+    name: values.product_name || "Untitled Product",
+    description: values.description || "",
+    images,
+    product_type: productType,
+    product_category: values.product_category || "",
+    refund_policy: buildProductRefundPolicy(productType, values),
+    variants: {
+      size_enabled: sizeEnabled,
+      color_enabled: colorEnabled,
+      sizes: sizeEnabled ? getProductSizeVariants() : [],
+      colors: colorEnabled ? getProductColorVariants() : [],
+    },
+    prices,
+    default_price_id: defaultPrice.price_id,
+    fulfillment: {
+      requires_shipping: isPhysical,
+      ship_from: null,
+      weight_lb: isPhysical ? Number(values.package_weight || 0) : null,
+      dimensions: {
+        length_in: isPhysical ? Number(values.package_length || 0) : null,
+        width_in: isPhysical ? Number(values.package_width || 0) : null,
+        height_in: isPhysical ? Number(values.package_height || 0) : null,
+      },
+    },
+    sync: {
+      status: "pending",
+      last_synced_at: null,
+      error: null,
+    },
+    created_at: now,
+    updated_at: now,
+    tags,
+  };
+}
+
+function updateProductPricePreview() {
+  document.querySelectorAll(".product-price-row").forEach((row) => {
+    const preview = row.querySelector(".price-preview");
+    if (!preview) return;
+    const currency = (priceFieldValue(row, "currency") || "usd").toLowerCase();
+    const pricingModel = selectedPriceRadio(row, "pricing_model", "one_time");
+    const feeHandling = selectedPriceRadio(row, "fee_handling", "standard");
+    const productType = document.querySelector("#productSchemaForm")?.elements.product_type?.value || "physical";
+    const saleAmount = pricingModel === "customer_chooses"
+      ? moneyToCents(priceFieldValue(row, "suggested_amount")) || moneyToCents(priceFieldValue(row, "amount"))
+      : moneyToCents(priceFieldValue(row, "amount"));
+    const compareAtAmount = moneyToCents(priceFieldValue(row, "compare_at_amount"));
+    const platformRate = platformFeeRate(productType, pricingModel);
+    const previewAmount = feeHandling === "net_guaranteed"
+      ? netGuaranteedCustomerAmount(saleAmount, platformRate)
+      : saleAmount;
+    preview.innerHTML = [
+      "<span>Preview:</span>",
+      `<strong>${escapeHtml(formatCurrency(previewAmount, currency))}</strong>`,
+      compareAtAmount > saleAmount ? `<span class="price-preview-compare">${escapeHtml(formatCurrency(compareAtAmount, currency))}</span>` : "",
+      feeHandling === "net_guaranteed" && saleAmount > 0
+        ? `<span class="price-preview-note">includes Stripe + ${escapeHtml(formatPercent(platformRate))} platform fee</span>`
+        : "",
+    ].join("");
+  });
+}
+
+function platformFeeRate(productType, pricingModel) {
+  const tier = appState.tenantPlan || "basic";
+  const feeClass = pricingModel === "customer_chooses" ? "tip-jar" : productType === "physical" ? "physical" : "digital";
+  const configuredRate = appState.platformFee?.[tier]?.[feeClass];
+  if (Number.isFinite(Number(configuredRate))) return Number(configuredRate);
+  return defaultPlatformFeeConfig.basic[feeClass] || 0;
+}
+
+function netGuaranteedCustomerAmount(netAmount, platformRate) {
+  if (!netAmount) return 0;
+  const variableRate = STRIPE_PERCENT_FEE + platformRate;
+  if (variableRate >= 1) return netAmount;
+  return Math.ceil((netAmount + STRIPE_FIXED_FEE_CENTS) / (1 - variableRate));
+}
+
+function formatPercent(rate) {
+  const percent = Number(rate) * 100;
+  return `${Number.isInteger(percent) ? percent.toFixed(0) : percent.toFixed(1)}%`;
+}
+
+function resetProductImageUploads() {
+  appState.productUploadedImages = [];
+  const previews = document.querySelector("#productImagePreviews");
+  const status = document.querySelector("#productUploadStatus");
+  if (previews) previews.innerHTML = "";
+  if (status) {
+    status.textContent = "";
+    status.className = "upload-status";
+  }
+}
+
+async function handleProductImageFiles(files) {
+  if (!files.length) return;
+  const validFiles = files.filter((file) => file.type.startsWith("image/") && file.size <= 10 * 1024 * 1024);
+  const rejected = files.length - validFiles.length;
+  const status = document.querySelector("#productUploadStatus");
+  if (rejected && status) {
+    status.textContent = `${rejected} file${rejected === 1 ? "" : "s"} skipped. Use image files up to 10MB.`;
+    status.className = "upload-status error";
+  }
+  if (!validFiles.length) return;
+  if (uniqueStrings([...appState.productUploadedImages, ...lines(document.querySelector("[name='images']")?.value)]).length + validFiles.length > 8) {
+    if (status) {
+      status.textContent = "Stripe products support a maximum of 8 images.";
+      status.className = "upload-status error";
+    }
+    return;
+  }
+  if (status) {
+    status.textContent = `Uploading ${validFiles.length} image${validFiles.length === 1 ? "" : "s"}...`;
+    status.className = "upload-status uploading";
+  }
+  let completed = 0;
+  for (const file of validFiles) {
+    try {
+      const url = await uploadProductImage(file);
+      completed += 1;
+      addProductImageUrl(url);
+      if (status) status.textContent = `Uploaded ${completed}/${validFiles.length} image${validFiles.length === 1 ? "" : "s"}...`;
+    } catch (error) {
+      if (status) {
+        status.textContent = `Failed to upload ${file.name}: ${error.message}`;
+        status.className = "upload-status error";
+      }
+      return;
+    }
+  }
+  if (status) {
+    status.textContent = `Uploaded ${completed} image${completed === 1 ? "" : "s"}.`;
+    status.className = "upload-status success";
+  }
+}
+
+async function uploadProductImage(file) {
+  const apiBase = apiBaseInput.value.trim().replace(/\/$/, "");
+  if (!apiBase) throw new Error("API Base URL is required for image uploads");
+  const presignResponse = await fetch(`${apiBase}/upload/multiple`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      fileName: file.name,
+      contentType: file.type,
+      basePrefix: "products",
+      targetBucket: "images.juniorbay.net",
+    }),
+  });
+  if (!presignResponse.ok) throw new Error("Failed to get upload URL");
+  const presigned = await presignResponse.json();
+  const formData = new FormData();
+  Object.entries(presigned.upload?.fields || {}).forEach(([key, value]) => formData.append(key, value));
+  formData.append("file", file);
+  const uploadResponse = await fetch(presigned.upload.url, { method: "POST", body: formData });
+  if (!uploadResponse.ok) throw new Error("Failed to upload file");
+  return pollProductImageUrl(presigned.id);
+}
+
+async function pollProductImageUrl(imageId) {
+  const apiBase = apiBaseInput.value.trim().replace(/\/$/, "");
+  if (!apiBase) throw new Error("API Base URL is required for image uploads");
+  const deadline = Date.now() + 180000;
+  let delay = 1200;
+  while (Date.now() < deadline) {
+    await sleep(delay);
+    delay = Math.min(8000, Math.ceil(delay * 1.35));
+    let body = {};
+    try {
+      const response = await fetch(`${apiBase}/upload/status/${encodeURIComponent(imageId)}`, { cache: "no-store" });
+      body = await response.json().catch(() => ({}));
+    } catch {
+      continue;
+    }
+    if (body.status === "failed") throw new Error("Image processing failed");
+    for (const url of productImageUrlCandidates(body.urls || {})) {
+      if (await imageUrlLoads(url)) return url;
+    }
+  }
+  throw new Error("Timed out waiting for processed image");
+}
+
+function preferredProductImageUrl(urls) {
+  return productImageUrlCandidates(urls)[0] || "";
+}
+
+function productImageUrlCandidates(urls) {
+  return uniqueStrings([
+    urls.small?.webp,
+    urls.small?.jpg,
+    urls.medium?.webp,
+    urls.medium?.jpg,
+    urls.large?.webp,
+    urls.large?.jpg,
+    urls.original,
+  ].filter(Boolean).map(cdnImageUrl));
+}
+
+function imageUrlLoads(url, timeoutMs = 4000) {
+  if (!url) return Promise.resolve(false);
+  return new Promise((resolve) => {
+    const image = new Image();
+    let done = false;
+    const finish = (ok) => {
+      if (done) return;
+      done = true;
+      image.onload = null;
+      image.onerror = null;
+      resolve(ok);
+    };
+    const cacheBuster = url.includes("?") ? "&" : "?";
+    image.onload = () => finish(true);
+    image.onerror = () => finish(false);
+    image.src = `${url}${cacheBuster}_probe=${Date.now()}`;
+    setTimeout(() => finish(false), timeoutMs);
+  });
+}
+
+function cdnImageUrl(url) {
+  return url ? String(url).replace("images.juniorbay.net", "images.juniorbay.com") : "";
+}
+
+function addProductImageUrl(url) {
+  if (!url) return;
+  appState.productUploadedImages = uniqueStrings([...appState.productUploadedImages, url]);
+  const textarea = document.querySelector("[name='images']");
+  if (textarea) textarea.value = uniqueStrings([...lines(textarea.value), url]).join("\n");
+  renderProductImagePreviews();
+}
+
+function renderProductImagePreviews() {
+  const previews = document.querySelector("#productImagePreviews");
+  if (!previews) return;
+  previews.innerHTML = appState.productUploadedImages.map((url) => `
+    <figure class="product-image-preview">
+      <img src="${escapeHtml(url)}" alt="Uploaded product image">
+      <figcaption>${escapeHtml(shortImageName(url))}</figcaption>
+    </figure>
+  `).join("");
+}
+
+function shortImageName(url) {
+  try {
+    const parsed = new URL(url);
+    return parsed.pathname.split("/").filter(Boolean).pop() || parsed.hostname;
+  } catch {
+    return url;
+  }
+}
+
+function uniqueStrings(values) {
+  return Array.from(new Set((values || []).map((value) => String(value || "").trim()).filter(Boolean)));
+}
+
+function normalizeProductTag(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[_-]+/g, " ")
+    .replace(/[^a-z0-9 ]+/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function productTagsFromText(value) {
+  const normalized = normalizeProductTag(value);
+  if (!normalized) return [];
+  const stopWords = new Set(["a", "an", "and", "for", "of", "the", "to", "with"]);
+  return [
+    normalized,
+    ...normalized.split(" ").filter((part) => part.length > 2 && !stopWords.has(part)),
+  ];
+}
+
+function buildProductTags(values) {
+  const category = normalizeProductTag(values.product_category || "");
+  const productType = normalizeProductTag(values.product_type || "");
+  const customTags = String(values.product_tags || "")
+    .split(/[,;\n]/)
+    .map(normalizeProductTag);
+  return uniqueStrings([
+    ...productTagsFromText(values.product_name || "Untitled Product"),
+    productType,
+    category && category !== "other" ? category : "",
+    ...customTags,
+  ]);
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function upsertLocalProduct(product) {
+  const existingIndex = appState.products.findIndex((item) => item.product_id === product.product_id);
+  if (existingIndex >= 0) {
+    appState.products.splice(existingIndex, 1, product);
+    return;
+  }
+  appState.products.push(product);
+}
+
+function renderProductTable() {
+  const rows = document.querySelector("#productsTableRows");
+  const tableWrap = document.querySelector("#productsTableWrap");
+  const empty = document.querySelector(".product-empty-state");
+  if (!rows || !tableWrap || !empty) return;
+  tableWrap.classList.toggle("hidden", !appState.products.length);
+  empty.classList.toggle("hidden", Boolean(appState.products.length));
+  rows.innerHTML = appState.products.map((product) => productCard(product)).join("");
+}
+
+function productCard(product) {
+  const price = defaultProductPrice(product);
+  const image = product.images?.[0] || "";
+  const priceText = price ? formatCurrency(price.unit_amount, price.currency) : "No price";
+  const compareAt = price?.compare_at_unit_amount
+    ? `<span class="product-card-compare">Regular ${escapeHtml(formatCurrency(price.compare_at_unit_amount, price.currency))}</span>`
+    : "";
+  const imageMarkup = image
+    ? `<img src="${escapeHtml(image)}" alt="${escapeHtml(product.name || "Product image")}">`
+    : `<span>${escapeHtml((product.name || "P").slice(0, 1).toUpperCase())}</span>`;
+  return `<article class="product-card">
+    <div class="product-card-image${image ? "" : " placeholder"}">${imageMarkup}</div>
+    <div class="product-card-body">
+      <h3>${escapeHtml(product.name || "Untitled Product")}</h3>
+      <p>${escapeHtml(product.description || "No description provided.")}</p>
+      <div class="product-card-price">
+        <strong>${escapeHtml(priceText)}</strong>
+        ${compareAt}
+      </div>
+      <div class="product-card-actions">
+        <button type="button" class="secondary-action">Edit</button>
+        <button type="button" class="secondary-action">Details</button>
+        <button type="button" class="secondary-action">Archive</button>
+      </div>
+    </div>
+  </article>`;
+}
+
+function defaultProductPrice(product) {
+  const prices = Array.isArray(product.prices) ? product.prices : [];
+  return prices.find((price) => price.price_id === product.default_price_id)
+    || prices.find((price) => price.active !== false)
+    || prices[0]
+    || null;
+}
+
+function refundSourceLabel(source) {
+  const labels = {
+    user_preference_default: "User preference",
+    tenant_default: "Tenant default",
+    product_override: "Product override",
+  };
+  return labels[source] || source || "Inherited";
+}
+
 function renderSimplePageHtml({ page, offer, product, checkout_url: checkoutUrl }) {
   const price = product.prices[0];
   const formattedPrice = formatCurrency(price.unit_amount, price.currency);
@@ -583,6 +2014,24 @@ function pageSlug(value) {
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "") || "simple-page";
+}
+
+function lines(value) {
+  return String(value || "")
+    .split(/\r?\n/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function commaList(value) {
+  return String(value || "")
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function moneyToCents(value) {
+  return Math.round(Number(value || 0) * 100);
 }
 
 async function loadRegistration() {
@@ -683,8 +2132,104 @@ function updateWebhookEndpoints() {
   const tenantId = encodeURIComponent(appState.tenantId || "tenant_demo");
   const testEndpoint = document.querySelector("[name='webhook_endpoint_test']");
   const liveEndpoint = document.querySelector("[name='webhook_endpoint_live']");
-  if (testEndpoint) testEndpoint.value = `https://api-dev.juniorbay.com/webhook/${tenantId}`;
-  if (liveEndpoint) liveEndpoint.value = `https://checkout.juniorbay.com/webhook/${tenantId}`;
+  if (testEndpoint) testEndpoint.value = `https://dev.juniorbay.com/webhook/${tenantId}`;
+  if (liveEndpoint) liveEndpoint.value = `https://prod.juniorbay.com/webhook/${tenantId}`;
+}
+
+function environmentKey(environment = currentEnvironment) {
+  return environment === "live" ? "live" : "test";
+}
+
+function configEnvironment(environment = currentEnvironment) {
+  return environmentKey(environment) === "live" ? "prod" : "dev";
+}
+
+function apiBaseStorageKey(environment = currentEnvironment) {
+  return `stripeLinkApiBase:${environmentKey(environment)}`;
+}
+
+function configuredApiBase(environment = currentEnvironment) {
+  const normalized = environmentKey(environment);
+  return (
+    localStorage.getItem(apiBaseStorageKey(normalized)) ||
+    (normalized === "test" ? localStorage.getItem("stripeLinkApiBase") : "") ||
+    defaultApiBaseByEnvironment[normalized] ||
+    ""
+  );
+}
+
+async function loadAppConfigApiBase(environment = currentEnvironment, options = {}) {
+  const normalized = environmentKey(environment);
+  const apiBase = (apiBaseInput.value.trim() || defaultApiBaseByEnvironment[normalized] || "").replace(/\/$/, "");
+  updateAppConfigPanel({
+    environment: configEnvironment(normalized),
+    value: configuredApiBase(normalized),
+    status: "Using dashboard fallback until app config is loaded.",
+  });
+  if (!apiBase) return;
+  try {
+    const url = new URL(`${apiBase}/app-config/app_config`);
+    url.searchParams.set("environment", "global");
+    const response = await fetch(url.toString(), {
+      headers: {
+        "Content-Type": "application/json",
+        "X-Environment": normalized,
+      },
+    });
+    const body = await response.json().catch(() => ({}));
+    if (body.app_config?.platform_fee) {
+      appState.platformFee = normalizedPlatformFee(body.app_config.platform_fee);
+      updateProductPricePreview();
+    }
+    const environmentConfig = body.app_config?.environments?.[configEnvironment(normalized)];
+    if (!response.ok || !environmentConfig?.api_base_url) {
+      if (options.updatePanel) {
+        updateAppConfigPanel({
+          environment: configEnvironment(normalized),
+          value: configuredApiBase(normalized),
+          status: body.message || "No app_config environment block found for this environment.",
+        });
+      }
+      return;
+    }
+    apiBaseInput.value = environmentConfig.api_base_url;
+    localStorage.setItem(apiBaseStorageKey(normalized), environmentConfig.api_base_url);
+    updateAppConfigPanel({
+      environment: configEnvironment(normalized),
+      value: environmentConfig.api_base_url,
+      status: `Loaded ${environmentConfig.label || configEnvironment(normalized)} API base URL from app config.`,
+    });
+  } catch (error) {
+    // The dashboard can still run from its environment fallback while config bootstraps.
+    if (options.updatePanel) {
+      updateAppConfigPanel({
+        environment: configEnvironment(normalized),
+        value: configuredApiBase(normalized),
+        status: "App config endpoint is unavailable. Using dashboard fallback.",
+      });
+    }
+  }
+}
+
+function normalizedPlatformFee(platformFee) {
+  const normalized = structuredClone(defaultPlatformFeeConfig);
+  Object.entries(platformFee || {}).forEach(([tier, fees]) => {
+    if (!normalized[tier] || !fees || typeof fees !== "object") return;
+    ["physical", "digital", "tip-jar"].forEach((feeClass) => {
+      const value = Number(fees[feeClass]);
+      if (Number.isFinite(value) && value >= 0 && value <= 1) normalized[tier][feeClass] = value;
+    });
+  });
+  return normalized;
+}
+
+function updateAppConfigPanel(config) {
+  const environmentInput = document.querySelector("#appConfigEnvironment");
+  const apiBaseUrlInput = document.querySelector("#appConfigApiBaseUrl");
+  const status = document.querySelector("#appConfigStatus");
+  if (environmentInput) environmentInput.value = config.environment || configEnvironment();
+  if (apiBaseUrlInput) apiBaseUrlInput.value = config.value || "";
+  if (status) status.textContent = config.status || "";
 }
 
 function applyEnvironment(environment) {

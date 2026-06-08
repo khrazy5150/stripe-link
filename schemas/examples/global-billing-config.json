@@ -1,0 +1,41 @@
+{
+  "schema_version": "2026-06-04",
+  "document_type": "global_billing_config",
+  "effective_date": "2026-06-04",
+  "canonical": true,
+  "platform_fees": {
+    "unit": "percent",
+    "tiers": {
+      "basic": { "physical": 10.0, "digital": 15.0, "tip_jar": 5.0 },
+      "standard": { "physical": 8.0, "digital": 13.0, "tip_jar": 4.0 },
+      "pro": { "physical": 5.0, "digital": 10.0, "tip_jar": 2.0 }
+    }
+  },
+  "payment_processing": {
+    "schedules": {
+      "US_USD": {
+        "merchant_loc": "US",
+        "settlement_currency": "USD",
+        "rates": {
+          "domestic_card": {
+            "percentage": 2.9,
+            "fixed_cents": 30,
+            "condition": "always"
+          },
+          "international_surcharge": {
+            "percentage": 1.5,
+            "fixed_cents": 0,
+            "condition": "card_country_differs_from_merchant_loc"
+          },
+          "fx_conversion": {
+            "percentage": 1.0,
+            "fixed_cents": 0,
+            "condition": "card_currency_differs_from_settlement_currency"
+          }
+        }
+      }
+    }
+  },
+  "created_at": 1780000000,
+  "updated_at": 1780000000
+}

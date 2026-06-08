@@ -31,6 +31,14 @@ You can also use the wrapper:
 ./deploy/deploy.sh dev
 ```
 
+Deploy the isolated dashboard frontend after the stack has created the dashboard bucket and CloudFront distribution:
+
+```bash
+./deploy/deploy-dashboard.sh dev
+```
+
+The dashboard deploy script reads `DashboardBucketName`, `DashboardDistributionId`, and `DashboardUrl` from the CloudFormation stack, syncs `dashboard/` to S3, and invalidates CloudFront. A custom dashboard URL such as `dashboard.juniorbay.com` can be attached by deploying the stack with `DASHBOARD_CUSTOM_DOMAIN_NAME` and a CloudFront-compatible ACM certificate ARN from `us-east-1`.
+
 ## Local Checks
 
 ```bash
@@ -64,4 +72,4 @@ The current application slice supports:
 
 ## Dashboard Shell
 
-Open `dashboard/index.html` in a browser for the first dashboard shell. Set the API Base URL to the deployed API stage URL, then use the menu forms to exercise registration, Stripe Connect, Stripe keys, services, notifications, invoices, shipping, customers, configuration, profile, and preferences.
+Open `dashboard/index.html` locally for the first dashboard shell, or deploy it with `./deploy/deploy-dashboard.sh dev`. Set the API Base URL to the deployed API stage URL or custom API URL, then use the menu forms to exercise registration, Stripe Connect, Stripe keys, services, notifications, invoices, shipping, customers, configuration, profile, and preferences.

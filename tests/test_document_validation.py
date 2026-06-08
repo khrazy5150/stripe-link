@@ -6,6 +6,8 @@ from pathlib import Path
 
 from stripe_link.domain.documents import (
     DocumentValidationError,
+    validate_app_config,
+    validate_global_billing_config,
     validate_offer_document,
     validate_page_document,
     validate_product_document,
@@ -37,20 +39,39 @@ class DocumentValidationTests(unittest.TestCase):
         validate_offer_document(load_fixture("offer-universal-bundle.json"))
         validate_page_document(load_fixture("page-universal-bundle.json"))
 
+    def test_accepts_app_config_fixture(self):
+        validate_app_config(load_fixture("app-config.json"))
+
+    def test_accepts_global_billing_config_fixture(self):
+        validate_global_billing_config(load_fixture("global-billing-config.json"))
+
+    def test_app_config_rejects_invalid_dev_api_base_url(self):
+        config = load_fixture("app-config.json")
+        config["environments"]["dev"]["api_base_url"] = "dev.juniorbay.com"
+
+        with self.assertRaisesRegex(DocumentValidationError, "environments.dev.api_base_url"):
+            validate_app_config(config)
+
+    def test_global_billing_config_rejects_invalid_platform_fee_percent(self):
+        config = load_fixture("global-billing-config.json")
+        config["platform_fees"]["tiers"]["basic"]["physical"] = 101
+
+        with self.assertRaisesRegex(DocumentValidationError, "platform_fees.tiers.basic.physical"):
+            validate_global_billing_config(config)
+
     def test_accepts_dynamodb_decimal_integer_fields(self):
         product = load_fixture("product-universal-bundle.json")
         offer = load_fixture("offer-universal-bundle.json")
         for price in product["prices"]:
             price["unit_amount"] = Decimal(price["unit_amount"])
+            price["tenant_keyed_amount"] = Decimal(price["tenant_keyed_amount"])
             price["quantity"] = Decimal(price["quantity"])
-            price["regular_unit_amount"] = Decimal(price["regular_unit_amount"])
-            price["discount_pct"] = Decimal(price["discount_pct"])
+            price["compare_at_unit_amount"] = Decimal(price["compare_at_unit_amount"])
         for item in offer["items"]:
             if "quantity" in item:
                 item["quantity"] = Decimal(item["quantity"])
             for price in item.get("selectable_prices", []):
                 price["quantity"] = Decimal(price["quantity"])
-                price["regular_unit_amount"] = Decimal(price["regular_unit_amount"])
                 price["display_discount_pct"] = Decimal(price["display_discount_pct"])
 
         validate_product_document(product)
@@ -63,6 +84,59 @@ class DocumentValidationTests(unittest.TestCase):
         with self.assertRaisesRegex(DocumentValidationError, "price.unit_amount"):
             validate_product_document(product)
 
+    def test_product_accepts_customer_chooses_price_without_unit_amount(self):
+        product = copy.deepcopy(self.product)
+        price = product["prices"][0]
+        price["pricing_model"] = "customer_chooses"
+        price.pop("unit_amount", None)
+        price["min_amount"] = 500
+        price["suggested_amount"] = 2500
+
+        validate_product_document(product)
+
+    def test_product_rejects_price_label(self):
+        product = copy.deepcopy(self.product)
+        product["prices"][0]["label"] = "One Bottle"
+
+        with self.assertRaisesRegex(DocumentValidationError, "price.label"):
+            validate_product_document(product)
+
+    def test_product_rejects_price_nickname(self):
+        product = copy.deepcopy(self.product)
+        product["prices"][0]["nickname"] = "One Bottle"
+
+        with self.assertRaisesRegex(DocumentValidationError, "price.nickname"):
+            validate_product_document(product)
+
+    def test_product_requires_canonical_marker(self):
+        product = copy.deepcopy(self.product)
+        product.pop("canonical")
+
+        with self.assertRaisesRegex(DocumentValidationError, "canonical"):
+            validate_product_document(product)
+
+    def test_product_requires_tags(self):
+        product = copy.deepcopy(self.product)
+        product.pop("tags")
+
+        with self.assertRaisesRegex(DocumentValidationError, "tags"):
+            validate_product_document(product)
+
+    def test_product_rejects_legacy_local_metadata(self):
+        product = copy.deepcopy(self.product)
+        product["local_metadata"] = {}
+
+        with self.assertRaisesRegex(DocumentValidationError, "local_metadata"):
+            validate_product_document(product)
+
+    def test_product_rejects_legacy_top_level_shipping_fields(self):
+        product = copy.deepcopy(self.product)
+        product["requires_shipping"] = True
+        product["package_dimensions"] = {"length": 10, "width": 8, "height": 4}
+
+        with self.assertRaisesRegex(DocumentValidationError, "requires_shipping"):
+            validate_product_document(product)
+
     def test_product_rejects_duplicate_price_ids(self):
         product = copy.deepcopy(self.product)
         product["prices"][1]["price_id"] = product["prices"][0]["price_id"]
@@ -72,20 +146,33 @@ class DocumentValidationTests(unittest.TestCase):
 
     def test_product_accepts_fulfillment_block(self):
         product = copy.deepcopy(self.product)
-        product.pop("requires_shipping", None)
         product["fulfillment"] = {
             "requires_shipping": True,
             "ship_from": None,
-            "weight_oz": None,
+            "weight_lb": None,
+            "dimensions": {
+                "length_in": None,
+                "width_in": None,
+                "height_in": None,
+            },
         }
 
         validate_product_document(product)
 
     def test_product_rejects_invalid_fulfillment_weight(self):
         product = copy.deepcopy(self.product)
-        product["fulfillment"] = {"requires_shipping": True, "weight_oz": "16"}
+        product["fulfillment"] = {
+            "requires_shipping": True,
+            "ship_from": None,
+            "weight_lb": "16",
+            "dimensions": {
+                "length_in": None,
+                "width_in": None,
+                "height_in": None,
+            },
+        }
 
-        with self.assertRaisesRegex(DocumentValidationError, "fulfillment.weight_oz"):
+        with self.assertRaisesRegex(DocumentValidationError, "fulfillment.weight_lb"):
             validate_product_document(product)
 
     def test_product_rejects_invalid_refund_policy(self):
