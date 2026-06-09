@@ -43,6 +43,7 @@ const appState = {
   productUploadedImages: [],
   leadCaptureAction: "capture_email",
   priceCalculationCache: new Map(),
+  productSaveInProgress: false,
 };
 applyEnvironment(currentEnvironment);
 loadAppConfigApiBase(currentEnvironment);
@@ -226,6 +227,11 @@ document.querySelector("#btnCreateProductUi")?.addEventListener("click", () => {
 });
 
 document.querySelector("#productSchemaForm")?.addEventListener("input", () => {
+  const form = document.querySelector("#productSchemaForm");
+  if (form?.classList.contains("was-validated") && form.checkValidity()) {
+    form.classList.remove("was-validated");
+    setProductFormError("");
+  }
   if (!productIsLeadGen()) updateProductPricePreview();
 });
 
@@ -286,6 +292,26 @@ document.querySelector("#btnAddSizeVariant")?.addEventListener("click", () => {
 
 document.querySelector("#btnAddColorVariant")?.addEventListener("click", () => {
   addProductVariantItem("color");
+});
+
+document.querySelector("#btnAddProductTag")?.addEventListener("click", () => {
+  showProductTagInput();
+});
+
+document.querySelector("#productTagInput")?.addEventListener("keydown", (event) => {
+  if (event.key !== "Enter") return;
+  event.preventDefault();
+  addProductTagFromInput();
+});
+
+document.querySelector("#productTagInput")?.addEventListener("blur", () => {
+  addProductTagFromInput({ hideWhenEmpty: true });
+});
+
+document.querySelector("#productTagList")?.addEventListener("click", (event) => {
+  const removeButton = event.target.closest("[data-remove-product-tag]");
+  if (!removeButton) return;
+  removeButton.closest("[data-product-tag]")?.remove();
 });
 
 document.querySelector("#productSchemaForm")?.addEventListener("click", (event) => {
@@ -352,10 +378,14 @@ document.querySelector("#btnSaveProductUi")?.addEventListener("click", async () 
 });
 
 document.querySelector("#btnResetProductUi")?.addEventListener("click", () => {
-  document.querySelector("#productSchemaForm")?.reset();
+  const form = document.querySelector("#productSchemaForm");
+  form?.reset();
+  form?.classList.remove("was-validated");
+  setProductFormError("");
   resetProductPriceRows();
   resetProductImageUploads();
   resetProductVariants();
+  resetProductTags();
   resetProductLeadCapture();
   resetProductRefundPolicyDefaults();
   updateProductFulfillmentVisibility();
@@ -365,21 +395,54 @@ document.querySelector("#btnResetProductUi")?.addEventListener("click", () => {
 
 async function saveProductFromForm() {
   const form = document.querySelector("#productSchemaForm");
-  const productName = form?.elements.product_name?.value?.trim() || "";
-  if (!productName) {
-    setPanelNote("products", "Product name is required.");
+  if (!form || appState.productSaveInProgress) return;
+  setProductFormError("");
+  form.classList.remove("was-validated");
+  if (!form.checkValidity()) {
+    form.classList.add("was-validated");
+    setProductFormError("Please complete the required fields before saving.");
+    form.reportValidity();
+    form.querySelector(":invalid")?.focus();
     return;
   }
-  if (!productIsLeadGen()) {
-    try {
+  appState.productSaveInProgress = true;
+  setProductSaveBusy(true);
+  try {
+    if (!productIsLeadGen()) {
       await calculateProductPricesForSave();
-    } catch (error) {
-      setPanelNote("products", `Can't calculate product prices: ${error.message}`);
-      return;
     }
+    const product = buildProductDocumentFromForm();
+    await saveProduct(product);
+  } catch (error) {
+    setProductFormError(error.message);
+    setPanelNote("products", error.message);
+  } finally {
+    appState.productSaveInProgress = false;
+    setProductSaveBusy(false);
   }
-  const product = buildProductDocumentFromForm();
-  await saveProduct(product);
+}
+
+function setProductFormError(message) {
+  const errorBox = document.querySelector("#productFormError");
+  if (!errorBox) return;
+  const messageTarget = errorBox.querySelector("[data-toast-message]");
+  if (messageTarget) {
+    messageTarget.textContent = message || "";
+  } else {
+    errorBox.textContent = message || "";
+  }
+  errorBox.classList.toggle("hidden", !message);
+}
+
+function setProductSaveBusy(isBusy) {
+  const button = document.querySelector("#btnSaveProductUi");
+  if (!button) return;
+  button.disabled = isBusy;
+  button.classList.toggle("is-loading", isBusy);
+  button.setAttribute("aria-busy", String(isBusy));
+  button.innerHTML = isBusy
+    ? '<span class="button-spinner" aria-hidden="true"></span><span>Saving...</span>'
+    : "Save Product";
 }
 
 document.querySelector("#btnRefreshAppConfig")?.addEventListener("click", async () => {
@@ -599,12 +662,6 @@ async function loadProducts() {
 }
 
 async function saveProduct(product) {
-  const button = document.querySelector("#btnSaveProductUi");
-  const originalText = button?.textContent || "Save Product";
-  if (button) {
-    button.disabled = true;
-    button.textContent = "Saving...";
-  }
   try {
     if (!apiBaseInput.value.trim()) {
       upsertLocalProduct(product);
@@ -627,11 +684,7 @@ async function saveProduct(product) {
   } catch (error) {
     writeOutput({ error: error.message, action: "save_product", product });
     setPanelNote("products", error.message);
-  } finally {
-    if (button) {
-      button.disabled = false;
-      button.textContent = originalText;
-    }
+    throw error;
   }
 }
 
@@ -893,6 +946,10 @@ function setLandingPreviewSize(size) {
 function showProductForm() {
   const form = document.querySelector("#productSchemaForm");
   form?.reset();
+  form?.classList.remove("was-validated");
+  setProductFormError("");
+  appState.productSaveInProgress = false;
+  setProductSaveBusy(false);
   if (form?.elements.tenant_id) {
     form.elements.tenant_id.value = appState.tenantId || "tenant_demo";
   }
@@ -900,6 +957,7 @@ function showProductForm() {
   resetProductPriceRows();
   resetProductImageUploads();
   resetProductVariants();
+  resetProductTags();
   resetProductLeadCapture();
   resetProductRefundPolicyDefaults();
   updateProductFulfillmentVisibility();
@@ -1019,7 +1077,12 @@ function leadActionDefinition(action) {
 function setProductStripeWarning(message) {
   const box = document.querySelector("#productStripeWarning");
   if (!box) return;
-  box.textContent = message || "";
+  const messageTarget = box.querySelector("[data-toast-message]");
+  if (messageTarget) {
+    messageTarget.textContent = message || "";
+  } else {
+    box.textContent = message || "";
+  }
   box.classList.toggle("hidden", !message);
 }
 
@@ -1102,7 +1165,6 @@ async function handleProductCanonicalChange() {
   }
   const ready = await productStripeGatewayReady();
   if (!ready) {
-    form.elements.product_canonical.value = "false";
     setProductStripeWarning("You must first have Stripe set up for this account before enabling the gateway.");
     return;
   }
@@ -1274,11 +1336,20 @@ function productPriceRows() {
   return Array.from(document.querySelectorAll(".product-price-row"));
 }
 
+function priceRowQuantity(row) {
+  const quantity = Math.floor(Number(priceFieldValue(row, "quantity") || 1));
+  return Number.isFinite(quantity) && quantity > 0 ? quantity : 1;
+}
+
+function priceRowAmountCents(row, field) {
+  return moneyToCents(priceFieldValue(row, field)) * priceRowQuantity(row);
+}
+
 function priceTenantKeyedAmount(row) {
   const pricingModel = selectedPriceRadio(row, "pricing_model", "one_time");
   return pricingModel === "customer_chooses"
-    ? moneyToCents(priceFieldValue(row, "suggested_amount")) || moneyToCents(priceFieldValue(row, "amount"))
-    : moneyToCents(priceFieldValue(row, "amount"));
+    ? priceRowAmountCents(row, "suggested_amount") || priceRowAmountCents(row, "amount")
+    : priceRowAmountCents(row, "amount");
 }
 
 function productPriceCalculationPayload(row) {
@@ -1362,7 +1433,7 @@ function buildProductPrices(productId) {
       : tenantKeyedAmount;
     const calculatedUnitAmount = Number(row.dataset.calculatedUnitAmount);
     const unitAmount = Number.isFinite(calculatedUnitAmount) ? calculatedUnitAmount : fallbackUnitAmount;
-    const quantity = Math.max(1, Number(priceFieldValue(row, "quantity") || 1));
+    const quantity = priceRowQuantity(row);
     const price = {
       price_id: row.dataset.priceId || generateLocalId(),
       stripe_price_id: null,
@@ -1381,10 +1452,10 @@ function buildProductPrices(productId) {
     const feeBreakdown = priceFeeBreakdown(row);
     if (feeBreakdown) price.fee_breakdown = feeBreakdown;
     if (pricingModel !== "customer_chooses" || unitAmount > 0) price.unit_amount = unitAmount;
-    const compareAtAmount = moneyToCents(priceFieldValue(row, "compare_at_amount"));
+    const compareAtAmount = priceRowAmountCents(row, "compare_at_amount");
     if (compareAtAmount > 0) price.compare_at_unit_amount = compareAtAmount;
-    const minAmount = moneyToCents(priceFieldValue(row, "min_amount"));
-    const suggestedAmount = moneyToCents(priceFieldValue(row, "suggested_amount"));
+    const minAmount = priceRowAmountCents(row, "min_amount");
+    const suggestedAmount = priceRowAmountCents(row, "suggested_amount");
     if (pricingModel === "customer_chooses") {
       price.min_amount = minAmount;
       price.suggested_amount = suggestedAmount;
@@ -1591,6 +1662,50 @@ function getProductColorVariants() {
     .filter((variant) => variant.label || variant.description);
 }
 
+function showProductTagInput() {
+  const entry = document.querySelector("#productTagEntry");
+  const input = document.querySelector("#productTagInput");
+  entry?.classList.remove("hidden");
+  input?.focus();
+}
+
+function addProductTagFromInput(options = {}) {
+  const input = document.querySelector("#productTagInput");
+  const entry = document.querySelector("#productTagEntry");
+  if (!input) return;
+  const tag = normalizeProductTag(input.value);
+  if (tag) addProductTag(tag);
+  input.value = "";
+  if (options.hideWhenEmpty && !tag) entry?.classList.add("hidden");
+}
+
+function addProductTag(tag) {
+  const normalized = normalizeProductTag(tag);
+  const list = document.querySelector("#productTagList");
+  if (!normalized || !list || getProductCustomTags().includes(normalized)) return;
+  list.insertAdjacentHTML("beforeend", `
+    <span class="product-tag-pill" data-product-tag="${escapeHtml(normalized)}">
+      <span>${escapeHtml(normalized)}</span>
+      <button type="button" data-remove-product-tag aria-label="Remove ${escapeHtml(normalized)} tag">×</button>
+    </span>
+  `);
+}
+
+function getProductCustomTags() {
+  return Array.from(document.querySelectorAll("[data-product-tag]"))
+    .map((tag) => normalizeProductTag(tag.dataset.productTag || tag.textContent || ""))
+    .filter(Boolean);
+}
+
+function resetProductTags() {
+  const list = document.querySelector("#productTagList");
+  const entry = document.querySelector("#productTagEntry");
+  const input = document.querySelector("#productTagInput");
+  if (list) list.innerHTML = "";
+  if (input) input.value = "";
+  entry?.classList.add("hidden");
+}
+
 function buildProductDocumentFromForm() {
   const form = document.querySelector("#productSchemaForm");
   const values = form ? formValues(form) : {};
@@ -1605,6 +1720,7 @@ function buildProductDocumentFromForm() {
   const sizeEnabled = isPhysical && Boolean(values.enable_item_size);
   const colorEnabled = isPhysical && Boolean(values.enable_item_color);
   const tags = buildProductTags(values);
+  const canonical = values.product_intent !== "lead_gen" && values.product_canonical === "true";
   return {
     schema_version: "2026-05-29",
     document_type: "product",
@@ -1612,7 +1728,7 @@ function buildProductDocumentFromForm() {
     product_id: productId,
     stripe_product_id: null,
     stripe_mode: currentEnvironment,
-    canonical: false,
+    canonical,
     active: Boolean(values.product_active),
     name: values.product_name || "Untitled Product",
     description: values.description || "",
@@ -1657,10 +1773,8 @@ function updateProductPricePreview() {
     const pricingModel = selectedPriceRadio(row, "pricing_model", "one_time");
     const feeHandling = selectedPriceRadio(row, "fee_handling", "standard");
     const productType = document.querySelector("#productSchemaForm")?.elements.product_type?.value || "physical";
-    const saleAmount = pricingModel === "customer_chooses"
-      ? moneyToCents(priceFieldValue(row, "suggested_amount")) || moneyToCents(priceFieldValue(row, "amount"))
-      : moneyToCents(priceFieldValue(row, "amount"));
-    const compareAtAmount = moneyToCents(priceFieldValue(row, "compare_at_amount"));
+    const saleAmount = priceTenantKeyedAmount(row);
+    const compareAtAmount = priceRowAmountCents(row, "compare_at_amount");
     const platformRate = platformFeeRate(productType, pricingModel);
     const previewAmount = feeHandling === "net_guaranteed"
       ? netGuaranteedCustomerAmount(saleAmount, platformRate)
@@ -1889,15 +2003,10 @@ function productTagsFromText(value) {
 
 function buildProductTags(values) {
   const category = normalizeProductTag(values.product_category || "");
-  const productType = normalizeProductTag(values.product_type || "");
-  const customTags = String(values.product_tags || "")
-    .split(/[,;\n]/)
-    .map(normalizeProductTag);
   return uniqueStrings([
     ...productTagsFromText(values.product_name || "Untitled Product"),
-    productType,
     category && category !== "other" ? category : "",
-    ...customTags,
+    ...getProductCustomTags(),
   ]);
 }
 

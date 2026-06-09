@@ -76,6 +76,54 @@ body.modal-open {
   display: none !important;
 }
 
+.ui-toast {
+  display: flex;
+  align-items: center;
+  gap: 1.2rem;
+  width: 100%;
+  padding: 1.4rem 1.6rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  font-size: 1.5rem;
+  line-height: 1.4;
+}
+
+.ui-toast-icon {
+  flex: 0 0 auto;
+  display: inline-grid;
+  place-items: center;
+  width: 2rem;
+  height: 2rem;
+}
+
+.ui-toast-icon .icon {
+  width: 1.8rem;
+  height: 1.8rem;
+}
+
+.ui-toast-content {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  min-width: 0;
+}
+
+.ui-toast-title {
+  font-weight: 800;
+}
+
+.ui-toast-warning {
+  border-color: #f59e0b;
+  background: #fff3c4;
+  color: #92400e;
+}
+
+.ui-toast-error {
+  border-color: #ef4444;
+  background: #fef2f2;
+  color: #991b1b;
+}
+
 .login-wrapper {
   min-height: 100vh;
   display: grid;
@@ -636,6 +684,35 @@ body.modal-open {
   background: var(--accent-strong);
 }
 
+.primary-action:disabled,
+.primary-action.is-loading,
+.secondary-action:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.primary-action.is-loading {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.8rem;
+}
+
+.button-spinner {
+  width: 1.4rem;
+  height: 1.4rem;
+  border: 0.2rem solid rgba(255, 255, 255, .45);
+  border-top-color: #ffffff;
+  border-radius: 999px;
+  animation: button-spin .7s linear infinite;
+}
+
+@keyframes button-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .stripe-keys-form {
   display: block;
 }
@@ -1005,6 +1082,77 @@ body.modal-open {
 .btn-remove-variant:hover {
   color: #dc2626;
   border-color: color-mix(in srgb, #dc2626 60%, var(--line));
+}
+
+.product-tags-field {
+  display: grid;
+  gap: 1rem;
+}
+
+.field-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  color: var(--muted);
+  font-size: 1.4rem;
+  font-weight: 700;
+}
+
+.product-tag-entry {
+  display: grid;
+}
+
+.product-tag-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.8rem;
+  min-height: 0;
+}
+
+.product-tags-field .field-note {
+  margin-top: 0;
+}
+
+.product-tag-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.7rem;
+  max-width: 100%;
+  padding: 0.7rem 1rem;
+  border: 1px solid #bfdbfe;
+  border-radius: var(--radius-md);
+  background: #dbeafe;
+  color: #1e3a8a;
+  font-size: 1.4rem;
+  font-weight: 700;
+}
+
+.product-tag-pill span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.product-tag-pill button {
+  display: inline-grid;
+  place-items: center;
+  width: 1.8rem;
+  height: 1.8rem;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: #f87171;
+  font: inherit;
+  font-size: 1.8rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.product-tag-pill button:hover {
+  background: rgba(59, 130, 246, .14);
+  color: #dc2626;
 }
 
 .modal-price-grid {
@@ -1772,6 +1920,13 @@ textarea:focus {
   outline: none;
   border-color: var(--accent);
   box-shadow: 0 0 0 0.3rem rgba(75, 73, 172, .12);
+}
+
+.was-validated input:invalid,
+.was-validated select:invalid,
+.was-validated textarea:invalid {
+  border-color: #ef4444;
+  box-shadow: 0 0 0 0.3rem rgba(239, 68, 68, .12);
 }
 
 textarea {

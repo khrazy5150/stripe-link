@@ -409,6 +409,17 @@
             </header>
             <form id="productSchemaForm" class="product-modal-body">
               <input name="tenant_id" type="hidden" value="tenant_demo">
+              <div class="ui-toast ui-toast-error hidden" id="productFormError" role="alert" aria-live="assertive">
+                <span class="ui-toast-icon" aria-hidden="true">
+                  <svg class="icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v4m0 4h.01M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+                  </svg>
+                </span>
+                <div class="ui-toast-content">
+                  <strong class="ui-toast-title">Missing required fields.</strong>
+                  <span class="ui-toast-message" data-toast-message></span>
+                </div>
+              </div>
               <label>Product Name <span class="required">*</span>
                 <input name="product_name" placeholder="e.g. Premium Widget" required autocomplete="off">
               </label>
@@ -444,7 +455,17 @@
                   <span class="field-note">Choose whether this product collects payment or captures lead information.</span>
                 </label>
               </div>
-              <div class="warning-box hidden" id="productStripeWarning"></div>
+              <div class="ui-toast ui-toast-warning hidden" id="productStripeWarning" role="status" aria-live="polite">
+                <span class="ui-toast-icon" aria-hidden="true">
+                  <svg class="icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v4m0 4h.01M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+                  </svg>
+                </span>
+                <div class="ui-toast-content">
+                  <strong class="ui-toast-title">Your Stripe account is not connected.</strong>
+                  <span class="ui-toast-message" data-toast-message></span>
+                </div>
+              </div>
               <div class="lead-capture-summary hidden" id="leadCaptureSummary">
                 <div>
                   <strong>Lead capture action</strong>
@@ -452,10 +473,17 @@
                 </div>
                 <button class="secondary-action" type="button" id="btnOpenLeadIntentModal">Choose action</button>
               </div>
-              <label>Tags
-                <input name="product_tags" placeholder="e.g. workout, blueberry, bundle" autocomplete="off">
-                <span class="field-note">Auto tags from product name, type, and category are added on save. Use commas for custom tags.</span>
-              </label>
+              <div class="product-tags-field">
+                <div class="field-heading">
+                  <span>Tags</span>
+                  <button type="button" class="secondary-action" id="btnAddProductTag">+ Add Tag</button>
+                </div>
+                <div class="product-tag-entry hidden" id="productTagEntry">
+                  <input id="productTagInput" placeholder="Type a tag and press Enter" autocomplete="off">
+                </div>
+                <div class="product-tag-list" id="productTagList" aria-live="polite"></div>
+                <span class="field-note">Product name and category are automatically added as tags. Add custom tags here.</span>
+              </div>
               <section class="modal-form-section" data-transactional-section>
                 <div class="modal-pricing-card">
                   <header>
@@ -558,7 +586,7 @@
             </form>
             <footer class="product-modal-footer">
               <button class="secondary-action" type="button" id="btnCancelProductModal">Cancel</button>
-              <button class="primary-action" type="button" id="btnSaveProductUi">Save Product</button>
+              <button class="primary-action" type="button" id="btnSaveProductUi" aria-live="polite">Save Product</button>
             </footer>
           </div>
         </div>
