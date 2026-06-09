@@ -372,13 +372,20 @@
             </header>
             <div class="product-filter-bar">
               <label>Search
-                <input id="productSearchInput" type="search" placeholder="Name, ID...">
+                <input id="productSearchInput" type="search" placeholder="Name, tag, keyword...">
               </label>
-              <label>Metadata Key
-                <input id="productMetadataKeyInput" type="text" placeholder="e.g., category">
+              <label>Category
+                <select id="productCategoryFilter">
+                  <option value="">All Categories</option>
+                </select>
               </label>
-              <label>Metadata Value
-                <input id="productMetadataValueInput" type="text" placeholder="Value">
+              <label>Product Type
+                <select id="productTypeFilter">
+                  <option value="">All Types</option>
+                  <option value="physical">Physical</option>
+                  <option value="digital">Digital</option>
+                  <option value="service">Service</option>
+                </select>
               </label>
               <label>Status
                 <select id="productStatusFilter">

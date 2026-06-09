@@ -700,6 +700,7 @@ async function loadConfigurationData() {
 }
 
 function prepareProductPanel() {
+  populateProductFilterOptions();
   renderProductTable();
   if (!appState.products.length) {
     setPanelNote("products", 'Click "Load Products" or adjust your filters to see products.');
@@ -709,8 +710,8 @@ function prepareProductPanel() {
 function productFilterValues() {
   return {
     search: document.querySelector("#productSearchInput")?.value.trim().toLowerCase() || "",
-    metadataKey: document.querySelector("#productMetadataKeyInput")?.value.trim() || "",
-    metadataValue: document.querySelector("#productMetadataValueInput")?.value.trim().toLowerCase() || "",
+    category: document.querySelector("#productCategoryFilter")?.value || "",
+    productType: document.querySelector("#productTypeFilter")?.value || "",
     status: document.querySelector("#productStatusFilter")?.value || "active",
   };
 }
@@ -724,12 +725,12 @@ async function applyProductFilters() {
 
 function resetProductFilters() {
   const search = document.querySelector("#productSearchInput");
-  const metadataKey = document.querySelector("#productMetadataKeyInput");
-  const metadataValue = document.querySelector("#productMetadataValueInput");
+  const category = document.querySelector("#productCategoryFilter");
+  const productType = document.querySelector("#productTypeFilter");
   const status = document.querySelector("#productStatusFilter");
   if (search) search.value = "";
-  if (metadataKey) metadataKey.value = "";
-  if (metadataValue) metadataValue.value = "";
+  if (category) category.value = "";
+  if (productType) productType.value = "";
   if (status) status.value = "active";
   renderProductTable();
 }
@@ -741,11 +742,8 @@ function filteredProducts() {
     if (filters.status === "active" && status !== "active") return false;
     if (filters.status === "archived" && status !== "archived") return false;
     if (filters.search && !productSearchText(product).includes(filters.search)) return false;
-    if (filters.metadataKey) {
-      const value = productMetadataValue(product, filters.metadataKey);
-      if (filters.metadataValue) return String(value || "").toLowerCase().includes(filters.metadataValue);
-      return value !== undefined && value !== null && String(value).trim() !== "";
-    }
+    if (filters.category && product.product_category !== filters.category) return false;
+    if (filters.productType && product.product_type !== filters.productType) return false;
     return true;
   });
 }
@@ -760,20 +758,6 @@ function productSearchText(product) {
     product.product_type,
     ...(Array.isArray(product.tags) ? product.tags : []),
   ].filter(Boolean).join(" ").toLowerCase();
-}
-
-function productMetadataValue(product, key) {
-  const normalized = String(key || "").trim();
-  if (!normalized) return undefined;
-  const lower = normalized.toLowerCase();
-  if (lower === "category") return product.product_category;
-  if (lower === "type") return product.product_type;
-  if (lower === "status") return productLifecycleStatus(product);
-  if (lower === "tags" || lower === "tag") return Array.isArray(product.tags) ? product.tags.join(" ") : "";
-  return normalized.split(".").reduce((value, part) => {
-    if (value === undefined || value === null) return undefined;
-    return value[part];
-  }, product.metadata?.[normalized] !== undefined ? product.metadata : product);
 }
 
 async function loadProducts(options = {}) {
@@ -1162,6 +1146,31 @@ const productCategoryOptionsByType = {
     ["other", "Other"],
   ],
 };
+
+function productCategoryFilterOptions() {
+  const seen = new Set();
+  return Object.values(productCategoryOptionsByType)
+    .flat()
+    .filter(([value]) => {
+      if (seen.has(value)) return false;
+      seen.add(value);
+      return true;
+    })
+    .sort((a, b) => a[1].localeCompare(b[1]));
+}
+
+function populateProductFilterOptions() {
+  const categorySelect = document.querySelector("#productCategoryFilter");
+  if (!categorySelect || categorySelect.dataset.ready === "true") return;
+  categorySelect.innerHTML = '<option value="">All Categories</option>';
+  productCategoryFilterOptions().forEach(([value, label]) => {
+    const option = document.createElement("option");
+    option.value = value;
+    option.textContent = label;
+    categorySelect.appendChild(option);
+  });
+  categorySelect.dataset.ready = "true";
+}
 
 function updateProductCategoryOptions() {
   const form = document.querySelector("#productSchemaForm");
