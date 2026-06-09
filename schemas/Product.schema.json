@@ -69,6 +69,10 @@
       },
       "default": []
     },
+    "product_intent": {
+      "type": "string",
+      "enum": ["transaction", "lead_gen"]
+    },
     "product_type": {
       "type": "string"
     },
@@ -100,6 +104,50 @@
         },
         "short_label": { "type": "string" },
         "full_policy": { "type": "string" }
+      }
+    },
+    "lead_capture": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["action", "title", "description"],
+      "properties": {
+        "action": {
+          "type": "string",
+          "enum": ["capture_email", "capture_phone", "capture_email_phone", "call_number", "external_url", "open_form", "social_redirect"]
+        },
+        "title": { "type": "string", "minLength": 1 },
+        "description": { "type": "string", "minLength": 1 },
+        "fields": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "type", "required"],
+            "properties": {
+              "name": { "type": "string", "minLength": 1 },
+              "type": { "type": "string", "minLength": 1 },
+              "required": { "type": "boolean" }
+            }
+          }
+        },
+        "target": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type"],
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": ["phone", "url", "form", "social"]
+            },
+            "value": { "type": "string" },
+            "form_id": { "type": "string" },
+            "platform": { "type": "string" },
+            "open": {
+              "type": "string",
+              "enum": ["new_tab", "same_tab", "modal"]
+            }
+          }
+        }
       }
     },
     "variants": {

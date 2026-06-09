@@ -110,22 +110,6 @@
         </div>
       </div>
 
-      <div class="modal-backdrop hidden" id="leadIntentModal" role="dialog" aria-modal="true" aria-labelledby="leadIntentModalTitle">
-        <div class="product-modal lead-picker-modal">
-          <header class="product-modal-header">
-            <h2 id="leadIntentModalTitle">Choose Lead Capture</h2>
-            <button class="modal-close" type="button" id="btnCloseLeadIntentModal" aria-label="Close lead capture modal">×</button>
-          </header>
-          <div class="product-modal-body lead-picker-body">
-            <p class="lead-picker-intro">Choose what this lead-generation product should collect or trigger.</p>
-            <div class="lead-action-grid" id="leadActionGrid"></div>
-          </div>
-          <footer class="product-modal-footer">
-            <button class="secondary-action" type="button" id="btnCancelLeadIntentModal">Cancel</button>
-            <button class="primary-action" type="button" id="btnSelectLeadIntent">Use Selected Action</button>
-          </footer>
-        </div>
-      </div>
       </section>
 
   <div id="main-app" class="app-shell hidden" data-theme="light" data-view="dashboard">
@@ -457,7 +441,7 @@
                 </label>
                 <label>Intent
                   <select name="product_intent">
-                    <option value="transactional" selected>I want a payment</option>
+                    <option value="transaction" selected>I want a payment</option>
                     <option value="lead_gen">I want to capture a lead</option>
                   </select>
                   <span class="field-note">Choose whether this product collects payment or captures lead information.</span>
@@ -474,10 +458,15 @@
                   <span class="ui-toast-message" data-toast-message></span>
                 </div>
               </div>
-              <div class="lead-capture-summary hidden" id="leadCaptureSummary">
-                <div>
-                  <strong>Lead capture action</strong>
-                  <span id="leadCaptureSummaryText">Capture emails</span>
+              <div class="ui-toast ui-toast-info lead-capture-summary hidden" id="leadCaptureSummary" role="status" aria-live="polite">
+                <span class="ui-toast-icon" aria-hidden="true">
+                  <svg class="icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18z"/>
+                  </svg>
+                </span>
+                <div class="ui-toast-content">
+                  <strong class="ui-toast-title">Lead capture action:</strong>
+                  <span class="ui-toast-message" id="leadCaptureSummaryText">Capture email</span>
                 </div>
                 <button class="secondary-action" type="button" id="btnOpenLeadIntentModal">Choose action</button>
               </div>
@@ -595,6 +584,29 @@
             <footer class="product-modal-footer">
               <button class="secondary-action" type="button" id="btnCancelProductModal">Cancel</button>
               <button class="primary-action" type="button" id="btnSaveProductUi" aria-live="polite">Save Product</button>
+            </footer>
+          </div>
+        </div>
+
+        <div class="modal-backdrop hidden" id="leadIntentModal" role="dialog" aria-modal="true" aria-labelledby="leadIntentModalTitle">
+          <div class="product-modal lead-picker-modal">
+            <header class="product-modal-header">
+              <div>
+                <h2 id="leadIntentModalTitle">Choose a lead capture action</h2>
+                <p>Select one action type for this product.</p>
+              </div>
+              <button class="modal-close" type="button" id="btnCloseLeadIntentModal" aria-label="Close lead capture modal">×</button>
+            </header>
+            <div class="product-modal-body lead-picker-body">
+              <div class="lead-action-grid" id="leadActionGrid" role="listbox" aria-label="Lead capture action"></div>
+              <div class="lead-target-fields hidden" id="leadTargetFields"></div>
+            </div>
+            <footer class="product-modal-footer lead-picker-footer">
+              <p class="lead-selection-label" id="leadSelectionLabel">No action selected</p>
+              <div class="lead-picker-actions">
+                <button class="secondary-action" type="button" id="btnCancelLeadIntentModal">Cancel</button>
+                <button class="primary-action" type="button" id="btnSelectLeadIntent" disabled>Apply selection</button>
+              </div>
             </footer>
           </div>
         </div>

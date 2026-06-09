@@ -1,0 +1,57 @@
+{
+  "schema_version": "2026-05-29",
+  "document_type": "product",
+  "tenant_id": "tenant_demo",
+  "product_id": "prod_lead_capture_email",
+  "stripe_product_id": null,
+  "stripe_mode": "test",
+  "canonical": false,
+  "status": "active",
+  "name": "Newsletter Lead Capture",
+  "description": "Collect email addresses for a newsletter or waitlist.",
+  "images": [],
+  "product_intent": "lead_gen",
+  "product_type": "digital",
+  "product_category": "other",
+  "lead_capture": {
+    "action": "capture_email",
+    "title": "Get updates straight to your inbox",
+    "description": "Enter your email and we'll be in touch.",
+    "fields": [
+      {
+        "name": "email",
+        "type": "email",
+        "required": true
+      }
+    ]
+  },
+  "prices": [
+    {
+      "price_id": "price_lead_capture_email",
+      "stripe_price_id": null,
+      "currency": "usd",
+      "unit_amount": 0,
+      "quantity": 1,
+      "context": "standard"
+    }
+  ],
+  "default_price_id": "price_lead_capture_email",
+  "fulfillment": {
+    "requires_shipping": false,
+    "ship_from": null,
+    "weight_lb": null,
+    "dimensions": {
+      "length_in": null,
+      "width_in": null,
+      "height_in": null
+    }
+  },
+  "sync": {
+    "status": "pending",
+    "last_synced_at": null,
+    "error": null
+  },
+  "created_at": 1780092000,
+  "updated_at": 1780092000,
+  "tags": ["newsletter lead capture", "newsletter", "lead", "capture"]
+}

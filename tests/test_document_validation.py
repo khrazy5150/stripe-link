@@ -40,6 +40,9 @@ class DocumentValidationTests(unittest.TestCase):
         validate_offer_document(load_fixture("offer-universal-bundle.json"))
         validate_page_document(load_fixture("page-universal-bundle.json"))
 
+    def test_accepts_lead_capture_product_fixture(self):
+        validate_product_document(load_fixture("product-lead-capture-email.json"))
+
     def test_accepts_app_config_fixture(self):
         validate_app_config(load_fixture("app-config.json"))
 
@@ -120,6 +123,57 @@ class DocumentValidationTests(unittest.TestCase):
         product["product_category"] = ""
 
         with self.assertRaisesRegex(DocumentValidationError, "product_category"):
+            validate_product_document(product)
+
+    def test_product_accepts_transaction_intent(self):
+        product = copy.deepcopy(self.product)
+        product["product_intent"] = "transaction"
+
+        validate_product_document(product)
+
+    def test_product_rejects_legacy_transactional_intent(self):
+        product = copy.deepcopy(self.product)
+        product["product_intent"] = "transactional"
+
+        with self.assertRaisesRegex(DocumentValidationError, "product_intent"):
+            validate_product_document(product)
+
+    def test_product_requires_lead_capture_for_lead_gen(self):
+        product = copy.deepcopy(self.product)
+        product["product_intent"] = "lead_gen"
+
+        with self.assertRaisesRegex(DocumentValidationError, "lead_capture"):
+            validate_product_document(product)
+
+    def test_product_accepts_lead_capture_target_action(self):
+        product = copy.deepcopy(self.product)
+        product["product_intent"] = "lead_gen"
+        product["lead_capture"] = {
+            "action": "external_url",
+            "title": "Learn more on our website",
+            "description": "You'll be taken to an external page.",
+            "target": {
+                "type": "url",
+                "value": "https://example.com/landing",
+                "open": "new_tab",
+            },
+        }
+
+        validate_product_document(product)
+
+    def test_product_rejects_incomplete_lead_capture_target(self):
+        product = copy.deepcopy(self.product)
+        product["product_intent"] = "lead_gen"
+        product["lead_capture"] = {
+            "action": "call_number",
+            "title": "Talk to someone now",
+            "description": "Tap to call our team directly.",
+            "target": {
+                "type": "phone",
+            },
+        }
+
+        with self.assertRaisesRegex(DocumentValidationError, "lead_capture.target.value"):
             validate_product_document(product)
 
     def test_product_rejects_legacy_active(self):

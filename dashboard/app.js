@@ -43,6 +43,9 @@ const appState = {
   editingProduct: null,
   productUploadedImages: [],
   leadCaptureAction: "capture_email",
+  leadCaptureDraftAction: "capture_email",
+  leadCaptureConfig: {},
+  leadCaptureDraftConfig: {},
   priceCalculationCache: new Map(),
   productSaveInProgress: false,
   confirmModal: {
@@ -236,6 +239,7 @@ document.querySelector("#productSchemaForm")?.addEventListener("input", () => {
     form.classList.remove("was-validated");
     setProductFormError("");
   }
+  updateProductPriceFieldVisibility();
   if (!productIsLeadGen()) updateProductPricePreview();
 });
 
@@ -258,6 +262,7 @@ document.querySelector("#productSchemaForm")?.addEventListener("change", async (
   if (event.target?.dataset.priceField === "default") {
     enforceSingleDefaultPrice(event.target);
   }
+  updateProductPriceFieldVisibility();
   if (!productIsLeadGen()) updateProductPricePreview();
 });
 
@@ -367,11 +372,20 @@ document.querySelector("#btnCancelProductModal")?.addEventListener("click", () =
 document.querySelector("#btnOpenLeadIntentModal")?.addEventListener("click", showLeadIntentModal);
 document.querySelector("#btnCloseLeadIntentModal")?.addEventListener("click", hideLeadIntentModal);
 document.querySelector("#btnCancelLeadIntentModal")?.addEventListener("click", hideLeadIntentModal);
-document.querySelector("#btnSelectLeadIntent")?.addEventListener("click", hideLeadIntentModal);
+document.querySelector("#btnSelectLeadIntent")?.addEventListener("click", applyLeadIntentSelection);
 document.querySelector("#leadActionGrid")?.addEventListener("click", (event) => {
   const card = event.target.closest("[data-lead-action]");
   if (card) selectLeadAction(card.dataset.leadAction);
 });
+document.querySelector("#leadActionGrid")?.addEventListener("keydown", (event) => {
+  if (event.key !== "Enter" && event.key !== " ") return;
+  const card = event.target.closest("[data-lead-action]");
+  if (!card) return;
+  event.preventDefault();
+  selectLeadAction(card.dataset.leadAction);
+});
+document.querySelector("#leadTargetFields")?.addEventListener("input", syncLeadTargetDraft);
+document.querySelector("#leadTargetFields")?.addEventListener("change", syncLeadTargetDraft);
 
 document.querySelector("#btnLoadProductsUi")?.addEventListener("click", async () => {
   await loadProducts();
@@ -1096,13 +1110,13 @@ function showProductForm(product = null) {
   }
   if (form?.elements.product_id) form.elements.product_id.value = product?.product_id || "";
   updateProductCategoryOptions();
+  resetProductLeadCapture();
   if (product) populateProductForm(product);
   else resetProductPriceRows();
   resetProductImageUploads();
   resetProductVariants();
   resetProductTags();
   if (product) populateProductCollections(product);
-  resetProductLeadCapture();
   resetProductRefundPolicyDefaults();
   updateProductFulfillmentVisibility();
   updateProductRefundPolicyVisibility();
@@ -1192,50 +1206,64 @@ function updateProductCategoryOptions() {
 const leadActionOptions = [
   {
     value: "capture_email",
-    title: "Capture emails",
-    description: "Collect email addresses for a list, waitlist, or downloadable resource.",
-    icon: "@",
-    color: "#3c81f7",
+    label: "Capture email",
+    title: "Get updates straight to your inbox",
+    description: "Enter your email and we'll be in touch.",
+    cardDescription: "Collect the visitor's email address.",
+    iconClass: "mail",
   },
   {
     value: "capture_phone",
-    title: "Capture phone numbers",
-    description: "Collect phone numbers for calls, SMS follow-up, or appointment outreach.",
-    icon: "TEL",
-    color: "#14b8a6",
+    label: "Capture phone",
+    title: "Get a callback from our team",
+    description: "Leave your number and we'll reach out shortly.",
+    cardDescription: "Collect the visitor's phone number.",
+    iconClass: "phone",
   },
   {
     value: "capture_email_phone",
-    title: "Capture emails and phone numbers",
-    description: "Collect both primary contact channels from each lead.",
-    icon: "ID",
-    color: "#8b5cf6",
+    label: "Capture email + phone",
+    title: "Stay connected",
+    description: "We'll use these to follow up with you.",
+    cardDescription: "Collect both primary contact channels.",
+    iconClass: "address",
   },
   {
     value: "call_number",
-    title: "Call a number",
-    description: "Send the visitor to a phone call action instead of checkout.",
-    icon: "CALL",
-    color: "#f97316",
+    label: "Call a number",
+    title: "Talk to someone now",
+    description: "Tap to call our team directly.",
+    cardDescription: "Prompt the visitor to call directly.",
+    iconClass: "call",
   },
   {
-    value: "application",
-    title: "Create an application",
-    description: "Collect application details for review or approval.",
-    icon: "APP",
-    color: "#ec4899",
+    value: "external_url",
+    label: "Go to URL",
+    title: "Learn more on our website",
+    description: "You'll be taken to an external page.",
+    cardDescription: "Send the visitor to an external page.",
+    iconClass: "url",
   },
   {
-    value: "custom",
-    title: "Custom lead flow",
-    description: "Reserve this product for a custom lead-generation workflow.",
-    icon: "*",
-    color: "#64748b",
+    value: "open_form",
+    label: "Open a form",
+    title: "Apply for financing",
+    description: "Complete a short application and we'll review it within 24 hours.",
+    cardDescription: "Link to a quiz, application, or survey.",
+    iconClass: "form",
+  },
+  {
+    value: "social_redirect",
+    label: "Social page",
+    title: "Follow us on Instagram",
+    description: "Stay up to date with our latest posts.",
+    cardDescription: "Direct the visitor to a social profile.",
+    iconClass: "social",
   },
 ];
 
 function productIntentValue() {
-  return document.querySelector("#productSchemaForm")?.elements.product_intent?.value || "transactional";
+  return document.querySelector("#productSchemaForm")?.elements.product_intent?.value || "transaction";
 }
 
 function productIsLeadGen() {
@@ -1244,6 +1272,32 @@ function productIsLeadGen() {
 
 function leadActionDefinition(action) {
   return leadActionOptions.find((option) => option.value === action) || leadActionOptions[0];
+}
+
+function leadActionIconSvg(action, className = "lead-action-svg") {
+  const attrs = `class="${className}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"`;
+  const icons = {
+    capture_email: `<svg ${attrs}><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/></svg>`,
+    capture_phone: `<svg ${attrs}><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6A19.79 19.79 0 0 1 2.12 4.18 2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.12.9.32 1.77.59 2.61a2 2 0 0 1-.45 2.11L8 9.69a16 16 0 0 0 6.31 6.31l1.25-1.25a2 2 0 0 1 2.11-.45c.84.27 1.71.47 2.61.59A2 2 0 0 1 22 16.92z"/></svg>`,
+    capture_email_phone: `<svg ${attrs}><rect x="5" y="3" width="14" height="18" rx="2"/><path d="M9 7h6"/><path d="M9 11h6"/><path d="M9 15h3"/><circle cx="16" cy="15" r="1"/></svg>`,
+    call_number: `<svg ${attrs}><path d="M13 2a9 9 0 0 1 9 9"/><path d="M13 6a5 5 0 0 1 5 5"/><path d="M13 10a1 1 0 0 1 1 1"/><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6A19.79 19.79 0 0 1 2.12 4.18 2 2 0 0 1 4.11 2h2.7a2 2 0 0 1 2 1.72c.1.75.26 1.48.49 2.19a2 2 0 0 1-.45 2.11L7.7 9.17a16 16 0 0 0 7.13 7.13l1.15-1.15a2 2 0 0 1 2.11-.45c.71.23 1.44.39 2.19.49A2 2 0 0 1 22 16.92z"/></svg>`,
+    external_url: `<svg ${attrs}><path d="M14 3h7v7"/><path d="M10 14 21 3"/><path d="M21 14v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5"/></svg>`,
+    open_form: `<svg ${attrs}><rect x="4" y="4" width="6" height="16" rx="1"/><rect x="14" y="4" width="6" height="16" rx="1"/><path d="M10 8h4"/><path d="M10 16h4"/><path d="m8 12-2 2-2-2"/><path d="m16 12 2-2 2 2"/></svg>`,
+    social_redirect: `<svg ${attrs}><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="m8.59 13.51 6.83 3.98"/><path d="m15.41 6.51-6.82 3.98"/></svg>`,
+  };
+  return icons[action] || icons.capture_email;
+}
+
+function leadTargetDefaults(action) {
+  if (action === "call_number") return { phone: "" };
+  if (action === "external_url") return { url: "", open: "new_tab" };
+  if (action === "open_form") return { form_id: "", open: "modal" };
+  if (action === "social_redirect") return { platform: "instagram", url: "", open: "new_tab" };
+  return {};
+}
+
+function mergeLeadTargetDefaults(action, values = {}) {
+  return { ...leadTargetDefaults(action), ...(values || {}) };
 }
 
 function setProductStripeWarning(message) {
@@ -1262,19 +1316,40 @@ function updateLeadCaptureSummary() {
   const summary = document.querySelector("#leadCaptureSummary");
   const text = document.querySelector("#leadCaptureSummaryText");
   const definition = leadActionDefinition(appState.leadCaptureAction);
-  if (text) text.textContent = definition.title;
+  if (text) text.innerHTML = leadCaptureSummaryHtml(definition.value);
   summary?.classList.toggle("hidden", !productIsLeadGen());
+}
+
+function leadCaptureSummaryHtml(action) {
+  const definition = leadActionDefinition(action);
+  const target = leadCaptureTargetSummary(action);
+  return [
+    `<span>${escapeHtml(definition.label)}</span>`,
+    target ? `<span class="lead-capture-target">${escapeHtml(target)}</span>` : "",
+  ].join("");
+}
+
+function leadCaptureTargetSummary(action) {
+  const config = appState.leadCaptureConfig[action] || {};
+  if (action === "call_number") return config.phone || "";
+  if (action === "external_url") return config.url || "";
+  if (action === "open_form") return config.form_id || "";
+  if (action === "social_redirect") {
+    const label = config.platform ? `${platformLabel(config.platform)}: ` : "";
+    return config.url ? `${label}${config.url}` : "";
+  }
+  return "";
 }
 
 function renderLeadActionCards() {
   const grid = document.querySelector("#leadActionGrid");
   if (!grid) return;
   grid.innerHTML = leadActionOptions.map((option) => `
-    <button class="lead-action-card" type="button" data-lead-action="${escapeHtml(option.value)}">
+    <button class="lead-action-card" type="button" role="option" aria-selected="false" data-lead-action="${escapeHtml(option.value)}">
       <span class="lead-action-selected" aria-hidden="true">✓</span>
-      <span class="lead-action-icon" style="background:${escapeHtml(option.color)}">${escapeHtml(option.icon)}</span>
-      <h3>${escapeHtml(option.title)}</h3>
-      <p>${escapeHtml(option.description)}</p>
+      <span class="lead-action-icon ${escapeHtml(option.iconClass)}">${leadActionIconSvg(option.value)}</span>
+      <h3>${escapeHtml(option.label)}</h3>
+      <p>${escapeHtml(option.cardDescription)}</p>
     </button>
   `).join("");
   updateLeadActionSelection();
@@ -1282,28 +1357,152 @@ function renderLeadActionCards() {
 
 function updateLeadActionSelection() {
   document.querySelectorAll("[data-lead-action]").forEach((card) => {
-    card.classList.toggle("selected", card.dataset.leadAction === appState.leadCaptureAction);
+    const selected = card.dataset.leadAction === appState.leadCaptureDraftAction;
+    card.classList.toggle("selected", selected);
+    card.setAttribute("aria-selected", selected ? "true" : "false");
   });
+  const label = document.querySelector("#leadSelectionLabel");
+  const button = document.querySelector("#btnSelectLeadIntent");
+  const definition = leadActionDefinition(appState.leadCaptureDraftAction);
+  if (label) label.innerHTML = `Selected: <span>${escapeHtml(definition.label)}</span>`;
+  if (button) button.disabled = !leadDraftIsValid();
 }
 
 function selectLeadAction(action) {
-  appState.leadCaptureAction = leadActionDefinition(action).value;
+  const nextAction = leadActionDefinition(action).value;
+  appState.leadCaptureDraftAction = nextAction;
+  appState.leadCaptureDraftConfig = mergeLeadTargetDefaults(nextAction, appState.leadCaptureConfig[nextAction]);
   updateLeadActionSelection();
-  updateLeadCaptureSummary();
+  renderLeadTargetFields();
 }
 
 function resetProductLeadCapture() {
   appState.leadCaptureAction = "capture_email";
+  appState.leadCaptureDraftAction = "capture_email";
+  appState.leadCaptureConfig = {};
+  appState.leadCaptureDraftConfig = {};
   updateLeadCaptureSummary();
 }
 
 function showLeadIntentModal() {
+  appState.leadCaptureDraftAction = appState.leadCaptureAction || "capture_email";
+  appState.leadCaptureDraftConfig = mergeLeadTargetDefaults(
+    appState.leadCaptureDraftAction,
+    appState.leadCaptureConfig[appState.leadCaptureDraftAction],
+  );
   renderLeadActionCards();
+  renderLeadTargetFields();
   document.querySelector("#leadIntentModal")?.classList.remove("hidden");
 }
 
 function hideLeadIntentModal() {
   document.querySelector("#leadIntentModal")?.classList.add("hidden");
+}
+
+function applyLeadIntentSelection() {
+  syncLeadTargetDraft();
+  if (!leadDraftIsValid()) {
+    document.querySelector("#leadTargetFields input, #leadTargetFields select")?.focus();
+    updateLeadActionSelection();
+    return;
+  }
+  appState.leadCaptureAction = appState.leadCaptureDraftAction;
+  appState.leadCaptureConfig[appState.leadCaptureAction] = { ...appState.leadCaptureDraftConfig };
+  updateLeadCaptureSummary();
+  hideLeadIntentModal();
+}
+
+function renderLeadTargetFields() {
+  const container = document.querySelector("#leadTargetFields");
+  if (!container) return;
+  const action = appState.leadCaptureDraftAction;
+  const values = mergeLeadTargetDefaults(action, appState.leadCaptureDraftConfig);
+  appState.leadCaptureDraftConfig = values;
+  const openSelect = (selected = "new_tab") => `
+    <label>Open
+      <select data-lead-target-field="open">
+        <option value="new_tab" ${selected === "new_tab" ? "selected" : ""}>New tab</option>
+        <option value="same_tab" ${selected === "same_tab" ? "selected" : ""}>Same tab</option>
+      </select>
+    </label>
+  `;
+  const fields = {
+    call_number: `
+      <label>Phone number
+        <input data-lead-target-field="phone" type="tel" placeholder="+13035550100" value="${escapeHtml(values.phone || "")}">
+      </label>
+    `,
+    external_url: `
+      <label>URL
+        <input data-lead-target-field="url" type="url" placeholder="https://example.com/landing" value="${escapeHtml(values.url || "")}">
+      </label>
+      ${openSelect(values.open)}
+    `,
+    open_form: `
+      <label>Form ID
+        <input data-lead-target-field="form_id" placeholder="form_0S3xkhrt07M" value="${escapeHtml(values.form_id || "")}">
+      </label>
+      <label>Open
+        <select data-lead-target-field="open">
+          <option value="modal" ${values.open === "modal" ? "selected" : ""}>Modal</option>
+          <option value="new_tab" ${values.open === "new_tab" ? "selected" : ""}>New tab</option>
+          <option value="same_tab" ${values.open === "same_tab" ? "selected" : ""}>Same tab</option>
+        </select>
+      </label>
+    `,
+    social_redirect: `
+      <label>Platform
+        <select data-lead-target-field="platform">
+          ${["instagram", "facebook", "tiktok", "youtube", "linkedin", "x", "other"].map((platform) => (
+            `<option value="${platform}" ${values.platform === platform ? "selected" : ""}>${platformLabel(platform)}</option>`
+          )).join("")}
+        </select>
+      </label>
+      <label>Social URL
+        <input data-lead-target-field="url" type="url" placeholder="https://instagram.com/yourbrand" value="${escapeHtml(values.url || "")}">
+      </label>
+      ${openSelect(values.open)}
+    `,
+  }[action] || "";
+  container.classList.toggle("hidden", !fields);
+  container.innerHTML = fields ? `
+    <h3>Action details</h3>
+    <div class="lead-target-grid">${fields}</div>
+  ` : "";
+  updateLeadActionSelection();
+}
+
+function syncLeadTargetDraft() {
+  const fields = document.querySelectorAll("[data-lead-target-field]");
+  if (!fields.length) return;
+  const values = {};
+  fields.forEach((field) => {
+    values[field.dataset.leadTargetField] = field.value.trim();
+  });
+  appState.leadCaptureDraftConfig = mergeLeadTargetDefaults(appState.leadCaptureDraftAction, values);
+  updateLeadActionSelection();
+}
+
+function leadDraftIsValid() {
+  const action = appState.leadCaptureDraftAction;
+  const values = mergeLeadTargetDefaults(action, appState.leadCaptureDraftConfig);
+  if (action === "call_number") return Boolean(values.phone);
+  if (action === "external_url") return Boolean(values.url);
+  if (action === "open_form") return Boolean(values.form_id);
+  if (action === "social_redirect") return Boolean(values.platform && values.url);
+  return Boolean(action);
+}
+
+function platformLabel(platform) {
+  return {
+    instagram: "Instagram",
+    facebook: "Facebook",
+    tiktok: "TikTok",
+    youtube: "YouTube",
+    linkedin: "LinkedIn",
+    x: "X",
+    other: "Other",
+  }[platform] || platform;
 }
 
 async function productStripeGatewayReady() {
@@ -1362,32 +1561,57 @@ function updateProductIntentVisibility() {
 
 function buildProductLeadCapture() {
   const definition = leadActionDefinition(appState.leadCaptureAction);
-  const fieldsByAction = {
-    capture_email: [{ name: "email", type: "email", required: true }],
-    capture_phone: [{ name: "phone", type: "tel", required: true }],
-    capture_email_phone: [
-      { name: "email", type: "email", required: true },
-      { name: "phone", type: "tel", required: true },
-    ],
-    call_number: [{ name: "phone_target", type: "tel", required: true }],
-    application: [
-      { name: "email", type: "email", required: true },
-      { name: "application", type: "textarea", required: true },
-    ],
-    custom: [],
-  };
-  return {
+  const config = mergeLeadTargetDefaults(
+    definition.value,
+    appState.leadCaptureConfig[definition.value],
+  );
+  const leadCapture = {
     action: definition.value,
     title: definition.title,
     description: definition.description,
-    fields: fieldsByAction[definition.value] || [],
   };
+  if (definition.value === "capture_email") {
+    leadCapture.fields = [{ name: "email", type: "email", required: true }];
+  } else if (definition.value === "capture_phone") {
+    leadCapture.fields = [{ name: "phone", type: "tel", required: true }];
+  } else if (definition.value === "capture_email_phone") {
+    leadCapture.fields = [
+      { name: "email", type: "email", required: true },
+      { name: "phone", type: "tel", required: true },
+    ];
+  } else if (definition.value === "call_number") {
+    leadCapture.target = {
+      type: "phone",
+      value: config.phone || "",
+    };
+  } else if (definition.value === "external_url") {
+    leadCapture.target = {
+      type: "url",
+      value: config.url || "",
+      open: config.open || "new_tab",
+    };
+  } else if (definition.value === "open_form") {
+    leadCapture.target = {
+      type: "form",
+      form_id: config.form_id || "",
+      open: config.open || "modal",
+    };
+  } else if (definition.value === "social_redirect") {
+    leadCapture.target = {
+      type: "social",
+      platform: config.platform || "instagram",
+      value: config.url || "",
+      open: config.open || "new_tab",
+    };
+  }
+  return leadCapture;
 }
 
 function resetProductPriceRows() {
   const container = document.querySelector("#productPriceRows");
   if (!container) return;
   container.innerHTML = productPriceRowHtml(0, { isDefault: true });
+  updateProductPriceFieldVisibility();
   updateProductPricePreview();
 }
 
@@ -1411,16 +1635,6 @@ function productPriceRowHtml(index, price = {}) {
         <label class="inline-check"><input data-price-field="default" type="checkbox" ${price.isDefault ? "checked" : ""}><span>Default price</span></label>
         <button type="button" class="danger-action" data-remove-price ${index === 0 ? "disabled" : ""}>Remove</button>
       </div>
-    </div>
-    <div class="modal-price-grid">
-      <label>Sales price<input data-price-field="amount" type="number" min="0" step="0.01" placeholder="0.00" value="${escapeHtml(amount)}"></label>
-      <label><span class="label-line">Regular price <button class="field-tooltip" type="button" data-tooltip="Optional. Shown as a struck-through reference price when it is higher than the sales price." aria-label="Regular price help">?</button></span><input data-price-field="compare_at_amount" type="number" min="0" step="0.01" placeholder="0.00" value="${escapeHtml(compareAtAmount)}"></label>
-      <label>Currency
-        <select data-price-field="currency">
-          ${["usd", "eur", "gbp", "cad"].map((code) => `<option value="${code}" ${code === currency ? "selected" : ""}>${code.toUpperCase()}</option>`).join("")}
-        </select>
-      </label>
-      <label>Quantity<input data-price-field="quantity" type="number" min="1" value="${escapeHtml(quantity)}"></label>
     </div>
     <div class="modal-pricing-options">
       <fieldset>
@@ -1452,7 +1666,17 @@ function productPriceRowHtml(index, price = {}) {
         <li><strong>Order Bump:</strong> a relatively small add-on price shown during checkout.</li>
       </ul>
     </div>
-    <div class="customer-chooses-grid">
+    <div class="modal-price-grid price-amount-grid" data-price-standard-fields>
+      <label>Sales price<input data-price-field="amount" type="number" min="0" step="0.01" placeholder="0.00" value="${escapeHtml(amount)}"></label>
+      <label><span class="label-line">Regular price <button class="field-tooltip" type="button" data-tooltip="Optional. Shown as a struck-through reference price when it is higher than the sales price." aria-label="Regular price help">?</button></span><input data-price-field="compare_at_amount" type="number" min="0" step="0.01" placeholder="0.00" value="${escapeHtml(compareAtAmount)}"></label>
+      <label>Currency
+        <select data-price-field="currency">
+          ${["usd", "eur", "gbp", "cad"].map((code) => `<option value="${code}" ${code === currency ? "selected" : ""}>${code.toUpperCase()}</option>`).join("")}
+        </select>
+      </label>
+      <label>Quantity<input data-price-field="quantity" type="number" min="1" value="${escapeHtml(quantity)}"></label>
+    </div>
+    <div class="customer-chooses-grid" data-price-customer-fields>
       <label>Minimum amount<input data-price-field="min_amount" type="number" min="0" step="0.01" placeholder="0.00" value="${escapeHtml(minAmount)}"></label>
       <label>Suggested amount<input data-price-field="suggested_amount" type="number" min="0" step="0.01" placeholder="0.00" value="${escapeHtml(suggestedAmount)}"></label>
     </div>
@@ -1480,6 +1704,7 @@ function addProductPriceRow() {
   if (!container) return;
   const index = container.querySelectorAll(".product-price-row").length;
   container.insertAdjacentHTML("beforeend", productPriceRowHtml(index));
+  updateProductPriceFieldVisibility();
   updateProductPricePreview();
 }
 
@@ -1494,6 +1719,15 @@ function renumberProductPriceRows() {
       if (radio.name.startsWith("pricing_model_")) radio.name = `pricing_model_${index}`;
       if (radio.name.startsWith("fee_handling_")) radio.name = `fee_handling_${index}`;
     });
+  });
+}
+
+function updateProductPriceFieldVisibility() {
+  document.querySelectorAll(".product-price-row").forEach((row) => {
+    const pricingModel = selectedPriceRadio(row, "pricing_model", "one_time");
+    const isCustomerChoice = pricingModel === "customer_chooses";
+    row.querySelector("[data-price-standard-fields]")?.classList.toggle("hidden", isCustomerChoice);
+    row.querySelector("[data-price-customer-fields]")?.classList.toggle("hidden", !isCustomerChoice);
   });
 }
 
@@ -1840,7 +2074,8 @@ function populateProductForm(product) {
   updateProductCategoryOptions();
   form.elements.product_category.value = product.product_category || "";
   form.elements.product_canonical.value = product.canonical ? "true" : "false";
-  form.elements.product_intent.value = product.lead_capture ? "lead_gen" : "transactional";
+  form.elements.product_intent.value = product.lead_capture ? "lead_gen" : "transaction";
+  hydrateProductLeadCapture(product.lead_capture);
   if (form.elements.product_active) form.elements.product_active.checked = productLifecycleStatus(product) === "active";
   if (form.elements.images) form.elements.images.value = (product.images || []).join("\n");
   const fulfillment = product.fulfillment || {};
@@ -1849,6 +2084,35 @@ function populateProductForm(product) {
   if (form.elements.package_width) form.elements.package_width.value = dimensions.width_in ?? "";
   if (form.elements.package_height) form.elements.package_height.value = dimensions.height_in ?? "";
   if (form.elements.package_weight) form.elements.package_weight.value = fulfillment.weight_lb ?? "";
+}
+
+function hydrateProductLeadCapture(leadCapture) {
+  if (!leadCapture || typeof leadCapture !== "object") {
+    resetProductLeadCapture();
+    return;
+  }
+  const action = leadActionDefinition(leadCapture.action).value;
+  appState.leadCaptureAction = action;
+  appState.leadCaptureDraftAction = action;
+  const target = leadCapture.target || {};
+  const config = {};
+  if (action === "call_number") config.phone = target.value || "";
+  if (action === "external_url") {
+    config.url = target.value || "";
+    config.open = target.open || "new_tab";
+  }
+  if (action === "open_form") {
+    config.form_id = target.form_id || "";
+    config.open = target.open || "modal";
+  }
+  if (action === "social_redirect") {
+    config.platform = target.platform || "instagram";
+    config.url = target.value || "";
+    config.open = target.open || "new_tab";
+  }
+  appState.leadCaptureConfig = { [action]: mergeLeadTargetDefaults(action, config) };
+  appState.leadCaptureDraftConfig = { ...appState.leadCaptureConfig[action] };
+  updateLeadCaptureSummary();
 }
 
 function populateProductCollections(product) {
@@ -1866,6 +2130,7 @@ function populateProductPrices(product) {
   container.innerHTML = prices.map((price, index) => productPriceRowHtml(index, productPriceFormModel(product, price))).join("");
   renumberProductPriceRows();
   ensureProductDefaultPrice();
+  updateProductPriceFieldVisibility();
 }
 
 function productPriceFormModel(product, price) {
@@ -1974,7 +2239,7 @@ function buildProductDocumentFromForm() {
   const colorEnabled = isPhysical && Boolean(values.enable_item_color);
   const tags = buildProductTags(values);
   const canonical = values.product_intent !== "lead_gen" && values.product_canonical === "true";
-  return {
+  const product = {
     schema_version: "2026-05-29",
     document_type: "product",
     tenant_id: values.tenant_id || appState.tenantId || "tenant_demo",
@@ -1986,6 +2251,7 @@ function buildProductDocumentFromForm() {
     name: values.product_name || "Untitled Product",
     description: values.description || "",
     images,
+    product_intent: values.product_intent || "transaction",
     product_type: productType,
     product_category: values.product_category || "",
     refund_policy: buildProductRefundPolicy(productType, values),
@@ -2016,9 +2282,12 @@ function buildProductDocumentFromForm() {
     updated_at: now,
     tags,
   };
+  if (values.product_intent === "lead_gen") product.lead_capture = buildProductLeadCapture();
+  return product;
 }
 
 function updateProductPricePreview() {
+  updateProductPriceFieldVisibility();
   document.querySelectorAll(".product-price-row").forEach((row) => {
     const preview = row.querySelector(".price-preview");
     if (!preview) return;
@@ -2341,6 +2610,35 @@ function renderProductTable() {
   }
 }
 
+function getProductIconStyle(productId = "") {
+  let hash = 0;
+  const key = String(productId || "");
+  for (let i = 0; i < key.length; i += 1) {
+    hash = key.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  const hue = Math.abs(hash) % 360;
+  return {
+    bg: `hsl(${hue}, 65%, 88%)`,
+    icon: `hsl(${hue}, 55%, 28%)`,
+  };
+}
+
+function productPlaceholderMarkup(product, className = "product-card-placeholder-icon") {
+  if (product?.lead_capture?.action) {
+    const { bg, icon } = getProductIconStyle(product.product_id || product.name || "");
+    return {
+      className: " lead-icon-placeholder",
+      style: ` style="background:${escapeHtml(bg)};color:${escapeHtml(icon)}"`,
+      markup: leadActionIconSvg(product.lead_capture.action, className),
+    };
+  }
+  return {
+    className: " placeholder",
+    style: "",
+    markup: `<span>${escapeHtml((product?.name || "P").slice(0, 1).toUpperCase())}</span>`,
+  };
+}
+
 function productCard(product) {
   const price = defaultProductPrice(product);
   const image = product.images?.[0] || "";
@@ -2350,12 +2648,13 @@ function productCard(product) {
   const compareAt = price?.compare_at_unit_amount
     ? `<span class="product-card-compare">Regular ${escapeHtml(formatCurrency(price.compare_at_unit_amount, price.currency))}</span>`
     : "";
+  const placeholder = image ? null : productPlaceholderMarkup(product);
   const imageMarkup = image
     ? `<img src="${escapeHtml(image)}" alt="${escapeHtml(product.name || "Product image")}">`
-    : `<span>${escapeHtml((product.name || "P").slice(0, 1).toUpperCase())}</span>`;
+    : placeholder.markup;
   const status = isArchived ? "Archived" : "Active";
   return `<article class="product-card${isArchived ? " archived" : ""}" data-product-id="${escapeHtml(product.product_id || "")}">
-    <div class="product-card-image${image ? "" : " placeholder"}">${imageMarkup}</div>
+    <div class="product-card-image${image ? "" : placeholder.className}"${image ? "" : placeholder.style}>${imageMarkup}</div>
     <div class="product-card-body">
       <div class="product-card-heading">
         <h3>${escapeHtml(product.name || "Untitled Product")}</h3>
@@ -2390,9 +2689,15 @@ function showProductDetails(product) {
   const price = defaultProductPrice(product);
   const tags = Array.isArray(product.tags) ? product.tags : [];
   const lifecycleStatus = productLifecycleStatus(product);
+  const detailImage = product.images?.[0]
+    ? `<div class="product-details-image"><img src="${escapeHtml(product.images[0])}" alt="${escapeHtml(product.name || "Product image")}"></div>`
+    : (() => {
+        const placeholder = productPlaceholderMarkup(product, "product-details-placeholder-icon");
+        return `<div class="product-details-image${placeholder.className}"${placeholder.style}>${placeholder.markup}</div>`;
+      })();
   body.innerHTML = `
     <div class="product-details-summary">
-      <div class="product-details-image">${product.images?.[0] ? `<img src="${escapeHtml(product.images[0])}" alt="${escapeHtml(product.name || "Product image")}">` : `<span>${escapeHtml((product.name || "P").slice(0, 1).toUpperCase())}</span>`}</div>
+      ${detailImage}
       <div>
         <h3>${escapeHtml(product.name || "Untitled Product")}</h3>
         <p>${escapeHtml(product.description || "No description provided.")}</p>

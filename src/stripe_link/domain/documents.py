@@ -58,6 +58,7 @@ PRODUCT_FIELD_ORDER = [
     "name",
     "description",
     "images",
+    "product_intent",
     "product_type",
     "product_category",
     "refund_policy",
@@ -411,6 +412,53 @@ def require_document_fields(document: dict[str, Any], document_type: str, id_fie
         raise DocumentValidationError(f"{document_type.replace('_', ' ').title()} document_type must be '{document_type}'.")
 
 
+def validate_product_lead_capture(document: dict[str, Any]) -> None:
+    lead_capture = document.get("lead_capture")
+    if document.get("product_intent") == "lead_gen" and not isinstance(lead_capture, dict):
+        raise DocumentValidationError("Product lead_capture must be provided for lead generation products.")
+    if lead_capture is None:
+        return
+    if not isinstance(lead_capture, dict):
+        raise DocumentValidationError("Product lead_capture must be an object.")
+    action = require_enum(
+        lead_capture,
+        "action",
+        {"capture_email", "capture_phone", "capture_email_phone", "call_number", "external_url", "open_form", "social_redirect"},
+        "Product lead_capture.action",
+    )
+    require_string(lead_capture, "title", "Product lead_capture.title")
+    require_string(lead_capture, "description", "Product lead_capture.description")
+    if action in {"capture_email", "capture_phone", "capture_email_phone"}:
+        fields = lead_capture.get("fields")
+        if not isinstance(fields, list) or not fields:
+            raise DocumentValidationError("Product lead_capture.fields must be a non-empty array for capture actions.")
+        for field in fields:
+            if not isinstance(field, dict):
+                raise DocumentValidationError("Each Product lead_capture.fields item must be an object.")
+            require_string(field, "name", "Product lead_capture.fields.name")
+            require_string(field, "type", "Product lead_capture.fields.type")
+            optional_bool(field, "required", "Product lead_capture.fields.required")
+        return
+    target = lead_capture.get("target")
+    if not isinstance(target, dict):
+        raise DocumentValidationError("Product lead_capture.target must be an object for target actions.")
+    expected_type = {
+        "call_number": "phone",
+        "external_url": "url",
+        "open_form": "form",
+        "social_redirect": "social",
+    }[action]
+    if target.get("type") != expected_type:
+        raise DocumentValidationError(f"Product lead_capture.target.type must be '{expected_type}'.")
+    if action == "open_form":
+        require_string(target, "form_id", "Product lead_capture.target.form_id")
+    else:
+        require_string(target, "value", "Product lead_capture.target.value")
+    if action == "social_redirect":
+        require_string(target, "platform", "Product lead_capture.target.platform")
+    optional_string(target, "open", "Product lead_capture.target.open")
+
+
 def validate_product_document(document: dict[str, Any]) -> None:
     require_document_fields(document, "product", "product_id")
     require_string(document, "name")
@@ -428,9 +476,12 @@ def validate_product_document(document: dict[str, Any]) -> None:
     if document.get("stripe_mode") is not None:
         require_enum(document, "stripe_mode", {"test", "live"})
     optional_string(document, "description")
+    if document.get("product_intent") is not None:
+        require_enum(document, "product_intent", {"transaction", "lead_gen"}, "Product product_intent")
     optional_string(document, "product_type")
     require_string(document, "product_category", "Product product_category")
     optional_string_list(document, "images")
+    validate_product_lead_capture(document)
     if "tags" not in document:
         raise DocumentValidationError("Product tags must be provided.")
     optional_string_list(document, "tags")
