@@ -40,10 +40,14 @@ const appState = {
   platformFee: defaultPlatformFeeConfig,
   session: null,
   products: [],
+  editingProduct: null,
   productUploadedImages: [],
   leadCaptureAction: "capture_email",
   priceCalculationCache: new Map(),
   productSaveInProgress: false,
+  confirmModal: {
+    resolve: null,
+  },
 };
 applyEnvironment(currentEnvironment);
 loadAppConfigApiBase(currentEnvironment);
@@ -373,6 +377,52 @@ document.querySelector("#btnLoadProductsUi")?.addEventListener("click", async ()
   await loadProducts();
 });
 
+document.querySelector("#btnApplyProductFilters")?.addEventListener("click", async () => {
+  await applyProductFilters();
+});
+
+document.querySelector("#btnResetProductFilters")?.addEventListener("click", () => {
+  resetProductFilters();
+});
+
+document.querySelector("#productSearchInput")?.addEventListener("keydown", async (event) => {
+  if (event.key !== "Enter") return;
+  event.preventDefault();
+  await applyProductFilters();
+});
+
+document.querySelector("#productsTableRows")?.addEventListener("click", async (event) => {
+  const button = event.target.closest("[data-product-action]");
+  if (!button) return;
+  const productId = button.closest("[data-product-id]")?.dataset.productId;
+  const product = productById(productId);
+  if (!product) return;
+  const action = button.dataset.productAction;
+  if (action === "edit") {
+    showProductForm(product);
+    return;
+  }
+  if (action === "details") {
+    showProductDetails(product);
+    return;
+  }
+  if (action === "archive") {
+    await archiveProduct(product);
+    return;
+  }
+  if (action === "restore") {
+    await restoreProduct(product);
+  }
+});
+
+document.querySelector("#btnCloseProductDetails")?.addEventListener("click", hideProductDetails);
+document.querySelector("#btnCloseProductDetailsFooter")?.addEventListener("click", hideProductDetails);
+document.querySelector("#confirmModalCancel")?.addEventListener("click", () => resolveConfirmModal(false));
+document.querySelector("#confirmModalConfirm")?.addEventListener("click", () => resolveConfirmModal(true));
+document.querySelector("#confirmModal")?.addEventListener("click", (event) => {
+  if (event.target?.id === "confirmModal") resolveConfirmModal(false);
+});
+
 document.querySelector("#btnSaveProductUi")?.addEventListener("click", async () => {
   await saveProductFromForm();
 });
@@ -400,9 +450,12 @@ async function saveProductFromForm() {
   form.classList.remove("was-validated");
   if (!form.checkValidity()) {
     form.classList.add("was-validated");
-    setProductFormError("Please complete the required fields before saving.");
+    const invalid = form.querySelector(":invalid");
+    setProductFormError(invalid?.name === "product_category"
+      ? "Please choose a product category before saving."
+      : "Please complete the required fields before saving.");
     form.reportValidity();
-    form.querySelector(":invalid")?.focus();
+    invalid?.focus();
     return;
   }
   appState.productSaveInProgress = true;
@@ -420,6 +473,43 @@ async function saveProductFromForm() {
     appState.productSaveInProgress = false;
     setProductSaveBusy(false);
   }
+}
+
+function showConfirmModal(options = {}) {
+  const modal = document.querySelector("#confirmModal");
+  const icon = document.querySelector("#confirmModalIcon");
+  const title = document.querySelector("#confirmModalTitle");
+  const message = document.querySelector("#confirmModalMessage");
+  const confirm = document.querySelector("#confirmModalConfirm");
+  const cancel = document.querySelector("#confirmModalCancel");
+  if (!modal || !title || !message || !confirm || !cancel) return Promise.resolve(false);
+  title.textContent = options.title || "Are you sure?";
+  message.textContent = options.message || "";
+  confirm.textContent = options.confirmLabel || "Confirm";
+  cancel.textContent = options.cancelLabel || "Cancel";
+  modal.dataset.variant = options.variant || "danger";
+  if (icon) icon.textContent = options.icon || "!";
+  modal.classList.remove("hidden");
+  document.body.classList.add("modal-open");
+  confirm.focus();
+  return new Promise((resolve) => {
+    appState.confirmModal.resolve = resolve;
+  });
+}
+
+function resolveConfirmModal(value) {
+  const modal = document.querySelector("#confirmModal");
+  if (!modal || modal.classList.contains("hidden")) return;
+  modal.classList.add("hidden");
+  const resolver = appState.confirmModal.resolve;
+  appState.confirmModal.resolve = null;
+  if (
+    document.querySelector("#productModal")?.classList.contains("hidden") !== false
+    && document.querySelector("#productDetailsModal")?.classList.contains("hidden") !== false
+  ) {
+    document.body.classList.remove("modal-open");
+  }
+  if (resolver) resolver(Boolean(value));
 }
 
 function setProductFormError(message) {
@@ -536,11 +626,7 @@ async function apiRequest(path, options = {}) {
   const response = await fetch(url.toString(), {
     method: options.method || "GET",
     headers: {
-      "Content-Type": "application/json",
-      "X-Tenant-Id": appState.tenantId,
-      "X-Client-Id": appState.tenantId,
-      "X-Environment": currentEnvironment,
-      "X-Stripe-Mode": currentEnvironment,
+      ...(options.body ? { "Content-Type": "application/json" } : {}),
       ...(options.headers || {}),
     },
     body: options.body ? JSON.stringify(options.body) : undefined,
@@ -620,7 +706,77 @@ function prepareProductPanel() {
   }
 }
 
-async function loadProducts() {
+function productFilterValues() {
+  return {
+    search: document.querySelector("#productSearchInput")?.value.trim().toLowerCase() || "",
+    metadataKey: document.querySelector("#productMetadataKeyInput")?.value.trim() || "",
+    metadataValue: document.querySelector("#productMetadataValueInput")?.value.trim().toLowerCase() || "",
+    status: document.querySelector("#productStatusFilter")?.value || "active",
+  };
+}
+
+async function applyProductFilters() {
+  if (!appState.products.length && apiBaseInput.value.trim()) {
+    await loadProducts({ preserveNote: true });
+  }
+  renderProductTable();
+}
+
+function resetProductFilters() {
+  const search = document.querySelector("#productSearchInput");
+  const metadataKey = document.querySelector("#productMetadataKeyInput");
+  const metadataValue = document.querySelector("#productMetadataValueInput");
+  const status = document.querySelector("#productStatusFilter");
+  if (search) search.value = "";
+  if (metadataKey) metadataKey.value = "";
+  if (metadataValue) metadataValue.value = "";
+  if (status) status.value = "active";
+  renderProductTable();
+}
+
+function filteredProducts() {
+  const filters = productFilterValues();
+  return appState.products.filter((product) => {
+    const status = productLifecycleStatus(product);
+    if (filters.status === "active" && status !== "active") return false;
+    if (filters.status === "archived" && status !== "archived") return false;
+    if (filters.search && !productSearchText(product).includes(filters.search)) return false;
+    if (filters.metadataKey) {
+      const value = productMetadataValue(product, filters.metadataKey);
+      if (filters.metadataValue) return String(value || "").toLowerCase().includes(filters.metadataValue);
+      return value !== undefined && value !== null && String(value).trim() !== "";
+    }
+    return true;
+  });
+}
+
+function productSearchText(product) {
+  return [
+    product.product_id,
+    product.stripe_product_id,
+    product.name,
+    product.description,
+    product.product_category,
+    product.product_type,
+    ...(Array.isArray(product.tags) ? product.tags : []),
+  ].filter(Boolean).join(" ").toLowerCase();
+}
+
+function productMetadataValue(product, key) {
+  const normalized = String(key || "").trim();
+  if (!normalized) return undefined;
+  const lower = normalized.toLowerCase();
+  if (lower === "category") return product.product_category;
+  if (lower === "type") return product.product_type;
+  if (lower === "status") return productLifecycleStatus(product);
+  if (lower === "tags" || lower === "tag") return Array.isArray(product.tags) ? product.tags.join(" ") : "";
+  return normalized.split(".").reduce((value, part) => {
+    if (value === undefined || value === null) return undefined;
+    return value[part];
+  }, product.metadata?.[normalized] !== undefined ? product.metadata : product);
+}
+
+async function loadProducts(options = {}) {
   const button = document.querySelector("#btnLoadProductsUi");
   const originalText = button?.textContent || "Load Products";
   if (button) {
@@ -630,9 +786,11 @@ async function loadProducts() {
   if (!apiBaseInput.value.trim()) {
     try {
       renderProductTable();
-      setPanelNote("products", appState.products.length
-        ? `${appState.products.length} product${appState.products.length === 1 ? "" : "s"} loaded in this UI session.`
-        : 'Click "Load Products" or adjust your filters to see products.');
+      if (!options.preserveNote) {
+        setPanelNote("products", appState.products.length
+          ? `${appState.products.length} product${appState.products.length === 1 ? "" : "s"} loaded in this UI session.`
+          : 'Click "Load Products" or adjust your filters to see products.');
+      }
       writeOutput({ products: appState.products, source: "local_ui_session" });
       return;
     } finally {
@@ -644,12 +802,14 @@ async function loadProducts() {
   }
   try {
     const body = await apiRequest("/products");
-    appState.products = Array.isArray(body.products) ? body.products : [];
+    appState.products = Array.isArray(body.products) ? body.products.map(canonicalProductDocument) : [];
     renderProductTable();
-    writeOutput(body);
-    setPanelNote("products", appState.products.length
-      ? `${appState.products.length} product${appState.products.length === 1 ? "" : "s"} loaded from backend.`
-      : 'Click "Load Products" or adjust your filters to see products.');
+    writeOutput({ ...body, products: appState.products });
+    if (!options.preserveNote) {
+      setPanelNote("products", appState.products.length
+        ? `${appState.products.length} product${appState.products.length === 1 ? "" : "s"} loaded from backend.`
+        : 'Click "Load Products" or adjust your filters to see products.');
+    }
   } catch (error) {
     writeOutput({ error: error.message, action: "load_products" });
     setPanelNote("products", error.message);
@@ -738,19 +898,15 @@ function buildLandingDocuments() {
     tenant_id: tenantId,
     product_id: productId,
     stripe_mode: currentEnvironment === "live" ? "live" : "test",
-    active: true,
+    status: "active",
     name: values.page_title || "Untitled Product",
     description: values.page_description || "",
     prices: [
       {
         price_id: priceId,
-        product_id: productId,
-        stripe_mode: currentEnvironment === "live" ? "live" : "test",
-        active: true,
         currency,
         unit_amount: unitAmount,
         quantity: 1,
-        label: "One Item",
         context: "standard",
       },
     ],
@@ -943,26 +1099,31 @@ function setLandingPreviewSize(size) {
   wrapper?.classList.toggle("mobile", size === "mobile");
 }
 
-function showProductForm() {
+function showProductForm(product = null) {
   const form = document.querySelector("#productSchemaForm");
   form?.reset();
   form?.classList.remove("was-validated");
   setProductFormError("");
+  appState.editingProduct = product;
   appState.productSaveInProgress = false;
   setProductSaveBusy(false);
   if (form?.elements.tenant_id) {
-    form.elements.tenant_id.value = appState.tenantId || "tenant_demo";
+    form.elements.tenant_id.value = product?.tenant_id || appState.tenantId || "tenant_demo";
   }
+  if (form?.elements.product_id) form.elements.product_id.value = product?.product_id || "";
   updateProductCategoryOptions();
-  resetProductPriceRows();
+  if (product) populateProductForm(product);
+  else resetProductPriceRows();
   resetProductImageUploads();
   resetProductVariants();
   resetProductTags();
+  if (product) populateProductCollections(product);
   resetProductLeadCapture();
   resetProductRefundPolicyDefaults();
   updateProductFulfillmentVisibility();
   updateProductRefundPolicyVisibility();
   updateProductIntentVisibility();
+  document.querySelector("#productModalTitle").textContent = product ? "Edit Product" : "Create New Product";
   document.querySelector("#productModal")?.classList.remove("hidden");
   document.body.classList.add("modal-open");
   if (!productIsLeadGen()) updateProductPricePreview();
@@ -973,6 +1134,8 @@ function showProductList() {
   hideLeadIntentModal();
   document.querySelector("#productModal")?.classList.add("hidden");
   document.body.classList.remove("modal-open");
+  appState.editingProduct = null;
+  document.querySelector("#productModalTitle").textContent = "Create New Product";
 }
 
 const productCategoryOptionsByType = {
@@ -1222,6 +1385,7 @@ function resetProductPriceRows() {
 function productPriceRowHtml(index, price = {}) {
   const rowNumber = index + 1;
   const priceId = price.priceId || generateLocalId();
+  const stripePriceId = price.stripePriceId || "";
   const amount = price.amount ?? "0.00";
   const compareAtAmount = price.compareAtAmount ?? "0.00";
   const currency = (price.currency || "usd").toLowerCase();
@@ -1231,7 +1395,7 @@ function productPriceRowHtml(index, price = {}) {
   const context = price.context || "standard";
   const minAmount = price.minAmount ?? "0.00";
   const suggestedAmount = price.suggestedAmount ?? "0.00";
-  return `<div class="modal-pricing-body product-price-row" data-price-index="${index}" data-price-id="${escapeHtml(priceId)}">
+  return `<div class="modal-pricing-body product-price-row" data-price-index="${index}" data-price-id="${escapeHtml(priceId)}" data-stripe-price-id="${escapeHtml(stripePriceId)}">
     <div class="price-line-header">
       <strong>Price ${rowNumber}</strong>
       <div class="price-line-actions">
@@ -1420,7 +1584,7 @@ function ensureProductDefaultPrice() {
   if (!defaults.some((input) => input.checked)) defaults[0].checked = true;
 }
 
-function buildProductPrices(productId) {
+function buildProductPrices() {
   ensureProductDefaultPrice();
   const rows = productPriceRows();
   return rows.map((row, index) => {
@@ -1436,17 +1600,13 @@ function buildProductPrices(productId) {
     const quantity = priceRowQuantity(row);
     const price = {
       price_id: row.dataset.priceId || generateLocalId(),
-      stripe_price_id: null,
-      product_id: productId,
-      stripe_mode: currentEnvironment,
-      active: true,
+      stripe_price_id: row.dataset.stripePriceId || null,
       currency: (priceFieldValue(row, "currency") || "usd").toLowerCase(),
       quantity,
       pricing_model: pricingModel,
       fee_handling: feeHandling,
       context: priceFieldValue(row, "context") || "standard",
       tenant_keyed_amount: tenantKeyedAmount,
-      metadata: { items: String(quantity) },
       is_default: Boolean(row.querySelector('[data-price-field="default"]')?.checked),
     };
     const feeBreakdown = priceFeeBreakdown(row);
@@ -1662,6 +1822,88 @@ function getProductColorVariants() {
     .filter((variant) => variant.label || variant.description);
 }
 
+function populateProductForm(product) {
+  const form = document.querySelector("#productSchemaForm");
+  if (!form) return;
+  form.elements.product_name.value = product.name || "";
+  form.elements.description.value = product.description || "";
+  form.elements.product_type.value = product.product_type || "physical";
+  updateProductCategoryOptions();
+  form.elements.product_category.value = product.product_category || "";
+  form.elements.product_canonical.value = product.canonical ? "true" : "false";
+  form.elements.product_intent.value = product.lead_capture ? "lead_gen" : "transactional";
+  if (form.elements.product_active) form.elements.product_active.checked = productLifecycleStatus(product) === "active";
+  if (form.elements.images) form.elements.images.value = (product.images || []).join("\n");
+  const fulfillment = product.fulfillment || {};
+  const dimensions = fulfillment.dimensions || {};
+  if (form.elements.package_length) form.elements.package_length.value = dimensions.length_in ?? "";
+  if (form.elements.package_width) form.elements.package_width.value = dimensions.width_in ?? "";
+  if (form.elements.package_height) form.elements.package_height.value = dimensions.height_in ?? "";
+  if (form.elements.package_weight) form.elements.package_weight.value = fulfillment.weight_lb ?? "";
+}
+
+function populateProductCollections(product) {
+  appState.productUploadedImages = Array.isArray(product.images) ? [...product.images] : [];
+  renderProductImagePreviews();
+  populateProductPrices(product);
+  populateProductVariants(product);
+  populateProductTags(product);
+}
+
+function populateProductPrices(product) {
+  const container = document.querySelector("#productPriceRows");
+  if (!container) return;
+  const prices = Array.isArray(product.prices) && product.prices.length ? product.prices : [{}];
+  container.innerHTML = prices.map((price, index) => productPriceRowHtml(index, productPriceFormModel(product, price))).join("");
+  renumberProductPriceRows();
+  ensureProductDefaultPrice();
+}
+
+function productPriceFormModel(product, price) {
+  const quantity = Math.max(1, Number(price.quantity || 1));
+  const pricingModel = price.pricing_model || "one_time";
+  return {
+    priceId: price.price_id || generateLocalId(),
+    stripePriceId: price.stripe_price_id || "",
+    amount: centsToMoneyInput(price.tenant_keyed_amount ?? price.unit_amount ?? 0, quantity),
+    compareAtAmount: centsToMoneyInput(price.compare_at_unit_amount || 0, quantity),
+    currency: price.currency || "usd",
+    quantity,
+    pricingModel,
+    feeHandling: price.fee_handling || "standard",
+    context: price.context || "standard",
+    minAmount: centsToMoneyInput(price.min_amount || 0, quantity),
+    suggestedAmount: centsToMoneyInput(price.suggested_amount || 0, quantity),
+    isDefault: price.price_id === product.default_price_id,
+  };
+}
+
+function centsToMoneyInput(cents, quantity = 1) {
+  const divisor = Math.max(1, Number(quantity || 1));
+  return (Number(cents || 0) / divisor / 100).toFixed(2);
+}
+
+function populateProductVariants(product) {
+  const form = document.querySelector("#productSchemaForm");
+  const sizes = product.variants?.sizes || [];
+  const colors = product.variants?.colors || [];
+  if (form?.elements.enable_item_size) form.elements.enable_item_size.checked = sizes.length > 0;
+  if (form?.elements.enable_item_color) form.elements.enable_item_color.checked = colors.length > 0;
+  sizes.forEach((variant) => addProductVariantItem("size", variant));
+  colors.forEach((variant) => addProductVariantItem("color", variant));
+  updateProductVariantVisibility();
+}
+
+function populateProductTags(product) {
+  const autoTags = new Set(buildProductAutoTags({
+    product_name: product.name || "",
+    product_category: product.product_category || "",
+  }));
+  (product.tags || [])
+    .filter((tag) => !autoTags.has(normalizeProductTag(tag)))
+    .forEach(addProductTag);
+}
+
 function showProductTagInput() {
   const entry = document.querySelector("#productTagEntry");
   const input = document.querySelector("#productTagInput");
@@ -1710,9 +1952,11 @@ function buildProductDocumentFromForm() {
   const form = document.querySelector("#productSchemaForm");
   const values = form ? formValues(form) : {};
   const now = Math.floor(Date.now() / 1000);
-  const productId = values.product_id || generateLocalId();
+  const editingProduct = appState.editingProduct || null;
+  const productId = values.product_id || editingProduct?.product_id || generateLocalId();
   const productType = values.product_type || "physical";
-  const prices = buildProductPrices(productId);
+  const status = values.product_active ? "active" : "archived";
+  const prices = buildProductPrices();
   const defaultPrice = prices.find((price) => price.is_default) || prices[0];
   prices.forEach((price) => delete price.is_default);
   const images = uniqueStrings([...appState.productUploadedImages, ...lines(values.images)]);
@@ -1726,10 +1970,10 @@ function buildProductDocumentFromForm() {
     document_type: "product",
     tenant_id: values.tenant_id || appState.tenantId || "tenant_demo",
     product_id: productId,
-    stripe_product_id: null,
+    stripe_product_id: editingProduct?.stripe_product_id || null,
     stripe_mode: currentEnvironment,
     canonical,
-    active: Boolean(values.product_active),
+    status,
     name: values.product_name || "Untitled Product",
     description: values.description || "",
     images,
@@ -1759,7 +2003,7 @@ function buildProductDocumentFromForm() {
       last_synced_at: null,
       error: null,
     },
-    created_at: now,
+    created_at: editingProduct?.created_at || now,
     updated_at: now,
     tags,
   };
@@ -1779,15 +2023,22 @@ function updateProductPricePreview() {
     const previewAmount = feeHandling === "net_guaranteed"
       ? netGuaranteedCustomerAmount(saleAmount, platformRate)
       : saleAmount;
+    const discountPercent = previewDiscountPercent(previewAmount, compareAtAmount);
     preview.innerHTML = [
       "<span>Preview:</span>",
       `<strong>${escapeHtml(formatCurrency(previewAmount, currency))}</strong>`,
-      compareAtAmount > saleAmount ? `<span class="price-preview-compare">${escapeHtml(formatCurrency(compareAtAmount, currency))}</span>` : "",
+      compareAtAmount > previewAmount ? `<span class="price-preview-compare">${escapeHtml(formatCurrency(compareAtAmount, currency))}</span>` : "",
+      discountPercent ? `<span class="price-preview-discount">Save ${escapeHtml(String(discountPercent))}%</span>` : "",
       feeHandling === "net_guaranteed" && saleAmount > 0
         ? `<span class="price-preview-note">includes Stripe + ${escapeHtml(formatPercent(platformRate))} platform fee</span>`
         : "",
     ].join("");
   });
+}
+
+function previewDiscountPercent(unitAmount, compareAtAmount) {
+  if (!compareAtAmount || compareAtAmount <= unitAmount) return 0;
+  return Math.max(1, Math.round((1 - unitAmount / compareAtAmount) * 100));
 }
 
 function platformFeeRate(productType, pricingModel) {
@@ -2001,11 +2252,17 @@ function productTagsFromText(value) {
   ];
 }
 
-function buildProductTags(values) {
+function buildProductAutoTags(values) {
   const category = normalizeProductTag(values.product_category || "");
-  return uniqueStrings([
+  return [
     ...productTagsFromText(values.product_name || "Untitled Product"),
     category && category !== "other" ? category : "",
+  ];
+}
+
+function buildProductTags(values) {
+  return uniqueStrings([
+    ...buildProductAutoTags(values),
     ...getProductCustomTags(),
   ]);
 }
@@ -2015,6 +2272,7 @@ function sleep(ms) {
 }
 
 function upsertLocalProduct(product) {
+  product = canonicalProductDocument(product);
   const existingIndex = appState.products.findIndex((item) => item.product_id === product.product_id);
   if (existingIndex >= 0) {
     appState.products.splice(existingIndex, 1, product);
@@ -2023,19 +2281,62 @@ function upsertLocalProduct(product) {
   appState.products.push(product);
 }
 
+function productById(productId) {
+  return appState.products.find((product) => product.product_id === productId) || null;
+}
+
+function canonicalProductDocument(product) {
+  const canonical = { ...(product || {}) };
+  if (!canonical.status) canonical.status = canonical.active === false ? "archived" : "active";
+  delete canonical.active;
+  if (Array.isArray(canonical.prices)) {
+    canonical.prices = canonical.prices.map((price) => {
+      if (!price || typeof price !== "object") return price;
+      const cleanPrice = { ...price };
+      delete cleanPrice.product_id;
+      delete cleanPrice.stripe_mode;
+      delete cleanPrice.active;
+      if (cleanPrice.metadata && cleanPrice.metadata.items === String(cleanPrice.quantity)) {
+        const metadata = { ...cleanPrice.metadata };
+        delete metadata.items;
+        if (Object.keys(metadata).length) cleanPrice.metadata = metadata;
+        else delete cleanPrice.metadata;
+      }
+      return cleanPrice;
+    });
+  }
+  return canonical;
+}
+
+function productLifecycleStatus(product) {
+  if (product?.status === "archived" || product?.active === false) return "archived";
+  return "active";
+}
+
 function renderProductTable() {
   const rows = document.querySelector("#productsTableRows");
   const tableWrap = document.querySelector("#productsTableWrap");
   const empty = document.querySelector(".product-empty-state");
   if (!rows || !tableWrap || !empty) return;
-  tableWrap.classList.toggle("hidden", !appState.products.length);
-  empty.classList.toggle("hidden", Boolean(appState.products.length));
-  rows.innerHTML = appState.products.map((product) => productCard(product)).join("");
+  const products = filteredProducts();
+  tableWrap.classList.toggle("hidden", !products.length);
+  empty.classList.toggle("hidden", Boolean(products.length));
+  if (!products.length) {
+    empty.textContent = appState.products.length
+      ? "No products match the current filters."
+      : 'Click "Load Products" or adjust your filters to see products.';
+  }
+  rows.innerHTML = products.map((product) => productCard(product)).join("");
+  if (appState.products.length) {
+    setPanelNote("products", `${products.length} of ${appState.products.length} product${appState.products.length === 1 ? "" : "s"} shown.`);
+  }
 }
 
 function productCard(product) {
   const price = defaultProductPrice(product);
   const image = product.images?.[0] || "";
+  const lifecycleStatus = productLifecycleStatus(product);
+  const isArchived = lifecycleStatus === "archived";
   const priceText = price ? formatCurrency(price.unit_amount, price.currency) : "No price";
   const compareAt = price?.compare_at_unit_amount
     ? `<span class="product-card-compare">Regular ${escapeHtml(formatCurrency(price.compare_at_unit_amount, price.currency))}</span>`
@@ -2043,20 +2344,25 @@ function productCard(product) {
   const imageMarkup = image
     ? `<img src="${escapeHtml(image)}" alt="${escapeHtml(product.name || "Product image")}">`
     : `<span>${escapeHtml((product.name || "P").slice(0, 1).toUpperCase())}</span>`;
-  return `<article class="product-card">
+  const status = isArchived ? "Archived" : "Active";
+  return `<article class="product-card${isArchived ? " archived" : ""}" data-product-id="${escapeHtml(product.product_id || "")}">
     <div class="product-card-image${image ? "" : " placeholder"}">${imageMarkup}</div>
     <div class="product-card-body">
-      <h3>${escapeHtml(product.name || "Untitled Product")}</h3>
+      <div class="product-card-heading">
+        <h3>${escapeHtml(product.name || "Untitled Product")}</h3>
+        <span class="product-status ${isArchived ? "archived" : "active"}">${escapeHtml(status)}</span>
+      </div>
       <p>${escapeHtml(product.description || "No description provided.")}</p>
       <div class="product-card-price">
         <strong>${escapeHtml(priceText)}</strong>
         ${compareAt}
       </div>
       <div class="product-card-actions">
-        <button type="button" class="secondary-action">Edit</button>
-        <button type="button" class="secondary-action">Details</button>
-        <button type="button" class="secondary-action">Archive</button>
+        <button type="button" class="secondary-action" data-product-action="edit">Edit</button>
+        <button type="button" class="secondary-action" data-product-action="details">Details</button>
+        <button type="button" class="secondary-action" data-product-action="${isArchived ? "restore" : "archive"}">${isArchived ? "Restore" : "Archive"}</button>
       </div>
+      ${isArchived ? '<div class="product-archived-label">Archived</div>' : ""}
     </div>
   </article>`;
 }
@@ -2067,6 +2373,119 @@ function defaultProductPrice(product) {
     || prices.find((price) => price.active !== false)
     || prices[0]
     || null;
+}
+
+function showProductDetails(product) {
+  const body = document.querySelector("#productDetailsBody");
+  if (!body) return;
+  const price = defaultProductPrice(product);
+  const tags = Array.isArray(product.tags) ? product.tags : [];
+  const lifecycleStatus = productLifecycleStatus(product);
+  body.innerHTML = `
+    <div class="product-details-summary">
+      <div class="product-details-image">${product.images?.[0] ? `<img src="${escapeHtml(product.images[0])}" alt="${escapeHtml(product.name || "Product image")}">` : `<span>${escapeHtml((product.name || "P").slice(0, 1).toUpperCase())}</span>`}</div>
+      <div>
+        <h3>${escapeHtml(product.name || "Untitled Product")}</h3>
+        <p>${escapeHtml(product.description || "No description provided.")}</p>
+      </div>
+    </div>
+    <dl class="product-details-grid">
+      <div><dt>Product ID</dt><dd>${escapeHtml(product.product_id || "")}</dd></div>
+      <div><dt>Status</dt><dd>${escapeHtml(lifecycleStatus === "archived" ? "Archived" : "Active")}</dd></div>
+      <div><dt>Type</dt><dd>${escapeHtml(product.product_type || "")}</dd></div>
+      <div><dt>Category</dt><dd>${escapeHtml(product.product_category || "")}</dd></div>
+      <div><dt>Default Price</dt><dd>${price ? escapeHtml(formatCurrency(price.unit_amount, price.currency)) : "No price"}</dd></div>
+      <div><dt>Prices</dt><dd>${Array.isArray(product.prices) ? product.prices.length : 0}</dd></div>
+    </dl>
+    <div class="product-details-tags">
+      ${tags.length ? tags.map((tag) => `<span class="product-tag-pill"><span>${escapeHtml(tag)}</span></span>`).join("") : "<span class=\"text-muted\">No tags</span>"}
+    </div>
+    <details class="product-json-details">
+      <summary>Raw JSON</summary>
+      <pre>${escapeHtml(JSON.stringify(product, null, 2))}</pre>
+    </details>
+  `;
+  document.querySelector("#productDetailsModal")?.classList.remove("hidden");
+  document.body.classList.add("modal-open");
+}
+
+function hideProductDetails() {
+  document.querySelector("#productDetailsModal")?.classList.add("hidden");
+  if (document.querySelector("#productModal")?.classList.contains("hidden") !== false) {
+    document.body.classList.remove("modal-open");
+  }
+}
+
+async function archiveProduct(product) {
+  if (productLifecycleStatus(product) === "archived") return;
+  const confirmed = await showConfirmModal({
+    title: "Archive product?",
+    message: `Archive "${product.name || "this product"}"? Archived products are hidden from the default product list and can be restored later.`,
+    confirmLabel: "Archive",
+    cancelLabel: "Cancel",
+    variant: "danger",
+    icon: "×",
+  });
+  if (!confirmed) return;
+  const archived = productWithLifecycleStatus(product, "archived");
+  try {
+    await saveProductStatusChange(archived, "archive_product");
+    renderProductTable();
+    setPanelNote("products", `${product.name || "Product"} archived.`);
+  } catch (error) {
+    writeOutput({ error: error.message, action: "archive_product", product_id: product.product_id });
+    setPanelNote("products", error.message);
+  }
+}
+
+async function restoreProduct(product) {
+  if (productLifecycleStatus(product) === "active") return;
+  const confirmed = await showConfirmModal({
+    title: "Restore product?",
+    message: `Restore "${product.name || "this product"}" to Active? It will appear in the default product list again.`,
+    confirmLabel: "Restore",
+    cancelLabel: "Cancel",
+    variant: "primary",
+    icon: "↺",
+  });
+  if (!confirmed) return;
+  const restored = productWithLifecycleStatus(product, "active");
+  try {
+    await saveProductStatusChange(restored, "restore_product");
+    renderProductTable();
+    setPanelNote("products", `${product.name || "Product"} restored.`);
+  } catch (error) {
+    writeOutput({ error: error.message, action: "restore_product", product_id: product.product_id });
+    setPanelNote("products", error.message);
+  }
+}
+
+function productWithLifecycleStatus(product, status) {
+  const updatedProduct = {
+    ...product,
+    status,
+    updated_at: Math.floor(Date.now() / 1000),
+  };
+  delete updatedProduct.active;
+  return updatedProduct;
+}
+
+async function saveProductStatusChange(product, action) {
+  if (apiBaseInput.value.trim()) {
+    const body = await apiRequest(`/products/${encodeURIComponent(product.product_id)}/status`, {
+      method: "PATCH",
+      body: {
+        tenant_id: product.tenant_id || appState.tenantId,
+        status: product.status,
+        updated_at: product.updated_at,
+      },
+    });
+    upsertLocalProduct(body.product || product);
+    writeOutput(body);
+    return;
+  }
+  upsertLocalProduct(product);
+  writeOutput({ product, action, ui_only: true });
 }
 
 function refundSourceLabel(source) {
@@ -2279,12 +2698,7 @@ async function loadAppConfigApiBase(environment = currentEnvironment, options = 
   try {
     const url = new URL(`${apiBase}/app-config/app_config`);
     url.searchParams.set("environment", "global");
-    const response = await fetch(url.toString(), {
-      headers: {
-        "Content-Type": "application/json",
-        "X-Environment": normalized,
-      },
-    });
+    const response = await fetch(url.toString());
     const body = await response.json().catch(() => ({}));
     if (body.app_config?.platform_fee) {
       appState.platformFee = normalizedPlatformFee(body.app_config.platform_fee);

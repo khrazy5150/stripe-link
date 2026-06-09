@@ -74,7 +74,46 @@ class ProductHandlerTests(unittest.TestCase):
         self.assertEqual(list(get_product)[-1], "tags")
         self.assertEqual(list(list_product)[-1], "tags")
 
-    def test_create_product_rejects_mixed_stripe_modes(self):
+    def test_update_product_status_archives_legacy_product(self):
+        legacy_product = dict(self.product)
+        legacy_product["requires_shipping"] = True
+        self.repository.put(legacy_product)
+
+        response = handler({
+            "httpMethod": "PATCH",
+            "resource": "/products/{product_id}/status",
+            "pathParameters": {"product_id": "prod_creatine_gummies"},
+            "body": json.dumps({
+                "tenant_id": "tenant_demo",
+                "status": "archived",
+                "updated_at": 1234,
+            }),
+        }, None, repository=self.repository)
+
+        self.assertEqual(response["statusCode"], 200)
+        product = json.loads(response["body"])["product"]
+        stored = self.repository.get("tenant_demo", "prod_creatine_gummies")
+        self.assertEqual(product["status"], "archived")
+        self.assertNotIn("active", product)
+        self.assertNotIn("active", stored)
+        self.assertEqual(stored["updated_at"], 1234)
+
+    def test_update_product_status_rejects_invalid_status(self):
+        self.repository.put(self.product)
+
+        response = handler({
+            "httpMethod": "PATCH",
+            "resource": "/products/{product_id}/status",
+            "pathParameters": {"product_id": "prod_creatine_gummies"},
+            "body": json.dumps({
+                "tenant_id": "tenant_demo",
+                "status": "inactive",
+            }),
+        }, None, repository=self.repository)
+
+        self.assertEqual(response["statusCode"], 400)
+
+    def test_create_product_rejects_price_stripe_mode(self):
         self.product["prices"][0]["stripe_mode"] = "live"
 
         response = handler({

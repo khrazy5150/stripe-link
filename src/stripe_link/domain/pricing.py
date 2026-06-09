@@ -28,19 +28,6 @@ def find_price(product: dict[str, Any], price_id: str) -> dict[str, Any]:
     raise PricingError(f"Price '{price_id}' was not found on product '{product.get('product_id', '')}'.")
 
 
-def validate_product_price_modes(product: dict[str, Any]) -> None:
-    product_mode = product.get("stripe_mode")
-    if not product_mode:
-        return
-    for price in product.get("prices", []):
-        price_mode = price.get("stripe_mode")
-        if price_mode and price_mode != product_mode:
-            raise PricingError(
-                f"Product '{product.get('product_id', '')}' is '{product_mode}' but price "
-                f"'{price.get('price_id', '')}' is '{price_mode}'."
-            )
-
-
 def selected_price_id_for_item(item: dict[str, Any], selected_prices: dict[str, str]) -> str:
     product_id = item.get("product_id", "")
     selectable_prices = item.get("selectable_prices") or []
@@ -69,16 +56,14 @@ def resolve_offer_item(
     product_id = item.get("product_id")
     if product.get("product_id") != product_id:
         raise PricingError(f"Offer item product '{product_id}' does not match product '{product.get('product_id', '')}'.")
-    if not product.get("active", False):
+    product_status = product.get("status") or ("archived" if product.get("active") is False else "active")
+    if product_status == "archived":
         raise PricingError(f"Product '{product_id}' is not active.")
-    validate_product_price_modes(product)
 
     selected_prices = selected_prices or {}
     price_id = selected_price_id_for_item(item, selected_prices)
     price = find_price(product, price_id)
-    if price.get("product_id") != product_id:
-        raise PricingError(f"Price '{price.get('price_id', '')}' belongs to a different product.")
-    if not price.get("active", False):
+    if price.get("active") is False:
         raise PricingError(f"Price '{price.get('price_id', '')}' is not active.")
 
     price_context = price.get("context", "standard")

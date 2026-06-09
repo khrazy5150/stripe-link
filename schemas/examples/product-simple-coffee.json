@@ -6,7 +6,7 @@
   "stripe_product_id": null,
   "stripe_mode": "test",
   "canonical": false,
-  "active": true,
+  "status": "active",
   "name": "Simple Coffee",
   "description": "A clean single-product checkout page for one bag of roasted coffee.",
   "images": [],
@@ -16,9 +16,6 @@
     {
       "price_id": "price_simple_coffee",
       "stripe_price_id": null,
-      "product_id": "prod_simple_coffee",
-      "stripe_mode": "test",
-      "active": true,
       "currency": "usd",
       "unit_amount": 1800,
       "quantity": 1,

@@ -54,7 +54,7 @@ PRODUCT_FIELD_ORDER = [
     "stripe_product_id",
     "stripe_mode",
     "canonical",
-    "active",
+    "status",
     "name",
     "description",
     "images",
@@ -80,6 +80,7 @@ def require_object(value: Any, label: str) -> dict[str, Any]:
 
 
 def order_product_document(document: dict[str, Any]) -> dict[str, Any]:
+    document = canonical_product_document(document)
     ordered: dict[str, Any] = {}
     for field in PRODUCT_FIELD_ORDER:
         if field in document:
@@ -90,6 +91,35 @@ def order_product_document(document: dict[str, Any]) -> dict[str, Any]:
     if "tags" in document:
         ordered["tags"] = document["tags"]
     return ordered
+
+
+def canonical_product_document(document: dict[str, Any]) -> dict[str, Any]:
+    canonical = dict(document)
+    if "status" not in canonical:
+        canonical["status"] = "archived" if canonical.get("active") is False else "active"
+    canonical.pop("active", None)
+
+    prices = []
+    for price in canonical.get("prices") or []:
+        if not isinstance(price, dict):
+            prices.append(price)
+            continue
+        clean_price = dict(price)
+        clean_price.pop("product_id", None)
+        clean_price.pop("stripe_mode", None)
+        clean_price.pop("active", None)
+        metadata = clean_price.get("metadata")
+        if isinstance(metadata, dict) and metadata.get("items") == str(clean_price.get("quantity")):
+            metadata = dict(metadata)
+            metadata.pop("items", None)
+            if metadata:
+                clean_price["metadata"] = metadata
+            else:
+                clean_price.pop("metadata", None)
+        prices.append(clean_price)
+    if "prices" in canonical:
+        canonical["prices"] = prices
+    return canonical
 
 
 def product_stripe_sync_gate(document: dict[str, Any]) -> dict[str, str]:
@@ -391,13 +421,15 @@ def validate_product_document(document: dict[str, Any]) -> None:
     if "canonical" not in document:
         raise DocumentValidationError("Product canonical must be provided.")
     optional_bool(document, "canonical")
-    optional_bool(document, "active")
+    if "active" in document:
+        raise DocumentValidationError("Product active is no longer supported; use status.")
+    require_enum(document, "status", {"active", "archived"}, "Product status")
     optional_string(document, "stripe_product_id")
     if document.get("stripe_mode") is not None:
         require_enum(document, "stripe_mode", {"test", "live"})
     optional_string(document, "description")
     optional_string(document, "product_type")
-    optional_string(document, "product_category")
+    require_string(document, "product_category", "Product product_category")
     optional_string_list(document, "images")
     if "tags" not in document:
         raise DocumentValidationError("Product tags must be provided.")
@@ -444,13 +476,11 @@ def validate_product_document(document: dict[str, Any]) -> None:
     if not isinstance(prices, list) or not prices:
         raise DocumentValidationError("Product prices must be a non-empty array.")
 
-    product_id = document.get("product_id")
-    product_mode = document.get("stripe_mode")
     price_ids = set()
     for price in prices:
         if not isinstance(price, dict):
             raise DocumentValidationError("Each product price must be an object.")
-        for field in ["price_id", "product_id", "currency"]:
+        for field in ["price_id", "currency"]:
             require_string(price, field, f"price.{field}")
         optional_string(price, "stripe_price_id", "price.stripe_price_id")
         pricing_model = price.setdefault("pricing_model", "one_time")
@@ -469,7 +499,12 @@ def validate_product_document(document: dict[str, Any]) -> None:
             raise DocumentValidationError("price.label is no longer supported; labels belong on offer items.")
         if "nickname" in price:
             raise DocumentValidationError("price.nickname is no longer supported.")
-        optional_bool(price, "active", "price.active")
+        if "product_id" in price:
+            raise DocumentValidationError("price.product_id is redundant; product prices inherit the parent product_id.")
+        if "stripe_mode" in price:
+            raise DocumentValidationError("price.stripe_mode is redundant; product prices inherit the parent stripe_mode.")
+        if "active" in price:
+            raise DocumentValidationError("price.active is no longer supported; use product status for lifecycle state.")
         optional_string(price, "context", "price.context")
         optional_string(price, "badge", "price.badge")
         optional_string(price, "description", "price.description")
@@ -480,14 +515,6 @@ def validate_product_document(document: dict[str, Any]) -> None:
         validate_price_fee_breakdown(price.get("fee_breakdown"), "price.fee_breakdown")
         if len(price.get("currency", "")) != 3 or price.get("currency", "") != price.get("currency", "").lower():
             raise DocumentValidationError("price.currency must be a lowercase 3-letter currency code.")
-        if price.get("stripe_mode") is not None:
-            require_enum(price, "stripe_mode", {"test", "live"}, "price.stripe_mode")
-        if price.get("product_id") != product_id:
-            raise DocumentValidationError(f"Price '{price.get('price_id')}' must belong to product '{product_id}'.")
-        if product_mode and price.get("stripe_mode") and price.get("stripe_mode") != product_mode:
-            raise DocumentValidationError(
-                f"Price '{price.get('price_id')}' stripe_mode must match product stripe_mode '{product_mode}'."
-            )
         if price.get("price_id") in price_ids:
             raise DocumentValidationError(f"Duplicate product price_id '{price.get('price_id')}'.")
         price_ids.add(price.get("price_id"))

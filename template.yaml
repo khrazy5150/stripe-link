@@ -195,6 +195,12 @@ Resources:
             RestApiId: !Ref RestApi
             Path: /app-config/{config_key}
             Method: PUT
+        AppConfigOptions:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /app-config/{config_key}
+            Method: OPTIONS
 
   OfferResolveFunction:
     Type: AWS::Serverless::Function
@@ -275,6 +281,18 @@ Resources:
           Properties:
             RestApiId: !Ref RestApi
             Path: /products/{product_id}
+            Method: OPTIONS
+        ProductStatusUpdate:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /products/{product_id}/status
+            Method: PATCH
+        ProductStatusOptions:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /products/{product_id}/status
             Method: OPTIONS
 
   UploadFunction:

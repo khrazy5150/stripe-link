@@ -11,7 +11,7 @@
     "product_id",
     "stripe_product_id",
     "canonical",
-    "active",
+    "status",
     "name",
     "prices",
     "default_price_id",
@@ -48,8 +48,10 @@
       "type": "boolean",
       "description": "True only after this product shape is accepted as canonical by the API."
     },
-    "active": {
-      "type": "boolean"
+    "status": {
+      "type": "string",
+      "enum": ["active", "archived"],
+      "description": "Product lifecycle status. Archived products are hidden from the default active product list."
     },
     "name": {
       "type": "string",
@@ -71,7 +73,8 @@
       "type": "string"
     },
     "product_category": {
-      "type": "string"
+      "type": "string",
+      "minLength": 1
     },
     "refund_policy": {
       "type": "object",

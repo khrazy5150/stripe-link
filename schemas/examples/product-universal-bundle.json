@@ -6,7 +6,7 @@
   "stripe_product_id": null,
   "stripe_mode": "test",
   "canonical": false,
-  "active": true,
+  "status": "active",
   "name": "Creatine Gummies",
   "description": "5000 mg of creatine monohydrate per serving. Excellent for men and women after a workout for muscle growth and development.",
   "images": [
@@ -27,9 +27,6 @@
     {
       "price_id": "price_universal_single",
       "stripe_price_id": null,
-      "product_id": "prod_universal_bundle",
-      "stripe_mode": "test",
-      "active": true,
       "currency": "usd",
       "unit_amount": 3709,
       "tenant_keyed_amount": 3709,
@@ -38,17 +35,11 @@
       "description": "5000 mg of creatine monohydrate per serving. Excellent for men and women after a workout for muscle growth and development.",
       "image_url": "images/universal-bundle/creatine_gummies_1.webp",
       "context": "standard",
-      "pricing_model": "one_time",
-      "metadata": {
-        "items": "1"
-      }
+      "pricing_model": "one_time"
     },
     {
       "price_id": "price_universal_double",
       "stripe_price_id": null,
-      "product_id": "prod_universal_bundle",
-      "stripe_mode": "test",
-      "active": true,
       "currency": "usd",
       "unit_amount": 6942,
       "tenant_keyed_amount": 6942,
@@ -57,17 +48,11 @@
       "description": "5000 mg of creatine monohydrate per serving. Excellent for men and women after a workout for muscle growth and development.",
       "image_url": "images/universal-bundle/creatine_gummies_2.webp",
       "context": "standard",
-      "pricing_model": "one_time",
-      "metadata": {
-        "items": "2"
-      }
+      "pricing_model": "one_time"
     },
     {
       "price_id": "price_universal_triple",
       "stripe_price_id": null,
-      "product_id": "prod_universal_bundle",
-      "stripe_mode": "test",
-      "active": true,
       "currency": "usd",
       "unit_amount": 9679,
       "tenant_keyed_amount": 9679,
@@ -76,10 +61,7 @@
       "description": "5000 mg of creatine monohydrate per serving. Excellent for men and women after a workout for muscle growth and development.",
       "image_url": "images/universal-bundle/creatine_gummies_3.png",
       "context": "standard",
-      "pricing_model": "one_time",
-      "metadata": {
-        "items": "3"
-      }
+      "pricing_model": "one_time"
     }
   ],
   "default_price_id": "price_universal_double",

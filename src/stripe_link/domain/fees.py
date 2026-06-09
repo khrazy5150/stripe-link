@@ -77,12 +77,12 @@ def _rate(value: Any) -> Decimal:
     return rate
 
 
-def _round_cents(value: Decimal) -> int:
-    return int(value.quantize(Decimal("1"), rounding=ROUND_HALF_UP))
-
-
 def _ceil_cents(value: Decimal) -> int:
     return int(value.quantize(Decimal("1"), rounding=ROUND_CEILING))
+
+
+def _round_cents(value: Decimal) -> int:
+    return int(value.quantize(Decimal("1"), rounding=ROUND_HALF_UP))
 
 
 def fee_class_for(product_type: str, pricing_model: str = "one_time") -> str:
@@ -146,7 +146,7 @@ def stripe_fee_terms(
 def _stripe_fee(unit_amount: int, stripe_rate: Decimal, fixed_cents: int) -> int:
     if unit_amount <= 0:
         return 0
-    return _round_cents(Decimal(unit_amount) * stripe_rate) + fixed_cents
+    return _ceil_cents(Decimal(unit_amount) * stripe_rate) + fixed_cents
 
 
 def _platform_fee(unit_amount: int, platform_rate: Decimal) -> int:

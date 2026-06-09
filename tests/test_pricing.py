@@ -71,13 +71,5 @@ class PricingResolutionTests(unittest.TestCase):
                 "prod_creatine_gummies": "price_missing",
             })
 
-    def test_product_rejects_mixed_stripe_modes(self):
-        offer = load_fixture("offer-creatine-standard.json")
-        self.product["prices"][0]["stripe_mode"] = "live"
-
-        with self.assertRaises(PricingError):
-            resolve_offer(offer, self.products)
-
-
 if __name__ == "__main__":
     unittest.main()

@@ -6,7 +6,7 @@
   "stripe_product_id": null,
   "stripe_mode": "test",
   "canonical": false,
-  "active": true,
+  "status": "active",
   "name": "Creatine Gummies",
   "description": "Creatine gummies with one canonical Stripe product and multiple Stripe prices.",
   "images": [
@@ -18,83 +18,52 @@
     {
       "price_id": "price_1bottle",
       "stripe_price_id": null,
-      "product_id": "prod_creatine_gummies",
-      "stripe_mode": "test",
-      "active": true,
       "currency": "usd",
       "unit_amount": 3900,
       "tenant_keyed_amount": 3900,
       "quantity": 1,
-      "context": "standard",
-      "metadata": {
-        "items": "1"
-      }
+      "context": "standard"
     },
     {
       "price_id": "price_2bottle",
       "stripe_price_id": null,
-      "product_id": "prod_creatine_gummies",
-      "stripe_mode": "test",
-      "active": true,
       "currency": "usd",
       "unit_amount": 6700,
       "tenant_keyed_amount": 6700,
       "quantity": 2,
       "badge": "Most Popular",
       "context": "standard",
-      "discount_pct": 15,
-      "metadata": {
-        "items": "2"
-      }
+      "discount_pct": 15
     },
     {
       "price_id": "price_3bottle",
       "stripe_price_id": null,
-      "product_id": "prod_creatine_gummies",
-      "stripe_mode": "test",
-      "active": true,
       "currency": "usd",
       "unit_amount": 8900,
       "tenant_keyed_amount": 8900,
       "quantity": 3,
       "context": "standard",
-      "discount_pct": 24,
-      "metadata": {
-        "items": "3"
-      }
+      "discount_pct": 24
     },
     {
       "price_id": "price_6bottle",
       "stripe_price_id": null,
-      "product_id": "prod_creatine_gummies",
-      "stripe_mode": "test",
-      "active": true,
       "currency": "usd",
       "unit_amount": 14900,
       "tenant_keyed_amount": 14900,
       "quantity": 6,
       "badge": "Best Value",
       "context": "standard",
-      "discount_pct": 36,
-      "metadata": {
-        "items": "6"
-      }
+      "discount_pct": 36
     },
     {
       "price_id": "price_upsell_1bottle",
       "stripe_price_id": null,
-      "product_id": "prod_creatine_gummies",
-      "stripe_mode": "test",
-      "active": true,
       "currency": "usd",
       "unit_amount": 2700,
       "tenant_keyed_amount": 2700,
       "quantity": 1,
-      "context": "upsell",
-      "metadata": {
-        "items": "1",
-        "context": "upsell"
-      }
+      "context": "upsell"
     }
   ],
   "default_price_id": "price_2bottle",

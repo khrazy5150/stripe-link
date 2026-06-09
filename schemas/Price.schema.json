@@ -6,8 +6,6 @@
   "additionalProperties": false,
   "required": [
     "price_id",
-    "product_id",
-    "active",
     "currency",
     "quantity"
   ],
@@ -23,17 +21,6 @@
     "previous_price_id": {
       "type": ["string", "null"],
       "description": "Optional lineage pointer when an archived Stripe Price is replaced."
-    },
-    "product_id": {
-      "type": "string",
-      "minLength": 1
-    },
-    "stripe_mode": {
-      "type": "string",
-      "enum": ["test", "live"]
-    },
-    "active": {
-      "type": "boolean"
     },
     "currency": {
       "type": "string",

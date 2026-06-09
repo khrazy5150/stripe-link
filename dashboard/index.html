@@ -372,24 +372,24 @@
             </header>
             <div class="product-filter-bar">
               <label>Search
-                <input type="search" placeholder="Name, ID...">
+                <input id="productSearchInput" type="search" placeholder="Name, ID...">
               </label>
               <label>Metadata Key
-                <input type="text" placeholder="e.g., category">
+                <input id="productMetadataKeyInput" type="text" placeholder="e.g., category">
               </label>
               <label>Metadata Value
-                <input type="text" placeholder="Value">
+                <input id="productMetadataValueInput" type="text" placeholder="Value">
               </label>
               <label>Status
-                <select>
-                  <option>Active</option>
-                  <option>Inactive</option>
-                  <option>All</option>
+                <select id="productStatusFilter">
+                  <option value="active">Active</option>
+                  <option value="archived">Archived</option>
+                  <option value="all">All</option>
                 </select>
               </label>
               <div class="product-filter-actions">
-                <button type="button" class="primary-action">Apply</button>
-                <button type="button" class="secondary-action">Reset</button>
+                <button type="button" class="primary-action" id="btnApplyProductFilters">Apply</button>
+                <button type="button" class="secondary-action" id="btnResetProductFilters">Reset</button>
               </div>
             </div>
             <div class="product-empty-state" data-backend-note="products">
@@ -409,6 +409,7 @@
             </header>
             <form id="productSchemaForm" class="product-modal-body">
               <input name="tenant_id" type="hidden" value="tenant_demo">
+              <input name="product_id" type="hidden">
               <div class="ui-toast ui-toast-error hidden" id="productFormError" role="alert" aria-live="assertive">
                 <span class="ui-toast-icon" aria-hidden="true">
                   <svg class="icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -434,8 +435,8 @@
                 </select>
                 <span class="field-note">Determines fulfillment behavior and address collection at checkout.</span>
               </label>
-              <label>Product Category
-                <select name="product_category">
+              <label>Product Category <span class="required">*</span>
+                <select name="product_category" required>
                   <option value="">Select a category</option>
                 </select>
               </label>
@@ -588,6 +589,31 @@
               <button class="secondary-action" type="button" id="btnCancelProductModal">Cancel</button>
               <button class="primary-action" type="button" id="btnSaveProductUi" aria-live="polite">Save Product</button>
             </footer>
+          </div>
+        </div>
+
+        <div class="modal-backdrop hidden" id="productDetailsModal" role="dialog" aria-modal="true" aria-labelledby="productDetailsTitle">
+          <div class="product-details-modal">
+            <header class="product-modal-header">
+              <h2 id="productDetailsTitle">Product Details</h2>
+              <button class="modal-close" type="button" id="btnCloseProductDetails" aria-label="Close product details">×</button>
+            </header>
+            <div class="product-details-body" id="productDetailsBody"></div>
+            <footer class="product-modal-footer">
+              <button class="secondary-action" type="button" id="btnCloseProductDetailsFooter">Close</button>
+            </footer>
+          </div>
+        </div>
+
+        <div class="confirm-modal-backdrop hidden" id="confirmModal" role="dialog" aria-modal="true" aria-labelledby="confirmModalTitle" aria-describedby="confirmModalMessage">
+          <div class="confirm-modal">
+            <div class="confirm-modal-icon" id="confirmModalIcon" aria-hidden="true">!</div>
+            <h2 id="confirmModalTitle">Are you sure?</h2>
+            <p id="confirmModalMessage"></p>
+            <div class="confirm-modal-actions">
+              <button type="button" class="secondary-action" id="confirmModalCancel">Cancel</button>
+              <button type="button" class="confirm-modal-primary" id="confirmModalConfirm">Confirm</button>
+            </div>
           </div>
         </div>
       </section>

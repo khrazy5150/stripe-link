@@ -5,6 +5,7 @@ from decimal import Decimal
 from pathlib import Path
 
 from stripe_link.domain.documents import (
+    canonical_product_document,
     DocumentValidationError,
     validate_app_config,
     validate_global_billing_config,
@@ -94,6 +95,40 @@ class DocumentValidationTests(unittest.TestCase):
 
         validate_product_document(product)
 
+    def test_product_accepts_archived_status(self):
+        product = copy.deepcopy(self.product)
+        product["status"] = "archived"
+
+        validate_product_document(product)
+
+    def test_product_requires_status(self):
+        product = copy.deepcopy(self.product)
+        product.pop("status")
+
+        with self.assertRaisesRegex(DocumentValidationError, "Product status"):
+            validate_product_document(product)
+
+    def test_product_rejects_invalid_status(self):
+        product = copy.deepcopy(self.product)
+        product["status"] = "inactive"
+
+        with self.assertRaisesRegex(DocumentValidationError, "Product status"):
+            validate_product_document(product)
+
+    def test_product_requires_category(self):
+        product = copy.deepcopy(self.product)
+        product["product_category"] = ""
+
+        with self.assertRaisesRegex(DocumentValidationError, "product_category"):
+            validate_product_document(product)
+
+    def test_product_rejects_legacy_active(self):
+        product = copy.deepcopy(self.product)
+        product["active"] = True
+
+        with self.assertRaisesRegex(DocumentValidationError, "Product active"):
+            validate_product_document(product)
+
     def test_product_rejects_price_label(self):
         product = copy.deepcopy(self.product)
         product["prices"][0]["label"] = "One Bottle"
@@ -107,6 +142,44 @@ class DocumentValidationTests(unittest.TestCase):
 
         with self.assertRaisesRegex(DocumentValidationError, "price.nickname"):
             validate_product_document(product)
+
+    def test_product_rejects_redundant_price_product_id(self):
+        product = copy.deepcopy(self.product)
+        product["prices"][0]["product_id"] = product["product_id"]
+
+        with self.assertRaisesRegex(DocumentValidationError, "price.product_id"):
+            validate_product_document(product)
+
+    def test_product_rejects_redundant_price_stripe_mode(self):
+        product = copy.deepcopy(self.product)
+        product["prices"][0]["stripe_mode"] = "test"
+
+        with self.assertRaisesRegex(DocumentValidationError, "price.stripe_mode"):
+            validate_product_document(product)
+
+    def test_product_rejects_price_active(self):
+        product = copy.deepcopy(self.product)
+        product["prices"][0]["active"] = True
+
+        with self.assertRaisesRegex(DocumentValidationError, "price.active"):
+            validate_product_document(product)
+
+    def test_product_canonicalizer_strips_legacy_runtime_fields(self):
+        product = copy.deepcopy(self.product)
+        product["active"] = True
+        product["prices"][0]["product_id"] = product["product_id"]
+        product["prices"][0]["stripe_mode"] = "test"
+        product["prices"][0]["active"] = True
+        product["prices"][0]["metadata"] = {"items": str(product["prices"][0]["quantity"])}
+
+        canonical = canonical_product_document(product)
+
+        self.assertNotIn("active", canonical)
+        self.assertEqual(canonical["status"], "active")
+        self.assertNotIn("product_id", canonical["prices"][0])
+        self.assertNotIn("stripe_mode", canonical["prices"][0])
+        self.assertNotIn("active", canonical["prices"][0])
+        self.assertNotIn("metadata", canonical["prices"][0])
 
     def test_product_requires_canonical_marker(self):
         product = copy.deepcopy(self.product)

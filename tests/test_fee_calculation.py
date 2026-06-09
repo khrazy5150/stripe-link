@@ -53,6 +53,26 @@ class FeeCalculationTests(unittest.TestCase):
             },
         })
 
+    def test_net_guaranteed_ceil_components_match_customer_amount(self):
+        result = calculate_price(
+            tenant_keyed_amount=5800,
+            currency="usd",
+            product_type="physical",
+            fee_handling="net_guaranteed",
+            tenant_plan="basic",
+            billing_config=BILLING_CONFIG,
+        )
+
+        self.assertEqual(result, {
+            "unit_amount": 6694,
+            "breakdown": {
+                "tenant_keyed_amount": 5800,
+                "stripe_fee": 225,
+                "platform_fee": 669,
+                "net_payout": 5800,
+            },
+        })
+
     def test_standard_physical_basic(self):
         result = calculate_price(
             tenant_keyed_amount=2900,
@@ -67,9 +87,9 @@ class FeeCalculationTests(unittest.TestCase):
             "unit_amount": 2900,
             "breakdown": {
                 "tenant_keyed_amount": 2900,
-                "stripe_fee": 114,
+                "stripe_fee": 115,
                 "platform_fee": 290,
-                "net_payout": 2496,
+                "net_payout": 2495,
             },
         })
 
