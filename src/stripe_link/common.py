@@ -86,6 +86,8 @@ def runtime_manifest() -> dict[str, Any]:
         "tables": {
             "app_config": os.environ.get("APP_CONFIG_TABLE", ""),
             "stripe_keys": os.environ.get("STRIPE_KEYS_TABLE", ""),
+            "stripe_keys_dev": os.environ.get("STRIPE_KEYS_TABLE_DEV", ""),
+            "stripe_keys_prod": os.environ.get("STRIPE_KEYS_TABLE_PROD", ""),
             "platform_config": os.environ.get("PLATFORM_CONFIG_TABLE", ""),
             "shipping_config": os.environ.get("SHIPPING_CONFIG_TABLE", ""),
             "tenant_profiles": os.environ.get("TENANT_PROFILES_TABLE", ""),

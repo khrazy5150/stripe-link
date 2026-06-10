@@ -588,6 +588,10 @@ document.querySelectorAll("form").forEach((form) => {
   });
 });
 
+document.querySelector("#btnVerifyStripeKeys")?.addEventListener("click", async () => {
+  await verifyStripeKeys();
+});
+
 async function startConnect(form) {
   const values = formValues(form);
   if (!apiBaseInput.value.trim()) {
@@ -857,6 +861,25 @@ async function loadStripeKeys() {
   writeOutput(body);
   renderStripeKeys(body.stripe_keys);
   setPanelNote("stripe_keys", body.stripe_keys ? "Stripe keys loaded" : "No Stripe keys saved yet. Re-enter keys for this environment.");
+}
+
+async function verifyStripeKeys() {
+  const mode = document.querySelector("[name='verify_mode']")?.value === "live" ? "live" : "test";
+  const body = await apiRequest("/stripe/keys/verify", {
+    method: "POST",
+    body: {
+      tenant_id: appState.tenantId || "tenant_demo",
+      mode,
+    },
+  });
+  writeOutput(body);
+  const result = body.stripe_keys_verification;
+  setPanelNote(
+    "stripe_keys",
+    result?.valid
+      ? `${mode === "live" ? "Live" : "Test"} Stripe keys verified for account ${result.account_id || "unknown"}.`
+      : `${mode === "live" ? "Live" : "Test"} Stripe keys could not be verified.`,
+  );
 }
 
 function loadSimpleLandingExample() {
@@ -2953,6 +2976,11 @@ function setPanelNote(key, text) {
 function renderStripeKeys(keys) {
   updateWebhookEndpoints();
   if (!keys) return;
+  if (keys.test || keys.live) {
+    renderStripeKeys(keys.test);
+    renderStripeKeys(keys.live);
+    return;
+  }
   const mode = keys.mode === "live" ? "live" : "test";
   const publishableInput = document.querySelector(`[name='publishable_key_${mode}']`);
   const secretInput = document.querySelector(`[name='secret_key_${mode}']`);
@@ -3117,15 +3145,14 @@ function buildPayload(type, values) {
     };
   }
   if (type === "stripe_keys") {
-    const mode = currentEnvironment === "live" ? "live" : "test";
     return {
       schema_version: "2026-05-29",
       document_type: "stripe_keys",
       tenant_id: values.tenant_id,
-      mode,
-      publishable_key: values[`publishable_key_${mode}`],
-      secret_key_ref: values[`secret_key_${mode}`],
-      webhook_secret_ref: values[`webhook_secret_${mode}`],
+      modes: {
+        test: stripeKeysModePayload(values, "test", now),
+        live: stripeKeysModePayload(values, "live", now),
+      },
       updated_at: now,
     };
   }
@@ -3610,6 +3637,17 @@ function buildPayload(type, values) {
     };
   }
   return values;
+}
+
+function stripeKeysModePayload(values, mode, now) {
+  return {
+    tenant_id: values.tenant_id,
+    mode,
+    publishable_key: values[`publishable_key_${mode}`],
+    secret_key_ref: values[`secret_key_${mode}`],
+    webhook_secret_ref: values[`webhook_secret_${mode}`],
+    updated_at: now,
+  };
 }
 
 function buildRefundPolicy(values, prefix) {

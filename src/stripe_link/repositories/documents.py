@@ -169,6 +169,62 @@ class SimpleKeyRepository:
         return response.get("Item")
 
 
+class StripeKeysRepository:
+    def __init__(
+        self,
+        *,
+        dev_table_name: str,
+        prod_table_name: str,
+        key_field: str = "tenant_id",
+        dev_table: Any | None = None,
+        prod_table: Any | None = None,
+    ):
+        if not dev_table_name:
+            raise RepositoryError("Dev Stripe keys table name is required.")
+        if not prod_table_name:
+            raise RepositoryError("Prod Stripe keys table name is required.")
+        assert_jb_resource_name(dev_table_name)
+        assert_jb_resource_name(prod_table_name)
+        self.dev_table_name = dev_table_name
+        self.prod_table_name = prod_table_name
+        self.key_field = key_field
+        self._dev_table = dev_table
+        self._prod_table = prod_table
+
+    def table_for_mode(self, mode: str):
+        if mode == "live":
+            return self.prod_table
+        return self.dev_table
+
+    @property
+    def dev_table(self):
+        if self._dev_table is None:
+            import boto3
+
+            self._dev_table = boto3.resource("dynamodb").Table(self.dev_table_name)
+        return self._dev_table
+
+    @property
+    def prod_table(self):
+        if self._prod_table is None:
+            import boto3
+
+            self._prod_table = boto3.resource("dynamodb").Table(self.prod_table_name)
+        return self._prod_table
+
+    def put(self, document: dict[str, Any]) -> dict[str, Any]:
+        key_value = str(document.get(self.key_field) or "").strip()
+        mode = "live" if document.get("mode") == "live" else "test"
+        if not key_value:
+            raise RepositoryError(f"Document {self.key_field} is required.")
+        self.table_for_mode(mode).put_item(Item=document)
+        return document
+
+    def get(self, key_value: str, mode: str = "test") -> dict[str, Any] | None:
+        response = self.table_for_mode("live" if mode == "live" else "test").get_item(Key={self.key_field: key_value})
+        return response.get("Item")
+
+
 class AppConfigRepository:
     def __init__(self, table_name: str, *, table: Any | None = None):
         if not table_name:
@@ -260,11 +316,14 @@ class TenantRangeRepository:
         return _query_all_pages(self.table, KeyConditionExpression=Key("tenant_id").eq(tenant_id))
 
 
-def stripe_keys_repository(table: Any | None = None) -> SimpleKeyRepository:
-    return SimpleKeyRepository(
-        os.environ.get("STRIPE_KEYS_TABLE", ""),
+def stripe_keys_repository(table: Any | None = None) -> StripeKeysRepository:
+    fallback_table = os.environ.get("STRIPE_KEYS_TABLE", "")
+    return StripeKeysRepository(
+        dev_table_name=os.environ.get("STRIPE_KEYS_TABLE_DEV") or fallback_table,
+        prod_table_name=os.environ.get("STRIPE_KEYS_TABLE_PROD") or fallback_table,
         key_field="tenant_id",
-        table=table,
+        dev_table=table,
+        prod_table=table,
     )
 
 

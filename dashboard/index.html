@@ -292,7 +292,7 @@
               <h2>Tenant Stripe Keys</h2>
             </header>
             <div class="stripe-keys-body">
-              <button type="submit" class="primary-action">Save Keys</button>
+              <button type="submit" class="primary-action">Save Test + Live Keys</button>
 
               <div class="stripe-key-grid">
                 <section class="stripe-key-panel stripe-key-panel-test">
@@ -329,7 +329,7 @@
                     <option value="live">Live</option>
                   </select>
                 </label>
-                <button type="button" class="primary-action">Verify Webhook Secret</button>
+                <button type="button" class="primary-action" id="btnVerifyStripeKeys">Verify Selected Keys</button>
               </div>
 
               <div class="keys-status-banner" data-backend-note="stripe_keys">Set API Base URL, then save new Stripe keys.</div>

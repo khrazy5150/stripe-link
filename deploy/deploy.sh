@@ -22,10 +22,19 @@ sam build
 PARAMETER_OVERRIDES=(
   "Environment=${ENVIRONMENT}"
   "ProjectPrefix=jb"
-  "ApiCustomDomainName=${API_CUSTOM_DOMAIN_NAME}"
-  "ApiCustomDomainCertificateArn=${API_CUSTOM_DOMAIN_CERTIFICATE_ARN}"
-  "ApiCustomDomainHostedZoneName=${API_CUSTOM_DOMAIN_HOSTED_ZONE_NAME}"
 )
+
+if [[ -n "${API_CUSTOM_DOMAIN_NAME}" ]]; then
+  PARAMETER_OVERRIDES+=("ApiCustomDomainName=${API_CUSTOM_DOMAIN_NAME}")
+fi
+
+if [[ -n "${API_CUSTOM_DOMAIN_CERTIFICATE_ARN}" ]]; then
+  PARAMETER_OVERRIDES+=("ApiCustomDomainCertificateArn=${API_CUSTOM_DOMAIN_CERTIFICATE_ARN}")
+fi
+
+if [[ -n "${API_CUSTOM_DOMAIN_NAME}" || -n "${API_CUSTOM_DOMAIN_CERTIFICATE_ARN}" ]]; then
+  PARAMETER_OVERRIDES+=("ApiCustomDomainHostedZoneName=${API_CUSTOM_DOMAIN_HOSTED_ZONE_NAME}")
+fi
 
 if [[ -n "${DASHBOARD_CUSTOM_DOMAIN_NAME}" ]]; then
   PARAMETER_OVERRIDES+=("DashboardCustomDomainName=${DASHBOARD_CUSTOM_DOMAIN_NAME}")

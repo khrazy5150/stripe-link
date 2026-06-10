@@ -48,6 +48,14 @@ Parameters:
     Type: String
     Default: juniorbay.com.
     Description: Route 53 hosted zone name used for the dashboard custom domain alias record.
+  CognitoUserPoolId:
+    Type: String
+    Default: us-west-2_gBemPnEF8
+    Description: Existing Cognito user pool used as the dashboard auth gatekeeper.
+  CognitoUserPoolClientId:
+    Type: String
+    Default: 2cusn1634kl6hqgn78r0h346m0
+    Description: Existing Cognito app client ID used by the dashboard auth API.
 
 Conditions:
   HasApiCustomDomain: !And
@@ -70,6 +78,8 @@ Globals:
         PROJECT_PREFIX: !Ref ProjectPrefix
         APP_CONFIG_TABLE: !Ref AppConfigTable
         STRIPE_KEYS_TABLE: !Ref StripeKeysTable
+        STRIPE_KEYS_TABLE_DEV: !Sub "${ProjectPrefix}-stripe-keys-dev"
+        STRIPE_KEYS_TABLE_PROD: !Sub "${ProjectPrefix}-stripe-keys-prod"
         PLATFORM_CONFIG_TABLE: !Ref PlatformConfigTable
         SHIPPING_CONFIG_TABLE: !Ref ShippingConfigTable
         TENANT_PROFILES_TABLE: !Ref TenantProfilesTable
@@ -103,14 +113,42 @@ Globals:
         PREVIEW_DISTRIBUTION_DOMAIN: !GetAtt PreviewDistribution.DomainName
         STRIPE_CLIENT_ID: !Ref StripeClientId
         STRIPE_CONNECT_REDIRECT_URI: !Ref StripeConnectRedirectUri
+        STRIPE_KEYS_KMS_KEY_ID: !Ref StripeKeysEncryptionKey
+        COGNITO_USER_POOL_ID: !Ref CognitoUserPoolId
+        COGNITO_USER_POOL_CLIENT_ID: !Ref CognitoUserPoolClientId
     Tracing: Active
 
 Resources:
+  StripeKeysEncryptionKey:
+    Type: AWS::KMS::Key
+    Properties:
+      Description: !Sub "Encrypt tenant Stripe secrets for ${ProjectPrefix}-${Environment}"
+      EnableKeyRotation: true
+      KeyPolicy:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: EnableAccountAdministration
+            Effect: Allow
+            Principal:
+              AWS: !Sub "arn:aws:iam::${AWS::AccountId}:root"
+            Action: "kms:*"
+            Resource: "*"
+
+  StripeKeysEncryptionAlias:
+    Type: AWS::KMS::Alias
+    Properties:
+      AliasName: !Sub "alias/${ProjectPrefix}-stripe-keys-${Environment}"
+      TargetKeyId: !Ref StripeKeysEncryptionKey
+
   RestApi:
     Type: AWS::Serverless::Api
     Properties:
       StageName: !Ref Environment
       EndpointConfiguration: REGIONAL
+      Cors:
+        AllowMethods: "'OPTIONS,GET,POST,PUT,PATCH,DELETE'"
+        AllowHeaders: "'Content-Type,Authorization,X-Tenant-Id,X-Client-Id,X-Environment,X-Stripe-Mode'"
+        AllowOrigin: "'*'"
 
   ApiCustomDomain:
     Type: AWS::ApiGateway::DomainName
@@ -463,6 +501,57 @@ Resources:
             Path: /tenants/{tenant_id}
             Method: GET
 
+  AuthFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${ProjectPrefix}-auth-api-${Environment}"
+      CodeUri: src/
+      Handler: handlers.auth.handler
+      Description: Cognito-backed dashboard authentication API.
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref TenantProfilesTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref UserProfilesTable
+        - Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Action:
+                - cognito-idp:AdminGetUser
+                - cognito-idp:AdminUpdateUserAttributes
+              Resource: !Sub "arn:aws:cognito-idp:${AWS::Region}:${AWS::AccountId}:userpool/${CognitoUserPoolId}"
+      Events:
+        AuthRegister:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /auth/register
+            Method: POST
+        AuthConfirm:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /auth/confirm
+            Method: POST
+        AuthLogin:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /auth/login
+            Method: POST
+        AuthForgot:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /auth/forgot
+            Method: POST
+        AuthReset:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /auth/reset
+            Method: POST
+
   StripeKeysFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -472,7 +561,20 @@ Resources:
       Description: Tenant Stripe key metadata API.
       Policies:
         - DynamoDBCrudPolicy:
-            TableName: !Ref StripeKeysTable
+            TableName: !Sub "${ProjectPrefix}-stripe-keys-dev"
+        - DynamoDBCrudPolicy:
+            TableName: !Sub "${ProjectPrefix}-stripe-keys-prod"
+        - Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Action:
+                - kms:Encrypt
+                - kms:Decrypt
+                - kms:GenerateDataKey
+              Resource: !Sub "arn:aws:kms:${AWS::Region}:${AWS::AccountId}:key/*"
+              Condition:
+                StringEquals:
+                  kms:EncryptionContext:service: stripe-link
       Events:
         GetStripeKeys:
           Type: Api
@@ -486,6 +588,12 @@ Resources:
             RestApiId: !Ref RestApi
             Path: /stripe/keys
             Method: PUT
+        VerifyStripeKeys:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /stripe/keys/verify
+            Method: POST
 
   StripeConnectStartFunction:
     Type: AWS::Serverless::Function

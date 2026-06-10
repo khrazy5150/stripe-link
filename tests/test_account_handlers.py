@@ -6,6 +6,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from handlers.app_config import handler as app_config_handler
+from handlers.auth import handler as auth_handler
 from handlers.config import handler as config_handler
 from handlers.customers import handler as customers_handler
 from handlers.invoices import handler as invoices_handler
@@ -17,6 +18,7 @@ from handlers.services import handler as services_handler
 from handlers.shipping import handler as shipping_handler
 from handlers.stripe_connect import start_handler, status_handler
 from handlers.stripe_keys import handler as stripe_keys_handler
+from stripe_link.kms_secrets import KmsSecretCipher
 from stripe_link.repositories.documents import dynamodb_safe_document
 from tests.fakes import FakeAppConfigRepository, FakeDocumentRepository, FakeSimpleRepository
 
@@ -30,6 +32,153 @@ def load_fixture(name: str):
 
 
 class AccountHandlerTests(unittest.TestCase):
+    def test_auth_register_creates_cognito_user_and_profiles(self):
+        class FakeCognito:
+            def __init__(self):
+                self.sign_up_payload = None
+
+            def sign_up(self, **kwargs):
+                self.sign_up_payload = kwargs
+                return {
+                    "UserSub": "user-sub-1",
+                    "CodeDeliveryDetails": {
+                        "Destination": "k***@example.com",
+                        "DeliveryMedium": "EMAIL",
+                        "AttributeName": "email",
+                    },
+                }
+
+        cognito = FakeCognito()
+        tenants = FakeDocumentRepository("tenant_id")
+        users = FakeDocumentRepository("user_id")
+
+        with patch.dict(os.environ, {"COGNITO_USER_POOL_CLIENT_ID": "client-app"}, clear=False):
+            response = auth_handler({
+                "httpMethod": "POST",
+                "path": "/auth/register",
+                "body": json.dumps({
+                    "client_id": "client_demo",
+                    "first_name": "Keith",
+                    "last_name": "De Costa",
+                    "email": "Keith@example.com",
+                    "phone_number": "+12065550100",
+                    "password": "password123",
+                }),
+            }, None, cognito=cognito, tenant_repository=tenants, user_repository=users)
+
+        body = json.loads(response["body"])
+        self.assertEqual(response["statusCode"], 201)
+        self.assertEqual(body["client_id"], "client_demo")
+        self.assertEqual(cognito.sign_up_payload["Username"], "keith@example.com")
+        self.assertNotIn({"Name": "custom:client_id", "Value": "client_demo"}, cognito.sign_up_payload["UserAttributes"])
+        self.assertEqual(tenants.get("client_demo", "client_demo")["auth"]["status"], "pending_confirmation")
+        self.assertEqual(users.get("client_demo", "user-sub-1")["role"], "owner")
+
+    def test_auth_register_defaults_client_id_to_cognito_sub(self):
+        class FakeCognito:
+            def sign_up(self, **kwargs):
+                return {"UserSub": "user-sub-default"}
+
+        tenants = FakeDocumentRepository("tenant_id")
+        users = FakeDocumentRepository("user_id")
+
+        with patch.dict(os.environ, {"COGNITO_USER_POOL_CLIENT_ID": "client-app"}, clear=False):
+            response = auth_handler({
+                "httpMethod": "POST",
+                "path": "/auth/register",
+                "body": json.dumps({
+                    "first_name": "Keith",
+                    "last_name": "De Costa",
+                    "email": "keith@example.com",
+                    "password": "password123",
+                }),
+            }, None, cognito=FakeCognito(), tenant_repository=tenants, user_repository=users)
+
+        body = json.loads(response["body"])
+        self.assertEqual(response["statusCode"], 201)
+        self.assertEqual(body["client_id"], "user-sub-default")
+        self.assertEqual(tenants.get("user-sub-default", "user-sub-default")["tenant_id"], "user-sub-default")
+
+    def test_auth_login_returns_client_session(self):
+        class FakeCognito:
+            def initiate_auth(self, **kwargs):
+                return {
+                    "AuthenticationResult": {
+                        "IdToken": "id-token",
+                        "AccessToken": "access-token",
+                        "RefreshToken": "refresh-token",
+                        "ExpiresIn": 3600,
+                        "TokenType": "Bearer",
+                    }
+                }
+
+            def admin_get_user(self, **kwargs):
+                return {
+                    "Username": "keith@example.com",
+                    "UserAttributes": [
+                        {"Name": "sub", "Value": "user-sub-1"},
+                        {"Name": "email", "Value": "keith@example.com"},
+                        {"Name": "given_name", "Value": "Keith"},
+                        {"Name": "family_name", "Value": "De Costa"},
+                        {"Name": "custom:client_id", "Value": "client_demo"},
+                        {"Name": "email_verified", "Value": "true"},
+                    ],
+                }
+
+        tenants = FakeDocumentRepository("tenant_id")
+        users = FakeDocumentRepository("user_id")
+        tenants.put({
+            "schema_version": "2026-05-29",
+            "document_type": "tenant_profile",
+            "tenant_id": "client_demo",
+            "owner": {"first_name": "Keith", "last_name": "De Costa", "email": "keith@example.com"},
+        })
+        users.put({
+            "schema_version": "2026-05-29",
+            "document_type": "user_profile",
+            "tenant_id": "client_demo",
+            "user_id": "user-sub-1",
+            "email": "keith@example.com",
+            "display_name": "Keith De Costa",
+        })
+
+        with patch.dict(os.environ, {
+            "COGNITO_USER_POOL_ID": "pool",
+            "COGNITO_USER_POOL_CLIENT_ID": "client-app",
+        }, clear=False):
+            response = auth_handler({
+                "httpMethod": "POST",
+                "path": "/auth/login",
+                "body": json.dumps({"email": "keith@example.com", "password": "password123"}),
+            }, None, cognito=FakeCognito(), tenant_repository=tenants, user_repository=users)
+
+        body = json.loads(response["body"])
+        self.assertEqual(response["statusCode"], 200)
+        self.assertEqual(body["session"]["client_id"], "client_demo")
+        self.assertEqual(body["session"]["tenant_id"], "client_demo")
+        self.assertEqual(body["session"]["access_token"], "access-token")
+
+    def test_kms_secret_cipher_encrypts_and_decrypts_with_context(self):
+        class FakeKmsClient:
+            def __init__(self):
+                self.context = None
+
+            def encrypt(self, KeyId, Plaintext, EncryptionContext):
+                self.context = EncryptionContext
+                return {"CiphertextBlob": b"wrapped:" + Plaintext}
+
+            def decrypt(self, CiphertextBlob, EncryptionContext):
+                self.context = EncryptionContext
+                return {"Plaintext": CiphertextBlob.removeprefix(b"wrapped:")}
+
+        client = FakeKmsClient()
+        cipher = KmsSecretCipher(key_id="key-demo", client=client)
+        wrapped = cipher.encrypt("sk_test_plain", tenant_id="tenant_demo", mode="test", field="secret_key_ref")
+
+        self.assertTrue(wrapped.startswith("kms:v1:"))
+        self.assertEqual(cipher.decrypt(wrapped, tenant_id="tenant_demo", mode="test", field="secret_key_ref"), "sk_test_plain")
+        self.assertEqual(client.context["tenant_id"], "tenant_demo")
+
     def test_app_config_create_and_get_api_base_url(self):
         repository = FakeAppConfigRepository()
         document = load_fixture("app-config.json")
@@ -102,8 +251,156 @@ class AccountHandlerTests(unittest.TestCase):
         }, None, repository=repository)
 
         self.assertEqual(created["statusCode"], 201)
-        self.assertEqual(json.loads(created["body"])["stripe_keys"]["secret_key_ref"], "********")
-        self.assertEqual(json.loads(fetched["body"])["stripe_keys"]["webhook_secret_ref"], "********")
+        self.assertEqual(json.loads(created["body"])["stripe_keys"]["test"]["secret_key_ref"], "********")
+        self.assertEqual(json.loads(fetched["body"])["stripe_keys"]["test"]["webhook_secret_ref"], "********")
+
+    def test_stripe_keys_batch_save_routes_test_and_live_modes(self):
+        class FakeModeRepository:
+            def __init__(self):
+                self.documents = {}
+
+            def put(self, document):
+                self.documents[(document["mode"], document["tenant_id"])] = dict(document)
+                return self.documents[(document["mode"], document["tenant_id"])]
+
+            def get(self, tenant_id, mode="test"):
+                document = self.documents.get((mode, tenant_id))
+                return dict(document) if document else None
+
+        class FakeSecretCipher:
+            def encrypt(self, plaintext, *, tenant_id, mode, field):
+                return f"kms:v1:{mode}:{field}:{plaintext}"
+
+        repository = FakeModeRepository()
+        response = stripe_keys_handler({
+            "httpMethod": "PUT",
+            "body": json.dumps({
+                "schema_version": "2026-05-29",
+                "document_type": "stripe_keys",
+                "tenant_id": "tenant_demo",
+                "modes": {
+                    "test": {
+                        "publishable_key": "pk_test_demo",
+                        "secret_key_ref": "sk_test_plain",
+                        "webhook_secret_ref": "whsec_test_plain",
+                    },
+                    "live": {
+                        "publishable_key": "pk_live_demo",
+                        "secret_key_ref": "sk_live_plain",
+                        "webhook_secret_ref": "whsec_live_plain",
+                    },
+                },
+            }),
+        }, None, repository=repository, secret_cipher=FakeSecretCipher())
+        body = json.loads(response["body"])
+
+        self.assertEqual(response["statusCode"], 201)
+        self.assertEqual(repository.get("tenant_demo", "test")["publishable_key"], "pk_test_demo")
+        self.assertEqual(repository.get("tenant_demo", "live")["publishable_key"], "pk_live_demo")
+        self.assertTrue(repository.get("tenant_demo", "test")["secret_key_ref"].startswith("kms:v1:test"))
+        self.assertTrue(repository.get("tenant_demo", "live")["secret_key_ref"].startswith("kms:v1:live"))
+        self.assertEqual(body["stripe_keys"]["test"]["secret_key_ref"], "********")
+        self.assertEqual(body["stripe_keys"]["live"]["secret_key_ref"], "********")
+
+    def test_stripe_key_secrets_are_encrypted_before_persistence(self):
+        class FakeSecretCipher:
+            def encrypt(self, plaintext, *, tenant_id, mode, field):
+                return f"kms:v1:{tenant_id}:{mode}:{field}:{plaintext[::-1]}"
+
+        repository = FakeSimpleRepository("tenant_id")
+        keys = {
+            "schema_version": "2026-05-29",
+            "document_type": "stripe_keys",
+            "tenant_id": "tenant_demo",
+            "mode": "test",
+            "publishable_key": "pk_test_demo",
+            "secret_key_ref": "sk_test_plain",
+            "webhook_secret_ref": "whsec_plain",
+        }
+
+        created = stripe_keys_handler({
+            "httpMethod": "PUT",
+            "body": json.dumps(keys),
+        }, None, repository=repository, secret_cipher=FakeSecretCipher())
+        stored = repository.get("tenant_demo")
+
+        self.assertEqual(created["statusCode"], 201)
+        self.assertEqual(json.loads(created["body"])["stripe_keys"]["test"]["secret_key_ref"], "********")
+        self.assertNotEqual(stored["secret_key_ref"], "sk_test_plain")
+        self.assertNotEqual(stored["webhook_secret_ref"], "whsec_plain")
+        self.assertTrue(stored["secret_key_ref"].startswith("kms:v1:"))
+
+    def test_stripe_key_blank_secret_inputs_preserve_existing_encrypted_values(self):
+        class FakeSecretCipher:
+            def encrypt(self, plaintext, *, tenant_id, mode, field):
+                return f"kms:v1:{field}:{plaintext}"
+
+        repository = FakeSimpleRepository("tenant_id")
+        repository.put({
+            "schema_version": "2026-05-29",
+            "document_type": "stripe_keys",
+            "tenant_id": "tenant_demo",
+            "mode": "test",
+            "publishable_key": "pk_test_old",
+            "secret_key_ref": "kms:v1:existing-secret",
+            "webhook_secret_ref": "kms:v1:existing-webhook",
+        })
+
+        response = stripe_keys_handler({
+            "httpMethod": "PUT",
+            "body": json.dumps({
+                "schema_version": "2026-05-29",
+                "document_type": "stripe_keys",
+                "tenant_id": "tenant_demo",
+                "mode": "test",
+                "publishable_key": "pk_test_new",
+                "secret_key_ref": "",
+                "webhook_secret_ref": "********",
+            }),
+        }, None, repository=repository, secret_cipher=FakeSecretCipher())
+        stored = repository.get("tenant_demo")
+
+        self.assertEqual(response["statusCode"], 201)
+        self.assertEqual(stored["publishable_key"], "pk_test_new")
+        self.assertEqual(stored["secret_key_ref"], "kms:v1:existing-secret")
+        self.assertEqual(stored["webhook_secret_ref"], "kms:v1:existing-webhook")
+
+    def test_stripe_keys_verify_decrypts_and_checks_stripe_account(self):
+        class FakeSecretCipher:
+            def decrypt(self, secret_ref, *, tenant_id, mode, field):
+                return "sk_test_plain"
+
+        repository = FakeSimpleRepository("tenant_id")
+        repository.put({
+            "schema_version": "2026-05-29",
+            "document_type": "stripe_keys",
+            "tenant_id": "tenant_demo",
+            "mode": "test",
+            "publishable_key": "pk_test_demo",
+            "secret_key_ref": "kms:v1:secret",
+        })
+
+        class FakeResponse:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def read(self):
+                return json.dumps({"id": "acct_verified", "livemode": False}).encode("utf-8")
+
+        with patch("handlers.stripe_keys.urlopen", return_value=FakeResponse()):
+            response = stripe_keys_handler({
+                "httpMethod": "POST",
+                "path": "/stripe/keys/verify",
+                "body": json.dumps({"tenant_id": "tenant_demo", "mode": "test"}),
+            }, None, repository=repository, secret_cipher=FakeSecretCipher())
+
+        body = json.loads(response["body"])
+        self.assertEqual(response["statusCode"], 200)
+        self.assertTrue(body["stripe_keys_verification"]["valid"])
+        self.assertEqual(body["stripe_keys_verification"]["account_id"], "acct_verified")
 
     def test_config_create_and_get(self):
         repository = FakeSimpleRepository("tenant_id")
