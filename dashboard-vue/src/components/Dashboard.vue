@@ -20,7 +20,7 @@
         <div class="stats-content">
           <span class="stats-label">Total Orders</span>
           <strong class="stats-value">{{ store.loading && !store.loaded ? "--" : store.stats.orders }}</strong>
-          <span class="stats-meta">Lifetime &bull; Test</span>
+          <span class="stats-meta">Lifetime &bull; {{ environmentLabel }}</span>
         </div>
       </article>
 
@@ -46,7 +46,7 @@
         <div class="stats-content">
           <span class="stats-label">Customers</span>
           <strong class="stats-value">{{ store.loading && !store.loaded ? "--" : store.stats.customers }}</strong>
-          <span class="stats-meta">Lifetime &bull; Test</span>
+          <span class="stats-meta">Lifetime &bull; {{ environmentLabel }}</span>
         </div>
       </article>
 
@@ -59,7 +59,7 @@
         <div class="stats-content">
           <span class="stats-label">Products</span>
           <strong class="stats-value">{{ store.loading && !store.loaded ? "--" : store.stats.products }}</strong>
-          <span class="stats-meta">Lifetime &bull; Test</span>
+          <span class="stats-meta">Lifetime &bull; {{ environmentLabel }}</span>
         </div>
       </article>
     </div>
@@ -121,6 +121,13 @@
 <script setup>
 import { onMounted } from "vue";
 import { useDashboardStore } from "../stores/dashboard";
+
+defineProps({
+  environmentLabel: {
+    type: String,
+    default: "Test",
+  },
+});
 
 const store = useDashboardStore();
 

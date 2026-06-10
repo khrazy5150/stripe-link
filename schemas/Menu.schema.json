@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.juniorbay.com/Menu.schema.json",
+  "title": "Dashboard Menu",
+  "type": "object",
+  "required": ["schema_version", "document_type", "groups", "items"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "type": "string"
+    },
+    "document_type": {
+      "const": "menu"
+    },
+    "groups": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["key", "label", "items"],
+        "additionalProperties": false,
+        "properties": {
+          "key": { "type": "string" },
+          "label": { "type": "string" },
+          "items": {
+            "type": "array",
+            "items": { "type": "string" }
+          }
+        }
+      }
+    },
+    "items": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["key", "label", "icon", "view", "environments"],
+        "additionalProperties": false,
+        "properties": {
+          "key": { "type": "string" },
+          "label": { "type": "string" },
+          "icon": { "type": "string" },
+          "view": { "type": "string" },
+          "enabled": { "type": "boolean", "default": false },
+          "environments": {
+            "type": "array",
+            "items": { "enum": ["test", "live"] },
+            "minItems": 1
+          }
+        }
+      }
+    }
+  }
+}

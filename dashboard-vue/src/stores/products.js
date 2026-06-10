@@ -1,5 +1,5 @@
 import { defineStore } from "pinia";
-import { apiRequest, getTenantId } from "../api/client";
+import { apiRequest, getApiEnvironment, getTenantId } from "../api/client";
 
 const CATEGORY_OPTIONS = [
   ["apparel", "Apparel"],
@@ -115,7 +115,7 @@ export const useProductsStore = defineStore("products", {
     loaded: false,
     savingStatus: false,
     error: "",
-    message: "Click Load Products or adjust your filters to see products.",
+    message: "Click Load Products to see products.",
     filters: {
       search: "",
       category: "",
@@ -154,7 +154,7 @@ export const useProductsStore = defineStore("products", {
       this.loaded = false;
       this.savingStatus = false;
       this.error = "";
-      this.message = "Click Load Products or adjust your filters to see products.";
+      this.message = "Click Load Products to see products.";
       this.resetFilters();
     },
 
@@ -163,6 +163,15 @@ export const useProductsStore = defineStore("products", {
       this.filters.category = "";
       this.filters.productType = "";
       this.filters.status = "active";
+      if (!this.loaded) this.message = "Click Load Products to see products.";
+    },
+
+    applyFilters() {
+      if (!this.loaded) {
+        this.message = "Click Load Products to see products.";
+        return;
+      }
+      this.message = `${this.filteredProducts.length} of ${this.products.length} product${this.products.length === 1 ? "" : "s"} shown.`;
     },
 
     async load() {
@@ -241,7 +250,7 @@ export const useProductsStore = defineStore("products", {
 
 export async function buildProductDocument(form) {
   const now = Math.floor(Date.now() / 1000);
-  const productId = localId("local");
+  const productId = form.product_id || localId("local");
   const productType = form.product_type || "physical";
   const priceForms = Array.isArray(form.prices) && form.prices.length ? form.prices : [defaultPriceForm()];
   const prices = await Promise.all(priceForms.map((priceForm) => buildPriceDocument(priceForm, productType, now)));
@@ -261,10 +270,10 @@ export async function buildProductDocument(form) {
     document_type: "product",
     tenant_id: getTenantId(),
     product_id: productId,
-    stripe_product_id: null,
-    stripe_mode: "test",
+    stripe_product_id: form.stripe_product_id || null,
+    stripe_mode: form.stripe_mode || getApiEnvironment(),
     canonical: !isLeadGen && form.canonical === "true",
-    status: "active",
+    status: form.status === "archived" ? "archived" : "active",
     name: String(form.name || "").trim(),
     description: String(form.description || "").trim(),
     images: isLeadGen ? [] : images,
@@ -275,8 +284,8 @@ export async function buildProductDocument(form) {
     variants: {
       size_enabled: isPhysical && !isLeadGen && Boolean(form.size_enabled),
       color_enabled: isPhysical && !isLeadGen && Boolean(form.color_enabled),
-      sizes: isPhysical && !isLeadGen && form.size_enabled ? variantLabels(form.sizes) : [],
-      colors: isPhysical && !isLeadGen && form.color_enabled ? variantLabels(form.colors) : [],
+      sizes: isPhysical && !isLeadGen && form.size_enabled ? sizeVariants(form.sizes) : [],
+      colors: isPhysical && !isLeadGen && form.color_enabled ? colorVariants(form.colors) : [],
     },
     prices: isLeadGen ? [freeLeadPrice(defaultPrice?.price_id || localId("price"), now)] : prices,
     default_price_id: isLeadGen ? (defaultPrice?.price_id || prices[0]?.price_id || localId("price")) : defaultPrice.price_id,
@@ -295,7 +304,7 @@ export async function buildProductDocument(form) {
       last_synced_at: null,
       error: null,
     },
-    created_at: now,
+    created_at: form.created_at || now,
     updated_at: now,
     tags,
   };
@@ -303,8 +312,39 @@ export async function buildProductDocument(form) {
   return product;
 }
 
-function variantLabels(values) {
-  return [...new Set((values || []).map((value) => String(value || "").trim()).filter(Boolean))];
+function sizeVariants(values) {
+  return uniqueVariants((values || [])
+    .map((value) => {
+      if (typeof value === "string") return { label: value.trim(), description: "" };
+      return {
+        label: String(value?.label || "").trim(),
+        description: String(value?.description || "").trim(),
+      };
+    })
+    .filter((variant) => variant.label || variant.description));
+}
+
+function colorVariants(values) {
+  return uniqueVariants((values || [])
+    .map((value) => {
+      if (typeof value === "string") return { label: value.trim(), hex_color: "#000000", description: "" };
+      return {
+        label: String(value?.label || "").trim(),
+        hex_color: String(value?.hex_color || "#000000").trim() || "#000000",
+        description: String(value?.description || "").trim(),
+      };
+    })
+    .filter((variant) => variant.label || variant.description));
+}
+
+function uniqueVariants(variants) {
+  const seen = new Set();
+  return variants.filter((variant) => {
+    const key = JSON.stringify(variant);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 function defaultPriceForm() {
@@ -337,7 +377,7 @@ async function buildPriceDocument(priceForm, productType, now) {
   });
   const price = {
     price_id: priceForm.price_id || localId("price"),
-    stripe_price_id: null,
+    stripe_price_id: priceForm.stripe_price_id || null,
     currency: String(priceForm.currency || "usd").toLowerCase(),
     quantity,
     pricing_model: pricingModel,
@@ -347,7 +387,7 @@ async function buildPriceDocument(priceForm, productType, now) {
     fee_breakdown: calculation.breakdown,
     unit_amount: calculation.unit_amount,
     compare_at_unit_amount: cents(priceForm.regular_price) * quantity,
-    created_at: now,
+    created_at: priceForm.created_at || now,
     updated_at: now,
   };
   if (pricingModel === "customer_chooses") {

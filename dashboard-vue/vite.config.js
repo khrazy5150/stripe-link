@@ -13,6 +13,12 @@ export default defineConfig({
         secure: true,
         rewrite: (path) => path.replace(/^\/api/, ""),
       },
+      "/api-live": {
+        target: "https://prod.juniorbay.com",
+        changeOrigin: true,
+        secure: true,
+        rewrite: (path) => path.replace(/^\/api-live/, ""),
+      },
     },
   },
 });

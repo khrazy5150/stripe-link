@@ -48,7 +48,7 @@
           </select>
         </label>
         <div class="product-filter-actions">
-          <button type="button" class="primary-action" @click="store.load">Apply</button>
+          <button type="button" class="primary-action" @click="store.applyFilters">Apply</button>
           <button type="button" class="secondary-action" @click="store.resetFilters">Reset</button>
         </div>
       </div>
@@ -57,7 +57,7 @@
       <div v-else class="keys-status-banner">{{ statusMessage }}</div>
 
       <div v-if="!store.filteredProducts.length" class="product-empty-state">
-        {{ store.loaded ? "No products match the current filters." : "Click Load Products or adjust your filters to see products." }}
+        {{ store.loaded ? "No products match the current filters." : "Click Load Products to see products." }}
       </div>
 
       <div v-else class="product-card-list">
@@ -90,7 +90,7 @@
               <span v-if="compareAtText(product)" class="product-card-compare">Regular {{ compareAtText(product) }}</span>
             </div>
             <div class="product-card-actions">
-              <button type="button" class="secondary-action" disabled>Edit</button>
+              <button type="button" class="secondary-action" @click="openEditModal(product)">Edit</button>
               <button type="button" class="secondary-action" @click="selectedProduct = product">Details</button>
               <button type="button" class="secondary-action" :disabled="store.savingStatus" @click="confirmStatusChange(product)">
                 {{ lifecycleStatus(product) === "archived" ? "Restore" : "Archive" }}
@@ -168,7 +168,7 @@
     <div v-if="showCreateModal" class="modal-backdrop" @click.self="closeCreateModal">
       <section class="modal-card product-create-modal" role="dialog" aria-modal="true" aria-labelledby="createProductTitle">
         <header class="modal-card-header">
-          <h2 id="createProductTitle">Create New Product</h2>
+          <h2 id="createProductTitle">{{ editingProduct ? "Edit Product" : "Create New Product" }}</h2>
           <button type="button" class="modal-close" aria-label="Close create product modal" @click="closeCreateModal">×</button>
         </header>
 
@@ -323,7 +323,9 @@
                   <select v-model="price.context">
                     <option value="standard">Standard</option>
                     <option value="sale">Sale</option>
+                    <option value="flash_sale">Flash sale</option>
                     <option value="upsell">Upsell</option>
+                    <option value="downsell">Downsell</option>
                     <option value="order_bump">Order bump</option>
                   </select>
                 </label>
@@ -393,31 +395,34 @@
 
           <section v-if="form.product_intent === 'transaction' && form.product_type === 'physical'" class="modal-form-section">
             <label class="switch-row variant-toggle">
-              <input v-model="form.size_enabled" type="checkbox" />
+              <input v-model="form.size_enabled" type="checkbox" @change="ensureSizeVariant" />
               <span><strong>Item Size</strong><small>Enable size variants, such as S, M, L, XL.</small></span>
             </label>
             <div v-if="form.size_enabled" class="variant-options">
-              <div class="variant-list">
-                <label v-for="(_, index) in form.sizes" :key="`size-${index}`">
-                  Size {{ index + 1 }}
-                  <input v-model.trim="form.sizes[index]" placeholder="e.g. Medium" />
-                </label>
+              <div class="variant-row-list">
+                <div v-for="(size, index) in form.sizes" :key="size.form_id" class="variant-item-row">
+                  <input v-model.trim="size.label" class="variant-label-input" :aria-label="`Size ${index + 1} label`" maxlength="10" placeholder="S" />
+                  <input v-model.trim="size.description" :aria-label="`Size ${index + 1} description`" placeholder="e.g., Waist: 30-32in, Hips: 37-39in" />
+                  <button type="button" class="variant-remove-button" :aria-label="`Remove size ${index + 1}`" @click="removeSizeVariant(index)">×</button>
+                </div>
               </div>
-              <button type="button" class="secondary-action" @click="form.sizes.push('')">+ New Size</button>
+              <button type="button" class="secondary-action" @click="addSizeVariant">+ New Size</button>
             </div>
 
             <label class="switch-row variant-toggle">
-              <input v-model="form.color_enabled" type="checkbox" />
+              <input v-model="form.color_enabled" type="checkbox" @change="ensureColorVariant" />
               <span><strong>Item Color</strong><small>Enable color variants, such as Black, White, Navy.</small></span>
             </label>
             <div v-if="form.color_enabled" class="variant-options">
-              <div class="variant-list">
-                <label v-for="(_, index) in form.colors" :key="`color-${index}`">
-                  Color {{ index + 1 }}
-                  <input v-model.trim="form.colors[index]" placeholder="e.g. Navy" />
-                </label>
+              <div class="variant-row-list">
+                <div v-for="(color, index) in form.colors" :key="color.form_id" class="variant-item-row color-variant-row">
+                  <input v-model.trim="color.label" class="variant-label-input" :aria-label="`Color ${index + 1} label`" maxlength="20" placeholder="Black" />
+                  <input v-model="color.hex_color" class="variant-color-preview" type="color" :aria-label="`Color ${index + 1} swatch`" />
+                  <input v-model.trim="color.description" :aria-label="`Color ${index + 1} description`" placeholder="e.g., Jet black finish" />
+                  <button type="button" class="variant-remove-button" :aria-label="`Remove color ${index + 1}`" @click="removeColorVariant(index)">×</button>
+                </div>
               </div>
-              <button type="button" class="secondary-action" @click="form.colors.push('')">+ New Color</button>
+              <button type="button" class="secondary-action" @click="addColorVariant">+ New Color</button>
             </div>
 
             <h3>Package Dimensions</h3>
@@ -481,7 +486,7 @@
 </template>
 
 <script setup>
-import { computed, h, onMounted, ref, watch } from "vue";
+import { computed, h, nextTick, ref, watch } from "vue";
 import { apiRequest } from "../api/client";
 import { defaultProductPrice, formatMoney, useProductsStore } from "../stores/products";
 
@@ -489,6 +494,7 @@ const store = useProductsStore();
 const selectedProduct = ref(null);
 const pendingStatusProduct = ref(null);
 const pendingStatus = ref("archived");
+const editingProduct = ref(null);
 const showCreateModal = ref(false);
 const showLeadPicker = ref(false);
 const tagInputVisible = ref(false);
@@ -512,6 +518,7 @@ const leadActions = [
 const defaultLeadAction = { ...leadActions[0], target: "", platform: "other" };
 const draftLeadAction = ref({ ...defaultLeadAction });
 const form = ref(defaultProductForm());
+const hydratingForm = ref(false);
 
 const statusMessage = computed(() => {
   if (!store.loaded) return store.message;
@@ -557,11 +564,8 @@ const leadTargetPlaceholder = computed(() => {
 
 const leadTargetPreview = computed(() => form.value.lead_capture.target || "");
 
-onMounted(() => {
-  if (!store.loaded) store.load();
-});
-
 watch(() => form.value.product_type, () => {
+  if (hydratingForm.value) return;
   form.value.product_category = "";
 });
 
@@ -625,6 +629,11 @@ function leadIcon(action) {
 
 function defaultProductForm() {
   return {
+    product_id: "",
+    stripe_product_id: null,
+    stripe_mode: "",
+    status: "active",
+    created_at: null,
     name: "",
     description: "",
     product_type: "physical",
@@ -669,6 +678,53 @@ function defaultPriceForm() {
   };
 }
 
+function variantFormId(prefix) {
+  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+function defaultSizeVariant() {
+  return {
+    form_id: variantFormId("size"),
+    label: "",
+    description: "",
+  };
+}
+
+function defaultColorVariant() {
+  return {
+    form_id: variantFormId("color"),
+    label: "",
+    hex_color: "#000000",
+    description: "",
+  };
+}
+
+function ensureSizeVariant() {
+  if (form.value.size_enabled && !form.value.sizes.length) addSizeVariant();
+}
+
+function ensureColorVariant() {
+  if (form.value.color_enabled && !form.value.colors.length) addColorVariant();
+}
+
+function addSizeVariant() {
+  form.value.sizes.push(defaultSizeVariant());
+}
+
+function addColorVariant() {
+  form.value.colors.push(defaultColorVariant());
+}
+
+function removeSizeVariant(index) {
+  form.value.sizes.splice(index, 1);
+  if (!form.value.sizes.length) form.value.size_enabled = false;
+}
+
+function removeColorVariant(index) {
+  form.value.colors.splice(index, 1);
+  if (!form.value.colors.length) form.value.color_enabled = false;
+}
+
 function addPrice() {
   form.value.prices.push(defaultPriceForm());
 }
@@ -701,6 +757,7 @@ function pricePreviewFor(price) {
 }
 
 function openCreateModal() {
+  editingProduct.value = null;
   form.value = defaultProductForm();
   draftLeadAction.value = { ...defaultLeadAction };
   formError.value = "";
@@ -711,9 +768,142 @@ function openCreateModal() {
   showCreateModal.value = true;
 }
 
+async function openEditModal(product) {
+  editingProduct.value = product;
+  hydratingForm.value = true;
+  form.value = productFormFromDocument(product);
+  draftLeadAction.value = { ...form.value.lead_capture };
+  formError.value = "";
+  uploadStatus.value = "";
+  uploadStatusKind.value = "";
+  tagInput.value = "";
+  tagInputVisible.value = false;
+  showCreateModal.value = true;
+  await nextTick();
+  hydratingForm.value = false;
+}
+
 function closeCreateModal() {
   showCreateModal.value = false;
   showLeadPicker.value = false;
+  editingProduct.value = null;
+}
+
+function productFormFromDocument(product) {
+  const base = defaultProductForm();
+  const productType = product.product_type || "physical";
+  const prices = Array.isArray(product.prices) && product.prices.length
+    ? product.prices.map((price) => priceFormFromDocument(product, price))
+    : [defaultPriceForm()];
+  const defaultPriceIndex = Math.max(0, prices.findIndex((price) => price.price_id === product.default_price_id));
+  const refundPolicy = product.refund_policy || {};
+  const fulfillment = product.fulfillment || {};
+  const dimensions = fulfillment.dimensions || {};
+  const images = Array.isArray(product.images) ? product.images : [];
+  const variants = product.variants || {};
+  const leadCapture = leadActionFromDocument(product.lead_capture);
+  return {
+    ...base,
+    product_id: product.product_id || "",
+    stripe_product_id: product.stripe_product_id || null,
+    stripe_mode: product.stripe_mode || "",
+    status: lifecycleStatus(product),
+    created_at: product.created_at || null,
+    name: product.name || "",
+    description: product.description || "",
+    product_type: productType,
+    product_category: product.product_category || "",
+    canonical: product.canonical ? "true" : "false",
+    product_intent: product.lead_capture ? "lead_gen" : product.product_intent || "transaction",
+    tags: customTagsFromProduct(product),
+    prices,
+    default_price_index: defaultPriceIndex >= 0 ? defaultPriceIndex : 0,
+    refund_source: refundPolicy.source || base.refund_source,
+    refund_window: refundPolicy.refund_window || base.refund_window,
+    refund_condition: refundPolicy.condition || base.refund_condition,
+    refund_return_method: refundPolicy.return_method || base.refund_return_method,
+    refund_short_label: refundPolicy.short_label || base.refund_short_label,
+    refund_full_policy: refundPolicy.full_policy || base.refund_full_policy,
+    uploaded_images: images,
+    images: "",
+    size_enabled: Boolean(variants.size_enabled || variants.sizes?.length),
+    color_enabled: Boolean(variants.color_enabled || variants.colors?.length),
+    sizes: variantSizesFromDocument(variants.sizes),
+    colors: variantColorsFromDocument(variants.colors),
+    length_in: dimensions.length_in ?? base.length_in,
+    width_in: dimensions.width_in ?? base.width_in,
+    height_in: dimensions.height_in ?? base.height_in,
+    weight_lb: fulfillment.weight_lb ?? base.weight_lb,
+    lead_capture: leadCapture,
+  };
+}
+
+function priceFormFromDocument(product, price) {
+  const quantity = Math.max(1, Number(price.quantity || 1));
+  return {
+    ...defaultPriceForm(),
+    price_id: price.price_id || "",
+    stripe_price_id: price.stripe_price_id || null,
+    created_at: price.created_at || null,
+    sales_price: centsToMoneyInput(price.tenant_keyed_amount ?? price.unit_amount ?? 0, quantity),
+    regular_price: centsToMoneyInput(price.compare_at_unit_amount || 0, quantity),
+    currency: price.currency || "usd",
+    quantity,
+    pricing_model: price.pricing_model || "one_time",
+    fee_handling: price.fee_handling || "standard",
+    context: price.context || "standard",
+    min_amount: centsToMoneyInput(price.min_amount || 0, quantity),
+    suggested_amount: centsToMoneyInput(price.suggested_amount || 0, quantity),
+  };
+}
+
+function centsToMoneyInput(cents, quantity = 1) {
+  return Number((Number(cents || 0) / Math.max(1, Number(quantity || 1)) / 100).toFixed(2));
+}
+
+function variantSizesFromDocument(values = []) {
+  return values.map((value) => {
+    if (typeof value === "string") return { ...defaultSizeVariant(), label: value, description: "" };
+    return {
+      ...defaultSizeVariant(),
+      label: value?.label || "",
+      description: value?.description || "",
+    };
+  });
+}
+
+function variantColorsFromDocument(values = []) {
+  return values.map((value) => {
+    if (typeof value === "string") return { ...defaultColorVariant(), label: value, hex_color: "#000000", description: "" };
+    return {
+      ...defaultColorVariant(),
+      label: value?.label || "",
+      hex_color: value?.hex_color || "#000000",
+      description: value?.description || "",
+    };
+  });
+}
+
+function leadActionFromDocument(leadCapture) {
+  if (!leadCapture) return { ...defaultLeadAction };
+  const definition = leadActions.find((action) => action.action === leadCapture.action) || leadActions[0];
+  const target = leadCapture.target || {};
+  return {
+    ...definition,
+    title: leadCapture.title || definition.label,
+    description: leadCapture.description || definition.description,
+    target: target.value || target.form_id || "",
+    platform: target.platform || "other",
+  };
+}
+
+function customTagsFromProduct(product) {
+  const autoTags = new Set([
+    normalizeTag(product.name),
+    ...normalizeTag(product.name).split(" ").filter((part) => part.length > 2),
+    product.product_category === "other" ? "" : normalizeTag(product.product_category),
+  ].filter(Boolean));
+  return (product.tags || []).map(normalizeTag).filter((tag) => tag && !autoTags.has(tag));
 }
 
 function normalizeTag(value) {

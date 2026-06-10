@@ -1,127 +1,36 @@
 <template>
   <AuthPage v-if="!auth.isAuthenticated" />
-  <div v-else class="app-shell" :class="{ 'sidebar-collapsed': sidebarCollapsed }" :key="auth.session?.client_id">
+  <div
+    v-else
+    class="app-shell"
+    :class="[`theme-${activeEnvironment}`, { 'sidebar-collapsed': sidebarCollapsed }]"
+    :key="auth.session?.client_id"
+  >
     <aside class="sidebar">
       <div class="brand">
         <img src="https://images.juniorbay.com/icon/favicon.png" alt="" />
         <strong>Admin Panel</strong>
       </div>
       <nav>
-        <div class="nav-section-title">Main</div>
-        <button
-          class="nav-item"
-          :class="{ active: activeView === 'dashboard' }"
-          type="button"
-          @click="activeView = 'dashboard'"
-        >
-          <span class="nav-icon" aria-hidden="true">
-            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0 7-7 7 7M5 10v10a1 1 0 0 0 1 1h3m10-11 2 2m-2-2v10a1 1 0 0 1-1 1h-3m-6 0a1 1 0 0 0 1-1v-4a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v4a1 1 0 0 0 1 1m-6 0h6" />
-            </svg>
-          </span>
-          <span class="nav-label">Dashboard</span>
-        </button>
-        <button
-          class="nav-item"
-          :class="{ active: activeView === 'stripeKeys' }"
-          type="button"
-          @click="activeView = 'stripeKeys'"
-        >
-          <span class="nav-icon" aria-hidden="true">
-            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 7a2 2 0 0 1 2 2m4 0a6 6 0 0 1-7.743 5.743L11 17H9v2H7v2H4a1 1 0 0 1-1-1v-2.586a1 1 0 0 1 .293-.707l5.964-5.964A6 6 0 1 1 21 9z" />
-            </svg>
-          </span>
-          <span class="nav-label">Stripe Keys</span>
-        </button>
-        <div class="nav-section-title">Catalog</div>
-        <button
-          class="nav-item"
-          :class="{ active: activeView === 'products' }"
-          type="button"
-          @click="activeView = 'products'"
-        >
-          <span class="nav-icon" aria-hidden="true">
-            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m21 7.5-9-4.5-9 4.5 9 4.5 9-4.5Zm0 0v9l-9 4.5m0-9v9m0-9-9-4.5m0 0v9l9 4.5" />
-            </svg>
-          </span>
-          <span class="nav-label">Products</span>
-        </button>
-        <button class="nav-item" type="button" disabled>
-          <span class="nav-icon" aria-hidden="true">
-            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 12v7.5A1.5 1.5 0 0 1 18.5 21h-13A1.5 1.5 0 0 1 4 19.5V12m16 0H4m16 0h-4.5A3.5 3.5 0 0 0 19 8.5 2.5 2.5 0 0 0 14.5 7L12 12m-8 0h4.5A3.5 3.5 0 0 1 5 8.5 2.5 2.5 0 0 1 9.5 7L12 12m0 0v9" />
-            </svg>
-          </span>
-          <span class="nav-label">Offers</span>
-        </button>
-        <button class="nav-item" type="button" disabled>
-          <span class="nav-icon" aria-hidden="true">
-            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5.25 18.75c4.75-.25 8.75-2.5 12-6.75m0 0 1.5 1.5m-1.5-1.5-1.5-1.5M6.75 14.25 4.5 19.5l5.25-2.25M12 3.75c3.5 1.25 6.25 4 7.5 7.5-4.75.5-8.25-1-10.5-4.5A10 10 0 0 1 12 3.75Z" />
-            </svg>
-          </span>
-          <span class="nav-label">Landing Pages</span>
-        </button>
-        <button class="nav-item" type="button" disabled>
-          <span class="nav-icon" aria-hidden="true">
-            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 3.75v3m8-3v3M4.5 9.75h15m-13.5-3h12A1.5 1.5 0 0 1 19.5 8.25v10.5A1.5 1.5 0 0 1 18 20.25H6a1.5 1.5 0 0 1-1.5-1.5V8.25A1.5 1.5 0 0 1 6 6.75Zm4.5 8.25 1.5 1.5 3-4" />
-            </svg>
-          </span>
-          <span class="nav-label">Services</span>
-        </button>
-        <div class="nav-section-title">Orders</div>
-        <button class="nav-item" type="button" disabled>
-          <span class="nav-icon" aria-hidden="true">
-            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.25 6.75h7.5M8.25 11.25h7.5M8.25 15.75h4.5M7.5 3.75h9A1.5 1.5 0 0 1 18 5.25v13.5a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 6 18.75V5.25a1.5 1.5 0 0 1 1.5-1.5Z" />
-            </svg>
-          </span>
-          <span class="nav-label">Orders</span>
-        </button>
-        <button class="nav-item" type="button" disabled>
-          <span class="nav-icon" aria-hidden="true">
-            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.5 18a2.5 2.5 0 0 1-5 0m9-3H5.5l1.25-2.25V9a5.25 5.25 0 0 1 10.5 0v3.75L18.5 15Z" />
-            </svg>
-          </span>
-          <span class="nav-label">Notifications</span>
-        </button>
-        <button class="nav-item" type="button" disabled>
-          <span class="nav-icon" aria-hidden="true">
-            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7.5 3.75h9A1.5 1.5 0 0 1 18 5.25v15l-3-1.5-3 1.5-3-1.5-3 1.5v-15a1.5 1.5 0 0 1 1.5-1.5Zm2.25 5.25h4.5m-4.5 3h4.5m-4.5 3h3" />
-            </svg>
-          </span>
-          <span class="nav-label">Invoices</span>
-        </button>
-        <button class="nav-item" type="button" disabled>
-          <span class="nav-icon" aria-hidden="true">
-            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3.75 7.5h10.5v9H3.75v-9Zm10.5 3h3.25l2.75 3v3h-6v-6Zm-7.5 8.25a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3Zm10.5 0a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3Z" />
-            </svg>
-          </span>
-          <span class="nav-label">Shipping</span>
-        </button>
-        <button class="nav-item" type="button" disabled>
-          <span class="nav-icon" aria-hidden="true">
-            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.25 11.25a3 3 0 1 0 0-6 3 3 0 0 0 0 6Zm7.5 0a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM3.75 19.5a4.5 4.5 0 0 1 9 0m-1.5 0a4.5 4.5 0 0 1 9 0" />
-            </svg>
-          </span>
-          <span class="nav-label">Customers</span>
-        </button>
-        <div class="nav-section-title">Settings</div>
-        <button class="nav-item" type="button" disabled>
-          <span class="nav-icon" aria-hidden="true">
-            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.5 6h3m-5.25 4.5h7.5m-6 4.5h4.5m-2.25 5.25a8.25 8.25 0 1 0 0-16.5 8.25 8.25 0 0 0 0 16.5Z" />
-            </svg>
-          </span>
-          <span class="nav-label">Configuration</span>
-        </button>
+        <template v-for="group in menuGroups" :key="group.key">
+          <div class="nav-section-title">{{ group.label }}</div>
+          <button
+            v-for="item in group.items"
+            :key="item.key"
+            class="nav-item"
+            :class="{ active: activeView === item.view }"
+            type="button"
+            :disabled="!item.enabled"
+            @click="activateMenuItem(item)"
+          >
+            <span class="nav-icon" aria-hidden="true">
+              <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" :d="iconPaths[item.icon]" />
+              </svg>
+            </span>
+            <span class="nav-label">{{ item.label }}</span>
+          </button>
+        </template>
       </nav>
     </aside>
 
@@ -136,6 +45,24 @@
         >
           <span></span><span></span><span></span>
         </button>
+        <div class="topbar-actions">
+          <span class="environment-pill">{{ environmentLabel }}</span>
+          <button
+            class="topbar-icon-button environment-toggle-button"
+            type="button"
+            :aria-label="`Switch to ${activeEnvironment === 'test' ? 'live' : 'test'} environment`"
+            @click="toggleEnvironment"
+          >
+            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4.5 6.75h15v10.5h-15V6.75Zm3 3 2.25 2.25L7.5 14.25m4.5 0h4.5" />
+            </svg>
+          </button>
+          <button class="topbar-icon-button notification-button" type="button" aria-label="Notifications">
+            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" :d="iconPaths.bell" />
+            </svg>
+          </button>
+        </div>
         <div class="user-menu" ref="userMenuRef">
           <button
             class="user-pill"
@@ -179,7 +106,7 @@
         </div>
       </header>
 
-      <Dashboard v-if="activeView === 'dashboard'" />
+      <Dashboard v-if="activeView === 'dashboard'" :environment-label="environmentLabel" />
       <StripeKeys v-else-if="activeView === 'stripeKeys'" />
       <Products v-else-if="activeView === 'products'" />
     </main>
@@ -187,11 +114,13 @@
 </template>
 
 <script setup>
-import { onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import AuthPage from "./components/AuthPage.vue";
 import Dashboard from "./components/Dashboard.vue";
 import Products from "./components/Products.vue";
 import StripeKeys from "./components/StripeKeys.vue";
+import { iconPaths, menuGroupsForEnvironment } from "./config/menu";
+import { getApiEnvironment, loadAppConfigApiBase, setApiEnvironment } from "./api/client";
 import { useAuthStore } from "./stores/auth";
 import { useDashboardStore } from "./stores/dashboard";
 import { useProductsStore } from "./stores/products";
@@ -202,9 +131,35 @@ const dashboard = useDashboardStore();
 const products = useProductsStore();
 const stripeKeys = useStripeKeysStore();
 const activeView = ref("dashboard");
+const activeEnvironment = ref(getApiEnvironment());
 const sidebarCollapsed = ref(false);
 const userMenuOpen = ref(false);
 const userMenuRef = ref(null);
+const menuGroups = computed(() => menuGroupsForEnvironment(activeEnvironment.value));
+const environmentLabel = computed(() => activeEnvironment.value === "live" ? "Live" : "Test");
+
+function activateMenuItem(item) {
+  if (!item.enabled) return;
+  activeView.value = item.view;
+}
+
+function toggleEnvironment() {
+  activeEnvironment.value = activeEnvironment.value === "test" ? "live" : "test";
+  setApiEnvironment(activeEnvironment.value);
+}
+
+async function reloadActiveView() {
+  dashboard.reset();
+  products.reset();
+  stripeKeys.resetForCurrentTenant();
+  if (activeView.value === "dashboard") {
+    await dashboard.load();
+  } else if (activeView.value === "products") {
+    await products.load();
+  } else if (activeView.value === "stripeKeys") {
+    await stripeKeys.load();
+  }
+}
 
 function handleLogout() {
   userMenuOpen.value = false;
@@ -216,12 +171,15 @@ function handleDocumentClick(event) {
 }
 
 function handleKeydown(event) {
-  if (event.key === "Escape") userMenuOpen.value = false;
+  if (event.key === "Escape") {
+    userMenuOpen.value = false;
+  }
 }
 
 onMounted(() => {
   document.addEventListener("click", handleDocumentClick);
   document.addEventListener("keydown", handleKeydown);
+  loadAppConfigApiBase(activeEnvironment.value).then(reloadActiveView).catch(() => {});
 });
 
 onBeforeUnmount(() => {
@@ -240,4 +198,13 @@ watch(
     userMenuOpen.value = false;
   },
 );
+
+watch(activeEnvironment, async () => {
+  const visibleItems = menuGroups.value.flatMap((group) => group.items);
+  if (!visibleItems.some((item) => item.view === activeView.value)) {
+    activeView.value = "dashboard";
+  }
+  await loadAppConfigApiBase(activeEnvironment.value);
+  await reloadActiveView();
+});
 </script>

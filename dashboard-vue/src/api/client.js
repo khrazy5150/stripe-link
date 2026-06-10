@@ -1,25 +1,97 @@
-const DEFAULT_API_BASE = "https://dev.juniorbay.com";
-const LOCAL_DEV_API_BASE = "/api";
+const API_BASES = {
+  test: "https://dev.juniorbay.com",
+  live: "https://prod.juniorbay.com",
+};
+const LOCAL_DEV_API_BASES = {
+  test: "/api",
+  live: "/api-live",
+};
 const API_BASE_STORAGE_KEY = "stripeLinkVueApiBase";
+const API_ENVIRONMENT_STORAGE_KEY = "stripeLinkVueEnvironment";
 const TENANT_ID_STORAGE_KEY = "stripeLinkTenantId";
 const SESSION_STORAGE_KEY = "stripeLinkSession";
 const DEFAULT_TENANT_ID = "tenant_demo";
 
-export function getApiBase() {
-  const configured = localStorage.getItem(API_BASE_STORAGE_KEY);
-  if (configured) return configured;
+function normalizeEnvironment(environment) {
+  return environment === "live" ? "live" : "test";
+}
+
+function configEnvironment(environment) {
+  return normalizeEnvironment(environment) === "live" ? "prod" : "dev";
+}
+
+function fallbackApiBase(environment) {
+  const normalized = normalizeEnvironment(environment);
   if (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1") {
-    return LOCAL_DEV_API_BASE;
+    return LOCAL_DEV_API_BASES[normalized];
   }
+  return API_BASES[normalized];
+}
+
+function apiBaseStorageKey(environment) {
+  return `${API_BASE_STORAGE_KEY}:${normalizeEnvironment(environment)}`;
+}
+
+export function getApiEnvironment() {
+  return normalizeEnvironment(localStorage.getItem(API_ENVIRONMENT_STORAGE_KEY));
+}
+
+export function setApiEnvironment(environment) {
+  localStorage.setItem(API_ENVIRONMENT_STORAGE_KEY, normalizeEnvironment(environment));
+}
+
+export function getApiBase() {
+  const environment = getApiEnvironment();
+  const configured = localStorage.getItem(apiBaseStorageKey(environment));
+  if (configured) return configured;
   return (
-    localStorage.getItem("stripeLinkApiBaseTest") ||
+    localStorage.getItem(environment === "live" ? "stripeLinkApiBaseLive" : "stripeLinkApiBaseTest") ||
     localStorage.getItem("stripeLinkApiBase") ||
-    DEFAULT_API_BASE
+    fallbackApiBase(environment)
   );
 }
 
 export function setApiBase(value) {
-  localStorage.setItem(API_BASE_STORAGE_KEY, value.replace(/\/$/, ""));
+  localStorage.setItem(apiBaseStorageKey(getApiEnvironment()), value.replace(/\/$/, ""));
+}
+
+export async function loadAppConfigApiBase(environment = getApiEnvironment()) {
+  const normalized = normalizeEnvironment(environment);
+  const targetEnvironment = configEnvironment(normalized);
+  const candidateBases = [
+    fallbackApiBase(normalized),
+    normalized === "live" ? fallbackApiBase("test") : "",
+  ].filter(Boolean);
+
+  for (const base of [...new Set(candidateBases)]) {
+    try {
+      const url = new URL(`${base.replace(/\/$/, "")}/app-config/app_config`, window.location.origin);
+      url.searchParams.set("environment", "global");
+      const response = await fetch(url);
+      const body = await response.json().catch(() => ({}));
+      const configuredBase = body.app_config?.environments?.[targetEnvironment]?.api_base_url;
+      if (response.ok && configuredBase) {
+        localStorage.setItem(apiBaseStorageKey(normalized), configuredBase.replace(/\/$/, ""));
+        return {
+          source: base,
+          environment: targetEnvironment,
+          api_base_url: configuredBase.replace(/\/$/, ""),
+          app_config: body.app_config,
+        };
+      }
+    } catch {
+      // Keep bootstrapping from the next candidate; hard-coded fallback remains last resort.
+    }
+  }
+
+  const fallback = fallbackApiBase(normalized);
+  localStorage.setItem(apiBaseStorageKey(normalized), fallback.replace(/\/$/, ""));
+  return {
+    source: "fallback",
+    environment: targetEnvironment,
+    api_base_url: fallback.replace(/\/$/, ""),
+    app_config: null,
+  };
 }
 
 export function getTenantId() {
