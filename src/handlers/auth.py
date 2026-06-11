@@ -11,14 +11,29 @@ from stripe_link.domain.documents import (
 )
 from stripe_link.repositories.documents import (
     RepositoryError,
+    tenant_profiles_registration_repositories,
     tenant_profiles_repository,
     user_profiles_repository,
 )
 
 
-def handler(event, context, cognito=None, tenant_repository=None, user_repository=None):
+def handler(
+    event,
+    context,
+    cognito=None,
+    tenant_repository=None,
+    tenant_registration_repositories=None,
+    user_repository=None,
+):
+    provided_tenant_repository = tenant_repository is not None
     cognito = cognito or cognito_client()
     tenant_repository = tenant_repository or tenant_profiles_repository()
+    if tenant_registration_repositories is None:
+        tenant_registration_repositories = (
+            [tenant_repository]
+            if provided_tenant_repository
+            else tenant_profiles_registration_repositories()
+        )
     user_repository = user_repository or user_profiles_repository()
     method = (event or {}).get("httpMethod", "").upper()
     path = (event or {}).get("path", "")
@@ -30,9 +45,9 @@ def handler(event, context, cognito=None, tenant_repository=None, user_repositor
 
     try:
         if path.endswith("/auth/register"):
-            return register(event, cognito, tenant_repository, user_repository)
+            return register(event, cognito, tenant_registration_repositories, user_repository)
         if path.endswith("/auth/confirm"):
-            return confirm(event, cognito, tenant_repository, user_repository)
+            return confirm(event, cognito, tenant_repository, tenant_registration_repositories, user_repository)
         if path.endswith("/auth/login"):
             return login(event, cognito, tenant_repository, user_repository)
         if path.endswith("/auth/forgot"):
@@ -49,7 +64,7 @@ def handler(event, context, cognito=None, tenant_repository=None, user_repositor
     return error_response("Unknown auth route.", status_code=404, code="not_found")
 
 
-def register(event, cognito, tenant_repository, user_repository):
+def register(event, cognito, tenant_repositories, user_repository):
     body = parse_json_body(event)
     email = required(body, "email").lower()
     password = required(body, "password")
@@ -95,12 +110,13 @@ def register(event, cognito, tenant_repository, user_repository):
             "confirmed_at": None,
         },
         "billing_status": "trial",
-        "tier_id": str(body.get("tier_id") or "starter"),
+        "tier_id": str(body.get("tier_id") or "basic"),
         "created_at": now,
         "updated_at": now,
     }
     validate_tenant_profile(tenant)
-    tenant_repository.put(tenant)
+    for tenant_repository in tenant_repositories:
+        tenant_repository.put(tenant)
 
     profile = user_profile_document(
         client_id=client_id,
@@ -123,7 +139,7 @@ def register(event, cognito, tenant_repository, user_repository):
     }, status_code=201)
 
 
-def confirm(event, cognito, tenant_repository, user_repository):
+def confirm(event, cognito, tenant_repository, tenant_repositories, user_repository):
     body = parse_json_body(event)
     email = required(body, "email").lower()
     code = required(body, "code")
@@ -140,7 +156,8 @@ def confirm(event, cognito, tenant_repository, user_repository):
         tenant["auth"]["status"] = "confirmed"
         tenant["auth"]["confirmed_at"] = now
         tenant["updated_at"] = now
-        tenant_repository.put(tenant)
+        for target_repository in tenant_repositories:
+            target_repository.put(tenant)
 
     profile = user_repository.get(session["tenant_id"], session["user_id"])
     if profile:

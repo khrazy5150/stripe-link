@@ -45,7 +45,7 @@
       }
     },
     "billing_status": { "type": "string", "enum": ["trial", "active", "past_due", "suspended"], "default": "trial" },
-    "tier_id": { "type": "string", "default": "starter" },
+    "tier_id": { "type": "string", "default": "basic" },
     "created_at": { "type": "integer", "minimum": 0 },
     "updated_at": { "type": "integer", "minimum": 0 }
   }

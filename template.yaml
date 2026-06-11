@@ -24,6 +24,10 @@ Parameters:
     Type: String
     Default: ""
     Description: Stripe Connect OAuth redirect URI.
+  StripePlatformSecretArn:
+    Type: String
+    Default: ""
+    Description: Optional Secrets Manager ARN containing Junior Bay platform Stripe secret keys.
   ApiCustomDomainName:
     Type: String
     Default: ""
@@ -64,6 +68,7 @@ Conditions:
   HasDashboardCustomDomain: !And
     - !Not [!Equals [!Ref DashboardCustomDomainName, ""]]
     - !Not [!Equals [!Ref DashboardCustomDomainCertificateArn, ""]]
+  HasStripePlatformSecret: !Not [!Equals [!Ref StripePlatformSecretArn, ""]]
 
 Globals:
   Function:
@@ -83,6 +88,8 @@ Globals:
         PLATFORM_CONFIG_TABLE: !Ref PlatformConfigTable
         SHIPPING_CONFIG_TABLE: !Ref ShippingConfigTable
         TENANT_PROFILES_TABLE: !Ref TenantProfilesTable
+        TENANT_PROFILES_TABLE_DEV: !Sub "${ProjectPrefix}-tenant-profiles-dev"
+        TENANT_PROFILES_TABLE_PROD: !Sub "${ProjectPrefix}-tenant-profiles-prod"
         USER_PREFERENCES_TABLE: !Ref UserPreferencesTable
         USER_PROFILES_TABLE: !Ref UserProfilesTable
         NOTIFICATIONS_TABLE: !Ref NotificationsTable
@@ -114,6 +121,15 @@ Globals:
         PREVIEW_DISTRIBUTION_DOMAIN: !GetAtt PreviewDistribution.DomainName
         STRIPE_CLIENT_ID: !Ref StripeClientId
         STRIPE_CONNECT_REDIRECT_URI: !Ref StripeConnectRedirectUri
+        STRIPE_PLATFORM_SECRET_ARN: !Ref StripePlatformSecretArn
+        PUBLIC_API_BASE_URL: !If
+          - HasApiCustomDomain
+          - !Sub "https://${ApiCustomDomainName}"
+          - !Sub "https://${RestApi}.execute-api.${AWS::Region}.amazonaws.com/${Environment}"
+        DASHBOARD_URL: !If
+          - HasDashboardCustomDomain
+          - !Sub "https://${DashboardCustomDomainName}"
+          - !Sub "https://${DashboardDistribution.DomainName}"
         STRIPE_KEYS_KMS_KEY_ID: !Ref StripeKeysEncryptionKey
         COGNITO_USER_POOL_ID: !Ref CognitoUserPoolId
         COGNITO_USER_POOL_CLIENT_ID: !Ref CognitoUserPoolClientId
@@ -278,6 +294,40 @@ Resources:
           Properties:
             RestApiId: !Ref RestApi
             Path: /prices/calculate
+            Method: OPTIONS
+
+  BillingConnectCardFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${ProjectPrefix}-billing-connect-card-${Environment}"
+      CodeUri: src/
+      Handler: handlers.billing.connect_card_handler
+      Description: Returns tenant Stripe Connect card state from billing config and tenant tier.
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref TenantProfilesTable
+        - DynamoDBCrudPolicy:
+            TableName: !Sub "${ProjectPrefix}-tenant-profiles-dev"
+        - DynamoDBCrudPolicy:
+            TableName: !Sub "${ProjectPrefix}-tenant-profiles-prod"
+        - DynamoDBCrudPolicy:
+            TableName: !Sub "${ProjectPrefix}-stripe-keys-dev"
+        - DynamoDBCrudPolicy:
+            TableName: !Sub "${ProjectPrefix}-stripe-keys-prod"
+        - S3ReadPolicy:
+            BucketName: !Ref ConfigBucket
+      Events:
+        BillingConnectCard:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /billing/connect-card
+            Method: GET
+        BillingConnectCardOptions:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /billing/connect-card
             Method: OPTIONS
 
   ProductsFunction:
@@ -538,6 +588,10 @@ Resources:
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref TenantProfilesTable
+        - DynamoDBCrudPolicy:
+            TableName: !Sub "${ProjectPrefix}-tenant-profiles-dev"
+        - DynamoDBCrudPolicy:
+            TableName: !Sub "${ProjectPrefix}-tenant-profiles-prod"
       Events:
         RegisterTenant:
           Type: Api
@@ -562,6 +616,10 @@ Resources:
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref TenantProfilesTable
+        - DynamoDBCrudPolicy:
+            TableName: !Sub "${ProjectPrefix}-tenant-profiles-dev"
+        - DynamoDBCrudPolicy:
+            TableName: !Sub "${ProjectPrefix}-tenant-profiles-prod"
         - DynamoDBCrudPolicy:
             TableName: !Ref UserProfilesTable
         - Version: "2012-10-17"
@@ -659,6 +717,44 @@ Resources:
           Properties:
             RestApiId: !Ref RestApi
             Path: /stripe/connect/start
+            Method: GET
+
+  StripeConnectCallbackFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${ProjectPrefix}-stripe-connect-callback-${Environment}"
+      CodeUri: src/
+      Handler: handlers.stripe_connect.callback_handler
+      Description: Handles Stripe Connect OAuth callbacks and stores encrypted tenant OAuth tokens.
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Sub "${ProjectPrefix}-stripe-keys-dev"
+        - DynamoDBCrudPolicy:
+            TableName: !Sub "${ProjectPrefix}-stripe-keys-prod"
+        - Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Action:
+                - kms:Encrypt
+                - kms:Decrypt
+                - kms:GenerateDataKey
+              Resource: !Sub "arn:aws:kms:${AWS::Region}:${AWS::AccountId}:key/*"
+              Condition:
+                StringEquals:
+                  kms:EncryptionContext:service: stripe-link
+            - Effect: Allow
+              Action:
+                - secretsmanager:GetSecretValue
+              Resource: !If
+                - HasStripePlatformSecret
+                - !Ref StripePlatformSecretArn
+                - !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:*"
+      Events:
+        StripeConnectCallback:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /stripe/connect/callback
             Method: GET
 
   StripeConnectStatusFunction:

@@ -1727,13 +1727,313 @@ button:disabled {
   cursor: not-allowed;
 }
 
-.keys-status-banner {
-  border: 1px solid #99f6e4;
+.stripe-setup-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1.6rem;
+  border: 1px solid #f59e0b;
   border-radius: var(--radius-md);
-  background: #ecfdf5;
-  color: #10b981;
+  background: #fef3c7;
+  color: #92400e;
+  padding: 1.4rem 1.6rem;
+  font-weight: 700;
+}
+
+.stripe-setup-banner strong {
+  margin-right: 0.4rem;
+}
+
+.theme-live .stripe-setup-banner {
+  background: #2f2518;
+  color: #fdba74;
+}
+
+.setup-action {
+  min-height: 4rem;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: #f59e0b;
+  color: #111827;
+  cursor: pointer;
+  font-weight: 900;
+  padding: 0.8rem 1.6rem;
+  white-space: nowrap;
+}
+
+.keys-status-banner {
+  border: 1px solid #bfdbfe;
+  border-radius: var(--radius-md);
+  background: #eff6ff;
+  color: #1d4ed8;
   padding: 1.4rem 1.6rem;
   font-weight: 800;
+}
+
+.keys-status-banner.success {
+  border-color: #99f6e4;
+  background: #ecfdf5;
+  color: #10b981;
+}
+
+.keys-status-banner.warning {
+  border-color: #fed7aa;
+  background: #fff7ed;
+  color: #c2410c;
+}
+
+.connect-card-header {
+  justify-content: center;
+  text-align: center;
+  position: relative;
+}
+
+.connect-card-header .tier-pill {
+  position: absolute;
+  right: 2rem;
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+.tier-pill {
+  border-radius: 999px;
+  background: #eef2ff;
+  color: var(--success-strong);
+  padding: 0.6rem 1rem;
+  font-size: 1.2rem;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.theme-live .tier-pill {
+  background: #0f2f2b;
+  color: #34d399;
+}
+
+.connect-card-body {
+  display: grid;
+  gap: 1.6rem;
+  padding: 2rem;
+}
+
+.connect-copy,
+.connect-muted {
+  margin: 0;
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.connect-fee-panel {
+  display: grid;
+  gap: 1rem;
+  max-width: 42rem;
+}
+
+.connect-fee-panel h3 {
+  margin: 0;
+  font-size: 1.6rem;
+}
+
+.connect-fee-list {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 1rem 2rem;
+  margin: 0;
+}
+
+.connect-fee-list dt {
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.connect-fee-list dd {
+  margin: 0;
+  color: var(--text);
+  font-weight: 800;
+}
+
+.connect-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+}
+
+.connect-connected {
+  background: #a5a4dc;
+}
+
+.connect-account-lines {
+  display: grid;
+  gap: 0.4rem;
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.connect-account-lines p {
+  margin: 0;
+}
+
+.connect-warning {
+  border: 1px solid #fed7aa;
+  border-radius: var(--radius-md);
+  background: #fff7ed;
+  color: #f97316;
+  padding: 1.4rem 1.6rem;
+  font-weight: 800;
+}
+
+.theme-live .connect-warning {
+  background: #2f2518;
+}
+
+.stripe-onboarding-modal {
+  width: min(100%, 72rem);
+}
+
+.stripe-onboarding-modal .modal-card-header {
+  align-items: start;
+}
+
+.stripe-onboarding-modal .modal-card-header p {
+  margin: 0.8rem 0 0;
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.onboarding-progress {
+  display: flex;
+  gap: 0.8rem;
+  margin-top: 1.2rem;
+}
+
+.onboarding-dot {
+  width: 1rem;
+  height: 1rem;
+  border-radius: 999px;
+  background: var(--line-strong);
+}
+
+.onboarding-dot.active,
+.onboarding-dot.complete {
+  background: var(--success-strong);
+}
+
+.onboarding-body {
+  display: grid;
+  gap: 1.6rem;
+  padding: 2.4rem;
+}
+
+.onboarding-step {
+  display: grid;
+  gap: 1.4rem;
+}
+
+.onboarding-step p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.onboarding-option-card {
+  display: grid;
+  gap: 0.6rem;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-md);
+  background: var(--panel);
+  color: var(--text);
+  cursor: pointer;
+  padding: 1.4rem 1.6rem;
+  text-align: left;
+}
+
+.onboarding-option-card.selected {
+  border-color: var(--success-strong);
+  background: var(--accent-soft);
+  box-shadow: 0 0 0 0.2rem rgba(79, 70, 181, .18);
+}
+
+.onboarding-option-card span {
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.onboarding-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
+}
+
+.onboarding-check {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  font-weight: 800;
+}
+
+.onboarding-check input {
+  width: 1.8rem;
+  height: 1.8rem;
+}
+
+.onboarding-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1.4rem;
+}
+
+.onboarding-review {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1.2rem;
+  margin: 0;
+}
+
+.onboarding-review div {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  padding: 1.2rem;
+}
+
+.onboarding-review dt {
+  color: var(--text-muted);
+  font-size: 1.2rem;
+  font-weight: 900;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.onboarding-review dd {
+  margin: 0.4rem 0 0;
+  overflow-wrap: anywhere;
+  font-weight: 800;
+}
+
+.onboarding-actions-row,
+.onboarding-footer-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+}
+
+.onboarding-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1.6rem;
+  border-top: 1px solid var(--line);
+  padding: 1.6rem 2.4rem;
+}
+
+.link-action {
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font-weight: 800;
+  text-decoration: underline;
 }
 
 .offer-card-body {
@@ -2455,6 +2755,16 @@ button:disabled {
   .offer-three-column,
   .selectable-price-row {
     grid-template-columns: 1fr;
+  }
+
+  .connect-card-header {
+    justify-content: space-between;
+    text-align: left;
+  }
+
+  .connect-card-header .tier-pill {
+    position: static;
+    transform: none;
   }
 
   .offer-card {

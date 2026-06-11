@@ -10,6 +10,11 @@ function emptyMode(mode) {
     webhook_secret_ref: "",
     saved_secret_key: false,
     saved_webhook_secret: false,
+    connect_account_id: "",
+    connect_status: "not_connected",
+    connect_scope: "",
+    connect_livemode: false,
+    connected_at: null,
   };
 }
 
@@ -19,6 +24,11 @@ function normalizeMode(mode, document) {
   normalized.publishable_key = document.publishable_key || "";
   normalized.saved_secret_key = Boolean(document.secret_key_ref);
   normalized.saved_webhook_secret = Boolean(document.webhook_secret_ref);
+  normalized.connect_account_id = document.connect_account_id || "";
+  normalized.connect_status = document.connect_status || "not_connected";
+  normalized.connect_scope = document.connect_scope || "";
+  normalized.connect_livemode = Boolean(document.connect_livemode);
+  normalized.connected_at = document.connected_at || null;
   return normalized;
 }
 
@@ -33,7 +43,12 @@ export const useStripeKeysStore = defineStore("stripeKeys", {
     loading: false,
     saving: false,
     verifying: false,
+    connectLoading: false,
+    connectStarting: false,
+    connectCard: null,
+    connectError: "",
     message: "Set API Base URL, then save new Stripe keys.",
+    messageTone: "info",
     error: "",
     output: null,
   }),
@@ -49,7 +64,12 @@ export const useStripeKeysStore = defineStore("stripeKeys", {
       this.loading = false;
       this.saving = false;
       this.verifying = false;
+      this.connectLoading = false;
+      this.connectStarting = false;
+      this.connectCard = null;
+      this.connectError = "";
       this.message = "Set API Base URL, then save new Stripe keys.";
+      this.messageTone = "info";
       this.error = "";
       this.output = null;
     },
@@ -65,11 +85,59 @@ export const useStripeKeysStore = defineStore("stripeKeys", {
         this.applyLoadedKeys(body.stripe_keys);
         this.output = body;
         this.message = "Stripe keys loaded.";
+        this.messageTone = "success";
+        await this.loadConnectCard();
       } catch (error) {
         this.output = { error: error.message };
         this.message = "No Stripe keys saved yet. Re-enter keys for this tenant.";
+        this.messageTone = "error";
+        await this.loadConnectCard();
       } finally {
         this.loading = false;
+      }
+    },
+
+    async loadConnectCard() {
+      this.connectLoading = true;
+      this.connectError = "";
+      setTenantId(this.tenantId);
+      try {
+        const body = await apiRequest("/billing/connect-card", {
+          params: {
+            tenant_id: this.tenantId,
+            mode: this.verifyMode,
+          },
+        });
+        this.connectCard = body.stripe_connect_card;
+      } catch (error) {
+        this.connectError = error.message;
+        this.connectCard = null;
+      } finally {
+        this.connectLoading = false;
+      }
+    },
+
+    async startConnect({ chain = "", path = "existing" } = {}) {
+      this.connectStarting = true;
+      this.connectError = "";
+      setTenantId(this.tenantId);
+      const params = {
+        tenant_id: this.tenantId,
+        mode: this.verifyMode,
+        path,
+      };
+      if (chain) params.chain = chain;
+      try {
+        const body = await apiRequest("/stripe/connect/start", {
+          params,
+        });
+        if (body.connect_url) {
+          window.location.assign(body.connect_url);
+        }
+      } catch (error) {
+        this.connectError = error.message;
+      } finally {
+        this.connectStarting = false;
       }
     },
 
@@ -85,8 +153,11 @@ export const useStripeKeysStore = defineStore("stripeKeys", {
         this.applyLoadedKeys(body.stripe_keys);
         this.output = body;
         this.message = "Stripe keys saved. Secrets are encrypted before persistence.";
+        this.messageTone = "success";
+        await this.loadConnectCard();
       } catch (error) {
         this.error = error.message;
+        this.messageTone = "error";
         this.output = { error: error.message };
       } finally {
         this.saving = false;
@@ -108,8 +179,10 @@ export const useStripeKeysStore = defineStore("stripeKeys", {
         const result = body.stripe_keys_verification;
         this.output = body;
         this.message = `${this.verifyMode === "live" ? "Live" : "Test"} Stripe keys verified for account ${result.account_id || "unknown"}.`;
+        this.messageTone = "success";
       } catch (error) {
         this.error = error.message;
+        this.messageTone = "error";
         this.output = { error: error.message };
       } finally {
         this.verifying = false;

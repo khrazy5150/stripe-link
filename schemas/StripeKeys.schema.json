@@ -15,6 +15,11 @@
     "webhook_secret_ref": { "type": "string", "description": "KMS-wrapped Stripe webhook signing secret. Plaintext inputs are encrypted before persistence and never exposed in read responses." },
     "connect_account_id": { "type": "string" },
     "connect_status": { "type": "string", "enum": ["not_connected", "pending", "connected", "restricted"], "default": "not_connected" },
+    "connect_access_token_ref": { "type": "string", "description": "KMS-wrapped Stripe Connect OAuth access token. Stored by the OAuth callback and never exposed in read responses." },
+    "connect_refresh_token_ref": { "type": "string", "description": "KMS-wrapped Stripe Connect OAuth refresh token. Stored by the OAuth callback and never exposed in read responses." },
+    "connect_scope": { "type": "string" },
+    "connect_livemode": { "type": "boolean" },
+    "connected_at": { "type": "integer", "minimum": 0 },
     "created_at": { "type": "integer", "minimum": 0 },
     "updated_at": { "type": "integer", "minimum": 0 }
   }

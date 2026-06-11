@@ -12,18 +12,19 @@
         <h2>Offer Configuration</h2>
         <div class="button-row">
           <button class="secondary-action" type="button" @click="openOfferModal">+ Add Offer</button>
-          <button class="secondary-action" type="button" @click="showOfferMessage = true">Load Offers</button>
+          <button class="secondary-action" type="button" :disabled="offersLoading" @click="loadOffers">
+            {{ offersLoading ? "Loading..." : "Load Offers" }}
+          </button>
           <button class="primary-action" type="button" disabled>Save All</button>
         </div>
       </header>
 
       <div class="offer-card-body">
-        <div v-if="showOfferMessage" class="keys-status-banner">
-          Offer loading will be connected when the JSON-first offer API is wired.
-        </div>
+        <div v-if="offersError" class="keys-status-banner error">{{ offersError }}</div>
+        <div v-else-if="offersMessage" class="keys-status-banner">{{ offersMessage }}</div>
 
         <div v-if="!offers.length" class="offer-empty-state">
-          No offers found. Click "+ Add Offer" to configure one.
+          {{ offersLoaded ? 'No offers found. Click "+ Add Offer" to configure one.' : 'Click "Load Offers" to see offers.' }}
         </div>
 
         <div v-else class="offer-grid">
@@ -426,7 +427,6 @@ const couponStore = useCouponsStore();
 const showOfferModal = ref(false);
 const showProductSelector = ref(false);
 const showCouponSelector = ref(false);
-const showOfferMessage = ref(false);
 const productSearch = ref("");
 const couponSearch = ref("");
 const selectedProductIds = ref([]);
@@ -434,6 +434,10 @@ const draftSelectedProductIds = ref(new Set());
 const formError = ref("");
 const selectorError = ref("");
 const offers = ref([]);
+const offersLoading = ref(false);
+const offersLoaded = ref(false);
+const offersError = ref("");
+const offersMessage = ref("");
 const latestDraftOffer = ref(null);
 const form = reactive(defaultOfferForm());
 const itemConfigs = reactive({});
@@ -625,7 +629,25 @@ function removeSelectedProduct(id) {
   selectedProductIds.value = selectedProductIds.value.filter((productIdValue) => productIdValue !== id);
 }
 
-function createOffer() {
+async function loadOffers() {
+  offersLoading.value = true;
+  offersError.value = "";
+  offersMessage.value = "";
+  try {
+    const body = await apiRequest("/offers");
+    offers.value = (Array.isArray(body.offers) ? body.offers : []).map(offerCardModel);
+    offersLoaded.value = true;
+    offersMessage.value = offers.value.length
+      ? `${offers.value.length} offer${offers.value.length === 1 ? "" : "s"} loaded.`
+      : "";
+  } catch (error) {
+    offersError.value = error.message || "Failed to load offers.";
+  } finally {
+    offersLoading.value = false;
+  }
+}
+
+async function createOffer() {
   formError.value = "";
   const result = buildOfferDocument();
   if (result.error) {
@@ -633,12 +655,15 @@ function createOffer() {
     return;
   }
   latestDraftOffer.value = result.offer;
-  offers.value.unshift({
-    ...result.offer,
-    image: selectedProducts.value[0]?.images?.[0] || "",
-    productSummary: selectedProducts.value.map((product) => product.product_id || product.name).join(", "),
-  });
-  showOfferModal.value = false;
+  try {
+    const body = await apiRequest("/offers", { method: "POST", body: result.offer });
+    offers.value.unshift(offerCardModel(body.offer || result.offer));
+    offersLoaded.value = true;
+    offersMessage.value = `${result.offer.name} was saved.`;
+    showOfferModal.value = false;
+  } catch (error) {
+    formError.value = error.message || "Failed to save offer.";
+  }
 }
 
 function buildOfferDocument() {
@@ -1037,6 +1062,16 @@ function contextLabel(value) {
 
 function titleCase(value) {
   return String(value || "").replace(/_/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function offerCardModel(offer) {
+  const items = Array.isArray(offer?.items) ? offer.items : [];
+  const firstProduct = activeProducts.value.find((product) => productId(product) === items[0]?.product_id);
+  return {
+    ...offer,
+    image: offer?.presentation?.image_url || firstProduct?.images?.[0] || "",
+    productSummary: items.map((item) => item.product_id).filter(Boolean).join(", "),
+  };
 }
 
 function slugify(value) {

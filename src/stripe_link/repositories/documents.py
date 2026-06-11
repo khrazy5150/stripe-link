@@ -369,6 +369,31 @@ def tenant_profiles_repository(table: Any | None = None) -> DynamoDocumentReposi
     )
 
 
+def tenant_profiles_registration_repositories(table: Any | None = None) -> list[DynamoDocumentRepository]:
+    table_names = [
+        os.environ.get("TENANT_PROFILES_TABLE_DEV", ""),
+        os.environ.get("TENANT_PROFILES_TABLE_PROD", ""),
+    ]
+    if not any(table_names):
+        table_names = [os.environ.get("TENANT_PROFILES_TABLE", "")]
+
+    repositories: list[DynamoDocumentRepository] = []
+    seen: set[str] = set()
+    for table_name in table_names:
+        if not table_name or table_name in seen:
+            continue
+        seen.add(table_name)
+        repositories.append(DynamoDocumentRepository(
+            table_name,
+            document_type="tenant",
+            id_field="tenant_id",
+            table=table,
+        ))
+    if not repositories:
+        raise RepositoryError("Tenant profile registration table names are required.")
+    return repositories
+
+
 def user_preferences_repository(table: Any | None = None) -> DynamoDocumentRepository:
     return DynamoDocumentRepository(
         os.environ.get("USER_PREFERENCES_TABLE", ""),

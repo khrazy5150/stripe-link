@@ -4,9 +4,11 @@ import unittest
 from decimal import Decimal
 from pathlib import Path
 from unittest.mock import patch
+from urllib.parse import parse_qs, urlparse
 
 from handlers.app_config import handler as app_config_handler
 from handlers.auth import handler as auth_handler
+from handlers.billing import connect_card_handler
 from handlers.config import handler as config_handler
 from handlers.customers import handler as customers_handler
 from handlers.invoices import handler as invoices_handler
@@ -72,7 +74,42 @@ class AccountHandlerTests(unittest.TestCase):
         self.assertEqual(cognito.sign_up_payload["Username"], "keith@example.com")
         self.assertNotIn({"Name": "custom:client_id", "Value": "client_demo"}, cognito.sign_up_payload["UserAttributes"])
         self.assertEqual(tenants.get("client_demo", "client_demo")["auth"]["status"], "pending_confirmation")
+        self.assertEqual(tenants.get("client_demo", "client_demo")["tier_id"], "basic")
+        self.assertEqual(tenants.get("client_demo", "client_demo")["billing_status"], "trial")
         self.assertEqual(users.get("client_demo", "user-sub-1")["role"], "owner")
+
+    def test_auth_register_writes_initial_tenant_profile_to_dev_and_prod(self):
+        class FakeCognito:
+            def sign_up(self, **kwargs):
+                return {"UserSub": "user-sub-1"}
+
+        dev_tenants = FakeDocumentRepository("tenant_id")
+        prod_tenants = FakeDocumentRepository("tenant_id")
+        users = FakeDocumentRepository("user_id")
+
+        with patch.dict(os.environ, {"COGNITO_USER_POOL_CLIENT_ID": "client-app"}, clear=False):
+            response = auth_handler({
+                "httpMethod": "POST",
+                "path": "/auth/register",
+                "body": json.dumps({
+                    "client_id": "client_demo",
+                    "first_name": "Keith",
+                    "last_name": "De Costa",
+                    "email": "Keith@example.com",
+                    "password": "password123",
+                }),
+            }, None,
+                cognito=FakeCognito(),
+                tenant_repository=dev_tenants,
+                tenant_registration_repositories=[dev_tenants, prod_tenants],
+                user_repository=users,
+            )
+
+        self.assertEqual(response["statusCode"], 201)
+        self.assertEqual(dev_tenants.get("client_demo", "client_demo")["tier_id"], "basic")
+        self.assertEqual(prod_tenants.get("client_demo", "client_demo")["tier_id"], "basic")
+        self.assertEqual(dev_tenants.get("client_demo", "client_demo")["billing_status"], "trial")
+        self.assertEqual(prod_tenants.get("client_demo", "client_demo")["billing_status"], "trial")
 
     def test_auth_register_defaults_client_id_to_cognito_sub(self):
         class FakeCognito:
@@ -158,6 +195,46 @@ class AccountHandlerTests(unittest.TestCase):
         self.assertEqual(body["session"]["tenant_id"], "client_demo")
         self.assertEqual(body["session"]["access_token"], "access-token")
 
+    def test_billing_connect_card_uses_tenant_tier_and_billing_config(self):
+        class FakeStripeRepository:
+            def get(self, tenant_id, mode="test"):
+                return {
+                    "schema_version": "2026-05-29",
+                    "document_type": "stripe_keys",
+                    "tenant_id": tenant_id,
+                    "mode": mode,
+                    "connect_status": "connected",
+                    "connect_account_id": "acct_test_demo",
+                    "secret_key_ref": "kms:v1:hidden",
+                }
+
+        tenants = FakeDocumentRepository("tenant_id")
+        tenants.put({
+            "schema_version": "2026-05-29",
+            "document_type": "tenant_profile",
+            "tenant_id": "tenant_demo",
+            "tier_id": "basic",
+            "billing_status": "trial",
+            "owner": {"email": "owner@example.com"},
+        })
+
+        response = connect_card_handler({
+            "httpMethod": "GET",
+            "queryStringParameters": {"tenant_id": "tenant_demo", "mode": "test"},
+        }, None,
+            tenant_repository=tenants,
+            stripe_repository=FakeStripeRepository(),
+            billing_config_loader=lambda: load_fixture("global-billing-config.json"),
+            now_fn=lambda: 1000,
+        )
+
+        body = json.loads(response["body"])
+        card = body["stripe_connect_card"]
+        self.assertEqual(response["statusCode"], 200)
+        self.assertEqual(card["tier_id"], "basic")
+        self.assertEqual(card["platform_fees"]["rates"]["physical"], 10.0)
+        self.assertEqual(card["stripe_connect"]["connect_account_id"], "acct_test_demo")
+
     def test_kms_secret_cipher_encrypts_and_decrypts_with_context(self):
         class FakeKmsClient:
             def __init__(self):
@@ -222,12 +299,13 @@ class AccountHandlerTests(unittest.TestCase):
 
     def test_registration_create_and_get(self):
         repository = FakeDocumentRepository("tenant_id")
+        prod_repository = FakeDocumentRepository("tenant_id")
         tenant = load_fixture("tenant-profile-demo.json")
 
         created = registration_handler({
             "httpMethod": "POST",
             "body": json.dumps(tenant),
-        }, None, repository=repository)
+        }, None, repository=repository, registration_repositories=[repository, prod_repository])
         fetched = registration_handler({
             "httpMethod": "GET",
             "pathParameters": {"tenant_id": "tenant_demo"},
@@ -236,6 +314,7 @@ class AccountHandlerTests(unittest.TestCase):
         self.assertEqual(created["statusCode"], 201)
         self.assertEqual(fetched["statusCode"], 200)
         self.assertEqual(json.loads(fetched["body"])["tenant"]["business_name"], "Demo Supplements")
+        self.assertEqual(prod_repository.get("tenant_demo", "tenant_demo")["tier_id"], "basic")
 
     def test_stripe_keys_are_redacted_on_write_and_read(self):
         repository = FakeSimpleRepository("tenant_id")
@@ -729,14 +808,37 @@ class AccountHandlerTests(unittest.TestCase):
         body = json.loads(response["body"])
         self.assertEqual(response["statusCode"], 200)
         self.assertIn("connect.stripe.com/oauth/authorize", body["connect_url"])
-        self.assertEqual(body["state"], "tenant_demo:test")
+        self.assertEqual(body["state"], "tenant_demo:test:single:existing")
+
+    def test_stripe_connect_start_can_request_both_environment_chain(self):
+        with patch.dict(os.environ, {
+            "STRIPE_CLIENT_ID": "ca_demo",
+            "STRIPE_CONNECT_REDIRECT_URI": "https://api.example.com/connect/callback",
+        }):
+            response = start_handler({
+                "queryStringParameters": {
+                    "tenant_id": "tenant_demo",
+                    "mode": "test",
+                    "chain": "both",
+                }
+            }, None)
+
+        body = json.loads(response["body"])
+        query = parse_qs(urlparse(body["connect_url"]).query)
+        self.assertEqual(response["statusCode"], 200)
+        self.assertEqual(body["state"], "tenant_demo:test:both:existing")
+        self.assertEqual(body["chain"], "both")
+        self.assertEqual(query["state"], ["tenant_demo:test:both:existing"])
 
     def test_stripe_connect_status_defaults_to_not_connected(self):
-        repository = FakeSimpleRepository("tenant_id")
+        class FakeStripeRepository:
+            def get(self, tenant_id, mode="test"):
+                return None
+
         response = status_handler({
             "httpMethod": "GET",
             "queryStringParameters": {"tenant_id": "tenant_demo"},
-        }, None, repository=repository)
+        }, None, repository=FakeStripeRepository())
 
         self.assertEqual(json.loads(response["body"])["stripe_connect"]["connect_status"], "not_connected")
 
