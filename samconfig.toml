@@ -6,7 +6,7 @@ region = "us-west-2"
 capabilities = "CAPABILITY_IAM"
 confirm_changeset = true
 resolve_s3 = true
-parameter_overrides = "Environment=dev ProjectPrefix=jb ApiCustomDomainName=dev.juniorbay.com ApiCustomDomainCertificateArn=arn:aws:acm:us-west-2:150544707159:certificate/b40bb746-6e32-4a7d-8c24-b738cd1c359a ApiCustomDomainHostedZoneName=juniorbay.com."
+parameter_overrides = "Environment=dev ProjectPrefix=jb ApiCustomDomainName=dev.juniorbay.com ApiCustomDomainCertificateArn=arn:aws:acm:us-west-2:150544707159:certificate/b40bb746-6e32-4a7d-8c24-b738cd1c359a ApiCustomDomainHostedZoneName=juniorbay.com. StripeClientId=ca_TbP9vsLxUbwOhpla1zfMNxNjBUbOpkh4 StripeConnectRedirectUri=https://dev.juniorbay.com/stripe/connect/callback StripePlatformSecretArn=arn:aws:secretsmanager:us-west-2:150544707159:secret:stripe-cart/dev/platform/stripe-Ds1gDX"
 tags = "Project=\"stripe-link\" Environment=\"dev\" ManagedBy=\"sam\""
 
 [prod.deploy.parameters]
@@ -15,5 +15,5 @@ region = "us-west-2"
 capabilities = "CAPABILITY_IAM"
 confirm_changeset = true
 resolve_s3 = true
-parameter_overrides = "Environment=prod ProjectPrefix=jb"
+parameter_overrides = "Environment=prod ProjectPrefix=jb ApiCustomDomainName=prod.juniorbay.com ApiCustomDomainCertificateArn=arn:aws:acm:us-west-2:150544707159:certificate/f5e2313a-947e-4902-b785-f978559416a2 ApiCustomDomainHostedZoneName=juniorbay.com. StripeClientId=ca_TbP9vsLxUbwOhpla1zfMNxNjBUbOpkh4 StripeConnectRedirectUri=https://prod.juniorbay.com/stripe/connect/callback StripePlatformSecretArn=arn:aws:secretsmanager:us-west-2:150544707159:secret:stripe-cart/prod/platform/stripe-fdI0Xg"
 tags = "Project=\"stripe-link\" Environment=\"prod\" ManagedBy=\"sam\""
