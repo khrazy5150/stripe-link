@@ -711,6 +711,9 @@ Resources:
       CodeUri: src/
       Handler: handlers.stripe_connect.start_handler
       Description: Starts Stripe Connect OAuth.
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref TenantProfilesTable
       Events:
         StripeConnectStart:
           Type: Api

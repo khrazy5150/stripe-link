@@ -8,7 +8,7 @@ from urllib.request import Request, urlopen
 
 from stripe_link.common import error_response, json_response, parse_json_body, tenant_id_from_event
 from stripe_link.kms_secrets import KmsSecretCipher
-from stripe_link.repositories.documents import RepositoryError, stripe_keys_repository
+from stripe_link.repositories.documents import RepositoryError, stripe_keys_repository, tenant_profiles_repository
 from stripe_link.security import redact_sensitive_fields
 from stripe_link.stripe_platform_secrets import get_platform_secret_key
 
@@ -53,6 +53,15 @@ def _parse_state(state):
     }
 
 
+def _tenant_owner_email(tenant_id, repository=None):
+    if not tenant_id:
+        return ""
+    repository = repository or tenant_profiles_repository()
+    tenant = repository.get(tenant_id, tenant_id) or {}
+    owner = tenant.get("owner") if isinstance(tenant.get("owner"), dict) else {}
+    return str(tenant.get("owner_email") or owner.get("email") or "").strip()
+
+
 def _exchange_oauth_code(code, mode):
     secret_key = get_platform_secret_key(mode)
     if not secret_key:
@@ -82,7 +91,7 @@ def _exchange_oauth_code(code, mode):
         raise RuntimeError(f"Stripe OAuth token exchange failed: {exc.reason}") from exc
 
 
-def start_handler(event, context):
+def start_handler(event, context, tenant_repository=None):
     tenant_id = tenant_id_from_event(event)
     query = event.get("queryStringParameters") or {}
     mode = _normalize_mode(query.get("mode", "test"))
@@ -96,13 +105,20 @@ def start_handler(event, context):
     if not client_id or not redirect_uri:
         return error_response("Stripe Connect is not configured for this environment.", status_code=503, code="connect_not_configured")
     state = f"{tenant_id}:{mode}:{chain or 'single'}:{path or 'existing'}"
-    params = urlencode({
+    params = {
         "response_type": "code",
         "client_id": client_id,
         "scope": "read_write",
         "redirect_uri": redirect_uri,
         "state": state,
-    })
+    }
+    try:
+        owner_email = _tenant_owner_email(tenant_id, tenant_repository)
+        if owner_email:
+            params["stripe_user[email]"] = owner_email
+    except RepositoryError:
+        pass
+    params = urlencode(params)
     connect_url = f"https://connect.stripe.com/oauth/authorize?{params}"
     if should_redirect:
         return _redirect(connect_url)

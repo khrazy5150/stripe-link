@@ -830,6 +830,32 @@ class AccountHandlerTests(unittest.TestCase):
         self.assertEqual(body["chain"], "both")
         self.assertEqual(query["state"], ["tenant_demo:test:both:existing"])
 
+    def test_stripe_connect_start_prefills_owner_email(self):
+        tenants = FakeDocumentRepository("tenant_id")
+        tenants.put({
+            "schema_version": "2026-05-29",
+            "document_type": "tenant_profile",
+            "tenant_id": "tenant_demo",
+            "owner_email": "owner@example.com",
+            "owner": {"email": "fallback@example.com"},
+        })
+
+        with patch.dict(os.environ, {
+            "STRIPE_CLIENT_ID": "ca_demo",
+            "STRIPE_CONNECT_REDIRECT_URI": "https://api.example.com/connect/callback",
+        }):
+            response = start_handler({
+                "queryStringParameters": {
+                    "tenant_id": "tenant_demo",
+                    "mode": "test",
+                }
+            }, None, tenant_repository=tenants)
+
+        body = json.loads(response["body"])
+        query = parse_qs(urlparse(body["connect_url"]).query)
+        self.assertEqual(response["statusCode"], 200)
+        self.assertEqual(query["stripe_user[email]"], ["owner@example.com"])
+
     def test_stripe_connect_status_defaults_to_not_connected(self):
         class FakeStripeRepository:
             def get(self, tenant_id, mode="test"):
