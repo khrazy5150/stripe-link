@@ -1,0 +1,215 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.juniorbay.com/stripe-link/Coupon.schema.json",
+  "title": "Coupon",
+  "description": "A Stripe-first coupon document. The document is persisted only after Stripe Coupon and Promotion Code creation succeeds.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "document_type",
+    "tenant_id",
+    "coupon_id",
+    "canonical",
+    "stripe_mode",
+    "stripe_coupon_id",
+    "stripe_promo_code_id",
+    "code",
+    "status",
+    "discount",
+    "restrictions",
+    "applies_to_offer_ids",
+    "redemption_count",
+    "sync",
+    "created_at",
+    "updated_at"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "2026-05-29"
+    },
+    "document_type": {
+      "type": "string",
+      "const": "coupon"
+    },
+    "tenant_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "coupon_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "System-generated unique identifier for this coupon document."
+    },
+    "canonical": {
+      "type": "boolean",
+      "const": true,
+      "description": "Always true. Coupons are usable only after successful Stripe sync."
+    },
+    "stripe_mode": {
+      "type": "string",
+      "enum": ["test", "live"]
+    },
+    "stripe_coupon_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Stripe Coupon object ID."
+    },
+    "stripe_promo_code_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Stripe Promotion Code object ID."
+    },
+    "code": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 50,
+      "pattern": "^[A-Z0-9_-]+$",
+      "description": "Customer-facing promotion code. Must be unique per tenant per stripe_mode."
+    },
+    "name": {
+      "type": "string",
+      "description": "Internal name shown in the admin dashboard. Defaults to code when omitted."
+    },
+    "status": {
+      "type": "string",
+      "enum": ["active", "inactive", "expired", "fully_redeemed"]
+    },
+    "discount": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "value", "duration"],
+      "description": "Maps directly to Stripe Coupon percent_off or amount_off.",
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["percent", "fixed"]
+        },
+        "value": {
+          "type": "number",
+          "minimum": 0,
+          "description": "For percent: 0-100. For fixed: amount in the smallest currency unit."
+        },
+        "currency": {
+          "type": "string",
+          "pattern": "^[a-z]{3}$",
+          "description": "Required when type is fixed."
+        },
+        "duration": {
+          "type": "string",
+          "enum": ["once", "repeating", "forever"]
+        },
+        "duration_months": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Required when duration is repeating."
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "type": { "const": "fixed" } },
+            "required": ["type"]
+          },
+          "then": {
+            "required": ["currency"]
+          }
+        },
+        {
+          "if": {
+            "properties": { "duration": { "const": "repeating" } },
+            "required": ["duration"]
+          },
+          "then": {
+            "required": ["duration_months"]
+          }
+        }
+      ]
+    },
+    "restrictions": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "expires_at": {
+          "type": ["integer", "null"],
+          "minimum": 0
+        },
+        "max_redemptions": {
+          "type": ["integer", "null"],
+          "minimum": 1
+        },
+        "max_redemptions_per_customer": {
+          "type": ["integer", "null"],
+          "minimum": 1
+        },
+        "first_time_only": {
+          "type": "boolean",
+          "default": false
+        },
+        "minimum_amount": {
+          "type": ["integer", "null"],
+          "minimum": 0
+        },
+        "minimum_amount_currency": {
+          "type": ["string", "null"],
+          "pattern": "^[a-z]{3}$"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "required": ["minimum_amount"],
+            "properties": {
+              "minimum_amount": { "type": "integer" }
+            }
+          },
+          "then": {
+            "required": ["minimum_amount_currency"]
+          }
+        }
+      ]
+    },
+    "applies_to_offer_ids": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "description": "Offers this Stripe-backed coupon is attached to. Empty array means it is in the coupon library but not attached."
+    },
+    "redemption_count": {
+      "type": "integer",
+      "minimum": 0,
+      "default": 0,
+      "description": "Synced from Stripe/webhook events and managed by the system."
+    },
+    "sync": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "last_synced_at", "error"],
+      "properties": {
+        "status": {
+          "type": "string",
+          "const": "synced",
+          "description": "Coupons are persisted only after Stripe sync succeeds."
+        },
+        "last_synced_at": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "error": {
+          "type": "null"
+        }
+      }
+    },
+    "created_at": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "updated_at": {
+      "type": "integer",
+      "minimum": 0
+    }
+  }
+}

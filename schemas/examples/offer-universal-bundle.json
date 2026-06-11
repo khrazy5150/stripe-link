@@ -3,10 +3,12 @@
   "document_type": "offer",
   "tenant_id": "tenant_demo",
   "offer_id": "offer_universal_bundle",
+  "slug": "universal-bundle-offer",
   "name": "Universal Bundle Offer",
-  "active": true,
+  "status": "active",
+  "product_intent": "transaction",
+  "stripe_mode": "test",
   "offer_type": "bundle",
-  "context": "standard",
   "items": [
     {
       "product_id": "prod_universal_bundle",
@@ -32,10 +34,12 @@
           "display_discount_pct": 31
         }
       ],
-      "default_price_id": "price_universal_double",
-      "presentation_context": "primary"
+      "default_price_id": "price_universal_double"
     }
   ],
+  "discount": {
+    "mode": "none"
+  },
   "presentation": {
     "headline": "Universal Bundle",
     "badge": "Limited Run",
@@ -45,9 +49,13 @@
     "mode": "payment",
     "allow_promotion_codes": true,
     "metadata": {
-      "offer_id": "offer_universal_bundle",
-      "context": "standard"
+      "offer_id": "offer_universal_bundle"
     }
+  },
+  "sync": {
+    "status": "pending",
+    "last_synced_at": null,
+    "error": null
   },
   "created_at": 1780092000,
   "updated_at": 1780092000

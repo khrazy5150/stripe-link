@@ -577,10 +577,14 @@ def validate_product_document(document: dict[str, Any]) -> None:
 def validate_offer_document(document: dict[str, Any]) -> None:
     require_document_fields(document, "offer", "offer_id")
     require_string(document, "name")
-    optional_bool(document, "active")
-    optional_string(document, "context")
+    if document.get("status") is not None:
+        require_enum(document, "status", {"draft", "active", "archived"}, "Offer status")
+    require_enum(document, "product_intent", {"transaction", "lead_gen"}, "Offer product_intent")
+    require_enum(document, "stripe_mode", {"test", "live"}, "Offer stripe_mode")
+    if document.get("context") is not None:
+        require_enum(document, "context", {"standard", "sale", "flash_sale", "upsell", "downsell", "order_bump"}, "Offer context")
     if document.get("offer_type") is not None:
-        require_enum(document, "offer_type", {"single-offer", "bundle", "listicle"}, "Offer offer_type")
+        require_enum(document, "offer_type", {"single_product", "bundle"}, "Offer offer_type")
 
     items = document.get("items")
     if not isinstance(items, list) or not items:
@@ -621,14 +625,41 @@ def validate_offer_document(document: dict[str, Any]) -> None:
             if item.get("default_price_id") not in selectable_price_ids:
                 raise DocumentValidationError("default_price_id must reference one of selectable_prices.")
 
+    discount = document.get("discount")
+    if not isinstance(discount, dict):
+        raise DocumentValidationError("Offer discount must be an object.")
+    discount_mode = require_enum(discount, "mode", {"none", "auto", "coupon_code", "promotion_code"}, "Offer discount.mode")
+    if document.get("product_intent") == "lead_gen" and discount_mode != "none":
+        raise DocumentValidationError("Lead generation offers cannot include payment discounts.")
+    if discount_mode == "coupon_code":
+        require_string(discount, "coupon_id", "Offer discount.coupon_id")
+    if discount_mode == "promotion_code":
+        require_string(discount, "promotion_code", "Offer discount.promotion_code")
+    if discount_mode == "auto":
+        require_enum(discount, "type", {"percent", "fixed"}, "Offer discount.type")
+        optional_non_negative_number(discount, "value", "Offer discount.value")
+        require_enum(discount, "duration", {"once", "repeating", "forever"}, "Offer discount.duration")
+        optional_bool(discount, "first_time_only", "Offer discount.first_time_only")
+        if discount.get("type") == "fixed":
+            currency = require_string(discount, "currency", "Offer discount.currency")
+            if len(currency) != 3 or currency != currency.lower():
+                raise DocumentValidationError("Offer discount.currency must be a lowercase 3-letter currency code.")
+        if discount.get("duration") == "repeating":
+            require_positive_int(discount, "duration_months", "Offer discount.duration_months")
+
     checkout = document.get("checkout")
-    if not isinstance(checkout, dict):
-        raise DocumentValidationError("Offer checkout must be an object.")
-    require_enum(checkout, "mode", {"payment", "subscription", "setup"}, "Offer checkout.mode")
-    optional_bool(checkout, "allow_promotion_codes", "Offer checkout.allow_promotion_codes")
-    metadata = checkout.get("metadata")
-    if metadata is not None and not isinstance(metadata, dict):
-        raise DocumentValidationError("Offer checkout.metadata must be an object.")
+    if document.get("product_intent") == "transaction":
+        if not isinstance(checkout, dict):
+            raise DocumentValidationError("Offer checkout must be an object.")
+        require_enum(checkout, "mode", {"payment", "subscription"}, "Offer checkout.mode")
+        optional_bool(checkout, "allow_promotion_codes", "Offer checkout.allow_promotion_codes")
+        if checkout.get("phone_number_collection") is not None:
+            require_enum(checkout, "phone_number_collection", {"inherit", "enabled", "disabled"}, "Offer checkout.phone_number_collection")
+        metadata = checkout.get("metadata")
+        if metadata is not None and not isinstance(metadata, dict):
+            raise DocumentValidationError("Offer checkout.metadata must be an object.")
+    elif checkout is not None:
+        raise DocumentValidationError("Lead generation offers must not include checkout.")
 
     eligibility = document.get("eligibility")
     if eligibility is not None:
@@ -645,6 +676,63 @@ def validate_offer_document(document: dict[str, Any]) -> None:
         optional_string(presentation, "badge", "Offer presentation.badge")
         optional_string(presentation, "cta_label", "Offer presentation.cta_label")
         optional_string(presentation, "hero_image_url", "Offer presentation.hero_image_url")
+
+
+def validate_coupon_document(document: dict[str, Any]) -> None:
+    require_document_fields(document, "coupon", "coupon_id")
+    require_string(document, "stripe_coupon_id", "Coupon stripe_coupon_id")
+    require_string(document, "stripe_promo_code_id", "Coupon stripe_promo_code_id")
+    code = require_string(document, "code", "Coupon code")
+    if not re.match(r"^[A-Z0-9_-]+$", code):
+        raise DocumentValidationError("Coupon code must contain only uppercase letters, numbers, underscores, or hyphens.")
+    optional_string(document, "name", "Coupon name")
+    require_enum(document, "stripe_mode", {"test", "live"}, "Coupon stripe_mode")
+    require_enum(document, "status", {"active", "inactive", "expired", "fully_redeemed"}, "Coupon status")
+    if document.get("canonical") is not True:
+        raise DocumentValidationError("Coupon canonical must be true.")
+
+    discount = require_object(document.get("discount"), "Coupon discount")
+    discount_type = require_enum(discount, "type", {"percent", "fixed"}, "Coupon discount.type")
+    optional_non_negative_number(discount, "value", "Coupon discount.value")
+    if discount_type == "percent" and Decimal(str(discount.get("value", 0))) > 100:
+        raise DocumentValidationError("Coupon percent discount.value cannot exceed 100.")
+    if discount_type == "fixed":
+        currency = require_string(discount, "currency", "Coupon discount.currency")
+        if len(currency) != 3 or currency != currency.lower():
+            raise DocumentValidationError("Coupon discount.currency must be a lowercase 3-letter currency code.")
+    require_enum(discount, "duration", {"once", "repeating", "forever"}, "Coupon discount.duration")
+    if discount.get("duration") == "repeating":
+        require_positive_int(discount, "duration_months", "Coupon discount.duration_months")
+
+    restrictions = require_object(document.get("restrictions"), "Coupon restrictions")
+    optional_non_negative_int(restrictions, "expires_at", "Coupon restrictions.expires_at")
+    for field in ["max_redemptions", "max_redemptions_per_customer"]:
+        value = restrictions.get(field)
+        if value is not None:
+            require_positive_int(restrictions, field, f"Coupon restrictions.{field}")
+    optional_bool(restrictions, "first_time_only", "Coupon restrictions.first_time_only")
+    optional_non_negative_int(restrictions, "minimum_amount", "Coupon restrictions.minimum_amount")
+    if restrictions.get("minimum_amount") is not None:
+        currency = require_string(restrictions, "minimum_amount_currency", "Coupon restrictions.minimum_amount_currency")
+        if len(currency) != 3 or currency != currency.lower():
+            raise DocumentValidationError("Coupon restrictions.minimum_amount_currency must be a lowercase 3-letter currency code.")
+
+    applies_to_offer_ids = document.get("applies_to_offer_ids")
+    if not isinstance(applies_to_offer_ids, list):
+        raise DocumentValidationError("Coupon applies_to_offer_ids must be an array.")
+    if any(not isinstance(offer_id, str) or not offer_id.strip() for offer_id in applies_to_offer_ids):
+        raise DocumentValidationError("Coupon applies_to_offer_ids must contain only non-empty strings.")
+    optional_non_negative_int(document, "redemption_count", "Coupon redemption_count")
+
+    sync = require_object(document.get("sync"), "Coupon sync")
+    if sync.get("status") != "synced":
+        raise DocumentValidationError("Coupon sync.status must be synced.")
+    optional_non_negative_int(sync, "last_synced_at", "Coupon sync.last_synced_at")
+    if sync.get("error") is not None:
+        raise DocumentValidationError("Coupon sync.error must be null.")
+
+    optional_non_negative_int(document, "created_at", "Coupon created_at")
+    optional_non_negative_int(document, "updated_at", "Coupon updated_at")
 
 
 def validate_page_document(document: dict[str, Any]) -> None:

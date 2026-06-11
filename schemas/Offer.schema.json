@@ -2,6 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://schemas.juniorbay.com/stripe-link/Offer.schema.json",
   "title": "Offer",
+  "description": "An offer is a presentation and checkout wrapper around one or more product prices. Products must share product_intent and stripe_mode. Product price context drives landing page placement; subscriptions are represented by price pricing_model and checkout.mode.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -9,10 +10,16 @@
     "document_type",
     "tenant_id",
     "offer_id",
+    "slug",
     "name",
-    "active",
+    "status",
+    "product_intent",
+    "stripe_mode",
     "items",
-    "checkout"
+    "discount",
+    "sync",
+    "created_at",
+    "updated_at"
   ],
   "properties": {
     "schema_version": {
@@ -29,32 +36,67 @@
     },
     "offer_id": {
       "type": "string",
-      "minLength": 1
+      "minLength": 1,
+      "description": "System-generated unique identifier for this offer."
+    },
+    "slug": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+      "description": "URL-friendly identifier generated from the offer name. Must be unique per tenant."
     },
     "name": {
       "type": "string",
-      "minLength": 1
+      "minLength": 1,
+      "description": "Human-readable offer label shown in the dashboard and optionally in customer-facing presentation."
     },
-    "active": {
-      "type": "boolean"
+    "status": {
+      "type": "string",
+      "enum": ["draft", "active", "archived"],
+      "description": "Lifecycle status. Replaces the older boolean active flag."
+    },
+    "product_intent": {
+      "type": "string",
+      "enum": ["transaction", "lead_gen"],
+      "description": "All offer items must share this product intent. This is resolved from selected products by the API."
+    },
+    "stripe_mode": {
+      "type": "string",
+      "enum": ["test", "live"],
+      "description": "All offer items must belong to this Stripe mode."
     },
     "context": {
       "type": "string",
-      "enum": ["standard", "sale", "flash_sale", "upsell", "downsell", "order_bump", "subscription"]
+      "enum": ["standard", "sale", "flash_sale", "upsell", "downsell", "order_bump"],
+      "default": "standard",
+      "description": "Deprecated transition field. Product price context now drives landing page placement; recurring billing belongs to product price pricing_model and checkout.mode."
+    },
+    "offer_type": {
+      "type": "string",
+      "enum": ["single_product", "bundle"],
+      "default": "single_product",
+      "description": "Dashboard-facing classification. Checkout behavior is still determined by items, prices, and checkout.mode."
+    },
+    "trigger_offer_id": {
+      "type": ["string", "null"],
+      "description": "Deprecated transition field. Triggering and funnel placement are handled by landing page/flow configuration."
     },
     "items": {
       "type": "array",
       "minItems": 1,
+      "description": "Products included in this offer. Each item references existing product price IDs rather than duplicating product or price documents.",
       "items": {
         "type": "object",
         "additionalProperties": false,
         "required": ["product_id"],
         "oneOf": [
           {
-            "required": ["price_id", "quantity"]
+            "required": ["price_id", "quantity"],
+            "description": "Fixed price path: one product price is locked to this offer item."
           },
           {
-            "required": ["selectable_prices", "default_price_id"]
+            "required": ["selectable_prices", "default_price_id"],
+            "description": "Selectable price path: the buyer chooses from multiple price options for this product."
           }
         ],
         "properties": {
@@ -64,18 +106,19 @@
           },
           "price_id": {
             "type": "string",
-            "minLength": 1
+            "minLength": 1,
+            "description": "References a price_id on the product document."
           },
           "quantity": {
             "type": "integer",
             "minimum": 1,
             "default": 1,
-            "description": "Checkout multiplier for the fixed price_id path. For selectable_prices, bundle quantity belongs on each selectable price option or the canonical Price."
+            "description": "Checkout line item quantity multiplier for the fixed price path."
           },
           "selectable_prices": {
             "type": "array",
             "minItems": 1,
-            "description": "Price options the customer can choose from for this product within one offer.",
+            "description": "Price options the buyer can choose from for this product within this offer.",
             "items": {
               "type": "object",
               "additionalProperties": false,
@@ -87,55 +130,174 @@
                 },
                 "quantity": {
                   "type": "integer",
-                  "minimum": 1
+                  "minimum": 1,
+                  "description": "Units represented by this selectable price option. Usually mirrors the referenced product price quantity."
                 },
                 "label": {
-                  "type": "string"
+                  "type": "string",
+                  "description": "Customer-facing label such as '1 Bottle' or '2 Bottles'."
                 },
                 "badge": {
-                  "type": "string"
+                  "type": "string",
+                  "description": "Short badge text such as 'Most Popular' or 'Best Value'."
                 },
                 "image_url": {
                   "type": "string",
                   "format": "uri-reference",
-                  "description": "Offer-specific image override for this selectable price option, such as a 2-pack or 3-pack composite image."
+                  "description": "Offer-specific image override for this selectable price option."
                 },
                 "display_discount_pct": {
                   "type": "number",
                   "minimum": 0,
                   "maximum": 100,
-                  "description": "Offer-context display override only; pricing still comes from the selected Stripe Price."
+                  "description": "Display-only discount percentage. Does not affect Stripe pricing."
+                },
+                "subscription_incentive": {
+                  "$ref": "#/$defs/subscriptionIncentive",
+                  "description": "Incentive for a referenced recurring price."
                 }
               }
             }
           },
           "default_price_id": {
             "type": "string",
-            "minLength": 1
+            "minLength": 1,
+            "description": "The price_id preselected when the offer renders. API validation must ensure this exists in selectable_prices."
           },
           "display_discount_pct": {
             "type": "number",
             "minimum": 0,
             "maximum": 100,
-            "description": "Offer-context display override only; pricing still comes from the selected Stripe Price."
-          },
-          "display_label": {
-            "type": "string"
-          },
-          "image_url": {
-            "type": "string",
-            "format": "uri-reference",
-            "description": "Offer-specific product presentation image override, such as a composite bundle image. Falls back to the product image when absent."
+            "description": "Item-level display-only discount override. Does not affect Stripe pricing."
           },
           "presentation_context": {
-            "type": "string"
+            "type": "string",
+            "enum": ["primary", "post_purchase", "order_bump", "cross_sell"],
+            "description": "Deprecated transition field. Prefer price.context and landing page placement rules."
+          },
+          "subscription_incentive": {
+            "$ref": "#/$defs/subscriptionIncentive",
+            "description": "Incentive for a fixed recurring price path."
           }
         }
       }
     },
+    "discount": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode"],
+      "description": "Offer-level discount configuration. Use { mode: 'none' } when no discount applies. Not applicable to lead_gen offers beyond explicit none.",
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": ["none", "auto", "coupon_code", "promotion_code"]
+        },
+        "coupon_id": {
+          "type": "string",
+          "description": "Reference to a Stripe-first Coupon document. Required when mode is coupon_code."
+        },
+        "promotion_code": {
+          "type": "string",
+          "description": "Public Stripe promotion code entered by the tenant. Required when mode is promotion_code."
+        },
+        "type": {
+          "type": "string",
+          "enum": ["percent", "fixed"],
+          "description": "Required when mode is auto."
+        },
+        "value": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Percentage when type is percent. Smallest currency unit when type is fixed."
+        },
+        "currency": {
+          "type": "string",
+          "pattern": "^[a-z]{3}$",
+          "description": "Required when type is fixed."
+        },
+        "duration": {
+          "type": "string",
+          "enum": ["once", "repeating", "forever"],
+          "description": "Stripe coupon duration for subscription checkout. One-time payment offers should use once."
+        },
+        "duration_months": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Required when duration is repeating."
+        },
+        "first_time_only": {
+          "type": "boolean",
+          "default": false
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "mode": { "const": "none" } },
+            "required": ["mode"]
+          },
+          "then": {
+            "not": {
+              "anyOf": [
+                { "required": ["coupon_id"] },
+                { "required": ["promotion_code"] },
+                { "required": ["type"] },
+                { "required": ["value"] }
+              ]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": { "mode": { "const": "coupon_code" } },
+            "required": ["mode"]
+          },
+          "then": {
+            "required": ["coupon_id"]
+          }
+        },
+        {
+          "if": {
+            "properties": { "mode": { "const": "promotion_code" } },
+            "required": ["mode"]
+          },
+          "then": {
+            "required": ["promotion_code"]
+          }
+        },
+        {
+          "if": {
+            "properties": { "mode": { "const": "auto" } },
+            "required": ["mode"]
+          },
+          "then": {
+            "required": ["type", "value"]
+          }
+        },
+        {
+          "if": {
+            "properties": { "type": { "const": "fixed" } },
+            "required": ["type"]
+          },
+          "then": {
+            "required": ["currency"]
+          }
+        },
+        {
+          "if": {
+            "properties": { "duration": { "const": "repeating" } },
+            "required": ["duration"]
+          },
+          "then": {
+            "required": ["duration_months"]
+          }
+        }
+      ]
+    },
     "eligibility": {
       "type": "object",
       "additionalProperties": false,
+      "description": "Rules that control when and to whom this offer is available.",
       "properties": {
         "requires_prior_purchase": {
           "type": "boolean",
@@ -144,7 +306,8 @@
         "allowed_price_contexts": {
           "type": "array",
           "items": {
-            "type": "string"
+            "type": "string",
+            "enum": ["standard", "sale", "flash_sale", "upsell", "downsell", "order_bump"]
           }
         },
         "starts_at": {
@@ -160,19 +323,21 @@
     "presentation": {
       "type": "object",
       "additionalProperties": true,
-      "description": "Offer-level copy, badges, urgency, and display metadata. Page schemas will constrain this later."
+      "description": "Offer-level copy, badges, urgency signals, and display metadata. Page schemas will constrain specific presentation fields later."
     },
     "refund_policy": {
       "type": "object",
       "additionalProperties": false,
-      "description": "Offer-level refund policy override or resolved policy derived from selected product policies.",
+      "description": "Optional offer-level refund policy override. When absent, the renderer falls back to product policy or tenant preferences.",
       "required": ["source", "refund_window", "condition", "return_method", "short_label", "full_policy"],
       "properties": {
         "source": {
           "type": "string",
-          "enum": ["product", "offer_override"]
+          "enum": ["product", "offer_override", "user_preference_default"]
         },
-        "product_id": { "type": "string" },
+        "product_id": {
+          "type": "string"
+        },
         "refund_window": {
           "type": "string",
           "enum": ["non_refundable", "72_hours", "7_days", "14_days", "30_days", "60_days", "custom"]
@@ -185,18 +350,24 @@
           "type": "string",
           "enum": ["no_return_customer_keeps", "return_required", "digital_revoke_access", "custom"]
         },
-        "short_label": { "type": "string" },
-        "full_policy": { "type": "string" }
+        "short_label": {
+          "type": "string"
+        },
+        "full_policy": {
+          "type": "string"
+        }
       }
     },
     "checkout": {
       "type": "object",
       "additionalProperties": false,
+      "description": "Stripe checkout session configuration. Required for transaction offers and omitted for lead_gen offers.",
       "required": ["mode"],
       "properties": {
         "mode": {
           "type": "string",
-          "enum": ["payment", "subscription"]
+          "enum": ["payment", "subscription"],
+          "description": "payment for one-time purchases. subscription for recurring product prices."
         },
         "success_url": {
           "type": "string"
@@ -204,19 +375,54 @@
         "cancel_url": {
           "type": "string"
         },
+        "phone_number_collection": {
+          "type": "string",
+          "enum": ["inherit", "enabled", "disabled"],
+          "default": "inherit"
+        },
         "allow_promotion_codes": {
           "type": "boolean",
           "default": false
         },
         "shipping": {
           "type": "object",
-          "additionalProperties": true
+          "additionalProperties": false,
+          "properties": {
+            "required": {
+              "type": "boolean"
+            },
+            "allowed_countries": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "pattern": "^[A-Z]{2}$"
+              }
+            }
+          }
         },
         "metadata": {
           "type": "object",
           "additionalProperties": {
             "type": ["string", "number", "integer", "boolean", "null"]
           }
+        }
+      }
+    },
+    "sync": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "last_synced_at", "error"],
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": ["pending", "synced", "error"]
+        },
+        "last_synced_at": {
+          "type": ["integer", "null"],
+          "minimum": 0
+        },
+        "error": {
+          "type": ["string", "null"]
         }
       }
     },
@@ -228,5 +434,128 @@
       "type": "integer",
       "minimum": 0
     }
-  }
+  },
+  "$defs": {
+    "subscriptionIncentive": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type"],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["none", "free_trial", "discount_percent", "discount_fixed", "paid_trial"]
+        },
+        "trial_days": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "discount_value": {
+          "type": "number",
+          "minimum": 0
+        },
+        "discount_currency": {
+          "type": "string",
+          "pattern": "^[a-z]{3}$"
+        },
+        "discount_duration": {
+          "type": "string",
+          "enum": ["once", "repeating", "forever"]
+        },
+        "discount_duration_months": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "paid_trial_amount": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "paid_trial_currency": {
+          "type": "string",
+          "pattern": "^[a-z]{3}$"
+        },
+        "paid_trial_cycles": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 1
+        },
+        "requires_flexible_billing": {
+          "type": "boolean",
+          "const": true
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "type": { "const": "free_trial" } },
+            "required": ["type"]
+          },
+          "then": {
+            "required": ["trial_days"]
+          }
+        },
+        {
+          "if": {
+            "properties": { "type": { "enum": ["discount_percent", "discount_fixed"] } },
+            "required": ["type"]
+          },
+          "then": {
+            "required": ["discount_value", "discount_duration"]
+          }
+        },
+        {
+          "if": {
+            "properties": { "type": { "const": "discount_fixed" } },
+            "required": ["type"]
+          },
+          "then": {
+            "required": ["discount_currency"]
+          }
+        },
+        {
+          "if": {
+            "properties": { "discount_duration": { "const": "repeating" } },
+            "required": ["discount_duration"]
+          },
+          "then": {
+            "required": ["discount_duration_months"]
+          }
+        },
+        {
+          "if": {
+            "properties": { "type": { "const": "paid_trial" } },
+            "required": ["type"]
+          },
+          "then": {
+            "required": ["paid_trial_amount", "paid_trial_currency", "paid_trial_cycles", "requires_flexible_billing"]
+          }
+        }
+      ]
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": { "product_intent": { "const": "transaction" } },
+        "required": ["product_intent"]
+      },
+      "then": {
+        "required": ["checkout"]
+      }
+    },
+    {
+      "if": {
+        "properties": { "product_intent": { "const": "lead_gen" } },
+        "required": ["product_intent"]
+      },
+      "then": {
+        "not": { "required": ["checkout"] },
+        "properties": {
+          "discount": {
+            "properties": { "mode": { "const": "none" } },
+            "required": ["mode"]
+          }
+        }
+      }
+    }
+  ]
 }

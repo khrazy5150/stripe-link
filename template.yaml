@@ -90,6 +90,7 @@ Globals:
         INVOICES_TABLE: !Ref InvoicesTable
         PRODUCTS_TABLE: !Ref ProductsTable
         OFFERS_TABLE: !Ref OffersTable
+        COUPONS_TABLE: !Ref CouponsTable
         PAGES_TABLE: !Ref PagesTable
         CHECKOUT_SESSIONS_TABLE: !Ref CheckoutSessionsTable
         ORDERS_TABLE: !Ref OrdersTable
@@ -379,6 +380,8 @@ Resources:
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref OffersTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref ProductsTable
       Events:
         OffersList:
           Type: Api
@@ -398,6 +401,54 @@ Resources:
             RestApiId: !Ref RestApi
             Path: /offers/{offer_id}
             Method: GET
+
+  CouponsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${ProjectPrefix}-coupons-api-${Environment}"
+      CodeUri: src/
+      Handler: handlers.coupons.handler
+      Description: JSON-first coupons API.
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref CouponsTable
+      Events:
+        CouponsList:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /coupons
+            Method: GET
+        CouponsCreate:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /coupons
+            Method: POST
+        CouponsOptions:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /coupons
+            Method: OPTIONS
+        CouponsGet:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /coupons/{coupon_id}
+            Method: GET
+        CouponsUpdate:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /coupons/{coupon_id}
+            Method: PUT
+        CouponsItemOptions:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /coupons/{coupon_id}
+            Method: OPTIONS
 
   PagesFunction:
     Type: AWS::Serverless::Function
@@ -1188,6 +1239,17 @@ Resources:
           Projection:
             ProjectionType: ALL
 
+  CouponsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "${ProjectPrefix}-coupons-${Environment}"
+      BillingMode: PAY_PER_REQUEST
+      SSESpecification:
+        SSEEnabled: true
+      AttributeDefinitions: *DocumentAttributeDefinitions
+      KeySchema: *DocumentKeySchema
+      GlobalSecondaryIndexes: *DocumentGlobalSecondaryIndexes
+
   PagesTable:
     Type: AWS::DynamoDB::Table
     Properties:
@@ -1664,6 +1726,9 @@ Outputs:
   OffersUrl:
     Description: Offers API endpoint.
     Value: !Sub "https://${RestApi}.execute-api.${AWS::Region}.amazonaws.com/${Environment}/offers"
+  CouponsUrl:
+    Description: Coupons API endpoint.
+    Value: !Sub "https://${RestApi}.execute-api.${AWS::Region}.amazonaws.com/${Environment}/coupons"
   PagesUrl:
     Description: Pages API endpoint.
     Value: !Sub "https://${RestApi}.execute-api.${AWS::Region}.amazonaws.com/${Environment}/pages"
@@ -1784,6 +1849,9 @@ Outputs:
   OffersTableName:
     Description: Offers table.
     Value: !Ref OffersTable
+  CouponsTableName:
+    Description: Coupons table.
+    Value: !Ref CouponsTable
   PagesTableName:
     Description: Pages table.
     Value: !Ref PagesTable

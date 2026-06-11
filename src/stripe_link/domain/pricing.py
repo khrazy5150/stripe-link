@@ -96,7 +96,8 @@ def resolve_offer(
     products_by_id: dict[str, dict[str, Any]],
     selected_prices: dict[str, str] | None = None,
 ) -> dict[str, Any]:
-    if not offer.get("active", False):
+    offer_status = offer.get("status") or ("active" if offer.get("active") is True else "archived")
+    if offer_status != "active":
         raise PricingError(f"Offer '{offer.get('offer_id', '')}' is not active.")
 
     offer_context = offer.get("context", "standard")

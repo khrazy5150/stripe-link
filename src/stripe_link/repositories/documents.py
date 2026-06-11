@@ -125,6 +125,15 @@ def offers_repository(table: Any | None = None) -> DynamoDocumentRepository:
     )
 
 
+def coupons_repository(table: Any | None = None) -> DynamoDocumentRepository:
+    return DynamoDocumentRepository(
+        os.environ.get("COUPONS_TABLE", ""),
+        document_type="coupon",
+        id_field="coupon_id",
+        table=table,
+    )
+
+
 def pages_repository(table: Any | None = None) -> DynamoDocumentRepository:
     return DynamoDocumentRepository(
         os.environ.get("PAGES_TABLE", ""),

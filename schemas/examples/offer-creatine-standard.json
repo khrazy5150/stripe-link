@@ -3,9 +3,11 @@
   "document_type": "offer",
   "tenant_id": "tenant_demo",
   "offer_id": "offer_creatine_standard",
+  "slug": "creatine-gummies-standard-offer",
   "name": "Creatine Gummies Standard Offer",
-  "active": true,
-  "context": "standard",
+  "status": "active",
+  "product_intent": "transaction",
+  "stripe_mode": "test",
   "items": [
     {
       "product_id": "prod_creatine_gummies",
@@ -36,10 +38,12 @@
           "display_discount_pct": 36
         }
       ],
-      "default_price_id": "price_2bottle",
-      "presentation_context": "primary"
+      "default_price_id": "price_2bottle"
     }
   ],
+  "discount": {
+    "mode": "none"
+  },
   "eligibility": {
     "requires_prior_purchase": false,
     "allowed_price_contexts": ["standard"],
@@ -55,9 +59,13 @@
     "mode": "payment",
     "allow_promotion_codes": true,
     "metadata": {
-      "offer_id": "offer_creatine_standard",
-      "context": "standard"
+      "offer_id": "offer_creatine_standard"
     }
+  },
+  "sync": {
+    "status": "pending",
+    "last_synced_at": null,
+    "error": null
   },
   "created_at": 1780092000,
   "updated_at": 1780092000

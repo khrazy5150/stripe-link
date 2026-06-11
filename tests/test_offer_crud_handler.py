@@ -17,13 +17,16 @@ def load_fixture(name: str):
 class OfferCrudHandlerTests(unittest.TestCase):
     def setUp(self):
         self.repository = FakeDocumentRepository("offer_id")
+        self.products = FakeDocumentRepository("product_id")
         self.offer = load_fixture("offer-creatine-standard.json")
+        self.product = load_fixture("product-creatine-gummies.json")
+        self.products.put(self.product)
 
     def test_create_offer_persists_selectable_price_offer(self):
         response = handler({
             "httpMethod": "POST",
             "body": json.dumps(self.offer),
-        }, None, repository=self.repository)
+        }, None, repository=self.repository, products_repo=self.products)
 
         self.assertEqual(response["statusCode"], 201)
         body = json.loads(response["body"])
@@ -55,10 +58,31 @@ class OfferCrudHandlerTests(unittest.TestCase):
         response = handler({
             "httpMethod": "POST",
             "body": json.dumps(self.offer),
-        }, None, repository=self.repository)
+        }, None, repository=self.repository, products_repo=self.products)
 
         self.assertEqual(response["statusCode"], 400)
         self.assertEqual(json.loads(response["body"])["error"], "invalid_offer")
+
+    def test_create_offer_rejects_mixed_product_intents(self):
+        lead_product = load_fixture("product-lead-capture-email.json")
+        self.products.put(lead_product)
+        self.offer["offer_type"] = "bundle"
+        self.offer["items"].append({
+            "product_id": lead_product["product_id"],
+            "price_id": lead_product["default_price_id"],
+            "quantity": 1,
+            "presentation_context": "primary",
+        })
+
+        response = handler({
+            "httpMethod": "POST",
+            "body": json.dumps(self.offer),
+        }, None, repository=self.repository, products_repo=self.products)
+
+        self.assertEqual(response["statusCode"], 400)
+        body = json.loads(response["body"])
+        self.assertEqual(body["error"], "invalid_offer")
+        self.assertIn("product_intent", body["message"])
 
 
 if __name__ == "__main__":

@@ -1,0 +1,37 @@
+{
+  "schema_version": "2026-05-29",
+  "document_type": "coupon",
+  "tenant_id": "tenant_demo",
+  "coupon_id": "coupon_demo_save10",
+  "canonical": true,
+  "stripe_mode": "test",
+  "stripe_coupon_id": "coupon_12345",
+  "stripe_promo_code_id": "promo_12345",
+  "code": "SAVE10",
+  "name": "Save 10%",
+  "status": "active",
+  "discount": {
+    "type": "percent",
+    "value": 10,
+    "duration": "once"
+  },
+  "restrictions": {
+    "expires_at": null,
+    "max_redemptions": null,
+    "max_redemptions_per_customer": 1,
+    "first_time_only": false,
+    "minimum_amount": null,
+    "minimum_amount_currency": null
+  },
+  "applies_to_offer_ids": [
+    "offer_creatine_standard"
+  ],
+  "redemption_count": 0,
+  "sync": {
+    "status": "synced",
+    "last_synced_at": 1780092000,
+    "error": null
+  },
+  "created_at": 1780092000,
+  "updated_at": 1780092000
+}

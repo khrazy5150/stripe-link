@@ -3,7 +3,7 @@ export const menuSchema = {
   document_type: "menu",
   groups: [
     { key: "main", label: "MAIN", items: ["dashboard", "stripeKeys"] },
-    { key: "catalog", label: "CATALOG", items: ["products", "offers", "landingPages", "services", "abTesting"] },
+    { key: "catalog", label: "CATALOG", items: ["products", "coupons", "offers", "landingPages", "services", "abTesting"] },
     { key: "orders", label: "ORDERS", items: ["orders", "notifications", "invoices", "shipping", "customers"] },
     { key: "settings", label: "SETTINGS", items: ["stripeConnect", "registration", "configuration", "profile", "preferences"] },
   ],
@@ -32,12 +32,20 @@ export const menuSchema = {
       enabled: true,
       environments: ["test", "live"],
     },
+    coupons: {
+      key: "coupons",
+      label: "Coupons",
+      icon: "ticket",
+      view: "coupons",
+      enabled: true,
+      environments: ["test", "live"],
+    },
     offers: {
       key: "offers",
       label: "Offers",
       icon: "gift",
       view: "offers",
-      enabled: false,
+      enabled: true,
       environments: ["test", "live"],
     },
     landingPages: {
@@ -162,6 +170,7 @@ export const iconPaths = {
   home: "M3 12l2-2m0 0 7-7 7 7M5 10v10a1 1 0 0 0 1 1h3m10-11 2 2m-2-2v10a1 1 0 0 1-1 1h-3m-6 0a1 1 0 0 0 1-1v-4a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v4a1 1 0 0 0 1 1m-6 0h6",
   key: "M15 7a2 2 0 0 1 2 2m4 0a6 6 0 0 1-7.743 5.743L11 17H9v2H7v2H4a1 1 0 0 1-1-1v-2.586a1 1 0 0 1 .293-.707l5.964-5.964A6 6 0 1 1 21 9z",
   box: "m21 7.5-9-4.5-9 4.5 9 4.5 9-4.5Zm0 0v9l-9 4.5m0-9v9m0-9-9-4.5m0 0v9l9 4.5",
+  ticket: "M4.5 7.5A1.5 1.5 0 0 1 6 6h12a1.5 1.5 0 0 1 1.5 1.5v2.25a2.25 2.25 0 0 0 0 4.5v2.25A1.5 1.5 0 0 1 18 18H6a1.5 1.5 0 0 1-1.5-1.5v-2.25a2.25 2.25 0 0 0 0-4.5V7.5Zm7.5 1.5v6",
   gift: "M20 12v7.5A1.5 1.5 0 0 1 18.5 21h-13A1.5 1.5 0 0 1 4 19.5V12m16 0H4m16 0h-4.5A3.5 3.5 0 0 0 19 8.5 2.5 2.5 0 0 0 14.5 7L12 12m-8 0h4.5A3.5 3.5 0 0 1 5 8.5 2.5 2.5 0 0 1 9.5 7L12 12m0 0v9",
   rocket: "M5.25 18.75c4.75-.25 8.75-2.5 12-6.75m0 0 1.5 1.5m-1.5-1.5-1.5-1.5M6.75 14.25 4.5 19.5l5.25-2.25M12 3.75c3.5 1.25 6.25 4 7.5 7.5-4.75.5-8.25-1-10.5-4.5A10 10 0 0 1 12 3.75Z",
   calendar: "M8 3.75v3m8-3v3M4.5 9.75h15m-13.5-3h12A1.5 1.5 0 0 1 19.5 8.25v10.5A1.5 1.5 0 0 1 18 20.25H6a1.5 1.5 0 0 1-1.5-1.5V8.25A1.5 1.5 0 0 1 6 6.75Zm4.5 8.25 1.5 1.5 3-4",

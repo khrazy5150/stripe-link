@@ -3,18 +3,21 @@
   "document_type": "offer",
   "tenant_id": "tenant_demo",
   "offer_id": "offer_creatine_upsell",
+  "slug": "creatine-gummies-one-click-upsell",
   "name": "Creatine Gummies One-Click Upsell",
-  "active": true,
-  "context": "upsell",
+  "status": "active",
+  "product_intent": "transaction",
+  "stripe_mode": "test",
   "items": [
     {
       "product_id": "prod_creatine_gummies",
       "price_id": "price_upsell_1bottle",
-      "quantity": 1,
-      "display_label": "Add 1 Bottle",
-      "presentation_context": "post_purchase"
+      "quantity": 1
     }
   ],
+  "discount": {
+    "mode": "none"
+  },
   "eligibility": {
     "requires_prior_purchase": true,
     "allowed_price_contexts": ["upsell"],
@@ -30,9 +33,13 @@
     "mode": "payment",
     "allow_promotion_codes": false,
     "metadata": {
-      "offer_id": "offer_creatine_upsell",
-      "context": "upsell"
+      "offer_id": "offer_creatine_upsell"
     }
+  },
+  "sync": {
+    "status": "pending",
+    "last_synced_at": null,
+    "error": null
   },
   "created_at": 1780092000,
   "updated_at": 1780092000

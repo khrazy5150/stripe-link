@@ -2,12 +2,13 @@
 
 These JSON Schemas define the durable contracts used by APIs, renderers, migration tools, and future LLM workflows.
 
-The first domain slice covers Product, Price, and Offer because those contracts determine how `stripe-link` avoids duplicate Stripe products:
+The first domain slice covers Product, Price, Offer, and Coupon because those contracts determine how `stripe-link` avoids duplicate Stripe products:
 
 - one canonical Stripe Product
 - multiple Stripe Prices on that product
 - local Offer documents that select price context, presentation context, checkout behavior, and eligibility
 - selectable offer items for pages where the customer chooses among multiple prices on the same product
+- Stripe-first Coupon documents that are persisted only after the Stripe Coupon and Promotion Code exist
 
 Important separation:
 
@@ -15,6 +16,11 @@ Important separation:
 - `Offer.items[].quantity` describes how many of that selected Stripe Price to add to checkout.
 - `Offer.items[].selectable_prices` describes the customer-facing selector for one product in one offer.
 - `Offer.items[].display_discount_pct` and `selectable_prices[].display_discount_pct` are display overrides only. Stripe pricing still comes from the selected immutable Price.
+- `Offer.status` is the lifecycle source of truth. Do not add a parallel boolean `active`.
+- `Offer.context` describes funnel placement only: standard, sale, flash sale, upsell, downsell, or order bump. Subscription is intentionally a price/checkout model, not an offer context.
+- `Offer.discount` is always present. Use `{ "mode": "none" }` when there is no discount, `{ "mode": "coupon_code" }` to attach a Stripe-first Coupon, and `{ "mode": "auto" }` only when the API will create/apply the corresponding Stripe discount behavior.
+- `Coupon` uses the immediate model: the API creates Stripe objects first, then writes the local document with `sync.status = "synced"`. Failed Stripe creation should return an error and leave no usable coupon document behind.
+- `order_bump` offers should normally reference distinct add-on products and a `trigger_offer_id`. The schema permits product references, but API validation should reject self-referential bumps unless a deliberate exception is documented.
 
 Template/page-section schemas should be implemented later as a vertical slice with one complete page experience before expanding the component catalog.
 

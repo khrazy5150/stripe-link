@@ -109,6 +109,8 @@
       <Dashboard v-if="activeView === 'dashboard'" :environment-label="environmentLabel" />
       <StripeKeys v-else-if="activeView === 'stripeKeys'" />
       <Products v-else-if="activeView === 'products'" />
+      <Coupons v-else-if="activeView === 'coupons'" />
+      <Offers v-else-if="activeView === 'offers'" />
     </main>
   </div>
 </template>
@@ -116,17 +118,21 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import AuthPage from "./components/AuthPage.vue";
+import Coupons from "./components/Coupons.vue";
 import Dashboard from "./components/Dashboard.vue";
+import Offers from "./components/Offers.vue";
 import Products from "./components/Products.vue";
 import StripeKeys from "./components/StripeKeys.vue";
 import { iconPaths, menuGroupsForEnvironment } from "./config/menu";
 import { getApiEnvironment, loadAppConfigApiBase, setApiEnvironment } from "./api/client";
 import { useAuthStore } from "./stores/auth";
+import { useCouponsStore } from "./stores/coupons";
 import { useDashboardStore } from "./stores/dashboard";
 import { useProductsStore } from "./stores/products";
 import { useStripeKeysStore } from "./stores/stripeKeys";
 
 const auth = useAuthStore();
+const coupons = useCouponsStore();
 const dashboard = useDashboardStore();
 const products = useProductsStore();
 const stripeKeys = useStripeKeysStore();
@@ -150,6 +156,7 @@ function toggleEnvironment() {
 
 async function reloadActiveView() {
   dashboard.reset();
+  coupons.reset();
   products.reset();
   stripeKeys.resetForCurrentTenant();
   if (activeView.value === "dashboard") {
@@ -192,6 +199,7 @@ watch(
   (clientId, previousClientId) => {
     if (clientId === previousClientId) return;
     dashboard.reset();
+    coupons.reset();
     products.reset();
     stripeKeys.resetForCurrentTenant();
     activeView.value = "dashboard";
