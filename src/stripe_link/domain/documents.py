@@ -176,6 +176,64 @@ def validate_font_settings(fonts: Any, label: str) -> None:
             require_enum(font, "fallback", SUPPORTED_FONT_FALLBACKS, f"{label}.{role}.fallback")
 
 
+def validate_thank_you_page(value: Any, label: str) -> None:
+    if not isinstance(value, dict):
+        raise DocumentValidationError(f"{label} must be an object.")
+    has_page_id = value.get("page_id") not in (None, "")
+    has_url = value.get("url") not in (None, "")
+    if has_page_id == has_url:
+        raise DocumentValidationError(f"{label} must define exactly one of page_id or url.")
+    if has_page_id:
+        require_string(value, "page_id", f"{label}.page_id")
+    if has_url:
+        url = require_string(value, "url", f"{label}.url")
+        if not HTTP_URL_PATTERN.match(url):
+            raise DocumentValidationError(f"{label}.url must be an HTTP(S) URL.")
+
+
+def validate_funnel_steps(value: Any, label: str) -> None:
+    if not isinstance(value, list) or not value:
+        raise DocumentValidationError(f"{label} must be a non-empty array.")
+    step_ids: set[str] = set()
+    targets: list[tuple[str, str]] = []
+    for index, step in enumerate(value):
+        step_label = f"{label}[{index}]"
+        if not isinstance(step, dict):
+            raise DocumentValidationError(f"{step_label} must be an object.")
+        step_id = require_string(step, "step_id", f"{step_label}.step_id")
+        if step_id in step_ids:
+            raise DocumentValidationError(f"Duplicate funnel step id '{step_id}'.")
+        step_ids.add(step_id)
+        require_string(step, "page_id", f"{step_label}.page_id")
+        for field in ["on_accept", "on_decline"]:
+            if step.get(field) is not None:
+                targets.append((f"{step_label}.{field}", require_string(step, field, f"{step_label}.{field}")))
+    for target_label, target in targets:
+        if target != "thank_you" and target not in step_ids:
+            raise DocumentValidationError(f"{target_label} target '{target}' must reference a funnel step_id or thank_you.")
+
+
+def validate_page_post_checkout(value: Any) -> None:
+    if value is None:
+        return
+    if not isinstance(value, dict):
+        raise DocumentValidationError("Page post_checkout must be an object.")
+    has_funnel_id = value.get("funnel_id") not in (None, "")
+    has_inline_config = "thank_you_page" in value or "funnel_steps" in value
+    if has_funnel_id and has_inline_config:
+        raise DocumentValidationError("Page post_checkout must use either funnel_id or inline configuration, not both.")
+    if has_funnel_id:
+        require_string(value, "funnel_id", "Page post_checkout.funnel_id")
+        return
+    if not has_inline_config:
+        raise DocumentValidationError("Page post_checkout must define thank_you_page or funnel_id.")
+    if "thank_you_page" not in value:
+        raise DocumentValidationError("Page post_checkout.thank_you_page is required for inline configuration.")
+    validate_thank_you_page(value.get("thank_you_page"), "Page post_checkout.thank_you_page")
+    if "funnel_steps" in value:
+        validate_funnel_steps(value.get("funnel_steps"), "Page post_checkout.funnel_steps")
+
+
 def require_positive_int(document: dict[str, Any], field: str, label: str | None = None) -> int:
     value = document.get(field)
     field_label = label or field
@@ -741,7 +799,7 @@ def validate_page_document(document: dict[str, Any]) -> None:
     require_string(document, "name")
     require_string(document, "offer_id")
     if document.get("status") is not None:
-        require_enum(document, "status", {"draft", "published", "archived"})
+        require_enum(document, "status", {"draft", "preview", "published", "archived"})
     optional_non_negative_int(document, "revision")
 
     route = document.get("route")
@@ -786,6 +844,8 @@ def validate_page_document(document: dict[str, Any]) -> None:
                 if not isinstance(key, str) or not isinstance(value, str) or not HEX_COLOR_PATTERN.match(value):
                     raise DocumentValidationError("Page theme.tokens values must be hex colors.")
         validate_font_settings(theme.get("fonts"), "Page theme.fonts")
+
+    validate_page_post_checkout(document.get("post_checkout"))
 
     sections = document.get("sections")
     if not isinstance(sections, list) or not sections:

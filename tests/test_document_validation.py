@@ -354,6 +354,67 @@ class DocumentValidationTests(unittest.TestCase):
         with self.assertRaisesRegex(DocumentValidationError, "must match page offer_id"):
             validate_page_document(page)
 
+    def test_page_accepts_preview_status(self):
+        page = copy.deepcopy(self.page)
+        page["status"] = "preview"
+
+        validate_page_document(page)
+
+    def test_page_accepts_inline_post_checkout_routing(self):
+        page = copy.deepcopy(self.page)
+        page["post_checkout"] = {
+            "thank_you_page": {"page_id": "page_thank_you"},
+            "funnel_steps": [
+                {
+                    "step_id": "upsell_1",
+                    "page_id": "page_upsell_1",
+                    "on_accept": "upsell_2",
+                    "on_decline": "thank_you",
+                },
+                {
+                    "step_id": "upsell_2",
+                    "page_id": "page_upsell_2",
+                    "on_accept": "thank_you",
+                    "on_decline": "thank_you",
+                },
+            ],
+        }
+
+        validate_page_document(page)
+
+    def test_page_accepts_external_funnel_post_checkout_routing(self):
+        page = copy.deepcopy(self.page)
+        page["post_checkout"] = {"funnel_id": "funnel_summer_bundle"}
+
+        validate_page_document(page)
+
+    def test_page_rejects_mixed_post_checkout_routing(self):
+        page = copy.deepcopy(self.page)
+        page["post_checkout"] = {
+            "funnel_id": "funnel_summer_bundle",
+            "thank_you_page": {"page_id": "page_thank_you"},
+        }
+
+        with self.assertRaisesRegex(DocumentValidationError, "either funnel_id or inline"):
+            validate_page_document(page)
+
+    def test_page_rejects_unknown_funnel_step_target(self):
+        page = copy.deepcopy(self.page)
+        page["post_checkout"] = {
+            "thank_you_page": {"page_id": "page_thank_you"},
+            "funnel_steps": [
+                {
+                    "step_id": "upsell_1",
+                    "page_id": "page_upsell_1",
+                    "on_accept": "missing_step",
+                    "on_decline": "thank_you",
+                }
+            ],
+        }
+
+        with self.assertRaisesRegex(DocumentValidationError, "missing_step"):
+            validate_page_document(page)
+
     def test_page_rejects_theme_color_injection(self):
         page = copy.deepcopy(self.page)
         page["theme"]["color"]["accent"] = "red;background:url(javascript:alert(1))"

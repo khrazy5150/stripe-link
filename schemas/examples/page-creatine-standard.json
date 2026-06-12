@@ -22,7 +22,16 @@
     }
   },
   "post_checkout": {
-    "upsell_page_id": "page_creatine_upsell"
+    "thank_you_page": {
+      "page_id": "page_creatine_thank_you"
+    },
+    "funnel_steps": [
+      {
+        "step_id": "upsell_1",
+        "page_id": "page_creatine_upsell",
+        "on_decline": "thank_you"
+      }
+    ]
   },
   "analytics": {
     "google_tag_id": "G-DEMO1234",

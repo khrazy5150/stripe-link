@@ -1,0 +1,128 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.juniorbay.com/stripe-link/Funnel.schema.json",
+  "title": "Funnel",
+  "type": "object",
+  "description": "Provisional detached post-checkout funnel definition. Page documents can reference this later through post_checkout.funnel_id.",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "document_type",
+    "tenant_id",
+    "funnel_id",
+    "name",
+    "entry_page_id",
+    "steps",
+    "thank_you_page"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "2026-05-29"
+    },
+    "document_type": {
+      "type": "string",
+      "const": "funnel"
+    },
+    "tenant_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "funnel_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1
+    },
+    "status": {
+      "type": "string",
+      "enum": ["draft", "active", "archived"],
+      "default": "draft"
+    },
+    "entry_page_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "steps": {
+      "$ref": "#/$defs/funnelStepsArray"
+    },
+    "thank_you_page": {
+      "$ref": "#/$defs/thankYouPage"
+    },
+    "revision": {
+      "type": "integer",
+      "minimum": 1,
+      "default": 1
+    },
+    "created_at": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "updated_at": {
+      "type": "integer",
+      "minimum": 0
+    }
+  },
+  "$defs": {
+    "thankYouPage": {
+      "type": "object",
+      "description": "Terminal post-checkout destination. Use page_id for an internal page or url for an external destination.",
+      "oneOf": [
+        {
+          "required": ["page_id"],
+          "additionalProperties": false,
+          "properties": {
+            "page_id": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        {
+          "required": ["url"],
+          "additionalProperties": false,
+          "properties": {
+            "url": {
+              "type": "string",
+              "format": "uri",
+              "minLength": 1
+            }
+          }
+        }
+      ]
+    },
+    "funnelStepsArray": {
+      "type": "array",
+      "description": "Ordered post-checkout funnel steps. The engine starts at index 0; on_accept and on_decline point to another step_id or the reserved thank_you terminal.",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/funnelStep" }
+    },
+    "funnelStep": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["step_id", "page_id"],
+      "properties": {
+        "step_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "page_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "on_accept": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Next step_id, or thank_you to terminate the funnel."
+        },
+        "on_decline": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Next step_id, or thank_you to terminate the funnel."
+        }
+      }
+    }
+  }
+}
