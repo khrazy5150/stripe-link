@@ -16,6 +16,11 @@ def handler(event, context, repository=None, products_repo=None):
         if offer_id:
             return get_offer(event, repository, offer_id)
         return list_offers(event, repository)
+    if method == "DELETE":
+        offer_id = path_params(event).get("offer_id")
+        if not offer_id:
+            return error_response("offer_id is required.", code="missing_offer")
+        return delete_offer(event, repository, offer_id)
     return error_response(f"Unsupported method '{method}'.", status_code=405, code="method_not_allowed")
 
 
@@ -68,6 +73,16 @@ def list_offers(event, repository):
     if not tenant_id:
         return error_response("tenant_id is required.", code="missing_tenant")
     return json_response({"offers": repository.list_for_tenant(tenant_id)})
+
+
+def delete_offer(event, repository, offer_id: str):
+    tenant_id = tenant_id_from_event(event)
+    if not tenant_id:
+        return error_response("tenant_id is required.", code="missing_tenant")
+    deleted = repository.delete(tenant_id, offer_id)
+    if not deleted:
+        return error_response("Offer not found.", status_code=404, code="not_found")
+    return json_response({"deleted": True, "offer": deleted})
 
 
 def resolve_handler(event, context):

@@ -71,12 +71,6 @@
       "default": "standard",
       "description": "Deprecated transition field. Product price context now drives landing page placement; recurring billing belongs to product price pricing_model and checkout.mode."
     },
-    "offer_type": {
-      "type": "string",
-      "enum": ["single_product", "bundle"],
-      "default": "single_product",
-      "description": "Dashboard-facing classification. Checkout behavior is still determined by items, prices, and checkout.mode."
-    },
     "trigger_offer_id": {
       "type": ["string", "null"],
       "description": "Deprecated transition field. Triggering and funnel placement are handled by landing page/flow configuration."

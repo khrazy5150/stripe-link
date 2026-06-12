@@ -323,11 +323,14 @@ class DocumentValidationTests(unittest.TestCase):
         with self.assertRaisesRegex(DocumentValidationError, "Offer checkout.mode"):
             validate_offer_document(offer)
 
-    def test_offer_rejects_invalid_offer_type(self):
+    def test_offer_rejects_ui_only_fields(self):
         offer = load_fixture("offer-universal-bundle.json")
-        offer["offer_type"] = "collection"
+        offer["offer_type"] = "single_product"
+        offer["intentLabel"] = "Transaction"
+        offer["image"] = "https://images.example.com/offer.webp"
+        offer["productSummary"] = "prod_demo"
 
-        with self.assertRaisesRegex(DocumentValidationError, "Offer offer_type"):
+        with self.assertRaisesRegex(DocumentValidationError, "UI-only fields"):
             validate_offer_document(offer)
 
     def test_page_rejects_unknown_section_type(self):

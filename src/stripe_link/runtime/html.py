@@ -642,10 +642,15 @@ def hero_media_images(
         return [offer_image]
 
     product_images = product.get("images") or []
-    if offer.get("offer_type") == "bundle":
+    if offer_uses_grouped_item_media(offer):
         first = first_image(product)
         return [first] if first else []
     return product_images
+
+
+def offer_uses_grouped_item_media(offer: dict[str, Any]) -> bool:
+    items = offer.get("items") or []
+    return len(items) > 1 or any(item.get("selectable_prices") for item in items if isinstance(item, dict))
 
 
 def render_headline(section: dict[str, Any]) -> str:

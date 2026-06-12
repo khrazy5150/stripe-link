@@ -90,6 +90,16 @@ class DynamoDocumentRepository:
             return None
         return self._strip_keys(item)
 
+    def delete(self, tenant_id: str, document_id: str) -> dict[str, Any] | None:
+        response = self.table.delete_item(
+            Key=self._key(tenant_id, document_id),
+            ReturnValues="ALL_OLD",
+        )
+        item = response.get("Attributes")
+        if not item:
+            return None
+        return self._strip_keys(item)
+
     def list_for_tenant(self, tenant_id: str) -> list[dict[str, Any]]:
         from boto3.dynamodb.conditions import Key
 

@@ -12,6 +12,10 @@ class FakeDocumentRepository:
         document = self.documents.get((tenant_id, document_id))
         return dict(document) if document else None
 
+    def delete(self, tenant_id, document_id):
+        document = self.documents.pop((tenant_id, document_id), None)
+        return dict(document) if document else None
+
     def list_for_tenant(self, tenant_id):
         return [
             dict(document)

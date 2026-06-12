@@ -8,7 +8,6 @@
   "status": "active",
   "product_intent": "transaction",
   "stripe_mode": "test",
-  "offer_type": "bundle",
   "items": [
     {
       "product_id": "prod_universal_bundle",

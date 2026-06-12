@@ -46,6 +46,7 @@ SUPPORTED_APP_CONFIG_ENVIRONMENTS = {"dev", "prod"}
 SUPPORTED_PLATFORM_FEE_TIERS = {"basic", "standard", "pro"}
 SUPPORTED_PLATFORM_FEE_CLASSES = {"physical", "digital", "tip_jar"}
 SUPPORTED_STRIPE_FEE_RATE_TYPES = {"domestic_card", "international_card"}
+OFFER_UI_ONLY_FIELDS = {"offer_type", "intentLabel", "image", "productSummary"}
 PRODUCT_FIELD_ORDER = [
     "schema_version",
     "document_type",
@@ -576,6 +577,9 @@ def validate_product_document(document: dict[str, Any]) -> None:
 
 def validate_offer_document(document: dict[str, Any]) -> None:
     require_document_fields(document, "offer", "offer_id")
+    ui_only_fields = sorted(field for field in OFFER_UI_ONLY_FIELDS if field in document)
+    if ui_only_fields:
+        raise DocumentValidationError(f"Offer contains UI-only fields: {', '.join(ui_only_fields)}.")
     require_string(document, "name")
     if document.get("status") is not None:
         require_enum(document, "status", {"draft", "active", "archived"}, "Offer status")
@@ -583,9 +587,6 @@ def validate_offer_document(document: dict[str, Any]) -> None:
     require_enum(document, "stripe_mode", {"test", "live"}, "Offer stripe_mode")
     if document.get("context") is not None:
         require_enum(document, "context", {"standard", "sale", "flash_sale", "upsell", "downsell", "order_bump"}, "Offer context")
-    if document.get("offer_type") is not None:
-        require_enum(document, "offer_type", {"single_product", "bundle"}, "Offer offer_type")
-
     items = document.get("items")
     if not isinstance(items, list) or not items:
         raise DocumentValidationError("Offer items must be a non-empty array.")

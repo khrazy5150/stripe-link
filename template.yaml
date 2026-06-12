@@ -461,6 +461,12 @@ Resources:
             RestApiId: !Ref RestApi
             Path: /offers/{offer_id}
             Method: GET
+        OffersDelete:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /offers/{offer_id}
+            Method: DELETE
 
   CouponsFunction:
     Type: AWS::Serverless::Function

@@ -51,6 +51,29 @@ class OfferCrudHandlerTests(unittest.TestCase):
         self.assertEqual(json.loads(get_response["body"])["offer"]["offer_id"], "offer_creatine_standard")
         self.assertEqual(json.loads(list_response["body"])["offers"][0]["offer_id"], "offer_creatine_standard")
 
+    def test_delete_offer_removes_document(self):
+        self.repository.put(self.offer)
+
+        response = handler({
+            "httpMethod": "DELETE",
+            "pathParameters": {"offer_id": "offer_creatine_standard"},
+            "queryStringParameters": {"tenant_id": "tenant_demo"},
+        }, None, repository=self.repository)
+
+        self.assertEqual(response["statusCode"], 200)
+        self.assertTrue(json.loads(response["body"])["deleted"])
+        self.assertIsNone(self.repository.get("tenant_demo", "offer_creatine_standard"))
+
+    def test_delete_offer_returns_404_when_missing(self):
+        response = handler({
+            "httpMethod": "DELETE",
+            "pathParameters": {"offer_id": "missing_offer"},
+            "queryStringParameters": {"tenant_id": "tenant_demo"},
+        }, None, repository=self.repository)
+
+        self.assertEqual(response["statusCode"], 404)
+        self.assertEqual(json.loads(response["body"])["error"], "not_found")
+
     def test_create_offer_rejects_item_with_fixed_and_selectable_prices(self):
         self.offer["items"][0]["price_id"] = "price_2bottle"
         self.offer["items"][0]["quantity"] = 1
@@ -66,7 +89,6 @@ class OfferCrudHandlerTests(unittest.TestCase):
     def test_create_offer_rejects_mixed_product_intents(self):
         lead_product = load_fixture("product-lead-capture-email.json")
         self.products.put(lead_product)
-        self.offer["offer_type"] = "bundle"
         self.offer["items"].append({
             "product_id": lead_product["product_id"],
             "price_id": lead_product["default_price_id"],

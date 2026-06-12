@@ -11,7 +11,7 @@
       <header class="dashboard-card-header">
         <h2>Offer Configuration</h2>
         <div class="button-row">
-          <button class="secondary-action" type="button" @click="openOfferModal">+ Add Offer</button>
+          <button class="secondary-action" type="button" @click="openOfferModal()">+ Add Offer</button>
           <button class="secondary-action" type="button" :disabled="offersLoading" @click="loadOffers">
             {{ offersLoading ? "Loading..." : "Load Offers" }}
           </button>
@@ -30,7 +30,7 @@
         <div v-else class="offer-grid">
           <article v-for="offer in offers" :key="offer.offer_id" class="offer-card">
             <div class="offer-card-media">
-              <img v-if="offer.image" :src="offer.image" :alt="offer.name" />
+              <img v-if="offerImage(offer)" :src="offerImage(offer)" :alt="offer.name" />
               <div v-else class="offer-card-placeholder" aria-hidden="true">
                 <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 12v7.5A1.5 1.5 0 0 1 18.5 21h-13A1.5 1.5 0 0 1 4 19.5V12m16 0H4m16 0h-4.5A3.5 3.5 0 0 0 19 8.5 2.5 2.5 0 0 0 14.5 7L12 12m-8 0h4.5A3.5 3.5 0 0 1 5 8.5 2.5 2.5 0 0 1 9.5 7L12 12m0 0v9" />
@@ -40,11 +40,28 @@
             <div class="offer-card-copy">
               <div class="offer-card-heading">
                 <h3>{{ offer.name }}</h3>
-                <span class="product-status" :class="offer.status">{{ titleCase(offer.status) }}</span>
+                <div class="offer-card-menu" @click.stop>
+                  <button
+                    type="button"
+                    class="offer-kebab-button"
+                    aria-label="Offer actions"
+                    :aria-expanded="openOfferMenuId === offer.offer_id"
+                    @click="toggleOfferMenu(offer.offer_id)"
+                  >
+                    ⋮
+                  </button>
+                  <div v-if="openOfferMenuId === offer.offer_id" class="offer-action-menu" role="menu">
+                    <button type="button" role="menuitem" @click="viewOffer(offer)">View</button>
+                    <button type="button" role="menuitem" @click="editOffer(offer)">Edit</button>
+                    <button type="button" class="danger" role="menuitem" @click="deleteOffer(offer)">Delete</button>
+                  </div>
+                </div>
               </div>
-              <p class="offer-slug">/{{ offer.slug }}</p>
-              <p><strong>Type:</strong> {{ titleCase(offer.offer_type) }}</p>
-              <p><strong>Products:</strong> {{ offer.productSummary }}</p>
+              <p><strong>Type:</strong> {{ derivedOfferTypeLabel(offer) }}</p>
+              <p><strong>Products:</strong> {{ productSummary(offer) }}</p>
+              <div class="offer-card-footer">
+                <span class="offer-intent-badge" :class="offer.product_intent">{{ intentLabel(offer.product_intent) }}</span>
+              </div>
             </div>
           </article>
         </div>
@@ -54,7 +71,7 @@
     <div v-if="showOfferModal" class="modal-backdrop" @click.self="closeOfferModal">
       <section class="modal-card offer-modal" role="dialog" aria-modal="true" aria-labelledby="offerModalTitle">
         <header class="modal-card-header">
-          <h2 id="offerModalTitle">Create New Offer</h2>
+          <h2 id="offerModalTitle">{{ editingOfferId ? "Edit Offer" : "Create New Offer" }}</h2>
           <button type="button" class="modal-close" aria-label="Close create offer modal" @click="closeOfferModal">×</button>
         </header>
 
@@ -183,7 +200,19 @@
                       <input v-model="itemConfig(product).default_price_id" type="radio" :value="price.price_id" />
                       <span>Default</span>
                     </label>
-                    <div class="selectable-price-image-controls">
+                    <div
+                      class="selectable-price-image-controls"
+                      :class="{ 'has-image-preview': itemConfig(product).price_image_urls[price.price_id] }"
+                    >
+                      <div
+                        v-if="itemConfig(product).price_image_urls[price.price_id]"
+                        class="selectable-price-image-preview"
+                      >
+                        <img
+                          :src="itemConfig(product).price_image_urls[price.price_id]"
+                          :alt="`${priceOptionLabel(price)} image preview`"
+                        />
+                      </div>
                       <input
                         :ref="(el) => setPriceImageInput(product, price.price_id, el)"
                         type="file"
@@ -311,9 +340,32 @@
 
           <footer class="modal-footer">
             <button class="secondary-action" type="button" @click="closeOfferModal">Cancel</button>
-            <button class="primary-action" type="submit">Create Offer</button>
+            <button class="primary-action" type="submit">{{ editingOfferId ? "Update Offer" : "Create Offer" }}</button>
           </footer>
         </form>
+      </section>
+    </div>
+
+    <div v-if="selectedOfferDetails" class="modal-backdrop" @click.self="closeOfferDetails">
+      <section class="modal-card offer-details-modal" role="dialog" aria-modal="true" aria-labelledby="offerDetailsTitle">
+        <header class="modal-card-header">
+          <h2 id="offerDetailsTitle">{{ selectedOfferDetails.name }}</h2>
+          <button type="button" class="modal-close" aria-label="Close offer details" @click="closeOfferDetails">×</button>
+        </header>
+        <div class="offer-details-body">
+          <div class="offer-details-summary">
+            <span class="offer-intent-badge" :class="selectedOfferDetails.product_intent">
+              {{ intentLabel(selectedOfferDetails.product_intent) }}
+            </span>
+            <span>{{ derivedOfferTypeLabel(selectedOfferDetails) }}</span>
+            <span>{{ productSummary(selectedOfferDetails) || "No products" }}</span>
+          </div>
+          <pre>{{ JSON.stringify(selectedOfferDetails, null, 2) }}</pre>
+        </div>
+        <footer class="modal-footer">
+          <button class="secondary-action" type="button" @click="closeOfferDetails">Close</button>
+          <button class="primary-action" type="button" @click="editOffer(selectedOfferDetails)">Edit</button>
+        </footer>
       </section>
     </div>
 
@@ -439,11 +491,15 @@ const offersLoaded = ref(false);
 const offersError = ref("");
 const offersMessage = ref("");
 const latestDraftOffer = ref(null);
+const openOfferMenuId = ref("");
+const editingOfferId = ref("");
+const selectedOfferDetails = ref(null);
 const form = reactive(defaultOfferForm());
 const itemConfigs = reactive({});
 const priceImageInputs = new Map();
 
 const activeProducts = computed(() => productStore.products.filter((product) => product.status !== "archived" && product.active !== false));
+const productsById = computed(() => new Map(productStore.products.map((product) => [productId(product), product])));
 const selectedProducts = computed(() => activeProducts.value.filter((product) => selectedProductIds.value.includes(productId(product))));
 const selectorProducts = computed(() => {
   const term = productSearch.value.toLowerCase();
@@ -549,6 +605,7 @@ function defaultOfferForm() {
 
 function resetForm() {
   Object.assign(form, defaultOfferForm());
+  editingOfferId.value = "";
   selectedProductIds.value = [];
   draftSelectedProductIds.value = new Set();
   formError.value = "";
@@ -559,8 +616,9 @@ function resetForm() {
   couponSearch.value = "";
 }
 
-function openOfferModal() {
+function openOfferModal(offer = null) {
   resetForm();
+  if (offer) loadOfferIntoForm(offer);
   showOfferModal.value = true;
 }
 
@@ -634,6 +692,7 @@ async function loadOffers() {
   offersError.value = "";
   offersMessage.value = "";
   try {
+    await ensureProductsLoaded();
     const body = await apiRequest("/offers");
     offers.value = (Array.isArray(body.offers) ? body.offers : []).map(offerCardModel);
     offersLoaded.value = true;
@@ -647,6 +706,46 @@ async function loadOffers() {
   }
 }
 
+function toggleOfferMenu(offerId) {
+  openOfferMenuId.value = openOfferMenuId.value === offerId ? "" : offerId;
+}
+
+function viewOffer(offer) {
+  selectedOfferDetails.value = offer;
+  openOfferMenuId.value = "";
+}
+
+function closeOfferDetails() {
+  selectedOfferDetails.value = null;
+}
+
+function editOffer(offer) {
+  selectedOfferDetails.value = null;
+  openOfferMenuId.value = "";
+  openOfferModal(offer);
+}
+
+async function deleteOffer(offer) {
+  openOfferMenuId.value = "";
+  const offerName = offer?.name || "this offer";
+  if (!window.confirm(`Delete ${offerName}?`)) return;
+  offersError.value = "";
+  offersMessage.value = "";
+  try {
+    await apiRequest(`/offers/${encodeURIComponent(offer.offer_id)}`, { method: "DELETE" });
+    offers.value = offers.value.filter((item) => item.offer_id !== offer.offer_id);
+    offersMessage.value = `${offerName} was deleted.`;
+  } catch (error) {
+    offersError.value = error.message || "Failed to delete offer.";
+  }
+}
+
+async function ensureProductsLoaded() {
+  if (!productStore.loaded && !productStore.loading) {
+    await productStore.load();
+  }
+}
+
 async function createOffer() {
   formError.value = "";
   const result = buildOfferDocument();
@@ -657,9 +756,12 @@ async function createOffer() {
   latestDraftOffer.value = result.offer;
   try {
     const body = await apiRequest("/offers", { method: "POST", body: result.offer });
-    offers.value.unshift(offerCardModel(body.offer || result.offer));
+    const savedOffer = offerCardModel(body.offer || result.offer);
+    offers.value = editingOfferId.value
+      ? offers.value.map((offer) => offer.offer_id === editingOfferId.value ? savedOffer : offer)
+      : [savedOffer, ...offers.value];
     offersLoaded.value = true;
-    offersMessage.value = `${result.offer.name} was saved.`;
+    offersMessage.value = `${result.offer.name} was ${editingOfferId.value ? "updated" : "saved"}.`;
     showOfferModal.value = false;
   } catch (error) {
     formError.value = error.message || "Failed to save offer.";
@@ -676,6 +778,7 @@ function buildOfferDocument() {
   if (form.checkout.allow_promotion_codes && !form.checkout.promotion_code) return { error: "Promotion code is required when promotion codes are enabled." };
 
   const now = Math.floor(Date.now() / 1000);
+  const offerId = editingOfferId.value || localId("offer");
   const items = [];
   for (const product of selectedProducts.value) {
     const config = itemConfig(product);
@@ -716,13 +819,12 @@ function buildOfferDocument() {
     schema_version: "2026-05-29",
     document_type: "offer",
     tenant_id: getTenantId(),
-    offer_id: localId("offer"),
+    offer_id: offerId,
     slug: form.slug,
     name: form.name,
     status: "active",
     product_intent: productIntent.value,
     stripe_mode: getApiEnvironment(),
-    offer_type: detectedOfferType.value,
     items,
     discount: buildDiscountBlock(),
     eligibility: {
@@ -740,7 +842,7 @@ function buildOfferDocument() {
       phone_number_collection: form.checkout.phone_number_collection,
       allow_promotion_codes: Boolean(form.checkout.allow_promotion_codes),
       metadata: {
-        offer_id: form.slug,
+        offer_id: offerId,
       },
     } : undefined,
     sync: {
@@ -752,6 +854,49 @@ function buildOfferDocument() {
     updated_at: now,
   });
   return { offer };
+}
+
+function loadOfferIntoForm(offer) {
+  editingOfferId.value = offer.offer_id;
+  form.name = offer.name || "";
+  form.slug = offer.slug || slugify(offer.name);
+  form.userEditedName = true;
+  form.userEditedSlug = true;
+  form.discount = {
+    ...defaultOfferForm().discount,
+    ...(offer.discount || {}),
+    type: offer.discount?.type || "percent",
+    value: Number(offer.discount?.value || 0),
+    duration: offer.discount?.duration || "once",
+    duration_months: Number(offer.discount?.duration_months || 1),
+    first_time_only: Boolean(offer.discount?.first_time_only),
+  };
+  form.checkout = {
+    ...defaultOfferForm().checkout,
+    ...(offer.checkout || {}),
+  };
+
+  const items = Array.isArray(offer.items) ? offer.items : [];
+  selectedProductIds.value = items.map((item) => item.product_id).filter(Boolean);
+  Object.keys(itemConfigs).forEach((key) => delete itemConfigs[key]);
+
+  items.forEach((item) => {
+    const product = productsById.value.get(item.product_id);
+    if (!product) return;
+    const config = itemConfig(product);
+    if (Array.isArray(item.selectable_prices) && item.selectable_prices.length) {
+      config.mode = "selectable";
+      config.selectable_price_ids = item.selectable_prices.map((price) => price.price_id).filter(Boolean);
+      config.default_price_id = item.default_price_id || config.selectable_price_ids[0] || "";
+      config.labels = Object.fromEntries(item.selectable_prices.map((price) => [price.price_id, price.label || selectablePriceDefaultLabel(price)]));
+      config.badges = Object.fromEntries(item.selectable_prices.map((price) => [price.price_id, price.badge || ""]));
+      config.price_image_urls = Object.fromEntries(item.selectable_prices.map((price) => [price.price_id, price.image_url || ""]));
+    } else {
+      config.mode = "fixed";
+      config.price_id = item.price_id || "";
+      config.quantity = Number(item.quantity || 1);
+    }
+  });
 }
 
 function buildDiscountBlock() {
@@ -1065,13 +1210,37 @@ function titleCase(value) {
 }
 
 function offerCardModel(offer) {
+  const {
+    offer_type,
+    intentLabel,
+    image,
+    productSummary,
+    ...document
+  } = offer || {};
+  return document;
+}
+
+function offerImage(offer) {
   const items = Array.isArray(offer?.items) ? offer.items : [];
-  const firstProduct = activeProducts.value.find((product) => productId(product) === items[0]?.product_id);
-  return {
-    ...offer,
-    image: offer?.presentation?.image_url || firstProduct?.images?.[0] || "",
-    productSummary: items.map((item) => item.product_id).filter(Boolean).join(", "),
-  };
+  const firstProduct = productsById.value.get(items[0]?.product_id);
+  return offer?.presentation?.image_url || offer?.presentation?.hero_image_url || firstProduct?.images?.[0] || "";
+}
+
+function productSummary(offer) {
+  const items = Array.isArray(offer?.items) ? offer.items : [];
+  return items.map((item) => item.product_id).filter(Boolean).join(", ");
+}
+
+function derivedOfferType(offer) {
+  const items = Array.isArray(offer?.items) ? offer.items : [];
+  if (items.length === 1 && Array.isArray(items[0]?.selectable_prices) && items[0].selectable_prices.length) {
+    return "single_product_selector";
+  }
+  return items.length > 1 ? "bundle" : "single_product";
+}
+
+function derivedOfferTypeLabel(offer) {
+  return titleCase(derivedOfferType(offer));
 }
 
 function slugify(value) {
