@@ -102,19 +102,23 @@ export const useStripeKeysStore = defineStore("stripeKeys", {
       this.connectError = "";
       setTenantId(this.tenantId);
       try {
-        const body = await apiRequest("/billing/connect-card", {
-          params: {
-            tenant_id: this.tenantId,
-            mode: this.verifyMode,
-          },
-        });
-        this.connectCard = body.stripe_connect_card;
+        this.connectCard = await this.loadConnectCardForMode(this.verifyMode);
       } catch (error) {
         this.connectError = error.message;
         this.connectCard = null;
       } finally {
         this.connectLoading = false;
       }
+    },
+
+    async loadConnectCardForMode(mode) {
+      const body = await apiRequest("/billing/connect-card", {
+        params: {
+          tenant_id: this.tenantId,
+          mode,
+        },
+      });
+      return body.stripe_connect_card;
     },
 
     async startConnect({ chain = "", path = "existing" } = {}) {
@@ -136,6 +140,30 @@ export const useStripeKeysStore = defineStore("stripeKeys", {
         }
       } catch (error) {
         this.connectError = error.message;
+      } finally {
+        this.connectStarting = false;
+      }
+    },
+
+    async disconnectConnect() {
+      this.connectStarting = true;
+      this.connectError = "";
+      setTenantId(this.tenantId);
+      try {
+        const body = await apiRequest("/stripe/connect/status", {
+          method: "DELETE",
+          params: {
+            tenant_id: this.tenantId,
+            mode: this.verifyMode,
+          },
+        });
+        this.output = body;
+        this.message = `${this.verifyMode === "live" ? "Live" : "Test"} Stripe account disconnected.`;
+        this.messageTone = "success";
+        await this.loadConnectCard();
+      } catch (error) {
+        this.connectError = error.message;
+        this.messageTone = "error";
       } finally {
         this.connectStarting = false;
       }

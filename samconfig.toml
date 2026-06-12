@@ -6,7 +6,7 @@ region = "us-west-2"
 capabilities = "CAPABILITY_IAM"
 confirm_changeset = true
 resolve_s3 = true
-parameter_overrides = "Environment=dev ProjectPrefix=jb ApiCustomDomainName=dev.juniorbay.com ApiCustomDomainCertificateArn=arn:aws:acm:us-west-2:150544707159:certificate/b40bb746-6e32-4a7d-8c24-b738cd1c359a ApiCustomDomainHostedZoneName=juniorbay.com. StripeClientId=ca_TbP9vsLxUbwOhpla1zfMNxNjBUbOpkh4 StripeConnectRedirectUri=https://dev.juniorbay.com/stripe/connect/callback StripePlatformSecretArn=arn:aws:secretsmanager:us-west-2:150544707159:secret:stripe-cart/dev/platform/stripe-Ds1gDX"
+parameter_overrides = "Environment=dev ProjectPrefix=jb ApiCustomDomainName=dev.juniorbay.com ApiCustomDomainCertificateArn=arn:aws:acm:us-west-2:150544707159:certificate/b40bb746-6e32-4a7d-8c24-b738cd1c359a ApiCustomDomainHostedZoneName=juniorbay.com. StripeClientId=ca_TbP9vsLxUbwOhpla1zfMNxNjBUbOpkh4 StripeClientIdTest=ca_TbP9X8xdC1FYAAoMB15aLTi9fJmIC0J4 StripeClientIdLive=ca_TbP9vsLxUbwOhpla1zfMNxNjBUbOpkh4 StripeConnectRedirectUri=https://dev.juniorbay.com/stripe/connect/callback StripePlatformSecretArn=arn:aws:secretsmanager:us-west-2:150544707159:secret:stripe-cart/dev/platform/stripe-Ds1gDX"
 tags = "Project=\"stripe-link\" Environment=\"dev\" ManagedBy=\"sam\""
 
 [prod.deploy.parameters]
@@ -15,5 +15,5 @@ region = "us-west-2"
 capabilities = "CAPABILITY_IAM"
 confirm_changeset = true
 resolve_s3 = true
-parameter_overrides = "Environment=prod ProjectPrefix=jb ApiCustomDomainName=prod.juniorbay.com ApiCustomDomainCertificateArn=arn:aws:acm:us-west-2:150544707159:certificate/6dccbf4e-3b7d-4ba1-bd08-f5ca9378426e ApiCustomDomainHostedZoneName=juniorbay.com. StripeClientId=ca_TbP9vsLxUbwOhpla1zfMNxNjBUbOpkh4 StripeConnectRedirectUri=https://prod.juniorbay.com/stripe/connect/callback StripePlatformSecretArn=arn:aws:secretsmanager:us-west-2:150544707159:secret:stripe-cart/prod/platform/stripe-fdI0Xg"
+parameter_overrides = "Environment=prod ProjectPrefix=jb ApiCustomDomainName=prod.juniorbay.com ApiCustomDomainCertificateArn=arn:aws:acm:us-west-2:150544707159:certificate/6dccbf4e-3b7d-4ba1-bd08-f5ca9378426e ApiCustomDomainHostedZoneName=juniorbay.com. StripeClientId=ca_TbP9vsLxUbwOhpla1zfMNxNjBUbOpkh4 StripeClientIdTest=ca_TbP9X8xdC1FYAAoMB15aLTi9fJmIC0J4 StripeClientIdLive=ca_TbP9vsLxUbwOhpla1zfMNxNjBUbOpkh4 StripeConnectRedirectUri=https://prod.juniorbay.com/stripe/connect/callback StripePlatformSecretArn=arn:aws:secretsmanager:us-west-2:150544707159:secret:stripe-cart/prod/platform/stripe-fdI0Xg"
 tags = "Project=\"stripe-link\" Environment=\"prod\" ManagedBy=\"sam\""

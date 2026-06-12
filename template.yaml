@@ -19,7 +19,15 @@ Parameters:
   StripeClientId:
     Type: String
     Default: ""
-    Description: Stripe Connect OAuth client ID.
+    Description: Legacy Stripe Connect live OAuth client ID.
+  StripeClientIdTest:
+    Type: String
+    Default: ""
+    Description: Stripe Connect test OAuth client ID.
+  StripeClientIdLive:
+    Type: String
+    Default: ""
+    Description: Stripe Connect live OAuth client ID.
   StripeConnectRedirectUri:
     Type: String
     Default: ""
@@ -120,6 +128,8 @@ Globals:
         PREVIEW_DISTRIBUTION_ID: !Ref PreviewDistribution
         PREVIEW_DISTRIBUTION_DOMAIN: !GetAtt PreviewDistribution.DomainName
         STRIPE_CLIENT_ID: !Ref StripeClientId
+        STRIPE_CLIENT_ID_TEST: !Ref StripeClientIdTest
+        STRIPE_CLIENT_ID_LIVE: !Ref StripeClientIdLive
         STRIPE_CONNECT_REDIRECT_URI: !Ref StripeConnectRedirectUri
         STRIPE_PLATFORM_SECRET_ARN: !Ref StripePlatformSecretArn
         PUBLIC_API_BASE_URL: !If
@@ -770,6 +780,16 @@ Resources:
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref StripeKeysTable
+        - !If
+          - HasStripePlatformSecret
+          - Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                Resource:
+                  - !Ref StripePlatformSecretArn
+          - !Ref AWS::NoValue
       Events:
         GetStripeConnectStatus:
           Type: Api
@@ -783,6 +803,48 @@ Resources:
             RestApiId: !Ref RestApi
             Path: /stripe/connect/status
             Method: PUT
+        DeleteStripeConnectStatus:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /stripe/connect/status
+            Method: DELETE
+
+  StripeWebhookFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${ProjectPrefix}-stripe-webhook-${Environment}"
+      CodeUri: src/
+      Handler: handlers.stripe_webhook.handler
+      Description: Receives Stripe Connect webhook events.
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Sub "${ProjectPrefix}-stripe-keys-dev"
+        - DynamoDBReadPolicy:
+            TableName: !Sub "${ProjectPrefix}-stripe-keys-prod"
+        - !If
+          - HasStripePlatformSecret
+          - Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                Resource:
+                  - !Ref StripePlatformSecretArn
+          - !Ref AWS::NoValue
+      Events:
+        StripeConnectWebhookPreview:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /webhook/stripe-preview
+            Method: POST
+        StripeConnectWebhookStable:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /webhook/stripe
+            Method: POST
 
   ConfigFunction:
     Type: AWS::Serverless::Function

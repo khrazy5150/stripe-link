@@ -5,7 +5,8 @@ ENVIRONMENT="${1:-dev}"
 STACK_NAME="${STACK_NAME:-jb-stripe-link-stack-${ENVIRONMENT}}"
 REGION="${AWS_REGION:-us-west-2}"
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-DASHBOARD_DIR="${ROOT_DIR}/dashboard"
+DASHBOARD_APP_DIR="${ROOT_DIR}/dashboard-vue"
+DASHBOARD_DIR="${DASHBOARD_DIR:-${DASHBOARD_APP_DIR}/dist}"
 
 stack_output() {
   local output_key="$1"
@@ -16,8 +17,15 @@ stack_output() {
     --output text
 }
 
+if [[ ! -d "${DASHBOARD_APP_DIR}" ]]; then
+  echo "Dashboard app directory not found: ${DASHBOARD_APP_DIR}" >&2
+  exit 1
+fi
+
+npm --prefix "${DASHBOARD_APP_DIR}" run build
+
 if [[ ! -d "${DASHBOARD_DIR}" ]]; then
-  echo "Dashboard directory not found: ${DASHBOARD_DIR}" >&2
+  echo "Dashboard build directory not found: ${DASHBOARD_DIR}" >&2
   exit 1
 fi
 

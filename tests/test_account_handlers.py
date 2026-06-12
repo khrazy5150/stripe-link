@@ -1,3 +1,5 @@
+import hashlib
+import hmac
 import json
 import os
 import unittest
@@ -18,8 +20,9 @@ from handlers.profile import handler as profile_handler
 from handlers.registration import handler as registration_handler
 from handlers.services import handler as services_handler
 from handlers.shipping import handler as shipping_handler
-from handlers.stripe_connect import start_handler, status_handler
+from handlers.stripe_connect import callback_handler, start_handler, status_handler
 from handlers.stripe_keys import handler as stripe_keys_handler
+from handlers.stripe_webhook import handler as stripe_webhook_handler
 from stripe_link.kms_secrets import KmsSecretCipher
 from stripe_link.repositories.documents import dynamodb_safe_document
 from tests.fakes import FakeAppConfigRepository, FakeDocumentRepository, FakeSimpleRepository
@@ -444,6 +447,78 @@ class AccountHandlerTests(unittest.TestCase):
         self.assertEqual(stored["secret_key_ref"], "kms:v1:existing-secret")
         self.assertEqual(stored["webhook_secret_ref"], "kms:v1:existing-webhook")
 
+    def test_stripe_preview_webhook_verifies_signature_and_resolves_connected_account(self):
+        class FakeStripeKeysRepository:
+            def find_by_connect_account_id(self, account_id, mode="test"):
+                return {
+                    "tenant_id": "tenant_demo",
+                    "mode": mode,
+                    "connect_account_id": account_id,
+                }
+
+        payload = {
+            "id": "evt_preview_1",
+            "type": "checkout.session.completed",
+            "account": "acct_connected_123",
+            "api_version": "2026-05-27.preview",
+            "livemode": False,
+            "data": {"object": {"id": "cs_test_123"}},
+        }
+        body = json.dumps(payload, separators=(",", ":"))
+        timestamp = 1781230000
+        signature = hmac.new(
+            b"whsec_preview_test",
+            f"{timestamp}.{body}".encode("utf-8"),
+            hashlib.sha256,
+        ).hexdigest()
+
+        with patch.dict(os.environ, {"ENVIRONMENT": "dev"}, clear=False):
+            response = stripe_webhook_handler({
+                "httpMethod": "POST",
+                "path": "/webhook/stripe-preview",
+                "headers": {"Stripe-Signature": f"t={timestamp},v1={signature}"},
+                "body": body,
+            }, None,
+                repository=FakeStripeKeysRepository(),
+                webhook_secret_loader=lambda kind, mode: "whsec_preview_test",
+                now_fn=lambda: timestamp,
+            )
+
+        response_body = json.loads(response["body"])
+        self.assertEqual(response["statusCode"], 200)
+        self.assertEqual(response_body["webhook"]["kind"], "preview")
+        self.assertEqual(response_body["webhook"]["mode"], "test")
+        self.assertEqual(response_body["webhook"]["tenant_id"], "tenant_demo")
+        self.assertEqual(response_body["webhook"]["connect_account_id"], "acct_connected_123")
+
+    def test_stripe_webhook_rejects_invalid_signature(self):
+        body = json.dumps({"id": "evt_bad", "type": "invoice.paid"})
+        timestamp = 1781230000
+
+        response = stripe_webhook_handler({
+            "httpMethod": "POST",
+            "path": "/webhook/stripe",
+            "headers": {"Stripe-Signature": f"t={timestamp},v1=bad"},
+            "body": body,
+        }, None,
+            webhook_secret_loader=lambda kind, mode: "whsec_stable_test",
+            now_fn=lambda: timestamp,
+        )
+
+        self.assertEqual(response["statusCode"], 400)
+        self.assertEqual(json.loads(response["body"])["error"], "invalid_signature")
+
+    def test_stripe_webhook_reports_missing_signing_secret(self):
+        response = stripe_webhook_handler({
+            "httpMethod": "POST",
+            "path": "/webhook/stripe-preview",
+            "headers": {},
+            "body": "{}",
+        }, None, webhook_secret_loader=lambda kind, mode: None)
+
+        self.assertEqual(response["statusCode"], 500)
+        self.assertEqual(json.loads(response["body"])["error"], "webhook_secret_not_configured")
+
     def test_stripe_keys_verify_decrypts_and_checks_stripe_account(self):
         class FakeSecretCipher:
             def decrypt(self, secret_ref, *, tenant_id, mode, field):
@@ -795,7 +870,7 @@ class AccountHandlerTests(unittest.TestCase):
 
     def test_stripe_connect_start_returns_oauth_url(self):
         with patch.dict(os.environ, {
-            "STRIPE_CLIENT_ID": "ca_demo",
+            "STRIPE_CLIENT_ID_TEST": "ca_test_demo",
             "STRIPE_CONNECT_REDIRECT_URI": "https://api.example.com/connect/callback",
         }):
             response = start_handler({
@@ -808,27 +883,43 @@ class AccountHandlerTests(unittest.TestCase):
         body = json.loads(response["body"])
         self.assertEqual(response["statusCode"], 200)
         self.assertIn("connect.stripe.com/oauth/authorize", body["connect_url"])
-        self.assertEqual(body["state"], "tenant_demo:test:single:existing")
+        self.assertEqual(body["state"], "tenant_demo:test:single:existing:test")
+        self.assertEqual(body["oauth_mode"], "test")
 
-    def test_stripe_connect_start_can_request_both_environment_chain(self):
+    def test_stripe_connect_start_requires_test_client_for_test_mode(self):
         with patch.dict(os.environ, {
             "STRIPE_CLIENT_ID": "ca_demo",
+            "STRIPE_CONNECT_REDIRECT_URI": "https://api.example.com/connect/callback",
+        }, clear=True):
+            response = start_handler({
+                "queryStringParameters": {
+                    "tenant_id": "tenant_demo",
+                    "mode": "test",
+                }
+            }, None)
+
+        self.assertEqual(response["statusCode"], 503)
+        self.assertEqual(json.loads(response["body"])["error"], "connect_not_configured")
+
+    def test_stripe_connect_start_uses_test_client_when_configured(self):
+        with patch.dict(os.environ, {
+            "STRIPE_CLIENT_ID": "ca_live_demo",
+            "STRIPE_CLIENT_ID_TEST": "ca_test_demo",
             "STRIPE_CONNECT_REDIRECT_URI": "https://api.example.com/connect/callback",
         }):
             response = start_handler({
                 "queryStringParameters": {
                     "tenant_id": "tenant_demo",
                     "mode": "test",
-                    "chain": "both",
                 }
             }, None)
 
         body = json.loads(response["body"])
         query = parse_qs(urlparse(body["connect_url"]).query)
         self.assertEqual(response["statusCode"], 200)
-        self.assertEqual(body["state"], "tenant_demo:test:both:existing")
-        self.assertEqual(body["chain"], "both")
-        self.assertEqual(query["state"], ["tenant_demo:test:both:existing"])
+        self.assertEqual(body["oauth_mode"], "test")
+        self.assertEqual(query["client_id"], ["ca_test_demo"])
+        self.assertEqual(query["state"], ["tenant_demo:test:single:existing:test"])
 
     def test_stripe_connect_start_prefills_owner_email(self):
         tenants = FakeDocumentRepository("tenant_id")
@@ -841,7 +932,7 @@ class AccountHandlerTests(unittest.TestCase):
         })
 
         with patch.dict(os.environ, {
-            "STRIPE_CLIENT_ID": "ca_demo",
+            "STRIPE_CLIENT_ID_TEST": "ca_test_demo",
             "STRIPE_CONNECT_REDIRECT_URI": "https://api.example.com/connect/callback",
         }):
             response = start_handler({
@@ -855,6 +946,87 @@ class AccountHandlerTests(unittest.TestCase):
         query = parse_qs(urlparse(body["connect_url"]).query)
         self.assertEqual(response["statusCode"], 200)
         self.assertEqual(query["stripe_user[email]"], ["owner@example.com"])
+
+    def test_stripe_connect_callback_uses_oauth_mode_for_exchange_and_storage(self):
+        class FakeStripeRepository:
+            def __init__(self):
+                self.documents = {}
+
+            def get(self, tenant_id, mode="test"):
+                return self.documents.get((tenant_id, mode))
+
+            def put(self, document):
+                self.documents[(document["tenant_id"], document["mode"])] = dict(document)
+                return document
+
+        class FakeSecretCipher:
+            def encrypt(self, value, **kwargs):
+                return f"kms:{kwargs['mode']}:{kwargs['field']}:{value}"
+
+        repository = FakeStripeRepository()
+        with patch("handlers.stripe_connect._exchange_oauth_code", return_value={
+            "stripe_user_id": "acct_live_demo",
+            "stripe_publishable_key": "pk_live_demo",
+            "access_token": "sk_live_connected",
+            "refresh_token": "rt_live_connected",
+            "scope": "read_write",
+            "livemode": True,
+        }) as exchange:
+            response = callback_handler({
+                "queryStringParameters": {
+                    "code": "ac_demo",
+                    "state": "tenant_demo:test:both:existing:live",
+                },
+            }, None, repository=repository, secret_cipher=FakeSecretCipher())
+
+        self.assertEqual(response["statusCode"], 302)
+        exchange.assert_called_once_with("ac_demo", "live")
+        document = repository.get("tenant_demo", "live")
+        self.assertEqual(document["mode"], "live")
+        self.assertEqual(document["connect_requested_mode"], "test")
+        self.assertEqual(document["connect_oauth_mode"], "live")
+        self.assertEqual(document["connect_account_id"], "acct_live_demo")
+        self.assertIsNone(repository.get("tenant_demo", "test"))
+
+    def test_stripe_connect_status_disconnects_connected_account(self):
+        class FakeStripeRepository:
+            def __init__(self):
+                self.document = {
+                    "schema_version": "2026-05-29",
+                    "document_type": "stripe_keys",
+                    "tenant_id": "tenant_demo",
+                    "mode": "live",
+                    "publishable_key": "pk_live_demo",
+                    "connect_account_id": "acct_live_demo",
+                    "connect_access_token_ref": "kms:token",
+                    "connect_status": "connected",
+                    "created_at": 123,
+                }
+
+            def get(self, tenant_id, mode="test"):
+                return dict(self.document) if tenant_id == "tenant_demo" and mode == "live" else None
+
+            def put(self, document):
+                self.document = dict(document)
+                return self.document
+
+        repository = FakeStripeRepository()
+        with patch("handlers.stripe_connect._deauthorize_connected_account") as deauthorize:
+            response = status_handler({
+                "httpMethod": "DELETE",
+                "queryStringParameters": {
+                    "tenant_id": "tenant_demo",
+                    "mode": "live",
+                },
+            }, None, repository=repository)
+
+        self.assertEqual(response["statusCode"], 200)
+        deauthorize.assert_called_once_with("acct_live_demo", "live")
+        body = json.loads(response["body"])
+        self.assertEqual(body["stripe_connect"]["connect_status"], "not_connected")
+        self.assertNotIn("connect_account_id", repository.document)
+        self.assertNotIn("publishable_key", repository.document)
+        self.assertEqual(repository.document["created_at"], 123)
 
     def test_stripe_connect_status_defaults_to_not_connected(self):
         class FakeStripeRepository:

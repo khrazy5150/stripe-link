@@ -1,5 +1,15 @@
 <template>
   <section class="page">
+    <div v-if="setupWarning" class="stripe-setup-banner">
+      <div>
+        <strong>{{ setupWarning.title }}</strong>
+        <span>{{ setupWarning.body }}</span>
+      </div>
+      <button type="button" class="setup-action" @click="openWizard">
+        Complete Setup
+      </button>
+    </div>
+
     <header class="page-header">
       <div>
         <h1>Dashboard</h1>
@@ -115,23 +125,208 @@
         </div>
       </section>
     </div>
+
+    <div v-if="wizardOpen" class="modal-backdrop" @click.self="closeWizard">
+      <section class="modal-card stripe-onboarding-modal" role="dialog" aria-modal="true" aria-labelledby="stripe-onboarding-title">
+        <header class="modal-card-header">
+          <div>
+            <h2 id="stripe-onboarding-title">{{ wizardTitle }}</h2>
+            <p>Step {{ wizardStep }} of 3</p>
+            <div class="onboarding-progress" aria-hidden="true">
+              <span
+                v-for="step in 3"
+                :key="step"
+                :class="['onboarding-dot', { active: step === wizardStep, complete: step < wizardStep }]"
+              ></span>
+            </div>
+          </div>
+          <button class="modal-close" type="button" aria-label="Close" @click="closeWizard">&times;</button>
+        </header>
+
+        <div class="onboarding-body">
+          <div v-if="wizardStep === 1" class="onboarding-step">
+            <p>
+              Continue to Stripe to authorize Junior Bay for the {{ environmentLabel.toLowerCase() }} environment.
+              No API keys need to be copied or pasted.
+            </p>
+            <div class="keys-status-banner info">
+              Stripe will send Junior Bay a secure OAuth token after approval. The token is encrypted before it is stored.
+            </div>
+            <button
+              type="button"
+              class="primary-action onboarding-link"
+              :disabled="stripeKeys.connectStarting"
+              @click="beginStripeOAuth"
+            >
+              {{ stripeKeys.connectStarting ? "Opening Stripe..." : "Continue with Stripe" }}
+            </button>
+          </div>
+
+          <div v-else-if="wizardStep === 2" class="onboarding-step">
+            <p>Junior Bay has refreshed the Stripe connection status for {{ environmentLabel.toLowerCase() }}.</p>
+            <div v-if="isConnected" class="keys-status-banner success">
+              Stripe account connected{{ connectAccountId ? `: ${connectAccountId}` : "" }}.
+            </div>
+            <div v-else class="keys-status-banner warning">
+              Waiting for Stripe authorization to complete.
+            </div>
+            <button type="button" class="secondary-action" :disabled="stripeKeys.connectLoading" @click="refreshConnectStatus()">
+              {{ stripeKeys.connectLoading ? "Refreshing..." : "Refresh Status" }}
+            </button>
+            <button v-if="isConnected" type="button" class="primary-action" @click="wizardStep = 3">
+              Next
+            </button>
+          </div>
+
+          <div v-else class="onboarding-step">
+            <p>
+              Do you want to configure the {{ otherEnvironmentLabel }} environment now?
+            </p>
+            <div class="onboarding-actions-row">
+              <button type="button" class="primary-action" @click="configureOtherEnvironment">
+                Configure {{ otherEnvironmentLabel }}
+              </button>
+              <button type="button" class="secondary-action" @click="closeWizard">
+                Not now
+              </button>
+            </div>
+          </div>
+
+          <div v-if="wizardError" class="keys-status-banner error">{{ wizardError }}</div>
+        </div>
+      </section>
+    </div>
   </section>
 </template>
 
 <script setup>
-import { onMounted } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import { useDashboardStore } from "../stores/dashboard";
+import { useStripeKeysStore } from "../stores/stripeKeys";
 
-defineProps({
+const props = defineProps({
   environmentLabel: {
     type: String,
     default: "Test",
   },
+  activeEnvironment: {
+    type: String,
+    default: "test",
+  },
 });
 
+const emit = defineEmits(["switch-environment"]);
 const store = useDashboardStore();
+const stripeKeys = useStripeKeysStore();
+const wizardOpen = ref(false);
+const wizardStep = ref(1);
+const wizardError = ref("");
+
+const connectDocument = computed(() => stripeKeys.connectCard?.stripe_connect || {});
+const connectStatus = computed(() => String(connectDocument.value.connect_status || "not_connected"));
+const connectAccountId = computed(() => (
+  connectDocument.value.connect_account_id
+  || connectDocument.value.stripe_account_id
+  || connectDocument.value.account_id
+  || ""
+));
+const isConnected = computed(() => connectStatus.value === "connected" || Boolean(connectAccountId.value));
+const isRestricted = computed(() => connectStatus.value === "restricted");
+const otherEnvironment = computed(() => (props.activeEnvironment === "live" ? "test" : "live"));
+const otherEnvironmentLabel = computed(() => (otherEnvironment.value === "live" ? "Live" : "Test"));
+
+const setupWarning = computed(() => {
+  if (isRestricted.value) {
+    return {
+      title: `Your ${props.environmentLabel.toLowerCase()} Stripe account is restricted.`,
+      body: " Resolve the Stripe requirement before accepting payments.",
+    };
+  }
+  if (!isConnected.value) {
+    return {
+      title: "Your Stripe account is not connected.",
+      body: " You won't be able to accept payments until setup is complete.",
+    };
+  }
+  return null;
+});
+
+const wizardTitle = computed(() => {
+  if (wizardStep.value === 1) return `Authorize ${props.environmentLabel} Stripe`;
+  if (wizardStep.value === 2) return "Confirm your Stripe connection";
+  return `Configure ${otherEnvironmentLabel.value} environment`;
+});
+
+function openWizard() {
+  wizardError.value = "";
+  wizardStep.value = isConnected.value ? 3 : 1;
+  wizardOpen.value = true;
+}
+
+function closeWizard() {
+  wizardOpen.value = false;
+  wizardError.value = "";
+}
+
+async function refreshConnectStatus(mode = props.activeEnvironment) {
+  stripeKeys.verifyMode = mode === "live" ? "live" : "test";
+  await stripeKeys.loadConnectCard();
+}
+
+async function beginStripeOAuth() {
+  wizardError.value = "";
+  stripeKeys.verifyMode = props.activeEnvironment === "live" ? "live" : "test";
+  await stripeKeys.startConnect({ path: "existing" });
+  if (stripeKeys.connectError) wizardError.value = stripeKeys.connectError;
+}
+
+function configureOtherEnvironment() {
+  closeWizard();
+  emit("switch-environment", otherEnvironment.value);
+  window.setTimeout(() => {
+    wizardStep.value = 1;
+    wizardOpen.value = true;
+  }, 0);
+}
+
+async function handleConnectReturn() {
+  const params = new URLSearchParams(window.location.search);
+  const result = params.get("stripe_connect");
+  if (!result) return;
+
+  const returnedMode = params.get("mode") === "live" ? "live" : params.get("mode") === "test" ? "test" : props.activeEnvironment;
+  if (returnedMode !== props.activeEnvironment) emit("switch-environment", returnedMode);
+  await refreshConnectStatus(returnedMode);
+
+  wizardOpen.value = true;
+  if (result === "connected") {
+    wizardStep.value = 2;
+    stripeKeys.message = "Stripe Connect account linked.";
+    stripeKeys.messageTone = "success";
+  } else {
+    wizardStep.value = 1;
+    wizardError.value = params.get("message") || "Stripe Connect authorization failed.";
+  }
+
+  const cleanUrl = `${window.location.origin}${window.location.pathname}${window.location.hash || ""}`;
+  window.history.replaceState({}, document.title, cleanUrl);
+}
+
+async function loadDashboardConnectState() {
+  stripeKeys.resetForCurrentTenant();
+  stripeKeys.verifyMode = props.activeEnvironment === "live" ? "live" : "test";
+  await stripeKeys.loadConnectCard();
+}
 
 onMounted(() => {
   if (!store.loaded) store.load();
+  loadDashboardConnectState().then(handleConnectReturn).catch(() => {});
 });
+
+watch(
+  () => props.activeEnvironment,
+  () => {
+    loadDashboardConnectState().catch(() => {});
+  },
+);
 </script>

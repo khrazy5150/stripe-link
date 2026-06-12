@@ -1,23 +1,10 @@
 <template>
   <section class="page">
-    <div v-if="setupWarning" class="stripe-setup-banner">
-      <div>
-        <strong>{{ setupWarning.title }}</strong>
-        <span>{{ setupWarning.body }}</span>
-      </div>
-      <button type="button" class="setup-action" @click="openWizard(setupStartStep)">
-        Complete Setup
-      </button>
-    </div>
-
     <header class="page-header">
       <div>
         <h1>Stripe Keys</h1>
         <p>Manage tenant Stripe API keys using the StripeKeys schema.</p>
       </div>
-      <button class="secondary-action" type="button" :disabled="store.loading" @click="store.load">
-        {{ store.loading ? "Loading..." : "Load Keys" }}
-      </button>
     </header>
 
     <form class="stripe-keys-form" @submit.prevent="store.save">
@@ -29,7 +16,14 @@
           </div>
           <label class="tenant-field">
             Tenant ID
-            <input v-model.trim="store.tenantId" required autocomplete="off" />
+            <input
+              v-model.trim="store.tenantId"
+              required
+              autocomplete="off"
+              readonly
+              title="Click to copy Tenant ID"
+              @click="copyTenantId"
+            />
           </label>
         </header>
 
@@ -41,19 +35,6 @@
           <div class="stripe-key-grid">
             <StripeKeyPanel mode="test" title="Test Keys" />
             <StripeKeyPanel mode="live" title="Live Keys" dark />
-          </div>
-
-          <div class="verify-row">
-            <label>
-              Verify Mode
-              <select v-model="store.verifyMode" @change="store.loadConnectCard">
-                <option value="test">Test</option>
-                <option value="live">Live</option>
-              </select>
-            </label>
-            <button class="primary-action" type="button" :disabled="store.verifying" @click="store.verify">
-              {{ store.verifying ? "Verifying..." : "Verify Selected Keys" }}
-            </button>
           </div>
 
           <div v-if="store.error" class="keys-status-banner error">{{ store.error }}</div>
@@ -91,19 +72,20 @@
           <button
             v-if="isConnected"
             type="button"
-            class="primary-action connect-connected"
-            disabled
+            class="secondary-action danger-action"
+            :disabled="store.connectStarting"
+            @click="store.disconnectConnect"
           >
-            {{ modeLabel }} Account Connected
+            {{ store.connectStarting ? "Disconnecting..." : "Disconnect from Stripe" }}
           </button>
           <button
             v-else
             type="button"
             class="primary-action"
             :disabled="store.connectLoading || store.connectStarting"
-            @click="store.startConnect({ chain: 'both', path: 'existing' })"
+            @click="store.startConnect({ path: 'existing' })"
           >
-            {{ store.connectStarting ? "Starting..." : `Connect ${modeLabel} Account` }}
+            {{ store.connectStarting ? "Starting..." : "Connect to Stripe" }}
           </button>
         </div>
 
@@ -215,30 +197,6 @@
             </div>
           </div>
 
-          <div v-else class="onboarding-step">
-            <p>
-              Verify the webhook endpoint once Stripe has returned webhook credentials. The advanced keys page remains available for manual secret management.
-            </p>
-            <dl class="onboarding-review">
-              <div>
-                <dt>Test webhook endpoint</dt>
-                <dd>{{ webhookUrl("test") }}</dd>
-              </div>
-              <div>
-                <dt>Live webhook endpoint</dt>
-                <dd>{{ webhookUrl("live") }}</dd>
-              </div>
-            </dl>
-            <div class="onboarding-actions-row">
-              <button type="button" class="primary-action" :disabled="store.verifying" @click="verifyWebhook">
-                {{ store.verifying ? "Verifying..." : "Verify Webhook Endpoint" }}
-              </button>
-              <button type="button" class="secondary-action" :disabled="store.connectLoading" @click="refreshConnectStatus">
-                {{ store.connectLoading ? "Refreshing..." : "Refresh Status" }}
-              </button>
-            </div>
-          </div>
-
           <div v-if="wizardError" class="keys-status-banner error">{{ wizardError }}</div>
         </div>
 
@@ -271,7 +229,7 @@ import StripeKeyPanel from "./StripeKeyPanel.vue";
 import { useStripeKeysStore } from "../stores/stripeKeys";
 
 const store = useStripeKeysStore();
-const wizardMaxStep = 5;
+const wizardMaxStep = 4;
 const wizardOpen = ref(false);
 const wizardStep = ref(1);
 const wizardIntent = ref("create");
@@ -313,30 +271,11 @@ const connectAccountId = computed(() => (
 const testAccountId = computed(() => (store.verifyMode === "test" ? connectAccountId.value : ""));
 const liveAccountId = computed(() => (store.verifyMode === "live" ? connectAccountId.value : ""));
 const restrictionReason = computed(() => connectDocument.value.restriction_reason || "Verification Document");
-const setupWarning = computed(() => {
-  if (isRestricted.value) {
-    return {
-      title: `Your ${modeLabel.value.toLowerCase()} Stripe account is restricted.`,
-      body: " Resolve the Stripe requirement before accepting payments.",
-    };
-  }
-  if (!isConnected.value) {
-    return {
-      title: "Your Stripe account is not configured.",
-      body: " You won't be able to accept payments until setup is complete.",
-    };
-  }
-  return null;
-});
-
-const setupStartStep = computed(() => (isConnected.value ? 4 : 1));
-
 const wizardTitle = computed(() => {
   if (wizardStep.value === 1) return "Welcome to Junior Bay! Let's connect your Stripe account.";
   if (wizardStep.value === 2) return "Authorize Junior Bay in Stripe";
   if (wizardStep.value === 3) return "Confirm your Stripe connection";
-  if (wizardStep.value === 4) return "Complete Stripe onboarding";
-  return "Verify your webhook endpoint";
+  return "Complete Stripe onboarding";
 });
 
 const wizardNextLabel = computed(() => {
@@ -357,16 +296,11 @@ function closeWizard() {
   wizardError.value = "";
 }
 
-function webhookUrl(mode) {
-  const host = mode === "live" ? "https://prod.juniorbay.com" : "https://dev.juniorbay.com";
-  return `${host}/webhook/${store.tenantId}`;
-}
-
 async function beginStripeOAuth() {
   wizardError.value = "";
   wizardSaving.value = true;
   try {
-    await store.startConnect({ chain: "both", path: wizardIntent.value });
+    await store.startConnect({ path: wizardIntent.value });
     if (store.connectError) wizardError.value = store.connectError;
   } finally {
     wizardSaving.value = false;
@@ -376,12 +310,6 @@ async function beginStripeOAuth() {
 async function refreshConnectStatus() {
   await store.load();
   await store.loadConnectCard();
-}
-
-async function verifyWebhook() {
-  wizardError.value = "";
-  await store.verify();
-  if (store.error) wizardError.value = store.error;
 }
 
 async function nextWizardStep() {
@@ -397,11 +325,25 @@ async function nextWizardStep() {
   wizardStep.value += 1;
 }
 
+async function copyTenantId() {
+  if (!store.tenantId || !navigator.clipboard) return;
+  try {
+    await navigator.clipboard.writeText(store.tenantId);
+    store.message = "Tenant ID copied to clipboard.";
+    store.messageTone = "success";
+  } catch {
+    store.message = "Tenant ID selected. Copy it from the field.";
+    store.messageTone = "info";
+  }
+}
+
 async function handleConnectReturn() {
   const params = new URLSearchParams(window.location.search);
   const result = params.get("stripe_connect");
   if (!result) return;
 
+  const returnedMode = params.get("mode") === "live" ? "live" : params.get("mode") === "test" ? "test" : "";
+  if (returnedMode) store.verifyMode = returnedMode;
   await refreshConnectStatus();
   if (result === "connected") {
     wizardOpen.value = true;

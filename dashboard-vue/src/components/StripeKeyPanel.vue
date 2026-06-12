@@ -34,14 +34,6 @@
           :title="secretTitle('webhook_secret_ref')"
         />
       </label>
-
-      <div class="webhook-row">
-        <label>
-          Webhook Endpoint ({{ modeLabel }})
-          <input readonly :value="webhookEndpoint" />
-        </label>
-        <button type="button" class="secondary-action">Test this endpoint</button>
-      </div>
     </div>
   </section>
 </template>
@@ -69,12 +61,6 @@ const props = defineProps({
 
 const store = useStripeKeysStore();
 const model = computed(() => store.modes[props.mode]);
-const modeLabel = computed(() => props.mode === "live" ? "Live" : "Test");
-const webhookEndpoint = computed(() => {
-  const tenantId = encodeURIComponent(store.tenantId || "tenant_demo");
-  const host = props.mode === "live" ? "https://prod.juniorbay.com" : "https://dev.juniorbay.com";
-  return `${host}/webhook/${tenantId}`;
-});
 
 function secretPlaceholder(field) {
   const saved = field === "secret_key_ref" ? model.value.saved_secret_key : model.value.saved_webhook_secret;

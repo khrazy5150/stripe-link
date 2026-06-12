@@ -106,7 +106,12 @@
         </div>
       </header>
 
-      <Dashboard v-if="activeView === 'dashboard'" :environment-label="environmentLabel" />
+      <Dashboard
+        v-if="activeView === 'dashboard'"
+        :environment-label="environmentLabel"
+        :active-environment="activeEnvironment"
+        @switch-environment="switchEnvironment"
+      />
       <StripeKeys v-else-if="activeView === 'stripeKeys'" />
       <Products v-else-if="activeView === 'products'" />
       <Coupons v-else-if="activeView === 'coupons'" />
@@ -150,7 +155,11 @@ function activateMenuItem(item) {
 }
 
 function toggleEnvironment() {
-  activeEnvironment.value = activeEnvironment.value === "test" ? "live" : "test";
+  switchEnvironment(activeEnvironment.value === "test" ? "live" : "test");
+}
+
+function switchEnvironment(environment) {
+  activeEnvironment.value = environment === "live" ? "live" : "test";
   setApiEnvironment(activeEnvironment.value);
 }
 

@@ -233,6 +233,30 @@ class StripeKeysRepository:
         response = self.table_for_mode("live" if mode == "live" else "test").get_item(Key={self.key_field: key_value})
         return response.get("Item")
 
+    def find_by_connect_account_id(self, account_id: str, mode: str = "test") -> dict[str, Any] | None:
+        account_id = str(account_id or "").strip()
+        if not account_id:
+            return None
+
+        from boto3.dynamodb.conditions import Attr
+
+        table = self.table_for_mode("live" if mode == "live" else "test")
+        request: dict[str, Any] = {
+            "FilterExpression": Attr("connect_account_id").eq(account_id),
+        }
+
+        while True:
+            response = table.scan(**request)
+            items = response.get("Items", [])
+            if items:
+                return items[0]
+
+            last_evaluated_key = response.get("LastEvaluatedKey")
+            if not last_evaluated_key:
+                return None
+
+            request["ExclusiveStartKey"] = last_evaluated_key
+
 
 class AppConfigRepository:
     def __init__(self, table_name: str, *, table: Any | None = None):
