@@ -53,7 +53,7 @@ export const menuSchema = {
       label: "Landing Pages",
       icon: "rocket",
       view: "landingPages",
-      enabled: false,
+      enabled: true,
       environments: ["test", "live"],
     },
     services: {

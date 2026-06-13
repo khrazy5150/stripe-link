@@ -116,6 +116,10 @@
       <Products v-else-if="activeView === 'products'" />
       <Coupons v-else-if="activeView === 'coupons'" />
       <Offers v-else-if="activeView === 'offers'" />
+      <LandingPages
+        v-else-if="activeView === 'landingPages'"
+        :key="`landing-pages-${activeEnvironment}-${auth.session?.client_id || ''}`"
+      />
     </main>
   </div>
 </template>
@@ -125,6 +129,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import AuthPage from "./components/AuthPage.vue";
 import Coupons from "./components/Coupons.vue";
 import Dashboard from "./components/Dashboard.vue";
+import LandingPages from "./components/LandingPages.vue";
 import Offers from "./components/Offers.vue";
 import Products from "./components/Products.vue";
 import StripeKeys from "./components/StripeKeys.vue";
