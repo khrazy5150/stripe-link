@@ -549,7 +549,8 @@
               v-for="price in previewPrices"
               :key="price.price_id"
               type="button"
-              :class="{ selected: price.price_id === previewDefaultPriceId, 'has-image': price.image_url }"
+              :class="{ selected: isPreviewPriceSelected(price), 'has-image': price.image_url }"
+              @click="selectPreviewPrice(price.price_id)"
             >
               <img v-if="price.image_url" class="preview-price-image" :src="price.image_url" alt="" />
               <span class="preview-price-copy">
@@ -594,7 +595,7 @@
             <span>© 2026 All rights reserved.</span>
           </div>
           <button type="button" class="preview-cta">
-            {{ builder.cta_label || (builderIntent === "transaction" ? "Buy Now" : "Continue") }}
+            {{ previewCtaLabel }}
           </button>
         </div>
       </article>
@@ -640,6 +641,7 @@ const builderOpen = ref(false);
 const builderFormHidden = ref(false);
 const builderExistingPageId = ref("");
 const previewDevice = ref("desktop");
+const selectedPreviewPriceId = ref("");
 const faviconFileInput = ref(null);
 const heroFileInput = ref(null);
 const blurbImageInputs = ref({});
@@ -665,6 +667,7 @@ const universalBundlePresets = [
   { value: "natural-calm", label: "Natural Calm" },
   { value: "cyber-pulse", label: "Cyber Pulse" },
 ];
+const landingPagePriceContexts = new Set(["standard", "sale", "flash_sale", "flash sale"]);
 
 const productsById = computed(() => new Map(products.value.map((product) => [productId(product), product])));
 const selectedOffer = computed(() => offers.value.find((offer) => offer.offer_id === form.offer_id) || null);
@@ -683,11 +686,13 @@ const visibleBlurbs = computed(() => builder.blurbs.filter((block) => block.titl
 const visibleFaqs = computed(() => builder.faq.filter((item) => item.question && item.answer));
 const previewPrices = computed(() => {
   const prices = [];
+  let displayIndex = 0;
   for (const item of builderOffer.value?.items || []) {
     const product = productsById.value.get(item.product_id);
     if (!product) continue;
     for (const option of item.selectable_prices || []) {
       const price = (product.prices || []).find((candidate) => candidate.price_id === option.price_id) || {};
+      if (!isLandingPagePrice(price)) continue;
       const unitAmount = Number(price.unit_amount || 0);
       const compareAt = Number(price.compare_at_unit_amount || 0);
       const calculatedSavings = compareAt > unitAmount && unitAmount > 0
@@ -703,14 +708,29 @@ const previewPrices = computed(() => {
         compare_at_unit_amount: compareAt,
         savings_pct: Number(option.savings_pct || price.savings_pct || calculatedSavings || 0),
         currency: price.currency || "usd",
+        quantity: landingPagePriceQuantity(price, option),
+        display_index: displayIndex,
       });
+      displayIndex += 1;
     }
   }
-  return prices;
+  return prices.sort(compareLandingPagePrices);
 });
 const previewDefaultPriceId = computed(() => {
-  const item = builderOffer.value?.items?.[0];
-  return item?.default_price_id || item?.selectable_prices?.[0]?.price_id || "";
+  const defaultPriceId = builderOffer.value?.items?.[0]?.default_price_id || "";
+  if (previewPrices.value.some((price) => price.price_id === defaultPriceId)) return defaultPriceId;
+  return previewPrices.value[0]?.price_id || "";
+});
+const selectedPreviewPrice = computed(() => {
+  return previewPrices.value.find((price) => price.price_id === selectedPreviewPriceId.value)
+    || previewPrices.value.find((price) => price.price_id === previewDefaultPriceId.value)
+    || previewPrices.value[0]
+    || null;
+});
+const previewCtaLabel = computed(() => {
+  const label = builder.cta_label || (builderIntent.value === "transaction" ? "Buy Now" : "Continue");
+  if (builderIntent.value !== "transaction" || !selectedPreviewPrice.value) return label;
+  return `${label} - ${formatMoney(selectedPreviewPrice.value.unit_amount || 0, selectedPreviewPrice.value.currency)}`;
 });
 const requiresExternalUrl = computed(() => selectedOfferIntent.value === "lead_gen" && form.experience_type === "external_redirect");
 const emptyStateText = computed(() => {
@@ -777,6 +797,16 @@ const experienceLabel = computed(() => {
 });
 const draftPage = computed(() => buildPageDocument());
 const builderPageDocument = computed(() => buildBuilderPageDocument());
+
+watch(previewPrices, (prices) => {
+  if (!prices.length) {
+    selectedPreviewPriceId.value = "";
+    return;
+  }
+  if (!prices.some((price) => price.price_id === selectedPreviewPriceId.value)) {
+    selectedPreviewPriceId.value = previewDefaultPriceId.value || prices[0].price_id;
+  }
+}, { immediate: true });
 
 watch(() => form.template, () => {
   if (!presetOptions.value.length) {
@@ -1329,6 +1359,36 @@ function parseLines(value) {
     .split(/\r?\n/)
     .map((item) => item.trim())
     .filter(Boolean);
+}
+
+function isLandingPagePrice(price) {
+  const context = String(price?.context || "standard").trim().toLowerCase();
+  return landingPagePriceContexts.has(context);
+}
+
+function landingPagePriceQuantity(price, option = {}) {
+  const explicitQuantity = Number(price?.quantity || option?.quantity || 0);
+  if (Number.isFinite(explicitQuantity) && explicitQuantity > 0) return explicitQuantity;
+  const label = String(option?.label || price?.label || "");
+  const match = label.match(/\b(\d+)\b/);
+  return match ? Number(match[1]) : 0;
+}
+
+function compareLandingPagePrices(left, right) {
+  if (left.quantity && right.quantity && left.quantity !== right.quantity) {
+    return left.quantity - right.quantity;
+  }
+  if (left.quantity && !right.quantity) return -1;
+  if (!left.quantity && right.quantity) return 1;
+  return left.display_index - right.display_index;
+}
+
+function selectPreviewPrice(priceId) {
+  selectedPreviewPriceId.value = priceId;
+}
+
+function isPreviewPriceSelected(price) {
+  return price.price_id === selectedPreviewPrice.value?.price_id;
 }
 
 function toggleHeroMedia(image) {

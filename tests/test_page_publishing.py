@@ -131,6 +131,127 @@ class PagePublishingTests(unittest.TestCase):
         self.assertEqual([artifact["kind"] for artifact in result["artifacts"]], ["preview", "test"])
         self.assertIsNone(result["invalidation"])
 
+    def test_publish_page_document_filters_landing_page_price_contexts_in_offer_order(self):
+        product = copy.deepcopy(self.product)
+        product["prices"] = [
+            {
+                "price_id": "price_standard",
+                "currency": "usd",
+                "unit_amount": 1800,
+                "quantity": 1,
+                "context": "standard",
+            },
+            {
+                "price_id": "price_sale",
+                "currency": "usd",
+                "unit_amount": 1400,
+                "quantity": 1,
+                "context": "sale",
+            },
+            {
+                "price_id": "price_upsell",
+                "currency": "usd",
+                "unit_amount": 900,
+                "quantity": 1,
+                "context": "upsell",
+            },
+            {
+                "price_id": "price_flash",
+                "currency": "usd",
+                "unit_amount": 1200,
+                "quantity": 1,
+                "context": "flash_sale",
+            },
+        ]
+        product["default_price_id"] = "price_standard"
+
+        offer = copy.deepcopy(self.offer)
+        offer["items"][0]["selectable_prices"] = [
+            {"price_id": "price_sale", "quantity": 1, "label": "Sale Price"},
+            {"price_id": "price_upsell", "quantity": 1, "label": "Upsell Price"},
+            {"price_id": "price_standard", "quantity": 1, "label": "Standard Price"},
+            {"price_id": "price_flash", "quantity": 1, "label": "Flash Sale Price"},
+        ]
+        offer["items"][0]["default_price_id"] = "price_standard"
+
+        s3 = FakeS3Client()
+        publish_page_document(
+            self.page,
+            offers_repository=FakeRepository("offer_id", [offer]),
+            products_repository=FakeRepository("product_id", [product]),
+            s3_client=s3,
+            pages_bucket="pages",
+            preview_bucket="preview",
+            environment="dev",
+        )
+
+        html = s3.puts[0]["Body"].decode("utf-8")
+        self.assertNotIn("Upsell Price", html)
+        self.assertLess(html.index("Sale Price"), html.index("Standard Price"))
+        self.assertLess(html.index("Standard Price"), html.index("Flash Sale Price"))
+
+    def test_publish_page_document_sorts_landing_page_prices_by_quantity(self):
+        product = copy.deepcopy(self.product)
+        product["prices"] = [
+            {
+                "price_id": "price_one",
+                "currency": "usd",
+                "unit_amount": 3709,
+                "quantity": 1,
+                "context": "standard",
+            },
+            {
+                "price_id": "price_two",
+                "currency": "usd",
+                "unit_amount": 6694,
+                "quantity": 2,
+                "context": "sale",
+            },
+            {
+                "price_id": "price_three",
+                "currency": "usd",
+                "unit_amount": 8990,
+                "quantity": 3,
+                "context": "flash_sale",
+            },
+            {
+                "price_id": "price_upsell",
+                "currency": "usd",
+                "unit_amount": 2217,
+                "quantity": 1,
+                "context": "upsell",
+            },
+        ]
+        product["default_price_id"] = "price_two"
+
+        offer = copy.deepcopy(self.offer)
+        offer["eligibility"] = {
+            "allowed_price_contexts": ["standard", "sale", "flash_sale"],
+        }
+        offer["items"][0]["selectable_prices"] = [
+            {"price_id": "price_three", "quantity": 3, "label": "3 Containers"},
+            {"price_id": "price_one", "quantity": 1, "label": "1 Container"},
+            {"price_id": "price_upsell", "quantity": 1, "label": "1 Container Upsell"},
+            {"price_id": "price_two", "quantity": 2, "label": "2 Containers"},
+        ]
+        offer["items"][0]["default_price_id"] = "price_two"
+
+        s3 = FakeS3Client()
+        publish_page_document(
+            self.page,
+            offers_repository=FakeRepository("offer_id", [offer]),
+            products_repository=FakeRepository("product_id", [product]),
+            s3_client=s3,
+            pages_bucket="pages",
+            preview_bucket="preview",
+            environment="dev",
+        )
+
+        html = s3.puts[0]["Body"].decode("utf-8")
+        self.assertNotIn("1 Container Upsell", html)
+        self.assertLess(html.index("1 Container"), html.index("2 Containers"))
+        self.assertLess(html.index("2 Containers"), html.index("3 Containers"))
+
     def test_publish_page_document_writes_published_html_and_invalidates_cloudfront(self):
         page = copy.deepcopy(self.page)
         page.update({

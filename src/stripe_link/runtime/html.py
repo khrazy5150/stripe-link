@@ -1,5 +1,6 @@
 from html import escape
 from decimal import Decimal
+import re
 from typing import Any
 
 from stripe_link.domain.pricing import find_price, resolve_offer
@@ -23,6 +24,7 @@ FONT_FALLBACK_STACKS = {
     "monospace": "monospace",
 }
 DEFAULT_FAVICON_URL = "https://images.juniorbay.com/icon/favicon.png"
+LANDING_PAGE_PRICE_CONTEXTS = {"standard", "sale", "flash_sale", "flash sale"}
 
 UNIVERSAL_BUNDLE_THEME_PRESETS = {
     "techno-green": {
@@ -703,7 +705,8 @@ def render_hero(section: dict[str, Any]) -> str:
 
 
 def render_offer_price_selector(offer: dict[str, Any], products_by_id: dict[str, dict[str, Any]]) -> str:
-    cards: list[str] = []
+    cards: list[tuple[tuple[int, int, int], str]] = []
+    display_index = 0
     for item in offer.get("items", []):
         product_id = item.get("product_id", "")
         product = products_by_id.get(product_id)
@@ -712,6 +715,8 @@ def render_offer_price_selector(offer: dict[str, Any], products_by_id: dict[str,
         default_price_id = item.get("default_price_id")
         for option in item.get("selectable_prices") or []:
             price = find_price(product, option.get("price_id", ""))
+            if not is_landing_page_price(price):
+                continue
             label = escape(str(option.get("label") or price.get("label") or "Option"))
             badge = escape(str(option.get("badge") or ""))
             amount = int(price.get("unit_amount", 0))
@@ -723,7 +728,7 @@ def render_offer_price_selector(offer: dict[str, Any], products_by_id: dict[str,
             savings_pct = option.get("display_discount_pct") or price.get("discount_pct")
             if not savings_pct and compare_at_unit_amount:
                 savings_pct = discount_pct(amount, int(compare_at_unit_amount))
-            cards.append("\n".join([
+            card_markup = "\n".join([
                 f"      <article class=\"sl-price-option\" data-price-id=\"{escape(str(price.get('price_id', '')))}\" data-default=\"{default_attr}\" data-sale-amount=\"{amount}\" data-regular-amount=\"{int(compare_at_unit_amount) if compare_at_unit_amount else ''}\" data-currency=\"{escape(currency)}\" data-label=\"{label}\">",
                 f"        <img src=\"{escape(image_url)}\" alt=\"{escape(str(product.get('name') or label))}\">" if image_url else "",
                 "        <div class=\"sl-price-copy\">",
@@ -738,14 +743,42 @@ def render_offer_price_selector(offer: dict[str, Any], products_by_id: dict[str,
                 "        </div>",
                 f"        <input type=\"radio\" name=\"sl-price-{escape(product_id)}\" value=\"{escape(str(price.get('price_id', '')))}\" {'checked' if default_attr == 'true' else ''}>",
                 "      </article>",
-            ]))
+            ])
+            cards.append((landing_page_price_sort_key(price, option, display_index), card_markup))
+            display_index += 1
     return "\n".join([
         "    <section class=\"sl-price-selector\" data-section-type=\"offer_price_selector\">",
         "      <div class=\"sl-price-options\">",
-        *cards,
+        *(card for _, card in sorted(cards, key=lambda item: item[0])),
         "      </div>",
         "    </section>",
     ])
+
+
+def is_landing_page_price(price: dict[str, Any]) -> bool:
+    context = str(price.get("context") or "standard").strip().lower()
+    return context in LANDING_PAGE_PRICE_CONTEXTS
+
+
+def landing_page_price_quantity(price: dict[str, Any], option: dict[str, Any]) -> int | None:
+    raw_quantity = price.get("quantity") or option.get("quantity")
+    try:
+        quantity = int(raw_quantity)
+    except (TypeError, ValueError):
+        quantity = 0
+    if quantity > 0:
+        return quantity
+
+    label = str(option.get("label") or price.get("label") or "")
+    match = re.search(r"\b(\d+)\b", label)
+    return int(match.group(1)) if match else None
+
+
+def landing_page_price_sort_key(price: dict[str, Any], option: dict[str, Any], index: int) -> tuple[int, int, int]:
+    quantity = landing_page_price_quantity(price, option)
+    if quantity is not None:
+        return (0, quantity, index)
+    return (1, index, index)
 
 
 def first_image(product: dict[str, Any]) -> str:
@@ -818,6 +851,8 @@ def refund_policy_applies_to(offer: dict[str, Any], products_by_id: dict[str, di
         product_name = product.get("name") if product else ""
         for option in item.get("selectable_prices") or []:
             price = find_price(product, option.get("price_id", "")) if product else {}
+            if not is_landing_page_price(price):
+                continue
             label = option.get("label") or price.get("label")
             labels.append(f"{product_name} - {label}" if product_name and label else str(label or product_name))
     return [label for label in labels if label]
