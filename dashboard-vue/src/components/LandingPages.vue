@@ -617,7 +617,7 @@
 
 <script setup>
 import { computed, reactive, ref, watch } from "vue";
-import { apiRequest, getApiEnvironment, getTenantId } from "../api/client";
+import { apiRequest, getApiEnvironment, getPagesBaseUrl, getTenantId } from "../api/client";
 import { formatMoney } from "../stores/products";
 
 const pages = ref([]);
@@ -1635,9 +1635,25 @@ function statusLabel(status) {
   return String(status || "draft").replace(/_/g, " ").toUpperCase();
 }
 
+function pageSlug(page) {
+  return String(page.route?.slug || page.page_id || "").replace(/^\/+|\/+$/g, "");
+}
+
+function artifactPageUrl(page, kind = "test") {
+  const tenantId = encodeURIComponent(page.tenant_id || getTenantId());
+  const slug = pageSlug(page).split("/").map(encodeURIComponent).join("/");
+  return `${getPagesBaseUrl()}/${kind}/${tenantId}/${slug}/index.html`;
+}
+
 function pageUrl(page) {
-  const env = getApiEnvironment() === "live" ? "prod" : "test";
-  return `https://${env}.juniorbay.com/${page.page_id || page.route?.slug || ""}`;
+  if (getApiEnvironment() === "live" && page.status === "published") {
+    return artifactPageUrl(page, "published");
+  }
+  return artifactPageUrl(page, "test");
+}
+
+function previewPageUrl(page) {
+  return artifactPageUrl(page, "test");
 }
 
 async function copyPageUrl(page) {
@@ -1649,7 +1665,7 @@ async function copyPageUrl(page) {
 
 function previewPage(page) {
   openMenuId.value = "";
-  window.open(pageUrl(page), "_blank", "noopener,noreferrer");
+  window.open(previewPageUrl(page), "_blank", "noopener,noreferrer");
 }
 
 function viewPage(page) {

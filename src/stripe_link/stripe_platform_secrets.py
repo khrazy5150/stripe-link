@@ -15,8 +15,6 @@ import json
 import os
 from typing import Any, Dict, Optional
 
-import boto3
-
 _CACHE: Dict[str, Any] = {}
 
 
@@ -43,6 +41,8 @@ def _load_secret_payload(*, refresh: bool = False) -> Dict[str, Any]:
     if not arn:
         _CACHE["payload"] = {}
         return {}
+
+    import boto3
 
     client = boto3.client("secretsmanager", region_name=_get_region())
     response = client.get_secret_value(SecretId=arn)

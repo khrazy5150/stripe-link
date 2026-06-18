@@ -7,6 +7,7 @@ const LOCAL_DEV_API_BASES = {
   live: "/api-live",
 };
 const API_BASE_STORAGE_KEY = "stripeLinkVueApiBase";
+const APP_CONFIG_STORAGE_KEY = "stripeLinkVueAppConfig";
 const API_ENVIRONMENT_STORAGE_KEY = "stripeLinkVueEnvironment";
 const TENANT_ID_STORAGE_KEY = "stripeLinkTenantId";
 const SESSION_STORAGE_KEY = "stripeLinkSession";
@@ -32,6 +33,10 @@ function apiBaseStorageKey(environment) {
   return `${API_BASE_STORAGE_KEY}:${normalizeEnvironment(environment)}`;
 }
 
+function appConfigStorageKey(environment) {
+  return `${APP_CONFIG_STORAGE_KEY}:${normalizeEnvironment(environment)}`;
+}
+
 export function getApiEnvironment() {
   return normalizeEnvironment(localStorage.getItem(API_ENVIRONMENT_STORAGE_KEY));
 }
@@ -55,6 +60,28 @@ export function setApiBase(value) {
   localStorage.setItem(apiBaseStorageKey(getApiEnvironment()), value.replace(/\/$/, ""));
 }
 
+export function getEnvironmentConfig(environment = getApiEnvironment()) {
+  const normalized = normalizeEnvironment(environment);
+  const targetEnvironment = configEnvironment(normalized);
+  const raw = localStorage.getItem(appConfigStorageKey(normalized));
+  if (raw) {
+    try {
+      return JSON.parse(raw)?.environments?.[targetEnvironment] || {};
+    } catch {
+      localStorage.removeItem(appConfigStorageKey(normalized));
+    }
+  }
+  return {};
+}
+
+export function getPagesBaseUrl(environment = getApiEnvironment()) {
+  const configured = getEnvironmentConfig(environment).pages_base_url;
+  if (configured) return configured.replace(/\/$/, "");
+  return normalizeEnvironment(environment) === "live"
+    ? "https://dlxn0y34f7dbz.cloudfront.net"
+    : "https://drjfn283z66uz.cloudfront.net";
+}
+
 export async function loadAppConfigApiBase(environment = getApiEnvironment()) {
   const normalized = normalizeEnvironment(environment);
   const targetEnvironment = configEnvironment(normalized);
@@ -72,6 +99,7 @@ export async function loadAppConfigApiBase(environment = getApiEnvironment()) {
       const configuredBase = body.app_config?.environments?.[targetEnvironment]?.api_base_url;
       if (response.ok && configuredBase) {
         localStorage.setItem(apiBaseStorageKey(normalized), configuredBase.replace(/\/$/, ""));
+        localStorage.setItem(appConfigStorageKey(normalized), JSON.stringify(body.app_config));
         return {
           source: base,
           environment: targetEnvironment,
@@ -86,6 +114,7 @@ export async function loadAppConfigApiBase(environment = getApiEnvironment()) {
 
   const fallback = fallbackApiBase(normalized);
   localStorage.setItem(apiBaseStorageKey(normalized), fallback.replace(/\/$/, ""));
+  localStorage.removeItem(appConfigStorageKey(normalized));
   return {
     source: "fallback",
     environment: targetEnvironment,
