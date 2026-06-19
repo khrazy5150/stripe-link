@@ -82,6 +82,14 @@ export function getPagesBaseUrl(environment = getApiEnvironment()) {
     : "https://drjfn283z66uz.cloudfront.net";
 }
 
+export function getPreviewPagesBaseUrl(environment = getApiEnvironment()) {
+  const configured = getEnvironmentConfig(environment).pages_preview_base_url;
+  if (configured) return configured.replace(/\/$/, "");
+  return normalizeEnvironment(environment) === "live"
+    ? "https://d1lcshydc31m77.cloudfront.net"
+    : "https://d1lcshydc31m77.cloudfront.net";
+}
+
 export async function loadAppConfigApiBase(environment = getApiEnvironment()) {
   const normalized = normalizeEnvironment(environment);
   const targetEnvironment = configEnvironment(normalized);

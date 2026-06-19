@@ -66,7 +66,8 @@ def handler(event, context, *, offers_repo=None, products_repo=None, s3_client=N
             continue
 
         try:
-            image = (record.get("dynamodb") or {}).get("NewImage") or (record.get("dynamodb") or {}).get("OldImage")
+            dynamodb_record = record.get("dynamodb") or {}
+            image = dynamodb_record.get("NewImage") or dynamodb_record.get("OldImage")
             page = deserialize_image(image)
             if page.get("document_type") != "page":
                 continue
@@ -81,6 +82,19 @@ def handler(event, context, *, offers_repo=None, products_repo=None, s3_client=N
                 )
                 logger.info("Deleted page artifacts: %s", result)
                 continue
+
+            old_image = dynamodb_record.get("OldImage") or {}
+            old_page = deserialize_image(old_image) if old_image else {}
+            if old_page.get("status") == "published" and page.get("status") != "published":
+                result = delete_page_artifacts(
+                    old_page,
+                    s3_client=s3_client,
+                    pages_bucket=os.environ.get("PAGES_BUCKET", ""),
+                    preview_bucket=os.environ.get("PAGES_PREVIEW_BUCKET", ""),
+                    cloudfront_client=cloudfront_client,
+                    pages_distribution_id=os.environ.get("PAGES_DISTRIBUTION_ID", ""),
+                )
+                logger.info("Deleted unpublished page artifacts: %s", result)
 
             result = publish_page_document(
                 page,

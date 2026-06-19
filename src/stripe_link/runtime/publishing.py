@@ -1,4 +1,5 @@
 import json
+import os
 import time
 from typing import Any
 
@@ -52,14 +53,6 @@ def artifact_targets(
             "cache_control": "public, max-age=300",
             "url": public_url(pages_domain, paths["published"]),
         })
-    else:
-        targets.append({
-            "kind": "test",
-            "bucket": pages_bucket,
-            "key": paths["test"],
-            "cache_control": "no-cache, no-store, must-revalidate",
-            "url": public_url(pages_domain, paths["test"]),
-        })
 
     missing_bucket = [target["kind"] for target in targets if not target.get("bucket")]
     if missing_bucket:
@@ -71,6 +64,21 @@ def public_url(domain: str, key: str) -> str:
     if not domain:
         return ""
     return f"https://{domain.rstrip('/')}/{key}"
+
+
+def checkout_base_url_for_page(page: dict[str, Any], offer: dict[str, Any], environment: str) -> str:
+    configured = str(page.get("checkout_url") or os.environ.get("CHECKOUT_BASE_URL") or "").strip()
+    if configured:
+        return configured
+
+    stripe_mode = str(offer.get("stripe_mode") or "").strip().lower()
+    if not stripe_mode:
+        stripe_mode = "live" if environment == "prod" else "test"
+    return (
+        "https://prod.juniorbay.com/checkout"
+        if stripe_mode == "live"
+        else "https://dev.juniorbay.com/checkout"
+    )
 
 
 def strip_document_keys(document: dict[str, Any]) -> dict[str, Any]:
@@ -133,7 +141,12 @@ def publish_page_document(
         offers_repository=offers_repository,
         products_repository=products_repository,
     )
-    html = render_page(page, offer, products_by_id, checkout_url=checkout_url or page.get("checkout_url"))
+    html = render_page(
+        page,
+        offer,
+        products_by_id,
+        checkout_url=checkout_url or checkout_base_url_for_page(page, offer, environment),
+    )
     targets = artifact_targets(
         page,
         environment=environment,

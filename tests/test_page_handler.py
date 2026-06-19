@@ -85,6 +85,52 @@ class PageHandlerTests(unittest.TestCase):
         self.assertEqual(response["statusCode"], 409)
         self.assertEqual(json.loads(response["body"])["error"], "published_page_requires_archive")
 
+    def test_published_page_cannot_be_modified(self):
+        page = dict(self.page)
+        page["status"] = "published"
+        self.repository.put(page)
+        edited = dict(page)
+        edited["name"] = "Edited published page"
+
+        response = handler({
+            "httpMethod": "POST",
+            "body": json.dumps(edited),
+        }, None, repository=self.repository)
+
+        self.assertEqual(response["statusCode"], 400)
+        self.assertIn("Published pages cannot be modified", json.loads(response["body"])["message"])
+
+    def test_published_page_can_be_unpublished(self):
+        page = dict(self.page)
+        page["status"] = "published"
+        self.repository.put(page)
+        unpublished = dict(page)
+        unpublished["status"] = "draft"
+
+        response = handler({
+            "httpMethod": "POST",
+            "body": json.dumps(unpublished),
+        }, None, repository=self.repository)
+
+        self.assertEqual(response["statusCode"], 201)
+        self.assertEqual(json.loads(response["body"])["page"]["status"], "draft")
+
+    def test_published_page_cannot_be_modified_during_unpublish(self):
+        page = dict(self.page)
+        page["status"] = "published"
+        self.repository.put(page)
+        unpublished = dict(page)
+        unpublished["status"] = "draft"
+        unpublished["name"] = "Edited while unpublishing"
+
+        response = handler({
+            "httpMethod": "POST",
+            "body": json.dumps(unpublished),
+        }, None, repository=self.repository)
+
+        self.assertEqual(response["statusCode"], 400)
+        self.assertIn("Published pages cannot be modified", json.loads(response["body"])["message"])
+
 
 if __name__ == "__main__":
     unittest.main()

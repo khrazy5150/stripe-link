@@ -1732,6 +1732,22 @@ select:focus {
   color: #fff;
 }
 
+.primary-action.publish-action {
+  background: #10b981;
+}
+
+.primary-action.publish-action:hover:not(:disabled) {
+  background: #059669;
+}
+
+.primary-action.publish-action.unpublished {
+  background: #64748b;
+}
+
+.primary-action.publish-action.unpublished:hover:not(:disabled) {
+  background: #475569;
+}
+
 .primary-action.stretch {
   justify-self: stretch;
 }
@@ -3059,7 +3075,8 @@ button:disabled {
 .landing-page-card {
   position: relative;
   display: grid;
-  grid-template-columns: 14rem minmax(0, 1fr);
+  grid-template-columns: 14rem minmax(0, 1fr) max-content;
+  align-items: start;
   gap: 1.6rem;
   border: 1px solid var(--line);
   border-radius: var(--radius-lg);
@@ -3101,9 +3118,11 @@ button:disabled {
 }
 
 .landing-page-title-row {
-  display: flex;
-  justify-content: space-between;
-  gap: 1.2rem;
+  display: block;
+  min-width: 0;
+}
+
+.landing-page-title-row > div:first-child {
   min-width: 0;
 }
 
@@ -3125,13 +3144,20 @@ button:disabled {
 .landing-page-title-row p span {
   color: var(--text-muted);
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  overflow-wrap: anywhere;
 }
 
 .landing-page-badges {
+  grid-column: 3;
+  grid-row: 1;
+  justify-self: end;
   display: flex;
   align-items: flex-start;
+  justify-content: flex-end;
+  flex-wrap: wrap;
   gap: 0.8rem;
-  flex: 0 0 auto;
+  min-width: 0;
+  max-width: 30rem;
 }
 
 .page-status-badge,
@@ -4436,6 +4462,14 @@ button:disabled {
   .landing-page-title-row {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .landing-page-badges {
+    grid-column: 1;
+    grid-row: auto;
+    justify-content: flex-start;
+    justify-self: stretch;
+    max-width: none;
   }
 
   .landing-pages-actions,

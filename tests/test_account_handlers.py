@@ -491,6 +491,97 @@ class AccountHandlerTests(unittest.TestCase):
         self.assertEqual(response_body["webhook"]["tenant_id"], "tenant_demo")
         self.assertEqual(response_body["webhook"]["connect_account_id"], "acct_connected_123")
 
+    def test_stripe_webhook_persists_checkout_session_completed(self):
+        class FakeTable:
+            def __init__(self):
+                self.items = []
+
+            def put_item(self, Item):
+                self.items.append(Item)
+                return {}
+
+        class FakeRepo:
+            def __init__(self):
+                self.documents = []
+
+            def put(self, document):
+                self.documents.append(document)
+                return document
+
+        checkout_sessions_table = FakeTable()
+        orders_table = FakeTable()
+        customers_repo = FakeRepo()
+        invoices_repo = FakeRepo()
+        notifications_repo = FakeRepo()
+        payload = {
+            "id": "evt_checkout_1",
+            "type": "checkout.session.completed",
+            "api_version": "2026-05-27.preview",
+            "livemode": False,
+            "data": {
+                "object": {
+                    "id": "cs_test_123",
+                    "object": "checkout.session",
+                    "created": 1781230000,
+                    "status": "complete",
+                    "payment_status": "paid",
+                    "amount_total": 3709,
+                    "currency": "usd",
+                    "customer": "cus_123",
+                    "payment_intent": "pi_123",
+                    "customer_details": {
+                        "name": "Ada Buyer",
+                        "email": "ada@example.com",
+                        "phone": "+15555550123",
+                    },
+                    "metadata": {
+                        "tenant_id": "tenant_demo",
+                        "clientID": "tenant_demo",
+                        "offer_id": "offer_demo",
+                        "page_id": "page_demo",
+                        "product_id": "prod_demo",
+                        "price_id": "price_demo",
+                        "product_name": "Demo Product",
+                    },
+                }
+            },
+        }
+        body = json.dumps(payload, separators=(",", ":"))
+        timestamp = 1781230000
+        signature = hmac.new(
+            b"whsec_stable_test",
+            f"{timestamp}.{body}".encode("utf-8"),
+            hashlib.sha256,
+        ).hexdigest()
+
+        with patch.dict(os.environ, {"ENVIRONMENT": "dev"}, clear=False):
+            response = stripe_webhook_handler({
+                "httpMethod": "POST",
+                "path": "/webhook/stripe",
+                "headers": {"Stripe-Signature": f"t={timestamp},v1={signature}"},
+                "body": body,
+            }, None,
+                checkout_sessions_table=checkout_sessions_table,
+                orders_table=orders_table,
+                customers_repo=customers_repo,
+                invoices_repo=invoices_repo,
+                notifications_repo=notifications_repo,
+                webhook_secret_loader=lambda kind, mode: "whsec_stable_test",
+                now_fn=lambda: timestamp,
+            )
+
+        response_body = json.loads(response["body"])
+        self.assertEqual(response["statusCode"], 200)
+        self.assertEqual(response_body["webhook"]["persistence"]["written"], ["checkout_session", "order", "invoice", "customer", "notification"])
+        self.assertEqual(checkout_sessions_table.items[0]["session_id"], "cs_test_123")
+        self.assertEqual(orders_table.items[0]["product"]["name"], "Demo Product")
+        self.assertEqual(invoices_repo.documents[0]["status"], "paid")
+        self.assertEqual(invoices_repo.documents[0]["amounts"]["amount_paid"], 3709)
+        self.assertEqual(customers_repo.documents[0]["contact"]["email"], "ada@example.com")
+        self.assertEqual(notifications_repo.documents[0]["type"], "order")
+        self.assertEqual(notifications_repo.documents[0]["title"], "New order")
+        self.assertEqual(notifications_repo.documents[0]["related"]["page_id"], "page_demo")
+
     def test_stripe_webhook_rejects_invalid_signature(self):
         body = json.dumps({"id": "evt_bad", "type": "invoice.paid"})
         timestamp = 1781230000

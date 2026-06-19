@@ -567,6 +567,53 @@ Resources:
             Path: /pages/render
             Method: POST
 
+  CheckoutFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${ProjectPrefix}-checkout-api-${Environment}"
+      CodeUri: src/
+      Handler: handlers.checkout.handler
+      Description: Creates Stripe Checkout sessions from stripe-link offer and product documents.
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref OffersTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref ProductsTable
+        - DynamoDBReadPolicy:
+            TableName: !Sub "${ProjectPrefix}-stripe-keys-dev"
+        - DynamoDBReadPolicy:
+            TableName: !Sub "${ProjectPrefix}-stripe-keys-prod"
+        - Statement:
+            Effect: Allow
+            Action:
+              - kms:Decrypt
+              - kms:DescribeKey
+            Resource: !GetAtt StripeKeysEncryptionKey.Arn
+        - Statement:
+            Effect: Allow
+            Action:
+              - secretsmanager:GetSecretValue
+            Resource: "*"
+      Events:
+        CheckoutCreate:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /checkout
+            Method: GET
+        CheckoutCreatePost:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /checkout
+            Method: POST
+        CheckoutOptions:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /checkout
+            Method: OPTIONS
+
   PagePublishFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -834,6 +881,16 @@ Resources:
             TableName: !Sub "${ProjectPrefix}-stripe-keys-dev"
         - DynamoDBReadPolicy:
             TableName: !Sub "${ProjectPrefix}-stripe-keys-prod"
+        - DynamoDBCrudPolicy:
+            TableName: !Ref CheckoutSessionsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref OrdersTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref CustomersTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref InvoicesTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref NotificationsTable
         - !If
           - HasStripePlatformSecret
           - Version: "2012-10-17"

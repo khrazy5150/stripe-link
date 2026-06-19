@@ -52,62 +52,6 @@
                   <h3>{{ page.name || "Untitled Landing Page" }}</h3>
                   <p>{{ templateLabel(page) }} <span>{{ page.page_id }}</span></p>
                 </div>
-                <div class="landing-page-badges">
-                  <span class="page-status-badge" :class="page.status || 'draft'">{{ statusLabel(page.status) }}</span>
-                  <span class="page-source-badge">{{ pageIntentLabel(page) }}</span>
-                  <div class="offer-card-menu" @click.stop>
-                    <button
-                      type="button"
-                      class="offer-kebab-button"
-                      aria-label="Page actions"
-                      :aria-expanded="openMenuId === page.page_id"
-                      @click="toggleMenu(page.page_id)"
-                    >
-                      ⋮
-                    </button>
-                    <div v-if="openMenuId === page.page_id" class="offer-action-menu" role="menu">
-                      <button type="button" role="menuitem" @click="viewPage(page)">
-                        <svg aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.25 12s3.5-6 9.75-6 9.75 6 9.75 6-3.5 6-9.75 6-9.75-6-9.75-6Z" />
-                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" />
-                        </svg>
-                        <span>View JSON</span>
-                      </button>
-                      <button type="button" role="menuitem" @click="editPage(page)">
-                        <svg aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m16.862 4.487 1.688-1.688a1.875 1.875 0 1 1 2.652 2.652L8.625 18.028 3.75 19.5l1.472-4.875L16.862 4.487Z" />
-                        </svg>
-                        <span>Edit</span>
-                      </button>
-                      <button type="button" role="menuitem" @click="copyPageUrl(page)">
-                        <svg aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 8h10.5A1.5 1.5 0 0 1 20 9.5V20a1.5 1.5 0 0 1-1.5 1.5H8A1.5 1.5 0 0 1 6.5 20V9.5A1.5 1.5 0 0 1 8 8Z" />
-                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16V5.5A1.5 1.5 0 0 1 5.5 4H16" />
-                        </svg>
-                        <span>Copy URL</span>
-                      </button>
-                      <button type="button" role="menuitem" @click="previewPage(page)">
-                        <svg aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 7h10v10H7V7Z" />
-                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 10h4v4h-4v-4Zm8-8h4v4m0-4-5 5M6 22H2v-4m0 4 5-5" />
-                        </svg>
-                        <span>Preview</span>
-                      </button>
-                      <button v-if="page.status !== 'published' && page.status !== 'archived'" type="button" role="menuitem" @click="publishPage(page)">
-                        <svg aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 16.5V4.5m0 0-4.5 4.5M12 4.5l4.5 4.5M4.5 19.5h15" />
-                        </svg>
-                        <span>Publish</span>
-                      </button>
-                      <button type="button" class="danger" role="menuitem" @click="requestArchivePage(page)">
-                        <svg aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 7h12m-9 0V5.5A1.5 1.5 0 0 1 10.5 4h3A1.5 1.5 0 0 1 15 5.5V7m-7 0 .75 12A2 2 0 0 0 10.75 21h2.5a2 2 0 0 0 2-2L16 7M10 11v6m4-6v6" />
-                        </svg>
-                        <span>{{ page.status === "published" ? "Archive" : "Delete" }}</span>
-                      </button>
-                    </div>
-                  </div>
-                </div>
               </div>
 
               <div class="landing-page-url-row">
@@ -126,6 +70,64 @@
                 <span>{{ Number(page.analytics_summary?.conversions || 0) }} conversions</span>
                 <strong>{{ formatMoney(page.analytics_summary?.revenue_cents || 0) }}</strong>
                 <span>revenue</span>
+              </div>
+            </div>
+
+            <div class="landing-page-badges">
+              <span class="page-status-badge" :class="page.status || 'draft'">{{ statusLabel(page.status) }}</span>
+              <span class="page-source-badge">{{ pageIntentLabel(page) }}</span>
+              <div class="offer-card-menu" @click.stop>
+                <button
+                  type="button"
+                  class="offer-kebab-button"
+                  aria-label="Page actions"
+                  :aria-expanded="openMenuId === page.page_id"
+                  @click="toggleMenu(page.page_id)"
+                >
+                  ⋮
+                </button>
+                <div v-if="openMenuId === page.page_id" class="offer-action-menu" role="menu">
+                  <button type="button" role="menuitem" @click="viewPage(page)">
+                    <svg aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.25 12s3.5-6 9.75-6 9.75 6 9.75 6-3.5 6-9.75 6-9.75-6-9.75-6Z" />
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" />
+                    </svg>
+                    <span>View JSON</span>
+                  </button>
+                  <button type="button" role="menuitem" @click="editPage(page)">
+                    <svg aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m16.862 4.487 1.688-1.688a1.875 1.875 0 1 1 2.652 2.652L8.625 18.028 3.75 19.5l1.472-4.875L16.862 4.487Z" />
+                    </svg>
+                    <span>Edit</span>
+                  </button>
+                  <button type="button" role="menuitem" @click="copyPageUrl(page)">
+                    <svg aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 8h10.5A1.5 1.5 0 0 1 20 9.5V20a1.5 1.5 0 0 1-1.5 1.5H8A1.5 1.5 0 0 1 6.5 20V9.5A1.5 1.5 0 0 1 8 8Z" />
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16V5.5A1.5 1.5 0 0 1 5.5 4H16" />
+                    </svg>
+                    <span>Copy URL</span>
+                  </button>
+                  <button type="button" role="menuitem" @click="previewPage(page)">
+                    <svg aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 7h10v10H7V7Z" />
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 10h4v4h-4v-4Zm8-8h4v4m0-4-5 5M6 22H2v-4m0 4 5-5" />
+                    </svg>
+                    <span>Preview</span>
+                  </button>
+                  <button v-if="page.status !== 'archived'" type="button" role="menuitem" @click="togglePagePublished(page)">
+                    <svg aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path v-if="page.status === 'published'" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18ZM6.6 17.4 17.4 6.6" />
+                      <path v-else stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5.25 18.75c4.75-.25 8.75-2.5 12-6.75m0 0 1.5 1.5m-1.5-1.5-1.5-1.5M6.75 14.25 4.5 19.5l5.25-2.25M12 3.75c3.5 1.25 6.25 4 7.5 7.5-4.75.5-8.25-1-10.5-4.5A10 10 0 0 1 12 3.75Z" />
+                    </svg>
+                    <span>{{ page.status === "published" ? "Unpublish" : "Publish" }}</span>
+                  </button>
+                  <button type="button" class="danger" role="menuitem" @click="requestArchivePage(page)">
+                    <svg aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 7h12m-9 0V5.5A1.5 1.5 0 0 1 10.5 4h3A1.5 1.5 0 0 1 15 5.5V7m-7 0 .75 12A2 2 0 0 0 10.75 21h2.5a2 2 0 0 0 2-2L16 7M10 11v6m4-6v6" />
+                    </svg>
+                    <span>{{ page.status === "published" ? "Archive" : "Delete" }}</span>
+                  </button>
+                </div>
               </div>
             </div>
           </article>
@@ -286,6 +288,10 @@
         <div v-else-if="message" class="keys-status-banner landing-builder-status">{{ message }}</div>
 
         <div v-if="!builderFormHidden" class="landing-builder-body">
+          <div v-if="isBuilderPublished" class="keys-status-banner warning">
+            Published pages cannot be modified. Unpublish this page before editing.
+          </div>
+
           <section class="builder-section">
             <h3>Page Basics</h3>
             <label class="offer-field">
@@ -549,11 +555,17 @@
 
         <footer v-if="!builderFormHidden" class="landing-builder-footer">
           <button class="secondary-action" type="button" @click="backToList">Cancel</button>
-          <button class="primary-action" type="button" :disabled="saving" @click="saveBuilderPage">
+          <button class="primary-action" type="button" :disabled="saving || isBuilderPublished" @click="saveBuilderPage">
             {{ saving ? "Saving..." : "Save Page" }}
           </button>
-          <button class="primary-action publish-action" type="button" :disabled="saving" @click="publishBuilderPage">
-            {{ saving ? "Publishing..." : "Publish" }}
+          <button
+            class="primary-action publish-action"
+            :class="{ unpublished: isBuilderPublished }"
+            type="button"
+            :disabled="saving"
+            @click="toggleBuilderPublished"
+          >
+            {{ saving ? (isBuilderPublished ? "Unpublishing..." : "Publishing...") : (isBuilderPublished ? "Unpublish" : "Publish") }}
           </button>
         </footer>
       </article>
@@ -690,7 +702,7 @@
 
 <script setup>
 import { computed, reactive, ref, watch } from "vue";
-import { apiRequest, getApiEnvironment, getPagesBaseUrl, getTenantId } from "../api/client";
+import { apiRequest, getApiEnvironment, getPagesBaseUrl, getPreviewPagesBaseUrl, getTenantId } from "../api/client";
 import { formatMoney } from "../stores/products";
 
 const pages = ref([]);
@@ -714,6 +726,7 @@ const pagesLoaded = ref(false);
 const builderOpen = ref(false);
 const builderFormHidden = ref(false);
 const builderExistingPageId = ref("");
+const builderOriginalPage = ref(null);
 const previewDevice = ref("desktop");
 const selectedPreviewPriceId = ref("");
 const faviconFileInput = ref(null);
@@ -882,6 +895,7 @@ const experienceLabel = computed(() => {
 });
 const draftPage = computed(() => buildPageDocument());
 const builderPageDocument = computed(() => buildBuilderPageDocument());
+const isBuilderPublished = computed(() => builder.status === "published");
 
 watch(previewPrices, (prices) => {
   if (!prices.length) {
@@ -984,14 +998,16 @@ async function loadPages() {
   error.value = "";
   message.value = "";
   try {
-    await ensureCatalogLoaded().catch((err) => {
+    const catalogPromise = ensureCatalogLoaded().catch((err) => {
       message.value = err.message || "Catalog context could not be loaded. Landing pages will show without offer details.";
     });
-    const body = await apiRequest("/pages");
+    const pagesPromise = apiRequest("/pages");
+    const body = await pagesPromise;
     pages.value = Array.isArray(body.pages) ? body.pages : [];
     pagesLoaded.value = true;
     const activeCount = pages.value.filter((page) => page.status !== "archived").length;
     if (activeCount) message.value = `${activeCount} landing page${activeCount === 1 ? "" : "s"} loaded.`;
+    catalogPromise.catch(() => {});
   } catch (err) {
     error.value = err.message || "Failed to load landing pages.";
   } finally {
@@ -1042,6 +1058,7 @@ function closeWizard() {
 function backToList() {
   builderOpen.value = false;
   builderExistingPageId.value = "";
+  builderOriginalPage.value = null;
   builderFormHidden.value = false;
 }
 
@@ -1080,6 +1097,7 @@ function startBuilderFromWizard() {
   }
   populateBuilderFromPage(page);
   builderExistingPageId.value = "";
+  builderOriginalPage.value = null;
   builderOpen.value = true;
   builderFormHidden.value = false;
   wizardOpen.value = false;
@@ -1321,6 +1339,36 @@ async function publishBuilderPage() {
   return saveBuilderPageWithStatus("published");
 }
 
+async function toggleBuilderPublished() {
+  if (isBuilderPublished.value) return unpublishBuilderPage();
+  return publishBuilderPage();
+}
+
+async function unpublishBuilderPage() {
+  const source = builderOriginalPage.value || builderPageDocument.value;
+  if (!source) {
+    error.value = "Page could not be generated.";
+    return;
+  }
+  saving.value = true;
+  error.value = "";
+  message.value = "";
+  try {
+    const document = applyPageStatus(source, "draft");
+    const body = await apiRequest("/pages", { method: "POST", body: document });
+    const saved = body.page || document;
+    pages.value = [saved, ...pages.value.filter((page) => page.page_id !== saved.page_id)];
+    message.value = `${saved.name || "Landing page"} was unpublished.`;
+    builder.status = saved.status || "draft";
+    builder.published_at = saved.published_at || null;
+    builderOriginalPage.value = { ...saved };
+  } catch (err) {
+    error.value = err.message || "Failed to unpublish landing page.";
+  } finally {
+    saving.value = false;
+  }
+}
+
 async function saveBuilderPageWithStatus(statusOverride = "") {
   error.value = "";
   message.value = "";
@@ -1343,6 +1391,7 @@ async function saveBuilderPageWithStatus(statusOverride = "") {
     builderExistingPageId.value = saved.page_id;
     builder.status = saved.status || builder.status;
     builder.published_at = saved.published_at || builder.published_at;
+    builderOriginalPage.value = { ...saved };
   } catch (err) {
     error.value = err.message || "Failed to save landing page.";
   } finally {
@@ -1715,6 +1764,7 @@ function editPage(page) {
   openMenuId.value = "";
   populateBuilderFromPage(page);
   builderExistingPageId.value = page.page_id;
+  builderOriginalPage.value = { ...page };
   builderOpen.value = true;
   builderFormHidden.value = false;
 }
@@ -1737,6 +1787,29 @@ async function publishPage(page) {
     message.value = `${saved.name || "Landing page"} was published.`;
   } catch (err) {
     error.value = err.message || "Failed to publish landing page.";
+  } finally {
+    saving.value = false;
+  }
+}
+
+async function togglePagePublished(page) {
+  if (page.status === "published") return unpublishPage(page);
+  return publishPage(page);
+}
+
+async function unpublishPage(page) {
+  openMenuId.value = "";
+  const unpublishedPage = applyPageStatus(page, "draft");
+  saving.value = true;
+  error.value = "";
+  message.value = "";
+  try {
+    const body = await apiRequest("/pages", { method: "POST", body: unpublishedPage });
+    const saved = body.page || unpublishedPage;
+    pages.value = pages.value.map((item) => item.page_id === saved.page_id ? saved : item);
+    message.value = `${saved.name || "Landing page"} was unpublished.`;
+  } catch (err) {
+    error.value = err.message || "Failed to unpublish landing page.";
   } finally {
     saving.value = false;
   }
@@ -1842,12 +1915,18 @@ function artifactPageUrl(page) {
   return `${getPagesBaseUrl()}/${pageId}/index.html`;
 }
 
+function previewArtifactPageUrl(page) {
+  const tenantId = encodeURIComponent(page.tenant_id || getTenantId());
+  const pageId = pagePathId(page).split("/").map(encodeURIComponent).join("/");
+  return `${getPreviewPagesBaseUrl()}/preview/${tenantId}/${pageId}/index.html`;
+}
+
 function pageUrl(page) {
-  return artifactPageUrl(page);
+  return page.status === "published" ? artifactPageUrl(page) : previewArtifactPageUrl(page);
 }
 
 function previewPageUrl(page) {
-  return artifactPageUrl(page);
+  return pageUrl(page);
 }
 
 async function copyPageUrl(page) {

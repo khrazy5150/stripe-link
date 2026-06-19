@@ -293,6 +293,18 @@ class PageRenderTests(unittest.TestCase):
 
         self.assertIn("href=\"https://checkout.stripe.com/c/pay/demo\"", html)
 
+    def test_render_page_disables_checkout_cta_on_click(self):
+        html = render_page(
+            self.page,
+            self.offer,
+            self.products_by_id,
+            checkout_url="https://dev.juniorbay.com/checkout",
+        )
+
+        self.assertIn(".sl-cta.is-connecting", html)
+        self.assertIn("cta.textContent = 'Connecting...';", html)
+        self.assertIn("window.location.assign(href)", html)
+
     def test_render_page_rejects_missing_offer_product(self):
         with self.assertRaisesRegex(RenderError, "was not provided"):
             render_page(self.page, self.offer, {})

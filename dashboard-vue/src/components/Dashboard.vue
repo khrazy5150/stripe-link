@@ -236,6 +236,7 @@ const otherEnvironment = computed(() => (props.activeEnvironment === "live" ? "t
 const otherEnvironmentLabel = computed(() => (otherEnvironment.value === "live" ? "Live" : "Test"));
 
 const setupWarning = computed(() => {
+  if (!stripeKeys.connectLoaded || stripeKeys.connectLoading || stripeKeys.connectError) return null;
   if (isRestricted.value) {
     return {
       title: `Your ${props.environmentLabel.toLowerCase()} Stripe account is restricted.`,

@@ -44,6 +44,7 @@ export const useStripeKeysStore = defineStore("stripeKeys", {
     saving: false,
     verifying: false,
     connectLoading: false,
+    connectLoaded: false,
     connectStarting: false,
     connectCard: null,
     connectError: "",
@@ -65,6 +66,7 @@ export const useStripeKeysStore = defineStore("stripeKeys", {
       this.saving = false;
       this.verifying = false;
       this.connectLoading = false;
+      this.connectLoaded = false;
       this.connectStarting = false;
       this.connectCard = null;
       this.connectError = "";
@@ -99,6 +101,7 @@ export const useStripeKeysStore = defineStore("stripeKeys", {
 
     async loadConnectCard() {
       this.connectLoading = true;
+      this.connectLoaded = false;
       this.connectError = "";
       setTenantId(this.tenantId);
       try {
@@ -108,6 +111,7 @@ export const useStripeKeysStore = defineStore("stripeKeys", {
         this.connectCard = null;
       } finally {
         this.connectLoading = false;
+        this.connectLoaded = true;
       }
     },
 

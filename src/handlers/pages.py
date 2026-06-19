@@ -26,11 +26,43 @@ def handler(event, context, repository=None):
 def create_page(event, repository):
     try:
         document = parse_json_body(event)
+        existing = existing_page_for_document(repository, document)
+        validate_published_page_mutation(existing, document)
         validate_page_document(document)
         saved = repository.put(document)
         return json_response({"page": saved}, status_code=201)
     except (DocumentValidationError, ValueError, RepositoryError) as exc:
         return error_response(str(exc), code="invalid_page")
+
+
+def existing_page_for_document(repository, document: dict):
+    tenant_id = str(document.get("tenant_id") or "").strip()
+    page_id = str(document.get("page_id") or "").strip()
+    if not tenant_id or not page_id:
+        return None
+    return repository.get(tenant_id, page_id)
+
+
+def validate_published_page_mutation(existing: dict | None, incoming: dict) -> None:
+    if not existing or existing.get("status") != "published":
+        return
+    incoming_status = incoming.get("status") or existing.get("status")
+    if incoming_status in {"draft", "archived"} and lifecycle_only_change(existing, incoming):
+        return
+    raise DocumentValidationError("Published pages cannot be modified. Unpublish this page before editing.")
+
+
+def lifecycle_only_change(existing: dict, incoming: dict) -> bool:
+    ignored = {"status", "published_at", "archived_at", "updated_at", "PK", "SK", "GSI1PK", "GSI1SK"}
+    return strip_lifecycle_fields(existing, ignored) == strip_lifecycle_fields(incoming, ignored)
+
+
+def strip_lifecycle_fields(document: dict, ignored: set[str]) -> dict:
+    return {
+        key: value
+        for key, value in document.items()
+        if key not in ignored
+    }
 
 
 def get_page(event, repository, page_id: str):

@@ -2,6 +2,7 @@ from html import escape
 from decimal import Decimal
 import re
 from typing import Any
+from urllib.parse import urlencode, urlparse
 
 from stripe_link.domain.pricing import find_price, resolve_offer
 
@@ -253,6 +254,7 @@ SIMPLE_TEMPLATE_STYLES = [
     "    .sl-price-option[data-default='true']{border-color:var(--sl-accent);box-shadow:0 0 0 1px var(--sl-accent)}",
     "    .sl-badge{display:inline-block;font-family:var(--sl-font-accent);font-size:1.2rem;font-weight:700;color:#166534;background:#dcfce7;padding:0.3rem 0.8rem;border-radius:99.9rem;margin-bottom:0.8rem}",
     "    .sl-cta{display:inline-flex;align-items:center;justify-content:center;background:var(--sl-accent);color:#fff;border:0;border-radius:0.8rem;padding:1.4rem 1.8rem;font-family:var(--sl-font-accent);font-weight:700;text-decoration:none}",
+    "    .sl-cta.is-connecting{opacity:.72;cursor:wait;pointer-events:none}",
     "    .sl-legal{display:flex;gap:1.2rem;flex-wrap:wrap;font-size:1.3rem;color:#6b7280}",
     "    .sl-legal a{color:inherit}",
 ]
@@ -320,6 +322,7 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     "    .sl-faq p{color:var(--sl-faq-text);font-size:1.4rem;line-height:1.6;padding:0 2rem 1.6rem}",
     "    .sl-checkout-cta{position:fixed;left:0;right:0;bottom:0;z-index:10;background:linear-gradient(transparent,var(--sl-cta-scrim) 20%);padding:1.6rem;display:flex;justify-content:center}",
     "    .sl-cta{display:inline-flex;width:min(52rem,100%);align-items:center;justify-content:center;background:linear-gradient(135deg,var(--sl-cta-from),var(--sl-cta-to));color:var(--sl-cta-text);border:0;border-radius:1rem;padding:1.5rem 1.8rem;font-family:var(--sl-font-accent);font-size:1.7rem;font-weight:900;text-decoration:none}",
+    "    .sl-cta.is-connecting{opacity:.72;cursor:wait;pointer-events:none}",
     "    .sl-legal{display:flex;gap:1.2rem;flex-wrap:wrap;justify-content:center;text-align:center;font-size:1.3rem;color:var(--sl-legal-text);padding:2.4rem 0 0}",
     "    .sl-legal span{flex:0 0 100%}",
     "    .sl-legal a{color:var(--sl-legal-link)}",
@@ -544,7 +547,7 @@ def render_section(
     if section_type == "content_block":
         return render_content_blocks(section)
     if section_type == "checkout_cta":
-        return render_checkout_cta(section, offer, resolved_offer, checkout_url)
+        return render_checkout_cta(page, section, offer, resolved_offer, checkout_url)
     if section_type == "legal_footer":
         return render_legal_footer(page.get("legal") or {}, section)
     return f"    <section data-section-id=\"{escape(str(section.get('id', '')))}\"></section>"
@@ -722,6 +725,7 @@ def render_offer_price_selector(offer: dict[str, Any], products_by_id: dict[str,
             badge = escape(str(option.get("badge") or ""))
             amount = int(price.get("unit_amount", 0))
             currency = str(price.get("currency") or "usd")
+            checkout_quantity = int(item.get("quantity") or 1)
             default_attr = "true" if price.get("price_id") == default_price_id else "false"
             image_url = price_image(product, price, option)
             description = escape(str(option.get("description") or price.get("description") or product.get("description") or ""))
@@ -730,7 +734,7 @@ def render_offer_price_selector(offer: dict[str, Any], products_by_id: dict[str,
             if not savings_pct and compare_at_unit_amount:
                 savings_pct = discount_pct(amount, int(compare_at_unit_amount))
             card_markup = "\n".join([
-                f"      <article class=\"sl-price-option\" data-price-id=\"{escape(str(price.get('price_id', '')))}\" data-default=\"{default_attr}\" data-sale-amount=\"{amount}\" data-regular-amount=\"{int(compare_at_unit_amount) if compare_at_unit_amount else ''}\" data-currency=\"{escape(currency)}\" data-label=\"{label}\">",
+                f"      <article class=\"sl-price-option\" data-product-id=\"{escape(str(product_id))}\" data-price-id=\"{escape(str(price.get('price_id', '')))}\" data-quantity=\"{checkout_quantity}\" data-default=\"{default_attr}\" data-sale-amount=\"{amount}\" data-regular-amount=\"{int(compare_at_unit_amount) if compare_at_unit_amount else ''}\" data-currency=\"{escape(currency)}\" data-label=\"{label}\">",
                 f"        <img src=\"{escape(image_url)}\" alt=\"{escape(str(product.get('name') or label))}\">" if image_url else "",
                 "        <div class=\"sl-price-copy\">",
                 f"          <span class=\"sl-badge\">{badge}</span>" if badge else "",
@@ -905,6 +909,7 @@ def render_content_blocks(section: dict[str, Any]) -> str:
 
 
 def render_checkout_cta(
+    page: dict[str, Any],
     section: dict[str, Any],
     offer: dict[str, Any],
     resolved_offer: dict[str, Any],
@@ -913,12 +918,83 @@ def render_checkout_cta(
     label = escape(str(section.get("label") or (offer.get("presentation") or {}).get("cta_label") or "Checkout"))
     subtotal = int(resolved_offer.get("subtotal", 0))
     currency = str(resolved_offer.get("currency") or "usd")
-    href = escape(checkout_url or "#checkout")
+    checkout = checkout_context(page, offer, resolved_offer, checkout_url)
+    href = escape(checkout["href"])
+    data_attrs = " ".join(
+        f"data-{escape(key)}=\"{escape(str(value))}\""
+        for key, value in checkout["data"].items()
+        if value is not None and value != ""
+    )
     return "\n".join([
         "    <section class=\"sl-checkout-cta\" data-section-type=\"checkout_cta\">",
-        f"      <a class=\"sl-cta\" href=\"{href}\" data-cta-label=\"{label}\" data-cta-currency=\"{escape(currency)}\" data-cta-amount=\"{subtotal}\">{label} - {escape(format_money(subtotal, currency))}</a>",
+        f"      <a class=\"sl-cta\" href=\"{href}\" data-cta-label=\"{label}\" data-cta-currency=\"{escape(currency)}\" data-cta-amount=\"{subtotal}\" {data_attrs}>{label} - {escape(format_money(subtotal, currency))}</a>",
         "    </section>",
     ])
+
+
+def checkout_context(
+    page: dict[str, Any],
+    offer: dict[str, Any],
+    resolved_offer: dict[str, Any],
+    checkout_url: str | None,
+) -> dict[str, Any]:
+    if not checkout_url:
+        return {"href": "#checkout", "data": {}}
+
+    parsed = urlparse(checkout_url)
+    if parsed.netloc.endswith("stripe.com"):
+        return {"href": checkout_url, "data": {}}
+
+    first_item = (resolved_offer.get("items") or [{}])[0]
+    product_id = str(first_item.get("product_id") or "")
+    price_id = str(first_item.get("price_id") or "")
+    quantity = str(first_item.get("quantity") or 1)
+    fallback = build_checkout_url(
+        checkout_url,
+        page=page,
+        offer=offer,
+        product_id=product_id,
+        price_id=price_id,
+        quantity=quantity,
+    )
+    return {
+        "href": fallback,
+        "data": {
+            "checkout-base-url": checkout_url,
+            "checkout-tenant-id": page.get("tenant_id") or offer.get("tenant_id") or "",
+            "checkout-offer-id": offer.get("offer_id") or "",
+            "checkout-page-id": page.get("page_id") or "",
+            "checkout-product-id": product_id,
+            "checkout-price-id": price_id,
+            "checkout-quantity": quantity,
+        },
+    }
+
+
+def build_checkout_url(
+    base_url: str,
+    *,
+    page: dict[str, Any],
+    offer: dict[str, Any],
+    product_id: str,
+    price_id: str,
+    quantity: str,
+) -> str:
+    if not base_url:
+        return "#checkout"
+    params = {
+        "clientID": page.get("tenant_id") or offer.get("tenant_id") or "",
+        "offer": offer.get("offer_id") or "",
+        "page_id": page.get("page_id") or "",
+        "product_id": product_id,
+        "price_id": price_id,
+        "quantity": quantity or "1",
+        "success_url": "{{success_url}}",
+        "cancel_url": "{{cancel_url}}",
+    }
+    query = urlencode({key: value for key, value in params.items() if value})
+    separator = "&" if "?" in base_url else "?"
+    return f"{base_url}{separator}{query}" if query else base_url
 
 
 def render_legal_footer(legal: dict[str, Any], section: dict[str, Any] | None = None) -> str:
@@ -972,11 +1048,12 @@ def render_favicon_tags(seo: dict[str, Any]) -> str:
 def render_page_interactions_script(page: dict[str, Any]) -> str:
     has_countdown = any(section.get("type") == "countdown_timer" for section in page.get("sections", []))
     has_price_selector = any(section.get("type") == "offer_price_selector" for section in page.get("sections", []))
+    has_checkout_cta = any(section.get("type") == "checkout_cta" for section in page.get("sections", []))
     has_current_year = any(
         section.get("type") == "legal_footer" and CURRENT_YEAR_TOKEN in str(section.get("copyright") or "")
         for section in page.get("sections", [])
     )
-    if not has_countdown and not has_price_selector and not has_current_year:
+    if not has_countdown and not has_price_selector and not has_current_year and not has_checkout_cta:
         return ""
     page_id = escape(str(page.get("page_id") or "page"))
     return "\n".join([
@@ -994,6 +1071,25 @@ def render_page_interactions_script(page: dict[str, Any]) -> str:
         "      };",
         "      const cta = document.querySelector('[data-section-type=\"checkout_cta\"] .sl-cta');",
         "      const cards = Array.from(document.querySelectorAll('.sl-price-option'));",
+        "      const pageUrl = () => `${window.location.origin}${window.location.pathname}`;",
+        "      const checkoutHref = (card) => {",
+        "        if (!cta || !cta.dataset.checkoutBaseUrl) return cta ? cta.href : '#checkout';",
+        "        const params = new URLSearchParams();",
+        "        const productId = card?.dataset.productId || cta.dataset.checkoutProductId || '';",
+        "        const priceId = card?.dataset.priceId || cta.dataset.checkoutPriceId || '';",
+        "        const quantity = card?.dataset.quantity || cta.dataset.checkoutQuantity || '1';",
+        "        if (cta.dataset.checkoutTenantId) params.set('clientID', cta.dataset.checkoutTenantId);",
+        "        if (cta.dataset.checkoutOfferId) params.set('offer', cta.dataset.checkoutOfferId);",
+        "        if (cta.dataset.checkoutPageId) params.set('page_id', cta.dataset.checkoutPageId);",
+        "        if (productId) params.set('product_id', productId);",
+        "        if (priceId) params.set('price_id', priceId);",
+        "        if (quantity) params.set('quantity', quantity);",
+        "        const current = pageUrl();",
+        "        params.set('success_url', `${current}?checkout=success`);",
+        "        params.set('cancel_url', current);",
+        "        const separator = cta.dataset.checkoutBaseUrl.includes('?') ? '&' : '?';",
+        "        return `${cta.dataset.checkoutBaseUrl}${separator}${params.toString()}`;",
+        "      };",
         "      const currentAmount = (card) => card?.dataset.expired === 'true' ? card.dataset.regularAmount : card?.dataset.saleAmount;",
         "      const updateCta = (card) => {",
         "        if (!cta || !card) return;",
@@ -1001,8 +1097,10 @@ def render_page_interactions_script(page: dict[str, Any]) -> str:
         "        const currency = card.dataset.currency || cta.dataset.ctaCurrency || 'usd';",
         "        const label = cta.dataset.ctaLabel || 'Checkout';",
         "        cta.dataset.ctaAmount = amount || '0';",
+        "        cta.href = checkoutHref(card);",
         "        cta.textContent = `${label} - ${money(amount, currency)}`;",
         "      };",
+        "      if (cta && cta.dataset.checkoutBaseUrl) cta.href = checkoutHref(document.querySelector('.sl-price-option.selected') || cards[0]);",
         "      const selectCard = (card) => {",
         "        if (!card) return;",
         "        cards.forEach((item) => item.classList.toggle('selected', item === card));",
@@ -1010,6 +1108,22 @@ def render_page_interactions_script(page: dict[str, Any]) -> str:
         "        if (radio) radio.checked = true;",
         "        updateCta(card);",
         "      };",
+        "      if (cta) {",
+        "        cta.addEventListener('click', (event) => {",
+        "          if (cta.dataset.connecting === 'true') {",
+        "            event.preventDefault();",
+        "            return;",
+        "          }",
+        "          const href = cta.href;",
+        "          if (!href || href.endsWith('#checkout')) return;",
+        "          event.preventDefault();",
+        "          cta.dataset.connecting = 'true';",
+        "          cta.setAttribute('aria-disabled', 'true');",
+        "          cta.classList.add('is-connecting');",
+        "          cta.textContent = 'Connecting...';",
+        "          window.setTimeout(() => { window.location.assign(href); }, 80);",
+        "        });",
+        "      }",
         "      cards.forEach((card) => {",
         "        card.addEventListener('click', () => selectCard(card));",
         "        const radio = card.querySelector('input[type=\"radio\"]');",
