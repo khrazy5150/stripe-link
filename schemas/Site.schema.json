@@ -1,0 +1,418 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.juniorbay.com/stripe-link/Site.schema.json",
+  "title": "Site",
+  "description": "A collection of Pages grouped under a shared domain. Site owns domain routing, integration setup, route slugs, and site-level SEO defaults; Page owns content, offers, theme, and sections.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "document_type",
+    "site_id",
+    "tenant_id",
+    "environment",
+    "name",
+    "status",
+    "domain",
+    "integration",
+    "pages",
+    "created_at",
+    "updated_at"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "description": "ISO date string identifying the schema version in use."
+    },
+    "document_type": {
+      "type": "string",
+      "const": "site"
+    },
+    "site_id": {
+      "type": "string",
+      "description": "Platform-generated unique identifier.",
+      "pattern": "^site_[A-Za-z0-9]+$"
+    },
+    "tenant_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "environment": {
+      "type": "string",
+      "description": "Sites are created and tested in test, then copied to live by a later workflow.",
+      "enum": ["test", "live"]
+    },
+    "name": {
+      "type": "string",
+      "description": "Internal dashboard display name.",
+      "minLength": 1,
+      "maxLength": 120
+    },
+    "status": {
+      "type": "string",
+      "description": "Archived Sites must return 404 for all routes.",
+      "enum": ["draft", "active", "archived"]
+    },
+    "domain": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["hostname", "verified"],
+      "properties": {
+        "hostname": {
+          "type": "string",
+          "description": "Fully qualified hostname without protocol or trailing slash.",
+          "pattern": "^(?!https?://)([a-z0-9-]+\\.)+[a-z]{2,}$"
+        },
+        "verified": {
+          "type": "boolean",
+          "description": "Set by the platform after DNS, Worker, plugin, or server validation completes.",
+          "default": false
+        },
+        "verified_at": {
+          "type": ["integer", "null"],
+          "minimum": 0
+        }
+      }
+    },
+    "integration": {
+      "description": "Exactly one config block must be present, matching mode.",
+      "oneOf": [
+        { "$ref": "#/$defs/workerIntegration" },
+        { "$ref": "#/$defs/cloudflareSaasIntegration" },
+        { "$ref": "#/$defs/cloudflarePartialIntegration" },
+        { "$ref": "#/$defs/dnsIntegration" },
+        { "$ref": "#/$defs/nginxIntegration" },
+        { "$ref": "#/$defs/wordpressIntegration" }
+      ]
+    },
+    "pages": {
+      "type": "object",
+      "description": "Slug-keyed route map. Object keys enforce slug uniqueness within a Site. Disabled route entries must return 404.",
+      "minProperties": 1,
+      "propertyNames": {
+        "$ref": "#/$defs/siteSlug"
+      },
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["page_id"],
+        "properties": {
+          "page_id": {
+            "type": "string",
+            "description": "Reference to an existing Page document. API validation must prevent one page_id from being assigned to more than one Site.",
+            "pattern": "^page_[A-Za-z0-9]+$"
+          },
+          "label": {
+            "type": "string",
+            "description": "Optional internal dashboard label.",
+            "maxLength": 80
+          },
+          "enabled": {
+            "type": "boolean",
+            "description": "When false, this slug is not routed and must return 404.",
+            "default": true
+          }
+        }
+      }
+    },
+    "seo_defaults": {
+      "type": "object",
+      "description": "Site-wide SEO fallback values applied when a Page does not override them.",
+      "additionalProperties": false,
+      "properties": {
+        "title_suffix": {
+          "type": ["string", "null"],
+          "maxLength": 60
+        },
+        "default_og_image": {
+          "type": ["string", "null"],
+          "description": "Fallback Open Graph image URL. Null means no site-wide fallback image is configured.",
+          "pattern": "^https?://"
+        },
+        "structured_data": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "entity_type": {
+              "type": "string",
+              "enum": [
+                "Organization",
+                "LocalBusiness",
+                "HomeAndConstructionBusiness",
+                "HealthAndBeautyBusiness",
+                "FoodEstablishment",
+                "ProfessionalService",
+                "Store"
+              ]
+            },
+            "name": {
+              "type": ["string", "null"]
+            },
+            "telephone": {
+              "type": ["string", "null"],
+              "description": "Primary contact phone number in E.164 format. Null means no site-wide phone value is configured.",
+              "pattern": "^\\+[1-9]\\d{1,14}$"
+            },
+            "address": {
+              "type": ["object", "null"],
+              "additionalProperties": false,
+              "properties": {
+                "street": { "type": "string" },
+                "city": { "type": "string" },
+                "state": { "type": "string" },
+                "postal_code": { "type": "string" },
+                "country": { "type": "string", "default": "US" }
+              }
+            },
+            "area_served": {
+              "type": "array",
+              "items": { "type": "string" }
+            },
+            "services": {
+              "type": "array",
+              "items": { "type": "string" }
+            }
+          }
+        }
+      }
+    },
+    "analytics": {
+      "type": "object",
+      "description": "Site-level analytics identifiers applied to pages unless overridden.",
+      "additionalProperties": false,
+      "properties": {
+        "google_tag_id": { "type": ["string", "null"] },
+        "pixel_id": { "type": ["string", "null"] }
+      }
+    },
+    "routing": {
+      "type": "object",
+      "description": "Edge routing publication metadata. Runtime routing should read this through CloudFront KVS or an equivalent edge-readable manifest, not live DynamoDB. Empty object means unpublished draft state; when any publication field is set, all three publication fields must be present.",
+      "additionalProperties": false,
+      "properties": {
+        "kvs_key": {
+          "type": ["string", "null"],
+          "description": "Key used by the edge router to look up this Site's published route map. Null means the Site has not been published to edge routing.",
+          "pattern": "^site:(test|live):[a-z0-9.-]+$"
+        },
+        "published_revision": {
+          "type": ["integer", "null"],
+          "minimum": 1
+        },
+        "published_at": {
+          "type": ["integer", "null"],
+          "minimum": 0
+        }
+      },
+      "dependentRequired": {
+        "kvs_key": ["published_revision", "published_at"],
+        "published_revision": ["kvs_key", "published_at"],
+        "published_at": ["kvs_key", "published_revision"]
+      }
+    },
+    "revision": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "created_at": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "updated_at": {
+      "type": "integer",
+      "minimum": 0
+    }
+  },
+  "$defs": {
+    "siteSlug": {
+      "type": "string",
+      "description": "The root page uses /. All other slugs begin with / and contain lowercase letters, numbers, hyphens, and single path separators.",
+      "pattern": "^/$|^/[a-z0-9]+(?:-[a-z0-9]+)*(?:/[a-z0-9]+(?:-[a-z0-9]+)*)*$"
+    },
+    "pathArray": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/siteSlug" },
+      "minItems": 1,
+      "uniqueItems": true
+    },
+    "workerIntegration": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode", "worker_config"],
+      "properties": {
+        "mode": { "const": "worker" },
+        "worker_config": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["zone_id", "script_id", "intercepted_paths"],
+          "properties": {
+            "zone_id": { "type": "string", "minLength": 1 },
+            "script_id": { "type": "string", "minLength": 1 },
+            "intercepted_paths": { "$ref": "#/$defs/pathArray" },
+            "deployed_at": { "type": ["integer", "null"], "minimum": 0 }
+          }
+        }
+      }
+    },
+    "cloudflareSaasIntegration": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode", "cloudflare_saas_config"],
+      "properties": {
+        "mode": { "const": "cloudflare_saas" },
+        "cloudflare_saas_config": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["proxy_hostname", "custom_hostname_id"],
+          "properties": {
+            "proxy_hostname": { "type": "string", "pattern": "^(?!https?://)([a-z0-9-]+\\.)+[a-z]{2,}$" },
+            "custom_hostname_id": { "type": "string", "minLength": 1 },
+            "ssl_status": { "type": "string", "enum": ["pending_validation", "active", "error"] }
+          }
+        }
+      }
+    },
+    "cloudflarePartialIntegration": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode", "cloudflare_partial_config"],
+      "properties": {
+        "mode": { "const": "cloudflare_partial" },
+        "cloudflare_partial_config": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["subdomain", "cname_target", "cloudfront_distribution_id"],
+          "properties": {
+            "subdomain": { "type": "string", "pattern": "^[a-z0-9-]+$" },
+            "cname_target": { "type": "string", "pattern": "^(?!https?://)([a-z0-9-]+\\.)+[a-z]{2,}$" },
+            "cloudfront_distribution_id": { "type": "string", "minLength": 1 }
+          }
+        }
+      }
+    },
+    "dnsIntegration": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode", "dns_config"],
+      "properties": {
+        "mode": { "const": "dns" },
+        "dns_config": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["cname_target", "cloudfront_distribution_id"],
+          "properties": {
+            "cname_target": { "type": "string", "pattern": "^(?!https?://)([a-z0-9-]+\\.)+[a-z]{2,}$" },
+            "cloudfront_distribution_id": { "type": "string", "minLength": 1 }
+          }
+        }
+      }
+    },
+    "nginxIntegration": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode", "nginx_config"],
+      "properties": {
+        "mode": { "const": "nginx" },
+        "nginx_config": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["origin_url", "proxy_paths"],
+          "properties": {
+            "origin_url": { "type": "string", "pattern": "^https?://" },
+            "proxy_paths": { "$ref": "#/$defs/pathArray" },
+            "server_type": { "type": ["string", "null"], "enum": ["nginx", "apache", null] }
+          }
+        }
+      }
+    },
+    "wordpressIntegration": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode", "wordpress_config"],
+      "properties": {
+        "mode": { "const": "wordpress" },
+        "wordpress_config": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["cache_ttl_seconds"],
+          "properties": {
+            "cache_ttl_seconds": { "type": "integer", "minimum": 0, "default": 300 },
+            "plugin_version": { "type": ["string", "null"] },
+            "last_rewrite_flush": { "type": ["integer", "null"], "minimum": 0 }
+          }
+        }
+      }
+    }
+  },
+  "examples": [
+    {
+      "schema_version": "2026-06-18",
+      "document_type": "site",
+      "site_id": "site_UpQW786zXMd1",
+      "tenant_id": "tenant_demo",
+      "environment": "test",
+      "name": "Element Home Services",
+      "status": "active",
+      "domain": {
+        "hostname": "test-site.juniorbay.com",
+        "verified": true,
+        "verified_at": 1750000000
+      },
+      "integration": {
+        "mode": "nginx",
+        "nginx_config": {
+          "origin_url": "https://test-go.jbay.be/UpQW786zXMd1",
+          "proxy_paths": ["/plumbing", "/hvac", "/electrical"],
+          "server_type": "nginx"
+        }
+      },
+      "pages": {
+        "/plumbing": {
+          "page_id": "page_PmL4LQuLg9b",
+          "label": "Plumbing Landing Page",
+          "enabled": true
+        },
+        "/hvac": {
+          "page_id": "page_dzPrrWPKwdk",
+          "label": "HVAC Landing Page",
+          "enabled": true
+        },
+        "/electrical": {
+          "page_id": "page_ewG3NXiATvX",
+          "label": "Electrical Landing Page",
+          "enabled": true
+        }
+      },
+      "seo_defaults": {
+        "title_suffix": "| Element Home Services",
+        "default_og_image": "https://images.juniorbay.com/tenants/element/og-default.webp",
+        "structured_data": {
+          "entity_type": "HomeAndConstructionBusiness",
+          "name": "Element Plumbing, Heating-Air, and Electrical",
+          "telephone": "+14355550100",
+          "address": {
+            "street": "123 Main St",
+            "city": "St. George",
+            "state": "UT",
+            "postal_code": "84770",
+            "country": "US"
+          },
+          "area_served": ["St. George", "Washington County", "Hurricane", "Ivins", "Santa Clara"],
+          "services": ["Plumbing", "HVAC", "Electrical"]
+        }
+      },
+      "analytics": {
+        "google_tag_id": "GT-XXXXXXXXX",
+        "pixel_id": null
+      },
+      "routing": {
+        "kvs_key": "site:test:test-site.juniorbay.com",
+        "published_revision": 1,
+        "published_at": 1750000000
+      },
+      "revision": 1,
+      "created_at": 1750000000,
+      "updated_at": 1750000000
+    }
+  ]
+}

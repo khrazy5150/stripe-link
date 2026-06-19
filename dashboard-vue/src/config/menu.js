@@ -3,7 +3,7 @@ export const menuSchema = {
   document_type: "menu",
   groups: [
     { key: "main", label: "MAIN", items: ["dashboard", "stripeKeys"] },
-    { key: "catalog", label: "CATALOG", items: ["products", "coupons", "offers", "landingPages", "services", "abTesting"] },
+    { key: "catalog", label: "CATALOG", items: ["products", "coupons", "offers", "landingPages", "sites", "services", "abTesting"] },
     { key: "orders", label: "ORDERS", items: ["orders", "notifications", "invoices", "shipping", "customers"] },
     { key: "settings", label: "SETTINGS", items: ["stripeConnect", "registration", "configuration", "profile", "preferences"] },
   ],
@@ -54,6 +54,14 @@ export const menuSchema = {
       icon: "rocket",
       view: "landingPages",
       enabled: true,
+      environments: ["test", "live"],
+    },
+    sites: {
+      key: "sites",
+      label: "Sites",
+      icon: "sitemap",
+      view: "sites",
+      enabled: false,
       environments: ["test", "live"],
     },
     services: {
@@ -173,6 +181,7 @@ export const iconPaths = {
   ticket: "M4.5 7.5A1.5 1.5 0 0 1 6 6h12a1.5 1.5 0 0 1 1.5 1.5v2.25a2.25 2.25 0 0 0 0 4.5v2.25A1.5 1.5 0 0 1 18 18H6a1.5 1.5 0 0 1-1.5-1.5v-2.25a2.25 2.25 0 0 0 0-4.5V7.5Zm7.5 1.5v6",
   gift: "M20 12v7.5A1.5 1.5 0 0 1 18.5 21h-13A1.5 1.5 0 0 1 4 19.5V12m16 0H4m16 0h-4.5A3.5 3.5 0 0 0 19 8.5 2.5 2.5 0 0 0 14.5 7L12 12m-8 0h4.5A3.5 3.5 0 0 1 5 8.5 2.5 2.5 0 0 1 9.5 7L12 12m0 0v9",
   rocket: "M5.25 18.75c4.75-.25 8.75-2.5 12-6.75m0 0 1.5 1.5m-1.5-1.5-1.5-1.5M6.75 14.25 4.5 19.5l5.25-2.25M12 3.75c3.5 1.25 6.25 4 7.5 7.5-4.75.5-8.25-1-10.5-4.5A10 10 0 0 1 12 3.75Z",
+  sitemap: "M12 4.5v4.5m0 0H7.5A1.5 1.5 0 0 0 6 10.5v3m6-4.5h4.5A1.5 1.5 0 0 1 18 10.5v3M8.25 18h-4.5v-4.5h4.5V18Zm6 0h-4.5v-4.5h4.5V18Zm6 0h-4.5v-4.5h4.5V18Z",
   calendar: "M8 3.75v3m8-3v3M4.5 9.75h15m-13.5-3h12A1.5 1.5 0 0 1 19.5 8.25v10.5A1.5 1.5 0 0 1 18 20.25H6a1.5 1.5 0 0 1-1.5-1.5V8.25A1.5 1.5 0 0 1 6 6.75Zm4.5 8.25 1.5 1.5 3-4",
   testTube: "M9 3.75h6M10.5 3.75v6.5l-5 7.75A2.25 2.25 0 0 0 7.4 21h9.2a2.25 2.25 0 0 0 1.9-3l-5-7.75v-6.5M8.5 15.75h7",
   clipboard: "M8.25 6.75h7.5M8.25 11.25h7.5M8.25 15.75h4.5M7.5 3.75h9A1.5 1.5 0 0 1 18 5.25v13.5a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 6 18.75V5.25a1.5 1.5 0 0 1 1.5-1.5Z",
