@@ -1,8 +1,8 @@
-def artifact_paths(tenant_id: str, page_id: str, slug: str) -> dict[str, str]:
+def artifact_paths(tenant_id: str, page_id: str, slug: str = "") -> dict[str, str]:
     return {
         "preview": f"preview/{tenant_id}/{page_id}/index.html",
-        "test": f"test/{tenant_id}/{slug}/index.html",
-        "published": f"published/{tenant_id}/{slug}/index.html",
+        "test": f"{page_id}/index.html",
+        "published": f"{page_id}/index.html",
     }
 
 

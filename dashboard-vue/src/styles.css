@@ -2150,6 +2150,11 @@ button:disabled {
   padding: 2rem;
 }
 
+.offer-management-card,
+.landing-pages-card {
+  overflow: visible;
+}
+
 .offer-empty-state,
 .selector-load-state {
   display: grid;
@@ -2168,6 +2173,7 @@ button:disabled {
 }
 
 .offer-card {
+  position: relative;
   display: grid;
   grid-template-columns: 11rem minmax(0, 1fr);
   gap: 1.6rem;
@@ -2274,6 +2280,9 @@ button:disabled {
 }
 
 .offer-action-menu button {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
   border: 0;
   border-radius: var(--radius-sm);
   background: transparent;
@@ -2283,6 +2292,16 @@ button:disabled {
   font-weight: 800;
   padding: 0.9rem 1rem;
   text-align: left;
+}
+
+.offer-action-menu button svg {
+  width: 1.8rem;
+  height: 1.8rem;
+  flex: 0 0 auto;
+}
+
+.offer-action-menu button span {
+  min-width: 0;
 }
 
 .offer-action-menu button:hover {
@@ -3038,6 +3057,7 @@ button:disabled {
 }
 
 .landing-page-card {
+  position: relative;
   display: grid;
   grid-template-columns: 14rem minmax(0, 1fr);
   gap: 1.6rem;

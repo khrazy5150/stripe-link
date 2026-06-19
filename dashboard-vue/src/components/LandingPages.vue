@@ -66,10 +66,39 @@
                       ⋮
                     </button>
                     <div v-if="openMenuId === page.page_id" class="offer-action-menu" role="menu">
-                      <button type="button" role="menuitem" @click="viewPage(page)">View JSON</button>
-                      <button type="button" role="menuitem" @click="editPage(page)">Edit</button>
-                      <button type="button" role="menuitem" @click="copyPageUrl(page)">Copy URL</button>
-                      <button type="button" role="menuitem" @click="previewPage(page)">Preview</button>
+                      <button type="button" role="menuitem" @click="viewPage(page)">
+                        <svg aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.25 12s3.5-6 9.75-6 9.75 6 9.75 6-3.5 6-9.75 6-9.75-6-9.75-6Z" />
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" />
+                        </svg>
+                        <span>View JSON</span>
+                      </button>
+                      <button type="button" role="menuitem" @click="editPage(page)">
+                        <svg aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m16.862 4.487 1.688-1.688a1.875 1.875 0 1 1 2.652 2.652L8.625 18.028 3.75 19.5l1.472-4.875L16.862 4.487Z" />
+                        </svg>
+                        <span>Edit</span>
+                      </button>
+                      <button type="button" role="menuitem" @click="copyPageUrl(page)">
+                        <svg aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 8h10.5A1.5 1.5 0 0 1 20 9.5V20a1.5 1.5 0 0 1-1.5 1.5H8A1.5 1.5 0 0 1 6.5 20V9.5A1.5 1.5 0 0 1 8 8Z" />
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16V5.5A1.5 1.5 0 0 1 5.5 4H16" />
+                        </svg>
+                        <span>Copy URL</span>
+                      </button>
+                      <button type="button" role="menuitem" @click="previewPage(page)">
+                        <svg aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 7h10v10H7V7Z" />
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 10h4v4h-4v-4Zm8-8h4v4m0-4-5 5M6 22H2v-4m0 4 5-5" />
+                        </svg>
+                        <span>Preview</span>
+                      </button>
+                      <button type="button" class="danger" role="menuitem" @click="requestArchivePage(page)">
+                        <svg aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 7h12m-9 0V5.5A1.5 1.5 0 0 1 10.5 4h3A1.5 1.5 0 0 1 15 5.5V7m-7 0 .75 12A2 2 0 0 0 10.75 21h2.5a2 2 0 0 0 2-2L16 7M10 11v6m4-6v6" />
+                        </svg>
+                        <span>Archive</span>
+                      </button>
                     </div>
                   </div>
                 </div>
@@ -212,7 +241,7 @@
               <div><span>Template</span><strong>{{ selectedTemplateLabel }}</strong></div>
               <div><span>Preset</span><strong>{{ selectedPresetLabel }}</strong></div>
               <div><span>Page ID</span><strong>{{ form.page_id }}</strong></div>
-              <div><span>Derived route</span><strong>/{{ form.slug }}</strong></div>
+              <div><span>Published path</span><strong>/{{ form.page_id }}/index.html</strong></div>
             </div>
             <details class="offer-json-preview">
               <summary>Generated page JSON</summary>
@@ -612,6 +641,18 @@
         </div>
       </section>
     </div>
+
+    <div v-if="pendingArchivePage" class="modal-backdrop" @click.self="pendingArchivePage = null">
+      <section class="modal-card confirm-card" role="dialog" aria-modal="true" aria-labelledby="confirmPageArchiveTitle">
+        <header class="confirm-icon danger">×</header>
+        <h2 id="confirmPageArchiveTitle">Archive page?</h2>
+        <p>Archive "{{ pendingArchivePage.name || "this landing page" }}"?</p>
+        <div class="confirm-actions">
+          <button type="button" class="secondary-action" @click="pendingArchivePage = null">Cancel</button>
+          <button type="button" class="primary-action" :disabled="saving" @click="archivePage">Archive</button>
+        </div>
+      </section>
+    </div>
   </section>
 </template>
 
@@ -636,6 +677,7 @@ const wizardOpen = ref(false);
 const wizardStep = ref(1);
 const openMenuId = ref("");
 const selectedPageDetails = ref(null);
+const pendingArchivePage = ref(null);
 const pagesLoaded = ref(false);
 const builderOpen = ref(false);
 const builderFormHidden = ref(false);
@@ -734,7 +776,7 @@ const previewCtaLabel = computed(() => {
 });
 const requiresExternalUrl = computed(() => selectedOfferIntent.value === "lead_gen" && form.experience_type === "external_redirect");
 const emptyStateText = computed(() => {
-  if (pages.value.length) return "No landing pages match your search.";
+  if (pages.value.some((page) => page.status !== "archived")) return "No landing pages match your search.";
   return pagesLoaded.value ? "No landing pages found. Create a page to get started." : 'Click "Load Pages" to view your landing pages.';
 });
 const templateOptions = computed(() => {
@@ -769,8 +811,9 @@ const leadExperienceOptions = computed(() => {
 });
 const filteredPages = computed(() => {
   const term = search.value.toLowerCase();
-  if (!term) return pages.value;
-  return pages.value.filter((page) => [
+  const activePages = pages.value.filter((page) => page.status !== "archived");
+  if (!term) return activePages;
+  return activePages.filter((page) => [
     page.name,
     page.page_id,
     page.offer_id,
@@ -901,7 +944,8 @@ async function loadPages() {
     const body = await apiRequest("/pages");
     pages.value = Array.isArray(body.pages) ? body.pages : [];
     pagesLoaded.value = true;
-    if (pages.value.length) message.value = `${pages.value.length} landing page${pages.value.length === 1 ? "" : "s"} loaded.`;
+    const activeCount = pages.value.filter((page) => page.status !== "archived").length;
+    if (activeCount) message.value = `${activeCount} landing page${activeCount === 1 ? "" : "s"} loaded.`;
   } catch (err) {
     error.value = err.message || "Failed to load landing pages.";
   } finally {
@@ -1582,6 +1626,35 @@ function editPage(page) {
   builderFormHidden.value = false;
 }
 
+function requestArchivePage(page) {
+  openMenuId.value = "";
+  pendingArchivePage.value = page;
+}
+
+async function archivePage() {
+  if (!pendingArchivePage.value) return;
+  const page = pendingArchivePage.value;
+  const archivedPage = {
+    ...page,
+    status: "archived",
+    updated_at: Math.floor(Date.now() / 1000),
+  };
+  saving.value = true;
+  error.value = "";
+  message.value = "";
+  try {
+    const body = await apiRequest("/pages", { method: "POST", body: archivedPage });
+    const saved = body.page || archivedPage;
+    pages.value = pages.value.map((item) => item.page_id === saved.page_id ? saved : item);
+    pendingArchivePage.value = null;
+    message.value = `${saved.name || "Landing page"} was archived.`;
+  } catch (err) {
+    error.value = err.message || "Failed to archive landing page.";
+  } finally {
+    saving.value = false;
+  }
+}
+
 function offerImage(offer) {
   const firstProduct = offerProducts(offer)[0];
   return offer?.presentation?.image_url || offer?.presentation?.hero_image_url || firstProduct?.images?.[0] || "";
@@ -1635,25 +1708,21 @@ function statusLabel(status) {
   return String(status || "draft").replace(/_/g, " ").toUpperCase();
 }
 
-function pageSlug(page) {
-  return String(page.route?.slug || page.page_id || "").replace(/^\/+|\/+$/g, "");
+function pagePathId(page) {
+  return String(page.page_id || "").replace(/^\/+|\/+$/g, "");
 }
 
-function artifactPageUrl(page, kind = "test") {
-  const tenantId = encodeURIComponent(page.tenant_id || getTenantId());
-  const slug = pageSlug(page).split("/").map(encodeURIComponent).join("/");
-  return `${getPagesBaseUrl()}/${kind}/${tenantId}/${slug}/index.html`;
+function artifactPageUrl(page) {
+  const pageId = pagePathId(page).split("/").map(encodeURIComponent).join("/");
+  return `${getPagesBaseUrl()}/${pageId}/index.html`;
 }
 
 function pageUrl(page) {
-  if (getApiEnvironment() === "live" && page.status === "published") {
-    return artifactPageUrl(page, "published");
-  }
-  return artifactPageUrl(page, "test");
+  return artifactPageUrl(page);
 }
 
 function previewPageUrl(page) {
-  return artifactPageUrl(page, "test");
+  return artifactPageUrl(page);
 }
 
 async function copyPageUrl(page) {

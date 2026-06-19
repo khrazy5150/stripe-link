@@ -51,9 +51,25 @@
                     ⋮
                   </button>
                   <div v-if="openOfferMenuId === offer.offer_id" class="offer-action-menu" role="menu">
-                    <button type="button" role="menuitem" @click="viewOffer(offer)">View</button>
-                    <button type="button" role="menuitem" @click="editOffer(offer)">Edit</button>
-                    <button type="button" class="danger" role="menuitem" @click="deleteOffer(offer)">Delete</button>
+                    <button type="button" role="menuitem" @click="viewOffer(offer)">
+                      <svg aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.25 12s3.5-6 9.75-6 9.75 6 9.75 6-3.5 6-9.75 6-9.75-6-9.75-6Z" />
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" />
+                      </svg>
+                      <span>View</span>
+                    </button>
+                    <button type="button" role="menuitem" @click="editOffer(offer)">
+                      <svg aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m16.862 4.487 1.688-1.688a1.875 1.875 0 1 1 2.652 2.652L8.625 18.028 3.75 19.5l1.472-4.875L16.862 4.487Z" />
+                      </svg>
+                      <span>Edit</span>
+                    </button>
+                    <button type="button" class="danger" role="menuitem" @click="requestDeleteOffer(offer)">
+                      <svg aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 7h12m-9 0V5.5A1.5 1.5 0 0 1 10.5 4h3A1.5 1.5 0 0 1 15 5.5V7m-7 0 .75 12A2 2 0 0 0 10.75 21h2.5a2 2 0 0 0 2-2L16 7M10 11v6m4-6v6" />
+                      </svg>
+                      <span>Delete</span>
+                    </button>
                   </div>
                 </div>
               </div>
@@ -369,6 +385,18 @@
       </section>
     </div>
 
+    <div v-if="pendingDeleteOffer" class="modal-backdrop" @click.self="pendingDeleteOffer = null">
+      <section class="modal-card confirm-card" role="dialog" aria-modal="true" aria-labelledby="confirmOfferDeleteTitle">
+        <header class="confirm-icon danger">×</header>
+        <h2 id="confirmOfferDeleteTitle">Delete offer?</h2>
+        <p>Delete "{{ pendingDeleteOffer.name || "this offer" }}"?</p>
+        <div class="confirm-actions">
+          <button type="button" class="secondary-action" @click="pendingDeleteOffer = null">Cancel</button>
+          <button type="button" class="primary-action" :disabled="deletingOffer" @click="deleteOffer">Delete</button>
+        </div>
+      </section>
+    </div>
+
     <div v-if="showProductSelector" class="modal-backdrop offer-selector-backdrop" @click.self="closeProductSelector">
       <section class="modal-card offer-product-selector-modal" role="dialog" aria-modal="true" aria-labelledby="productSelectorTitle">
         <header class="modal-card-header">
@@ -494,6 +522,8 @@ const latestDraftOffer = ref(null);
 const openOfferMenuId = ref("");
 const editingOfferId = ref("");
 const selectedOfferDetails = ref(null);
+const pendingDeleteOffer = ref(null);
+const deletingOffer = ref(false);
 const form = reactive(defaultOfferForm());
 const itemConfigs = reactive({});
 const priceImageInputs = new Map();
@@ -725,18 +755,27 @@ function editOffer(offer) {
   openOfferModal(offer);
 }
 
-async function deleteOffer(offer) {
+function requestDeleteOffer(offer) {
   openOfferMenuId.value = "";
+  pendingDeleteOffer.value = offer;
+}
+
+async function deleteOffer() {
+  if (!pendingDeleteOffer.value) return;
+  const offer = pendingDeleteOffer.value;
   const offerName = offer?.name || "this offer";
-  if (!window.confirm(`Delete ${offerName}?`)) return;
   offersError.value = "";
   offersMessage.value = "";
+  deletingOffer.value = true;
   try {
     await apiRequest(`/offers/${encodeURIComponent(offer.offer_id)}`, { method: "DELETE" });
     offers.value = offers.value.filter((item) => item.offer_id !== offer.offer_id);
+    pendingDeleteOffer.value = null;
     offersMessage.value = `${offerName} was deleted.`;
   } catch (error) {
     offersError.value = error.message || "Failed to delete offer.";
+  } finally {
+    deletingOffer.value = false;
   }
 }
 

@@ -43,14 +43,6 @@ def artifact_targets(
         }
     ]
 
-    targets.append({
-        "kind": "test",
-        "bucket": pages_bucket,
-        "key": paths["test"],
-        "cache_control": "no-cache, no-store, must-revalidate",
-        "url": public_url(pages_domain, paths["test"]),
-    })
-
     if page.get("status") == "published":
         targets.append({
             "kind": "published",
@@ -58,6 +50,14 @@ def artifact_targets(
             "key": paths["published"],
             "cache_control": "public, max-age=300",
             "url": public_url(pages_domain, paths["published"]),
+        })
+    else:
+        targets.append({
+            "kind": "test",
+            "bucket": pages_bucket,
+            "key": paths["test"],
+            "cache_control": "no-cache, no-store, must-revalidate",
+            "url": public_url(pages_domain, paths["test"]),
         })
 
     missing_bucket = [target["kind"] for target in targets if not target.get("bucket")]

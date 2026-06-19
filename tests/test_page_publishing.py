@@ -74,9 +74,15 @@ class PagePublishingTests(unittest.TestCase):
             artifact_paths("tenant_demo", "page_simple_coffee", "simple-coffee"),
             {
                 "preview": "preview/tenant_demo/page_simple_coffee/index.html",
-                "test": "test/tenant_demo/simple-coffee/index.html",
-                "published": "published/tenant_demo/simple-coffee/index.html",
+                "test": "page_simple_coffee/index.html",
+                "published": "page_simple_coffee/index.html",
             },
+        )
+
+    def test_artifact_paths_use_page_id_for_public_key(self):
+        self.assertNotEqual(
+            artifact_paths("tenant_demo", "page_first", "same-slug")["test"],
+            artifact_paths("tenant_demo", "page_second", "same-slug")["test"],
         )
 
     def test_artifact_targets_include_preview_and_dev_test(self):
@@ -91,8 +97,8 @@ class PagePublishingTests(unittest.TestCase):
 
         self.assertEqual([target["kind"] for target in targets], ["preview", "test"])
         self.assertEqual(targets[0]["key"], "preview/tenant_demo/page_simple_coffee/index.html")
-        self.assertEqual(targets[1]["key"], "test/tenant_demo/simple-coffee/index.html")
-        self.assertEqual(targets[1]["url"], "https://pages.example.com/test/tenant_demo/simple-coffee/index.html")
+        self.assertEqual(targets[1]["key"], "page_simple_coffee/index.html")
+        self.assertEqual(targets[1]["url"], "https://pages.example.com/page_simple_coffee/index.html")
 
     def test_artifact_targets_include_published_when_page_is_published(self):
         page = copy.deepcopy(self.page)
@@ -105,8 +111,8 @@ class PagePublishingTests(unittest.TestCase):
             preview_bucket="preview",
         )
 
-        self.assertEqual([target["kind"] for target in targets], ["preview", "test", "published"])
-        self.assertEqual(targets[2]["key"], "published/tenant_demo/simple-coffee/index.html")
+        self.assertEqual([target["kind"] for target in targets], ["preview", "published"])
+        self.assertEqual(targets[1]["key"], "page_simple_coffee/index.html")
 
     def test_publish_page_document_writes_preview_and_test_html(self):
         result = publish_page_document(
@@ -124,7 +130,7 @@ class PagePublishingTests(unittest.TestCase):
 
         self.assertEqual([put["Key"] for put in self.s3.puts], [
             "preview/tenant_demo/page_simple_coffee/index.html",
-            "test/tenant_demo/simple-coffee/index.html",
+            "page_simple_coffee/index.html",
         ])
         self.assertIn(b"Simple Coffee", self.s3.puts[0]["Body"])
         self.assertIn(b"https://checkout.stripe.com/c/pay/demo", self.s3.puts[0]["Body"])
@@ -275,17 +281,16 @@ class PagePublishingTests(unittest.TestCase):
 
         self.assertEqual([put["Key"] for put in self.s3.puts], [
             "preview/tenant_demo/page_simple_coffee/index.html",
-            "test/tenant_demo/simple-coffee/index.html",
-            "published/tenant_demo/simple-coffee/index.html",
+            "page_simple_coffee/index.html",
         ])
-        self.assertEqual(result["invalidation"]["paths"], ["/published/tenant_demo/simple-coffee/index.html"])
+        self.assertEqual(result["invalidation"]["paths"], ["/page_simple_coffee/index.html"])
         self.assertEqual(self.cloudfront.invalidations[0]["DistributionId"], "DIST123")
         self.assertEqual(
             self.cloudfront.invalidations[0]["InvalidationBatch"],
             {
                 "Paths": {
                     "Quantity": 1,
-                    "Items": ["/published/tenant_demo/simple-coffee/index.html"],
+                    "Items": ["/page_simple_coffee/index.html"],
                 },
                 "CallerReference": "page_simple_coffee",
             },
