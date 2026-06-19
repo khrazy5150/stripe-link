@@ -37,7 +37,7 @@
       },
     "status": {
       "type": "string",
-      "enum": ["draft", "preview", "published", "archived"],
+      "enum": ["draft", "published", "archived"],
       "default": "draft"
     },
     "published_at": {

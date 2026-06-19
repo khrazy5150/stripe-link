@@ -93,11 +93,17 @@
                         </svg>
                         <span>Preview</span>
                       </button>
+                      <button v-if="page.status !== 'published' && page.status !== 'archived'" type="button" role="menuitem" @click="publishPage(page)">
+                        <svg aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 16.5V4.5m0 0-4.5 4.5M12 4.5l4.5 4.5M4.5 19.5h15" />
+                        </svg>
+                        <span>Publish</span>
+                      </button>
                       <button type="button" class="danger" role="menuitem" @click="requestArchivePage(page)">
                         <svg aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 7h12m-9 0V5.5A1.5 1.5 0 0 1 10.5 4h3A1.5 1.5 0 0 1 15 5.5V7m-7 0 .75 12A2 2 0 0 0 10.75 21h2.5a2 2 0 0 0 2-2L16 7M10 11v6m4-6v6" />
                         </svg>
-                        <span>Archive</span>
+                        <span>{{ page.status === "published" ? "Archive" : "Delete" }}</span>
                       </button>
                     </div>
                   </div>
@@ -451,6 +457,15 @@
           </section>
 
           <section class="builder-section">
+            <h3>Refund Policy</h3>
+            <label class="builder-toggle">
+              <input v-model="builder.refund_policy.enabled" type="checkbox" />
+              <span>Show refund policy</span>
+            </label>
+            <small>Refund policy copy comes from the selected offer.</small>
+          </section>
+
+          <section class="builder-section">
             <header class="builder-section-title">
               <h3>Content Blurbs</h3>
               <button class="secondary-action compact" type="button" @click="addBlurb">+ Add Blurb</button>
@@ -537,6 +552,9 @@
           <button class="primary-action" type="button" :disabled="saving" @click="saveBuilderPage">
             {{ saving ? "Saving..." : "Save Page" }}
           </button>
+          <button class="primary-action publish-action" type="button" :disabled="saving" @click="publishBuilderPage">
+            {{ saving ? "Publishing..." : "Publish" }}
+          </button>
         </footer>
       </article>
 
@@ -617,11 +635,20 @@
               <p>{{ item.answer }}</p>
             </details>
           </div>
+          <details v-if="builder.refund_policy.enabled && previewRefundPolicy" class="preview-refund-policy">
+            <summary>{{ previewRefundPolicy.short_label || "Refund policy" }}</summary>
+            <div>
+              <h2>Refund Policy</h2>
+              <p v-if="previewRefundAppliesTo">Applies to: {{ previewRefundAppliesTo }}</p>
+              <p v-if="previewRefundPolicy.full_policy">{{ previewRefundPolicy.full_policy }}</p>
+              <p v-if="previewRefundReturnNote">{{ previewRefundReturnNote }}</p>
+            </div>
+          </details>
           <div class="preview-legal">
-            <a href="#">Terms of Service</a>
-            <a href="#">Privacy Policy</a>
-            <a href="#">Refund Policy</a>
-            <span>© 2026 All rights reserved.</span>
+            <a :href="defaultLegalLinks.terms_url">Terms of Service</a>
+            <a :href="defaultLegalLinks.privacy_url">Privacy Policy</a>
+            <a :href="defaultLegalLinks.refund_url">Refund Policy</a>
+            <span>{{ defaultFooterCopyright }}</span>
           </div>
           <button type="button" class="preview-cta">
             {{ previewCtaLabel }}
@@ -645,11 +672,16 @@
     <div v-if="pendingArchivePage" class="modal-backdrop" @click.self="pendingArchivePage = null">
       <section class="modal-card confirm-card" role="dialog" aria-modal="true" aria-labelledby="confirmPageArchiveTitle">
         <header class="confirm-icon danger">×</header>
-        <h2 id="confirmPageArchiveTitle">Archive page?</h2>
-        <p>Archive "{{ pendingArchivePage.name || "this landing page" }}"?</p>
+        <h2 id="confirmPageArchiveTitle">{{ pendingArchivePage.status === "published" ? "Archive page?" : "Delete page?" }}</h2>
+        <p>
+          {{ pendingArchivePage.status === "published" ? "Archive" : "Delete" }}
+          "{{ pendingArchivePage.name || "this landing page" }}"?
+        </p>
         <div class="confirm-actions">
           <button type="button" class="secondary-action" @click="pendingArchivePage = null">Cancel</button>
-          <button type="button" class="primary-action" :disabled="saving" @click="archivePage">Archive</button>
+          <button type="button" class="primary-action" :disabled="saving" @click="removePage">
+            {{ pendingArchivePage.status === "published" ? "Archive" : "Delete" }}
+          </button>
         </div>
       </section>
     </div>
@@ -696,6 +728,14 @@ const blurbImageErrors = reactive({});
 const form = reactive(defaultWizardForm());
 const builder = reactive(defaultBuilderForm());
 const defaultFaviconUrl = "https://images.juniorbay.com/icon/favicon.png";
+const defaultLegalLinks = Object.freeze({
+  terms_url: "#terms",
+  privacy_url: "#privacy",
+  refund_url: "#refund-policy",
+});
+const currentYear = new Date().getFullYear();
+const defaultFooterCopyright = `© ${currentYear} All rights reserved.`;
+const defaultFooterCopyrightTemplate = "© {{current_year}} All rights reserved.";
 
 const universalBundlePresets = [
   { value: "clean-slate", label: "Clean Slate" },
@@ -726,6 +766,9 @@ const previewHeroImage = computed(() => heroMediaList.value[0] || offerImage(bui
 const visibleTrustBadges = computed(() => builder.trust_badges.badges.filter((badge) => badge.label));
 const visibleBlurbs = computed(() => builder.blurbs.filter((block) => block.title || block.text || block.image_url));
 const visibleFaqs = computed(() => builder.faq.filter((item) => item.question && item.answer));
+const previewRefundPolicy = computed(() => builderOffer.value?.refund_policy || builderOfferProducts.value[0]?.refund_policy || null);
+const previewRefundAppliesTo = computed(() => previewPrices.value.map((price) => price.label).filter(Boolean).join(", "));
+const previewRefundReturnNote = computed(() => refundPolicyReturnNote(previewRefundPolicy.value));
 const previewPrices = computed(() => {
   const prices = [];
   let displayIndex = 0;
@@ -776,7 +819,7 @@ const previewCtaLabel = computed(() => {
 });
 const requiresExternalUrl = computed(() => selectedOfferIntent.value === "lead_gen" && form.experience_type === "external_redirect");
 const emptyStateText = computed(() => {
-  if (pages.value.some((page) => page.status !== "archived")) return "No landing pages match your search.";
+  if (pages.value.length) return "No landing pages match your search.";
   return pagesLoaded.value ? "No landing pages found. Create a page to get started." : 'Click "Load Pages" to view your landing pages.';
 });
 const templateOptions = computed(() => {
@@ -811,9 +854,8 @@ const leadExperienceOptions = computed(() => {
 });
 const filteredPages = computed(() => {
   const term = search.value.toLowerCase();
-  const activePages = pages.value.filter((page) => page.status !== "archived");
-  if (!term) return activePages;
-  return activePages.filter((page) => [
+  if (!term) return pages.value;
+  return pages.value.filter((page) => [
     page.name,
     page.page_id,
     page.offer_id,
@@ -916,11 +958,15 @@ function defaultBuilderForm() {
         { emoji: "↩", label: "Easy support" },
       ],
     },
+    refund_policy: {
+      enabled: true,
+    },
     blurbs: [],
     faq: [],
     google_tag_id: "",
     pixel_id: "",
     status: "draft",
+    published_at: null,
     created_at: 0,
     revision: 1,
   };
@@ -1067,6 +1113,7 @@ function populateBuilderFromPage(page) {
   const hero = sections.find((section) => section.type === "hero") || {};
   const heroMedia = sections.find((section) => section.type === "hero_media") || {};
   const trustBadges = sections.find((section) => section.type === "trust_badges") || {};
+  const refundPolicy = sections.find((section) => section.type === "refund_policy") || {};
   const content = sections.find((section) => section.type === "content_block") || {};
   const faq = sections.find((section) => section.type === "faq") || {};
   const cta = sections.find((section) => section.type === "checkout_cta") || {};
@@ -1093,6 +1140,7 @@ function populateBuilderFromPage(page) {
     google_tag_id: page.analytics?.google_tag_id || "",
     pixel_id: page.analytics?.pixel_id || "",
     status: page.status || "draft",
+    published_at: page.published_at || null,
     created_at: page.created_at || 0,
     revision: page.revision || 1,
   });
@@ -1118,6 +1166,9 @@ function populateBuilderFromPage(page) {
       ? trustBadges.badges.map((badge) => ({ ...badge }))
       : defaultBuilderForm().trust_badges.badges,
   });
+  Object.assign(builder.refund_policy, defaultBuilderForm().refund_policy, {
+    enabled: refundPolicy.enabled !== false,
+  });
 }
 
 function buildBuilderPageDocument() {
@@ -1133,7 +1184,7 @@ function buildBuilderPageDocument() {
     page_id: builder.page_id,
     name: builder.name || `${offer?.name || "Offer"} Landing Page`,
     status: builder.status || "draft",
-    published_at: null,
+    published_at: builder.published_at || null,
     route: {
       slug: slugify(builder.slug || offer?.slug || builder.name || builder.page_id),
     },
@@ -1162,6 +1213,7 @@ function buildBuilderPageDocument() {
       google_tag_id: builder.google_tag_id,
       pixel_id: builder.pixel_id,
     },
+    legal: legalLinks(),
     sections: builderSections(intent),
     revision: builder.revision || 1,
     created_at: createdAt,
@@ -1247,15 +1299,29 @@ function builderSections(intent) {
       url: intent === "lead_gen" ? builder.action_url : undefined,
     },
     {
+      id: "refund-policy",
+      type: "refund_policy",
+      enabled: builder.refund_policy.enabled !== false,
+      heading: "Refund Policy",
+    },
+    {
       id: "legal-footer",
       type: "legal_footer",
-      copyright: "Junior Bay",
+      copyright: defaultFooterCopyrightTemplate,
     },
   );
   return sections;
 }
 
 async function saveBuilderPage() {
+  return saveBuilderPageWithStatus();
+}
+
+async function publishBuilderPage() {
+  return saveBuilderPageWithStatus("published");
+}
+
+async function saveBuilderPageWithStatus(statusOverride = "") {
   error.value = "";
   message.value = "";
   if (!builderPageDocument.value) {
@@ -1268,12 +1334,15 @@ async function saveBuilderPage() {
   }
   saving.value = true;
   try {
-    const body = await apiRequest("/pages", { method: "POST", body: builderPageDocument.value });
-    const saved = body.page || builderPageDocument.value;
+    const document = applyPageStatus(builderPageDocument.value, statusOverride);
+    const body = await apiRequest("/pages", { method: "POST", body: document });
+    const saved = body.page || document;
     pages.value = [saved, ...pages.value.filter((page) => page.page_id !== saved.page_id)];
     pagesLoaded.value = true;
-    message.value = `${saved.name} was saved.`;
+    message.value = statusOverride === "published" ? `${saved.name} was published.` : `${saved.name} was saved.`;
     builderExistingPageId.value = saved.page_id;
+    builder.status = saved.status || builder.status;
+    builder.published_at = saved.published_at || builder.published_at;
   } catch (err) {
     error.value = err.message || "Failed to save landing page.";
   } finally {
@@ -1315,6 +1384,7 @@ function buildPageDocument() {
       } : undefined,
     },
     post_checkout: intent === "transaction" ? postCheckoutBlock() : undefined,
+    legal: legalLinks(),
     sections: pageSections(intent, offer, leadAction),
     revision: 1,
     created_at: now,
@@ -1356,9 +1426,15 @@ function pageSections(intent, offer, leadAction) {
         label: offer.presentation?.cta_label || "Continue to Checkout",
       },
       {
+        id: "refund-policy",
+        type: "refund_policy",
+        enabled: true,
+        heading: "Refund Policy",
+      },
+      {
         id: "legal-footer",
         type: "legal_footer",
-        copyright: "Junior Bay",
+        copyright: defaultFooterCopyrightTemplate,
       },
     ];
   }
@@ -1425,6 +1501,23 @@ function compareLandingPagePrices(left, right) {
   if (left.quantity && !right.quantity) return -1;
   if (!left.quantity && right.quantity) return 1;
   return left.display_index - right.display_index;
+}
+
+function legalLinks() {
+  return { ...defaultLegalLinks };
+}
+
+function refundPolicyReturnNote(policy) {
+  if (!policy) return "";
+  if (policy.return_note) return policy.return_note;
+  const method = String(policy.return_method || "").toLowerCase();
+  if (method.includes("no return") || method.includes("customer keeps") || method.includes("no_return")) {
+    return "This item doesn't need to be returned. The customer may keep the item and dispose of it in a responsible way. The seller may still grant a refund.";
+  }
+  if (method.includes("return_required") || method.includes("return required")) {
+    return "The customer must return the item according to the seller's return instructions before the refund is completed.";
+  }
+  return "";
 }
 
 function selectPreviewPrice(priceId) {
@@ -1631,28 +1724,60 @@ function requestArchivePage(page) {
   pendingArchivePage.value = page;
 }
 
-async function archivePage() {
-  if (!pendingArchivePage.value) return;
-  const page = pendingArchivePage.value;
-  const archivedPage = {
-    ...page,
-    status: "archived",
-    updated_at: Math.floor(Date.now() / 1000),
-  };
+async function publishPage(page) {
+  openMenuId.value = "";
+  const publishedPage = applyPageStatus(page, "published");
   saving.value = true;
   error.value = "";
   message.value = "";
   try {
-    const body = await apiRequest("/pages", { method: "POST", body: archivedPage });
-    const saved = body.page || archivedPage;
+    const body = await apiRequest("/pages", { method: "POST", body: publishedPage });
+    const saved = body.page || publishedPage;
     pages.value = pages.value.map((item) => item.page_id === saved.page_id ? saved : item);
-    pendingArchivePage.value = null;
-    message.value = `${saved.name || "Landing page"} was archived.`;
+    message.value = `${saved.name || "Landing page"} was published.`;
   } catch (err) {
-    error.value = err.message || "Failed to archive landing page.";
+    error.value = err.message || "Failed to publish landing page.";
   } finally {
     saving.value = false;
   }
+}
+
+async function removePage() {
+  if (!pendingArchivePage.value) return;
+  const page = pendingArchivePage.value;
+  saving.value = true;
+  error.value = "";
+  message.value = "";
+  try {
+    if (page.status === "published") {
+      const archivedPage = applyPageStatus(page, "archived");
+      const body = await apiRequest("/pages", { method: "POST", body: archivedPage });
+      const saved = body.page || archivedPage;
+      pages.value = pages.value.map((item) => item.page_id === saved.page_id ? saved : item);
+      message.value = `${saved.name || "Landing page"} was archived.`;
+    } else {
+      await apiRequest(`/pages/${encodeURIComponent(page.page_id)}`, { method: "DELETE" });
+      pages.value = pages.value.filter((item) => item.page_id !== page.page_id);
+      message.value = `${page.name || "Landing page"} was deleted.`;
+    }
+    pendingArchivePage.value = null;
+  } catch (err) {
+    error.value = err.message || "Failed to remove landing page.";
+  } finally {
+    saving.value = false;
+  }
+}
+
+function applyPageStatus(page, statusOverride = "") {
+  if (!statusOverride) return { ...page };
+  const now = Math.floor(Date.now() / 1000);
+  return {
+    ...page,
+    status: statusOverride,
+    published_at: statusOverride === "published" ? (page.published_at || now) : page.published_at,
+    archived_at: statusOverride === "archived" ? now : page.archived_at,
+    updated_at: now,
+  };
 }
 
 function offerImage(offer) {

@@ -799,7 +799,7 @@ def validate_page_document(document: dict[str, Any]) -> None:
     require_string(document, "name")
     require_string(document, "offer_id")
     if document.get("status") is not None:
-        require_enum(document, "status", {"draft", "preview", "published", "archived"})
+        require_enum(document, "status", {"draft", "published", "archived"})
     optional_non_negative_int(document, "revision")
 
     route = document.get("route")
@@ -899,6 +899,7 @@ def validate_page_document(document: dict[str, Any]) -> None:
             if section.get("offer_id") != document.get("offer_id"):
                 raise DocumentValidationError("Offer price selector offer_id must match page offer_id.")
         elif section_type == "refund_policy":
+            optional_bool(section, "enabled", "Refund policy enabled")
             optional_string(section, "heading", "Refund policy heading")
         elif section_type == "faq":
             items = optional_limited_object_list(section, "items", 10, "FAQ items")

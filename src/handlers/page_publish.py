@@ -6,7 +6,7 @@ from typing import Any
 from boto3.dynamodb.types import TypeDeserializer
 
 from stripe_link.repositories.documents import offers_repository, products_repository
-from stripe_link.runtime.publishing import publish_page_document
+from stripe_link.runtime.publishing import delete_page_artifacts, publish_page_document
 
 
 logger = logging.getLogger(__name__)
@@ -39,9 +39,12 @@ def normalize_dynamodb_value(value: Any) -> Any:
 
 
 def should_publish_record(record: dict[str, Any]) -> bool:
-    if record.get("eventName") not in {"INSERT", "MODIFY"}:
+    if record.get("eventName") not in {"INSERT", "MODIFY", "REMOVE"}:
         return False
-    image = ((record.get("dynamodb") or {}).get("NewImage") or {})
+    image = (
+        ((record.get("dynamodb") or {}).get("NewImage") or {})
+        or ((record.get("dynamodb") or {}).get("OldImage") or {})
+    )
     return bool(image)
 
 
@@ -63,11 +66,20 @@ def handler(event, context, *, offers_repo=None, products_repo=None, s3_client=N
             continue
 
         try:
-            page = deserialize_image(record["dynamodb"]["NewImage"])
+            image = (record.get("dynamodb") or {}).get("NewImage") or (record.get("dynamodb") or {}).get("OldImage")
+            page = deserialize_image(image)
             if page.get("document_type") != "page":
                 continue
-            if page.get("status") == "archived":
-                logger.info("Skipping archived page %s", page.get("page_id"))
+            if record.get("eventName") == "REMOVE" or page.get("status") == "archived":
+                result = delete_page_artifacts(
+                    page,
+                    s3_client=s3_client,
+                    pages_bucket=os.environ.get("PAGES_BUCKET", ""),
+                    preview_bucket=os.environ.get("PAGES_PREVIEW_BUCKET", ""),
+                    cloudfront_client=cloudfront_client,
+                    pages_distribution_id=os.environ.get("PAGES_DISTRIBUTION_ID", ""),
+                )
+                logger.info("Deleted page artifacts: %s", result)
                 continue
 
             result = publish_page_document(

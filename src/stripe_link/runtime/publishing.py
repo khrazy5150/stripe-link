@@ -1,4 +1,5 @@
 import json
+import time
 from typing import Any
 
 from stripe_link.domain.documents import validate_offer_document, validate_page_document, validate_product_document
@@ -174,6 +175,47 @@ def publish_page_document(
     }
 
 
+def delete_page_artifacts(
+    page: dict[str, Any],
+    *,
+    s3_client: Any,
+    pages_bucket: str,
+    preview_bucket: str,
+    cloudfront_client: Any | None = None,
+    pages_distribution_id: str = "",
+) -> dict[str, Any]:
+    page = strip_document_keys(page)
+    tenant_id = str(page.get("tenant_id") or "").strip()
+    page_id = str(page.get("page_id") or "").strip()
+    slug = page_slug(page)
+    if not tenant_id or not page_id:
+        raise PublishError("Page tenant_id and page_id are required for artifact deletion.")
+    paths = artifact_paths(tenant_id, page_id, slug)
+    targets = [
+        {"kind": "preview", "bucket": preview_bucket, "key": paths["preview"]},
+        {"kind": "page", "bucket": pages_bucket, "key": paths["published"]},
+    ]
+    deleted = []
+    for target in targets:
+        if not target.get("bucket"):
+            continue
+        s3_client.delete_object(Bucket=target["bucket"], Key=target["key"])
+        deleted.append(target)
+
+    invalidation = invalidate_path(
+        paths["published"],
+        cloudfront_client=cloudfront_client,
+        distribution_id=pages_distribution_id,
+        caller_reference=f"{page_id}:delete:{int(time.time() * 1000)}",
+    )
+    return {
+        "page_id": page_id,
+        "tenant_id": tenant_id,
+        "artifacts": deleted,
+        "invalidation": invalidation,
+    }
+
+
 def invalidate_published_artifact(
     artifacts: list[dict[str, str]],
     *,
@@ -188,7 +230,25 @@ def invalidate_published_artifact(
     if not published:
         return None
 
-    path = cloudfront_path(published["key"])
+    return invalidate_path(
+        published["key"],
+        cloudfront_client=cloudfront_client,
+        distribution_id=distribution_id,
+        caller_reference=f"{page_id}:publish:{int(time.time() * 1000)}",
+    )
+
+
+def invalidate_path(
+    key: str,
+    *,
+    cloudfront_client: Any | None,
+    distribution_id: str,
+    caller_reference: str,
+) -> dict[str, Any] | None:
+    if not cloudfront_client or not distribution_id:
+        return None
+
+    path = cloudfront_path(key)
     response = cloudfront_client.create_invalidation(
         DistributionId=distribution_id,
         InvalidationBatch={
@@ -196,7 +256,7 @@ def invalidate_published_artifact(
                 "Quantity": 1,
                 "Items": [path],
             },
-            "CallerReference": page_id,
+            "CallerReference": caller_reference,
         },
     )
     return {

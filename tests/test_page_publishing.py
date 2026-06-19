@@ -9,7 +9,7 @@ from boto3.dynamodb.types import TypeSerializer
 
 from handlers.page_publish import handler
 from stripe_link.runtime.artifacts import artifact_paths
-from stripe_link.runtime.publishing import PublishError, artifact_targets, publish_page_document
+from stripe_link.runtime.publishing import PublishError, artifact_targets, delete_page_artifacts, publish_page_document
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -44,9 +44,14 @@ class FakeRepository:
 class FakeS3Client:
     def __init__(self):
         self.puts = []
+        self.deletes = []
 
     def put_object(self, **kwargs):
         self.puts.append(kwargs)
+        return {}
+
+    def delete_object(self, **kwargs):
+        self.deletes.append(kwargs)
         return {}
 
 
@@ -113,6 +118,25 @@ class PagePublishingTests(unittest.TestCase):
 
         self.assertEqual([target["kind"] for target in targets], ["preview", "published"])
         self.assertEqual(targets[1]["key"], "page_simple_coffee/index.html")
+
+    def test_delete_page_artifacts_removes_preview_and_public_keys(self):
+        result = delete_page_artifacts(
+            self.page,
+            s3_client=self.s3,
+            pages_bucket="pages",
+            preview_bucket="preview",
+            cloudfront_client=self.cloudfront,
+            pages_distribution_id="DIST123",
+        )
+
+        self.assertEqual(
+            [(item["Bucket"], item["Key"]) for item in self.s3.deletes],
+            [
+                ("preview", "preview/tenant_demo/page_simple_coffee/index.html"),
+                ("pages", "page_simple_coffee/index.html"),
+            ],
+        )
+        self.assertEqual(result["invalidation"]["paths"], ["/page_simple_coffee/index.html"])
 
     def test_publish_page_document_writes_preview_and_test_html(self):
         result = publish_page_document(
@@ -285,16 +309,12 @@ class PagePublishingTests(unittest.TestCase):
         ])
         self.assertEqual(result["invalidation"]["paths"], ["/page_simple_coffee/index.html"])
         self.assertEqual(self.cloudfront.invalidations[0]["DistributionId"], "DIST123")
-        self.assertEqual(
-            self.cloudfront.invalidations[0]["InvalidationBatch"],
-            {
-                "Paths": {
-                    "Quantity": 1,
-                    "Items": ["/page_simple_coffee/index.html"],
-                },
-                "CallerReference": "page_simple_coffee",
-            },
-        )
+        invalidation_batch = self.cloudfront.invalidations[0]["InvalidationBatch"]
+        self.assertEqual(invalidation_batch["Paths"], {
+            "Quantity": 1,
+            "Items": ["/page_simple_coffee/index.html"],
+        })
+        self.assertTrue(invalidation_batch["CallerReference"].startswith("page_simple_coffee:publish:"))
 
     def test_publish_page_document_rejects_missing_offer(self):
         missing_offers = FakeRepository("offer_id", [])

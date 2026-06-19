@@ -160,6 +160,48 @@ class PageRenderTests(unittest.TestCase):
         self.assertIn("--sl-brand:#0ea5e9", html)
         self.assertIn("--sl-cta-to:#0284c7", html)
 
+    def test_refund_policy_prefers_offer_policy(self):
+        page = load_fixture("page-universal-bundle.json")
+        offer = load_fixture("offer-universal-bundle.json")
+        product = load_fixture("product-universal-bundle.json")
+        offer["refund_policy"] = {
+            "source": "offer",
+            "short_label": "Offer refund guarantee",
+            "return_method": "return_required",
+            "full_policy": "Offer-specific refund copy applies to this bundle.",
+        }
+
+        html = render_page(page, offer, {product["product_id"]: product})
+
+        self.assertIn("<summary>Offer refund guarantee</summary>", html)
+        self.assertIn("Offer-specific refund copy applies to this bundle.", html)
+        self.assertIn("The customer must return the item", html)
+        self.assertNotIn("Physical items may be returned within 30 days", html)
+
+    def test_refund_policy_section_can_be_disabled(self):
+        page = load_fixture("page-universal-bundle.json")
+        offer = load_fixture("offer-universal-bundle.json")
+        product = load_fixture("product-universal-bundle.json")
+        refund_section = next(section for section in page["sections"] if section["type"] == "refund_policy")
+        refund_section["enabled"] = False
+
+        html = render_page(page, offer, {product["product_id"]: product})
+
+        self.assertNotIn("class=\"sl-refund-policy\"", html)
+        self.assertNotIn("data-section-type=\"refund_policy\"", html)
+
+    def test_legal_footer_current_year_token_is_filled_by_javascript(self):
+        page = load_fixture("page-universal-bundle.json")
+        offer = load_fixture("offer-universal-bundle.json")
+        product = load_fixture("product-universal-bundle.json")
+        legal_footer = next(section for section in page["sections"] if section["type"] == "legal_footer")
+        legal_footer["copyright"] = "© {{current_year}} All rights reserved."
+
+        html = render_page(page, offer, {product["product_id"]: product})
+
+        self.assertIn("© <span data-sl-current-year></span> All rights reserved.", html)
+        self.assertIn("new Date().getFullYear()", html)
+
     def test_universal_bundle_element_tokens_override_preset(self):
         page = load_fixture("page-universal-bundle.json")
         offer = load_fixture("offer-universal-bundle.json")

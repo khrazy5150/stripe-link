@@ -58,6 +58,33 @@ class PageHandlerTests(unittest.TestCase):
         self.assertEqual(response["statusCode"], 400)
         self.assertEqual(json.loads(response["body"])["error"], "invalid_page")
 
+    def test_delete_draft_page_removes_document(self):
+        self.repository.put(self.page)
+
+        response = handler({
+            "httpMethod": "DELETE",
+            "pathParameters": {"page_id": "page_creatine_standard"},
+            "queryStringParameters": {"tenant_id": "tenant_demo"},
+        }, None, repository=self.repository)
+
+        self.assertEqual(response["statusCode"], 200)
+        self.assertTrue(json.loads(response["body"])["deleted"])
+        self.assertIsNone(self.repository.get("tenant_demo", "page_creatine_standard"))
+
+    def test_delete_published_page_requires_archive(self):
+        page = dict(self.page)
+        page["status"] = "published"
+        self.repository.put(page)
+
+        response = handler({
+            "httpMethod": "DELETE",
+            "pathParameters": {"page_id": "page_creatine_standard"},
+            "queryStringParameters": {"tenant_id": "tenant_demo"},
+        }, None, repository=self.repository)
+
+        self.assertEqual(response["statusCode"], 409)
+        self.assertEqual(json.loads(response["body"])["error"], "published_page_requires_archive")
+
 
 if __name__ == "__main__":
     unittest.main()

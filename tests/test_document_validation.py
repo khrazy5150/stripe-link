@@ -354,11 +354,12 @@ class DocumentValidationTests(unittest.TestCase):
         with self.assertRaisesRegex(DocumentValidationError, "must match page offer_id"):
             validate_page_document(page)
 
-    def test_page_accepts_preview_status(self):
+    def test_page_rejects_preview_status(self):
         page = copy.deepcopy(self.page)
         page["status"] = "preview"
 
-        validate_page_document(page)
+        with self.assertRaisesRegex(DocumentValidationError, "status"):
+            validate_page_document(page)
 
     def test_page_accepts_inline_post_checkout_routing(self):
         page = copy.deepcopy(self.page)

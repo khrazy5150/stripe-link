@@ -3155,8 +3155,8 @@ button:disabled {
 }
 
 .page-status-badge.archived {
-  background: #f3f4f6;
-  color: #6b7280;
+  background: #fee2e2;
+  color: #b91c1c;
 }
 
 .page-source-badge {
@@ -3172,6 +3172,11 @@ button:disabled {
 .theme-live .page-status-badge.published {
   background: rgba(16, 185, 129, 0.18);
   color: #86efac;
+}
+
+.theme-live .page-status-badge.archived {
+  background: rgba(239, 68, 68, 0.2);
+  color: #fca5a5;
 }
 
 .theme-live .page-source-badge {
@@ -4042,7 +4047,8 @@ button:disabled {
   text-align: left;
 }
 
-.preview-faqs {
+.preview-faqs,
+.preview-refund-policy {
   width: min(100%, 52rem);
   justify-self: center;
 }
@@ -4075,6 +4081,64 @@ button:disabled {
   font-size: 1.4rem;
   line-height: 1.6;
   padding: 0 2rem 1.6rem;
+  text-align: left;
+}
+
+.preview-refund-policy {
+  border: 1px solid var(--preview-faq-border);
+  border-radius: 1.6rem;
+  background: var(--preview-faq-bg);
+  color: var(--preview-faq-summary);
+  overflow: hidden;
+}
+
+.preview-refund-policy summary {
+  cursor: pointer;
+  list-style: none;
+  position: relative;
+  color: var(--preview-faq-summary);
+  font-size: 1.4rem;
+  font-weight: 800;
+  line-height: 1.35;
+  padding: 1.6rem 4.4rem 1.6rem 2rem;
+}
+
+.preview-refund-policy summary::-webkit-details-marker {
+  display: none;
+}
+
+.preview-refund-policy summary::after {
+  content: "+";
+  position: absolute;
+  right: 2rem;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--preview-faq-summary);
+  font-size: 2rem;
+  line-height: 1;
+}
+
+.preview-refund-policy[open] summary::after {
+  content: "-";
+}
+
+.preview-refund-policy div {
+  display: grid;
+  gap: 1rem;
+  padding: 0 2rem 1.8rem;
+}
+
+.preview-refund-policy h2 {
+  margin: 0;
+  color: var(--preview-text);
+  font-size: 1.8rem;
+  line-height: 1.2;
+}
+
+.preview-refund-policy p {
+  color: var(--preview-faq-text);
+  font-size: 1.4rem;
+  line-height: 1.6;
   text-align: left;
 }
 

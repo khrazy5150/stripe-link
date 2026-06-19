@@ -24,6 +24,7 @@ FONT_FALLBACK_STACKS = {
     "monospace": "monospace",
 }
 DEFAULT_FAVICON_URL = "https://images.juniorbay.com/icon/favicon.png"
+CURRENT_YEAR_TOKEN = "{{current_year}}"
 LANDING_PAGE_PRICE_CONTEXTS = {"standard", "sale", "flash_sale", "flash sale"}
 
 UNIVERSAL_BUNDLE_THEME_PRESETS = {
@@ -806,8 +807,10 @@ def render_refund_policy(
     offer: dict[str, Any],
     products_by_id: dict[str, dict[str, Any]],
 ) -> str:
+    if section.get("enabled") is False:
+        return ""
     product = first_offer_product(offer, products_by_id)
-    policy = product.get("refund_policy") or {}
+    policy = offer.get("refund_policy") or product.get("refund_policy") or {}
     if not policy:
         return ""
 
@@ -935,9 +938,15 @@ def render_legal_footer(legal: dict[str, Any], section: dict[str, Any] | None = 
     return "\n".join([
         "    <footer class=\"sl-legal\" data-section-type=\"legal_footer\">",
         *rendered_links,
-        f"      <span>{escape(str(copyright_text))}</span>" if copyright_text else "",
+        f"      <span>{render_copyright_text(str(copyright_text))}</span>" if copyright_text else "",
         "    </footer>",
     ])
+
+
+def render_copyright_text(value: str) -> str:
+    if CURRENT_YEAR_TOKEN not in value:
+        return escape(value)
+    return "<span data-sl-current-year></span>".join(escape(part) for part in value.split(CURRENT_YEAR_TOKEN))
 
 
 def render_analytics_tags(analytics: dict[str, Any]) -> str:
@@ -963,12 +972,19 @@ def render_favicon_tags(seo: dict[str, Any]) -> str:
 def render_page_interactions_script(page: dict[str, Any]) -> str:
     has_countdown = any(section.get("type") == "countdown_timer" for section in page.get("sections", []))
     has_price_selector = any(section.get("type") == "offer_price_selector" for section in page.get("sections", []))
-    if not has_countdown and not has_price_selector:
+    has_current_year = any(
+        section.get("type") == "legal_footer" and CURRENT_YEAR_TOKEN in str(section.get("copyright") or "")
+        for section in page.get("sections", [])
+    )
+    if not has_countdown and not has_price_selector and not has_current_year:
         return ""
     page_id = escape(str(page.get("page_id") or "page"))
     return "\n".join([
         "  <script>",
         "    document.addEventListener('DOMContentLoaded', () => {",
+        "      document.querySelectorAll('[data-sl-current-year]').forEach((node) => {",
+        "        node.textContent = String(new Date().getFullYear());",
+        "      });",
         f"      const pageId = \"{page_id}\";",
         "      const money = (amount, currency) => {",
         "        const cents = Number(amount || 0);",

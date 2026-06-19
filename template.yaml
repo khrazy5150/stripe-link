@@ -545,6 +545,12 @@ Resources:
             RestApiId: !Ref RestApi
             Path: /pages/{page_id}
             Method: GET
+        PagesDelete:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /pages/{page_id}
+            Method: DELETE
 
   PageRenderFunction:
     Type: AWS::Serverless::Function

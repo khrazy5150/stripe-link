@@ -15,6 +15,11 @@ def handler(event, context, repository=None):
         if page_id:
             return get_page(event, repository, page_id)
         return list_pages(event, repository)
+    if method == "DELETE":
+        page_id = path_params(event).get("page_id")
+        if not page_id:
+            return error_response("page_id is required.", code="missing_page")
+        return delete_page(event, repository, page_id)
     return error_response(f"Unsupported method '{method}'.", status_code=405, code="method_not_allowed")
 
 
@@ -43,3 +48,20 @@ def list_pages(event, repository):
     if not tenant_id:
         return error_response("tenant_id is required.", code="missing_tenant")
     return json_response({"pages": repository.list_for_tenant(tenant_id)})
+
+
+def delete_page(event, repository, page_id: str):
+    tenant_id = tenant_id_from_event(event)
+    if not tenant_id:
+        return error_response("tenant_id is required.", code="missing_tenant")
+    page = repository.get(tenant_id, page_id)
+    if not page:
+        return error_response("Page not found.", status_code=404, code="not_found")
+    if page.get("status") == "published":
+        return error_response(
+            "Published pages must be archived before deletion.",
+            status_code=409,
+            code="published_page_requires_archive",
+        )
+    deleted = repository.delete(tenant_id, page_id)
+    return json_response({"deleted": True, "page": deleted})
