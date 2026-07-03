@@ -3,6 +3,7 @@ from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 from stripe_link.common import error_response, json_response, query_params, tenant_id_from_event
+from stripe_link.domain.billing_status import BillingStatusError, assert_billing_in_good_standing
 from stripe_link.domain.fees import build_fee_context
 from stripe_link.domain.pricing import (
     PricingError,
@@ -69,6 +70,8 @@ def handler(
     opener = opener or urlopen
 
     try:
+        assert_billing_in_good_standing(tenant_repo.get(tenant_id, tenant_id))
+
         offer = offers_repo.get(tenant_id, offer_id)
         if not offer:
             return error_response("Offer not found.", status_code=404, code="not_found")
@@ -121,6 +124,8 @@ def handler(
         if not checkout_url:
             return error_response("Stripe did not return a checkout URL.", status_code=502, code="checkout_error")
         return redirect_response(checkout_url)
+    except BillingStatusError as exc:
+        return error_response(str(exc), status_code=402, code="tenant_billing_hold")
     except PricingError as exc:
         return error_response(str(exc), code="checkout_error")
     except Exception as exc:

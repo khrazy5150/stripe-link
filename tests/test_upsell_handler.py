@@ -172,6 +172,25 @@ class ProcessUpsellTests(unittest.TestCase):
             opener=opener,
         )
 
+    def test_process_upsell_blocks_tenant_with_suspended_billing_status(self):
+        suspended_tenant_repo = FakeRepository("tenant_id", [{"tenant_id": "tenant_demo", "billing_status": "suspended"}])
+
+        response = handler(
+            self.base_event(),
+            None,
+            offers_repo=FakeRepository("offer_id", [self.offer]),
+            products_repo=FakeRepository("product_id", [self.product]),
+            stripe_repo=FakeStripeKeysRepository(),
+            tenant_repo=suspended_tenant_repo,
+            orders_repo=self.orders_repo,
+            customers_repo=self.customers_repo,
+            secret_cipher=FakeCipher(),
+            opener=FakeStripeOpener({}),
+        )
+
+        self.assertEqual(response["statusCode"], 402)
+        self.assertEqual(json.loads(response["body"])["error"], "tenant_billing_hold")
+
     def test_process_upsell_charges_saved_payment_method_and_records_order(self):
         opener = FakeStripeOpener({
             ("GET", "/v1/customers/cus_123"): {

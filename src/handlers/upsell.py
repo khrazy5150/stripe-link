@@ -6,6 +6,7 @@ from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 from stripe_link.common import error_response, json_response, parse_json_body, query_params, tenant_id_from_event
+from stripe_link.domain.billing_status import BillingStatusError, assert_billing_in_good_standing
 from stripe_link.domain.fees import build_fee_context
 from stripe_link.domain.pricing import PricingError, load_offer_products, resolve_offer
 from stripe_link.kms_secrets import KmsSecretCipher
@@ -174,6 +175,8 @@ def process_upsell(
         return error_response("customer_id is required.", code="missing_customer")
 
     try:
+        assert_billing_in_good_standing(tenant_repo.get(tenant_id, tenant_id))
+
         offer = offers_repo.get(tenant_id, offer_id)
         if not offer:
             return error_response("Offer not found.", status_code=404, code="not_found")
@@ -202,6 +205,8 @@ def process_upsell(
             stripe_account=stripe_account,
             opener=opener,
         )
+    except BillingStatusError as exc:
+        return error_response(str(exc), status_code=402, code="tenant_billing_hold")
     except PricingError as exc:
         return error_response(str(exc), code="upsell_error")
     except UpsellError as exc:

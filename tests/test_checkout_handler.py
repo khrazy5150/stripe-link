@@ -117,6 +117,32 @@ class CheckoutHandlerTests(unittest.TestCase):
         self.requests.append(request)
         return FakeResponse()
 
+    def test_checkout_blocks_tenant_with_past_due_billing_status(self):
+        response = handler(
+            {
+                "httpMethod": "GET",
+                "queryStringParameters": {
+                    "clientID": "tenant_demo",
+                    "offer": "offer_simple_coffee",
+                    "product_id": "prod_simple_coffee",
+                    "price_id": "price_simple_coffee",
+                    "success_url": "https://pages.example.com/thanks",
+                    "cancel_url": "https://pages.example.com/buy",
+                },
+            },
+            None,
+            offers_repo=FakeRepository("offer_id", [self.offer]),
+            products_repo=FakeRepository("product_id", [self.product]),
+            stripe_repo=FakeStripeKeysRepository(),
+            tenant_repo=FakeRepository("tenant_id", [{"tenant_id": "tenant_demo", "billing_status": "past_due"}]),
+            secret_cipher=FakeCipher(),
+            opener=self.opener,
+        )
+
+        self.assertEqual(response["statusCode"], 402)
+        self.assertEqual(json.loads(response["body"])["error"], "tenant_billing_hold")
+        self.assertEqual(self.requests, [])
+
     def test_checkout_redirects_to_stripe_session_for_local_offer_price(self):
         response = handler(
             {
