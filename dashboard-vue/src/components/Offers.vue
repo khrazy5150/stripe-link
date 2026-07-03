@@ -527,6 +527,7 @@ const deletingOffer = ref(false);
 const form = reactive(defaultOfferForm());
 const itemConfigs = reactive({});
 const priceImageInputs = new Map();
+let productsLoadPromise = null;
 
 const activeProducts = computed(() => productStore.products.filter((product) => product.status !== "archived" && product.active !== false));
 const productsById = computed(() => new Map(productStore.products.map((product) => [productId(product), product])));
@@ -722,13 +723,13 @@ async function loadOffers() {
   offersError.value = "";
   offersMessage.value = "";
   try {
-    await ensureProductsLoaded();
     const body = await apiRequest("/offers");
     offers.value = (Array.isArray(body.offers) ? body.offers : []).map(offerCardModel);
     offersLoaded.value = true;
     offersMessage.value = offers.value.length
       ? `${offers.value.length} offer${offers.value.length === 1 ? "" : "s"} loaded.`
       : "";
+    ensureProductsLoaded().catch(() => {});
   } catch (error) {
     offersError.value = error.message || "Failed to load offers.";
   } finally {
@@ -749,9 +750,16 @@ function closeOfferDetails() {
   selectedOfferDetails.value = null;
 }
 
-function editOffer(offer) {
+async function editOffer(offer) {
   selectedOfferDetails.value = null;
   openOfferMenuId.value = "";
+  offersError.value = "";
+  try {
+    await ensureProductsLoaded();
+  } catch (error) {
+    offersError.value = error.message || "Failed to load products for this offer.";
+    return;
+  }
   openOfferModal(offer);
 }
 
@@ -780,8 +788,24 @@ async function deleteOffer() {
 }
 
 async function ensureProductsLoaded() {
-  if (!productStore.loaded && !productStore.loading) {
-    await productStore.load();
+  if (productStore.loaded) return;
+  if (productsLoadPromise) return productsLoadPromise;
+  if (productStore.loading) {
+    await waitForProductsLoaded();
+    return;
+  }
+  productsLoadPromise = productStore.load().finally(() => {
+    productsLoadPromise = null;
+  });
+  return productsLoadPromise;
+}
+
+async function waitForProductsLoaded() {
+  while (productStore.loading) {
+    await sleep(50);
+  }
+  if (!productStore.loaded && productStore.error) {
+    throw new Error(productStore.error);
   }
 }
 

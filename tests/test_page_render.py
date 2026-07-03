@@ -160,6 +160,64 @@ class PageRenderTests(unittest.TestCase):
         self.assertIn("--sl-brand:#0ea5e9", html)
         self.assertIn("--sl-cta-to:#0284c7", html)
 
+    def test_trust_badges_skip_disabled_slots(self):
+        page = load_fixture("page-universal-bundle.json")
+        offer = load_fixture("offer-universal-bundle.json")
+        product = load_fixture("product-universal-bundle.json")
+        page = copy.deepcopy(page)
+        trust_badges = next(section for section in page["sections"] if section["type"] == "trust_badges")
+        trust_badges["badges"] = [
+            {"enabled": False, "emoji": "x", "label": "Hidden badge"},
+            {"enabled": True, "emoji": "✓", "label": "Visible badge"},
+        ]
+
+        html = render_page(page, offer, {product["product_id"]: product})
+
+        self.assertIn("Visible badge", html)
+        self.assertNotIn("Hidden badge", html)
+
+    def test_headlines_use_chicago_title_case_and_markup(self):
+        page = load_fixture("page-universal-bundle.json")
+        offer = load_fixture("offer-universal-bundle.json")
+        product = load_fixture("product-universal-bundle.json")
+        page = copy.deepcopy(page)
+        page["theme"]["tokens"] = {
+            "highlight_text": "#123456",
+            "highlight_bg": "#abcdef",
+            "highlight_bg_text": "#111111",
+        }
+        headline = next(section for section in page["sections"] if section["type"] == "headline")
+        headline["text"] = "make **more money** with ^^stripe link^^ today"
+        content = next(section for section in page["sections"] if section["type"] == "content_block")
+        content["blocks"][0]["title"] = "answers for **busy tenants**"
+        faq = next(section for section in page["sections"] if section["type"] == "faq")
+        faq["items"][0]["question"] = "what is ^^inside the box^^?"
+
+        html = render_page(page, offer, {product["product_id"]: product})
+
+        self.assertIn("--sl-highlight-text:#123456", html)
+        self.assertIn("--sl-highlight-bg:#abcdef", html)
+        self.assertIn("--sl-highlight-bg-text:#111111", html)
+        self.assertIn("Make <span class=\"sl-mark-text\">More Money</span> With <span class=\"sl-mark-bg\">Stripe Link</span> Today", html)
+        self.assertIn("Answers for <span class=\"sl-mark-text\">Busy Tenants</span>", html)
+        self.assertIn("What Is <span class=\"sl-mark-bg\">Inside the Box</span>?", html)
+
+    def test_universal_bundle_markup_uses_default_highlight_colors(self):
+        page = load_fixture("page-universal-bundle.json")
+        offer = load_fixture("offer-universal-bundle.json")
+        product = load_fixture("product-universal-bundle.json")
+        page = copy.deepcopy(page)
+        headline = next(section for section in page["sections"] if section["type"] == "headline")
+        headline["text"] = "Create **Recurring Revenue** With ^^Payment Links^^"
+
+        html = render_page(page, offer, {product["product_id"]: product})
+
+        self.assertIn("--sl-highlight-text:#f97316", html)
+        self.assertIn("--sl-highlight-bg:#facc15", html)
+        self.assertIn("--sl-highlight-bg-text:#1a1a1a", html)
+        self.assertIn("<span class=\"sl-mark-text\">Recurring Revenue</span>", html)
+        self.assertIn("<span class=\"sl-mark-bg\">Payment Links</span>", html)
+
     def test_refund_policy_prefers_offer_policy(self):
         page = load_fixture("page-universal-bundle.json")
         offer = load_fixture("offer-universal-bundle.json")

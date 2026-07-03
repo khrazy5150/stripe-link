@@ -198,13 +198,13 @@ function handleKeydown(event) {
 }
 
 onMounted(() => {
-  document.addEventListener("click", handleDocumentClick);
+  document.addEventListener("mousedown", handleDocumentClick);
   document.addEventListener("keydown", handleKeydown);
   loadAppConfigApiBase(activeEnvironment.value).then(reloadActiveView).catch(() => {});
 });
 
 onBeforeUnmount(() => {
-  document.removeEventListener("click", handleDocumentClick);
+  document.removeEventListener("mousedown", handleDocumentClick);
   document.removeEventListener("keydown", handleKeydown);
 });
 

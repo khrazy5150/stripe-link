@@ -417,7 +417,7 @@
             <h3>Hero</h3>
             <label class="offer-field">
               <span>Hero Headline</span>
-              <input v-model.trim="builder.headline" type="text" />
+              <input :value="builder.headline" type="text" @input="updateHeadlineInput((value) => { builder.headline = value; }, $event)" />
             </label>
             <label class="offer-field">
               <span>Hero Subheadline</span>
@@ -450,14 +450,21 @@
 
           <section class="builder-section">
             <h3>Trust Badges</h3>
-            <label class="builder-toggle">
-              <input v-model="builder.trust_badges.enabled" type="checkbox" />
-              <span>Show trust badges</span>
-            </label>
             <div class="builder-repeat-list">
-              <div v-for="(badge, index) in builder.trust_badges.badges" :key="`badge-${index}`" class="builder-repeat-row compact">
-                <input v-model.trim="badge.emoji" type="text" aria-label="Badge icon" />
-                <input v-model.trim="badge.label" type="text" aria-label="Badge label" />
+              <div v-for="(badge, index) in builder.trust_badges.badges" :key="`badge-${index}`" class="builder-repeat-row builder-trust-badge-row">
+                <label class="builder-switch" @click.stop>
+                  <input v-model="badge.enabled" type="checkbox" :aria-label="`Enable trust badge ${index + 1}`" />
+                  <span aria-hidden="true"></span>
+                </label>
+                <strong>Trust Badge {{ index + 1 }}</strong>
+                <button
+                  type="button"
+                  class="badge-icon-picker-btn"
+                  :disabled="!badge.enabled"
+                  :aria-label="`Change icon for trust badge ${index + 1}`"
+                  @click.stop="showIconPicker(badge.emoji, (emoji) => { badge.emoji = emoji; }, 'Choose an Icon')"
+                >{{ badge.emoji || '—' }}</button>
+                <input v-model.trim="badge.label" type="text" :disabled="!badge.enabled" aria-label="Badge label" />
               </div>
             </div>
           </section>
@@ -478,7 +485,7 @@
             </header>
             <div class="builder-repeat-list">
               <div v-for="(block, index) in builder.blurbs" :key="`blurb-${index}`" class="builder-repeat-row">
-                <input v-model.trim="block.title" type="text" placeholder="Title" />
+                <input :value="block.title" type="text" placeholder="Title" @input="updateHeadlineInput((value) => { block.title = value; }, $event)" />
                 <textarea v-model.trim="block.text" rows="2" placeholder="Text"></textarea>
                 <div class="selectable-price-image-controls" :class="{ 'has-image-preview': block.image_url }">
                   <div v-if="block.image_url" class="selectable-price-image-preview">
@@ -526,7 +533,7 @@
             </header>
             <div class="builder-repeat-list">
               <div v-for="(item, index) in builder.faq" :key="`faq-${index}`" class="builder-repeat-row">
-                <input v-model.trim="item.question" type="text" placeholder="Question" />
+                <input :value="item.question" type="text" placeholder="Question" @input="updateHeadlineInput((value) => { item.question = value; }, $event)" />
                 <textarea v-model.trim="item.answer" rows="2" placeholder="Answer"></textarea>
                 <button class="danger-action compact" type="button" @click="removeFaq(index)">Remove</button>
               </div>
@@ -598,9 +605,9 @@
             <span>{{ builderOffer?.name || builder.name || "Junior Bay" }}</span>
           </div>
           <img v-if="previewHeroImage" class="preview-hero-image" :src="previewHeroImage" alt="" />
-          <h1>{{ builder.headline || builder.name }}</h1>
+          <h1 v-html="headlineHtml(builder.headline || builder.name)"></h1>
           <p>{{ builder.subheadline }}</p>
-          <div v-if="builder.trust_badges.enabled" class="preview-badges">
+          <div v-if="visibleTrustBadges.length" class="preview-badges">
             <span v-for="badge in visibleTrustBadges" :key="badge.label">{{ badge.emoji }} {{ badge.label }}</span>
           </div>
           <div v-if="builderIntent === 'transaction'" class="preview-prices">
@@ -634,7 +641,7 @@
           <div v-if="builder.blurbs.length" class="preview-blurbs">
             <article v-for="block in visibleBlurbs" :key="block.title">
               <span class="preview-blurb-copy">
-                <strong>{{ block.title }}</strong>
+                <strong v-html="headlineHtml(block.title)"></strong>
                 <p>{{ block.text }}</p>
               </span>
               <img v-if="block.image_url" :src="block.image_url" alt="" />
@@ -643,7 +650,7 @@
           <div v-if="visibleFaqs.length" class="preview-faqs">
             <h2>FAQ</h2>
             <details v-for="item in visibleFaqs" :key="item.question" open>
-              <summary>{{ item.question }}</summary>
+              <summary v-html="headlineHtml(item.question)"></summary>
               <p>{{ item.answer }}</p>
             </details>
           </div>
@@ -704,6 +711,7 @@
 import { computed, reactive, ref, watch } from "vue";
 import { apiRequest, getApiEnvironment, getPagesBaseUrl, getPreviewPagesBaseUrl, getTenantId } from "../api/client";
 import { formatMoney } from "../stores/products";
+import { showIconPicker } from "../icon-picker.js";
 
 const pages = ref([]);
 const offers = ref([]);
@@ -763,6 +771,32 @@ const universalBundlePresets = [
   { value: "cyber-pulse", label: "Cyber Pulse" },
 ];
 const landingPagePriceContexts = new Set(["standard", "sale", "flash_sale", "flash sale"]);
+const headlineLowercaseWords = new Set([
+  "a",
+  "an",
+  "the",
+  "and",
+  "but",
+  "or",
+  "nor",
+  "for",
+  "yet",
+  "so",
+  "as",
+  "at",
+  "by",
+  "in",
+  "of",
+  "off",
+  "on",
+  "per",
+  "to",
+  "up",
+  "via",
+  "if",
+  "vs",
+  "vs.",
+]);
 
 const productsById = computed(() => new Map(products.value.map((product) => [productId(product), product])));
 const selectedOffer = computed(() => offers.value.find((offer) => offer.offer_id === form.offer_id) || null);
@@ -776,7 +810,7 @@ const builderLeadAction = computed(() => builderOfferProducts.value.find((produc
 const builderProductImages = computed(() => [...new Set(builderOfferProducts.value.flatMap((product) => product.images || []).filter(Boolean))]);
 const heroMediaList = computed(() => parseLines(builder.hero_media_text));
 const previewHeroImage = computed(() => heroMediaList.value[0] || offerImage(builderOffer.value) || "");
-const visibleTrustBadges = computed(() => builder.trust_badges.badges.filter((badge) => badge.label));
+const visibleTrustBadges = computed(() => builder.trust_badges.badges.filter((badge) => badge.enabled !== false && badge.label));
 const visibleBlurbs = computed(() => builder.blurbs.filter((block) => block.title || block.text || block.image_url));
 const visibleFaqs = computed(() => builder.faq.filter((item) => item.question && item.answer));
 const previewRefundPolicy = computed(() => builderOffer.value?.refund_policy || builderOfferProducts.value[0]?.refund_policy || null);
@@ -967,9 +1001,9 @@ function defaultBuilderForm() {
     trust_badges: {
       enabled: true,
       badges: [
-        { emoji: "✓", label: "Secure checkout" },
-        { emoji: "★", label: "Customer favorite" },
-        { emoji: "↩", label: "Easy support" },
+        { enabled: true, emoji: "🚀", label: "Fast Checkout" },
+        { enabled: true, emoji: "✅", label: "Satisfaction Guarantee" },
+        { enabled: true, emoji: "🇺🇸", label: "Ships from USA" },
       ],
     },
     refund_policy: {
@@ -1060,6 +1094,78 @@ function backToList() {
   builderExistingPageId.value = "";
   builderOriginalPage.value = null;
   builderFormHidden.value = false;
+}
+
+function updateHeadlineInput(assign, event) {
+  const input = event.target;
+  const original = input.value;
+  const formatted = formatHeadline(original);
+  const cursorFromEnd = original.length - input.selectionStart;
+  assign(formatted);
+  if (formatted !== original) {
+    input.value = formatted;
+    const nextPosition = Math.max(0, formatted.length - cursorFromEnd);
+    requestAnimationFrame(() => input.setSelectionRange(nextPosition, nextPosition));
+  }
+}
+
+function formatHeadline(text) {
+  if (!text || typeof text !== "string") return text || "";
+  const parts = text.split(/(\s+)/);
+  const wordIndexes = parts.map((part, index) => (part && !/\s+/.test(part) ? index : -1)).filter((index) => index >= 0);
+  if (!wordIndexes.length) return text;
+  const firstWord = wordIndexes[0];
+  const lastWord = wordIndexes[wordIndexes.length - 1];
+  return parts.map((part, index) => {
+    if (!part || /\s+/.test(part)) return part;
+    return formatHeadlineWord(part, index === firstWord, index === lastWord);
+  }).join("");
+}
+
+function formatHeadlineWord(word, isFirst, isLast) {
+  if (word.length >= 2 && word === word.toUpperCase() && /^[A-Z]+$/.test(word)) return word;
+  const leading = word.match(/^[^a-zA-Z]*/)?.[0] || "";
+  const trailing = word.match(/[^a-zA-Z]*$/)?.[0] || "";
+  const endIndex = trailing ? word.length - trailing.length : word.length;
+  const core = word.slice(leading.length, endIndex);
+  if (!core) return word;
+  if (core.length >= 2 && core === core.toUpperCase() && /^[A-Z]+$/.test(core)) return word;
+  const lowerCore = core.toLowerCase();
+  if (lowerCore === "s" && /[\d']$/.test(leading)) return `${leading}${core}${trailing}`;
+  if (!isFirst && !isLast && headlineLowercaseWords.has(lowerCore)) return `${leading}${lowerCore}${trailing}`;
+  return `${leading}${capitalizeHeadlineCore(lowerCore)}${trailing}`;
+}
+
+function capitalizeHeadlineCore(word) {
+  if (!word) return word;
+  if (word.includes("-")) return word.split("-").map(capitalizeHeadlineCore).join("-");
+  return word.charAt(0).toUpperCase() + word.slice(1);
+}
+
+function headlineHtml(text) {
+  return processHeadlineMarkup(formatHeadline(text || ""));
+}
+
+function processHeadlineMarkup(text) {
+  return String(text || "").split(/(\*\*.*?\*\*|\^\^.*?\^\^)/g).map((part) => {
+    if (!part) return "";
+    if (part.startsWith("**") && part.endsWith("**") && part.length >= 4) {
+      return `<span class="preview-mark-text">${escapeHtml(part.slice(2, -2))}</span>`;
+    }
+    if (part.startsWith("^^") && part.endsWith("^^") && part.length >= 4) {
+      return `<span class="preview-mark-bg">${escapeHtml(part.slice(2, -2))}</span>`;
+    }
+    return escapeHtml(part);
+  }).join("");
+}
+
+function escapeHtml(value) {
+  return String(value || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
 }
 
 function selectOffer(offer) {
@@ -1181,7 +1287,10 @@ function populateBuilderFromPage(page) {
   Object.assign(builder.trust_badges, defaultBuilderForm().trust_badges, {
     enabled: trustBadges.enabled !== false,
     badges: Array.isArray(trustBadges.badges) && trustBadges.badges.length
-      ? trustBadges.badges.map((badge) => ({ ...badge }))
+      ? trustBadges.badges.map((badge) => ({
+        ...badge,
+        enabled: trustBadges.enabled !== false && badge.enabled !== false,
+      }))
       : defaultBuilderForm().trust_badges.badges,
   });
   Object.assign(builder.refund_policy, defaultBuilderForm().refund_policy, {
@@ -1266,7 +1375,7 @@ function builderSections(intent) {
       id: "brand",
       type: "brand_label",
       enabled: true,
-      label: builderOffer.value?.name || "Junior Bay",
+      label: formatHeadline(builderOffer.value?.name || "Junior Bay"),
     },
     {
       id: "hero-media",
@@ -1276,23 +1385,30 @@ function builderSections(intent) {
     {
       id: "hero",
       type: "hero",
-      headline: builder.headline || builder.name || "Landing Page",
+      headline: formatHeadline(builder.headline || builder.name || "Landing Page"),
       subheadline: builder.subheadline || "Continue when you are ready.",
     },
   );
-  if (builder.trust_badges.enabled && visibleTrustBadges.value.length) {
+  if (visibleTrustBadges.value.length) {
     sections.push({
       id: "trust-badges",
       type: "trust_badges",
       enabled: true,
-      badges: visibleTrustBadges.value,
+      badges: visibleTrustBadges.value.map((badge) => ({
+        enabled: true,
+        emoji: badge.emoji,
+        label: badge.label,
+      })),
     });
   }
   if (visibleBlurbs.value.length) {
     sections.push({
       id: "content",
       type: "content_block",
-      blocks: visibleBlurbs.value,
+      blocks: visibleBlurbs.value.map((block) => ({
+        ...block,
+        title: formatHeadline(block.title || ""),
+      })),
     });
   }
   if (intent === "transaction") {
@@ -1306,7 +1422,9 @@ function builderSections(intent) {
     sections.push({
       id: "faq",
       type: "faq",
-      items: builder.faq.filter((item) => item.question && item.answer),
+      items: builder.faq
+        .filter((item) => item.question && item.answer)
+        .map((item) => ({ ...item, question: formatHeadline(item.question || "") })),
     });
   }
   sections.push(
@@ -1456,12 +1574,12 @@ function pageSections(intent, offer, leadAction) {
         id: "brand",
         type: "brand_label",
         enabled: true,
-        label: "Junior Bay",
+        label: formatHeadline("Junior Bay"),
       },
       {
         id: "hero",
         type: "hero",
-        headline: offer.presentation?.headline || offer.name || "Complete your order",
+        headline: formatHeadline(offer.presentation?.headline || offer.name || "Complete your order"),
         subheadline: offer.presentation?.subheadline || "Choose your option and continue to secure checkout.",
       },
       {
@@ -1492,7 +1610,7 @@ function pageSections(intent, offer, leadAction) {
     {
       id: "hero",
       type: "hero",
-      headline: offerHeadline(offer) || "Get started",
+      headline: formatHeadline(offerHeadline(offer) || "Get started"),
       subheadline: offerDescription(offer) || leadAction?.description || "Complete the next step to continue.",
     },
     {
@@ -1500,7 +1618,7 @@ function pageSections(intent, offer, leadAction) {
       type: "content_block",
       blocks: [
         {
-          title: direct ? experienceLabel.value : "Lead capture",
+          title: formatHeadline(direct ? experienceLabel.value : "Lead capture"),
           text: leadActionText(leadAction),
         },
       ],
@@ -1743,7 +1861,7 @@ function onBuilderOfferChange() {
   builder.offerName = offer.name || "";
   if (!builder.name) builder.name = `${offer.name || "Offer"} Landing Page`;
   if (!builder.slug) builder.slug = slugify(offer.slug || offer.name || builder.page_id);
-  builder.headline = offerHeadline(offer) || builder.headline || builder.name;
+  builder.headline = formatHeadline(offerHeadline(offer) || builder.headline || builder.name);
   builder.subheadline = offerDescription(offer) || builder.subheadline || "Choose your option and continue.";
   if (!builder.seo_title) builder.seo_title = builder.name;
   if (!builder.seo_description) builder.seo_description = offerDescription(offer) || offer.name || "";

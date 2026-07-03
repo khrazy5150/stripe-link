@@ -27,6 +27,32 @@ FONT_FALLBACK_STACKS = {
 DEFAULT_FAVICON_URL = "https://images.juniorbay.com/icon/favicon.png"
 CURRENT_YEAR_TOKEN = "{{current_year}}"
 LANDING_PAGE_PRICE_CONTEXTS = {"standard", "sale", "flash_sale", "flash sale"}
+HEADLINE_LOWERCASE_WORDS = {
+    "a",
+    "an",
+    "the",
+    "and",
+    "but",
+    "or",
+    "nor",
+    "for",
+    "yet",
+    "so",
+    "as",
+    "at",
+    "by",
+    "in",
+    "of",
+    "off",
+    "on",
+    "per",
+    "to",
+    "up",
+    "via",
+    "if",
+    "vs",
+    "vs.",
+}
 
 UNIVERSAL_BUNDLE_THEME_PRESETS = {
     "techno-green": {
@@ -248,6 +274,8 @@ SIMPLE_TEMPLATE_STYLES = [
     "    body{font-size:1.6rem;padding:3.2rem;display:flex;justify-content:center;background:var(--sl-background)}",
     "    main{width:min(96rem,100%);display:grid;gap:2.4rem}",
     "    .sl-hero h1{font-family:var(--sl-font-heading);font-size:4rem;line-height:1.05;margin:0 0 1rem}",
+    "    .sl-mark-text{color:var(--sl-highlight-text)}",
+    "    .sl-mark-bg{background:var(--sl-highlight-bg);color:var(--sl-highlight-bg-text);padding:0.1em 0.3em;border-radius:0.4rem}",
     "    .sl-hero p{font-size:1.8rem;color:#4b5563;margin:0}",
     "    .sl-price-options{display:grid;grid-template-columns:repeat(auto-fit,minmax(15rem,1fr));gap:1.2rem}",
     "    .sl-price-option{border:1px solid #d1d5db;border-radius:0.8rem;padding:1.6rem;background:#fff}",
@@ -278,6 +306,8 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     "    .sl-brand-label h1{font-family:var(--sl-font-accent);font-size:1.3rem;font-weight:700;letter-spacing:0.08em;line-height:1.2;text-transform:uppercase;color:var(--sl-brand-label-text)}",
     "    .sl-seo-title{text-align:center}",
     "    .sl-seo-title h1{font-family:var(--sl-font-heading);font-size:clamp(2.4rem,5vw,3.2rem);line-height:1.2;color:var(--sl-headline)}",
+    "    .sl-mark-text{color:var(--sl-highlight-text)}",
+    "    .sl-mark-bg{background:var(--sl-highlight-bg);color:var(--sl-highlight-bg-text);padding:0.1em 0.3em;border-radius:0.4rem}",
     "    .sl-headline{text-align:center;padding:0.8rem 0 0.4rem}",
     "    .sl-headline h2{font-family:var(--sl-font-heading);font-size:clamp(2.4rem,5vw,3.2rem);line-height:1.2;font-weight:800;color:var(--sl-headline);letter-spacing:0}",
     "    .sl-subheadline{text-align:center}",
@@ -373,6 +403,9 @@ def theme_tokens(page: dict[str, Any]) -> dict[str, str]:
     tokens.setdefault("countdown_text", "#ffffff")
     tokens.setdefault("brand_label_text", tokens["muted"])
     tokens.setdefault("brand_dot", tokens["brand"])
+    tokens.setdefault("highlight_text", "#f97316")
+    tokens.setdefault("highlight_bg", "#facc15")
+    tokens.setdefault("highlight_bg_text", "#1a1a1a")
     tokens.setdefault("subheadline_text", tokens["muted"])
     tokens.setdefault("hero_bg", tokens["card"])
     tokens.setdefault("hero_border", tokens["border"])
@@ -456,9 +489,74 @@ def render_template_styles(page: dict[str, Any]) -> list[str]:
     text = escape(theme_color(page, "text", "#111827"))
     accent = escape(theme_color(page, "accent", "#16a34a"))
     return [
-        f"    :root{{--sl-theme-background:{background};--sl-theme-text:{text};--sl-theme-accent:{accent};{font_vars(page)}}}",
+        f"    :root{{--sl-theme-background:{background};--sl-theme-text:{text};--sl-theme-accent:{accent};--sl-highlight-text:{accent};--sl-highlight-bg:{accent};--sl-highlight-bg-text:#ffffff;{font_vars(page)}}}",
         *styles,
     ]
+
+
+def format_headline(text: str) -> str:
+    if not text:
+        return ""
+
+    words = re.split(r"(\s+)", str(text))
+    word_indexes = [index for index, word in enumerate(words) if word and not word.isspace()]
+    if not word_indexes:
+        return str(text)
+    first_word = word_indexes[0]
+    last_word = word_indexes[-1]
+
+    formatted: list[str] = []
+    for index, word in enumerate(words):
+        if not word or word.isspace():
+            formatted.append(word)
+            continue
+        formatted.append(format_headline_word(word, index == first_word, index == last_word))
+    return "".join(formatted)
+
+
+def format_headline_word(word: str, is_first: bool, is_last: bool) -> str:
+    if len(word) >= 2 and word == word.upper() and re.fullmatch(r"[A-Z]+", word):
+        return word
+
+    leading = re.match(r"^[^A-Za-z]*", word).group(0)  # type: ignore[union-attr]
+    trailing_match = re.search(r"[^A-Za-z]*$", word)
+    trailing = trailing_match.group(0) if trailing_match else ""
+    end_index = len(word) - len(trailing) if trailing else len(word)
+    core = word[len(leading):end_index]
+    if not core:
+        return word
+    if len(core) >= 2 and core == core.upper() and re.fullmatch(r"[A-Z]+", core):
+        return word
+
+    lower_core = core.lower()
+    if lower_core == "s" and re.search(r"[\d']$", leading):
+        return f"{leading}{core}{trailing}"
+    if not is_first and not is_last and lower_core in HEADLINE_LOWERCASE_WORDS:
+        return f"{leading}{lower_core}{trailing}"
+    return f"{leading}{capitalize_headline_core(lower_core)}{trailing}"
+
+
+def capitalize_headline_core(word: str) -> str:
+    if "-" in word:
+        return "-".join(capitalize_headline_core(part) for part in word.split("-"))
+    return word[:1].upper() + word[1:] if word else word
+
+
+def render_headline_markup(text: Any) -> str:
+    raw = format_headline(str(text or ""))
+    tokens = re.split(r"(\*\*.*?\*\*|\^\^.*?\^\^)", raw)
+    rendered: list[str] = []
+    for token in tokens:
+        if not token:
+            continue
+        if token.startswith("**") and token.endswith("**") and len(token) >= 4:
+            rendered.append(f"<span class=\"sl-mark-text\">{escape(token[2:-2])}</span>")
+            continue
+        if token.startswith("^^") and token.endswith("^^") and len(token) >= 4:
+            rendered.append(f"<span class=\"sl-mark-bg\">{escape(token[2:-2])}</span>")
+            continue
+        rendered.append(escape(token))
+    return "".join(rendered)
 
 
 def require_offer_products(offer: dict[str, Any], products_by_id: dict[str, dict[str, Any]]) -> None:
@@ -595,7 +693,7 @@ def render_seo_title(
     products_by_id: dict[str, dict[str, Any]],
 ) -> str:
     product_name = next((product.get("name") for product in products_by_id.values() if product.get("name")), "")
-    title = escape(str(section.get("label") or (page.get("seo") or {}).get("title") or product_name or page.get("name") or ""))
+    title = render_headline_markup(section.get("label") or (page.get("seo") or {}).get("title") or product_name or page.get("name") or "")
     return "\n".join([
         f"    <section class=\"sl-seo-title\" data-section-id=\"{escape(str(section.get('id', 'seo-title')))}\" data-section-type=\"seo_title\">",
         f"      <h1>{title}</h1>",
@@ -606,7 +704,7 @@ def render_seo_title(
 def render_brand_label(section: dict[str, Any], page: dict[str, Any]) -> str:
     if section.get("enabled") is False:
         return ""
-    label = escape(str(section.get("label") or (page.get("seo") or {}).get("title") or page.get("name") or ""))
+    label = render_headline_markup(section.get("label") or (page.get("seo") or {}).get("title") or page.get("name") or "")
     return "\n".join([
         f"    <section class=\"sl-brand-label\" data-section-id=\"{escape(str(section.get('id', 'brand-label')))}\" data-section-type=\"brand_label\">",
         f"      <h1>{label}</h1>",
@@ -662,7 +760,7 @@ def offer_uses_grouped_item_media(offer: dict[str, Any]) -> bool:
 def render_headline(section: dict[str, Any]) -> str:
     return "\n".join([
         f"    <section class=\"sl-headline\" data-section-id=\"{escape(str(section.get('id', 'headline')))}\" data-section-type=\"headline\">",
-        f"      <h2>{escape(str(section.get('text') or ''))}</h2>",
+        f"      <h2>{render_headline_markup(section.get('text') or '')}</h2>",
         "    </section>",
     ])
 
@@ -678,7 +776,11 @@ def render_subheadline(section: dict[str, Any]) -> str:
 def render_trust_badges(section: dict[str, Any]) -> str:
     if section.get("enabled") is False:
         return ""
-    badges = section.get("badges") or []
+    badges = [
+        badge
+        for badge in section.get("badges") or []
+        if badge.get("enabled") is not False and badge.get("label")
+    ]
     rendered = [
         "\n".join([
             "      <div class=\"sl-trust-badge\">",
@@ -698,7 +800,7 @@ def render_trust_badges(section: dict[str, Any]) -> str:
 
 
 def render_hero(section: dict[str, Any]) -> str:
-    headline = escape(str(section.get("headline") or ""))
+    headline = render_headline_markup(section.get("headline") or "")
     subheadline = escape(str(section.get("subheadline") or ""))
     return "\n".join([
         f"    <section class=\"sl-hero\" data-section-id=\"{escape(str(section.get('id', 'hero')))}\" data-section-type=\"hero\">",
@@ -870,7 +972,7 @@ def render_faq(section: dict[str, Any]) -> str:
     rendered = [
         "\n".join([
             "      <details>",
-            f"        <summary>{escape(str(item.get('question') or ''))}</summary>",
+            f"        <summary>{render_headline_markup(item.get('question') or '')}</summary>",
             f"        <p>{escape(str(item.get('answer') or ''))}</p>",
             "      </details>",
         ])
@@ -893,7 +995,7 @@ def render_content_blocks(section: dict[str, Any]) -> str:
         rendered.append("\n".join([
             "      <article class=\"sl-content-block\">",
             "        <div>",
-            f"          <h3>{escape(str(block.get('title') or ''))}</h3>",
+            f"          <h3>{render_headline_markup(block.get('title') or '')}</h3>",
             f"          <p>{escape(str(block.get('text') or ''))}</p>",
             "        </div>",
             f"        <img src=\"{escape(str(image_url))}\" alt=\"{escape(str(block.get('title') or 'Content image'))}\">" if image_url else "",
