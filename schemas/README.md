@@ -88,3 +88,42 @@ Important separation between Site and Page:
 - Sites live in the `jb-sites-*` DynamoDB table with `PK: TENANT#{tenant_id}` and `SK: SITE#{site_id}`.
 - Runtime routing should use a CloudFront KeyValueStore or equivalent edge-readable route manifest, not live DynamoDB reads at the edge. The deployed route map should resolve the incoming hostname and environment to a Site, then match the request path to the correct `page_id` within that Site's slug-keyed page map. Standalone pages without a Site continue to resolve by short URL lookup as today.
 - `Site.routing` may be empty for unpublished drafts. Once any publication field is set, `kvs_key`, `published_revision`, and `published_at` must be stored together.
+
+## Funnel vs. Offer/Checkout separation
+
+`Funnel.schema.json` and `Page.post_checkout` own **sequencing**: what page or step comes next after checkout, an accepted upsell, or a declined offer. `Offer.schema.json` and the checkout/upsell handlers own **pricing and payment**: what gets charged, at what fee, to which Stripe account. These are deliberately separate concerns and must stay decoupled:
+
+- A Funnel step never contains pricing, product, or Stripe fields. It only references a `page_id` (what to show) and the next `step_id`/`thank_you` (where to go on accept/decline). This applies equally to a detached `Funnel` document and to a Page's inline `post_checkout.funnel_steps` (Phase 1) — both reuse the same `$defs/funnelStep` shape.
+- An Offer or checkout/upsell handler never contains routing fields. `handlers/checkout.py` and `handlers/upsell.py` accept an `offer_id` and charge it; they have no opinion about what happens next. `metadata.funnel_id` on a checkout/upsell charge is purely an attribution stamp for reporting, not a live routing reference.
+- A downsell is not a new concept: it is just another Offer document (`context`/price `context: "downsell"`), charged through the same one-click upsell endpoint as any other post-purchase offer. The *decision* to present it, because the customer declined the upsell, is a Funnel routing decision (`step.on_decline`), never logic embedded in the checkout/offer code.
+- This means a Funnel can be redesigned, reordered, A/B tested, or replaced without ever touching Offer, Price, Product, or checkout/upsell code, and vice versa: fee or pricing changes never require touching Funnel or Page routing.
+
+## Funnel actions (planned, not yet implemented)
+
+Beyond routing to the next page, a funnel step frequently needs to trigger a side effect that has nothing to do with routing or payment: send a follow-up email, tag a customer, add or remove them from a marketing list, notify an external system, and so on. These are **Funnel Actions** — a third, independent concern alongside routing (Funnel/Page) and payment (Offer/Checkout), not an extension of either. This section documents the intended shape so that future Funnel schema, dashboard, and action-runner work builds toward one consistent design instead of three independently invented ones.
+
+Design principles for when this is implemented:
+
+- **Declarative and versioned**, matching the checkout action pattern already anticipated in the refactoring plan (`create_checkout_session`, `apply_upsell`, `select_price`, `track_event`): every action is `{ "type": "<action_type>", ...params }`, dispatched by a small handler registry (`action_type -> handler`), never a hard-coded if/elif chain. Adding a new action type means adding one handler function and registering it — no changes to the Funnel schema structure, checkout code, or existing action types required.
+- **Attached to funnel step triggers, not to routing itself.** `on_accept`/`on_decline` stay plain next-step references (pure routing, unchanged). A sibling `actions` array on the step declares side effects per trigger, for example:
+  ```json
+  {
+    "step_id": "upsell_1",
+    "page_id": "page_upsell_1",
+    "on_accept": "thank_you",
+    "on_decline": "downsell_1",
+    "actions": [
+      { "trigger": "on_decline", "type": "add_to_list", "list_id": "list_declined_upsell" },
+      { "trigger": "on_accept", "type": "send_email", "template_id": "upsell_receipt" }
+    ]
+  }
+  ```
+  `trigger` may be `on_enter` (step displayed), `on_accept`, or `on_decline`. Routing (next `step_id`) and side effects (`actions`) can change independently of each other.
+- **Executed out-of-band from checkout/payment.** Actions are dispatched by a dedicated action-runner (subscribed to funnel-transition events), never by `handlers/checkout.py` or `handlers/upsell.py`, so a slow or failing email provider/list API can never block or fail a payment. This mirrors how `stripe_webhook.py` already treats order/invoice/customer/notification writes as independent, best-effort side effects of one event.
+- **Idempotent by construction.** Every dispatched action needs a stable idempotency key, for example `f"{funnel_id}:{step_id}:{trigger}:{session_id}"` — the same pattern already used for one-click upsell PaymentIntents — so retries and duplicate webhook deliveries never double-send an email or double-add a list entry.
+- **Initial action type catalog** (an illustrative starting point, not exhaustive — new types are added by registering a handler, not by editing this list):
+  - `send_email` — `{ template_id, to: "customer" | "tenant" }`
+  - `add_to_list` / `remove_from_list` — `{ list_id }`
+  - `add_tag` / `remove_tag` — `{ tag }`
+  - `notify_webhook` — `{ url, payload_template }` (a generic escape hatch for anything not yet modeled as its own type)
+- **References external resources by id, not inline config.** Action params reference other tenant-owned resources (an email template, a list/segment) by id rather than embedding template bodies or list definitions inline. Those resources (`EmailTemplate`, `List`/`Segment`) do not exist as schemas yet and should be modeled separately when this is implemented, following the same reference-by-id pattern already used for Product/Price/Offer.
