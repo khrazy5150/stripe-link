@@ -129,3 +129,19 @@ def get_platform_webhook_secret(kind: str, mode: str, env_fallback: Optional[str
     if isinstance(generic, str) and generic.strip():
         return generic.strip()
     return None
+
+
+def checkout_credentials(tenant_id: str, mode: str, stripe_keys: Dict[str, Any], secret_cipher: Any) -> tuple[str, str]:
+    """Resolve the (api_key, stripe_account) pair used to call Stripe on a tenant's behalf.
+
+    Connected tenants use the platform's own secret key scoped to their connected account
+    (direct charges); tenants without Connect use their own KMS-wrapped secret key.
+    """
+    connect_account_id = str(stripe_keys.get("connect_account_id") or "").strip()
+    if connect_account_id:
+        return get_platform_secret_key(mode), connect_account_id
+
+    secret_ref = str(stripe_keys.get("secret_key_ref") or "").strip()
+    if not secret_ref:
+        return "", ""
+    return secret_cipher.decrypt(secret_ref, tenant_id=tenant_id, mode=mode, field="secret_key_ref"), ""

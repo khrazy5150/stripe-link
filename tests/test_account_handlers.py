@@ -23,6 +23,7 @@ from handlers.shipping import handler as shipping_handler
 from handlers.stripe_connect import callback_handler, start_handler, status_handler
 from handlers.stripe_keys import handler as stripe_keys_handler
 from handlers.stripe_webhook import handler as stripe_webhook_handler
+from stripe_link.domain.fees import default_billing_config
 from stripe_link.kms_secrets import KmsSecretCipher
 from stripe_link.repositories.documents import dynamodb_safe_document
 from tests.fakes import FakeAppConfigRepository, FakeDocumentRepository, FakeSimpleRepository
@@ -568,6 +569,7 @@ class AccountHandlerTests(unittest.TestCase):
                 notifications_repo=notifications_repo,
                 webhook_secret_loader=lambda kind, mode: "whsec_stable_test",
                 now_fn=lambda: timestamp,
+                billing_config_loader=lambda: default_billing_config(),
             )
 
         response_body = json.loads(response["body"])
@@ -581,6 +583,17 @@ class AccountHandlerTests(unittest.TestCase):
         self.assertEqual(notifications_repo.documents[0]["type"], "order")
         self.assertEqual(notifications_repo.documents[0]["title"], "New order")
         self.assertEqual(notifications_repo.documents[0]["related"]["page_id"], "page_demo")
+        # Standard fee handling, "basic" tier, "physical" product_type (both metadata defaults):
+        # stripe_fee = ceil(3709 * 2.9%) + 30 = 138, platform_fee = round(3709 * 10%) = 371.
+        self.assertEqual(orders_table.items[0]["fees"], {
+            "tenant_keyed_amount": 3709,
+            "stripe_fee": 138,
+            "platform_fee": 371,
+            "net_payout": 3200,
+        })
+        self.assertEqual(invoices_repo.documents[0]["amounts"]["stripe_fee"], 138)
+        self.assertEqual(invoices_repo.documents[0]["amounts"]["platform_fee"], 371)
+        self.assertEqual(invoices_repo.documents[0]["amounts"]["net_payout"], 3200)
 
     def test_stripe_webhook_rejects_invalid_signature(self):
         body = json.dumps({"id": "evt_bad", "type": "invoice.paid"})

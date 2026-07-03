@@ -394,6 +394,14 @@ def customers_repository(table: Any | None = None) -> TenantRangeRepository:
     )
 
 
+def orders_repository(table: Any | None = None) -> TenantRangeRepository:
+    return TenantRangeRepository(
+        os.environ.get("ORDERS_TABLE", ""),
+        id_field="order_id",
+        table=table,
+    )
+
+
 def tenant_profiles_repository(table: Any | None = None) -> DynamoDocumentRepository:
     return DynamoDocumentRepository(
         os.environ.get("TENANT_PROFILES_TABLE", ""),

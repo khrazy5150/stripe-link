@@ -583,6 +583,10 @@ Resources:
             TableName: !Sub "${ProjectPrefix}-stripe-keys-dev"
         - DynamoDBReadPolicy:
             TableName: !Sub "${ProjectPrefix}-stripe-keys-prod"
+        - DynamoDBReadPolicy:
+            TableName: !Ref TenantProfilesTable
+        - S3ReadPolicy:
+            BucketName: !Ref ConfigBucket
         - Statement:
             Effect: Allow
             Action:
@@ -612,6 +616,67 @@ Resources:
           Properties:
             RestApiId: !Ref RestApi
             Path: /checkout
+            Method: OPTIONS
+
+  UpsellFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${ProjectPrefix}-upsell-api-${Environment}"
+      CodeUri: src/
+      Handler: handlers.upsell.handler
+      Description: Retrieves original checkout session details and charges one-click post-purchase upsell offers.
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref OffersTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref ProductsTable
+        - DynamoDBReadPolicy:
+            TableName: !Sub "${ProjectPrefix}-stripe-keys-dev"
+        - DynamoDBReadPolicy:
+            TableName: !Sub "${ProjectPrefix}-stripe-keys-prod"
+        - DynamoDBReadPolicy:
+            TableName: !Ref TenantProfilesTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref OrdersTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref CustomersTable
+        - S3ReadPolicy:
+            BucketName: !Ref ConfigBucket
+        - Statement:
+            Effect: Allow
+            Action:
+              - kms:Decrypt
+              - kms:DescribeKey
+            Resource: !GetAtt StripeKeysEncryptionKey.Arn
+        - Statement:
+            Effect: Allow
+            Action:
+              - secretsmanager:GetSecretValue
+            Resource: "*"
+      Events:
+        UpsellSession:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /upsell/session
+            Method: GET
+        UpsellCharge:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /upsell/charge
+            Method: POST
+        UpsellSessionOptions:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /upsell/session
+            Method: OPTIONS
+        UpsellChargeOptions:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /upsell/charge
             Method: OPTIONS
 
   PagePublishFunction:
@@ -891,6 +956,8 @@ Resources:
             TableName: !Ref InvoicesTable
         - DynamoDBCrudPolicy:
             TableName: !Ref NotificationsTable
+        - S3ReadPolicy:
+            BucketName: !Ref ConfigBucket
         - !If
           - HasStripePlatformSecret
           - Version: "2012-10-17"
@@ -1159,6 +1226,30 @@ Resources:
           Properties:
             RestApiId: !Ref RestApi
             Path: /invoices/{invoice_id}
+            Method: GET
+
+  OrdersFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${ProjectPrefix}-orders-api-${Environment}"
+      CodeUri: src/
+      Handler: handlers.orders.handler
+      Description: Read-only order history API backed by webhook-recorded orders.
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref OrdersTable
+      Events:
+        OrdersList:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /orders
+            Method: GET
+        OrdersGet:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /orders/{order_id}
             Method: GET
 
   AppConfigTable:

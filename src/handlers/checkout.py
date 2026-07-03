@@ -3,10 +3,22 @@ from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 from stripe_link.common import error_response, json_response, query_params, tenant_id_from_event
-from stripe_link.domain.pricing import PricingError, find_price, resolve_offer
+from stripe_link.domain.fees import build_fee_context
+from stripe_link.domain.pricing import (
+    PricingError,
+    find_price,
+    load_offer_products,
+    merge_resolved_offers,
+    resolve_offer,
+)
 from stripe_link.kms_secrets import KmsSecretCipher
-from stripe_link.repositories.documents import offers_repository, products_repository, stripe_keys_repository
-from stripe_link.stripe_platform_secrets import get_platform_secret_key
+from stripe_link.repositories.documents import (
+    offers_repository,
+    products_repository,
+    stripe_keys_repository,
+    tenant_profiles_repository,
+)
+from stripe_link.stripe_platform_secrets import checkout_credentials
 
 
 STRIPE_CHECKOUT_SESSIONS_URL = "https://api.stripe.com/v1/checkout/sessions"
@@ -19,8 +31,10 @@ def handler(
     offers_repo=None,
     products_repo=None,
     stripe_repo=None,
+    tenant_repo=None,
     secret_cipher=None,
     opener=None,
+    billing_config_loader=None,
 ):
     method = (event or {}).get("httpMethod", "GET").upper()
     if method == "OPTIONS":
@@ -36,6 +50,9 @@ def handler(
     page_id = str(params.get("page_id") or "").strip()
     success_url = str(params.get("success_url") or "").strip()
     cancel_url = str(params.get("cancel_url") or "").strip()
+    order_bump_offer_ids = [
+        bump_id.strip() for bump_id in str(params.get("order_bump_ids") or "").split(",") if bump_id.strip()
+    ]
 
     if not tenant_id:
         return error_response("clientID or tenant_id is required.", code="missing_tenant")
@@ -47,6 +64,7 @@ def handler(
     offers_repo = offers_repo or offers_repository()
     products_repo = products_repo or products_repository()
     stripe_repo = stripe_repo or stripe_keys_repository()
+    tenant_repo = tenant_repo or tenant_profiles_repository()
     secret_cipher = secret_cipher or KmsSecretCipher()
     opener = opener or urlopen
 
@@ -58,12 +76,29 @@ def handler(
         products_by_id = load_offer_products(tenant_id, offer, products_repo)
         selected_prices = {product_id: price_id} if product_id and price_id else {}
         resolved = resolve_offer(offer, products_by_id, selected_prices)
+
+        resolved, products_by_id = resolve_order_bumps(
+            tenant_id=tenant_id,
+            resolved=resolved,
+            products_by_id=products_by_id,
+            order_bump_offer_ids=order_bump_offer_ids,
+            offers_repo=offers_repo,
+            products_repo=products_repo,
+        )
         mode = "live" if offer.get("stripe_mode") == "live" else "test"
         stripe_keys = stripe_repo.get(tenant_id, mode=mode) or {}
         api_key, stripe_account = checkout_credentials(tenant_id, mode, stripe_keys, secret_cipher)
         if not api_key:
             return error_response(f"{mode} Stripe keys are not configured.", status_code=400, code="stripe_not_configured")
 
+        fee_context = build_fee_context(
+            tenant_id=tenant_id,
+            offer=offer,
+            products_by_id=products_by_id,
+            resolved=resolved,
+            tenant_repo=tenant_repo,
+            billing_config_loader=billing_config_loader,
+        )
         checkout_payload = build_checkout_payload(
             tenant_id=tenant_id,
             offer=offer,
@@ -72,6 +107,9 @@ def handler(
             success_url=success_url,
             cancel_url=cancel_url,
             page_id=page_id,
+            fee_context=fee_context,
+            apply_application_fee=bool(stripe_account),
+            order_bump_offer_ids=order_bump_offer_ids,
         )
         stripe_response = create_stripe_checkout_session(
             checkout_payload,
@@ -89,29 +127,44 @@ def handler(
         return error_response(str(exc), status_code=500, code="checkout_error")
 
 
-def load_offer_products(tenant_id, offer, products_repo):
-    products_by_id = {}
-    for item in offer.get("items", []):
-        product_id = str(item.get("product_id") or "")
-        product = products_repo.get(tenant_id, product_id)
-        if not product:
-            raise PricingError(f"Product '{product_id}' was not found.")
-        products_by_id[product_id] = product
-    return products_by_id
+def resolve_order_bumps(*, tenant_id, resolved, products_by_id, order_bump_offer_ids, offers_repo, products_repo):
+    """Fold optional order-bump offers into the same checkout session as extra line items.
+
+    Each order-bump offer_id references a distinct Offer document (context/price-context
+    "order_bump"), resolved the same way as any other offer so its own active/eligibility
+    checks apply. Unlike a one-click upsell, order bumps join the *initial* checkout session
+    rather than triggering a separate follow-up charge.
+    """
+    if not order_bump_offer_ids:
+        return resolved, products_by_id
+
+    merged_products_by_id = dict(products_by_id)
+    resolved_bumps = []
+    for bump_offer_id in order_bump_offer_ids:
+        bump_offer = offers_repo.get(tenant_id, bump_offer_id)
+        if not bump_offer:
+            raise PricingError(f"Order bump offer '{bump_offer_id}' was not found.")
+        bump_products_by_id = load_offer_products(tenant_id, bump_offer, products_repo)
+        bump_resolved = resolve_offer(bump_offer, bump_products_by_id)
+        resolved_bumps.append(bump_resolved)
+        merged_products_by_id.update(bump_products_by_id)
+
+    return merge_resolved_offers(resolved, resolved_bumps), merged_products_by_id
 
 
-def checkout_credentials(tenant_id, mode, stripe_keys, secret_cipher):
-    connect_account_id = str(stripe_keys.get("connect_account_id") or "").strip()
-    if connect_account_id:
-        return get_platform_secret_key(mode), connect_account_id
-
-    secret_ref = str(stripe_keys.get("secret_key_ref") or "").strip()
-    if not secret_ref:
-        return "", ""
-    return secret_cipher.decrypt(secret_ref, tenant_id=tenant_id, mode=mode, field="secret_key_ref"), ""
-
-
-def build_checkout_payload(*, tenant_id, offer, products_by_id, resolved, success_url, cancel_url, page_id=""):
+def build_checkout_payload(
+    *,
+    tenant_id,
+    offer,
+    products_by_id,
+    resolved,
+    success_url,
+    cancel_url,
+    page_id="",
+    fee_context=None,
+    apply_application_fee=False,
+    order_bump_offer_ids=None,
+):
     checkout = offer.get("checkout") or {}
     mode = checkout.get("mode") or "payment"
     payload = {
@@ -163,8 +216,20 @@ def build_checkout_payload(*, tenant_id, offer, products_by_id, resolved, succes
     payload["metadata[product_name]"] = first_product_name
     payload["metadata[page_id]"] = str(page_id or "")
     payload["metadata[funnel_id]"] = ""
-    payload["metadata[order_bump_ids]"] = ""
+    payload["metadata[order_bump_ids]"] = ",".join(order_bump_offer_ids or [])
     payload["metadata[post_checkout_entry]"] = "thank_you"
+
+    if fee_context:
+        payload["metadata[product_type]"] = fee_context.get("product_type", "")
+        payload["metadata[tenant_plan]"] = fee_context.get("tenant_plan", "")
+        platform_fee = int(fee_context.get("platform_fee") or 0)
+        subtotal = int(fee_context.get("subtotal") or 0)
+        if apply_application_fee and platform_fee > 0 and subtotal > 0:
+            if payload["mode"] == "subscription":
+                percent = (platform_fee / subtotal) * 100
+                payload["subscription_data[application_fee_percent]"] = f"{percent:.4f}"
+            else:
+                payload["payment_intent_data[application_fee_amount]"] = str(platform_fee)
     return payload
 
 

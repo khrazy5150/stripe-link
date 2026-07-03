@@ -1,59 +1,14 @@
-import json
-import os
 import time
-from typing import Any, Callable
+from typing import Callable
 
 from stripe_link.common import error_response, json_response, parse_json_body, tenant_id_from_event
-from stripe_link.domain.fees import PriceCalculationError, calculate_price, default_billing_config
-
-
-CONFIG_CACHE_TTL_SECONDS = int(os.environ.get("BILLING_CONFIG_CACHE_TTL_SECONDS", "300"))
-BILLING_CONFIG_KEY = os.environ.get("BILLING_CONFIG_KEY", "global_billing_config.json")
-_CONFIG_CACHE: dict[str, Any] = {
-    "expires_at": 0.0,
-    "billing_config": None,
-}
-_S3_CLIENT = None
-
-
-def clear_config_cache() -> None:
-    _CONFIG_CACHE["expires_at"] = 0.0
-    _CONFIG_CACHE["billing_config"] = None
-
-
-def s3_client():
-    global _S3_CLIENT
-    if _S3_CLIENT is None:
-        import boto3
-
-        _S3_CLIENT = boto3.client("s3")
-    return _S3_CLIENT
-
-
-def load_billing_config_from_s3() -> dict[str, Any]:
-    bucket = os.environ.get("BILLING_CONFIG_BUCKET")
-    if not bucket:
-        return default_billing_config()
-    try:
-        response = s3_client().get_object(Bucket=bucket, Key=BILLING_CONFIG_KEY)
-        return json.loads(response["Body"].read().decode("utf-8"))
-    except Exception:
-        return default_billing_config()
-
-
-def cached_billing_config(
-    billing_config_loader: Callable[[], dict[str, Any]] | None = None,
-    now_fn: Callable[[], float] = time.time,
-) -> dict[str, Any]:
-    now = now_fn()
-    if _CONFIG_CACHE["billing_config"] is not None and _CONFIG_CACHE["expires_at"] > now:
-        return _CONFIG_CACHE["billing_config"]
-
-    loader = billing_config_loader or load_billing_config_from_s3
-    billing_config = loader() or default_billing_config()
-    _CONFIG_CACHE["billing_config"] = billing_config
-    _CONFIG_CACHE["expires_at"] = now + CONFIG_CACHE_TTL_SECONDS
-    return billing_config
+from stripe_link.domain.fees import (
+    PriceCalculationError,
+    cached_billing_config,
+    calculate_price,
+    clear_config_cache,
+    load_billing_config_from_s3,
+)
 
 
 def handler(event, context, billing_config_loader=None, now_fn: Callable[[], float] = time.time):

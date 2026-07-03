@@ -21,6 +21,17 @@ class ResolvedOfferItem:
     selectable: bool
 
 
+def load_offer_products(tenant_id: str, offer: dict[str, Any], products_repo: Any) -> dict[str, dict[str, Any]]:
+    products_by_id = {}
+    for item in offer.get("items", []):
+        product_id = str(item.get("product_id") or "")
+        product = products_repo.get(tenant_id, product_id)
+        if not product:
+            raise PricingError(f"Product '{product_id}' was not found.")
+        products_by_id[product_id] = product
+    return products_by_id
+
+
 def find_price(product: dict[str, Any], price_id: str) -> dict[str, Any]:
     for price in product.get("prices", []):
         if price.get("price_id") == price_id:
@@ -136,3 +147,21 @@ def resolve_offer(
             for item in resolved_items
         ],
     }
+
+
+def merge_resolved_offers(primary: dict[str, Any], additions: list[dict[str, Any]]) -> dict[str, Any]:
+    """Fold resolved order-bump offers into the primary resolved offer for a single checkout session.
+
+    Each addition is itself the output of resolve_offer() for a distinct order-bump Offer document
+    (context/price-context "order_bump"), so its own eligibility/active-status checks already ran.
+    """
+    currency = primary.get("currency", "usd")
+    items = list(primary.get("items") or [])
+    subtotal = int(primary.get("subtotal") or 0)
+    for addition in additions:
+        addition_currency = addition.get("currency", "usd")
+        if addition.get("items") and addition_currency != currency:
+            raise PricingError("Order bump currency does not match the primary offer currency.")
+        items.extend(addition.get("items") or [])
+        subtotal += int(addition.get("subtotal") or 0)
+    return {**primary, "items": items, "subtotal": subtotal}

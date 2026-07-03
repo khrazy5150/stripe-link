@@ -7,6 +7,7 @@ import time
 from typing import Any, Callable
 
 from stripe_link.common import error_response, header_value, json_response
+from stripe_link.domain.fees import cached_billing_config, calculate_price
 from stripe_link.repositories.documents import (
     RepositoryError,
     customers_repository,
@@ -95,6 +96,7 @@ def handler(
     notifications_repo=None,
     webhook_secret_loader: Callable[[str, str], str | None] = get_platform_webhook_secret,
     now_fn: Callable[[], int] = lambda: int(time.time()),
+    billing_config_loader: Callable[[], dict[str, Any]] | None = None,
 ):
     method = event.get("httpMethod", "")
     if method == "OPTIONS":
@@ -144,6 +146,7 @@ def handler(
             invoices_repo=invoices_repo,
             notifications_repo=notifications_repo,
             now_fn=now_fn,
+            billing_config_loader=billing_config_loader,
         )
     return json_response({
         "received": True,
@@ -172,6 +175,7 @@ def persist_checkout_session_completed(
     invoices_repo=None,
     notifications_repo=None,
     now_fn: Callable[[], int] = lambda: int(time.time()),
+    billing_config_loader: Callable[[], dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     session = _event_data_object(stripe_event)
     if not session:
@@ -184,9 +188,10 @@ def persist_checkout_session_completed(
     invoices_repo = invoices_repo or (invoices_repository() if os.environ.get("INVOICES_TABLE") else None)
     notifications_repo = notifications_repo or (notifications_repository() if os.environ.get("NOTIFICATIONS_TABLE") else None)
 
+    fees = fee_breakdown_from_session(session, billing_config_loader)
     session_record = checkout_session_record(stripe_event, session, tenant_id, now)
-    order_record = order_record_from_session(session, tenant_id, now)
-    invoice_record = invoice_record_from_session(session, tenant_id, now)
+    order_record = order_record_from_session(session, tenant_id, now, fees)
+    invoice_record = invoice_record_from_session(session, tenant_id, now, fees)
     customer_record = customer_record_from_session(session, tenant_id, now)
     notification_record = notification_record_from_session(session, tenant_id, order_record, invoice_record, now)
 
@@ -245,7 +250,25 @@ def checkout_session_record(stripe_event: dict[str, Any], session: dict[str, Any
     }
 
 
-def order_record_from_session(session: dict[str, Any], tenant_id: str, now: int) -> dict[str, Any]:
+def fee_breakdown_from_session(
+    session: dict[str, Any],
+    billing_config_loader: Callable[[], dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    metadata = session.get("metadata") if isinstance(session.get("metadata"), dict) else {}
+    amount = int(session.get("amount_total") or 0)
+    result = calculate_price(
+        tenant_keyed_amount=amount,
+        currency=session.get("currency") or "usd",
+        product_type=metadata.get("product_type") or "physical",
+        fee_handling="standard",
+        pricing_model="recurring" if session.get("mode") == "subscription" else "one_time",
+        tenant_plan=metadata.get("tenant_plan") or "basic",
+        billing_config=cached_billing_config(billing_config_loader),
+    )
+    return result["breakdown"]
+
+
+def order_record_from_session(session: dict[str, Any], tenant_id: str, now: int, fees: dict[str, Any]) -> dict[str, Any]:
     metadata = session.get("metadata") if isinstance(session.get("metadata"), dict) else {}
     details = customer_details(session)
     product_name = metadata.get("product_name") or "Checkout"
@@ -272,6 +295,7 @@ def order_record_from_session(session: dict[str, Any], tenant_id: str, now: int)
             "price_id": metadata.get("price_id", ""),
             "name": product_name,
         },
+        "fees": fees,
         "attribution": attribution_from_metadata(metadata),
         "metadata": metadata,
         "created_at": str(created),
@@ -279,7 +303,7 @@ def order_record_from_session(session: dict[str, Any], tenant_id: str, now: int)
     }
 
 
-def invoice_record_from_session(session: dict[str, Any], tenant_id: str, now: int) -> dict[str, Any]:
+def invoice_record_from_session(session: dict[str, Any], tenant_id: str, now: int, fees: dict[str, Any]) -> dict[str, Any]:
     metadata = session.get("metadata") if isinstance(session.get("metadata"), dict) else {}
     details = customer_details(session)
     email = details.get("email") or "unknown"
@@ -315,6 +339,9 @@ def invoice_record_from_session(session: dict[str, Any], tenant_id: str, now: in
             "total": amount,
             "amount_due": 0 if session.get("payment_status") == "paid" else amount,
             "amount_paid": amount if session.get("payment_status") == "paid" else 0,
+            "stripe_fee": fees.get("stripe_fee", 0),
+            "platform_fee": fees.get("platform_fee", 0),
+            "net_payout": fees.get("net_payout", 0),
         },
         "stripe": {
             "checkout_session_id": session_id,

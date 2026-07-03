@@ -1,6 +1,9 @@
+import json
+import os
+import time
 from copy import deepcopy
 from decimal import Decimal, ROUND_CEILING, ROUND_HALF_UP
-from typing import Any
+from typing import Any, Callable
 
 
 class PriceCalculationError(ValueError):
@@ -95,6 +98,62 @@ def fee_class_for(product_type: str, pricing_model: str = "one_time") -> str:
 
 def default_billing_config() -> dict[str, Any]:
     return deepcopy(DEFAULT_GLOBAL_BILLING_CONFIG)
+
+
+BILLING_CONFIG_CACHE_TTL_SECONDS = int(os.environ.get("BILLING_CONFIG_CACHE_TTL_SECONDS", "300"))
+BILLING_CONFIG_KEY = os.environ.get("BILLING_CONFIG_KEY", "global_billing_config.json")
+_CONFIG_CACHE: dict[str, Any] = {
+    "expires_at": 0.0,
+    "billing_config": None,
+}
+_S3_CLIENT = None
+
+
+def clear_config_cache() -> None:
+    _CONFIG_CACHE["expires_at"] = 0.0
+    _CONFIG_CACHE["billing_config"] = None
+
+
+def _s3_client():
+    global _S3_CLIENT
+    if _S3_CLIENT is None:
+        import boto3
+
+        _S3_CLIENT = boto3.client("s3")
+    return _S3_CLIENT
+
+
+def load_billing_config_from_s3() -> dict[str, Any]:
+    bucket = os.environ.get("BILLING_CONFIG_BUCKET")
+    if not bucket:
+        return default_billing_config()
+    try:
+        response = _s3_client().get_object(Bucket=bucket, Key=BILLING_CONFIG_KEY)
+        return json.loads(response["Body"].read().decode("utf-8"))
+    except Exception:
+        return default_billing_config()
+
+
+def cached_billing_config(
+    billing_config_loader: Callable[[], dict[str, Any]] | None = None,
+    now_fn: Callable[[], float] = time.time,
+) -> dict[str, Any]:
+    now = now_fn()
+    if _CONFIG_CACHE["billing_config"] is not None and _CONFIG_CACHE["expires_at"] > now:
+        return _CONFIG_CACHE["billing_config"]
+
+    loader = billing_config_loader or load_billing_config_from_s3
+    billing_config = loader() or default_billing_config()
+    _CONFIG_CACHE["billing_config"] = billing_config
+    _CONFIG_CACHE["expires_at"] = now + BILLING_CONFIG_CACHE_TTL_SECONDS
+    return billing_config
+
+
+def normalize_tier_id(value: Any) -> str:
+    tier_id = str(value or "basic").strip().lower()
+    if tier_id == "starter":
+        return "basic"
+    return tier_id or "basic"
 
 
 def platform_fee_rate(
@@ -221,4 +280,45 @@ def calculate_price(
             "platform_fee": platform_fee,
             "net_payout": max(net_payout, 0),
         },
+    }
+
+
+def build_fee_context(
+    *,
+    tenant_id: str,
+    offer: dict[str, Any],
+    products_by_id: dict[str, Any],
+    resolved: dict[str, Any],
+    tenant_repo: Any,
+    billing_config_loader: Any = None,
+) -> dict[str, Any]:
+    """Resolve the product type/tenant tier/platform-fee context for a resolved offer.
+
+    Shared by the initial checkout session and one-click post-purchase upsell charges,
+    since both charge against a resolved Offer document with the same fee-tier rules.
+    """
+    items = resolved.get("items") or []
+    primary_product = products_by_id.get(items[0]["product_id"]) if items else {}
+    product_type = (primary_product or {}).get("product_type") or "physical"
+
+    tenant_profile = tenant_repo.get(tenant_id, tenant_id) or {}
+    tenant_plan = normalize_tier_id(tenant_profile.get("tier_id"))
+
+    checkout_mode = (offer.get("checkout") or {}).get("mode") or "payment"
+    subtotal = int(resolved.get("subtotal") or 0)
+    fee_result = calculate_price(
+        tenant_keyed_amount=subtotal,
+        currency=resolved.get("currency", "usd"),
+        product_type=product_type,
+        fee_handling="standard",
+        pricing_model="recurring" if checkout_mode == "subscription" else "one_time",
+        tenant_plan=tenant_plan,
+        billing_config=cached_billing_config(billing_config_loader),
+    )
+    return {
+        "product_type": product_type,
+        "tenant_plan": tenant_plan,
+        "subtotal": subtotal,
+        "platform_fee": fee_result["breakdown"]["platform_fee"],
+        "fees": fee_result["breakdown"],
     }
