@@ -17,6 +17,7 @@ def handler(event, context):
         products = body.get("products")
         selected_prices = body.get("selected_prices") or {}
         checkout_url = body.get("checkout_url")
+        api_base_url = body.get("api_base_url") or ""
         if not isinstance(page, dict):
             return error_response("Field 'page' must be an object.")
         if not isinstance(offer, dict):
@@ -27,6 +28,8 @@ def handler(event, context):
             return error_response("Field 'selected_prices' must be an object when provided.")
         if checkout_url is not None and not isinstance(checkout_url, str):
             return error_response("Field 'checkout_url' must be a string when provided.")
+        if not isinstance(api_base_url, str):
+            return error_response("Field 'api_base_url' must be a string when provided.")
         validate_page_document(page)
         validate_offer_document(offer)
         if page.get("tenant_id") != offer.get("tenant_id"):
@@ -46,7 +49,7 @@ def handler(event, context):
             for product in products
             if isinstance(product, dict) and product.get("product_id")
         }
-        html = render_page(page, offer, products_by_id, selected_prices, checkout_url)
+        html = render_page(page, offer, products_by_id, selected_prices, checkout_url, api_base_url)
         return json_response({"html": html})
     except (DocumentValidationError, PricingError, RenderError, ValueError) as exc:
         return error_response(str(exc), code="render_error")

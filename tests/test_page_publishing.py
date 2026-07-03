@@ -156,6 +156,23 @@ class PagePublishingTests(unittest.TestCase):
         self.assertEqual([artifact["kind"] for artifact in result["artifacts"]], ["preview"])
         self.assertIsNone(result["invalidation"])
 
+    def test_publish_page_document_threads_api_base_url_into_rendered_html(self):
+        publish_page_document(
+            self.page,
+            offers_repository=self.offers_repo,
+            products_repository=self.products_repo,
+            s3_client=self.s3,
+            pages_bucket="pages",
+            preview_bucket="preview",
+            environment="dev",
+            pages_domain="pages.example.com",
+            preview_domain="preview.example.com",
+            checkout_url="https://dev.juniorbay.com/checkout",
+            api_base_url="https://api.example.com/dev",
+        )
+
+        self.assertIn(b"data-checkout-api-base-url=\"https://api.example.com/dev\"", self.s3.puts[0]["Body"])
+
     def test_publish_page_document_uses_offer_mode_checkout_base(self):
         result = publish_page_document(
             self.page,

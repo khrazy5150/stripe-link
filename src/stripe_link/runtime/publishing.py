@@ -131,6 +131,7 @@ def publish_page_document(
     pages_domain: str = "",
     preview_domain: str = "",
     checkout_url: str | None = None,
+    api_base_url: str = "",
     cloudfront_client: Any | None = None,
     pages_distribution_id: str = "",
 ) -> dict[str, Any]:
@@ -146,6 +147,7 @@ def publish_page_document(
         offer,
         products_by_id,
         checkout_url=checkout_url or checkout_base_url_for_page(page, offer, environment),
+        api_base_url=api_base_url,
     )
     targets = artifact_targets(
         page,

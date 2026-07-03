@@ -281,8 +281,10 @@ SIMPLE_TEMPLATE_STYLES = [
     "    .sl-price-option{border:1px solid #d1d5db;border-radius:0.8rem;padding:1.6rem;background:#fff}",
     "    .sl-price-option[data-default='true']{border-color:var(--sl-accent);box-shadow:0 0 0 1px var(--sl-accent)}",
     "    .sl-badge{display:inline-block;font-family:var(--sl-font-accent);font-size:1.2rem;font-weight:700;color:#166534;background:#dcfce7;padding:0.3rem 0.8rem;border-radius:99.9rem;margin-bottom:0.8rem}",
+    "    .sl-checkout-cta{display:flex;flex-direction:column;align-items:center;gap:0.8rem}",
     "    .sl-cta{display:inline-flex;align-items:center;justify-content:center;background:var(--sl-accent);color:#fff;border:0;border-radius:0.8rem;padding:1.4rem 1.8rem;font-family:var(--sl-font-accent);font-weight:700;text-decoration:none}",
     "    .sl-cta.is-connecting{opacity:.72;cursor:wait;pointer-events:none}",
+    "    .sl-decline-cta{background:none;color:var(--sl-accent);text-decoration:underline;font-weight:600;padding:0.4rem}",
     "    .sl-legal{display:flex;gap:1.2rem;flex-wrap:wrap;font-size:1.3rem;color:#6b7280}",
     "    .sl-legal a{color:inherit}",
 ]
@@ -350,9 +352,10 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     "    .sl-faq details{border:1px solid var(--sl-faq-border);background:var(--sl-faq-bg);border-radius:1.6rem;padding:0;overflow:hidden}",
     "    .sl-faq summary{cursor:pointer;font-family:var(--sl-font-heading);font-size:1.4rem;font-weight:600;line-height:1.35;color:var(--sl-faq-summary);display:flex;align-items:center;justify-content:space-between;gap:1.2rem;padding:1.6rem 2rem}",
     "    .sl-faq p{color:var(--sl-faq-text);font-size:1.4rem;line-height:1.6;padding:0 2rem 1.6rem}",
-    "    .sl-checkout-cta{position:fixed;left:0;right:0;bottom:0;z-index:10;background:linear-gradient(transparent,var(--sl-cta-scrim) 20%);padding:1.6rem;display:flex;justify-content:center}",
+    "    .sl-checkout-cta{position:fixed;left:0;right:0;bottom:0;z-index:10;background:linear-gradient(transparent,var(--sl-cta-scrim) 20%);padding:1.6rem;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:0.8rem}",
     "    .sl-cta{display:inline-flex;width:min(52rem,100%);align-items:center;justify-content:center;background:linear-gradient(135deg,var(--sl-cta-from),var(--sl-cta-to));color:var(--sl-cta-text);border:0;border-radius:1rem;padding:1.5rem 1.8rem;font-family:var(--sl-font-accent);font-size:1.7rem;font-weight:900;text-decoration:none}",
     "    .sl-cta.is-connecting{opacity:.72;cursor:wait;pointer-events:none}",
+    "    .sl-decline-cta{width:auto;background:none;color:var(--sl-cta-text);text-decoration:underline;font-weight:600;font-size:1.3rem;padding:0.4rem}",
     "    .sl-legal{display:flex;gap:1.2rem;flex-wrap:wrap;justify-content:center;text-align:center;font-size:1.3rem;color:var(--sl-legal-text);padding:2.4rem 0 0}",
     "    .sl-legal span{flex:0 0 100%}",
     "    .sl-legal a{color:var(--sl-legal-link)}",
@@ -572,6 +575,7 @@ def render_page(
     products_by_id: dict[str, dict[str, Any]],
     selected_prices: dict[str, str] | None = None,
     checkout_url: str | None = None,
+    api_base_url: str | None = None,
 ) -> str:
     require_offer_products(offer, products_by_id)
     resolved_offer = resolve_offer(offer, products_by_id, selected_prices)
@@ -580,7 +584,7 @@ def render_page(
     favicon_tags = render_favicon_tags(page.get("seo") or {})
     styles = render_template_styles(page)
     body = "\n".join(
-        render_section(section, page, offer, products_by_id, resolved_offer, checkout_url)
+        render_section(section, page, offer, products_by_id, resolved_offer, checkout_url, api_base_url)
         for section in page.get("sections", [])
     )
     has_legal_footer_section = any(section.get("type") == "legal_footer" for section in page.get("sections", []))
@@ -618,6 +622,7 @@ def render_section(
     products_by_id: dict[str, dict[str, Any]],
     resolved_offer: dict[str, Any],
     checkout_url: str | None,
+    api_base_url: str | None = None,
 ) -> str:
     section_type = section.get("type")
     if section_type == "countdown_timer":
@@ -645,7 +650,7 @@ def render_section(
     if section_type == "content_block":
         return render_content_blocks(section)
     if section_type == "checkout_cta":
-        return render_checkout_cta(page, section, offer, resolved_offer, checkout_url)
+        return render_checkout_cta(page, section, offer, resolved_offer, checkout_url, api_base_url)
     if section_type == "legal_footer":
         return render_legal_footer(page.get("legal") or {}, section)
     return f"    <section data-section-id=\"{escape(str(section.get('id', '')))}\"></section>"
@@ -1016,11 +1021,12 @@ def render_checkout_cta(
     offer: dict[str, Any],
     resolved_offer: dict[str, Any],
     checkout_url: str | None,
+    api_base_url: str | None = None,
 ) -> str:
     label = escape(str(section.get("label") or (offer.get("presentation") or {}).get("cta_label") or "Checkout"))
     subtotal = int(resolved_offer.get("subtotal", 0))
     currency = str(resolved_offer.get("currency") or "usd")
-    checkout = checkout_context(page, offer, resolved_offer, checkout_url)
+    checkout = checkout_context(page, offer, resolved_offer, checkout_url, api_base_url)
     href = escape(checkout["href"])
     data_attrs = " ".join(
         f"data-{escape(key)}=\"{escape(str(value))}\""
@@ -1030,6 +1036,7 @@ def render_checkout_cta(
     return "\n".join([
         "    <section class=\"sl-checkout-cta\" data-section-type=\"checkout_cta\">",
         f"      <a class=\"sl-cta\" href=\"{href}\" data-cta-label=\"{label}\" data-cta-currency=\"{escape(currency)}\" data-cta-amount=\"{subtotal}\" {data_attrs}>{label} - {escape(format_money(subtotal, currency))}</a>",
+        "      <a class=\"sl-cta sl-decline-cta\" href=\"#decline\" data-role=\"decline\" style=\"display:none\">No thanks, continue</a>",
         "    </section>",
     ])
 
@@ -1039,6 +1046,7 @@ def checkout_context(
     offer: dict[str, Any],
     resolved_offer: dict[str, Any],
     checkout_url: str | None,
+    api_base_url: str | None = None,
 ) -> dict[str, Any]:
     if not checkout_url:
         return {"href": "#checkout", "data": {}}
@@ -1069,6 +1077,8 @@ def checkout_context(
             "checkout-product-id": product_id,
             "checkout-price-id": price_id,
             "checkout-quantity": quantity,
+            "checkout-api-base-url": str(api_base_url or "").rstrip("/"),
+            "checkout-has-post-checkout": "true" if page.get("post_checkout") else "false",
         },
     }
 
@@ -1172,8 +1182,33 @@ def render_page_interactions_script(page: dict[str, Any]) -> str:
         "        return `${code} ${(cents / 100).toFixed(2)}`;",
         "      };",
         "      const cta = document.querySelector('[data-section-type=\"checkout_cta\"] .sl-cta');",
+        "      const declineCta = document.querySelector('[data-section-type=\"checkout_cta\"] .sl-decline-cta');",
         "      const cards = Array.from(document.querySelectorAll('.sl-price-option'));",
         "      const pageUrl = () => `${window.location.origin}${window.location.pathname}`;",
+        "      const funnelParams = new URLSearchParams(window.location.search);",
+        "      const funnelPageId = funnelParams.get('funnel_page') || '';",
+        "      const funnelStepId = funnelParams.get('funnel_step') || '';",
+        "      const funnelSessionId = funnelParams.get('session_id') || '';",
+        "      const isFunnelStep = Boolean(funnelPageId && funnelStepId && cta);",
+        "      const postCheckoutNextUrl = (outcome, stepId) => {",
+        "        const next = new URLSearchParams();",
+        "        next.set('outcome', outcome);",
+        "        if (stepId) next.set('step_id', stepId);",
+        "        if (cta.dataset.checkoutTenantId) next.set('tenant_id', cta.dataset.checkoutTenantId);",
+        "        if (funnelSessionId) next.set('session_id', funnelSessionId);",
+        "        return `${cta.dataset.checkoutApiBaseUrl}/pages/${funnelPageId || cta.dataset.checkoutPageId}/post-checkout/next?${next.toString()}`;",
+        "      };",
+        "      const successUrl = () => {",
+        "        const current = pageUrl();",
+        "        if (cta && cta.dataset.checkoutApiBaseUrl && cta.dataset.checkoutHasPostCheckout === 'true') {",
+        "          const next = new URLSearchParams();",
+        "          next.set('outcome', 'accept');",
+        "          if (cta.dataset.checkoutTenantId) next.set('tenant_id', cta.dataset.checkoutTenantId);",
+        "          next.set('session_id', '{CHECKOUT_SESSION_ID}');",
+        "          return `${cta.dataset.checkoutApiBaseUrl}/pages/${cta.dataset.checkoutPageId}/post-checkout/next?${next.toString()}`;",
+        "        }",
+        "        return `${current}?checkout=success`;",
+        "      };",
         "      const checkoutHref = (card) => {",
         "        if (!cta || !cta.dataset.checkoutBaseUrl) return cta ? cta.href : '#checkout';",
         "        const params = new URLSearchParams();",
@@ -1187,7 +1222,7 @@ def render_page_interactions_script(page: dict[str, Any]) -> str:
         "        if (priceId) params.set('price_id', priceId);",
         "        if (quantity) params.set('quantity', quantity);",
         "        const current = pageUrl();",
-        "        params.set('success_url', `${current}?checkout=success`);",
+        "        params.set('success_url', successUrl());",
         "        params.set('cancel_url', current);",
         "        const separator = cta.dataset.checkoutBaseUrl.includes('?') ? '&' : '?';",
         "        return `${cta.dataset.checkoutBaseUrl}${separator}${params.toString()}`;",
@@ -1210,7 +1245,7 @@ def render_page_interactions_script(page: dict[str, Any]) -> str:
         "        if (radio) radio.checked = true;",
         "        updateCta(card);",
         "      };",
-        "      if (cta) {",
+        "      if (cta && !isFunnelStep) {",
         "        cta.addEventListener('click', (event) => {",
         "          if (cta.dataset.connecting === 'true') {",
         "            event.preventDefault();",
@@ -1232,6 +1267,64 @@ def render_page_interactions_script(page: dict[str, Any]) -> str:
         "        if (radio) radio.addEventListener('change', () => selectCard(card));",
         "      });",
         "      selectCard(cards.find((card) => card.dataset.default === 'true') || cards[0]);",
+        "      let upsellCustomerId = '';",
+        "      let upsellCustomerInfo = {};",
+        "      if (isFunnelStep) {",
+        "        if (declineCta) {",
+        "          declineCta.style.display = '';",
+        "          declineCta.addEventListener('click', (event) => {",
+        "            event.preventDefault();",
+        "            window.location.assign(postCheckoutNextUrl('decline', funnelStepId));",
+        "          });",
+        "        }",
+        "        cta.setAttribute('aria-disabled', 'true');",
+        "        cta.dataset.ctaDefaultLabel = cta.textContent;",
+        "        cta.textContent = 'Loading...';",
+        "        fetch(`${cta.dataset.checkoutApiBaseUrl}/upsell/session?session_id=${encodeURIComponent(funnelSessionId)}&clientID=${encodeURIComponent(cta.dataset.checkoutTenantId || '')}`)",
+        "          .then((response) => response.json())",
+        "          .then((body) => {",
+        "            const session = (body && body.session) || {};",
+        "            upsellCustomerId = session.customer_id || '';",
+        "            upsellCustomerInfo = {",
+        "              name: session.customer_name || '',",
+        "              email: session.customer_email || '',",
+        "              phone: session.customer_phone || '',",
+        "            };",
+        "            cta.removeAttribute('aria-disabled');",
+        "            cta.textContent = cta.dataset.ctaDefaultLabel || 'Add to my order';",
+        "          })",
+        "          .catch(() => { cta.textContent = 'Unavailable'; });",
+        "        cta.addEventListener('click', (event) => {",
+        "          event.preventDefault();",
+        "          if (cta.dataset.connecting === 'true' || !upsellCustomerId) return;",
+        "          cta.dataset.connecting = 'true';",
+        "          cta.setAttribute('aria-disabled', 'true');",
+        "          cta.classList.add('is-connecting');",
+        "          cta.textContent = 'Processing...';",
+        "          fetch(`${cta.dataset.checkoutApiBaseUrl}/upsell/charge`, {",
+        "            method: 'POST',",
+        "            headers: { 'Content-Type': 'application/json' },",
+        "            body: JSON.stringify({",
+        "              tenant_id: cta.dataset.checkoutTenantId || '',",
+        "              session_id: funnelSessionId,",
+        "              offer_id: cta.dataset.checkoutOfferId || '',",
+        "              customer_id: upsellCustomerId,",
+        "              customer: upsellCustomerInfo,",
+        "            }),",
+        "          })",
+        "            .then((response) => response.json().then((body) => ({ ok: response.ok, body })))",
+        "            .then(({ ok, body }) => {",
+        "              if (!ok) throw new Error((body && body.message) || 'Payment failed');",
+        "              window.location.assign(postCheckoutNextUrl('accept', funnelStepId));",
+        "            })",
+        "            .catch(() => {",
+        "              cta.dataset.connecting = 'false';",
+        "              cta.removeAttribute('aria-disabled');",
+        "              cta.classList.remove('is-connecting');",
+        "              cta.textContent = 'Card declined - try again';",
+        "            });",
+        "        });",
+        "      }",
         "      const expireDiscounts = () => {",
         "        cards.forEach((card) => {",
         "          const regular = Number(card.dataset.regularAmount || 0);",

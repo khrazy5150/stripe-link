@@ -567,6 +567,30 @@ Resources:
             Path: /pages/render
             Method: POST
 
+  PostCheckoutFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${ProjectPrefix}-post-checkout-${Environment}"
+      CodeUri: src/
+      Handler: handlers.post_checkout.handler
+      Description: Resolves and redirects Phase 1 inline funnel routing (post-checkout upsell/downsell/thank-you sequencing) owned by a Page document. Pure routing only — never touches Offer, Product, or Stripe state.
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref PagesTable
+      Events:
+        PostCheckoutNext:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /pages/{page_id}/post-checkout/next
+            Method: GET
+        PostCheckoutNextOptions:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /pages/{page_id}/post-checkout/next
+            Method: OPTIONS
+
   CheckoutFunction:
     Type: AWS::Serverless::Function
     Properties:

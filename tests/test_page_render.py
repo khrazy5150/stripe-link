@@ -361,6 +361,40 @@ class PageRenderTests(unittest.TestCase):
 
         self.assertIn(".sl-cta.is-connecting", html)
         self.assertIn("cta.textContent = 'Connecting...';", html)
+
+    def test_render_page_stamps_post_checkout_and_api_base_url_for_funnel_routing(self):
+        self.assertIn("post_checkout", self.page)
+        html = render_page(
+            self.page,
+            self.offer,
+            self.products_by_id,
+            checkout_url="https://dev.juniorbay.com/checkout",
+            api_base_url="https://api.example.com/dev",
+        )
+
+        self.assertIn("data-checkout-has-post-checkout=\"true\"", html)
+        self.assertIn("data-checkout-api-base-url=\"https://api.example.com/dev\"", html)
+        self.assertIn("class=\"sl-cta sl-decline-cta\"", html)
+        self.assertIn("style=\"display:none\"", html)
+        self.assertIn("post-checkout/next", html)
+        self.assertIn("/upsell/session", html)
+        self.assertIn("/upsell/charge", html)
+        self.assertIn("funnel_page", html)
+        self.assertIn("isFunnelStep", html)
+        self.assertIn("{CHECKOUT_SESSION_ID}", html)
+
+    def test_render_page_marks_post_checkout_false_when_not_configured(self):
+        page = copy.deepcopy(self.page)
+        page.pop("post_checkout", None)
+        html = render_page(
+            page,
+            self.offer,
+            self.products_by_id,
+            checkout_url="https://dev.juniorbay.com/checkout",
+            api_base_url="https://api.example.com/dev",
+        )
+
+        self.assertIn("data-checkout-has-post-checkout=\"false\"", html)
         self.assertIn("window.location.assign(href)", html)
 
     def test_render_page_rejects_missing_offer_product(self):

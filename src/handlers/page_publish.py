@@ -107,6 +107,7 @@ def handler(event, context, *, offers_repo=None, products_repo=None, s3_client=N
                 pages_domain=os.environ.get("PAGES_DISTRIBUTION_DOMAIN", ""),
                 preview_domain=os.environ.get("PREVIEW_DISTRIBUTION_DOMAIN", ""),
                 checkout_url=page.get("checkout_url"),
+                api_base_url=os.environ.get("PUBLIC_API_BASE_URL", ""),
                 cloudfront_client=cloudfront_client,
                 pages_distribution_id=os.environ.get("PAGES_DISTRIBUTION_ID", ""),
             )
