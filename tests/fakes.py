@@ -23,6 +23,12 @@ class FakeDocumentRepository:
             if doc_tenant_id == tenant_id
         ]
 
+    def find_by_id(self, document_id):
+        for document in self.documents.values():
+            if document.get(self.id_field) == document_id:
+                return dict(document)
+        return None
+
 
 class FakeSimpleRepository:
     def __init__(self, key_field):

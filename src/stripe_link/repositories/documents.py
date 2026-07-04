@@ -109,6 +109,20 @@ class DynamoDocumentRepository:
         )
         return [self._strip_keys(item) for item in items]
 
+    def find_by_id(self, document_id: str) -> dict[str, Any] | None:
+        """Look up a document by id alone (cross-tenant) via GSI1. Assumes document_id is unique."""
+        from boto3.dynamodb.conditions import Key
+
+        response = self.table.query(
+            IndexName="GSI1",
+            KeyConditionExpression=Key("GSI1PK").eq(f"{self.sort_prefix}#{document_id}"),
+            Limit=1,
+        )
+        items = response.get("Items", [])
+        if not items:
+            return None
+        return self._strip_keys(items[0])
+
     def _strip_keys(self, item: dict[str, Any]) -> dict[str, Any]:
         return {
             key: value
@@ -522,5 +536,20 @@ def invoices_repository(table: Any | None = None) -> DynamoDocumentRepository:
         os.environ.get("INVOICES_TABLE", ""),
         document_type="invoice",
         id_field="invoice_id",
+        table=table,
+    )
+
+
+def custom_domains_index_repository(table: Any | None = None) -> DynamoDocumentRepository:
+    """Denormalized domain -> tenant/page lookup index, kept in sync with TenantConfig.custom_domains.
+
+    TenantConfig remains the source of truth for a domain's full record; this index exists
+    only so the public resolve endpoint can look up a domain in O(1) via GSI1 instead of
+    scanning every tenant's config.
+    """
+    return DynamoDocumentRepository(
+        os.environ.get("CUSTOM_DOMAINS_TABLE", ""),
+        document_type="custom_domain",
+        id_field="domain",
         table=table,
     )

@@ -68,6 +68,14 @@ Parameters:
     Type: String
     Default: 2cusn1634kl6hqgn78r0h346m0
     Description: Existing Cognito app client ID used by the dashboard auth API.
+  CloudflareZoneId:
+    Type: String
+    Default: ""
+    Description: Cloudflare zone ID (Cloudflare for SaaS) used to create custom hostnames for tenant custom domains.
+  CustomDomainTargetHost:
+    Type: String
+    Default: domains.jbay.uk
+    Description: Hostname tenants CNAME their custom subdomain to (the Cloudflare for SaaS fallback origin, on the dedicated jbay.uk zone).
 
 Conditions:
   HasApiCustomDomain: !And
@@ -77,6 +85,7 @@ Conditions:
     - !Not [!Equals [!Ref DashboardCustomDomainName, ""]]
     - !Not [!Equals [!Ref DashboardCustomDomainCertificateArn, ""]]
   HasStripePlatformSecret: !Not [!Equals [!Ref StripePlatformSecretArn, ""]]
+  HasCloudflareZone: !Not [!Equals [!Ref CloudflareZoneId, ""]]
 
 Globals:
   Function:
@@ -143,9 +152,20 @@ Globals:
         STRIPE_KEYS_KMS_KEY_ID: !Ref StripeKeysEncryptionKey
         COGNITO_USER_POOL_ID: !Ref CognitoUserPoolId
         COGNITO_USER_POOL_CLIENT_ID: !Ref CognitoUserPoolClientId
+        CLOUDFLARE_ZONE_ID: !Ref CloudflareZoneId
+        CLOUDFLARE_API_TOKEN_SECRET_ARN: !If [HasCloudflareZone, !Ref CloudflareApiTokenSecret, ""]
+        CUSTOM_DOMAIN_TARGET_HOST: !Ref CustomDomainTargetHost
     Tracing: Active
 
 Resources:
+  CloudflareApiTokenSecret:
+    Type: AWS::SecretsManager::Secret
+    Condition: HasCloudflareZone
+    Properties:
+      Name: !Sub "${ProjectPrefix}-cloudflare-api-token-${Environment}"
+      Description: Cloudflare API token (Zone:SSL and Certificates:Edit + Zone:Custom Hostname:Edit scope) used to manage custom hostnames for tenant custom domains. Populate the real value after deployment via `aws secretsmanager put-secret-value`.
+      SecretString: "PLACEHOLDER-SET-VIA-put-secret-value"
+
   StripeKeysEncryptionKey:
     Type: AWS::KMS::Key
     Properties:
@@ -1029,6 +1049,95 @@ Resources:
             RestApiId: !Ref RestApi
             Path: /config
             Method: PUT
+
+  CustomDomainsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${ProjectPrefix}-custom-domains-api-${Environment}"
+      CodeUri: src/
+      Handler: handlers.custom_domains.handler
+      Description: Tenant custom domain CRUD -- creates/verifies/deletes Cloudflare for SaaS custom hostnames and stores domain records on TenantConfig.
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref PlatformConfigTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref CustomDomainsTable
+        - !If
+          - HasCloudflareZone
+          - Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                Resource: !Ref CloudflareApiTokenSecret
+          - !Ref AWS::NoValue
+      Events:
+        CustomDomainsList:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /custom-domains
+            Method: GET
+        CustomDomainsCreate:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /custom-domains
+            Method: POST
+        CustomDomainsOptions:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /custom-domains
+            Method: OPTIONS
+        CustomDomainsCheck:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /custom-domains/{domain}/check
+            Method: POST
+        CustomDomainsCheckOptions:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /custom-domains/{domain}/check
+            Method: OPTIONS
+        CustomDomainsDelete:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /custom-domains/{domain}
+            Method: DELETE
+        CustomDomainsItemOptions:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /custom-domains/{domain}
+            Method: OPTIONS
+
+  CustomDomainsResolveFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${ProjectPrefix}-custom-domains-resolve-${Environment}"
+      CodeUri: src/
+      Handler: handlers.custom_domains_resolve.handler
+      Description: Public, unauthenticated endpoint the Cloudflare Worker calls on every custom-domain request to resolve which page to reverse-proxy to. Read-only, no Offer/Product/Stripe/TenantConfig access.
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref CustomDomainsTable
+      Events:
+        CustomDomainsResolve:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /custom-domains/resolve
+            Method: GET
+        CustomDomainsResolveOptions:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /custom-domains/resolve
+            Method: OPTIONS
 
   PreferencesFunction:
     Type: AWS::Serverless::Function

@@ -88,7 +88,7 @@
       "properties": {
         "enabled": { "type": "boolean", "default": true },
         "live_only": { "type": "boolean", "default": true },
-        "dns_target": { "type": "string", "default": "domains.jbay.be" },
+        "dns_target": { "type": "string", "default": "domains.jbay.uk" },
         "domains": {
           "type": "array",
           "items": {
@@ -101,6 +101,7 @@
               "registrar_provider": { "type": "string" },
               "target_type": { "type": "string", "enum": ["landing_page", "storefront"], "default": "landing_page" },
               "target_page_id": { "type": "string" },
+              "cloudflare_hostname_id": { "type": "string", "description": "Cloudflare custom hostname resource ID, used to poll/delete the hostname without re-searching by name." },
               "status": {
                 "type": "string",
                 "enum": ["pending_dns", "pending_ssl", "pending_verification", "active", "failed", "disabled"]
