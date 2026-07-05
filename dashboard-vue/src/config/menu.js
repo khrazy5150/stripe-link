@@ -85,7 +85,7 @@ export const menuSchema = {
       label: "Orders",
       icon: "clipboard",
       view: "orders",
-      enabled: false,
+      enabled: true,
       environments: ["test", "live"],
     },
     notifications: {
@@ -93,7 +93,7 @@ export const menuSchema = {
       label: "Notifications",
       icon: "bell",
       view: "notifications",
-      enabled: false,
+      enabled: true,
       environments: ["test", "live"],
     },
     invoices: {
@@ -101,7 +101,7 @@ export const menuSchema = {
       label: "Invoices",
       icon: "receipt",
       view: "invoices",
-      enabled: false,
+      enabled: true,
       environments: ["test", "live"],
     },
     shipping: {
@@ -117,7 +117,7 @@ export const menuSchema = {
       label: "Customers",
       icon: "users",
       view: "customers",
-      enabled: false,
+      enabled: true,
       environments: ["test", "live"],
     },
     stripeConnect: {

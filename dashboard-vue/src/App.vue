@@ -124,6 +124,10 @@
         v-else-if="activeView === 'configuration'"
         :key="`configuration-${activeEnvironment}-${auth.session?.client_id || ''}`"
       />
+      <Orders v-else-if="activeView === 'orders'" :key="`orders-${activeEnvironment}-${auth.session?.client_id || ''}`" />
+      <Customers v-else-if="activeView === 'customers'" :key="`customers-${activeEnvironment}-${auth.session?.client_id || ''}`" />
+      <Invoices v-else-if="activeView === 'invoices'" :key="`invoices-${activeEnvironment}-${auth.session?.client_id || ''}`" />
+      <Notifications v-else-if="activeView === 'notifications'" :key="`notifications-${activeEnvironment}-${auth.session?.client_id || ''}`" />
     </main>
   </div>
 </template>
@@ -133,9 +137,13 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import AuthPage from "./components/AuthPage.vue";
 import Configuration from "./components/Configuration.vue";
 import Coupons from "./components/Coupons.vue";
+import Customers from "./components/Customers.vue";
 import Dashboard from "./components/Dashboard.vue";
+import Invoices from "./components/Invoices.vue";
 import LandingPages from "./components/LandingPages.vue";
+import Notifications from "./components/Notifications.vue";
 import Offers from "./components/Offers.vue";
+import Orders from "./components/Orders.vue";
 import Products from "./components/Products.vue";
 import StripeKeys from "./components/StripeKeys.vue";
 import { iconPaths, menuGroupsForEnvironment } from "./config/menu";
