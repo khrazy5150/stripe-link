@@ -120,6 +120,10 @@
         v-else-if="activeView === 'landingPages'"
         :key="`landing-pages-${activeEnvironment}-${auth.session?.client_id || ''}`"
       />
+      <Configuration
+        v-else-if="activeView === 'configuration'"
+        :key="`configuration-${activeEnvironment}-${auth.session?.client_id || ''}`"
+      />
     </main>
   </div>
 </template>
@@ -127,6 +131,7 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import AuthPage from "./components/AuthPage.vue";
+import Configuration from "./components/Configuration.vue";
 import Coupons from "./components/Coupons.vue";
 import Dashboard from "./components/Dashboard.vue";
 import LandingPages from "./components/LandingPages.vue";

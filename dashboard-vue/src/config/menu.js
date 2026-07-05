@@ -141,7 +141,7 @@ export const menuSchema = {
       label: "Configuration",
       icon: "settings",
       view: "configuration",
-      enabled: false,
+      enabled: true,
       environments: ["test", "live"],
     },
     profile: {

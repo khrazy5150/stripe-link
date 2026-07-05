@@ -4716,3 +4716,14 @@ button:disabled {
   font-size: 1.6rem;
   color: var(--text-muted);
 }
+
+.config-save-bar {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  justify-content: flex-end;
+  gap: 1.2rem;
+  padding: 1.2rem 0;
+  margin-top: 0.8rem;
+  background: linear-gradient(transparent, var(--surface, #fff) 40%);
+}
