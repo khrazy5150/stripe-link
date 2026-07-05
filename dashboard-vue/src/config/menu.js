@@ -149,7 +149,7 @@ export const menuSchema = {
       label: "Profile",
       icon: "user",
       view: "profile",
-      enabled: false,
+      enabled: true,
       environments: ["test", "live"],
     },
     preferences: {
@@ -157,7 +157,7 @@ export const menuSchema = {
       label: "Preferences",
       icon: "sliders",
       view: "preferences",
-      enabled: false,
+      enabled: true,
       environments: ["test", "live"],
     },
   },

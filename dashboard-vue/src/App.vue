@@ -78,13 +78,13 @@
             </div>
           </button>
           <div v-if="userMenuOpen" class="user-dropdown" role="menu">
-            <button class="user-dropdown-item" type="button" role="menuitem" disabled>
+            <button class="user-dropdown-item" type="button" role="menuitem" @click="openUserView('profile')">
               <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.75 7.5a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0ZM4.5 20.25a7.5 7.5 0 0 1 15 0" />
               </svg>
               Profile
             </button>
-            <button class="user-dropdown-item" type="button" role="menuitem" disabled>
+            <button class="user-dropdown-item" type="button" role="menuitem" @click="openUserView('preferences')">
               <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 4.5v15m12-15v15M9 8.25H3m18 7.5h-6M9 15.75a3 3 0 1 0-6 0 3 3 0 0 0 6 0Zm12-7.5a3 3 0 1 0-6 0 3 3 0 0 0 6 0Z" />
               </svg>
@@ -128,6 +128,8 @@
       <Customers v-else-if="activeView === 'customers'" :key="`customers-${activeEnvironment}-${auth.session?.client_id || ''}`" />
       <Invoices v-else-if="activeView === 'invoices'" :key="`invoices-${activeEnvironment}-${auth.session?.client_id || ''}`" />
       <Notifications v-else-if="activeView === 'notifications'" :key="`notifications-${activeEnvironment}-${auth.session?.client_id || ''}`" />
+      <Profile v-else-if="activeView === 'profile'" :key="`profile-${auth.session?.user_id || ''}`" />
+      <Preferences v-else-if="activeView === 'preferences'" :key="`preferences-${auth.session?.user_id || ''}`" />
     </main>
   </div>
 </template>
@@ -144,7 +146,9 @@ import LandingPages from "./components/LandingPages.vue";
 import Notifications from "./components/Notifications.vue";
 import Offers from "./components/Offers.vue";
 import Orders from "./components/Orders.vue";
+import Preferences from "./components/Preferences.vue";
 import Products from "./components/Products.vue";
+import Profile from "./components/Profile.vue";
 import StripeKeys from "./components/StripeKeys.vue";
 import { iconPaths, menuGroupsForEnvironment } from "./config/menu";
 import { getApiEnvironment, loadAppConfigApiBase, setApiEnvironment } from "./api/client";
@@ -193,6 +197,11 @@ async function reloadActiveView() {
   } else if (activeView.value === "stripeKeys") {
     await stripeKeys.load();
   }
+}
+
+function openUserView(view) {
+  userMenuOpen.value = false;
+  activeView.value = view;
 }
 
 function handleLogout() {
