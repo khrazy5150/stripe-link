@@ -31,25 +31,21 @@
         {{ store.loaded ? "No notifications found." : "Loading notifications..." }}
       </div>
 
-      <div v-else class="coupon-card-grid">
-        <article v-for="notification in visibleNotifications" :key="notification.notification_id" class="coupon-card">
-          <header>
-            <div>
-              <h3>{{ notification.status === "unread" ? "● " : "" }}{{ notification.title || statusLabel(notification.type) }}</h3>
-              <p class="font-mono">{{ statusLabel(notification.type) }}</p>
-            </div>
-            <span class="product-status">{{ statusLabel(notification.severity || "info") }}</span>
-          </header>
-          <p class="notification-message">{{ notification.message }}</p>
-          <dl class="coupon-detail-list">
-            <div><dt>Status</dt><dd>{{ statusLabel(notification.status) }}</dd></div>
-            <div><dt>Date</dt><dd>{{ formatDate(notification.created_at) }}</dd></div>
-          </dl>
-          <div class="product-card-actions">
-            <button type="button" class="secondary-action" @click="selected = notification">Details</button>
-          </div>
-        </article>
-      </div>
+      <ul v-else class="notification-list">
+        <li v-for="notification in visibleNotifications" :key="notification.notification_id">
+          <button
+            type="button"
+            :class="['notification-row', { 'is-unread': notification.status === 'unread' }]"
+            @click="selected = notification"
+          >
+            <span class="notification-row-dot" aria-hidden="true"></span>
+            <span class="notification-row-title">{{ notification.title || statusLabel(notification.type) }}</span>
+            <span class="notification-row-type">{{ statusLabel(notification.type) }}</span>
+            <span class="notification-row-snippet">{{ notification.message }}</span>
+            <time class="notification-row-date">{{ formatDate(notification.created_at) }}</time>
+          </button>
+        </li>
+      </ul>
     </section>
 
     <div v-if="selected" class="modal-backdrop" @click.self="selected = null">
