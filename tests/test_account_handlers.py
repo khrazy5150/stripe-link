@@ -785,6 +785,34 @@ class AccountHandlerTests(unittest.TestCase):
         self.assertEqual(saved["statusCode"], 201)
         self.assertEqual(json.loads(listed["body"])["notifications"][0]["type"], "paid_invoice")
 
+    def test_notifications_mark_read_marks_all_unread(self):
+        repository = FakeDocumentRepository("notification_id")
+        refund_repository = FakeDocumentRepository("refund_request_id")
+        for index, status in enumerate(["unread", "unread", "read"]):
+            repository.put({
+                "schema_version": "2026-05-29",
+                "document_type": "notification",
+                "tenant_id": "tenant_demo",
+                "notification_id": f"notif_{index}",
+                "type": "order",
+                "title": "New order",
+                "message": "x",
+                "status": status,
+                "created_at": 1781230000 + index,
+            })
+
+        response = notifications_handler({
+            "httpMethod": "POST",
+            "path": "/notifications/mark-read",
+            "queryStringParameters": {"tenant_id": "tenant_demo"},
+        }, None, notifications_repo=repository, refund_requests_repo=refund_repository, now_fn=lambda: 1781239999)
+
+        self.assertEqual(response["statusCode"], 200)
+        self.assertEqual(json.loads(response["body"])["marked"], 2)
+        remaining_unread = [n for n in repository.list_for_tenant("tenant_demo") if n["status"] == "unread"]
+        self.assertEqual(remaining_unread, [])
+        self.assertEqual(repository.get("tenant_demo", "notif_0")["read_at"], 1781239999)
+
     def test_refund_request_create_and_filter(self):
         notifications_repository = FakeDocumentRepository("notification_id")
         refund_repository = FakeDocumentRepository("refund_request_id")

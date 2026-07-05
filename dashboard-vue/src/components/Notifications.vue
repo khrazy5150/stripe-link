@@ -6,8 +6,8 @@
         <p>Operational alerts such as new orders and paid invoices</p>
       </div>
       <div class="button-row">
-        <button class="secondary-action" type="button" :disabled="loading" @click="load">
-          {{ loading ? "Loading..." : "Reload" }}
+        <button class="secondary-action" type="button" :disabled="store.loading" @click="reload">
+          {{ store.loading ? "Loading..." : "Reload" }}
         </button>
       </div>
     </header>
@@ -24,11 +24,11 @@
         </label>
       </div>
 
-      <div v-if="error" class="keys-status-banner error">{{ error }}</div>
+      <div v-if="store.error" class="keys-status-banner error">{{ store.error }}</div>
       <div v-else class="keys-status-banner">{{ message }}</div>
 
       <div v-if="!visibleNotifications.length" class="product-empty-state">
-        {{ loaded ? "No notifications found." : "Loading notifications..." }}
+        {{ store.loaded ? "No notifications found." : "Loading notifications..." }}
       </div>
 
       <div v-else class="coupon-card-grid">
@@ -86,43 +86,36 @@
 </template>
 
 <script setup>
-import { computed, ref } from "vue";
-import { apiRequest } from "../api/client";
+import { computed, onMounted, ref } from "vue";
 import { formatEpochDate, statusLabel } from "../utils/format";
+import { useNotificationsStore } from "../stores/notifications";
 
-const notifications = ref([]);
-const loaded = ref(false);
-const loading = ref(false);
-const error = ref("");
-const message = ref("");
+const store = useNotificationsStore();
 const selected = ref(null);
 const filterStatus = ref("");
 
 const formatDate = formatEpochDate;
 
 const visibleNotifications = computed(() =>
-  filterStatus.value ? notifications.value.filter((item) => item.status === filterStatus.value) : notifications.value,
+  filterStatus.value ? store.items.filter((item) => item.status === filterStatus.value) : store.items,
 );
+const message = computed(() => {
+  if (!store.loaded) return "";
+  const unread = store.items.filter((item) => item.status === "unread").length;
+  return store.items.length ? `${store.items.length} total · ${unread} unread.` : "";
+});
 
 function relatedEntries(notification) {
   return Object.entries(notification.related || {}).filter(([, value]) => value !== undefined && value !== null && value !== "");
 }
 
-async function load() {
-  loading.value = true;
-  error.value = "";
-  try {
-    const body = await apiRequest("/notifications");
-    notifications.value = Array.isArray(body.notifications) ? body.notifications : [];
-    loaded.value = true;
-    const unread = notifications.value.filter((item) => item.status === "unread").length;
-    message.value = notifications.value.length ? `${notifications.value.length} total · ${unread} unread.` : "";
-  } catch (err) {
-    error.value = err.message || "Failed to load notifications.";
-  } finally {
-    loading.value = false;
-  }
+function reload() {
+  store.load();
 }
 
-load();
+// Opening the page acknowledges the alerts: load, then clear the unread badge.
+onMounted(async () => {
+  await store.load();
+  store.markAllRead();
+});
 </script>

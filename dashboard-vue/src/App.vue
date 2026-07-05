@@ -57,10 +57,16 @@
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4.5 6.75h15v10.5h-15V6.75Zm3 3 2.25 2.25L7.5 14.25m4.5 0h4.5" />
             </svg>
           </button>
-          <button class="topbar-icon-button notification-button" type="button" aria-label="Notifications">
+          <button
+            class="topbar-icon-button notification-button"
+            type="button"
+            :aria-label="notifications.unreadCount ? `Notifications (${notifications.unreadCount} unread)` : 'Notifications'"
+            @click="openNotifications"
+          >
             <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" :d="iconPaths.bell" />
             </svg>
+            <span v-if="notifications.badgeLabel" class="notification-badge" aria-hidden="true">{{ notifications.badgeLabel }}</span>
           </button>
         </div>
         <div class="user-menu" ref="userMenuRef">
@@ -157,14 +163,17 @@ import { getApiEnvironment, loadAppConfigApiBase, setApiEnvironment } from "./ap
 import { useAuthStore } from "./stores/auth";
 import { useCouponsStore } from "./stores/coupons";
 import { useDashboardStore } from "./stores/dashboard";
+import { useNotificationsStore } from "./stores/notifications";
 import { useProductsStore } from "./stores/products";
 import { useStripeKeysStore } from "./stores/stripeKeys";
 
 const auth = useAuthStore();
 const coupons = useCouponsStore();
 const dashboard = useDashboardStore();
+const notifications = useNotificationsStore();
 const products = useProductsStore();
 const stripeKeys = useStripeKeysStore();
+let notificationsPoll = null;
 const activeView = ref("dashboard");
 const activeEnvironment = ref(getApiEnvironment());
 const sidebarCollapsed = ref(false);
@@ -192,6 +201,8 @@ async function reloadActiveView() {
   coupons.reset();
   products.reset();
   stripeKeys.resetForCurrentTenant();
+  notifications.reset();
+  notifications.load({ silent: true });
   if (activeView.value === "dashboard") {
     await dashboard.load();
   } else if (activeView.value === "products") {
@@ -199,6 +210,10 @@ async function reloadActiveView() {
   } else if (activeView.value === "stripeKeys") {
     await stripeKeys.load();
   }
+}
+
+function openNotifications() {
+  activeView.value = "notifications";
 }
 
 function openUserView(view) {
@@ -225,11 +240,16 @@ onMounted(() => {
   document.addEventListener("mousedown", handleDocumentClick);
   document.addEventListener("keydown", handleKeydown);
   loadAppConfigApiBase(activeEnvironment.value).then(reloadActiveView).catch(() => {});
+  // Keep the bell badge fresh while the dashboard is open.
+  notificationsPoll = window.setInterval(() => {
+    if (auth.isAuthenticated) notifications.load({ silent: true });
+  }, 60000);
 });
 
 onBeforeUnmount(() => {
   document.removeEventListener("mousedown", handleDocumentClick);
   document.removeEventListener("keydown", handleKeydown);
+  if (notificationsPoll) window.clearInterval(notificationsPoll);
 });
 
 watch(

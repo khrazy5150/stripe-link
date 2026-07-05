@@ -1222,6 +1222,18 @@ Resources:
             RestApiId: !Ref RestApi
             Path: /notifications/refund-requests
             Method: PUT
+        MarkNotificationsRead:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /notifications/mark-read
+            Method: POST
+        MarkNotificationsReadOptions:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /notifications/mark-read
+            Method: OPTIONS
 
   ShippingFunction:
     Type: AWS::Serverless::Function
