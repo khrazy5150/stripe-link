@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.juniorbay.com/stripe-link/Experiment.schema.json",
+  "title": "Experiment",
+  "description": "An A/B test: a weighted traffic split across two or more variant landing pages that share one short URL. Each visit is resolved by the experiment resolver, which assigns a variant by weight and keeps the visitor sticky via an assignment cookie. Results are per-variant views (counted at the resolver) plus conversions and revenue (attributed from orders by page_id).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "document_type", "tenant_id", "experiment_id", "name", "status", "control_page_id", "variants"],
+  "properties": {
+    "schema_version": { "type": "string", "const": "2026-05-29" },
+    "document_type": { "type": "string", "const": "experiment" },
+    "tenant_id": { "type": "string", "minLength": 1 },
+    "experiment_id": { "type": "string", "pattern": "^[0-9A-Za-z_]+$", "minLength": 1 },
+    "name": { "type": "string", "minLength": 1 },
+    "status": { "type": "string", "enum": ["draft", "running", "paused", "completed"] },
+    "control_page_id": { "type": "string", "minLength": 1, "description": "The baseline page. Must also appear as one of the variants (its variant carries key 'control')." },
+    "winner_page_id": { "type": ["string", "null"], "description": "Set when the experiment is completed; all future traffic routes here." },
+    "variants": {
+      "type": "array",
+      "minItems": 2,
+      "description": "The pages under test, including the control. Weights are relative; the dashboard requires them to sum to 100 before starting.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["key", "page_id", "weight"],
+        "properties": {
+          "key": { "type": "string", "minLength": 1, "description": "Stable variant identifier, e.g. control, variant_a." },
+          "page_id": { "type": "string", "minLength": 1 },
+          "label": { "type": "string", "description": "Optional human-readable name for the dashboard." },
+          "weight": { "type": "integer", "minimum": 0 }
+        }
+      }
+    },
+    "short_code": { "type": "string", "description": "The experiment's own short code; a Route with target_type 'experiment' points at it." },
+    "cookie_name": { "type": "string", "description": "Sticky-assignment cookie name, e.g. jb_ab_exp_abc123." },
+    "stats": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Live counters maintained by the resolver. Conversions and revenue are derived from orders at read time, not stored here.",
+      "properties": {
+        "views_by_page": {
+          "type": "object",
+          "description": "Map of page_id -> view count, incremented on each running resolve.",
+          "additionalProperties": { "type": "integer", "minimum": 0 }
+        }
+      }
+    },
+    "created_at": { "type": "integer", "minimum": 0 },
+    "updated_at": { "type": "integer", "minimum": 0 },
+    "started_at": { "type": ["integer", "null"], "minimum": 0 },
+    "completed_at": { "type": ["integer", "null"], "minimum": 0 }
+  }
+}

@@ -11,8 +11,12 @@ def _short_url_host():
     return os.environ.get("SHORT_URL_HOST", "go.jbay.uk")
 
 
+def short_url_for_code(short_code):
+    return f"https://{_short_url_host()}/{short_code}" if short_code else ""
+
+
 def with_short_url(route):
-    return {**route, "short_url": f"https://{_short_url_host()}/{route.get('short_code', '')}"}
+    return {**route, "short_url": short_url_for_code(route.get("short_code", ""))}
 
 
 def handler(event, context, *, repository=None, now_fn=lambda: int(time.time()), code_fn=generate_short_url_code):

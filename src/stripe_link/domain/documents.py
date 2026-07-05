@@ -1143,6 +1143,43 @@ def validate_route(document: dict[str, Any]) -> None:
     require_fields(document, [required_target])
 
 
+def validate_experiment(document: dict[str, Any]) -> None:
+    require_fields(
+        document,
+        ["schema_version", "document_type", "tenant_id", "experiment_id", "name", "status", "control_page_id", "variants"],
+    )
+    if document.get("document_type") != "experiment":
+        raise DocumentValidationError("Experiment document_type must be 'experiment'.")
+    if document.get("status") not in {"draft", "running", "paused", "completed"}:
+        raise DocumentValidationError("Experiment status must be 'draft', 'running', 'paused', or 'completed'.")
+
+    variants = document.get("variants")
+    if not isinstance(variants, list) or len(variants) < 2:
+        raise DocumentValidationError("Experiment must have at least two variants.")
+
+    keys: set[str] = set()
+    page_ids: set[str] = set()
+    total_weight = 0
+    for variant in variants:
+        if not isinstance(variant, dict):
+            raise DocumentValidationError("Each experiment variant must be an object.")
+        require_fields(variant, ["key", "page_id", "weight"])
+        key = variant["key"]
+        if key in keys:
+            raise DocumentValidationError("Experiment variant keys must be unique.")
+        keys.add(key)
+        page_ids.add(variant["page_id"])
+        weight = variant.get("weight")
+        if not isinstance(weight, int) or isinstance(weight, bool) or weight < 0:
+            raise DocumentValidationError("Experiment variant weight must be a non-negative integer.")
+        total_weight += weight
+
+    if total_weight <= 0:
+        raise DocumentValidationError("Experiment variant weights must sum to a positive number.")
+    if document.get("control_page_id") not in page_ids:
+        raise DocumentValidationError("Experiment control_page_id must match one of the variants.")
+
+
 def validate_shipping_config(document: dict[str, Any]) -> None:
     require_fields(document, ["schema_version", "document_type", "tenant_id", "provider", "ship_from_address", "return_address", "default_parcel"])
     if document.get("document_type") != "shipping_config":

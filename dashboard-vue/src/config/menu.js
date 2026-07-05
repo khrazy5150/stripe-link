@@ -77,7 +77,7 @@ export const menuSchema = {
       label: "A/B Testing",
       icon: "testTube",
       view: "abTesting",
-      enabled: false,
+      enabled: true,
       environments: ["live"],
     },
     orders: {

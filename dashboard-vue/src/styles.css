@@ -4843,3 +4843,114 @@ button:disabled {
   font-size: 1.3rem;
   white-space: nowrap;
 }
+
+/* A/B Testing */
+.product-status.draft {
+  background: #e5e7eb;
+  color: #374151;
+}
+
+.product-status.running {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.product-status.paused {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.product-status.completed {
+  background: #dbeafe;
+  color: #1e40af;
+}
+
+.modal-card-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 1rem;
+  margin-top: 1.5rem;
+}
+
+.ab-variant-row {
+  align-items: end;
+  border-top: 1px solid var(--line);
+  padding-top: 1.25rem;
+  margin-top: 1.25rem;
+}
+
+.ab-variant-weight {
+  display: flex;
+  align-items: end;
+  gap: 0.75rem;
+}
+
+.ab-variant-weight .danger-action {
+  flex: 0 0 auto;
+  align-self: end;
+  height: 4rem;
+  padding: 0 1.2rem;
+}
+
+.ab-weight-total {
+  margin-top: 1.25rem;
+  color: var(--muted);
+  font-size: 1.4rem;
+}
+
+.ab-weight-total.warn {
+  color: #92400e;
+}
+
+.ab-results {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.ab-results-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 1.4rem;
+}
+
+.ab-results-table th,
+.ab-results-table td {
+  text-align: left;
+  padding: 0.9rem 1rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.ab-results-table th {
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.ab-results-table tr.winner td {
+  background: #dcfce7;
+}
+
+.ab-tag {
+  display: inline-block;
+  margin-left: 0.6rem;
+  border-radius: 999px;
+  padding: 0.1rem 0.7rem;
+  font-size: 1.1rem;
+  font-weight: 700;
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.ab-tag.winner {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.ab-winner-picker {
+  display: flex;
+  align-items: end;
+  gap: 1rem;
+  flex-wrap: wrap;
+  border-top: 1px solid var(--line);
+  padding-top: 1.25rem;
+}

@@ -123,6 +123,20 @@ class DynamoDocumentRepository:
             return None
         return self._strip_keys(items[0])
 
+    def increment_view(self, tenant_id: str, document_id: str, page_id: str, amount: int = 1) -> None:
+        """Atomically bump stats.views_by_page[page_id] by amount.
+
+        Used by the experiment resolver on every running resolve, where a full read-modify-write
+        put() would race under concurrent traffic. Assumes stats.views_by_page exists (the map is
+        seeded when the document is created); ADD creates the per-page counter on first hit.
+        """
+        self.table.update_item(
+            Key=self._key(tenant_id, document_id),
+            UpdateExpression="ADD #stats.#views.#page :amount",
+            ExpressionAttributeNames={"#stats": "stats", "#views": "views_by_page", "#page": page_id},
+            ExpressionAttributeValues={":amount": amount},
+        )
+
     def _strip_keys(self, item: dict[str, Any]) -> dict[str, Any]:
         return {
             key: value
@@ -546,6 +560,16 @@ def routes_repository(table: Any | None = None) -> DynamoDocumentRepository:
         os.environ.get("ROUTES_TABLE", ""),
         document_type="route",
         id_field="short_code",
+        table=table,
+    )
+
+
+def experiments_repository(table: Any | None = None) -> DynamoDocumentRepository:
+    """A/B experiments, keyed by tenant but resolvable by experiment_id via GSI1 (find_by_id)."""
+    return DynamoDocumentRepository(
+        os.environ.get("EXPERIMENTS_TABLE", ""),
+        document_type="experiment",
+        id_field="experiment_id",
         table=table,
     )
 

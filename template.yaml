@@ -125,6 +125,7 @@ Globals:
         CUSTOMERS_TABLE: !Ref CustomersTable
         DOCUMENT_EVENTS_TABLE: !Ref DocumentEventsTable
         ROUTES_TABLE: !Ref RoutesTable
+        EXPERIMENTS_TABLE: !Ref ExperimentsTable
         TIER_POLICIES_TABLE: !Ref TierPoliciesTable
         MEDIA_TABLE: !Ref MediaTable
         THEMES_TABLE: !Ref ThemesTable
@@ -1210,6 +1211,114 @@ Resources:
             Path: /routes/resolve
             Method: OPTIONS
 
+  ExperimentsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${ProjectPrefix}-experiments-api-${Environment}"
+      CodeUri: src/
+      Handler: handlers.experiments.handler
+      Description: Tenant A/B testing CRUD and lifecycle -- create experiments, edit variants/weights, start/pause/complete, and read per-variant results. Also writes the experiment's short-URL route.
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ExperimentsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref RoutesTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref PagesTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref OrdersTable
+      Events:
+        ExperimentsList:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /experiments
+            Method: GET
+        ExperimentsCreate:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /experiments
+            Method: POST
+        ExperimentsOptions:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /experiments
+            Method: OPTIONS
+        ExperimentsGet:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /experiments/{experiment_id}
+            Method: GET
+        ExperimentsUpdate:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /experiments/{experiment_id}
+            Method: PUT
+        ExperimentsDelete:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /experiments/{experiment_id}
+            Method: DELETE
+        ExperimentsItemOptions:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /experiments/{experiment_id}
+            Method: OPTIONS
+        ExperimentsStart:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /experiments/{experiment_id}/start
+            Method: POST
+        ExperimentsPause:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /experiments/{experiment_id}/pause
+            Method: POST
+        ExperimentsComplete:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /experiments/{experiment_id}/complete
+            Method: POST
+        ExperimentsActionOptions:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /experiments/{experiment_id}/{action}
+            Method: OPTIONS
+
+  ExperimentsResolveFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${ProjectPrefix}-experiments-resolve-${Environment}"
+      CodeUri: src/
+      Handler: handlers.experiments_resolve.handler
+      Description: Public, unauthenticated endpoint reached by the browser for A/B short links. Assigns a variant by weight, sets a sticky cookie, counts a view, and 302s to the variant's published page.
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ExperimentsTable
+      Events:
+        ExperimentsResolve:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /experiments/{experiment_id}/resolve
+            Method: GET
+        ExperimentsResolveOptions:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /experiments/{experiment_id}/resolve
+            Method: OPTIONS
+
   PreferencesFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -1894,6 +2003,17 @@ Resources:
     Type: AWS::DynamoDB::Table
     Properties:
       TableName: !Sub "${ProjectPrefix}-routes-${Environment}"
+      BillingMode: PAY_PER_REQUEST
+      SSESpecification:
+        SSEEnabled: true
+      AttributeDefinitions: *DocumentAttributeDefinitions
+      KeySchema: *DocumentKeySchema
+      GlobalSecondaryIndexes: *DocumentGlobalSecondaryIndexes
+
+  ExperimentsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "${ProjectPrefix}-experiments-${Environment}"
       BillingMode: PAY_PER_REQUEST
       SSESpecification:
         SSEEnabled: true

@@ -126,6 +126,10 @@
         v-else-if="activeView === 'landingPages'"
         :key="`landing-pages-${activeEnvironment}-${auth.session?.client_id || ''}`"
       />
+      <ABTesting
+        v-else-if="activeView === 'abTesting'"
+        :key="`ab-testing-${activeEnvironment}-${auth.session?.client_id || ''}`"
+      />
       <Configuration
         v-else-if="activeView === 'configuration'"
         :key="`configuration-${activeEnvironment}-${auth.session?.client_id || ''}`"
@@ -143,6 +147,7 @@
 
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import ABTesting from "./components/ABTesting.vue";
 import AuthPage from "./components/AuthPage.vue";
 import Configuration from "./components/Configuration.vue";
 import Coupons from "./components/Coupons.vue";

@@ -29,6 +29,14 @@ class FakeDocumentRepository:
                 return dict(document)
         return None
 
+    def increment_view(self, tenant_id, document_id, page_id, amount=1):
+        document = self.documents.get((tenant_id, document_id))
+        if not document:
+            return
+        stats = document.setdefault("stats", {})
+        views = stats.setdefault("views_by_page", {})
+        views[page_id] = int(views.get(page_id, 0)) + amount
+
 
 class FakeSimpleRepository:
     def __init__(self, key_field):
