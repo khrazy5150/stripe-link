@@ -1132,6 +1132,17 @@ def validate_refund_request(document: dict[str, Any]) -> None:
         raise DocumentValidationError("Refund request risk_level is invalid.")
 
 
+def validate_route(document: dict[str, Any]) -> None:
+    require_fields(document, ["schema_version", "document_type", "tenant_id", "short_code", "target_type"])
+    if document.get("document_type") != "route":
+        raise DocumentValidationError("Route document_type must be 'route'.")
+    target_type = document.get("target_type")
+    if target_type not in {"page", "url", "experiment"}:
+        raise DocumentValidationError("Route target_type must be 'page', 'url', or 'experiment'.")
+    required_target = {"page": "target_page_id", "url": "target_url", "experiment": "target_experiment_id"}[target_type]
+    require_fields(document, [required_target])
+
+
 def validate_shipping_config(document: dict[str, Any]) -> None:
     require_fields(document, ["schema_version", "document_type", "tenant_id", "provider", "ship_from_address", "return_address", "default_parcel"])
     if document.get("document_type") != "shipping_config":

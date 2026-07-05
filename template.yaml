@@ -76,6 +76,10 @@ Parameters:
     Type: String
     Default: domains.jbay.uk
     Description: Hostname tenants CNAME their custom subdomain to (the Cloudflare for SaaS fallback origin, on the dedicated jbay.uk zone).
+  ShortUrlHost:
+    Type: String
+    Default: go.jbay.uk
+    Description: Public short-URL host served by the Cloudflare Worker on the jbay.uk zone (short links look like https://go.jbay.uk/{code}).
 
 Conditions:
   HasApiCustomDomain: !And
@@ -155,6 +159,7 @@ Globals:
         CLOUDFLARE_ZONE_ID: !Ref CloudflareZoneId
         CLOUDFLARE_API_TOKEN_SECRET_ARN: !If [HasCloudflareZone, !Ref CloudflareApiTokenSecret, ""]
         CUSTOM_DOMAIN_TARGET_HOST: !Ref CustomDomainTargetHost
+        SHORT_URL_HOST: !Ref ShortUrlHost
     Tracing: Active
 
 Resources:
@@ -1137,6 +1142,72 @@ Resources:
           Properties:
             RestApiId: !Ref RestApi
             Path: /custom-domains/resolve
+            Method: OPTIONS
+
+  RoutesFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${ProjectPrefix}-routes-api-${Environment}"
+      CodeUri: src/
+      Handler: handlers.routes.handler
+      Description: Tenant short-URL CRUD -- create/list/delete short links that resolve to pages, A/B experiments, or external URLs.
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref RoutesTable
+      Events:
+        RoutesList:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /routes
+            Method: GET
+        RoutesCreate:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /routes
+            Method: POST
+        RoutesOptions:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /routes
+            Method: OPTIONS
+        RoutesDelete:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /routes/{short_code}
+            Method: DELETE
+        RoutesItemOptions:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /routes/{short_code}
+            Method: OPTIONS
+
+  RoutesResolveFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${ProjectPrefix}-routes-resolve-${Environment}"
+      CodeUri: src/
+      Handler: handlers.routes_resolve.handler
+      Description: Public, unauthenticated endpoint the Cloudflare Worker calls to resolve a short code to its redirect destination. Read-only.
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref RoutesTable
+      Events:
+        RoutesResolve:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /routes/resolve
+            Method: GET
+        RoutesResolveOptions:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /routes/resolve
             Method: OPTIONS
 
   PreferencesFunction:

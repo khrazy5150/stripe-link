@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.juniorbay.com/stripe-link/Route.schema.json",
+  "title": "Route",
+  "description": "A short-URL route: a Base62 short_code that resolves to a target (a published page, an A/B experiment, or an external URL). Resolved at the edge (Cloudflare Worker) via a public resolve endpoint.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "document_type", "tenant_id", "short_code", "target_type"],
+  "properties": {
+    "schema_version": { "type": "string", "const": "2026-05-29" },
+    "document_type": { "type": "string", "const": "route" },
+    "tenant_id": { "type": "string", "minLength": 1 },
+    "short_code": { "type": "string", "pattern": "^[0-9A-Za-z]+$", "minLength": 1 },
+    "target_type": { "type": "string", "enum": ["page", "url", "experiment"] },
+    "target_page_id": { "type": "string", "description": "Required when target_type is page." },
+    "target_url": { "type": "string", "description": "Required when target_type is url." },
+    "target_experiment_id": { "type": "string", "description": "Required when target_type is experiment." },
+    "label": { "type": "string", "description": "Optional human-readable label for the dashboard." },
+    "created_at": { "type": "integer", "minimum": 0 },
+    "updated_at": { "type": "integer", "minimum": 0 }
+  },
+  "allOf": [
+    { "if": { "properties": { "target_type": { "const": "page" } } }, "then": { "required": ["target_page_id"] } },
+    { "if": { "properties": { "target_type": { "const": "url" } } }, "then": { "required": ["target_url"] } },
+    { "if": { "properties": { "target_type": { "const": "experiment" } } }, "then": { "required": ["target_experiment_id"] } }
+  ]
+}

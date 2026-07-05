@@ -540,6 +540,16 @@ def invoices_repository(table: Any | None = None) -> DynamoDocumentRepository:
     )
 
 
+def routes_repository(table: Any | None = None) -> DynamoDocumentRepository:
+    """Short-URL routes, keyed by tenant but resolvable by short_code via GSI1 (find_by_id)."""
+    return DynamoDocumentRepository(
+        os.environ.get("ROUTES_TABLE", ""),
+        document_type="route",
+        id_field="short_code",
+        table=table,
+    )
+
+
 def custom_domains_index_repository(table: Any | None = None) -> DynamoDocumentRepository:
     """Denormalized domain -> tenant/page lookup index, kept in sync with TenantConfig.custom_domains.
 
