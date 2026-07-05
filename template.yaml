@@ -1233,6 +1233,17 @@ Resources:
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref ShippingConfigTable
+        - Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Action:
+                - kms:Encrypt
+                - kms:Decrypt
+                - kms:GenerateDataKey
+              Resource: !Sub "arn:aws:kms:${AWS::Region}:${AWS::AccountId}:key/*"
+              Condition:
+                StringEquals:
+                  kms:EncryptionContext:service: stripe-link
       Events:
         GetShipping:
           Type: Api

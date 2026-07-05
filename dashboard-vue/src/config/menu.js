@@ -109,7 +109,7 @@ export const menuSchema = {
       label: "Shipping",
       icon: "truck",
       view: "shipping",
-      enabled: false,
+      enabled: true,
       environments: ["test", "live"],
     },
     customers: {

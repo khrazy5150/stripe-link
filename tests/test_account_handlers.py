@@ -839,6 +839,76 @@ class AccountHandlerTests(unittest.TestCase):
         self.assertEqual(response["statusCode"], 400)
         self.assertEqual(json.loads(response["body"])["error"], "invalid_shipping_config")
 
+    def test_shipping_config_encrypts_and_redacts_provider_api_key(self):
+        repository = FakeSimpleRepository("tenant_id")
+        config = load_fixture("shipping-config-demo.json")
+        config["provider"]["name"] = "shippo"
+        config["provider"]["api_key_ref"] = "shippo_test_PLAINTEXT_KEY"
+
+        class FakeCipher:
+            def encrypt(self, plaintext, *, tenant_id, mode, field):
+                return f"kms:v1:enc({plaintext})"
+
+        response = shipping_handler({
+            "httpMethod": "PUT",
+            "body": json.dumps(config),
+        }, None, repository=repository, secret_cipher=FakeCipher())
+
+        self.assertEqual(response["statusCode"], 201)
+        # Response never exposes the key or the ciphertext.
+        self.assertEqual(json.loads(response["body"])["shipping_config"]["provider"]["api_key_ref"], "********")
+        # Stored value is encrypted, not the plaintext.
+        stored = repository.get("tenant_demo")
+        self.assertEqual(stored["provider"]["api_key_ref"], "kms:v1:enc(shippo_test_PLAINTEXT_KEY)")
+        self.assertEqual(stored["provider"]["connection_status"], "untested")
+        # GET is redacted too.
+        fetched = shipping_handler({
+            "httpMethod": "GET",
+            "queryStringParameters": {"tenant_id": "tenant_demo"},
+        }, None, repository=repository, secret_cipher=FakeCipher())
+        self.assertEqual(json.loads(fetched["body"])["shipping_config"]["provider"]["api_key_ref"], "********")
+
+    def test_shipping_config_preserves_key_when_provider_unchanged(self):
+        repository = FakeSimpleRepository("tenant_id")
+
+        class FakeCipher:
+            def encrypt(self, plaintext, *, tenant_id, mode, field):
+                return f"kms:v1:enc({plaintext})"
+
+        config = load_fixture("shipping-config-demo.json")
+        config["provider"]["name"] = "shippo"
+        config["provider"]["api_key_ref"] = "shippo_PLAINTEXT"
+        shipping_handler({"httpMethod": "PUT", "body": json.dumps(config)}, None, repository=repository, secret_cipher=FakeCipher())
+        stored_ref = repository.get("tenant_demo")["provider"]["api_key_ref"]
+
+        resaved = load_fixture("shipping-config-demo.json")
+        resaved["provider"]["name"] = "shippo"
+        resaved["provider"]["api_key_ref"] = "********"
+        shipping_handler({"httpMethod": "PUT", "body": json.dumps(resaved)}, None, repository=repository, secret_cipher=FakeCipher())
+
+        self.assertEqual(repository.get("tenant_demo")["provider"]["api_key_ref"], stored_ref)
+
+    def test_shipping_config_clears_key_on_provider_change(self):
+        repository = FakeSimpleRepository("tenant_id")
+
+        class FakeCipher:
+            def encrypt(self, plaintext, *, tenant_id, mode, field):
+                return f"kms:v1:enc({plaintext})"
+
+        config = load_fixture("shipping-config-demo.json")
+        config["provider"]["name"] = "shippo"
+        config["provider"]["api_key_ref"] = "shippo_PLAINTEXT"
+        shipping_handler({"httpMethod": "PUT", "body": json.dumps(config)}, None, repository=repository, secret_cipher=FakeCipher())
+
+        switched = load_fixture("shipping-config-demo.json")
+        switched["provider"]["name"] = "easypost"
+        switched["provider"]["api_key_ref"] = "********"
+        shipping_handler({"httpMethod": "PUT", "body": json.dumps(switched)}, None, repository=repository, secret_cipher=FakeCipher())
+
+        stored = repository.get("tenant_demo")
+        self.assertNotIn("api_key_ref", stored["provider"])
+        self.assertEqual(stored["provider"]["connection_status"], "not_configured")
+
     def test_customer_create_get_and_filter(self):
         repository = FakeDocumentRepository("customer_id")
         customer = load_fixture("customer-demo.json")

@@ -128,6 +128,7 @@
       <Customers v-else-if="activeView === 'customers'" :key="`customers-${activeEnvironment}-${auth.session?.client_id || ''}`" />
       <Invoices v-else-if="activeView === 'invoices'" :key="`invoices-${activeEnvironment}-${auth.session?.client_id || ''}`" />
       <Notifications v-else-if="activeView === 'notifications'" :key="`notifications-${activeEnvironment}-${auth.session?.client_id || ''}`" />
+      <Shipping v-else-if="activeView === 'shipping'" :key="`shipping-${activeEnvironment}-${auth.session?.client_id || ''}`" />
       <Profile v-else-if="activeView === 'profile'" :key="`profile-${auth.session?.user_id || ''}`" />
       <Preferences v-else-if="activeView === 'preferences'" :key="`preferences-${auth.session?.user_id || ''}`" />
     </main>
@@ -149,6 +150,7 @@ import Orders from "./components/Orders.vue";
 import Preferences from "./components/Preferences.vue";
 import Products from "./components/Products.vue";
 import Profile from "./components/Profile.vue";
+import Shipping from "./components/Shipping.vue";
 import StripeKeys from "./components/StripeKeys.vue";
 import { iconPaths, menuGroupsForEnvironment } from "./config/menu";
 import { getApiEnvironment, loadAppConfigApiBase, setApiEnvironment } from "./api/client";
