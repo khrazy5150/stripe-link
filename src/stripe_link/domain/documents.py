@@ -1180,6 +1180,14 @@ def validate_experiment(document: dict[str, Any]) -> None:
         raise DocumentValidationError("Experiment control_page_id must match one of the variants.")
 
 
+def validate_legal_page(document: dict[str, Any]) -> None:
+    require_fields(document, ["schema_version", "document_type", "tenant_id", "page_id"])
+    if document.get("document_type") != "legal_page":
+        raise DocumentValidationError("Legal page document_type must be 'legal_page'.")
+    if document.get("page_id") not in {"terms", "privacy", "refund"}:
+        raise DocumentValidationError("Legal page page_id must be 'terms', 'privacy', or 'refund'.")
+
+
 def validate_shipping_config(document: dict[str, Any]) -> None:
     require_fields(document, ["schema_version", "document_type", "tenant_id", "provider", "ship_from_address", "return_address", "default_parcel"])
     if document.get("document_type") != "shipping_config":

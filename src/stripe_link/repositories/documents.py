@@ -574,6 +574,21 @@ def experiments_repository(table: Any | None = None) -> DynamoDocumentRepository
     )
 
 
+# Platform legal pages are global (not per-tenant); they live under one reserved partition
+# and are resolvable by page_id via GSI1. Built-in defaults cover the empty-table case.
+PLATFORM_TENANT_ID = "platform"
+
+
+def legal_pages_repository(table: Any | None = None) -> DynamoDocumentRepository:
+    """Platform-global legal pages (terms/privacy/refund), resolvable by page_id via GSI1."""
+    return DynamoDocumentRepository(
+        os.environ.get("LEGAL_PAGES_TABLE", ""),
+        document_type="legal_page",
+        id_field="page_id",
+        table=table,
+    )
+
+
 def custom_domains_index_repository(table: Any | None = None) -> DynamoDocumentRepository:
     """Denormalized domain -> tenant/page lookup index, kept in sync with TenantConfig.custom_domains.
 

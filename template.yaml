@@ -1295,6 +1295,42 @@ Resources:
             Path: /experiments/{experiment_id}/{action}
             Method: OPTIONS
 
+  LegalFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${ProjectPrefix}-legal-api-${Environment}"
+      CodeUri: src/
+      Handler: handlers.legal.handler
+      Description: Public, unauthenticated platform legal pages -- serves Terms/Privacy/Refund as HTML at /legal/{page_id} (with built-in defaults) plus a JSON list for footer links.
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref LegalPagesTable
+      Events:
+        LegalList:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /legal
+            Method: GET
+        LegalListOptions:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /legal
+            Method: OPTIONS
+        LegalPage:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /legal/{page_id}
+            Method: GET
+        LegalPageOptions:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /legal/{page_id}
+            Method: OPTIONS
+
   ExperimentsResolveFunction:
     Type: AWS::Serverless::Function
     Properties:

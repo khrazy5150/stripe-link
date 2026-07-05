@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.juniorbay.com/stripe-link/LegalPage.schema.json",
+  "title": "LegalPage",
+  "description": "A platform-global legal/policy page (Terms, Privacy, Refund) served as HTML at /legal/{page_id} and linked from storefront footers. Optional override of the built-in default; a stored document supplies any of title, link_text, display_order, enabled, or content, and empty fields fall back to the default.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "document_type", "tenant_id", "page_id"],
+  "properties": {
+    "schema_version": { "type": "string", "const": "2026-05-29" },
+    "document_type": { "type": "string", "const": "legal_page" },
+    "tenant_id": { "type": "string", "minLength": 1, "description": "Reserved platform partition; legal pages are not per-merchant." },
+    "page_id": { "type": "string", "enum": ["terms", "privacy", "refund"] },
+    "title": { "type": "string" },
+    "link_text": { "type": "string", "description": "Short label for footer links." },
+    "display_order": { "type": "integer", "minimum": 0 },
+    "enabled": { "type": "boolean" },
+    "content": { "type": "string", "description": "Inner HTML body of the page." },
+    "created_at": { "type": "integer", "minimum": 0 },
+    "updated_at": { "type": "integer", "minimum": 0 }
+  }
+}
