@@ -20,141 +20,157 @@
 
     <section class="dashboard-card">
       <header class="dashboard-card-header"><h2>General</h2></header>
-      <div class="offer-two-column">
-        <label class="offer-field">
-          <span>Default Currency</span>
-          <input v-model.trim="form.default_currency" type="text" maxlength="3" placeholder="usd" />
-          <small>Three-letter ISO currency code (lowercase), e.g. usd.</small>
-        </label>
+      <div class="dashboard-card-body">
+        <div class="offer-two-column">
+          <label class="offer-field">
+            <span>Default Currency</span>
+            <input v-model.trim="form.default_currency" type="text" maxlength="3" placeholder="usd" />
+            <small>Three-letter ISO currency code (lowercase), e.g. usd.</small>
+          </label>
+        </div>
       </div>
     </section>
 
     <section class="dashboard-card">
       <header class="dashboard-card-header"><h2>Support Contact</h2></header>
-      <p class="field-note">Shown to customers and used for tenant notifications.</p>
-      <div class="offer-two-column">
-        <label class="offer-field">
-          <span>Support Email</span>
-          <input v-model.trim="form.support.email" type="email" placeholder="support@yourbusiness.com" />
-        </label>
-        <label class="offer-field">
-          <span>Support Phone</span>
-          <input v-model.trim="form.support.phone" type="tel" placeholder="+1 555 555 0123" />
-        </label>
-      </div>
-      <div class="offer-two-column">
-        <label class="offer-field">
-          <span>SMS Notification Phone</span>
-          <input v-model.trim="form.support.sms_notification_phone" type="tel" placeholder="+15555550123" />
-          <small>E.164 number for tenant SMS/admin notifications.</small>
-        </label>
+      <div class="dashboard-card-body">
+        <p class="field-note">Shown to customers and used for tenant notifications.</p>
+        <div class="offer-two-column">
+          <label class="offer-field">
+            <span>Support Email</span>
+            <input v-model.trim="form.support.email" type="email" placeholder="support@yourbusiness.com" />
+          </label>
+          <label class="offer-field">
+            <span>Support Phone</span>
+            <input v-model.trim="form.support.phone" type="tel" placeholder="+1 555 555 0123" />
+          </label>
+        </div>
+        <div class="offer-two-column">
+          <label class="offer-field">
+            <span>SMS Notification Phone</span>
+            <input v-model.trim="form.support.sms_notification_phone" type="tel" placeholder="+15555550123" />
+            <small>E.164 number for tenant SMS/admin notifications.</small>
+          </label>
+        </div>
       </div>
     </section>
 
     <section class="dashboard-card">
       <header class="dashboard-card-header"><h2>Checkout Defaults</h2></header>
-      <p class="field-note">Individual offers can override these settings.</p>
-      <label class="checkbox-row offer-checkbox-inline">
-        <input v-model="form.checkout.phone_number_collection_enabled" type="checkbox" />
-        <span>Collect the customer's phone number at checkout</span>
-      </label>
-      <div class="offer-two-column">
-        <label class="offer-field">
-          <span>Default Success URL</span>
-          <input v-model.trim="form.checkout.default_success_url" type="url" placeholder="https://yourbusiness.com/thank-you" />
+      <div class="dashboard-card-body">
+        <p class="field-note">Individual offers can override these settings.</p>
+        <label class="checkbox-row">
+          <input v-model="form.checkout.phone_number_collection_enabled" type="checkbox" />
+          <span>Collect the customer's phone number at checkout</span>
         </label>
-        <label class="offer-field">
-          <span>Default Cancel URL</span>
-          <input v-model.trim="form.checkout.default_cancel_url" type="url" placeholder="https://yourbusiness.com/checkout" />
-        </label>
+        <div class="offer-two-column">
+          <label class="offer-field">
+            <span>Default Success URL</span>
+            <input v-model.trim="form.checkout.default_success_url" type="url" placeholder="https://yourbusiness.com/thank-you" />
+          </label>
+          <label class="offer-field">
+            <span>Default Cancel URL</span>
+            <input v-model.trim="form.checkout.default_cancel_url" type="url" placeholder="https://yourbusiness.com/checkout" />
+          </label>
+        </div>
       </div>
     </section>
 
     <section class="dashboard-card">
       <header class="dashboard-card-header"><h2>Upsell Page Defaults</h2></header>
-      <p class="field-note">Auto-populate when creating landing pages. Individual pages can override them.</p>
-      <div class="offer-two-column">
-        <label class="offer-field">
-          <span>Headline</span>
-          <input v-model.trim="form.page_defaults.upsell.headline" type="text" placeholder="Wait! Before You Go..." />
-        </label>
-        <label class="offer-field">
-          <span>Subheadline</span>
-          <input v-model.trim="form.page_defaults.upsell.subheadline" type="text" placeholder="Exclusive One-Time Offer Just For You" />
-        </label>
-      </div>
-      <div class="offer-two-column">
-        <label class="offer-field">
-          <span>Accept Button Text</span>
-          <input v-model.trim="form.page_defaults.upsell.accept_button_text" type="text" :placeholder="acceptButtonPlaceholder" />
-          <small>Use {{ priceToken }} to insert the product price.</small>
-        </label>
-        <label class="offer-field">
-          <span>Decline Button Text</span>
-          <input v-model.trim="form.page_defaults.upsell.decline_button_text" type="text" placeholder="No, Thank You! Let's Move On" />
-        </label>
+      <div class="dashboard-card-body">
+        <p class="field-note">Auto-populate when creating landing pages. Individual pages can override them.</p>
+        <div class="offer-two-column">
+          <label class="offer-field">
+            <span>Headline</span>
+            <input v-model.trim="form.page_defaults.upsell.headline" type="text" placeholder="Wait! Before You Go..." />
+          </label>
+          <label class="offer-field">
+            <span>Subheadline</span>
+            <input v-model.trim="form.page_defaults.upsell.subheadline" type="text" placeholder="Exclusive One-Time Offer Just For You" />
+          </label>
+        </div>
+        <div class="offer-two-column">
+          <label class="offer-field">
+            <span>Accept Button Text</span>
+            <input v-model.trim="form.page_defaults.upsell.accept_button_text" type="text" :placeholder="acceptButtonPlaceholder" />
+            <small>Use {{ priceToken }} to insert the product price.</small>
+          </label>
+          <label class="offer-field">
+            <span>Decline Button Text</span>
+            <input v-model.trim="form.page_defaults.upsell.decline_button_text" type="text" placeholder="No, Thank You! Let's Move On" />
+          </label>
+        </div>
       </div>
     </section>
 
     <section class="dashboard-card">
       <header class="dashboard-card-header"><h2>Thank You Page Defaults</h2></header>
-      <div class="offer-two-column">
+      <div class="dashboard-card-body">
+        <div class="offer-two-column">
+          <label class="offer-field">
+            <span>Headline</span>
+            <input v-model.trim="form.page_defaults.thank_you.headline" type="text" placeholder="Thank You for Your Purchase!" />
+          </label>
+          <label class="offer-field">
+            <span>Subtitle</span>
+            <input v-model.trim="form.page_defaults.thank_you.subtitle" type="text" placeholder="Your Order Has Been Confirmed!" />
+          </label>
+        </div>
         <label class="offer-field">
-          <span>Headline</span>
-          <input v-model.trim="form.page_defaults.thank_you.headline" type="text" placeholder="Thank You for Your Purchase!" />
-        </label>
-        <label class="offer-field">
-          <span>Subtitle</span>
-          <input v-model.trim="form.page_defaults.thank_you.subtitle" type="text" placeholder="Your Order Has Been Confirmed!" />
+          <span>Message</span>
+          <textarea v-model.trim="form.page_defaults.thank_you.message" rows="3" placeholder="Look for an email from us with further details on your order."></textarea>
         </label>
       </div>
-      <label class="offer-field">
-        <span>Message</span>
-        <textarea v-model.trim="form.page_defaults.thank_you.message" rows="3" placeholder="Look for an email from us with further details on your order."></textarea>
-      </label>
     </section>
 
     <section class="dashboard-card">
       <header class="dashboard-card-header"><h2>Legal Links</h2></header>
-      <p class="field-note">Default legal page URLs linked from checkout and landing pages.</p>
-      <div class="offer-three-column">
-        <label class="offer-field">
-          <span>Terms URL</span>
-          <input v-model.trim="form.legal_defaults.terms_url" type="url" placeholder="https://yourbusiness.com/terms" />
-        </label>
-        <label class="offer-field">
-          <span>Privacy URL</span>
-          <input v-model.trim="form.legal_defaults.privacy_url" type="url" placeholder="https://yourbusiness.com/privacy" />
-        </label>
-        <label class="offer-field">
-          <span>Refund URL</span>
-          <input v-model.trim="form.legal_defaults.refund_url" type="url" placeholder="https://yourbusiness.com/refunds" />
-        </label>
+      <div class="dashboard-card-body">
+        <p class="field-note">Default legal page URLs linked from checkout and landing pages.</p>
+        <div class="offer-three-column">
+          <label class="offer-field">
+            <span>Terms URL</span>
+            <input v-model.trim="form.legal_defaults.terms_url" type="url" placeholder="https://yourbusiness.com/terms" />
+          </label>
+          <label class="offer-field">
+            <span>Privacy URL</span>
+            <input v-model.trim="form.legal_defaults.privacy_url" type="url" placeholder="https://yourbusiness.com/privacy" />
+          </label>
+          <label class="offer-field">
+            <span>Refund URL</span>
+            <input v-model.trim="form.legal_defaults.refund_url" type="url" placeholder="https://yourbusiness.com/refunds" />
+          </label>
+        </div>
       </div>
     </section>
 
     <section class="dashboard-card">
       <header class="dashboard-card-header"><h2>Analytics Defaults</h2></header>
-      <p class="field-note">Applied to landing pages that don't set their own tracking IDs.</p>
-      <div class="offer-two-column">
-        <label class="offer-field">
-          <span>Google Tag ID</span>
-          <input v-model.trim="form.analytics_defaults.google_tag_id" type="text" placeholder="G-XXXXXXXXXX" />
-        </label>
-        <label class="offer-field">
-          <span>Meta Pixel ID</span>
-          <input v-model.trim="form.analytics_defaults.pixel_id" type="text" placeholder="000000000000000" />
-        </label>
+      <div class="dashboard-card-body">
+        <p class="field-note">Applied to landing pages that don't set their own tracking IDs.</p>
+        <div class="offer-two-column">
+          <label class="offer-field">
+            <span>Google Tag ID</span>
+            <input v-model.trim="form.analytics_defaults.google_tag_id" type="text" placeholder="G-XXXXXXXXXX" />
+          </label>
+          <label class="offer-field">
+            <span>Meta Pixel ID</span>
+            <input v-model.trim="form.analytics_defaults.pixel_id" type="text" placeholder="000000000000000" />
+          </label>
+        </div>
       </div>
     </section>
 
     <section class="dashboard-card">
       <header class="dashboard-card-header"><h2>System</h2></header>
-      <p class="field-note">Read-only. Managed by the platform for the active environment.</p>
-      <dl class="product-details-grid">
-        <div><dt>Environment</dt><dd>{{ environmentLabel }}</dd></div>
-        <div><dt>API Endpoint</dt><dd class="font-mono">{{ apiBase || "—" }}</dd></div>
-      </dl>
+      <div class="dashboard-card-body">
+        <p class="field-note">Read-only. Managed by the platform for the active environment.</p>
+        <dl class="product-details-grid">
+          <div><dt>Environment</dt><dd>{{ environmentLabel }}</dd></div>
+          <div><dt>API Endpoint</dt><dd class="font-mono">{{ apiBase || "—" }}</dd></div>
+        </dl>
+      </div>
     </section>
 
     <footer class="config-save-bar">

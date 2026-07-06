@@ -20,43 +20,47 @@
 
     <section class="dashboard-card">
       <header class="dashboard-card-header"><h2>Details</h2></header>
-      <div class="offer-two-column">
-        <label class="offer-field">
-          <span>First Name</span>
-          <input v-model.trim="form.first_name" type="text" placeholder="Ada" />
-        </label>
-        <label class="offer-field">
-          <span>Last Name</span>
-          <input v-model.trim="form.last_name" type="text" placeholder="Lovelace" />
-        </label>
-      </div>
-      <div class="offer-two-column">
-        <label class="offer-field">
-          <span>Display Name</span>
-          <input v-model.trim="form.display_name" type="text" :placeholder="displayNamePlaceholder" />
-          <small>Shown in the dashboard. Defaults to your name if left blank.</small>
-        </label>
-        <label class="offer-field">
-          <span>Email</span>
-          <input :value="email" type="email" disabled />
-          <small>Your sign-in email is managed by the auth provider.</small>
-        </label>
+      <div class="dashboard-card-body">
+        <div class="offer-two-column">
+          <label class="offer-field">
+            <span>First Name</span>
+            <input v-model.trim="form.first_name" type="text" placeholder="Ada" />
+          </label>
+          <label class="offer-field">
+            <span>Last Name</span>
+            <input v-model.trim="form.last_name" type="text" placeholder="Lovelace" />
+          </label>
+        </div>
+        <div class="offer-two-column">
+          <label class="offer-field">
+            <span>Display Name</span>
+            <input v-model.trim="form.display_name" type="text" :placeholder="displayNamePlaceholder" />
+            <small>Shown in the dashboard. Defaults to your name if left blank.</small>
+          </label>
+          <label class="offer-field">
+            <span>Email</span>
+            <input :value="email" type="email" disabled />
+            <small>Your sign-in email is managed by the auth provider.</small>
+          </label>
+        </div>
       </div>
     </section>
 
     <section class="dashboard-card">
       <header class="dashboard-card-header"><h2>Account</h2></header>
-      <p class="field-note">Read-only. Managed by the platform.</p>
-      <dl class="product-details-grid">
-        <div><dt>Role</dt><dd>{{ statusLabel(rawDoc.role || "user") }}</dd></div>
-        <div><dt>Status</dt><dd>{{ statusLabel(rawDoc.status || "active") }}</dd></div>
-        <div><dt>Plan Tier</dt><dd>{{ rawDoc.subscription?.tier_id || "—" }}</dd></div>
-        <div><dt>Account Status</dt><dd>{{ statusLabel(rawDoc.subscription?.account_status || "—") }}</dd></div>
-        <div><dt>Billing Status</dt><dd>{{ statusLabel(rawDoc.subscription?.billing_status || "—") }}</dd></div>
-        <div><dt>Email Verified</dt><dd>{{ rawDoc.auth?.email_verified ? "Yes" : "No" }}</dd></div>
-        <div><dt>Last Login</dt><dd>{{ formatDate(rawDoc.auth?.last_login_at) }}</dd></div>
-        <div><dt>Created</dt><dd>{{ formatDate(rawDoc.created_at) }}</dd></div>
-      </dl>
+      <div class="dashboard-card-body">
+        <p class="field-note">Read-only. Managed by the platform.</p>
+        <dl class="product-details-grid">
+          <div><dt>Role</dt><dd>{{ statusLabel(rawDoc.role || "user") }}</dd></div>
+          <div><dt>Status</dt><dd>{{ statusLabel(rawDoc.status || "active") }}</dd></div>
+          <div><dt>Plan Tier</dt><dd>{{ rawDoc.subscription?.tier_id || "—" }}</dd></div>
+          <div><dt>Account Status</dt><dd>{{ statusLabel(rawDoc.subscription?.account_status || "—") }}</dd></div>
+          <div><dt>Billing Status</dt><dd>{{ statusLabel(rawDoc.subscription?.billing_status || "—") }}</dd></div>
+          <div><dt>Email Verified</dt><dd>{{ rawDoc.auth?.email_verified ? "Yes" : "No" }}</dd></div>
+          <div><dt>Last Login</dt><dd>{{ formatDate(rawDoc.auth?.last_login_at) }}</dd></div>
+          <div><dt>Created</dt><dd>{{ formatDate(rawDoc.created_at) }}</dd></div>
+        </dl>
+      </div>
     </section>
   </section>
 </template>

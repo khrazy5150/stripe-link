@@ -20,40 +20,42 @@
 
     <section class="dashboard-card">
       <header class="dashboard-card-header"><h2>Appearance & Defaults</h2></header>
-      <div class="offer-two-column">
-        <label class="offer-field">
-          <span>Theme</span>
-          <select v-model="form.theme">
-            <option value="system">System</option>
-            <option value="light">Light</option>
-            <option value="dark">Dark</option>
-          </select>
-        </label>
-        <label class="offer-field">
-          <span>Default Stripe Mode</span>
-          <select v-model="form.default_stripe_mode">
-            <option value="test">Test</option>
-            <option value="live">Live</option>
-          </select>
+      <div class="dashboard-card-body">
+        <div class="offer-two-column">
+          <label class="offer-field">
+            <span>Theme</span>
+            <select v-model="form.theme">
+              <option value="system">System</option>
+              <option value="light">Light</option>
+              <option value="dark">Dark</option>
+            </select>
+          </label>
+          <label class="offer-field">
+            <span>Default Stripe Mode</span>
+            <select v-model="form.default_stripe_mode">
+              <option value="test">Test</option>
+              <option value="live">Live</option>
+            </select>
+          </label>
+        </div>
+        <div class="offer-two-column">
+          <label class="offer-field">
+            <span>Default Home View</span>
+            <select v-model="form.dashboard_home">
+              <option value="dashboard">Dashboard</option>
+              <option value="products">Products</option>
+              <option value="offers">Offers</option>
+              <option value="landingPages">Landing Pages</option>
+              <option value="orders">Orders</option>
+              <option value="customers">Customers</option>
+            </select>
+          </label>
+        </div>
+        <label class="checkbox-row">
+          <input v-model="form.sidebar_collapsed" type="checkbox" />
+          <span>Collapse the side menu by default</span>
         </label>
       </div>
-      <div class="offer-two-column">
-        <label class="offer-field">
-          <span>Default Home View</span>
-          <select v-model="form.dashboard_home">
-            <option value="dashboard">Dashboard</option>
-            <option value="products">Products</option>
-            <option value="offers">Offers</option>
-            <option value="landingPages">Landing Pages</option>
-            <option value="orders">Orders</option>
-            <option value="customers">Customers</option>
-          </select>
-        </label>
-      </div>
-      <label class="checkbox-row offer-checkbox-inline">
-        <input v-model="form.sidebar_collapsed" type="checkbox" />
-        <span>Collapse the side menu by default</span>
-      </label>
     </section>
   </section>
 </template>
