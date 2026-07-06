@@ -13,9 +13,24 @@
       </div>
       <nav>
         <template v-for="group in menuGroups" :key="group.key">
-          <div class="nav-section-title">{{ group.label }}</div>
+          <button
+            class="nav-section-title"
+            type="button"
+            :aria-expanded="!isGroupCollapsed(group.key)"
+            @click="toggleGroup(group.key)"
+          >
+            <span>{{ group.label }}</span>
+            <svg
+              class="nav-section-chevron"
+              :class="{ collapsed: isGroupCollapsed(group.key) }"
+              fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"
+            >
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="m6 9 6 6 6-6" />
+            </svg>
+          </button>
           <button
             v-for="item in group.items"
+            v-show="sidebarCollapsed || !isGroupCollapsed(group.key)"
             :key="item.key"
             class="nav-item"
             :class="{ active: activeView === item.view }"
@@ -183,6 +198,30 @@ const activeView = ref("dashboard");
 const activeEnvironment = ref(getApiEnvironment());
 const sidebarCollapsed = ref(false);
 const userMenuOpen = ref(false);
+
+const COLLAPSED_GROUPS_KEY = "jb_sidebar_collapsed_groups";
+function loadCollapsedGroups() {
+  try {
+    const stored = JSON.parse(localStorage.getItem(COLLAPSED_GROUPS_KEY) || "[]");
+    return new Set(Array.isArray(stored) ? stored : []);
+  } catch {
+    return new Set();
+  }
+}
+const collapsedGroups = ref(loadCollapsedGroups());
+function isGroupCollapsed(key) {
+  return collapsedGroups.value.has(key);
+}
+function toggleGroup(key) {
+  const next = new Set(collapsedGroups.value);
+  next.has(key) ? next.delete(key) : next.add(key);
+  collapsedGroups.value = next;
+  try {
+    localStorage.setItem(COLLAPSED_GROUPS_KEY, JSON.stringify([...next]));
+  } catch {
+    /* localStorage unavailable; collapse state is best-effort */
+  }
+}
 const userMenuRef = ref(null);
 const menuGroups = computed(() => menuGroupsForEnvironment(activeEnvironment.value));
 const environmentLabel = computed(() => activeEnvironment.value === "live" ? "Live" : "Test");

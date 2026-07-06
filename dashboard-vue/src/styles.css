@@ -94,12 +94,35 @@ nav {
 }
 
 .nav-section-title {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.8rem;
+  border: 0;
+  background: transparent;
   color: var(--text-muted);
   font-size: 1.1rem;
   font-weight: 700;
   letter-spacing: 0.08rem;
   padding: 1.2rem 2rem 0.4rem;
   text-transform: uppercase;
+  cursor: pointer;
+}
+
+.nav-section-title:hover {
+  color: var(--text);
+}
+
+.nav-section-chevron {
+  width: 1.4rem;
+  height: 1.4rem;
+  flex: 0 0 auto;
+  transition: transform 0.15s ease;
+}
+
+.nav-section-chevron.collapsed {
+  transform: rotate(-90deg);
 }
 
 .nav-section-title:first-child {
