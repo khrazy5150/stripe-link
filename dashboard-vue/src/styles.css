@@ -557,6 +557,14 @@ main {
   overflow: hidden;
 }
 
+/* Padded body for cards whose content sits directly in the card (aligns with the
+   header's inset and gives consistent spacing between rows). */
+.dashboard-card-body {
+  display: grid;
+  gap: 1.6rem;
+  padding: 1.8rem 2rem;
+}
+
 .dashboard-card-header {
   padding: 1.8rem 2rem;
   border-bottom: 1px solid var(--line);
@@ -1713,6 +1721,22 @@ textarea {
 textarea {
   min-height: auto;
   resize: vertical;
+}
+
+/* Checkboxes and radios must opt out of the full-width text-input styling above,
+   otherwise they render as full-width bordered boxes that push their labels away. */
+input[type="checkbox"],
+input[type="radio"] {
+  width: 1.6rem;
+  height: 1.6rem;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  flex: 0 0 auto;
+  accent-color: var(--accent);
+  cursor: pointer;
 }
 
 .theme-live input,

@@ -20,59 +20,65 @@
 
     <section class="dashboard-card">
       <header class="dashboard-card-header"><h2>General</h2></header>
-      <label class="checkbox-row offer-checkbox-inline">
-        <input v-model="form.enabled" type="checkbox" />
-        <span>Enable shipping (rates and labels)</span>
-      </label>
-      <label class="checkbox-row offer-checkbox-inline">
-        <input v-model="form.test_mode" type="checkbox" />
-        <span>Test mode (use the provider's test environment)</span>
-      </label>
-      <label class="checkbox-row offer-checkbox-inline">
-        <input v-model="form.auto_fulfill_after_label_purchase" type="checkbox" />
-        <span>Auto-fulfill orders after a label is purchased</span>
-      </label>
+      <div class="dashboard-card-body">
+        <label class="checkbox-row">
+          <input v-model="form.enabled" type="checkbox" />
+          <span>Enable shipping (rates and labels)</span>
+        </label>
+        <label class="checkbox-row">
+          <input v-model="form.test_mode" type="checkbox" />
+          <span>Test mode (use the provider's test environment)</span>
+        </label>
+        <label class="checkbox-row">
+          <input v-model="form.auto_fulfill_after_label_purchase" type="checkbox" />
+          <span>Auto-fulfill orders after a label is purchased</span>
+        </label>
+      </div>
     </section>
 
     <section class="dashboard-card">
       <header class="dashboard-card-header"><h2>Provider</h2></header>
-      <div class="offer-two-column">
-        <label class="offer-field">
-          <span>Provider <strong>*</strong></span>
-          <select v-model="form.provider.name">
-            <option value="">Select a provider…</option>
-            <option value="shippo">Shippo</option>
-            <option value="easypost">EasyPost</option>
-            <option value="shipstation">ShipStation</option>
-            <option value="easyship">Easyship</option>
-            <option value="mock">Mock (testing)</option>
-          </select>
-        </label>
-        <label class="offer-field">
-          <span>Base URL</span>
-          <input v-model.trim="form.provider.base_url" type="url" placeholder="Optional provider API base URL" />
-        </label>
+      <div class="dashboard-card-body">
+        <div class="offer-two-column">
+          <label class="offer-field">
+            <span>Provider <strong>*</strong></span>
+            <select v-model="form.provider.name">
+              <option value="">Select a provider…</option>
+              <option value="shippo">Shippo</option>
+              <option value="easypost">EasyPost</option>
+              <option value="shipstation">ShipStation</option>
+              <option value="easyship">Easyship</option>
+              <option value="mock">Mock (testing)</option>
+            </select>
+          </label>
+          <label class="offer-field">
+            <span>Base URL</span>
+            <input v-model.trim="form.provider.base_url" type="url" placeholder="Optional provider API base URL" />
+          </label>
+        </div>
+        <div class="offer-two-column">
+          <label class="offer-field">
+            <span>API Key</span>
+            <input v-model="form.provider.api_key" type="password" autocomplete="new-password" :placeholder="apiKeyPlaceholder" />
+            <small>Your provider's API key. Stored encrypted and never shown again after saving.</small>
+          </label>
+          <label class="offer-field">
+            <span>Connection Status</span>
+            <input :value="statusLabel(rawDoc.provider?.connection_status || 'not_configured')" disabled />
+            <small>{{ keyConfigured ? "A key is saved for this provider." : "No key saved yet." }}</small>
+          </label>
+        </div>
+        <p v-if="providerChangedNeedsKey" class="keys-status-banner error">
+          You changed providers — enter the new provider's API key. The previous key will not carry over.
+        </p>
       </div>
-      <div class="offer-two-column">
-        <label class="offer-field">
-          <span>API Key</span>
-          <input v-model="form.provider.api_key" type="password" autocomplete="new-password" :placeholder="apiKeyPlaceholder" />
-          <small>Your provider's API key. Stored encrypted and never shown again after saving.</small>
-        </label>
-        <label class="offer-field">
-          <span>Connection Status</span>
-          <input :value="statusLabel(rawDoc.provider?.connection_status || 'not_configured')" disabled />
-          <small>{{ keyConfigured ? "A key is saved for this provider." : "No key saved yet." }}</small>
-        </label>
-      </div>
-      <p v-if="providerChangedNeedsKey" class="keys-status-banner error">
-        You changed providers — enter the new provider's API key. The previous key will not carry over.
-      </p>
     </section>
 
     <section class="dashboard-card">
       <header class="dashboard-card-header"><h2>Ship-From Address</h2></header>
-      <AddressFields :address="form.ship_from_address" />
+      <div class="dashboard-card-body">
+        <AddressFields :address="form.ship_from_address" />
+      </div>
     </section>
 
     <section class="dashboard-card">
@@ -82,88 +88,94 @@
           <button class="secondary-action" type="button" @click="copyShipFromToReturn">Copy from ship-from</button>
         </div>
       </header>
-      <AddressFields :address="form.return_address" />
+      <div class="dashboard-card-body">
+        <AddressFields :address="form.return_address" />
+      </div>
     </section>
 
     <section class="dashboard-card">
       <header class="dashboard-card-header"><h2>Default Parcel</h2></header>
-      <div class="offer-three-column">
-        <label class="offer-field">
-          <span>Length <strong>*</strong></span>
-          <input v-model.number="form.default_parcel.length" type="number" min="0" step="0.01" />
-        </label>
-        <label class="offer-field">
-          <span>Width <strong>*</strong></span>
-          <input v-model.number="form.default_parcel.width" type="number" min="0" step="0.01" />
-        </label>
-        <label class="offer-field">
-          <span>Height <strong>*</strong></span>
-          <input v-model.number="form.default_parcel.height" type="number" min="0" step="0.01" />
-        </label>
-      </div>
-      <div class="offer-three-column">
-        <label class="offer-field">
-          <span>Weight <strong>*</strong></span>
-          <input v-model.number="form.default_parcel.weight" type="number" min="0" step="0.01" />
-        </label>
-        <label class="offer-field">
-          <span>Distance Unit</span>
-          <select v-model="form.default_parcel.distance_unit">
-            <option value="in">in</option>
-            <option value="cm">cm</option>
-          </select>
-        </label>
-        <label class="offer-field">
-          <span>Mass Unit</span>
-          <select v-model="form.default_parcel.mass_unit">
-            <option value="oz">oz</option>
-            <option value="lb">lb</option>
-            <option value="g">g</option>
-            <option value="kg">kg</option>
-          </select>
-        </label>
+      <div class="dashboard-card-body">
+        <div class="offer-three-column">
+          <label class="offer-field">
+            <span>Length <strong>*</strong></span>
+            <input v-model.number="form.default_parcel.length" type="number" min="0" step="0.01" />
+          </label>
+          <label class="offer-field">
+            <span>Width <strong>*</strong></span>
+            <input v-model.number="form.default_parcel.width" type="number" min="0" step="0.01" />
+          </label>
+          <label class="offer-field">
+            <span>Height <strong>*</strong></span>
+            <input v-model.number="form.default_parcel.height" type="number" min="0" step="0.01" />
+          </label>
+        </div>
+        <div class="offer-three-column">
+          <label class="offer-field">
+            <span>Weight <strong>*</strong></span>
+            <input v-model.number="form.default_parcel.weight" type="number" min="0" step="0.01" />
+          </label>
+          <label class="offer-field">
+            <span>Distance Unit</span>
+            <select v-model="form.default_parcel.distance_unit">
+              <option value="in">in</option>
+              <option value="cm">cm</option>
+            </select>
+          </label>
+          <label class="offer-field">
+            <span>Mass Unit</span>
+            <select v-model="form.default_parcel.mass_unit">
+              <option value="oz">oz</option>
+              <option value="lb">lb</option>
+              <option value="g">g</option>
+              <option value="kg">kg</option>
+            </select>
+          </label>
+        </div>
       </div>
     </section>
 
     <section class="dashboard-card">
-      <header class="dashboard-card-header"><h2>Rate & Label Options</h2></header>
-      <p class="field-note">Optional.</p>
-      <div class="offer-two-column">
-        <label class="offer-field">
-          <span>Default Service Level</span>
-          <input v-model.trim="form.rate_options.default_service_level" type="text" placeholder="e.g. usps_priority" />
-        </label>
-        <label class="offer-field">
-          <span>Allowed Carriers</span>
-          <input v-model.trim="form.rate_options.allowed_carriers" type="text" placeholder="Comma-separated, e.g. usps, ups" />
-        </label>
-      </div>
-      <div class="offer-two-column">
-        <label class="offer-field">
-          <span>Markup Amount (cents)</span>
-          <input v-model.number="form.rate_options.markup_amount" type="number" min="0" step="1" />
-        </label>
-        <label class="offer-field">
-          <span>Free Shipping Threshold (cents)</span>
-          <input v-model.number="form.rate_options.free_shipping_threshold" type="number" min="0" step="1" />
-        </label>
-      </div>
-      <div class="offer-two-column">
-        <label class="offer-field">
-          <span>Label Format</span>
-          <select v-model="form.label_options.format">
-            <option value="pdf">PDF</option>
-            <option value="png">PNG</option>
-            <option value="zpl">ZPL</option>
-          </select>
-        </label>
-        <label class="offer-field">
-          <span>Label Size</span>
-          <select v-model="form.label_options.size">
-            <option value="4x6">4x6</option>
-            <option value="8.5x11">8.5x11</option>
-          </select>
-        </label>
+      <header class="dashboard-card-header"><h2>Rate &amp; Label Options</h2></header>
+      <div class="dashboard-card-body">
+        <p class="field-note">Optional.</p>
+        <div class="offer-two-column">
+          <label class="offer-field">
+            <span>Default Service Level</span>
+            <input v-model.trim="form.rate_options.default_service_level" type="text" placeholder="e.g. usps_priority" />
+          </label>
+          <label class="offer-field">
+            <span>Allowed Carriers</span>
+            <input v-model.trim="form.rate_options.allowed_carriers" type="text" placeholder="Comma-separated, e.g. usps, ups" />
+          </label>
+        </div>
+        <div class="offer-two-column">
+          <label class="offer-field">
+            <span>Markup Amount (cents)</span>
+            <input v-model.number="form.rate_options.markup_amount" type="number" min="0" step="1" />
+          </label>
+          <label class="offer-field">
+            <span>Free Shipping Threshold (cents)</span>
+            <input v-model.number="form.rate_options.free_shipping_threshold" type="number" min="0" step="1" />
+          </label>
+        </div>
+        <div class="offer-two-column">
+          <label class="offer-field">
+            <span>Label Format</span>
+            <select v-model="form.label_options.format">
+              <option value="pdf">PDF</option>
+              <option value="png">PNG</option>
+              <option value="zpl">ZPL</option>
+            </select>
+          </label>
+          <label class="offer-field">
+            <span>Label Size</span>
+            <select v-model="form.label_options.size">
+              <option value="4x6">4x6</option>
+              <option value="8.5x11">8.5x11</option>
+            </select>
+          </label>
+        </div>
       </div>
     </section>
 
