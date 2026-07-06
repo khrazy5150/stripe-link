@@ -517,6 +517,47 @@ Resources:
             Path: /download
             Method: OPTIONS
 
+  RefundsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${ProjectPrefix}-refunds-api-${Environment}"
+      CodeUri: src/
+      Handler: handlers.refunds.handler
+      Description: Approve/reject a refund request and execute the Stripe refund on the tenant's connected account (platform fee kept).
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref NotificationsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref OrdersTable
+        - DynamoDBReadPolicy:
+            TableName: !Sub "${ProjectPrefix}-stripe-keys-dev"
+        - DynamoDBReadPolicy:
+            TableName: !Sub "${ProjectPrefix}-stripe-keys-prod"
+        - Statement:
+            - Effect: Allow
+              Action:
+                - kms:Decrypt
+                - kms:DescribeKey
+              Resource: !GetAtt StripeKeysEncryptionKey.Arn
+        - Statement:
+            - Effect: Allow
+              Action:
+                - secretsmanager:GetSecretValue
+              Resource: "*"
+      Events:
+        RefundAction:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /refunds/{refund_request_id}/{action}
+            Method: POST
+        RefundActionOptions:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /refunds/{refund_request_id}/{action}
+            Method: OPTIONS
+
   UploadFunction:
     Type: AWS::Serverless::Function
     Properties:

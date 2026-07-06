@@ -17,6 +17,7 @@ from stripe_link.repositories.documents import (
     dynamodb_safe_document,
     invoices_repository,
     notifications_repository,
+    orders_repository,
     platform_config_repository,
     products_repository,
     stripe_keys_repository,
@@ -144,8 +145,11 @@ def handler(
             return error_response(str(exc), 500, code="repository_error")
 
     tenant_id = str((tenant_document or {}).get("tenant_id") or "").strip() or _metadata_tenant_id(stripe_event)
+    event_type = stripe_event.get("type")
     persistence = {}
-    if stripe_event.get("type") == "checkout.session.completed" and tenant_id:
+    if event_type == "charge.refunded" and tenant_id:
+        persistence = reconcile_charge_refunded(stripe_event, tenant_id=tenant_id, now_fn=now_fn)
+    elif event_type == "checkout.session.completed" and tenant_id:
         persistence = persist_checkout_session_completed(
             stripe_event,
             tenant_id=tenant_id,
@@ -242,6 +246,38 @@ def persist_checkout_session_completed(
         "written": written,
         "receipt": receipt,
     }
+
+
+def reconcile_charge_refunded(
+    stripe_event: dict[str, Any],
+    *,
+    tenant_id: str,
+    orders_repo=None,
+    now_fn: Callable[[], int] = lambda: int(time.time()),
+) -> dict[str, Any]:
+    """Reflect a Stripe refund on the local order. Matches by our refund's order_id metadata;
+    externally-initiated refunds without that metadata are skipped (no payment_intent index)."""
+    charge = _event_data_object(stripe_event)
+    metadata = charge.get("metadata") if isinstance(charge.get("metadata"), dict) else {}
+    order_id = str(metadata.get("order_id") or "").strip()
+    if not order_id:
+        return {"status": "skipped", "reason": "no_order_id"}
+    orders_repo = orders_repo or (orders_repository() if os.environ.get("ORDERS_TABLE") else None)
+    if not orders_repo:
+        return {"status": "skipped", "reason": "orders_repo_unavailable"}
+    order = orders_repo.get(tenant_id, order_id)
+    if not order:
+        return {"status": "skipped", "reason": "order_not_found"}
+
+    now = int(now_fn())
+    refunded = int(charge.get("amount_refunded") or 0)
+    order_amount = int(order.get("amount_total") or 0)
+    order["refund"] = {**(order.get("refund") or {}), "amount": refunded, "refunded_at": now}
+    order["refunded_at"] = now
+    order["status"] = "refunded" if order_amount and refunded >= order_amount else "partially_refunded"
+    order["updated_at"] = now
+    orders_repo.put(order)
+    return {"status": "reconciled", "order_id": order_id, "amount_refunded": refunded}
 
 
 def resolve_download_links(order: dict[str, Any], tenant_id: str, products_repo) -> list[dict[str, str]]:
@@ -370,6 +406,7 @@ def order_record_from_session(session: dict[str, Any], tenant_id: str, now: int,
         "amount_total": int(session.get("amount_total") or 0),
         "currency": session.get("currency") or "usd",
         "payment_intent_id": session.get("payment_intent", ""),
+        "mode": "live" if session.get("livemode") else "test",
         "customer": {
             "name": details.get("name", ""),
             "email": details.get("email", ""),
