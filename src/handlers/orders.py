@@ -43,7 +43,8 @@ def filter_orders(orders, params):
     for order in orders:
         order_customer = order.get("customer") or {}
         haystack = f"{order_customer.get('name', '')} {order_customer.get('email', '')}".lower()
-        if status and order.get("status") != status:
+        order_status = order.get("payment_status") or order.get("status")
+        if status and order_status != status:
             continue
         if customer and customer not in haystack:
             continue

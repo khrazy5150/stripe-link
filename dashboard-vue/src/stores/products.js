@@ -252,6 +252,26 @@ export const useProductsStore = defineStore("products", {
       }
     },
 
+    async checkDrift(product) {
+      this.error = "";
+      try {
+        const body = await apiRequest(`/products/${encodeURIComponent(product.product_id)}/sync`, {
+          method: "POST",
+          params: { check: "true" },
+        });
+        if (body.product) this.upsertProduct(body.product);
+        const differences = body.drift?.differences || [];
+        this.message = body.drift?.in_sync
+          ? `${product.name || "Product"} is in sync with Stripe.`
+          : `${differences.length} difference(s) vs Stripe.`;
+        return body;
+      } catch (error) {
+        this.error = error.message;
+        this.message = error.message;
+        throw error;
+      }
+    },
+
     async uploadDigitalAsset(productId, file) {
       this.error = "";
       const contentType = file.type || "application/octet-stream";

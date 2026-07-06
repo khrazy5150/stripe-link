@@ -47,12 +47,12 @@
               <h3>{{ order.product?.name || "Checkout" }}</h3>
               <p class="font-mono">{{ order.order_id }}</p>
             </div>
-            <span class="product-status" :class="order.status">{{ statusLabel(order.status) }}</span>
+            <span class="product-status" :class="paymentBadgeClass(orderStatus(order))">{{ statusLabel(orderStatus(order)) }}</span>
           </header>
           <strong class="coupon-discount">{{ formatMoney(order.amount_total, order.currency) }}</strong>
           <dl class="coupon-detail-list">
             <div><dt>Customer</dt><dd>{{ order.customer?.name || order.customer?.email || "—" }}</dd></div>
-            <div><dt>Type</dt><dd>{{ statusLabel(order.line_item_type || "checkout") }}</dd></div>
+            <div v-if="Number(order.amount_refunded) > 0"><dt>Refunded</dt><dd>{{ formatMoney(order.amount_refunded, order.currency) }}</dd></div>
             <div><dt>Date</dt><dd>{{ formatDate(order.created_at) }}</dd></div>
           </dl>
           <div class="product-card-actions">
@@ -71,8 +71,10 @@
         <div class="product-details-body">
           <dl class="product-details-grid">
             <div><dt>Order ID</dt><dd class="font-mono">{{ selected.order_id }}</dd></div>
-            <div><dt>Status</dt><dd>{{ statusLabel(selected.status) }}</dd></div>
+            <div><dt>Status</dt><dd>{{ statusLabel(orderStatus(selected)) }}</dd></div>
             <div><dt>Amount</dt><dd>{{ formatMoney(selected.amount_total, selected.currency) }}</dd></div>
+            <div v-if="Number(selected.amount_refunded) > 0"><dt>Refunded</dt><dd>{{ formatMoney(selected.amount_refunded, selected.currency) }}</dd></div>
+            <div v-if="Number(selected.amount_refunded) > 0"><dt>Refundable</dt><dd>{{ formatMoney(selected.refundable_amount, selected.currency) }}</dd></div>
             <div><dt>Date</dt><dd>{{ formatDate(selected.created_at) }}</dd></div>
             <div><dt>Customer</dt><dd>{{ selected.customer?.name || "—" }}</dd></div>
             <div><dt>Email</dt><dd>{{ selected.customer?.email || "—" }}</dd></div>
@@ -113,6 +115,21 @@ const selected = ref(null);
 const filters = reactive({ customer: "", status: "" });
 
 const formatDate = formatEpochDate;
+
+function orderStatus(order) {
+  return order?.payment_status || order?.status || "paid";
+}
+
+function paymentBadgeClass(status) {
+  return {
+    paid: "active",
+    completed: "active",
+    partially_refunded: "warning",
+    refunded: "inactive",
+    disputed: "archived",
+    cancelled: "archived",
+  }[status] || "inactive";
+}
 
 async function load() {
   loading.value = true;

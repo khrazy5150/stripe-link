@@ -139,9 +139,15 @@
               <small v-if="selectedProduct.sync?.error" class="text-muted">{{ selectedProduct.sync.error }}</small>
               <small v-else-if="selectedProduct.stripe_product_id" class="text-muted font-mono">{{ selectedProduct.stripe_product_id }}</small>
             </div>
-            <button type="button" class="secondary-action" :disabled="syncing" @click="syncProduct(selectedProduct)">
-              {{ syncing ? "Syncing…" : (selectedProduct.stripe_product_id ? "Re-sync to Stripe" : "Sync to Stripe") }}
-            </button>
+            <div class="button-row">
+              <button
+                v-if="selectedProduct.stripe_product_id" type="button" class="secondary-action"
+                :disabled="syncing" @click="checkDrift(selectedProduct)"
+              >Check drift</button>
+              <button type="button" class="secondary-action" :disabled="syncing" @click="syncProduct(selectedProduct)">
+                {{ syncing ? "Syncing…" : (selectedProduct.stripe_product_id ? "Re-sync to Stripe" : "Sync to Stripe") }}
+              </button>
+            </div>
           </div>
           <div v-if="selectedProduct.digital_asset" class="product-details-digital">
             <span class="product-sync-label">Download file</span>
@@ -1025,13 +1031,27 @@ async function syncProduct(product) {
   }
 }
 
+async function checkDrift(product) {
+  syncing.value = true;
+  try {
+    const body = await store.checkDrift(product);
+    if (body?.product) selectedProduct.value = body.product;
+  } catch {
+    /* store surfaces the error banner */
+  } finally {
+    syncing.value = false;
+  }
+}
+
 function syncBadgeText(product) {
-  if (product?.sync?.status === "success" || product?.stripe_product_id) return "Synced";
+  if (product?.sync?.status === "drift") return "Drift";
   if (product?.sync?.status === "failed") return "Sync failed";
+  if (product?.sync?.status === "success" || product?.stripe_product_id) return "Synced";
   return "Not synced";
 }
 
 function syncBadgeClass(product) {
+  if (product?.sync?.status === "drift") return "warning";
   if (product?.sync?.status === "failed") return "archived";
   if (product?.sync?.status === "success" || product?.stripe_product_id) return "active";
   return "inactive";
