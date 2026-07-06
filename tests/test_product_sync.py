@@ -1,7 +1,7 @@
 import json
 import unittest
 
-from handlers.product_sync import handler, run_product_sync
+from handlers.product_sync import check_product_drift, handler, run_product_sync
 from stripe_link.domain.stripe_products import build_price_params, build_product_params
 from stripe_link.stripe_client import StripeApiError
 from tests.fakes import FakeDocumentRepository
@@ -30,16 +30,23 @@ def product_doc(**overrides):
 
 
 class FakeStripe:
-    """Records calls; returns deterministic ids."""
-    def __init__(self, fail_on=None):
+    """Records calls; returns deterministic ids. existing_prices/stripe_product drive the
+    GET responses used by orphan-archival and drift checks."""
+    def __init__(self, fail_on=None, existing_prices=None, stripe_product=None):
         self.calls = []
         self.fail_on = fail_on
+        self.existing_prices = existing_prices or []
+        self.stripe_product = stripe_product
         self._n = 0
 
-    def __call__(self, method, path, *, api_key, stripe_account="", data=None, **kwargs):
-        self.calls.append({"method": method, "path": path, "stripe_account": stripe_account, "data": data})
+    def __call__(self, method, path, *, api_key, stripe_account="", data=None, params=None, **kwargs):
+        self.calls.append({"method": method, "path": path, "stripe_account": stripe_account, "data": data, "params": params})
         if self.fail_on and self.fail_on in path:
             raise StripeApiError(402, "Your card was declined.", "card_declined")
+        if method == "GET" and path == "/prices":
+            return {"data": self.existing_prices}
+        if method == "GET" and path.startswith("/products/"):
+            return self.stripe_product or {"id": "prod_stripe_1", "name": "Creatine Gummies", "active": True}
         if path == "/products" or path.startswith("/products/"):
             return {"id": "prod_stripe_1"}
         if path == "/prices":
@@ -99,6 +106,47 @@ class RunSyncTests(unittest.TestCase):
         self.assertEqual(result["status"], "failed")
         self.assertEqual(synced["sync"]["status"], "failed")
         self.assertIn("declined", synced["sync"]["error"])
+
+    def test_archives_orphan_stripe_prices(self):
+        doc = product_doc(stripe_product_id="prod_stripe_1")
+        doc["prices"][0]["stripe_price_id"] = "price_keep"
+        doc["prices"][1]["stripe_price_id"] = "price_keep_b"
+        # Stripe has an extra active price with no local counterpart -> should be archived.
+        stripe = FakeStripe(existing_prices=[
+            {"id": "price_keep", "active": True},
+            {"id": "price_orphan", "active": True},
+        ])
+        _, result = run_product_sync(doc, api_key="sk", stripe_account="", caller=stripe, now=1)
+        self.assertEqual(result["prices_archived"], 1)
+        archive_calls = [c for c in stripe.calls if c["path"] == "/prices/price_orphan" and c["data"] == {"active": False}]
+        self.assertEqual(len(archive_calls), 1)
+
+
+class DriftCheckTests(unittest.TestCase):
+    def test_reports_name_and_price_drift(self):
+        doc = product_doc(stripe_product_id="prod_stripe_1")
+        doc["prices"][0]["stripe_price_id"] = "price_a"
+        doc["prices"][1]["stripe_price_id"] = "price_b"
+        stripe = FakeStripe(
+            stripe_product={"id": "prod_stripe_1", "name": "Different Name", "active": True},
+            existing_prices=[{"id": "price_a", "unit_amount": 9999}, {"id": "price_b", "unit_amount": 6700}],
+        )
+        drift = check_product_drift(doc, api_key="sk", stripe_account="", caller=stripe)
+        self.assertFalse(drift["in_sync"])
+        fields = {d["field"] for d in drift["differences"]}
+        self.assertIn("name", fields)
+        self.assertIn("price_amount", fields)  # price_a amount differs (3900 vs 9999)
+
+    def test_in_sync_when_matching(self):
+        doc = product_doc(stripe_product_id="prod_stripe_1")
+        doc["prices"][0]["stripe_price_id"] = "price_a"
+        doc["prices"][1]["stripe_price_id"] = "price_b"
+        stripe = FakeStripe(
+            stripe_product={"id": "prod_stripe_1", "name": "Creatine Gummies", "active": True},
+            existing_prices=[{"id": "price_a", "unit_amount": 3900}, {"id": "price_b", "unit_amount": 6700}],
+        )
+        drift = check_product_drift(doc, api_key="sk", stripe_account="", caller=stripe)
+        self.assertTrue(drift["in_sync"])
 
 
 class HandlerTests(unittest.TestCase):

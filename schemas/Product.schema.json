@@ -37,12 +37,18 @@
       "minLength": 1
     },
     "stripe_product_id": {
-      "type": ["string", "null"],
+      "type": [
+        "string",
+        "null"
+      ],
       "description": "Stripe product ID after synchronization. Null for local products that have not synced yet."
     },
     "stripe_mode": {
       "type": "string",
-      "enum": ["test", "live"]
+      "enum": [
+        "test",
+        "live"
+      ]
     },
     "canonical": {
       "type": "boolean",
@@ -50,7 +56,10 @@
     },
     "status": {
       "type": "string",
-      "enum": ["active", "archived"],
+      "enum": [
+        "active",
+        "archived"
+      ],
       "description": "Product lifecycle status. Archived products are hidden from the default active product list."
     },
     "name": {
@@ -71,7 +80,10 @@
     },
     "product_intent": {
       "type": "string",
-      "enum": ["transaction", "lead_gen"]
+      "enum": [
+        "transaction",
+        "lead_gen"
+      ]
     },
     "product_type": {
       "type": "string"
@@ -84,67 +96,147 @@
       "type": "object",
       "additionalProperties": false,
       "description": "Product-level refund policy. New products may copy this from the creating user's UserPreferences.authoring_defaults.refund_policies by product class.",
-      "required": ["source", "short_label", "full_policy"],
+      "required": [
+        "source",
+        "short_label",
+        "full_policy"
+      ],
       "properties": {
         "source": {
           "type": "string",
-          "enum": ["user_preference_default", "tenant_default", "product_override", "user_preferences.physical_products"]
+          "enum": [
+            "user_preference_default",
+            "tenant_default",
+            "product_override",
+            "user_preferences.physical_products"
+          ]
         },
         "refund_window": {
           "type": "string",
-          "enum": ["non_refundable", "72_hours", "7_days", "14_days", "30_days", "60_days", "custom"]
+          "enum": [
+            "non_refundable",
+            "72_hours",
+            "7_days",
+            "14_days",
+            "30_days",
+            "60_days",
+            "custom"
+          ]
         },
         "condition": {
           "type": "string",
-          "enum": ["any", "unused", "unopened", "defective_only", "not_downloaded", "custom"]
+          "enum": [
+            "any",
+            "unused",
+            "unopened",
+            "defective_only",
+            "not_downloaded",
+            "custom"
+          ]
         },
         "return_method": {
           "type": "string",
-          "enum": ["no_return_customer_keeps", "return_required", "digital_revoke_access", "custom"]
+          "enum": [
+            "no_return_customer_keeps",
+            "return_required",
+            "digital_revoke_access",
+            "custom"
+          ]
         },
-        "short_label": { "type": "string" },
-        "full_policy": { "type": "string" }
+        "short_label": {
+          "type": "string"
+        },
+        "full_policy": {
+          "type": "string"
+        }
       }
     },
     "lead_capture": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["action", "title", "description"],
+      "required": [
+        "action",
+        "title",
+        "description"
+      ],
       "properties": {
         "action": {
           "type": "string",
-          "enum": ["capture_email", "capture_phone", "capture_email_phone", "call_number", "external_url", "open_form", "social_redirect"]
+          "enum": [
+            "capture_email",
+            "capture_phone",
+            "capture_email_phone",
+            "call_number",
+            "external_url",
+            "open_form",
+            "social_redirect"
+          ]
         },
-        "title": { "type": "string", "minLength": 1 },
-        "description": { "type": "string", "minLength": 1 },
+        "title": {
+          "type": "string",
+          "minLength": 1
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1
+        },
         "fields": {
           "type": "array",
           "items": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["name", "type", "required"],
+            "required": [
+              "name",
+              "type",
+              "required"
+            ],
             "properties": {
-              "name": { "type": "string", "minLength": 1 },
-              "type": { "type": "string", "minLength": 1 },
-              "required": { "type": "boolean" }
+              "name": {
+                "type": "string",
+                "minLength": 1
+              },
+              "type": {
+                "type": "string",
+                "minLength": 1
+              },
+              "required": {
+                "type": "boolean"
+              }
             }
           }
         },
         "target": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["type"],
+          "required": [
+            "type"
+          ],
           "properties": {
             "type": {
               "type": "string",
-              "enum": ["phone", "url", "form", "social"]
+              "enum": [
+                "phone",
+                "url",
+                "form",
+                "social"
+              ]
             },
-            "value": { "type": "string" },
-            "form_id": { "type": "string" },
-            "platform": { "type": "string" },
+            "value": {
+              "type": "string"
+            },
+            "form_id": {
+              "type": "string"
+            },
+            "platform": {
+              "type": "string"
+            },
             "open": {
               "type": "string",
-              "enum": ["new_tab", "same_tab", "modal"]
+              "enum": [
+                "new_tab",
+                "same_tab",
+                "modal"
+              ]
             }
           }
         }
@@ -154,19 +246,31 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "size_enabled": { "type": "boolean", "default": false },
-        "color_enabled": { "type": "boolean", "default": false },
+        "size_enabled": {
+          "type": "boolean",
+          "default": false
+        },
+        "color_enabled": {
+          "type": "boolean",
+          "default": false
+        },
         "sizes": {
           "type": "array",
           "items": {
             "oneOf": [
-              { "type": "string" },
+              {
+                "type": "string"
+              },
               {
                 "type": "object",
                 "additionalProperties": false,
                 "properties": {
-                  "label": { "type": "string" },
-                  "description": { "type": "string" }
+                  "label": {
+                    "type": "string"
+                  },
+                  "description": {
+                    "type": "string"
+                  }
                 }
               }
             ]
@@ -177,17 +281,23 @@
           "type": "array",
           "items": {
             "oneOf": [
-              { "type": "string" },
+              {
+                "type": "string"
+              },
               {
                 "type": "object",
                 "additionalProperties": false,
                 "properties": {
-                  "label": { "type": "string" },
+                  "label": {
+                    "type": "string"
+                  },
                   "hex_color": {
                     "type": "string",
                     "pattern": "^#[0-9a-fA-F]{6}$"
                   },
-                  "description": { "type": "string" }
+                  "description": {
+                    "type": "string"
+                  }
                 }
               }
             ]
@@ -199,7 +309,13 @@
     "stripe_metadata": {
       "type": "object",
       "additionalProperties": {
-        "type": ["string", "number", "integer", "boolean", "null"]
+        "type": [
+          "string",
+          "number",
+          "integer",
+          "boolean",
+          "null"
+        ]
       }
     },
     "prices": {
@@ -216,12 +332,21 @@
     "fulfillment": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["requires_shipping", "ship_from", "weight_lb", "dimensions"],
+      "required": [
+        "requires_shipping",
+        "ship_from",
+        "weight_lb",
+        "dimensions"
+      ],
       "properties": {
-        "requires_shipping": { "type": "boolean" },
+        "requires_shipping": {
+          "type": "boolean"
+        },
         "ship_from": {
           "oneOf": [
-            { "type": "null" },
+            {
+              "type": "null"
+            },
             {
               "type": "object",
               "additionalProperties": true
@@ -229,17 +354,42 @@
           ]
         },
         "weight_lb": {
-          "type": ["number", "null"],
+          "type": [
+            "number",
+            "null"
+          ],
           "minimum": 0
         },
         "dimensions": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["length_in", "width_in", "height_in"],
+          "required": [
+            "length_in",
+            "width_in",
+            "height_in"
+          ],
           "properties": {
-            "length_in": { "type": ["number", "null"], "minimum": 0 },
-            "width_in": { "type": ["number", "null"], "minimum": 0 },
-            "height_in": { "type": ["number", "null"], "minimum": 0 }
+            "length_in": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "minimum": 0
+            },
+            "width_in": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "minimum": 0
+            },
+            "height_in": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "minimum": 0
+            }
           }
         }
       }
@@ -247,18 +397,38 @@
     "sync": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["status", "last_synced_at", "error"],
+      "required": [
+        "status",
+        "last_synced_at",
+        "error"
+      ],
       "properties": {
         "status": {
-          "type": ["string", "null"],
-          "enum": ["pending", "success", "failed", "not_applicable", null]
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            "pending",
+            "success",
+            "failed",
+            "drift",
+            "not_applicable",
+            null
+          ]
         },
         "last_synced_at": {
-          "type": ["integer", "null"],
+          "type": [
+            "integer",
+            "null"
+          ],
           "minimum": 0
         },
         "error": {
-          "type": ["string", "null"]
+          "type": [
+            "string",
+            "null"
+          ]
         }
       }
     },
@@ -266,14 +436,36 @@
       "type": "object",
       "additionalProperties": false,
       "description": "Downloadable file for a digital product, stored privately in the media bucket. Presence marks the product as digital; buyers receive a purchase-verified download link.",
-      "required": ["asset_id", "bucket_key", "filename"],
+      "required": [
+        "asset_id",
+        "bucket_key",
+        "filename"
+      ],
       "properties": {
-        "asset_id": { "type": "string", "minLength": 1 },
-        "bucket_key": { "type": "string", "minLength": 1, "description": "S3 key in the media bucket, e.g. downloads/{tenant_id}/{product_id}/{asset_id}/{filename}." },
-        "filename": { "type": "string", "minLength": 1 },
-        "content_type": { "type": "string" },
-        "size_bytes": { "type": "integer", "minimum": 0 },
-        "uploaded_at": { "type": "integer", "minimum": 0 }
+        "asset_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "bucket_key": {
+          "type": "string",
+          "minLength": 1,
+          "description": "S3 key in the media bucket, e.g. downloads/{tenant_id}/{product_id}/{asset_id}/{filename}."
+        },
+        "filename": {
+          "type": "string",
+          "minLength": 1
+        },
+        "content_type": {
+          "type": "string"
+        },
+        "size_bytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "uploaded_at": {
+          "type": "integer",
+          "minimum": 0
+        }
       }
     },
     "created_at": {

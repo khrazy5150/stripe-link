@@ -577,7 +577,7 @@ def validate_product_document(document: dict[str, Any]) -> None:
     if not isinstance(sync, dict):
         raise DocumentValidationError("Product sync must be an object.")
     sync_status = sync.get("status")
-    if sync_status is not None and sync_status not in {"pending", "success", "failed", "not_applicable"}:
+    if sync_status is not None and sync_status not in {"pending", "success", "failed", "drift", "not_applicable"}:
         raise DocumentValidationError("Product sync.status must be one of: failed, not_applicable, pending, success, or null.")
     optional_non_negative_int(sync, "last_synced_at", "Product sync.last_synced_at")
     optional_string(sync, "error", "Product sync.error")
