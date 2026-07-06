@@ -29,6 +29,21 @@ class FakeDocumentRepository:
                 return dict(document)
         return None
 
+    def find_by_payment_intent(self, payment_intent_id):
+        for document in self.documents.values():
+            if document.get("payment_intent_id") == payment_intent_id:
+                return dict(document)
+        return None
+
+    def find_by_stripe_refund(self, stripe_refund_id):
+        for document in self.documents.values():
+            if document.get("stripe_refund_id") == stripe_refund_id:
+                return dict(document)
+        return None
+
+    def list_for_order(self, order_id):
+        return [dict(document) for document in self.documents.values() if document.get("order_id") == order_id]
+
     def increment_view(self, tenant_id, document_id, page_id, amount=1):
         document = self.documents.get((tenant_id, document_id))
         if not document:

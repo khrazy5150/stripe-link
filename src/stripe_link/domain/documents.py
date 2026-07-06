@@ -1140,6 +1140,20 @@ def validate_refund_request(document: dict[str, Any]) -> None:
         raise DocumentValidationError("Refund request risk_level is invalid.")
 
 
+def validate_refund(document: dict[str, Any]) -> None:
+    require_fields(document, ["schema_version", "document_type", "tenant_id", "refund_id", "order_id", "amount", "created_at"])
+    if document.get("document_type") != "refund":
+        raise DocumentValidationError("Refund document_type must be 'refund'.")
+    if not isinstance(document.get("amount"), int) or isinstance(document.get("amount"), bool) or document["amount"] < 0:
+        raise DocumentValidationError("Refund amount must be a non-negative integer (cents).")
+
+
+def validate_webhook_event(document: dict[str, Any]) -> None:
+    require_fields(document, ["schema_version", "document_type", "event_id", "event_type", "processed_at"])
+    if document.get("document_type") != "webhook_event":
+        raise DocumentValidationError("Webhook event document_type must be 'webhook_event'.")
+
+
 def validate_route(document: dict[str, Any]) -> None:
     require_fields(document, ["schema_version", "document_type", "tenant_id", "short_code", "target_type"])
     if document.get("document_type") != "route":

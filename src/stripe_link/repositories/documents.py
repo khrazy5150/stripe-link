@@ -386,6 +386,80 @@ class TenantRangeRepository:
 
         return _query_all_pages(self.table, KeyConditionExpression=Key("tenant_id").eq(tenant_id))
 
+    def find_by_payment_intent(self, payment_intent_id: str) -> dict[str, Any] | None:
+        """Resolve an order from a Stripe PaymentIntent via the PaymentIntentIndex GSI."""
+        from boto3.dynamodb.conditions import Key
+
+        if not payment_intent_id:
+            return None
+        response = self.table.query(
+            IndexName="PaymentIntentIndex",
+            KeyConditionExpression=Key("payment_intent_id").eq(payment_intent_id),
+            Limit=1,
+        )
+        items = response.get("Items", [])
+        return items[0] if items else None
+
+
+class RefundsRepository:
+    """Immutable refunds ledger keyed (tenant_id, refund_id), with GSIs to dedupe by
+    stripe_refund_id and list by order_id."""
+
+    def __init__(self, table_name: str, *, table: Any | None = None):
+        if not table_name:
+            raise RepositoryError("Table name is required.")
+        assert_jb_resource_name(table_name)
+        self.table_name = table_name
+        self._table = table
+
+    @property
+    def table(self):
+        if self._table is None:
+            import boto3
+
+            self._table = boto3.resource("dynamodb").Table(self.table_name)
+        return self._table
+
+    def put(self, document: dict[str, Any]) -> dict[str, Any]:
+        if not str(document.get("tenant_id") or "").strip():
+            raise RepositoryError("Refund tenant_id is required.")
+        if not str(document.get("refund_id") or "").strip():
+            raise RepositoryError("Refund refund_id is required.")
+        self.table.put_item(Item=dynamodb_safe_document(document))
+        return document
+
+    def get(self, tenant_id: str, refund_id: str) -> dict[str, Any] | None:
+        response = self.table.get_item(Key={"tenant_id": tenant_id, "refund_id": refund_id})
+        return response.get("Item")
+
+    def list_for_order(self, order_id: str) -> list[dict[str, Any]]:
+        from boto3.dynamodb.conditions import Key
+
+        items = _query_all_pages(self.table, IndexName="OrderIndex", KeyConditionExpression=Key("order_id").eq(order_id))
+        items.sort(key=lambda item: int(item.get("created_at") or 0))
+        return items
+
+    def find_by_stripe_refund(self, stripe_refund_id: str) -> dict[str, Any] | None:
+        from boto3.dynamodb.conditions import Key
+
+        if not stripe_refund_id:
+            return None
+        response = self.table.query(
+            IndexName="StripeRefundIndex",
+            KeyConditionExpression=Key("stripe_refund_id").eq(stripe_refund_id),
+            Limit=1,
+        )
+        items = response.get("Items", [])
+        return items[0] if items else None
+
+
+def refunds_repository(table: Any | None = None) -> RefundsRepository:
+    return RefundsRepository(os.environ.get("REFUNDS_TABLE", ""), table=table)
+
+
+def webhook_events_repository(table: Any | None = None) -> SimpleKeyRepository:
+    return SimpleKeyRepository(os.environ.get("WEBHOOK_EVENTS_TABLE", ""), key_field="event_id", table=table)
+
 
 def stripe_keys_repository(table: Any | None = None) -> StripeKeysRepository:
     fallback_table = os.environ.get("STRIPE_KEYS_TABLE", "")

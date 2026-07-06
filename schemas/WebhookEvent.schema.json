@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.juniorbay.com/stripe-link/WebhookEvent.schema.json",
+  "title": "WebhookEvent",
+  "description": "An immutable record of a processed Stripe webhook event, keyed by Stripe event_id. Written once on first receipt so redelivered events are ignored (idempotency) and for audit.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "document_type", "event_id", "event_type", "processed_at"],
+  "properties": {
+    "schema_version": { "type": "string", "const": "2026-05-29" },
+    "document_type": { "type": "string", "const": "webhook_event" },
+    "event_id": { "type": "string", "minLength": 1, "description": "Stripe event id (evt_...)." },
+    "event_type": { "type": "string" },
+    "tenant_id": { "type": "string" },
+    "processed_at": { "type": "integer", "minimum": 0 },
+    "result": { "type": "object", "additionalProperties": true, "description": "Summary of what processing did." },
+    "payload": { "type": "object", "additionalProperties": true, "description": "The raw Stripe event." }
+  }
+}

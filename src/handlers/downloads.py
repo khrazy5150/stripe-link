@@ -93,9 +93,11 @@ def serve_handler(event, context, *, products_repo=None, orders_repo=None, s3_cl
 
     orders_repo = orders_repo or orders_repository()
     products_repo = products_repo or products_repository()
+    downloadable_statuses = {"paid", "partially_refunded", "completed"}
     try:
         order = orders_repo.get(tenant_id, f"order_{session_id}")
-        if not order or str(order.get("status")) != "paid":
+        status = str((order or {}).get("payment_status") or (order or {}).get("status") or "")
+        if not order or status not in downloadable_statuses:
             return error_response("No paid order found for this download.", status_code=403, code="not_purchased")
         if str((order.get("product") or {}).get("product_id") or "") != product_id:
             return error_response("This order does not include that product.", status_code=403, code="product_mismatch")

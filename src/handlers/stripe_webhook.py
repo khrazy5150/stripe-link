@@ -10,6 +10,7 @@ from stripe_link.common import error_response, header_value, json_response
 from stripe_link.domain.downloads import digital_download_links
 from stripe_link.domain.fees import cached_billing_config, calculate_price
 from stripe_link.domain.receipts import receipt_content
+from stripe_link.domain.refund_ledger import build_refund_entry, initial_payment_aggregates, set_refund_aggregates
 from stripe_link.mailer import send_email
 from stripe_link.repositories.documents import (
     RepositoryError,
@@ -20,8 +21,10 @@ from stripe_link.repositories.documents import (
     orders_repository,
     platform_config_repository,
     products_repository,
+    refunds_repository,
     stripe_keys_repository,
     tenant_profiles_repository,
+    webhook_events_repository,
 )
 from stripe_link.stripe_platform_secrets import get_platform_webhook_secret
 
@@ -102,6 +105,9 @@ def handler(
     invoices_repo=None,
     notifications_repo=None,
     products_repo=None,
+    refunds_repo=None,
+    webhook_events_repo=None,
+    orders_repo=None,
     webhook_secret_loader: Callable[[str, str], str | None] = get_platform_webhook_secret,
     now_fn: Callable[[], int] = lambda: int(time.time()),
     billing_config_loader: Callable[[], dict[str, Any]] | None = None,
@@ -146,9 +152,28 @@ def handler(
 
     tenant_id = str((tenant_document or {}).get("tenant_id") or "").strip() or _metadata_tenant_id(stripe_event)
     event_type = stripe_event.get("type")
+    event_id = str(stripe_event.get("id") or "").strip()
+
+    # Idempotency: Stripe redelivers events; skip any we've already processed.
+    events_repo = webhook_events_repo or (webhook_events_repository() if os.environ.get("WEBHOOK_EVENTS_TABLE") else None)
+    if event_id and events_repo:
+        try:
+            if events_repo.get(event_id):
+                return json_response({
+                    "received": True,
+                    "duplicate": True,
+                    "webhook": {"event_id": event_id, "type": event_type, "tenant_id": tenant_id},
+                })
+        except RepositoryError:
+            events_repo = None  # never block processing on the idempotency store
+
     persistence = {}
     if event_type == "charge.refunded" and tenant_id:
-        persistence = reconcile_charge_refunded(stripe_event, tenant_id=tenant_id, now_fn=now_fn)
+        persistence = reconcile_charge_refunded(
+            stripe_event, tenant_id=tenant_id, orders_repo=orders_repo, refunds_repo=refunds_repo, now_fn=now_fn,
+        )
+    elif event_type == "charge.dispute.created" and tenant_id:
+        persistence = reconcile_dispute(stripe_event, tenant_id=tenant_id, orders_repo=orders_repo, now_fn=now_fn)
     elif event_type == "checkout.session.completed" and tenant_id:
         persistence = persist_checkout_session_completed(
             stripe_event,
@@ -164,6 +189,22 @@ def handler(
             receipt_mailer=receipt_mailer,
             email_context_loader=email_context_loader,
         )
+
+    if event_id and events_repo:
+        try:
+            events_repo.put(dynamodb_safe_document({
+                "schema_version": "2026-05-29",
+                "document_type": "webhook_event",
+                "event_id": event_id,
+                "event_type": event_type or "",
+                "tenant_id": tenant_id,
+                "processed_at": int(now_fn()),
+                "result": persistence,
+                "payload": stripe_event,
+            }))
+        except RepositoryError:
+            pass
+
     return json_response({
         "received": True,
         "webhook": {
@@ -253,31 +294,92 @@ def reconcile_charge_refunded(
     *,
     tenant_id: str,
     orders_repo=None,
+    refunds_repo=None,
     now_fn: Callable[[], int] = lambda: int(time.time()),
 ) -> dict[str, Any]:
-    """Reflect a Stripe refund on the local order. Matches by our refund's order_id metadata;
-    externally-initiated refunds without that metadata are skipped (no payment_intent index)."""
+    """Reflect a Stripe refund on the local order and append ledger rows.
+
+    Resolves the order from the charge's PaymentIntent via the orders GSI (works for both our
+    refunds and Stripe-dashboard refunds), dedupes each Stripe refund against the ledger, and
+    sets the order's authoritative refund aggregates from charge.amount_refunded.
+    """
     charge = _event_data_object(stripe_event)
-    metadata = charge.get("metadata") if isinstance(charge.get("metadata"), dict) else {}
-    order_id = str(metadata.get("order_id") or "").strip()
-    if not order_id:
-        return {"status": "skipped", "reason": "no_order_id"}
+    payment_intent = str(charge.get("payment_intent") or "").strip()
+    charge_id = str(charge.get("id") or "").strip()
+
     orders_repo = orders_repo or (orders_repository() if os.environ.get("ORDERS_TABLE") else None)
     if not orders_repo:
         return {"status": "skipped", "reason": "orders_repo_unavailable"}
-    order = orders_repo.get(tenant_id, order_id)
+    order = orders_repo.find_by_payment_intent(payment_intent) if payment_intent else None
     if not order:
         return {"status": "skipped", "reason": "order_not_found"}
+    order_id = str(order.get("order_id") or "")
+    currency = str(order.get("currency") or "usd")
 
     now = int(now_fn())
-    refunded = int(charge.get("amount_refunded") or 0)
-    order_amount = int(order.get("amount_total") or 0)
-    order["refund"] = {**(order.get("refund") or {}), "amount": refunded, "refunded_at": now}
-    order["refunded_at"] = now
-    order["status"] = "refunded" if order_amount and refunded >= order_amount else "partially_refunded"
+    refunds_repo = refunds_repo or (refunds_repository() if os.environ.get("REFUNDS_TABLE") else None)
+    refunds = ((charge.get("refunds") or {}).get("data")) or []
+    ledger_written = 0
+    if refunds_repo:
+        for refund in refunds:
+            stripe_refund_id = str(refund.get("id") or "").strip()
+            if not stripe_refund_id:
+                continue
+            try:
+                if refunds_repo.find_by_stripe_refund(stripe_refund_id):
+                    continue  # our execute path or a prior delivery already recorded it
+                refund_metadata = refund.get("metadata") if isinstance(refund.get("metadata"), dict) else {}
+                initiated_by = "admin" if refund_metadata.get("refund_request_id") else "stripe_dashboard"
+                refunds_repo.put(build_refund_entry(
+                    refund_id=stripe_refund_id,
+                    tenant_id=tenant_id,
+                    order_id=order_id,
+                    payment_intent_id=payment_intent,
+                    charge_id=charge_id,
+                    amount=int(refund.get("amount") or 0),
+                    currency=currency,
+                    reason=str(refund.get("reason") or ""),
+                    initiated_by=initiated_by,
+                    stripe_refund_id=stripe_refund_id,
+                    status=str(refund.get("status") or "succeeded"),
+                    created_at=now,
+                ))
+                ledger_written += 1
+            except RepositoryError:
+                continue
+
+    total_refunded = int(charge.get("amount_refunded") or 0)
+    updated = set_refund_aggregates(order, amount_refunded=total_refunded, refund_count=len(refunds), at=now)
+    orders_repo.put(updated)
+    return {
+        "status": "reconciled",
+        "order_id": order_id,
+        "amount_refunded": total_refunded,
+        "ledger_written": ledger_written,
+    }
+
+
+def reconcile_dispute(
+    stripe_event: dict[str, Any],
+    *,
+    tenant_id: str,
+    orders_repo=None,
+    now_fn: Callable[[], int] = lambda: int(time.time()),
+) -> dict[str, Any]:
+    """Flag the order as disputed when a chargeback is opened."""
+    dispute = _event_data_object(stripe_event)
+    payment_intent = str(dispute.get("payment_intent") or "").strip()
+    orders_repo = orders_repo or (orders_repository() if os.environ.get("ORDERS_TABLE") else None)
+    if not orders_repo or not payment_intent:
+        return {"status": "skipped", "reason": "no_pi_or_repo"}
+    order = orders_repo.find_by_payment_intent(payment_intent)
+    if not order:
+        return {"status": "skipped", "reason": "order_not_found"}
+    now = int(now_fn())
+    order["payment_status"] = "disputed"
     order["updated_at"] = now
     orders_repo.put(order)
-    return {"status": "reconciled", "order_id": order_id, "amount_refunded": refunded}
+    return {"status": "disputed", "order_id": order.get("order_id", "")}
 
 
 def resolve_download_links(order: dict[str, Any], tenant_id: str, products_repo) -> list[dict[str, str]]:
@@ -421,6 +523,7 @@ def order_record_from_session(session: dict[str, Any], tenant_id: str, now: int,
         "fees": fees,
         "attribution": attribution_from_metadata(metadata),
         "metadata": metadata,
+        **initial_payment_aggregates(int(session.get("amount_total") or 0)),
         "created_at": str(created),
         "updated_at": now,
     }

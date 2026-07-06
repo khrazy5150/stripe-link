@@ -127,6 +127,8 @@ Globals:
         PAGES_TABLE: !Ref PagesTable
         CHECKOUT_SESSIONS_TABLE: !Ref CheckoutSessionsTable
         ORDERS_TABLE: !Ref OrdersTable
+        REFUNDS_TABLE: !Ref RefundsTable
+        WEBHOOK_EVENTS_TABLE: !Ref WebhookEventsTable
         CUSTOMERS_TABLE: !Ref CustomersTable
         DOCUMENT_EVENTS_TABLE: !Ref DocumentEventsTable
         ROUTES_TABLE: !Ref RoutesTable
@@ -529,6 +531,8 @@ Resources:
             TableName: !Ref NotificationsTable
         - DynamoDBCrudPolicy:
             TableName: !Ref OrdersTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref RefundsTable
         - DynamoDBReadPolicy:
             TableName: !Sub "${ProjectPrefix}-stripe-keys-dev"
         - DynamoDBReadPolicy:
@@ -1150,6 +1154,10 @@ Resources:
             TableName: !Ref TenantProfilesTable
         - DynamoDBReadPolicy:
             TableName: !Ref ProductsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref RefundsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref WebhookEventsTable
         - S3ReadPolicy:
             BucketName: !Ref ConfigBucket
         - Version: "2012-10-17"
@@ -2135,6 +2143,8 @@ Resources:
           AttributeType: S
         - AttributeName: created_at
           AttributeType: S
+        - AttributeName: payment_intent_id
+          AttributeType: S
       KeySchema:
         - AttributeName: tenant_id
           KeyType: HASH
@@ -2149,6 +2159,65 @@ Resources:
               KeyType: RANGE
           Projection:
             ProjectionType: ALL
+        - IndexName: PaymentIntentIndex
+          KeySchema:
+            - AttributeName: payment_intent_id
+              KeyType: HASH
+          Projection:
+            ProjectionType: KEYS_ONLY
+
+  RefundsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "${ProjectPrefix}-refunds-${Environment}"
+      BillingMode: PAY_PER_REQUEST
+      SSESpecification:
+        SSEEnabled: true
+      AttributeDefinitions:
+        - AttributeName: tenant_id
+          AttributeType: S
+        - AttributeName: refund_id
+          AttributeType: S
+        - AttributeName: stripe_refund_id
+          AttributeType: S
+        - AttributeName: order_id
+          AttributeType: S
+        - AttributeName: created_at
+          AttributeType: "N"
+      KeySchema:
+        - AttributeName: tenant_id
+          KeyType: HASH
+        - AttributeName: refund_id
+          KeyType: RANGE
+      GlobalSecondaryIndexes:
+        - IndexName: StripeRefundIndex
+          KeySchema:
+            - AttributeName: stripe_refund_id
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+        - IndexName: OrderIndex
+          KeySchema:
+            - AttributeName: order_id
+              KeyType: HASH
+            - AttributeName: created_at
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+
+  WebhookEventsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "${ProjectPrefix}-webhook-events-${Environment}"
+      BillingMode: PAY_PER_REQUEST
+      SSESpecification:
+        SSEEnabled: true
+      AttributeDefinitions:
+        - AttributeName: event_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: event_id
+          KeyType: HASH
 
   CustomersTable:
     Type: AWS::DynamoDB::Table

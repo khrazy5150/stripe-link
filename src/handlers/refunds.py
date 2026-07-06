@@ -11,11 +11,13 @@ application fee is NOT reversed (legacy behavior). Idempotent on refund_request_
 import time
 
 from stripe_link.common import error_response, json_response, parse_json_body, path_params, tenant_id_from_event
+from stripe_link.domain.refund_ledger import build_refund_entry, set_refund_aggregates
 from stripe_link.kms_secrets import KmsSecretCipher
 from stripe_link.repositories.documents import (
     RepositoryError,
     orders_repository,
     refund_requests_repository,
+    refunds_repository,
     stripe_keys_repository,
 )
 from stripe_link.stripe_client import StripeApiError, stripe_request
@@ -36,6 +38,7 @@ def handler(
     *,
     requests_repo=None,
     orders_repo=None,
+    refunds_repo=None,
     stripe_repo=None,
     secret_cipher=None,
     caller=stripe_request,
@@ -73,6 +76,7 @@ def handler(
             request, tenant_id, now,
             requests_repo=requests_repo,
             orders_repo=orders_repo or orders_repository(),
+            refunds_repo=refunds_repo or refunds_repository(),
             stripe_repo=stripe_repo or stripe_keys_repository(),
             secret_cipher=secret_cipher if secret_cipher is not None else KmsSecretCipher(),
             caller=caller,
@@ -93,7 +97,7 @@ def _set_status(repo, request, status, body, now, resolved=False):
     return json_response({"refund_request": repo.put(request)})
 
 
-def _execute(request, tenant_id, now, *, requests_repo, orders_repo, stripe_repo, secret_cipher, caller, credentials_fn):
+def _execute(request, tenant_id, now, *, requests_repo, orders_repo, refunds_repo, stripe_repo, secret_cipher, caller, credentials_fn):
     if request.get("refund", {}).get("stripe_refund_id"):
         return json_response({"refund_request": request, "refund": {"status": "already_refunded"}})
     if request.get("status") != "approved":
@@ -135,26 +139,48 @@ def _execute(request, tenant_id, now, *, requests_repo, orders_repo, stripe_repo
 
     refunded_amount = int(refund.get("amount") or partial_amount or order_amount)
     currency = str(order.get("currency") or "usd")
-    refund_block = {
-        "stripe_refund_id": refund.get("id", ""),
-        "amount": refunded_amount,
-        "currency": currency,
-        "refunded_at": now,
-    }
+    stripe_refund_id = str(refund.get("id") or "")
+    charge_id = str(refund.get("charge") or "")
+
+    # Append an immutable ledger row (refund_id == stripe_refund_id so the webhook dedupes on it).
+    if refunds_repo and stripe_refund_id:
+        try:
+            refunds_repo.put(build_refund_entry(
+                refund_id=stripe_refund_id,
+                tenant_id=tenant_id,
+                order_id=str(order.get("order_id") or ""),
+                payment_intent_id=payment_intent,
+                charge_id=charge_id,
+                amount=refunded_amount,
+                currency=currency,
+                reason="requested_by_customer",
+                initiated_by="admin",
+                stripe_refund_id=stripe_refund_id,
+                status=str(refund.get("status") or "succeeded"),
+                created_at=now,
+            ))
+        except RepositoryError:
+            pass  # refund already issued; ledger write is best-effort
+
+    # Update order aggregates.
+    total_refunded = int(order.get("amount_refunded") or 0) + refunded_amount
+    updated_order = set_refund_aggregates(
+        order, amount_refunded=total_refunded, refund_count=int(order.get("refund_count") or 0) + 1, at=now,
+    )
+    orders_repo.put(updated_order)
 
     request["status"] = "refunded"
-    request["refund"] = refund_block
+    request["refund"] = {"stripe_refund_id": stripe_refund_id, "amount": refunded_amount, "currency": currency, "refunded_at": now}
     request["resolved_at"] = now
     request["updated_at"] = now
     requests_repo.put(request)
 
-    order["refund"] = {"stripe_refund_id": refund.get("id", ""), "amount": refunded_amount, "refunded_at": now}
-    order["refunded_at"] = now
-    order["status"] = "refunded" if refunded_amount >= order_amount else "partially_refunded"
-    order["updated_at"] = now
-    orders_repo.put(order)
-
     return json_response({
         "refund_request": request,
-        "refund": {"status": "refunded", "stripe_refund_id": refund.get("id", ""), "amount": refunded_amount},
+        "refund": {
+            "status": "refunded",
+            "stripe_refund_id": stripe_refund_id,
+            "amount": refunded_amount,
+            "payment_status": updated_order.get("payment_status"),
+        },
     })
