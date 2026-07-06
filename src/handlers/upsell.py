@@ -1,9 +1,5 @@
-import json
 import time
-from base64 import b64encode
-from urllib.error import HTTPError
-from urllib.parse import urlencode
-from urllib.request import Request, urlopen
+from urllib.request import urlopen
 
 from stripe_link.common import error_response, json_response, parse_json_body, query_params, tenant_id_from_event
 from stripe_link.domain.billing_status import BillingStatusError, assert_billing_in_good_standing
@@ -18,19 +14,8 @@ from stripe_link.repositories.documents import (
     stripe_keys_repository,
     tenant_profiles_repository,
 )
+from stripe_link.stripe_client import StripeApiError, stripe_request
 from stripe_link.stripe_platform_secrets import checkout_credentials
-
-
-STRIPE_API_BASE = "https://api.stripe.com/v1"
-STRIPE_API_VERSION = "2024-06-20"
-
-
-class StripeApiError(Exception):
-    def __init__(self, status_code, message, stripe_code=None):
-        super().__init__(message)
-        self.status_code = status_code
-        self.message = message
-        self.stripe_code = stripe_code
 
 
 class UpsellError(Exception):
@@ -375,34 +360,3 @@ def update_customer_after_upsell(customers_repo, *, tenant_id, customer_id, amou
     return customers_repo.put(updated)
 
 
-def stripe_request(method, path, *, api_key, stripe_account="", params=None, data=None, opener=None, idempotency_key=None):
-    opener = opener or urlopen
-    url = f"{STRIPE_API_BASE}{path}"
-    if params:
-        url = f"{url}?{urlencode(params)}"
-    headers = {
-        "Authorization": f"Basic {b64encode((api_key + ':').encode('utf-8')).decode('ascii')}",
-        "Stripe-Version": STRIPE_API_VERSION,
-    }
-    if stripe_account:
-        headers["Stripe-Account"] = stripe_account
-    if idempotency_key:
-        headers["Idempotency-Key"] = idempotency_key
-
-    body = None
-    if data is not None:
-        headers["Content-Type"] = "application/x-www-form-urlencoded"
-        body = urlencode(data).encode("utf-8")
-
-    request = Request(url, data=body, headers=headers, method=method)
-    try:
-        with opener(request, timeout=20) as response:
-            return json.loads(response.read().decode("utf-8"))
-    except HTTPError as exc:
-        payload = {}
-        try:
-            payload = json.loads(exc.read().decode("utf-8"))
-        except Exception:
-            pass
-        error = payload.get("error") or {}
-        raise StripeApiError(exc.code, error.get("message") or str(exc), error.get("code")) from exc

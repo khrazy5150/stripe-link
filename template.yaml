@@ -426,6 +426,45 @@ Resources:
             Path: /products/{product_id}/status
             Method: OPTIONS
 
+  ProductSyncFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${ProjectPrefix}-product-sync-${Environment}"
+      CodeUri: src/
+      Handler: handlers.product_sync.handler
+      Description: Push a local Product (and its Prices) to the tenant's Stripe account and record the returned ids + sync status.
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ProductsTable
+        - DynamoDBReadPolicy:
+            TableName: !Sub "${ProjectPrefix}-stripe-keys-dev"
+        - DynamoDBReadPolicy:
+            TableName: !Sub "${ProjectPrefix}-stripe-keys-prod"
+        - Statement:
+            - Effect: Allow
+              Action:
+                - kms:Decrypt
+                - kms:DescribeKey
+              Resource: !GetAtt StripeKeysEncryptionKey.Arn
+        - Statement:
+            - Effect: Allow
+              Action:
+                - secretsmanager:GetSecretValue
+              Resource: "*"
+      Events:
+        ProductSync:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /products/{product_id}/sync
+            Method: POST
+        ProductSyncOptions:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /products/{product_id}/sync
+            Method: OPTIONS
+
   UploadFunction:
     Type: AWS::Serverless::Function
     Properties:
