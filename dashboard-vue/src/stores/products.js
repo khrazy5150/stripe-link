@@ -237,6 +237,37 @@ export const useProductsStore = defineStore("products", {
       }
     },
 
+    async syncToStripe(product) {
+      this.error = "";
+      try {
+        const body = await apiRequest(`/products/${encodeURIComponent(product.product_id)}/sync`, { method: "POST" });
+        if (body.product) this.upsertProduct(body.product);
+        this.message = `${product.name || "Product"} synced to Stripe.`;
+        return body;
+      } catch (error) {
+        this.error = error.message;
+        this.message = `Stripe sync failed: ${error.message}`;
+        await this.load();  // pull the persisted failed status
+        throw error;
+      }
+    },
+
+    async uploadDigitalAsset(productId, file) {
+      this.error = "";
+      const contentType = file.type || "application/octet-stream";
+      const presign = await apiRequest("/downloads/upload-url", {
+        method: "POST",
+        body: { product_id: productId, filename: file.name, content_type: contentType, size_bytes: file.size },
+      });
+      const put = await fetch(presign.upload_url, {
+        method: "PUT",
+        headers: { "Content-Type": contentType },
+        body: file,
+      });
+      if (!put.ok) throw new Error(`Upload failed with ${put.status}`);
+      return presign.digital_asset;
+    },
+
     upsertProduct(product) {
       const index = this.products.findIndex((item) => item.product_id === product.product_id);
       if (index >= 0) {
@@ -309,6 +340,9 @@ export async function buildProductDocument(form) {
     tags,
   };
   if (isLeadGen) product.lead_capture = leadCaptureShape(form.lead_capture);
+  if (!isLeadGen && form.digital_asset && form.digital_asset.bucket_key) {
+    product.digital_asset = form.digital_asset;
+  }
   return product;
 }
 

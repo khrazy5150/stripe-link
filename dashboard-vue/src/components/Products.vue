@@ -132,6 +132,21 @@
             <div><dt>Default Price</dt><dd>{{ priceText(selectedProduct) }}</dd></div>
             <div><dt>Prices</dt><dd>{{ selectedProduct.prices?.length || 0 }}</dd></div>
           </dl>
+          <div class="product-stripe-sync">
+            <div class="product-stripe-sync-status">
+              <span class="product-sync-label">Stripe</span>
+              <span class="product-status" :class="syncBadgeClass(selectedProduct)">{{ syncBadgeText(selectedProduct) }}</span>
+              <small v-if="selectedProduct.sync?.error" class="text-muted">{{ selectedProduct.sync.error }}</small>
+              <small v-else-if="selectedProduct.stripe_product_id" class="text-muted font-mono">{{ selectedProduct.stripe_product_id }}</small>
+            </div>
+            <button type="button" class="secondary-action" :disabled="syncing" @click="syncProduct(selectedProduct)">
+              {{ syncing ? "Syncing…" : (selectedProduct.stripe_product_id ? "Re-sync to Stripe" : "Sync to Stripe") }}
+            </button>
+          </div>
+          <div v-if="selectedProduct.digital_asset" class="product-details-digital">
+            <span class="product-sync-label">Download file</span>
+            <span class="font-mono">{{ selectedProduct.digital_asset.filename }}</span>
+          </div>
           <div class="product-details-tags">
             <span v-if="!selectedProduct.tags?.length" class="text-muted">No tags</span>
             <template v-else>
@@ -222,6 +237,19 @@
               <span class="field-note">Choose whether this product collects payment or captures lead information.</span>
             </label>
           </div>
+
+          <section v-if="form.product_type === 'digital' && form.product_intent === 'transaction'" class="digital-asset-field">
+            <div class="field-heading"><span>Download File</span></div>
+            <div v-if="form.digital_asset && form.digital_asset.filename" class="digital-asset-current">
+              <span class="font-mono">📎 {{ form.digital_asset.filename }}</span>
+              <button type="button" class="secondary-action" @click="form.digital_asset = null">Remove</button>
+            </div>
+            <label v-else class="digital-asset-picker">
+              <input type="file" :disabled="uploadingAsset" @change="onDigitalFileChange" />
+              <span>{{ uploadingAsset ? "Uploading…" : "Choose a file to deliver after purchase" }}</span>
+            </label>
+            <span class="field-note">Buyers receive a secure, purchase-verified download link in their receipt email.</span>
+          </section>
 
           <div v-if="form.product_intent === 'lead_gen'" class="lead-action-toast">
             <span class="lead-action-info" aria-hidden="true">i</span>
@@ -504,6 +532,8 @@ const imageFileInput = ref(null);
 const imageDragActive = ref(false);
 const uploadStatus = ref("");
 const uploadStatusKind = ref("");
+const syncing = ref(false);
+const uploadingAsset = ref(false);
 
 const leadActions = [
   { action: "capture_email", label: "Capture email", description: "Collect the visitor's email address.", tone: "blue" },
@@ -651,6 +681,7 @@ function defaultProductForm() {
     refund_full_policy: "Refunds are available within 30 days of delivery in unused condition.",
     images: "",
     uploaded_images: [],
+    digital_asset: null,
     size_enabled: false,
     color_enabled: false,
     sizes: [],
@@ -826,6 +857,7 @@ function productFormFromDocument(product) {
     refund_full_policy: refundPolicy.full_policy || base.refund_full_policy,
     uploaded_images: images,
     images: "",
+    digital_asset: product.digital_asset || null,
     size_enabled: Boolean(variants.size_enabled || variants.sizes?.length),
     color_enabled: Boolean(variants.color_enabled || variants.colors?.length),
     sizes: variantSizesFromDocument(variants.sizes),
@@ -956,6 +988,53 @@ async function saveProduct() {
   } catch (error) {
     formError.value = error.message;
   }
+}
+
+function ensureProductId() {
+  if (!form.value.product_id) {
+    const alpha = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+    form.value.product_id = "local_" + Array.from({ length: 11 }, () => alpha[Math.floor(Math.random() * alpha.length)]).join("");
+  }
+  return form.value.product_id;
+}
+
+async function onDigitalFileChange(event) {
+  const file = event.target.files?.[0];
+  if (!file) return;
+  uploadingAsset.value = true;
+  formError.value = "";
+  try {
+    form.value.digital_asset = await store.uploadDigitalAsset(ensureProductId(), file);
+  } catch (error) {
+    formError.value = `Upload failed: ${error.message}`;
+  } finally {
+    uploadingAsset.value = false;
+    event.target.value = "";
+  }
+}
+
+async function syncProduct(product) {
+  syncing.value = true;
+  try {
+    const body = await store.syncToStripe(product);
+    if (body?.product) selectedProduct.value = body.product;
+  } catch {
+    /* store surfaces the error banner */
+  } finally {
+    syncing.value = false;
+  }
+}
+
+function syncBadgeText(product) {
+  if (product?.sync?.status === "success" || product?.stripe_product_id) return "Synced";
+  if (product?.sync?.status === "failed") return "Sync failed";
+  return "Not synced";
+}
+
+function syncBadgeClass(product) {
+  if (product?.sync?.status === "failed") return "archived";
+  if (product?.sync?.status === "success" || product?.stripe_product_id) return "active";
+  return "inactive";
 }
 
 async function handlePickedImages(event) {

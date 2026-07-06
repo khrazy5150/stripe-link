@@ -4,7 +4,7 @@ export const menuSchema = {
   groups: [
     { key: "main", label: "MAIN", items: ["dashboard", "stripeKeys"] },
     { key: "catalog", label: "CATALOG", items: ["products", "coupons", "offers", "landingPages", "sites", "services", "abTesting"] },
-    { key: "orders", label: "ORDERS", items: ["orders", "notifications", "invoices", "shipping", "customers"] },
+    { key: "orders", label: "ORDERS", items: ["orders", "notifications", "invoices", "refunds", "shipping", "customers"] },
     { key: "settings", label: "SETTINGS", items: ["stripeConnect", "registration", "configuration", "profile", "preferences"] },
   ],
   items: {
@@ -104,6 +104,14 @@ export const menuSchema = {
       enabled: true,
       environments: ["test", "live"],
     },
+    refunds: {
+      key: "refunds",
+      label: "Refunds",
+      icon: "refund",
+      view: "refunds",
+      enabled: true,
+      environments: ["test", "live"],
+    },
     shipping: {
       key: "shipping",
       label: "Shipping",
@@ -187,6 +195,7 @@ export const iconPaths = {
   clipboard: "M8.25 6.75h7.5M8.25 11.25h7.5M8.25 15.75h4.5M7.5 3.75h9A1.5 1.5 0 0 1 18 5.25v13.5a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 6 18.75V5.25a1.5 1.5 0 0 1 1.5-1.5Z",
   bell: "M14.5 18a2.5 2.5 0 0 1-5 0m9-3H5.5l1.25-2.25V9a5.25 5.25 0 0 1 10.5 0v3.75L18.5 15Z",
   receipt: "M7.5 3.75h9A1.5 1.5 0 0 1 18 5.25v15l-3-1.5-3 1.5-3-1.5-3 1.5v-15a1.5 1.5 0 0 1 1.5-1.5Zm2.25 5.25h4.5m-4.5 3h4.5m-4.5 3h3",
+  refund: "M9 15 3 9m0 0 6-6M3 9h12a6 6 0 0 1 0 12h-3",
   truck: "M3.75 7.5h10.5v9H3.75v-9Zm10.5 3h3.25l2.75 3v3h-6v-6Zm-7.5 8.25a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3Zm10.5 0a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3Z",
   users: "M8.25 11.25a3 3 0 1 0 0-6 3 3 0 0 0 0 6Zm7.5 0a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM3.75 19.5a4.5 4.5 0 0 1 9 0m-1.5 0a4.5 4.5 0 0 1 9 0",
   terminal: "M4.5 6.75h15v10.5h-15V6.75Zm3 3 2.25 2.25L7.5 14.25m4.5 0h4.5",
