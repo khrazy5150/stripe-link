@@ -8,13 +8,17 @@ from typing import Any, Callable
 
 from stripe_link.common import error_response, header_value, json_response
 from stripe_link.domain.fees import cached_billing_config, calculate_price
+from stripe_link.domain.receipts import receipt_content
+from stripe_link.mailer import send_email
 from stripe_link.repositories.documents import (
     RepositoryError,
     customers_repository,
     dynamodb_safe_document,
     invoices_repository,
     notifications_repository,
+    platform_config_repository,
     stripe_keys_repository,
+    tenant_profiles_repository,
 )
 from stripe_link.stripe_platform_secrets import get_platform_webhook_secret
 
@@ -97,6 +101,8 @@ def handler(
     webhook_secret_loader: Callable[[str, str], str | None] = get_platform_webhook_secret,
     now_fn: Callable[[], int] = lambda: int(time.time()),
     billing_config_loader: Callable[[], dict[str, Any]] | None = None,
+    receipt_mailer: Callable[..., Any] | None = None,
+    email_context_loader: Callable[[str], dict[str, str]] | None = None,
 ):
     method = event.get("httpMethod", "")
     if method == "OPTIONS":
@@ -147,6 +153,8 @@ def handler(
             notifications_repo=notifications_repo,
             now_fn=now_fn,
             billing_config_loader=billing_config_loader,
+            receipt_mailer=receipt_mailer,
+            email_context_loader=email_context_loader,
         )
     return json_response({
         "received": True,
@@ -176,6 +184,8 @@ def persist_checkout_session_completed(
     notifications_repo=None,
     now_fn: Callable[[], int] = lambda: int(time.time()),
     billing_config_loader: Callable[[], dict[str, Any]] | None = None,
+    receipt_mailer: Callable[..., Any] | None = None,
+    email_context_loader: Callable[[str], dict[str, str]] | None = None,
 ) -> dict[str, Any]:
     session = _event_data_object(stripe_event)
     if not session:
@@ -212,13 +222,64 @@ def persist_checkout_session_completed(
         notifications_repo.put(notification_record)
         written.append("notification")
 
+    receipt = send_order_receipt(order_record, tenant_id, mailer_send=receipt_mailer, context_loader=email_context_loader)
+
     return {
         "status": "stored",
         "session_id": session.get("id", ""),
         "invoice_id": invoice_record.get("invoice_id") if invoice_record else "",
         "order_id": order_record.get("order_id", ""),
         "written": written,
+        "receipt": receipt,
     }
+
+
+def load_tenant_email_context(tenant_id: str) -> dict[str, str]:
+    """Business name (TenantProfile) + support email (TenantConfig) for receipt branding."""
+    business_name = ""
+    support_email = ""
+    if os.environ.get("TENANT_PROFILES_TABLE"):
+        profile = tenant_profiles_repository().get(tenant_id, tenant_id) or {}
+        business_name = str(profile.get("business_name") or "").strip()
+    if os.environ.get("PLATFORM_CONFIG_TABLE"):
+        config = platform_config_repository().get(tenant_id) or {}
+        support_email = str(((config.get("support") or {}).get("email")) or "").strip()
+    return {"business_name": business_name, "support_email": support_email}
+
+
+def send_order_receipt(
+    order: dict[str, Any],
+    tenant_id: str,
+    *,
+    mailer_send: Callable[..., Any] | None = None,
+    context_loader: Callable[[str], dict[str, str]] | None = None,
+    download_links: list[dict[str, str]] | None = None,
+) -> dict[str, Any]:
+    """Best-effort receipt email. Never raises -- Stripe would retry and duplicate writes."""
+    if mailer_send is None and not os.environ.get("EMAIL_FROM_ADDRESS"):
+        return {"status": "skipped", "reason": "email_not_configured"}
+    email = str(((order.get("customer") or {}).get("email")) or "").strip()
+    if not email:
+        return {"status": "skipped", "reason": "no_customer_email"}
+    try:
+        context = (context_loader or load_tenant_email_context)(tenant_id)
+        content = receipt_content(
+            order,
+            business_name=context.get("business_name", ""),
+            support_email=context.get("support_email", ""),
+            download_links=download_links,
+        )
+        (mailer_send or send_email)(
+            to=email,
+            subject=content["subject"],
+            html=content["html"],
+            text=content["text"],
+            from_name=context.get("business_name", ""),
+            reply_to=context.get("support_email", ""),
+        )
+        return {"status": "sent", "to": email}
+    except Exception as exc:  # noqa: BLE001 - receipt failure must not fail the webhook
+        return {"status": "failed", "error": str(exc)}
 
 
 def dynamodb_table(table_name: str):
@@ -284,6 +345,7 @@ def order_record_from_session(session: dict[str, Any], tenant_id: str, now: int,
         "status": "paid" if session.get("payment_status") == "paid" else session.get("payment_status", "completed"),
         "amount_total": int(session.get("amount_total") or 0),
         "currency": session.get("currency") or "usd",
+        "payment_intent_id": session.get("payment_intent", ""),
         "customer": {
             "name": details.get("name", ""),
             "email": details.get("email", ""),

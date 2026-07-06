@@ -81,6 +81,11 @@ Parameters:
     Default: go.jbay.uk
     Description: Public short-URL host served by the Cloudflare Worker on the jbay.uk zone (short links look like https://go.jbay.uk/{code}).
 
+  EmailFromAddress:
+    Type: String
+    Default: support@juniorbay.net
+    Description: Verified SES sender address for transactional email (receipts). Tenant business name is used as the display name and tenant support email as Reply-To.
+
 Conditions:
   HasApiCustomDomain: !And
     - !Not [!Equals [!Ref ApiCustomDomainName, ""]]
@@ -126,6 +131,7 @@ Globals:
         DOCUMENT_EVENTS_TABLE: !Ref DocumentEventsTable
         ROUTES_TABLE: !Ref RoutesTable
         EXPERIMENTS_TABLE: !Ref ExperimentsTable
+        EMAIL_FROM_ADDRESS: !Ref EmailFromAddress
         TIER_POLICIES_TABLE: !Ref TierPoliciesTable
         MEDIA_TABLE: !Ref MediaTable
         THEMES_TABLE: !Ref ThemesTable
@@ -1006,8 +1012,19 @@ Resources:
             TableName: !Ref InvoicesTable
         - DynamoDBCrudPolicy:
             TableName: !Ref NotificationsTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref PlatformConfigTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref TenantProfilesTable
         - S3ReadPolicy:
             BucketName: !Ref ConfigBucket
+        - Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Action:
+                - ses:SendEmail
+                - sesv2:SendEmail
+              Resource: "*"
         - !If
           - HasStripePlatformSecret
           - Version: "2012-10-17"
