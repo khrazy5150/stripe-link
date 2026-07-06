@@ -224,16 +224,33 @@ export const useProductsStore = defineStore("products", {
           method: "POST",
           body: product,
         });
-        this.upsertProduct(body.product || product);
+        const saved = body.product || product;
+        this.upsertProduct(saved);
         this.loaded = true;
         this.message = `${product.name} was saved to the products database.`;
-        return body.product || product;
+        // Payment-enabled products push to Stripe automatically. On a price edit this creates a
+        // new Stripe price and archives the old one behind the scenes (Stripe prices are immutable).
+        if (saved.canonical) {
+          await this._autoSyncToStripe(saved);
+        }
+        return saved;
       } catch (error) {
         this.error = error.message;
         this.message = error.message;
         throw error;
       } finally {
         this.savingStatus = false;
+      }
+    },
+
+    async _autoSyncToStripe(product) {
+      try {
+        const body = await apiRequest(`/products/${encodeURIComponent(product.product_id)}/sync`, { method: "POST" });
+        if (body.product) this.upsertProduct(body.product);
+        this.message = `${product.name || "Product"} saved and synced to Stripe.`;
+      } catch (error) {
+        // The local save already succeeded; surface the sync error without failing the save.
+        this.message = `${product.name || "Product"} saved, but Stripe sync failed: ${error.message}`;
       }
     },
 

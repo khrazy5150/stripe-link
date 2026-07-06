@@ -10,7 +10,7 @@ import copy
 import time
 
 from stripe_link.common import error_response, json_response, path_params, query_params, tenant_id_from_event
-from stripe_link.domain.stripe_products import build_price_params, build_product_params
+from stripe_link.domain.stripe_products import build_price_params, build_product_params, price_differs
 from stripe_link.kms_secrets import KmsSecretCipher
 from stripe_link.repositories.documents import RepositoryError, products_repository, stripe_keys_repository
 from stripe_link.stripe_client import StripeApiError, stripe_request
@@ -94,7 +94,7 @@ def run_product_sync(product, *, api_key, stripe_account, caller, now):
     """Returns (updated_product, result). Never raises for Stripe errors -- records them on
     the document's sync block and in the result so the caller can surface them."""
     product = copy.deepcopy(product)
-    call = lambda method, path, data: caller(  # noqa: E731
+    call = lambda method, path, data=None: caller(  # noqa: E731
         method, path, api_key=api_key, stripe_account=stripe_account, data=data,
     )
     try:
@@ -107,14 +107,39 @@ def run_product_sync(product, *, api_key, stripe_account, caller, now):
         stripe_product_id = stripe_product.get("id")
         product["stripe_product_id"] = stripe_product_id
 
-        created_prices = 0
-        for price in product.get("prices") or []:
-            if str(price.get("stripe_price_id") or "").strip():
-                continue
-            created = call("POST", "/prices", build_price_params(price, stripe_product_id))
-            price["stripe_price_id"] = created.get("id")
-            created_prices += 1
+        # Snapshot existing Stripe prices so we can compare amounts and archive the leftovers.
+        stripe_prices = {}
+        if existing_id:
+            try:
+                stripe_prices = {str(sp.get("id")): sp for sp in _list_stripe_prices(stripe_product_id, api_key, stripe_account, caller)}
+            except StripeApiError:
+                stripe_prices = {}
 
+        created_prices = 0
+        replaced_prices = 0
+        for price in product.get("prices") or []:
+            existing_price_id = str(price.get("stripe_price_id") or "").strip()
+            if not existing_price_id:
+                new = call("POST", "/prices", build_price_params(price, stripe_product_id))
+                price["stripe_price_id"] = new.get("id")
+                created_prices += 1
+            elif existing_price_id not in stripe_prices:
+                # Referenced Stripe price is gone (deleted upstream) -- recreate it.
+                new = call("POST", "/prices", build_price_params(price, stripe_product_id))
+                price["previous_price_id"] = existing_price_id
+                price["stripe_price_id"] = new.get("id")
+                created_prices += 1
+            elif price_differs(price, stripe_prices[existing_price_id]):
+                # Amount/currency/recurring changed -- Stripe prices are immutable, so create a new
+                # one and archive the old (below). previous_price_id keeps the lineage.
+                new = call("POST", "/prices", build_price_params(price, stripe_product_id))
+                price["previous_price_id"] = existing_price_id
+                price["stripe_price_id"] = new.get("id")
+                replaced_prices += 1
+            # else: unchanged -- leave the Stripe price as-is.
+
+        # Point the Stripe product at the current default's price BEFORE archiving anything,
+        # since Stripe won't let you archive a product's active default price.
         default_local = str(product.get("default_price_id") or "").strip()
         if default_local:
             match = next(
@@ -125,13 +150,23 @@ def run_product_sync(product, *, api_key, stripe_account, caller, now):
             if match:
                 call("POST", f"/products/{stripe_product_id}", {"default_price": match["stripe_price_id"]})
 
-        archived_prices = _archive_orphan_prices(product, stripe_product_id, api_key, stripe_account, caller)
+        # Archive every Stripe price that no longer maps to a local price (replaced + removed).
+        kept = {str(p.get("stripe_price_id") or "") for p in (product.get("prices") or []) if p.get("stripe_price_id")}
+        archived_prices = 0
+        for stripe_price_id, stripe_price in stripe_prices.items():
+            if stripe_price.get("active") and stripe_price_id not in kept:
+                try:
+                    call("POST", f"/prices/{stripe_price_id}", {"active": False})
+                    archived_prices += 1
+                except StripeApiError:
+                    pass  # best-effort; a stuck archive must not fail the sync
 
         product["sync"] = {"status": "success", "last_synced_at": now, "error": None}
         return product, {
             "status": "success",
             "stripe_product_id": stripe_product_id,
             "prices_created": created_prices,
+            "prices_replaced": replaced_prices,
             "prices_archived": archived_prices,
         }
     except StripeApiError as exc:
@@ -146,22 +181,6 @@ def _list_stripe_prices(stripe_product_id, api_key, stripe_account, caller):
         params={"product": stripe_product_id, "limit": 100},
     )
     return listing.get("data") or []
-
-
-def _archive_orphan_prices(product, stripe_product_id, api_key, stripe_account, caller):
-    """Deactivate Stripe prices that no longer have a local counterpart (Stripe prices are
-    immutable, so removed/changed local prices leave orphans). Best-effort."""
-    kept = {str(p.get("stripe_price_id") or "") for p in (product.get("prices") or []) if p.get("stripe_price_id")}
-    archived = 0
-    try:
-        for stripe_price in _list_stripe_prices(stripe_product_id, api_key, stripe_account, caller):
-            if stripe_price.get("active") and str(stripe_price.get("id")) not in kept:
-                caller("POST", f"/prices/{stripe_price['id']}",
-                       api_key=api_key, stripe_account=stripe_account, data={"active": False})
-                archived += 1
-    except StripeApiError:
-        pass  # archival is best-effort; a listing/deactivate failure must not fail the sync
-    return archived
 
 
 def check_product_drift(product, *, api_key, stripe_account, caller):

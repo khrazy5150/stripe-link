@@ -92,13 +92,40 @@ class RunSyncTests(unittest.TestCase):
         default_calls = [c for c in stripe.calls if c["path"] == "/products/prod_stripe_1" and c["data"].get("default_price")]
         self.assertEqual(default_calls[0]["data"]["default_price"], "price_stripe_1")
 
-    def test_updates_existing_product_and_skips_synced_prices(self):
+    def test_updates_existing_product_and_skips_unchanged_prices(self):
         doc = product_doc(stripe_product_id="prod_stripe_existing")
         doc["prices"][0]["stripe_price_id"] = "price_stripe_existing"
-        stripe = FakeStripe()
+        # Stripe already has price_a at the same amount -> unchanged, must be left alone.
+        stripe = FakeStripe(existing_prices=[{"id": "price_stripe_existing", "unit_amount": 3900, "currency": "usd", "active": True}])
         synced, result = run_product_sync(doc, api_key="sk", stripe_account="", caller=stripe, now=1)
-        self.assertEqual(result["prices_created"], 1)  # only price_b created
+        self.assertEqual(result["prices_created"], 1)  # only price_b (no stripe id) created
+        self.assertEqual(result["prices_replaced"], 0)
+        self.assertEqual(synced["prices"][0]["stripe_price_id"], "price_stripe_existing")  # unchanged
         self.assertEqual(stripe.calls[0]["path"], "/products/prod_stripe_existing")
+
+    def test_replaces_changed_price_and_archives_old(self):
+        doc = product_doc(stripe_product_id="prod_stripe_1")
+        doc["prices"][0]["stripe_price_id"] = "price_old"      # price_a
+        doc["prices"][0]["unit_amount"] = 5000                  # tenant raised the price locally
+        doc["prices"][1]["stripe_price_id"] = "price_b_synced"  # price_b unchanged
+        stripe = FakeStripe(existing_prices=[
+            {"id": "price_old", "unit_amount": 3900, "currency": "usd", "active": True},
+            {"id": "price_b_synced", "unit_amount": 6700, "currency": "usd", "active": True},
+        ])
+        synced, result = run_product_sync(doc, api_key="sk", stripe_account="acct", caller=stripe, now=99)
+        self.assertEqual(result["prices_replaced"], 1)
+        self.assertEqual(result["prices_created"], 0)
+        # price_a got a fresh Stripe price, old id preserved as lineage
+        self.assertEqual(synced["prices"][0]["previous_price_id"], "price_old")
+        self.assertEqual(synced["prices"][0]["stripe_price_id"], "price_stripe_1")
+        # default moved to the new price BEFORE the old was archived
+        default_call = next(c for c in stripe.calls if c["path"] == "/products/prod_stripe_1" and c["data"].get("default_price"))
+        archive_call = next(c for c in stripe.calls if c["path"] == "/prices/price_old")
+        self.assertEqual(default_call["data"]["default_price"], "price_stripe_1")
+        self.assertLess(stripe.calls.index(default_call), stripe.calls.index(archive_call))
+        self.assertEqual(archive_call["data"], {"active": False})
+        # price_b left untouched (no archive for it)
+        self.assertFalse(any(c["path"] == "/prices/price_b_synced" for c in stripe.calls))
 
     def test_stripe_error_records_failed_status(self):
         stripe = FakeStripe(fail_on="/products")
@@ -111,13 +138,15 @@ class RunSyncTests(unittest.TestCase):
         doc = product_doc(stripe_product_id="prod_stripe_1")
         doc["prices"][0]["stripe_price_id"] = "price_keep"
         doc["prices"][1]["stripe_price_id"] = "price_keep_b"
-        # Stripe has an extra active price with no local counterpart -> should be archived.
+        # Stripe has the two current prices (matching amounts) plus an orphan -> only the orphan archived.
         stripe = FakeStripe(existing_prices=[
-            {"id": "price_keep", "active": True},
-            {"id": "price_orphan", "active": True},
+            {"id": "price_keep", "unit_amount": 3900, "currency": "usd", "active": True},
+            {"id": "price_keep_b", "unit_amount": 6700, "currency": "usd", "active": True},
+            {"id": "price_orphan", "unit_amount": 100, "currency": "usd", "active": True},
         ])
         _, result = run_product_sync(doc, api_key="sk", stripe_account="", caller=stripe, now=1)
         self.assertEqual(result["prices_archived"], 1)
+        self.assertEqual(result["prices_replaced"], 0)
         archive_calls = [c for c in stripe.calls if c["path"] == "/prices/price_orphan" and c["data"] == {"active": False}]
         self.assertEqual(len(archive_calls), 1)
 

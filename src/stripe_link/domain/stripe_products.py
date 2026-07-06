@@ -43,6 +43,22 @@ def build_product_params(product: dict[str, Any]) -> dict[str, Any]:
     return params
 
 
+def price_differs(local_price: dict[str, Any], stripe_price: dict[str, Any]) -> bool:
+    """True if an immutable Stripe field (amount, currency, recurring) changed locally, so the
+    Stripe price must be replaced (Stripe prices cannot be edited)."""
+    if int(local_price.get("unit_amount") or 0) != int(stripe_price.get("unit_amount") or 0):
+        return True
+    if str(local_price.get("currency") or "usd").lower() != str(stripe_price.get("currency") or "usd").lower():
+        return True
+    local_recurring = local_price.get("recurring") if isinstance(local_price.get("recurring"), dict) else {}
+    stripe_recurring = stripe_price.get("recurring") if isinstance(stripe_price.get("recurring"), dict) else {}
+    if str(local_recurring.get("interval") or "") != str(stripe_recurring.get("interval") or ""):
+        return True
+    if local_recurring.get("interval") and int(local_recurring.get("interval_count") or 1) != int(stripe_recurring.get("interval_count") or 1):
+        return True
+    return False
+
+
 def build_price_params(price: dict[str, Any], stripe_product_id: str) -> dict[str, Any]:
     params: dict[str, Any] = {
         "product": stripe_product_id,
