@@ -7,6 +7,7 @@ import time
 from typing import Any, Callable
 
 from stripe_link.common import error_response, header_value, json_response
+from stripe_link.domain.downloads import digital_download_links
 from stripe_link.domain.fees import cached_billing_config, calculate_price
 from stripe_link.domain.receipts import receipt_content
 from stripe_link.mailer import send_email
@@ -17,6 +18,7 @@ from stripe_link.repositories.documents import (
     invoices_repository,
     notifications_repository,
     platform_config_repository,
+    products_repository,
     stripe_keys_repository,
     tenant_profiles_repository,
 )
@@ -98,6 +100,7 @@ def handler(
     customers_repo=None,
     invoices_repo=None,
     notifications_repo=None,
+    products_repo=None,
     webhook_secret_loader: Callable[[str, str], str | None] = get_platform_webhook_secret,
     now_fn: Callable[[], int] = lambda: int(time.time()),
     billing_config_loader: Callable[[], dict[str, Any]] | None = None,
@@ -151,6 +154,7 @@ def handler(
             customers_repo=customers_repo,
             invoices_repo=invoices_repo,
             notifications_repo=notifications_repo,
+            products_repo=products_repo,
             now_fn=now_fn,
             billing_config_loader=billing_config_loader,
             receipt_mailer=receipt_mailer,
@@ -182,6 +186,7 @@ def persist_checkout_session_completed(
     customers_repo=None,
     invoices_repo=None,
     notifications_repo=None,
+    products_repo=None,
     now_fn: Callable[[], int] = lambda: int(time.time()),
     billing_config_loader: Callable[[], dict[str, Any]] | None = None,
     receipt_mailer: Callable[..., Any] | None = None,
@@ -197,6 +202,7 @@ def persist_checkout_session_completed(
     customers_repo = customers_repo or (customers_repository() if os.environ.get("CUSTOMERS_TABLE") else None)
     invoices_repo = invoices_repo or (invoices_repository() if os.environ.get("INVOICES_TABLE") else None)
     notifications_repo = notifications_repo or (notifications_repository() if os.environ.get("NOTIFICATIONS_TABLE") else None)
+    products_repo = products_repo or (products_repository() if os.environ.get("PRODUCTS_TABLE") else None)
 
     fees = fee_breakdown_from_session(session, billing_config_loader)
     session_record = checkout_session_record(stripe_event, session, tenant_id, now)
@@ -222,7 +228,11 @@ def persist_checkout_session_completed(
         notifications_repo.put(notification_record)
         written.append("notification")
 
-    receipt = send_order_receipt(order_record, tenant_id, mailer_send=receipt_mailer, context_loader=email_context_loader)
+    download_links = resolve_download_links(order_record, tenant_id, products_repo)
+    receipt = send_order_receipt(
+        order_record, tenant_id,
+        mailer_send=receipt_mailer, context_loader=email_context_loader, download_links=download_links,
+    )
 
     return {
         "status": "stored",
@@ -232,6 +242,20 @@ def persist_checkout_session_completed(
         "written": written,
         "receipt": receipt,
     }
+
+
+def resolve_download_links(order: dict[str, Any], tenant_id: str, products_repo) -> list[dict[str, str]]:
+    """Download links for any digital product on the order (for the receipt). Best-effort."""
+    try:
+        product_id = str((order.get("product") or {}).get("product_id") or "")
+        if not product_id or not products_repo:
+            return []
+        product = products_repo.get(tenant_id, product_id)
+        if not product:
+            return []
+        return digital_download_links(order, product, os.environ.get("PUBLIC_API_BASE_URL", ""))
+    except Exception:  # noqa: BLE001 - download links must not fail the webhook
+        return []
 
 
 def load_tenant_email_context(tenant_id: str) -> dict[str, str]:

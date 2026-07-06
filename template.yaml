@@ -465,6 +465,58 @@ Resources:
             Path: /products/{product_id}/sync
             Method: OPTIONS
 
+  DownloadsUploadFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${ProjectPrefix}-downloads-upload-${Environment}"
+      CodeUri: src/
+      Handler: handlers.downloads.upload_url_handler
+      Description: Tenant -- mint a presigned S3 PUT URL for a digital-product file in the media bucket.
+      Policies:
+        - S3CrudPolicy:
+            BucketName: !Ref MediaBucket
+      Events:
+        DownloadsUploadUrl:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /downloads/upload-url
+            Method: POST
+        DownloadsUploadUrlOptions:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /downloads/upload-url
+            Method: OPTIONS
+
+  DownloadServeFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${ProjectPrefix}-download-serve-${Environment}"
+      CodeUri: src/
+      Handler: handlers.downloads.serve_handler
+      Description: Public -- verify the paid order owns the product, then 302 to a short-lived presigned download URL.
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref OrdersTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref ProductsTable
+        - S3ReadPolicy:
+            BucketName: !Ref MediaBucket
+      Events:
+        DownloadServe:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /download
+            Method: GET
+        DownloadServeOptions:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /download
+            Method: OPTIONS
+
   UploadFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -1055,6 +1107,8 @@ Resources:
             TableName: !Ref PlatformConfigTable
         - DynamoDBReadPolicy:
             TableName: !Ref TenantProfilesTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref ProductsTable
         - S3ReadPolicy:
             BucketName: !Ref ConfigBucket
         - Version: "2012-10-17"

@@ -262,6 +262,20 @@
         }
       }
     },
+    "digital_asset": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Downloadable file for a digital product, stored privately in the media bucket. Presence marks the product as digital; buyers receive a purchase-verified download link.",
+      "required": ["asset_id", "bucket_key", "filename"],
+      "properties": {
+        "asset_id": { "type": "string", "minLength": 1 },
+        "bucket_key": { "type": "string", "minLength": 1, "description": "S3 key in the media bucket, e.g. downloads/{tenant_id}/{product_id}/{asset_id}/{filename}." },
+        "filename": { "type": "string", "minLength": 1 },
+        "content_type": { "type": "string" },
+        "size_bytes": { "type": "integer", "minimum": 0 },
+        "uploaded_at": { "type": "integer", "minimum": 0 }
+      }
+    },
     "created_at": {
       "type": "integer",
       "minimum": 0

@@ -582,6 +582,14 @@ def validate_product_document(document: dict[str, Any]) -> None:
     optional_non_negative_int(sync, "last_synced_at", "Product sync.last_synced_at")
     optional_string(sync, "error", "Product sync.error")
 
+    digital_asset = document.get("digital_asset")
+    if digital_asset is not None:
+        if not isinstance(digital_asset, dict):
+            raise DocumentValidationError("Product digital_asset must be an object.")
+        require_string(digital_asset, "asset_id", "Product digital_asset.asset_id")
+        require_string(digital_asset, "bucket_key", "Product digital_asset.bucket_key")
+        require_string(digital_asset, "filename", "Product digital_asset.filename")
+
     prices = document.get("prices")
     if not isinstance(prices, list) or not prices:
         raise DocumentValidationError("Product prices must be a non-empty array.")
