@@ -664,9 +664,9 @@
             </div>
           </details>
           <div class="preview-legal">
-            <a :href="defaultLegalLinks.terms_url">Terms of Service</a>
-            <a :href="defaultLegalLinks.privacy_url">Privacy Policy</a>
-            <a :href="defaultLegalLinks.refund_url">Refund Policy</a>
+            <a :href="defaultLegalLinks.terms_url" target="_blank" rel="noopener">Terms of Service</a>
+            <a :href="defaultLegalLinks.privacy_url" target="_blank" rel="noopener">Privacy Policy</a>
+            <a :href="defaultLegalLinks.refund_url" target="_blank" rel="noopener">Refund Policy</a>
             <span>{{ defaultFooterCopyright }}</span>
           </div>
           <button type="button" class="preview-cta">
@@ -709,7 +709,7 @@
 
 <script setup>
 import { computed, reactive, ref, watch } from "vue";
-import { apiRequest, getApiEnvironment, getPagesBaseUrl, getPreviewPagesBaseUrl, getTenantId } from "../api/client";
+import { apiRequest, getApiBase, getApiEnvironment, getPagesBaseUrl, getPreviewPagesBaseUrl, getTenantId } from "../api/client";
 import { formatMoney } from "../stores/products";
 import { showIconPicker } from "../icon-picker.js";
 
@@ -749,11 +749,16 @@ const blurbImageErrors = reactive({});
 const form = reactive(defaultWizardForm());
 const builder = reactive(defaultBuilderForm());
 const defaultFaviconUrl = "https://images.juniorbay.com/icon/favicon.png";
-const defaultLegalLinks = Object.freeze({
-  terms_url: "#terms",
-  privacy_url: "#privacy",
-  refund_url: "#refund-policy",
-});
+function legalPageUrl(pageId) {
+  return `${getApiBase().replace(/\/$/, "")}/legal/${pageId}`;
+}
+// Preview links to the platform legal pages. Published pages resolve the same URLs at
+// publish time from the API base, so the saved document stays environment-agnostic.
+const defaultLegalLinks = computed(() => ({
+  terms_url: legalPageUrl("terms"),
+  privacy_url: legalPageUrl("privacy"),
+  refund_url: legalPageUrl("refund"),
+}));
 const currentYear = new Date().getFullYear();
 const defaultFooterCopyright = `© ${currentYear} All rights reserved.`;
 const defaultFooterCopyrightTemplate = "© {{current_year}} All rights reserved.";
@@ -1671,7 +1676,9 @@ function compareLandingPagePrices(left, right) {
 }
 
 function legalLinks() {
-  return { ...defaultLegalLinks };
+  // Persist no legal URLs on the page document; the renderer injects the platform
+  // /legal/* links at publish time so pages stay environment-agnostic.
+  return {};
 }
 
 function refundPolicyReturnNote(policy) {

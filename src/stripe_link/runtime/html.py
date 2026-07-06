@@ -588,7 +588,7 @@ def render_page(
         for section in page.get("sections", [])
     )
     has_legal_footer_section = any(section.get("type") == "legal_footer" for section in page.get("sections", []))
-    legal_footer = "" if has_legal_footer_section else render_legal_footer(page.get("legal") or {})
+    legal_footer = "" if has_legal_footer_section else render_legal_footer(page.get("legal") or {}, api_base_url=api_base_url)
     analytics_tags = render_analytics_tags(page.get("analytics") or {})
     return "\n".join([
         "<!doctype html>",
@@ -652,7 +652,7 @@ def render_section(
     if section_type == "checkout_cta":
         return render_checkout_cta(page, section, offer, resolved_offer, checkout_url, api_base_url)
     if section_type == "legal_footer":
-        return render_legal_footer(page.get("legal") or {}, section)
+        return render_legal_footer(page.get("legal") or {}, section, api_base_url)
     return f"    <section data-section-id=\"{escape(str(section.get('id', '')))}\"></section>"
 
 
@@ -1109,16 +1109,29 @@ def build_checkout_url(
     return f"{base_url}{separator}{query}" if query else base_url
 
 
-def render_legal_footer(legal: dict[str, Any], section: dict[str, Any] | None = None) -> str:
-    links = [
-        ("Terms of Service", legal.get("terms_url")),
-        ("Privacy Policy", legal.get("privacy_url")),
-        ("Refund Policy", legal.get("refund_url")),
-    ]
+LEGAL_FOOTER_LINKS = (
+    ("terms", "Terms of Service", "terms_url"),
+    ("privacy", "Privacy Policy", "privacy_url"),
+    ("refund", "Refund Policy", "refund_url"),
+)
+
+
+def _legal_href(stored_url: Any, page_id: str, api_base_url: str) -> str:
+    """Resolve a footer legal link: honor an explicit absolute URL, else point at the
+    platform legal page. Empty values and bare-anchor placeholders (e.g. '#terms') are
+    treated as unset and default to {api_base_url}/legal/{page_id}."""
+    stored = str(stored_url or "").strip()
+    if stored.startswith("http://") or stored.startswith("https://"):
+        return stored
+    base = str(api_base_url or "").rstrip("/")
+    return f"{base}/legal/{page_id}" if base else ""
+
+
+def render_legal_footer(legal: dict[str, Any], section: dict[str, Any] | None = None, api_base_url: str = "") -> str:
     rendered_links = [
-        f"      <a href=\"{escape(str(url))}\">{label}</a>"
-        for label, url in links
-        if url
+        f"      <a href=\"{escape(href)}\" target=\"_blank\" rel=\"noopener\">{label}</a>"
+        for page_id, label, field in LEGAL_FOOTER_LINKS
+        if (href := _legal_href(legal.get(field), page_id, api_base_url))
     ]
     copyright_text = (section or {}).get("copyright")
     if not rendered_links and not copyright_text:

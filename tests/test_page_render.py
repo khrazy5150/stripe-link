@@ -260,6 +260,30 @@ class PageRenderTests(unittest.TestCase):
         self.assertIn("© <span data-sl-current-year></span> All rights reserved.", html)
         self.assertIn("new Date().getFullYear()", html)
 
+    def test_legal_footer_links_open_in_new_tab_and_honor_absolute_urls(self):
+        page = load_fixture("page-universal-bundle.json")
+        offer = load_fixture("offer-universal-bundle.json")
+        product = load_fixture("product-universal-bundle.json")
+
+        html = render_page(page, offer, {product["product_id"]: product}, api_base_url="https://api.example.com/prod")
+
+        self.assertIn("<a href=\"https://example.com/terms\" target=\"_blank\" rel=\"noopener\">Terms of Service</a>", html)
+        self.assertIn("<a href=\"https://example.com/refunds\" target=\"_blank\" rel=\"noopener\">Refund Policy</a>", html)
+
+    def test_legal_footer_placeholders_default_to_platform_legal_pages(self):
+        page = copy.deepcopy(load_fixture("page-universal-bundle.json"))
+        offer = load_fixture("offer-universal-bundle.json")
+        product = load_fixture("product-universal-bundle.json")
+        page["legal"] = {"terms_url": "#terms", "privacy_url": "#privacy", "refund_url": "#refund-policy"}
+
+        html = render_page(page, offer, {product["product_id"]: product}, api_base_url="https://api.example.com/prod")
+
+        self.assertIn("<a href=\"https://api.example.com/prod/legal/terms\" target=\"_blank\" rel=\"noopener\">Terms of Service</a>", html)
+        self.assertIn("<a href=\"https://api.example.com/prod/legal/privacy\" target=\"_blank\" rel=\"noopener\">Privacy Policy</a>", html)
+        self.assertIn("<a href=\"https://api.example.com/prod/legal/refund\" target=\"_blank\" rel=\"noopener\">Refund Policy</a>", html)
+        self.assertNotIn("#terms", html)
+        self.assertNotIn("#refund-policy", html)
+
     def test_universal_bundle_element_tokens_override_preset(self):
         page = load_fixture("page-universal-bundle.json")
         offer = load_fixture("offer-universal-bundle.json")
