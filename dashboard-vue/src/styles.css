@@ -3482,6 +3482,20 @@ button:disabled {
   color: #b91c1c;
 }
 
+.service-hero-preview {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.service-hero-preview img {
+  width: 8rem;
+  height: 8rem;
+  object-fit: cover;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--line);
+}
+
 .builder-toggle {
   display: inline-flex;
   align-items: center;

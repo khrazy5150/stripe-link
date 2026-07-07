@@ -711,6 +711,7 @@
 import { computed, reactive, ref, watch } from "vue";
 import { apiRequest, getApiBase, getApiEnvironment, getPagesBaseUrl, getPreviewPagesBaseUrl, getTenantId } from "../api/client";
 import { formatMoney } from "../stores/products";
+import { uploadImage } from "../api/uploads";
 import { showIconPicker } from "../icon-picker.js";
 
 const pages = ref([]);
@@ -1724,7 +1725,7 @@ async function handleFaviconPicked(event) {
   faviconUploadError.value = "";
   faviconUploading.value = true;
   try {
-    builder.favicon_url = await uploadBuilderImage(file);
+    builder.favicon_url = await uploadImage(file);
   } catch (err) {
     faviconUploadError.value = err.message || "Favicon upload failed.";
   } finally {
@@ -1739,7 +1740,7 @@ async function handleHeroMediaPicked(event) {
   heroUploadError.value = "";
   heroUploading.value = true;
   try {
-    appendHeroMedia(await uploadBuilderImage(file));
+    appendHeroMedia(await uploadImage(file));
   } catch (err) {
     heroUploadError.value = err.message || "Hero image upload failed.";
   } finally {
@@ -1763,7 +1764,7 @@ async function handleBlurbImagePicked(index, event) {
   blurbImageErrors[index] = "";
   blurbImageUploading[index] = true;
   try {
-    builder.blurbs[index].image_url = await uploadBuilderImage(file);
+    builder.blurbs[index].image_url = await uploadImage(file);
   } catch (err) {
     blurbImageErrors[index] = err.message || "Image upload failed.";
   } finally {
@@ -1771,75 +1772,6 @@ async function handleBlurbImagePicked(index, event) {
   }
 }
 
-async function uploadBuilderImage(file) {
-  if (!file.type.startsWith("image/") || file.size > 10 * 1024 * 1024) throw new Error("Use an image file up to 10MB.");
-  const presigned = await apiRequest("/upload/multiple", {
-    method: "POST",
-    body: {
-      fileName: file.name,
-      contentType: file.type,
-      basePrefix: "offers",
-      targetBucket: "images.juniorbay.net",
-    },
-  });
-  const formData = new FormData();
-  Object.entries(presigned.upload?.fields || {}).forEach(([key, value]) => formData.append(key, value));
-  formData.append("file", file);
-  const uploadResponse = await fetch(presigned.upload.url, { method: "POST", body: formData });
-  if (!uploadResponse.ok) throw new Error("Failed to upload file.");
-  return pollBuilderImageUrl(presigned.id);
-}
-
-async function pollBuilderImageUrl(imageId) {
-  const deadline = Date.now() + 180000;
-  let delay = 1200;
-  while (Date.now() < deadline) {
-    await sleep(delay);
-    delay = Math.min(8000, Math.ceil(delay * 1.35));
-    const body = await apiRequest(`/upload/status/${encodeURIComponent(imageId)}`).catch(() => ({}));
-    if (body.status === "failed") throw new Error("Image processing failed.");
-    for (const url of imageUrlCandidates(body.urls || {})) {
-      if (await imageUrlLoads(url)) return url;
-    }
-  }
-  throw new Error("Timed out waiting for processed image.");
-}
-
-function imageUrlCandidates(urls) {
-  return [...new Set([
-    urls.small?.webp,
-    urls.small?.jpg,
-    urls.medium?.webp,
-    urls.medium?.jpg,
-    urls.large?.webp,
-    urls.large?.jpg,
-    urls.original,
-  ].filter(Boolean).map(cdnImageUrl))];
-}
-
-function cdnImageUrl(url) {
-  return String(url || "").replace("images.juniorbay.net", "images.juniorbay.com");
-}
-
-function imageUrlLoads(url, timeoutMs = 4000) {
-  return new Promise((resolve) => {
-    const image = new Image();
-    const timeout = window.setTimeout(() => finish(false), timeoutMs);
-    function finish(result) {
-      window.clearTimeout(timeout);
-      image.onload = null;
-      image.onerror = null;
-      resolve(result);
-    }
-    image.onload = () => finish(true);
-    image.onerror = () => finish(false);
-    image.src = `${url}${url.includes("?") ? "&" : "?"}_probe=${Date.now()}`;
-  });
-}
-
-function sleep(ms) {
-  return new Promise((resolve) => window.setTimeout(resolve, ms));
-}
 
 function addBlurb() {
   if (builder.blurbs.length >= 8) return;

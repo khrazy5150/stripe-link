@@ -137,6 +137,7 @@
       <Products v-else-if="activeView === 'products'" />
       <Coupons v-else-if="activeView === 'coupons'" />
       <Offers v-else-if="activeView === 'offers'" />
+      <Services v-else-if="activeView === 'services'" :key="`services-${activeEnvironment}-${auth.session?.client_id || ''}`" />
       <LandingPages
         v-else-if="activeView === 'landingPages'"
         :key="`landing-pages-${activeEnvironment}-${auth.session?.client_id || ''}`"
@@ -178,6 +179,7 @@ import Preferences from "./components/Preferences.vue";
 import Products from "./components/Products.vue";
 import Profile from "./components/Profile.vue";
 import Refunds from "./components/Refunds.vue";
+import Services from "./components/Services.vue";
 import Shipping from "./components/Shipping.vue";
 import StripeKeys from "./components/StripeKeys.vue";
 import { iconPaths, menuGroupsForEnvironment } from "./config/menu";

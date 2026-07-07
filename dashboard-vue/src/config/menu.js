@@ -69,7 +69,7 @@ export const menuSchema = {
       label: "Services",
       icon: "calendar",
       view: "services",
-      enabled: false,
+      enabled: true,
       environments: ["test", "live"],
     },
     abTesting: {
