@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 
 from handlers.page_render import handler
-from stripe_link.runtime.html import RenderError, format_money, render_page
+from stripe_link.runtime.html import RenderError, format_money, render_page, responsive_img
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -488,6 +488,39 @@ class PageRenderTests(unittest.TestCase):
             "href=\"https://checkout.stripe.com/c/pay/demo\"",
             json.loads(response["body"])["html"],
         )
+
+
+class ResponsiveImageTests(unittest.TestCase):
+    def test_rendition_url_emits_webp_srcset_and_sizes(self):
+        markup = responsive_img(
+            "https://images.juniorbay.com/products/ABC123/medium.webp",
+            "Water Gun",
+            sizes="9rem",
+        )
+        # A processor rendition advertises every rendition (widths mirror the processor's SIZES
+        # table) so a small slot can pick thumb/small instead of downloading the 1080px file.
+        base = "https://images.juniorbay.com/products/ABC123"
+        for size, width in (("thumb", 200), ("small", 640), ("medium", 1080), ("large", 1920), ("full", 2560)):
+            self.assertIn(f"{base}/{size}.webp {width}w", markup)
+        self.assertIn('sizes="9rem"', markup)
+        self.assertIn('loading="lazy"', markup)
+        self.assertIn('decoding="async"', markup)
+
+    def test_eager_hero_image_gets_high_fetch_priority(self):
+        markup = responsive_img(
+            "https://images.juniorbay.com/products/ABC123/small.webp",
+            "Hero",
+            sizes="100vw",
+            eager=True,
+        )
+        self.assertIn('loading="eager"', markup)
+        self.assertIn('fetchpriority="high"', markup)
+
+    def test_non_rendition_url_falls_back_without_srcset(self):
+        markup = responsive_img("https://cdn.example.com/pic.jpg", "External", sizes="9rem")
+        self.assertNotIn("srcset", markup)
+        self.assertIn('src="https://cdn.example.com/pic.jpg"', markup)
+        self.assertIn('loading="lazy"', markup)
 
 
 if __name__ == "__main__":

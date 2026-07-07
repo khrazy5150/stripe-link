@@ -724,9 +724,10 @@ def render_hero_media(
 ) -> str:
     product = first_offer_product(offer, products_by_id)
     images = hero_media_images(section, offer, product)
+    alt = str(product.get("name") or "Product image")
     rendered = [
-        f"      <img src=\"{escape(str(image_url))}\" alt=\"{escape(str(product.get('name') or 'Product image'))}\">"
-        for image_url in images
+        "      " + responsive_img(image_url, alt, sizes=HERO_MEDIA_SIZES, eager=(index == 0))
+        for index, image_url in enumerate(images)
     ]
     if not rendered:
         return ""
@@ -842,7 +843,7 @@ def render_offer_price_selector(offer: dict[str, Any], products_by_id: dict[str,
                 savings_pct = discount_pct(amount, int(compare_at_unit_amount))
             card_markup = "\n".join([
                 f"      <article class=\"sl-price-option\" data-product-id=\"{escape(str(product_id))}\" data-price-id=\"{escape(str(price.get('price_id', '')))}\" data-quantity=\"{checkout_quantity}\" data-default=\"{default_attr}\" data-sale-amount=\"{amount}\" data-regular-amount=\"{int(compare_at_unit_amount) if compare_at_unit_amount else ''}\" data-currency=\"{escape(currency)}\" data-label=\"{label}\">",
-                f"        <img src=\"{escape(image_url)}\" alt=\"{escape(str(product.get('name') or label))}\">" if image_url else "",
+                "        " + responsive_img(image_url, str(product.get("name") or label), sizes=PRICE_OPTION_SIZES) if image_url else "",
                 "        <div class=\"sl-price-copy\">",
                 f"          <span class=\"sl-badge\">{badge}</span>" if badge else "",
                 f"          <strong>{label}</strong>",
@@ -891,6 +892,47 @@ def landing_page_price_sort_key(price: dict[str, Any], option: dict[str, Any], i
     if quantity is not None:
         return (0, quantity, index)
     return (1, index, index)
+
+
+# Intrinsic pixel widths of the renditions the image processor writes for every uploaded asset
+# (keyed by the URL size token). These mirror the processor's SIZES table (image-processing
+# stack); keep them in sync if that table changes.
+IMAGE_RENDITION_WIDTHS = {"thumb": 200, "small": 640, "medium": 1080, "large": 1920, "full": 2560}
+_RENDITION_URL_RE = re.compile(r"^(?P<base>.+)/(?:thumb|small|medium|large|full)\.(?:webp|jpe?g|png)$", re.IGNORECASE)
+
+
+def responsive_img(url: str, alt: str, *, sizes: str, eager: bool = False) -> str:
+    """Render an <img> that lets the browser pick the right rendition per slot and DPR.
+
+    When the URL is a processor rendition (.../<key>/<size>.webp) we emit a webp srcset over
+    all renditions plus a sizes hint, so a 144px thumbnail no longer downloads the 1080px file.
+    Non-rendition URLs (external/custom) fall back to a plain tag but still get lazy loading.
+    Always adds loading/decoding; the first hero image opts into eager + high fetch priority
+    because it is the LCP candidate.
+    """
+    url = str(url or "")
+    alt_attr = escape(str(alt or ""))
+    loading = "eager" if eager else "lazy"
+    priority = ' fetchpriority="high"' if eager else ""
+    match = _RENDITION_URL_RE.match(url)
+    if not match:
+        return f'<img src="{escape(url)}" alt="{alt_attr}" loading="{loading}" decoding="async"{priority}>'
+    base = match.group("base")
+    srcset = ", ".join(
+        f"{escape(f'{base}/{size}.webp')} {width}w"
+        for size, width in IMAGE_RENDITION_WIDTHS.items()
+    )
+    return (
+        f'<img src="{escape(f"{base}/medium.webp")}" srcset="{srcset}" sizes="{escape(sizes)}" '
+        f'alt="{alt_attr}" loading="{loading}" decoding="async"{priority}>'
+    )
+
+
+# Slot widths per image context, used as the srcset `sizes` hint. Hero/content stretch to the
+# ~52rem content column (full width on phones); price-option thumbnails are a fixed 9rem.
+HERO_MEDIA_SIZES = "(min-width: 52rem) 52rem, 100vw"
+CONTENT_BLOCK_SIZES = "(min-width: 52rem) 52rem, 100vw"
+PRICE_OPTION_SIZES = "9rem"
 
 
 def first_image(product: dict[str, Any]) -> str:
@@ -1003,7 +1045,7 @@ def render_content_blocks(section: dict[str, Any]) -> str:
             f"          <h3>{render_headline_markup(block.get('title') or '')}</h3>",
             f"          <p>{escape(str(block.get('text') or ''))}</p>",
             "        </div>",
-            f"        <img src=\"{escape(str(image_url))}\" alt=\"{escape(str(block.get('title') or 'Content image'))}\">" if image_url else "",
+            "        " + responsive_img(image_url, str(block.get("title") or "Content image"), sizes=CONTENT_BLOCK_SIZES) if image_url else "",
             "      </article>",
         ]))
     if not rendered:
