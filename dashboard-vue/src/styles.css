@@ -5094,3 +5094,226 @@ button:disabled {
   width: auto;
   min-width: 14rem;
 }
+
+/* --- Services: weekly hours, panels --- */
+.weekly-hours {
+  display: grid;
+  gap: 0.8rem;
+  margin: 0.4rem 0 1.2rem;
+}
+
+.weekly-hours-row {
+  display: grid;
+  grid-template-columns: 4rem 3.6rem 1fr 1fr;
+  align-items: center;
+  gap: 1rem;
+}
+
+.weekly-hours-day {
+  font-weight: 700;
+  color: var(--muted);
+}
+
+.weekly-hours-row input[type="time"] {
+  min-height: 0;
+}
+
+.switch {
+  position: relative;
+  display: inline-flex;
+  width: 3.4rem;
+  height: 1.9rem;
+}
+
+.switch input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+  z-index: 1;
+}
+
+.switch .switch-track {
+  flex: 1;
+  border-radius: 999px;
+  background: var(--line);
+  transition: background 0.15s ease;
+  position: relative;
+}
+
+.switch .switch-track::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 1.5rem;
+  height: 1.5rem;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+  transition: transform 0.15s ease;
+}
+
+.switch input:checked + .switch-track {
+  background: #22c55e;
+}
+
+.switch input:checked + .switch-track::after {
+  transform: translateX(1.5rem);
+}
+
+.services-subheading {
+  font-size: 1.3rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-top: 0.8rem;
+}
+
+.services-hint {
+  font-size: 1.3rem;
+  color: var(--muted);
+  margin: 0.2rem 0 0.8rem;
+}
+
+.services-form-actions {
+  justify-content: flex-end;
+  margin-top: 1.2rem;
+}
+
+.services-table {
+  margin-top: 1.6rem;
+}
+
+.services-row-actions {
+  display: flex;
+  gap: 0.6rem;
+}
+
+.secondary-action.danger {
+  color: #b91c1c;
+  border-color: rgba(185, 28, 28, 0.4);
+}
+
+.product-status.invited {
+  background: rgba(37, 99, 235, 0.12);
+  color: #1d4ed8;
+}
+
+.secondary-action.compact.active {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+}
+
+/* --- Appointments calendar --- */
+.appt-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+  gap: 1.6rem;
+  margin-bottom: 1.6rem;
+}
+
+@media (max-width: 60rem) {
+  .appt-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+.appt-calendar-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+  margin-bottom: 1rem;
+}
+
+.appt-period {
+  min-width: 12rem;
+  text-align: center;
+}
+
+.appt-weekdays,
+.appt-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 0.4rem;
+}
+
+.appt-weekdays {
+  margin-bottom: 0.4rem;
+  color: var(--muted);
+  font-size: 1.2rem;
+  font-weight: 700;
+  text-align: center;
+}
+
+.appt-cell {
+  position: relative;
+  aspect-ratio: 1 / 1;
+  border: 1px solid var(--line);
+  border-radius: 0.8rem;
+  background: var(--panel);
+  cursor: pointer;
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-start;
+  padding: 0.6rem;
+  font-size: 1.3rem;
+}
+
+.appt-cell.muted {
+  color: var(--muted);
+  opacity: 0.55;
+}
+
+.appt-cell.today {
+  border-color: var(--accent);
+}
+
+.appt-cell.selected {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  border-color: var(--accent);
+}
+
+.appt-count {
+  position: absolute;
+  bottom: 0.4rem;
+  right: 0.4rem;
+  min-width: 1.7rem;
+  height: 1.7rem;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 1.1rem;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.appt-day-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.6rem;
+}
+
+.appt-day-list li {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+
+.appt-assign {
+  width: auto;
+  min-width: 10rem;
+  min-height: 0;
+}

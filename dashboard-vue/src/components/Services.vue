@@ -3,7 +3,7 @@
     <header class="page-header">
       <div>
         <h1>Services</h1>
-        <p>Manage bookable services in your catalog</p>
+        <p>Configure services, fulfillers, availability, and appointments</p>
       </div>
     </header>
 
@@ -68,6 +68,11 @@
       </div>
     </section>
 
+    <FulfillersPanel />
+    <TenantAvailabilityPanel />
+    <AvailabilityExceptionsPanel />
+    <AppointmentsPanel />
+
     <div v-if="showServiceModal" class="modal-backdrop" @click.self="closeServiceModal">
       <section class="modal-card" role="dialog" aria-modal="true" aria-labelledby="serviceModalTitle">
         <header class="modal-card-header">
@@ -120,6 +125,105 @@
                 <input v-model.number="form.duration_minutes" min="1" step="5" type="number" required />
               </label>
             </div>
+          </section>
+
+          <section class="offer-form-section">
+            <header class="offer-section-header">
+              <div>
+                <h3>Fulfillment</h3>
+                <p>Who delivers it, and an optional linked product for checkout.</p>
+              </div>
+            </header>
+            <div class="offer-three-column">
+              <label class="offer-field">
+                <span>Default Fulfiller</span>
+                <select v-model="form.default_fulfiller_id">
+                  <option value="">Unassigned</option>
+                  <option v-for="f in fulfillers.fulfillers" :key="f.fulfiller_id" :value="f.fulfiller_id">{{ fulfillerDisplayName(f) }}</option>
+                </select>
+              </label>
+              <label class="offer-field">
+                <span>Linked Product</span>
+                <select v-model="form.linked_product_id" @change="form.linked_price_id = ''">
+                  <option value="">None</option>
+                  <option v-for="p in products.products" :key="p.product_id" :value="p.product_id">{{ p.name }}</option>
+                </select>
+              </label>
+              <label class="offer-field">
+                <span>Linked Price</span>
+                <select v-model="form.linked_price_id" :disabled="!linkedProductPrices.length">
+                  <option value="">Select price</option>
+                  <option v-for="pr in linkedProductPrices" :key="pr.price_id" :value="pr.price_id">{{ priceLabel(pr) }}</option>
+                </select>
+              </label>
+            </div>
+          </section>
+
+          <section class="offer-form-section">
+            <header class="offer-section-header">
+              <div>
+                <h3>Check-in &amp; Completion</h3>
+                <p>Optional on-site check-in and completion steps for the fulfiller.</p>
+              </div>
+            </header>
+            <div class="offer-two-column">
+              <label class="offer-field"><span>Check-In Label</span><input v-model.trim="form.booking_rules.check_in_label" type="text" placeholder="Ready on Site" /></label>
+              <label class="offer-field"><span>Completion Label</span><input v-model.trim="form.booking_rules.completion_label" type="text" placeholder="Done" /></label>
+            </div>
+            <div class="offer-two-column">
+              <label class="offer-field"><span>Check-In Window Start (min before)</span><input v-model.number="form.booking_rules.check_in_window_start_minutes" type="number" min="0" /></label>
+              <label class="offer-field"><span>Check-In Window End (min before)</span><input v-model.number="form.booking_rules.check_in_window_end_minutes" type="number" min="0" /></label>
+            </div>
+            <div class="offer-two-column">
+              <label class="checkbox-row offer-checkbox-inline"><input v-model="form.booking_rules.check_in_required" type="checkbox" /><span>Check-in required</span></label>
+              <label class="checkbox-row offer-checkbox-inline"><input v-model="form.booking_rules.completion_required" type="checkbox" /><span>Completion required</span></label>
+            </div>
+          </section>
+
+          <section class="offer-form-section">
+            <header class="offer-section-header">
+              <div>
+                <h3>Allowed Fulfillers</h3>
+                <p>Assign which fulfillers can perform this service, with an optional per-service compensation override.</p>
+              </div>
+            </header>
+            <div class="offer-three-column">
+              <label class="offer-field">
+                <span>Fulfiller</span>
+                <select v-model="allowedForm.fulfiller_id">
+                  <option value="">Select fulfiller</option>
+                  <option v-for="f in assignableFulfillers" :key="f.fulfiller_id" :value="f.fulfiller_id">{{ fulfillerDisplayName(f) }}</option>
+                </select>
+              </label>
+              <label class="offer-field">
+                <span>Override Type</span>
+                <select v-model="allowedForm.override_type">
+                  <option value="use_fulfiller_default">Use fulfiller default</option>
+                  <option value="flat_fee">Flat Fee</option>
+                  <option value="percent">Percent</option>
+                </select>
+              </label>
+              <label class="offer-field">
+                <span>Override Amount</span>
+                <input v-model.number="allowedForm.override_amount" type="number" min="0" step="0.01" :disabled="allowedForm.override_type === 'use_fulfiller_default'" />
+              </label>
+            </div>
+            <label class="checkbox-row offer-checkbox-inline"><input v-model="allowedForm.tips_to_fulfiller" type="checkbox" /><span>Tips go to fulfiller</span></label>
+            <div class="button-row services-form-actions">
+              <button type="button" class="secondary-action" :disabled="!allowedForm.fulfiller_id" @click="addAllowedFulfiller">Add fulfiller</button>
+            </div>
+            <table v-if="form.allowed_fulfillers.length" class="dashboard-table services-table">
+              <thead><tr><th>Fulfiller</th><th>Compensation</th><th>Tips</th><th>Enabled</th><th></th></tr></thead>
+              <tbody>
+                <tr v-for="(row, index) in form.allowed_fulfillers" :key="row.fulfiller_id">
+                  <td>{{ fulfillerName(row.fulfiller_id) }}</td>
+                  <td>{{ overrideLabel(row) }}</td>
+                  <td><input v-model="row.tips_to_fulfiller" type="checkbox" /></td>
+                  <td><input v-model="row.enabled" type="checkbox" /></td>
+                  <td><button type="button" class="secondary-action compact danger" @click="form.allowed_fulfillers.splice(index, 1)">Remove</button></td>
+                </tr>
+              </tbody>
+            </table>
           </section>
 
           <section class="offer-form-section">
@@ -190,25 +294,86 @@
 </template>
 
 <script setup>
-import { ref } from "vue";
+import { computed, onMounted, ref } from "vue";
 import {
   LOCATION_MODES,
+  defaultBookingRules,
   formatServiceDuration,
   formatServicePrice,
   serviceIsActive,
   useServicesStore,
 } from "../stores/services";
 import { uploadImage } from "../api/uploads";
+import { fulfillerDisplayName, useFulfillersStore } from "../stores/fulfillers";
+import { formatMoney, useProductsStore } from "../stores/products";
+import FulfillersPanel from "./services/FulfillersPanel.vue";
+import TenantAvailabilityPanel from "./services/TenantAvailabilityPanel.vue";
+import AvailabilityExceptionsPanel from "./services/AvailabilityExceptionsPanel.vue";
+import AppointmentsPanel from "./services/AppointmentsPanel.vue";
 
 const store = useServicesStore();
+const fulfillers = useFulfillersStore();
+const products = useProductsStore();
 const showServiceModal = ref(false);
 const editingService = ref(null);
 const selectedService = ref(null);
 const formError = ref("");
 const form = ref(defaultServiceForm());
+const allowedForm = ref(defaultAllowedForm());
 const heroFileInput = ref(null);
 const heroUploading = ref(false);
 const heroUploadError = ref("");
+
+onMounted(() => {
+  if (!fulfillers.loaded) fulfillers.load();
+  if (!products.loaded) products.load();
+});
+
+const linkedProductPrices = computed(() => {
+  const product = products.products.find((p) => p.product_id === form.value.linked_product_id);
+  return Array.isArray(product?.prices) ? product.prices : [];
+});
+
+const assignableFulfillers = computed(() => {
+  const taken = new Set(form.value.allowed_fulfillers.map((row) => row.fulfiller_id));
+  return fulfillers.fulfillers.filter((f) => !taken.has(f.fulfiller_id));
+});
+
+function defaultAllowedForm() {
+  return { fulfiller_id: "", override_type: "use_fulfiller_default", override_amount: 0, tips_to_fulfiller: true };
+}
+
+function priceLabel(price) {
+  return `${formatMoney(price.unit_amount, price.currency)}${price.active === false ? " (archived)" : ""}`;
+}
+
+function fulfillerName(id) {
+  const match = fulfillers.fulfillers.find((f) => f.fulfiller_id === id);
+  return match ? fulfillerDisplayName(match) : id;
+}
+
+function overrideLabel(row) {
+  const type = row.compensation_override?.type || "use_fulfiller_default";
+  if (type === "use_fulfiller_default") return "Fulfiller default";
+  const amount = Number(row.compensation_override?.amount || 0);
+  return type === "percent" ? `${amount}%` : formatMoney(Math.round(amount * 100), "usd");
+}
+
+function addAllowedFulfiller() {
+  if (!allowedForm.value.fulfiller_id) return;
+  const entry = {
+    fulfiller_id: allowedForm.value.fulfiller_id,
+    enabled: true,
+    tips_to_fulfiller: allowedForm.value.tips_to_fulfiller !== false,
+  };
+  if (allowedForm.value.override_type !== "use_fulfiller_default") {
+    entry.compensation_override = { type: allowedForm.value.override_type, amount: Math.max(0, Number(allowedForm.value.override_amount || 0)) };
+  } else {
+    entry.compensation_override = { type: "use_fulfiller_default" };
+  }
+  form.value.allowed_fulfillers.push(entry);
+  allowedForm.value = defaultAllowedForm();
+}
 
 async function handleHeroPicked(event) {
   const file = event.target.files?.[0];
@@ -236,6 +401,11 @@ function defaultServiceForm() {
     location_mode: "onsite",
     hero_image_url: "",
     active: true,
+    default_fulfiller_id: "",
+    linked_product_id: "",
+    linked_price_id: "",
+    booking_rules: defaultBookingRules(),
+    allowed_fulfillers: [],
     created_at: null,
   };
 }
@@ -296,6 +466,13 @@ function formFromService(service) {
     location_mode: service.location_mode || "onsite",
     hero_image_url: service.presentation?.hero_image_url || "",
     active: serviceIsActive(service),
+    default_fulfiller_id: service.default_fulfiller_id || "",
+    linked_product_id: service.linked_product?.product_id || "",
+    linked_price_id: service.linked_product?.price_id || "",
+    booking_rules: { ...defaultBookingRules(), ...(service.booking_rules || {}) },
+    allowed_fulfillers: Array.isArray(service.allowed_fulfillers)
+      ? service.allowed_fulfillers.map((row) => ({ ...row }))
+      : [],
     created_at: service.created_at || null,
   };
 }

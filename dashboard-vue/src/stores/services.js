@@ -155,9 +155,24 @@ export function buildServiceDocument(form, base = {}) {
     },
     location_mode: LOCATION_MODES.includes(form.location_mode) ? form.location_mode : "onsite",
     active: form.active !== false,
+    booking_rules: buildBookingRules(form),
+    allowed_fulfillers: buildAllowedFulfillers(form.allowed_fulfillers),
     created_at: base.created_at || form.created_at || now,
     updated_at: now,
   };
+
+  const defaultFulfillerId = String(form.default_fulfiller_id || "").trim();
+  if (defaultFulfillerId) document.default_fulfiller_id = defaultFulfillerId;
+  else delete document.default_fulfiller_id;
+
+  const productId = String(form.linked_product_id || "").trim();
+  if (productId) {
+    document.linked_product = { product_id: productId };
+    const priceId = String(form.linked_price_id || "").trim();
+    if (priceId) document.linked_product.price_id = priceId;
+  } else {
+    delete document.linked_product;
+  }
 
   const heroImage = String(form.hero_image_url || "").trim();
   if (heroImage) {
@@ -169,4 +184,49 @@ export function buildServiceDocument(form, base = {}) {
   }
 
   return document;
+}
+
+export function defaultBookingRules() {
+  return {
+    check_in_required: false,
+    check_in_window_start_minutes: 15,
+    check_in_window_end_minutes: 5,
+    check_in_label: "Ready on Site",
+    completion_required: true,
+    completion_label: "Done",
+  };
+}
+
+function buildBookingRules(form) {
+  const defaults = defaultBookingRules();
+  const rules = form.booking_rules || {};
+  return {
+    check_in_required: Boolean(rules.check_in_required),
+    check_in_window_start_minutes: Math.max(0, Math.round(Number(rules.check_in_window_start_minutes ?? defaults.check_in_window_start_minutes))),
+    check_in_window_end_minutes: Math.max(0, Math.round(Number(rules.check_in_window_end_minutes ?? defaults.check_in_window_end_minutes))),
+    check_in_label: String(rules.check_in_label || defaults.check_in_label).trim(),
+    completion_required: rules.completion_required !== false,
+    completion_label: String(rules.completion_label || defaults.completion_label).trim(),
+  };
+}
+
+function buildAllowedFulfillers(entries) {
+  // Form entries share the document shape (fulfiller_id, enabled, tips_to_fulfiller,
+  // compensation_override:{type, amount?}); normalize/validate them here.
+  return (Array.isArray(entries) ? entries : [])
+    .filter((entry) => entry && entry.fulfiller_id)
+    .map((entry) => {
+      const row = {
+        fulfiller_id: String(entry.fulfiller_id),
+        enabled: entry.enabled !== false,
+        tips_to_fulfiller: entry.tips_to_fulfiller !== false,
+      };
+      const type = entry.compensation_override?.type;
+      if (type === "flat_fee" || type === "percent") {
+        row.compensation_override = { type, amount: Math.max(0, Number(entry.compensation_override?.amount || 0)) };
+      } else if (type === "use_fulfiller_default") {
+        row.compensation_override = { type: "use_fulfiller_default" };
+      }
+      return row;
+    });
 }

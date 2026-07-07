@@ -1,4 +1,7 @@
-from stripe_link.common import error_response, json_response, parse_json_body, path_params, tenant_id_from_event
+import time
+
+from stripe_link.common import error_response, json_response, parse_json_body, path_params, query_params, tenant_id_from_event
+from stripe_link.domain.appointments import AppointmentTransitionError, transition_appointment
 from stripe_link.domain.documents import (
     DocumentValidationError,
     validate_appointment,
@@ -39,12 +42,42 @@ def handler(
     if "/services/fulfillers" in path:
         return document_route(event, method, fulfillers_repo, "fulfiller", validate_fulfiller, "fulfillers")
     if "/services/availability/exceptions" in path:
-        return document_route(event, method, exceptions_repo, "availability_exception", validate_availability_exception, "availability_exceptions")
+        return document_route(event, method, exceptions_repo, "availability_exception", validate_availability_exception, "availability_exceptions", id_param="exception_id")
     if "/services/availability/defaults" in path:
         return default_availability_route(event, method, availability_repo)
     if "/services/appointments" in path:
-        return document_route(event, method, appointments_repo, "appointment", validate_appointment, "appointments")
+        action = path_params(event).get("action")
+        if action and method == "POST":
+            return appointment_action_route(event, appointments_repo, action)
+        return document_route(event, method, appointments_repo, "appointment", validate_appointment, "appointments", id_param="appointment_id")
     return document_route(event, method, services_repo, "service", validate_service, "services", id_param="service_id")
+
+
+def appointment_action_route(event, repository, action):
+    tenant_id = tenant_id_from_event(event)
+    if not tenant_id:
+        return error_response("tenant_id is required.", code="missing_tenant")
+    appointment_id = path_params(event).get("appointment_id")
+    appointment = repository.get(tenant_id, appointment_id) if appointment_id else None
+    if not appointment:
+        return error_response("Appointment not found.", status_code=404, code="not_found")
+    try:
+        body = parse_json_body(event) if (event or {}).get("body") else {}
+    except ValueError:
+        body = {}
+    try:
+        updated = transition_appointment(
+            appointment,
+            action,
+            now_epoch=int(time.time()),
+            assigned_fulfiller_id=body.get("assigned_fulfiller_id"),
+        )
+        saved = repository.put(updated)
+        return json_response({"appointment": saved})
+    except AppointmentTransitionError as exc:
+        return error_response(str(exc), code="invalid_transition")
+    except RepositoryError as exc:
+        return error_response(str(exc), code="save_failed")
 
 
 def default_availability_route(event, method, repository):
@@ -69,6 +102,12 @@ def document_route(event, method, repository, singular, validator, plural, id_pa
         if document_id:
             return get_document(event, repository, singular, document_id)
         return list_documents(event, repository, plural)
+    if method == "DELETE":
+        key = id_param or f"{singular}_id"
+        document_id = path_params(event).get(key) or query_params(event).get(key)
+        if not document_id:
+            return error_response(f"{key} is required.", code=f"missing_{key}")
+        return delete_document(event, repository, singular, document_id)
     return error_response(f"Unsupported method '{method}'.", status_code=405, code="method_not_allowed")
 
 
@@ -98,3 +137,13 @@ def list_documents(event, repository, response_key):
         return error_response("tenant_id is required.", code="missing_tenant")
     documents = repository.list_for_tenant(tenant_id)
     return json_response({response_key: documents, "count": len(documents)})
+
+
+def delete_document(event, repository, response_key, document_id):
+    tenant_id = tenant_id_from_event(event)
+    if not tenant_id:
+        return error_response("tenant_id is required.", code="missing_tenant")
+    deleted = repository.delete(tenant_id, document_id)
+    if not deleted:
+        return error_response(f"{response_key.replace('_', ' ').title()} not found.", status_code=404, code="not_found")
+    return json_response({"deleted": True, response_key: deleted})

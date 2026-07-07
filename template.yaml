@@ -1703,12 +1703,18 @@ Resources:
           Properties:
             RestApiId: !Ref RestApi
             Path: /services/{service_id}
-            Method: GET
+            Method: ANY
         Fulfillers:
           Type: Api
           Properties:
             RestApiId: !Ref RestApi
             Path: /services/fulfillers
+            Method: ANY
+        FulfillerItem:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /services/fulfillers/{fulfiller_id}
             Method: ANY
         AvailabilityDefaults:
           Type: Api
@@ -1722,12 +1728,30 @@ Resources:
             RestApiId: !Ref RestApi
             Path: /services/availability/exceptions
             Method: ANY
+        AvailabilityExceptionItem:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /services/availability/exceptions/{exception_id}
+            Method: ANY
         Appointments:
           Type: Api
           Properties:
             RestApiId: !Ref RestApi
             Path: /services/appointments
             Method: ANY
+        AppointmentItem:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /services/appointments/{appointment_id}
+            Method: ANY
+        AppointmentAction:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /services/appointments/{appointment_id}/{action}
+            Method: POST
 
   InvoicesFunction:
     Type: AWS::Serverless::Function
