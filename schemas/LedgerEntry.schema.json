@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.stripe-link.local/LedgerEntry.schema.json",
+  "title": "LedgerEntry",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "document_type", "tenant_id", "entry_id", "entry_type", "occurred_at", "mode", "currency", "amounts", "idempotency_key"],
+  "properties": {
+    "schema_version": { "type": "string" },
+    "document_type": { "const": "ledger_entry" },
+    "tenant_id": { "type": "string" },
+    "entry_id": { "type": "string" },
+    "entry_type": {
+      "enum": ["sale", "refund", "dispute", "dispute_won", "shipping_cost", "cost_adjustment", "fee_adjustment", "tax_remittance", "adjustment"]
+    },
+    "occurred_at": { "type": "integer" },
+    "mode": { "enum": ["test", "live"] },
+    "currency": { "type": "string" },
+    "order_id": { "type": "string" },
+    "line_item_id": { "type": "string" },
+    "offer_id": { "type": "string" },
+    "product_id": { "type": "string" },
+    "customer_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "email": { "type": "string" },
+        "name": { "type": "string" }
+      }
+    },
+    "stripe": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "charge_id": { "type": "string" },
+        "payment_intent_id": { "type": "string" },
+        "balance_transaction_id": { "type": "string" },
+        "refund_id": { "type": "string" },
+        "dispute_id": { "type": "string" },
+        "event_id": { "type": "string" }
+      }
+    },
+    "amounts": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "gross": { "type": "integer" },
+        "stripe_fee": { "type": "integer" },
+        "platform_fee": { "type": "integer" },
+        "tax": { "type": "integer" },
+        "cogs": { "type": "integer" },
+        "shipping_cost": { "type": "integer" }
+      }
+    },
+    "idempotency_key": { "type": "string" },
+    "source": { "enum": ["webhook", "manual", "migration", "reconciliation"] },
+    "reverses_entry_id": { "type": "string" },
+    "description": { "type": "string" },
+    "metadata": { "type": "object" },
+    "created_at": { "type": "integer" }
+  }
+}

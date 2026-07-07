@@ -1154,6 +1154,31 @@ def validate_webhook_event(document: dict[str, Any]) -> None:
         raise DocumentValidationError("Webhook event document_type must be 'webhook_event'.")
 
 
+_LEDGER_ENTRY_TYPES = {
+    "sale", "refund", "dispute", "dispute_won", "shipping_cost",
+    "cost_adjustment", "fee_adjustment", "tax_remittance", "adjustment",
+}
+_LEDGER_AMOUNT_COMPONENTS = {"gross", "stripe_fee", "platform_fee", "tax", "cogs", "shipping_cost"}
+
+
+def validate_ledger_entry(document: dict[str, Any]) -> None:
+    require_fields(document, ["schema_version", "document_type", "tenant_id", "entry_id", "entry_type", "occurred_at", "mode", "currency", "amounts", "idempotency_key"])
+    if document.get("document_type") != "ledger_entry":
+        raise DocumentValidationError("Ledger entry document_type must be 'ledger_entry'.")
+    if document.get("entry_type") not in _LEDGER_ENTRY_TYPES:
+        raise DocumentValidationError("Ledger entry entry_type is invalid.")
+    if document.get("mode") not in {"test", "live"}:
+        raise DocumentValidationError("Ledger entry mode must be 'test' or 'live'.")
+    amounts = document.get("amounts")
+    if not isinstance(amounts, dict):
+        raise DocumentValidationError("Ledger entry amounts must be an object.")
+    for key, value in amounts.items():
+        if key not in _LEDGER_AMOUNT_COMPONENTS:
+            raise DocumentValidationError(f"Unknown ledger amount component '{key}'.")
+        if not isinstance(value, int) or isinstance(value, bool):
+            raise DocumentValidationError("Ledger amount components must be integers (minor units).")
+
+
 def validate_route(document: dict[str, Any]) -> None:
     require_fields(document, ["schema_version", "document_type", "tenant_id", "short_code", "target_type"])
     if document.get("document_type") != "route":

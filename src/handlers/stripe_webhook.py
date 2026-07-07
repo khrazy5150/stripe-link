@@ -9,6 +9,7 @@ from typing import Any, Callable
 from stripe_link.common import error_response, header_value, json_response
 from stripe_link.domain.downloads import digital_download_links
 from stripe_link.domain.fees import cached_billing_config, calculate_price
+from stripe_link.domain.ledger import refund_entry as build_ledger_refund_entry, sale_entry_from_order
 from stripe_link.domain.receipts import receipt_content
 from stripe_link.domain.refund_ledger import build_refund_entry, initial_payment_aggregates, set_refund_aggregates
 from stripe_link.mailer import send_email
@@ -17,6 +18,7 @@ from stripe_link.repositories.documents import (
     customers_repository,
     dynamodb_safe_document,
     invoices_repository,
+    ledger_repository,
     notifications_repository,
     orders_repository,
     platform_config_repository,
@@ -232,6 +234,7 @@ def persist_checkout_session_completed(
     invoices_repo=None,
     notifications_repo=None,
     products_repo=None,
+    ledger_repo=None,
     now_fn: Callable[[], int] = lambda: int(time.time()),
     billing_config_loader: Callable[[], dict[str, Any]] | None = None,
     receipt_mailer: Callable[..., Any] | None = None,
@@ -248,6 +251,7 @@ def persist_checkout_session_completed(
     invoices_repo = invoices_repo or (invoices_repository() if os.environ.get("INVOICES_TABLE") else None)
     notifications_repo = notifications_repo or (notifications_repository() if os.environ.get("NOTIFICATIONS_TABLE") else None)
     products_repo = products_repo or (products_repository() if os.environ.get("PRODUCTS_TABLE") else None)
+    ledger_repo = ledger_repo or (ledger_repository() if os.environ.get("LEDGER_TABLE") else None)
 
     fees = fee_breakdown_from_session(session, billing_config_loader)
     session_record = checkout_session_record(stripe_event, session, tenant_id, now)
@@ -273,6 +277,9 @@ def persist_checkout_session_completed(
         notifications_repo.put(notification_record)
         written.append("notification")
 
+    if ledger_repo and record_sale_ledger_entry(order_record, ledger_repo, now):
+        written.append("ledger_entry")
+
     download_links = resolve_download_links(order_record, tenant_id, products_repo)
     receipt = send_order_receipt(
         order_record, tenant_id,
@@ -289,12 +296,52 @@ def persist_checkout_session_completed(
     }
 
 
+def record_sale_ledger_entry(order: dict[str, Any], ledger_repo, now: int) -> bool:
+    """Best-effort append of a sale entry to the transaction ledger. Never fails the webhook."""
+    try:
+        entry = sale_entry_from_order(order, now_epoch=now)
+        if not entry:
+            return False
+        ledger_repo.append(entry)
+        return True
+    except Exception:  # noqa: BLE001 - ledger recording must not break checkout persistence
+        return False
+
+
+def record_refund_ledger_entry(ledger_repo, *, tenant_id: str, order: dict[str, Any], refund: dict[str, Any], payment_intent: str, charge_id: str, now: int) -> bool:
+    """Best-effort append of a refund entry. Idempotent (deterministic entry id per stripe refund)."""
+    try:
+        stripe_refund_id = str(refund.get("id") or "").strip()
+        if not stripe_refund_id:
+            return False
+        customer = order.get("customer") if isinstance(order.get("customer"), dict) else None
+        entry = build_ledger_refund_entry(
+            tenant_id=tenant_id,
+            entry_id=f"le_refund_{stripe_refund_id}",
+            occurred_at=now,
+            mode="live" if order.get("mode") == "live" else "test",
+            currency=str(order.get("currency") or "usd"),
+            refund_amount=int(refund.get("amount") or 0),
+            idempotency_key=f"refund:{stripe_refund_id}",
+            order_id=str(order.get("order_id") or "") or None,
+            customer=customer,
+            stripe={"refund_id": stripe_refund_id, "charge_id": charge_id, "payment_intent_id": payment_intent},
+            source="reconciliation",
+            now_epoch=now,
+        )
+        ledger_repo.append(entry)
+        return True
+    except Exception:  # noqa: BLE001 - ledger recording must not break refund reconciliation
+        return False
+
+
 def reconcile_charge_refunded(
     stripe_event: dict[str, Any],
     *,
     tenant_id: str,
     orders_repo=None,
     refunds_repo=None,
+    ledger_repo=None,
     now_fn: Callable[[], int] = lambda: int(time.time()),
 ) -> dict[str, Any]:
     """Reflect a Stripe refund on the local order and append ledger rows.
@@ -318,13 +365,18 @@ def reconcile_charge_refunded(
 
     now = int(now_fn())
     refunds_repo = refunds_repo or (refunds_repository() if os.environ.get("REFUNDS_TABLE") else None)
+    ledger_repo = ledger_repo or (ledger_repository() if os.environ.get("LEDGER_TABLE") else None)
     refunds = ((charge.get("refunds") or {}).get("data")) or []
     ledger_written = 0
-    if refunds_repo:
-        for refund in refunds:
-            stripe_refund_id = str(refund.get("id") or "").strip()
-            if not stripe_refund_id:
-                continue
+    for refund in refunds:
+        stripe_refund_id = str(refund.get("id") or "").strip()
+        if not stripe_refund_id:
+            continue
+        # Ledger refund entries are idempotent by deterministic id, so record them regardless of
+        # whether the refunds table already has this refund (e.g. our own execute path recorded it).
+        if ledger_repo:
+            record_refund_ledger_entry(ledger_repo, tenant_id=tenant_id, order=order, refund=refund, payment_intent=payment_intent, charge_id=charge_id, now=now)
+        if refunds_repo:
             try:
                 if refunds_repo.find_by_stripe_refund(stripe_refund_id):
                     continue  # our execute path or a prior delivery already recorded it

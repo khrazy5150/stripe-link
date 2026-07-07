@@ -457,6 +457,58 @@ def refunds_repository(table: Any | None = None) -> RefundsRepository:
     return RefundsRepository(os.environ.get("REFUNDS_TABLE", ""), table=table)
 
 
+class LedgerRepository:
+    """Append-only transaction ledger keyed (tenant_id, entry_id), with an OrderIndex GSI to
+    list every financial movement for an order. Entry ids are deterministic per financial
+    effect (e.g. le_sale_<payment_intent>), so a duplicate append overwrites the same row —
+    idempotent by primary key."""
+
+    def __init__(self, table_name: str, *, table: Any | None = None):
+        if not table_name:
+            raise RepositoryError("Table name is required.")
+        assert_jb_resource_name(table_name)
+        self.table_name = table_name
+        self._table = table
+
+    @property
+    def table(self):
+        if self._table is None:
+            import boto3
+
+            self._table = boto3.resource("dynamodb").Table(self.table_name)
+        return self._table
+
+    def append(self, document: dict[str, Any]) -> dict[str, Any]:
+        if not str(document.get("tenant_id") or "").strip():
+            raise RepositoryError("Ledger entry tenant_id is required.")
+        if not str(document.get("entry_id") or "").strip():
+            raise RepositoryError("Ledger entry entry_id is required.")
+        self.table.put_item(Item=dynamodb_safe_document(document))
+        return document
+
+    def get(self, tenant_id: str, entry_id: str) -> dict[str, Any] | None:
+        response = self.table.get_item(Key={"tenant_id": tenant_id, "entry_id": entry_id})
+        return response.get("Item")
+
+    def list_for_tenant(self, tenant_id: str) -> list[dict[str, Any]]:
+        from boto3.dynamodb.conditions import Key
+
+        items = _query_all_pages(self.table, KeyConditionExpression=Key("tenant_id").eq(tenant_id))
+        items.sort(key=lambda item: int(item.get("occurred_at") or item.get("created_at") or 0))
+        return items
+
+    def list_for_order(self, order_id: str) -> list[dict[str, Any]]:
+        from boto3.dynamodb.conditions import Key
+
+        items = _query_all_pages(self.table, IndexName="OrderIndex", KeyConditionExpression=Key("order_id").eq(order_id))
+        items.sort(key=lambda item: int(item.get("occurred_at") or item.get("created_at") or 0))
+        return items
+
+
+def ledger_repository(table: Any | None = None) -> LedgerRepository:
+    return LedgerRepository(os.environ.get("LEDGER_TABLE", ""), table=table)
+
+
 def webhook_events_repository(table: Any | None = None) -> SimpleKeyRepository:
     return SimpleKeyRepository(os.environ.get("WEBHOOK_EVENTS_TABLE", ""), key_field="event_id", table=table)
 

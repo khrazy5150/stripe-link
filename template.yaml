@@ -128,6 +128,7 @@ Globals:
         CHECKOUT_SESSIONS_TABLE: !Ref CheckoutSessionsTable
         ORDERS_TABLE: !Ref OrdersTable
         REFUNDS_TABLE: !Ref RefundsTable
+        LEDGER_TABLE: !Ref LedgerTable
         WEBHOOK_EVENTS_TABLE: !Ref WebhookEventsTable
         CUSTOMERS_TABLE: !Ref CustomersTable
         DOCUMENT_EVENTS_TABLE: !Ref DocumentEventsTable
@@ -1157,6 +1158,8 @@ Resources:
         - DynamoDBCrudPolicy:
             TableName: !Ref RefundsTable
         - DynamoDBCrudPolicy:
+            TableName: !Ref LedgerTable
+        - DynamoDBCrudPolicy:
             TableName: !Ref WebhookEventsTable
         - S3ReadPolicy:
             BucketName: !Ref ConfigBucket
@@ -1783,6 +1786,24 @@ Resources:
             Path: /invoices/{invoice_id}
             Method: GET
 
+  LedgerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${ProjectPrefix}-ledger-api-${Environment}"
+      CodeUri: src/
+      Handler: handlers.ledger.handler
+      Description: Read-only transaction ledger API (entries + derived summary).
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref LedgerTable
+      Events:
+        LedgerList:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /ledger
+            Method: GET
+
   OrdersFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -2225,6 +2246,37 @@ Resources:
             - AttributeName: order_id
               KeyType: HASH
             - AttributeName: created_at
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+
+  LedgerTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "${ProjectPrefix}-ledger-${Environment}"
+      BillingMode: PAY_PER_REQUEST
+      SSESpecification:
+        SSEEnabled: true
+      AttributeDefinitions:
+        - AttributeName: tenant_id
+          AttributeType: S
+        - AttributeName: entry_id
+          AttributeType: S
+        - AttributeName: order_id
+          AttributeType: S
+        - AttributeName: occurred_at
+          AttributeType: "N"
+      KeySchema:
+        - AttributeName: tenant_id
+          KeyType: HASH
+        - AttributeName: entry_id
+          KeyType: RANGE
+      GlobalSecondaryIndexes:
+        - IndexName: OrderIndex
+          KeySchema:
+            - AttributeName: order_id
+              KeyType: HASH
+            - AttributeName: occurred_at
               KeyType: RANGE
           Projection:
             ProjectionType: ALL
