@@ -1160,6 +1160,8 @@ Resources:
         - DynamoDBCrudPolicy:
             TableName: !Ref LedgerTable
         - DynamoDBCrudPolicy:
+            TableName: !Ref ServicesTable
+        - DynamoDBCrudPolicy:
             TableName: !Ref WebhookEventsTable
         - S3ReadPolicy:
             BucketName: !Ref ConfigBucket
@@ -1810,10 +1812,26 @@ Resources:
       FunctionName: !Sub "${ProjectPrefix}-booking-api-${Environment}"
       CodeUri: src/
       Handler: handlers.booking.handler
-      Description: Public booking API (availability + reserve; checkout/manage in later Phase B steps).
+      Description: Public booking API (availability, reserve, checkout; manage in a later Phase B step).
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref ServicesTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref NotificationsTable
+        - DynamoDBReadPolicy:
+            TableName: !Sub "${ProjectPrefix}-stripe-keys-dev"
+        - DynamoDBReadPolicy:
+            TableName: !Sub "${ProjectPrefix}-stripe-keys-prod"
+        - DynamoDBReadPolicy:
+            TableName: !Ref TenantProfilesTable
+        - S3ReadPolicy:
+            BucketName: !Ref ConfigBucket
+        - Statement:
+            Effect: Allow
+            Action:
+              - kms:Decrypt
+              - kms:DescribeKey
+            Resource: !GetAtt StripeKeysEncryptionKey.Arn
       Events:
         Availability:
           Type: Api
@@ -1826,6 +1844,12 @@ Resources:
           Properties:
             RestApiId: !Ref RestApi
             Path: /services/appointments/reserve
+            Method: POST
+        Checkout:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /services/appointments/checkout
             Method: POST
 
   OrdersFunction:

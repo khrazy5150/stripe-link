@@ -3,6 +3,7 @@
 Tenant is derived from the service, not an admin session. B.1 ships the availability endpoint;
 resolve / reserve / checkout / manage land in later Phase B steps.
 """
+import os
 import secrets
 import time
 import uuid
@@ -10,19 +11,26 @@ import uuid
 from stripe_link.common import error_response, json_response, parse_json_body, path_params, query_params
 from stripe_link.domain.booking import requires_payment, reserved_appointment
 from stripe_link.domain.documents import DocumentValidationError, validate_appointment
+from stripe_link.domain.fees import cached_billing_config, calculate_price, normalize_tier_id
 from stripe_link.domain.scheduling import available_slots
+from stripe_link.kms_secrets import KmsSecretCipher
 from stripe_link.repositories.documents import (
     RepositoryError,
     appointments_repository,
     availability_exceptions_repository,
     fulfillers_repository,
+    notifications_repository,
     services_repository,
     slot_locks_repository,
+    stripe_keys_repository,
     tenant_availability_repository,
+    tenant_profiles_repository,
 )
+from stripe_link.stripe_platform_secrets import checkout_credentials
 
 DEFAULT_WINDOW_DAYS = 14
 HOLD_MINUTES = 10
+SERVICE_FEE_PRODUCT_TYPE = "digital"
 
 
 def handler(
@@ -34,6 +42,12 @@ def handler(
     exceptions_repo=None,
     appointments_repo=None,
     slot_locks_repo=None,
+    stripe_repo=None,
+    tenant_repo=None,
+    notifications_repo=None,
+    secret_cipher=None,
+    opener=None,
+    billing_config_loader=None,
 ):
     services_repo = services_repo or services_repository()
     availability_repo = availability_repo or tenant_availability_repository()
@@ -48,6 +62,12 @@ def handler(
         return json_response({})
     if "/appointments/reserve" in path and method == "POST":
         return reserve_route(event, repos, slot_locks_repo or slot_locks_repository())
+    if "/appointments/checkout" in path and method == "POST":
+        return checkout_route(
+            event, appointments_repo,
+            stripe_repo=stripe_repo, tenant_repo=tenant_repo, notifications_repo=notifications_repo,
+            secret_cipher=secret_cipher, opener=opener, billing_config_loader=billing_config_loader,
+        )
     if "/availability" in path and method == "GET":
         return availability_route(event, *repos)
     return error_response("Unsupported booking route.", status_code=404, code="not_found")
@@ -128,6 +148,132 @@ def reserve_route(event, repos, slot_locks_repo):
         "hold_expires_at": hold_expires_at,
         "requires_payment": requires_payment(appointment),
     }, status_code=201)
+
+
+def checkout_route(event, appointments_repo, *, stripe_repo, tenant_repo, notifications_repo, secret_cipher, opener, billing_config_loader):
+    try:
+        body = parse_json_body(event)
+    except ValueError as exc:
+        return error_response(str(exc), code="invalid_body")
+
+    appointment_id = str(body.get("appointment_id") or "").strip()
+    manage_token = str(body.get("manage_token") or "").strip()
+    if not appointment_id:
+        return error_response("appointment_id is required.", code="missing_appointment_id")
+
+    appointment = appointments_repo.find_by_id(appointment_id)
+    if not appointment:
+        return error_response("Appointment not found.", status_code=404, code="not_found")
+    if str(appointment.get("customer_manage_token") or "") != manage_token or not manage_token:
+        return error_response("Invalid manage token.", status_code=403, code="forbidden")
+    if appointment.get("status") != "reserved":
+        return error_response("Appointment is not awaiting checkout.", status_code=409, code="not_reservable")
+
+    tenant_id = str(appointment.get("tenant_id") or "")
+    now = int(time.time())
+
+    # Free / lead-gen booking: confirm immediately, no Stripe.
+    if not requires_payment(appointment):
+        confirmed = {**appointment, "status": "booked", "updated_at": now}
+        confirmed.pop("hold_expires_at", None)
+        appointments_repo.put(confirmed)
+        _emit_booked_notification(notifications_repo or (notifications_repository() if os.environ.get("NOTIFICATIONS_TABLE") else None), confirmed, tenant_id, now)
+        return json_response({"appointment": _public_appointment(confirmed), "status": "booked", "requires_payment": False})
+
+    success_url = str(body.get("success_url") or "").strip()
+    cancel_url = str(body.get("cancel_url") or "").strip()
+    if not success_url or not cancel_url:
+        return error_response("success_url and cancel_url are required.", code="missing_redirect_url")
+
+    stripe_repo = stripe_repo or stripe_keys_repository()
+    tenant_repo = tenant_repo or tenant_profiles_repository()
+    secret_cipher = secret_cipher or KmsSecretCipher()
+    mode = "live" if os.environ.get("ENVIRONMENT") == "prod" else "test"
+
+    stripe_keys = stripe_repo.get(tenant_id, mode=mode) or {}
+    api_key, stripe_account = checkout_credentials(tenant_id, mode, stripe_keys, secret_cipher)
+    if not api_key:
+        return error_response(f"{mode} Stripe keys are not configured.", status_code=400, code="stripe_not_configured")
+
+    tenant_plan = normalize_tier_id((tenant_repo.get(tenant_id, tenant_id) or {}).get("tier_id"))
+    price = appointment.get("price") or {}
+    fee = calculate_price(
+        tenant_keyed_amount=int(price.get("unit_amount") or 0),
+        currency=str(price.get("currency") or "usd"),
+        product_type=SERVICE_FEE_PRODUCT_TYPE,
+        tenant_plan=tenant_plan,
+        billing_config=cached_billing_config(billing_config_loader),
+    )
+    platform_fee = int(fee.get("breakdown", {}).get("platform_fee") or 0) if stripe_account else 0
+
+    payload = build_booking_checkout_payload(
+        appointment, tenant_id, success_url=success_url, cancel_url=cancel_url,
+        platform_fee=platform_fee, tenant_plan=tenant_plan,
+    )
+    try:
+        from handlers.checkout import create_stripe_checkout_session
+
+        session = create_stripe_checkout_session(payload, api_key=api_key, stripe_account=stripe_account, opener=opener)
+    except Exception as exc:  # noqa: BLE001
+        return error_response(str(exc), status_code=502, code="checkout_error")
+    checkout_url = session.get("url")
+    if not checkout_url:
+        return error_response("Stripe did not return a checkout URL.", status_code=502, code="checkout_error")
+    return json_response({"checkout_url": checkout_url, "appointment_id": appointment_id, "requires_payment": True})
+
+
+def build_booking_checkout_payload(appointment, tenant_id, *, success_url, cancel_url, platform_fee, tenant_plan):
+    price = appointment.get("price") or {}
+    name = appointment.get("service_name") or "Service booking"
+    payload = {
+        "mode": "payment",
+        "success_url": success_url,
+        "cancel_url": cancel_url,
+        "line_items[0][price_data][currency]": str(price.get("currency") or "usd"),
+        "line_items[0][price_data][unit_amount]": str(int(price.get("unit_amount") or 0)),
+        "line_items[0][price_data][product_data][name]": name,
+        "line_items[0][quantity]": "1",
+        "metadata[tenant_id]": tenant_id,
+        "metadata[appointment_id]": appointment.get("appointment_id") or "",
+        "metadata[service_id]": appointment.get("service_id") or "",
+        "metadata[product_name]": name,
+        "metadata[product_type]": SERVICE_FEE_PRODUCT_TYPE,
+        "metadata[tenant_plan]": tenant_plan,
+    }
+    email = (appointment.get("customer") or {}).get("email")
+    if email:
+        payload["customer_email"] = email
+    if platform_fee > 0:
+        payload["payment_intent_data[application_fee_amount]"] = str(int(platform_fee))
+    return payload
+
+
+def _emit_booked_notification(notifications_repo, appointment, tenant_id, now):
+    if not notifications_repo:
+        return
+    customer = appointment.get("customer") or {}
+    who = customer.get("name") or customer.get("email") or "A customer"
+    service = appointment.get("service_name") or appointment.get("service_id") or "a service"
+    try:
+        notifications_repo.put({
+            "schema_version": "2026-05-29",
+            "document_type": "notification",
+            "tenant_id": tenant_id,
+            "notification_id": f"notif_appt_{appointment.get('appointment_id', '')}",
+            "type": "order",
+            "severity": "success",
+            "title": "New booking",
+            "message": f"{who} booked {service} for {appointment.get('starts_at', '')}.",
+            "status": "unread",
+            "sort_priority": 100,
+            "related": {"appointment_id": appointment.get("appointment_id", "")},
+            "action": {"label": "View appointments", "route": "services"},
+            "created_at": int(now),
+            "read_at": None,
+            "archived_at": None,
+        })
+    except Exception:  # noqa: BLE001 - notification must not fail the booking
+        pass
 
 
 def _public_appointment(appointment):

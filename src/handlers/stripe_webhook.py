@@ -9,12 +9,13 @@ from typing import Any, Callable
 from stripe_link.common import error_response, header_value, json_response
 from stripe_link.domain.downloads import digital_download_links
 from stripe_link.domain.fees import cached_billing_config, calculate_price
-from stripe_link.domain.ledger import refund_entry as build_ledger_refund_entry, sale_entry_from_order
+from stripe_link.domain.ledger import refund_entry as build_ledger_refund_entry, sale_entry, sale_entry_from_order
 from stripe_link.domain.receipts import receipt_content
 from stripe_link.domain.refund_ledger import build_refund_entry, initial_payment_aggregates, set_refund_aggregates
 from stripe_link.mailer import send_email
 from stripe_link.repositories.documents import (
     RepositoryError,
+    appointments_repository,
     customers_repository,
     dynamodb_safe_document,
     invoices_repository,
@@ -177,20 +178,28 @@ def handler(
     elif event_type == "charge.dispute.created" and tenant_id:
         persistence = reconcile_dispute(stripe_event, tenant_id=tenant_id, orders_repo=orders_repo, now_fn=now_fn)
     elif event_type == "checkout.session.completed" and tenant_id:
-        persistence = persist_checkout_session_completed(
-            stripe_event,
-            tenant_id=tenant_id,
-            checkout_sessions_table=checkout_sessions_table,
-            orders_table=orders_table,
-            customers_repo=customers_repo,
-            invoices_repo=invoices_repo,
-            notifications_repo=notifications_repo,
-            products_repo=products_repo,
-            now_fn=now_fn,
-            billing_config_loader=billing_config_loader,
-            receipt_mailer=receipt_mailer,
-            email_context_loader=email_context_loader,
-        )
+        session = _event_data_object(stripe_event)
+        appointment_id = str(((session.get("metadata") or {}).get("appointment_id")) or "").strip()
+        if appointment_id:
+            persistence = persist_appointment_paid(
+                stripe_event, tenant_id=tenant_id, appointment_id=appointment_id, mode=mode,
+                notifications_repo=notifications_repo, now_fn=now_fn, billing_config_loader=billing_config_loader,
+            )
+        else:
+            persistence = persist_checkout_session_completed(
+                stripe_event,
+                tenant_id=tenant_id,
+                checkout_sessions_table=checkout_sessions_table,
+                orders_table=orders_table,
+                customers_repo=customers_repo,
+                invoices_repo=invoices_repo,
+                notifications_repo=notifications_repo,
+                products_repo=products_repo,
+                now_fn=now_fn,
+                billing_config_loader=billing_config_loader,
+                receipt_mailer=receipt_mailer,
+                email_context_loader=email_context_loader,
+            )
 
     if event_id and events_repo:
         try:
@@ -293,6 +302,97 @@ def persist_checkout_session_completed(
         "order_id": order_record.get("order_id", ""),
         "written": written,
         "receipt": receipt,
+    }
+
+
+def persist_appointment_paid(
+    stripe_event: dict[str, Any],
+    *,
+    tenant_id: str,
+    appointment_id: str,
+    mode: str,
+    appointments_repo=None,
+    ledger_repo=None,
+    notifications_repo=None,
+    billing_config_loader: Callable[[], dict[str, Any]] | None = None,
+    now_fn: Callable[[], int] = lambda: int(time.time()),
+) -> dict[str, Any]:
+    """A paid booking's checkout session completed: mark the appointment booked/paid, drop the
+    hold, append a ledger sale entry, and emit the booked notification."""
+    session = _event_data_object(stripe_event)
+    appointments_repo = appointments_repo or (appointments_repository() if os.environ.get("SERVICES_TABLE") else None)
+    if not appointments_repo:
+        return {"status": "skipped", "reason": "appointments_repo_unavailable"}
+    appointment = appointments_repo.get(tenant_id, appointment_id)
+    if not appointment:
+        return {"status": "skipped", "reason": "appointment_not_found"}
+
+    now = int(now_fn())
+    fees = fee_breakdown_from_session(session, billing_config_loader)
+    payment_intent = str(session.get("payment_intent") or "").strip()
+    amount_total = int(session.get("amount_total") or (appointment.get("price") or {}).get("unit_amount") or 0)
+    currency = str(session.get("currency") or (appointment.get("price") or {}).get("currency") or "usd")
+
+    updated = {**appointment, "status": "booked", "payment_status": "paid", "updated_at": now}
+    if payment_intent:
+        updated["payment_intent_id"] = payment_intent
+    updated.pop("hold_expires_at", None)  # confirmed booking outlives the reserve hold
+    appointments_repo.put(updated)
+
+    ledger_written = False
+    ledger_repo = ledger_repo or (ledger_repository() if os.environ.get("LEDGER_TABLE") else None)
+    if ledger_repo and amount_total and payment_intent:
+        try:
+            ledger_repo.append(sale_entry(
+                tenant_id=tenant_id,
+                entry_id=f"le_sale_{payment_intent}",
+                occurred_at=now,
+                mode=mode,
+                currency=currency,
+                gross=amount_total,
+                stripe_fee=int(fees.get("stripe_fee") or 0),
+                platform_fee=int(fees.get("platform_fee") or 0),
+                idempotency_key=f"sale:{payment_intent}",
+                order_id=appointment_id,
+                customer=appointment.get("customer") if isinstance(appointment.get("customer"), dict) else None,
+                stripe={"payment_intent_id": payment_intent},
+                source="webhook",
+                description=f"Booking: {appointment.get('service_name') or appointment.get('service_id')}",
+                now_epoch=now,
+            ))
+            ledger_written = True
+        except Exception:  # noqa: BLE001 - ledger must not fail the webhook
+            pass
+
+    if notifications_repo:
+        try:
+            notifications_repo.put(appointment_notification(updated, tenant_id, now))
+        except Exception:  # noqa: BLE001 - notification must not fail the webhook
+            pass
+
+    return {"status": "booked", "appointment_id": appointment_id, "ledger_entry": ledger_written}
+
+
+def appointment_notification(appointment: dict[str, Any], tenant_id: str, now: int) -> dict[str, Any]:
+    customer = appointment.get("customer") or {}
+    who = customer.get("name") or customer.get("email") or "A customer"
+    service = appointment.get("service_name") or appointment.get("service_id") or "a service"
+    return {
+        "schema_version": "2026-05-29",
+        "document_type": "notification",
+        "tenant_id": tenant_id,
+        "notification_id": f"notif_appt_{appointment.get('appointment_id', '')}",
+        "type": "order",
+        "severity": "success",
+        "title": "New booking",
+        "message": f"{who} booked {service} for {appointment.get('starts_at', '')}.",
+        "status": "unread",
+        "sort_priority": 100,
+        "related": {"appointment_id": appointment.get("appointment_id", "")},
+        "action": {"label": "View appointments", "route": "services"},
+        "created_at": int(now),
+        "read_at": None,
+        "archived_at": None,
     }
 
 

@@ -115,5 +115,95 @@ class ReserveTests(unittest.TestCase):
         self.assertEqual(json.loads(response["body"])["error"], "slot_taken")
 
 
+def checkout_event(appointment_id, manage_token):
+    return {
+        "httpMethod": "POST",
+        "path": "/services/appointments/checkout",
+        "pathParameters": {},
+        "queryStringParameters": {},
+        "body": json.dumps({"appointment_id": appointment_id, "manage_token": manage_token}),
+    }
+
+
+class CheckoutTests(unittest.TestCase):
+    def _reserve(self, env, unit_amount):
+        r = handler(reserve_event(next_valid_slot_iso()), None, **env)
+        body = json.loads(r["body"])
+        return body["appointment"]["appointment_id"], body["manage_token"]
+
+    def test_free_checkout_confirms_booking(self):
+        env = make_env(unit_amount=0)
+        appt_id, token = self._reserve(env, 0)
+        notifications = FakeDocumentRepository("notification_id")
+        response = handler(checkout_event(appt_id, token), None, notifications_repo=notifications, **env)
+        body = json.loads(response["body"])
+        self.assertEqual(response["statusCode"], 200)
+        self.assertEqual(body["status"], "booked")
+        self.assertFalse(body["requires_payment"])
+        stored = env["appointments_repo"].get("t1", appt_id)
+        self.assertEqual(stored["status"], "booked")
+        self.assertNotIn("hold_expires_at", stored)
+        self.assertEqual(len(notifications.list_for_tenant("t1")), 1)
+
+    def test_checkout_wrong_token_forbidden(self):
+        env = make_env(unit_amount=0)
+        appt_id, _ = self._reserve(env, 0)
+        response = handler(checkout_event(appt_id, "nope"), None, **env)
+        self.assertEqual(response["statusCode"], 403)
+
+    def test_checkout_unknown_appointment(self):
+        env = make_env()
+        response = handler(checkout_event("missing", "tok"), None, **env)
+        self.assertEqual(response["statusCode"], 404)
+
+    def test_build_booking_checkout_payload(self):
+        from handlers.booking import build_booking_checkout_payload
+
+        appt = {"appointment_id": "appt_1", "service_id": "svc_1", "service_name": "Massage",
+                "price": {"currency": "usd", "unit_amount": 12000}, "customer": {"email": "c@e.com"}}
+        payload = build_booking_checkout_payload(appt, "t1", success_url="s", cancel_url="c", platform_fee=500, tenant_plan="basic")
+        self.assertEqual(payload["metadata[appointment_id]"], "appt_1")
+        self.assertEqual(payload["line_items[0][price_data][unit_amount]"], "12000")
+        self.assertEqual(payload["payment_intent_data[application_fee_amount]"], "500")
+        self.assertEqual(payload["customer_email"], "c@e.com")
+
+
+class WebhookBookingTests(unittest.TestCase):
+    def test_persist_appointment_paid_records_booking_and_ledger(self):
+        from handlers.stripe_webhook import persist_appointment_paid
+        from tests.test_ledger import FakeLedgerRepository
+
+        appointments = FakeDocumentRepository("appointment_id")
+        appointments.put({
+            "schema_version": "2026-05-29", "document_type": "appointment", "tenant_id": "t1",
+            "appointment_id": "appt_1", "service_id": "svc_1", "service_name": "Massage",
+            "starts_at": "2026-07-08T15:00:00Z", "ends_at": "2026-07-08T16:00:00Z", "timezone": "UTC",
+            "status": "reserved", "payment_status": "unpaid", "customer": {"email": "c@e.com"},
+            "price": {"currency": "usd", "unit_amount": 12000}, "hold_expires_at": 999,
+        })
+        ledger = FakeLedgerRepository()
+        notifications = FakeDocumentRepository("notification_id")
+        event = {"type": "checkout.session.completed", "data": {"object": {
+            "metadata": {"appointment_id": "appt_1", "tenant_id": "t1", "product_type": "digital", "tenant_plan": "basic"},
+            "payment_intent": "pi_x", "amount_total": 12000, "currency": "usd",
+        }}}
+        result = persist_appointment_paid(
+            event, tenant_id="t1", appointment_id="appt_1", mode="test",
+            appointments_repo=appointments, ledger_repo=ledger, notifications_repo=notifications,
+            billing_config_loader=lambda: {}, now_fn=lambda: 1000,
+        )
+        self.assertEqual(result["status"], "booked")
+        self.assertTrue(result["ledger_entry"])
+        stored = appointments.get("t1", "appt_1")
+        self.assertEqual(stored["status"], "booked")
+        self.assertEqual(stored["payment_status"], "paid")
+        self.assertNotIn("hold_expires_at", stored)
+        entries = ledger.list_for_order("appt_1")
+        self.assertEqual(len(entries), 1)
+        self.assertEqual(entries[0]["entry_type"], "sale")
+        self.assertEqual(entries[0]["amounts"]["gross"], 12000)
+        self.assertEqual(len(notifications.list_for_tenant("t1")), 1)
+
+
 if __name__ == "__main__":
     unittest.main()
