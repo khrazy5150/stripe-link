@@ -1857,6 +1857,24 @@ Resources:
             RestApiId: !Ref RestApi
             Path: /book/{service}
             Method: GET
+        ManageView:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /services/appointments/manage
+            Method: GET
+        ManageCancel:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /services/appointments/manage/cancel
+            Method: POST
+        ManageReschedule:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /services/appointments/manage/reschedule
+            Method: POST
 
   OrdersFunction:
     Type: AWS::Serverless::Function

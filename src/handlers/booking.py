@@ -9,7 +9,8 @@ import time
 import uuid
 
 from stripe_link.common import error_response, json_response, parse_json_body, path_params, query_params
-from stripe_link.domain.booking import requires_payment, reserved_appointment
+from stripe_link.domain.appointments import AppointmentTransitionError, transition_appointment
+from stripe_link.domain.booking import compensation_snapshot, requires_payment, reserved_appointment, slot_end_iso
 from stripe_link.domain.documents import DocumentValidationError, validate_appointment
 from stripe_link.domain.fees import cached_billing_config, calculate_price, normalize_tier_id
 from stripe_link.domain.scheduling import available_slots
@@ -71,6 +72,12 @@ def handler(
             stripe_repo=stripe_repo, tenant_repo=tenant_repo, notifications_repo=notifications_repo,
             secret_cipher=secret_cipher, opener=opener, billing_config_loader=billing_config_loader,
         )
+    if "/appointments/manage/cancel" in path and method == "POST":
+        return manage_cancel_route(event, appointments_repo, slot_locks_repo or slot_locks_repository())
+    if "/appointments/manage/reschedule" in path and method == "POST":
+        return manage_reschedule_route(event, repos, slot_locks_repo or slot_locks_repository())
+    if "/appointments/manage" in path and method == "GET":
+        return manage_view_route(event, appointments_repo)
     if "/availability" in path and method == "GET":
         return availability_route(event, *repos)
     return error_response("Unsupported booking route.", status_code=404, code="not_found")
@@ -138,6 +145,10 @@ def reserve_route(event, repos, slot_locks_repo):
         tz_name=str(tenant_availability.get("timezone") or "UTC"), fulfiller_id=fulfiller_id,
         customer=customer, manage_token=manage_token, hold_expires_at=hold_expires_at, now_epoch=now,
     )
+    if fulfiller_id:
+        fulfiller_doc = next((f for f in fulfillers if f.get("fulfiller_id") == fulfiller_id), None)
+        if fulfiller_doc:
+            appointment["rule_snapshot"] = compensation_snapshot(service, fulfiller_doc)
     try:
         validate_appointment(appointment)
         appointments_repo.put(appointment)
@@ -223,6 +234,104 @@ def checkout_route(event, appointments_repo, *, stripe_repo, tenant_repo, notifi
     if not checkout_url:
         return error_response("Stripe did not return a checkout URL.", status_code=502, code="checkout_error")
     return json_response({"checkout_url": checkout_url, "appointment_id": appointment_id, "requires_payment": True})
+
+
+RESCHEDULABLE_STATUSES = {"reserved", "booked", "paid"}
+
+
+def _authorized_appointment(appointments_repo, appointment_id, manage_token):
+    appointment = appointments_repo.find_by_id(appointment_id) if appointment_id else None
+    if not appointment:
+        return None, error_response("Appointment not found.", status_code=404, code="not_found")
+    if not manage_token or str(appointment.get("customer_manage_token") or "") != manage_token:
+        return None, error_response("Invalid manage token.", status_code=403, code="forbidden")
+    return appointment, None
+
+
+def manage_view_route(event, appointments_repo):
+    params = query_params(event)
+    appointment, err = _authorized_appointment(appointments_repo, str(params.get("appointment_id") or "").strip(), str(params.get("manage_token") or "").strip())
+    if err:
+        return err
+    return json_response({
+        "appointment": _public_appointment(appointment),
+        "can_cancel": appointment.get("status") not in {"completed", "canceled", "no_show"},
+        "can_reschedule": appointment.get("status") in RESCHEDULABLE_STATUSES,
+    })
+
+
+def manage_cancel_route(event, appointments_repo, slot_locks_repo):
+    try:
+        body = parse_json_body(event)
+    except ValueError as exc:
+        return error_response(str(exc), code="invalid_body")
+    appointment, err = _authorized_appointment(appointments_repo, str(body.get("appointment_id") or "").strip(), str(body.get("manage_token") or "").strip())
+    if err:
+        return err
+    try:
+        canceled = transition_appointment(appointment, "cancel", now_epoch=int(time.time()))
+    except AppointmentTransitionError as exc:
+        return error_response(str(exc), status_code=409, code="invalid_transition")
+    appointments_repo.put(canceled)
+    _release_lock(slot_locks_repo, canceled)
+    return json_response({"appointment": _public_appointment(canceled), "status": "canceled"})
+
+
+def manage_reschedule_route(event, repos, slot_locks_repo):
+    services_repo, availability_repo, fulfillers_repo, exceptions_repo, appointments_repo = repos
+    try:
+        body = parse_json_body(event)
+    except ValueError as exc:
+        return error_response(str(exc), code="invalid_body")
+
+    appointment, err = _authorized_appointment(appointments_repo, str(body.get("appointment_id") or "").strip(), str(body.get("manage_token") or "").strip())
+    if err:
+        return err
+    if appointment.get("status") not in RESCHEDULABLE_STATUSES:
+        return error_response("This appointment can no longer be rescheduled.", status_code=409, code="not_reschedulable")
+    new_slot = str(body.get("slot_start") or "").strip()
+    if not new_slot:
+        return error_response("slot_start is required.", code="missing_slot_start")
+
+    tenant_id = str(appointment.get("tenant_id") or "")
+    service = services_repo.find_by_id(str(appointment.get("service_id") or ""))
+    if not service:
+        return error_response("Service not found.", status_code=404, code="not_found")
+    now = int(time.time())
+    duration = max(1, int(service.get("duration_minutes") or 60))
+    start_epoch = _iso_to_epoch(new_slot)
+    if start_epoch is None:
+        return error_response("slot_start must be an ISO-8601 timestamp.", code="invalid_slot_start")
+
+    fulfiller_id = appointment.get("assigned_fulfiller_id")
+    open_slots = available_slots(
+        service, availability_repo.get(tenant_id, "default") or {}, fulfillers_repo.list_for_tenant(tenant_id),
+        exceptions_repo.list_for_tenant(tenant_id), appointments_repo.list_for_tenant(tenant_id),
+        now_epoch=now, range_start_epoch=start_epoch, range_end_epoch=start_epoch + duration * 60, fulfiller_id=fulfiller_id,
+    )
+    if not any(s["start"] == new_slot for s in open_slots):
+        return error_response("That slot is no longer available.", status_code=409, code="slot_unavailable")
+
+    try:
+        claimed = slot_locks_repo.claim(tenant_id, fulfiller_id, new_slot, appointment_id=appointment["appointment_id"], hold_expires_at=now + HOLD_MINUTES * 60, now=now)
+    except RepositoryError as exc:
+        return error_response(str(exc), status_code=502, code="lock_failed")
+    if not claimed:
+        return error_response("That slot was just taken.", status_code=409, code="slot_taken")
+
+    old_start = appointment.get("starts_at")
+    updated = {**appointment, "starts_at": new_slot, "ends_at": slot_end_iso(new_slot, duration), "updated_at": now}
+    appointments_repo.put(updated)
+    if old_start and old_start != new_slot:
+        slot_locks_repo.release(tenant_id, fulfiller_id, old_start)
+    return json_response({"appointment": _public_appointment(updated), "status": "rescheduled"})
+
+
+def _release_lock(slot_locks_repo, appointment):
+    try:
+        slot_locks_repo.release(str(appointment.get("tenant_id") or ""), appointment.get("assigned_fulfiller_id"), appointment.get("starts_at"))
+    except Exception:  # noqa: BLE001 - lock release is best-effort
+        pass
 
 
 def build_booking_checkout_payload(appointment, tenant_id, *, success_url, cancel_url, platform_fee, tenant_plan):

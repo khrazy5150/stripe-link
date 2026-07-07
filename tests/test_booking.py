@@ -38,9 +38,7 @@ def all_day_availability():
 
 
 def next_valid_slot_iso():
-    dt = datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0) + timedelta(hours=2)
-    while dt.hour == 23:
-        dt += timedelta(hours=1)
+    dt = (datetime.now(timezone.utc) + timedelta(days=1)).replace(hour=10, minute=0, second=0, microsecond=0)
     return dt.isoformat().replace("+00:00", "Z")
 
 
@@ -203,6 +201,86 @@ class WebhookBookingTests(unittest.TestCase):
         self.assertEqual(entries[0]["entry_type"], "sale")
         self.assertEqual(entries[0]["amounts"]["gross"], 12000)
         self.assertEqual(len(notifications.list_for_tenant("t1")), 1)
+
+
+def manage_event(path, method, *, body=None, params=None):
+    return {"httpMethod": method, "path": path, "pathParameters": {},
+            "queryStringParameters": params or {},
+            "body": json.dumps(body) if body is not None else None}
+
+
+class ManageTests(unittest.TestCase):
+    def _reserve(self, env):
+        r = handler(reserve_event(next_valid_slot_iso()), None, **env)
+        b = json.loads(r["body"])
+        return b["appointment"]["appointment_id"], b["manage_token"]
+
+    def test_manage_view_requires_token(self):
+        env = make_env(unit_amount=0)
+        appt_id, token = self._reserve(env)
+        ok = handler(manage_event("/services/appointments/manage", "GET", params={"appointment_id": appt_id, "manage_token": token}), None, **env)
+        self.assertEqual(ok["statusCode"], 200)
+        self.assertTrue(json.loads(ok["body"])["can_cancel"])
+        bad = handler(manage_event("/services/appointments/manage", "GET", params={"appointment_id": appt_id, "manage_token": "x"}), None, **env)
+        self.assertEqual(bad["statusCode"], 403)
+
+    def test_manage_cancel_releases_slot(self):
+        env = make_env(unit_amount=0)
+        appt_id, token = self._reserve(env)
+        slot = env["appointments_repo"].get("t1", appt_id)["starts_at"]
+        self.assertIn(("t1", "any", slot), env["slot_locks_repo"].locks)
+        response = handler(manage_event("/services/appointments/manage/cancel", "POST", body={"appointment_id": appt_id, "manage_token": token}), None, **env)
+        self.assertEqual(response["statusCode"], 200)
+        self.assertEqual(env["appointments_repo"].get("t1", appt_id)["status"], "canceled")
+        self.assertNotIn(("t1", "any", slot), env["slot_locks_repo"].locks)  # lock released
+
+    def test_manage_reschedule_moves_slot(self):
+        env = make_env(unit_amount=0)
+        appt_id, token = self._reserve(env)
+        old_slot = env["appointments_repo"].get("t1", appt_id)["starts_at"]
+        new_slot = (datetime.fromisoformat(old_slot.replace("Z", "+00:00")) + timedelta(hours=1)).isoformat().replace("+00:00", "Z")
+        response = handler(manage_event("/services/appointments/manage/reschedule", "POST", body={"appointment_id": appt_id, "manage_token": token, "slot_start": new_slot}), None, **env)
+        self.assertEqual(response["statusCode"], 200)
+        stored = env["appointments_repo"].get("t1", appt_id)
+        self.assertEqual(stored["starts_at"], new_slot)
+        self.assertNotIn(("t1", "any", old_slot), env["slot_locks_repo"].locks)  # old released
+        self.assertIn(("t1", "any", new_slot), env["slot_locks_repo"].locks)  # new held
+
+
+class CompensationSnapshotTests(unittest.TestCase):
+    def test_service_override_wins(self):
+        from stripe_link.domain.booking import compensation_snapshot
+
+        service = {"allowed_fulfillers": [{"fulfiller_id": "ful_1", "tips_to_fulfiller": False,
+                                           "compensation_override": {"type": "percent", "amount": 40}}]}
+        fulfiller = {"fulfiller_id": "ful_1", "compensation": {"type": "flat_fee", "amount": 60, "tips_to_fulfiller": True}}
+        snap = compensation_snapshot(service, fulfiller)
+        self.assertEqual(snap["type"], "percent")
+        self.assertEqual(snap["amount"], 40)
+        self.assertFalse(snap["tips_to_fulfiller"])
+        self.assertEqual(snap["source"], "service_override")
+
+    def test_fulfiller_default_when_no_override(self):
+        from stripe_link.domain.booking import compensation_snapshot
+
+        snap = compensation_snapshot({}, {"fulfiller_id": "ful_1", "compensation": {"type": "flat_fee", "amount": 60}})
+        self.assertEqual(snap["type"], "flat_fee")
+        self.assertEqual(snap["amount"], 60)
+        self.assertEqual(snap["source"], "fulfiller_default")
+
+    def test_reserve_snapshots_compensation(self):
+        env = make_env(unit_amount=0)
+        env["services_repo"].put({"service_id": "svc_1", "tenant_id": "t1", "duration_minutes": 60, "active": True,
+                                  "name": "Massage", "price": {"currency": "usd", "unit_amount": 0},
+                                  "allowed_fulfillers": [{"fulfiller_id": "ful_1", "enabled": True}]})
+        env["fulfillers_repo"].put({"fulfiller_id": "ful_1", "tenant_id": "t1",
+                                    "availability": {"weekly_hours": [{"day": d, "enabled": True, "start_time": "00:00", "end_time": "23:00"} for d in DAYS]},
+                                    "compensation": {"type": "flat_fee", "amount": 75}})
+        r = handler(reserve_event(next_valid_slot_iso()), None, **env)
+        appt_id = json.loads(r["body"])["appointment"]["appointment_id"]
+        snapshot = env["appointments_repo"].get("t1", appt_id).get("rule_snapshot")
+        self.assertEqual(snapshot["fulfiller_id"], "ful_1")
+        self.assertEqual(snapshot["amount"], 75)
 
 
 if __name__ == "__main__":

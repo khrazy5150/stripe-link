@@ -78,3 +78,35 @@ def reserved_appointment(
 
 def requires_payment(appointment: dict[str, Any]) -> bool:
     return int((appointment.get("price") or {}).get("unit_amount") or 0) > 0
+
+
+def slot_end_iso(slot_start_iso: str, duration_minutes: int) -> str:
+    return _iso(_parse_iso(slot_start_iso) + timedelta(minutes=max(1, int(duration_minutes))))
+
+
+def compensation_snapshot(service: dict[str, Any], fulfiller: dict[str, Any]) -> dict[str, Any]:
+    """Freeze the fulfiller's effective compensation for this service at booking time, so later
+    payout reporting uses what was true then. A service-level allowed_fulfillers override wins
+    over the fulfiller's default."""
+    fulfiller = fulfiller or {}
+    base = fulfiller.get("compensation") or {}
+    fulfiller_id = str(fulfiller.get("fulfiller_id") or "")
+    snapshot = {
+        "fulfiller_id": fulfiller_id,
+        "type": base.get("type") or "flat_fee",
+        "amount": float(base.get("amount") or 0),
+        "tips_to_fulfiller": base.get("tips_to_fulfiller", True),
+        "source": "fulfiller_default",
+    }
+    for entry in service.get("allowed_fulfillers") or []:
+        if str(entry.get("fulfiller_id")) != fulfiller_id:
+            continue
+        if "tips_to_fulfiller" in entry:
+            snapshot["tips_to_fulfiller"] = bool(entry.get("tips_to_fulfiller"))
+        override = entry.get("compensation_override") or {}
+        if override.get("type") in {"flat_fee", "percent"}:
+            snapshot["type"] = override["type"]
+            snapshot["amount"] = float(override.get("amount") or 0)
+            snapshot["source"] = "service_override"
+        break
+    return snapshot
