@@ -40,6 +40,8 @@
     "service_location": { "type": "object" },
     "rule_snapshot": { "type": "object" },
     "manage_token_ref": { "type": "string" },
+    "customer_manage_token": { "type": "string" },
+    "hold_expires_at": { "type": ["integer", "null"] },
     "checked_in_at": { "type": ["string", "null"] },
     "completed_at": { "type": ["string", "null"] },
     "canceled_at": { "type": ["string", "null"] },

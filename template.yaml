@@ -1810,9 +1810,9 @@ Resources:
       FunctionName: !Sub "${ProjectPrefix}-booking-api-${Environment}"
       CodeUri: src/
       Handler: handlers.booking.handler
-      Description: Public booking API (slot availability; reserve/checkout/manage in later Phase B steps).
+      Description: Public booking API (availability + reserve; checkout/manage in later Phase B steps).
       Policies:
-        - DynamoDBReadPolicy:
+        - DynamoDBCrudPolicy:
             TableName: !Ref ServicesTable
       Events:
         Availability:
@@ -1821,6 +1821,12 @@ Resources:
             RestApiId: !Ref RestApi
             Path: /services/{service_id}/availability
             Method: GET
+        Reserve:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /services/appointments/reserve
+            Method: POST
 
   OrdersFunction:
     Type: AWS::Serverless::Function
@@ -2037,6 +2043,9 @@ Resources:
       BillingMode: PAY_PER_REQUEST
       SSESpecification:
         SSEEnabled: true
+      TimeToLiveSpecification:
+        AttributeName: hold_expires_at
+        Enabled: true
       AttributeDefinitions:
         - AttributeName: PK
           AttributeType: S

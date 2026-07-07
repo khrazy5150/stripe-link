@@ -509,6 +509,64 @@ def ledger_repository(table: Any | None = None) -> LedgerRepository:
     return LedgerRepository(os.environ.get("LEDGER_TABLE", ""), table=table)
 
 
+class SlotLockRepository:
+    """Atomic slot holds (in the services table) that prevent double-booking. A claim is a
+    conditional put keyed by (tenant, fulfiller, slot_start); it succeeds only if no live lock
+    exists — an expired lock (hold_expires_at < now) may be reclaimed. DynamoDB TTL on
+    hold_expires_at eventually sweeps abandoned holds."""
+
+    def __init__(self, table_name: str, *, table: Any | None = None):
+        if not table_name:
+            raise RepositoryError("Table name is required.")
+        assert_jb_resource_name(table_name)
+        self.table_name = table_name
+        self._table = table
+
+    @property
+    def table(self):
+        if self._table is None:
+            import boto3
+
+            self._table = boto3.resource("dynamodb").Table(self.table_name)
+        return self._table
+
+    def _key(self, tenant_id: str, fulfiller_id: str | None, slot_start: str) -> dict[str, str]:
+        return {"PK": f"TENANT#{tenant_id}", "SK": f"SLOTLOCK#{fulfiller_id or 'any'}#{slot_start}"}
+
+    def claim(self, tenant_id: str, fulfiller_id: str | None, slot_start: str, *, appointment_id: str, hold_expires_at: int, now: int) -> bool:
+        """Return True if the slot was claimed, False if it is already held by a live lock."""
+        from botocore.exceptions import ClientError
+
+        item = {
+            **self._key(tenant_id, fulfiller_id, slot_start),
+            "tenant_id": tenant_id,
+            "document_type": "slot_lock",
+            "fulfiller_id": fulfiller_id or "",
+            "slot_start": slot_start,
+            "appointment_id": appointment_id,
+            "hold_expires_at": int(hold_expires_at),
+        }
+        try:
+            self.table.put_item(
+                Item=item,
+                ConditionExpression="attribute_not_exists(SK) OR #hold < :now",
+                ExpressionAttributeNames={"#hold": "hold_expires_at"},
+                ExpressionAttributeValues={":now": int(now)},
+            )
+            return True
+        except ClientError as exc:
+            if exc.response.get("Error", {}).get("Code") == "ConditionalCheckFailedException":
+                return False
+            raise RepositoryError(str(exc)) from exc
+
+    def release(self, tenant_id: str, fulfiller_id: str | None, slot_start: str) -> None:
+        self.table.delete_item(Key=self._key(tenant_id, fulfiller_id, slot_start))
+
+
+def slot_locks_repository(table: Any | None = None) -> SlotLockRepository:
+    return SlotLockRepository(os.environ.get("SERVICES_TABLE", ""), table=table)
+
+
 def webhook_events_repository(table: Any | None = None) -> SimpleKeyRepository:
     return SimpleKeyRepository(os.environ.get("WEBHOOK_EVENTS_TABLE", ""), key_field="event_id", table=table)
 
