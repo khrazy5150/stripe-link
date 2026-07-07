@@ -5317,3 +5317,9 @@ button:disabled {
   min-width: 10rem;
   min-height: 0;
 }
+
+.calendar-waiting {
+  color: var(--muted);
+  margin-top: 0.8rem;
+  font-size: 1.3rem;
+}

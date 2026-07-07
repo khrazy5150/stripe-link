@@ -71,6 +71,7 @@
     <FulfillersPanel />
     <TenantAvailabilityPanel />
     <AvailabilityExceptionsPanel />
+    <CalendarPanel />
     <AppointmentsPanel />
 
     <div v-if="showServiceModal" class="modal-backdrop" @click.self="closeServiceModal">
@@ -309,6 +310,7 @@ import { formatMoney, useProductsStore } from "../stores/products";
 import FulfillersPanel from "./services/FulfillersPanel.vue";
 import TenantAvailabilityPanel from "./services/TenantAvailabilityPanel.vue";
 import AvailabilityExceptionsPanel from "./services/AvailabilityExceptionsPanel.vue";
+import CalendarPanel from "./services/CalendarPanel.vue";
 import AppointmentsPanel from "./services/AppointmentsPanel.vue";
 
 const store = useServicesStore();
