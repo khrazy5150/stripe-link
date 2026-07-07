@@ -24,7 +24,7 @@ EXISTING="$(aws secretsmanager get-secret-value --secret-id "${SECRET_NAME}" --r
 
 read -r  -p "Client ID: " CLIENT_ID
 read -r -s -p "Client Secret (hidden): " CLIENT_SECRET; echo
-read -r -s -p "Refresh Token (hidden): " REFRESH_TOKEN; echo
+read -r -s -p "Refresh Token (optional, hidden): " REFRESH_TOKEN; echo
 
 PAYLOAD="$(EXISTING="$EXISTING" CLIENT_ID="$CLIENT_ID" CLIENT_SECRET="$CLIENT_SECRET" REFRESH_TOKEN="$REFRESH_TOKEN" python3 - <<'PY'
 import json, os
@@ -39,14 +39,18 @@ def pick(key, entered):
     entered = entered.strip()
     return entered if entered else existing.get(key, "")
 
+# client_id + client_secret run the OAuth flow (required). refresh_token is a test-only
+# convenience (real tenant tokens are per-tenant, KMS-encrypted) — omit it if not needed.
 out = {
     "client_id": pick("client_id", os.environ["CLIENT_ID"]),
     "client_secret": pick("client_secret", os.environ["CLIENT_SECRET"]),
-    "refresh_token": pick("refresh_token", os.environ["REFRESH_TOKEN"]),
 }
 missing = [k for k, v in out.items() if not v]
 if missing:
     raise SystemExit("No value entered and none stored for: " + ", ".join(missing))
+refresh_token = pick("refresh_token", os.environ["REFRESH_TOKEN"])
+if refresh_token:
+    out["refresh_token"] = refresh_token
 print(json.dumps(out))
 PY
 )"

@@ -20,8 +20,14 @@ CLIENT_ID="$(read_field client_id)"
 CLIENT_SECRET="$(read_field client_secret)"
 REFRESH_TOKEN="$(read_field refresh_token)"
 
-if [ -z "$CLIENT_ID" ] || [ -z "$CLIENT_SECRET" ] || [ -z "$REFRESH_TOKEN" ]; then
-  echo "Secret is missing one of client_id / client_secret / refresh_token."; exit 1
+if [ -z "$CLIENT_ID" ] || [ -z "$CLIENT_SECRET" ]; then
+  echo "Secret is missing client_id and/or client_secret."; exit 1
+fi
+if [ -z "$REFRESH_TOKEN" ]; then
+  echo "client_id + client_secret are present; no platform refresh_token is stored."
+  echo "(That's expected for prod — real tenant tokens come from the connect flow, so there is"
+  echo " nothing to exchange here. Add a refresh_token only if you want a platform smoke test.)"
+  exit 0
 fi
 
 RESP="$(curl -s -X POST https://oauth2.googleapis.com/token \
