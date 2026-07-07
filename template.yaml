@@ -28,6 +28,11 @@ Parameters:
     Type: String
     Default: ""
     Description: Stripe Connect live OAuth client ID.
+  CalendarRedirectUri:
+    Type: String
+    Default: ""
+    Description: OAuth redirect URI for Google Calendar connect (must be registered in the Google OAuth client). e.g. https://dev.juniorbay.com/calendar/callback
+
   StripeConnectRedirectUri:
     Type: String
     Default: ""
@@ -140,6 +145,8 @@ Globals:
         THEMES_TABLE: !Ref ThemesTable
         LEGAL_PAGES_TABLE: !Ref LegalPagesTable
         CUSTOM_DOMAINS_TABLE: !Ref CustomDomainsTable
+        CALENDAR_CONNECTIONS_TABLE: !Ref CalendarConnectionsTable
+        GOOGLE_OAUTH_SECRET_NAME: !Sub "jb/google-oauth/${Environment}"
         PAGES_BUCKET: !Ref PagesBucket
         PAGES_PREVIEW_BUCKET: !Ref PagesPreviewBucket
         MEDIA_BUCKET: !Ref MediaBucket
@@ -1806,6 +1813,57 @@ Resources:
             Path: /ledger
             Method: GET
 
+  CalendarFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${ProjectPrefix}-calendar-api-${Environment}"
+      CodeUri: src/
+      Handler: handlers.calendar.handler
+      Description: Per-tenant Google Calendar OAuth connect/callback + connection status.
+      Environment:
+        Variables:
+          CALENDAR_REDIRECT_URI: !Ref CalendarRedirectUri
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref CalendarConnectionsTable
+        - Statement:
+            Effect: Allow
+            Action:
+              - secretsmanager:GetSecretValue
+            Resource: !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:jb/google-oauth/*"
+        - Statement:
+            Effect: Allow
+            Action:
+              - kms:Encrypt
+              - kms:Decrypt
+              - kms:DescribeKey
+            Resource: !GetAtt StripeKeysEncryptionKey.Arn
+      Events:
+        Connect:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /calendar/connect
+            Method: POST
+        Callback:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /calendar/callback
+            Method: GET
+        ConnectionStatus:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /calendar/connection
+            Method: GET
+        Disconnect:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /calendar/connection
+            Method: DELETE
+
   BookingFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -2352,6 +2410,40 @@ Resources:
             - AttributeName: order_id
               KeyType: HASH
             - AttributeName: occurred_at
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+
+  CalendarConnectionsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "${ProjectPrefix}-calendar-connections-${Environment}"
+      BillingMode: PAY_PER_REQUEST
+      SSESpecification:
+        SSEEnabled: true
+      TimeToLiveSpecification:
+        AttributeName: expires_at
+        Enabled: true
+      AttributeDefinitions:
+        - AttributeName: PK
+          AttributeType: S
+        - AttributeName: SK
+          AttributeType: S
+        - AttributeName: GSI1PK
+          AttributeType: S
+        - AttributeName: GSI1SK
+          AttributeType: S
+      KeySchema:
+        - AttributeName: PK
+          KeyType: HASH
+        - AttributeName: SK
+          KeyType: RANGE
+      GlobalSecondaryIndexes:
+        - IndexName: GSI1
+          KeySchema:
+            - AttributeName: GSI1PK
+              KeyType: HASH
+            - AttributeName: GSI1SK
               KeyType: RANGE
           Projection:
             ProjectionType: ALL

@@ -181,6 +181,24 @@ def pages_repository(table: Any | None = None) -> DynamoDocumentRepository:
     )
 
 
+def calendar_connections_repository(table: Any | None = None) -> DynamoDocumentRepository:
+    return DynamoDocumentRepository(
+        os.environ.get("CALENDAR_CONNECTIONS_TABLE", ""),
+        document_type="calendar_connection",
+        id_field="connection_id",
+        table=table,
+    )
+
+
+def oauth_states_repository(table: Any | None = None) -> DynamoDocumentRepository:
+    return DynamoDocumentRepository(
+        os.environ.get("CALENDAR_CONNECTIONS_TABLE", ""),
+        document_type="oauth_state",
+        id_field="state_id",
+        table=table,
+    )
+
+
 class SimpleKeyRepository:
     def __init__(
         self,

@@ -36,6 +36,16 @@ if [[ -n "${API_CUSTOM_DOMAIN_NAME}" || -n "${API_CUSTOM_DOMAIN_CERTIFICATE_ARN}
   PARAMETER_OVERRIDES+=("ApiCustomDomainHostedZoneName=${API_CUSTOM_DOMAIN_HOSTED_ZONE_NAME}")
 fi
 
+# Google Calendar OAuth redirect URI (must be registered in the Google OAuth client).
+# Defaults to the API custom domain's /calendar/callback when a custom domain is set.
+CALENDAR_REDIRECT_URI="${CALENDAR_REDIRECT_URI:-}"
+if [[ -z "${CALENDAR_REDIRECT_URI}" && -n "${API_CUSTOM_DOMAIN_NAME}" ]]; then
+  CALENDAR_REDIRECT_URI="https://${API_CUSTOM_DOMAIN_NAME}/calendar/callback"
+fi
+if [[ -n "${CALENDAR_REDIRECT_URI}" ]]; then
+  PARAMETER_OVERRIDES+=("CalendarRedirectUri=${CALENDAR_REDIRECT_URI}")
+fi
+
 if [[ -n "${DASHBOARD_CUSTOM_DOMAIN_NAME}" ]]; then
   PARAMETER_OVERRIDES+=("DashboardCustomDomainName=${DASHBOARD_CUSTOM_DOMAIN_NAME}")
 fi

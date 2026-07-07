@@ -1179,6 +1179,16 @@ def validate_ledger_entry(document: dict[str, Any]) -> None:
             raise DocumentValidationError("Ledger amount components must be integers (minor units).")
 
 
+def validate_calendar_connection(document: dict[str, Any]) -> None:
+    require_fields(document, ["schema_version", "document_type", "tenant_id", "connection_id", "provider", "status"])
+    if document.get("document_type") != "calendar_connection":
+        raise DocumentValidationError("Calendar connection document_type must be 'calendar_connection'.")
+    if document.get("provider") not in {"google"}:
+        raise DocumentValidationError("Calendar connection provider is invalid.")
+    if document.get("status") not in {"connected", "revoked", "error"}:
+        raise DocumentValidationError("Calendar connection status is invalid.")
+
+
 def validate_route(document: dict[str, Any]) -> None:
     require_fields(document, ["schema_version", "document_type", "tenant_id", "short_code", "target_type"])
     if document.get("document_type") != "route":
