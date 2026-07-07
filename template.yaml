@@ -1804,6 +1804,24 @@ Resources:
             Path: /ledger
             Method: GET
 
+  BookingFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${ProjectPrefix}-booking-api-${Environment}"
+      CodeUri: src/
+      Handler: handlers.booking.handler
+      Description: Public booking API (slot availability; reserve/checkout/manage in later Phase B steps).
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref ServicesTable
+      Events:
+        Availability:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /services/{service_id}/availability
+            Method: GET
+
   OrdersFunction:
     Type: AWS::Serverless::Function
     Properties:
