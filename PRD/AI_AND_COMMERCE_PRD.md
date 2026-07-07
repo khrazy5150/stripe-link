@@ -230,7 +230,9 @@ providers.
 
 ### Phase 5 — Commerce foundations
 
-**Goal.** Prepare the order and offer models for listicles, carts, and tax without a migration later.
+**Goal.** Prepare the order and offer models for listicles, carts, and tax without a migration later,
+and establish an **append-only transaction ledger** as the canonical financial record (P&L,
+reconciliation, tax reporting).
 
 **Scope.**
 - Promote `offer_type` to a validated field.
@@ -239,17 +241,32 @@ providers.
 - Reserve per-line `tax_amount` and order-level tax totals (default 0).
 - Add actual-fee true-up so Stripe fee reporting matches balance transactions (if not already shipped
   as the Phase 1 hygiene item).
+- Add `unit_cost` to the Product model (COGS capture) so profit is real, not aspirational.
+- Build the **transaction ledger** per **[`plans/TRANSACTION_LEDGER_STRIPE_LINK.md`](../plans/TRANSACTION_LEDGER_STRIPE_LINK.md)**:
+  an immutable `LedgerEntry` (sale/refund/dispute/shipping/cost) with additive signed amounts, made
+  the source of truth from which order payment aggregates and refund history are **derived**
+  (consolidating today's `RefundsTable` / `WebhookEventsTable` roles rather than adding a parallel
+  table). Direct-charge Connect economics kept explicit (tenant P&L vs platform application-fee
+  revenue); daily rollups for fast dashboards. Sequenced **on top of** the line-item model and the
+  fee true-up.
 
 **Functional requirements.**
 - Existing single-product orders continue to render and reconcile.
 - Each order line carries attribution data.
 - Tax data is representable even when tax collection is off.
 - Fee reconciliation uses actual Stripe values, not estimates, when available.
+- Every financial event (sale, refund, dispute, shipping/cost) appends an immutable, idempotent
+  ledger entry; order aggregates are derived from the ledger, not authored independently.
+- Reports (gross, net, fees, COGS, shipping, **profit**, tax-by-jurisdiction) come from the ledger /
+  rollups via date-range queries — never a full-partition scan.
 
 **Acceptance criteria.**
 - A legacy single-product order still works after the model change.
 - A line-item order can be stored and retrieved without loss of attribution.
 - Fee reporting can reconcile to balance-transaction actuals.
+- Replaying the ledger reproduces the order payment aggregates (ledger is authoritative; aggregates
+  are a rebuildable cache).
+- The same financial event recorded twice yields exactly one ledger entry (idempotency).
 
 ### Phase 6 — Listicle + buy-now
 
