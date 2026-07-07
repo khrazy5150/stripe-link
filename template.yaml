@@ -1851,6 +1851,12 @@ Resources:
             RestApiId: !Ref RestApi
             Path: /services/appointments/checkout
             Method: POST
+        BookingPage:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /book/{service}
+            Method: GET
 
   OrdersFunction:
     Type: AWS::Serverless::Function

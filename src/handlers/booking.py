@@ -14,6 +14,7 @@ from stripe_link.domain.documents import DocumentValidationError, validate_appoi
 from stripe_link.domain.fees import cached_billing_config, calculate_price, normalize_tier_id
 from stripe_link.domain.scheduling import available_slots
 from stripe_link.kms_secrets import KmsSecretCipher
+from stripe_link.runtime.booking_page import render_booking_page
 from stripe_link.repositories.documents import (
     RepositoryError,
     appointments_repository,
@@ -60,6 +61,8 @@ def handler(
 
     if method == "OPTIONS":
         return json_response({})
+    if path.startswith("/book/") and method == "GET":
+        return booking_page_route(event, services_repo)
     if "/appointments/reserve" in path and method == "POST":
         return reserve_route(event, repos, slot_locks_repo or slot_locks_repository())
     if "/appointments/checkout" in path and method == "POST":
@@ -291,6 +294,26 @@ def _iso_to_epoch(value):
         return int(_parse_iso(value).timestamp())
     except (ValueError, TypeError):
         return None
+
+
+def booking_page_route(event, services_repo):
+    service_id = path_params(event).get("service")
+    service = services_repo.find_by_id(service_id) if service_id else None
+    if not service or service.get("active") is False:
+        return _html_response("<!doctype html><meta charset=utf-8><title>Not available</title><p style=\"font-family:sans-serif;padding:2rem\">This service is not available for booking.</p>", status_code=404)
+    return _html_response(render_booking_page(service))
+
+
+def _html_response(html: str, status_code: int = 200):
+    return {
+        "statusCode": status_code,
+        "headers": {
+            "Content-Type": "text/html; charset=utf-8",
+            "Cache-Control": "no-store",
+            "Access-Control-Allow-Origin": "*",
+        },
+        "body": html,
+    }
 
 
 def availability_route(event, services_repo, availability_repo, fulfillers_repo, exceptions_repo, appointments_repo):
