@@ -36,6 +36,22 @@ Deferred, non-blocking follow-ups. Each item notes what, why it was deferred, an
 - **Why deferred:** the functional path works via the Configuration form; the wizard is a UX upgrade.
   Reference design written 2026-07-03, not yet built.
 
+## Production setup
+
+### Create a separate prod Google OAuth client (calendar)
+- **What:** Before enabling calendar sync in **prod**, create a *separate* Google OAuth 2.0 client
+  for production (option #2 — isolated credentials per environment), in the same Google Cloud project
+  / consent screen as dev.
+- **Steps:** (1) Google Cloud → Credentials → create a new OAuth client (Web application);
+  (2) add the prod redirect URI `https://prod.juniorbay.com/calendar/callback` to it;
+  (3) store its creds with `./deploy/google-oauth-secrets.sh prod` (client_id + client_secret only —
+  the refresh token is optional/test-only); (4) submit the app for **Google verification** (sensitive
+  scopes) before serving real tenants — has lead time, start early.
+- **Already handled:** the secret is per-env (`jb/google-oauth/prod`), the deploy auto-derives
+  `CalendarRedirectUri` from the prod API domain, and the CalendarFunction reads the prod secret.
+- **Why deferred:** dev calendar work is validated on the dev client; prod client is only needed when
+  calendar sync goes live in prod.
+
 ## Landing Pages / SEO
 
 ### Implement an on-page SEO checklist for landing pages
