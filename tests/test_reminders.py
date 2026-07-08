@@ -155,7 +155,7 @@ class SweepHandlerTests(unittest.TestCase):
             sent.append((to, body))
             return {"MessageId": "m9"}
 
-        result = reminders_handler({}, None, appointments_repo=appointments, tenant_repo=tenants, sms_send=fake_send, now_fn=lambda: START - 30 * 60)
+        result = reminders_handler({}, None, appointments_repo=appointments, tenant_repo=tenants, sms_send=fake_send, now_fn=lambda: START - 30 * 60, origination_configured=True)
         self.assertEqual(result, {"scanned": 1, "sent": 1, "failed": 0})
         self.assertEqual(sent[0][0], "+14155550123")
         self.assertIn("Acme", sent[0][1])
@@ -172,8 +172,8 @@ class SweepHandlerTests(unittest.TestCase):
             calls["n"] += 1
             return {"MessageId": "m9"}
 
-        reminders_handler({}, None, appointments_repo=appointments, tenant_repo=tenants, sms_send=fake_send, now_fn=lambda: START - 30 * 60)
-        second = reminders_handler({}, None, appointments_repo=appointments, tenant_repo=tenants, sms_send=fake_send, now_fn=lambda: START - 20 * 60)
+        reminders_handler({}, None, appointments_repo=appointments, tenant_repo=tenants, sms_send=fake_send, now_fn=lambda: START - 30 * 60, origination_configured=True)
+        second = reminders_handler({}, None, appointments_repo=appointments, tenant_repo=tenants, sms_send=fake_send, now_fn=lambda: START - 20 * 60, origination_configured=True)
         self.assertEqual(calls["n"], 1)
         self.assertEqual(second["sent"], 0)
 
@@ -184,11 +184,26 @@ class SweepHandlerTests(unittest.TestCase):
         def boom(*, to, body):
             raise SmsError("carrier down")
 
-        result = reminders_handler({}, None, appointments_repo=appointments, tenant_repo=tenants, sms_send=boom, now_fn=lambda: START - 30 * 60)
+        result = reminders_handler({}, None, appointments_repo=appointments, tenant_repo=tenants, sms_send=boom, now_fn=lambda: START - 30 * 60, origination_configured=True)
         self.assertEqual(result["failed"], 1)
         stored = appointments.get("t1", "appt_1")
         self.assertEqual(stored["reminders"][0]["status"], SCHEDULED)
         self.assertEqual(stored["reminders"][0]["attempts"], 1)
+
+    def test_sweep_skips_when_sms_unconfigured(self):
+        appt = appointment(reminders=[{"lead_minutes": 60, "channel": "sms", "status": SCHEDULED, "send_at": START - HOUR, "attempts": 0}])
+        appointments, tenants = self._repos(appt)
+        calls = {"n": 0}
+
+        def fake_send(*, to, body):
+            calls["n"] += 1
+            return {"MessageId": "m9"}
+
+        result = reminders_handler({}, None, appointments_repo=appointments, tenant_repo=tenants, sms_send=fake_send, now_fn=lambda: START - 30 * 60, origination_configured=False)
+        self.assertEqual(calls["n"], 0)
+        self.assertEqual(result["skipped"], "sms_not_configured")
+        # the scheduled reminder is untouched — not marked failed
+        self.assertEqual(appointments.get("t1", "appt_1")["reminders"][0]["status"], SCHEDULED)
 
 
 if __name__ == "__main__":

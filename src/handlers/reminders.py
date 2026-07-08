@@ -9,6 +9,7 @@ This is the sweep-based delivery model (simple, self-healing, fully testable aga
 fake). A per-booking EventBridge Scheduler one-shot is a future precision upgrade that
 reuses the same ``domain/reminders.py`` planning — see plans/TODO.md.
 """
+import os
 import time
 
 from stripe_link.domain.reminders import FAILED, SENT, due_reminders, mark_reminder, reminder_sms_text
@@ -20,7 +21,14 @@ from stripe_link.repositories.documents import (
 from stripe_link.sms import send_sms
 
 
-def handler(event, context, *, appointments_repo=None, tenant_repo=None, sms_send=None, now_fn=None):
+def handler(event, context, *, appointments_repo=None, tenant_repo=None, sms_send=None, now_fn=None, origination_configured=None):
+    # No origination number yet (10DLC pending) → do nothing rather than burn retry attempts
+    # and prematurely mark real reminders failed before live delivery is even possible.
+    if origination_configured is None:
+        origination_configured = bool(os.environ.get("SMS_ORIGINATION_IDENTITY"))
+    if not origination_configured:
+        return {"scanned": 0, "sent": 0, "failed": 0, "skipped": "sms_not_configured"}
+
     appointments_repo = appointments_repo or appointments_repository()
     tenant_repo = tenant_repo or tenant_profiles_repository()
     sms_send = sms_send or send_sms
