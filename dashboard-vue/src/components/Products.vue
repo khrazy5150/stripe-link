@@ -377,6 +377,7 @@
                   <span v-if="pricePreviewFor(price).compareAt" class="price-preview-compare">{{ pricePreviewFor(price).compareAt }}</span>
                   <span v-if="pricePreviewFor(price).discount" class="price-preview-discount">Save {{ pricePreviewFor(price).discount }}%</span>
                   <span v-if="pricePreviewFor(price).note" class="price-preview-note">{{ pricePreviewFor(price).note }}</span>
+                  <span v-if="pricePreviewFor(price).youKeep" class="price-preview-note">You keep {{ pricePreviewFor(price).youKeep }}</span>
                 </div>
               </div>
               <footer class="price-card-footer">
@@ -785,11 +786,17 @@ function pricePreviewFor(price) {
     ? Math.ceil((tenantAmount + 30) / (1 - 0.029 - platformRate))
     : tenantAmount;
   const discount = compareAt > unitAmount ? Math.max(1, Math.round((1 - unitAmount / compareAt) * 100)) : 0;
+  // For standard pricing, surface what the tenant nets (charge - Stripe fee - platform fee) so the
+  // net-guaranteed benefit is visible. Mirrors calculate_price's breakdown.net_payout rounding.
+  const stripeFee = unitAmount > 0 ? Math.ceil(unitAmount * 0.029) + 30 : 0;
+  const platformFee = Math.round(unitAmount * platformRate);
+  const netPayout = Math.max(0, unitAmount - stripeFee - platformFee);
   return {
     amount: formatMoney(unitAmount, price.currency),
     compareAt: compareAt > unitAmount ? formatMoney(compareAt, price.currency) : "",
     discount,
     note: price.fee_handling === "net_guaranteed" && tenantAmount ? `includes Stripe + ${Math.round(platformRate * 100)}% platform fee` : "",
+    youKeep: price.fee_handling !== "net_guaranteed" && tenantAmount ? formatMoney(netPayout, price.currency) : "",
   };
 }
 
