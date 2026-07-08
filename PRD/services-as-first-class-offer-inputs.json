@@ -1,0 +1,425 @@
+{
+  "project": {
+    "name": "services-as-first-class-offer-inputs",
+    "document_type": "implementation_spec",
+    "stack": {
+      "backend_language": "Python",
+      "cloud": "AWS",
+      "database": "DynamoDB",
+      "architecture": "serverless"
+    },
+    "scope": {
+      "phase": "phase_1_backend_only",
+      "includes": [
+        "data_model_changes",
+        "backend_api_changes",
+        "pricing_and_fee_engine_updates",
+        "booking_and_invoicing_workflow_logic",
+        "security_integrity_requirements",
+        "high_level_testing"
+      ],
+      "excludes": [
+        "landing_page_ui",
+        "dashboard_ui",
+        "customer_facing_frontend_changes"
+      ]
+    }
+  },
+  "project_intent": {
+    "goal": "Make services first-class sellable and bookable entities inside offers, replacing the linked_product workaround with a service-native model.",
+    "instructions_for_claude": [
+      "Treat this as a full implementation spec, not a brainstorm.",
+      "Use AWS-only infrastructure patterns and Python backend code.",
+      "Use DynamoDB for all persistent storage.",
+      "Keep the system serverless.",
+      "Implement only backend and data model changes in this phase.",
+      "Retire linked_product entirely: it already exists in this codebase (schema field), so remove its behavior rather than migrate it.",
+      "Preserve current behaviors unless this spec explicitly changes them.",
+      "Preserve the existing direct booking flow (/book/{service} reserve -> checkout -> pay) as a first-class entry point; migrate it to the shared pricing model.",
+      "Optimize for minimal ambiguity and implementation readiness."
+    ]
+  },
+  "architecture_principles": {
+    "source_of_truth": [
+      "Service is the source of truth for scheduling and service pricing.",
+      "Offer is the source of truth for what the customer sees and buys.",
+      "Appointment is the source of truth for booking state.",
+      "Invoice is the source of truth for book-then-pay payment collection."
+    ],
+    "design_constraints": [
+      "Re-use the shared Price primitive.",
+      "Support mixed offers containing products and services.",
+      "Do not create service-specific pricing logic outside the shared pricing model.",
+      "Keep booking and invoicing decoupled but linkable through IDs and metadata."
+    ]
+  },
+  "epics": [
+    {
+      "id": "EPIC-1",
+      "name": "Service Data Model",
+      "objective": "Refactor service storage to use shared pricing objects and support first-class offer inclusion.",
+      "stories": [
+        {
+          "id": "STORY-1.1",
+          "name": "Migrate service pricing to prices[]",
+          "description": "Represent service pricing using the shared Price primitive with default_price_id as the selector.",
+          "acceptance_criteria": [
+            "Service stores prices[] instead of only a single price.",
+            "default_price_id points to a valid price in prices[].",
+            "Existing services with a legacy single price are migrated: on read, a lazy adapter synthesizes prices[] and default_price_id from the legacy price so all consumers see the new shape even for un-migrated documents; the migrated shape is written forward on the next save.",
+            "Legacy price may be read only through that back-compat adapter.",
+            "Service pricing supports standard, sale, and flash_sale contexts (upsell/order_bump/downsell are funnel-only and excluded for services).",
+            "Service pricing supports standard and net_guaranteed fee handling.",
+            "pricing_model is one_time for services in this phase; recurring and customer_chooses are out of scope."
+          ],
+          "implementation_notes": [
+            "Keep price schema identical to the shared primitive.",
+            "Do not add service-only pricing fields that duplicate shared Price fields.",
+            "Provide the read adapter so appointment/checkout/invoice code paths never branch on legacy vs migrated service documents."
+          ]
+        },
+        {
+          "id": "STORY-1.2",
+          "name": "Add booking_flow to service",
+          "description": "Store a service default booking flow to drive checkout and scheduling behavior.",
+          "acceptance_criteria": [
+            "Each service has a booking_flow value.",
+            "Allowed values are book_then_pay and pay_then_book.",
+            "The backend can override service default booking_flow at the offer item level."
+          ],
+          "implementation_notes": [
+            "Use this as the default behavior only; offer items may override it."
+          ]
+        }
+      ]
+    },
+    {
+      "id": "EPIC-2",
+      "name": "Offer Item Expansion",
+      "objective": "Allow offers to include services as first-class sellable items.",
+      "stories": [
+        {
+          "id": "STORY-2.1",
+          "name": "Support service_id offer items",
+          "description": "Extend offer item schema so an item can reference either a product or a service.",
+          "acceptance_criteria": [
+            "Offer items support product_id or service_id.",
+            "Exactly one of product_id or service_id is required per item.",
+            "Service items reference a service price_id from Service.prices[] via the fixed price_id path only; selectable_prices (packages) for services are out of scope for this phase.",
+            "Service items must share the offer's product_intent=transaction and stripe_mode, consistent with existing offer invariants.",
+            "Offer resolution returns a uniform resolved shape for both products and services."
+          ],
+          "implementation_notes": [
+            "Retire linked_product behavior entirely.",
+            "Maintain compatibility with existing product offer behavior.",
+            "Extend the existing oneOf on offer items rather than replacing it."
+          ]
+        },
+        {
+          "id": "STORY-2.2",
+          "name": "Support per-item booking flow override",
+          "description": "Allow each service item in an offer to override the service default booking flow.",
+          "acceptance_criteria": [
+            "Offer service items may specify booking_flow.",
+            "Allowed values are book_then_pay and pay_then_book.",
+            "If omitted, service default booking_flow is used."
+          ],
+          "implementation_notes": [
+            "This enables the same service to be sold differently on different offers."
+          ]
+        }
+      ]
+    },
+    {
+      "id": "EPIC-3",
+      "name": "Appointment Linkage",
+      "objective": "Attach booking, offer, invoice, and page attribution to appointments.",
+      "stories": [
+        {
+          "id": "STORY-3.1",
+          "name": "Add appointment source metadata",
+          "description": "Persist source attribution and related object IDs on appointments.",
+          "acceptance_criteria": [
+            "Appointment stores order_id.",
+            "Appointment stores offer_id.",
+            "Appointment stores invoice_id.",
+            "Appointment stores page_id.",
+            "Appointment stores source with allowed values booking_page, offer, and invoice."
+          ],
+          "implementation_notes": [
+            "Use these fields for reconciliation, analytics, and workflow routing."
+          ]
+        },
+        {
+          "id": "STORY-3.2",
+          "name": "Add awaiting_schedule flag",
+          "description": "Represent a paid but unscheduled appointment cleanly.",
+          "acceptance_criteria": [
+            "Appointment can exist with awaiting_schedule=true.",
+            "When awaiting_schedule=true, starts_at, ends_at, and timezone are optional/nullable and are populated at scheduling time.",
+            "Appointment transitions out of awaiting_schedule after scheduling.",
+            "Booked appointment state remains supported."
+          ],
+          "implementation_notes": [
+            "Prefer a flag over introducing a new paid-but-unscheduled status.",
+            "Relax the Appointment schema and validate_appointment required fields so a paid-but-unscheduled appointment validates without a time; re-require them once scheduled."
+          ]
+        }
+      ]
+    },
+    {
+      "id": "EPIC-4",
+      "name": "Pricing and Fees",
+      "objective": "Ensure services use the shared pricing and fee logic correctly.",
+      "stories": [
+        {
+          "id": "STORY-4.1",
+          "name": "Resolve service pricing through shared pricing engine",
+          "description": "Use the existing pricing engine for services without bespoke logic.",
+          "acceptance_criteria": [
+            "Service pricing resolves through the shared Price primitive.",
+            "Service items route to a defined platform fee rate; they must not silently fall through to the digital class by accident.",
+            "Fee handling supports standard and net_guaranteed.",
+            "compare_at and context values are honored."
+          ],
+          "implementation_notes": [
+            "Known behavior: fee_class_for() currently returns 'digital' for any non-physical/non-tip_jar product_type, and the default billing config has no 'service' tier. So passing product_type='service' alone yields the digital rate.",
+            "Choose one and document it: (a) explicitly reuse the digital fee class for services (drop the 'service class' language), or (b) add a 'service' branch to fee_class_for AND 'service' rates under platform_fees.tiers for every plan.",
+            "Do not fork the pricing engine."
+          ]
+        }
+      ]
+    },
+    {
+      "id": "EPIC-5",
+      "name": "Booking and Invoicing Workflows",
+      "objective": "Support pay-then-book, book-then-pay, and standalone invoicing through backend logic.",
+      "stories": [
+        {
+          "id": "STORY-5.1",
+          "name": "Implement pay-then-book workflow",
+          "description": "Allow a customer to pay first and schedule afterward.",
+          "acceptance_criteria": [
+            "Checkout completion creates an order and an appointment.",
+            "The appointment is marked payment_status=paid.",
+            "The appointment is marked awaiting_schedule=true.",
+            "Appointment creation is idempotent on the checkout session / payment_intent (deterministic appointment_id or existence check), so a duplicate or redelivered session cannot create two appointments.",
+            "Customer can later schedule the appointment using the manage-token protected flow."
+          ],
+          "implementation_notes": [
+            "Make the scheduling step idempotent.",
+            "Do not require invoice creation in this flow."
+          ]
+        },
+        {
+          "id": "STORY-5.2",
+          "name": "Implement book-then-pay workflow",
+          "description": "Allow a customer to book first and pay later through invoicing.",
+          "acceptance_criteria": [
+            "Appointment can be created with status booked and payment_status=unpaid.",
+            "Invoice can be created from the appointment.",
+            "Invoice source links back to appointment_id.",
+            "invoice.paid updates appointment payment_status to paid.",
+            "The unpaid-booked lifecycle is defined: state whether/when an unpaid booked appointment expires or auto-cancels and whether it holds the slot until paid. Default: it holds the slot and does not auto-expire; a tenant policy may override."
+          ],
+          "implementation_notes": [
+            "Invoice sending must be configurable.",
+            "Default behavior may be one-click send, but not hard-coded."
+          ]
+        },
+        {
+          "id": "STORY-5.3",
+          "name": "Preserve standalone invoicing",
+          "description": "Keep invoice creation and payment available without offers or landing pages.",
+          "acceptance_criteria": [
+            "Tenant can create a standalone invoice without an offer.",
+            "Tenant can create a standalone invoice without a page.",
+            "Standalone invoicing still supports service lines."
+          ],
+          "implementation_notes": [
+            "Treat this as a first-class supported path, not a fallback."
+          ]
+        },
+        {
+          "id": "STORY-5.4",
+          "name": "Define mixed product + service offer behavior",
+          "description": "Support (or explicitly restrict) offers that contain both products and services in one checkout.",
+          "acceptance_criteria": [
+            "A single checkout may contain product lines and service lines.",
+            "Each service line produces its own appointment following that item's resolved booking_flow.",
+            "Product lines are fulfilled through existing product fulfillment with no scheduling.",
+            "One payment covers the whole cart; scheduling for pay_then_book service lines happens after payment.",
+            "If full mixed-cart support is deferred, mixed offers are rejected at validation time rather than silently mishandled."
+          ],
+          "implementation_notes": [
+            "Reuse the existing single-offer checkout; do not introduce a new cart primitive in this phase."
+          ]
+        },
+        {
+          "id": "STORY-5.5",
+          "name": "Preserve the direct booking (schedule-then-pay) flow",
+          "description": "Keep the existing /book/{service} reserve -> checkout -> pay flow working and migrate it to shared pricing.",
+          "acceptance_criteria": [
+            "The existing schedule-then-pay booking flow continues to function unchanged in behavior.",
+            "It resolves price via prices[]/default_price_id (through the legacy read adapter) instead of the single legacy price.",
+            "It honors fee_handling (standard and net_guaranteed) from the resolved price, delivering net-guaranteed on the direct booking path."
+          ],
+          "implementation_notes": [
+            "This is the third entry point alongside offer-driven and standalone-invoice; do not remove it."
+          ]
+        }
+      ]
+    },
+    {
+      "id": "EPIC-6",
+      "name": "Backend API and Event Handling",
+      "objective": "Expose the endpoints and event handlers needed to support the new service flows.",
+      "stories": [
+        {
+          "id": "STORY-6.1",
+          "name": "Update checkout session creation",
+          "description": "Create checkout sessions from service offer items and include booking metadata.",
+          "acceptance_criteria": [
+            "Checkout builder resolves service items correctly.",
+            "Checkout metadata includes service_id, booking_flow, offer_id, and page_id.",
+            "Service purchase flow follows the selected booking timing."
+          ],
+          "implementation_notes": [
+            "Do not allow service-offer checkout to bypass required metadata."
+          ]
+        },
+        {
+          "id": "STORY-6.2",
+          "name": "Update webhook handling",
+          "description": "Process paid sessions and invoice events for service flows safely.",
+          "acceptance_criteria": [
+            "checkout.completed creates order and appointment for pay-then-book.",
+            "invoice.paid updates appointment payment status for book-then-pay.",
+            "Webhook processing is idempotent.",
+            "Duplicate webhook events do not create duplicate side effects."
+          ],
+          "implementation_notes": [
+            "Use existing webhook event tracking or equivalent idempotency storage."
+          ]
+        },
+        {
+          "id": "STORY-6.3",
+          "name": "Update booking endpoints",
+          "description": "Allow scheduling of purchased appointments.",
+          "acceptance_criteria": [
+            "Booking endpoints can schedule an awaiting_schedule appointment.",
+            "Scheduling re-validates live availability and claims the slot via the existing slot-lock mechanism before committing, preventing double-booking of a taken slot.",
+            "Scheduling clears awaiting_schedule.",
+            "Scheduling sets starts_at and ends_at.",
+            "For pay_then_book appointments, the compensation snapshot (rule_snapshot) is taken at scheduling time from the chosen fulfiller, not at purchase time."
+          ],
+          "implementation_notes": [
+            "Require manage-token authorization.",
+            "Reuse the existing available_slots + SlotLockRepository conditional-claim path used by reserve; do not add a parallel availability check."
+          ]
+        },
+        {
+          "id": "STORY-6.4",
+          "name": "Update invoice endpoints",
+          "description": "Support invoice creation from appointments.",
+          "acceptance_criteria": [
+            "Invoice can be generated from an appointment.",
+            "Invoice retains source relationship to appointment.",
+            "Invoice can be sent according to configuration."
+          ],
+          "implementation_notes": [
+            "Support explicit send and auto-send modes if already part of platform behavior."
+          ]
+        }
+      ]
+    },
+    {
+      "id": "EPIC-7",
+      "name": "Security and Integrity",
+      "objective": "Ensure the new service model remains isolated, safe, and tenant-correct.",
+      "stories": [
+        {
+          "id": "STORY-7.1",
+          "name": "Enforce environment isolation",
+          "description": "Keep test and live data fully separated.",
+          "acceptance_criteria": [
+            "Offers, services, appointments, invoices, and checkout sessions remain partitioned by mode.",
+            "Test-mode records cannot leak into live mode or vice versa."
+          ]
+        },
+        {
+          "id": "STORY-7.2",
+          "name": "Enforce authorization and token gating",
+          "description": "Protect scheduling and other sensitive mutations.",
+          "acceptance_criteria": [
+            "Scheduling purchased appointments requires valid manage-token authorization.",
+            "Tenant-aware access controls apply to all backend mutations.",
+            "IAM permissions are least privilege."
+          ]
+        }
+      ]
+    }
+  ],
+  "acceptance_criteria": {
+    "system_level": [
+      "A service can be sold through an offer as a first-class item.",
+      "A service can be booked and paid through both book-then-pay and pay-then-book flows.",
+      "The direct booking (schedule-then-pay) flow still works and uses the shared pricing model, including net_guaranteed.",
+      "Standalone invoicing still works without offers or landing pages.",
+      "Pricing uses the shared Price primitive everywhere.",
+      "Legacy single-price services resolve through the prices[] read adapter without breaking any consumer.",
+      "linked_product is no longer part of the implementation.",
+      "The backend remains serverless on AWS with DynamoDB as the database.",
+      "Webhook and booking operations are idempotent and secure."
+    ]
+  },
+  "testing": {
+    "high_level_success_tests": [
+      "Offer resolution returns the correct service price and service name.",
+      "Mixed product and service offers resolve correctly.",
+      "Service pricing applies fee logic correctly in both standard and net_guaranteed modes.",
+      "pay_then_book creates a paid appointment with awaiting_schedule=true and allows later scheduling.",
+      "Scheduling a purchased appointment re-checks availability and cannot double-book a slot already taken by another appointment.",
+      "book_then_pay creates an unpaid booked appointment and marks it paid after invoice payment.",
+      "The direct schedule-then-pay booking flow works and applies net_guaranteed pricing from prices[].",
+      "Legacy single-price services resolve correctly via the prices[] read adapter.",
+      "Mixed product+service offers either resolve and check out correctly or are explicitly rejected at validation.",
+      "Standalone invoice creation works without an offer or page.",
+      "Duplicate webhook events do not create duplicate records or state transitions."
+    ]
+  },
+  "nonfunctional_requirements": {
+    "security": [
+      "Apply tenant-aware authorization on all backend mutations.",
+      "Use least-privilege IAM for AWS resources.",
+      "Gate purchase scheduling with manage tokens.",
+      "Separate test and live data absolutely."
+    ],
+    "reliability": [
+      "All payment-triggered and booking-triggered handlers must be idempotent.",
+      "Do not rely on UI behavior for correctness."
+    ],
+    "maintainability": [
+      "Keep pricing, booking, and invoicing logic modular.",
+      "Prefer shared primitives and shared handlers over duplicated service-specific logic."
+    ]
+  },
+  "phase_plan": {
+    "phase_1_backend_only": [
+      "Service schema refactor (prices[] + legacy-price read adapter/migration)",
+      "Offer item schema expansion",
+      "Appointment linkage + awaiting_schedule schema relaxation",
+      "Pricing and fee logic updates (service fee-class decision)",
+      "Direct booking flow migration to shared pricing",
+      "Checkout and webhook backend updates (idempotent appointment creation)",
+      "Booking and invoice endpoint updates (schedule with availability re-check + slot lock)",
+      "Security and integrity controls",
+      "High-level testing"
+    ],
+    "phase_2_ui": [
+      "Landing page renderer changes",
+      "Dashboard service and offer editors",
+      "Customer-facing booking and invoice UX updates"
+    ]
+  }
+}
