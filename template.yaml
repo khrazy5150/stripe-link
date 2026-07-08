@@ -1908,6 +1908,24 @@ Resources:
             RestApiId: !Ref RestApi
             Path: /calendar/connection
             Method: DELETE
+        ConnectionsList:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /calendar/connections
+            Method: GET
+        ConnectionUpdate:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /calendar/connections/{connection_id}
+            Method: PATCH
+        ConnectionDelete:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /calendar/connections/{connection_id}
+            Method: DELETE
 
   BookingFunction:
     Type: AWS::Serverless::Function

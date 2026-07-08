@@ -894,6 +894,63 @@ main {
   color: #92400e;
 }
 
+.product-status.connected,
+.product-status.default {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.product-status.error {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.calendar-connection-list {
+  list-style: none;
+  margin: 0 0 1rem;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.calendar-connection {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+  border: 1px solid var(--line, #e5e7eb);
+  border-radius: 10px;
+  padding: 0.85rem 1rem;
+}
+
+.calendar-connection-main {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.calendar-connection-email {
+  width: 100%;
+  margin: 0.2rem 0 0;
+  color: var(--muted, #6b7280);
+  font-size: 1.3rem;
+}
+
+.calendar-connection-actions {
+  display: flex;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+
+.calendar-waiting {
+  color: var(--muted, #6b7280);
+  font-style: italic;
+  margin-top: 0.75rem;
+}
+
 .product-card-price {
   display: flex;
   flex-wrap: wrap;

@@ -54,7 +54,7 @@ def sync(appointment, action, opener):
 class SyncAppointmentEventTests(unittest.TestCase):
     def test_upsert_creates_event(self):
         events = sync(APPOINTMENT, "upsert", _FakeOpener({"access_token": "ya29"}, {"id": "evt_1"}))
-        self.assertEqual(events, [{"provider": "google", "calendar_id": "me@gmail.com", "event_id": "evt_1"}])
+        self.assertEqual(events, [{"provider": "google", "connection_id": "google", "calendar_id": "me@gmail.com", "event_id": "evt_1"}])
 
     def test_upsert_updates_existing_event(self):
         appt = {**APPOINTMENT, "external_calendar_events": [{"provider": "google", "calendar_id": "me@gmail.com", "event_id": "evt_1"}]}
