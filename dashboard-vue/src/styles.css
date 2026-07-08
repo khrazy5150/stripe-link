@@ -5249,6 +5249,16 @@ button:disabled {
   color: #b45309;
 }
 
+.quick-add-fulfiller {
+  border: 1px dashed var(--line, #e5e7eb);
+  border-radius: 10px;
+  padding: 1.2rem;
+  margin-top: 0.6rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
 .services-form-actions {
   justify-content: flex-end;
   margin-top: 1.2rem;

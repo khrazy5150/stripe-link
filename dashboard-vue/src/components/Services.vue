@@ -136,10 +136,8 @@
                 <p>If you intend to fulfill the work yourself, leave this blank. Otherwise, you can assign which fulfillers can perform this service, with an optional per-service compensation override.</p>
               </div>
             </header>
-            <p v-if="!assignableFulfillers.length && !form.allowed_fulfillers.length" class="services-hint">
-              No staff to assign yet. Add staff in the <strong>Fulfillers</strong> section below, then assign them here.
-            </p>
-            <template v-else>
+            <!-- Assign an existing fulfiller (staff already created). -->
+            <template v-if="assignableFulfillers.length">
               <div class="offer-three-column">
                 <label class="offer-field">
                   <span>Fulfiller</span>
@@ -163,10 +161,41 @@
               </div>
               <label class="checkbox-row offer-checkbox-inline"><input v-model="allowedForm.tips_to_fulfiller" type="checkbox" /><span>Tips go to fulfiller</span></label>
               <div class="button-row services-form-actions">
-                <span class="services-hint" style="margin:0">Staff come from the Fulfillers section below.</span>
                 <button type="button" class="secondary-action" :disabled="!allowedForm.fulfiller_id" @click="addAllowedFulfiller">Assign fulfiller</button>
               </div>
             </template>
+            <p v-else-if="!form.allowed_fulfillers.length" class="services-hint">No staff yet — add one below.</p>
+
+            <!-- Create a brand-new fulfiller without leaving this modal. -->
+            <div v-if="!showAddFulfiller" class="button-row services-form-actions">
+              <button type="button" class="secondary-action" @click="openAddFulfiller">+ Add a fulfiller</button>
+            </div>
+            <div v-else class="quick-add-fulfiller">
+              <div class="offer-two-column">
+                <label class="offer-field"><span>First Name</span><input v-model.trim="newFulfiller.first_name" type="text" placeholder="Mary" /></label>
+                <label class="offer-field"><span>Last Name</span><input v-model.trim="newFulfiller.last_name" type="text" placeholder="Therapist" /></label>
+              </div>
+              <div class="offer-three-column">
+                <label class="offer-field"><span>Email <strong>*</strong></span><input v-model.trim="newFulfiller.email" type="email" placeholder="mary@example.com" /></label>
+                <label class="offer-field">
+                  <span>Compensation Type</span>
+                  <select v-model="newFulfiller.compensation_type">
+                    <option value="flat_fee">Flat Fee</option>
+                    <option value="percent">Percent</option>
+                    <option value="hourly">Hourly</option>
+                  </select>
+                </label>
+                <label class="offer-field"><span>Compensation Amount</span><input v-model.number="newFulfiller.compensation_amount" type="number" min="0" step="0.01" /></label>
+              </div>
+              <p v-if="addFulfillerError" class="services-hint warning">{{ addFulfillerError }}</p>
+              <div class="button-row services-form-actions">
+                <button type="button" class="secondary-action" @click="showAddFulfiller = false">Cancel</button>
+                <button type="button" class="primary-action" :disabled="fulfillers.saving" @click="createFulfiller">
+                  {{ fulfillers.saving ? "Adding…" : "Add fulfiller" }}
+                </button>
+              </div>
+            </div>
+
             <table v-if="form.allowed_fulfillers.length" class="dashboard-table services-table">
               <thead><tr><th>Fulfiller</th><th>Compensation</th><th>Tips</th><th>Enabled</th><th></th></tr></thead>
               <tbody>
@@ -331,6 +360,9 @@ const selectedService = ref(null);
 const formError = ref("");
 const form = ref(defaultServiceForm());
 const allowedForm = ref(defaultAllowedForm());
+const showAddFulfiller = ref(false);
+const newFulfiller = ref(defaultNewFulfiller());
+const addFulfillerError = ref("");
 const heroFileInput = ref(null);
 const heroUploading = ref(false);
 const heroUploadError = ref("");
@@ -362,6 +394,42 @@ const serviceFulfillerOptions = computed(() => {
 
 function defaultAllowedForm() {
   return { fulfiller_id: "", override_type: "use_fulfiller_default", override_amount: 0, tips_to_fulfiller: true };
+}
+
+function defaultNewFulfiller() {
+  return { first_name: "", last_name: "", email: "", compensation_type: "flat_fee", compensation_amount: 0 };
+}
+
+function openAddFulfiller() {
+  newFulfiller.value = defaultNewFulfiller();
+  addFulfillerError.value = "";
+  showAddFulfiller.value = true;
+}
+
+// Create a new staff member without leaving the modal, then assign them to this service.
+async function createFulfiller() {
+  addFulfillerError.value = "";
+  if (!String(newFulfiller.value.email || "").trim()) {
+    addFulfillerError.value = "Email is required.";
+    return;
+  }
+  try {
+    const created = await fulfillers.saveFulfiller({
+      first_name: newFulfiller.value.first_name,
+      last_name: newFulfiller.value.last_name,
+      email: newFulfiller.value.email,
+      compensation_type: newFulfiller.value.compensation_type,
+      compensation_amount: newFulfiller.value.compensation_amount,
+      tips_to_fulfiller: true,
+    });
+    if (created?.fulfiller_id && !form.value.allowed_fulfillers.some((r) => r.fulfiller_id === created.fulfiller_id)) {
+      form.value.allowed_fulfillers.push({ fulfiller_id: created.fulfiller_id, enabled: true, tips_to_fulfiller: true, compensation_override: { type: "use_fulfiller_default" } });
+    }
+    showAddFulfiller.value = false;
+    newFulfiller.value = defaultNewFulfiller();
+  } catch {
+    addFulfillerError.value = fulfillers.error || "Could not add the fulfiller.";
+  }
 }
 
 function fulfillerName(id) {
@@ -426,10 +494,18 @@ function defaultServiceForm() {
   };
 }
 
+function resetFulfillerForms() {
+  allowedForm.value = defaultAllowedForm();
+  newFulfiller.value = defaultNewFulfiller();
+  showAddFulfiller.value = false;
+  addFulfillerError.value = "";
+}
+
 function openCreateModal() {
   editingService.value = null;
   form.value = defaultServiceForm();
   formError.value = "";
+  resetFulfillerForms();
   showServiceModal.value = true;
 }
 
@@ -437,6 +513,7 @@ function openEditModal(service) {
   editingService.value = service;
   form.value = formFromService(service);
   formError.value = "";
+  resetFulfillerForms();
   showServiceModal.value = true;
 }
 

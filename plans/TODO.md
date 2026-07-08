@@ -4,6 +4,11 @@ Deferred, non-blocking follow-ups. Each item notes what, why it was deferred, an
 
 ## Services / Booking
 
+### Consider adding a wizard for the services page
+- Idea only — not planned yet. The Create Service flow is dense; a guided wizard (Basics → Pricing
+  → "fulfill yourself or delegate?" → conditional staff/calendar/check-in steps) could simplify it
+  for tenants. Monitoring whether it's worth building; revisit later.
+
 ### Re-snapshot compensation on admin reassign
 - **What:** When an admin reassigns an appointment to a different fulfiller via the lifecycle
   `assign` action, the appointment's `rule_snapshot` (frozen compensation) is **not** recomputed, so
