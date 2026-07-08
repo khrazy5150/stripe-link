@@ -137,5 +137,53 @@ class SendInvoiceHandlerTests(unittest.TestCase):
         self.assertEqual(json.loads(response["body"])["error"], "stripe_not_configured")
 
 
+class InvoiceWebhookTests(unittest.TestCase):
+    def _invoice_event(self, event_type, *, payment_intent="pi_1", amount_paid=15000):
+        return {"type": event_type, "data": {"object": {
+            "metadata": {"invoice_id": "inv_1", "tenant_id": "t1", "product_type": "digital", "tenant_plan": "basic"},
+            "payment_intent": payment_intent, "amount_paid": amount_paid, "currency": "usd",
+            "hosted_invoice_url": "https://pay.stripe.com/x",
+        }}}
+
+    def test_paid_updates_status_ledger_and_notification(self):
+        from handlers.stripe_webhook import persist_invoice_event
+        from tests.test_ledger import FakeLedgerRepository
+
+        invoices = FakeDocumentRepository("invoice_id")
+        invoices.put({**INVOICE, "status": "open"})
+        ledger = FakeLedgerRepository()
+        notifications = FakeDocumentRepository("notification_id")
+        result = persist_invoice_event(self._invoice_event("invoice.paid"), tenant_id="t1", event_type="invoice.paid",
+                                       mode="test", invoices_repo=invoices, ledger_repo=ledger, notifications_repo=notifications,
+                                       billing_config_loader=lambda: {}, now_fn=lambda: 1000)
+        self.assertEqual(result["status"], "paid")
+        self.assertTrue(result["ledger_entry"])
+        stored = invoices.get("t1", "inv_1")
+        self.assertEqual(stored["status"], "paid")
+        self.assertEqual(stored["payment"]["paid_at"], 1000)
+        entries = ledger.list_for_order("inv_1")
+        self.assertEqual(len(entries), 1)
+        self.assertEqual(entries[0]["amounts"]["gross"], 15000)
+        self.assertEqual(len(notifications.list_for_tenant("t1")), 1)
+
+    def test_voided_sets_status(self):
+        from handlers.stripe_webhook import persist_invoice_event
+
+        invoices = FakeDocumentRepository("invoice_id")
+        invoices.put({**INVOICE, "status": "open"})
+        result = persist_invoice_event(self._invoice_event("invoice.voided"), tenant_id="t1", event_type="invoice.voided",
+                                       mode="test", invoices_repo=invoices, now_fn=lambda: 1000)
+        self.assertEqual(result["status"], "void")
+        self.assertEqual(invoices.get("t1", "inv_1")["status"], "void")
+
+    def test_untracked_invoice_skipped(self):
+        from handlers.stripe_webhook import persist_invoice_event
+
+        event = {"type": "invoice.paid", "data": {"object": {"metadata": {}}}}
+        result = persist_invoice_event(event, tenant_id="t1", event_type="invoice.paid", mode="test",
+                                       invoices_repo=FakeDocumentRepository("invoice_id"))
+        self.assertEqual(result["status"], "skipped")
+
+
 if __name__ == "__main__":
     unittest.main()

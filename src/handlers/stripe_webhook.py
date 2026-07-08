@@ -201,6 +201,12 @@ def handler(
                 receipt_mailer=receipt_mailer,
                 email_context_loader=email_context_loader,
             )
+    elif event_type and event_type.startswith("invoice.") and tenant_id:
+        persistence = persist_invoice_event(
+            stripe_event, tenant_id=tenant_id, event_type=event_type, mode=mode,
+            invoices_repo=invoices_repo, notifications_repo=notifications_repo,
+            now_fn=now_fn, billing_config_loader=billing_config_loader,
+        )
 
     if event_id and events_repo:
         try:
@@ -399,6 +405,112 @@ def appointment_notification(appointment: dict[str, Any], tenant_id: str, now: i
         "sort_priority": 100,
         "related": {"appointment_id": appointment.get("appointment_id", "")},
         "action": {"label": "View appointments", "route": "services"},
+        "created_at": int(now),
+        "read_at": None,
+        "archived_at": None,
+    }
+
+
+INVOICE_EVENT_STATUS = {
+    "invoice.paid": "paid",
+    "invoice.payment_succeeded": "paid",
+    "invoice.finalized": "open",
+    "invoice.payment_failed": "open",
+    "invoice.voided": "void",
+    "invoice.marked_uncollectible": "uncollectible",
+}
+
+
+def persist_invoice_event(
+    stripe_event: dict[str, Any],
+    *,
+    tenant_id: str,
+    event_type: str,
+    mode: str,
+    invoices_repo=None,
+    ledger_repo=None,
+    notifications_repo=None,
+    billing_config_loader: Callable[[], dict[str, Any]] | None = None,
+    now_fn: Callable[[], int] = lambda: int(time.time()),
+) -> dict[str, Any]:
+    """Sync a Stripe invoice.* event onto our Invoice doc; on paid, append a sale ledger entry and
+    emit a notification. Only invoices we created (metadata.invoice_id) are tracked."""
+    new_status = INVOICE_EVENT_STATUS.get(event_type)
+    if not new_status:
+        return {"status": "ignored", "event": event_type}
+    stripe_invoice = _event_data_object(stripe_event)
+    metadata = stripe_invoice.get("metadata") if isinstance(stripe_invoice.get("metadata"), dict) else {}
+    invoice_id = str(metadata.get("invoice_id") or "").strip()
+    if not invoice_id:
+        return {"status": "skipped", "reason": "not_a_tracked_invoice"}
+
+    invoices_repo = invoices_repo or (invoices_repository() if os.environ.get("INVOICES_TABLE") else None)
+    if not invoices_repo:
+        return {"status": "skipped", "reason": "invoices_repo_unavailable"}
+    invoice = invoices_repo.get(tenant_id, invoice_id)
+    if not invoice:
+        return {"status": "skipped", "reason": "invoice_not_found"}
+
+    now = int(now_fn())
+    payment = dict(invoice.get("payment") or {})
+    if stripe_invoice.get("hosted_invoice_url"):
+        payment["hosted_invoice_url"] = stripe_invoice["hosted_invoice_url"]
+    if stripe_invoice.get("invoice_pdf"):
+        payment["invoice_pdf_url"] = stripe_invoice["invoice_pdf"]
+    payment_intent = str(stripe_invoice.get("payment_intent") or "").strip()
+    if payment_intent:
+        payment["payment_intent_id"] = payment_intent
+
+    ledger_written = False
+    if new_status == "paid":
+        payment["paid_at"] = now
+        amount_paid = int(stripe_invoice.get("amount_paid") or 0)
+        currency = str(stripe_invoice.get("currency") or (invoice.get("amounts") or {}).get("currency") or "usd")
+        ledger_repo = ledger_repo or (ledger_repository() if os.environ.get("LEDGER_TABLE") else None)
+        if ledger_repo and amount_paid and payment_intent:
+            try:
+                fees = fee_breakdown_from_session({"amount_total": amount_paid, "currency": currency, "metadata": metadata}, billing_config_loader)
+                ledger_repo.append(sale_entry(
+                    tenant_id=tenant_id, entry_id=f"le_sale_{payment_intent}", occurred_at=now, mode=mode, currency=currency,
+                    gross=amount_paid, stripe_fee=int(fees.get("stripe_fee") or 0), platform_fee=int(fees.get("platform_fee") or 0),
+                    idempotency_key=f"sale:{payment_intent}", order_id=invoice_id,
+                    customer=invoice.get("customer") if isinstance(invoice.get("customer"), dict) else None,
+                    stripe={"payment_intent_id": payment_intent}, source="webhook", description=f"Invoice {invoice_id}", now_epoch=now,
+                ))
+                ledger_written = True
+            except Exception:  # noqa: BLE001
+                pass
+
+    updated = {**invoice, "status": new_status, "payment": payment, "updated_at": now}
+    if new_status in {"void"}:
+        updated["voided_at"] = now
+    invoices_repo.put(updated)
+
+    if new_status == "paid" and notifications_repo:
+        try:
+            notifications_repo.put(invoice_paid_notification(updated, tenant_id, now))
+        except Exception:  # noqa: BLE001
+            pass
+
+    return {"status": new_status, "invoice_id": invoice_id, "ledger_entry": ledger_written}
+
+
+def invoice_paid_notification(invoice: dict[str, Any], tenant_id: str, now: int) -> dict[str, Any]:
+    customer = invoice.get("customer") or {}
+    who = customer.get("name") or customer.get("email") or "A customer"
+    return {
+        "schema_version": "2026-05-29",
+        "document_type": "notification",
+        "tenant_id": tenant_id,
+        "notification_id": f"notif_invpaid_{invoice.get('invoice_id', '')}",
+        "type": "paid_invoice",
+        "severity": "success",
+        "title": "Invoice paid",
+        "message": f"{who} paid invoice {invoice.get('invoice_id', '')}.",
+        "status": "unread",
+        "sort_priority": 100,
+        "related": {"invoice_id": invoice.get("invoice_id", "")},
+        "action": {"label": "View invoices", "route": "invoices"},
         "created_at": int(now),
         "read_at": None,
         "archived_at": None,
