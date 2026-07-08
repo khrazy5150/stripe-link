@@ -1784,10 +1784,35 @@ Resources:
       FunctionName: !Sub "${ProjectPrefix}-invoices-api-${Environment}"
       CodeUri: src/
       Handler: handlers.invoices.handler
-      Description: Service and custom invoice API.
+      Description: Service and custom invoice API (create, list, and finalize+send via Stripe Invoicing).
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref InvoicesTable
+        - DynamoDBReadPolicy:
+            TableName: !Sub "${ProjectPrefix}-stripe-keys-dev"
+        - DynamoDBReadPolicy:
+            TableName: !Sub "${ProjectPrefix}-stripe-keys-prod"
+        - DynamoDBReadPolicy:
+            TableName: !Ref TenantProfilesTable
+        - S3ReadPolicy:
+            BucketName: !Ref ConfigBucket
+        - Statement:
+            Effect: Allow
+            Action:
+              - kms:Decrypt
+              - kms:DescribeKey
+            Resource: !GetAtt StripeKeysEncryptionKey.Arn
+        - Statement:
+            Effect: Allow
+            Action:
+              - ses:SendEmail
+              - sesv2:SendEmail
+            Resource: "*"
+        - Statement:
+            Effect: Allow
+            Action:
+              - secretsmanager:GetSecretValue
+            Resource: "*"
       Events:
         InvoicesList:
           Type: Api
@@ -1807,6 +1832,12 @@ Resources:
             RestApiId: !Ref RestApi
             Path: /invoices/{invoice_id}
             Method: GET
+        InvoiceSend:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /invoices/{invoice_id}/send
+            Method: POST
 
   LedgerFunction:
     Type: AWS::Serverless::Function
