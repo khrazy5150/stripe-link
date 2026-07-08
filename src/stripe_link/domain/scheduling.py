@@ -64,6 +64,17 @@ def _overlaps(a_start: datetime, a_end: datetime, b_start: datetime, b_end: date
     return a_start < b_end and b_start < a_end
 
 
+def _to_windows(intervals):
+    """Parse [{start, end}] ISO intervals into [(datetime, datetime)] blocking windows."""
+    windows = []
+    for interval in intervals or []:
+        start = _parse_iso(interval.get("start"))
+        end = _parse_iso(interval.get("end"))
+        if start and end:
+            windows.append((start, end))
+    return windows
+
+
 def _resolve_scope(service: dict[str, Any], fulfillers: list[dict[str, Any]], fulfiller_id: str | None):
     """Return a list of (fulfiller_id_or_None, weekly_hours_map_or_None) to consider. When a
     fulfiller has its own weekly hours they override the tenant default (None means 'use tenant')."""
@@ -151,6 +162,7 @@ def available_slots(
     range_end_epoch: int,
     fulfiller_id: str | None = None,
     external_busy: list[dict[str, str]] | None = None,
+    external_busy_by_fulfiller: dict[Any, list[dict[str, str]]] | None = None,
 ) -> list[dict[str, Any]]:
     tenant_availability = tenant_availability or {}
     tz = _zone(str(tenant_availability.get("timezone") or "UTC"))
@@ -171,17 +183,18 @@ def available_slots(
 
     scope = _resolve_scope(service, fulfillers, fulfiller_id)
 
-    # External busy (e.g. the tenant's connected calendar) blocks every fulfiller.
-    external_windows = []
-    for interval in external_busy or []:
-        start = _parse_iso(interval.get("start"))
-        end = _parse_iso(interval.get("end"))
-        if start and end:
-            external_windows.append((start, end))
+    # External busy from connected calendars. `external_busy` (legacy) and the None key of
+    # `external_busy_by_fulfiller` apply globally (the shared service/default calendar); a
+    # per-fulfiller key applies to ONLY that fulfiller (their own delegated calendar) and
+    # REPLACES the global for them — so a delegate is blocked by their calendar, not everyone's.
+    by_fulfiller = external_busy_by_fulfiller or {}
+    global_windows = _to_windows(external_busy) + _to_windows(by_fulfiller.get(None))
+    per_fulfiller_windows = {fid: _to_windows(intervals) for fid, intervals in by_fulfiller.items() if fid is not None}
 
     # Precompute the busy/exception windows for each fulfiller once.
     busy_by_fulfiller = {}
     for fid, _ in scope:
+        external_windows = per_fulfiller_windows.get(fid, global_windows)
         busy_by_fulfiller[fid] = (
             _blocking_windows(appointments, fulfiller_id=fid, buffer_before=buffer_before, buffer_after=buffer_after, now_epoch=now_epoch)
             + _block_exception_windows(exceptions, fulfiller_id=fid)

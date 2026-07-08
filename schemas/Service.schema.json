@@ -51,6 +51,7 @@
       }
     },
     "default_fulfiller_id": { "type": "string" },
+    "calendar_connection_id": { "type": "string" },
     "allowed_fulfillers": {
       "type": "array",
       "items": {

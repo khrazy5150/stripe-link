@@ -13,15 +13,18 @@ from stripe_link.domain.appointments import AppointmentTransitionError, transiti
 from stripe_link.domain.booking import compensation_snapshot, requires_payment, reserved_appointment, slot_end_iso
 from stripe_link.domain.documents import DocumentValidationError, validate_appointment
 from stripe_link.domain.fees import cached_billing_config, calculate_price, normalize_tier_id
+from stripe_link.domain.calendar_routing import candidate_fulfiller_ids, fulfiller_busy_connection, service_busy_connection
 from stripe_link.domain.reminders import cancel_reminders, plan_reminders
 from stripe_link.domain.scheduling import available_slots
-from stripe_link.calendar_sync import sync_appointment_event, tenant_busy_intervals
+from stripe_link.calendar_sync import tenant_busy_intervals
+from stripe_link.delegation import apply_delegation
 from stripe_link.kms_secrets import KmsSecretCipher
 from stripe_link.runtime.booking_page import render_booking_page
 from stripe_link.repositories.documents import (
     RepositoryError,
     appointments_repository,
     availability_exceptions_repository,
+    calendar_connections_repository,
     fulfillers_repository,
     notifications_repository,
     services_repository,
@@ -52,15 +55,25 @@ def handler(
     secret_cipher=None,
     opener=None,
     billing_config_loader=None,
+    connections_repo=None,
+    mailer_send=None,
 ):
     services_repo = services_repo or services_repository()
     availability_repo = availability_repo or tenant_availability_repository()
     fulfillers_repo = fulfillers_repo or fulfillers_repository()
     exceptions_repo = exceptions_repo or availability_exceptions_repository()
     appointments_repo = appointments_repo or appointments_repository()
+    if connections_repo is None:
+        try:
+            connections_repo = calendar_connections_repository()
+        except Exception:  # noqa: BLE001 - calendar is optional; degrade to no delegation sync
+            connections_repo = None
     method = (event or {}).get("httpMethod", "").upper()
     path = (event or {}).get("path", "")
     repos = (services_repo, availability_repo, fulfillers_repo, exceptions_repo, appointments_repo)
+    # Repos the delegation flow (calendar routing + delegate email) needs beyond the slot repos.
+    delegation = {"services_repo": services_repo, "fulfillers_repo": fulfillers_repo,
+                  "connections_repo": connections_repo, "tenant_repo": tenant_repo, "mailer_send": mailer_send}
 
     if method == "OPTIONS":
         return json_response({})
@@ -73,15 +86,16 @@ def handler(
             event, appointments_repo,
             stripe_repo=stripe_repo, tenant_repo=tenant_repo, notifications_repo=notifications_repo,
             secret_cipher=secret_cipher, opener=opener, billing_config_loader=billing_config_loader,
+            delegation=delegation,
         )
     if "/appointments/manage/cancel" in path and method == "POST":
-        return manage_cancel_route(event, appointments_repo, slot_locks_repo or slot_locks_repository())
+        return manage_cancel_route(event, appointments_repo, slot_locks_repo or slot_locks_repository(), delegation=delegation)
     if "/appointments/manage/reschedule" in path and method == "POST":
-        return manage_reschedule_route(event, repos, slot_locks_repo or slot_locks_repository())
+        return manage_reschedule_route(event, repos, slot_locks_repo or slot_locks_repository(), delegation=delegation)
     if "/appointments/manage" in path and method == "GET":
         return manage_view_route(event, appointments_repo)
     if "/availability" in path and method == "GET":
-        return availability_route(event, *repos)
+        return availability_route(event, *repos, connections_repo=connections_repo)
     return error_response("Unsupported booking route.", status_code=404, code="not_found")
 
 
@@ -166,7 +180,7 @@ def reserve_route(event, repos, slot_locks_repo):
     }, status_code=201)
 
 
-def checkout_route(event, appointments_repo, *, stripe_repo, tenant_repo, notifications_repo, secret_cipher, opener, billing_config_loader):
+def checkout_route(event, appointments_repo, *, stripe_repo, tenant_repo, notifications_repo, secret_cipher, opener, billing_config_loader, delegation=None):
     try:
         body = parse_json_body(event)
     except ValueError as exc:
@@ -195,7 +209,7 @@ def checkout_route(event, appointments_repo, *, stripe_repo, tenant_repo, notifi
         confirmed["reminders"] = plan_reminders(confirmed, now=now)
         appointments_repo.put(confirmed)
         _emit_booked_notification(notifications_repo or (notifications_repository() if os.environ.get("NOTIFICATIONS_TABLE") else None), confirmed, tenant_id, now)
-        _sync_calendar(appointments_repo, confirmed, "upsert")
+        _delegate(appointments_repo, confirmed, action="upsert", change="booked", delegation=delegation, tenant_repo=tenant_repo)
         return json_response({"appointment": _public_appointment(confirmed), "status": "booked", "requires_payment": False})
 
     success_url = str(body.get("success_url") or "").strip()
@@ -264,7 +278,7 @@ def manage_view_route(event, appointments_repo):
     })
 
 
-def manage_cancel_route(event, appointments_repo, slot_locks_repo):
+def manage_cancel_route(event, appointments_repo, slot_locks_repo, delegation=None):
     try:
         body = parse_json_body(event)
     except ValueError as exc:
@@ -279,11 +293,11 @@ def manage_cancel_route(event, appointments_repo, slot_locks_repo):
     canceled["reminders"] = cancel_reminders(canceled)
     appointments_repo.put(canceled)
     _release_lock(slot_locks_repo, canceled)
-    _sync_calendar(appointments_repo, canceled, "delete")
+    _delegate(appointments_repo, canceled, action="delete", change="canceled", delegation=delegation)
     return json_response({"appointment": _public_appointment(canceled), "status": "canceled"})
 
 
-def manage_reschedule_route(event, repos, slot_locks_repo):
+def manage_reschedule_route(event, repos, slot_locks_repo, delegation=None):
     services_repo, availability_repo, fulfillers_repo, exceptions_repo, appointments_repo = repos
     try:
         body = parse_json_body(event)
@@ -331,7 +345,7 @@ def manage_reschedule_route(event, repos, slot_locks_repo):
     appointments_repo.put(updated)
     if old_start and old_start != new_slot:
         slot_locks_repo.release(tenant_id, fulfiller_id, old_start)
-    _sync_calendar(appointments_repo, updated, "upsert")
+    _delegate(appointments_repo, updated, action="upsert", change="rescheduled", delegation=delegation)
     return json_response({"appointment": _public_appointment(updated), "status": "rescheduled"})
 
 
@@ -419,15 +433,40 @@ def _epoch_to_iso(epoch):
     return datetime.datetime.fromtimestamp(int(epoch), tz=datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def _sync_calendar(appointments_repo, appointment, action):
-    """Best-effort push to the tenant's calendar; persist the returned event links if changed."""
-    events = sync_appointment_event(appointment, action=action)
-    if events is not None:
-        appointment["external_calendar_events"] = events
-        try:
-            appointments_repo.put(appointment)
-        except RepositoryError:
-            pass
+def _external_busy_by_fulfiller(tenant_id, service, fulfillers, fulfiller_id, time_min, time_max, connections_repo):
+    """Busy windows per calendar for the slot engine. The service/default calendar blocks the
+    whole service (None key); a fulfiller with their own calendar is blocked only by theirs
+    (fulfiller_id key). Best-effort — returns {} when no calendar is connected or on error."""
+    try:
+        connections = list((connections_repo.list_for_tenant(tenant_id)) or []) if connections_repo else []
+    except Exception:  # noqa: BLE001
+        connections = []
+    if not connections:
+        return {}
+    by_fulfiller = {}
+    service_conn = service_busy_connection(service, connections)
+    if service_conn:
+        by_fulfiller[None] = tenant_busy_intervals(tenant_id, time_min, time_max, connection=service_conn)
+    by_id = {str(f.get("fulfiller_id")): f for f in fulfillers if f.get("fulfiller_id")}
+    for fid in candidate_fulfiller_ids(service, fulfiller_id):
+        own = fulfiller_busy_connection(by_id.get(str(fid)), connections)
+        if own:
+            by_fulfiller[str(fid)] = tenant_busy_intervals(tenant_id, time_min, time_max, connection=own)
+    return by_fulfiller
+
+
+def _delegate(appointments_repo, appointment, *, action, change, delegation, tenant_repo=None):
+    """Route the appointment's calendar event to the right calendar (fulfiller override > service
+    > default), stamp delegation_calendar, persist, and email the assigned delegate. Best-effort."""
+    bundle = dict(delegation or {})
+    if tenant_repo is not None and not bundle.get("tenant_repo"):
+        bundle["tenant_repo"] = tenant_repo
+    apply_delegation(
+        appointment, action=action, change=change, appointments_repo=appointments_repo,
+        services_repo=bundle.get("services_repo"), fulfillers_repo=bundle.get("fulfillers_repo"),
+        connections_repo=bundle.get("connections_repo"), tenant_repo=bundle.get("tenant_repo"),
+        mailer_send=bundle.get("mailer_send"),
+    )
 
 
 def booking_page_route(event, services_repo):
@@ -450,7 +489,7 @@ def _html_response(html: str, status_code: int = 200):
     }
 
 
-def availability_route(event, services_repo, availability_repo, fulfillers_repo, exceptions_repo, appointments_repo):
+def availability_route(event, services_repo, availability_repo, fulfillers_repo, exceptions_repo, appointments_repo, connections_repo=None):
     service_id = path_params(event).get("service_id")
     if not service_id:
         return error_response("service_id is required.", code="missing_service_id")
@@ -469,7 +508,9 @@ def availability_route(event, services_repo, availability_repo, fulfillers_repo,
     fulfillers = fulfillers_repo.list_for_tenant(tenant_id)
     exceptions = exceptions_repo.list_for_tenant(tenant_id)
     appointments = appointments_repo.list_for_tenant(tenant_id)
-    external_busy = tenant_busy_intervals(tenant_id, _epoch_to_iso(range_start), _epoch_to_iso(range_end))
+    external_busy_by_fulfiller = _external_busy_by_fulfiller(
+        tenant_id, service, fulfillers, fulfiller_id, _epoch_to_iso(range_start), _epoch_to_iso(range_end), connections_repo,
+    )
 
     slots = available_slots(
         service,
@@ -481,7 +522,7 @@ def availability_route(event, services_repo, availability_repo, fulfillers_repo,
         range_start_epoch=range_start,
         range_end_epoch=range_end,
         fulfiller_id=fulfiller_id,
-        external_busy=external_busy,
+        external_busy_by_fulfiller=external_busy_by_fulfiller,
     )
     return json_response({
         "service_id": service_id,

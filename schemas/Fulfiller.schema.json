@@ -33,6 +33,7 @@
         "weekly_hours": { "$ref": "#/$defs/weekly_hours" }
       }
     },
+    "calendar_connection_id": { "type": "string" },
     "created_at": { "type": "integer" },
     "updated_at": { "type": "integer" }
   },

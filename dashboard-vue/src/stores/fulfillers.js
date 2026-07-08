@@ -110,7 +110,7 @@ export function buildFulfillerDocument(form, base = {}) {
     [form.first_name, form.last_name].map((s) => String(s || "").trim()).filter(Boolean).join(" ") ||
     String(form.email || "").trim();
 
-  return {
+  const document = {
     ...base,
     schema_version: base.schema_version || "2026-05-29",
     document_type: "fulfiller",
@@ -133,4 +133,11 @@ export function buildFulfillerDocument(form, base = {}) {
     created_at: base.created_at || form.created_at || now,
     updated_at: now,
   };
+
+  // The staff member's own calendar (delegation): bookings assigned to them write there.
+  const calendarConnectionId = String(form.calendar_connection_id || "").trim();
+  if (calendarConnectionId) document.calendar_connection_id = calendarConnectionId;
+  else delete document.calendar_connection_id;
+
+  return document;
 }

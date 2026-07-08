@@ -165,6 +165,10 @@ export function buildServiceDocument(form, base = {}) {
   if (defaultFulfillerId) document.default_fulfiller_id = defaultFulfillerId;
   else delete document.default_fulfiller_id;
 
+  const calendarConnectionId = String(form.calendar_connection_id || "").trim();
+  if (calendarConnectionId) document.calendar_connection_id = calendarConnectionId;
+  else delete document.calendar_connection_id;
+
   const productId = String(form.linked_product_id || "").trim();
   if (productId) {
     document.linked_product = { product_id: productId };

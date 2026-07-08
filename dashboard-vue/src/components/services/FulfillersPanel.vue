@@ -49,6 +49,19 @@
           <span>Tips go to fulfiller</span>
         </label>
 
+        <label class="offer-field">
+          <span>Own calendar (for delegated bookings)</span>
+          <select v-model="form.calendar_connection_id">
+            <option value="">None — use the service / default calendar</option>
+            <option v-for="c in calendar.connections" :key="c.connection_id" :value="c.connection_id" :disabled="!c.connected">
+              {{ c.display_name }}{{ c.connected ? "" : " (not connected)" }}
+            </option>
+          </select>
+        </label>
+        <p v-if="form.calendar_connection_id && !calendarConnected(form.calendar_connection_id)" class="services-hint warning">
+          This calendar is not connected — delegated bookings will fall back to the service/default calendar until it is reconnected.
+        </p>
+
         <div class="services-subheading">Personal availability</div>
         <p class="services-hint">These weekly hours override tenant defaults when this fulfiller is assigned.</p>
         <WeeklyHours v-model="form.weekly_hours" />
@@ -86,14 +99,21 @@ import { onMounted, ref } from "vue";
 import WeeklyHours from "./WeeklyHours.vue";
 import { defaultWeeklyHours } from "../../utils/weeklyHours";
 import { fulfillerDisplayName, formatCompensation, useFulfillersStore } from "../../stores/fulfillers";
+import { useCalendarStore } from "../../stores/calendar";
 
 const store = useFulfillersStore();
+const calendar = useCalendarStore();
 const editing = ref(null);
 const form = ref(defaultForm());
 
 onMounted(() => {
   if (!store.loaded) store.load();
+  if (!calendar.loaded) calendar.load();
 });
+
+function calendarConnected(connectionId) {
+  return calendar.connections.some((c) => c.connection_id === connectionId && c.connected);
+}
 
 function defaultForm() {
   return {
@@ -107,6 +127,7 @@ function defaultForm() {
     compensation_type: "flat_fee",
     compensation_amount: 0,
     tips_to_fulfiller: true,
+    calendar_connection_id: "",
     weekly_hours: defaultWeeklyHours(),
     created_at: null,
   };
@@ -131,6 +152,7 @@ function edit(fulfiller) {
     compensation_type: fulfiller.compensation?.type || "flat_fee",
     compensation_amount: Number(fulfiller.compensation?.amount || 0),
     tips_to_fulfiller: fulfiller.compensation?.tips_to_fulfiller !== false,
+    calendar_connection_id: fulfiller.calendar_connection_id || "",
     weekly_hours: fulfiller.availability?.weekly_hours?.length ? fulfiller.availability.weekly_hours : defaultWeeklyHours(),
     created_at: fulfiller.created_at || null,
   };

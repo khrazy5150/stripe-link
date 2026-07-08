@@ -9,7 +9,7 @@ from typing import Any, Callable
 from stripe_link.common import error_response, header_value, json_response
 from stripe_link.domain.downloads import digital_download_links
 from stripe_link.domain.fees import cached_billing_config, calculate_price
-from stripe_link.calendar_sync import sync_appointment_event
+from stripe_link.delegation import apply_delegation
 from stripe_link.domain.ledger import refund_entry as build_ledger_refund_entry, sale_entry, sale_entry_from_order
 from stripe_link.domain.receipts import receipt_content
 from stripe_link.domain.reminders import plan_reminders
@@ -18,8 +18,10 @@ from stripe_link.mailer import send_email
 from stripe_link.repositories.documents import (
     RepositoryError,
     appointments_repository,
+    calendar_connections_repository,
     customers_repository,
     dynamodb_safe_document,
+    fulfillers_repository,
     invoices_repository,
     ledger_repository,
     notifications_repository,
@@ -27,6 +29,7 @@ from stripe_link.repositories.documents import (
     platform_config_repository,
     products_repository,
     refunds_repository,
+    services_repository,
     stripe_keys_repository,
     tenant_profiles_repository,
     webhook_events_repository,
@@ -322,11 +325,17 @@ def persist_appointment_paid(
     appointments_repo=None,
     ledger_repo=None,
     notifications_repo=None,
+    services_repo=None,
+    fulfillers_repo=None,
+    connections_repo=None,
+    tenant_repo=None,
+    mailer_send=None,
     billing_config_loader: Callable[[], dict[str, Any]] | None = None,
     now_fn: Callable[[], int] = lambda: int(time.time()),
 ) -> dict[str, Any]:
     """A paid booking's checkout session completed: mark the appointment booked/paid, drop the
-    hold, append a ledger sale entry, and emit the booked notification."""
+    hold, append a ledger sale entry, route the calendar event to the delegate's calendar, email
+    the delegate, and emit the booked notification."""
     session = _event_data_object(stripe_event)
     appointments_repo = appointments_repo or (appointments_repository() if os.environ.get("SERVICES_TABLE") else None)
     if not appointments_repo:
@@ -348,13 +357,16 @@ def persist_appointment_paid(
     updated["reminders"] = plan_reminders(updated, now=now)
     appointments_repo.put(updated)
 
-    events = sync_appointment_event(updated, action="upsert")
-    if events is not None:
-        updated["external_calendar_events"] = events
-        try:
-            appointments_repo.put(updated)
-        except RepositoryError:
-            pass
+    # Route the calendar event to the assigned delegate's calendar + email them (best-effort).
+    services_repo = services_repo or (services_repository() if os.environ.get("SERVICES_TABLE") else None)
+    fulfillers_repo = fulfillers_repo or (fulfillers_repository() if os.environ.get("SERVICES_TABLE") else None)
+    connections_repo = connections_repo or (calendar_connections_repository() if os.environ.get("CALENDAR_CONNECTIONS_TABLE") else None)
+    tenant_repo = tenant_repo or (tenant_profiles_repository() if os.environ.get("TENANT_PROFILES_TABLE") else None)
+    apply_delegation(
+        updated, action="upsert", change="booked", appointments_repo=appointments_repo,
+        services_repo=services_repo, fulfillers_repo=fulfillers_repo, connections_repo=connections_repo,
+        tenant_repo=tenant_repo, mailer_send=mailer_send,
+    )
 
     ledger_written = False
     ledger_repo = ledger_repo or (ledger_repository() if os.environ.get("LEDGER_TABLE") else None)

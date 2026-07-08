@@ -144,6 +144,15 @@
                 </select>
               </label>
               <label class="offer-field">
+                <span>Calendar</span>
+                <select v-model="form.calendar_connection_id">
+                  <option value="">Default calendar</option>
+                  <option v-for="c in calendar.connections" :key="c.connection_id" :value="c.connection_id" :disabled="!c.connected">
+                    {{ c.display_name }}{{ c.connected ? "" : " (not connected)" }}
+                  </option>
+                </select>
+              </label>
+              <label class="offer-field">
                 <span>Linked Product</span>
                 <select v-model="form.linked_product_id" @change="form.linked_price_id = ''">
                   <option value="">None</option>
@@ -158,6 +167,9 @@
                 </select>
               </label>
             </div>
+            <p v-if="delegateNeedsCalendar" class="services-hint warning">
+              The default fulfiller has no calendar of their own — their bookings will use this service's calendar. Connect one on the Fulfillers tab to have bookings land on their own calendar automatically.
+            </p>
           </section>
 
           <section class="offer-form-section">
@@ -307,6 +319,7 @@ import {
 import { uploadImage } from "../api/uploads";
 import { fulfillerDisplayName, useFulfillersStore } from "../stores/fulfillers";
 import { formatMoney, useProductsStore } from "../stores/products";
+import { useCalendarStore } from "../stores/calendar";
 import FulfillersPanel from "./services/FulfillersPanel.vue";
 import TenantAvailabilityPanel from "./services/TenantAvailabilityPanel.vue";
 import AvailabilityExceptionsPanel from "./services/AvailabilityExceptionsPanel.vue";
@@ -316,6 +329,7 @@ import AppointmentsPanel from "./services/AppointmentsPanel.vue";
 const store = useServicesStore();
 const fulfillers = useFulfillersStore();
 const products = useProductsStore();
+const calendar = useCalendarStore();
 const showServiceModal = ref(false);
 const editingService = ref(null);
 const selectedService = ref(null);
@@ -329,6 +343,16 @@ const heroUploadError = ref("");
 onMounted(() => {
   if (!fulfillers.loaded) fulfillers.load();
   if (!products.loaded) products.load();
+  if (!calendar.loaded) calendar.load();
+});
+
+// Warn when the service's default fulfiller has no calendar of their own — their bookings
+// won't land on their own calendar (they fall back to the service/default calendar).
+const delegateNeedsCalendar = computed(() => {
+  const id = String(form.value.default_fulfiller_id || "").trim();
+  if (!id) return false;
+  const f = fulfillers.fulfillers.find((x) => x.fulfiller_id === id);
+  return Boolean(f) && !String(f.calendar_connection_id || "").trim();
 });
 
 const linkedProductPrices = computed(() => {
@@ -404,6 +428,7 @@ function defaultServiceForm() {
     hero_image_url: "",
     active: true,
     default_fulfiller_id: "",
+    calendar_connection_id: "",
     linked_product_id: "",
     linked_price_id: "",
     booking_rules: defaultBookingRules(),
@@ -469,6 +494,7 @@ function formFromService(service) {
     hero_image_url: service.presentation?.hero_image_url || "",
     active: serviceIsActive(service),
     default_fulfiller_id: service.default_fulfiller_id || "",
+    calendar_connection_id: service.calendar_connection_id || "",
     linked_product_id: service.linked_product?.product_id || "",
     linked_price_id: service.linked_product?.price_id || "",
     booking_rules: { ...defaultBookingRules(), ...(service.booking_rules || {}) },

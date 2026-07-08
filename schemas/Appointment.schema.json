@@ -43,6 +43,7 @@
     "manage_token_ref": { "type": "string" },
     "customer_manage_token": { "type": "string" },
     "payment_intent_id": { "type": "string" },
+    "delegation_calendar": { "enum": ["written", "unavailable"] },
     "external_calendar_events": {
       "type": "array",
       "items": { "type": "object" }
