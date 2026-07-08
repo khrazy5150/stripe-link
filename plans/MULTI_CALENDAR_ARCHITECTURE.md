@@ -279,7 +279,8 @@ On every booking assigned to a delegate, email that delegate the service + appoi
 - **Phase 3 — Microsoft Graph provider (Outlook 365 / Exchange).** `MicrosoftCalendarClient`,
   OAuth + `jb/microsoft-oauth/{env}` secret, provider selection in connect flow.
 - **Phase 4 — Refinements.** Busy aggregation (`busy_connection_ids[]`); external-change push
-  notifications/webhooks; richer within-account calendar management.
+  notifications/webhooks; richer within-account calendar management; **auto video-conferencing
+  links (Google Meet / Teams) for virtual services (§13)**.
 
 ---
 
@@ -294,3 +295,43 @@ On every booking assigned to a delegate, email that delegate the service + appoi
   connections (simplest) vs. one connection with a calendar list. (Lean: two connections.)
 - **Microsoft consent/verification** lead time mirrors Google's (app registration + admin
   consent for delegated calendar scopes) — start early when Phase 3 approaches.
+
+---
+
+## 13. Future upgrade — auto video conferencing (Google Meet / Teams)
+
+Attach a video link to virtual bookings automatically. **Low difficulty and no new code set** —
+it reuses the existing calendar event-write path, and (critically) **needs no new OAuth scope and
+no re-verification** (Meet creation is covered by the `calendar.events` write scope we already
+request).
+
+**How it works (Google).** A Meet link is created by the *same* event-insert call we already make
+(`google_event_body` → `create_event`, `src/stripe_link/google_calendar.py`). Four small changes:
+
+1. **Event body:** add a `conferenceData.createRequest` with a deterministic `requestId` (derive
+   from `appointment_id` so it's idempotent) and `conferenceSolutionKey.type = "hangoutsMeet"` —
+   only when a meeting is requested.
+2. **API call:** pass `conferenceDataVersion=1` on `create_event` / `update_event` (Google ignores
+   conference data without it) — a one-line query-param tweak to those two methods.
+3. **Capture:** read `hangoutLink` (or `conferenceData.entryPoints[].uri`) from the response and
+   store it on the appointment as `conference: {provider, join_url}`.
+4. **Surface:** include the link in the customer confirmation/receipt, the delegate email (§5.2),
+   and the manage page. It's already on the calendar event itself.
+
+**Trigger:** `Service.location_mode in {"virtual","hybrid"}` (enum already exists), optionally a
+per-service toggle. **Delegation fit:** because the event lands on the assigned delegate's calendar
+(§5.1), that delegate is automatically the **meeting host** — exactly the right behavior.
+
+**Provider-agnostic:** once the Phase 3 `CalendarClient` seam exists, the Microsoft Graph analog is
+`isOnlineMeeting: true` + `onlineMeetingProvider: "teamsForBusiness"` → a Teams link. So a single
+"request online meeting" flag on the interface covers Meet and Teams.
+
+**Idempotency / lifecycle:** reuse the same `requestId` so reschedule/update keeps the *same* link;
+cancel deletes the event and the link with it.
+
+**Only real caveat:** Meet creation works for personal and Workspace Google accounts, but an org
+policy can disable it — so treat a missing `hangoutLink` as "no link, proceed normally," never an
+error (consistent with best-effort calendar sync).
+
+**Effort:** ~a day for Google incl. tests + surfacing the link. Depends only on the event-write
+path (not routing), so it can land any time after Phase 2; grouped into Phase 4 above.
