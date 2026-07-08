@@ -31,7 +31,7 @@
           <div class="calendar-connection-actions">
             <button v-if="!conn.is_default && conn.connected" type="button" class="secondary-action compact" @click="setDefault(conn)">Make default</button>
             <button type="button" class="secondary-action compact" @click="rename(conn)">Rename</button>
-            <button type="button" class="secondary-action compact" @click="disconnect(conn)">Disconnect</button>
+            <button type="button" class="secondary-action compact" @click="askDisconnect(conn)">Disconnect</button>
           </div>
         </li>
       </ul>
@@ -44,15 +44,50 @@
 
       <p v-if="waiting" class="calendar-waiting">Waiting for you to finish in the Google window…</p>
     </div>
+
+    <div v-if="renaming" class="modal-backdrop" @click.self="renaming = null">
+      <section class="modal-card confirm-card" role="dialog" aria-modal="true" aria-labelledby="renameCalendarTitle">
+        <h2 id="renameCalendarTitle">Rename calendar</h2>
+        <p>Give this calendar a label your team will recognize.</p>
+        <input
+          ref="renameInput"
+          v-model.trim="renameLabel"
+          type="text"
+          class="modal-input"
+          placeholder="e.g. Downtown Salon"
+          @keyup.enter="saveRename"
+        />
+        <div class="confirm-actions">
+          <button type="button" class="secondary-action" @click="renaming = null">Cancel</button>
+          <button type="button" class="primary-action" :disabled="!renameLabel" @click="saveRename">Save</button>
+        </div>
+      </section>
+    </div>
+
+    <div v-if="disconnecting" class="modal-backdrop" @click.self="disconnecting = null">
+      <section class="modal-card confirm-card" role="dialog" aria-modal="true" aria-labelledby="disconnectCalendarTitle">
+        <header class="confirm-icon danger">×</header>
+        <h2 id="disconnectCalendarTitle">Disconnect calendar?</h2>
+        <p>Disconnect "{{ disconnecting.display_name }}"? Bookings will stop syncing to it.</p>
+        <div class="confirm-actions">
+          <button type="button" class="secondary-action" @click="disconnecting = null">Cancel</button>
+          <button type="button" class="primary-action" @click="disconnect">Disconnect</button>
+        </div>
+      </section>
+    </div>
   </section>
 </template>
 
 <script setup>
-import { onBeforeUnmount, onMounted, ref } from "vue";
+import { nextTick, onBeforeUnmount, onMounted, ref } from "vue";
 import { useCalendarStore } from "../../stores/calendar";
 
 const store = useCalendarStore();
 const waiting = ref(false);
+const renaming = ref(null);
+const renameLabel = ref("");
+const renameInput = ref(null);
+const disconnecting = ref(null);
 let pollTimer = null;
 let pollTries = 0;
 let baselineCount = 0;
@@ -80,19 +115,37 @@ async function setDefault(conn) {
   }
 }
 
-async function rename(conn) {
-  const name = window.prompt("Calendar label", conn.display_name || conn.account_email || "");
-  if (name && name.trim() && name.trim() !== conn.display_name) {
+function rename(conn) {
+  renaming.value = conn;
+  renameLabel.value = conn.display_name || conn.account_email || "";
+  nextTick(() => renameInput.value?.focus());
+}
+
+async function saveRename() {
+  const conn = renaming.value;
+  const label = renameLabel.value.trim();
+  if (!conn || !label) {
+    renaming.value = null;
+    return;
+  }
+  if (label !== conn.display_name) {
     try {
-      await store.rename(conn.connection_id, name.trim());
+      await store.rename(conn.connection_id, label);
     } catch {
       /* error surfaced by store */
     }
   }
+  renaming.value = null;
 }
 
-async function disconnect(conn) {
-  if (!window.confirm(`Disconnect ${conn.display_name}?`)) return;
+function askDisconnect(conn) {
+  disconnecting.value = conn;
+}
+
+async function disconnect() {
+  const conn = disconnecting.value;
+  disconnecting.value = null;
+  if (!conn) return;
   try {
     await store.disconnect(conn.connection_id);
   } catch {

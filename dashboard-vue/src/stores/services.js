@@ -42,7 +42,7 @@ export const useServicesStore = defineStore("services", {
     loaded: false,
     saving: false,
     error: "",
-    message: "Click Load Services to see services.",
+    message: "",
     filters: {
       search: "",
       status: "all",
@@ -73,14 +73,14 @@ export const useServicesStore = defineStore("services", {
       this.loaded = false;
       this.saving = false;
       this.error = "";
-      this.message = "Click Load Services to see services.";
+      this.message = "";
       this.filters.search = "";
       this.filters.status = "all";
     },
 
     applyFilters() {
       if (!this.loaded) {
-        this.message = "Click Load Services to see services.";
+        this.message = "";
         return;
       }
       this.message = `${this.filteredServices.length} of ${this.services.length} service${this.services.length === 1 ? "" : "s"} shown.`;
