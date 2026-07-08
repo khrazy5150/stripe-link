@@ -109,6 +109,22 @@ class DynamoDocumentRepository:
         )
         return [self._strip_keys(item) for item in items]
 
+    def scan_type(self) -> list[dict[str, Any]]:
+        """Cross-tenant scan of every document of this repo's type. Intended for periodic
+        sweeps (e.g. due-reminder delivery), not the request path — it reads the whole table."""
+        from boto3.dynamodb.conditions import Attr
+
+        items: list[dict[str, Any]] = []
+        request: dict[str, Any] = {"FilterExpression": Attr("SK").begins_with(f"{self.sort_prefix}#")}
+        while True:
+            response = self.table.scan(**request)
+            items.extend(response.get("Items", []))
+            last_evaluated_key = response.get("LastEvaluatedKey")
+            if not last_evaluated_key:
+                break
+            request["ExclusiveStartKey"] = last_evaluated_key
+        return [self._strip_keys(item) for item in items]
+
     def find_by_id(self, document_id: str) -> dict[str, Any] | None:
         """Look up a document by id alone (cross-tenant) via GSI1. Assumes document_id is unique."""
         from boto3.dynamodb.conditions import Key

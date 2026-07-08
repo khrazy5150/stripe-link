@@ -71,6 +71,18 @@ fake in the meantime.
   per campaign + small per-message carrier fees.
 - **Platform model:** register **one** platform brand + campaign; the platform number sends reminders
   that *reference* each tenant's business (simplest compliant model for multi-tenant SaaS).
+- **C.2 code status (built 2026-07-07, dev):** the reminder engine ships and runs against a fake — pure
+  `src/stripe_link/domain/reminders.py` (plan/due/cancel/format), the `src/stripe_link/sms.py` adapter
+  (`pinpoint-sms-voice-v2`), and the `RemindersFunction` sweep (`handlers/reminders.py`, EventBridge
+  `rate(15 minutes)`). Reminders are planned on confirm/paid/reschedule and canceled on cancel.
+  **To go live once the number is approved:** (1) deploy with `SmsOriginationIdentity` (phone pool ARN
+  or 10DLC number) and optional `SmsConfigurationSet` set — until then `send_sms` no-ops with a config
+  error and the sweep marks nothing sent; (2) add the **opt-in consent line** to the booking form
+  ("you'll get SMS reminders — reply STOP to opt out"); STOP/HELP + the opt-out list are handled by
+  End User Messaging itself, and `sms_opted_out` on the customer is honored as a belt-and-suspenders.
+- **Future precision upgrade (optional):** swap the 15-min sweep for a per-booking **EventBridge
+  Scheduler** one-shot (exact-minute delivery). The `domain/reminders.py` planning is model-agnostic, so
+  only the handler/infra changes; a two-way inbound-STOP SNS handler could also record app-level opt-out.
 
 ### Verify the Google OAuth app (Calendar sensitive scopes) — before prod calendar at scale
 Removes the "unverified app" warning, the ~100-user cap, and the 7-day refresh-token expiry. Review

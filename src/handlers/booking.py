@@ -13,6 +13,7 @@ from stripe_link.domain.appointments import AppointmentTransitionError, transiti
 from stripe_link.domain.booking import compensation_snapshot, requires_payment, reserved_appointment, slot_end_iso
 from stripe_link.domain.documents import DocumentValidationError, validate_appointment
 from stripe_link.domain.fees import cached_billing_config, calculate_price, normalize_tier_id
+from stripe_link.domain.reminders import cancel_reminders, plan_reminders
 from stripe_link.domain.scheduling import available_slots
 from stripe_link.calendar_sync import sync_appointment_event, tenant_busy_intervals
 from stripe_link.kms_secrets import KmsSecretCipher
@@ -191,6 +192,7 @@ def checkout_route(event, appointments_repo, *, stripe_repo, tenant_repo, notifi
     if not requires_payment(appointment):
         confirmed = {**appointment, "status": "booked", "updated_at": now}
         confirmed.pop("hold_expires_at", None)
+        confirmed["reminders"] = plan_reminders(confirmed, now=now)
         appointments_repo.put(confirmed)
         _emit_booked_notification(notifications_repo or (notifications_repository() if os.environ.get("NOTIFICATIONS_TABLE") else None), confirmed, tenant_id, now)
         _sync_calendar(appointments_repo, confirmed, "upsert")
@@ -274,6 +276,7 @@ def manage_cancel_route(event, appointments_repo, slot_locks_repo):
         canceled = transition_appointment(appointment, "cancel", now_epoch=int(time.time()))
     except AppointmentTransitionError as exc:
         return error_response(str(exc), status_code=409, code="invalid_transition")
+    canceled["reminders"] = cancel_reminders(canceled)
     appointments_repo.put(canceled)
     _release_lock(slot_locks_repo, canceled)
     _sync_calendar(appointments_repo, canceled, "delete")
@@ -324,6 +327,7 @@ def manage_reschedule_route(event, repos, slot_locks_repo):
 
     old_start = appointment.get("starts_at")
     updated = {**appointment, "starts_at": new_slot, "ends_at": slot_end_iso(new_slot, duration), "updated_at": now}
+    updated["reminders"] = plan_reminders(updated, now=now)  # re-anchor reminders to the new start
     appointments_repo.put(updated)
     if old_start and old_start != new_slot:
         slot_locks_repo.release(tenant_id, fulfiller_id, old_start)

@@ -12,6 +12,7 @@ from stripe_link.domain.fees import cached_billing_config, calculate_price
 from stripe_link.calendar_sync import sync_appointment_event
 from stripe_link.domain.ledger import refund_entry as build_ledger_refund_entry, sale_entry, sale_entry_from_order
 from stripe_link.domain.receipts import receipt_content
+from stripe_link.domain.reminders import plan_reminders
 from stripe_link.domain.refund_ledger import build_refund_entry, initial_payment_aggregates, set_refund_aggregates
 from stripe_link.mailer import send_email
 from stripe_link.repositories.documents import (
@@ -344,6 +345,7 @@ def persist_appointment_paid(
     if payment_intent:
         updated["payment_intent_id"] = payment_intent
     updated.pop("hold_expires_at", None)  # confirmed booking outlives the reserve hold
+    updated["reminders"] = plan_reminders(updated, now=now)
     appointments_repo.put(updated)
 
     events = sync_appointment_event(updated, action="upsert")

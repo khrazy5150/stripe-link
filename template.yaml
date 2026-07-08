@@ -32,6 +32,14 @@ Parameters:
     Type: String
     Default: ""
     Description: OAuth redirect URI for Google Calendar connect (must be registered in the Google OAuth client). e.g. https://dev.juniorbay.com/calendar/callback
+  SmsOriginationIdentity:
+    Type: String
+    Default: ""
+    Description: AWS End User Messaging origination identity (phone pool ARN or 10DLC number) used to send appointment SMS reminders. Empty until A2P 10DLC registration completes.
+  SmsConfigurationSet:
+    Type: String
+    Default: ""
+    Description: Optional AWS End User Messaging configuration set name for SMS delivery events.
 
   StripeConnectRedirectUri:
     Type: String
@@ -146,6 +154,8 @@ Globals:
         LEGAL_PAGES_TABLE: !Ref LegalPagesTable
         CUSTOM_DOMAINS_TABLE: !Ref CustomDomainsTable
         CALENDAR_CONNECTIONS_TABLE: !Ref CalendarConnectionsTable
+        SMS_ORIGINATION_IDENTITY: !Ref SmsOriginationIdentity
+        SMS_CONFIGURATION_SET: !Ref SmsConfigurationSet
         GOOGLE_OAUTH_SECRET_NAME: !Sub "jb/google-oauth/${Environment}"
         PAGES_BUCKET: !Ref PagesBucket
         PAGES_PREVIEW_BUCKET: !Ref PagesPreviewBucket
@@ -1984,6 +1994,31 @@ Resources:
             RestApiId: !Ref RestApi
             Path: /services/appointments/manage/reschedule
             Method: POST
+
+  RemindersFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${ProjectPrefix}-reminders-sweep-${Environment}"
+      CodeUri: src/
+      Handler: handlers.reminders.handler
+      Description: Scheduled sweep that delivers due appointment SMS reminders via AWS End User Messaging.
+      Timeout: 120
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ServicesTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref TenantProfilesTable
+        - Statement:
+            Effect: Allow
+            Action:
+              - sms-voice:SendTextMessage
+            Resource: "*"
+      Events:
+        ReminderSweep:
+          Type: Schedule
+          Properties:
+            Schedule: rate(15 minutes)
+            Description: Trigger the appointment SMS reminder sweep.
 
   OrdersFunction:
     Type: AWS::Serverless::Function

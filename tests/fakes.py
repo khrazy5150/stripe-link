@@ -29,6 +29,9 @@ class FakeDocumentRepository:
                 return dict(document)
         return None
 
+    def scan_type(self):
+        return [dict(document) for document in self.documents.values()]
+
     def find_by_payment_intent(self, payment_intent_id):
         for document in self.documents.values():
             if document.get("payment_intent_id") == payment_intent_id:

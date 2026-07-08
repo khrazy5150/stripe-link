@@ -26,7 +26,8 @@
         "customer_id": { "type": "string" },
         "name": { "type": "string" },
         "email": { "type": "string" },
-        "phone": { "type": "string" }
+        "phone": { "type": "string" },
+        "sms_opted_out": { "type": "boolean" }
       }
     },
     "price": {
@@ -41,6 +42,29 @@
     "rule_snapshot": { "type": "object" },
     "manage_token_ref": { "type": "string" },
     "customer_manage_token": { "type": "string" },
+    "payment_intent_id": { "type": "string" },
+    "external_calendar_events": {
+      "type": "array",
+      "items": { "type": "object" }
+    },
+    "reminders": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["lead_minutes", "channel", "status"],
+        "properties": {
+          "lead_minutes": { "type": "integer", "minimum": 1 },
+          "channel": { "enum": ["sms"] },
+          "send_at": { "type": ["integer", "null"] },
+          "status": { "enum": ["scheduled", "sent", "canceled", "failed"] },
+          "sent_at": { "type": ["integer", "null"] },
+          "message_id": { "type": "string" },
+          "attempts": { "type": "integer", "minimum": 0 },
+          "error": { "type": "string" }
+        }
+      }
+    },
     "hold_expires_at": { "type": ["integer", "null"] },
     "checked_in_at": { "type": ["string", "null"] },
     "completed_at": { "type": ["string", "null"] },
