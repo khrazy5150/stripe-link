@@ -74,6 +74,7 @@ _TEMPLATE = """<!doctype html>
   .msg.error { background:#fef2f2; color:#b91c1c; }
   .msg.ok { background:#ecfdf5; color:#047857; }
   .empty { color:var(--muted); padding:1rem 0; }
+  .consent { color:var(--muted); font-size:.78rem; line-height:1.4; margin:.4rem 0 0; }
 </style>
 </head>
 <body>
@@ -96,6 +97,7 @@ _TEMPLATE = """<!doctype html>
     <input id="email" type="email" autocomplete="email" required>
     <label for="phone">Phone (optional)</label>
     <input id="phone" type="tel" autocomplete="tel">
+    <p class="consent">By adding your phone number, you agree to receive SMS appointment reminders. Message &amp; data rates may apply; reply STOP to opt out, HELP for help.</p>
 
     <button id="book" class="book" disabled>Select a time</button>
   </div>

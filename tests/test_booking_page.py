@@ -26,6 +26,11 @@ class BookingPageRenderTests(unittest.TestCase):
         self.assertIn("/services/appointments/reserve", html)
         self.assertIn("/services/appointments/checkout", html)
 
+    def test_shows_sms_consent_line(self):
+        html = render_booking_page(SERVICE)
+        self.assertIn("SMS appointment reminders", html)
+        self.assertIn("reply STOP to opt out", html)
+
     def test_free_service_shows_free(self):
         html = render_booking_page({**SERVICE, "price": {"currency": "usd", "unit_amount": 0}})
         self.assertIn("Free", html)
