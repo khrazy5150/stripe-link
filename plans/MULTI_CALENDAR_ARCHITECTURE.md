@@ -17,7 +17,14 @@ manager. We want:
    Graph)** later — with no churn to the booking engine when a provider is added.
 3. Routing: **which calendar a booking touches** is chosen per service/page, with a
    per-fulfiller override (a delegated manager's own calendar wins for their appointments).
-4. No hardcoded `connection_id` (the current `"google"` constant is the thing to kill).
+4. **Delegation must actually delegate (hard requirement).** When a tenant delegates a service
+   to a staff person, that person's booking event is written **automatically to their own
+   connected calendar** — no manual step. The delegate must have a *supported* calendar
+   connected (Google today) for this to work; §5.1 defines the precondition and the fallback.
+5. **The delegate is notified (hard requirement).** On each booking assigned to a delegate, an
+   **email** is sent to that delegate with the service + appointment details (SMS later, reusing
+   the C.2 channel). See §5.2.
+6. No hardcoded `connection_id` (the current `"google"` constant is the thing to kill).
 
 ---
 
@@ -85,6 +92,11 @@ Add **`connection_id`** to each entry: `{provider, connection_id, calendar_id, e
 Sync matches by `connection_id` (not `provider`), so multiple same-provider calendars are
 unambiguous. Still an array → an appointment can hold events in more than one calendar.
 
+Also add **`delegation_calendar`** (optional): `"written"` when the event landed on the assigned
+delegate's own calendar, `"unavailable"` when the delegate had no usable calendar and routing fell
+back (§5.1). Drives the delegate email's calendar-added-or-not line and surfaces delegation health
+in the admin.
+
 ---
 
 ## 4. Provider abstraction (the Outlook/Exchange seam)
@@ -131,6 +143,51 @@ New `domain/calendar_routing.py`:
 the flat `external_busy`; `None` = applies to all). This is the fix for the "one calendar blocks
 everyone" bug and is what makes per-fulfiller delegation correct.
 
+### 5.1 Delegation: automatic write to the delegate's calendar (hard requirement)
+
+When a service is delegated to a staff person (the appointment's `assigned_fulfiller_id` resolves
+to a fulfiller with a `calendar_connection_id`), the booking event **must be written
+automatically to that fulfiller's own connected calendar** — the fulfiller override in
+`resolve_write_connection` (step 1) is what guarantees this, on every booking path (free confirm,
+paid webhook, reschedule → move the event; cancel → delete it).
+
+- **Precondition — the delegate needs a *supported, connected* calendar.** A fulfiller can only
+  be "fully delegated to" if they have a `calendar_connection_id` pointing at a `connected`
+  connection whose `provider` is supported (Google today). The dashboard enforces this at
+  **setup time**: assigning a fulfiller as a service's delegate surfaces a clear warning (and a
+  "connect calendar" prompt) if that fulfiller has no connected supported calendar, so the tenant
+  sets it up before real bookings arrive. Each fulfiller connects via the same OAuth flow; the
+  resulting connection is stamped with `owner_fulfiller_id`.
+- **Runtime fallback (never drop a booking).** If, at booking time, the assigned fulfiller has no
+  usable connection (never connected, revoked, or an error state), routing falls back to the
+  service calendar, then the tenant default (§5 steps 2–3). The booking still succeeds; the
+  appointment records that the delegate write was skipped (`delegation_calendar: "unavailable"`)
+  and the delegate email (§5.2) says the event **could not** be added to their calendar and asks
+  them to connect it. Calendar sync is best-effort by design — a missing delegate calendar must
+  degrade, not fail the booking.
+- **Correct busy-checking follows automatically.** Because a delegated fulfiller's own calendar
+  is keyed by their `fulfiller_id` in `resolve_busy_sources`, their external commitments block
+  only *their* slots — so a customer can only book a delegate when that delegate is actually free.
+
+### 5.2 Delegate notification (hard requirement)
+
+On every booking assigned to a delegate, email that delegate the service + appointment details.
+
+- **Channel:** email now (SES `mailer.py`), SMS later (reuse the C.2 sender + opt-out; gated on
+  the fulfiller having a phone + consent). Content built by a pure
+  `domain/notifications_content.py::delegate_booking_email(appointment, service, fulfiller)` —
+  service name, date/time + timezone, customer name, location/notes, and a manage link;
+  plus a line stating whether the event was added to their calendar (ties to the §5.1 fallback).
+- **Recipient:** `Fulfiller.email` (required field). Sent best-effort from the same place the
+  booked notification is emitted today — `handlers/booking.py` free-confirm and
+  `stripe_webhook.persist_appointment_paid` (paid) — and on reschedule/cancel (update/cancelled
+  variants), so the delegate always knows the current state. A delivery failure never blocks the
+  booking (same pattern as receipts).
+- **Idempotency:** keyed off the appointment + state transition so webhook redelivery / retries
+  don't double-send (mirrors the existing webhook idempotency).
+- **Distinct from the tenant's bell notification.** The existing in-app "New booking" notification
+  is tenant-facing; this is a separate, delegate-facing email to the assigned staff person.
+
 ---
 
 ## 6. API / handler changes
@@ -145,10 +202,12 @@ everyone" bug and is what makes per-fulfiller delegation correct.
   - `DELETE /calendar/connections/{id}` → disconnect one; block/relink if it's referenced by a
     service/fulfiller (warn, reassign, or clear the reference).
 - **`handlers/services.py`** — accept/persist `Service.calendar_connection_id`.
-- **Fulfiller admin** — accept/persist `Fulfiller.calendar_connection_id`.
+- **Fulfiller admin** — accept/persist `Fulfiller.calendar_connection_id`; return whether the
+  fulfiller has a connected supported calendar so the dashboard can warn on delegation (§5.1).
 - **`handlers/booking.py`** — `availability_route` computes per-fulfiller busy via the routing
   helper; `_sync_calendar` / webhook `persist_appointment_paid` resolve the **write connection**
-  per appointment instead of the single tenant calendar.
+  per appointment (fulfiller override → service → default) instead of the single tenant calendar,
+  and **emit the delegate email** (§5.2) on confirm/paid/reschedule/cancel, best-effort.
 
 ---
 
@@ -158,7 +217,10 @@ everyone" bug and is what makes per-fulfiller delegation correct.
   choose which calendar within the account, mark default, disconnect individually; shows each
   connection's status + owning fulfiller.
 - **Service editor** → "Calendar" picker (default / specific connection).
-- **Fulfiller editor** → optional "Uses their own calendar" picker.
+- **Fulfiller editor** → "Uses their own calendar" — connect/pick a calendar for this staff
+  person (stamps `owner_fulfiller_id`); shows connected/not-connected status.
+- **Service delegation** → when a fulfiller is set as a service's delegate/default and has **no**
+  connected supported calendar, show an inline warning + "connect calendar" prompt (§5.1).
 
 ---
 
@@ -189,6 +251,12 @@ everyone" bug and is what makes per-fulfiller delegation correct.
 
 - Pure: `calendar_routing` resolution (fulfiller override > service > default > none); busy-source
   mapping; `available_slots` with `external_busy_by_fulfiller` (per-fulfiller vs global).
+- **Delegation (hard req):** an appointment assigned to a fulfiller-with-calendar writes to
+  **their** connection (not the service/tenant one); a delegate with no/revoked calendar falls
+  back per §5.1, still books, and stamps `delegation_calendar: "unavailable"`.
+- **Delegate email (hard req):** `delegate_booking_email` content includes service/time/customer
+  + the calendar-added-or-not line; sent to `Fulfiller.email` on confirm/paid; idempotent under
+  webhook redelivery; not sent when no fulfiller is assigned.
 - Provider factory: selects Google; unknown provider → `None` (no crash). Google client behind
   the interface unchanged (reuse existing calendar tests).
 - Handlers: connect creates generated-id connection + auto-default; list/patch/delete; set-default
@@ -202,9 +270,12 @@ everyone" bug and is what makes per-fulfiller delegation correct.
 - **Phase 1 — Foundation (Google, no routing yet).** De-hardcode `connection_id`; provider
   factory (Google only); connection list / set-default / per-connection disconnect; schema +
   migration backfill; dashboard connection list. Behavior preserved (all → default).
-- **Phase 2 — Routing (service default + fulfiller override).** `Service`/`Fulfiller` calendar
-  fields; `calendar_routing`; per-fulfiller busy in `available_slots` (**fixes the all-fulfiller
-  busy bug**); write-target resolution in booking + webhook; dashboard pickers.
+- **Phase 2 — Routing + delegation (service default + fulfiller override).** `Service`/`Fulfiller`
+  calendar fields; `calendar_routing`; per-fulfiller busy in `available_slots` (**fixes the
+  all-fulfiller busy bug**); **automatic write to the delegate's calendar** with the §5.1
+  precondition/fallback; **delegate email notification** (§5.2, SES now); write-target resolution
+  in booking + webhook; dashboard pickers + the "connect calendar" delegation warning. *(These are
+  the two hard requirements — they land together in this phase.)*
 - **Phase 3 — Microsoft Graph provider (Outlook 365 / Exchange).** `MicrosoftCalendarClient`,
   OAuth + `jb/microsoft-oauth/{env}` secret, provider selection in connect flow.
 - **Phase 4 — Refinements.** Busy aggregation (`busy_connection_ids[]`); external-change push
