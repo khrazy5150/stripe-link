@@ -13,7 +13,12 @@
 
       <form class="offer-form-section" @submit.prevent="save">
         <div class="offer-two-column">
-          <label class="offer-field"><span>Timezone</span><input v-model.trim="form.timezone" type="text" placeholder="America/Denver" /></label>
+          <label class="offer-field">
+            <span>Timezone</span>
+            <select v-model="form.timezone">
+              <option v-for="tz in timezones" :key="tz" :value="tz">{{ tz }}</option>
+            </select>
+          </label>
           <label class="offer-field"><span>Slot Interval (minutes)</span><input v-model.number="form.slot_interval_minutes" type="number" min="1" step="5" /></label>
         </div>
         <div class="offer-three-column">
@@ -35,13 +40,15 @@
 </template>
 
 <script setup>
-import { onMounted, ref, watch } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import WeeklyHours from "./WeeklyHours.vue";
 import { defaultWeeklyHours } from "../../utils/weeklyHours";
+import { timeZoneOptions } from "../../utils/timezones";
 import { useTenantAvailabilityStore } from "../../stores/tenantAvailability";
 
 const store = useTenantAvailabilityStore();
 const form = ref(defaultForm());
+const timezones = computed(() => timeZoneOptions(form.value.timezone));
 
 onMounted(async () => {
   if (!store.loaded) await store.load();
