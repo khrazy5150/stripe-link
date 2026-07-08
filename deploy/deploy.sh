@@ -11,6 +11,25 @@ DASHBOARD_CUSTOM_DOMAIN_NAME="${DASHBOARD_CUSTOM_DOMAIN_NAME:-}"
 DASHBOARD_CUSTOM_DOMAIN_CERTIFICATE_ARN="${DASHBOARD_CUSTOM_DOMAIN_CERTIFICATE_ARN:-}"
 DASHBOARD_CUSTOM_DOMAIN_HOSTED_ZONE_NAME="${DASHBOARD_CUSTOM_DOMAIN_HOSTED_ZONE_NAME:-juniorbay.com.}"
 
+# AWS End User Messaging (SMS) origination identity for appointment reminders. Set this to
+# the approved A2P 10DLC phone number (E.164, e.g. +18885551234) or a phone-pool ARN once
+# 10DLC registration completes. Until it is set, the reminder sweep no-ops (nothing is sent).
+# Enter it here per environment (persists across deploys) or override with the env var.
+SMS_ORIGINATION_IDENTITY="${SMS_ORIGINATION_IDENTITY:-}"
+SMS_CONFIGURATION_SET="${SMS_CONFIGURATION_SET:-}"
+
+if [[ "${ENVIRONMENT}" == "prod" ]]; then
+  # Paste the approved prod 10DLC number / pool ARN below (leave empty to keep SMS off):
+  SMS_ORIGINATION_IDENTITY="${SMS_ORIGINATION_IDENTITY:-}"
+  SMS_CONFIGURATION_SET="${SMS_CONFIGURATION_SET:-}"
+fi
+
+if [[ "${ENVIRONMENT}" == "dev" ]]; then
+  # Optional: a separate test/dev 10DLC or simulator number for staging SMS.
+  SMS_ORIGINATION_IDENTITY="${SMS_ORIGINATION_IDENTITY:-}"
+  SMS_CONFIGURATION_SET="${SMS_CONFIGURATION_SET:-}"
+fi
+
 if [[ "${ENVIRONMENT}" == "dev" ]]; then
   API_CUSTOM_DOMAIN_NAME="${API_CUSTOM_DOMAIN_NAME:-dev.juniorbay.com}"
   API_CUSTOM_DOMAIN_CERTIFICATE_ARN="${API_CUSTOM_DOMAIN_CERTIFICATE_ARN:-arn:aws:acm:us-west-2:150544707159:certificate/b40bb746-6e32-4a7d-8c24-b738cd1c359a}"
@@ -44,6 +63,14 @@ if [[ -z "${CALENDAR_REDIRECT_URI}" && -n "${API_CUSTOM_DOMAIN_NAME}" ]]; then
 fi
 if [[ -n "${CALENDAR_REDIRECT_URI}" ]]; then
   PARAMETER_OVERRIDES+=("CalendarRedirectUri=${CALENDAR_REDIRECT_URI}")
+fi
+
+if [[ -n "${SMS_ORIGINATION_IDENTITY}" ]]; then
+  PARAMETER_OVERRIDES+=("SmsOriginationIdentity=${SMS_ORIGINATION_IDENTITY}")
+fi
+
+if [[ -n "${SMS_CONFIGURATION_SET}" ]]; then
+  PARAMETER_OVERRIDES+=("SmsConfigurationSet=${SMS_CONFIGURATION_SET}")
 fi
 
 if [[ -n "${DASHBOARD_CUSTOM_DOMAIN_NAME}" ]]; then
