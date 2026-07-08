@@ -52,6 +52,41 @@ Deferred, non-blocking follow-ups. Each item notes what, why it was deferred, an
 - **Why deferred:** dev calendar work is validated on the dev client; prod client is only needed when
   calendar sync goes live in prod.
 
+### Apply for 10DLC (AWS End User Messaging SMS) — required before real SMS sending
+Gates Phase C.2 (appointment reminders) and the SMS-delivery option for payable invoices. Submit-and-
+wait review, **several business days to ~2–3 weeks**; start early. Code can be built/tested against a
+fake in the meantime.
+- **Prep:** legal business name + **EIN**, business address, website; a **website privacy policy that
+  mentions SMS**; the **opt-in story** (customer enters phone at booking and is told they'll get
+  reminders + "reply STOP to opt out" — the booking flow needs this consent line when C.2 is built);
+  2–3 **sample messages** (e.g. "Reminder: your [Business] appointment is tomorrow at 2:00 PM. Reply
+  STOP to opt out.").
+- **Steps:** (1) AWS Console → **AWS End User Messaging SMS**; (2) Phone numbers → Registrations →
+  **10DLC company (brand)** — legal name/EIN/address/website/vertical → submit (usually fast);
+  (3) **10DLC campaign** tied to the brand, use case **Customer Care / Low Volume Mixed** (reminders
+  are transactional), with sample messages + opt-in + HELP/STOP text → submit (the slow vetting step);
+  (4) once approved, **request a 10DLC phone number** and associate it with the campaign;
+  (5) create a **configuration set** for delivery receipts.
+- **Costs (approx, pass-through):** one-time brand (~a few $) + campaign vetting (~$15) + **~$10–15/mo**
+  per campaign + small per-message carrier fees.
+- **Platform model:** register **one** platform brand + campaign; the platform number sends reminders
+  that *reference* each tenant's business (simplest compliant model for multi-tenant SaaS).
+
+### Verify the Google OAuth app (Calendar sensitive scopes) — before prod calendar at scale
+Removes the "unverified app" warning, the ~100-user cap, and the 7-day refresh-token expiry. Review
+takes **days to a couple of weeks**. Calendar scopes are *sensitive* (not *restricted*), so **no**
+third-party security assessment is required.
+- **Prep:** a public **homepage** on the domain (`https://juniorbay.com`); a **privacy policy URL** on
+  that domain disclosing Google user-data usage + **Limited Use** compliance (can be generated from the
+  legal-pages system — needs the Google-specific language added); **verify domain ownership** in Google
+  Search Console; an **unlisted YouTube demo video** showing the consent flow + each scope in use (the
+  C.1b connect flow on dev can be screen-recorded for this).
+- **Steps:** (1) Google Cloud → **APIs & Services → OAuth consent screen**; (2) complete app name, logo,
+  support email, home page, privacy policy + terms URLs, **Authorized domains** (`juniorbay.com`);
+  (3) confirm scopes `calendar.events` + `calendar.readonly`; (4) **Publish App** (Testing → In
+  production); (5) **Prepare for verification** — submit scope justifications + demo video + policy URLs;
+  (6) wait for approval.
+
 ## Landing Pages / SEO
 
 ### Implement an on-page SEO checklist for landing pages
