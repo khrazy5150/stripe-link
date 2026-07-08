@@ -32,14 +32,6 @@ Parameters:
     Type: String
     Default: ""
     Description: OAuth redirect URI for Google Calendar connect (must be registered in the Google OAuth client). e.g. https://dev.juniorbay.com/calendar/callback
-  SmsOriginationIdentity:
-    Type: String
-    Default: ""
-    Description: AWS End User Messaging origination identity (phone pool ARN or 10DLC number) used to send appointment SMS reminders. Empty until A2P 10DLC registration completes.
-  SmsConfigurationSet:
-    Type: String
-    Default: ""
-    Description: Optional AWS End User Messaging configuration set name for SMS delivery events.
 
   StripeConnectRedirectUri:
     Type: String
@@ -154,8 +146,7 @@ Globals:
         LEGAL_PAGES_TABLE: !Ref LegalPagesTable
         CUSTOM_DOMAINS_TABLE: !Ref CustomDomainsTable
         CALENDAR_CONNECTIONS_TABLE: !Ref CalendarConnectionsTable
-        SMS_ORIGINATION_IDENTITY: !Ref SmsOriginationIdentity
-        SMS_CONFIGURATION_SET: !Ref SmsConfigurationSet
+        SMS_ORIGINATION_SECRET_NAME: !Sub "jb/sms-origination/${Environment}"
         GOOGLE_OAUTH_SECRET_NAME: !Sub "jb/google-oauth/${Environment}"
         PAGES_BUCKET: !Ref PagesBucket
         PAGES_PREVIEW_BUCKET: !Ref PagesPreviewBucket
@@ -2013,6 +2004,11 @@ Resources:
             Action:
               - sms-voice:SendTextMessage
             Resource: "*"
+        - Statement:
+            Effect: Allow
+            Action:
+              - secretsmanager:GetSecretValue
+            Resource: !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:jb/sms-origination/*"
       Events:
         ReminderSweep:
           Type: Schedule

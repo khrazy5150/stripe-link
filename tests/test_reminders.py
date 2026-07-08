@@ -1,5 +1,8 @@
+import json
+import os
 import unittest
 
+import stripe_link.sms as sms
 from handlers.reminders import handler as reminders_handler
 from stripe_link.domain.reminders import (
     SCHEDULED,
@@ -134,8 +137,64 @@ class SmsAdapterTests(unittest.TestCase):
     def test_send_sms_requires_fields(self):
         with self.assertRaises(SmsError):
             send_sms(to="", body="hi", origination="pool-1")
-        with self.assertRaises(SmsError):
-            send_sms(to="+14155550123", body="hi")  # no origination configured
+
+
+class OriginationResolverTests(unittest.TestCase):
+    def setUp(self):
+        sms._ORIGINATION_CACHE.clear()
+        self._saved = {k: os.environ.get(k) for k in ("SMS_ORIGINATION_IDENTITY", "SMS_CONFIGURATION_SET", "SMS_ORIGINATION_SECRET_NAME")}
+        for key in self._saved:
+            os.environ.pop(key, None)
+
+    def tearDown(self):
+        for key, value in self._saved.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+        sms._ORIGINATION_CACHE.clear()
+
+    class FakeSecrets:
+        def __init__(self, payload, *, raise_on=False):
+            self.payload = payload
+            self.raise_on = raise_on
+            self.calls = 0
+
+        def get_secret_value(self, SecretId):
+            self.calls += 1
+            if self.raise_on:
+                raise RuntimeError("no such secret")
+            return {"SecretString": json.dumps(self.payload)}
+
+    def test_env_override_wins_without_secret(self):
+        os.environ["SMS_ORIGINATION_IDENTITY"] = "+18885550000"
+        os.environ["SMS_CONFIGURATION_SET"] = "cs-env"
+        self.assertEqual(sms.resolve_origination(), ("+18885550000", "cs-env"))
+
+    def test_reads_from_secret(self):
+        os.environ["SMS_ORIGINATION_SECRET_NAME"] = "jb/sms-origination/test"
+        client = self.FakeSecrets({"origination_identity": "+18885551234", "configuration_set": "cs1"})
+        self.assertEqual(sms.resolve_origination(secrets_client=client), ("+18885551234", "cs1"))
+
+    def test_unconfigured_returns_empty_and_is_not_cached(self):
+        os.environ["SMS_ORIGINATION_SECRET_NAME"] = "jb/sms-origination/test"
+        empty = self.FakeSecrets({}, raise_on=True)
+        self.assertEqual(sms.resolve_origination(secrets_client=empty), ("", ""))
+        # a later populated read is picked up (empty result was not cached)
+        populated = self.FakeSecrets({"origination_identity": "+18885551234"})
+        self.assertEqual(sms.resolve_origination(secrets_client=populated)[0], "+18885551234")
+
+    def test_send_sms_resolves_when_origination_omitted(self):
+        os.environ["SMS_ORIGINATION_IDENTITY"] = "+18885550000"
+        captured = {}
+
+        class FakeSms:
+            def send_text_message(self, **kwargs):
+                captured.update(kwargs)
+                return {"MessageId": "m1"}
+
+        send_sms(to="+14155550123", body="hi", client=FakeSms())
+        self.assertEqual(captured["OriginationIdentity"], "+18885550000")
 
 
 class SweepHandlerTests(unittest.TestCase):

@@ -75,11 +75,13 @@ fake in the meantime.
   `src/stripe_link/domain/reminders.py` (plan/due/cancel/format), the `src/stripe_link/sms.py` adapter
   (`pinpoint-sms-voice-v2`), and the `RemindersFunction` sweep (`handlers/reminders.py`, EventBridge
   `rate(15 minutes)`). Reminders are planned on confirm/paid/reschedule and canceled on cancel.
-  **To go live once the number is approved:** (1) deploy with `SmsOriginationIdentity` (phone pool ARN
-  or 10DLC number) and optional `SmsConfigurationSet` set — until then `send_sms` no-ops with a config
-  error and the sweep marks nothing sent; (2) add the **opt-in consent line** to the booking form
-  ("you'll get SMS reminders — reply STOP to opt out"); STOP/HELP + the opt-out list are handled by
-  End User Messaging itself, and `sms_opted_out` on the customer is honored as a belt-and-suspenders.
+  **To go live once the number is approved:** run `./deploy/sms-origination-secrets.sh prod` and enter
+  the approved 10DLC number (or phone-pool ARN) + optional configuration set. It is stored in Secrets
+  Manager (`jb/sms-origination/{env}`) and read at **runtime** by the sweep — so it takes effect on the
+  next sweep (~15 min) with **no redeploy**, and can be rotated the same way. Until it is set the sweep
+  no-ops (`skipped: sms_not_configured`). The **opt-in consent line** is already on the public booking
+  form; STOP/HELP + the opt-out list are handled by End User Messaging itself, and `sms_opted_out` on
+  the customer is honored as a belt-and-suspenders. Use a test/simulator number in dev the same way.
 - **Future precision upgrade (optional):** swap the 15-min sweep for a per-booking **EventBridge
   Scheduler** one-shot (exact-minute delivery). The `domain/reminders.py` planning is model-agnostic, so
   only the handler/infra changes; a two-way inbound-STOP SNS handler could also record app-level opt-out.
