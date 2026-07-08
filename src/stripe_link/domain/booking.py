@@ -7,6 +7,8 @@ self-serve cancel/reschedule.
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from stripe_link.domain.service_pricing import price_tenant_keyed_amount, resolve_service_price, service_booking_flow
+
 APPOINTMENT_SCHEMA_VERSION = "2026-05-29"
 
 
@@ -40,7 +42,18 @@ def reserved_appointment(
     duration = max(1, int(service.get("duration_minutes") or 60))
     start = _parse_iso(slot_start_iso)
     end = start + timedelta(minutes=duration)
-    price = service.get("price") or {}
+    resolved = resolve_service_price(service) or {}
+    tenant_keyed = price_tenant_keyed_amount(resolved)
+    appointment_price = {
+        "currency": str(resolved.get("currency") or "usd").lower(),
+        "unit_amount": tenant_keyed,
+        "tenant_keyed_amount": tenant_keyed,
+        "fee_handling": str(resolved.get("fee_handling") or "standard"),
+        "pricing_model": str(resolved.get("pricing_model") or "one_time"),
+        "context": str(resolved.get("context") or "standard"),
+    }
+    if resolved.get("price_id"):
+        appointment_price["price_id"] = str(resolved.get("price_id"))
     appointment: dict[str, Any] = {
         "schema_version": APPOINTMENT_SCHEMA_VERSION,
         "document_type": "appointment",
@@ -53,6 +66,8 @@ def reserved_appointment(
         "timezone": tz_name or "UTC",
         "status": "reserved",
         "payment_status": "unpaid",
+        "booking_flow": service_booking_flow(service),
+        "source": "booking_page",
         "customer": {
             key: value
             for key, value in {
@@ -62,10 +77,7 @@ def reserved_appointment(
             }.items()
             if value
         },
-        "price": {
-            "currency": str(price.get("currency") or "usd").lower(),
-            "unit_amount": int(price.get("unit_amount") or 0),
-        },
+        "price": appointment_price,
         "customer_manage_token": str(manage_token),
         "hold_expires_at": int(hold_expires_at),
         "created_at": int(now_epoch),

@@ -1,4 +1,22 @@
 {
+  "autonomous_execution_protocol": {
+    "directive": "CRITICAL: YOU ARE OPERATING AS AN AUTONOMOUS SENIOR SOFTWARE ENGINEER. READ AND FOLLOW THESE RULES ABSOLUTELY.",
+    "interactivity_rules": [
+      "DO NOT halt execution to ask for permission, clarification, or human validation.",
+      "DO NOT ask the user to run bash commands, install dependencies, provision AWS mock resources, or update configuration files. Run them yourself using your available tool suite.",
+      "If you need to check if a file exists, inspect a database schema, or run a test script, use your terminal/file tools immediately without reporting a staging message first."
+    ],
+    "error_handling_loop": [
+      "If a command, script, or unit test fails: Read the full traceback/stdout.",
+      "Do not output 'Please fix this' or 'Run X to resolve.'",
+      "Formulate a fix directly, modify the file, re-run your verification command, and iterate autonomously until it passes.",
+      "Only return control to the user if an irreconcilable structural failure occurs that breaks core data safety boundaries."
+    ],
+    "definition_of_done": [
+      "You may only conclude your execution loop when every backend system story in Phase 1 is written, syntactically clean, locally verified against the high-level success tests, and fully integrated.",
+      "Provide a single, comprehensive final report detailing the file changes, database schema mutations, and test results at the very end of your execution run."
+    ]
+  },
   "project": {
     "name": "services-as-first-class-offer-inputs",
     "document_type": "implementation_spec",
@@ -28,7 +46,7 @@
   "project_intent": {
     "goal": "Make services first-class sellable and bookable entities inside offers, replacing the linked_product workaround with a service-native model.",
     "instructions_for_claude": [
-      "Treat this as a full implementation spec, not a brainstorm.",
+      "Treat this as a full, automated implementation spec, not a brainstorm.",
       "Use AWS-only infrastructure patterns and Python backend code.",
       "Use DynamoDB for all persistent storage.",
       "Keep the system serverless.",
@@ -178,14 +196,12 @@
           "description": "Use the existing pricing engine for services without bespoke logic.",
           "acceptance_criteria": [
             "Service pricing resolves through the shared Price primitive.",
-            "Service items route to a defined platform fee rate; they must not silently fall through to the digital class by accident.",
+            "Explicit Resolution Rule: Modify fee_class_for() to explicitly add a 'service' branch, and ensure platform_fees.tiers has matching fallback service rates to prevent falling back to the digital class tier by accident.",
             "Fee handling supports standard and net_guaranteed.",
             "compare_at and context values are honored."
           ],
           "implementation_notes": [
-            "Known behavior: fee_class_for() currently returns 'digital' for any non-physical/non-tip_jar product_type, and the default billing config has no 'service' tier. So passing product_type='service' alone yields the digital rate.",
-            "Choose one and document it: (a) explicitly reuse the digital fee class for services (drop the 'service class' language), or (b) add a 'service' branch to fee_class_for AND 'service' rates under platform_fees.tiers for every plan.",
-            "Do not fork the pricing engine."
+            "Do not fork the pricing engine. Implement explicit branch logic within the existing fee modules."
           ]
         }
       ]
@@ -245,14 +261,11 @@
           "name": "Define mixed product + service offer behavior",
           "description": "Support (or explicitly restrict) offers that contain both products and services in one checkout.",
           "acceptance_criteria": [
-            "A single checkout may contain product lines and service lines.",
-            "Each service line produces its own appointment following that item's resolved booking_flow.",
-            "Product lines are fulfilled through existing product fulfillment with no scheduling.",
-            "One payment covers the whole cart; scheduling for pay_then_book service lines happens after payment.",
-            "If full mixed-cart support is deferred, mixed offers are rejected at validation time rather than silently mishandled."
+            "Explicit Resolution Rule: If a mixed cart containing both a product line item and a service line item is submitted, the validation engine must reject the request with a 400 Bad Request error. Full mixed-cart support is explicitly deferred to Phase 2.",
+            "Each individual item flow remains completely protected against silent mis-handling."
           ],
           "implementation_notes": [
-            "Reuse the existing single-offer checkout; do not introduce a new cart primitive in this phase."
+            "Reuse the existing single-offer checkout validations; do not introduce a new cart primitive or multi-line routing mechanism in this phase."
           ]
         },
         {
@@ -376,14 +389,13 @@
   "testing": {
     "high_level_success_tests": [
       "Offer resolution returns the correct service price and service name.",
-      "Mixed product and service offers resolve correctly.",
-      "Service pricing applies fee logic correctly in both standard and net_guaranteed modes.",
+      "Service pricing applies fee logic correctly in both standard and net_guaranteed modes using the explicit service tier fallback branch.",
       "pay_then_book creates a paid appointment with awaiting_schedule=true and allows later scheduling.",
       "Scheduling a purchased appointment re-checks availability and cannot double-book a slot already taken by another appointment.",
       "book_then_pay creates an unpaid booked appointment and marks it paid after invoice payment.",
       "The direct schedule-then-pay booking flow works and applies net_guaranteed pricing from prices[].",
       "Legacy single-price services resolve correctly via the prices[] read adapter.",
-      "Mixed product+service offers either resolve and check out correctly or are explicitly rejected at validation.",
+      "Mixed product+service offers hit the validation block and are explicitly rejected with a 400 response.",
       "Standalone invoice creation works without an offer or page.",
       "Duplicate webhook events do not create duplicate records or state transitions."
     ]
@@ -409,7 +421,7 @@
       "Service schema refactor (prices[] + legacy-price read adapter/migration)",
       "Offer item schema expansion",
       "Appointment linkage + awaiting_schedule schema relaxation",
-      "Pricing and fee logic updates (service fee-class decision)",
+      "Pricing and fee logic updates (service fee-class resolution mapping)",
       "Direct booking flow migration to shared pricing",
       "Checkout and webhook backend updates (idempotent appointment creation)",
       "Booking and invoice endpoint updates (schedule with availability re-check + slot lock)",

@@ -78,30 +78,29 @@
     "items": {
       "type": "array",
       "minItems": 1,
-      "description": "Products included in this offer. Each item references existing product price IDs rather than duplicating product or price documents.",
+      "description": "Products and/or services included in this offer. Each item references exactly one of product_id or service_id and an existing price_id, rather than duplicating product/service or price documents.",
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["product_id"],
-        "oneOf": [
-          {
-            "required": ["price_id", "quantity"],
-            "description": "Fixed price path: one product price is locked to this offer item."
-          },
-          {
-            "required": ["selectable_prices", "default_price_id"],
-            "description": "Selectable price path: the buyer chooses from multiple price options for this product."
-          }
-        ],
+        "description": "Exactly one of product_id or service_id is required (enforced by validate_offer_document). Service items use the fixed price_id path only.",
         "properties": {
           "product_id": {
             "type": "string",
             "minLength": 1
           },
+          "service_id": {
+            "type": "string",
+            "minLength": 1,
+            "description": "References a Service document; the item is a first-class bookable service."
+          },
+          "booking_flow": {
+            "enum": ["book_then_pay", "pay_then_book"],
+            "description": "Per-item override of the service's default booking flow. Service items only."
+          },
           "price_id": {
             "type": "string",
             "minLength": 1,
-            "description": "References a price_id on the product document."
+            "description": "References a price_id on the product document, or on Service.prices[] for service items."
           },
           "quantity": {
             "type": "integer",

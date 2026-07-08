@@ -7,6 +7,7 @@ import time
 from typing import Any, Callable
 
 from stripe_link.common import error_response, header_value, json_response
+from stripe_link.domain.documents import validate_appointment
 from stripe_link.domain.downloads import digital_download_links
 from stripe_link.domain.fees import cached_billing_config, calculate_price
 from stripe_link.delegation import apply_delegation
@@ -184,7 +185,9 @@ def handler(
         persistence = reconcile_dispute(stripe_event, tenant_id=tenant_id, orders_repo=orders_repo, now_fn=now_fn)
     elif event_type == "checkout.session.completed" and tenant_id:
         session = _event_data_object(stripe_event)
-        appointment_id = str(((session.get("metadata") or {}).get("appointment_id")) or "").strip()
+        session_metadata = session.get("metadata") or {}
+        appointment_id = str(session_metadata.get("appointment_id") or "").strip()
+        service_id = str(session_metadata.get("service_id") or "").strip()
         if appointment_id:
             persistence = persist_appointment_paid(
                 stripe_event, tenant_id=tenant_id, appointment_id=appointment_id, mode=mode,
@@ -205,6 +208,14 @@ def handler(
                 receipt_mailer=receipt_mailer,
                 email_context_loader=email_context_loader,
             )
+            # A paid service-offer purchase (pay_then_book) also creates an awaiting_schedule
+            # appointment the customer schedules later (STORY-5.1 / STORY-6.2).
+            if service_id and str(session_metadata.get("booking_flow") or "pay_then_book") == "pay_then_book":
+                persist_service_purchase(
+                    stripe_event, tenant_id=tenant_id, mode=mode,
+                    order_id=str((persistence or {}).get("order_id") or ""),
+                    notifications_repo=notifications_repo, now_fn=now_fn,
+                )
     elif event_type and event_type.startswith("invoice.") and tenant_id:
         persistence = persist_invoice_event(
             stripe_event, tenant_id=tenant_id, event_type=event_type, mode=mode,
@@ -314,6 +325,83 @@ def persist_checkout_session_completed(
         "written": written,
         "receipt": receipt,
     }
+
+
+def persist_service_purchase(
+    stripe_event: dict[str, Any],
+    *,
+    tenant_id: str,
+    mode: str,
+    order_id: str = "",
+    appointments_repo=None,
+    notifications_repo=None,
+    now_fn: Callable[[], int] = lambda: int(time.time()),
+) -> dict[str, Any]:
+    """A paid service-offer purchase (pay_then_book): create a paid, awaiting_schedule appointment
+    the customer schedules later. Idempotent on the checkout session id (STORY-5.1 / STORY-6.2)."""
+    import secrets as _secrets
+
+    session = _event_data_object(stripe_event)
+    metadata = session.get("metadata") or {}
+    service_id = str(metadata.get("service_id") or "").strip()
+    if not service_id:
+        return {"status": "skipped", "reason": "no_service_id"}
+    appointments_repo = appointments_repo or (appointments_repository() if os.environ.get("SERVICES_TABLE") else None)
+    if not appointments_repo:
+        return {"status": "skipped", "reason": "appointments_repo_unavailable"}
+
+    session_id = str(session.get("id") or "").strip()
+    appointment_id = f"appt_svc_{session_id}" if session_id else f"appt_svc_{str(session.get('payment_intent') or '')}"
+    if appointments_repo.get(tenant_id, appointment_id):
+        return {"status": "skipped", "reason": "already_created", "appointment_id": appointment_id}
+
+    now = int(now_fn())
+    details = session.get("customer_details") or {}
+    customer = {k: v for k, v in {"name": details.get("name"), "email": details.get("email"), "phone": details.get("phone")}.items() if v}
+    amount_total = int(session.get("amount_total") or 0)
+    currency = str(session.get("currency") or "usd").lower()
+    appointment = {
+        "schema_version": "2026-05-29",
+        "document_type": "appointment",
+        "tenant_id": tenant_id,
+        "appointment_id": appointment_id,
+        "service_id": service_id,
+        "service_name": str(metadata.get("service_name") or "Service"),
+        "status": "booked",
+        "payment_status": "paid",
+        "awaiting_schedule": True,
+        "customer": customer,
+        "price": {"currency": currency, "unit_amount": amount_total, "price_id": str(metadata.get("service_price_id") or "")},
+        "source": "offer",
+        "offer_id": str(metadata.get("offer_id") or ""),
+        "page_id": str(metadata.get("page_id") or ""),
+        "order_id": order_id,
+        "payment_intent_id": str(session.get("payment_intent") or ""),
+        "customer_manage_token": _secrets.token_urlsafe(24),
+        "stripe_mode": mode,
+        "created_at": now,
+        "updated_at": now,
+    }
+    try:
+        validate_appointment(appointment)
+        appointments_repo.put(appointment)
+    except Exception:  # noqa: BLE001 - never fail the webhook on booking side effects
+        return {"status": "error", "reason": "appointment_save_failed"}
+
+    if notifications_repo:
+        try:
+            notifications_repo.put({
+                "schema_version": "2026-05-29", "document_type": "notification", "tenant_id": tenant_id,
+                "notification_id": f"notif_appt_{appointment_id}", "type": "order", "severity": "success",
+                "title": "New booking (awaiting schedule)",
+                "message": f"{customer.get('name') or customer.get('email') or 'A customer'} purchased {appointment['service_name']} and needs to pick a time.",
+                "status": "unread", "sort_priority": 100,
+                "related": {"appointment_id": appointment_id}, "action": {"label": "View appointments", "route": "services"},
+                "created_at": now, "read_at": None, "archived_at": None,
+            })
+        except Exception:  # noqa: BLE001
+            pass
+    return {"status": "awaiting_schedule", "appointment_id": appointment_id}
 
 
 def persist_appointment_paid(
@@ -444,6 +532,7 @@ def persist_invoice_event(
     invoices_repo=None,
     ledger_repo=None,
     notifications_repo=None,
+    appointments_repo=None,
     billing_config_loader: Callable[[], dict[str, Any]] | None = None,
     now_fn: Callable[[], int] = lambda: int(time.time()),
 ) -> dict[str, Any]:
@@ -499,6 +588,17 @@ def persist_invoice_event(
     if new_status in {"void"}:
         updated["voided_at"] = now
     invoices_repo.put(updated)
+
+    # book_then_pay: a paid invoice linked to an appointment marks that appointment paid (STORY-5.2).
+    linked_appointment_id = str(((invoice.get("source") or {}).get("appointment_id")) or "").strip()
+    appointments_repo = appointments_repo or (appointments_repository() if os.environ.get("SERVICES_TABLE") else None)
+    if new_status == "paid" and linked_appointment_id and appointments_repo:
+        try:
+            appt = appointments_repo.get(tenant_id, linked_appointment_id)
+            if appt and appt.get("payment_status") != "paid":
+                appointments_repo.put({**appt, "payment_status": "paid", "invoice_id": invoice_id, "updated_at": now})
+        except Exception:  # noqa: BLE001 - appointment sync must not fail the webhook
+            pass
 
     if new_status == "paid" and notifications_repo:
         try:

@@ -17,11 +17,19 @@
       "type": "object",
       "additionalProperties": false,
       "required": ["currency", "unit_amount"],
+      "description": "Legacy mirror of the default price {currency, unit_amount}. Canonical pricing is prices[]/default_price_id; read via domain/service_pricing.py.",
       "properties": {
         "currency": { "type": "string" },
         "unit_amount": { "type": "integer", "minimum": 0 }
       }
     },
+    "prices": {
+      "type": "array",
+      "description": "Canonical service price list on the shared Price primitive (Price.schema.json).",
+      "items": { "$ref": "Price.schema.json" }
+    },
+    "default_price_id": { "type": "string" },
+    "booking_flow": { "enum": ["book_then_pay", "pay_then_book"] },
     "location_mode": { "enum": ["onsite", "mobile", "virtual", "hybrid"] },
     "linked_product": {
       "type": "object",

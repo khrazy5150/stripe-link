@@ -2,6 +2,7 @@ import time
 
 from stripe_link.common import error_response, json_response, parse_json_body, path_params, query_params, tenant_id_from_event
 from stripe_link.domain.appointments import AppointmentTransitionError, transition_appointment
+from stripe_link.domain.service_pricing import normalize_service_pricing
 from stripe_link.domain.documents import (
     DocumentValidationError,
     validate_appointment,
@@ -50,7 +51,7 @@ def handler(
         if action and method == "POST":
             return appointment_action_route(event, appointments_repo, action)
         return document_route(event, method, appointments_repo, "appointment", validate_appointment, "appointments", id_param="appointment_id")
-    return document_route(event, method, services_repo, "service", validate_service, "services", id_param="service_id")
+    return document_route(event, method, services_repo, "service", validate_service, "services", id_param="service_id", normalizer=normalize_service_pricing)
 
 
 def appointment_action_route(event, repository, action):
@@ -94,9 +95,9 @@ def default_availability_route(event, method, repository):
     return error_response(f"Unsupported method '{method}'.", status_code=405, code="method_not_allowed")
 
 
-def document_route(event, method, repository, singular, validator, plural, id_param=None):
+def document_route(event, method, repository, singular, validator, plural, id_param=None, normalizer=None):
     if method in {"POST", "PUT"}:
-        return save_document(event, repository, validator, singular, f"invalid_{singular}")
+        return save_document(event, repository, validator, singular, f"invalid_{singular}", normalizer=normalizer)
     if method == "GET":
         document_id = path_params(event).get(id_param or f"{singular}_id")
         if document_id:
@@ -111,9 +112,11 @@ def document_route(event, method, repository, singular, validator, plural, id_pa
     return error_response(f"Unsupported method '{method}'.", status_code=405, code="method_not_allowed")
 
 
-def save_document(event, repository, validator, response_key, error_code):
+def save_document(event, repository, validator, response_key, error_code, normalizer=None):
     try:
         document = parse_json_body(event)
+        if normalizer:
+            document = normalizer(document)
         validator(document)
         saved = repository.put(document)
         return json_response({response_key: saved}, status_code=201)

@@ -1,6 +1,8 @@
 from dataclasses import dataclass
 from typing import Any
 
+from stripe_link.domain.service_pricing import resolve_service_price, service_booking_flow
+
 
 class PricingError(ValueError):
     pass
@@ -19,17 +21,68 @@ class ResolvedOfferItem:
     context: str
     line_amount: int
     selectable: bool
+    kind: str = "product"
+    service_id: str = ""
+    booking_flow: str = ""
 
 
 def load_offer_products(tenant_id: str, offer: dict[str, Any], products_repo: Any) -> dict[str, dict[str, Any]]:
     products_by_id = {}
     for item in offer.get("items", []):
         product_id = str(item.get("product_id") or "")
+        if not product_id:
+            continue  # service items are loaded separately
         product = products_repo.get(tenant_id, product_id)
         if not product:
             raise PricingError(f"Product '{product_id}' was not found.")
         products_by_id[product_id] = product
     return products_by_id
+
+
+def load_offer_services(tenant_id: str, offer: dict[str, Any], services_repo: Any) -> dict[str, dict[str, Any]]:
+    services_by_id = {}
+    for item in offer.get("items", []):
+        service_id = str(item.get("service_id") or "")
+        if not service_id:
+            continue
+        if services_repo is None:
+            raise PricingError("Services repository is unavailable for a service offer item.")
+        service = services_repo.get(tenant_id, service_id)
+        if not service:
+            raise PricingError(f"Service '{service_id}' was not found.")
+        services_by_id[service_id] = service
+    return services_by_id
+
+
+def resolve_service_offer_item(item: dict[str, Any], service: dict[str, Any], offer_context: str) -> ResolvedOfferItem:
+    service_id = str(item.get("service_id") or "")
+    if service.get("service_id") != service_id:
+        raise PricingError(f"Offer item service '{service_id}' does not match service '{service.get('service_id', '')}'.")
+    if service.get("active") is False:
+        raise PricingError(f"Service '{service_id}' is not active.")
+    price = resolve_service_price(service, str(item.get("price_id") or ""))
+    if not price:
+        raise PricingError(f"Price '{item.get('price_id', '')}' was not found on service '{service_id}'.")
+    price_context = str(price.get("context") or "standard")
+    quantity = int(item.get("quantity", 1))
+    unit_amount = int(price.get("unit_amount", 0))
+    flow = str(item.get("booking_flow") or "").strip() or service_booking_flow(service)
+    return ResolvedOfferItem(
+        product_id="",
+        product_name=str(service.get("name") or ""),
+        price_id=str(price.get("price_id") or ""),
+        currency=str(price.get("currency") or "usd"),
+        unit_amount=unit_amount,
+        quantity=quantity,
+        price_quantity=int(price.get("quantity") or 1),
+        label=str(item.get("display_label") or price.get("label") or service.get("name") or ""),
+        context=price_context,
+        line_amount=unit_amount * quantity,
+        selectable=False,
+        kind="service",
+        service_id=service_id,
+        booking_flow=flow,
+    )
 
 
 def find_price(product: dict[str, Any], price_id: str) -> dict[str, Any]:
@@ -106,6 +159,7 @@ def resolve_offer(
     offer: dict[str, Any],
     products_by_id: dict[str, dict[str, Any]],
     selected_prices: dict[str, str] | None = None,
+    services_by_id: dict[str, dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     offer_status = offer.get("status") or ("active" if offer.get("active") is True else "archived")
     if offer_status != "active":
@@ -114,9 +168,17 @@ def resolve_offer(
     offer_context = offer.get("context", "standard")
     eligibility = offer.get("eligibility") or {}
     allowed_price_contexts = eligibility.get("allowed_price_contexts") or [offer_context]
+    services_by_id = services_by_id or {}
 
     resolved_items: list[ResolvedOfferItem] = []
     for item in offer.get("items", []):
+        service_id = str(item.get("service_id") or "")
+        if service_id:
+            service = services_by_id.get(service_id)
+            if not service:
+                raise PricingError(f"Service '{service_id}' was not provided for offer resolution.")
+            resolved_items.append(resolve_service_offer_item(item, service, offer_context))
+            continue
         product_id = item.get("product_id", "")
         product = products_by_id.get(product_id)
         if not product:
@@ -132,7 +194,9 @@ def resolve_offer(
         "subtotal": sum(item.line_amount for item in resolved_items),
         "items": [
             {
+                "kind": item.kind,
                 "product_id": item.product_id,
+                "service_id": item.service_id,
                 "product_name": item.product_name,
                 "price_id": item.price_id,
                 "currency": item.currency,
@@ -143,6 +207,7 @@ def resolve_offer(
                 "context": item.context,
                 "line_amount": item.line_amount,
                 "selectable": item.selectable,
+                "booking_flow": item.booking_flow,
             }
             for item in resolved_items
         ],

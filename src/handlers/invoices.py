@@ -1,5 +1,6 @@
 import os
 import time
+import uuid
 
 from stripe_link.common import error_response, json_response, parse_json_body, path_params, query_params, tenant_id_from_event
 from stripe_link.domain.documents import DocumentValidationError, validate_invoice
@@ -8,6 +9,7 @@ from stripe_link.domain.invoicing import (
     DEFAULT_DAYS_UNTIL_DUE,
     invoice_currency,
     invoice_email_content,
+    invoice_from_appointment,
     invoice_total,
     stripe_customer_params,
     stripe_invoice_params,
@@ -17,6 +19,7 @@ from stripe_link.kms_secrets import KmsSecretCipher
 from stripe_link.mailer import send_email
 from stripe_link.repositories.documents import (
     RepositoryError,
+    appointments_repository,
     invoices_repository,
     stripe_keys_repository,
     tenant_profiles_repository,
@@ -25,12 +28,14 @@ from stripe_link.stripe_client import StripeApiError, stripe_request
 from stripe_link.stripe_platform_secrets import checkout_credentials
 
 
-def handler(event, context, repository=None, stripe_repo=None, tenant_repo=None, secret_cipher=None, opener=None, mailer_send=None, billing_config_loader=None):
+def handler(event, context, repository=None, stripe_repo=None, tenant_repo=None, secret_cipher=None, opener=None, mailer_send=None, billing_config_loader=None, appointments_repo=None):
     repository = repository or invoices_repository()
     method = (event or {}).get("httpMethod", "").upper()
     path = (event or {}).get("path", "")
     if method == "OPTIONS":
         return json_response({})
+    if method == "POST" and path.endswith("/from-appointment"):
+        return invoice_from_appointment_route(event, repository, appointments_repo=appointments_repo)
     if method == "POST" and path.endswith("/send"):
         return send_invoice_route(event, repository, stripe_repo=stripe_repo, tenant_repo=tenant_repo,
                                   secret_cipher=secret_cipher, opener=opener, mailer_send=mailer_send,
@@ -141,6 +146,41 @@ def send_invoice_route(event, repository, *, stripe_repo, tenant_repo, secret_ci
     }
     repository.put(updated)
     return json_response({"invoice": updated, "hosted_invoice_url": hosted_url, "delivered": sent})
+
+
+def invoice_from_appointment_route(event, repository, *, appointments_repo=None):
+    """Create a draft invoice from a book-then-pay appointment (STORY-6.4). Idempotent per
+    appointment: returns the existing linked invoice if one was already created."""
+    tenant_id = tenant_id_from_event(event)
+    if not tenant_id:
+        return error_response("tenant_id is required.", code="missing_tenant")
+    try:
+        body = parse_json_body(event)
+    except ValueError as exc:
+        return error_response(str(exc), code="invalid_body")
+    appointment_id = str(body.get("appointment_id") or "").strip()
+    if not appointment_id:
+        return error_response("appointment_id is required.", code="missing_appointment_id")
+
+    appointments_repo = appointments_repo or (appointments_repository() if os.environ.get("SERVICES_TABLE") else None)
+    if not appointments_repo:
+        return error_response("Appointments are not available.", status_code=400, code="appointments_unavailable")
+    appointment = appointments_repo.get(tenant_id, appointment_id)
+    if not appointment:
+        return error_response("Appointment not found.", status_code=404, code="not_found")
+
+    for existing in repository.list_for_tenant(tenant_id):
+        if (existing.get("source") or {}).get("appointment_id") == appointment_id:
+            return json_response({"invoice": existing, "created": False})
+
+    now = int(time.time())
+    invoice = invoice_from_appointment(appointment, invoice_id=f"inv_{uuid.uuid4().hex[:12]}", now=now)
+    try:
+        validate_invoice(invoice)
+        saved = repository.put(invoice)
+    except (DocumentValidationError, RepositoryError) as exc:
+        return error_response(str(exc), code="invalid_invoice")
+    return json_response({"invoice": saved, "created": True}, status_code=201)
 
 
 def save_invoice(event, repository):

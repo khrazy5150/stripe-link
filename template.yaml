@@ -774,12 +774,14 @@ Resources:
       FunctionName: !Sub "${ProjectPrefix}-checkout-api-${Environment}"
       CodeUri: src/
       Handler: handlers.checkout.handler
-      Description: Creates Stripe Checkout sessions from stripe-link offer and product documents.
+      Description: Creates Stripe Checkout sessions from stripe-link offer, product, and service documents.
       Policies:
         - DynamoDBReadPolicy:
             TableName: !Ref OffersTable
         - DynamoDBReadPolicy:
             TableName: !Ref ProductsTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref ServicesTable
         - DynamoDBReadPolicy:
             TableName: !Sub "${ProjectPrefix}-stripe-keys-dev"
         - DynamoDBReadPolicy:
@@ -1790,6 +1792,8 @@ Resources:
         - DynamoDBCrudPolicy:
             TableName: !Ref InvoicesTable
         - DynamoDBReadPolicy:
+            TableName: !Ref ServicesTable
+        - DynamoDBReadPolicy:
             TableName: !Sub "${ProjectPrefix}-stripe-keys-dev"
         - DynamoDBReadPolicy:
             TableName: !Sub "${ProjectPrefix}-stripe-keys-prod"
@@ -1827,6 +1831,12 @@ Resources:
             RestApiId: !Ref RestApi
             Path: /invoices
             Method: PUT
+        InvoiceFromAppointment:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /invoices/from-appointment
+            Method: POST
         InvoicesGet:
           Type: Api
           Properties:
@@ -2002,6 +2012,12 @@ Resources:
           Properties:
             RestApiId: !Ref RestApi
             Path: /services/appointments/manage/reschedule
+            Method: POST
+        ManageSchedule:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /services/appointments/manage/schedule
             Method: POST
 
   RemindersFunction:

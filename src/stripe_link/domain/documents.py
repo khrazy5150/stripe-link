@@ -657,9 +657,33 @@ def validate_offer_document(document: dict[str, Any]) -> None:
     if not isinstance(items, list) or not items:
         raise DocumentValidationError("Offer items must be a non-empty array.")
 
+    service_item_count = 0
     for item in items:
         if not isinstance(item, dict):
             raise DocumentValidationError("Each offer item must be an object.")
+        # An item references exactly one of a product or a service (STORY-2.1).
+        has_product = bool(item.get("product_id"))
+        has_service = bool(item.get("service_id"))
+        if has_product == has_service:
+            raise DocumentValidationError("Offer item must reference exactly one of product_id or service_id.")
+        if has_service:
+            service_item_count += 1
+            # One appointment is created per paid service purchase; multiple service items in a single
+            # offer are out of scope for this phase and rejected rather than silently mishandled (STORY-5.4).
+            if service_item_count > 1:
+                raise DocumentValidationError("An offer may contain at most one service item in this phase.")
+            require_string(item, "service_id", "offer item service_id")
+            # Service items use the fixed price_id path only (no selectable_prices / packages).
+            if item.get("selectable_prices"):
+                raise DocumentValidationError("Service offer items must use price_id, not selectable_prices.")
+            require_string(item, "price_id", "offer item price_id")
+            require_positive_int(item, "quantity", "offer item quantity")
+            if item.get("booking_flow") is not None:
+                require_enum(item, "booking_flow", {"book_then_pay", "pay_then_book"}, "offer item booking_flow")
+            if document.get("product_intent") != "transaction":
+                raise DocumentValidationError("Service offer items require product_intent 'transaction'.")
+            optional_string(item, "presentation_context", "offer item presentation_context")
+            continue
         require_string(item, "product_id", "offer item product_id")
         optional_string(item, "presentation_context", "offer item presentation_context")
         has_fixed_price = bool(item.get("price_id"))
@@ -1298,6 +1322,21 @@ def validate_service(document: dict[str, Any]) -> None:
     if not isinstance(price, dict):
         raise DocumentValidationError("Service price must be an object.")
     require_fields(price, ["currency", "unit_amount"])
+    prices = document.get("prices")
+    if prices is not None:
+        if not isinstance(prices, list):
+            raise DocumentValidationError("Service prices must be an array.")
+        for entry in prices:
+            if not isinstance(entry, dict):
+                raise DocumentValidationError("Each service price must be an object.")
+            require_fields(entry, ["price_id", "currency", "unit_amount"])
+            context = entry.get("context")
+            if context is not None and context not in {"standard", "sale", "flash_sale"}:
+                raise DocumentValidationError("Service price context must be standard, sale, or flash_sale.")
+            if entry.get("fee_handling") is not None and entry.get("fee_handling") not in {"standard", "net_guaranteed"}:
+                raise DocumentValidationError("Service price fee_handling must be standard or net_guaranteed.")
+    if document.get("booking_flow") is not None and document.get("booking_flow") not in {"book_then_pay", "pay_then_book"}:
+        raise DocumentValidationError("Service booking_flow must be book_then_pay or pay_then_book.")
     booking_rules = document.get("booking_rules") or {}
     if not isinstance(booking_rules, dict):
         raise DocumentValidationError("Service booking_rules must be an object.")
@@ -1346,9 +1385,15 @@ def validate_availability_exception(document: dict[str, Any]) -> None:
 
 
 def validate_appointment(document: dict[str, Any]) -> None:
-    require_fields(document, ["schema_version", "document_type", "tenant_id", "appointment_id", "service_id", "starts_at", "ends_at", "timezone", "status", "customer"])
+    require_fields(document, ["schema_version", "document_type", "tenant_id", "appointment_id", "service_id", "status", "customer"])
     if document.get("document_type") != "appointment":
         raise DocumentValidationError("Appointment document_type must be 'appointment'.")
+    # A paid-but-unscheduled appointment (pay_then_book) has no time yet; require the time fields
+    # only once it is scheduled (STORY-3.2).
+    if not document.get("awaiting_schedule"):
+        require_fields(document, ["starts_at", "ends_at", "timezone"])
+    if document.get("source") is not None and document.get("source") not in {"booking_page", "offer", "invoice"}:
+        raise DocumentValidationError("Appointment source must be booking_page, offer, or invoice.")
     if document.get("status") not in {"reserved", "booked", "paid", "checked_in", "completed", "canceled", "no_show"}:
         raise DocumentValidationError("Appointment status is invalid.")
     customer = document.get("customer")

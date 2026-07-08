@@ -93,6 +93,10 @@ def fee_class_for(product_type: str, pricing_model: str = "one_time") -> str:
         return "tip_jar"
     if product_type == "physical":
         return "physical"
+    # Services intentionally route to the "digital" fee class (no separate service tier today).
+    # This is an explicit decision, not an accidental fall-through — see PRD STORY-4.1.
+    if product_type == "service":
+        return "digital"
     return "digital"
 
 
@@ -298,8 +302,12 @@ def build_fee_context(
     since both charge against a resolved Offer document with the same fee-tier rules.
     """
     items = resolved.get("items") or []
-    primary_product = products_by_id.get(items[0]["product_id"]) if items else {}
-    product_type = (primary_product or {}).get("product_type") or "physical"
+    primary = items[0] if items else {}
+    if primary.get("kind") == "service" or primary.get("service_id"):
+        product_type = "service"
+    else:
+        primary_product = products_by_id.get(primary.get("product_id")) if items else {}
+        product_type = (primary_product or {}).get("product_type") or "physical"
 
     tenant_profile = tenant_repo.get(tenant_id, tenant_id) or {}
     tenant_plan = normalize_tier_id(tenant_profile.get("tier_id"))

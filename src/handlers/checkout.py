@@ -9,6 +9,7 @@ from stripe_link.domain.pricing import (
     PricingError,
     find_price,
     load_offer_products,
+    load_offer_services,
     merge_resolved_offers,
     resolve_offer,
 )
@@ -16,6 +17,7 @@ from stripe_link.kms_secrets import KmsSecretCipher
 from stripe_link.repositories.documents import (
     offers_repository,
     products_repository,
+    services_repository,
     stripe_keys_repository,
     tenant_profiles_repository,
 )
@@ -31,6 +33,7 @@ def handler(
     *,
     offers_repo=None,
     products_repo=None,
+    services_repo=None,
     stripe_repo=None,
     tenant_repo=None,
     secret_cipher=None,
@@ -64,6 +67,11 @@ def handler(
 
     offers_repo = offers_repo or offers_repository()
     products_repo = products_repo or products_repository()
+    if services_repo is None:
+        try:
+            services_repo = services_repository()
+        except Exception:  # noqa: BLE001 - services table optional; only needed for service offer items
+            services_repo = None
     stripe_repo = stripe_repo or stripe_keys_repository()
     tenant_repo = tenant_repo or tenant_profiles_repository()
     secret_cipher = secret_cipher or KmsSecretCipher()
@@ -77,8 +85,9 @@ def handler(
             return error_response("Offer not found.", status_code=404, code="not_found")
 
         products_by_id = load_offer_products(tenant_id, offer, products_repo)
+        services_by_id = load_offer_services(tenant_id, offer, services_repo)
         selected_prices = {product_id: price_id} if product_id and price_id else {}
-        resolved = resolve_offer(offer, products_by_id, selected_prices)
+        resolved = resolve_offer(offer, products_by_id, selected_prices, services_by_id=services_by_id)
 
         resolved, products_by_id = resolve_order_bumps(
             tenant_id=tenant_id,
@@ -187,14 +196,26 @@ def build_checkout_payload(
     first_product_id = ""
     first_price_id = ""
     first_product_name = ""
+    service_item = None
     for index, item in enumerate(resolved.get("items") or []):
+        prefix = f"line_items[{index}]"
+        if item.get("kind") == "service" or item.get("service_id"):
+            # First-class service line: no product doc; price comes straight from the resolved item.
+            if service_item is None:
+                service_item = item
+            payload[f"{prefix}[price_data][currency]"] = item.get("currency") or "usd"
+            payload[f"{prefix}[price_data][unit_amount]"] = str(int(item.get("unit_amount") or 0))
+            payload[f"{prefix}[price_data][product_data][name]"] = item.get("label") or item.get("product_name") or "Service"
+            payload[f"{prefix}[quantity]"] = str(int(item.get("quantity") or 1))
+            if index == 0:
+                first_product_name = item.get("product_name") or "Service"
+            continue
         product = products_by_id.get(item.get("product_id")) or {}
         price = find_price(product, item.get("price_id") or "")
         if index == 0:
             first_product_id = item.get("product_id") or ""
             first_price_id = item.get("price_id") or ""
             first_product_name = product.get("name") or item.get("product_name") or "Product"
-        prefix = f"line_items[{index}]"
         stripe_price_id = price.get("stripe_price_id")
         if stripe_price_id:
             payload[f"{prefix}[price]"] = stripe_price_id
@@ -210,6 +231,13 @@ def build_checkout_payload(
                 payload[f"{prefix}[price_data][recurring][interval_count]"] = str(int(recurring.get("interval_count") or 1))
         payload[f"{prefix}[quantity]"] = str(int(item.get("quantity") or 1))
         collect_shipping = collect_shipping or product.get("product_type") == "physical"
+
+    # Booking metadata so the webhook can create/route the appointment for a service purchase.
+    if service_item is not None:
+        payload["metadata[service_id]"] = service_item.get("service_id") or ""
+        payload["metadata[service_price_id]"] = service_item.get("price_id") or ""
+        payload["metadata[booking_flow]"] = service_item.get("booking_flow") or "pay_then_book"
+        payload["metadata[service_name]"] = service_item.get("product_name") or service_item.get("label") or "Service"
 
     if collect_shipping and payload["mode"] == "payment":
         payload["shipping_address_collection[allowed_countries][0]"] = "US"

@@ -37,7 +37,7 @@ from stripe_link.stripe_platform_secrets import checkout_credentials
 
 DEFAULT_WINDOW_DAYS = 14
 HOLD_MINUTES = 10
-SERVICE_FEE_PRODUCT_TYPE = "digital"
+SERVICE_FEE_PRODUCT_TYPE = "service"
 
 
 def handler(
@@ -88,6 +88,8 @@ def handler(
             secret_cipher=secret_cipher, opener=opener, billing_config_loader=billing_config_loader,
             delegation=delegation,
         )
+    if "/appointments/manage/schedule" in path and method == "POST":
+        return manage_schedule_route(event, repos, slot_locks_repo or slot_locks_repository(), delegation=delegation)
     if "/appointments/manage/cancel" in path and method == "POST":
         return manage_cancel_route(event, appointments_repo, slot_locks_repo or slot_locks_repository(), delegation=delegation)
     if "/appointments/manage/reschedule" in path and method == "POST":
@@ -202,15 +204,22 @@ def checkout_route(event, appointments_repo, *, stripe_repo, tenant_repo, notifi
     tenant_id = str(appointment.get("tenant_id") or "")
     now = int(time.time())
 
-    # Free / lead-gen booking: confirm immediately, no Stripe.
-    if not requires_payment(appointment):
+    # Free / lead-gen booking, or book-then-pay: confirm the booking now, no Stripe checkout.
+    # book_then_pay collects payment later via an invoice (STORY-5.2); the slot is booked + unpaid.
+    book_then_pay = appointment.get("booking_flow") == "book_then_pay"
+    if not requires_payment(appointment) or book_then_pay:
         confirmed = {**appointment, "status": "booked", "updated_at": now}
         confirmed.pop("hold_expires_at", None)
         confirmed["reminders"] = plan_reminders(confirmed, now=now)
         appointments_repo.put(confirmed)
         _emit_booked_notification(notifications_repo or (notifications_repository() if os.environ.get("NOTIFICATIONS_TABLE") else None), confirmed, tenant_id, now)
         _delegate(appointments_repo, confirmed, action="upsert", change="booked", delegation=delegation, tenant_repo=tenant_repo)
-        return json_response({"appointment": _public_appointment(confirmed), "status": "booked", "requires_payment": False})
+        payable = book_then_pay and requires_payment(appointment)
+        return json_response({
+            "appointment": _public_appointment(confirmed), "status": "booked",
+            "requires_payment": bool(payable), "payment_status": confirmed.get("payment_status", "unpaid"),
+            "booking_flow": confirmed.get("booking_flow"),
+        })
 
     success_url = str(body.get("success_url") or "").strip()
     cancel_url = str(body.get("cancel_url") or "").strip()
@@ -229,18 +238,24 @@ def checkout_route(event, appointments_repo, *, stripe_repo, tenant_repo, notifi
 
     tenant_plan = normalize_tier_id((tenant_repo.get(tenant_id, tenant_id) or {}).get("tier_id"))
     price = appointment.get("price") or {}
+    # Honor the resolved price's fee handling: net_guaranteed grosses up the charged amount so the
+    # tenant nets the sticker; standard charges the sticker and deducts fees (STORY-5.5 / STORY-4.1).
+    tenant_keyed = int(price.get("tenant_keyed_amount") if price.get("tenant_keyed_amount") is not None else price.get("unit_amount") or 0)
     fee = calculate_price(
-        tenant_keyed_amount=int(price.get("unit_amount") or 0),
+        tenant_keyed_amount=tenant_keyed,
         currency=str(price.get("currency") or "usd"),
         product_type=SERVICE_FEE_PRODUCT_TYPE,
+        fee_handling=str(price.get("fee_handling") or "standard"),
+        pricing_model=str(price.get("pricing_model") or "one_time"),
         tenant_plan=tenant_plan,
         billing_config=cached_billing_config(billing_config_loader),
     )
+    charged_unit_amount = int(fee.get("unit_amount") or tenant_keyed)
     platform_fee = int(fee.get("breakdown", {}).get("platform_fee") or 0) if stripe_account else 0
 
     payload = build_booking_checkout_payload(
         appointment, tenant_id, success_url=success_url, cancel_url=cancel_url,
-        platform_fee=platform_fee, tenant_plan=tenant_plan,
+        platform_fee=platform_fee, tenant_plan=tenant_plan, charged_unit_amount=charged_unit_amount,
     )
     try:
         from handlers.checkout import create_stripe_checkout_session
@@ -295,6 +310,72 @@ def manage_cancel_route(event, appointments_repo, slot_locks_repo, delegation=No
     _release_lock(slot_locks_repo, canceled)
     _delegate(appointments_repo, canceled, action="delete", change="canceled", delegation=delegation)
     return json_response({"appointment": _public_appointment(canceled), "status": "canceled"})
+
+
+def manage_schedule_route(event, repos, slot_locks_repo, delegation=None):
+    """Schedule a paid-but-unscheduled (awaiting_schedule) appointment from a pay_then_book purchase.
+    Re-validates availability and claims the slot lock to prevent double-booking (STORY-6.3)."""
+    services_repo, availability_repo, fulfillers_repo, exceptions_repo, appointments_repo = repos
+    try:
+        body = parse_json_body(event)
+    except ValueError as exc:
+        return error_response(str(exc), code="invalid_body")
+
+    appointment, err = _authorized_appointment(appointments_repo, str(body.get("appointment_id") or "").strip(), str(body.get("manage_token") or "").strip())
+    if err:
+        return err
+    if not appointment.get("awaiting_schedule"):
+        return error_response("This appointment is not awaiting scheduling.", status_code=409, code="not_awaiting_schedule")
+    new_slot = str(body.get("slot_start") or "").strip()
+    if not new_slot:
+        return error_response("slot_start is required.", code="missing_slot_start")
+
+    tenant_id = str(appointment.get("tenant_id") or "")
+    service = services_repo.find_by_id(str(appointment.get("service_id") or ""))
+    if not service:
+        return error_response("Service not found.", status_code=404, code="not_found")
+    now = int(time.time())
+    duration = max(1, int(service.get("duration_minutes") or 60))
+    start_epoch = _iso_to_epoch(new_slot)
+    if start_epoch is None:
+        return error_response("slot_start must be an ISO-8601 timestamp.", code="invalid_slot_start")
+
+    tenant_availability = availability_repo.get(tenant_id, "default") or {}
+    fulfillers = fulfillers_repo.list_for_tenant(tenant_id)
+    requested_fulfiller = appointment.get("assigned_fulfiller_id") or str(body.get("fulfiller_id") or "").strip() or None
+    open_slots = available_slots(
+        service, tenant_availability, fulfillers, exceptions_repo.list_for_tenant(tenant_id), appointments_repo.list_for_tenant(tenant_id),
+        now_epoch=now, range_start_epoch=start_epoch, range_end_epoch=start_epoch + duration * 60, fulfiller_id=requested_fulfiller,
+    )
+    match = next((s for s in open_slots if s["start"] == new_slot), None)
+    if not match:
+        return error_response("That slot is no longer available.", status_code=409, code="slot_unavailable")
+    fulfiller_id = requested_fulfiller or match.get("fulfiller_id")
+
+    try:
+        claimed = slot_locks_repo.claim(tenant_id, fulfiller_id, new_slot, appointment_id=appointment["appointment_id"], hold_expires_at=now + HOLD_MINUTES * 60, now=now)
+    except RepositoryError as exc:
+        return error_response(str(exc), status_code=502, code="lock_failed")
+    if not claimed:
+        return error_response("That slot was just taken.", status_code=409, code="slot_taken")
+
+    updated = {
+        **appointment,
+        "starts_at": new_slot,
+        "ends_at": slot_end_iso(new_slot, duration),
+        "timezone": str(tenant_availability.get("timezone") or "UTC"),
+        "updated_at": now,
+    }
+    updated.pop("awaiting_schedule", None)
+    if fulfiller_id:
+        updated["assigned_fulfiller_id"] = str(fulfiller_id)
+        fulfiller_doc = next((f for f in fulfillers if f.get("fulfiller_id") == fulfiller_id), None)
+        if fulfiller_doc:
+            updated["rule_snapshot"] = compensation_snapshot(service, fulfiller_doc)  # comp frozen at schedule time
+    updated["reminders"] = plan_reminders(updated, now=now)
+    appointments_repo.put(updated)
+    _delegate(appointments_repo, updated, action="upsert", change="booked", delegation=delegation)
+    return json_response({"appointment": _public_appointment(updated), "status": "scheduled"})
 
 
 def manage_reschedule_route(event, repos, slot_locks_repo, delegation=None):
@@ -356,15 +437,16 @@ def _release_lock(slot_locks_repo, appointment):
         pass
 
 
-def build_booking_checkout_payload(appointment, tenant_id, *, success_url, cancel_url, platform_fee, tenant_plan):
+def build_booking_checkout_payload(appointment, tenant_id, *, success_url, cancel_url, platform_fee, tenant_plan, charged_unit_amount=None):
     price = appointment.get("price") or {}
     name = appointment.get("service_name") or "Service booking"
+    unit_amount = int(charged_unit_amount if charged_unit_amount is not None else price.get("unit_amount") or 0)
     payload = {
         "mode": "payment",
         "success_url": success_url,
         "cancel_url": cancel_url,
         "line_items[0][price_data][currency]": str(price.get("currency") or "usd"),
-        "line_items[0][price_data][unit_amount]": str(int(price.get("unit_amount") or 0)),
+        "line_items[0][price_data][unit_amount]": str(unit_amount),
         "line_items[0][price_data][product_data][name]": name,
         "line_items[0][quantity]": "1",
         "metadata[tenant_id]": tenant_id,
@@ -414,7 +496,8 @@ def _public_appointment(appointment):
     return {
         key: appointment.get(key)
         for key in ("appointment_id", "service_id", "service_name", "starts_at", "ends_at",
-                    "timezone", "status", "payment_status", "price", "assigned_fulfiller_id")
+                    "timezone", "status", "payment_status", "price", "assigned_fulfiller_id",
+                    "awaiting_schedule", "booking_flow")
     }
 
 
