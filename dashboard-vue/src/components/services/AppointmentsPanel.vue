@@ -24,7 +24,7 @@
             <div class="button-row">
               <button type="button" class="secondary-action compact" :class="{ active: viewMode === 'month' }" @click="viewMode = 'month'">Month</button>
               <button type="button" class="secondary-action compact" :class="{ active: viewMode === 'week' }" @click="viewMode = 'week'">Week</button>
-              <button type="button" class="secondary-action compact" @click="goToday">Today</button>
+              <button type="button" class="secondary-action compact" :class="{ active: isViewingToday }" @click="goToday">Today</button>
             </div>
           </div>
 
@@ -150,6 +150,8 @@ const cells = computed(() => {
   }
   return out;
 });
+
+const isViewingToday = computed(() => selectedDay.value === todayKey && cells.value.some((c) => c.key === todayKey));
 
 const countByDay = computed(() => {
   const map = {};
