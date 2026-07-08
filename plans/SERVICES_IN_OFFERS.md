@@ -157,6 +157,14 @@ this exact machinery; the difference is only whether an Appointment is attached
 - **Service editor** — the **Pricing card** ports the shared price UI (fee handling std/net-guaranteed,
   context standard/sale/flash, compare-at, live preview) on the `Price` primitive; a `booking_flow`
   default selector.
+- **Shared pricing-card enhancement (products *and* services): "You keep" on Standard.** Today the
+  live preview shows the customer-charged amount for both modes, and Net-guaranteed makes the tenant's
+  kept amount obvious (they set it). Standard hides it. Add a line at the end of the preview for
+  **Standard** fee handling: **"You keep $XX.XX"**, where the amount is `unit_amount − stripe_fee −
+  platform_fee` — i.e. the existing `calculate_price(...).breakdown.net_payout` (no new math). Show the
+  figure only, no fee breakdown. This lets tenants directly compare Standard vs Net-guaranteed and see
+  the benefit. Applies to the existing Products pricing card (`Products.vue`) as well as the ported
+  Services one, since they share the `Price` primitive/UI.
 
 ## 7. Security / integrity
 
