@@ -150,6 +150,7 @@ def available_slots(
     range_start_epoch: int,
     range_end_epoch: int,
     fulfiller_id: str | None = None,
+    external_busy: list[dict[str, str]] | None = None,
 ) -> list[dict[str, Any]]:
     tenant_availability = tenant_availability or {}
     tz = _zone(str(tenant_availability.get("timezone") or "UTC"))
@@ -170,12 +171,21 @@ def available_slots(
 
     scope = _resolve_scope(service, fulfillers, fulfiller_id)
 
+    # External busy (e.g. the tenant's connected calendar) blocks every fulfiller.
+    external_windows = []
+    for interval in external_busy or []:
+        start = _parse_iso(interval.get("start"))
+        end = _parse_iso(interval.get("end"))
+        if start and end:
+            external_windows.append((start, end))
+
     # Precompute the busy/exception windows for each fulfiller once.
     busy_by_fulfiller = {}
     for fid, _ in scope:
         busy_by_fulfiller[fid] = (
             _blocking_windows(appointments, fulfiller_id=fid, buffer_before=buffer_before, buffer_after=buffer_after, now_epoch=now_epoch)
             + _block_exception_windows(exceptions, fulfiller_id=fid)
+            + external_windows
         )
 
     slots_by_start: dict[datetime, str | None] = {}

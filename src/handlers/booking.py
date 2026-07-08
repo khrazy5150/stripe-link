@@ -14,6 +14,7 @@ from stripe_link.domain.booking import compensation_snapshot, requires_payment, 
 from stripe_link.domain.documents import DocumentValidationError, validate_appointment
 from stripe_link.domain.fees import cached_billing_config, calculate_price, normalize_tier_id
 from stripe_link.domain.scheduling import available_slots
+from stripe_link.calendar_sync import sync_appointment_event, tenant_busy_intervals
 from stripe_link.kms_secrets import KmsSecretCipher
 from stripe_link.runtime.booking_page import render_booking_page
 from stripe_link.repositories.documents import (
@@ -192,6 +193,7 @@ def checkout_route(event, appointments_repo, *, stripe_repo, tenant_repo, notifi
         confirmed.pop("hold_expires_at", None)
         appointments_repo.put(confirmed)
         _emit_booked_notification(notifications_repo or (notifications_repository() if os.environ.get("NOTIFICATIONS_TABLE") else None), confirmed, tenant_id, now)
+        _sync_calendar(appointments_repo, confirmed, "upsert")
         return json_response({"appointment": _public_appointment(confirmed), "status": "booked", "requires_payment": False})
 
     success_url = str(body.get("success_url") or "").strip()
@@ -274,6 +276,7 @@ def manage_cancel_route(event, appointments_repo, slot_locks_repo):
         return error_response(str(exc), status_code=409, code="invalid_transition")
     appointments_repo.put(canceled)
     _release_lock(slot_locks_repo, canceled)
+    _sync_calendar(appointments_repo, canceled, "delete")
     return json_response({"appointment": _public_appointment(canceled), "status": "canceled"})
 
 
@@ -324,6 +327,7 @@ def manage_reschedule_route(event, repos, slot_locks_repo):
     appointments_repo.put(updated)
     if old_start and old_start != new_slot:
         slot_locks_repo.release(tenant_id, fulfiller_id, old_start)
+    _sync_calendar(appointments_repo, updated, "upsert")
     return json_response({"appointment": _public_appointment(updated), "status": "rescheduled"})
 
 
@@ -405,6 +409,23 @@ def _iso_to_epoch(value):
         return None
 
 
+def _epoch_to_iso(epoch):
+    import datetime
+
+    return datetime.datetime.fromtimestamp(int(epoch), tz=datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _sync_calendar(appointments_repo, appointment, action):
+    """Best-effort push to the tenant's calendar; persist the returned event links if changed."""
+    events = sync_appointment_event(appointment, action=action)
+    if events is not None:
+        appointment["external_calendar_events"] = events
+        try:
+            appointments_repo.put(appointment)
+        except RepositoryError:
+            pass
+
+
 def booking_page_route(event, services_repo):
     service_id = path_params(event).get("service")
     service = services_repo.find_by_id(service_id) if service_id else None
@@ -444,6 +465,7 @@ def availability_route(event, services_repo, availability_repo, fulfillers_repo,
     fulfillers = fulfillers_repo.list_for_tenant(tenant_id)
     exceptions = exceptions_repo.list_for_tenant(tenant_id)
     appointments = appointments_repo.list_for_tenant(tenant_id)
+    external_busy = tenant_busy_intervals(tenant_id, _epoch_to_iso(range_start), _epoch_to_iso(range_end))
 
     slots = available_slots(
         service,
@@ -455,6 +477,7 @@ def availability_route(event, services_repo, availability_repo, fulfillers_repo,
         range_start_epoch=range_start,
         range_end_epoch=range_end,
         fulfiller_id=fulfiller_id,
+        external_busy=external_busy,
     )
     return json_response({
         "service_id": service_id,

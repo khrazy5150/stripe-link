@@ -104,6 +104,16 @@ class SlotEngineTests(unittest.TestCase):
         slots = self.slots(now=sat, start=sat, end=epoch(2026, 7, 12, 0, 0))
         self.assertEqual(slots, [])
 
+    def test_external_busy_blocks_slot(self):
+        # A connected-calendar busy window (Denver 10:00-11:00 == 16:00-17:00Z) removes that slot.
+        slots = available_slots(
+            SERVICE, tenant_avail(), [], [], [],
+            now_epoch=WED_START, range_start_epoch=WED_START, range_end_epoch=WED_END,
+            external_busy=[{"start": "2026-07-08T16:00:00Z", "end": "2026-07-08T17:00:00Z"}],
+        )
+        self.assertEqual(len(slots), 7)
+        self.assertNotIn("2026-07-08T16:00:00Z", [s["start"] for s in slots])
+
 
 class BookingHandlerTests(unittest.TestCase):
     def test_availability_endpoint(self):

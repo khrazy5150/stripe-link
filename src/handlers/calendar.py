@@ -23,6 +23,7 @@ from stripe_link.google_calendar import (
     exchange_code_for_tokens,
     load_google_oauth_secret,
 )
+from stripe_link.calendar_sync import CONNECTION_ID, KMS_FIELD, KMS_MODE, resolve_tenant_calendar  # noqa: F401 (re-exported)
 from stripe_link.kms_secrets import KmsSecretCipher
 from stripe_link.repositories.documents import (
     RepositoryError,
@@ -30,10 +31,7 @@ from stripe_link.repositories.documents import (
     oauth_states_repository,
 )
 
-CONNECTION_ID = "google"
 STATE_TTL_SECONDS = 600
-KMS_MODE = "calendar"
-KMS_FIELD = "google_refresh_token"
 
 
 def handler(event, context, connections_repo=None, states_repo=None, secret_cipher=None, google_secret=None, opener=None):
@@ -165,23 +163,6 @@ def disconnect_route(event, connections_repo):
         return error_response("tenant_id is required.", code="missing_tenant")
     connections_repo.delete(tenant_id, CONNECTION_ID)
     return json_response({"connected": False, "disconnected": True})
-
-
-def resolve_tenant_calendar(tenant_id, *, connections_repo=None, secret_cipher=None, google_secret=None):
-    """C.1c helper: return {client_id, client_secret, refresh_token, calendar_id} for a connected
-    tenant (refresh token decrypted), or None if not connected."""
-    connections_repo = connections_repo or calendar_connections_repository()
-    conn = connections_repo.get(tenant_id, CONNECTION_ID)
-    if not conn or conn.get("status") != "connected":
-        return None
-    creds = _google_creds(google_secret)
-    secret_cipher = secret_cipher or KmsSecretCipher()
-    return {
-        "client_id": creds.get("client_id", ""),
-        "client_secret": creds.get("client_secret", ""),
-        "refresh_token": secret_cipher.decrypt(conn.get("refresh_token_ref", ""), tenant_id=tenant_id, mode=KMS_MODE, field=KMS_FIELD),
-        "calendar_id": conn.get("calendar_id") or "primary",
-    }
 
 
 def _html(message, status_code=200):

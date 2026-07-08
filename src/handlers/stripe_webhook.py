@@ -9,6 +9,7 @@ from typing import Any, Callable
 from stripe_link.common import error_response, header_value, json_response
 from stripe_link.domain.downloads import digital_download_links
 from stripe_link.domain.fees import cached_billing_config, calculate_price
+from stripe_link.calendar_sync import sync_appointment_event
 from stripe_link.domain.ledger import refund_entry as build_ledger_refund_entry, sale_entry, sale_entry_from_order
 from stripe_link.domain.receipts import receipt_content
 from stripe_link.domain.refund_ledger import build_refund_entry, initial_payment_aggregates, set_refund_aggregates
@@ -338,6 +339,14 @@ def persist_appointment_paid(
         updated["payment_intent_id"] = payment_intent
     updated.pop("hold_expires_at", None)  # confirmed booking outlives the reserve hold
     appointments_repo.put(updated)
+
+    events = sync_appointment_event(updated, action="upsert")
+    if events is not None:
+        updated["external_calendar_events"] = events
+        try:
+            appointments_repo.put(updated)
+        except RepositoryError:
+            pass
 
     ledger_written = False
     ledger_repo = ledger_repo or (ledger_repository() if os.environ.get("LEDGER_TABLE") else None)
