@@ -367,7 +367,7 @@
       danger
       title="Delete service?"
       confirm-label="Delete"
-      :busy="store.saving"
+      :busy="deletingService"
       @cancel="pendingDeleteService = null"
       @confirm="confirmDelete"
     >
@@ -421,24 +421,31 @@ function serviceMetaText(service) {
 async function toggleArchive(service) {
   await store.setActive(service, !serviceIsActive(service));
 }
-async function promptDelete(service) {
-  const offers = await store.offersReferencing(service.service_id);
-  if (offers.length) {
-    store.error = store.message =
-      `Can't delete "${service.name}" — it's used by ${offers.length} offer(s): ${offers.join(", ")}. Remove it from those offers first.`;
-    return;
-  }
-  pendingDeleteService.value = service;
+function promptDelete(service) {
+  pendingDeleteService.value = service; // open the modal instantly; reference check runs on confirm
 }
 async function confirmDelete() {
-  if (!pendingDeleteService.value) return;
-  await store.deleteService(pendingDeleteService.value);
-  pendingDeleteService.value = null;
+  const service = pendingDeleteService.value;
+  if (!service || deletingService.value) return;
+  deletingService.value = true;
+  try {
+    const offers = await store.offersReferencing(service.service_id);
+    if (offers.length) {
+      store.error = store.message =
+        `Can't delete "${service.name}" — it's used by ${offers.length} offer(s): ${offers.join(", ")}. Remove it from those offers first.`;
+      return;
+    }
+    await store.deleteService(service);
+  } finally {
+    deletingService.value = false;
+    pendingDeleteService.value = null;
+  }
 }
 const showServiceModal = ref(false);
 const editingService = ref(null);
 const selectedService = ref(null);
 const pendingDeleteService = ref(null);
+const deletingService = ref(false);
 const formError = ref("");
 const form = ref(defaultServiceForm());
 const allowedForm = ref(defaultAllowedForm());

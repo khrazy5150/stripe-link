@@ -883,14 +883,8 @@ async function pagesReferencing(offerId) {
   }
 }
 
-async function requestDeleteOffer(offer) {
-  const pages = await pagesReferencing(offer.offer_id);
-  if (pages.length) {
-    offersError.value = offersMessage.value =
-      `Can't delete "${offer.name}" — it's used by ${pages.length} landing page(s): ${pages.join(", ")}. Archive or delete those pages first.`;
-    return;
-  }
-  pendingDeleteOffer.value = offer;
+function requestDeleteOffer(offer) {
+  pendingDeleteOffer.value = offer; // open the modal instantly; the reference check runs on confirm
 }
 
 async function deleteOffer() {
@@ -901,6 +895,13 @@ async function deleteOffer() {
   offersMessage.value = "";
   deletingOffer.value = true;
   try {
+    const pages = await pagesReferencing(offer.offer_id);
+    if (pages.length) {
+      offersError.value = offersMessage.value =
+        `Can't delete "${offerName}" — it's used by ${pages.length} landing page(s): ${pages.join(", ")}. Archive or delete those pages first.`;
+      pendingDeleteOffer.value = null;
+      return;
+    }
     await apiRequest(`/offers/${encodeURIComponent(offer.offer_id)}`, { method: "DELETE" });
     offers.value = offers.value.filter((item) => item.offer_id !== offer.offer_id);
     pendingDeleteOffer.value = null;
