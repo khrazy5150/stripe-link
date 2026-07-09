@@ -163,6 +163,7 @@ export async function buildServiceDocument(form, base = {}) {
     service_id: serviceId,
     name: String(form.name || "").trim(),
     description: String(form.description || "").trim(),
+    fulfillment_mode: form.fulfillment_mode === "no_booking" ? "no_booking" : "scheduled",
     duration_minutes: Math.max(1, Math.round(Number(form.duration_minutes || 0))),
     prices,
     default_price_id: defaultPrice.price_id,
@@ -177,6 +178,8 @@ export async function buildServiceDocument(form, base = {}) {
     updated_at: now,
   };
   delete document.linked_product;  // retired workaround
+  // no_booking services have no slot, so they carry no duration (backend validates this).
+  if (form.fulfillment_mode === "no_booking") delete document.duration_minutes;
 
   const defaultFulfillerId = String(form.default_fulfiller_id || "").trim();
   if (defaultFulfillerId) document.default_fulfiller_id = defaultFulfillerId;

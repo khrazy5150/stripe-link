@@ -1837,6 +1837,12 @@ Resources:
             RestApiId: !Ref RestApi
             Path: /invoices/from-appointment
             Method: POST
+        InvoiceFromOrder:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /invoices/from-order
+            Method: POST
         InvoicesGet:
           Type: Api
           Properties:

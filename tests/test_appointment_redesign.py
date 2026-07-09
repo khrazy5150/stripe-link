@@ -262,5 +262,142 @@ class InvoicePaidFanOutTests(unittest.TestCase):
         self.assertEqual(len(appts.list_for_tenant("t1")), 0)
 
 
+# --- Phase 3 helpers -------------------------------------------------------------------------
+from handlers.booking import handler as booking_handler  # noqa: E402
+from handlers.invoices import handler as invoices_handler  # noqa: E402
+from stripe_link.domain.booking import slot_end_iso  # noqa: E402
+from stripe_link.domain.invoicing import invoice_from_order  # noqa: E402
+from tests.test_services_in_offers import DAYS, FakeSlotLockRepository, _iso_tomorrow, priced_service  # noqa: E402
+
+
+def _open_availability():
+    repo = FakeDocumentRepository("availability_id")
+    repo.put({"tenant_id": "t1", "availability_id": "default", "timezone": "UTC", "slot_interval_minutes": 60,
+              "lead_time_minutes": 0, "weekly_hours": [{"day": d, "enabled": True, "start_time": "00:00", "end_time": "23:00"} for d in DAYS]})
+    return repo
+
+
+def _combined_appt(status="booked", awaiting=True, starts_at=None):
+    appt = {"schema_version": "2026-05-29", "document_type": "appointment", "tenant_id": "t1", "appointment_id": "a1",
+            "services": [{"service_id": "svc_1", "service_name": "Tax Prep", "price_id": "p1", "duration_minutes": 60},
+                         {"service_id": "svc_2", "service_name": "Notary", "price_id": "p2", "duration_minutes": 15}],
+            "duration_minutes": 75, "status": status, "payment_status": "paid", "customer": {"email": "c@e.com"},
+            "customer_manage_token": "tok"}
+    if awaiting:
+        appt["awaiting_schedule"] = True
+    if starts_at:
+        appt["starts_at"] = starts_at
+        appt["ends_at"] = slot_end_iso(starts_at, 75)
+        appt["timezone"] = "UTC"
+    return appt
+
+
+def _booking_env(appt):
+    services = FakeDocumentRepository("service_id"); services.put(priced_service())
+    appts = FakeDocumentRepository("appointment_id"); appts.put(appt)
+    return dict(services_repo=services, availability_repo=_open_availability(),
+                fulfillers_repo=FakeDocumentRepository("fulfiller_id"), exceptions_repo=FakeDocumentRepository("exception_id"),
+                appointments_repo=appts, connections_repo=None), appts
+
+
+# --- STORY-3.1: schedule a combined appointment against the summed duration ------------------
+class CombinedScheduleTests(unittest.TestCase):
+    def test_combined_slot_uses_summed_duration(self):
+        env, appts = _booking_env(_combined_appt())
+        slot = _iso_tomorrow()
+        event = {"httpMethod": "POST", "path": "/services/appointments/manage/schedule",
+                 "queryStringParameters": {"tenant_id": "t1"},
+                 "body": json.dumps({"appointment_id": "a1", "manage_token": "tok", "slot_start": slot})}
+        resp = booking_handler(event, None, slot_locks_repo=FakeSlotLockRepository(), **env)
+        self.assertEqual(resp["statusCode"], 200)
+        stored = appts.get("t1", "a1")
+        self.assertEqual(stored["starts_at"], slot)
+        self.assertEqual(stored["ends_at"], slot_end_iso(slot, 75))  # 60 + 15
+        self.assertNotIn("awaiting_schedule", stored)
+
+    def test_taken_slot_rejected(self):
+        env, appts = _booking_env(_combined_appt())
+        slot = _iso_tomorrow()
+        locks = FakeSlotLockRepository()
+        locks.claim("t1", None, slot, appointment_id="other", hold_expires_at=9999999999, now=0)
+        event = {"httpMethod": "POST", "path": "/services/appointments/manage/schedule",
+                 "queryStringParameters": {"tenant_id": "t1"},
+                 "body": json.dumps({"appointment_id": "a1", "manage_token": "tok", "slot_start": slot})}
+        resp = booking_handler(event, None, slot_locks_repo=locks, **env)
+        self.assertEqual(resp["statusCode"], 409)
+
+
+# --- STORY-3.2: availability accepts a combined-duration override ----------------------------
+class CombinedAvailabilityTests(unittest.TestCase):
+    def _query(self, params):
+        services = FakeDocumentRepository("service_id"); services.put(priced_service())
+        event = {"httpMethod": "GET", "path": "/services/svc_1/availability",
+                 "pathParameters": {"service_id": "svc_1"}, "queryStringParameters": {"tenant_id": "t1", **params}}
+        resp = booking_handler(event, None, services_repo=services, availability_repo=_open_availability(),
+                               fulfillers_repo=FakeDocumentRepository("fulfiller_id"), exceptions_repo=FakeDocumentRepository("exception_id"),
+                               appointments_repo=FakeDocumentRepository("appointment_id"), slot_locks_repo=FakeSlotLockRepository(), connections_repo=None)
+        return json.loads(resp["body"])
+
+    def test_override_drives_slot_length(self):
+        body = self._query({"duration_minutes": "75"})
+        self.assertEqual(body["duration_minutes"], 75)
+        first = body["slots"][0]
+        self.assertEqual(first["end"], slot_end_iso(first["start"], 75))
+
+    def test_default_is_service_duration(self):
+        body = self._query({})
+        self.assertEqual(body["duration_minutes"], 60)  # the service's own duration, unchanged
+
+
+# --- STORY-3.3: invoice_from_order ----------------------------------------------------------
+class InvoiceFromOrderTests(unittest.TestCase):
+    def _appt(self, appt_id, amount):
+        return {"tenant_id": "t1", "appointment_id": appt_id, "order_id": "ord_1", "customer": {"email": "c@e.com"},
+                "services": [{"service_id": f"s_{appt_id}", "service_name": appt_id, "price_id": "p", "duration_minutes": 30,
+                              "price": {"currency": "usd", "unit_amount": amount}}]}
+
+    def test_two_appointments_one_invoice_two_lines(self):
+        inv = invoice_from_order([self._appt("a1", 10000), self._appt("a2", 5000)], invoice_id="inv_1", now=1000)
+        self.assertEqual(len(inv["line_items"]), 2)
+        self.assertEqual(inv["source"]["appointment_ids"], ["a1", "a2"])
+        self.assertEqual(inv["amounts"]["total"], 15000)
+
+    def test_no_booking_only_empty_appointment_ids(self):
+        nb = [{"type": "service", "description": "Top-off", "quantity": 1, "unit_amount": 2000, "currency": "usd",
+               "fulfillment": "no_booking", "fulfillment_status": "fulfilled"}]
+        inv = invoice_from_order([], invoice_id="inv_2", now=1000, no_booking_lines=nb, tenant_id="t1", customer={"email": "c@e.com"})
+        self.assertEqual(inv["source"]["appointment_ids"], [])
+        self.assertEqual(len(inv["line_items"]), 1)
+        self.assertEqual(inv["line_items"][0]["fulfillment"], "no_booking")
+
+    def test_from_order_route_idempotent(self):
+        invoices = FakeDocumentRepository("invoice_id")
+        appts = FakeDocumentRepository("appointment_id")
+        appts.put(self._appt("a1", 10000)); appts.put(self._appt("a2", 5000))
+        event = {"httpMethod": "POST", "path": "/invoices/from-order", "queryStringParameters": {"tenant_id": "t1"},
+                 "body": json.dumps({"order_id": "ord_1"})}
+        r1 = invoices_handler(event, None, repository=invoices, appointments_repo=appts)
+        self.assertEqual(r1["statusCode"], 201)
+        self.assertTrue(json.loads(r1["body"])["created"])
+        r2 = invoices_handler(event, None, repository=invoices, appointments_repo=appts)
+        self.assertFalse(json.loads(r2["body"])["created"])
+
+
+# --- STORY-3.4: reschedule a combined appointment against the summed duration ----------------
+class CombinedRescheduleTests(unittest.TestCase):
+    def test_reschedule_uses_summed_duration(self):
+        first = _iso_tomorrow(hour=10)
+        env, appts = _booking_env(_combined_appt(status="booked", awaiting=False, starts_at=first))
+        new_slot = _iso_tomorrow(hour=14)
+        event = {"httpMethod": "POST", "path": "/services/appointments/manage/reschedule",
+                 "queryStringParameters": {"tenant_id": "t1"},
+                 "body": json.dumps({"appointment_id": "a1", "manage_token": "tok", "slot_start": new_slot})}
+        resp = booking_handler(event, None, slot_locks_repo=FakeSlotLockRepository(), **env)
+        self.assertEqual(resp["statusCode"], 200)
+        stored = appts.get("t1", "a1")
+        self.assertEqual(stored["starts_at"], new_slot)
+        self.assertEqual(stored["ends_at"], slot_end_iso(new_slot, 75))
+
+
 if __name__ == "__main__":
     unittest.main()

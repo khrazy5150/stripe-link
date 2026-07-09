@@ -7,42 +7,75 @@ from decimal import Decimal
 from html import escape
 from typing import Any
 
-from stripe_link.domain.booking import appointment_price, appointment_service_id, appointment_service_name
+from stripe_link.domain.booking import service_lines
 
 CURRENCY_SYMBOLS = {"usd": "$", "eur": "€", "gbp": "£"}
 DEFAULT_DAYS_UNTIL_DUE = 7
 
 
-def invoice_from_appointment(appointment: dict[str, Any], *, invoice_id: str, now: int) -> dict[str, Any]:
-    """Build a draft Invoice for a book-then-pay appointment, linked back via source.appointment_id
-    (STORY-6.4). Amount is the appointment's sticker price; the send flow adds the platform fee."""
-    price = appointment_price(appointment)
-    currency = str(price.get("currency") or "usd").lower()
-    unit_amount = int(price.get("tenant_keyed_amount") if price.get("tenant_keyed_amount") is not None else price.get("unit_amount") or 0)
-    service_name = appointment_service_name(appointment) or "Service"
-    line = {
-        "type": "service",
-        "description": service_name,
-        "quantity": 1,
-        "unit_amount": unit_amount,
-        "currency": currency,
-        "service_id": appointment_service_id(appointment),
-        "appointment_id": str(appointment.get("appointment_id") or ""),
-    }
+def _appointment_invoice_lines(appointment: dict[str, Any]) -> list[dict[str, Any]]:
+    """One invoice line per service line in an appointment (tenant-keyed amount for payout parity)."""
+    appointment_id = str(appointment.get("appointment_id") or "")
+    lines = []
+    for line in service_lines(appointment):
+        price = line.get("price") or {}
+        amount = int(price.get("tenant_keyed_amount") if price.get("tenant_keyed_amount") is not None else price.get("unit_amount") or 0)
+        lines.append({
+            "type": "service",
+            "description": str(line.get("service_name") or "Service"),
+            "quantity": 1,
+            "unit_amount": amount,
+            "currency": str(price.get("currency") or "usd").lower(),
+            "service_id": str(line.get("service_id") or ""),
+            "appointment_id": appointment_id,
+        })
+    return lines
+
+
+def invoice_from_order(
+    appointments: list[dict[str, Any]], *, invoice_id: str, now: int,
+    no_booking_lines: list[dict[str, Any]] | None = None,
+    tenant_id: str | None = None, customer: dict[str, Any] | None = None,
+    order_id: str = "", stripe_mode: str = "",
+) -> dict[str, Any]:
+    """Build ONE draft Invoice for a book-then-pay purchase: one line per service line across all its
+    appointments, plus any no_booking lines. Links source.appointment_ids[] (0..N — empty for a
+    no_booking-only purchase). The send flow adds the platform fee (STORY-3.3)."""
+    appointments = list(appointments or [])
+    no_booking_lines = list(no_booking_lines or [])
+    first = appointments[0] if appointments else {}
+    tenant_id = tenant_id if tenant_id is not None else str(first.get("tenant_id") or "")
+    customer = customer if customer is not None else dict(first.get("customer") or {})
+    stripe_mode = stripe_mode or str(first.get("stripe_mode") or "")
+    order_id = order_id or str(first.get("order_id") or "")
+
+    line_items: list[dict[str, Any]] = []
+    for appointment in appointments:
+        line_items.extend(_appointment_invoice_lines(appointment))
+    line_items.extend(dict(line) for line in no_booking_lines)
+
+    currency = str((line_items[0].get("currency") if line_items else "usd") or "usd").lower()
+    subtotal = sum(int(item.get("unit_amount") or 0) * max(1, int(item.get("quantity") or 1)) for item in line_items)
+    appointment_ids = [str(a.get("appointment_id") or "") for a in appointments]
     return {
         "schema_version": "2026-05-29",
         "document_type": "invoice",
-        "tenant_id": str(appointment.get("tenant_id") or ""),
+        "tenant_id": tenant_id,
         "invoice_id": invoice_id,
         "status": "draft",
-        "stripe_mode": str(appointment.get("stripe_mode") or ""),
-        "customer": dict(appointment.get("customer") or {}),
-        "line_items": [line],
-        "amounts": {"currency": currency, "subtotal": unit_amount, "total": unit_amount, "amount_paid": 0, "amount_due": unit_amount},
-        "source": {"appointment_ids": [str(appointment.get("appointment_id") or "")], "service_id": appointment_service_id(appointment), "created_from": "appointment"},
+        "stripe_mode": stripe_mode,
+        "customer": customer,
+        "line_items": line_items,
+        "amounts": {"currency": currency, "subtotal": subtotal, "total": subtotal, "amount_paid": 0, "amount_due": subtotal},
+        "source": {"appointment_ids": appointment_ids, "order_id": order_id, "created_from": "order"},
         "created_at": now,
         "updated_at": now,
     }
+
+
+def invoice_from_appointment(appointment: dict[str, Any], *, invoice_id: str, now: int) -> dict[str, Any]:
+    """Single-appointment convenience over invoice_from_order (book-then-pay direct booking)."""
+    return invoice_from_order([appointment], invoice_id=invoice_id, now=now)
 
 
 def line_total(item: dict[str, Any]) -> int:

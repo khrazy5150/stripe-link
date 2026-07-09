@@ -57,7 +57,8 @@
           </header>
           <strong class="coupon-discount">{{ formatServicePrice(service) }}</strong>
           <dl class="coupon-detail-list">
-            <div><dt>Duration</dt><dd>{{ formatServiceDuration(service) }}</dd></div>
+            <div v-if="service.fulfillment_mode !== 'no_booking'"><dt>Duration</dt><dd>{{ formatServiceDuration(service) }}</dd></div>
+            <div v-else><dt>Fulfillment</dt><dd>No booking</dd></div>
             <div><dt>Location</dt><dd>{{ locationLabel(service.location_mode) }}</dd></div>
           </dl>
           <div class="product-card-actions">
@@ -99,6 +100,16 @@
               </label>
             </div>
             <label class="offer-field">
+              <span>Fulfillment</span>
+              <select v-model="form.fulfillment_mode">
+                <option value="scheduled">Scheduled — customer books a time</option>
+                <option value="no_booking">No booking — pay only (no appointment)</option>
+              </select>
+              <small v-if="form.fulfillment_mode === 'no_booking'" class="services-hint">
+                Pay-only service with no appointment (e.g. an add-on or standalone charge). Taxed as a service; routes to a fulfiller for payout.
+              </small>
+            </label>
+            <label class="offer-field">
               <span>Description</span>
               <textarea v-model.trim="form.description" rows="3" placeholder="What the customer gets"></textarea>
             </label>
@@ -120,7 +131,7 @@
               :contexts="SERVICE_PRICE_CONTEXTS"
               :pricing-models="SERVICE_PRICING_MODELS"
             />
-            <div class="offer-two-column">
+            <div v-if="form.fulfillment_mode !== 'no_booking'" class="offer-two-column">
               <label class="offer-field">
                 <span>Duration (minutes) <strong>*</strong></span>
                 <input v-model.number="form.duration_minutes" min="1" step="5" type="number" required />
@@ -232,7 +243,7 @@
                     <option v-for="f in serviceFulfillerOptions" :key="f.fulfiller_id" :value="f.fulfiller_id">{{ fulfillerDisplayName(f) }}</option>
                   </select>
                 </label>
-                <label class="offer-field">
+                <label v-if="form.fulfillment_mode !== 'no_booking'" class="offer-field">
                   <span>Calendar</span>
                   <select v-model="form.calendar_connection_id">
                     <option value="">Default calendar</option>
@@ -242,12 +253,12 @@
                   </select>
                 </label>
               </div>
-              <p v-if="delegateNeedsCalendar" class="services-hint warning">
+              <p v-if="delegateNeedsCalendar && form.fulfillment_mode !== 'no_booking'" class="services-hint warning">
                 The default fulfiller has no calendar of their own — their bookings will use this service's calendar. Connect one on the Fulfillers tab to have bookings land on their own calendar automatically.
               </p>
             </section>
 
-            <section v-if="form.default_fulfiller_id" class="offer-form-section">
+            <section v-if="form.default_fulfiller_id && form.fulfillment_mode !== 'no_booking'" class="offer-form-section">
               <header class="offer-section-header">
                 <div>
                   <h3>Check-in &amp; Completion</h3>
@@ -322,7 +333,8 @@
             <div><dt>Service ID</dt><dd>{{ selectedService.service_id }}</dd></div>
             <div><dt>Name</dt><dd>{{ selectedService.name }}</dd></div>
             <div><dt>Price</dt><dd>{{ formatServicePrice(selectedService) }}</dd></div>
-            <div><dt>Duration</dt><dd>{{ formatServiceDuration(selectedService) }}</dd></div>
+            <div v-if="selectedService.fulfillment_mode !== 'no_booking'"><dt>Duration</dt><dd>{{ formatServiceDuration(selectedService) }}</dd></div>
+            <div v-else><dt>Fulfillment</dt><dd>No booking</dd></div>
             <div><dt>Location</dt><dd>{{ locationLabel(selectedService.location_mode) }}</dd></div>
             <div><dt>Status</dt><dd>{{ serviceIsActive(selectedService) ? "Active" : "Inactive" }}</dd></div>
           </dl>
@@ -494,6 +506,7 @@ function defaultServiceForm() {
     description: "",
     prices: [defaultPriceForm()],
     default_price_index: 0,
+    fulfillment_mode: "scheduled",
     booking_flow: "pay_then_book",
     duration_minutes: 60,
     location_mode: "onsite",
@@ -541,7 +554,7 @@ async function saveService() {
     formError.value = "Service name is required.";
     return;
   }
-  if (Number(form.value.duration_minutes || 0) < 1) {
+  if (form.value.fulfillment_mode !== "no_booking" && Number(form.value.duration_minutes || 0) < 1) {
     formError.value = "Duration must be at least 1 minute.";
     return;
   }
@@ -573,6 +586,7 @@ function formFromService(service) {
     description: service.description || "",
     prices,
     default_price_index: defaultIndex >= 0 ? defaultIndex : 0,
+    fulfillment_mode: service.fulfillment_mode === "no_booking" ? "no_booking" : "scheduled",
     booking_flow: ["book_then_pay", "pay_then_book"].includes(service.booking_flow) ? service.booking_flow : "pay_then_book",
     duration_minutes: Number(service.duration_minutes || 60),
     location_mode: service.location_mode || "onsite",

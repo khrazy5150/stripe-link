@@ -10,6 +10,7 @@ from stripe_link.domain.invoicing import (
     invoice_currency,
     invoice_email_content,
     invoice_from_appointment,
+    invoice_from_order,
     invoice_total,
     stripe_customer_params,
     stripe_invoice_params,
@@ -36,6 +37,8 @@ def handler(event, context, repository=None, stripe_repo=None, tenant_repo=None,
         return json_response({})
     if method == "POST" and path.endswith("/from-appointment"):
         return invoice_from_appointment_route(event, repository, appointments_repo=appointments_repo)
+    if method == "POST" and path.endswith("/from-order"):
+        return invoice_from_order_route(event, repository, appointments_repo=appointments_repo)
     if method == "POST" and path.endswith("/send"):
         return send_invoice_route(event, repository, stripe_repo=stripe_repo, tenant_repo=tenant_repo,
                                   secret_cipher=secret_cipher, opener=opener, mailer_send=mailer_send,
@@ -175,6 +178,39 @@ def invoice_from_appointment_route(event, repository, *, appointments_repo=None)
 
     now = int(time.time())
     invoice = invoice_from_appointment(appointment, invoice_id=f"inv_{uuid.uuid4().hex[:12]}", now=now)
+    try:
+        validate_invoice(invoice)
+        saved = repository.put(invoice)
+    except (DocumentValidationError, RepositoryError) as exc:
+        return error_response(str(exc), code="invalid_invoice")
+    return json_response({"invoice": saved, "created": True}, status_code=201)
+
+
+def invoice_from_order_route(event, repository, *, appointments_repo=None):
+    """Create (idempotently) one invoice for a book-then-pay order, covering all its appointments
+    (one line per service line). Returns the existing invoice if one was already created (STORY-3.3)."""
+    tenant_id = tenant_id_from_event(event)
+    try:
+        body = parse_json_body(event)
+    except ValueError as exc:
+        return error_response(str(exc), code="invalid_body")
+    order_id = str(body.get("order_id") or "").strip()
+    if not order_id:
+        return error_response("order_id is required.", code="missing_order_id")
+
+    appointments_repo = appointments_repo or (appointments_repository() if os.environ.get("SERVICES_TABLE") else None)
+    if not appointments_repo:
+        return error_response("Appointments are not available.", status_code=503, code="appointments_unavailable")
+    appointments = [a for a in appointments_repo.list_for_tenant(tenant_id) if str(a.get("order_id") or "") == order_id]
+    if not appointments:
+        return error_response("No appointments found for this order.", status_code=404, code="not_found")
+
+    for existing in repository.list_for_tenant(tenant_id):
+        if (existing.get("source") or {}).get("order_id") == order_id:
+            return json_response({"invoice": existing, "created": False})
+
+    now = int(time.time())
+    invoice = invoice_from_order(appointments, invoice_id=f"inv_{uuid.uuid4().hex[:12]}", now=now)
     try:
         validate_invoice(invoice)
         saved = repository.put(invoice)

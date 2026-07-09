@@ -11,6 +11,7 @@ import uuid
 from stripe_link.common import error_response, json_response, parse_json_body, path_params, query_params
 from stripe_link.domain.appointments import AppointmentTransitionError, transition_appointment
 from stripe_link.domain.booking import (
+    appointment_duration_minutes,
     appointment_price,
     appointment_service_id,
     appointment_service_name,
@@ -344,7 +345,10 @@ def manage_schedule_route(event, repos, slot_locks_repo, delegation=None):
     if not service:
         return error_response("Service not found.", status_code=404, code="not_found")
     now = int(time.time())
-    duration = max(1, int(service.get("duration_minutes") or 60))
+    # A combined (multi-service) appointment needs one contiguous slot of the summed duration for the
+    # single fulfiller (STORY-3.1); fall back to the service duration for a legacy single-line shape.
+    duration = appointment_duration_minutes(appointment) or max(1, int(service.get("duration_minutes") or 60))
+    slot_service = {**service, "duration_minutes": duration}
     start_epoch = _iso_to_epoch(new_slot)
     if start_epoch is None:
         return error_response("slot_start must be an ISO-8601 timestamp.", code="invalid_slot_start")
@@ -353,7 +357,7 @@ def manage_schedule_route(event, repos, slot_locks_repo, delegation=None):
     fulfillers = fulfillers_repo.list_for_tenant(tenant_id)
     requested_fulfiller = appointment.get("assigned_fulfiller_id") or str(body.get("fulfiller_id") or "").strip() or None
     open_slots = available_slots(
-        service, tenant_availability, fulfillers, exceptions_repo.list_for_tenant(tenant_id), appointments_repo.list_for_tenant(tenant_id),
+        slot_service, tenant_availability, fulfillers, exceptions_repo.list_for_tenant(tenant_id), appointments_repo.list_for_tenant(tenant_id),
         now_epoch=now, range_start_epoch=start_epoch, range_end_epoch=start_epoch + duration * 60, fulfiller_id=requested_fulfiller,
     )
     match = next((s for s in open_slots if s["start"] == new_slot), None)
@@ -408,14 +412,16 @@ def manage_reschedule_route(event, repos, slot_locks_repo, delegation=None):
     if not service:
         return error_response("Service not found.", status_code=404, code="not_found")
     now = int(time.time())
-    duration = max(1, int(service.get("duration_minutes") or 60))
+    # Reschedule the whole visit against its summed duration (STORY-3.4).
+    duration = appointment_duration_minutes(appointment) or max(1, int(service.get("duration_minutes") or 60))
+    slot_service = {**service, "duration_minutes": duration}
     start_epoch = _iso_to_epoch(new_slot)
     if start_epoch is None:
         return error_response("slot_start must be an ISO-8601 timestamp.", code="invalid_slot_start")
 
     fulfiller_id = appointment.get("assigned_fulfiller_id")
     open_slots = available_slots(
-        service, availability_repo.get(tenant_id, "default") or {}, fulfillers_repo.list_for_tenant(tenant_id),
+        slot_service, availability_repo.get(tenant_id, "default") or {}, fulfillers_repo.list_for_tenant(tenant_id),
         exceptions_repo.list_for_tenant(tenant_id), appointments_repo.list_for_tenant(tenant_id),
         now_epoch=now, range_start_epoch=start_epoch, range_end_epoch=start_epoch + duration * 60, fulfiller_id=fulfiller_id,
     )
@@ -602,6 +608,16 @@ def availability_route(event, services_repo, availability_repo, fulfillers_repo,
     range_start = _epoch(params.get("from"), default=now)
     range_end = _epoch(params.get("to"), default=now + DEFAULT_WINDOW_DAYS * 86400)
     fulfiller_id = str(params.get("fulfiller_id") or "").strip() or None
+    # Optional combined-duration override so a multi-service (single_visit) appointment can request
+    # slots that fit the summed duration (STORY-3.2). Absent → the service's own duration.
+    duration = max(1, int(service.get("duration_minutes") or 60))
+    try:
+        override = int(params.get("duration_minutes") or 0)
+        if override > 0:
+            duration = override
+    except (TypeError, ValueError):
+        pass
+    slot_service = {**service, "duration_minutes": duration}
 
     tenant_availability = availability_repo.get(tenant_id, "default") or {}
     fulfillers = fulfillers_repo.list_for_tenant(tenant_id)
@@ -612,7 +628,7 @@ def availability_route(event, services_repo, availability_repo, fulfillers_repo,
     )
 
     slots = available_slots(
-        service,
+        slot_service,
         tenant_availability,
         fulfillers,
         exceptions,
@@ -626,7 +642,7 @@ def availability_route(event, services_repo, availability_repo, fulfillers_repo,
     return json_response({
         "service_id": service_id,
         "timezone": tenant_availability.get("timezone") or "UTC",
-        "duration_minutes": int(service.get("duration_minutes") or 60),
+        "duration_minutes": duration,
         "slots": slots,
         "count": len(slots),
     })
