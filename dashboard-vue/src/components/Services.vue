@@ -563,7 +563,7 @@ function formFromService(service) {
   // Load prices via the shared adapter: prices[] if present, else synthesize from the legacy price.
   const priceDocs = Array.isArray(service.prices) && service.prices.length
     ? service.prices
-    : [{ price_id: "legacy", currency: (service.price || {}).currency || "usd", unit_amount: (service.price || {}).unit_amount || 0 }];
+    : [{ price_id: `svcprice_${service.service_id}`, currency: (service.price || {}).currency || "usd", unit_amount: (service.price || {}).unit_amount || 0 }];
   const prices = priceDocs.map((price) => priceFormFromDocument(price));
   const defaultIndex = Math.max(0, prices.findIndex((p) => p.price_id === service.default_price_id));
   return {

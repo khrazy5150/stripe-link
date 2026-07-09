@@ -543,7 +543,15 @@ const productStore = useProductsStore();
 const couponStore = useCouponsStore();
 const servicesStore = useServicesStore();
 const selectedServiceObj = computed(() => servicesStore.services.find((s) => s.service_id === form.service_id) || null);
-const selectedServicePrices = computed(() => (selectedServiceObj.value?.prices) || (selectedServiceObj.value?.price ? [{ price_id: "legacy", ...selectedServiceObj.value.price }] : []));
+const selectedServicePrices = computed(() => {
+  const s = selectedServiceObj.value;
+  if (!s) return [];
+  if (Array.isArray(s.prices) && s.prices.length) return s.prices;
+  // Legacy single-price service: synthesize the same price_id the backend adapter uses
+  // (domain/service_pricing._legacy_price_to_price -> `svcprice_{service_id}`) so it resolves.
+  if (s.price) return [{ price_id: `svcprice_${s.service_id}`, ...s.price }];
+  return [];
+});
 const hasService = computed(() => Boolean(form.service_id && form.service_price_id));
 const showOfferModal = ref(false);
 const showProductSelector = ref(false);
@@ -971,7 +979,7 @@ function buildOfferDocument() {
       headline: form.name,
       cta_label: "Buy Now",
     },
-    checkout: productIntent.value === "transaction" ? {
+    checkout: effectiveIntent === "transaction" ? {
       mode: checkoutMode,
       phone_number_collection: form.checkout.phone_number_collection,
       allow_promotion_codes: Boolean(form.checkout.allow_promotion_codes),
