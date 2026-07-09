@@ -111,20 +111,26 @@
                 <p>The price a customer pays and how long the service takes.</p>
               </div>
             </header>
-            <div class="offer-three-column">
-              <label class="offer-field">
-                <span>Price <strong>*</strong></span>
-                <input v-model.number="form.price_amount" min="0" type="number" step="0.01" required />
-              </label>
-              <label class="offer-field">
-                <span>Currency</span>
-                <select v-model="form.currency">
-                  <option value="usd">USD</option>
-                </select>
-              </label>
+            <PricingCard
+              :prices="form.prices"
+              v-model:default-index="form.default_price_index"
+              product-type="service"
+              title="Pricing"
+              subtitle="Net-guaranteed adds fees on top so you keep the full amount."
+              :contexts="SERVICE_PRICE_CONTEXTS"
+              :pricing-models="SERVICE_PRICING_MODELS"
+            />
+            <div class="offer-two-column">
               <label class="offer-field">
                 <span>Duration (minutes) <strong>*</strong></span>
                 <input v-model.number="form.duration_minutes" min="1" step="5" type="number" required />
+              </label>
+              <label class="offer-field">
+                <span>Booking flow</span>
+                <select v-model="form.booking_flow">
+                  <option value="pay_then_book">Pay first, then book a time</option>
+                  <option value="book_then_pay">Book first, pay later (invoice)</option>
+                </select>
               </label>
             </div>
           </section>
@@ -345,11 +351,17 @@ import { fulfillerDisplayName, useFulfillersStore } from "../stores/fulfillers";
 import { formatMoney } from "../stores/products";
 import { useCalendarStore } from "../stores/calendar";
 import { applyTitleCaseInput } from "../utils/titleCase.js";
+import { defaultPriceForm, priceFormFromDocument } from "../utils/priceForm";
+import PricingCard from "./shared/PricingCard.vue";
 import FulfillersPanel from "./services/FulfillersPanel.vue";
 import TenantAvailabilityPanel from "./services/TenantAvailabilityPanel.vue";
 import AvailabilityExceptionsPanel from "./services/AvailabilityExceptionsPanel.vue";
 import CalendarPanel from "./services/CalendarPanel.vue";
 import AppointmentsPanel from "./services/AppointmentsPanel.vue";
+
+// Services support only these price contexts and one-time pricing (PRD Phase 1 scope).
+const SERVICE_PRICE_CONTEXTS = [["standard", "Standard"], ["sale", "Sale"], ["flash_sale", "Flash sale"]];
+const SERVICE_PRICING_MODELS = [["one_time", "One-time"]];
 
 const store = useServicesStore();
 const fulfillers = useFulfillersStore();
@@ -480,8 +492,9 @@ function defaultServiceForm() {
     service_id: "",
     name: "",
     description: "",
-    price_amount: 0,
-    currency: "usd",
+    prices: [defaultPriceForm()],
+    default_price_index: 0,
+    booking_flow: "pay_then_book",
     duration_minutes: 60,
     location_mode: "onsite",
     hero_image_url: "",
@@ -547,14 +560,20 @@ function resetFilters() {
 }
 
 function formFromService(service) {
-  const price = service.price || {};
+  // Load prices via the shared adapter: prices[] if present, else synthesize from the legacy price.
+  const priceDocs = Array.isArray(service.prices) && service.prices.length
+    ? service.prices
+    : [{ price_id: "legacy", currency: (service.price || {}).currency || "usd", unit_amount: (service.price || {}).unit_amount || 0 }];
+  const prices = priceDocs.map((price) => priceFormFromDocument(price));
+  const defaultIndex = Math.max(0, prices.findIndex((p) => p.price_id === service.default_price_id));
   return {
     ...defaultServiceForm(),
     service_id: service.service_id || "",
     name: service.name || "",
     description: service.description || "",
-    price_amount: Number(price.unit_amount || 0) / 100,
-    currency: price.currency || "usd",
+    prices,
+    default_price_index: defaultIndex >= 0 ? defaultIndex : 0,
+    booking_flow: ["book_then_pay", "pay_then_book"].includes(service.booking_flow) ? service.booking_flow : "pay_then_book",
     duration_minutes: Number(service.duration_minutes || 60),
     location_mode: service.location_mode || "onsite",
     hero_image_url: service.presentation?.hero_image_url || "",

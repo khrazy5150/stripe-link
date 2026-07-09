@@ -125,11 +125,47 @@
             </div>
           </section>
 
-          <section v-if="selectedProducts.length" class="offer-form-section">
+          <section class="offer-form-section">
+            <header class="offer-section-header">
+              <div>
+                <h3>Service (optional)</h3>
+                <p>Attach a bookable service. One service per offer. Choose whether the customer pays first then books, or books first and pays via invoice.</p>
+              </div>
+            </header>
+            <div class="offer-three-column">
+              <label class="offer-field">
+                <span>Service</span>
+                <select v-model="form.service_id" @change="onServiceChange">
+                  <option value="">None</option>
+                  <option v-for="s in servicesStore.services" :key="s.service_id" :value="s.service_id">{{ s.name }}</option>
+                </select>
+              </label>
+              <label v-if="form.service_id" class="offer-field">
+                <span>Price</span>
+                <select v-model="form.service_price_id">
+                  <option v-for="p in selectedServicePrices" :key="p.price_id" :value="p.price_id">
+                    {{ formatMoney(p.unit_amount, p.currency) }}{{ p.context && p.context !== 'standard' ? ` (${p.context})` : '' }}
+                  </option>
+                </select>
+              </label>
+              <label v-if="form.service_id" class="offer-field">
+                <span>Booking flow</span>
+                <select v-model="form.service_booking_flow">
+                  <option value="pay_then_book">Pay first, then book</option>
+                  <option value="book_then_pay">Book first, pay later</option>
+                </select>
+              </label>
+            </div>
+            <div v-if="form.service_id" class="button-row">
+              <button type="button" class="secondary-action compact" @click="clearService">Remove service</button>
+            </div>
+          </section>
+
+          <section v-if="selectedProducts.length || hasService" class="offer-form-section">
             <div class="offer-two-column">
               <label class="offer-field">
                 <span>Offer Label <strong>*</strong></span>
-                <input v-model.trim="form.name" type="text" placeholder="Auto-generated from products..." required />
+                <input v-model.trim="form.name" type="text" placeholder="Name this offer..." required />
                 <small>Auto-generated label (you can modify it)</small>
               </label>
 
@@ -140,7 +176,7 @@
               </label>
             </div>
 
-            <div class="detected-offer-type">
+            <div v-if="selectedProducts.length" class="detected-offer-type">
               <span>{{ detectedOfferTypeLabel }}</span>
               <strong>{{ detectedOfferTypeDescription }}</strong>
             </div>
@@ -501,9 +537,14 @@ import { computed, reactive, ref, watch } from "vue";
 import { apiRequest, getApiEnvironment, getTenantId } from "../api/client";
 import { formatCouponDiscount, useCouponsStore } from "../stores/coupons";
 import { defaultProductPrice, formatMoney, useProductsStore } from "../stores/products";
+import { useServicesStore } from "../stores/services";
 
 const productStore = useProductsStore();
 const couponStore = useCouponsStore();
+const servicesStore = useServicesStore();
+const selectedServiceObj = computed(() => servicesStore.services.find((s) => s.service_id === form.service_id) || null);
+const selectedServicePrices = computed(() => (selectedServiceObj.value?.prices) || (selectedServiceObj.value?.price ? [{ price_id: "legacy", ...selectedServiceObj.value.price }] : []));
+const hasService = computed(() => Boolean(form.service_id && form.service_price_id));
 const showOfferModal = ref(false);
 const showProductSelector = ref(false);
 const showCouponSelector = ref(false);
@@ -615,6 +656,9 @@ function defaultOfferForm() {
   return {
     name: "",
     slug: "",
+    service_id: "",
+    service_price_id: "",
+    service_booking_flow: "pay_then_book",
     discount: {
       mode: "none",
       coupon_id: "",
@@ -651,6 +695,19 @@ function openOfferModal(offer = null) {
   resetForm();
   if (offer) loadOfferIntoForm(offer);
   showOfferModal.value = true;
+  if (!servicesStore.loaded && !servicesStore.loading) servicesStore.load();
+}
+
+function onServiceChange() {
+  const prices = selectedServicePrices.value;
+  const preferred = selectedServiceObj.value?.default_price_id;
+  form.service_price_id = prices.find((p) => p.price_id === preferred)?.price_id || prices[0]?.price_id || "";
+  form.service_booking_flow = selectedServiceObj.value?.booking_flow || "pay_then_book";
+}
+
+function clearService() {
+  form.service_id = "";
+  form.service_price_id = "";
 }
 
 function closeOfferModal() {
@@ -832,10 +889,10 @@ async function createOffer() {
 }
 
 function buildOfferDocument() {
-  if (!selectedProducts.value.length) return { error: "Select at least one product for this offer." };
+  if (!selectedProducts.value.length && !hasService.value) return { error: "Select at least one product or service for this offer." };
   if (!form.name || !form.slug) return { error: "Offer label and slug are required." };
-  if (productIntent.value === "mixed") return { error: "An offer cannot mix transaction and lead generation products." };
-  const checkoutMode = inferredCheckoutMode();
+  if (selectedProducts.value.length && productIntent.value === "mixed") return { error: "An offer cannot mix transaction and lead generation products." };
+  const checkoutMode = selectedProducts.value.length ? inferredCheckoutMode() : "payment";
   if (checkoutMode === "mixed") return { error: "An offer cannot mix one-time and recurring prices." };
   if (form.discount.mode === "coupon_code" && !form.discount.coupon_id) return { error: "Select a coupon or choose No Discount." };
   if (form.checkout.allow_promotion_codes && !form.checkout.promotion_code) return { error: "Promotion code is required when promotion codes are enabled." };
@@ -876,7 +933,21 @@ function buildOfferDocument() {
       }));
     }
   }
-  const priceContexts = selectedPriceContexts();
+  // A single bookable service (backend rejects more than one service item per offer).
+  let serviceContext = "standard";
+  if (hasService.value) {
+    const servicePrice = selectedServicePrices.value.find((p) => p.price_id === form.service_price_id);
+    serviceContext = servicePrice?.context || "standard";
+    items.push(cleanObject({
+      service_id: form.service_id,
+      price_id: form.service_price_id,
+      quantity: 1,
+      booking_flow: form.service_booking_flow || "pay_then_book",
+    }));
+  }
+
+  const priceContexts = selectedProducts.value.length ? selectedPriceContexts() : [serviceContext];
+  const effectiveIntent = selectedProducts.value.length ? productIntent.value : "transaction";
 
   const offer = cleanObject({
     schema_version: "2026-05-29",
@@ -886,7 +957,7 @@ function buildOfferDocument() {
     slug: form.slug,
     name: form.name,
     status: "active",
-    product_intent: productIntent.value,
+    product_intent: effectiveIntent,
     stripe_mode: getApiEnvironment(),
     items,
     discount: buildDiscountBlock(),
@@ -941,6 +1012,13 @@ function loadOfferIntoForm(offer) {
 
   const items = Array.isArray(offer.items) ? offer.items : [];
   selectedProductIds.value = items.map((item) => item.product_id).filter(Boolean);
+  const serviceItem = items.find((item) => item.service_id);
+  if (serviceItem) {
+    form.service_id = serviceItem.service_id;
+    form.service_price_id = serviceItem.price_id || "";
+    form.service_booking_flow = serviceItem.booking_flow || "pay_then_book";
+    if (!servicesStore.loaded && !servicesStore.loading) servicesStore.load();
+  }
   Object.keys(itemConfigs).forEach((key) => delete itemConfigs[key]);
 
   items.forEach((item) => {

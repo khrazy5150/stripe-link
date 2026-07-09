@@ -290,100 +290,12 @@
           </section>
 
           <section v-if="form.product_intent === 'transaction'" class="modal-form-section">
-            <div class="modal-pricing-card">
-              <header>
-                <div>
-                  <h3>Pricing</h3>
-                  <p>Product owns the canonical price list. Labels and bundle presentation are set in Offers.</p>
-                </div>
-              </header>
-              <div
-                v-for="(price, index) in form.prices"
-                :key="price.form_id"
-                class="product-price-row"
-              >
-                <div class="price-row-heading">
-                  <strong>Price {{ index + 1 }}</strong>
-                  <div class="price-row-actions">
-                    <label class="default-price-check">
-                      <input
-                        type="checkbox"
-                        :checked="form.default_price_index === index"
-                        @change="form.default_price_index = index"
-                      />
-                      Default price
-                    </label>
-                    <button
-                      type="button"
-                      class="secondary-action danger-action"
-                      :disabled="form.prices.length === 1"
-                      @click="removePrice(index)"
-                    >
-                      Remove
-                    </button>
-                  </div>
-                </div>
-
-                <div class="price-top-row">
-                  <label>Sales price
-                    <input v-model.number="price.sales_price" type="number" min="0" step="0.01" />
-                  </label>
-                  <label>Regular price
-                    <input v-model.number="price.regular_price" type="number" min="0" step="0.01" />
-                  </label>
-                  <label>Currency
-                    <select v-model="price.currency">
-                      <option value="usd">USD</option>
-                    </select>
-                  </label>
-                  <label>Quantity
-                    <input v-model.number="price.quantity" type="number" min="1" step="1" />
-                  </label>
-                </div>
-                <div class="price-options-grid">
-                  <fieldset>
-                    <legend>Pricing model</legend>
-                    <label><input v-model="price.pricing_model" type="radio" value="one_time" /> One-time</label>
-                    <label><input v-model="price.pricing_model" type="radio" value="recurring" /> Recurring</label>
-                    <label><input v-model="price.pricing_model" type="radio" value="customer_chooses" /> Customer chooses</label>
-                  </fieldset>
-                  <fieldset>
-                    <legend>Fee handling</legend>
-                    <label><input v-model="price.fee_handling" type="radio" value="standard" /> Standard fees deducted</label>
-                    <label><input v-model="price.fee_handling" type="radio" value="net_guaranteed" /> Net-guaranteed fees added on top</label>
-                  </fieldset>
-                </div>
-                <label class="price-context-field">Price context
-                  <select v-model="price.context">
-                    <option value="standard">Standard</option>
-                    <option value="sale">Sale</option>
-                    <option value="flash_sale">Flash sale</option>
-                    <option value="upsell">Upsell</option>
-                    <option value="downsell">Downsell</option>
-                    <option value="order_bump">Order bump</option>
-                  </select>
-                </label>
-                <div v-if="price.pricing_model === 'customer_chooses'" class="modal-inline-grid">
-                  <label>Minimum amount
-                    <input v-model.number="price.min_amount" type="number" min="0" step="0.01" />
-                  </label>
-                  <label>Suggested amount
-                    <input v-model.number="price.suggested_amount" type="number" min="0" step="0.01" />
-                  </label>
-                </div>
-                <div class="price-preview">
-                  <span>Preview:</span>
-                  <strong>{{ pricePreviewFor(price).amount }}</strong>
-                  <span v-if="pricePreviewFor(price).compareAt" class="price-preview-compare">{{ pricePreviewFor(price).compareAt }}</span>
-                  <span v-if="pricePreviewFor(price).discount" class="price-preview-discount">Save {{ pricePreviewFor(price).discount }}%</span>
-                  <span v-if="pricePreviewFor(price).note" class="price-preview-note">{{ pricePreviewFor(price).note }}</span>
-                  <span v-if="pricePreviewFor(price).youKeep" class="price-preview-note">You keep {{ pricePreviewFor(price).youKeep }}</span>
-                </div>
-              </div>
-              <footer class="price-card-footer">
-                <button type="button" class="secondary-action" @click="addPrice">+ Add another price</button>
-              </footer>
-            </div>
+            <PricingCard
+              :prices="form.prices"
+              v-model:default-index="form.default_price_index"
+              :product-type="form.product_type"
+              subtitle="Product owns the canonical price list. Labels and bundle presentation are set in Offers."
+            />
           </section>
 
           <section v-if="form.product_intent === 'transaction'" class="modal-form-section">
@@ -524,6 +436,8 @@
 import { computed, h, nextTick, ref, watch } from "vue";
 import { apiRequest } from "../api/client";
 import { defaultProductPrice, formatMoney, useProductsStore } from "../stores/products";
+import { defaultPriceForm, priceFormFromDocument } from "../utils/priceForm";
+import PricingCard from "./shared/PricingCard.vue";
 
 const store = useProductsStore();
 const selectedProduct = ref(null);
@@ -701,21 +615,6 @@ function defaultProductForm() {
   };
 }
 
-function defaultPriceForm() {
-  return {
-    form_id: `price-${Date.now()}-${Math.random().toString(36).slice(2)}`,
-    sales_price: 0,
-    regular_price: 0,
-    currency: "usd",
-    quantity: 1,
-    pricing_model: "one_time",
-    fee_handling: "standard",
-    context: "standard",
-    min_amount: 0,
-    suggested_amount: 0,
-  };
-}
-
 function variantFormId(prefix) {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
@@ -763,43 +662,6 @@ function removeColorVariant(index) {
   if (!form.value.colors.length) form.value.color_enabled = false;
 }
 
-function addPrice() {
-  form.value.prices.push(defaultPriceForm());
-}
-
-function removePrice(index) {
-  if (form.value.prices.length === 1) return;
-  form.value.prices.splice(index, 1);
-  if (form.value.default_price_index === index) form.value.default_price_index = 0;
-  if (form.value.default_price_index > index) form.value.default_price_index -= 1;
-}
-
-function pricePreviewFor(price) {
-  const quantity = Math.max(1, Number(price.quantity || 1));
-  const keyedSource = price.pricing_model === "customer_chooses" && Number(price.suggested_amount || 0) > 0
-    ? price.suggested_amount
-    : price.sales_price;
-  const tenantAmount = Math.max(0, Math.round(Number(keyedSource || 0) * 100)) * quantity;
-  const compareAt = Math.max(0, Math.round(Number(price.regular_price || 0) * 100)) * quantity;
-  const platformRate = price.pricing_model === "customer_chooses" ? 0.05 : form.value.product_type === "digital" ? 0.15 : 0.10;
-  const unitAmount = price.fee_handling === "net_guaranteed" && tenantAmount
-    ? Math.ceil((tenantAmount + 30) / (1 - 0.029 - platformRate))
-    : tenantAmount;
-  const discount = compareAt > unitAmount ? Math.max(1, Math.round((1 - unitAmount / compareAt) * 100)) : 0;
-  // For standard pricing, surface what the tenant nets (charge - Stripe fee - platform fee) so the
-  // net-guaranteed benefit is visible. Mirrors calculate_price's breakdown.net_payout rounding.
-  const stripeFee = unitAmount > 0 ? Math.ceil(unitAmount * 0.029) + 30 : 0;
-  const platformFee = Math.round(unitAmount * platformRate);
-  const netPayout = Math.max(0, unitAmount - stripeFee - platformFee);
-  return {
-    amount: formatMoney(unitAmount, price.currency),
-    compareAt: compareAt > unitAmount ? formatMoney(compareAt, price.currency) : "",
-    discount,
-    note: price.fee_handling === "net_guaranteed" && tenantAmount ? `includes Stripe + ${Math.round(platformRate * 100)}% platform fee` : "",
-    youKeep: price.fee_handling !== "net_guaranteed" && tenantAmount ? formatMoney(netPayout, price.currency) : "",
-  };
-}
-
 function openCreateModal() {
   editingProduct.value = null;
   form.value = defaultProductForm();
@@ -837,7 +699,7 @@ function productFormFromDocument(product) {
   const base = defaultProductForm();
   const productType = product.product_type || "physical";
   const prices = Array.isArray(product.prices) && product.prices.length
-    ? product.prices.map((price) => priceFormFromDocument(product, price))
+    ? product.prices.map((price) => priceFormFromDocument(price))
     : [defaultPriceForm()];
   const defaultPriceIndex = Math.max(0, prices.findIndex((price) => price.price_id === product.default_price_id));
   const refundPolicy = product.refund_policy || {};
@@ -881,29 +743,6 @@ function productFormFromDocument(product) {
     weight_lb: fulfillment.weight_lb ?? base.weight_lb,
     lead_capture: leadCapture,
   };
-}
-
-function priceFormFromDocument(product, price) {
-  const quantity = Math.max(1, Number(price.quantity || 1));
-  return {
-    ...defaultPriceForm(),
-    price_id: price.price_id || "",
-    stripe_price_id: price.stripe_price_id || null,
-    created_at: price.created_at || null,
-    sales_price: centsToMoneyInput(price.tenant_keyed_amount ?? price.unit_amount ?? 0, quantity),
-    regular_price: centsToMoneyInput(price.compare_at_unit_amount || 0, quantity),
-    currency: price.currency || "usd",
-    quantity,
-    pricing_model: price.pricing_model || "one_time",
-    fee_handling: price.fee_handling || "standard",
-    context: price.context || "standard",
-    min_amount: centsToMoneyInput(price.min_amount || 0, quantity),
-    suggested_amount: centsToMoneyInput(price.suggested_amount || 0, quantity),
-  };
-}
-
-function centsToMoneyInput(cents, quantity = 1) {
-  return Number((Number(cents || 0) / Math.max(1, Number(quantity || 1)) / 100).toFixed(2));
 }
 
 function variantSizesFromDocument(values = []) {

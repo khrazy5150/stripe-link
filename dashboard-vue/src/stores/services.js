@@ -1,5 +1,9 @@
 import { defineStore } from "pinia";
 import { apiRequest, getTenantId } from "../api/client";
+import { buildPriceDocument } from "./pricing";
+import { defaultPriceForm } from "../utils/priceForm";
+
+const SERVICE_BOOKING_FLOWS = ["book_then_pay", "pay_then_book"];
 
 function localId(prefix = "svc") {
   const alphabet = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
@@ -108,7 +112,7 @@ export const useServicesStore = defineStore("services", {
       this.saving = true;
       this.error = "";
       try {
-        const service = buildServiceDocument(form, base || {});
+        const service = await buildServiceDocument(form, base || {});
         // The services API upserts create and edit through a single collection-level
         // PUT /services; the document carries service_id (generated client-side for new).
         const body = await apiRequest("/services", { method: "PUT", body: service });
@@ -133,14 +137,25 @@ export const useServicesStore = defineStore("services", {
   },
 });
 
-export function buildServiceDocument(form, base = {}) {
+// Fallback price-form built from the legacy single-price inputs (form.price_amount/currency),
+// for callers that haven't migrated to a prices[] editor yet.
+function legacyServicePriceForm(form) {
+  return { ...defaultPriceForm(), sales_price: Number(form.price_amount || 0), currency: String(form.currency || "usd").toLowerCase() };
+}
+
+export async function buildServiceDocument(form, base = {}) {
   const now = Math.floor(Date.now() / 1000);
   const serviceId = form.service_id || base.service_id || localId("svc");
 
+  // Services own a canonical prices[] on the shared Price primitive, exactly like products.
+  const priceForms = Array.isArray(form.prices) && form.prices.length ? form.prices : [legacyServicePriceForm(form)];
+  const prices = await Promise.all(priceForms.map((priceForm) => buildPriceDocument(priceForm, "service", now)));
+  const defaultIndex = Math.min(Math.max(Number(form.default_price_index || 0), 0), prices.length - 1);
+  const defaultPrice = prices[defaultIndex] || prices[0];
+
   const document = {
-    // Preserve fields the catalog form doesn't render (booking_rules, fulfillers,
-    // linked_product, metadata, ...). The API replaces the whole document, so without
-    // this spread an edit would wipe them — matching legacy _update_service's merge.
+    // Preserve fields the catalog form doesn't render (metadata, ...). The API replaces the whole
+    // document, so without this spread an edit would wipe them.
     ...base,
     schema_version: base.schema_version || "2026-05-29",
     document_type: "service",
@@ -149,10 +164,11 @@ export function buildServiceDocument(form, base = {}) {
     name: String(form.name || "").trim(),
     description: String(form.description || "").trim(),
     duration_minutes: Math.max(1, Math.round(Number(form.duration_minutes || 0))),
-    price: {
-      currency: String(form.currency || "usd").toLowerCase(),
-      unit_amount: cents(form.price_amount),
-    },
+    prices,
+    default_price_id: defaultPrice.price_id,
+    // Legacy mirror of the default price (the backend keeps this in sync too).
+    price: { currency: defaultPrice.currency, unit_amount: defaultPrice.unit_amount },
+    booking_flow: SERVICE_BOOKING_FLOWS.includes(form.booking_flow) ? form.booking_flow : "pay_then_book",
     location_mode: LOCATION_MODES.includes(form.location_mode) ? form.location_mode : "onsite",
     active: form.active !== false,
     booking_rules: buildBookingRules(form),
@@ -160,6 +176,7 @@ export function buildServiceDocument(form, base = {}) {
     created_at: base.created_at || form.created_at || now,
     updated_at: now,
   };
+  delete document.linked_product;  // retired workaround
 
   const defaultFulfillerId = String(form.default_fulfiller_id || "").trim();
   if (defaultFulfillerId) document.default_fulfiller_id = defaultFulfillerId;
@@ -168,15 +185,6 @@ export function buildServiceDocument(form, base = {}) {
   const calendarConnectionId = String(form.calendar_connection_id || "").trim();
   if (calendarConnectionId) document.calendar_connection_id = calendarConnectionId;
   else delete document.calendar_connection_id;
-
-  const productId = String(form.linked_product_id || "").trim();
-  if (productId) {
-    document.linked_product = { product_id: productId };
-    const priceId = String(form.linked_price_id || "").trim();
-    if (priceId) document.linked_product.price_id = priceId;
-  } else {
-    delete document.linked_product;
-  }
 
   const heroImage = String(form.hero_image_url || "").trim();
   if (heroImage) {
