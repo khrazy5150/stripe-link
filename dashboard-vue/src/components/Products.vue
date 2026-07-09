@@ -61,44 +61,36 @@
       </div>
 
       <div v-else class="product-card-list">
-        <article
+        <ListCard
           v-for="product in store.filteredProducts"
           :key="product.product_id"
-          class="product-card"
-          :class="{ archived: lifecycleStatus(product) === 'archived' }"
+          :image="product.images?.[0] || ''"
+          :icon-color-key="product.product_id"
+          :title="product.name || 'Untitled Product'"
+          :description="product.description"
+          :status-label="lifecycleStatus(product) === 'archived' ? 'Archived' : 'Active'"
+          :status-tone="lifecycleStatus(product)"
+          :archived="lifecycleStatus(product) === 'archived'"
         >
-          <div
-            class="product-card-image"
-            :class="{ placeholder: !product.images?.[0], 'lead-icon-placeholder': !product.images?.[0] && product.lead_capture?.action }"
-            :style="placeholderStyle(product)"
-          >
-            <img v-if="product.images?.[0]" :src="product.images[0]" :alt="product.name || 'Product image'" />
-            <component v-else-if="product.lead_capture?.action" :is="leadIcon(product.lead_capture.action)" />
+          <template #icon>
+            <component v-if="product.lead_capture?.action" :is="leadIcon(product.lead_capture.action)" />
             <span v-else>{{ productInitial(product) }}</span>
-          </div>
-
-          <div class="product-card-body">
-            <div class="product-card-heading">
-              <h3>{{ product.name || "Untitled Product" }}</h3>
-              <span class="product-status" :class="lifecycleStatus(product)">
-                {{ lifecycleStatus(product) === "archived" ? "Archived" : "Active" }}
-              </span>
-            </div>
-            <p>{{ product.description || "No description provided." }}</p>
-            <div class="product-card-price">
-              <strong>{{ priceText(product) }}</strong>
-              <span v-if="compareAtText(product)" class="product-card-compare">Regular {{ compareAtText(product) }}</span>
-            </div>
-            <div class="product-card-actions">
-              <button type="button" class="secondary-action" @click="openEditModal(product)">Edit</button>
-              <button type="button" class="secondary-action" @click="selectedProduct = product">Details</button>
-              <button type="button" class="secondary-action" :disabled="store.savingStatus" @click="confirmStatusChange(product)">
-                {{ lifecycleStatus(product) === "archived" ? "Restore" : "Archive" }}
-              </button>
-            </div>
+          </template>
+          <template #subtitle>
+            <strong>{{ priceText(product) }}</strong>
+            <span v-if="compareAtText(product)" class="product-card-compare">Regular {{ compareAtText(product) }}</span>
+          </template>
+          <template #actions>
+            <button type="button" class="secondary-action" @click="openEditModal(product)">Edit</button>
+            <button type="button" class="secondary-action" @click="selectedProduct = product">Details</button>
+            <button type="button" class="secondary-action" :disabled="store.savingStatus" @click="confirmStatusChange(product)">
+              {{ lifecycleStatus(product) === "archived" ? "Restore" : "Archive" }}
+            </button>
+          </template>
+          <template #footer>
             <div v-if="lifecycleStatus(product) === 'archived'" class="product-archived-label">Archived</div>
-          </div>
-        </article>
+          </template>
+        </ListCard>
       </div>
     </section>
 
@@ -167,24 +159,17 @@
       </section>
     </div>
 
-    <div v-if="pendingStatusProduct" class="modal-backdrop" @click.self="pendingStatusProduct = null">
-      <section class="modal-card confirm-card" role="dialog" aria-modal="true" aria-labelledby="confirmProductTitle">
-        <header class="confirm-icon" :class="pendingStatus === 'archived' ? 'danger' : 'primary'">
-          {{ pendingStatus === "archived" ? "×" : "↺" }}
-        </header>
-        <h2 id="confirmProductTitle">{{ pendingStatus === "archived" ? "Archive product?" : "Restore product?" }}</h2>
-        <p>
-          {{ pendingStatus === "archived" ? "Archive" : "Restore" }}
-          "{{ pendingStatusProduct.name || "this product" }}"?
-        </p>
-        <div class="confirm-actions">
-          <button type="button" class="secondary-action" @click="pendingStatusProduct = null">Cancel</button>
-          <button type="button" class="primary-action" :disabled="store.savingStatus" @click="applyStatusChange">
-            {{ pendingStatus === "archived" ? "Archive" : "Restore" }}
-          </button>
-        </div>
-      </section>
-    </div>
+    <ConfirmDialog
+      :open="!!pendingStatusProduct"
+      :danger="pendingStatus === 'archived'"
+      :title="pendingStatus === 'archived' ? 'Archive product?' : 'Restore product?'"
+      :confirm-label="pendingStatus === 'archived' ? 'Archive' : 'Restore'"
+      :busy="store.savingStatus"
+      @cancel="pendingStatusProduct = null"
+      @confirm="applyStatusChange"
+    >
+      {{ pendingStatus === "archived" ? "Archive" : "Restore" }} "{{ pendingStatusProduct?.name || "this product" }}"?
+    </ConfirmDialog>
 
     <div v-if="showCreateModal" class="modal-backdrop" @click.self="closeCreateModal">
       <section class="modal-card product-create-modal" role="dialog" aria-modal="true" aria-labelledby="createProductTitle">
@@ -437,7 +422,10 @@ import { computed, h, nextTick, ref, watch } from "vue";
 import { apiRequest } from "../api/client";
 import { defaultProductPrice, formatMoney, useProductsStore } from "../stores/products";
 import { defaultPriceForm, priceFormFromDocument } from "../utils/priceForm";
+import { idColorStyle } from "../utils/iconColor";
 import PricingCard from "./shared/PricingCard.vue";
+import ConfirmDialog from "./shared/ConfirmDialog.vue";
+import ListCard from "./shared/ListCard.vue";
 
 const store = useProductsStore();
 const selectedProduct = ref(null);
@@ -542,21 +530,8 @@ function productInitial(product) {
   return (product?.name || "P").slice(0, 1).toUpperCase();
 }
 
-function getProductIconStyle(productId = "") {
-  let hash = 0;
-  const key = String(productId || "");
-  for (let i = 0; i < key.length; i += 1) {
-    hash = key.charCodeAt(i) + ((hash << 5) - hash);
-  }
-  const hue = Math.abs(hash) % 360;
-  return {
-    backgroundColor: `hsl(${hue}, 65%, 88%)`,
-    color: `hsl(${hue}, 55%, 28%)`,
-  };
-}
-
 function placeholderStyle(product) {
-  return product?.lead_capture?.action ? getProductIconStyle(product.product_id || product.name || "") : {};
+  return product?.lead_capture?.action ? idColorStyle(product.product_id || product.name || "") : {};
 }
 
 function leadIcon(action) {

@@ -688,22 +688,17 @@
       </section>
     </div>
 
-    <div v-if="pendingArchivePage" class="modal-backdrop" @click.self="pendingArchivePage = null">
-      <section class="modal-card confirm-card" role="dialog" aria-modal="true" aria-labelledby="confirmPageArchiveTitle">
-        <header class="confirm-icon danger">×</header>
-        <h2 id="confirmPageArchiveTitle">{{ pendingArchivePage.status === "published" ? "Archive page?" : "Delete page?" }}</h2>
-        <p>
-          {{ pendingArchivePage.status === "published" ? "Archive" : "Delete" }}
-          "{{ pendingArchivePage.name || "this landing page" }}"?
-        </p>
-        <div class="confirm-actions">
-          <button type="button" class="secondary-action" @click="pendingArchivePage = null">Cancel</button>
-          <button type="button" class="primary-action" :disabled="saving" @click="removePage">
-            {{ pendingArchivePage.status === "published" ? "Archive" : "Delete" }}
-          </button>
-        </div>
-      </section>
-    </div>
+    <ConfirmDialog
+      :open="!!pendingArchivePage"
+      danger
+      :title="pendingArchivePage?.status === 'published' ? 'Archive page?' : 'Delete page?'"
+      :confirm-label="pendingArchivePage?.status === 'published' ? 'Archive' : 'Delete'"
+      :busy="saving"
+      @cancel="pendingArchivePage = null"
+      @confirm="removePage"
+    >
+      {{ pendingArchivePage?.status === "published" ? "Archive" : "Delete" }} "{{ pendingArchivePage?.name || "this landing page" }}"?
+    </ConfirmDialog>
   </section>
 </template>
 
@@ -714,6 +709,7 @@ import { formatMoney } from "../stores/products";
 import { uploadImage } from "../api/uploads";
 import { showIconPicker } from "../icon-picker.js";
 import { applyTitleCaseInput, formatHeadline } from "../utils/titleCase.js";
+import ConfirmDialog from "./shared/ConfirmDialog.vue";
 
 const pages = ref([]);
 const offers = ref([]);

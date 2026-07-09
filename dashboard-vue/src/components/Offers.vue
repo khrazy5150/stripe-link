@@ -27,59 +27,32 @@
           {{ offersLoaded ? 'No offers found. Click "+ Add Offer" to configure one.' : 'Click "Load Offers" to see offers.' }}
         </div>
 
-        <div v-else class="offer-grid">
-          <article v-for="offer in offers" :key="offer.offer_id" class="offer-card">
-            <div class="offer-card-media">
-              <img v-if="offerImage(offer)" :src="offerImage(offer)" :alt="offer.name" />
-              <div v-else class="offer-card-placeholder" aria-hidden="true">
-                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 12v7.5A1.5 1.5 0 0 1 18.5 21h-13A1.5 1.5 0 0 1 4 19.5V12m16 0H4m16 0h-4.5A3.5 3.5 0 0 0 19 8.5 2.5 2.5 0 0 0 14.5 7L12 12m-8 0h4.5A3.5 3.5 0 0 1 5 8.5 2.5 2.5 0 0 1 9.5 7L12 12m0 0v9" />
-                </svg>
-              </div>
-            </div>
-            <div class="offer-card-copy">
-              <div class="offer-card-heading">
-                <h3>{{ offer.name }}</h3>
-                <div class="offer-card-menu" @click.stop>
-                  <button
-                    type="button"
-                    class="offer-kebab-button"
-                    aria-label="Offer actions"
-                    :aria-expanded="openOfferMenuId === offer.offer_id"
-                    @click="toggleOfferMenu(offer.offer_id)"
-                  >
-                    ⋮
-                  </button>
-                  <div v-if="openOfferMenuId === offer.offer_id" class="offer-action-menu" role="menu">
-                    <button type="button" role="menuitem" @click="viewOffer(offer)">
-                      <svg aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.25 12s3.5-6 9.75-6 9.75 6 9.75 6-3.5 6-9.75 6-9.75-6-9.75-6Z" />
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" />
-                      </svg>
-                      <span>View</span>
-                    </button>
-                    <button type="button" role="menuitem" @click="editOffer(offer)">
-                      <svg aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m16.862 4.487 1.688-1.688a1.875 1.875 0 1 1 2.652 2.652L8.625 18.028 3.75 19.5l1.472-4.875L16.862 4.487Z" />
-                      </svg>
-                      <span>Edit</span>
-                    </button>
-                    <button type="button" class="danger" role="menuitem" @click="requestDeleteOffer(offer)">
-                      <svg aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 7h12m-9 0V5.5A1.5 1.5 0 0 1 10.5 4h3A1.5 1.5 0 0 1 15 5.5V7m-7 0 .75 12A2 2 0 0 0 10.75 21h2.5a2 2 0 0 0 2-2L16 7M10 11v6m4-6v6" />
-                      </svg>
-                      <span>Delete</span>
-                    </button>
-                  </div>
-                </div>
-              </div>
+        <div v-else class="product-card-list">
+          <ListCard
+            v-for="offer in offers"
+            :key="offer.offer_id"
+            :image="offerImage(offer)"
+            :icon-color-key="offer.offer_id"
+            :title="offer.name"
+          >
+            <template #icon>
+              <svg class="offer-card-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 12v7.5A1.5 1.5 0 0 1 18.5 21h-13A1.5 1.5 0 0 1 4 19.5V12m16 0H4m16 0h-4.5A3.5 3.5 0 0 0 19 8.5 2.5 2.5 0 0 0 14.5 7L12 12m-8 0h4.5A3.5 3.5 0 0 1 5 8.5 2.5 2.5 0 0 1 9.5 7L12 12m0 0v9" />
+              </svg>
+            </template>
+            <template #badge>
+              <span class="offer-intent-badge" :class="offer.product_intent">{{ intentLabel(offer.product_intent) }}</span>
+            </template>
+            <template #description>
               <p><strong>Type:</strong> {{ derivedOfferTypeLabel(offer) }}</p>
               <p><strong>Products:</strong> {{ productSummary(offer) }}</p>
-              <div class="offer-card-footer">
-                <span class="offer-intent-badge" :class="offer.product_intent">{{ intentLabel(offer.product_intent) }}</span>
-              </div>
-            </div>
-          </article>
+            </template>
+            <template #actions>
+              <button type="button" class="secondary-action" @click="viewOffer(offer)">View</button>
+              <button type="button" class="secondary-action" @click="editOffer(offer)">Edit</button>
+              <button type="button" class="secondary-action danger-action" @click="requestDeleteOffer(offer)">Delete</button>
+            </template>
+          </ListCard>
         </div>
       </div>
     </section>
@@ -433,17 +406,17 @@
       </section>
     </div>
 
-    <div v-if="pendingDeleteOffer" class="modal-backdrop" @click.self="pendingDeleteOffer = null">
-      <section class="modal-card confirm-card" role="dialog" aria-modal="true" aria-labelledby="confirmOfferDeleteTitle">
-        <header class="confirm-icon danger">×</header>
-        <h2 id="confirmOfferDeleteTitle">Delete offer?</h2>
-        <p>Delete "{{ pendingDeleteOffer.name || "this offer" }}"?</p>
-        <div class="confirm-actions">
-          <button type="button" class="secondary-action" @click="pendingDeleteOffer = null">Cancel</button>
-          <button type="button" class="primary-action" :disabled="deletingOffer" @click="deleteOffer">Delete</button>
-        </div>
-      </section>
-    </div>
+    <ConfirmDialog
+      :open="!!pendingDeleteOffer"
+      danger
+      title="Delete offer?"
+      confirm-label="Delete"
+      :busy="deletingOffer"
+      @cancel="pendingDeleteOffer = null"
+      @confirm="deleteOffer"
+    >
+      Delete "{{ pendingDeleteOffer?.name || "this offer" }}"?
+    </ConfirmDialog>
 
     <div v-if="showProductSelector" class="modal-backdrop offer-selector-backdrop" @click.self="closeProductSelector">
       <section class="modal-card offer-product-selector-modal" role="dialog" aria-modal="true" aria-labelledby="productSelectorTitle">
@@ -550,6 +523,8 @@ import { apiRequest, getApiEnvironment, getTenantId } from "../api/client";
 import { formatCouponDiscount, useCouponsStore } from "../stores/coupons";
 import { defaultProductPrice, formatMoney, useProductsStore } from "../stores/products";
 import { useServicesStore } from "../stores/services";
+import ConfirmDialog from "./shared/ConfirmDialog.vue";
+import ListCard from "./shared/ListCard.vue";
 
 const productStore = useProductsStore();
 const couponStore = useCouponsStore();
@@ -587,7 +562,6 @@ const offersLoaded = ref(false);
 const offersError = ref("");
 const offersMessage = ref("");
 const latestDraftOffer = ref(null);
-const openOfferMenuId = ref("");
 const editingOfferId = ref("");
 const selectedOfferDetails = ref(null);
 const pendingDeleteOffer = ref(null);
@@ -827,13 +801,8 @@ async function loadOffers() {
   }
 }
 
-function toggleOfferMenu(offerId) {
-  openOfferMenuId.value = openOfferMenuId.value === offerId ? "" : offerId;
-}
-
 function viewOffer(offer) {
   selectedOfferDetails.value = offer;
-  openOfferMenuId.value = "";
 }
 
 function closeOfferDetails() {
@@ -842,7 +811,6 @@ function closeOfferDetails() {
 
 async function editOffer(offer) {
   selectedOfferDetails.value = null;
-  openOfferMenuId.value = "";
   offersError.value = "";
   try {
     await ensureProductsLoaded();
@@ -854,7 +822,6 @@ async function editOffer(offer) {
 }
 
 function requestDeleteOffer(offer) {
-  openOfferMenuId.value = "";
   pendingDeleteOffer.value = offer;
 }
 

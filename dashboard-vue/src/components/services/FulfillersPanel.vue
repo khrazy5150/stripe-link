@@ -84,19 +84,31 @@
             <td><span class="product-status" :class="fulfiller.status">{{ fulfiller.status }}</span></td>
             <td class="services-row-actions">
               <button type="button" class="secondary-action compact" @click="edit(fulfiller)">Edit</button>
-              <button type="button" class="secondary-action compact danger" @click="remove(fulfiller)">Delete</button>
+              <button type="button" class="secondary-action compact danger" @click="pendingDelete = fulfiller">Delete</button>
             </td>
           </tr>
         </tbody>
       </table>
       <p v-else-if="store.loaded" class="product-empty-state">No fulfillers yet. Add staff who deliver appointments.</p>
     </div>
+
+    <ConfirmDialog
+      :open="!!pendingDelete"
+      danger
+      title="Delete fulfiller?"
+      confirm-label="Delete"
+      @cancel="pendingDelete = null"
+      @confirm="confirmRemove"
+    >
+      Delete fulfiller "{{ pendingDelete ? fulfillerDisplayName(pendingDelete) : "" }}"?
+    </ConfirmDialog>
   </section>
 </template>
 
 <script setup>
 import { onMounted, ref } from "vue";
 import WeeklyHours from "./WeeklyHours.vue";
+import ConfirmDialog from "../shared/ConfirmDialog.vue";
 import { defaultWeeklyHours } from "../../utils/weeklyHours";
 import { fulfillerDisplayName, formatCompensation, useFulfillersStore } from "../../stores/fulfillers";
 import { useCalendarStore } from "../../stores/calendar";
@@ -105,6 +117,7 @@ const store = useFulfillersStore();
 const calendar = useCalendarStore();
 const editing = ref(null);
 const form = ref(defaultForm());
+const pendingDelete = ref(null);
 
 onMounted(() => {
   if (!store.loaded) store.load();
@@ -167,13 +180,15 @@ async function save() {
   }
 }
 
-async function remove(fulfiller) {
-  if (!window.confirm(`Delete fulfiller "${fulfillerDisplayName(fulfiller)}"?`)) return;
+async function confirmRemove() {
+  const fulfiller = pendingDelete.value;
+  if (!fulfiller) return;
   try {
     await store.removeFulfiller(fulfiller.fulfiller_id);
     if (editing.value?.fulfiller_id === fulfiller.fulfiller_id) resetForm();
   } catch {
     /* error surfaced by store */
   }
+  pendingDelete.value = null;
 }
 </script>

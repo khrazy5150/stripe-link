@@ -28,7 +28,7 @@
           <select v-model="store.filters.status">
             <option value="all">All</option>
             <option value="active">Active</option>
-            <option value="inactive">Inactive</option>
+            <option value="inactive">Archived</option>
           </select>
         </label>
         <div class="product-filter-actions">
@@ -44,28 +44,44 @@
         {{ store.loaded ? "No services found. Create a service to get started." : "Click Load Services to see services." }}
       </div>
 
-      <div v-else class="coupon-card-grid">
-        <article v-for="service in store.filteredServices" :key="service.service_id" class="coupon-card">
-          <header>
-            <div>
-              <h3>{{ service.name }}</h3>
-              <p class="font-mono">{{ service.service_id }}</p>
-            </div>
-            <span class="product-status" :class="serviceIsActive(service) ? 'active' : 'inactive'">
-              {{ serviceIsActive(service) ? "Active" : "Inactive" }}
-            </span>
-          </header>
-          <strong class="coupon-discount">{{ formatServicePrice(service) }}</strong>
-          <dl class="coupon-detail-list">
-            <div v-if="service.fulfillment_mode !== 'no_booking'"><dt>Duration</dt><dd>{{ formatServiceDuration(service) }}</dd></div>
-            <div v-else><dt>Fulfillment</dt><dd>No booking</dd></div>
-            <div><dt>Location</dt><dd>{{ locationLabel(service.location_mode) }}</dd></div>
-          </dl>
-          <div class="product-card-actions">
+      <div v-else class="product-card-list">
+        <ListCard
+          v-for="service in store.filteredServices"
+          :key="service.service_id"
+          :image="serviceImage(service)"
+          :icon-color-key="service.service_id"
+          :title="service.name || 'Untitled Service'"
+          :description="service.description"
+          :status-label="serviceIsActive(service) ? 'Active' : 'Archived'"
+          :status-tone="serviceIsActive(service) ? 'active' : 'archived'"
+          :archived="!serviceIsActive(service)"
+        >
+          <template #icon>
+            <svg class="service-tools-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M11.42 15.17 17.25 21A2.652 2.652 0 0 0 21 17.25l-5.877-5.877M11.42 15.17l2.496-3.03c.317-.384.74-.626 1.208-.766M11.42 15.17l-4.655 5.653a2.548 2.548 0 1 1-3.586-3.586l6.837-5.63m5.108-.233c.55-.164 1.163-.188 1.743-.14a4.5 4.5 0 0 0 4.486-6.336l-3.276 3.277a3.004 3.004 0 0 1-2.25-2.25l3.276-3.276a4.5 4.5 0 0 0-6.336 4.486c.091 1.076-.071 2.264-.904 2.95l-.102.085m-1.745 1.437L5.909 7.5H4.5L2.25 3.75l1.5-1.5L7.5 4.5v1.409l4.26 4.26m-1.745 1.437 1.745-1.437m6.615 8.206L15.75 15.75M4.867 19.125h.008v.008h-.008v-.008Z" />
+            </svg>
+          </template>
+          <template #subtitle>
+            <strong>{{ formatServicePrice(service) }}</strong>
+            <span class="product-card-compare">{{ serviceMetaText(service) }}</span>
+          </template>
+          <template #actions>
             <button type="button" class="secondary-action" @click="openEditModal(service)">Edit</button>
             <button type="button" class="secondary-action" @click="selectedService = service">Details</button>
-          </div>
-        </article>
+            <button type="button" class="secondary-action" :disabled="store.saving" @click="toggleArchive(service)">
+              {{ serviceIsActive(service) ? "Archive" : "Restore" }}
+            </button>
+            <button
+              v-if="!serviceIsActive(service)"
+              type="button"
+              class="secondary-action danger-action"
+              :disabled="store.saving"
+              @click="promptDelete(service)"
+            >
+              Delete
+            </button>
+          </template>
+        </ListCard>
       </div>
     </section>
 
@@ -336,7 +352,7 @@
             <div v-if="selectedService.fulfillment_mode !== 'no_booking'"><dt>Duration</dt><dd>{{ formatServiceDuration(selectedService) }}</dd></div>
             <div v-else><dt>Fulfillment</dt><dd>No booking</dd></div>
             <div><dt>Location</dt><dd>{{ locationLabel(selectedService.location_mode) }}</dd></div>
-            <div><dt>Status</dt><dd>{{ serviceIsActive(selectedService) ? "Active" : "Inactive" }}</dd></div>
+            <div><dt>Status</dt><dd>{{ serviceIsActive(selectedService) ? "Active" : "Archived" }}</dd></div>
           </dl>
           <details class="product-json-details">
             <summary>Raw JSON</summary>
@@ -345,6 +361,18 @@
         </div>
       </section>
     </div>
+
+    <ConfirmDialog
+      :open="!!pendingDeleteService"
+      danger
+      title="Delete service?"
+      confirm-label="Delete"
+      :busy="store.saving"
+      @cancel="pendingDeleteService = null"
+      @confirm="confirmDelete"
+    >
+      Permanently delete "{{ pendingDeleteService?.name || "this service" }}"? This cannot be undone.
+    </ConfirmDialog>
   </section>
 </template>
 
@@ -365,6 +393,8 @@ import { useCalendarStore } from "../stores/calendar";
 import { applyTitleCaseInput } from "../utils/titleCase.js";
 import { defaultPriceForm, priceFormFromDocument } from "../utils/priceForm";
 import PricingCard from "./shared/PricingCard.vue";
+import ConfirmDialog from "./shared/ConfirmDialog.vue";
+import ListCard from "./shared/ListCard.vue";
 import FulfillersPanel from "./services/FulfillersPanel.vue";
 import TenantAvailabilityPanel from "./services/TenantAvailabilityPanel.vue";
 import AvailabilityExceptionsPanel from "./services/AvailabilityExceptionsPanel.vue";
@@ -378,9 +408,37 @@ const SERVICE_PRICING_MODELS = [["one_time", "One-time"]];
 const store = useServicesStore();
 const fulfillers = useFulfillersStore();
 const calendar = useCalendarStore();
+
+// List-card helpers (mirrors the Products long-card layout).
+function serviceImage(service) {
+  return service?.presentation?.hero_image_url || "";
+}
+function serviceMetaText(service) {
+  const where = locationLabel(service.location_mode);
+  if (service.fulfillment_mode === "no_booking") return `No booking · ${where}`;
+  return `${formatServiceDuration(service)} · ${where}`;
+}
+async function toggleArchive(service) {
+  await store.setActive(service, !serviceIsActive(service));
+}
+async function promptDelete(service) {
+  const offers = await store.offersReferencing(service.service_id);
+  if (offers.length) {
+    store.error = store.message =
+      `Can't delete "${service.name}" — it's used by ${offers.length} offer(s): ${offers.join(", ")}. Remove it from those offers first.`;
+    return;
+  }
+  pendingDeleteService.value = service;
+}
+async function confirmDelete() {
+  if (!pendingDeleteService.value) return;
+  await store.deleteService(pendingDeleteService.value);
+  pendingDeleteService.value = null;
+}
 const showServiceModal = ref(false);
 const editingService = ref(null);
 const selectedService = ref(null);
+const pendingDeleteService = ref(null);
 const formError = ref("");
 const form = ref(defaultServiceForm());
 const allowedForm = ref(defaultAllowedForm());

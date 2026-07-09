@@ -45,48 +45,40 @@
       <p v-if="waiting" class="calendar-waiting">Waiting for you to finish in the Google window…</p>
     </div>
 
-    <div v-if="renaming" class="modal-backdrop" @click.self="renaming = null">
-      <section class="modal-card confirm-card" role="dialog" aria-modal="true" aria-labelledby="renameCalendarTitle">
-        <h2 id="renameCalendarTitle">Rename calendar</h2>
-        <p>Give this calendar a label your team will recognize.</p>
-        <input
-          ref="renameInput"
-          v-model.trim="renameLabel"
-          type="text"
-          class="modal-input"
-          placeholder="e.g. Downtown Salon"
-          @keyup.enter="saveRename"
-        />
-        <div class="confirm-actions">
-          <button type="button" class="secondary-action" @click="renaming = null">Cancel</button>
-          <button type="button" class="primary-action" :disabled="!renameLabel" @click="saveRename">Save</button>
-        </div>
-      </section>
-    </div>
+    <PromptDialog
+      :open="!!renaming"
+      title="Rename calendar"
+      message="Give this calendar a label your team will recognize."
+      :initial-value="renaming ? (renaming.display_name || renaming.account_email || '') : ''"
+      placeholder="e.g. Downtown Salon"
+      confirm-label="Save"
+      required
+      @cancel="renaming = null"
+      @confirm="saveRename"
+    />
 
-    <div v-if="disconnecting" class="modal-backdrop" @click.self="disconnecting = null">
-      <section class="modal-card confirm-card" role="dialog" aria-modal="true" aria-labelledby="disconnectCalendarTitle">
-        <header class="confirm-icon danger">×</header>
-        <h2 id="disconnectCalendarTitle">Disconnect calendar?</h2>
-        <p>Disconnect "{{ disconnecting.display_name }}"? Bookings will stop syncing to it.</p>
-        <div class="confirm-actions">
-          <button type="button" class="secondary-action" @click="disconnecting = null">Cancel</button>
-          <button type="button" class="primary-action" @click="disconnect">Disconnect</button>
-        </div>
-      </section>
-    </div>
+    <ConfirmDialog
+      :open="!!disconnecting"
+      danger
+      title="Disconnect calendar?"
+      confirm-label="Disconnect"
+      @cancel="disconnecting = null"
+      @confirm="disconnect"
+    >
+      Disconnect "{{ disconnecting?.display_name }}"? Bookings will stop syncing to it.
+    </ConfirmDialog>
   </section>
 </template>
 
 <script setup>
 import { nextTick, onBeforeUnmount, onMounted, ref } from "vue";
 import { useCalendarStore } from "../../stores/calendar";
+import ConfirmDialog from "../shared/ConfirmDialog.vue";
+import PromptDialog from "../shared/PromptDialog.vue";
 
 const store = useCalendarStore();
 const waiting = ref(false);
 const renaming = ref(null);
-const renameLabel = ref("");
-const renameInput = ref(null);
 const disconnecting = ref(null);
 let pollTimer = null;
 let pollTries = 0;
@@ -117,13 +109,11 @@ async function setDefault(conn) {
 
 function rename(conn) {
   renaming.value = conn;
-  renameLabel.value = conn.display_name || conn.account_email || "";
-  nextTick(() => renameInput.value?.focus());
 }
 
-async function saveRename() {
+async function saveRename(newLabel) {
   const conn = renaming.value;
-  const label = renameLabel.value.trim();
+  const label = String(newLabel || "").trim();
   if (!conn || !label) {
     renaming.value = null;
     return;

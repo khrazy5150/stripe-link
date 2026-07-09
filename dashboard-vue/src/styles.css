@@ -842,6 +842,13 @@ main {
   height: 4rem;
 }
 
+/* List-card placeholder icons (services tools, offer tag) for entities without an uploaded image. */
+.product-card-image .service-tools-icon,
+.product-card-image .offer-card-icon {
+  width: 4rem;
+  height: 4rem;
+}
+
 .product-card-body {
   display: grid;
   gap: 1rem;

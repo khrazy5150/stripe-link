@@ -63,7 +63,7 @@
             >Pause</button>
             <button
               v-if="experiment.status !== 'completed'"
-              type="button" class="danger-action" :disabled="store.saving" @click="removeExperiment(experiment)"
+              type="button" class="danger-action" :disabled="store.saving" @click="pendingDelete = experiment"
             >Delete</button>
           </div>
         </article>
@@ -220,12 +220,27 @@
         </div>
       </section>
     </div>
+
+    <ConfirmDialog
+      :open="!!pendingDelete"
+      danger
+      title="Delete experiment?"
+      confirm-label="Delete"
+      :busy="store.saving"
+      @cancel="pendingDelete = null"
+      @confirm="confirmRemoveExperiment"
+    >
+      <template v-if="pendingDelete">
+        Delete “{{ pendingDelete.name || pendingDelete.experiment_id }}”? This also removes its short URL.
+      </template>
+    </ConfirmDialog>
   </section>
 </template>
 
 <script setup>
 import { computed, reactive, ref } from "vue";
 import { useAbTestingStore, statusLabel, formatCurrencyCents, formatConversionRate, totalWeight } from "../stores/abTesting";
+import ConfirmDialog from "./shared/ConfirmDialog.vue";
 
 function blankForm() {
   return {
@@ -246,6 +261,7 @@ const form = reactive(blankForm());
 const formError = ref("");
 const resultsFor = ref(null);
 const winnerPageId = ref("");
+const pendingDelete = ref(null);
 
 const assembledVariants = computed(() => {
   const control = { page_id: form.control_page_id, label: form.control_label, weight: form.control_weight };
@@ -325,10 +341,12 @@ async function startExperiment(experiment) {
   }
 }
 
-async function removeExperiment(experiment) {
-  if (!window.confirm(`Delete “${experiment.name || experiment.experiment_id}”? This also removes its short URL.`)) return;
+async function confirmRemoveExperiment() {
+  const experiment = pendingDelete.value;
+  if (!experiment) return;
   await store.remove(experiment.experiment_id);
   if (resultsFor.value?.experiment_id === experiment.experiment_id) resultsFor.value = null;
+  pendingDelete.value = null;
 }
 
 async function openResults(experiment) {

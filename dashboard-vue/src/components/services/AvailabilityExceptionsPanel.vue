@@ -62,24 +62,36 @@
             <td>{{ exception.type }}</td>
             <td>{{ exception.reason || "—" }}</td>
             <td class="services-row-actions">
-              <button type="button" class="secondary-action compact danger" @click="remove(exception)">Delete</button>
+              <button type="button" class="secondary-action compact danger" @click="pendingDelete = exception">Delete</button>
             </td>
           </tr>
         </tbody>
       </table>
       <p v-else-if="store.loaded" class="product-empty-state">No availability exceptions yet.</p>
     </div>
+
+    <ConfirmDialog
+      :open="!!pendingDelete"
+      danger
+      title="Delete exception?"
+      confirm-label="Delete"
+      message="Delete this availability exception?"
+      @cancel="pendingDelete = null"
+      @confirm="confirmRemove"
+    />
   </section>
 </template>
 
 <script setup>
 import { onMounted, ref } from "vue";
+import ConfirmDialog from "../shared/ConfirmDialog.vue";
 import { useAvailabilityExceptionsStore } from "../../stores/availabilityExceptions";
 import { fulfillerDisplayName, useFulfillersStore } from "../../stores/fulfillers";
 
 const store = useAvailabilityExceptionsStore();
 const fulfillers = useFulfillersStore();
 const form = ref(defaultForm());
+const pendingDelete = ref(null);
 
 onMounted(() => {
   if (!store.loaded) store.load();
@@ -115,12 +127,14 @@ async function save() {
   }
 }
 
-async function remove(exception) {
-  if (!window.confirm("Delete this availability exception?")) return;
+async function confirmRemove() {
+  const exception = pendingDelete.value;
+  if (!exception) return;
   try {
     await store.removeException(exception.exception_id);
   } catch {
     /* error surfaced by store */
   }
+  pendingDelete.value = null;
 }
 </script>

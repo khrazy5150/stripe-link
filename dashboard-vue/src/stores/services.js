@@ -134,6 +134,55 @@ export const useServicesStore = defineStore("services", {
       if (index >= 0) this.services.splice(index, 1, service);
       else this.services.unshift(service);
     },
+
+    // Archive (soft) / restore: flip the active flag. References (offers, appointments) are
+    // preserved, unlike a hard delete — so this is the safe, reversible default.
+    async setActive(service, active) {
+      this.saving = true;
+      this.error = "";
+      try {
+        const updated = { ...service, active, updated_at: Math.floor(Date.now() / 1000) };
+        const body = await apiRequest("/services", { method: "PUT", body: updated });
+        this.upsertService(body.service || updated);
+        this.message = `${service.name || "Service"} was ${active ? "restored" : "archived"}.`;
+      } catch (error) {
+        this.error = error.message;
+        this.message = error.message;
+      } finally {
+        this.saving = false;
+      }
+    },
+
+    // Permanent delete (hard). Only reached for an already-archived service that no live offer
+    // references (the caller checks offersReferencing first).
+    async deleteService(service) {
+      this.saving = true;
+      this.error = "";
+      try {
+        await apiRequest(`/services/${encodeURIComponent(service.service_id)}`, { method: "DELETE" });
+        this.services = this.services.filter((item) => item.service_id !== service.service_id);
+        this.message = `${service.name || "Service"} was deleted.`;
+      } catch (error) {
+        this.error = error.message;
+        this.message = error.message;
+      } finally {
+        this.saving = false;
+      }
+    },
+
+    // Names of offers whose items reference this service — used to block a delete that would break
+    // a live landing page. Best-effort: on a fetch failure we return none rather than hard-block.
+    async offersReferencing(serviceId) {
+      try {
+        const body = await apiRequest("/offers");
+        const offers = Array.isArray(body.offers) ? body.offers : [];
+        return offers
+          .filter((offer) => (offer.items || []).some((item) => item.service_id === serviceId))
+          .map((offer) => offer.name || offer.offer_id);
+      } catch {
+        return [];
+      }
+    },
   },
 });
 
