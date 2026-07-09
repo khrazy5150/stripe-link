@@ -16,6 +16,11 @@ def handler(event, context, repository=None, products_repo=None):
         if offer_id:
             return get_offer(event, repository, offer_id)
         return list_offers(event, repository)
+    if method == "PATCH":
+        offer_id = path_params(event).get("offer_id")
+        if not offer_id:
+            return error_response("offer_id is required.", code="missing_offer")
+        return update_offer_status(event, repository, offer_id)
     if method == "DELETE":
         offer_id = path_params(event).get("offer_id")
         if not offer_id:
@@ -73,6 +78,32 @@ def list_offers(event, repository):
     if not tenant_id:
         return error_response("tenant_id is required.", code="missing_tenant")
     return json_response({"offers": repository.list_for_tenant(tenant_id)})
+
+
+def update_offer_status(event, repository, offer_id: str):
+    """Archive/restore an offer (soft) without a full re-save. Preserves referential integrity for
+    published landing pages that reference the offer — unlike delete, which the UI guards."""
+    try:
+        body = parse_json_body(event)
+    except ValueError as exc:
+        return error_response(str(exc), code="invalid_offer_status")
+    status = str(body.get("status") or "").strip()
+    if status not in {"active", "archived"}:
+        return error_response("Offer status must be one of: active, archived.", code="invalid_offer_status")
+    tenant_id = tenant_id_from_event(event, body)
+    if not tenant_id:
+        return error_response("tenant_id is required.", code="missing_tenant")
+    offer = repository.get(tenant_id, offer_id)
+    if not offer:
+        return error_response("Offer not found.", status_code=404, code="not_found")
+    offer["status"] = status
+    if body.get("updated_at") is not None:
+        offer["updated_at"] = body.get("updated_at")
+    try:
+        saved = repository.put(offer)
+        return json_response({"offer": saved})
+    except RepositoryError as exc:
+        return error_response(str(exc), code="invalid_offer_status")
 
 
 def delete_offer(event, repository, offer_id: str):

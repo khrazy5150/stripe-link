@@ -849,6 +849,16 @@ main {
   height: 4rem;
 }
 
+.offer-status-filter {
+  margin-bottom: 1rem;
+}
+.offer-status-filter label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-weight: 600;
+}
+
 .product-card-body {
   display: grid;
   gap: 1rem;

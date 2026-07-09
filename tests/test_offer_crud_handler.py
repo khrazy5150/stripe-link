@@ -34,6 +34,33 @@ class OfferCrudHandlerTests(unittest.TestCase):
         self.assertEqual(item["default_price_id"], "price_2bottle")
         self.assertEqual(len(item["selectable_prices"]), 4)
 
+    def test_update_offer_status_archives_and_restores(self):
+        self.repository.put(self.offer)
+        tenant_id = self.offer["tenant_id"]
+        offer_id = self.offer["offer_id"]
+
+        def patch(status):
+            return handler({
+                "httpMethod": "PATCH",
+                "pathParameters": {"offer_id": offer_id},
+                "body": json.dumps({"status": status, "tenant_id": tenant_id}),
+            }, None, repository=self.repository, products_repo=self.products)
+
+        archived = patch("archived")
+        self.assertEqual(archived["statusCode"], 200)
+        self.assertEqual(self.repository.get(tenant_id, offer_id)["status"], "archived")
+        restored = patch("active")
+        self.assertEqual(json.loads(restored["body"])["offer"]["status"], "active")
+
+    def test_update_offer_status_rejects_invalid_status(self):
+        self.repository.put(self.offer)
+        response = handler({
+            "httpMethod": "PATCH",
+            "pathParameters": {"offer_id": self.offer["offer_id"]},
+            "body": json.dumps({"status": "deleted", "tenant_id": self.offer["tenant_id"]}),
+        }, None, repository=self.repository, products_repo=self.products)
+        self.assertEqual(response["statusCode"], 400)
+
     def test_get_and_list_offers(self):
         self.repository.put(self.offer)
 

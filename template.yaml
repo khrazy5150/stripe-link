@@ -644,6 +644,12 @@ Resources:
             RestApiId: !Ref RestApi
             Path: /offers/{offer_id}
             Method: DELETE
+        OfferStatus:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /offers/{offer_id}/status
+            Method: PATCH
 
   CouponsFunction:
     Type: AWS::Serverless::Function

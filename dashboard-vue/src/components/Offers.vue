@@ -23,17 +23,32 @@
         <div v-if="offersError" class="keys-status-banner error">{{ offersError }}</div>
         <div v-else-if="offersMessage" class="keys-status-banner">{{ offersMessage }}</div>
 
+        <div v-if="offers.length" class="offer-status-filter">
+          <label>
+            <span>Status</span>
+            <select v-model="offerStatusFilter">
+              <option value="active">Active</option>
+              <option value="archived">Archived</option>
+              <option value="all">All</option>
+            </select>
+          </label>
+        </div>
+
         <div v-if="!offers.length" class="offer-empty-state">
           {{ offersLoaded ? 'No offers found. Click "+ Add Offer" to configure one.' : 'Click "Load Offers" to see offers.' }}
+        </div>
+        <div v-else-if="!visibleOffers.length" class="offer-empty-state">
+          No {{ offerStatusFilter === 'all' ? '' : offerStatusFilter }} offers to show.
         </div>
 
         <div v-else class="product-card-list">
           <ListCard
-            v-for="offer in offers"
+            v-for="offer in visibleOffers"
             :key="offer.offer_id"
             :image="offerImage(offer)"
             :icon-color-key="offer.offer_id"
             :title="offer.name"
+            :archived="offer.status === 'archived'"
           >
             <template #icon>
               <svg class="offer-card-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
@@ -45,12 +60,22 @@
             </template>
             <template #description>
               <p><strong>Type:</strong> {{ derivedOfferTypeLabel(offer) }}</p>
-              <p><strong>Products:</strong> {{ productSummary(offer) }}</p>
+              <p><strong>Items:</strong> {{ itemSummary(offer) }}</p>
             </template>
             <template #actions>
               <button type="button" class="secondary-action" @click="viewOffer(offer)">View</button>
               <button type="button" class="secondary-action" @click="editOffer(offer)">Edit</button>
-              <button type="button" class="secondary-action danger-action" @click="requestDeleteOffer(offer)">Delete</button>
+              <button type="button" class="secondary-action" @click="setOfferStatus(offer, offer.status === 'archived' ? 'active' : 'archived')">
+                {{ offer.status === "archived" ? "Restore" : "Archive" }}
+              </button>
+              <button
+                v-if="offer.status === 'archived'"
+                type="button"
+                class="secondary-action danger-action"
+                @click="requestDeleteOffer(offer)"
+              >
+                Delete
+              </button>
             </template>
           </ListCard>
         </div>
@@ -395,7 +420,7 @@
               {{ intentLabel(selectedOfferDetails.product_intent) }}
             </span>
             <span>{{ derivedOfferTypeLabel(selectedOfferDetails) }}</span>
-            <span>{{ productSummary(selectedOfferDetails) || "No products" }}</span>
+            <span>{{ itemSummary(selectedOfferDetails) || "No items" }}</span>
           </div>
           <pre>{{ JSON.stringify(selectedOfferDetails, null, 2) }}</pre>
         </div>
@@ -566,6 +591,13 @@ const editingOfferId = ref("");
 const selectedOfferDetails = ref(null);
 const pendingDeleteOffer = ref(null);
 const deletingOffer = ref(false);
+const offerStatusFilter = ref("active");
+const visibleOffers = computed(() => {
+  const isArchived = (o) => o.status === "archived";
+  if (offerStatusFilter.value === "archived") return offers.value.filter(isArchived);
+  if (offerStatusFilter.value === "all") return offers.value;
+  return offers.value.filter((o) => !isArchived(o));
+});
 const form = reactive(defaultOfferForm());
 const itemConfigs = reactive({});
 const priceImageInputs = new Map();
@@ -821,7 +853,43 @@ async function editOffer(offer) {
   openOfferModal(offer);
 }
 
-function requestDeleteOffer(offer) {
+async function setOfferStatus(offer, status) {
+  offersError.value = "";
+  offersMessage.value = "";
+  try {
+    const body = await apiRequest(`/offers/${encodeURIComponent(offer.offer_id)}/status`, {
+      method: "PATCH",
+      body: { tenant_id: offer.tenant_id || getTenantId(), status, updated_at: Math.floor(Date.now() / 1000) },
+    });
+    const updated = body.offer ? offerCardModel(body.offer) : { ...offer, status };
+    offers.value = offers.value.map((item) => (item.offer_id === offer.offer_id ? updated : item));
+    offersMessage.value = `${offer.name || "Offer"} was ${status === "archived" ? "archived" : "restored"}.`;
+  } catch (error) {
+    offersError.value = error.message || "Failed to update the offer.";
+  }
+}
+
+// Names of non-archived landing pages built on this offer — deleting it would break them (publishing
+// raises "Offer not found"). Best-effort: on a fetch failure we return none rather than hard-block.
+async function pagesReferencing(offerId) {
+  try {
+    const body = await apiRequest("/pages");
+    const pages = Array.isArray(body.pages) ? body.pages : [];
+    return pages
+      .filter((page) => page.offer_id === offerId && page.status !== "archived")
+      .map((page) => page.name || page.page_id);
+  } catch {
+    return [];
+  }
+}
+
+async function requestDeleteOffer(offer) {
+  const pages = await pagesReferencing(offer.offer_id);
+  if (pages.length) {
+    offersError.value = offersMessage.value =
+      `Can't delete "${offer.name}" — it's used by ${pages.length} landing page(s): ${pages.join(", ")}. Archive or delete those pages first.`;
+    return;
+  }
   pendingDeleteOffer.value = offer;
 }
 
@@ -1369,9 +1437,10 @@ function offerImage(offer) {
   return offer?.presentation?.image_url || offer?.presentation?.hero_image_url || firstProduct?.images?.[0] || "";
 }
 
-function productSummary(offer) {
+function itemSummary(offer) {
+  // Offer items are products or services; show whichever id each item carries.
   const items = Array.isArray(offer?.items) ? offer.items : [];
-  return items.map((item) => item.product_id).filter(Boolean).join(", ");
+  return items.map((item) => item.product_id || item.service_id).filter(Boolean).join(", ");
 }
 
 function derivedOfferType(offer) {
