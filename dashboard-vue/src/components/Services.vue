@@ -247,7 +247,7 @@
               </p>
             </section>
 
-            <section class="offer-form-section">
+            <section v-if="form.default_fulfiller_id" class="offer-form-section">
               <header class="offer-section-header">
                 <div>
                   <h3>Check-in &amp; Completion</h3>
