@@ -16,6 +16,8 @@ import datetime
 import re
 from typing import Any
 
+from stripe_link.domain.booking import appointment_service_name
+
 DEFAULT_LEAD_MINUTES = [1440, 60]  # 24h and 1h before start
 SMS_CHANNEL = "sms"
 MAX_SEND_ATTEMPTS = 5
@@ -161,7 +163,7 @@ def mark_reminder(appointment: dict[str, Any], reminder: dict[str, Any], *, stat
 def reminder_sms_text(appointment: dict[str, Any], *, business_name: str = "") -> str:
     """Compose the reminder body. Kept short (single SMS segment where possible) and always
     carries the STOP hint that US A2P 10DLC compliance expects."""
-    service = appointment.get("service_name") or "your appointment"
+    service = appointment_service_name(appointment) or "your appointment"
     prefix = f"{str(business_name).strip()}: " if str(business_name).strip() else ""
     body = f"{prefix}Reminder — {service} {_format_when(appointment)}."
     return f"{body} Reply STOP to opt out."[:320]

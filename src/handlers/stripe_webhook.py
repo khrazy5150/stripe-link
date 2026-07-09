@@ -7,6 +7,16 @@ import time
 from typing import Any, Callable
 
 from stripe_link.common import error_response, header_value, json_response
+from stripe_link.domain.booking import (
+    appointment_line_from_purchase,
+    appointment_price,
+    appointment_service_id,
+    appointment_service_name,
+    appointment_total_amount,
+    compensation_snapshot,
+    group_purchased_service_lines,
+    no_booking_invoice_line,
+)
 from stripe_link.domain.documents import validate_appointment
 from stripe_link.domain.downloads import digital_download_links
 from stripe_link.domain.fees import cached_billing_config, calculate_price
@@ -214,7 +224,7 @@ def handler(
                 persist_service_purchase(
                     stripe_event, tenant_id=tenant_id, mode=mode,
                     order_id=str((persistence or {}).get("order_id") or ""),
-                    notifications_repo=notifications_repo, now_fn=now_fn,
+                    invoices_repo=invoices_repo, notifications_repo=notifications_repo, now_fn=now_fn,
                 )
     elif event_type and event_type.startswith("invoice.") and tenant_id:
         persistence = persist_invoice_event(
@@ -327,6 +337,94 @@ def persist_checkout_session_completed(
     }
 
 
+def _service_lines_from_metadata(metadata: dict[str, Any]) -> list[dict[str, Any]]:
+    """Parse the checkout metadata's service_lines JSON (STORY-2.3). Falls back to a single
+    scheduled line built from the legacy singular fields when service_lines is absent."""
+    raw = metadata.get("service_lines")
+    if raw:
+        try:
+            lines = json.loads(raw) if isinstance(raw, str) else raw
+            if isinstance(lines, list):
+                return [line for line in lines if isinstance(line, dict) and line.get("service_id")]
+        except (ValueError, TypeError):
+            pass
+    service_id = str(metadata.get("service_id") or "").strip()
+    if not service_id:
+        return []
+    return [{
+        "service_id": service_id,
+        "price_id": str(metadata.get("service_price_id") or ""),
+        "service_name": str(metadata.get("service_name") or "Service"),
+        "unit_amount": 0,
+        "booking_flow": str(metadata.get("booking_flow") or "pay_then_book"),
+        "fulfillment_mode": "scheduled",
+        "duration_minutes": 0,
+    }]
+
+
+def _no_booking_comp_snapshot(tenant_id: str, line: dict[str, Any], services_repo, fulfillers_repo) -> dict[str, Any] | None:
+    """Freeze the assigned fulfiller's compensation for a no_booking line (payout attribution).
+    Best-effort: returns None when unassigned or the service/fulfiller can't be loaded."""
+    fulfiller_id = str(line.get("default_fulfiller_id") or "")
+    if not fulfiller_id:
+        return None
+    services_repo = services_repo or (services_repository() if os.environ.get("SERVICES_TABLE") else None)
+    fulfillers_repo = fulfillers_repo or (fulfillers_repository() if os.environ.get("SERVICES_TABLE") else None)
+    if not services_repo or not fulfillers_repo:
+        return None
+    try:
+        service = services_repo.get(tenant_id, str(line.get("service_id") or ""))
+        fulfiller = fulfillers_repo.get(tenant_id, fulfiller_id)
+        if service and fulfiller:
+            return compensation_snapshot(service, fulfiller)
+    except Exception:  # noqa: BLE001
+        pass
+    return None
+
+
+def _record_service_purchase_on_invoice(
+    *, tenant_id, session_id, appointment_ids, no_booking_lines, currency, now,
+    invoices_repo, services_repo, fulfillers_repo,
+) -> None:
+    """Stamp the appointment fan-out set + no_booking line items onto the purchase's invoice
+    (source.appointment_ids may be empty for a no_booking-only purchase). Best-effort."""
+    invoices_repo = invoices_repo or (invoices_repository() if os.environ.get("INVOICES_TABLE") else None)
+    if not invoices_repo:
+        return
+    try:
+        invoice = invoices_repo.get(tenant_id, f"inv_{session_id}")
+    except Exception:  # noqa: BLE001
+        invoice = None
+    if not invoice:
+        return
+    source = dict(invoice.get("source") or {})
+    source["appointment_ids"] = list(appointment_ids)
+    line_items = list(invoice.get("line_items") or [])
+    for line in no_booking_lines:
+        snapshot = _no_booking_comp_snapshot(tenant_id, line, services_repo, fulfillers_repo)
+        line_items.append(no_booking_invoice_line(line, currency, rule_snapshot=snapshot))
+    try:
+        invoices_repo.put({**invoice, "source": source, "line_items": line_items, "updated_at": now})
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def _emit_awaiting_schedule_notification(notifications_repo, appointment: dict[str, Any], tenant_id: str, now: int) -> None:
+    customer = appointment.get("customer") or {}
+    try:
+        notifications_repo.put({
+            "schema_version": "2026-05-29", "document_type": "notification", "tenant_id": tenant_id,
+            "notification_id": f"notif_appt_{appointment['appointment_id']}", "type": "order", "severity": "success",
+            "title": "New booking (awaiting schedule)",
+            "message": f"{customer.get('name') or customer.get('email') or 'A customer'} purchased {appointment_service_name(appointment)} and needs to pick a time.",
+            "status": "unread", "sort_priority": 100,
+            "related": {"appointment_id": appointment["appointment_id"]}, "action": {"label": "View appointments", "route": "services"},
+            "created_at": now, "read_at": None, "archived_at": None,
+        })
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def persist_service_purchase(
     stripe_event: dict[str, Any],
     *,
@@ -334,74 +432,83 @@ def persist_service_purchase(
     mode: str,
     order_id: str = "",
     appointments_repo=None,
+    invoices_repo=None,
+    services_repo=None,
+    fulfillers_repo=None,
     notifications_repo=None,
     now_fn: Callable[[], int] = lambda: int(time.time()),
 ) -> dict[str, Any]:
-    """A paid service-offer purchase (pay_then_book): create a paid, awaiting_schedule appointment
-    the customer schedules later. Idempotent on the checkout session id (STORY-5.1 / STORY-6.2)."""
+    """A paid service-offer purchase (pay_then_book): fan out 1..N awaiting_schedule appointments per
+    the offer's service_booking_mode, and record no_booking service lines on the linked invoice.
+    Idempotent on the checkout session id + group index (STORY-2.4)."""
     import secrets as _secrets
 
     session = _event_data_object(stripe_event)
     metadata = session.get("metadata") or {}
-    service_id = str(metadata.get("service_id") or "").strip()
-    if not service_id:
-        return {"status": "skipped", "reason": "no_service_id"}
+    purchased_lines = _service_lines_from_metadata(metadata)
+    if not purchased_lines:
+        return {"status": "skipped", "reason": "no_service_lines"}
     appointments_repo = appointments_repo or (appointments_repository() if os.environ.get("SERVICES_TABLE") else None)
     if not appointments_repo:
         return {"status": "skipped", "reason": "appointments_repo_unavailable"}
 
-    session_id = str(session.get("id") or "").strip()
-    appointment_id = f"appt_svc_{session_id}" if session_id else f"appt_svc_{str(session.get('payment_intent') or '')}"
-    if appointments_repo.get(tenant_id, appointment_id):
-        return {"status": "skipped", "reason": "already_created", "appointment_id": appointment_id}
-
+    session_id = str(session.get("id") or "").strip() or str(session.get("payment_intent") or "")
     now = int(now_fn())
     details = session.get("customer_details") or {}
     customer = {k: v for k, v in {"name": details.get("name"), "email": details.get("email"), "phone": details.get("phone")}.items() if v}
-    amount_total = int(session.get("amount_total") or 0)
     currency = str(session.get("currency") or "usd").lower()
-    appointment = {
-        "schema_version": "2026-05-29",
-        "document_type": "appointment",
-        "tenant_id": tenant_id,
-        "appointment_id": appointment_id,
-        "service_id": service_id,
-        "service_name": str(metadata.get("service_name") or "Service"),
-        "status": "booked",
-        "payment_status": "paid",
-        "awaiting_schedule": True,
-        "customer": customer,
-        "price": {"currency": currency, "unit_amount": amount_total, "price_id": str(metadata.get("service_price_id") or "")},
-        "source": "offer",
-        "offer_id": str(metadata.get("offer_id") or ""),
-        "page_id": str(metadata.get("page_id") or ""),
-        "order_id": order_id,
-        "payment_intent_id": str(session.get("payment_intent") or ""),
-        "customer_manage_token": _secrets.token_urlsafe(24),
-        "stripe_mode": mode,
-        "created_at": now,
-        "updated_at": now,
-    }
-    try:
-        validate_appointment(appointment)
-        appointments_repo.put(appointment)
-    except Exception:  # noqa: BLE001 - never fail the webhook on booking side effects
-        return {"status": "error", "reason": "appointment_save_failed"}
+    payment_intent = str(session.get("payment_intent") or "")
 
-    if notifications_repo:
+    groups, no_booking_lines = group_purchased_service_lines(purchased_lines, metadata.get("service_booking_mode"))
+
+    appointment_ids: list[str] = []
+    for index, group in enumerate(groups):
+        appointment_id = f"appt_svc_{session_id}_{index}"
+        appointment_ids.append(appointment_id)
+        if appointments_repo.get(tenant_id, appointment_id):
+            continue  # idempotent on session id + group index
+        lines = [appointment_line_from_purchase(line, currency) for line in group]
+        appointment = {
+            "schema_version": "2026-05-29",
+            "document_type": "appointment",
+            "tenant_id": tenant_id,
+            "appointment_id": appointment_id,
+            "services": lines,
+            "duration_minutes": sum(int(line.get("duration_minutes") or 0) for line in lines),
+            "status": "booked",
+            "payment_status": "paid",
+            "awaiting_schedule": True,
+            "customer": customer,
+            "source": "offer",
+            "offer_id": str(metadata.get("offer_id") or ""),
+            "page_id": str(metadata.get("page_id") or ""),
+            "order_id": order_id,
+            "payment_intent_id": payment_intent,
+            "customer_manage_token": _secrets.token_urlsafe(24),
+            "stripe_mode": mode,
+            "created_at": now,
+            "updated_at": now,
+        }
         try:
-            notifications_repo.put({
-                "schema_version": "2026-05-29", "document_type": "notification", "tenant_id": tenant_id,
-                "notification_id": f"notif_appt_{appointment_id}", "type": "order", "severity": "success",
-                "title": "New booking (awaiting schedule)",
-                "message": f"{customer.get('name') or customer.get('email') or 'A customer'} purchased {appointment['service_name']} and needs to pick a time.",
-                "status": "unread", "sort_priority": 100,
-                "related": {"appointment_id": appointment_id}, "action": {"label": "View appointments", "route": "services"},
-                "created_at": now, "read_at": None, "archived_at": None,
-            })
-        except Exception:  # noqa: BLE001
-            pass
-    return {"status": "awaiting_schedule", "appointment_id": appointment_id}
+            validate_appointment(appointment)
+            appointments_repo.put(appointment)
+        except Exception:  # noqa: BLE001 - never fail the webhook on booking side effects
+            return {"status": "error", "reason": "appointment_save_failed"}
+        if notifications_repo:
+            _emit_awaiting_schedule_notification(notifications_repo, appointment, tenant_id, now)
+
+    # Record the fan-out set + no_booking lines on the purchase's invoice (STORY-2.4 / STORY-2.5).
+    _record_service_purchase_on_invoice(
+        tenant_id=tenant_id, session_id=session_id, appointment_ids=appointment_ids,
+        no_booking_lines=no_booking_lines, currency=currency, now=now,
+        invoices_repo=invoices_repo, services_repo=services_repo, fulfillers_repo=fulfillers_repo,
+    )
+
+    return {
+        "status": "awaiting_schedule" if appointment_ids else "fulfilled",
+        "appointment_ids": appointment_ids,
+        "no_booking_lines": len(no_booking_lines),
+    }
 
 
 def persist_appointment_paid(
@@ -435,8 +542,8 @@ def persist_appointment_paid(
     now = int(now_fn())
     fees = fee_breakdown_from_session(session, billing_config_loader)
     payment_intent = str(session.get("payment_intent") or "").strip()
-    amount_total = int(session.get("amount_total") or (appointment.get("price") or {}).get("unit_amount") or 0)
-    currency = str(session.get("currency") or (appointment.get("price") or {}).get("currency") or "usd")
+    amount_total = int(session.get("amount_total") or appointment_total_amount(appointment) or 0)
+    currency = str(session.get("currency") or appointment_price(appointment).get("currency") or "usd")
 
     updated = {**appointment, "status": "booked", "payment_status": "paid", "updated_at": now}
     if payment_intent:
@@ -474,7 +581,7 @@ def persist_appointment_paid(
                 customer=appointment.get("customer") if isinstance(appointment.get("customer"), dict) else None,
                 stripe={"payment_intent_id": payment_intent},
                 source="webhook",
-                description=f"Booking: {appointment.get('service_name') or appointment.get('service_id')}",
+                description=f"Booking: {appointment_service_name(appointment) or appointment_service_id(appointment)}",
                 now_epoch=now,
             ))
             ledger_written = True
@@ -493,7 +600,7 @@ def persist_appointment_paid(
 def appointment_notification(appointment: dict[str, Any], tenant_id: str, now: int) -> dict[str, Any]:
     customer = appointment.get("customer") or {}
     who = customer.get("name") or customer.get("email") or "A customer"
-    service = appointment.get("service_name") or appointment.get("service_id") or "a service"
+    service = appointment_service_name(appointment) or appointment_service_id(appointment) or "a service"
     return {
         "schema_version": "2026-05-29",
         "document_type": "notification",
@@ -589,16 +696,19 @@ def persist_invoice_event(
         updated["voided_at"] = now
     invoices_repo.put(updated)
 
-    # book_then_pay: a paid invoice linked to an appointment marks that appointment paid (STORY-5.2).
-    linked_appointment_id = str(((invoice.get("source") or {}).get("appointment_id")) or "").strip()
+    # book_then_pay: a paid invoice marks its linked appointments paid, fanning out over the whole set
+    # (STORY-2.5). source.appointment_ids[] may be empty (a no_booking-only purchase).
+    source = invoice.get("source") or {}
+    linked_ids = list(source.get("appointment_ids") or ([source["appointment_id"]] if source.get("appointment_id") else []))
     appointments_repo = appointments_repo or (appointments_repository() if os.environ.get("SERVICES_TABLE") else None)
-    if new_status == "paid" and linked_appointment_id and appointments_repo:
-        try:
-            appt = appointments_repo.get(tenant_id, linked_appointment_id)
-            if appt and appt.get("payment_status") != "paid":
-                appointments_repo.put({**appt, "payment_status": "paid", "invoice_id": invoice_id, "updated_at": now})
-        except Exception:  # noqa: BLE001 - appointment sync must not fail the webhook
-            pass
+    if new_status == "paid" and linked_ids and appointments_repo:
+        for linked_appointment_id in linked_ids:
+            try:
+                appt = appointments_repo.get(tenant_id, linked_appointment_id)
+                if appt and appt.get("payment_status") != "paid":
+                    appointments_repo.put({**appt, "payment_status": "paid", "invoice_id": invoice_id, "updated_at": now})
+            except Exception:  # noqa: BLE001 - appointment sync must not fail the webhook
+                pass
 
     if new_status == "paid" and notifications_repo:
         try:

@@ -24,6 +24,9 @@ class ResolvedOfferItem:
     kind: str = "product"
     service_id: str = ""
     booking_flow: str = ""
+    fulfillment_mode: str = "scheduled"
+    duration_minutes: int = 0
+    default_fulfiller_id: str = ""
 
 
 def load_offer_products(tenant_id: str, offer: dict[str, Any], products_repo: Any) -> dict[str, dict[str, Any]]:
@@ -54,6 +57,29 @@ def load_offer_services(tenant_id: str, offer: dict[str, Any], services_repo: An
     return services_by_id
 
 
+def service_fulfillment_mode(service: dict[str, Any]) -> str:
+    mode = str((service or {}).get("fulfillment_mode") or "scheduled").strip()
+    return mode if mode in {"scheduled", "no_booking"} else "scheduled"
+
+
+def booking_groups_for(offer: dict[str, Any], services_by_id: dict[str, dict[str, Any]]) -> list[list[dict[str, Any]]]:
+    """Expand the Offer's service_booking_mode into groups of SCHEDULED service items — the single
+    place grouping is computed. single_visit -> one group with all scheduled items; separate_visits
+    -> one group per item. no_booking services are excluded (they never book). Returns item groups."""
+    mode = str((offer or {}).get("service_booking_mode") or "single_visit")
+    scheduled = [
+        item
+        for item in (offer.get("items") or [])
+        if str(item.get("service_id") or "")
+        and service_fulfillment_mode(services_by_id.get(str(item.get("service_id") or ""))) != "no_booking"
+    ]
+    if not scheduled:
+        return []
+    if mode == "separate_visits":
+        return [[item] for item in scheduled]
+    return [scheduled]
+
+
 def resolve_service_offer_item(item: dict[str, Any], service: dict[str, Any], offer_context: str) -> ResolvedOfferItem:
     service_id = str(item.get("service_id") or "")
     if service.get("service_id") != service_id:
@@ -82,6 +108,9 @@ def resolve_service_offer_item(item: dict[str, Any], service: dict[str, Any], of
         kind="service",
         service_id=service_id,
         booking_flow=flow,
+        fulfillment_mode=service_fulfillment_mode(service),
+        duration_minutes=int(service.get("duration_minutes") or 0),
+        default_fulfiller_id=str(service.get("default_fulfiller_id") or ""),
     )
 
 
@@ -208,6 +237,9 @@ def resolve_offer(
                 "line_amount": item.line_amount,
                 "selectable": item.selectable,
                 "booking_flow": item.booking_flow,
+                "fulfillment_mode": item.fulfillment_mode,
+                "duration_minutes": item.duration_minutes,
+                "default_fulfiller_id": item.default_fulfiller_id,
             }
             for item in resolved_items
         ],

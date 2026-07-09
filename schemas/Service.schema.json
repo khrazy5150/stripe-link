@@ -4,7 +4,7 @@
   "title": "Service",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_version", "document_type", "tenant_id", "service_id", "name", "duration_minutes", "price"],
+  "required": ["schema_version", "document_type", "tenant_id", "service_id", "name", "price"],
   "properties": {
     "schema_version": { "type": "string" },
     "document_type": { "const": "service" },
@@ -12,6 +12,10 @@
     "service_id": { "type": "string" },
     "name": { "type": "string" },
     "description": { "type": "string" },
+    "fulfillment_mode": {
+      "enum": ["scheduled", "no_booking"],
+      "description": "scheduled (default) needs a time slot; no_booking is pay-only (no appointment), taxed as a service. duration_minutes is required only when scheduled."
+    },
     "duration_minutes": { "type": "integer", "minimum": 1 },
     "price": {
       "type": "object",

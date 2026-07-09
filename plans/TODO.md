@@ -4,6 +4,22 @@ Deferred, non-blocking follow-ups. Each item notes what, why it was deferred, an
 
 ## Services / Booking
 
+### Decouple Booking from Service (Booking = its own primitive)
+- **What:** `Appointment` is 1:1 with a service today. Make a **Booking** its own primitive — a scheduled
+  visit covering **one or more** service line items — and let a Service declare `fulfillment_mode`
+  (`scheduled` | `no_booking`). The **Offer** coordinates delivery (`service_booking_mode`:
+  `single_visit` | `separate_visits`). Full design in **`plans/BOOKING_AS_PRIMITIVE.md`**.
+- **Deferred sub-phases that must not fall through:**
+  - **Multi-fulfiller single visit (multi-resource scheduling)** — different delegates performing
+    different services in the *same* visit (find a slot where all required fulfillers are free). v1
+    restricts a combined booking to **one fulfiller / unassigned**; this is its own non-trivial phase.
+  - **Per-item `booking_group` on offers** — mixed offers where some services share a visit and others
+    are separate (beyond the offer-wide `single_visit`/`separate_visits` switch).
+  - **Service tax categories** — `no_booking` services stay *services* for fiscal/tax reasons (differ
+    from products); per-service tax classification pairs with the commerce tax/fee work.
+- **Why deferred:** design locked 2026-07-08, no code yet; awaiting greenlight to start Phase 1
+  (Booking.services[] + read adapter + Service.fulfillment_mode, no behavior change).
+
 ### Consider adding a wizard for the services page
 - Idea only — not planned yet. The Create Service flow is dense; a guided wizard (Basics → Pricing
   → "fulfill yourself or delegate?" → conditional staff/calendar/check-in steps) could simplify it

@@ -75,6 +75,11 @@
       "type": ["string", "null"],
       "description": "Deprecated transition field. Triggering and funnel placement are handled by landing page/flow configuration."
     },
+    "service_booking_mode": {
+      "enum": ["single_visit", "separate_visits"],
+      "default": "single_visit",
+      "description": "How the offer's scheduled services are delivered: single_visit collapses them into one appointment; separate_visits gives each its own. no_booking services are never booked. Shorthand expanded by booking_groups_for(offer)."
+    },
     "items": {
       "type": "array",
       "minItems": 1,

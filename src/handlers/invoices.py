@@ -170,7 +170,7 @@ def invoice_from_appointment_route(event, repository, *, appointments_repo=None)
         return error_response("Appointment not found.", status_code=404, code="not_found")
 
     for existing in repository.list_for_tenant(tenant_id):
-        if (existing.get("source") or {}).get("appointment_id") == appointment_id:
+        if appointment_id in ((existing.get("source") or {}).get("appointment_ids") or []):
             return json_response({"invoice": existing, "created": False})
 
     now = int(time.time())

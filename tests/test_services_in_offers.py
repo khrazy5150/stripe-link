@@ -136,12 +136,12 @@ class OfferValidationTests(unittest.TestCase):
         with self.assertRaises(DocumentValidationError):
             validate_offer_document(self._offer([{"product_id": "p", "service_id": "s", "price_id": "x", "quantity": 1}]))
 
-    def test_multi_service_rejected(self):
-        with self.assertRaises(DocumentValidationError):
-            validate_offer_document(self._offer([
-                {"service_id": "s1", "price_id": "p1", "quantity": 1},
-                {"service_id": "s2", "price_id": "p2", "quantity": 1},
-            ]))
+    def test_multi_service_allowed(self):
+        # An offer may now carry N service items (STORY-2.1); grouping is coordinated by service_booking_mode.
+        validate_offer_document(self._offer([
+            {"service_id": "s1", "price_id": "p1", "quantity": 1},
+            {"service_id": "s2", "price_id": "p2", "quantity": 1},
+        ]))
 
     def test_service_item_requires_transaction_intent(self):
         offer = self._offer([{"service_id": "svc_1", "price_id": "p1", "quantity": 1}])
@@ -155,14 +155,16 @@ class DirectBookingPricingTests(unittest.TestCase):
         appt = reserved_appointment(priced_service(fee_handling="net_guaranteed"), tenant_id="t1", appointment_id="a1",
                                     slot_start_iso="2026-07-10T17:00:00Z", tz_name="UTC", fulfiller_id=None,
                                     customer={"email": "c@e.com"}, manage_token="tok", hold_expires_at=0, now_epoch=0)
-        self.assertEqual(appt["price"]["fee_handling"], "net_guaranteed")
-        self.assertEqual(appt["price"]["tenant_keyed_amount"], 15000)
+        line_price = appt["services"][0]["price"]
+        self.assertEqual(line_price["fee_handling"], "net_guaranteed")
+        self.assertEqual(line_price["tenant_keyed_amount"], 15000)
         self.assertEqual(appt["booking_flow"], "pay_then_book")
         self.assertEqual(appt["source"], "booking_page")
 
     def test_net_guaranteed_line_item_is_grossed_up(self):
         fee = calculate_price(tenant_keyed_amount=15000, product_type="service", fee_handling="net_guaranteed")
-        appt = {"service_name": "Tax", "price": {"currency": "usd", "unit_amount": 15000}}
+        appt = {"services": [{"service_id": "svc_1", "service_name": "Tax", "price_id": "svcprice_svc_1",
+                              "duration_minutes": 60, "price": {"currency": "usd", "unit_amount": 15000}}]}
         payload = build_booking_checkout_payload(appt, "t1", success_url="s", cancel_url="c",
                                                  platform_fee=0, tenant_plan="basic", charged_unit_amount=fee["unit_amount"])
         self.assertEqual(payload["line_items[0][price_data][unit_amount]"], str(fee["unit_amount"]))
@@ -175,11 +177,15 @@ def _iso_tomorrow(hour=10):
 
 class PayThenBookWebhookTests(unittest.TestCase):
     def _event(self):
+        service_lines = json.dumps([{"service_id": "svc_1", "price_id": "p1", "service_name": "Tax Prep",
+                                     "unit_amount": 15000, "currency": "usd", "quantity": 1, "booking_flow": "pay_then_book",
+                                     "fulfillment_mode": "scheduled", "duration_minutes": 60}])
         return {"type": "checkout.session.completed", "data": {"object": {
             "id": "cs_123", "payment_intent": "pi_1", "amount_total": 15000, "currency": "usd",
             "customer_details": {"name": "Casey", "email": "c@e.com"},
             "metadata": {"service_id": "svc_1", "service_name": "Tax Prep", "booking_flow": "pay_then_book",
-                         "offer_id": "off_1", "service_price_id": "p1"},
+                         "offer_id": "off_1", "service_price_id": "p1", "service_booking_mode": "single_visit",
+                         "service_lines": service_lines},
         }}}
 
     def test_creates_awaiting_schedule_appointment_idempotently(self):
@@ -187,7 +193,8 @@ class PayThenBookWebhookTests(unittest.TestCase):
         r1 = persist_service_purchase(self._event(), tenant_id="t1", mode="test", order_id="ord_1",
                                       appointments_repo=appts, now_fn=lambda: 1000)
         self.assertEqual(r1["status"], "awaiting_schedule")
-        appt = appts.get("t1", r1["appointment_id"])
+        self.assertEqual(len(r1["appointment_ids"]), 1)
+        appt = appts.get("t1", r1["appointment_ids"][0])
         self.assertTrue(appt["awaiting_schedule"])
         self.assertEqual(appt["payment_status"], "paid")
         self.assertEqual(appt["source"], "offer")
@@ -195,8 +202,8 @@ class PayThenBookWebhookTests(unittest.TestCase):
         self.assertIsNone(appt.get("starts_at"))  # no time yet
         # idempotent: a redelivered session does not create a second appointment
         r2 = persist_service_purchase(self._event(), tenant_id="t1", mode="test", appointments_repo=appts, now_fn=lambda: 1001)
-        self.assertEqual(r2["status"], "skipped")
         self.assertEqual(len(appts.list_for_tenant("t1")), 1)
+        self.assertEqual(r2["appointment_ids"], r1["appointment_ids"])
 
 
 class ScheduleEndpointTests(unittest.TestCase):
@@ -208,7 +215,9 @@ class ScheduleEndpointTests(unittest.TestCase):
                           "lead_time_minutes": 0, "weekly_hours": [{"day": d, "enabled": True, "start_time": "00:00", "end_time": "23:00"} for d in DAYS]})
         appts = FakeDocumentRepository("appointment_id")
         appts.put({"schema_version": "2026-05-29", "document_type": "appointment", "tenant_id": "t1",
-                   "appointment_id": "a1", "service_id": "svc_1", "service_name": "Tax Prep", "status": "booked",
+                   "appointment_id": "a1",
+                   "services": [{"service_id": "svc_1", "service_name": "Tax Prep", "price_id": "svcprice_svc_1", "duration_minutes": 60}],
+                   "status": "booked",
                    "payment_status": "paid", "awaiting_schedule": True, "customer": {"email": "c@e.com"},
                    "customer_manage_token": "tok"})
         return services, availability, appts
@@ -271,19 +280,22 @@ class BookThenPayCheckoutTests(unittest.TestCase):
 
 class BookThenPayTests(unittest.TestCase):
     def test_invoice_from_appointment_links_source(self):
-        appt = {"tenant_id": "t1", "appointment_id": "a1", "service_id": "svc_1", "service_name": "Tax Prep",
-                "price": {"currency": "usd", "unit_amount": 15000, "tenant_keyed_amount": 15000}}
+        appt = {"tenant_id": "t1", "appointment_id": "a1",
+                "services": [{"service_id": "svc_1", "service_name": "Tax Prep", "price_id": "svcprice_svc_1", "duration_minutes": 60,
+                              "price": {"currency": "usd", "unit_amount": 15000, "tenant_keyed_amount": 15000}}]}
         inv = invoice_from_appointment(appt, invoice_id="inv_1", now=1000)
         self.assertEqual(inv["status"], "draft")
-        self.assertEqual(inv["source"]["appointment_id"], "a1")
+        self.assertEqual(inv["source"]["appointment_ids"], ["a1"])
         self.assertEqual(inv["line_items"][0]["unit_amount"], 15000)
         self.assertEqual(inv["amounts"]["total"], 15000)
 
     def test_invoice_from_appointment_route(self):
         invoices = FakeDocumentRepository("invoice_id")
         appts = FakeDocumentRepository("appointment_id")
-        appts.put({"tenant_id": "t1", "appointment_id": "a1", "service_id": "svc_1", "service_name": "Tax Prep",
-                   "customer": {"email": "c@e.com", "name": "Casey"}, "price": {"currency": "usd", "unit_amount": 15000}})
+        appts.put({"tenant_id": "t1", "appointment_id": "a1",
+                   "services": [{"service_id": "svc_1", "service_name": "Tax Prep", "price_id": "svcprice_svc_1", "duration_minutes": 60,
+                                 "price": {"currency": "usd", "unit_amount": 15000}}],
+                   "customer": {"email": "c@e.com", "name": "Casey"}})
         event = {"httpMethod": "POST", "path": "/invoices/from-appointment", "queryStringParameters": {"tenant_id": "t1"},
                  "body": json.dumps({"appointment_id": "a1"})}
         resp = invoices_handler(event, None, repository=invoices, appointments_repo=appts)

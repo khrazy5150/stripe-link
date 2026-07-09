@@ -5,6 +5,7 @@ break a booking. Shared by the booking handler and the Stripe webhook.
 from typing import Any
 
 from stripe_link.calendar_sync import sync_appointment_event
+from stripe_link.domain.booking import appointment_service_id
 from stripe_link.domain.calendar_routing import delegation_status, resolve_write_connection
 from stripe_link.domain.notifications_content import delegate_booking_email
 from stripe_link.mailer import send_email
@@ -54,7 +55,7 @@ def apply_delegation(appointment: dict[str, Any], *, action, change, services_re
     end to end — never raises. Returns the (possibly mutated) appointment."""
     try:
         tenant_id = str(appointment.get("tenant_id") or "")
-        service = services_repo.find_by_id(str(appointment.get("service_id") or "")) if services_repo else None
+        service = services_repo.find_by_id(appointment_service_id(appointment)) if services_repo else None
         fulfiller = None
         fulfiller_id = str(appointment.get("assigned_fulfiller_id") or "")
         if fulfiller_id and fulfillers_repo:

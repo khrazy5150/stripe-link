@@ -653,11 +653,14 @@ def validate_offer_document(document: dict[str, Any]) -> None:
     require_enum(document, "stripe_mode", {"test", "live"}, "Offer stripe_mode")
     if document.get("context") is not None:
         require_enum(document, "context", {"standard", "sale", "flash_sale", "upsell", "downsell", "order_bump"}, "Offer context")
+    # The Offer coordinates how its scheduled services are delivered (single_visit collapses them
+    # into one appointment; separate_visits gives each its own). Optional; defaults to single_visit.
+    if document.get("service_booking_mode") is not None:
+        require_enum(document, "service_booking_mode", {"single_visit", "separate_visits"}, "Offer service_booking_mode")
     items = document.get("items")
     if not isinstance(items, list) or not items:
         raise DocumentValidationError("Offer items must be a non-empty array.")
 
-    service_item_count = 0
     for item in items:
         if not isinstance(item, dict):
             raise DocumentValidationError("Each offer item must be an object.")
@@ -667,11 +670,8 @@ def validate_offer_document(document: dict[str, Any]) -> None:
         if has_product == has_service:
             raise DocumentValidationError("Offer item must reference exactly one of product_id or service_id.")
         if has_service:
-            service_item_count += 1
-            # One appointment is created per paid service purchase; multiple service items in a single
-            # offer are out of scope for this phase and rejected rather than silently mishandled (STORY-5.4).
-            if service_item_count > 1:
-                raise DocumentValidationError("An offer may contain at most one service item in this phase.")
+            # An offer may carry N service items; the Offer's service_booking_mode coordinates how the
+            # scheduled ones are grouped into appointments (STORY-2.1).
             require_string(item, "service_id", "offer item service_id")
             # Service items use the fixed price_id path only (no selectable_prices / packages).
             if item.get("selectable_prices"):
@@ -1313,10 +1313,19 @@ def validate_customer(document: dict[str, Any]) -> None:
 
 
 def validate_service(document: dict[str, Any]) -> None:
-    require_fields(document, ["schema_version", "document_type", "tenant_id", "service_id", "name", "duration_minutes", "price"])
+    fulfillment_mode = document.get("fulfillment_mode")
+    if fulfillment_mode is not None and fulfillment_mode not in {"scheduled", "no_booking"}:
+        raise DocumentValidationError("Service fulfillment_mode must be scheduled or no_booking.")
+    no_booking = fulfillment_mode == "no_booking"
+    required = ["schema_version", "document_type", "tenant_id", "service_id", "name", "price"]
+    if not no_booking:
+        # Scheduled services (the default) need a duration to size the calendar slot; a no_booking
+        # service has no slot, so duration_minutes is optional/absent.
+        required.append("duration_minutes")
+    require_fields(document, required)
     if document.get("document_type") != "service":
         raise DocumentValidationError("Service document_type must be 'service'.")
-    if int(document.get("duration_minutes") or 0) <= 0:
+    if not no_booking and int(document.get("duration_minutes") or 0) <= 0:
         raise DocumentValidationError("Service duration_minutes must be positive.")
     price = document.get("price")
     if not isinstance(price, dict):
@@ -1385,11 +1394,20 @@ def validate_availability_exception(document: dict[str, Any]) -> None:
 
 
 def validate_appointment(document: dict[str, Any]) -> None:
-    require_fields(document, ["schema_version", "document_type", "tenant_id", "appointment_id", "service_id", "status", "customer"])
+    require_fields(document, ["schema_version", "document_type", "tenant_id", "appointment_id", "services", "status", "customer"])
     if document.get("document_type") != "appointment":
         raise DocumentValidationError("Appointment document_type must be 'appointment'.")
+    # services[] is the single canonical shape; a single service is a one-element array. There is no
+    # scalar service_id (greenfield — no back-compat, no mirror).
+    services = document.get("services")
+    if not isinstance(services, list) or not services:
+        raise DocumentValidationError("Appointment services must be a non-empty array.")
+    for line in services:
+        if not isinstance(line, dict):
+            raise DocumentValidationError("Each appointment service line must be an object.")
+        require_fields(line, ["service_id", "price_id", "duration_minutes"])
     # A paid-but-unscheduled appointment (pay_then_book) has no time yet; require the time fields
-    # only once it is scheduled (STORY-3.2).
+    # only once it is scheduled (STORY-3.1).
     if not document.get("awaiting_schedule"):
         require_fields(document, ["starts_at", "ends_at", "timezone"])
     if document.get("source") is not None and document.get("source") not in {"booking_page", "offer", "invoice"}:

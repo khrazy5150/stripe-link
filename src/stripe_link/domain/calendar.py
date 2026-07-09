@@ -5,11 +5,13 @@ normalizes a free/busy response into {start, end} ISO windows the slot engine ca
 """
 from typing import Any
 
+from stripe_link.domain.booking import appointment_service_name
+
 
 def google_event_body(appointment: dict[str, Any]) -> dict[str, Any]:
     customer = appointment.get("customer") or {}
     who = customer.get("name") or customer.get("email") or "Customer"
-    service = appointment.get("service_name") or "Appointment"
+    service = appointment_service_name(appointment) or "Appointment"
     lines = [f"Service: {service}", f"Customer: {who}"]
     if customer.get("email"):
         lines.append(f"Email: {customer['email']}")

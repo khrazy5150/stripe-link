@@ -4,14 +4,30 @@
   "title": "Appointment",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_version", "document_type", "tenant_id", "appointment_id", "service_id", "status", "customer"],
+  "required": ["schema_version", "document_type", "tenant_id", "appointment_id", "services", "status", "customer"],
   "properties": {
     "schema_version": { "type": "string" },
     "document_type": { "const": "appointment" },
     "tenant_id": { "type": "string" },
     "appointment_id": { "type": "string" },
-    "service_id": { "type": "string" },
-    "service_name": { "type": "string" },
+    "services": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["service_id", "price_id", "duration_minutes"],
+        "properties": {
+          "service_id": { "type": "string" },
+          "service_name": { "type": "string" },
+          "price_id": { "type": "string" },
+          "duration_minutes": { "type": "integer", "minimum": 1 },
+          "fulfiller_id": { "type": "string" },
+          "rule_snapshot": { "type": "object" },
+          "price": { "type": "object" }
+        }
+      }
+    },
+    "duration_minutes": { "type": "integer", "minimum": 0 },
     "starts_at": { "type": ["string", "null"] },
     "ends_at": { "type": ["string", "null"] },
     "timezone": { "type": ["string", "null"] },
@@ -35,14 +51,6 @@
         "email": { "type": "string" },
         "phone": { "type": "string" },
         "sms_opted_out": { "type": "boolean" }
-      }
-    },
-    "price": {
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "currency": { "type": "string" },
-        "unit_amount": { "type": "integer", "minimum": 0 }
       }
     },
     "service_location": { "type": "object" },

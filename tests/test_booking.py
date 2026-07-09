@@ -157,8 +157,9 @@ class CheckoutTests(unittest.TestCase):
     def test_build_booking_checkout_payload(self):
         from handlers.booking import build_booking_checkout_payload
 
-        appt = {"appointment_id": "appt_1", "service_id": "svc_1", "service_name": "Massage",
-                "price": {"currency": "usd", "unit_amount": 12000}, "customer": {"email": "c@e.com"}}
+        appt = {"appointment_id": "appt_1", "customer": {"email": "c@e.com"},
+                "services": [{"service_id": "svc_1", "service_name": "Massage", "price_id": "svcprice_svc_1",
+                              "duration_minutes": 60, "price": {"currency": "usd", "unit_amount": 12000}}]}
         payload = build_booking_checkout_payload(appt, "t1", success_url="s", cancel_url="c", platform_fee=500, tenant_plan="basic")
         self.assertEqual(payload["metadata[appointment_id]"], "appt_1")
         self.assertEqual(payload["line_items[0][price_data][unit_amount]"], "12000")
@@ -174,10 +175,12 @@ class WebhookBookingTests(unittest.TestCase):
         appointments = FakeDocumentRepository("appointment_id")
         appointments.put({
             "schema_version": "2026-05-29", "document_type": "appointment", "tenant_id": "t1",
-            "appointment_id": "appt_1", "service_id": "svc_1", "service_name": "Massage",
+            "appointment_id": "appt_1",
+            "services": [{"service_id": "svc_1", "service_name": "Massage", "price_id": "svcprice_svc_1",
+                          "duration_minutes": 60, "price": {"currency": "usd", "unit_amount": 12000}}],
             "starts_at": "2026-07-08T15:00:00Z", "ends_at": "2026-07-08T16:00:00Z", "timezone": "UTC",
             "status": "reserved", "payment_status": "unpaid", "customer": {"email": "c@e.com"},
-            "price": {"currency": "usd", "unit_amount": 12000}, "hold_expires_at": 999,
+            "hold_expires_at": 999,
         })
         ledger = FakeLedgerRepository()
         notifications = FakeDocumentRepository("notification_id")

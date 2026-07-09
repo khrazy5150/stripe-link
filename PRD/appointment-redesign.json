@@ -1,0 +1,542 @@
+{
+  "document_type": "PRD",
+  "title": "Appointment as a Multi-Service Primitive",
+  "target_assistant": "Claude",
+  "optimization_goal": "Engineering implementation",
+  "status": "approved",
+  "autonomous_execution_protocol": {
+    "directive": "CRITICAL: YOU ARE OPERATING AS AN AUTONOMOUS SENIOR SOFTWARE ENGINEER. READ AND FOLLOW THESE RULES ABSOLUTELY.",
+    "interactivity_rules": [
+      "DO NOT halt execution to ask for permission, clarification, or human validation on minor implementation details.",
+      "DO NOT ask the user to run bash commands, install dependencies, provision resources, or update configuration. Run them yourself using your available tools.",
+      "If you need to check a file, inspect a schema, or run a test, use your tools immediately without reporting a staging message first.",
+      "Stop and ask ONLY when a decision materially affects architecture, public APIs, data models, security, or user-visible behavior in a way this PRD does not already settle."
+    ],
+    "error_handling_loop": [
+      "If a command, script, or unit test fails: read the full traceback/stdout.",
+      "Do not output 'Please fix this' or 'Run X to resolve.'",
+      "Formulate a fix directly, modify the file, re-run your verification command, and iterate autonomously until it passes.",
+      "Only return control if an irreconcilable structural failure occurs that breaks core data-safety boundaries."
+    ],
+    "definition_of_done": [
+      "Conclude a phase only when every story in that phase is written, syntactically clean, locally verified against its success_tests (pytest), and integrated.",
+      "Keep domain logic pure and out of handlers; schemas remain the source of truth for document bodies.",
+      "Provide a single, comprehensive final report at the end of the run detailing file changes, schema mutations, and test results."
+    ]
+  },
+  "source_material": [
+    {
+      "type": "attached_plan",
+      "file_id": "plans/BOOKING_AS_PRIMITIVE.md",
+      "title": "Booking as a First-Class Primitive"
+    }
+  ],
+  "product_summary": {
+    "problem_statement": "The appointment entity is 1:1 with a single service (appointment.service_id is singular). This makes two real situations impossible: (a) one visit covering multiple services (tax prep + notary in the same slot), and (b) a service that requires no booking at all (a taxable fluid top-off bundled with an oil change). Services-in-offers shipped the same day this flaw was found, so there is no legacy data or frozen client to preserve.",
+    "product_goal": "Make the appointment a multi-service primitive. appointment.services[] (minItems 1) is the single canonical shape. A Service declares fulfillment_mode (scheduled | no_booking). The Offer coordinates delivery via service_booking_mode (single_visit | separate_visits). One purchase produces 1..N appointments plus 0..N no_booking invoice lines, driven by Stripe webhooks as the source of truth for payment."
+  },
+  "non_goals": [
+    "Multi-fulfiller single visit (multi-resource scheduling): different delegates performing different services within the same visit. v1 restricts a combined appointment to one fulfiller (or unassigned).",
+    "Per-item booking_group on offers (mixing combine and separate within one offer). v1 uses the offer-wide service_booking_mode only.",
+    "Optional combined-duration override/buffer for shared setup. v1 combined duration is the strict sum of line durations.",
+    "Bill-on-completion / installment invoicing. v1 is one invoice per purchase.",
+    "Per-service tax categories and reporting. Tracked separately with the commerce tax/fee work.",
+    "Per-line status/completion lifecycle. v1 appointment status is visit-level (single fulfiller).",
+    "Renaming the appointment entity to Booking. 'booking' remains the verb/flow (booking.py, booking_page, booking_flow).",
+    "Introducing primary_index. Not a v1 field; services[0] is the representative line."
+  ],
+  "core_principles": [
+    "services[] is the single source of truth. appointment.services[] has minItems 1. No scalar service_id/service_name, no mirror, no read adapter. A single service is a one-element array.",
+    "Greenfield: no back-compat. Any stray test appointments are wiped or backfilled once, then forgotten.",
+    "The Offer coordinates the 'how'; the Service declares 'whether it books'; a future per-item field is a finer grain of the Offer's grouping, never a competing knob.",
+    "no_booking is a Service, not a Product, for tax/fiscal reasons.",
+    "Stripe webhooks are the source of truth for payment-triggered state. Event handlers are idempotent and order-independent.",
+    "Cite existing schemas and the state machine for enumerations; the PRD pins only new or changed behavior and genuinely new state.",
+    "Omit derivable defaults: primary_index absent implies 0; rule_snapshot present only when a delegate is assigned."
+  ],
+  "data_model": {
+    "appointment": {
+      "persistent_identifier": "appointment_id",
+      "canonical_fields": [
+        "appointment_id",
+        "tenant_id",
+        "services[]",
+        "starts_at",
+        "ends_at",
+        "timezone",
+        "fulfiller_id",
+        "duration_minutes",
+        "status",
+        "payment_status",
+        "awaiting_schedule",
+        "customer",
+        "order_id",
+        "offer_id",
+        "invoice_id",
+        "page_id",
+        "source"
+      ],
+      "service_line_schema": {
+        "required_fields": ["service_id", "price_id", "duration_minutes"],
+        "optional_fields": ["fulfiller_id", "rule_snapshot"],
+        "constraints": [
+          "services[] has minItems 1.",
+          "No scalar service_id/service_name on the appointment; readers use services[] (services[0] is the representative line).",
+          "duration_minutes is required on every services[] line (all lines are scheduled by construction); appointment.duration_minutes equals the sum of the line durations.",
+          "No no_booking service ever appears in services[]; no_booking services are invoice lines, never appointment lines.",
+          "primary_index is NOT a v1 field. If ever introduced it is an integer index into services[], absent implies 0, validated in-range only when present, and never a duplicate id."
+        ]
+      }
+    },
+    "service": {
+      "new_field": "fulfillment_mode",
+      "allowed_values": ["scheduled", "no_booking"],
+      "rules": [
+        "Default is scheduled.",
+        "duration_minutes is optional/absent when no_booking; required when scheduled.",
+        "scheduled services keep duration_minutes, fulfiller/calendar routing, and check-in/completion rules.",
+        "no_booking services are taxed as services and route to a fulfiller for payout only (no scheduling)."
+      ]
+    },
+    "offer": {
+      "new_field": "service_booking_mode",
+      "allowed_values": ["single_visit", "separate_visits"],
+      "rules": [
+        "Default is single_visit.",
+        "single_visit: all scheduled services in the offer collapse into one appointment. separate_visits: each scheduled service becomes its own appointment.",
+        "service_booking_mode is shorthand expanded into per-item booking groups by a single resolver, booking_groups_for(offer).",
+        "Relax the (added-today) one-service-item cap to allow N service items per offer.",
+        "no_booking services in the offer are fulfilled (invoice line + payout), never booked.",
+        "Per-item booking_group is reserved for a future phase; when added, an explicit item group wins, else falls back to the mode-derived default."
+      ]
+    },
+    "invoice": {
+      "source_linkage": [
+        "The source anchor is the purchase (checkout_session_id / order id) and is always present.",
+        "source.appointment_ids[] is the fan-out set of scheduled appointments (0..N); it may be empty for a no_booking-only purchase.",
+        "No scalar source.appointment_id; a single-appointment purchase is a one-element appointment_ids[]."
+      ],
+      "line_item_rules": [
+        "A no_booking purchase is represented as an invoice line only: no separate fulfillment record and no timeless appointment.",
+        "An assigned no_booking line carries fulfiller_id + rule_snapshot (frozen at webhook time); an unassigned line carries neither (tenant/business revenue).",
+        "Each no_booking line carries fulfillment_status (default 'fulfilled'; 'pending' for async). no_booking lines have no duration_minutes (no scheduling/payout/tax role)."
+      ]
+    }
+  },
+  "scope": {
+    "in_scope": [
+      "Appointment.schema services[] (minItems 1) replacing scalar service_id; per-line duration; appointment duration rollup.",
+      "Service.fulfillment_mode (scheduled | no_booking).",
+      "Offer.service_booking_mode and relaxing the one-service-item cap; booking_groups_for(offer) resolver.",
+      "Checkout metadata carrying all scheduled lines + no_booking lines + service_booking_mode.",
+      "Webhook fan-out to 1..N appointments; no_booking fulfillment as enriched invoice lines; invoice.paid fan-out.",
+      "Scheduling 1..N appointments; summed-duration availability; invoice_from_order for book_then_pay.",
+      "Cancel/reschedule/view for multi-line and multi-appointment purchases."
+    ],
+    "out_of_scope": [
+      "Multi-fulfiller single visit and multi-resource availability.",
+      "Per-item booking_group and mixed combine/separate offers.",
+      "Combined-duration override/buffer.",
+      "Bill-on-completion / installment invoicing.",
+      "Per-service tax categories.",
+      "Per-line completion lifecycle.",
+      "Appointment entity rename."
+    ]
+  },
+  "entry_points": [
+    {
+      "name": "reserve",
+      "mode": "sync",
+      "flow_type": "book_then_pay (direct or offer reserve)",
+      "shape": "services[]",
+      "fan_out": false,
+      "notes": [
+        "Creates a services[]-shaped appointment. Direct booking = one line.",
+        "book_then_pay leaves the appointment booked + unpaid; pay_then_book proceeds to checkout."
+      ]
+    },
+    {
+      "name": "webhook",
+      "mode": "event",
+      "flow_type": "pay_then_book (offer purchase)",
+      "shape": "services[]",
+      "fan_out": true,
+      "notes": [
+        "The only fan-out path. persist_service_purchase creates 1..N appointments per service_booking_mode; no_booking lines become invoice lines with no appointment.",
+        "Idempotent on session id + line/appointment index; order-independent (Stripe is at-least-once and may arrive out of order).",
+        "Fan-out stays inline in the webhook Lambda for v1; no internal event bus."
+      ]
+    },
+    {
+      "name": "admin_put",
+      "mode": "sync",
+      "flow_type": "manual admin create/edit",
+      "shape": "services[]",
+      "fan_out": false,
+      "notes": [
+        "PUT /services/appointments upserts a services[]-shaped appointment.",
+        "Does not fan out; a single document with 1..N lines."
+      ]
+    }
+  ],
+  "behavioral_rules": {
+    "scheduled_services": [
+      "Each scheduled service becomes a services[] line with its own price_id, duration_minutes, and optional fulfiller_id/rule_snapshot.",
+      "single_visit: one appointment covering all scheduled lines, one time window, one fulfiller (v1); duration = sum of line durations.",
+      "separate_visits: one appointment per scheduled line, scheduled independently.",
+      "Appointment status is visit-level in v1 (one status for the whole combined appointment)."
+    ],
+    "no_booking_services": [
+      "Never create an appointment; represented as an invoice line only.",
+      "Assigned (service default_fulfiller_id present): the line carries fulfiller_id + rule_snapshot frozen at webhook time.",
+      "Unassigned (no service default): the line carries neither; resolves to tenant/business revenue. This is a terminal state with no later assignment step.",
+      "Taxed as a service; fulfillment_status defaults to 'fulfilled' ('pending' for async fulfillment)."
+    ],
+    "availability": [
+      "A combined (single_visit) appointment requires one contiguous slot of the summed duration for the single fulfiller.",
+      "separate_visits appointments are scheduled independently, each against its own service's availability.",
+      "Scheduling re-validates availability and claims a slot lock (as today)."
+    ],
+    "payment_and_fanout": [
+      "pay_then_book: appointments are created paid + awaiting_schedule at webhook time.",
+      "book_then_pay: appointments are created booked + unpaid; one invoice per purchase (invoice_from_order) with one line per service; source.appointment_ids[] links the scheduled appointments.",
+      "invoice.paid sets payment_status across all source.appointment_ids[], and marks the invoice/order paid when the set is empty (no_booking-only purchase).",
+      "One purchase = one payment posture; pay_then_book vs book_then_pay is an offer-level timing decision."
+    ]
+  },
+  "initial_states_and_transitions": {
+    "applies_to": "appointment.status, appointment.payment_status, appointment.awaiting_schedule",
+    "source_of_truth_note": "Status values and legal transitions are defined by Appointment.schema.json and the transition_appointment state machine (appointments.py). This PRD does not re-enumerate them; it pins only the initial states and transitions this effort triggers.",
+    "rules": [
+      "Each fanned-out appointment starts awaiting_schedule, and is paid (pay_then_book) or booked + unpaid (book_then_pay).",
+      "The schedule action clears awaiting_schedule, sets the time window, and freezes comp (rule_snapshot) at schedule time, applied per appointment across the fan-out.",
+      "invoice.paid sets payment_status = paid across source.appointment_ids[].",
+      "no_booking fulfillment_status is a new state on the invoice line (default 'fulfilled', 'pending' for async). It is NOT part of the appointment status set.",
+      "Status granularity is visit-level in v1."
+    ]
+  },
+  "shared_error_conventions": {
+    "purpose": "Cross-cutting error keys defined once. Each per-story interface_block.key_errors lists only endpoint-material errors.",
+    "source_of_truth_note": "There is no central error-code registry today; codes exist as ad-hoc code=\"...\" literals in handlers (e.g. error_response(..., code=\"not_found\")). This section is the canonical list for cross-cutting keys; implementation should centralize these as constants and reuse existing spellings.",
+    "keys": [
+      { "key": "validation_error", "http_status": 400, "meaning": "Document failed schema or domain validation (DocumentValidationError)." },
+      { "key": "unauthorized", "http_status": 401, "meaning": "Missing or invalid authentication." },
+      { "key": "forbidden", "http_status": 403, "meaning": "Authenticated but not permitted for this tenant or resource." },
+      { "key": "not_found", "http_status": 404, "meaning": "Resource not found (reuse the existing spelling)." },
+      { "key": "idempotent_replay", "http_status": 200, "meaning": "Not an error: a replay with the same idempotency key returns the prior success. Documented here so no endpoint treats a replay as a 409." }
+    ]
+  },
+  "engineering_requirements": [
+    "All event handlers are idempotent (keyed on session/invoice id + line/appointment index) and order-independent.",
+    "All sync mutations are idempotent (slot lock, schedule).",
+    "Fan-out stays inline in the webhook Lambda; no internal event bus in v1.",
+    "No back-compat code paths and no scalar service_id anywhere.",
+    "Domain logic stays pure and out of handlers; schemas are the source of truth for document bodies.",
+    "Each story is locally verified against its success_tests with pytest before the phase is considered done.",
+    "Cross-cutting error keys are centralized as constants mirroring shared_error_conventions."
+  ],
+  "phases": [
+    {
+      "id": "phase_1",
+      "name": "Appointment model",
+      "goal": "appointment.services[] canonical + Service.fulfillment_mode; single fulfiller; existing flows adopt the new shape with no user-visible behavior change.",
+      "story_ids": ["STORY-1.1", "STORY-1.2", "STORY-1.3"]
+    },
+    {
+      "id": "phase_2",
+      "name": "Offer coordination",
+      "goal": "service_booking_mode; checkout metadata carries all lines; webhook fans out 1..N appointments; no_booking fulfilled without an appointment.",
+      "story_ids": ["STORY-2.1", "STORY-2.2", "STORY-2.3", "STORY-2.4", "STORY-2.5"]
+    },
+    {
+      "id": "phase_3",
+      "name": "Scheduling and invoicing UX",
+      "goal": "schedule 1..N appointments; summed-duration availability; invoice_from_order for book_then_pay; multi-line cancel/reschedule/view.",
+      "story_ids": ["STORY-3.1", "STORY-3.2", "STORY-3.3", "STORY-3.4"]
+    }
+  ],
+  "stories": [
+    {
+      "id": "STORY-1.1",
+      "phase": "phase_1",
+      "title": "Reshape Appointment to services[] (canonical, minItems 1)",
+      "description": "Replace singular appointment.service_id with services[] in Appointment.schema.json and validate_appointment. Each line requires service_id, price_id, duration_minutes; fulfiller_id and rule_snapshot are optional. appointment.duration_minutes equals the sum of the line durations. No scalar service_id/service_name and no mirror. Greenfield: no migration path; wipe or one-time backfill any test rows.",
+      "acceptance_criteria": [
+        "Appointment.schema.json defines services[] with minItems 1 and the per-line required fields; the scalar service_id is removed.",
+        "validate_appointment enforces services[] minItems 1 and per-line required fields.",
+        "appointment.duration_minutes equals the sum of services[].duration_minutes.",
+        "No code path reads a scalar appointment.service_id."
+      ],
+      "success_tests": [
+        "An appointment with two service lines validates and its duration_minutes equals the sum of the two line durations.",
+        "An appointment with an empty services[] is rejected with validation_error.",
+        "A line missing price_id or duration_minutes is rejected with validation_error."
+      ]
+    },
+    {
+      "id": "STORY-1.2",
+      "phase": "phase_1",
+      "title": "Add Service.fulfillment_mode",
+      "description": "Add fulfillment_mode (scheduled | no_booking, default scheduled) to Service.schema.json and validate_service. duration_minutes becomes optional/absent when no_booking and required when scheduled.",
+      "acceptance_criteria": [
+        "Service.schema.json defines fulfillment_mode as enum [scheduled, no_booking] with default scheduled.",
+        "duration_minutes is optional when fulfillment_mode = no_booking and required when scheduled.",
+        "validate_service enforces the above."
+      ],
+      "success_tests": [
+        "A no_booking service without duration_minutes validates.",
+        "A scheduled service without duration_minutes is rejected with validation_error.",
+        "fulfillment_mode defaults to scheduled when absent."
+      ]
+    },
+    {
+      "id": "STORY-1.3",
+      "phase": "phase_1",
+      "title": "Reserve and direct booking build services[]-shaped appointments",
+      "description": "Update reserve_route and domain/booking to build an appointment with services[] (one line for direct booking). The direct booking page (GET /book/{service}) continues to produce a one-line appointment with unchanged user-visible behavior.",
+      "interface_block": {
+        "endpoint": "/services/appointments/reserve",
+        "method": "POST",
+        "mode": "sync",
+        "idempotency": "Keyed on the slot lock; a re-submit for the same slot returns the existing reservation rather than a duplicate.",
+        "shape_delta": "Builds a services[]-shaped appointment; a direct/single service is a one-element services[].",
+        "key_errors": ["availability_conflict", "slot_locked", "validation_error"]
+      },
+      "acceptance_criteria": [
+        "reserve_route and domain/booking emit appointments whose services[] has one line for a direct booking.",
+        "book_then_pay reservations are booked + unpaid; pay_then_book reservations proceed to checkout.",
+        "GET /book/{service} still renders and reserves a single-service appointment with no behavior change."
+      ],
+      "success_tests": [
+        "Reserving a single service produces an appointment with a one-element services[] line carrying price_id and duration_minutes.",
+        "A book_then_pay reservation is persisted as booked + unpaid with no Stripe charge.",
+        "Re-submitting the same slot returns the existing reservation, not a second appointment."
+      ]
+    },
+    {
+      "id": "STORY-2.1",
+      "phase": "phase_2",
+      "title": "Add Offer.service_booking_mode and allow N service items",
+      "description": "Add service_booking_mode (single_visit | separate_visits, default single_visit) to Offer.schema.json and validate_offer_document. Relax the current one-service-item cap so an offer may carry N service items.",
+      "acceptance_criteria": [
+        "Offer.schema.json defines service_booking_mode enum [single_visit, separate_visits] default single_visit.",
+        "validate_offer_document accepts more than one service item.",
+        "Existing single-service offers validate unchanged."
+      ],
+      "success_tests": [
+        "An offer with two service items and service_booking_mode = single_visit validates.",
+        "An offer with service_booking_mode absent defaults to single_visit.",
+        "An offer with an invalid service_booking_mode is rejected with validation_error."
+      ]
+    },
+    {
+      "id": "STORY-2.2",
+      "phase": "phase_2",
+      "title": "booking_groups_for(offer) resolver",
+      "description": "Add a single resolver that expands service_booking_mode into per-item booking groups: single_visit assigns every scheduled item to one group; separate_visits assigns each scheduled item to its own group. no_booking items are excluded. This resolver is the sole place grouping is computed.",
+      "acceptance_criteria": [
+        "booking_groups_for(offer) returns groups of scheduled service items keyed by group.",
+        "single_visit yields one group with all scheduled items; separate_visits yields one group per scheduled item.",
+        "no_booking items are not included in any group."
+      ],
+      "success_tests": [
+        "single_visit over two scheduled services returns one group of two items.",
+        "separate_visits over two scheduled services returns two groups of one item each.",
+        "An offer mixing one scheduled and one no_booking service returns a single group containing only the scheduled item."
+      ]
+    },
+    {
+      "id": "STORY-2.3",
+      "phase": "phase_2",
+      "title": "Checkout metadata carries all lines and the booking mode",
+      "description": "Update checkout to emit line items and metadata for ALL scheduled service lines plus no_booking lines, and include the offer's service_booking_mode, so the webhook can fan out. Net-guaranteed pricing is honored per line.",
+      "interface_block": {
+        "endpoint": "/checkout",
+        "method": "POST",
+        "mode": "sync",
+        "idempotency": "Stripe Checkout Session creation is keyed by the offer/cart; a repeat with the same inputs reuses/returns an equivalent session.",
+        "shape_delta": "Metadata carries service_booking_mode and one entry per scheduled and no_booking service line, not just the first service.",
+        "key_errors": ["validation_error", "billing_inactive", "payment_failed"]
+      },
+      "acceptance_criteria": [
+        "The Checkout Session metadata includes service_booking_mode and every scheduled and no_booking service line.",
+        "Per-line net-guaranteed amounts are computed independently.",
+        "A service-only offer and a mixed product+service offer both produce correct sessions."
+      ],
+      "success_tests": [
+        "An offer with tax prep + notary + a no_booking top-off emits three service line entries plus service_booking_mode in metadata.",
+        "A net_guaranteed service line's charged amount grosses up so the tenant nets the sticker.",
+        "Checkout for a service-only offer succeeds."
+      ]
+    },
+    {
+      "id": "STORY-2.4",
+      "phase": "phase_2",
+      "title": "Webhook fans out 1..N appointments and no_booking invoice lines",
+      "description": "Generalize persist_service_purchase to create 1..N appointments per service_booking_mode (single_visit = one appointment with all scheduled lines, duration = sum; separate_visits = one per scheduled line), each awaiting_schedule. no_booking lines become invoice lines carrying fulfiller_id + rule_snapshot when a service default fulfiller exists (else neither) plus fulfillment_status; they create no appointment. Idempotent on session id + index and order-independent.",
+      "interface_block": {
+        "endpoint": "/webhook/stripe",
+        "method": "POST",
+        "mode": "event",
+        "idempotency": "Keyed on checkout session id + line/appointment index; a re-delivered event is a no-op returning success.",
+        "shape_delta": "checkout.session.completed creates 1..N services[]-shaped appointments and 0..N enriched no_booking invoice lines; source.appointment_ids[] records the created appointments.",
+        "key_errors": ["idempotent_replay"]
+      },
+      "acceptance_criteria": [
+        "single_visit purchase creates one appointment with all scheduled lines and duration = sum; separate_visits creates one appointment per scheduled line.",
+        "no_booking lines are written as invoice lines with fulfillment_status and, when assigned, fulfiller_id + rule_snapshot; they create no appointment.",
+        "source.appointment_ids[] lists exactly the created appointments (empty for a no_booking-only purchase).",
+        "Re-delivering the same event creates no duplicates."
+      ],
+      "success_tests": [
+        "A single_visit purchase of two scheduled services yields one appointment with two lines, awaiting_schedule, paid.",
+        "A separate_visits purchase of two scheduled services yields two awaiting_schedule appointments.",
+        "A no_booking-only purchase creates zero appointments and an invoice with the no_booking line(s); source.appointment_ids[] is empty.",
+        "Delivering checkout.session.completed twice produces the same single set of appointments."
+      ]
+    },
+    {
+      "id": "STORY-2.5",
+      "phase": "phase_2",
+      "title": "invoice.paid fans payment status out to appointment_ids[]",
+      "description": "Update persist_invoice_event so invoice.paid sets payment_status = paid across all source.appointment_ids[], and marks the invoice/order paid when the set is empty (no_booking-only). Order-independent with appointment creation.",
+      "interface_block": {
+        "endpoint": "/webhook/stripe",
+        "method": "POST",
+        "mode": "event",
+        "idempotency": "Keyed on invoice id; re-delivery is a no-op returning success.",
+        "shape_delta": "invoice.paid propagates paid status to every appointment in source.appointment_ids[] instead of a single source.appointment_id.",
+        "key_errors": ["idempotent_replay"]
+      },
+      "acceptance_criteria": [
+        "invoice.paid sets payment_status = paid on every appointment in source.appointment_ids[].",
+        "An invoice with empty appointment_ids[] is marked paid without touching any appointment.",
+        "invoice.paid arriving before the appointments exist is tolerated (retry/no-op), and vice versa."
+      ],
+      "success_tests": [
+        "Paying an invoice linked to two appointments marks both paid.",
+        "Paying a no_booking-only invoice marks the invoice paid and touches no appointment.",
+        "invoice.paid delivered twice leaves a single paid state."
+      ]
+    },
+    {
+      "id": "STORY-3.1",
+      "phase": "phase_3",
+      "title": "Schedule 1..N appointments with summed-duration availability",
+      "description": "Generalize manage_schedule_route to schedule 1..N appointments for a purchase. A combined (single_visit) appointment needs one contiguous slot of the summed duration for the single fulfiller; separate_visits appointments are scheduled independently. Re-validate availability, claim the slot lock, set the time window, clear awaiting_schedule, and freeze comp at schedule time. The response is an array of appointments.",
+      "interface_block": {
+        "endpoint": "/services/appointments/manage/schedule",
+        "method": "POST",
+        "mode": "sync",
+        "idempotency": "Keyed on the slot lock; re-submitting the same schedule returns the scheduled appointment(s).",
+        "shape_delta": "Accepts and returns 1..N appointments; combined availability uses the summed duration; response is an array.",
+        "key_errors": ["availability_conflict", "slot_locked", "awaiting_schedule_invalid", "validation_error", "not_found"]
+      },
+      "acceptance_criteria": [
+        "A combined appointment is scheduled into one contiguous slot equal to the summed duration for the single fulfiller.",
+        "separate_visits appointments can each be scheduled independently.",
+        "Scheduling clears awaiting_schedule, sets the window, and freezes rule_snapshot at schedule time.",
+        "Scheduling an appointment not in awaiting_schedule returns awaiting_schedule_invalid."
+      ],
+      "success_tests": [
+        "Scheduling a two-line combined appointment claims a slot of the summed duration and clears awaiting_schedule.",
+        "A slot already taken returns availability_conflict and no state change.",
+        "Scheduling a second separate-visit appointment does not disturb the first."
+      ]
+    },
+    {
+      "id": "STORY-3.2",
+      "phase": "phase_3",
+      "title": "Combined (summed-duration) availability query",
+      "description": "Extend availability_route with a combined variant that computes free slots against the summed duration of a combined appointment for the single fulfiller. The single-service query is unchanged.",
+      "interface_block": {
+        "endpoint": "/services/{service_id}/availability",
+        "method": "GET",
+        "mode": "sync",
+        "idempotency": "Read-only.",
+        "shape_delta": "Supports a summed-duration/combined query; single-service availability is unchanged.",
+        "key_errors": ["validation_error", "not_found"]
+      },
+      "acceptance_criteria": [
+        "The combined query returns only slots that fit the summed duration.",
+        "The single-service query returns identical results to today.",
+        "Existing busy events are respected (no double-book)."
+      ],
+      "success_tests": [
+        "A 75-minute combined query excludes a 60-minute gap and includes a 90-minute gap.",
+        "A single-service availability query is byte-for-byte unchanged from current behavior."
+      ]
+    },
+    {
+      "id": "STORY-3.3",
+      "phase": "phase_3",
+      "title": "invoice_from_order (one invoice per purchase)",
+      "description": "Generalize invoice_from_appointment to invoice_from_order: one draft invoice per purchase with one line per service, linking source.appointment_ids[] (0..N). Application fee is the sum of per-line platform fees. Idempotent per order. The single-appointment case is the trivial one-line invoice.",
+      "interface_block": {
+        "endpoint": "/invoices/from-order",
+        "method": "POST",
+        "mode": "sync",
+        "idempotency": "Keyed on the order/purchase id; a repeat returns the existing draft invoice.",
+        "shape_delta": "Builds one invoice with N lines and source.appointment_ids[] instead of one invoice per appointment_id.",
+        "key_errors": ["validation_error", "not_found"]
+      },
+      "acceptance_criteria": [
+        "One invoice is created per purchase with one line per service.",
+        "source.appointment_ids[] lists the scheduled appointments (0..N; empty for no_booking-only).",
+        "application_fee_amount equals the sum of the per-line platform fees.",
+        "Re-invoking for the same order returns the existing invoice."
+      ],
+      "success_tests": [
+        "A book_then_pay purchase of two scheduled services yields one invoice with two lines linking both appointment_ids.",
+        "A no_booking-only purchase yields one invoice with the no_booking line(s) and empty appointment_ids[].",
+        "Calling from-order twice for one order does not create a second invoice."
+      ]
+    },
+    {
+      "id": "STORY-3.4",
+      "phase": "phase_3",
+      "title": "Cancel, reschedule, and view for multi-line/multi-appointment purchases",
+      "description": "Update manage_cancel_route, manage_reschedule_route, and manage_view_route to operate on multi-line appointments and multi-appointment purchases. Reschedule re-validates the summed duration for a combined appointment. View returns services[] and any sibling appointments for the purchase.",
+      "interface_block": {
+        "endpoint": "/services/appointments/manage",
+        "method": "POST",
+        "mode": "sync",
+        "idempotency": "Cancel/reschedule keyed on the appointment id + slot lock; repeats return the current state.",
+        "shape_delta": "Cancel/reschedule act on a whole visit (services[]); reschedule re-validates summed duration; view returns services[] and sibling appointments.",
+        "key_errors": ["availability_conflict", "slot_locked", "not_found", "validation_error"]
+      },
+      "acceptance_criteria": [
+        "Cancelling a combined appointment releases its slot and cancels the whole visit.",
+        "Rescheduling a combined appointment re-validates the summed-duration slot.",
+        "The manage view returns services[] and lists sibling appointments belonging to the same purchase."
+      ],
+      "success_tests": [
+        "Rescheduling a two-line appointment into a too-small slot returns availability_conflict.",
+        "Cancelling one separate-visit appointment leaves its sibling intact.",
+        "The manage view of a combined appointment shows both service lines."
+      ]
+    }
+  ],
+  "interface_conventions": {
+    "method_semantics": [
+      "GET reads; POST creates or commits; PUT upserts a full document.",
+      "sync = API Gateway request/response (the caller blocks); event = Stripe webhook (source of truth for payment-triggered state).",
+      "Idempotent replays return the prior success, not an error."
+    ],
+    "error_handling": [
+      "Cross-cutting keys are defined once in shared_error_conventions; per-story key_errors list only endpoint-material errors.",
+      "Availability/slot contention is a 409 (availability_conflict / slot_locked) and applies to scheduling endpoints only.",
+      "Idempotency is not a 409: a same-key replay returns success.",
+      "Document/schema failures return validation_error (400)."
+    ]
+  },
+  "acceptance_summary": [
+    "A single-service offer produces one one-line appointment and behaves exactly as before.",
+    "A single_visit offer with tax prep + notary produces ONE appointment with two lines and one slot of the summed duration.",
+    "A separate_visits offer produces N appointments scheduled independently.",
+    "A no_booking service (e.g. fluid top-off) produces an invoice line with no appointment; assigned lines carry fulfiller_id + rule_snapshot, unassigned lines carry neither.",
+    "One purchase yields one invoice (invoice_from_order) with one line per service; invoice.paid marks all source.appointment_ids[] paid.",
+    "No scalar service_id or source.appointment_id remains; all handlers use services[] and appointment_ids[].",
+    "All event handlers are idempotent and order-independent; fan-out is inline in the webhook."
+  ]
+}

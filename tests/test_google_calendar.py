@@ -5,7 +5,8 @@ from stripe_link.domain.calendar import busy_intervals, google_event_body
 from stripe_link.google_calendar import GoogleCalendarClient, fetch_access_token
 
 APPOINTMENT = {
-    "appointment_id": "appt_1", "tenant_id": "t1", "service_name": "Massage",
+    "appointment_id": "appt_1", "tenant_id": "t1",
+    "services": [{"service_id": "svc_1", "service_name": "Massage", "price_id": "svcprice_svc_1", "duration_minutes": 60}],
     "starts_at": "2026-07-08T15:00:00Z", "ends_at": "2026-07-08T16:00:00Z",
     "customer": {"name": "Casey", "email": "c@e.com", "phone": "+15551234567"},
 }

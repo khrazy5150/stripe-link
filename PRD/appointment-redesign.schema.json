@@ -1,0 +1,264 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "appointment-as-multi-service-primitive.prd.schema.json",
+  "title": "Appointment as a Multi-Service Primitive (PRD schema)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "document_type",
+    "title",
+    "target_assistant",
+    "optimization_goal",
+    "status",
+    "autonomous_execution_protocol",
+    "source_material",
+    "product_summary",
+    "non_goals",
+    "core_principles",
+    "data_model",
+    "scope",
+    "entry_points",
+    "behavioral_rules",
+    "initial_states_and_transitions",
+    "shared_error_conventions",
+    "engineering_requirements",
+    "phases",
+    "stories",
+    "interface_conventions",
+    "acceptance_summary"
+  ],
+  "properties": {
+    "document_type": { "type": "string", "const": "PRD" },
+    "title": { "type": "string", "const": "Appointment as a Multi-Service Primitive" },
+    "target_assistant": { "type": "string", "const": "Claude" },
+    "optimization_goal": { "type": "string", "const": "Engineering implementation" },
+    "status": { "type": "string", "enum": ["draft", "review", "approved"] },
+    "autonomous_execution_protocol": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["directive", "interactivity_rules", "error_handling_loop", "definition_of_done"],
+      "properties": {
+        "directive": { "type": "string" },
+        "interactivity_rules": { "type": "array", "items": { "type": "string" } },
+        "error_handling_loop": { "type": "array", "items": { "type": "string" } },
+        "definition_of_done": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "source_material": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["type", "file_id", "title"],
+        "properties": {
+          "type": { "type": "string", "const": "attached_plan" },
+          "file_id": { "type": "string" },
+          "title": { "type": "string" }
+        }
+      }
+    },
+    "product_summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["problem_statement", "product_goal"],
+      "properties": {
+        "problem_statement": { "type": "string" },
+        "product_goal": { "type": "string" }
+      }
+    },
+    "non_goals": { "type": "array", "items": { "type": "string" } },
+    "core_principles": { "type": "array", "items": { "type": "string" } },
+    "data_model": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["appointment", "service", "offer", "invoice"],
+      "properties": {
+        "appointment": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["persistent_identifier", "canonical_fields", "service_line_schema"],
+          "properties": {
+            "persistent_identifier": { "type": "string", "const": "appointment_id" },
+            "canonical_fields": { "type": "array", "items": { "type": "string" } },
+            "service_line_schema": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["required_fields", "optional_fields", "constraints"],
+              "properties": {
+                "required_fields": { "type": "array", "items": { "type": "string" } },
+                "optional_fields": { "type": "array", "items": { "type": "string" } },
+                "constraints": { "type": "array", "items": { "type": "string" } }
+              }
+            }
+          }
+        },
+        "service": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["new_field", "allowed_values", "rules"],
+          "properties": {
+            "new_field": { "type": "string", "const": "fulfillment_mode" },
+            "allowed_values": {
+              "type": "array",
+              "items": { "type": "string", "enum": ["scheduled", "no_booking"] },
+              "minItems": 2,
+              "maxItems": 2
+            },
+            "rules": { "type": "array", "items": { "type": "string" } }
+          }
+        },
+        "offer": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["new_field", "allowed_values", "rules"],
+          "properties": {
+            "new_field": { "type": "string", "const": "service_booking_mode" },
+            "allowed_values": {
+              "type": "array",
+              "items": { "type": "string", "enum": ["single_visit", "separate_visits"] },
+              "minItems": 2,
+              "maxItems": 2
+            },
+            "rules": { "type": "array", "items": { "type": "string" } }
+          }
+        },
+        "invoice": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["source_linkage", "line_item_rules"],
+          "properties": {
+            "source_linkage": { "type": "array", "items": { "type": "string" } },
+            "line_item_rules": { "type": "array", "items": { "type": "string" } }
+          }
+        }
+      }
+    },
+    "scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["in_scope", "out_of_scope"],
+      "properties": {
+        "in_scope": { "type": "array", "items": { "type": "string" } },
+        "out_of_scope": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "entry_points": {
+      "type": "array",
+      "minItems": 3,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "mode", "flow_type", "shape", "fan_out", "notes"],
+        "properties": {
+          "name": { "type": "string" },
+          "mode": { "type": "string", "enum": ["sync", "event"] },
+          "flow_type": { "type": "string" },
+          "shape": { "type": "string", "const": "services[]" },
+          "fan_out": { "type": "boolean" },
+          "notes": { "type": "array", "items": { "type": "string" } }
+        }
+      }
+    },
+    "behavioral_rules": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["scheduled_services", "no_booking_services", "availability", "payment_and_fanout"],
+      "properties": {
+        "scheduled_services": { "type": "array", "items": { "type": "string" } },
+        "no_booking_services": { "type": "array", "items": { "type": "string" } },
+        "availability": { "type": "array", "items": { "type": "string" } },
+        "payment_and_fanout": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "initial_states_and_transitions": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["applies_to", "source_of_truth_note", "rules"],
+      "properties": {
+        "applies_to": { "type": "string" },
+        "source_of_truth_note": { "type": "string" },
+        "rules": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "shared_error_conventions": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["purpose", "source_of_truth_note", "keys"],
+      "properties": {
+        "purpose": { "type": "string" },
+        "source_of_truth_note": { "type": "string" },
+        "keys": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["key", "http_status", "meaning"],
+            "properties": {
+              "key": { "type": "string" },
+              "http_status": { "type": "integer" },
+              "meaning": { "type": "string" }
+            }
+          }
+        }
+      }
+    },
+    "engineering_requirements": { "type": "array", "items": { "type": "string" } },
+    "phases": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "name", "goal", "story_ids"],
+        "properties": {
+          "id": { "type": "string" },
+          "name": { "type": "string" },
+          "goal": { "type": "string" },
+          "story_ids": { "type": "array", "items": { "type": "string" } }
+        }
+      }
+    },
+    "stories": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "phase", "title", "description", "acceptance_criteria", "success_tests"],
+        "properties": {
+          "id": { "type": "string" },
+          "phase": { "type": "string" },
+          "title": { "type": "string" },
+          "description": { "type": "string" },
+          "interface_block": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["endpoint", "method", "mode", "idempotency", "shape_delta", "key_errors"],
+            "properties": {
+              "endpoint": { "type": "string" },
+              "method": { "type": "string" },
+              "mode": { "type": "string", "enum": ["sync", "event"] },
+              "idempotency": { "type": "string" },
+              "shape_delta": { "type": "string" },
+              "key_errors": { "type": "array", "items": { "type": "string" } }
+            }
+          },
+          "acceptance_criteria": { "type": "array", "items": { "type": "string" } },
+          "success_tests": { "type": "array", "items": { "type": "string" } }
+        }
+      }
+    },
+    "interface_conventions": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["method_semantics", "error_handling"],
+      "properties": {
+        "method_semantics": { "type": "array", "items": { "type": "string" } },
+        "error_handling": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "acceptance_summary": { "type": "array", "items": { "type": "string" } }
+  }
+}

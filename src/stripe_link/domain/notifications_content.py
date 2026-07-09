@@ -7,6 +7,8 @@ details. Kept pure so it is trivially testable; the handler resolves the recipie
 from html import escape
 from typing import Any
 
+from stripe_link.domain.booking import appointment_service_name
+
 
 def _when(appointment: dict[str, Any]) -> str:
     starts = str(appointment.get("starts_at") or "").strip()
@@ -28,7 +30,7 @@ def delegate_booking_email(
     `calendar_written` (True/False/None) drives the calendar-added-or-not line."""
     business = str(business_name or "").strip()
     fulfiller_name = str((fulfiller or {}).get("display_name") or (fulfiller or {}).get("first_name") or "there").strip() or "there"
-    service_name = str((service or {}).get("name") or appointment.get("service_name") or "a service").strip()
+    service_name = str((service or {}).get("name") or appointment_service_name(appointment) or "a service").strip()
     customer = appointment.get("customer") or {}
     customer_name = str(customer.get("name") or customer.get("email") or "A customer").strip()
     when = _when(appointment)

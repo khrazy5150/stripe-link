@@ -7,6 +7,8 @@ from decimal import Decimal
 from html import escape
 from typing import Any
 
+from stripe_link.domain.booking import appointment_price, appointment_service_id, appointment_service_name
+
 CURRENCY_SYMBOLS = {"usd": "$", "eur": "€", "gbp": "£"}
 DEFAULT_DAYS_UNTIL_DUE = 7
 
@@ -14,17 +16,17 @@ DEFAULT_DAYS_UNTIL_DUE = 7
 def invoice_from_appointment(appointment: dict[str, Any], *, invoice_id: str, now: int) -> dict[str, Any]:
     """Build a draft Invoice for a book-then-pay appointment, linked back via source.appointment_id
     (STORY-6.4). Amount is the appointment's sticker price; the send flow adds the platform fee."""
-    price = appointment.get("price") or {}
+    price = appointment_price(appointment)
     currency = str(price.get("currency") or "usd").lower()
     unit_amount = int(price.get("tenant_keyed_amount") if price.get("tenant_keyed_amount") is not None else price.get("unit_amount") or 0)
-    service_name = str(appointment.get("service_name") or "Service")
+    service_name = appointment_service_name(appointment) or "Service"
     line = {
         "type": "service",
         "description": service_name,
         "quantity": 1,
         "unit_amount": unit_amount,
         "currency": currency,
-        "service_id": str(appointment.get("service_id") or ""),
+        "service_id": appointment_service_id(appointment),
         "appointment_id": str(appointment.get("appointment_id") or ""),
     }
     return {
@@ -37,7 +39,7 @@ def invoice_from_appointment(appointment: dict[str, Any], *, invoice_id: str, no
         "customer": dict(appointment.get("customer") or {}),
         "line_items": [line],
         "amounts": {"currency": currency, "subtotal": unit_amount, "total": unit_amount, "amount_paid": 0, "amount_due": unit_amount},
-        "source": {"appointment_id": str(appointment.get("appointment_id") or ""), "service_id": str(appointment.get("service_id") or ""), "created_from": "appointment"},
+        "source": {"appointment_ids": [str(appointment.get("appointment_id") or "")], "service_id": appointment_service_id(appointment), "created_from": "appointment"},
         "created_at": now,
         "updated_at": now,
     }

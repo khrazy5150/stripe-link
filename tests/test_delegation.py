@@ -131,7 +131,8 @@ GOOGLE_SECRET = {"client_id": "cid", "client_secret": "sec"}
 class ApplyDelegationTests(unittest.TestCase):
     def _env(self, *, fulfiller_cal="cal_jane", connections=None):
         appointments = FakeDocumentRepository("appointment_id")
-        appt = {"tenant_id": "t1", "appointment_id": "appt_1", "service_id": "s1", "service_name": "Consult",
+        appt = {"tenant_id": "t1", "appointment_id": "appt_1",
+                "services": [{"service_id": "s1", "service_name": "Consult", "price_id": "svcprice_s1", "duration_minutes": 30}],
                 "starts_at": "2026-07-10T17:00:00Z", "ends_at": "2026-07-10T17:30:00Z", "timezone": "UTC",
                 "status": "booked", "assigned_fulfiller_id": "f_jane", "customer": {"name": "Casey", "email": "c@e.com"}}
         appointments.put(appt)

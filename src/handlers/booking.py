@@ -10,7 +10,16 @@ import uuid
 
 from stripe_link.common import error_response, json_response, parse_json_body, path_params, query_params
 from stripe_link.domain.appointments import AppointmentTransitionError, transition_appointment
-from stripe_link.domain.booking import compensation_snapshot, requires_payment, reserved_appointment, slot_end_iso
+from stripe_link.domain.booking import (
+    appointment_price,
+    appointment_service_id,
+    appointment_service_name,
+    compensation_snapshot,
+    requires_payment,
+    reserved_appointment,
+    service_lines,
+    slot_end_iso,
+)
 from stripe_link.domain.documents import DocumentValidationError, validate_appointment
 from stripe_link.domain.fees import cached_billing_config, calculate_price, normalize_tier_id
 from stripe_link.domain.calendar_routing import candidate_fulfiller_ids, fulfiller_busy_connection, service_busy_connection
@@ -237,7 +246,7 @@ def checkout_route(event, appointments_repo, *, stripe_repo, tenant_repo, notifi
         return error_response(f"{mode} Stripe keys are not configured.", status_code=400, code="stripe_not_configured")
 
     tenant_plan = normalize_tier_id((tenant_repo.get(tenant_id, tenant_id) or {}).get("tier_id"))
-    price = appointment.get("price") or {}
+    price = appointment_price(appointment)
     # Honor the resolved price's fee handling: net_guaranteed grosses up the charged amount so the
     # tenant nets the sticker; standard charges the sticker and deducts fees (STORY-5.5 / STORY-4.1).
     tenant_keyed = int(price.get("tenant_keyed_amount") if price.get("tenant_keyed_amount") is not None else price.get("unit_amount") or 0)
@@ -331,7 +340,7 @@ def manage_schedule_route(event, repos, slot_locks_repo, delegation=None):
         return error_response("slot_start is required.", code="missing_slot_start")
 
     tenant_id = str(appointment.get("tenant_id") or "")
-    service = services_repo.find_by_id(str(appointment.get("service_id") or ""))
+    service = services_repo.find_by_id(appointment_service_id(appointment))
     if not service:
         return error_response("Service not found.", status_code=404, code="not_found")
     now = int(time.time())
@@ -395,7 +404,7 @@ def manage_reschedule_route(event, repos, slot_locks_repo, delegation=None):
         return error_response("slot_start is required.", code="missing_slot_start")
 
     tenant_id = str(appointment.get("tenant_id") or "")
-    service = services_repo.find_by_id(str(appointment.get("service_id") or ""))
+    service = services_repo.find_by_id(appointment_service_id(appointment))
     if not service:
         return error_response("Service not found.", status_code=404, code="not_found")
     now = int(time.time())
@@ -438,8 +447,8 @@ def _release_lock(slot_locks_repo, appointment):
 
 
 def build_booking_checkout_payload(appointment, tenant_id, *, success_url, cancel_url, platform_fee, tenant_plan, charged_unit_amount=None):
-    price = appointment.get("price") or {}
-    name = appointment.get("service_name") or "Service booking"
+    price = appointment_price(appointment)
+    name = appointment_service_name(appointment) or "Service booking"
     unit_amount = int(charged_unit_amount if charged_unit_amount is not None else price.get("unit_amount") or 0)
     payload = {
         "mode": "payment",
@@ -451,7 +460,7 @@ def build_booking_checkout_payload(appointment, tenant_id, *, success_url, cance
         "line_items[0][quantity]": "1",
         "metadata[tenant_id]": tenant_id,
         "metadata[appointment_id]": appointment.get("appointment_id") or "",
-        "metadata[service_id]": appointment.get("service_id") or "",
+        "metadata[service_id]": appointment_service_id(appointment),
         "metadata[product_name]": name,
         "metadata[product_type]": SERVICE_FEE_PRODUCT_TYPE,
         "metadata[tenant_plan]": tenant_plan,
@@ -469,7 +478,7 @@ def _emit_booked_notification(notifications_repo, appointment, tenant_id, now):
         return
     customer = appointment.get("customer") or {}
     who = customer.get("name") or customer.get("email") or "A customer"
-    service = appointment.get("service_name") or appointment.get("service_id") or "a service"
+    service = appointment_service_name(appointment) or appointment_service_id(appointment) or "a service"
     try:
         notifications_repo.put({
             "schema_version": "2026-05-29",
@@ -493,12 +502,19 @@ def _emit_booked_notification(notifications_repo, appointment, tenant_id, now):
 
 
 def _public_appointment(appointment):
-    return {
+    public = {
         key: appointment.get(key)
-        for key in ("appointment_id", "service_id", "service_name", "starts_at", "ends_at",
-                    "timezone", "status", "payment_status", "price", "assigned_fulfiller_id",
-                    "awaiting_schedule", "booking_flow")
+        for key in ("appointment_id", "starts_at", "ends_at", "timezone", "status",
+                    "payment_status", "assigned_fulfiller_id", "awaiting_schedule",
+                    "booking_flow", "duration_minutes")
     }
+    public["services"] = service_lines(appointment)
+    # Convenience mirrors of the representative line for the booking-page UI (response-only, not
+    # persisted): the canonical shape is services[].
+    public["service_id"] = appointment_service_id(appointment)
+    public["service_name"] = appointment_service_name(appointment)
+    public["price"] = appointment_price(appointment)
+    return public
 
 
 def _iso_to_epoch(value):

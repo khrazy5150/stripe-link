@@ -128,36 +128,48 @@
           <section class="offer-form-section">
             <header class="offer-section-header">
               <div>
-                <h3>Service (optional)</h3>
-                <p>Attach a bookable service. One service per offer. Choose whether the customer pays first then books, or books first and pays via invoice.</p>
+                <h3>Services (optional)</h3>
+                <p>Attach one or more bookable services. Choose whether the customer pays first then books, or books first and pays via invoice.</p>
               </div>
             </header>
-            <div class="offer-three-column">
+            <div v-for="(row, index) in form.services" :key="index" class="offer-three-column">
               <label class="offer-field">
                 <span>Service</span>
-                <select v-model="form.service_id" @change="onServiceChange">
+                <select v-model="row.service_id" @change="onRowServiceChange(row)">
                   <option value="">None</option>
                   <option v-for="s in servicesStore.services" :key="s.service_id" :value="s.service_id">{{ s.name }}</option>
                 </select>
               </label>
-              <label v-if="form.service_id" class="offer-field">
+              <label v-if="row.service_id" class="offer-field">
                 <span>Price</span>
-                <select v-model="form.service_price_id">
-                  <option v-for="p in selectedServicePrices" :key="p.price_id" :value="p.price_id">
+                <select v-model="row.price_id">
+                  <option v-for="p in servicePricesFor(row.service_id)" :key="p.price_id" :value="p.price_id">
                     {{ formatMoney(p.unit_amount, p.currency) }}{{ p.context && p.context !== 'standard' ? ` (${p.context})` : '' }}
                   </option>
                 </select>
               </label>
-              <label v-if="form.service_id" class="offer-field">
+              <div v-if="form.services.length > 1" class="offer-field offer-field-actions">
+                <button type="button" class="secondary-action compact" @click="removeServiceRow(index)">Remove</button>
+              </div>
+            </div>
+            <div class="button-row">
+              <button type="button" class="secondary-action compact" @click="addServiceRow">+ Add service</button>
+            </div>
+            <div v-if="hasService" class="offer-three-column">
+              <label class="offer-field">
                 <span>Booking flow</span>
                 <select v-model="form.service_booking_flow">
                   <option value="pay_then_book">Pay first, then book</option>
                   <option value="book_then_pay">Book first, pay later</option>
                 </select>
               </label>
-            </div>
-            <div v-if="form.service_id" class="button-row">
-              <button type="button" class="secondary-action compact" @click="clearService">Remove service</button>
+              <label v-if="scheduledServiceCount > 1" class="offer-field">
+                <span>Scheduling</span>
+                <select v-model="form.service_booking_mode">
+                  <option value="single_visit">One combined visit</option>
+                  <option value="separate_visits">Separate visits</option>
+                </select>
+              </label>
             </div>
           </section>
 
@@ -542,17 +554,24 @@ import { useServicesStore } from "../stores/services";
 const productStore = useProductsStore();
 const couponStore = useCouponsStore();
 const servicesStore = useServicesStore();
-const selectedServiceObj = computed(() => servicesStore.services.find((s) => s.service_id === form.service_id) || null);
-const selectedServicePrices = computed(() => {
-  const s = selectedServiceObj.value;
+function serviceObjFor(serviceId) {
+  return servicesStore.services.find((s) => s.service_id === serviceId) || null;
+}
+function servicePricesFor(serviceId) {
+  const s = serviceObjFor(serviceId);
   if (!s) return [];
   if (Array.isArray(s.prices) && s.prices.length) return s.prices;
   // Legacy single-price service: synthesize the same price_id the backend adapter uses
   // (domain/service_pricing._legacy_price_to_price -> `svcprice_{service_id}`) so it resolves.
   if (s.price) return [{ price_id: `svcprice_${s.service_id}`, ...s.price }];
   return [];
-});
-const hasService = computed(() => Boolean(form.service_id && form.service_price_id));
+}
+const serviceRows = computed(() => (form.services || []).filter((r) => r.service_id && r.price_id));
+const hasService = computed(() => serviceRows.value.length > 0);
+// no_booking services never book; only scheduled ones need a single/separate-visit choice.
+const scheduledServiceCount = computed(() =>
+  serviceRows.value.filter((r) => (serviceObjFor(r.service_id)?.fulfillment_mode || "scheduled") !== "no_booking").length,
+);
 const showOfferModal = ref(false);
 const showProductSelector = ref(false);
 const showCouponSelector = ref(false);
@@ -664,9 +683,9 @@ function defaultOfferForm() {
   return {
     name: "",
     slug: "",
-    service_id: "",
-    service_price_id: "",
+    services: [{ service_id: "", price_id: "" }],
     service_booking_flow: "pay_then_book",
+    service_booking_mode: "single_visit",
     discount: {
       mode: "none",
       coupon_id: "",
@@ -706,16 +725,22 @@ function openOfferModal(offer = null) {
   if (!servicesStore.loaded && !servicesStore.loading) servicesStore.load();
 }
 
-function onServiceChange() {
-  const prices = selectedServicePrices.value;
-  const preferred = selectedServiceObj.value?.default_price_id;
-  form.service_price_id = prices.find((p) => p.price_id === preferred)?.price_id || prices[0]?.price_id || "";
-  form.service_booking_flow = selectedServiceObj.value?.booking_flow || "pay_then_book";
+function onRowServiceChange(row) {
+  const prices = servicePricesFor(row.service_id);
+  const service = serviceObjFor(row.service_id);
+  const preferred = service?.default_price_id;
+  row.price_id = prices.find((p) => p.price_id === preferred)?.price_id || prices[0]?.price_id || "";
+  // Booking flow is offer-level (one payment posture); seed it from the first service chosen.
+  if (serviceRows.value.length <= 1) form.service_booking_flow = service?.booking_flow || "pay_then_book";
 }
 
-function clearService() {
-  form.service_id = "";
-  form.service_price_id = "";
+function addServiceRow() {
+  form.services.push({ service_id: "", price_id: "" });
+}
+
+function removeServiceRow(index) {
+  form.services.splice(index, 1);
+  if (!form.services.length) form.services.push({ service_id: "", price_id: "" });
 }
 
 function closeOfferModal() {
@@ -941,20 +966,20 @@ function buildOfferDocument() {
       }));
     }
   }
-  // A single bookable service (backend rejects more than one service item per offer).
-  let serviceContext = "standard";
-  if (hasService.value) {
-    const servicePrice = selectedServicePrices.value.find((p) => p.price_id === form.service_price_id);
-    serviceContext = servicePrice?.context || "standard";
+  // One or more bookable services; the Offer's service_booking_mode coordinates scheduled ones.
+  const serviceContexts = [];
+  for (const row of serviceRows.value) {
+    const servicePrice = servicePricesFor(row.service_id).find((p) => p.price_id === row.price_id);
+    serviceContexts.push(servicePrice?.context || "standard");
     items.push(cleanObject({
-      service_id: form.service_id,
-      price_id: form.service_price_id,
+      service_id: row.service_id,
+      price_id: row.price_id,
       quantity: 1,
       booking_flow: form.service_booking_flow || "pay_then_book",
     }));
   }
 
-  const priceContexts = selectedProducts.value.length ? selectedPriceContexts() : [serviceContext];
+  const priceContexts = selectedProducts.value.length ? selectedPriceContexts() : (serviceContexts.length ? [...new Set(serviceContexts)] : ["standard"]);
   const effectiveIntent = selectedProducts.value.length ? productIntent.value : "transaction";
 
   const offer = cleanObject({
@@ -968,6 +993,8 @@ function buildOfferDocument() {
     product_intent: effectiveIntent,
     stripe_mode: getApiEnvironment(),
     items,
+    // Only meaningful with 2+ scheduled services; omit otherwise to keep the document clean.
+    service_booking_mode: scheduledServiceCount.value > 1 ? form.service_booking_mode : undefined,
     discount: buildDiscountBlock(),
     eligibility: {
       requires_prior_purchase: priceContexts.some((context) => ["upsell", "downsell", "order_bump"].includes(context)),
@@ -1020,11 +1047,11 @@ function loadOfferIntoForm(offer) {
 
   const items = Array.isArray(offer.items) ? offer.items : [];
   selectedProductIds.value = items.map((item) => item.product_id).filter(Boolean);
-  const serviceItem = items.find((item) => item.service_id);
-  if (serviceItem) {
-    form.service_id = serviceItem.service_id;
-    form.service_price_id = serviceItem.price_id || "";
-    form.service_booking_flow = serviceItem.booking_flow || "pay_then_book";
+  const serviceItems = items.filter((item) => item.service_id);
+  if (serviceItems.length) {
+    form.services = serviceItems.map((item) => ({ service_id: item.service_id, price_id: item.price_id || "" }));
+    form.service_booking_flow = serviceItems[0].booking_flow || "pay_then_book";
+    form.service_booking_mode = offer.service_booking_mode || "single_visit";
     if (!servicesStore.loaded && !servicesStore.loading) servicesStore.load();
   }
   Object.keys(itemConfigs).forEach((key) => delete itemConfigs[key]);

@@ -1,3 +1,4 @@
+import json
 from base64 import b64encode
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
@@ -196,13 +197,12 @@ def build_checkout_payload(
     first_product_id = ""
     first_price_id = ""
     first_product_name = ""
-    service_item = None
+    service_items = []
     for index, item in enumerate(resolved.get("items") or []):
         prefix = f"line_items[{index}]"
         if item.get("kind") == "service" or item.get("service_id"):
             # First-class service line: no product doc; price comes straight from the resolved item.
-            if service_item is None:
-                service_item = item
+            service_items.append(item)
             payload[f"{prefix}[price_data][currency]"] = item.get("currency") or "usd"
             payload[f"{prefix}[price_data][unit_amount]"] = str(int(item.get("unit_amount") or 0))
             payload[f"{prefix}[price_data][product_data][name]"] = item.get("label") or item.get("product_name") or "Service"
@@ -232,12 +232,32 @@ def build_checkout_payload(
         payload[f"{prefix}[quantity]"] = str(int(item.get("quantity") or 1))
         collect_shipping = collect_shipping or product.get("product_type") == "physical"
 
-    # Booking metadata so the webhook can create/route the appointment for a service purchase.
-    if service_item is not None:
-        payload["metadata[service_id]"] = service_item.get("service_id") or ""
-        payload["metadata[service_price_id]"] = service_item.get("price_id") or ""
-        payload["metadata[booking_flow]"] = service_item.get("booking_flow") or "pay_then_book"
-        payload["metadata[service_name]"] = service_item.get("product_name") or service_item.get("label") or "Service"
+    # Booking metadata so the webhook can fan out 1..N appointments + no_booking invoice lines
+    # (STORY-2.3). service_lines carries ALL service lines; service_booking_mode coordinates grouping.
+    # (Stripe caps a metadata value at 500 chars — fine for the handful of services a real offer holds.)
+    if service_items:
+        first = service_items[0]
+        payload["metadata[service_booking_mode]"] = str(offer.get("service_booking_mode") or "single_visit")
+        payload["metadata[service_lines]"] = json.dumps([
+            {
+                "service_id": s.get("service_id") or "",
+                "price_id": s.get("price_id") or "",
+                "service_name": s.get("product_name") or s.get("label") or "Service",
+                "unit_amount": int(s.get("unit_amount") or 0),
+                "currency": s.get("currency") or "usd",
+                "quantity": int(s.get("quantity") or 1),
+                "booking_flow": s.get("booking_flow") or "pay_then_book",
+                "fulfillment_mode": s.get("fulfillment_mode") or "scheduled",
+                "duration_minutes": int(s.get("duration_minutes") or 0),
+                "default_fulfiller_id": s.get("default_fulfiller_id") or "",
+            }
+            for s in service_items
+        ], separators=(",", ":"))
+        # Routing hint for the webhook dispatch (first line).
+        payload["metadata[service_id]"] = first.get("service_id") or ""
+        payload["metadata[service_price_id]"] = first.get("price_id") or ""
+        payload["metadata[booking_flow]"] = first.get("booking_flow") or "pay_then_book"
+        payload["metadata[service_name]"] = first.get("product_name") or first.get("label") or "Service"
 
     if collect_shipping and payload["mode"] == "payment":
         payload["shipping_address_collection[allowed_countries][0]"] = "US"
