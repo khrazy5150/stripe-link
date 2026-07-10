@@ -60,6 +60,12 @@
       "enum": ["transaction", "lead_gen"],
       "description": "All offer items must share this product intent. This is resolved from selected products by the API."
     },
+    "offer_type": {
+      "type": "string",
+      "enum": ["single", "bundle", "listicle"],
+      "default": "single",
+      "description": "Drives landing-page rendering. single/bundle -> pick-one price selector; listicle -> a carousel of the offer's items, each independently add-to-cart. See plans/LISTICLE_AND_CART.md."
+    },
     "stripe_mode": {
       "type": "string",
       "enum": ["test", "live"],

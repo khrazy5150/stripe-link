@@ -50,7 +50,7 @@ SUPPORTED_APP_CONFIG_ENVIRONMENTS = {"dev", "prod"}
 SUPPORTED_PLATFORM_FEE_TIERS = {"basic", "standard", "pro"}
 SUPPORTED_PLATFORM_FEE_CLASSES = {"physical", "digital", "tip_jar"}
 SUPPORTED_STRIPE_FEE_RATE_TYPES = {"domestic_card", "international_card"}
-OFFER_UI_ONLY_FIELDS = {"offer_type", "intentLabel", "image", "productSummary"}
+OFFER_UI_ONLY_FIELDS = {"intentLabel", "image", "productSummary"}
 PRODUCT_FIELD_ORDER = [
     "schema_version",
     "document_type",
@@ -655,6 +655,10 @@ def validate_offer_document(document: dict[str, Any]) -> None:
         require_enum(document, "status", {"draft", "active", "archived"}, "Offer status")
     require_enum(document, "product_intent", {"transaction", "lead_gen"}, "Offer product_intent")
     require_enum(document, "stripe_mode", {"test", "live"}, "Offer stripe_mode")
+    # offer_type drives landing-page rendering: single/bundle -> pick-one price selector; listicle -> a
+    # carousel of the offer's items, each add-to-cart (plans/LISTICLE_AND_CART.md). Optional, default single.
+    if document.get("offer_type") is not None:
+        require_enum(document, "offer_type", {"single", "bundle", "listicle"}, "Offer offer_type")
     if document.get("context") is not None:
         require_enum(document, "context", {"standard", "sale", "flash_sale", "upsell", "downsell", "order_bump"}, "Offer context")
     # The Offer coordinates how its scheduled services are delivered (single_visit collapses them

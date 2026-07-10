@@ -657,6 +657,8 @@ def render_section(
     if section_type == "hero":
         return render_hero(section)
     if section_type == "offer_price_selector":
+        if str(offer.get("offer_type") or "single") == "listicle":
+            return render_listicle_carousel(offer, products_by_id, services_by_id, page, checkout_url, api_base_url)
         return render_offer_price_selector(offer, products_by_id, services_by_id)
     if section_type == "refund_policy":
         return render_refund_policy(section, offer, products_by_id)
@@ -899,6 +901,58 @@ def render_service_price_card(item, service_id, services_by_id, offer, display_i
         "      </article>",
     ])
     return (landing_page_price_sort_key(price, item, display_index), card_markup)
+
+
+def render_listicle_carousel(
+    offer: dict[str, Any],
+    products_by_id: dict[str, dict[str, Any]],
+    services_by_id: dict[str, dict[str, Any]],
+    page: dict[str, Any],
+    checkout_url: str | None,
+    api_base_url: str | None = None,
+) -> str:
+    """A listicle offer renders its OWN items as a swipeable carousel — one slide per item, each with its
+    own price. Slides carry cart data-attributes (product/price/offer) for the Add-to-cart JS; a Buy-now
+    link is the interim action until the server-side cart (plans/LISTICLE_AND_CART.md L2) is wired."""
+    resolved = resolve_offer(offer, products_by_id, None, services_by_id=services_by_id)
+    offer_id = escape(str(offer.get("offer_id") or ""))
+    api_base = escape(str(api_base_url or "").rstrip("/"))
+    slides = []
+    for item in resolved.get("items", []):
+        name = str(item.get("product_name") or "")
+        unit_amount = int(item.get("unit_amount") or 0)
+        currency = str(item.get("currency") or "usd")
+        product_id = str(item.get("product_id") or "")
+        service_id = str(item.get("service_id") or "")
+        price_id = str(item.get("price_id") or "")
+        image = ""
+        if product_id and product_id in products_by_id:
+            image = str((products_by_id[product_id].get("images") or [""])[0] or "")
+        elif service_id and service_id in services_by_id:
+            image = str((services_by_id[service_id].get("presentation") or {}).get("hero_image_url") or "")
+        href = "#checkout"
+        if checkout_url:
+            href = build_checkout_url(checkout_url, page=page, offer=offer, product_id=product_id, price_id=price_id, quantity="1")
+        slides.append("\n".join(line for line in [
+            f"        <article class=\"sl-carousel-slide\" data-cart-item data-product-id=\"{escape(product_id)}\" "
+            f"data-service-id=\"{escape(service_id)}\" data-price-id=\"{escape(price_id)}\" data-offer-id=\"{offer_id}\" "
+            f"data-amount=\"{unit_amount}\" data-currency=\"{escape(currency)}\" data-name=\"{escape(name)}\">",
+            (f"          {responsive_img(image, name or 'Product', sizes=CONTENT_BLOCK_SIZES)}" if image else ""),
+            f"          <h3 class=\"sl-carousel-title\">{render_headline_markup(name)}</h3>",
+            f"          <p class=\"sl-carousel-price\">{escape(format_money(unit_amount, currency))}</p>",
+            f"          <a class=\"sl-cta sl-carousel-buy\" href=\"{escape(href)}\" data-cart-add>Buy now</a>",
+            "        </article>",
+        ] if line))
+    if not slides:
+        return ""
+    return "\n".join([
+        f"    <section class=\"sl-product-carousel\" data-section-type=\"offer_price_selector\" data-listicle "
+        f"data-offer-id=\"{offer_id}\" data-api-base=\"{api_base}\">",
+        "      <div class=\"sl-carousel-track\">",
+        *slides,
+        "      </div>",
+        "    </section>",
+    ])
 
 
 def render_offer_price_selector(

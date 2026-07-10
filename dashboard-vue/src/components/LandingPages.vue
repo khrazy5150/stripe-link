@@ -525,16 +525,6 @@
                   <button class="secondary-action compact" type="button" @click="addSubItem(element, 'items', { question: '', answer: '' })">+ Add question</button>
                 </template>
 
-                <template v-else-if="element.type === 'product_carousel'">
-                  <input v-model.trim="element.heading" type="text" placeholder="Section heading (optional)" />
-                  <p class="element-empty">Pick the offers to feature. Each becomes a swipeable slide with its own Buy button.</p>
-                  <div class="carousel-offer-picker">
-                    <label v-for="offer in carouselOfferChoices" :key="offer.offer_id" class="carousel-offer-choice">
-                      <input type="checkbox" :checked="element.offer_ids.includes(offer.offer_id)" @change="toggleCarouselOffer(element, offer.offer_id)" />
-                      <span>{{ offer.name || offer.offer_id }}</span>
-                    </label>
-                  </div>
-                </template>
               </div>
             </div>
           </section>
@@ -655,24 +645,20 @@
                 <p>{{ item.answer }}</p>
               </details>
             </div>
-            <div v-else-if="entry.element.type === 'product_carousel'" class="preview-carousel">
-              <h2 v-if="entry.element.heading" v-html="headlineHtml(entry.element.heading)"></h2>
-              <div class="preview-carousel-track">
-                <template v-for="offerId in entry.section.offer_ids" :key="offerId">
-                  <article v-if="carouselOfferModel(offerId)" class="preview-carousel-slide">
-                    <img v-if="carouselOfferModel(offerId).image" :src="carouselOfferModel(offerId).image" alt="" />
-                    <strong>{{ carouselOfferModel(offerId).name }}</strong>
-                    <span v-if="carouselOfferModel(offerId).price" class="preview-carousel-price">
-                      {{ formatMoney(carouselOfferModel(offerId).price.unit_amount || 0, carouselOfferModel(offerId).price.currency) }}
-                    </span>
-                    <span class="preview-carousel-buy">Buy now</span>
-                  </article>
-                </template>
-              </div>
-            </div>
           </template>
+          <!-- Listicle: the offer's items as a swipeable carousel, each add-to-cart. -->
+          <div v-if="isListicleOffer" class="preview-carousel">
+            <div class="preview-carousel-track">
+              <article v-for="price in previewPrices" :key="price.price_id" class="preview-carousel-slide">
+                <img v-if="price.image_url" :src="price.image_url" alt="" />
+                <strong>{{ price.label || price.product_name || "Item" }}</strong>
+                <span class="preview-carousel-price">{{ formatMoney(price.unit_amount || 0, price.currency) }}</span>
+                <span class="preview-carousel-buy">Buy now</span>
+              </article>
+            </div>
+          </div>
           <!-- One CTA component, chosen by the offer's cta.type. The page never combines CTAs. -->
-          <div v-if="ctaShowsPrices" class="preview-prices">
+          <div v-else-if="ctaShowsPrices" class="preview-prices">
             <button
               v-for="price in previewPrices"
               :key="price.price_id"
@@ -724,7 +710,7 @@
             <a :href="defaultLegalLinks.refund_url" target="_blank" rel="noopener">Refund Policy</a>
             <span>{{ defaultFooterCopyright }}</span>
           </div>
-          <button type="button" class="preview-cta">
+          <button v-if="!isListicleOffer" type="button" class="preview-cta">
             {{ previewCtaLabel }}
           </button>
         </div>
@@ -845,31 +831,14 @@ const builderLeadAction = computed(() => builderOfferProducts.value.find((produc
 const builderCta = computed(() => builderOffer.value?.presentation?.cta || { type: builderIntent.value === "lead_gen" ? "email" : "buy" });
 const selectedOfferCta = computed(() => selectedOffer.value?.presentation?.cta || { type: selectedOfferIntent.value === "lead_gen" ? "email" : "buy" });
 // buy + booking (service) offers show the price cards; call/email/external render their own component instead.
-const ctaShowsPrices = computed(() => ["buy", "booking"].includes(builderCta.value.type));
+const ctaShowsPrices = computed(() => ["buy", "booking"].includes(builderCta.value.type) && !isListicleOffer.value);
+// A listicle offer renders its items as a carousel (each add-to-cart) instead of the pick-one selector.
+const isListicleOffer = computed(() => (builderOffer.value?.offer_type || "single") === "listicle");
 const builderProductImages = computed(() => [...new Set(builderOfferProducts.value.flatMap((product) => product.images || []).filter(Boolean))]);
 const heroMediaList = computed(() => parseLines(builder.hero_media_text));
 const previewHeroImage = computed(() => heroMediaList.value[0] || offerImage(builderOffer.value) || "");
 const visibleTrustBadges = computed(() => builder.trust_badges.badges.filter((badge) => badge.enabled !== false && badge.label));
 const previewElements = computed(() => builder.elements.map((element) => ({ element, section: elementSection(element) })).filter((entry) => entry.section));
-// Offers selectable in a listicle carousel: active offers other than the page's own primary offer.
-const carouselOfferChoices = computed(() => offers.value.filter((offer) => offer.status !== "archived" && offer.offer_id !== builder.offer_id));
-function toggleCarouselOffer(element, offerId) {
-  const index = element.offer_ids.indexOf(offerId);
-  if (index >= 0) element.offer_ids.splice(index, 1);
-  else element.offer_ids.push(offerId);
-}
-function carouselOfferModel(offerId) {
-  const offer = offers.value.find((entry) => entry.offer_id === offerId);
-  if (!offer) return null;
-  const cards = offerItemModels(offer).flatMap((model) => model.priceCards).sort(compareLandingPagePrices);
-  const price = cards[0] || null;
-  return {
-    offer_id: offerId,
-    name: offer.presentation?.headline || offer.name || offerId,
-    image: offer.presentation?.hero_image_url || offerImage(offer),
-    price,
-  };
-}
 const previewRefundPolicy = computed(() => builderOffer.value?.refund_policy || builderOfferProducts.value[0]?.refund_policy || null);
 const previewRefundAppliesTo = computed(() => previewPrices.value.map((price) => price.label).filter(Boolean).join(", "));
 const previewRefundReturnNote = computed(() => refundPolicyReturnNote(previewRefundPolicy.value));
@@ -1643,13 +1612,14 @@ async function handleHeroMediaPicked(event) {
 
 // Composable page elements: an ordered, draggable list the tenant builds. Each element maps 1:1 to a
 // rendered page section (plans/LANDING_PAGE_CTA_AND_COMPOSITION.md phase 4).
+// A listicle is now driven by the offer (offer_type: listicle renders its items as a carousel), so the
+// page-level multi-offer carousel element was retired — see plans/LISTICLE_AND_CART.md.
 const ELEMENT_TYPES = [
   { type: "content_block", label: "Content" },
   { type: "testimonials", label: "Testimonials" },
   { type: "rating", label: "Rating" },
   { type: "client_marquee", label: "Client Logos" },
   { type: "faq", label: "FAQ" },
-  { type: "product_carousel", label: "Listicle Carousel" },
 ];
 
 function elementLabel(type) {
@@ -1663,7 +1633,6 @@ function newElement(type) {
   if (type === "rating") return { ...base, value: 5, count: 0, label: "" };
   if (type === "client_marquee") return { ...base, heading: "", logos: [{ image_url: "", name: "" }] };
   if (type === "faq") return { ...base, items: [{ question: "", answer: "" }] };
-  if (type === "product_carousel") return { ...base, heading: "", offer_ids: [] };
   return base;
 }
 
@@ -1748,11 +1717,6 @@ function elementSection(element) {
     if (!items.length) return null;
     return { id: element.id, type: "faq", items: items.map((item) => ({ question: formatHeadline(item.question || ""), answer: item.answer })) };
   }
-  if (element.type === "product_carousel") {
-    const offerIds = (element.offer_ids || []).filter(Boolean);
-    if (!offerIds.length) return null;
-    return { id: element.id, type: "product_carousel", heading: element.heading || undefined, offer_ids: offerIds };
-  }
   return null;
 }
 
@@ -1774,8 +1738,6 @@ function elementsFromPage(sections) {
         logos: (section.logos || []).map((logo) => ({ image_url: logo.image_url || "", name: logo.name || "" })) });
     } else if (section.type === "faq") {
       elements.push({ id: localId("el"), type: "faq", items: (section.items || []).map((item) => ({ question: item.question || "", answer: item.answer || "" })) });
-    } else if (section.type === "product_carousel") {
-      elements.push({ id: localId("el"), type: "product_carousel", heading: section.heading || "", offer_ids: [...(section.offer_ids || [])] });
     }
   }
   return elements;

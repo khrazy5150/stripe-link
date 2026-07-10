@@ -163,6 +163,16 @@
               </label>
             </div>
 
+            <label class="offer-field">
+              <span>Offer Type</span>
+              <select v-model="form.offer_type">
+                <option value="single">Single — one product, one checkout</option>
+                <option value="bundle">Bundle — a fixed set sold together</option>
+                <option value="listicle">Listicle — a carousel of items, each add-to-cart</option>
+              </select>
+              <small v-if="form.offer_type === 'listicle'">The landing page renders this offer's items as a swipeable carousel with a shopping cart.</small>
+            </label>
+
             <div v-if="selectedProducts.length" class="detected-offer-type">
               <span>{{ detectedOfferTypeLabel }}</span>
               <strong>{{ detectedOfferTypeDescription }}</strong>
@@ -686,6 +696,7 @@ function defaultOfferForm() {
   return {
     name: "",
     slug: "",
+    offer_type: "single",
     services: [{ service_id: "", price_id: "" }],
     service_booking_flow: "pay_then_book",
     service_booking_mode: "single_visit",
@@ -1067,6 +1078,7 @@ function buildOfferDocument() {
     name: form.name,
     status: "active",
     product_intent: effectiveIntent,
+    offer_type: form.offer_type || "single",
     stripe_mode: getApiEnvironment(),
     items,
     // Only meaningful with 2+ scheduled services; omit otherwise to keep the document clean.
@@ -1108,6 +1120,7 @@ function loadOfferIntoForm(offer) {
   editingOfferId.value = offer.offer_id;
   form.name = offer.name || "";
   form.slug = offer.slug || slugify(offer.name);
+  form.offer_type = offer.offer_type || "single";
   form.userEditedName = true;
   form.userEditedSlug = true;
   form.discount = {
@@ -1474,8 +1487,8 @@ function titleCase(value) {
 }
 
 function offerCardModel(offer) {
+  // offer_type is now a real persisted field; only strip the legacy UI-computed display fields.
   const {
-    offer_type,
     intentLabel,
     image,
     productSummary,
