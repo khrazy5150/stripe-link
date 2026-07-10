@@ -92,7 +92,7 @@
       "properties": {
         "template": {
           "type": "string",
-          "enum": ["simple", "universal_bundle"]
+          "enum": ["universal_bundle"]
         },
         "preset": {
           "type": "string",
@@ -112,7 +112,7 @@
         "color": {
           "type": "object",
           "additionalProperties": false,
-          "description": "Legacy simple-template color overrides.",
+          "description": "Legacy color overrides, bridged onto Universal Bundle tokens (background/text/accent) by the renderer.",
           "properties": {
             "background": { "$ref": "#/$defs/hexColor" },
             "text": { "$ref": "#/$defs/hexColor" },

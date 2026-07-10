@@ -971,6 +971,28 @@ function primaryOfferItemDisplay() {
   return { name: "", description: "", image: "" };
 }
 
+function primaryCtaContract() {
+  // Snapshot the CTA the landing page should render, derived from the primary item. The offer is the
+  // page's contract, so cta.type (buy/call/email/external/booking) drives which CTA component renders.
+  const product = selectedProducts.value[0];
+  if (product) {
+    if ((product.product_intent || "transaction") !== "lead_gen") return { type: "buy", label: "Buy Now" };
+    const lc = product.lead_capture || {};
+    const target = lc.target?.value || "";
+    if (lc.action === "call_number") return { type: "call", label: lc.title || "Call Now", target };
+    if (lc.action === "external_url" || lc.action === "social_redirect") return { type: "external", label: lc.title || "Learn More", target };
+    // capture_email / capture_phone / capture_email_phone / open_form -> inline collector (Phase 2)
+    return { type: "email", label: lc.title || "Get Started" };
+  }
+  const row = serviceRows.value[0];
+  if (row) {
+    const service = serviceObjFor(row.service_id);
+    if ((service?.fulfillment_mode || "scheduled") === "no_booking") return { type: "buy", label: "Buy Now" };
+    return { type: "booking", label: "Book Now", target: row.service_id };
+  }
+  return { type: "buy", label: "Buy Now" };
+}
+
 function buildOfferDocument() {
   if (!selectedProducts.value.length && !hasService.value) return { error: "Select at least one product or service for this offer." };
   if (!form.name || !form.slug) return { error: "Offer label and slug are required." };
@@ -1034,6 +1056,7 @@ function buildOfferDocument() {
   // Snapshot the primary item's copy/image onto the offer so it is a self-contained contract for the
   // landing page (suggestions the tenant/AI can override later). Only price stays resolved-live.
   const primary = primaryOfferItemDisplay();
+  const cta = primaryCtaContract();
 
   const offer = cleanObject({
     schema_version: "2026-05-29",
@@ -1059,7 +1082,8 @@ function buildOfferDocument() {
       headline: primary.name || form.name,
       subheadline: primary.description || undefined,
       hero_image_url: primary.image || undefined,
-      cta_label: "Buy Now",
+      cta_label: cta.label || "Buy Now",
+      cta: cleanObject({ type: cta.type, label: cta.label, target: cta.target || undefined }),
     }),
     checkout: effectiveIntent === "transaction" ? {
       mode: checkoutMode,

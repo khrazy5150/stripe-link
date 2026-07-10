@@ -183,8 +183,8 @@
 
           <section v-else-if="wizardStep === 2" class="wizard-step">
             <header class="wizard-step-header">
-              <h3>{{ selectedOfferIntent === "lead_gen" ? "Choose Lead Flow" : "Configure Checkout Page" }}</h3>
-              <p>{{ selectedOfferIntent === "lead_gen" ? "Lead-gen offers create a landing page with a CTA action." : "Transaction offers create a checkout landing page with Stripe pricing sections." }}</p>
+              <h3>Configure Page</h3>
+              <p>Pick a preset. The call-to-action is determined by the offer — the page just renders it.</p>
             </header>
 
             <div v-if="selectedOffer" class="wizard-selected-summary">
@@ -192,33 +192,10 @@
               <span class="page-source-badge">{{ offerIntentLabel(selectedOffer) }}</span>
             </div>
 
-            <div v-if="selectedOfferIntent === 'lead_gen'" class="experience-options">
-              <button
-                v-for="option in leadExperienceOptions"
-                :key="option.value"
-                type="button"
-                class="experience-option"
-                :class="{ selected: form.experience_type === option.value }"
-                @click="form.experience_type = option.value"
-              >
-                <strong>{{ option.label }}</strong>
-                <span>{{ option.description }}</span>
-              </button>
-            </div>
-
             <div class="offer-two-column">
               <label class="offer-field">
-                <span>Template</span>
-                <select v-model="form.template">
-                  <option v-for="option in templateOptions" :key="option.value" :value="option.value">
-                    {{ option.label }}
-                  </option>
-                </select>
-              </label>
-              <label class="offer-field">
                 <span>Preset</span>
-                <select v-model="form.preset" :disabled="!presetOptions.length">
-                  <option v-if="!presetOptions.length" value="">None</option>
+                <select v-model="form.preset">
                   <option v-for="option in presetOptions" :key="option.value" :value="option.value">
                     {{ option.label }}
                   </option>
@@ -226,15 +203,10 @@
               </label>
             </div>
 
-            <label v-if="requiresExternalUrl" class="offer-field">
-              <span>CTA Destination URL <strong>*</strong></span>
-              <input v-model.trim="form.external_url" type="url" placeholder="https://example.com/offer" required />
-            </label>
-
-            <div v-if="selectedLeadAction" class="lead-action-summary">
-              <strong>{{ selectedLeadAction.title }}</strong>
-              <span>{{ selectedLeadAction.description }}</span>
-              <code v-if="selectedLeadAction.target?.value">{{ selectedLeadAction.target.value }}</code>
+            <div class="lead-action-summary">
+              <strong>Call to action: {{ ctaTypeLabel(selectedOfferCta.type) }}</strong>
+              <span>{{ ctaTypeDescription(selectedOfferCta.type) }}</span>
+              <code v-if="selectedOfferCta.target">{{ selectedOfferCta.target }}</code>
             </div>
           </section>
 
@@ -302,16 +274,8 @@
 
             <div class="offer-two-column">
               <label class="offer-field">
-                <span>Template Type</span>
-                <select v-model="builder.template">
-                  <option value="universal_bundle">Universal Bundle</option>
-                  <option value="simple">Simple</option>
-                </select>
-              </label>
-              <label class="offer-field">
                 <span>Preset</span>
-                <select v-model="builder.preset" :disabled="builder.template !== 'universal_bundle'">
-                  <option v-if="builder.template !== 'universal_bundle'" value="">None</option>
+                <select v-model="builder.preset">
                   <option v-for="option in universalBundlePresets" :key="option.value" :value="option.value">
                     {{ option.label }}
                   </option>
@@ -515,15 +479,16 @@
           </section>
 
           <section class="builder-section">
-            <h3>{{ builderIntent === "lead_gen" ? "Lead Action" : "Checkout CTA" }}</h3>
+            <h3>Call to Action</h3>
             <label class="offer-field">
               <span>Button Label</span>
               <input v-model.trim="builder.cta_label" type="text" />
             </label>
-            <label v-if="builderIntent === 'lead_gen'" class="offer-field">
-              <span>Action URL</span>
-              <input v-model.trim="builder.action_url" type="url" placeholder="https://example.com/affiliate-link" />
-            </label>
+            <div class="lead-action-summary">
+              <strong>{{ ctaTypeLabel(builderCta.type) }}</strong>
+              <span>{{ ctaTypeDescription(builderCta.type) }} This comes from the offer and can't be changed here.</span>
+              <code v-if="builderCta.target">{{ builderCta.target }}</code>
+            </div>
           </section>
 
           <section class="builder-section">
@@ -610,7 +575,8 @@
           <div v-if="visibleTrustBadges.length" class="preview-badges">
             <span v-for="badge in visibleTrustBadges" :key="badge.label">{{ badge.emoji }} {{ badge.label }}</span>
           </div>
-          <div v-if="builderIntent === 'transaction'" class="preview-prices">
+          <!-- One CTA component, chosen by the offer's cta.type. The page never combines CTAs. -->
+          <div v-if="ctaShowsPrices" class="preview-prices">
             <button
               v-for="price in previewPrices"
               :key="price.price_id"
@@ -634,9 +600,18 @@
               <span class="preview-price-radio" aria-hidden="true"></span>
             </button>
           </div>
-          <div v-else class="preview-lead-card">
-            <strong>{{ builderLeadAction?.title || "Next step" }}</strong>
-            <span>{{ builderLeadAction?.description || "Continue when you are ready." }}</span>
+          <div v-else-if="builderCta.type === 'call'" class="preview-cta-card preview-call-card">
+            <strong>{{ builderCta.label || "Call us" }}</strong>
+            <span v-if="builderCta.target" class="preview-call-number">{{ builderCta.target }}</span>
+          </div>
+          <div v-else-if="builderCta.type === 'external'" class="preview-cta-card preview-external-card">
+            <strong>{{ builderCta.label || "Learn more" }}</strong>
+            <span v-if="builderCta.target" class="preview-external-url">{{ builderCta.target }}</span>
+          </div>
+          <div v-else class="preview-cta-card preview-email-card">
+            <strong>{{ builderLeadAction?.title || builderCta.label || "Get started" }}</strong>
+            <span>{{ builderLeadAction?.description || "Enter your details to continue." }}</span>
+            <span class="preview-email-input" aria-hidden="true">you@example.com</span>
           </div>
           <div v-if="builder.blurbs.length" class="preview-blurbs">
             <article v-for="block in visibleBlurbs" :key="block.title">
@@ -786,6 +761,11 @@ const builderOffer = computed(() => offers.value.find((offer) => offer.offer_id 
 const builderOfferProducts = computed(() => offerProducts(builderOffer.value));
 const builderIntent = computed(() => builderOffer.value?.product_intent || builderOfferProducts.value[0]?.product_intent || "transaction");
 const builderLeadAction = computed(() => builderOfferProducts.value.find((product) => product.lead_capture)?.lead_capture || null);
+// The offer's snapshotted CTA contract drives the preview's on-page experience (buy/call/email/external/booking).
+const builderCta = computed(() => builderOffer.value?.presentation?.cta || { type: builderIntent.value === "lead_gen" ? "email" : "buy" });
+const selectedOfferCta = computed(() => selectedOffer.value?.presentation?.cta || { type: selectedOfferIntent.value === "lead_gen" ? "email" : "buy" });
+// buy + booking (service) offers show the price cards; call/email/external render their own component instead.
+const ctaShowsPrices = computed(() => ["buy", "booking"].includes(builderCta.value.type));
 const builderProductImages = computed(() => [...new Set(builderOfferProducts.value.flatMap((product) => product.images || []).filter(Boolean))]);
 const heroMediaList = computed(() => parseLines(builder.hero_media_text));
 const previewHeroImage = computed(() => heroMediaList.value[0] || offerImage(builderOffer.value) || "");
@@ -810,45 +790,18 @@ const selectedPreviewPrice = computed(() => {
     || null;
 });
 const previewCtaLabel = computed(() => {
-  const label = builder.cta_label || (builderIntent.value === "transaction" ? "Buy Now" : "Continue");
-  if (builderIntent.value !== "transaction" || !selectedPreviewPrice.value) return label;
+  const label = builder.cta_label || builderCta.value.label || (ctaShowsPrices.value ? "Buy Now" : "Continue");
+  if (!ctaShowsPrices.value || !selectedPreviewPrice.value) return label;
   return `${label} - ${formatMoney(selectedPreviewPrice.value.unit_amount || 0, selectedPreviewPrice.value.currency)}`;
 });
-const requiresExternalUrl = computed(() => selectedOfferIntent.value === "lead_gen" && form.experience_type === "external_redirect");
 const emptyStateText = computed(() => {
   if (pages.value.length) return "No landing pages match your search.";
   return pagesLoaded.value ? "No landing pages found. Create a page to get started." : 'Click "Load Pages" to view your landing pages.';
 });
-const templateOptions = computed(() => {
-  if (selectedOfferIntent.value === "lead_gen") return [{ value: "simple", label: "Simple" }];
-  return [{ value: "universal_bundle", label: "Universal Bundle" }];
-});
-const presetOptions = computed(() => form.template === "universal_bundle" ? universalBundlePresets : []);
-const selectedTemplateLabel = computed(() => templateOptions.value.find((option) => option.value === form.template)?.label || "Simple");
+// One universal template for every offer type; the offer's CTA drives the on-page experience, not a template swap.
+const presetOptions = computed(() => universalBundlePresets);
+const selectedTemplateLabel = computed(() => "Universal Bundle");
 const selectedPresetLabel = computed(() => presetOptions.value.find((option) => option.value === form.preset)?.label || "None");
-const leadExperienceOptions = computed(() => {
-  const action = selectedLeadAction.value?.action || "capture_email";
-  const options = [
-    {
-      value: "lead_capture_page",
-      label: actionLabel(action),
-      description: "Create a simple lead-generation page using this product action.",
-    },
-    {
-      value: "external_redirect",
-      label: "External link CTA",
-      description: "Create a landing page whose CTA sends visitors to an external URL.",
-    },
-  ];
-  if (["call_number", "external_url", "social_redirect", "open_form"].includes(action)) {
-    options.unshift({
-      value: "direct_action",
-      label: directActionLabel(action),
-      description: "Create a landing page using the product's configured CTA target.",
-    });
-  }
-  return options;
-});
 const filteredPages = computed(() => {
   const term = search.value.toLowerCase();
   if (!term) return pages.value;
@@ -872,10 +825,6 @@ const wizardOffers = computed(() => {
     offer.product_intent,
     productSummary(offer),
   ].filter(Boolean).join(" ").toLowerCase().includes(term));
-});
-const experienceLabel = computed(() => {
-  if (selectedOfferIntent.value !== "lead_gen") return "Checkout landing page";
-  return leadExperienceOptions.value.find((option) => option.value === form.experience_type)?.label || "Lead generation page";
 });
 const draftPage = computed(() => buildPageDocument());
 const builderPageDocument = computed(() => buildBuilderPageDocument());
@@ -906,8 +855,6 @@ function defaultWizardForm() {
     offer_id: "",
     name: "",
     slug: "",
-    experience_type: "checkout_page",
-    external_url: "",
     template: "universal_bundle",
     preset: "clean-slate",
   };
@@ -931,7 +878,6 @@ function defaultBuilderForm() {
     subheadline: "",
     hero_media_text: "",
     cta_label: "Buy Now",
-    action_url: "",
     countdown: {
       enabled: false,
       duration_minutes: 15,
@@ -1088,10 +1034,8 @@ function selectOffer(offer) {
   const baseName = offer.name || "Landing Page";
   form.name = `${baseName} Landing Page`;
   form.slug = slugify(offer.slug || baseName);
-  form.experience_type = offer.product_intent === "lead_gen" ? defaultLeadExperience(offer) : "checkout_page";
-  form.external_url = defaultExternalUrl(offer);
-  form.template = offer.product_intent === "lead_gen" ? "simple" : "universal_bundle";
-  form.preset = form.template === "universal_bundle" ? "clean-slate" : "";
+  form.template = "universal_bundle";
+  form.preset = "clean-slate";
 }
 
 function nextWizardStep() {
@@ -1099,12 +1043,6 @@ function nextWizardStep() {
   if (wizardStep.value === 1 && !selectedOffer.value) {
     wizardError.value = "Choose an offer before continuing.";
     return;
-  }
-  if (wizardStep.value === 2) {
-    if (requiresExternalUrl.value && !isHttpUrl(form.external_url)) {
-      wizardError.value = "External URL must be a valid HTTP(S) URL.";
-      return;
-    }
   }
   wizardStep.value += 1;
 }
@@ -1173,7 +1111,6 @@ function populateBuilderFromPage(page) {
     subheadline: hero.subheadline || sectionText(sections, "subheadline") || "",
     hero_media_text: (heroMedia.images || [page.seo?.image || pageImage(page)].filter(Boolean)).join("\n"),
     cta_label: cta.label || (offerIntentLabel(offer) === "Lead generation" ? "Continue" : "Buy Now"),
-    action_url: cta.url || page.post_checkout?.thank_you_page?.url || "",
     blurbs: Array.isArray(content.blocks) ? content.blocks.map((block) => ({ ...block })) : [],
     faq: Array.isArray(faq.items) ? faq.items.map((item) => ({ ...item })) : [],
     google_tag_id: page.analytics?.google_tag_id || "",
@@ -1238,13 +1175,8 @@ function buildBuilderPageDocument() {
     },
     offer_id: builder.offer_id,
     theme: {
-      template: builder.template,
-      preset: builder.template === "universal_bundle" ? builder.preset : undefined,
-      color: builder.template === "simple" ? {
-        background: "#ffffff",
-        text: "#111827",
-        accent: "#4f46b5",
-      } : undefined,
+      template: "universal_bundle",
+      preset: builder.preset,
     },
     post_checkout: intent === "transaction" ? {
       thank_you_page: {
@@ -1347,7 +1279,6 @@ function builderSections(intent) {
       id: "checkout-cta",
       type: "checkout_cta",
       label: builder.cta_label || (intent === "transaction" ? "Buy Now" : "Continue"),
-      url: intent === "lead_gen" ? builder.action_url : undefined,
     },
     {
       id: "refund-policy",
@@ -1409,10 +1340,6 @@ async function saveBuilderPageWithStatus(statusOverride = "") {
     error.value = "Page could not be generated.";
     return;
   }
-  if (builderIntent.value === "lead_gen" && builder.action_url && !isHttpUrl(builder.action_url)) {
-    error.value = "Action URL must be a valid HTTP(S) URL.";
-    return;
-  }
   saving.value = true;
   try {
     const document = applyPageStatus(builderPageDocument.value, statusOverride);
@@ -1457,13 +1384,8 @@ function buildPageDocument() {
     },
     offer_id: offer.offer_id,
     theme: {
-      template: form.template,
-      preset: form.template === "universal_bundle" ? form.preset : undefined,
-      color: intent === "lead_gen" ? {
-        background: "#ffffff",
-        text: "#111827",
-        accent: "#4f46b5",
-      } : undefined,
+      template: "universal_bundle",
+      preset: form.preset || "clean-slate",
     },
     post_checkout: intent === "transaction" ? postCheckoutBlock() : undefined,
     legal: legalLinks(),
@@ -1483,68 +1405,50 @@ function postCheckoutBlock() {
 }
 
 function pageSections(intent, offer, leadAction) {
-  if (intent === "transaction") {
-    return [
-      {
-        id: "brand",
-        type: "brand_label",
-        enabled: true,
-        label: formatHeadline("Junior Bay"),
-      },
-      {
-        id: "hero",
-        type: "hero",
-        headline: formatHeadline(offerHeadline(offer) || "Complete your order"),
-        subheadline: offerDescription(offer) || "Choose your option and continue to secure checkout.",
-      },
-      {
-        id: "offer-selector",
-        type: "offer_price_selector",
-        offer_id: offer.offer_id,
-      },
-      {
-        id: "checkout-cta",
-        type: "checkout_cta",
-        label: offer.presentation?.cta_label || "Continue to Checkout",
-      },
-      {
-        id: "refund-policy",
-        type: "refund_policy",
-        enabled: true,
-        heading: "Refund Policy",
-      },
-      {
-        id: "legal-footer",
-        type: "legal_footer",
-        copyright: defaultFooterCopyrightTemplate,
-      },
-    ];
-  }
-  const direct = form.experience_type === "direct_action" || form.experience_type === "external_redirect";
-  return [
+  // One section list for every offer type. The CTA component is chosen by the offer's cta.type at
+  // render time (server + preview), so the page only needs a hero, an optional price selector, and a
+  // checkout_cta — never a lead-flow content block or a page-level CTA override.
+  const sections = [
+    {
+      id: "brand",
+      type: "brand_label",
+      enabled: true,
+      label: formatHeadline("Junior Bay"),
+    },
     {
       id: "hero",
       type: "hero",
-      headline: formatHeadline(offerHeadline(offer) || "Get started"),
-      subheadline: offerDescription(offer) || leadAction?.description || "Complete the next step to continue.",
-    },
-    {
-      id: "lead-action",
-      type: "content_block",
-      blocks: [
-        {
-          title: formatHeadline(direct ? experienceLabel.value : "Lead capture"),
-          text: leadActionText(leadAction),
-        },
-      ],
-    },
-    {
-      id: "lead-cta",
-      type: "checkout_cta",
-      label: leadCtaLabel(leadAction),
-      url: form.experience_type === "external_redirect" ? form.external_url : leadAction?.target?.value,
+      headline: formatHeadline(offerHeadline(offer) || (intent === "transaction" ? "Complete your order" : "Get started")),
+      subheadline: offerDescription(offer) || leadAction?.description || "Choose your option and continue.",
     },
   ];
+  if (intent === "transaction") {
+    sections.push({
+      id: "offer-selector",
+      type: "offer_price_selector",
+      offer_id: offer.offer_id,
+    });
+  }
+  sections.push(
+    {
+      id: "checkout-cta",
+      type: "checkout_cta",
+      label: offer.presentation?.cta?.label || offer.presentation?.cta_label
+        || (intent === "transaction" ? "Continue to Checkout" : "Continue"),
+    },
+    {
+      id: "refund-policy",
+      type: "refund_policy",
+      enabled: true,
+      heading: "Refund Policy",
+    },
+    {
+      id: "legal-footer",
+      type: "legal_footer",
+      copyright: defaultFooterCopyrightTemplate,
+    },
+  );
+  return sections;
 }
 
 function pageImage(page) {
@@ -1718,15 +1622,11 @@ async function onBuilderOfferChange() {
   if (!builder.seo_description) builder.seo_description = offerDescription(offer) || offer.name || "";
   if (!builder.seo_image) builder.seo_image = offerImage(offer);
   if (!builder.hero_media_text && offerImage(offer)) builder.hero_media_text = offerImage(offer);
-  builder.cta_label = builderIntent.value === "lead_gen" ? leadCtaLabel(builderLeadAction.value) : "Buy Now";
-  builder.action_url = defaultExternalUrl(offer);
-  if (builderIntent.value === "lead_gen") {
-    builder.template = "simple";
-    builder.preset = "";
-  } else {
-    builder.template = "universal_bundle";
-    builder.preset = builder.preset || "clean-slate";
-  }
+  // The offer is the page's contract: take the CTA label it snapshotted, falling back to a sensible default.
+  builder.cta_label = offer.presentation?.cta?.label || offer.presentation?.cta_label
+    || (builderIntent.value === "lead_gen" ? "Continue" : "Buy Now");
+  builder.template = "universal_bundle";
+  builder.preset = builder.preset || "clean-slate";
 }
 
 function editPage(page) {
@@ -1926,7 +1826,7 @@ function itemCount(page) {
 }
 
 function templateLabel(page) {
-  return page.theme?.template || "simple";
+  return page.theme?.template || "universal_bundle";
 }
 
 function statusLabel(status) {
@@ -1977,57 +1877,27 @@ function toggleMenu(pageId) {
   openMenuId.value = openMenuId.value === pageId ? "" : pageId;
 }
 
-function defaultLeadExperience(offer) {
-  const action = offerProducts(offer).find((product) => product.lead_capture)?.lead_capture?.action;
-  if (["call_number", "external_url", "social_redirect", "open_form"].includes(action)) return "direct_action";
-  return "lead_capture_page";
-}
-
-function defaultExternalUrl(offer) {
-  const target = offerProducts(offer).find((product) => product.lead_capture)?.lead_capture?.target;
-  return target?.type === "url" ? target.value || "" : "";
-}
-
-function actionLabel(action) {
+// The offer's cta.type is the single source of truth for the on-page CTA; these just label it for the UI.
+function ctaTypeLabel(type) {
   const labels = {
-    capture_email: "Email capture page",
-    capture_phone: "Phone capture page",
-    capture_email_phone: "Contact capture page",
-    call_number: "Call page",
-    external_url: "Redirect page",
-    open_form: "Form page",
-    social_redirect: "Social redirect page",
+    buy: "Buy — price + checkout",
+    call: "Call — click-to-call",
+    email: "Email — inline capture form",
+    external: "External link",
+    booking: "Booking — inline calendar",
   };
-  return labels[action] || "Lead capture page";
+  return labels[type] || "Buy — price + checkout";
 }
 
-function directActionLabel(action) {
-  const labels = {
-    call_number: "Click-to-call action",
-    external_url: "Direct external URL",
-    open_form: "Open external form",
-    social_redirect: "Social redirect",
+function ctaTypeDescription(type) {
+  const descriptions = {
+    buy: "Shows the price card(s) and a Stripe checkout button.",
+    call: "Shows a tel: call button and the phone number.",
+    email: "Collects the visitor's contact details inline.",
+    external: "Sends the visitor to an external URL.",
+    booking: "Reveals a booking calendar to schedule the service.",
   };
-  return labels[action] || "Direct action";
-}
-
-function leadActionText(action) {
-  if (!action) return "The visitor will complete the configured lead action.";
-  const target = action.target?.value ? ` Target: ${action.target.value}` : "";
-  return `${action.description || "The visitor will complete the configured lead action."}${target}`;
-}
-
-function leadCtaLabel(action) {
-  const labels = {
-    capture_email: "Submit Email",
-    capture_phone: "Submit Phone",
-    capture_email_phone: "Submit Contact Info",
-    call_number: "Call Now",
-    external_url: "Continue",
-    open_form: "Open Form",
-    social_redirect: "Continue",
-  };
-  return labels[action?.action] || "Continue";
+  return descriptions[type] || descriptions.buy;
 }
 
 function productId(product) {
@@ -2058,7 +1928,4 @@ function cleanObject(value) {
     .map(([key, item]) => [key, cleanObject(item)]));
 }
 
-function isHttpUrl(value) {
-  return /^https?:\/\/[^\s"'<>]+$/.test(String(value || ""));
-}
 </script>

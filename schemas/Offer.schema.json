@@ -321,7 +321,35 @@
     "presentation": {
       "type": "object",
       "additionalProperties": true,
-      "description": "Offer-level copy, badges, urgency signals, and display metadata. Page schemas will constrain specific presentation fields later."
+      "description": "Offer-level copy, badges, urgency signals, and display metadata snapshotted from the primary item at save time. These are self-contained suggestions the tenant/AI can override; only price stays resolved-live.",
+      "properties": {
+        "headline": { "type": "string" },
+        "subheadline": { "type": "string" },
+        "badge": { "type": "string" },
+        "cta_label": { "type": "string" },
+        "hero_image_url": { "type": "string" },
+        "cta": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "The offer's CTA contract. type selects which CTA component the landing page renders; the offer is the page's single source of truth for this.",
+          "required": ["type"],
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": ["buy", "call", "email", "external", "booking"],
+              "description": "buy = price card + Stripe checkout; call = tel: button + phone banner; email = inline capture form; external = link out; booking = inline booking calendar."
+            },
+            "label": {
+              "type": "string",
+              "description": "Button label."
+            },
+            "target": {
+              "type": "string",
+              "description": "Phone number (call), URL (external), or service_id (booking). Empty for buy/email."
+            }
+          }
+        }
+      }
     },
     "refund_policy": {
       "type": "object",

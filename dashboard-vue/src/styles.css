@@ -4304,6 +4304,45 @@ button:disabled {
   color: var(--preview-content-text);
 }
 
+.preview-cta-card {
+  display: grid;
+  gap: 0.6rem;
+  border: 1px solid var(--preview-content-border);
+  border-radius: 1.6rem;
+  background: var(--preview-card);
+  color: var(--preview-content-heading);
+  font-weight: 900;
+  padding: 1.4rem 1.6rem;
+  text-align: center;
+}
+
+.preview-cta-card span {
+  color: var(--preview-content-text);
+  font-weight: 600;
+}
+
+.preview-cta-card .preview-call-number {
+  color: var(--preview-content-heading);
+  font-size: 2rem;
+  font-weight: 900;
+  letter-spacing: 0.02em;
+}
+
+.preview-cta-card .preview-external-url {
+  color: var(--preview-brand, var(--preview-content-text));
+  font-size: 1.3rem;
+  word-break: break-all;
+}
+
+.preview-cta-card .preview-email-input {
+  border: 1px dashed var(--preview-content-border);
+  border-radius: 0.8rem;
+  padding: 0.9rem 1.1rem;
+  color: var(--preview-content-text);
+  font-weight: 500;
+  opacity: 0.7;
+}
+
 .preview-blurbs {
   width: min(100%, 52rem);
   justify-self: center;

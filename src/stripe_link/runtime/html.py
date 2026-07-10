@@ -268,28 +268,6 @@ UNIVERSAL_BUNDLE_THEME_PRESETS = {
     },
 }
 
-SIMPLE_TEMPLATE_STYLES = [
-    "    html{font-size:62.5%}",
-    "    *{margin:0;padding:0;box-sizing:border-box}",
-    "    :root{--sl-background:var(--sl-theme-background);--sl-text:var(--sl-theme-text);--sl-accent:var(--sl-theme-accent);font-family:var(--sl-font-body);color:var(--sl-text);background:var(--sl-background)}",
-    "    body{font-size:1.6rem;padding:3.2rem;display:flex;justify-content:center;background:var(--sl-background)}",
-    "    main{width:min(96rem,100%);display:grid;gap:2.4rem}",
-    "    .sl-hero h1{font-family:var(--sl-font-heading);font-size:4rem;line-height:1.05;margin:0 0 1rem}",
-    "    .sl-mark-text{color:var(--sl-highlight-text)}",
-    "    .sl-mark-bg{background:var(--sl-highlight-bg);color:var(--sl-highlight-bg-text);padding:0.1em 0.3em;border-radius:0.4rem}",
-    "    .sl-hero p{font-size:1.8rem;color:#4b5563;margin:0}",
-    "    .sl-price-options{display:grid;grid-template-columns:repeat(auto-fit,minmax(15rem,1fr));gap:1.2rem}",
-    "    .sl-price-option{border:1px solid #d1d5db;border-radius:0.8rem;padding:1.6rem;background:#fff}",
-    "    .sl-price-option[data-default='true']{border-color:var(--sl-accent);box-shadow:0 0 0 1px var(--sl-accent)}",
-    "    .sl-badge{display:inline-block;font-family:var(--sl-font-accent);font-size:1.2rem;font-weight:700;color:#166534;background:#dcfce7;padding:0.3rem 0.8rem;border-radius:99.9rem;margin-bottom:0.8rem}",
-    "    .sl-checkout-cta{display:flex;flex-direction:column;align-items:center;gap:0.8rem}",
-    "    .sl-cta{display:inline-flex;align-items:center;justify-content:center;background:var(--sl-accent);color:#fff;border:0;border-radius:0.8rem;padding:1.4rem 1.8rem;font-family:var(--sl-font-accent);font-weight:700;text-decoration:none}",
-    "    .sl-cta.is-connecting{opacity:.72;cursor:wait;pointer-events:none}",
-    "    .sl-decline-cta{background:none;color:var(--sl-accent);text-decoration:underline;font-weight:600;padding:0.4rem}",
-    "    .sl-legal{display:flex;gap:1.2rem;flex-wrap:wrap;font-size:1.3rem;color:#6b7280}",
-    "    .sl-legal a{color:inherit}",
-]
-
 UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     "    html{font-size:62.5%;-webkit-text-size-adjust:100%}",
     "    *{margin:0;padding:0;box-sizing:border-box}",
@@ -357,6 +335,7 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     "    .sl-cta{display:inline-flex;width:min(52rem,100%);align-items:center;justify-content:center;background:linear-gradient(135deg,var(--sl-cta-from),var(--sl-cta-to));color:var(--sl-cta-text);border:0;border-radius:1rem;padding:1.5rem 1.8rem;font-family:var(--sl-font-accent);font-size:1.7rem;font-weight:900;text-decoration:none}",
     "    .sl-cta.is-connecting{opacity:.72;cursor:wait;pointer-events:none}",
     "    .sl-decline-cta{width:auto;background:none;color:var(--sl-cta-text);text-decoration:underline;font-weight:600;font-size:1.3rem;padding:0.4rem}",
+    "    .sl-call-number{width:auto;color:var(--sl-cta-text);font-family:var(--sl-font-accent);font-weight:900;font-size:2.2rem;letter-spacing:0.02em;text-decoration:none}",
     "    .sl-legal{display:flex;gap:1.2rem;flex-wrap:wrap;justify-content:center;text-align:center;font-size:1.3rem;color:var(--sl-legal-text);padding:2.4rem 0 0}",
     "    .sl-legal span{flex:0 0 100%}",
     "    .sl-legal a{color:var(--sl-legal-link)}",
@@ -364,16 +343,8 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
 ]
 
 TEMPLATE_STYLES = {
-    "simple": SIMPLE_TEMPLATE_STYLES,
     "universal_bundle": UNIVERSAL_BUNDLE_TEMPLATE_STYLES,
 }
-
-
-def theme_color(page: dict[str, Any], name: str, fallback: str) -> str:
-    value = ((page.get("theme") or {}).get("color") or {}).get(name)
-    if isinstance(value, str) and value.startswith("#") and len(value) in {4, 7}:
-        return value
-    return fallback
 
 
 def format_money(unit_amount: int, currency: str) -> str:
@@ -386,7 +357,7 @@ def format_money(unit_amount: int, currency: str) -> str:
 
 
 def template_name(page: dict[str, Any]) -> str:
-    return str((page.get("theme") or {}).get("template") or "simple")
+    return str((page.get("theme") or {}).get("template") or "universal_bundle")
 
 
 def theme_tokens(page: dict[str, Any]) -> dict[str, str]:
@@ -478,22 +449,13 @@ def render_template_styles(page: dict[str, Any]) -> list[str]:
     except KeyError as exc:
         raise RenderError(f"Unsupported page theme.template '{template}'.") from exc
 
-    if template == "universal_bundle":
-        tokens = theme_tokens(page)
-        token_vars = ";".join(
-            f"--sl-{css_var_name(key)}:{escape(str(value))}"
-            for key, value in tokens.items()
-        )
-        return [
-            f"    :root{{{token_vars};--sl-theme-background:{escape(tokens['background'])};--sl-theme-text:{escape(tokens['text'])};--sl-theme-accent:{escape(tokens['accent'])};{font_vars(page)}}}",
-            *styles,
-        ]
-
-    background = escape(theme_color(page, "background", "#ffffff"))
-    text = escape(theme_color(page, "text", "#111827"))
-    accent = escape(theme_color(page, "accent", "#16a34a"))
+    tokens = theme_tokens(page)
+    token_vars = ";".join(
+        f"--sl-{css_var_name(key)}:{escape(str(value))}"
+        for key, value in tokens.items()
+    )
     return [
-        f"    :root{{--sl-theme-background:{background};--sl-theme-text:{text};--sl-theme-accent:{accent};--sl-highlight-text:{accent};--sl-highlight-bg:{accent};--sl-highlight-bg-text:#ffffff;{font_vars(page)}}}",
+        f"    :root{{{token_vars};--sl-theme-background:{escape(tokens['background'])};--sl-theme-text:{escape(tokens['text'])};--sl-theme-accent:{escape(tokens['accent'])};{font_vars(page)}}}",
         *styles,
     ]
 
@@ -1128,7 +1090,46 @@ def render_content_blocks(section: dict[str, Any]) -> str:
     ])
 
 
+CTA_TYPES = {"buy", "call", "email", "external", "booking"}
+
+
+def offer_cta(offer: dict[str, Any]) -> dict[str, str]:
+    """Normalize the offer's snapshotted CTA contract. The offer is the page's source of truth, so the
+    CTA type (buy / call / email / external / booking) drives which CTA component the page renders."""
+    presentation = offer.get("presentation") or {}
+    cta = presentation.get("cta") or {}
+    cta_type = str(cta.get("type") or "").strip().lower()
+    if cta_type not in CTA_TYPES:
+        cta_type = "buy"
+    return {
+        "type": cta_type,
+        "label": str(cta.get("label") or presentation.get("cta_label") or ""),
+        "target": str(cta.get("target") or ""),
+    }
+
+
 def render_checkout_cta(
+    page: dict[str, Any],
+    section: dict[str, Any],
+    offer: dict[str, Any],
+    resolved_offer: dict[str, Any],
+    checkout_url: str | None,
+    api_base_url: str | None = None,
+) -> str:
+    cta = offer_cta(offer)
+    cta_type = cta["type"]
+    if cta_type == "call":
+        return render_call_cta(cta)
+    if cta_type == "external":
+        return render_external_cta(cta)
+    if cta_type in {"email", "booking"}:
+        # Interim: a plain action button until the dedicated EmailCollector / BookingWidget components
+        # (plans/LANDING_PAGE_CTA_AND_COMPOSITION.md phases 2 & 3) render their inline experiences.
+        return render_action_cta(cta)
+    return render_buy_cta(page, section, offer, resolved_offer, checkout_url, api_base_url)
+
+
+def render_buy_cta(
     page: dict[str, Any],
     section: dict[str, Any],
     offer: dict[str, Any],
@@ -1147,9 +1148,49 @@ def render_checkout_cta(
         if value is not None and value != ""
     )
     return "\n".join([
-        "    <section class=\"sl-checkout-cta\" data-section-type=\"checkout_cta\">",
+        "    <section class=\"sl-checkout-cta\" data-section-type=\"checkout_cta\" data-cta-type=\"buy\">",
         f"      <a class=\"sl-cta\" href=\"{href}\" data-cta-label=\"{label}\" data-cta-currency=\"{escape(currency)}\" data-cta-amount=\"{subtotal}\" {data_attrs}>{label} - {escape(format_money(subtotal, currency))}</a>",
         "      <a class=\"sl-cta sl-decline-cta\" href=\"#decline\" data-role=\"decline\" style=\"display:none\">No thanks, continue</a>",
+        "    </section>",
+    ])
+
+
+def render_call_cta(cta: dict[str, str]) -> str:
+    """Phone/call CTA: a prominent number banner + a tel: call button."""
+    phone = cta["target"].strip()
+    label = escape(cta["label"] or "Call Now")
+    tel = re.sub(r"[^\d+]", "", phone)
+    href = f"tel:{escape(tel)}" if tel else "#"
+    number_line = f"      <a class=\"sl-call-number\" href=\"{href}\">{escape(phone)}</a>" if phone else ""
+    return "\n".join(line for line in [
+        "    <section class=\"sl-checkout-cta sl-call-cta\" data-section-type=\"checkout_cta\" data-cta-type=\"call\">",
+        number_line,
+        f"      <a class=\"sl-cta sl-call-button\" href=\"{href}\">{label}</a>",
+        "    </section>",
+    ] if line)
+
+
+def render_external_cta(cta: dict[str, str]) -> str:
+    """External-link CTA: a button that navigates out to the target URL in a new tab."""
+    url = cta["target"].strip()
+    label = escape(cta["label"] or "Learn More")
+    href = escape(url) if url else "#"
+    return "\n".join([
+        "    <section class=\"sl-checkout-cta sl-external-cta\" data-section-type=\"checkout_cta\" data-cta-type=\"external\">",
+        f"      <a class=\"sl-cta\" href=\"{href}\" target=\"_blank\" rel=\"noopener noreferrer\">{label}</a>",
+        "    </section>",
+    ])
+
+
+def render_action_cta(cta: dict[str, str]) -> str:
+    """Interim renderer for email/booking CTAs: a labeled button (no price) linking to the target."""
+    label = escape(cta["label"] or "Get Started")
+    target = cta["target"].strip()
+    href = escape(target) if target else "#"
+    cta_type = escape(cta["type"])
+    return "\n".join([
+        f"    <section class=\"sl-checkout-cta sl-{cta_type}-cta\" data-section-type=\"checkout_cta\" data-cta-type=\"{cta_type}\">",
+        f"      <a class=\"sl-cta\" href=\"{href}\">{label}</a>",
         "    </section>",
     ])
 
@@ -1307,7 +1348,9 @@ def render_page_interactions_script(page: dict[str, Any]) -> str:
         "        if (code === 'USD') return `$${(cents / 100).toFixed(2)}`;",
         "        return `${code} ${(cents / 100).toFixed(2)}`;",
         "      };",
-        "      const cta = document.querySelector('[data-section-type=\"checkout_cta\"] .sl-cta');",
+        "      const ctaSection = document.querySelector('[data-section-type=\"checkout_cta\"]');",
+        "      const ctaType = (ctaSection && ctaSection.dataset.ctaType) || 'buy';",
+        "      const cta = ctaType === 'buy' ? document.querySelector('[data-section-type=\"checkout_cta\"] .sl-cta') : null;",
         "      const declineCta = document.querySelector('[data-section-type=\"checkout_cta\"] .sl-decline-cta');",
         "      const cards = Array.from(document.querySelectorAll('.sl-price-option'));",
         "      const pageUrl = () => `${window.location.origin}${window.location.pathname}`;",

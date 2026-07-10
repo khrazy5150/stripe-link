@@ -27,7 +27,7 @@ SUPPORTED_PAGE_SECTION_TYPES = {
     "subheadline",
     "trust_badges",
 }
-SUPPORTED_PAGE_TEMPLATES = {"simple", "universal_bundle"}
+SUPPORTED_PAGE_TEMPLATES = {"universal_bundle"}
 SUPPORTED_THEME_PRESETS = {
     "techno-green",
     "rose-minimalist",
@@ -768,6 +768,13 @@ def validate_offer_document(document: dict[str, Any]) -> None:
         optional_string(presentation, "badge", "Offer presentation.badge")
         optional_string(presentation, "cta_label", "Offer presentation.cta_label")
         optional_string(presentation, "hero_image_url", "Offer presentation.hero_image_url")
+        cta = presentation.get("cta")
+        if cta is not None:
+            if not isinstance(cta, dict):
+                raise DocumentValidationError("Offer presentation.cta must be an object.")
+            require_enum(cta, "type", {"buy", "call", "email", "external", "booking"}, "Offer presentation.cta.type")
+            optional_string(cta, "label", "Offer presentation.cta.label")
+            optional_string(cta, "target", "Offer presentation.cta.target")
 
 
 def validate_coupon_document(document: dict[str, Any]) -> None:
