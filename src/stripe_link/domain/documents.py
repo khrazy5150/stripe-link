@@ -14,6 +14,7 @@ HTTP_URL_PATTERN = re.compile(r"^https?://[^\s\"'<>]+$")
 SUPPORTED_PAGE_SECTION_TYPES = {
     "brand_label",
     "checkout_cta",
+    "client_marquee",
     "content_block",
     "countdown_timer",
     "faq",
@@ -22,9 +23,11 @@ SUPPORTED_PAGE_SECTION_TYPES = {
     "hero_media",
     "legal_footer",
     "offer_price_selector",
+    "rating",
     "refund_policy",
     "seo_title",
     "subheadline",
+    "testimonials",
     "trust_badges",
 }
 SUPPORTED_PAGE_TEMPLATES = {"universal_bundle"}
@@ -952,6 +955,28 @@ def validate_page_document(document: dict[str, Any]) -> None:
                 require_string(block, "title", "Content block title")
                 require_string(block, "text", "Content block text")
                 optional_string(block, "image_url", "Content block image_url")
+        elif section_type == "testimonials":
+            optional_string(section, "heading", "Testimonials heading")
+            items = optional_limited_object_list(section, "items", 12, "Testimonials")
+            for item in items:
+                require_string(item, "quote", "Testimonial quote")
+                optional_string(item, "author", "Testimonial author")
+                optional_string(item, "role", "Testimonial role")
+                optional_string(item, "avatar_url", "Testimonial avatar_url")
+        elif section_type == "rating":
+            optional_string(section, "label", "Rating label")
+            value = section.get("value")
+            if value is not None and (not isinstance(value, (int, float)) or isinstance(value, bool) or not 0 <= value <= 5):
+                raise DocumentValidationError("Rating value must be a number between 0 and 5.")
+            count = section.get("count")
+            if count is not None and (not isinstance(count, int) or isinstance(count, bool) or count < 0):
+                raise DocumentValidationError("Rating count must be a non-negative integer.")
+        elif section_type == "client_marquee":
+            optional_string(section, "heading", "Client marquee heading")
+            logos = optional_limited_object_list(section, "logos", 24, "Client marquee logos")
+            for logo in logos:
+                require_string(logo, "image_url", "Client marquee logo image_url")
+                optional_string(logo, "name", "Client marquee logo name")
         elif section_type == "checkout_cta":
             optional_string(section, "label", "Checkout CTA label")
         elif section_type == "legal_footer":

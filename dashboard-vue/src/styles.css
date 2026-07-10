@@ -3666,6 +3666,129 @@ button:disabled {
   align-items: center;
 }
 
+/* Composable page elements */
+.element-add-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  margin-bottom: 1rem;
+}
+
+.element-empty {
+  color: var(--text-muted, #6b7280);
+  font-size: 1.3rem;
+}
+
+.element-list {
+  display: grid;
+  gap: 1rem;
+}
+
+.element-card {
+  display: grid;
+  gap: 0.8rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--input-bg);
+  padding: 1rem;
+}
+
+.element-card-header {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+}
+
+.element-card-header strong {
+  flex: 1;
+}
+
+.element-drag {
+  cursor: grab;
+  color: var(--text-muted, #9ca3af);
+  font-size: 1.4rem;
+  user-select: none;
+}
+
+.element-subrow {
+  display: grid;
+  gap: 0.6rem;
+  border: 1px dashed var(--line);
+  border-radius: var(--radius-sm, 8px);
+  padding: 0.8rem;
+}
+
+/* Preview elements */
+.preview-testimonials {
+  display: grid;
+  gap: 1rem;
+  width: min(100%, 52rem);
+  justify-self: center;
+}
+
+.preview-testimonials figure {
+  margin: 0;
+  display: grid;
+  gap: 0.5rem;
+  background: var(--preview-card);
+  border: 1px solid var(--preview-content-border);
+  border-radius: 1.2rem;
+  padding: 1.2rem;
+}
+
+.preview-testimonials img {
+  width: 4.4rem;
+  height: 4.4rem;
+  border-radius: 50%;
+  object-fit: cover;
+}
+
+.preview-testimonials blockquote {
+  margin: 0;
+  color: var(--preview-content-text);
+}
+
+.preview-testimonials figcaption {
+  font-size: 1.2rem;
+  color: var(--preview-content-text);
+  opacity: 0.8;
+}
+
+.preview-rating {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.preview-rating-stars {
+  color: #f59e0b;
+  font-size: 2rem;
+  letter-spacing: 0.2rem;
+}
+
+.preview-marquee {
+  width: min(100%, 52rem);
+  justify-self: center;
+  overflow: hidden;
+}
+
+.preview-marquee-row {
+  display: flex;
+  gap: 2.4rem;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+}
+
+.preview-marquee-row img {
+  height: 3.2rem;
+  width: auto;
+  object-fit: contain;
+  filter: grayscale(1);
+  opacity: 0.75;
+}
+
 .builder-trust-badge-row strong {
   color: var(--muted);
   font-size: 1.3rem;

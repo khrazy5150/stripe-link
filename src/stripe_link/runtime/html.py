@@ -356,6 +356,21 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     "    .sl-booking-consent{font-size:1.2rem;color:var(--sl-price-description)}",
     "    .sl-booking-banner{font-size:1.4rem;color:var(--sl-price-description)}",
     "    .sl-booking-banner.is-error{color:#dc2626}",
+    "    .sl-section-heading{font-family:var(--sl-font-heading);font-weight:800;font-size:2.4rem;text-align:center;color:var(--sl-content-heading);margin-bottom:1.6rem}",
+    "    .sl-testimonials{display:grid;gap:1.4rem}",
+    "    .sl-testimonial{display:grid;gap:0.8rem;background:var(--sl-card);border:1px solid var(--sl-content-border);border-radius:1.2rem;padding:1.6rem;margin:0}",
+    "    .sl-testimonial img{width:5.6rem;height:5.6rem;border-radius:50%;object-fit:cover}",
+    "    .sl-testimonial blockquote{margin:0;font-size:1.6rem;line-height:1.5;color:var(--sl-content-text)}",
+    "    .sl-testimonial figcaption{font-size:1.4rem;color:var(--sl-muted)}",
+    "    .sl-rating{display:flex;flex-direction:column;align-items:center;gap:0.4rem}",
+    "    .sl-rating-stars{color:#f59e0b;font-size:2.4rem;letter-spacing:0.2rem}",
+    "    .sl-rating-meta{font-size:1.4rem;color:var(--sl-content-text)}",
+    "    .sl-client-marquee{overflow:hidden}",
+    "    .sl-marquee-track{display:flex;width:max-content;animation:sl-marquee 30s linear infinite}",
+    "    .sl-marquee-row{display:flex;align-items:center;gap:3.2rem;padding-right:3.2rem}",
+    "    .sl-marquee-logo img{height:4rem;width:auto;object-fit:contain;filter:grayscale(1);opacity:0.75}",
+    "    @keyframes sl-marquee{from{transform:translateX(0)}to{transform:translateX(-50%)}}",
+    "    @media (prefers-reduced-motion: reduce){.sl-marquee-track{animation:none;flex-wrap:wrap}}",
     "    .sl-legal{display:flex;gap:1.2rem;flex-wrap:wrap;justify-content:center;text-align:center;font-size:1.3rem;color:var(--sl-legal-text);padding:2.4rem 0 0}",
     "    .sl-legal span{flex:0 0 100%}",
     "    .sl-legal a{color:var(--sl-legal-link)}",
@@ -638,6 +653,12 @@ def render_section(
         return render_faq(section)
     if section_type == "content_block":
         return render_content_blocks(section)
+    if section_type == "testimonials":
+        return render_testimonials(section)
+    if section_type == "rating":
+        return render_rating(section)
+    if section_type == "client_marquee":
+        return render_client_marquee(section)
     if section_type == "checkout_cta":
         return render_checkout_cta(page, section, offer, resolved_offer, checkout_url, api_base_url, products_by_id)
     if section_type == "legal_footer":
@@ -1136,6 +1157,85 @@ def offer_cta(offer: dict[str, Any]) -> dict[str, str]:
         "label": str(cta.get("label") or presentation.get("cta_label") or ""),
         "target": str(cta.get("target") or ""),
     }
+
+
+def render_testimonials(section: dict[str, Any]) -> str:
+    items = section.get("items") or []
+    cards = []
+    for item in items:
+        quote = str(item.get("quote") or "").strip()
+        if not quote:
+            continue
+        author = str(item.get("author") or "").strip()
+        role = str(item.get("role") or "").strip()
+        avatar_url = str(item.get("avatar_url") or "").strip()
+        byline = " · ".join(part for part in [f"<strong>{escape(author)}</strong>" if author else "", escape(role) if role else ""] if part)
+        cards.append("\n".join(line for line in [
+            "      <figure class=\"sl-testimonial\">",
+            (f"        {responsive_img(avatar_url, author or 'Reviewer', sizes=CONTENT_BLOCK_SIZES)}" if avatar_url else ""),
+            f"        <blockquote>{escape(quote)}</blockquote>",
+            (f"        <figcaption>{byline}</figcaption>" if byline else ""),
+            "      </figure>",
+        ] if line))
+    if not cards:
+        return ""
+    heading = str(section.get("heading") or "").strip()
+    heading_html = f"      <h2 class=\"sl-section-heading\">{render_headline_markup(heading)}</h2>" if heading else ""
+    return "\n".join(line for line in [
+        f"    <section class=\"sl-testimonials\" data-section-id=\"{escape(str(section.get('id', 'testimonials')))}\" data-section-type=\"testimonials\">",
+        heading_html,
+        *cards,
+        "    </section>",
+    ] if line)
+
+
+def render_rating(section: dict[str, Any]) -> str:
+    try:
+        value = float(section.get("value") or 0)
+    except (TypeError, ValueError):
+        value = 0.0
+    value = max(0.0, min(5.0, value))
+    full = int(value)
+    half = 1 if value - full >= 0.5 else 0
+    stars = "★" * full + ("⯨" if half else "") + "☆" * (5 - full - half)
+    count = section.get("count")
+    label = str(section.get("label") or "").strip()
+    meta_parts = []
+    if value:
+        meta_parts.append(f"<strong>{value:.1f}</strong>")
+    if isinstance(count, int) and count > 0:
+        meta_parts.append(f"{count:,} reviews")
+    if label:
+        meta_parts.append(escape(label))
+    meta = " · ".join(meta_parts)
+    return "\n".join(line for line in [
+        f"    <section class=\"sl-rating\" data-section-id=\"{escape(str(section.get('id', 'rating')))}\" data-section-type=\"rating\">",
+        f"      <span class=\"sl-rating-stars\" aria-hidden=\"true\">{stars}</span>",
+        (f"      <span class=\"sl-rating-meta\">{meta}</span>" if meta else ""),
+        "    </section>",
+    ] if line)
+
+
+def render_client_marquee(section: dict[str, Any]) -> str:
+    logos = [logo for logo in (section.get("logos") or []) if str(logo.get("image_url") or "").strip()]
+    if not logos:
+        return ""
+    # Duplicate the row so the CSS marquee scrolls seamlessly.
+    items = "".join(
+        f"<span class=\"sl-marquee-logo\">{responsive_img(str(logo.get('image_url')), str(logo.get('name') or 'Client'), sizes=CONTENT_BLOCK_SIZES)}</span>"
+        for logo in logos
+    )
+    heading = str(section.get("heading") or "").strip()
+    heading_html = f"      <h2 class=\"sl-section-heading\">{render_headline_markup(heading)}</h2>" if heading else ""
+    return "\n".join(line for line in [
+        f"    <section class=\"sl-client-marquee\" data-section-id=\"{escape(str(section.get('id', 'client-marquee')))}\" data-section-type=\"client_marquee\">",
+        heading_html,
+        "      <div class=\"sl-marquee-track\">",
+        f"        <div class=\"sl-marquee-row\">{items}</div>",
+        f"        <div class=\"sl-marquee-row\" aria-hidden=\"true\">{items}</div>",
+        "      </div>",
+        "    </section>",
+    ] if line)
 
 
 def render_checkout_cta(

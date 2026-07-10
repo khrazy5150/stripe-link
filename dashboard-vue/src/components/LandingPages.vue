@@ -444,36 +444,86 @@
 
           <section class="builder-section">
             <header class="builder-section-title">
-              <h3>Content Blurbs</h3>
-              <button class="secondary-action compact" type="button" @click="addBlurb">+ Add Blurb</button>
+              <h3>Page Elements</h3>
             </header>
-            <div class="builder-repeat-list">
-              <div v-for="(block, index) in builder.blurbs" :key="`blurb-${index}`" class="builder-repeat-row">
-                <input :value="block.title" type="text" placeholder="Title" @input="applyTitleCaseInput((value) => { block.title = value; }, $event)" />
-                <textarea v-model.trim="block.text" rows="2" placeholder="Text"></textarea>
-                <div class="selectable-price-image-controls" :class="{ 'has-image-preview': block.image_url }">
-                  <div v-if="block.image_url" class="selectable-price-image-preview">
-                    <img :src="block.image_url" :alt="`${block.title || 'Blurb'} image preview`" />
+            <div class="element-add-row">
+              <button v-for="entry in ELEMENT_TYPES" :key="entry.type" class="secondary-action compact" type="button" @click="addElement(entry.type)">
+                + {{ entry.label }}
+              </button>
+            </div>
+            <p v-if="!builder.elements.length" class="element-empty">
+              Add testimonials, ratings, content, client logos, or FAQs — drag to reorder.
+            </p>
+            <div class="element-list">
+              <div
+                v-for="(element, index) in builder.elements"
+                :key="element.id"
+                class="element-card"
+                draggable="true"
+                @dragstart="onElementDragStart(index)"
+                @dragover.prevent
+                @drop="onElementDrop(index)"
+              >
+                <header class="element-card-header">
+                  <span class="element-drag" title="Drag to reorder">⠿</span>
+                  <strong>{{ elementLabel(element.type) }}</strong>
+                  <button class="danger-action compact" type="button" @click="removeElement(element.id)">Remove</button>
+                </header>
+
+                <template v-if="element.type === 'content_block'">
+                  <input :value="element.title" type="text" placeholder="Title" @input="applyTitleCaseInput((value) => { element.title = value; }, $event)" />
+                  <textarea v-model.trim="element.text" rows="2" placeholder="Text"></textarea>
+                  <div class="selectable-price-image-controls" :class="{ 'has-image-preview': element.image_url }">
+                    <div v-if="element.image_url" class="selectable-price-image-preview">
+                      <img :src="element.image_url" alt="Content image preview" />
+                    </div>
+                    <input :ref="(el) => setElementImageInput(element.id, el)" type="file" accept="image/*" hidden @change="handleElementImagePicked(element, $event)" />
+                    <button class="secondary-action compact" type="button" :disabled="Boolean(blurbImageUploading[element.id])" @click.prevent="triggerElementImageUpload(element.id)">
+                      {{ blurbImageUploading[element.id] ? "Uploading..." : "Upload Image" }}
+                    </button>
+                    <input v-model.trim="element.image_url" type="url" placeholder="Optional image URL" />
                   </div>
-                  <input
-                    :ref="(el) => setBlurbImageInput(index, el)"
-                    type="file"
-                    accept="image/*"
-                    hidden
-                    @change="handleBlurbImagePicked(index, $event)"
-                  />
-                  <button
-                    class="secondary-action compact"
-                    type="button"
-                    :disabled="Boolean(blurbImageUploading[index])"
-                    @click.prevent="triggerBlurbImageUpload(index)"
-                  >
-                    {{ blurbImageUploading[index] ? "Uploading..." : "Upload Image" }}
-                  </button>
-                  <input v-model.trim="block.image_url" type="url" placeholder="Optional image URL" />
-                </div>
-                <div v-if="blurbImageErrors[index]" class="price-image-error">{{ blurbImageErrors[index] }}</div>
-                <button class="danger-action compact" type="button" @click="removeBlurb(index)">Remove</button>
+                  <div v-if="blurbImageErrors[element.id]" class="price-image-error">{{ blurbImageErrors[element.id] }}</div>
+                </template>
+
+                <template v-else-if="element.type === 'testimonials'">
+                  <input v-model.trim="element.heading" type="text" placeholder="Section heading (optional)" />
+                  <div v-for="(item, i) in element.items" :key="i" class="element-subrow">
+                    <textarea v-model.trim="item.quote" rows="2" placeholder="Quote"></textarea>
+                    <input v-model.trim="item.author" type="text" placeholder="Author" />
+                    <input v-model.trim="item.role" type="text" placeholder="Role (optional)" />
+                    <input v-model.trim="item.avatar_url" type="url" placeholder="Avatar URL (optional)" />
+                    <button class="danger-action compact" type="button" @click="removeSubItem(element, 'items', i)">Remove</button>
+                  </div>
+                  <button class="secondary-action compact" type="button" @click="addSubItem(element, 'items', { quote: '', author: '', role: '', avatar_url: '' })">+ Add testimonial</button>
+                </template>
+
+                <template v-else-if="element.type === 'rating'">
+                  <div class="offer-two-column">
+                    <label class="offer-field"><span>Stars (0–5)</span><input v-model.number="element.value" type="number" min="0" max="5" step="0.1" /></label>
+                    <label class="offer-field"><span>Review count</span><input v-model.number="element.count" type="number" min="0" /></label>
+                  </div>
+                  <label class="offer-field"><span>Label</span><input v-model.trim="element.label" type="text" placeholder="e.g. on Google" /></label>
+                </template>
+
+                <template v-else-if="element.type === 'client_marquee'">
+                  <input v-model.trim="element.heading" type="text" placeholder="Section heading (optional)" />
+                  <div v-for="(logo, i) in element.logos" :key="i" class="element-subrow">
+                    <input v-model.trim="logo.image_url" type="url" placeholder="Logo image URL" />
+                    <input v-model.trim="logo.name" type="text" placeholder="Client name (optional)" />
+                    <button class="danger-action compact" type="button" @click="removeSubItem(element, 'logos', i)">Remove</button>
+                  </div>
+                  <button class="secondary-action compact" type="button" @click="addSubItem(element, 'logos', { image_url: '', name: '' })">+ Add logo</button>
+                </template>
+
+                <template v-else-if="element.type === 'faq'">
+                  <div v-for="(item, i) in element.items" :key="i" class="element-subrow">
+                    <input :value="item.question" type="text" placeholder="Question" @input="applyTitleCaseInput((value) => { item.question = value; }, $event)" />
+                    <textarea v-model.trim="item.answer" rows="2" placeholder="Answer"></textarea>
+                    <button class="danger-action compact" type="button" @click="removeSubItem(element, 'items', i)">Remove</button>
+                  </div>
+                  <button class="secondary-action compact" type="button" @click="addSubItem(element, 'items', { question: '', answer: '' })">+ Add question</button>
+                </template>
               </div>
             </div>
           </section>
@@ -488,20 +538,6 @@
               <strong>{{ ctaTypeLabel(builderCta.type) }}</strong>
               <span>{{ ctaTypeDescription(builderCta.type) }} This comes from the offer and can't be changed here.</span>
               <code v-if="builderCta.target">{{ builderCta.target }}</code>
-            </div>
-          </section>
-
-          <section class="builder-section">
-            <header class="builder-section-title">
-              <h3>FAQ</h3>
-              <button class="secondary-action compact" type="button" @click="addFaq">+ Add FAQ</button>
-            </header>
-            <div class="builder-repeat-list">
-              <div v-for="(item, index) in builder.faq" :key="`faq-${index}`" class="builder-repeat-row">
-                <input :value="item.question" type="text" placeholder="Question" @input="applyTitleCaseInput((value) => { item.question = value; }, $event)" />
-                <textarea v-model.trim="item.answer" rows="2" placeholder="Answer"></textarea>
-                <button class="danger-action compact" type="button" @click="removeFaq(index)">Remove</button>
-              </div>
             </div>
           </section>
 
@@ -575,6 +611,40 @@
           <div v-if="visibleTrustBadges.length" class="preview-badges">
             <span v-for="badge in visibleTrustBadges" :key="badge.label">{{ badge.emoji }} {{ badge.label }}</span>
           </div>
+          <!-- Composable elements, in the tenant's order (matches the published page). -->
+          <template v-for="entry in previewElements" :key="entry.element.id">
+            <article v-if="entry.element.type === 'content_block'" class="preview-blurbs">
+              <span class="preview-blurb-copy">
+                <strong v-html="headlineHtml(entry.element.title)"></strong>
+                <p>{{ entry.element.text }}</p>
+              </span>
+              <img v-if="entry.element.image_url" :src="entry.element.image_url" alt="" />
+            </article>
+            <div v-else-if="entry.element.type === 'testimonials'" class="preview-testimonials">
+              <h2 v-if="entry.element.heading" v-html="headlineHtml(entry.element.heading)"></h2>
+              <figure v-for="(item, i) in entry.section.items" :key="i">
+                <img v-if="item.avatar_url" :src="item.avatar_url" alt="" />
+                <blockquote>{{ item.quote }}</blockquote>
+                <figcaption v-if="item.author || item.role"><strong>{{ item.author }}</strong> {{ item.role }}</figcaption>
+              </figure>
+            </div>
+            <div v-else-if="entry.element.type === 'rating'" class="preview-rating">
+              <span class="preview-rating-stars">{{ "★".repeat(Math.round(Math.min(5, Math.max(0, entry.element.value || 0)))) }}</span>
+              <span>{{ Number(entry.element.value || 0).toFixed(1) }}<template v-if="entry.element.count"> · {{ Number(entry.element.count).toLocaleString() }} reviews</template><template v-if="entry.element.label"> · {{ entry.element.label }}</template></span>
+            </div>
+            <div v-else-if="entry.element.type === 'client_marquee'" class="preview-marquee">
+              <h2 v-if="entry.element.heading" v-html="headlineHtml(entry.element.heading)"></h2>
+              <div class="preview-marquee-row">
+                <img v-for="(logo, i) in entry.section.logos" :key="i" :src="logo.image_url" :alt="logo.name || ''" />
+              </div>
+            </div>
+            <div v-else-if="entry.element.type === 'faq'" class="preview-faqs">
+              <details v-for="(item, i) in entry.section.items" :key="i" open>
+                <summary v-html="headlineHtml(item.question)"></summary>
+                <p>{{ item.answer }}</p>
+              </details>
+            </div>
+          </template>
           <!-- One CTA component, chosen by the offer's cta.type. The page never combines CTAs. -->
           <div v-if="ctaShowsPrices" class="preview-prices">
             <button
@@ -612,22 +682,6 @@
             <strong>{{ builderLeadAction?.title || builderCta.label || "Get started" }}</strong>
             <span>{{ builderLeadAction?.description || "Enter your details to continue." }}</span>
             <span class="preview-email-input" aria-hidden="true">you@example.com</span>
-          </div>
-          <div v-if="builder.blurbs.length" class="preview-blurbs">
-            <article v-for="block in visibleBlurbs" :key="block.title">
-              <span class="preview-blurb-copy">
-                <strong v-html="headlineHtml(block.title)"></strong>
-                <p>{{ block.text }}</p>
-              </span>
-              <img v-if="block.image_url" :src="block.image_url" alt="" />
-            </article>
-          </div>
-          <div v-if="visibleFaqs.length" class="preview-faqs">
-            <h2>FAQ</h2>
-            <details v-for="item in visibleFaqs" :key="item.question" open>
-              <summary v-html="headlineHtml(item.question)"></summary>
-              <p>{{ item.answer }}</p>
-            </details>
           </div>
           <details v-if="builder.refund_policy.enabled && previewRefundPolicy" class="preview-refund-policy">
             <summary>{{ previewRefundPolicy.short_label || "Refund policy" }}</summary>
@@ -770,8 +824,7 @@ const builderProductImages = computed(() => [...new Set(builderOfferProducts.val
 const heroMediaList = computed(() => parseLines(builder.hero_media_text));
 const previewHeroImage = computed(() => heroMediaList.value[0] || offerImage(builderOffer.value) || "");
 const visibleTrustBadges = computed(() => builder.trust_badges.badges.filter((badge) => badge.enabled !== false && badge.label));
-const visibleBlurbs = computed(() => builder.blurbs.filter((block) => block.title || block.text || block.image_url));
-const visibleFaqs = computed(() => builder.faq.filter((item) => item.question && item.answer));
+const previewElements = computed(() => builder.elements.map((element) => ({ element, section: elementSection(element) })).filter((entry) => entry.section));
 const previewRefundPolicy = computed(() => builderOffer.value?.refund_policy || builderOfferProducts.value[0]?.refund_policy || null);
 const previewRefundAppliesTo = computed(() => previewPrices.value.map((price) => price.label).filter(Boolean).join(", "));
 const previewRefundReturnNote = computed(() => refundPolicyReturnNote(previewRefundPolicy.value));
@@ -905,8 +958,7 @@ function defaultBuilderForm() {
     refund_policy: {
       enabled: true,
     },
-    blurbs: [],
-    faq: [],
+    elements: [],
     google_tag_id: "",
     pixel_id: "",
     status: "draft",
@@ -1091,8 +1143,6 @@ function populateBuilderFromPage(page) {
   const heroMedia = sections.find((section) => section.type === "hero_media") || {};
   const trustBadges = sections.find((section) => section.type === "trust_badges") || {};
   const refundPolicy = sections.find((section) => section.type === "refund_policy") || {};
-  const content = sections.find((section) => section.type === "content_block") || {};
-  const faq = sections.find((section) => section.type === "faq") || {};
   const cta = sections.find((section) => section.type === "checkout_cta") || {};
   Object.assign(builder, defaultBuilderForm(), {
     page_id: page.page_id || localId("page"),
@@ -1111,8 +1161,7 @@ function populateBuilderFromPage(page) {
     subheadline: hero.subheadline || sectionText(sections, "subheadline") || "",
     hero_media_text: (heroMedia.images || [page.seo?.image || pageImage(page)].filter(Boolean)).join("\n"),
     cta_label: cta.label || (offerIntentLabel(offer) === "Lead generation" ? "Continue" : "Buy Now"),
-    blurbs: Array.isArray(content.blocks) ? content.blocks.map((block) => ({ ...block })) : [],
-    faq: Array.isArray(faq.items) ? faq.items.map((item) => ({ ...item })) : [],
+    elements: elementsFromPage(sections),
     google_tag_id: page.analytics?.google_tag_id || "",
     pixel_id: page.analytics?.pixel_id || "",
     status: page.status || "draft",
@@ -1248,30 +1297,16 @@ function builderSections(intent) {
       })),
     });
   }
-  if (visibleBlurbs.value.length) {
-    sections.push({
-      id: "content",
-      type: "content_block",
-      blocks: visibleBlurbs.value.map((block) => ({
-        ...block,
-        title: formatHeadline(block.title || ""),
-      })),
-    });
-  }
+  // Composable body: the tenant's ordered elements (content, testimonials, rating, logos, FAQ).
+  builder.elements.forEach((element) => {
+    const section = elementSection(element);
+    if (section) sections.push(section);
+  });
   if (intent === "transaction") {
     sections.push({
       id: "offer-selector",
       type: "offer_price_selector",
       offer_id: builder.offer_id,
-    });
-  }
-  if (builder.faq.some((item) => item.question && item.answer)) {
-    sections.push({
-      id: "faq",
-      type: "faq",
-      items: builder.faq
-        .filter((item) => item.question && item.answer)
-        .map((item) => ({ ...item, question: formatHeadline(item.question || "") })),
     });
   }
   sections.push(
@@ -1561,50 +1596,135 @@ async function handleHeroMediaPicked(event) {
   }
 }
 
-function setBlurbImageInput(index, el) {
-  if (el) blurbImageInputs.value[index] = el;
-  else delete blurbImageInputs.value[index];
+// Composable page elements: an ordered, draggable list the tenant builds. Each element maps 1:1 to a
+// rendered page section (plans/LANDING_PAGE_CTA_AND_COMPOSITION.md phase 4).
+const ELEMENT_TYPES = [
+  { type: "content_block", label: "Content" },
+  { type: "testimonials", label: "Testimonials" },
+  { type: "rating", label: "Rating" },
+  { type: "client_marquee", label: "Client Logos" },
+  { type: "faq", label: "FAQ" },
+];
+
+function elementLabel(type) {
+  return ELEMENT_TYPES.find((entry) => entry.type === type)?.label || type;
 }
 
-function triggerBlurbImageUpload(index) {
-  blurbImageInputs.value[index]?.click();
+function newElement(type) {
+  const base = { id: localId("el"), type };
+  if (type === "content_block") return { ...base, title: "", text: "", image_url: "" };
+  if (type === "testimonials") return { ...base, heading: "", items: [{ quote: "", author: "", role: "", avatar_url: "" }] };
+  if (type === "rating") return { ...base, value: 5, count: 0, label: "" };
+  if (type === "client_marquee") return { ...base, heading: "", logos: [{ image_url: "", name: "" }] };
+  if (type === "faq") return { ...base, items: [{ question: "", answer: "" }] };
+  return base;
 }
 
-async function handleBlurbImagePicked(index, event) {
+function addElement(type) {
+  if (builder.elements.length >= 20) return;
+  builder.elements.push(newElement(type));
+}
+
+function removeElement(id) {
+  const index = builder.elements.findIndex((element) => element.id === id);
+  if (index >= 0) builder.elements.splice(index, 1);
+  delete blurbImageUploading[id];
+  delete blurbImageErrors[id];
+  delete blurbImageInputs.value[id];
+}
+
+function addSubItem(element, key, item) {
+  (element[key] = element[key] || []).push(item);
+}
+
+function removeSubItem(element, key, index) {
+  element[key].splice(index, 1);
+}
+
+const elementDragIndex = ref(-1);
+function onElementDragStart(index) {
+  elementDragIndex.value = index;
+}
+function onElementDrop(index) {
+  const from = elementDragIndex.value;
+  elementDragIndex.value = -1;
+  if (from < 0 || from === index) return;
+  const [moved] = builder.elements.splice(from, 1);
+  builder.elements.splice(index, 0, moved);
+}
+
+function setElementImageInput(id, el) {
+  if (el) blurbImageInputs.value[id] = el;
+  else delete blurbImageInputs.value[id];
+}
+function triggerElementImageUpload(id) {
+  blurbImageInputs.value[id]?.click();
+}
+async function handleElementImagePicked(element, event) {
   const file = event.target.files?.[0];
   event.target.value = "";
-  if (!file || !builder.blurbs[index]) return;
-  blurbImageErrors[index] = "";
-  blurbImageUploading[index] = true;
+  if (!file) return;
+  blurbImageErrors[element.id] = "";
+  blurbImageUploading[element.id] = true;
   try {
-    builder.blurbs[index].image_url = await uploadImage(file);
+    element.image_url = await uploadImage(file);
   } catch (err) {
-    blurbImageErrors[index] = err.message || "Image upload failed.";
+    blurbImageErrors[element.id] = err.message || "Image upload failed.";
   } finally {
-    blurbImageUploading[index] = false;
+    blurbImageUploading[element.id] = false;
   }
 }
 
-
-function addBlurb() {
-  if (builder.blurbs.length >= 8) return;
-  builder.blurbs.push({ title: "", text: "", image_url: "" });
+// Map a composable element to its rendered page section, or null when empty.
+function elementSection(element) {
+  if (element.type === "content_block") {
+    if (!element.title && !element.text && !element.image_url) return null;
+    return { id: element.id, type: "content_block", blocks: [{ title: formatHeadline(element.title || ""), text: element.text || "", image_url: element.image_url || undefined }] };
+  }
+  if (element.type === "testimonials") {
+    const items = (element.items || []).filter((item) => (item.quote || "").trim());
+    if (!items.length) return null;
+    return { id: element.id, type: "testimonials", heading: element.heading || undefined,
+      items: items.map((item) => ({ quote: item.quote, author: item.author || undefined, role: item.role || undefined, avatar_url: item.avatar_url || undefined })) };
+  }
+  if (element.type === "rating") {
+    return { id: element.id, type: "rating", value: Number(element.value || 0), count: Number(element.count || 0), label: element.label || undefined };
+  }
+  if (element.type === "client_marquee") {
+    const logos = (element.logos || []).filter((logo) => (logo.image_url || "").trim());
+    if (!logos.length) return null;
+    return { id: element.id, type: "client_marquee", heading: element.heading || undefined,
+      logos: logos.map((logo) => ({ image_url: logo.image_url, name: logo.name || undefined })) };
+  }
+  if (element.type === "faq") {
+    const items = (element.items || []).filter((item) => item.question && item.answer);
+    if (!items.length) return null;
+    return { id: element.id, type: "faq", items: items.map((item) => ({ question: formatHeadline(item.question || ""), answer: item.answer })) };
+  }
+  return null;
 }
 
-function removeBlurb(index) {
-  builder.blurbs.splice(index, 1);
-  delete blurbImageUploading[index];
-  delete blurbImageErrors[index];
-  delete blurbImageInputs.value[index];
-}
-
-function addFaq() {
-  if (builder.faq.length >= 10) return;
-  builder.faq.push({ question: "", answer: "" });
-}
-
-function removeFaq(index) {
-  builder.faq.splice(index, 1);
+// Rebuild the editable element list from an existing page's sections (round-trip on edit).
+function elementsFromPage(sections) {
+  const elements = [];
+  for (const section of sections || []) {
+    if (section.type === "content_block") {
+      for (const block of section.blocks || []) {
+        elements.push({ id: localId("el"), type: "content_block", title: block.title || "", text: block.text || "", image_url: block.image_url || "" });
+      }
+    } else if (section.type === "testimonials") {
+      elements.push({ id: localId("el"), type: "testimonials", heading: section.heading || "",
+        items: (section.items || []).map((item) => ({ quote: item.quote || "", author: item.author || "", role: item.role || "", avatar_url: item.avatar_url || "" })) });
+    } else if (section.type === "rating") {
+      elements.push({ id: localId("el"), type: "rating", value: section.value ?? 5, count: section.count ?? 0, label: section.label || "" });
+    } else if (section.type === "client_marquee") {
+      elements.push({ id: localId("el"), type: "client_marquee", heading: section.heading || "",
+        logos: (section.logos || []).map((logo) => ({ image_url: logo.image_url || "", name: logo.name || "" })) });
+    } else if (section.type === "faq") {
+      elements.push({ id: localId("el"), type: "faq", items: (section.items || []).map((item) => ({ question: item.question || "", answer: item.answer || "" })) });
+    }
+  }
+  return elements;
 }
 
 async function onBuilderOfferChange() {
