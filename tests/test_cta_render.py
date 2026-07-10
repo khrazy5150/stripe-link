@@ -43,10 +43,15 @@ class OfferCtaTests(unittest.TestCase):
         self.assertIn('target="_blank"', html)
         self.assertNotIn("$150.00", html)
 
-    def test_booking_renders_action_button_without_price(self):
-        html = _render({"type": "booking", "label": "Go", "target": "svc_1"})
+    def test_booking_renders_inline_calendar_widget(self):
+        html = _render({"type": "booking", "label": "Book Now", "target": "svc_1"})
         self.assertIn('data-cta-type="booking"', html)
-        self.assertNotIn("$150.00", html)
+        self.assertIn('data-booking-widget', html)
+        self.assertIn('data-service-id="svc_1"', html)
+        self.assertIn('data-booking-reveal', html)      # button reveals the panel
+        self.assertIn('data-booking-panel', html)       # inline calendar panel
+        self.assertIn('data-booking-slots', html)
+        self.assertNotIn("$150.00", html)               # a booking CTA is not a price button
 
     def test_email_renders_inline_form_from_lead_capture_fields(self):
         page = {"tenant_id": "t1", "page_id": "pg_1"}

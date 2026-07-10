@@ -345,6 +345,17 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     "    .sl-lead-status{font-size:1.4rem;color:var(--sl-price-description);text-align:center;min-height:1.4rem}",
     "    .sl-lead-status.is-error{color:#dc2626}",
     "    .sl-hp{position:absolute;left:-9999px;width:1px;height:1px;opacity:0;pointer-events:none}",
+    "    .sl-booking-panel{display:flex;flex-direction:column;gap:1rem;width:min(52rem,100%);background:var(--sl-price-card-bg);border:1px solid var(--sl-price-card-border);border-radius:1.2rem;padding:1.6rem;margin-top:1.2rem;text-align:left}",
+    "    .sl-booking-heading{font-family:var(--sl-font-heading);font-weight:800;font-size:1.6rem;color:var(--sl-price-title)}",
+    "    .sl-booking-slots.is-empty{color:var(--sl-price-description);font-size:1.4rem}",
+    "    .sl-booking-day{margin-bottom:1rem}",
+    "    .sl-booking-day h4{font-size:1.4rem;font-weight:700;color:var(--sl-price-title);margin-bottom:0.6rem}",
+    "    .sl-booking-times{display:flex;flex-wrap:wrap;gap:0.6rem}",
+    "    .sl-booking-slot{border:1px solid var(--sl-price-card-border);background:var(--sl-background);color:var(--sl-text);border-radius:0.8rem;padding:0.6rem 1rem;font-size:1.4rem;cursor:pointer}",
+    "    .sl-booking-slot.selected{background:var(--sl-brand);color:#fff;border-color:var(--sl-brand)}",
+    "    .sl-booking-consent{font-size:1.2rem;color:var(--sl-price-description)}",
+    "    .sl-booking-banner{font-size:1.4rem;color:var(--sl-price-description)}",
+    "    .sl-booking-banner.is-error{color:#dc2626}",
     "    .sl-legal{display:flex;gap:1.2rem;flex-wrap:wrap;justify-content:center;text-align:center;font-size:1.3rem;color:var(--sl-legal-text);padding:2.4rem 0 0}",
     "    .sl-legal span{flex:0 0 100%}",
     "    .sl-legal a{color:var(--sl-legal-link)}",
@@ -1145,9 +1156,7 @@ def render_checkout_cta(
     if cta_type == "email":
         return render_email_cta(page, offer, cta, products_by_id or {}, api_base_url)
     if cta_type == "booking":
-        # Interim: a plain action button until the BookingWidget component
-        # (plans/LANDING_PAGE_CTA_AND_COMPOSITION.md phase 3) renders the inline calendar.
-        return render_action_cta(cta)
+        return render_booking_cta(cta, api_base_url)
     return render_buy_cta(page, section, offer, resolved_offer, checkout_url, api_base_url)
 
 
@@ -1263,15 +1272,26 @@ def render_external_cta(cta: dict[str, str]) -> str:
     ])
 
 
-def render_action_cta(cta: dict[str, str]) -> str:
-    """Interim renderer for email/booking CTAs: a labeled button (no price) linking to the target."""
-    label = escape(cta["label"] or "Get Started")
-    target = cta["target"].strip()
-    href = escape(target) if target else "#"
-    cta_type = escape(cta["type"])
+def render_booking_cta(cta: dict[str, str], api_base_url: str | None) -> str:
+    """Booking CTA: a button that reveals an inline booking calendar. The JS island (page interactions)
+    drives the same public availability -> reserve -> checkout flow as the standalone /book page."""
+    service_id = escape(cta["target"].strip())
+    label = escape(cta["label"] or "Book Now")
+    api_base = escape(str(api_base_url or "").rstrip("/"))
     return "\n".join([
-        f"    <section class=\"sl-checkout-cta sl-{cta_type}-cta\" data-section-type=\"checkout_cta\" data-cta-type=\"{cta_type}\">",
-        f"      <a class=\"sl-cta\" href=\"{href}\">{label}</a>",
+        "    <section class=\"sl-checkout-cta sl-booking-cta\" data-section-type=\"checkout_cta\" data-cta-type=\"booking\"",
+        f"      data-booking-widget data-service-id=\"{service_id}\" data-api-base=\"{api_base}\">",
+        f"      <button class=\"sl-cta\" type=\"button\" data-booking-reveal>{label}</button>",
+        "      <div class=\"sl-booking-panel\" data-booking-panel hidden>",
+        "        <div class=\"sl-booking-banner\" data-booking-banner role=\"status\" aria-live=\"polite\"></div>",
+        "        <p class=\"sl-booking-heading\">Choose a time</p>",
+        "        <div class=\"sl-booking-slots\" data-booking-slots>Loading available times…</div>",
+        "        <input class=\"sl-lead-input\" type=\"text\" data-booking-name placeholder=\"Name\" autocomplete=\"name\" />",
+        "        <input class=\"sl-lead-input\" type=\"email\" data-booking-email placeholder=\"Email\" autocomplete=\"email\" required />",
+        "        <input class=\"sl-lead-input\" type=\"tel\" data-booking-phone placeholder=\"Phone (optional)\" autocomplete=\"tel\" />",
+        "        <p class=\"sl-booking-consent\">By adding your phone number, you agree to receive SMS appointment reminders. Message &amp; data rates may apply; reply STOP to opt out.</p>",
+        "        <button class=\"sl-cta\" type=\"button\" data-booking-confirm disabled>Select a time</button>",
+        "      </div>",
         "    </section>",
     ])
 
@@ -1458,6 +1478,85 @@ def render_page_interactions_script(page: dict[str, Any]) -> str:
         "            if (submitBtn) { submitBtn.dataset.busy = 'false'; submitBtn.classList.remove('is-connecting'); }",
         "          });",
         "        });",
+        "      }",
+        # Inline booking widget: reveal on click, then drive availability -> reserve -> checkout (same
+        # public flow as the standalone /book page), cross-origin to the API base.
+        "      const bookingWidget = document.querySelector('[data-booking-widget]');",
+        "      if (bookingWidget) {",
+        "        const serviceId = bookingWidget.dataset.serviceId;",
+        "        const apiBase = (bookingWidget.dataset.apiBase || '').replace(/\\/$/, '');",
+        "        const panel = bookingWidget.querySelector('[data-booking-panel]');",
+        "        const revealBtn = bookingWidget.querySelector('[data-booking-reveal]');",
+        "        const slotsHost = bookingWidget.querySelector('[data-booking-slots]');",
+        "        const confirmBtn = bookingWidget.querySelector('[data-booking-confirm]');",
+        "        const bookingBanner = bookingWidget.querySelector('[data-booking-banner]');",
+        "        let selectedSlot = null; let selectedFulfiller = null; let slotsLoaded = false;",
+        "        const bookingError = (text) => { bookingBanner.className = 'sl-booking-banner is-error'; bookingBanner.textContent = text; };",
+        "        const fmtTime = (iso) => new Date(iso).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });",
+        "        const fmtDay = (iso) => new Date(iso).toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' });",
+        "        const renderSlots = (slots) => {",
+        "          if (!slots.length) { slotsHost.className = 'sl-booking-slots is-empty'; slotsHost.textContent = 'No available times in the next two weeks.'; return; }",
+        "          const byDay = {};",
+        "          slots.forEach((s) => { const k = new Date(s.start).toDateString(); (byDay[k] = byDay[k] || []).push(s); });",
+        "          slotsHost.className = 'sl-booking-slots'; slotsHost.innerHTML = '';",
+        "          Object.keys(byDay).forEach((k) => {",
+        "            const group = byDay[k];",
+        "            const day = document.createElement('div'); day.className = 'sl-booking-day';",
+        "            const h = document.createElement('h4'); h.textContent = fmtDay(group[0].start); day.appendChild(h);",
+        "            const row = document.createElement('div'); row.className = 'sl-booking-times';",
+        "            group.forEach((s) => {",
+        "              const b = document.createElement('button'); b.type = 'button'; b.className = 'sl-booking-slot'; b.textContent = fmtTime(s.start);",
+        "              b.addEventListener('click', () => {",
+        "                selectedSlot = s.start; selectedFulfiller = s.fulfiller_id || null;",
+        "                bookingWidget.querySelectorAll('.sl-booking-slot').forEach((el) => el.classList.remove('selected'));",
+        "                b.classList.add('selected'); confirmBtn.disabled = false; confirmBtn.textContent = 'Book ' + fmtTime(s.start);",
+        "              });",
+        "              row.appendChild(b);",
+        "            });",
+        "            day.appendChild(row); slotsHost.appendChild(day);",
+        "          });",
+        "        };",
+        "        const loadSlots = () => {",
+        "          const from = Math.floor(Date.now() / 1000); const to = from + 14 * 86400;",
+        "          fetch(`${apiBase}/services/${encodeURIComponent(serviceId)}/availability?from=${from}&to=${to}`)",
+        "            .then((r) => r.json()).then((d) => renderSlots(d.slots || []))",
+        "            .catch(() => { slotsHost.textContent = 'Could not load times.'; });",
+        "        };",
+        "        revealBtn.addEventListener('click', () => {",
+        "          panel.hidden = false; revealBtn.style.display = 'none';",
+        "          if (!slotsLoaded) { slotsLoaded = true; loadSlots(); }",
+        "        });",
+        "        confirmBtn.addEventListener('click', () => {",
+        "          bookingBanner.textContent = '';",
+        "          const email = (bookingWidget.querySelector('[data-booking-email]').value || '').trim();",
+        "          if (!selectedSlot) return;",
+        "          if (!email) { bookingError('Please enter your email.'); return; }",
+        "          const customer = {",
+        "            name: (bookingWidget.querySelector('[data-booking-name]').value || '').trim(), email,",
+        "            phone: (bookingWidget.querySelector('[data-booking-phone]').value || '').trim(),",
+        "          };",
+        "          const body = { service_id: serviceId, slot_start: selectedSlot, customer };",
+        "          if (selectedFulfiller) body.fulfiller_id = selectedFulfiller;",
+        "          confirmBtn.disabled = true; confirmBtn.textContent = 'Reserving...';",
+        "          const base = window.location.href.split('?')[0];",
+        "          fetch(`${apiBase}/services/appointments/reserve`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })",
+        "            .then((r) => r.json().then((j) => ({ ok: r.ok, j })))",
+        "            .then((res) => {",
+        "              if (!res.ok) throw new Error(res.j.message || 'That time is no longer available.');",
+        "              return fetch(`${apiBase}/services/appointments/checkout`, { method: 'POST', headers: { 'Content-Type': 'application/json' },",
+        "                body: JSON.stringify({ appointment_id: res.j.appointment.appointment_id, manage_token: res.j.manage_token, success_url: base + '?booking=success', cancel_url: base + '?booking=cancel' }) }).then((r) => r.json());",
+        "            })",
+        "            .then((checkout) => {",
+        "              if (checkout.checkout_url) { window.location = checkout.checkout_url; }",
+        "              else if (checkout.status === 'booked') { panel.innerHTML = '<div class=\"sl-booking-banner\">Your booking is confirmed — check your email for details.</div>'; }",
+        "              else { throw new Error(checkout.message || 'Could not complete booking.'); }",
+        "            })",
+        "            .catch((e) => { bookingError(e.message); confirmBtn.disabled = false; confirmBtn.textContent = 'Book'; loadSlots(); });",
+        "        });",
+        "        if (new URLSearchParams(window.location.search).get('booking') === 'success') {",
+        "          panel.hidden = false; revealBtn.style.display = 'none';",
+        "          panel.innerHTML = '<div class=\"sl-booking-banner\">Your booking is confirmed — check your email for details.</div>';",
+        "        }",
         "      }",
         f"      const pageId = \"{page_id}\";",
         "      const money = (amount, currency) => {",
