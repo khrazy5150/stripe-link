@@ -94,7 +94,8 @@ def load_render_context(
     *,
     offers_repository: Any,
     products_repository: Any,
-) -> tuple[dict[str, Any], dict[str, dict[str, Any]]]:
+    services_repository: Any | None = None,
+) -> tuple[dict[str, Any], dict[str, dict[str, Any]], dict[str, dict[str, Any]]]:
     tenant_id = str(page.get("tenant_id") or "")
     offer_id = str(page.get("offer_id") or "")
     offer = offers_repository.get(tenant_id, offer_id)
@@ -106,7 +107,19 @@ def load_render_context(
         raise PublishError("Page and offer tenant_id must match.")
 
     products_by_id: dict[str, dict[str, Any]] = {}
+    services_by_id: dict[str, dict[str, Any]] = {}
     for item in offer.get("items", []):
+        service_id = str(item.get("service_id") or "")
+        if service_id:
+            if services_repository is None:
+                raise PublishError(f"Services repository unavailable for offer '{offer_id}'.")
+            service = services_repository.get(tenant_id, service_id)
+            if not service:
+                raise PublishError(f"Service '{service_id}' was not found for offer '{offer_id}'.")
+            if service.get("tenant_id") != tenant_id:
+                raise PublishError("Page and service tenant_id must match.")
+            services_by_id[service_id] = service
+            continue
         product_id = item.get("product_id", "")
         product = products_repository.get(tenant_id, product_id)
         if not product:
@@ -116,7 +129,7 @@ def load_render_context(
             raise PublishError("Page and product tenant_id must match.")
         products_by_id[product_id] = product
 
-    return offer, products_by_id
+    return offer, products_by_id, services_by_id
 
 
 def publish_page_document(
@@ -124,6 +137,7 @@ def publish_page_document(
     *,
     offers_repository: Any,
     products_repository: Any,
+    services_repository: Any | None = None,
     s3_client: Any,
     pages_bucket: str,
     preview_bucket: str,
@@ -137,10 +151,11 @@ def publish_page_document(
 ) -> dict[str, Any]:
     page = strip_document_keys(page)
     validate_page_document(page)
-    offer, products_by_id = load_render_context(
+    offer, products_by_id, services_by_id = load_render_context(
         page,
         offers_repository=offers_repository,
         products_repository=products_repository,
+        services_repository=services_repository,
     )
     html = render_page(
         page,
@@ -148,6 +163,7 @@ def publish_page_document(
         products_by_id,
         checkout_url=checkout_url or checkout_base_url_for_page(page, offer, environment),
         api_base_url=api_base_url,
+        services_by_id=services_by_id,
     )
     targets = artifact_targets(
         page,

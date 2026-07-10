@@ -957,6 +957,20 @@ async function createOffer() {
   }
 }
 
+function primaryOfferItemDisplay() {
+  // The first item (products come before services) supplies the offer's default hero name/copy/image.
+  const product = selectedProducts.value[0];
+  if (product) {
+    return { name: product.name || "", description: product.description || "", image: (product.images || [])[0] || "" };
+  }
+  const row = serviceRows.value[0];
+  if (row) {
+    const service = serviceObjFor(row.service_id);
+    return { name: service?.name || "", description: service?.description || "", image: service?.presentation?.hero_image_url || "" };
+  }
+  return { name: "", description: "", image: "" };
+}
+
 function buildOfferDocument() {
   if (!selectedProducts.value.length && !hasService.value) return { error: "Select at least one product or service for this offer." };
   if (!form.name || !form.slug) return { error: "Offer label and slug are required." };
@@ -1017,6 +1031,9 @@ function buildOfferDocument() {
 
   const priceContexts = selectedProducts.value.length ? selectedPriceContexts() : (serviceContexts.length ? [...new Set(serviceContexts)] : ["standard"]);
   const effectiveIntent = selectedProducts.value.length ? productIntent.value : "transaction";
+  // Snapshot the primary item's copy/image onto the offer so it is a self-contained contract for the
+  // landing page (suggestions the tenant/AI can override later). Only price stays resolved-live.
+  const primary = primaryOfferItemDisplay();
 
   const offer = cleanObject({
     schema_version: "2026-05-29",
@@ -1038,10 +1055,12 @@ function buildOfferDocument() {
       starts_at: null,
       ends_at: null,
     },
-    presentation: {
-      headline: form.name,
+    presentation: cleanObject({
+      headline: primary.name || form.name,
+      subheadline: primary.description || undefined,
+      hero_image_url: primary.image || undefined,
       cta_label: "Buy Now",
-    },
+    }),
     checkout: effectiveIntent === "transaction" ? {
       mode: checkoutMode,
       phone_number_collection: form.checkout.phone_number_collection,

@@ -4,6 +4,7 @@ from stripe_link.domain.documents import (
     validate_offer_document,
     validate_page_document,
     validate_product_document,
+    validate_service,
 )
 from stripe_link.domain.pricing import PricingError
 from stripe_link.runtime.html import RenderError, render_page
@@ -15,6 +16,7 @@ def handler(event, context):
         page = body.get("page")
         offer = body.get("offer")
         products = body.get("products")
+        services = body.get("services") or []
         selected_prices = body.get("selected_prices") or {}
         checkout_url = body.get("checkout_url")
         api_base_url = body.get("api_base_url") or ""
@@ -24,6 +26,8 @@ def handler(event, context):
             return error_response("Field 'offer' must be an object.")
         if not isinstance(products, list):
             return error_response("Field 'products' must be an array.")
+        if not isinstance(services, list):
+            return error_response("Field 'services' must be an array when provided.")
         if not isinstance(selected_prices, dict):
             return error_response("Field 'selected_prices' must be an object when provided.")
         if checkout_url is not None and not isinstance(checkout_url, str):
@@ -49,7 +53,20 @@ def handler(event, context):
             for product in products
             if isinstance(product, dict) and product.get("product_id")
         }
-        html = render_page(page, offer, products_by_id, selected_prices, checkout_url, api_base_url)
+        for service in services:
+            if not isinstance(service, dict):
+                return error_response("Each service must be an object.", code="render_error")
+            validate_service(service)
+            if service.get("tenant_id") != page.get("tenant_id"):
+                return error_response("Service tenant_id must match page tenant_id.", code="render_error")
+        services_by_id = {
+            service.get("service_id"): service
+            for service in services
+            if isinstance(service, dict) and service.get("service_id")
+        }
+        html = render_page(
+            page, offer, products_by_id, selected_prices, checkout_url, api_base_url, services_by_id=services_by_id,
+        )
         return json_response({"html": html})
     except (DocumentValidationError, PricingError, RenderError, ValueError) as exc:
         return error_response(str(exc), code="render_error")

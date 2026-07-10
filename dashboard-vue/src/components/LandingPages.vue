@@ -714,11 +714,13 @@ import ConfirmDialog from "./shared/ConfirmDialog.vue";
 const pages = ref([]);
 const offers = ref([]);
 const products = ref([]);
+const services = ref([]);
 const search = ref("");
 const offerSearch = ref("");
 const loading = ref(false);
 const offersLoading = ref(false);
 const productsLoading = ref(false);
+const servicesLoading = ref(false);
 const saving = ref(false);
 const error = ref("");
 const message = ref("");
@@ -775,6 +777,7 @@ const universalBundlePresets = [
 ];
 const landingPagePriceContexts = new Set(["standard", "sale", "flash_sale", "flash sale"]);
 const productsById = computed(() => new Map(products.value.map((product) => [productId(product), product])));
+const servicesById = computed(() => new Map(services.value.map((service) => [service.service_id, service])));
 const selectedOffer = computed(() => offers.value.find((offer) => offer.offer_id === form.offer_id) || null);
 const selectedOfferProducts = computed(() => offerProducts(selectedOffer.value));
 const selectedOfferIntent = computed(() => selectedOffer.value?.product_intent || selectedOfferProducts.value[0]?.product_intent || "transaction");
@@ -792,38 +795,9 @@ const visibleFaqs = computed(() => builder.faq.filter((item) => item.question &&
 const previewRefundPolicy = computed(() => builderOffer.value?.refund_policy || builderOfferProducts.value[0]?.refund_policy || null);
 const previewRefundAppliesTo = computed(() => previewPrices.value.map((price) => price.label).filter(Boolean).join(", "));
 const previewRefundReturnNote = computed(() => refundPolicyReturnNote(previewRefundPolicy.value));
-const previewPrices = computed(() => {
-  const prices = [];
-  let displayIndex = 0;
-  for (const item of builderOffer.value?.items || []) {
-    const product = productsById.value.get(item.product_id);
-    if (!product) continue;
-    for (const option of item.selectable_prices || []) {
-      const price = (product.prices || []).find((candidate) => candidate.price_id === option.price_id) || {};
-      if (!isLandingPagePrice(price)) continue;
-      const unitAmount = Number(price.unit_amount || 0);
-      const compareAt = Number(price.compare_at_unit_amount || 0);
-      const calculatedSavings = compareAt > unitAmount && unitAmount > 0
-        ? Math.round(((compareAt - unitAmount) / compareAt) * 100)
-        : 0;
-      prices.push({
-        price_id: option.price_id,
-        label: option.label || price.label || product.name || "Option",
-        description: option.description || price.description || product.description || "",
-        badge: option.badge || "",
-        image_url: option.image_url || price.image_url || product.images?.[0] || "",
-        unit_amount: unitAmount,
-        compare_at_unit_amount: compareAt,
-        savings_pct: Number(option.savings_pct || price.savings_pct || calculatedSavings || 0),
-        currency: price.currency || "usd",
-        quantity: landingPagePriceQuantity(price, option),
-        display_index: displayIndex,
-      });
-      displayIndex += 1;
-    }
-  }
-  return prices.sort(compareLandingPagePrices);
-});
+// The landing page is object-agnostic: it consumes one normalized presentation from the offer,
+// never product-vs-service. offerItemModels is the single place item types are shaped into cards.
+const previewPrices = computed(() => offerItemModels(builderOffer.value).flatMap((model) => model.priceCards).sort(compareLandingPagePrices));
 const previewDefaultPriceId = computed(() => {
   const defaultPriceId = builderOffer.value?.items?.[0]?.default_price_id || "";
   if (previewPrices.value.some((price) => price.price_id === defaultPriceId)) return defaultPriceId;
@@ -1026,7 +1000,7 @@ async function loadPages() {
 }
 
 async function ensureCatalogLoaded() {
-  await Promise.all([ensureProductsLoaded(), ensureOffersLoaded()]);
+  await Promise.all([ensureProductsLoaded(), ensureServicesLoaded(), ensureOffersLoaded()]);
 }
 
 async function ensureOffersLoaded() {
@@ -1048,6 +1022,17 @@ async function ensureProductsLoaded() {
     products.value = Array.isArray(body.products) ? body.products : [];
   } finally {
     productsLoading.value = false;
+  }
+}
+
+async function ensureServicesLoaded() {
+  if (services.value.length || servicesLoading.value) return;
+  servicesLoading.value = true;
+  try {
+    const body = await apiRequest("/services");
+    services.value = Array.isArray(body.services) ? body.services : [];
+  } finally {
+    servicesLoading.value = false;
   }
 }
 
@@ -1246,7 +1231,7 @@ function buildBuilderPageDocument() {
       slug: slugify(builder.slug || offer?.slug || builder.name || builder.page_id),
     },
     seo: {
-      title: builder.seo_title || builder.name,
+      title: builder.seo_title || offerHeadline(builderOffer.value) || builder.name,
       description: builder.seo_description,
       image: builder.seo_image || previewHeroImage.value,
       favicon_url: builder.favicon_url,
@@ -1509,8 +1494,8 @@ function pageSections(intent, offer, leadAction) {
       {
         id: "hero",
         type: "hero",
-        headline: formatHeadline(offer.presentation?.headline || offer.name || "Complete your order"),
-        subheadline: offer.presentation?.subheadline || "Choose your option and continue to secure checkout.",
+        headline: formatHeadline(offerHeadline(offer) || "Complete your order"),
+        subheadline: offerDescription(offer) || "Choose your option and continue to secure checkout.",
       },
       {
         id: "offer-selector",
@@ -1718,15 +1703,18 @@ function removeFaq(index) {
   builder.faq.splice(index, 1);
 }
 
-function onBuilderOfferChange() {
+async function onBuilderOfferChange() {
   const offer = builderOffer.value;
   if (!offer) return;
+  // The offer's presentation (name/description/hero/prices) resolves against products+services;
+  // ensure they're loaded before seeding so defaults come from the offer contract, not fallbacks.
+  await ensureCatalogLoaded();
   builder.offerName = offer.name || "";
   if (!builder.name) builder.name = `${offer.name || "Offer"} Landing Page`;
   if (!builder.slug) builder.slug = slugify(offer.slug || offer.name || builder.page_id);
   builder.headline = formatHeadline(offerHeadline(offer) || builder.headline || builder.name);
   builder.subheadline = offerDescription(offer) || builder.subheadline || "Choose your option and continue.";
-  if (!builder.seo_title) builder.seo_title = builder.name;
+  if (!builder.seo_title) builder.seo_title = offerHeadline(offer) || builder.name;
   if (!builder.seo_description) builder.seo_description = offerDescription(offer) || offer.name || "";
   if (!builder.seo_image) builder.seo_image = offerImage(offer);
   if (!builder.hero_media_text && offerImage(offer)) builder.hero_media_text = offerImage(offer);
@@ -1834,13 +1822,71 @@ function applyPageStatus(page, statusOverride = "") {
   };
 }
 
-function offerImage(offer) {
-  const firstProduct = offerProducts(offer)[0];
-  return offer?.presentation?.image_url || offer?.presentation?.hero_image_url || firstProduct?.images?.[0] || "";
+function servicePricesOf(service) {
+  if (Array.isArray(service?.prices) && service.prices.length) return service.prices;
+  return service?.price ? [{ price_id: `svcprice_${service.service_id}`, ...service.price }] : [];
 }
 
-function firstProductDescription(offer) {
-  return offerProducts(offer)[0]?.description || "";
+function normalizedPriceCard(priceRecord, option, model, item, displayIndex) {
+  const unitAmount = Number(priceRecord.unit_amount || 0);
+  const compareAt = Number(priceRecord.compare_at_unit_amount || 0);
+  const calculatedSavings = compareAt > unitAmount && unitAmount > 0
+    ? Math.round(((compareAt - unitAmount) / compareAt) * 100)
+    : 0;
+  return {
+    price_id: option?.price_id || priceRecord.price_id || item.price_id,
+    label: option?.label || item.display_label || priceRecord.label || model.name || "Option",
+    description: option?.description || priceRecord.description || model.description || "",
+    badge: option?.badge || "",
+    image_url: option?.image_url || priceRecord.image_url || model.image || "",
+    unit_amount: unitAmount,
+    compare_at_unit_amount: compareAt,
+    savings_pct: Number(option?.savings_pct || priceRecord.savings_pct || calculatedSavings || 0),
+    currency: priceRecord.currency || "usd",
+    quantity: option ? landingPagePriceQuantity(priceRecord, option) : Number(item.quantity || 1),
+    display_index: displayIndex,
+  };
+}
+
+// Single normalization: shape any offer item (product, service, or a future type) into a uniform
+// presentation model { type, id, name, description, image, priceCards[] }. Everything else in the
+// builder consumes these models and stays blind to the underlying object type — the offer is the
+// contract. To support a new item type, add a branch here and nothing else changes.
+function offerItemModels(offer) {
+  const items = Array.isArray(offer?.items) ? offer.items : [];
+  const models = [];
+  let displayIndex = 0;
+  for (const item of items) {
+    let model = null;
+    if (item.service_id) {
+      const service = servicesById.value.get(item.service_id);
+      if (!service) continue;
+      model = { type: "service", id: item.service_id, name: service.name || "", description: service.description || "", image: service.presentation?.hero_image_url || "", priceCards: [] };
+      const prices = servicePricesOf(service);
+      const price = prices.find((candidate) => candidate.price_id === item.price_id) || prices[0];
+      if (price && isLandingPagePrice(price)) {
+        model.priceCards.push(normalizedPriceCard(price, null, model, item, displayIndex));
+        displayIndex += 1;
+      }
+    } else if (item.product_id) {
+      const product = productsById.value.get(item.product_id);
+      if (!product) continue;
+      model = { type: "product", id: item.product_id, name: product.name || "", description: product.description || "", image: product.images?.[0] || "", priceCards: [] };
+      for (const option of item.selectable_prices || []) {
+        const price = (product.prices || []).find((candidate) => candidate.price_id === option.price_id);
+        if (!price || !isLandingPagePrice(price)) continue;
+        model.priceCards.push(normalizedPriceCard(price, option, model, item, displayIndex));
+        displayIndex += 1;
+      }
+    }
+    if (model) models.push(model);
+  }
+  return models;
+}
+
+// --- Offer presentation contract: the fields the landing page derives from any offer by default ---
+function offerImage(offer) {
+  return offer?.presentation?.image_url || offer?.presentation?.hero_image_url || offerItemModels(offer)[0]?.image || "";
 }
 
 function offerHeadline(offer) {
@@ -1848,7 +1894,7 @@ function offerHeadline(offer) {
 }
 
 function offerDescription(offer) {
-  return offer?.presentation?.subheadline || firstProductDescription(offer) || "";
+  return offer?.presentation?.subheadline || offerItemModels(offer)[0]?.description || "";
 }
 
 function offerProducts(offer) {

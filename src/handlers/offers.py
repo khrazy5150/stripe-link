@@ -121,10 +121,13 @@ def resolve_handler(event, context):
         body = parse_json_body(event)
         offer = body.get("offer")
         products = body.get("products")
+        services = body.get("services") or []
         if not isinstance(offer, dict):
             return error_response("Field 'offer' must be an object.")
         if not isinstance(products, list):
             return error_response("Field 'products' must be an array.")
+        if not isinstance(services, list):
+            return error_response("Field 'services' must be an array when provided.")
         selected_prices = body.get("selected_prices") or {}
         if not isinstance(selected_prices, dict):
             return error_response("Field 'selected_prices' must be an object when provided.")
@@ -134,8 +137,13 @@ def resolve_handler(event, context):
             for product in products
             if isinstance(product, dict) and product.get("product_id")
         }
+        services_by_id = {
+            service.get("service_id"): service
+            for service in services
+            if isinstance(service, dict) and service.get("service_id")
+        }
         return json_response({
-            "resolved_offer": resolve_offer(offer, products_by_id, selected_prices),
+            "resolved_offer": resolve_offer(offer, products_by_id, selected_prices, services_by_id=services_by_id),
         })
     except PricingError as exc:
         return error_response(str(exc), code="pricing_error")

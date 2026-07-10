@@ -764,6 +764,7 @@ def validate_offer_document(document: dict[str, Any]) -> None:
         if not isinstance(presentation, dict):
             raise DocumentValidationError("Offer presentation must be an object.")
         optional_string(presentation, "headline", "Offer presentation.headline")
+        optional_string(presentation, "subheadline", "Offer presentation.subheadline")
         optional_string(presentation, "badge", "Offer presentation.badge")
         optional_string(presentation, "cta_label", "Offer presentation.cta_label")
         optional_string(presentation, "hero_image_url", "Offer presentation.hero_image_url")

@@ -5,6 +5,7 @@ from typing import Any
 from urllib.parse import urlencode, urlparse
 
 from stripe_link.domain.pricing import find_price, resolve_offer
+from stripe_link.domain.service_pricing import resolve_service_price
 
 
 class RenderError(ValueError):
@@ -564,6 +565,8 @@ def render_headline_markup(text: Any) -> str:
 
 def require_offer_products(offer: dict[str, Any], products_by_id: dict[str, dict[str, Any]]) -> None:
     for item in offer.get("items", []):
+        if item.get("service_id"):
+            continue  # service items are resolved against services_by_id, not products
         product_id = item.get("product_id", "")
         if product_id not in products_by_id:
             raise RenderError(f"Product '{product_id}' was not provided for offer '{offer.get('offer_id', '')}'.")
@@ -576,15 +579,17 @@ def render_page(
     selected_prices: dict[str, str] | None = None,
     checkout_url: str | None = None,
     api_base_url: str | None = None,
+    services_by_id: dict[str, dict[str, Any]] | None = None,
 ) -> str:
+    services_by_id = services_by_id or {}
     require_offer_products(offer, products_by_id)
-    resolved_offer = resolve_offer(offer, products_by_id, selected_prices)
+    resolved_offer = resolve_offer(offer, products_by_id, selected_prices, services_by_id=services_by_id)
     title = escape((page.get("seo") or {}).get("title") or page.get("name") or "Checkout")
     description = escape((page.get("seo") or {}).get("description") or "")
     favicon_tags = render_favicon_tags(page.get("seo") or {})
     styles = render_template_styles(page)
     body = "\n".join(
-        render_section(section, page, offer, products_by_id, resolved_offer, checkout_url, api_base_url)
+        render_section(section, page, offer, products_by_id, resolved_offer, checkout_url, api_base_url, services_by_id)
         for section in page.get("sections", [])
     )
     has_legal_footer_section = any(section.get("type") == "legal_footer" for section in page.get("sections", []))
@@ -623,7 +628,9 @@ def render_section(
     resolved_offer: dict[str, Any],
     checkout_url: str | None,
     api_base_url: str | None = None,
+    services_by_id: dict[str, dict[str, Any]] | None = None,
 ) -> str:
+    services_by_id = services_by_id or {}
     section_type = section.get("type")
     if section_type == "countdown_timer":
         return render_countdown_timer(section, page)
@@ -632,7 +639,7 @@ def render_section(
     if section_type == "brand_label":
         return render_brand_label(section, page)
     if section_type == "hero_media":
-        return render_hero_media(section, offer, products_by_id)
+        return render_hero_media(section, offer, products_by_id, services_by_id)
     if section_type == "headline":
         return render_headline(section)
     if section_type == "subheadline":
@@ -642,7 +649,7 @@ def render_section(
     if section_type == "hero":
         return render_hero(section)
     if section_type == "offer_price_selector":
-        return render_offer_price_selector(offer, products_by_id)
+        return render_offer_price_selector(offer, products_by_id, services_by_id)
     if section_type == "refund_policy":
         return render_refund_policy(section, offer, products_by_id)
     if section_type == "faq":
@@ -717,14 +724,28 @@ def render_brand_label(section: dict[str, Any], page: dict[str, Any]) -> str:
     ])
 
 
+def first_offer_service_image(offer: dict[str, Any], services_by_id: dict[str, dict[str, Any]]) -> str:
+    for item in offer.get("items", []):
+        service = services_by_id.get(item.get("service_id", ""))
+        image = (service or {}).get("presentation", {}).get("hero_image_url") if service else ""
+        if image:
+            return str(image)
+    return ""
+
+
 def render_hero_media(
     section: dict[str, Any],
     offer: dict[str, Any],
     products_by_id: dict[str, dict[str, Any]],
+    services_by_id: dict[str, dict[str, Any]] | None = None,
 ) -> str:
     product = first_offer_product(offer, products_by_id)
     images = hero_media_images(section, offer, product)
-    alt = str(product.get("name") or "Product image")
+    if not images:
+        service_image = first_offer_service_image(offer, services_by_id or {})
+        if service_image:
+            images = [service_image]
+    alt = str(product.get("name") or offer.get("name") or "Product image")
     rendered = [
         "      " + responsive_img(image_url, alt, sizes=HERO_MEDIA_SIZES, eager=(index == 0))
         for index, image_url in enumerate(images)
@@ -816,10 +837,60 @@ def render_hero(section: dict[str, Any]) -> str:
     ])
 
 
-def render_offer_price_selector(offer: dict[str, Any], products_by_id: dict[str, dict[str, Any]]) -> str:
+def render_service_price_card(item, service_id, services_by_id, offer, display_index):
+    """A single landing-page price card for a service offer item, sourced from the service's own
+    prices[] (the fixed price_id path). Carries data-service-id so checkout resolves the service."""
+    service = services_by_id.get(service_id)
+    if service is None:
+        raise RenderError(f"Service '{service_id}' was not provided for offer '{offer.get('offer_id', '')}'.")
+    price = resolve_service_price(service, item.get("price_id")) or {}
+    if not is_landing_page_price(price):
+        return None
+    label = escape(str(item.get("display_label") or price.get("label") or service.get("name") or "Option"))
+    amount = int(price.get("unit_amount", 0))
+    currency = str(price.get("currency") or "usd")
+    checkout_quantity = int(item.get("quantity") or 1)
+    price_id = str(price.get("price_id") or "")
+    image_url = (service.get("presentation") or {}).get("hero_image_url") or ""
+    description = escape(str(price.get("description") or service.get("description") or ""))
+    compare_at_unit_amount = price.get("compare_at_unit_amount")
+    savings_pct = price.get("discount_pct")
+    if not savings_pct and compare_at_unit_amount:
+        savings_pct = discount_pct(amount, int(compare_at_unit_amount))
+    card_markup = "\n".join([
+        f"      <article class=\"sl-price-option\" data-service-id=\"{escape(service_id)}\" data-product-id=\"\" data-price-id=\"{escape(price_id)}\" data-quantity=\"{checkout_quantity}\" data-default=\"true\" data-sale-amount=\"{amount}\" data-regular-amount=\"{int(compare_at_unit_amount) if compare_at_unit_amount else ''}\" data-currency=\"{escape(currency)}\" data-label=\"{label}\">",
+        "        " + responsive_img(image_url, str(service.get("name") or label), sizes=PRICE_OPTION_SIZES) if image_url else "",
+        "        <div class=\"sl-price-copy\">",
+        f"          <strong>{label}</strong>",
+        f"          <p class=\"sl-price-description\">{description}</p>" if description else "",
+        "          <div class=\"sl-price-row\">",
+        f"            <span class=\"sl-price-amount\" data-price-amount>{escape(format_money(amount, currency))}</span>",
+        f"            <span class=\"sl-regular-price\">{escape(format_money(int(compare_at_unit_amount), currency))}</span>" if compare_at_unit_amount else "",
+        f"            <span class=\"sl-savings\">Save {int(savings_pct)}%</span>" if savings_pct else "",
+        "          </div>",
+        "        </div>",
+        f"        <input type=\"radio\" name=\"sl-price-{escape(service_id)}\" value=\"{escape(price_id)}\" checked>",
+        "      </article>",
+    ])
+    return (landing_page_price_sort_key(price, item, display_index), card_markup)
+
+
+def render_offer_price_selector(
+    offer: dict[str, Any],
+    products_by_id: dict[str, dict[str, Any]],
+    services_by_id: dict[str, dict[str, Any]] | None = None,
+) -> str:
+    services_by_id = services_by_id or {}
     cards: list[tuple[tuple[int, int, int], str]] = []
     display_index = 0
     for item in offer.get("items", []):
+        service_id = item.get("service_id", "")
+        if service_id:
+            card = render_service_price_card(item, service_id, services_by_id, offer, display_index)
+            if card is not None:
+                cards.append(card)
+                display_index += 1
+            continue
         product_id = item.get("product_id", "")
         product = products_by_id.get(product_id)
         if product is None:

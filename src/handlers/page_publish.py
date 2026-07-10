@@ -5,7 +5,7 @@ from typing import Any
 
 from boto3.dynamodb.types import TypeDeserializer
 
-from stripe_link.repositories.documents import offers_repository, products_repository
+from stripe_link.repositories.documents import offers_repository, products_repository, services_repository
 from stripe_link.runtime.publishing import delete_page_artifacts, publish_page_document
 
 
@@ -48,9 +48,10 @@ def should_publish_record(record: dict[str, Any]) -> bool:
     return bool(image)
 
 
-def handler(event, context, *, offers_repo=None, products_repo=None, s3_client=None, cloudfront_client=None):
+def handler(event, context, *, offers_repo=None, products_repo=None, services_repo=None, s3_client=None, cloudfront_client=None):
     offers_repo = offers_repo or offers_repository()
     products_repo = products_repo or products_repository()
+    services_repo = services_repo or (services_repository() if os.environ.get("SERVICES_TABLE") else None)
     if s3_client is None or cloudfront_client is None:
         import boto3
 
@@ -100,6 +101,7 @@ def handler(event, context, *, offers_repo=None, products_repo=None, s3_client=N
                 page,
                 offers_repository=offers_repo,
                 products_repository=products_repo,
+                services_repository=services_repo,
                 s3_client=s3_client,
                 pages_bucket=os.environ.get("PAGES_BUCKET", ""),
                 preview_bucket=os.environ.get("PAGES_PREVIEW_BUCKET", ""),
