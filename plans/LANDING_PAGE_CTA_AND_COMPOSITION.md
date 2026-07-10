@@ -100,9 +100,13 @@ new backend behavior; the rest is deletions of the simple/universal forks.
    endpoint + `lead_submission` doc + where the tenant sees leads — notification bell vs a dashboard Leads
    screen). Decide storage scope when picked up. Until then the email CTA renders the interim button.
 3. **BookingWidget CTA.** Inline calendar reveal reusing the booking flow; the biggest CTA component.
-4. **Page composition.** Addable elements (testimonials, ratings, marquee, `product_carousel`/listicle) +
-   drag-and-drop `sections[]` ordering. Listicle buy-now on existing checkout; server-side cart is a later
-   project (see `AI_AND_COMMERCE_ARCHITECTURE.md` Part C).
+4. **Page composition — ✅ SHIPPED (2026-07-10).** The page body is a composable, drag-to-reorder list of
+   elements (builder "Page Elements" card). New element types with server render + validation + tests:
+   **testimonials, rating, client_marquee**. Existing content-block/FAQ migrated into the list. **Listicle
+   `product_carousel`** section: references multiple offers; the render pipeline (`load_render_context`)
+   now resolves multiple offers; each slide shows that offer's price + a Buy-now launching *that offer's*
+   existing single-offer checkout. **Server-side cart still deferred** (see `AI_AND_COMMERCE_ARCHITECTURE.md`
+   Part C) — buy-now only for now.
 
 ## Relationship to other plans
 - Builds on the offer-as-contract work (Phases 1–2, shipped) and `SERVICES_IN_OFFERS` / `BOOKING_AS_PRIMITIVE`

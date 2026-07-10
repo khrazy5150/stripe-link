@@ -23,6 +23,7 @@ SUPPORTED_PAGE_SECTION_TYPES = {
     "hero_media",
     "legal_footer",
     "offer_price_selector",
+    "product_carousel",
     "rating",
     "refund_policy",
     "seo_title",
@@ -977,6 +978,11 @@ def validate_page_document(document: dict[str, Any]) -> None:
             for logo in logos:
                 require_string(logo, "image_url", "Client marquee logo image_url")
                 optional_string(logo, "name", "Client marquee logo name")
+        elif section_type == "product_carousel":
+            optional_string(section, "heading", "Product carousel heading")
+            optional_string_list(section, "offer_ids", "Product carousel offer_ids")
+            if isinstance(section.get("offer_ids"), list) and len(section["offer_ids"]) > 24:
+                raise DocumentValidationError("Product carousel supports at most 24 offers.")
         elif section_type == "checkout_cta":
             optional_string(section, "label", "Checkout CTA label")
         elif section_type == "legal_footer":

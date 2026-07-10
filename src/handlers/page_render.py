@@ -64,8 +64,17 @@ def handler(event, context):
             for service in services
             if isinstance(service, dict) and service.get("service_id")
         }
+        # Optional additional offers referenced by product_carousel (listicle) sections.
+        carousel_offers = body.get("offers") or []
+        if not isinstance(carousel_offers, list):
+            return error_response("Field 'offers' must be an array when provided.", code="render_error")
+        offers_by_id = {str(offer.get("offer_id") or ""): offer}
+        for extra in carousel_offers:
+            if isinstance(extra, dict) and extra.get("offer_id"):
+                offers_by_id[str(extra["offer_id"])] = extra
         html = render_page(
-            page, offer, products_by_id, selected_prices, checkout_url, api_base_url, services_by_id=services_by_id,
+            page, offer, products_by_id, selected_prices, checkout_url, api_base_url,
+            services_by_id=services_by_id, offers_by_id=offers_by_id,
         )
         return json_response({"html": html})
     except (DocumentValidationError, PricingError, RenderError, ValueError) as exc:

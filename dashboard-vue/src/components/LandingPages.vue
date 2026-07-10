@@ -524,6 +524,17 @@
                   </div>
                   <button class="secondary-action compact" type="button" @click="addSubItem(element, 'items', { question: '', answer: '' })">+ Add question</button>
                 </template>
+
+                <template v-else-if="element.type === 'product_carousel'">
+                  <input v-model.trim="element.heading" type="text" placeholder="Section heading (optional)" />
+                  <p class="element-empty">Pick the offers to feature. Each becomes a swipeable slide with its own Buy button.</p>
+                  <div class="carousel-offer-picker">
+                    <label v-for="offer in carouselOfferChoices" :key="offer.offer_id" class="carousel-offer-choice">
+                      <input type="checkbox" :checked="element.offer_ids.includes(offer.offer_id)" @change="toggleCarouselOffer(element, offer.offer_id)" />
+                      <span>{{ offer.name || offer.offer_id }}</span>
+                    </label>
+                  </div>
+                </template>
               </div>
             </div>
           </section>
@@ -643,6 +654,21 @@
                 <summary v-html="headlineHtml(item.question)"></summary>
                 <p>{{ item.answer }}</p>
               </details>
+            </div>
+            <div v-else-if="entry.element.type === 'product_carousel'" class="preview-carousel">
+              <h2 v-if="entry.element.heading" v-html="headlineHtml(entry.element.heading)"></h2>
+              <div class="preview-carousel-track">
+                <template v-for="offerId in entry.section.offer_ids" :key="offerId">
+                  <article v-if="carouselOfferModel(offerId)" class="preview-carousel-slide">
+                    <img v-if="carouselOfferModel(offerId).image" :src="carouselOfferModel(offerId).image" alt="" />
+                    <strong>{{ carouselOfferModel(offerId).name }}</strong>
+                    <span v-if="carouselOfferModel(offerId).price" class="preview-carousel-price">
+                      {{ formatMoney(carouselOfferModel(offerId).price.unit_amount || 0, carouselOfferModel(offerId).price.currency) }}
+                    </span>
+                    <span class="preview-carousel-buy">Buy now</span>
+                  </article>
+                </template>
+              </div>
             </div>
           </template>
           <!-- One CTA component, chosen by the offer's cta.type. The page never combines CTAs. -->
@@ -825,6 +851,25 @@ const heroMediaList = computed(() => parseLines(builder.hero_media_text));
 const previewHeroImage = computed(() => heroMediaList.value[0] || offerImage(builderOffer.value) || "");
 const visibleTrustBadges = computed(() => builder.trust_badges.badges.filter((badge) => badge.enabled !== false && badge.label));
 const previewElements = computed(() => builder.elements.map((element) => ({ element, section: elementSection(element) })).filter((entry) => entry.section));
+// Offers selectable in a listicle carousel: active offers other than the page's own primary offer.
+const carouselOfferChoices = computed(() => offers.value.filter((offer) => offer.status !== "archived" && offer.offer_id !== builder.offer_id));
+function toggleCarouselOffer(element, offerId) {
+  const index = element.offer_ids.indexOf(offerId);
+  if (index >= 0) element.offer_ids.splice(index, 1);
+  else element.offer_ids.push(offerId);
+}
+function carouselOfferModel(offerId) {
+  const offer = offers.value.find((entry) => entry.offer_id === offerId);
+  if (!offer) return null;
+  const cards = offerItemModels(offer).flatMap((model) => model.priceCards).sort(compareLandingPagePrices);
+  const price = cards[0] || null;
+  return {
+    offer_id: offerId,
+    name: offer.presentation?.headline || offer.name || offerId,
+    image: offer.presentation?.hero_image_url || offerImage(offer),
+    price,
+  };
+}
 const previewRefundPolicy = computed(() => builderOffer.value?.refund_policy || builderOfferProducts.value[0]?.refund_policy || null);
 const previewRefundAppliesTo = computed(() => previewPrices.value.map((price) => price.label).filter(Boolean).join(", "));
 const previewRefundReturnNote = computed(() => refundPolicyReturnNote(previewRefundPolicy.value));
@@ -1604,6 +1649,7 @@ const ELEMENT_TYPES = [
   { type: "rating", label: "Rating" },
   { type: "client_marquee", label: "Client Logos" },
   { type: "faq", label: "FAQ" },
+  { type: "product_carousel", label: "Listicle Carousel" },
 ];
 
 function elementLabel(type) {
@@ -1617,6 +1663,7 @@ function newElement(type) {
   if (type === "rating") return { ...base, value: 5, count: 0, label: "" };
   if (type === "client_marquee") return { ...base, heading: "", logos: [{ image_url: "", name: "" }] };
   if (type === "faq") return { ...base, items: [{ question: "", answer: "" }] };
+  if (type === "product_carousel") return { ...base, heading: "", offer_ids: [] };
   return base;
 }
 
@@ -1701,6 +1748,11 @@ function elementSection(element) {
     if (!items.length) return null;
     return { id: element.id, type: "faq", items: items.map((item) => ({ question: formatHeadline(item.question || ""), answer: item.answer })) };
   }
+  if (element.type === "product_carousel") {
+    const offerIds = (element.offer_ids || []).filter(Boolean);
+    if (!offerIds.length) return null;
+    return { id: element.id, type: "product_carousel", heading: element.heading || undefined, offer_ids: offerIds };
+  }
   return null;
 }
 
@@ -1722,6 +1774,8 @@ function elementsFromPage(sections) {
         logos: (section.logos || []).map((logo) => ({ image_url: logo.image_url || "", name: logo.name || "" })) });
     } else if (section.type === "faq") {
       elements.push({ id: localId("el"), type: "faq", items: (section.items || []).map((item) => ({ question: item.question || "", answer: item.answer || "" })) });
+    } else if (section.type === "product_carousel") {
+      elements.push({ id: localId("el"), type: "product_carousel", heading: section.heading || "", offer_ids: [...(section.offer_ids || [])] });
     }
   }
   return elements;

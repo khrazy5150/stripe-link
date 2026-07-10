@@ -3789,6 +3789,65 @@ button:disabled {
   opacity: 0.75;
 }
 
+.carousel-offer-picker {
+  display: grid;
+  gap: 0.4rem;
+  max-height: 18rem;
+  overflow-y: auto;
+}
+
+.carousel-offer-choice {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  font-size: 1.3rem;
+}
+
+.preview-carousel {
+  width: 100%;
+}
+
+.preview-carousel-track {
+  display: flex;
+  gap: 1.2rem;
+  overflow-x: auto;
+  padding-bottom: 0.8rem;
+}
+
+.preview-carousel-slide {
+  flex: 0 0 min(70%, 20rem);
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  background: var(--preview-card);
+  border: 1px solid var(--preview-content-border);
+  border-radius: 1rem;
+  padding: 1rem;
+}
+
+.preview-carousel-slide img {
+  width: 100%;
+  height: 10rem;
+  object-fit: cover;
+  border-radius: 0.6rem;
+}
+
+.preview-carousel-price {
+  font-weight: 800;
+  color: var(--preview-content-heading);
+}
+
+.preview-carousel-buy {
+  margin-top: auto;
+  text-align: center;
+  background: var(--preview-brand, #4f46e5);
+  color: #fff;
+  border-radius: 0.6rem;
+  padding: 0.5rem;
+  font-weight: 700;
+  font-size: 1.3rem;
+}
+
 .builder-trust-badge-row strong {
   color: var(--muted);
   font-size: 1.3rem;

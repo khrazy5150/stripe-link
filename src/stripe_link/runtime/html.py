@@ -371,6 +371,13 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     "    .sl-marquee-logo img{height:4rem;width:auto;object-fit:contain;filter:grayscale(1);opacity:0.75}",
     "    @keyframes sl-marquee{from{transform:translateX(0)}to{transform:translateX(-50%)}}",
     "    @media (prefers-reduced-motion: reduce){.sl-marquee-track{animation:none;flex-wrap:wrap}}",
+    "    .sl-carousel-track{display:flex;gap:1.6rem;overflow-x:auto;scroll-snap-type:x mandatory;padding-bottom:1.2rem;-webkit-overflow-scrolling:touch}",
+    "    .sl-carousel-slide{scroll-snap-align:start;flex:0 0 min(80%,28rem);display:flex;flex-direction:column;gap:0.8rem;background:var(--sl-price-card-bg);border:1px solid var(--sl-price-card-border);border-radius:1.2rem;padding:1.4rem}",
+    "    .sl-carousel-slide img{width:100%;height:16rem;object-fit:cover;border-radius:0.8rem}",
+    "    .sl-carousel-title{font-family:var(--sl-font-heading);font-weight:800;font-size:1.8rem;color:var(--sl-price-title)}",
+    "    .sl-carousel-desc{font-size:1.4rem;color:var(--sl-price-description)}",
+    "    .sl-carousel-price{font-family:var(--sl-font-accent);font-weight:900;font-size:2rem;color:var(--sl-price-amount);margin-top:auto}",
+    "    .sl-carousel-buy{width:auto;text-align:center}",
     "    .sl-legal{display:flex;gap:1.2rem;flex-wrap:wrap;justify-content:center;text-align:center;font-size:1.3rem;color:var(--sl-legal-text);padding:2.4rem 0 0}",
     "    .sl-legal span{flex:0 0 100%}",
     "    .sl-legal a{color:var(--sl-legal-link)}",
@@ -577,8 +584,10 @@ def render_page(
     checkout_url: str | None = None,
     api_base_url: str | None = None,
     services_by_id: dict[str, dict[str, Any]] | None = None,
+    offers_by_id: dict[str, dict[str, Any]] | None = None,
 ) -> str:
     services_by_id = services_by_id or {}
+    offers_by_id = offers_by_id or {str(offer.get("offer_id") or ""): offer}
     require_offer_products(offer, products_by_id)
     resolved_offer = resolve_offer(offer, products_by_id, selected_prices, services_by_id=services_by_id)
     title = escape((page.get("seo") or {}).get("title") or page.get("name") or "Checkout")
@@ -586,7 +595,7 @@ def render_page(
     favicon_tags = render_favicon_tags(page.get("seo") or {})
     styles = render_template_styles(page)
     body = "\n".join(
-        render_section(section, page, offer, products_by_id, resolved_offer, checkout_url, api_base_url, services_by_id)
+        render_section(section, page, offer, products_by_id, resolved_offer, checkout_url, api_base_url, services_by_id, offers_by_id)
         for section in page.get("sections", [])
     )
     has_legal_footer_section = any(section.get("type") == "legal_footer" for section in page.get("sections", []))
@@ -626,8 +635,10 @@ def render_section(
     checkout_url: str | None,
     api_base_url: str | None = None,
     services_by_id: dict[str, dict[str, Any]] | None = None,
+    offers_by_id: dict[str, dict[str, Any]] | None = None,
 ) -> str:
     services_by_id = services_by_id or {}
+    offers_by_id = offers_by_id or {}
     section_type = section.get("type")
     if section_type == "countdown_timer":
         return render_countdown_timer(section, page)
@@ -659,6 +670,8 @@ def render_section(
         return render_rating(section)
     if section_type == "client_marquee":
         return render_client_marquee(section)
+    if section_type == "product_carousel":
+        return render_product_carousel(section, page, offers_by_id, products_by_id, services_by_id, checkout_url, api_base_url)
     if section_type == "checkout_cta":
         return render_checkout_cta(page, section, offer, resolved_offer, checkout_url, api_base_url, products_by_id)
     if section_type == "legal_footer":
@@ -1233,6 +1246,59 @@ def render_client_marquee(section: dict[str, Any]) -> str:
         "      <div class=\"sl-marquee-track\">",
         f"        <div class=\"sl-marquee-row\">{items}</div>",
         f"        <div class=\"sl-marquee-row\" aria-hidden=\"true\">{items}</div>",
+        "      </div>",
+        "    </section>",
+    ] if line)
+
+
+def render_product_carousel(
+    section: dict[str, Any],
+    page: dict[str, Any],
+    offers_by_id: dict[str, dict[str, Any]],
+    products_by_id: dict[str, dict[str, Any]],
+    services_by_id: dict[str, dict[str, Any]],
+    checkout_url: str | None,
+    api_base_url: str | None = None,
+) -> str:
+    """Listicle carousel: a swipeable row of several offers, each slide with its own price and a Buy-now
+    that launches THAT offer's existing single-offer checkout. Server-side cart is a later project."""
+    slides = []
+    for offer_id in section.get("offer_ids") or []:
+        offer = offers_by_id.get(str(offer_id))
+        if not offer:
+            continue
+        try:
+            resolved = resolve_offer(offer, products_by_id, None, services_by_id=services_by_id)
+        except Exception:  # noqa: BLE001 - a broken slide must not break the page
+            continue
+        subtotal = int(resolved.get("subtotal", 0))
+        currency = str(resolved.get("currency") or "usd")
+        presentation = offer.get("presentation") or {}
+        name = str(presentation.get("headline") or offer.get("name") or "")
+        subheadline = str(presentation.get("subheadline") or "")
+        image = str(presentation.get("hero_image_url") or "").strip()
+        if not image:
+            product = first_offer_product(offer, products_by_id)
+            image = str((product.get("images") or [""])[0] if product else "") or first_offer_service_image(offer, services_by_id)
+        href = escape(checkout_context(page, offer, resolved, checkout_url, api_base_url)["href"])
+        slides.append("\n".join(line for line in [
+            "        <article class=\"sl-carousel-slide\">",
+            (f"          {responsive_img(image, name or 'Product', sizes=CONTENT_BLOCK_SIZES)}" if image else ""),
+            f"          <h3 class=\"sl-carousel-title\">{render_headline_markup(name)}</h3>",
+            (f"          <p class=\"sl-carousel-desc\">{escape(subheadline)}</p>" if subheadline else ""),
+            f"          <p class=\"sl-carousel-price\">{escape(format_money(subtotal, currency))}</p>",
+            f"          <a class=\"sl-cta sl-carousel-buy\" href=\"{href}\">Buy now</a>",
+            "        </article>",
+        ] if line))
+    if not slides:
+        return ""
+    heading = str(section.get("heading") or "").strip()
+    heading_html = f"      <h2 class=\"sl-section-heading\">{render_headline_markup(heading)}</h2>" if heading else ""
+    return "\n".join(line for line in [
+        f"    <section class=\"sl-product-carousel\" data-section-id=\"{escape(str(section.get('id', 'product-carousel')))}\" data-section-type=\"product_carousel\">",
+        heading_html,
+        "      <div class=\"sl-carousel-track\">",
+        *slides,
         "      </div>",
         "    </section>",
     ] if line)
