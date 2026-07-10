@@ -3,7 +3,7 @@ external/booking). render_checkout_cta must branch on it, not always emit a Stri
 import unittest
 
 from stripe_link.domain.documents import DocumentValidationError, validate_offer_document
-from stripe_link.runtime.html import offer_cta, render_checkout_cta
+from stripe_link.runtime.html import offer_cta, render_checkout_cta, render_email_cta
 
 
 def _offer(cta=None):
@@ -43,11 +43,29 @@ class OfferCtaTests(unittest.TestCase):
         self.assertIn('target="_blank"', html)
         self.assertNotIn("$150.00", html)
 
-    def test_booking_and_email_render_action_button_without_price(self):
-        for cta_type in ("booking", "email"):
-            html = _render({"type": cta_type, "label": "Go", "target": "svc_1"})
-            self.assertIn(f'data-cta-type="{cta_type}"', html)
-            self.assertNotIn("$150.00", html)
+    def test_booking_renders_action_button_without_price(self):
+        html = _render({"type": "booking", "label": "Go", "target": "svc_1"})
+        self.assertIn('data-cta-type="booking"', html)
+        self.assertNotIn("$150.00", html)
+
+    def test_email_renders_inline_form_from_lead_capture_fields(self):
+        page = {"tenant_id": "t1", "page_id": "pg_1"}
+        offer = {"offer_id": "off_1", "tenant_id": "t1", "items": [{"product_id": "p1"}],
+                 "presentation": {"cta": {"type": "email", "label": "Get Help"}, "headline": "Acme"}}
+        products = {"p1": {"product_id": "p1", "lead_capture": {
+            "action": "capture_email_phone", "title": "Get help", "description": "We'll reach out.",
+            "fields": [{"name": "email", "type": "email", "required": True},
+                       {"name": "phone", "type": "phone", "required": False}]}}}
+        html = render_email_cta(page, offer, offer_cta(offer), products, "https://api.example.com/dev")
+        self.assertIn('data-cta-type="email"', html)
+        self.assertIn('data-lead-form', html)
+        self.assertIn('data-endpoint="https://api.example.com/dev/leads"', html)
+        self.assertIn('name="email"', html)
+        self.assertIn('name="phone"', html)
+        self.assertIn('name="company_website"', html)          # honeypot present
+        self.assertIn('data-consent="tenant_marketing"', html)  # dual opt-in
+        self.assertIn('data-consent="platform_marketing"', html)
+        self.assertNotIn("$150.00", html)
 
 
 class OfferCtaValidationTests(unittest.TestCase):

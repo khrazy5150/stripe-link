@@ -336,6 +336,15 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     "    .sl-cta.is-connecting{opacity:.72;cursor:wait;pointer-events:none}",
     "    .sl-decline-cta{width:auto;background:none;color:var(--sl-cta-text);text-decoration:underline;font-weight:600;font-size:1.3rem;padding:0.4rem}",
     "    .sl-call-number{width:auto;color:var(--sl-cta-text);font-family:var(--sl-font-accent);font-weight:900;font-size:2.2rem;letter-spacing:0.02em;text-decoration:none}",
+    "    .sl-lead-form{display:flex;flex-direction:column;gap:1rem;width:min(52rem,100%);background:var(--sl-price-card-bg);border:1px solid var(--sl-price-card-border);border-radius:1.2rem;padding:1.6rem}",
+    "    .sl-lead-title{font-family:var(--sl-font-heading);font-weight:800;font-size:1.8rem;color:var(--sl-price-title)}",
+    "    .sl-lead-description{font-size:1.4rem;color:var(--sl-price-description)}",
+    "    .sl-lead-input{width:100%;padding:1.2rem 1.4rem;border:1px solid var(--sl-price-card-border);border-radius:0.8rem;background:var(--sl-background);color:var(--sl-text);font-size:1.5rem}",
+    "    .sl-lead-consent{display:flex;align-items:flex-start;gap:0.8rem;font-size:1.3rem;color:var(--sl-price-description);text-align:left}",
+    "    .sl-lead-consent input{margin-top:0.3rem}",
+    "    .sl-lead-status{font-size:1.4rem;color:var(--sl-price-description);text-align:center;min-height:1.4rem}",
+    "    .sl-lead-status.is-error{color:#dc2626}",
+    "    .sl-hp{position:absolute;left:-9999px;width:1px;height:1px;opacity:0;pointer-events:none}",
     "    .sl-legal{display:flex;gap:1.2rem;flex-wrap:wrap;justify-content:center;text-align:center;font-size:1.3rem;color:var(--sl-legal-text);padding:2.4rem 0 0}",
     "    .sl-legal span{flex:0 0 100%}",
     "    .sl-legal a{color:var(--sl-legal-link)}",
@@ -619,7 +628,7 @@ def render_section(
     if section_type == "content_block":
         return render_content_blocks(section)
     if section_type == "checkout_cta":
-        return render_checkout_cta(page, section, offer, resolved_offer, checkout_url, api_base_url)
+        return render_checkout_cta(page, section, offer, resolved_offer, checkout_url, api_base_url, products_by_id)
     if section_type == "legal_footer":
         return render_legal_footer(page.get("legal") or {}, section, api_base_url)
     return f"    <section data-section-id=\"{escape(str(section.get('id', '')))}\"></section>"
@@ -630,6 +639,16 @@ def first_offer_product(offer: dict[str, Any], products_by_id: dict[str, dict[st
         product = products_by_id.get(item.get("product_id", ""))
         if product:
             return product
+    return {}
+
+
+def first_offer_lead_capture(offer: dict[str, Any], products_by_id: dict[str, dict[str, Any]]) -> dict[str, Any]:
+    """The lead_capture block of the offer's primary lead-gen product — drives the inline form fields."""
+    for item in offer.get("items", []):
+        product = products_by_id.get(str((item or {}).get("product_id") or ""))
+        capture = (product or {}).get("lead_capture")
+        if isinstance(capture, dict):
+            return capture
     return {}
 
 
@@ -1115,6 +1134,7 @@ def render_checkout_cta(
     resolved_offer: dict[str, Any],
     checkout_url: str | None,
     api_base_url: str | None = None,
+    products_by_id: dict[str, dict[str, Any]] | None = None,
 ) -> str:
     cta = offer_cta(offer)
     cta_type = cta["type"]
@@ -1122,11 +1142,72 @@ def render_checkout_cta(
         return render_call_cta(cta)
     if cta_type == "external":
         return render_external_cta(cta)
-    if cta_type in {"email", "booking"}:
-        # Interim: a plain action button until the dedicated EmailCollector / BookingWidget components
-        # (plans/LANDING_PAGE_CTA_AND_COMPOSITION.md phases 2 & 3) render their inline experiences.
+    if cta_type == "email":
+        return render_email_cta(page, offer, cta, products_by_id or {}, api_base_url)
+    if cta_type == "booking":
+        # Interim: a plain action button until the BookingWidget component
+        # (plans/LANDING_PAGE_CTA_AND_COMPOSITION.md phase 3) renders the inline calendar.
         return render_action_cta(cta)
     return render_buy_cta(page, section, offer, resolved_offer, checkout_url, api_base_url)
+
+
+LEAD_FIELD_INPUT_TYPES = {"email": "email", "phone": "tel", "tel": "tel", "number": "number"}
+
+
+def render_email_cta(
+    page: dict[str, Any],
+    offer: dict[str, Any],
+    cta: dict[str, str],
+    products_by_id: dict[str, dict[str, Any]],
+    api_base_url: str | None,
+) -> str:
+    """Inline lead-capture form. Renders the primary product's declared lead_capture.fields[], a honeypot,
+    and two independent GDPR opt-ins (tenant list + Junior Bay list). Submits to POST /leads via JS."""
+    lead_capture = first_offer_lead_capture(offer, products_by_id)
+    declared = lead_capture.get("fields") or [{"name": "email", "type": "email", "required": True}]
+    label = escape(cta["label"] or "Get Started")
+    title = escape(str(lead_capture.get("title") or ""))
+    description = escape(str(lead_capture.get("description") or ""))
+    endpoint = escape(f"{str(api_base_url or '').rstrip('/')}/leads")
+    tenant_id = escape(str(page.get("tenant_id") or offer.get("tenant_id") or ""))
+    offer_id = escape(str(offer.get("offer_id") or ""))
+    page_id = escape(str(page.get("page_id") or ""))
+    brand = escape(str((offer.get("presentation") or {}).get("headline") or offer.get("name") or "us"))
+
+    inputs = []
+    for field in declared:
+        name = str(field.get("name") or "").strip()
+        if not name:
+            continue
+        field_type = str(field.get("type") or "text").strip().lower()
+        input_type = LEAD_FIELD_INPUT_TYPES.get(field_type, "text")
+        required = "required" if field.get("required") else ""
+        placeholder = escape(name.replace("_", " ").title())
+        inputs.append(
+            f"        <input class=\"sl-lead-input\" type=\"{input_type}\" name=\"{escape(name)}\" "
+            f"placeholder=\"{placeholder}\" {required} />"
+        )
+
+    tenant_consent_text = f"Join {brand}'s mailing list."
+    platform_consent_text = "Also hear from Junior Bay about offers like this."
+    return "\n".join([
+        "    <section class=\"sl-checkout-cta sl-email-cta\" data-section-type=\"checkout_cta\" data-cta-type=\"email\">",
+        f"      <form class=\"sl-lead-form\" data-lead-form data-endpoint=\"{endpoint}\" "
+        f"data-tenant-id=\"{tenant_id}\" data-offer-id=\"{offer_id}\" data-page-id=\"{page_id}\">",
+        (f"        <p class=\"sl-lead-title\">{title}</p>" if title else ""),
+        (f"        <p class=\"sl-lead-description\">{description}</p>" if description else ""),
+        *inputs,
+        # Honeypot — visually hidden, off-screen; bots fill it, humans don't.
+        "        <input class=\"sl-hp\" type=\"text\" name=\"company_website\" tabindex=\"-1\" autocomplete=\"off\" aria-hidden=\"true\" />",
+        "        <label class=\"sl-lead-consent\"><input type=\"checkbox\" data-consent=\"tenant_marketing\" "
+        f"data-consent-text=\"{escape(tenant_consent_text)}\" /> {escape(tenant_consent_text)}</label>",
+        "        <label class=\"sl-lead-consent\"><input type=\"checkbox\" data-consent=\"platform_marketing\" "
+        f"data-consent-text=\"{escape(platform_consent_text)}\" /> {escape(platform_consent_text)}</label>",
+        f"        <button class=\"sl-cta\" type=\"submit\">{label}</button>",
+        "        <p class=\"sl-lead-status\" data-lead-status role=\"status\" aria-live=\"polite\"></p>",
+        "      </form>",
+        "    </section>",
+    ])
 
 
 def render_buy_cta(
@@ -1341,6 +1422,43 @@ def render_page_interactions_script(page: dict[str, Any]) -> str:
         "      document.querySelectorAll('[data-sl-current-year]').forEach((node) => {",
         "        node.textContent = String(new Date().getFullYear());",
         "      });",
+        # Inline lead-capture form: POST to /leads, honeypot on the server, show a thank-you on success.
+        "      const leadForm = document.querySelector('[data-lead-form]');",
+        "      if (leadForm) {",
+        "        const statusEl = leadForm.querySelector('[data-lead-status]');",
+        "        const idempotencyKey = `${leadForm.dataset.pageId || 'p'}-${Date.now()}-${Math.random().toString(36).slice(2)}`;",
+        "        leadForm.addEventListener('submit', (event) => {",
+        "          event.preventDefault();",
+        "          const submitBtn = leadForm.querySelector('button[type=\"submit\"]');",
+        "          if (submitBtn && submitBtn.dataset.busy === 'true') return;",
+        "          const fields = {};",
+        "          leadForm.querySelectorAll('.sl-lead-input').forEach((input) => {",
+        "            if (input.name && input.value.trim()) fields[input.name] = input.value.trim();",
+        "          });",
+        "          const consent = {};",
+        "          leadForm.querySelectorAll('[data-consent]').forEach((box) => {",
+        "            consent[box.dataset.consent] = { granted: box.checked, text: box.dataset.consentText || '' };",
+        "          });",
+        "          const hp = leadForm.querySelector('.sl-hp');",
+        "          const payload = {",
+        "            tenant_id: leadForm.dataset.tenantId, offer_id: leadForm.dataset.offerId,",
+        "            page_id: leadForm.dataset.pageId, fields, consent, idempotency_key: idempotencyKey,",
+        "            company_website: hp ? hp.value : '',",
+        "          };",
+        "          if (statusEl) { statusEl.classList.remove('is-error'); statusEl.textContent = 'Sending...'; }",
+        "          if (submitBtn) { submitBtn.dataset.busy = 'true'; submitBtn.classList.add('is-connecting'); }",
+        "          fetch(leadForm.dataset.endpoint, {",
+        "            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),",
+        "          }).then((response) => {",
+        "            if (!response.ok && response.status !== 202) throw new Error('failed');",
+        "            leadForm.querySelectorAll('.sl-lead-input,.sl-lead-consent,button[type=\"submit\"]').forEach((el) => el.remove());",
+        "            if (statusEl) statusEl.textContent = 'Thanks! We\\'ll be in touch shortly.';",
+        "          }).catch(() => {",
+        "            if (statusEl) { statusEl.classList.add('is-error'); statusEl.textContent = 'Something went wrong. Please try again.'; }",
+        "            if (submitBtn) { submitBtn.dataset.busy = 'false'; submitBtn.classList.remove('is-connecting'); }",
+        "          });",
+        "        });",
+        "      }",
         f"      const pageId = \"{page_id}\";",
         "      const money = (amount, currency) => {",
         "        const cents = Number(amount || 0);",

@@ -125,6 +125,7 @@ Globals:
         USER_PROFILES_TABLE: !Ref UserProfilesTable
         NOTIFICATIONS_TABLE: !Ref NotificationsTable
         SERVICES_TABLE: !Ref ServicesTable
+        LEADS_TABLE: !Ref LeadsTable
         INVOICES_TABLE: !Ref InvoicesTable
         PRODUCTS_TABLE: !Ref ProductsTable
         OFFERS_TABLE: !Ref OffersTable
@@ -435,6 +436,60 @@ Resources:
           Properties:
             RestApiId: !Ref RestApi
             Path: /products/{product_id}/status
+            Method: OPTIONS
+
+  LeadsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${ProjectPrefix}-leads-api-${Environment}"
+      CodeUri: src/
+      Handler: handlers.leads.handler
+      Description: Lead capture — public ingest + tenant-scoped read/manage.
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref LeadsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref NotificationsTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref OffersTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref ProductsTable
+      Events:
+        LeadsCreate:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /leads
+            Method: POST
+        LeadsList:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /leads
+            Method: GET
+        LeadsOptions:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /leads
+            Method: OPTIONS
+        LeadGet:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /leads/{lead_id}
+            Method: GET
+        LeadPatch:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /leads/{lead_id}
+            Method: PATCH
+        LeadOptions:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /leads/{lead_id}
             Method: OPTIONS
 
   ProductSyncFunction:
@@ -2311,6 +2366,40 @@ Resources:
       BillingMode: PAY_PER_REQUEST
       SSESpecification:
         SSEEnabled: true
+      AttributeDefinitions:
+        - AttributeName: PK
+          AttributeType: S
+        - AttributeName: SK
+          AttributeType: S
+        - AttributeName: GSI1PK
+          AttributeType: S
+        - AttributeName: GSI1SK
+          AttributeType: S
+      KeySchema:
+        - AttributeName: PK
+          KeyType: HASH
+        - AttributeName: SK
+          KeyType: RANGE
+      GlobalSecondaryIndexes:
+        - IndexName: GSI1
+          KeySchema:
+            - AttributeName: GSI1PK
+              KeyType: HASH
+            - AttributeName: GSI1SK
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+
+  LeadsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "${ProjectPrefix}-lead-capture-${Environment}"
+      BillingMode: PAY_PER_REQUEST
+      SSESpecification:
+        SSEEnabled: true
+      TimeToLiveSpecification:
+        AttributeName: retention_expires_at
+        Enabled: true
       AttributeDefinitions:
         - AttributeName: PK
           AttributeType: S

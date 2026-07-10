@@ -95,6 +95,7 @@ def runtime_manifest() -> dict[str, Any]:
             "user_profiles": os.environ.get("USER_PROFILES_TABLE", ""),
             "notifications": os.environ.get("NOTIFICATIONS_TABLE", ""),
             "services": os.environ.get("SERVICES_TABLE", ""),
+            "leads": os.environ.get("LEADS_TABLE", ""),
             "invoices": os.environ.get("INVOICES_TABLE", ""),
             "products": os.environ.get("PRODUCTS_TABLE", ""),
             "offers": os.environ.get("OFFERS_TABLE", ""),

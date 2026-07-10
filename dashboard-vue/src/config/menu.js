@@ -4,7 +4,7 @@ export const menuSchema = {
   groups: [
     { key: "main", label: "MAIN", items: ["dashboard", "stripeKeys"] },
     { key: "catalog", label: "CATALOG", items: ["products", "coupons", "offers", "landingPages", "sites", "services", "abTesting"] },
-    { key: "orders", label: "ORDERS", items: ["orders", "notifications", "invoices", "refunds", "shipping", "customers"] },
+    { key: "orders", label: "ORDERS", items: ["orders", "leads", "notifications", "invoices", "refunds", "shipping", "customers"] },
     { key: "settings", label: "SETTINGS", items: ["stripeConnect", "registration", "configuration", "profile", "preferences"] },
   ],
   items: {
@@ -85,6 +85,14 @@ export const menuSchema = {
       label: "Orders",
       icon: "clipboard",
       view: "orders",
+      enabled: true,
+      environments: ["test", "live"],
+    },
+    leads: {
+      key: "leads",
+      label: "Leads",
+      icon: "userPlus",
+      view: "leads",
       enabled: true,
       environments: ["test", "live"],
     },

@@ -1,0 +1,211 @@
+{
+  "document_metadata": {
+    "title": "Engineering Implementation Document - Multi-Tenant Lead Capture Platform",
+    "version": "2.0.1",
+    "source_prd_version": "2.0.0",
+    "architecture": "AWS Serverless + DynamoDB Single Table"
+  },
+  "environments": {
+    "dev": {
+      "table": "lead-capture-dev"
+    },
+    "prod": {
+      "table": "lead-capture-prod"
+    }
+  },
+  "purpose": "Build a multi-tenant lead capture platform with sharded monthly partitions, transactional dedupe, campaign and status query paths, and daily/monthly analytics.",
+  "scope": [
+    "Lead ingestion",
+    "Tenant and campaign configuration",
+    "Email and phone deduplication",
+    "Recent lead queries",
+    "Campaign and status queries",
+    "Daily and monthly aggregate analytics",
+    "Tenant isolation",
+    "Observability and error handling"
+  ],
+  "core_design": {
+    "table": "lead-capture-prod",
+    "pk_strategy": "TENANT#<tenant>#SHARD#<0-15>#YYYYMM",
+    "sk_strategy": "LEAD#<ISO8601>#<uuid>",
+    "partitioning_notes": [
+      "Shard writes across 16 partitions using a deterministic hash of email, phone, or uuid.",
+      "Use monthly buckets to limit partition growth.",
+      "Store tenant metadata separately under TENANTMETA#<tenant>."
+    ]
+  },
+  "entities": {
+    "tenant_metadata": {
+      "pk": "TENANTMETA#<tenant>",
+      "sk": "METADATA",
+      "purpose": "Tenant configuration and metadata"
+    },
+    "campaign": {
+      "pk": "TENANTMETA#<tenant>",
+      "sk": "CAMPAIGN#<campaign>",
+      "fields": [
+        "version"
+      ],
+      "purpose": "Mutable campaign configuration with optimistic concurrency"
+    },
+    "lead": {
+      "pk": "TENANT#<tenant>#SHARD#<n>#YYYYMM",
+      "sk": "LEAD#<timestamp>#<uuid>",
+      "attributes": [
+        "email",
+        "phone",
+        "campaign_id",
+        "status",
+        "custom_fields",
+        "created_at",
+        "updated_at",
+        "source_ip",
+        "user_agent"
+      ]
+    },
+    "lookup_items": [
+      {
+        "pk": "LOOKUP#EMAIL#<normalized_email>",
+        "sk": "TENANT#<tenant>#LEAD#<uuid>"
+      },
+      {
+        "pk": "LOOKUP#PHONE#<normalized_phone>",
+        "sk": "TENANT#<tenant>#LEAD#<uuid>"
+      }
+    ],
+    "daily_stats": {
+      "pk": "TENANTSTATS#<tenant>",
+      "sk": "DAY#YYYY-MM-DD",
+      "purpose": "Daily aggregate counters"
+    },
+    "monthly_stats": {
+      "pk": "TENANTSTATS#<tenant>",
+      "sk": "MONTH#YYYY-MM",
+      "purpose": "Monthly aggregate counters"
+    }
+  },
+  "indexes": {
+    "GSI1": {
+      "purpose": "Email and phone lookup",
+      "recommended_use": "Resolution path for lookup access"
+    },
+    "GSI2": {
+      "purpose": "Campaign + timestamp",
+      "recommended_attributes": {
+        "pk": "TENANT#<tenant>#CAMPAIGN#<campaign>",
+        "sk": "<timestamp>#<uuid>"
+      }
+    },
+    "GSI3": {
+      "purpose": "Status + timestamp",
+      "recommended_attributes": {
+        "pk": "TENANT#<tenant>#STATUS#<status>",
+        "sk": "<timestamp>#<uuid>"
+      }
+    }
+  },
+  "access_patterns": [
+    "Conditional or transactional dedupe using lookup items",
+    "Query month buckets for recent leads",
+    "Query campaign index",
+    "Query status index",
+    "Read dashboards from aggregate stats",
+    "Resolve leads via email or phone lookup"
+  ],
+  "write_flow": [
+    "Validate required fields and tenant authorization.",
+    "Normalize email and phone.",
+    "Compute shard and monthly bucket.",
+    "Write lookup items conditionally or via transaction.",
+    "Write lead item.",
+    "Update daily stats atomically.",
+    "Update monthly stats asynchronously or as part of the same transactional flow, depending on implementation choice."
+  ],
+  "analytics": {
+    "aggregate_records": [
+      "daily",
+      "monthly"
+    ],
+    "updates": "Atomic counters on ingest",
+    "metrics": [
+      "Lead count",
+      "Deduped/rejected count",
+      "Counts by campaign",
+      "Counts by status",
+      "Ingest failures by reason"
+    ]
+  },
+  "security": {
+    "tenant_isolation": "Partition key enforced",
+    "optimistic_concurrency": "Version attribute on mutable config",
+    "rules": [
+      "Every read and write path must require tenant context.",
+      "Do not accept arbitrary partition keys from clients.",
+      "Restrict IAM permissions to the needed table and indexes."
+    ]
+  },
+  "api_surface": [
+    "POST /tenants/{tenantId}/leads",
+    "GET /tenants/{tenantId}/leads",
+    "GET /tenants/{tenantId}/leads/{leadId}",
+    "GET /tenants/{tenantId}/campaigns/{campaignId}/leads",
+    "GET /tenants/{tenantId}/statuses/{status}/leads",
+    "GET /tenants/{tenantId}/stats/daily",
+    "PUT /tenants/{tenantId}/campaigns/{campaignId}"
+  ],
+  "error_handling": {
+    "400": "Invalid payload",
+    "401": "Unauthenticated request",
+    "403": "Tenant mismatch or unauthorized access",
+    "409": "Duplicate lead conflict",
+    "429": "Throttled request",
+    "500": "Unexpected internal failure"
+  },
+  "observability": {
+    "logging": [
+      "Tenant ID",
+      "Request ID",
+      "Dedupe outcome",
+      "Latency"
+    ],
+    "metrics": [
+      "Ingest throughput",
+      "Duplicate rate",
+      "Latency p50/p95/p99",
+      "DynamoDB consumed capacity",
+      "Daily and monthly lead totals"
+    ],
+    "alerts": [
+      "Elevated conflict rate",
+      "Write throttling",
+      "Missing analytics updates"
+    ]
+  },
+  "implementation_tasks": [
+    "Define the DynamoDB table and indexes.",
+    "Build normalization and shard-selection utilities.",
+    "Implement transaction-based ingest with lookup items.",
+    "Implement query handlers for recent, campaign, and status views.",
+    "Implement stats updates and rollups.",
+    "Add tenant-scoped auth and authorization checks.",
+    "Add tests for dedupe, concurrency, and tenant isolation.",
+    "Add observability and alarms."
+  ],
+  "acceptance_criteria": [
+    "A lead can be written with sharded month-based partitioning.",
+    "Duplicate leads are blocked through transactional lookup enforcement.",
+    "Recent leads, campaign views, and status views are queryable.",
+    "Daily and monthly aggregates update correctly on ingest.",
+    "Tenant isolation is enforced at every data access boundary.",
+    "Campaign updates use optimistic concurrency with version."
+  ],
+  "open_questions": [
+    "What should happen when email and phone dedupe disagree?",
+    "Should duplicate requests return the existing lead ID or a conflict?",
+    "Are monthly rollups synchronous or asynchronous?",
+    "What is the exact GSI attribute schema?",
+    "Which auth provider should be used?",
+    "What is the retention policy for old partitions?"
+  ],
+  "claude_build_prompt": "Build a multi-tenant lead capture platform on AWS serverless with a single DynamoDB table named lead-capture-prod. Implement tenant metadata, campaigns, leads, lookup items for email and phone dedupe, and daily stats using the item shapes defined in the PRD. Use partition keys of the form TENANT#<tenant>#SHARD#<0-15>#YYYYMM for lead data and compute shard selection deterministically from normalized email, phone, or UUID. Implement transactional ingest so lookup items and lead records are written atomically with dedupe enforcement. Add query handlers for recent leads, campaign filtering, status filtering, and dashboard stats. Support atomic daily and monthly analytics counters, tenant isolation, and optimistic concurrency for mutable campaign config using a version field. Include tests, observability, and clear error handling for conflicts, throttling, and authorization failures. Preserve the PRD’s access patterns and do not introduce non-tenant-scoped reads or writes."
+}

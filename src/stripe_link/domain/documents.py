@@ -1158,6 +1158,19 @@ def validate_notification(document: dict[str, Any]) -> None:
         raise DocumentValidationError("Notification status is invalid.")
 
 
+def validate_lead_submission(document: dict[str, Any]) -> None:
+    require_fields(document, ["schema_version", "document_type", "tenant_id", "lead_id", "offer_id", "fields", "created_at"])
+    if document.get("document_type") != "lead_submission":
+        raise DocumentValidationError("Lead submission document_type must be 'lead_submission'.")
+    if not isinstance(document.get("fields"), dict) or not document["fields"]:
+        raise DocumentValidationError("Lead submission fields must be a non-empty object.")
+    if document.get("status", "new") not in {"new", "contacted", "qualified", "archived"}:
+        raise DocumentValidationError("Lead submission status is invalid.")
+    consent = document.get("consent")
+    if consent is not None and not isinstance(consent, dict):
+        raise DocumentValidationError("Lead submission consent must be an object.")
+
+
 def validate_refund_request(document: dict[str, Any]) -> None:
     require_fields(document, ["schema_version", "document_type", "tenant_id", "refund_request_id", "status", "customer", "order_id", "created_at"])
     if document.get("document_type") != "refund_request":

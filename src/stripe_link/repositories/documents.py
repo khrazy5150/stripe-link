@@ -718,6 +718,15 @@ def refund_requests_repository(table: Any | None = None) -> DynamoDocumentReposi
     )
 
 
+def leads_repository(table: Any | None = None) -> DynamoDocumentRepository:
+    return DynamoDocumentRepository(
+        os.environ.get("LEADS_TABLE", ""),
+        document_type="lead_submission",
+        id_field="lead_id",
+        table=table,
+    )
+
+
 def services_repository(table: Any | None = None) -> DynamoDocumentRepository:
     return DynamoDocumentRepository(
         os.environ.get("SERVICES_TABLE", ""),
