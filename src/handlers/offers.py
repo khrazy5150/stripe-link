@@ -1,7 +1,34 @@
+import re
+
 from stripe_link.common import error_response, json_response, parse_json_body, path_params, query_params, tenant_id_from_event
 from stripe_link.domain.documents import DocumentValidationError, validate_offer_document
 from stripe_link.domain.pricing import PricingError, resolve_offer
 from stripe_link.repositories.documents import RepositoryError, offers_repository, products_repository
+
+
+def sanitize_slug(value: str) -> str:
+    """URL-safe slug: lowercase, non-alphanumerics collapsed to single hyphens, trimmed."""
+    slug = re.sub(r"[^a-z0-9]+", "-", str(value or "").strip().lower()).strip("-")
+    return slug or "offer"
+
+
+def unique_offer_slug(desired: str, *, tenant_id: str, offer_id: str, repository) -> str:
+    """Sanitize the desired slug and make it unique within the tenant. Slugs address published pages,
+    so two offers off the same item must not collide — append -2, -3, … when taken."""
+    base = sanitize_slug(desired)
+    try:
+        existing = repository.list_for_tenant(tenant_id)
+    except Exception:  # noqa: BLE001 - if we can't check, fall back to the sanitized slug
+        return base
+    taken = {str(offer.get("slug") or "") for offer in existing if str(offer.get("offer_id") or "") != offer_id}
+    if base not in taken:
+        return base
+    candidate = base
+    suffix = 2
+    while candidate in taken:
+        candidate = f"{base}-{suffix}"
+        suffix += 1
+    return candidate
 
 
 def handler(event, context, repository=None, products_repo=None):
@@ -32,6 +59,14 @@ def handler(event, context, repository=None, products_repo=None):
 def create_offer(event, repository, products_repo=None):
     try:
         document = parse_json_body(event)
+        # Server owns the slug: sanitize illegal characters and guarantee tenant-uniqueness so two
+        # offers off the same item can't collide, regardless of what the client sent.
+        document["slug"] = unique_offer_slug(
+            document.get("slug") or document.get("name"),
+            tenant_id=str(document.get("tenant_id") or ""),
+            offer_id=str(document.get("offer_id") or ""),
+            repository=repository,
+        )
         validate_offer_document(document)
         validate_offer_product_compatibility(document, products_repo or products_repository())
         saved = repository.put(document)

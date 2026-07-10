@@ -34,6 +34,26 @@ class OfferCrudHandlerTests(unittest.TestCase):
         self.assertEqual(item["default_price_id"], "price_2bottle")
         self.assertEqual(len(item["selectable_prices"]), 4)
 
+    def _post(self, offer):
+        return handler({"httpMethod": "POST", "body": json.dumps(offer)}, None,
+                       repository=self.repository, products_repo=self.products)
+
+    def test_offer_slug_is_sanitized(self):
+        resp = self._post({**self.offer, "offer_id": "offer_a", "slug": "Tax Prep!! SVC"})
+        self.assertEqual(resp["statusCode"], 201)
+        self.assertEqual(json.loads(resp["body"])["offer"]["slug"], "tax-prep-svc")
+
+    def test_offer_slug_uniqueness_suffixes_collisions(self):
+        self._post({**self.offer, "offer_id": "offer_a", "slug": "combo"})
+        resp = self._post({**self.offer, "offer_id": "offer_b", "slug": "combo"})
+        self.assertEqual(json.loads(resp["body"])["offer"]["slug"], "combo-2")
+
+    def test_offer_slug_stable_on_re_save(self):
+        first = self._post({**self.offer, "offer_id": "offer_a", "slug": "combo"})
+        again = self._post({**self.offer, "offer_id": "offer_a", "slug": "combo"})
+        self.assertEqual(json.loads(first["body"])["offer"]["slug"], "combo")
+        self.assertEqual(json.loads(again["body"])["offer"]["slug"], "combo")
+
     def test_update_offer_status_archives_and_restores(self):
         self.repository.put(self.offer)
         tenant_id = self.offer["tenant_id"]

@@ -92,23 +92,23 @@
         <form class="offer-form" @submit.prevent="createOffer">
           <section class="offer-form-section">
             <label class="offer-field">
-              <span>1. Select Products <strong>*</strong></span>
+              <span>1. Select Items <strong>*</strong></span>
               <button type="button" class="secondary-action stretch" @click="openProductSelector">
-                Select Products Visually
+                Select Items Visually
               </button>
             </label>
 
             <div class="selected-products-list">
-              <div v-if="!selectedProducts.length" class="selected-products-empty">No products selected</div>
+              <div v-if="!selectedItems.length" class="selected-products-empty">No items selected</div>
               <template v-else>
                 <button
-                  v-for="product in selectedProducts"
-                  :key="productId(product)"
+                  v-for="item in selectedItems"
+                  :key="item.kind + ':' + item.id"
                   type="button"
                   class="selected-product-badge"
-                  @click="removeSelectedProduct(productId(product))"
+                  @click="removeSelectedItem(item)"
                 >
-                  <span>{{ product.name || "Untitled Product" }}</span>
+                  <span>{{ item.name }}</span>
                   <span aria-hidden="true">×</span>
                 </button>
               </template>
@@ -123,37 +123,14 @@
             </div>
           </section>
 
-          <section class="offer-form-section">
+          <section v-if="hasService" class="offer-form-section">
             <header class="offer-section-header">
               <div>
-                <h3>Services (optional)</h3>
-                <p>Attach one or more bookable services. Choose whether the customer pays first then books, or books first and pays via invoice.</p>
+                <h3>Service Options</h3>
+                <p>Choose whether the customer pays first then books, or books first and pays via invoice.</p>
               </div>
             </header>
-            <div v-for="(row, index) in form.services" :key="index" class="offer-three-column">
-              <label class="offer-field">
-                <span>Service</span>
-                <select v-model="row.service_id" @change="onRowServiceChange(row)">
-                  <option value="">None</option>
-                  <option v-for="s in servicesStore.services" :key="s.service_id" :value="s.service_id">{{ s.name }}</option>
-                </select>
-              </label>
-              <label v-if="row.service_id" class="offer-field">
-                <span>Price</span>
-                <select v-model="row.price_id">
-                  <option v-for="p in servicePricesFor(row.service_id)" :key="p.price_id" :value="p.price_id">
-                    {{ formatMoney(p.unit_amount, p.currency) }}{{ p.context && p.context !== 'standard' ? ` (${p.context})` : '' }}
-                  </option>
-                </select>
-              </label>
-              <div v-if="form.services.length > 1" class="offer-field offer-field-actions">
-                <button type="button" class="secondary-action compact" @click="removeServiceRow(index)">Remove</button>
-              </div>
-            </div>
-            <div class="button-row">
-              <button type="button" class="secondary-action compact" @click="addServiceRow">+ Add service</button>
-            </div>
-            <div v-if="hasService" class="offer-three-column">
+            <div class="offer-three-column">
               <label class="offer-field">
                 <span>Booking flow</span>
                 <select v-model="form.service_booking_flow">
@@ -446,12 +423,12 @@
     <div v-if="showProductSelector" class="modal-backdrop offer-selector-backdrop" @click.self="closeProductSelector">
       <section class="modal-card offer-product-selector-modal" role="dialog" aria-modal="true" aria-labelledby="productSelectorTitle">
         <header class="modal-card-header">
-          <h2 id="productSelectorTitle">Select Products for Offer</h2>
-          <button type="button" class="modal-close" aria-label="Close product selector" @click="closeProductSelector">×</button>
+          <h2 id="productSelectorTitle">Select Items for Offer</h2>
+          <button type="button" class="modal-close" aria-label="Close item selector" @click="closeProductSelector">×</button>
         </header>
 
         <div class="offer-product-selector-body">
-          <input v-model.trim="productSearch" class="offer-product-search" type="search" placeholder="Search products..." />
+          <input v-model.trim="productSearch" class="offer-product-search" type="search" placeholder="Search items..." />
 
           <div v-if="productStore.error" class="keys-status-banner error">{{ productStore.error }}</div>
           <div v-if="selectorError" class="keys-status-banner error">{{ selectorError }}</div>
@@ -459,13 +436,13 @@
             <p>{{ productStore.loading ? "Loading products..." : "Products will appear here once loaded." }}</p>
           </div>
 
-          <div v-else-if="!productStore.error && !selectorProducts.length" class="selector-load-state">
-            No products found.
+          <div v-else-if="!productStore.error && !selectorItems.length" class="selector-load-state">
+            No items found.
           </div>
 
           <div v-else-if="!productStore.error" class="offer-product-grid">
             <button
-              v-for="product in selectorProducts"
+              v-for="product in selectorItems"
               :key="productId(product)"
               type="button"
               class="offer-product-card"
@@ -606,17 +583,37 @@ let productsLoadPromise = null;
 const activeProducts = computed(() => productStore.products.filter((product) => product.status !== "archived" && product.active !== false));
 const productsById = computed(() => new Map(productStore.products.map((product) => [productId(product), product])));
 const selectedProducts = computed(() => activeProducts.value.filter((product) => selectedProductIds.value.includes(productId(product))));
-const selectorProducts = computed(() => {
+function serviceSelectorCard(service) {
+  // Shape a service into a product-compatible card so the visual selector + its helpers
+  // (productId/priceText/productIntentFor/defaultProductPrice) work unchanged. Services are transactional.
+  const prices = servicePricesFor(service.service_id);
+  return {
+    __service: true,
+    product_id: service.service_id,
+    service_id: service.service_id,
+    name: service.name || "Untitled Service",
+    description: service.description || "",
+    images: service.presentation?.hero_image_url ? [service.presentation.hero_image_url] : [],
+    product_intent: "transaction",
+    prices,
+    default_price_id: service.default_price_id || prices[0]?.price_id || "",
+  };
+}
+const activeServices = computed(() => servicesStore.services.filter((service) => service.active !== false));
+// Products and services are both "items"; the visual selector treats them as one list.
+const selectorItems = computed(() => {
+  const items = [...activeProducts.value, ...activeServices.value.map(serviceSelectorCard)];
   const term = productSearch.value.toLowerCase();
-  if (!term) return activeProducts.value;
-  return activeProducts.value.filter((product) => [
-    product.name,
-    product.description,
-    product.product_id,
-    product.product_category,
-    ...(Array.isArray(product.tags) ? product.tags : []),
+  if (!term) return items;
+  return items.filter((item) => [
+    item.name, item.description, item.product_id, item.service_id, item.product_category,
+    ...(Array.isArray(item.tags) ? item.tags : []),
   ].filter(Boolean).join(" ").toLowerCase().includes(term));
 });
+const selectedItems = computed(() => [
+  ...selectedProducts.value.map((product) => ({ id: productId(product), name: product.name || "Untitled Product", kind: "product" })),
+  ...serviceRows.value.map((row) => ({ id: row.service_id, name: serviceObjFor(row.service_id)?.name || "Service", kind: "service" })),
+]);
 const couponSelectorCoupons = computed(() => {
   const term = couponSearch.value.toLowerCase();
   const coupons = couponStore.usableCoupons;
@@ -642,8 +639,8 @@ const productIntent = computed(() => {
   return intents.size === 1 ? [...intents][0] : "mixed";
 });
 const draftSelectedIntent = computed(() => {
-  const selectedDraftProducts = activeProducts.value.filter((product) => draftSelectedProductIds.value.has(productId(product)));
-  const intents = new Set(selectedDraftProducts.map(productIntentFor));
+  const selectedDraftItems = selectorItems.value.filter((item) => draftSelectedProductIds.value.has(productId(item)));
+  const intents = new Set(selectedDraftItems.map(productIntentFor));
   return intents.size === 1 ? [...intents][0] : "";
 });
 const detectedOfferTypeLabel = computed(() => {
@@ -661,10 +658,10 @@ const detectedOfferTypeDescription = computed(() => {
   return descriptions[detectedOfferType.value] || "";
 });
 
-watch(selectedProducts, (products) => {
-  syncItemConfigs(products);
-  if (!products.length) return;
-  const label = generateOfferLabel(products, detectedOfferType.value);
+watch(selectedItems, () => {
+  syncItemConfigs(selectedProducts.value);
+  if (!selectedItems.value.length) return;
+  const label = offerLabelForItems();
   if (!form.name || !form.userEditedName) {
     form.name = label;
     form.slug = slugify(label);
@@ -672,7 +669,7 @@ watch(selectedProducts, (products) => {
 }, { immediate: true });
 
 watch(() => form.name, (value, oldValue) => {
-  if (!oldValue || value === generateOfferLabel(selectedProducts.value, detectedOfferType.value)) return;
+  if (!oldValue || value === offerLabelForItems()) return;
   form.userEditedName = true;
   if (!form.userEditedSlug) form.slug = slugify(value);
 });
@@ -731,24 +728,6 @@ function openOfferModal(offer = null) {
   if (!servicesStore.loaded && !servicesStore.loading) servicesStore.load();
 }
 
-function onRowServiceChange(row) {
-  const prices = servicePricesFor(row.service_id);
-  const service = serviceObjFor(row.service_id);
-  const preferred = service?.default_price_id;
-  row.price_id = prices.find((p) => p.price_id === preferred)?.price_id || prices[0]?.price_id || "";
-  // Booking flow is offer-level (one payment posture); seed it from the first service chosen.
-  if (serviceRows.value.length <= 1) form.service_booking_flow = service?.booking_flow || "pay_then_book";
-}
-
-function addServiceRow() {
-  form.services.push({ service_id: "", price_id: "" });
-}
-
-function removeServiceRow(index) {
-  form.services.splice(index, 1);
-  if (!form.services.length) form.services.push({ service_id: "", price_id: "" });
-}
-
 function closeOfferModal() {
   showOfferModal.value = false;
   showProductSelector.value = false;
@@ -756,13 +735,13 @@ function closeOfferModal() {
 }
 
 async function openProductSelector() {
-  draftSelectedProductIds.value = new Set(selectedProductIds.value);
+  // Seed the draft from both already-selected products and services (both are items now).
+  draftSelectedProductIds.value = new Set([...selectedProductIds.value, ...serviceRows.value.map((row) => row.service_id)]);
   productSearch.value = "";
   selectorError.value = "";
   showProductSelector.value = true;
-  if (!productStore.loaded && !productStore.loading) {
-    await productStore.load();
-  }
+  if (!productStore.loaded && !productStore.loading) await productStore.load();
+  if (!servicesStore.loaded && !servicesStore.loading) servicesStore.load();
 }
 
 function closeProductSelector() {
@@ -784,10 +763,22 @@ function closeCouponSelector() {
 
 function applyProductSelection() {
   if (!draftSelectionIsCompatible()) {
-    selectorError.value = "An offer cannot mix transaction products with lead generation products.";
+    selectorError.value = "An offer cannot mix transaction items with lead generation items.";
     return;
   }
-  selectedProductIds.value = [...draftSelectedProductIds.value];
+  // Split the selection back into products and services (services use their default price).
+  const selectedIds = [...draftSelectedProductIds.value];
+  const productIdSet = new Set(activeProducts.value.map((product) => productId(product)));
+  selectedProductIds.value = selectedIds.filter((id) => productIdSet.has(id));
+  const serviceIds = selectedIds.filter((id) => !productIdSet.has(id));
+  form.services = serviceIds.length
+    ? serviceIds.map((serviceId) => ({
+        service_id: serviceId,
+        price_id: serviceObjFor(serviceId)?.default_price_id || servicePricesFor(serviceId)[0]?.price_id || "",
+      }))
+    : [{ service_id: "", price_id: "" }];
+  // Booking flow is offer-level (one payment posture); seed it from the first service chosen.
+  if (serviceIds.length) form.service_booking_flow = serviceObjFor(serviceIds[0])?.booking_flow || "pay_then_book";
   showProductSelector.value = false;
   selectorError.value = "";
 }
@@ -796,7 +787,7 @@ function toggleDraftProduct(id) {
   const next = new Set(draftSelectedProductIds.value);
   if (next.has(id)) next.delete(id);
   else {
-    const product = activeProducts.value.find((item) => productId(item) === id);
+    const product = selectorItems.value.find((item) => productId(item) === id);
     if (!product) return;
     const selectedIntent = draftSelectedIntent.value;
     const nextIntent = productIntentFor(product);
@@ -812,6 +803,15 @@ function toggleDraftProduct(id) {
 
 function removeSelectedProduct(id) {
   selectedProductIds.value = selectedProductIds.value.filter((productIdValue) => productIdValue !== id);
+}
+
+function removeSelectedItem(item) {
+  if (item.kind === "service") {
+    form.services = form.services.filter((row) => row.service_id !== item.id);
+    if (!form.services.length) form.services.push({ service_id: "", price_id: "" });
+  } else {
+    removeSelectedProduct(item.id);
+  }
 }
 
 async function loadOffers() {
@@ -1340,8 +1340,8 @@ function isIncompatibleDraftProduct(product) {
 }
 
 function draftSelectionIsCompatible() {
-  const selectedDraftProducts = activeProducts.value.filter((product) => draftSelectedProductIds.value.has(productId(product)));
-  return new Set(selectedDraftProducts.map(productIntentFor)).size <= 1;
+  const selectedDraftItems = selectorItems.value.filter((item) => draftSelectedProductIds.value.has(productId(item)));
+  return new Set(selectedDraftItems.map(productIntentFor)).size <= 1;
 }
 
 function productInitial(product) {
@@ -1422,6 +1422,15 @@ function generateOfferLabel(products, type) {
   if (!products.length) return "";
   const baseName = String(products[0].name || "Product").split(" - ")[0].trim() || "Product";
   return `${baseName} ${type === "bundle" ? "Bundle" : "Single Offer"}`;
+}
+
+// Auto-label from the unified item set (products + services). Names off the first item for now;
+// multi-item naming is a known follow-up. A single item -> "… Single Offer"; multiple -> "… Bundle".
+function offerLabelForItems() {
+  const items = selectedItems.value;
+  if (!items.length) return "";
+  const baseName = String(items[0].name || "Item").split(" - ")[0].trim() || "Item";
+  return `${baseName} ${items.length > 1 ? "Bundle" : "Single Offer"}`;
 }
 
 function contextLabel(value) {
