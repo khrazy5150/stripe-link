@@ -4,7 +4,7 @@ import re
 from typing import Any
 from urllib.parse import urlencode, urlparse
 
-from stripe_link.domain.pricing import find_price, resolve_offer
+from stripe_link.domain.pricing import find_price, resolve_offer, single_unit_price
 from stripe_link.domain.service_pricing import resolve_service_price
 
 
@@ -378,6 +378,26 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     "    .sl-carousel-desc{font-size:1.4rem;color:var(--sl-price-description)}",
     "    .sl-carousel-price{font-family:var(--sl-font-accent);font-weight:900;font-size:2rem;color:var(--sl-price-amount);margin-top:auto}",
     "    .sl-carousel-buy{width:auto;text-align:center}",
+    "    .sl-listicle{width:min(52rem,100%);margin:0 auto;display:flex;flex-direction:column;gap:1.2rem}",
+    "    .sl-listicle-carousel{display:flex;overflow-x:auto;scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch;scrollbar-width:none}",
+    "    .sl-listicle-carousel::-webkit-scrollbar{display:none}",
+    "    .sl-listicle-slide{flex:0 0 100%;scroll-snap-align:center;display:flex;align-items:center;justify-content:center}",
+    "    .sl-listicle-slide img{width:100%;height:auto;max-height:38rem;object-fit:contain;border-radius:1.2rem}",
+    "    .sl-listicle-dots{display:flex;gap:0.6rem;justify-content:center}",
+    "    .sl-listicle-dot{width:0.7rem;height:0.7rem;border-radius:50%;background:var(--sl-border);transition:background .2s}",
+    "    .sl-listicle-dot.is-active{background:var(--sl-brand)}",
+    "    .sl-listicle-card{background:var(--sl-price-card-bg);border:1px solid var(--sl-price-card-border);border-radius:1.4rem;padding:1.6rem;display:flex;flex-direction:column;gap:0.8rem}",
+    "    .sl-listicle-pricerow{display:flex;align-items:baseline;gap:0.8rem;flex-wrap:wrap}",
+    "    .sl-listicle-discount{color:#e11d48;font-family:var(--sl-font-accent);font-weight:900;font-size:2rem}",
+    "    .sl-listicle-price{font-family:var(--sl-font-accent);font-weight:900;font-size:2.4rem;color:var(--sl-price-amount)}",
+    "    .sl-listicle-compare{color:var(--sl-price-regular);font-size:1.6rem}",
+    "    .sl-listicle-title{font-family:var(--sl-font-heading);font-weight:700;font-size:1.7rem;color:var(--sl-price-title)}",
+    "    .sl-listicle-desc{font-size:1.4rem;color:var(--sl-price-description)}",
+    "    .sl-listicle-add{width:100%;text-align:center;margin-top:0.4rem}",
+    "    .sl-minicart{position:fixed;left:0;right:0;bottom:0;z-index:20;display:none;align-items:center;justify-content:space-between;gap:1rem;padding:1.2rem 1.6rem;background:var(--sl-card);border-top:1px solid var(--sl-border);box-shadow:0 -2px 16px rgba(0,0,0,.12)}",
+    "    .sl-minicart.is-visible{display:flex}",
+    "    .sl-minicart-summary{font-family:var(--sl-font-accent);font-weight:800;color:var(--sl-text)}",
+    "    .sl-minicart-note{font-size:1.3rem;color:var(--sl-muted)}",
     "    .sl-legal{display:flex;gap:1.2rem;flex-wrap:wrap;justify-content:center;text-align:center;font-size:1.3rem;color:var(--sl-legal-text);padding:2.4rem 0 0}",
     "    .sl-legal span{flex:0 0 100%}",
     "    .sl-legal a{color:var(--sl-legal-link)}",
@@ -601,7 +621,9 @@ def render_page(
     has_legal_footer_section = any(section.get("type") == "legal_footer" for section in page.get("sections", []))
     legal_footer = "" if has_legal_footer_section else render_legal_footer(page.get("legal") or {}, api_base_url=api_base_url)
     analytics_tags = render_analytics_tags(page.get("analytics") or {})
-    return "\n".join([
+    # A listicle page gets a persistent mini-cart (client-side this phase; server-side cart is L2).
+    minicart = render_minicart() if str(offer.get("offer_type") or "single") == "listicle" else ""
+    return "\n".join(part for part in [
         "<!doctype html>",
         "<html lang=\"en\">",
         "<head>",
@@ -621,8 +643,20 @@ def render_page(
         body,
         legal_footer,
         "  </main>",
+        minicart,
         "</body>",
         "</html>",
+    ] if part != "")
+
+
+def render_minicart() -> str:
+    # This phase: a summary bar showing the client-side cart accumulate. Checkout is wired in L2 (the
+    # server-side cart + multi-line Stripe checkout) — plans/LISTICLE_AND_CART.md.
+    return "\n".join([
+        "  <div class=\"sl-minicart\" data-minicart>",
+        "    <span class=\"sl-minicart-summary\" data-minicart-summary></span>",
+        "    <span class=\"sl-minicart-note\">Checkout coming soon</span>",
+        "  </div>",
     ])
 
 
@@ -903,6 +937,42 @@ def render_service_price_card(item, service_id, services_by_id, offer, display_i
     return (landing_page_price_sort_key(price, item, display_index), card_markup)
 
 
+def listicle_slides(
+    offer: dict[str, Any],
+    products_by_id: dict[str, dict[str, Any]],
+    services_by_id: dict[str, dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """One slide per offer item, priced at the SINGLE-UNIT price (bundles/funnels ignored)."""
+    slides = []
+    for item in offer.get("items", []):
+        product_id = str(item.get("product_id") or "")
+        service_id = str(item.get("service_id") or "")
+        if product_id and product_id in products_by_id:
+            product = products_by_id[product_id]
+            price = single_unit_price(product)
+            if not price:
+                continue
+            compare = int(price.get("compare_at_amount") or 0)
+            slides.append({
+                "product_id": product_id, "service_id": "", "price_id": str(price.get("price_id") or ""),
+                "name": str(product.get("name") or ""), "description": str(product.get("description") or ""),
+                "image": str((product.get("images") or [""])[0] or ""),
+                "amount": int(price.get("unit_amount") or 0), "currency": str(price.get("currency") or "usd"),
+                "compare_at": compare,
+            })
+        elif service_id and service_id in services_by_id:
+            service = services_by_id[service_id]
+            svc_price = service.get("price") or (service.get("prices") or [{}])[0]
+            slides.append({
+                "product_id": "", "service_id": service_id, "price_id": str(item.get("price_id") or ""),
+                "name": str(service.get("name") or ""), "description": str(service.get("description") or ""),
+                "image": str((service.get("presentation") or {}).get("hero_image_url") or ""),
+                "amount": int(svc_price.get("unit_amount") or 0), "currency": str(svc_price.get("currency") or "usd"),
+                "compare_at": 0,
+            })
+    return slides
+
+
 def render_listicle_carousel(
     offer: dict[str, Any],
     products_by_id: dict[str, dict[str, Any]],
@@ -911,45 +981,51 @@ def render_listicle_carousel(
     checkout_url: str | None,
     api_base_url: str | None = None,
 ) -> str:
-    """A listicle offer renders its OWN items as a swipeable carousel — one slide per item, each with its
-    own price. Slides carry cart data-attributes (product/price/offer) for the Add-to-cart JS; a Buy-now
-    link is the interim action until the server-side cart (plans/LISTICLE_AND_CART.md L2) is wired."""
-    resolved = resolve_offer(offer, products_by_id, None, services_by_id=services_by_id)
-    offer_id = escape(str(offer.get("offer_id") or ""))
-    api_base = escape(str(api_base_url or "").rstrip("/"))
-    slides = []
-    for item in resolved.get("items", []):
-        name = str(item.get("product_name") or "")
-        unit_amount = int(item.get("unit_amount") or 0)
-        currency = str(item.get("currency") or "usd")
-        product_id = str(item.get("product_id") or "")
-        service_id = str(item.get("service_id") or "")
-        price_id = str(item.get("price_id") or "")
-        image = ""
-        if product_id and product_id in products_by_id:
-            image = str((products_by_id[product_id].get("images") or [""])[0] or "")
-        elif service_id and service_id in services_by_id:
-            image = str((services_by_id[service_id].get("presentation") or {}).get("hero_image_url") or "")
-        href = "#checkout"
-        if checkout_url:
-            href = build_checkout_url(checkout_url, page=page, offer=offer, product_id=product_id, price_id=price_id, quantity="1")
-        slides.append("\n".join(line for line in [
-            f"        <article class=\"sl-carousel-slide\" data-cart-item data-product-id=\"{escape(product_id)}\" "
-            f"data-service-id=\"{escape(service_id)}\" data-price-id=\"{escape(price_id)}\" data-offer-id=\"{offer_id}\" "
-            f"data-amount=\"{unit_amount}\" data-currency=\"{escape(currency)}\" data-name=\"{escape(name)}\">",
-            (f"          {responsive_img(image, name or 'Product', sizes=CONTENT_BLOCK_SIZES)}" if image else ""),
-            f"          <h3 class=\"sl-carousel-title\">{render_headline_markup(name)}</h3>",
-            f"          <p class=\"sl-carousel-price\">{escape(format_money(unit_amount, currency))}</p>",
-            f"          <a class=\"sl-cta sl-carousel-buy\" href=\"{escape(href)}\" data-cart-add>Buy now</a>",
-            "        </article>",
-        ] if line))
+    """TikTok-Shop-style listicle: ONE swipeable image carousel; the price card below SYNCS to the shown
+    item (discount % / price / compare-at / title); an Add-to-cart button adds the shown item to a
+    client-side cart (server-side cart + checkout are the next phase — plans/LISTICLE_AND_CART.md L2)."""
+    slides = listicle_slides(offer, products_by_id, services_by_id)
     if not slides:
         return ""
+    offer_id = escape(str(offer.get("offer_id") or ""))
+
+    images = []
+    dots = []
+    for index, slide in enumerate(slides):
+        discount_pct = 0
+        if slide["compare_at"] > slide["amount"] > 0:
+            discount_pct = round((slide["compare_at"] - slide["amount"]) / slide["compare_at"] * 100)
+        images.append("\n".join(line for line in [
+            f"        <div class=\"sl-listicle-slide\" data-listicle-item data-index=\"{index}\" "
+            f"data-product-id=\"{escape(slide['product_id'])}\" data-service-id=\"{escape(slide['service_id'])}\" "
+            f"data-price-id=\"{escape(slide['price_id'])}\" data-amount=\"{slide['amount']}\" "
+            f"data-compare=\"{slide['compare_at']}\" data-discount=\"{discount_pct}\" "
+            f"data-currency=\"{escape(slide['currency'])}\" data-name=\"{escape(slide['name'])}\" "
+            f"data-desc=\"{escape(slide['description'])}\">",
+            (f"          {responsive_img(slide['image'], slide['name'] or 'Product', sizes=CONTENT_BLOCK_SIZES)}" if slide["image"] else ""),
+            "        </div>",
+        ] if line))
+        dots.append(f"        <span class=\"sl-listicle-dot{' is-active' if index == 0 else ''}\" data-listicle-dot data-index=\"{index}\"></span>")
+
+    first = slides[0]
+    first_discount = round((first["compare_at"] - first["amount"]) / first["compare_at"] * 100) if first["compare_at"] > first["amount"] > 0 else 0
     return "\n".join([
-        f"    <section class=\"sl-product-carousel\" data-section-type=\"offer_price_selector\" data-listicle "
-        f"data-offer-id=\"{offer_id}\" data-api-base=\"{api_base}\">",
-        "      <div class=\"sl-carousel-track\">",
-        *slides,
+        f"    <section class=\"sl-listicle\" data-section-type=\"offer_price_selector\" data-listicle data-offer-id=\"{offer_id}\">",
+        "      <div class=\"sl-listicle-carousel\" data-listicle-track>",
+        *images,
+        "      </div>",
+        "      <div class=\"sl-listicle-dots\">",
+        *dots,
+        "      </div>",
+        "      <div class=\"sl-listicle-card\">",
+        "        <div class=\"sl-listicle-pricerow\">",
+        f"          <span class=\"sl-listicle-discount\" data-listicle-discount>{('-' + str(first_discount) + '%') if first_discount else ''}</span>",
+        f"          <span class=\"sl-listicle-price\" data-listicle-price>{escape(format_money(first['amount'], first['currency']))}</span>",
+        f"          <del class=\"sl-listicle-compare\" data-listicle-compare>{escape(format_money(first['compare_at'], first['currency'])) if first['compare_at'] > first['amount'] else ''}</del>",
+        "        </div>",
+        f"        <p class=\"sl-listicle-title\" data-listicle-title>{render_headline_markup(first['name'])}</p>",
+        f"        <p class=\"sl-listicle-desc\" data-listicle-desc>{escape(first['description'])}</p>",
+        "        <button class=\"sl-cta sl-listicle-add\" type=\"button\" data-listicle-add>Add to cart</button>",
         "      </div>",
         "    </section>",
     ])
@@ -1777,6 +1853,69 @@ def render_page_interactions_script(page: dict[str, Any]) -> str:
         "          panel.hidden = false; revealBtn.style.display = 'none';",
         "          panel.innerHTML = '<div class=\"sl-booking-banner\">Your booking is confirmed — check your email for details.</div>';",
         "        }",
+        "      }",
+        # Listicle: sync the price card to the shown carousel item + a client-side cart with a mini-cart.
+        "      const listicle = document.querySelector('[data-listicle]');",
+        "      if (listicle) {",
+        "        const track = listicle.querySelector('[data-listicle-track]');",
+        "        const items = Array.from(listicle.querySelectorAll('[data-listicle-item]'));",
+        "        const dots = Array.from(listicle.querySelectorAll('[data-listicle-dot]'));",
+        "        const cardEls = {",
+        "          discount: listicle.querySelector('[data-listicle-discount]'),",
+        "          price: listicle.querySelector('[data-listicle-price]'),",
+        "          compare: listicle.querySelector('[data-listicle-compare]'),",
+        "          title: listicle.querySelector('[data-listicle-title]'),",
+        "          desc: listicle.querySelector('[data-listicle-desc]'),",
+        "        };",
+        "        const addBtn = listicle.querySelector('[data-listicle-add]');",
+        "        const cartKey = 'sl_cart_' + (listicle.dataset.offerId || 'offer');",
+        "        const fmt = (cents, currency) => { const c = String(currency||'usd').toUpperCase(); const v = (Number(cents||0)/100).toFixed(2); return c === 'USD' ? ('$'+v) : (c+' '+v); };",
+        "        const readCart = () => { try { return JSON.parse(localStorage.getItem(cartKey) || '[]'); } catch (e) { return []; } };",
+        "        const writeCart = (cart) => { try { localStorage.setItem(cartKey, JSON.stringify(cart)); } catch (e) {} };",
+        "        const minicart = document.querySelector('[data-minicart]');",
+        "        const minicartSummary = minicart && minicart.querySelector('[data-minicart-summary]');",
+        "        const renderMinicart = () => {",
+        "          if (!minicart) return;",
+        "          const cart = readCart();",
+        "          const count = cart.reduce((n, i) => n + (i.qty||1), 0);",
+        "          const total = cart.reduce((s, i) => s + (i.amount||0) * (i.qty||1), 0);",
+        "          const currency = (cart[0] && cart[0].currency) || 'usd';",
+        "          if (count > 0) { minicart.classList.add('is-visible'); if (minicartSummary) minicartSummary.textContent = 'Cart (' + count + ') · ' + fmt(total, currency); }",
+        "          else minicart.classList.remove('is-visible');",
+        "        };",
+        "        let activeIndex = 0;",
+        "        const setActive = (index) => {",
+        "          if (index < 0 || index >= items.length) return;",
+        "          activeIndex = index;",
+        "          const d = items[index].dataset;",
+        "          if (cardEls.discount) cardEls.discount.textContent = Number(d.discount) > 0 ? ('-' + d.discount + '%') : '';",
+        "          if (cardEls.price) cardEls.price.textContent = fmt(d.amount, d.currency);",
+        "          if (cardEls.compare) cardEls.compare.textContent = Number(d.compare) > Number(d.amount) ? fmt(d.compare, d.currency) : '';",
+        "          if (cardEls.title) cardEls.title.textContent = d.name || '';",
+        "          if (cardEls.desc) cardEls.desc.textContent = d.desc || '';",
+        "          dots.forEach((dot, i) => dot.classList.toggle('is-active', i === index));",
+        "        };",
+        "        if (track) {",
+        "          let scrollTimer = null;",
+        "          track.addEventListener('scroll', () => {",
+        "            window.clearTimeout(scrollTimer);",
+        "            scrollTimer = window.setTimeout(() => {",
+        "              const index = Math.round(track.scrollLeft / track.clientWidth);",
+        "              if (index !== activeIndex) setActive(index);",
+        "            }, 60);",
+        "          });",
+        "        }",
+        "        dots.forEach((dot, i) => dot.addEventListener('click', () => { if (track) track.scrollTo({ left: i * track.clientWidth, behavior: 'smooth' }); setActive(i); }));",
+        "        if (addBtn) addBtn.addEventListener('click', () => {",
+        "          const d = items[activeIndex].dataset;",
+        "          const cart = readCart();",
+        "          const existing = cart.find((i) => i.price_id === d.priceId);",
+        "          if (existing) existing.qty = (existing.qty||1) + 1;",
+        "          else cart.push({ product_id: d.productId, service_id: d.serviceId, price_id: d.priceId, name: d.name, amount: Number(d.amount||0), currency: d.currency, qty: 1 });",
+        "          writeCart(cart); renderMinicart();",
+        "          addBtn.textContent = 'Added ✓'; window.setTimeout(() => { addBtn.textContent = 'Add to cart'; }, 1200);",
+        "        });",
+        "        renderMinicart();",
         "      }",
         f"      const pageId = \"{page_id}\";",
         "      const money = (amount, currency) => {",

@@ -13,27 +13,47 @@ renders its own items as a carousel. The multi-offer carousel element is **retir
 
 ## Locked decisions
 
-- **`offer_type` becomes a first-class, validated Offer field**: `single | bundle | listicle` (default
-  `single`; currently the concept is UI-only and stripped). It drives rendering:
-  - `single` / `bundle` → today's `offer_price_selector` (pick-one radio + one Buy).
-  - `listicle` → a **carousel of the offer's items**, each slide independently **add-to-cart** (not
-    pick-one). Rendered by adapting the price-selector section to a carousel when the offer is a listicle.
-- **Server-side cart** (the "pick several, check out later" model the tenant expects). Buy-now-only is
-  **not** enough for a listicle. This is the deliberate cart project from `AI_AND_COMMERCE` C.3.
-- **Listicle offers ignore upsell funnels** (deterministic), per `AI_AND_COMMERCE` C.1.
+- **`offer_type` is AUTO-INFERRED, never chosen by the tenant** (the software knows from what's selected):
+  - **1 product, 1 price → `single`.**
+  - **1 product, buyable in 2+ units of the SAME product (multiple quantity/price options) → `bundle`.**
+  - **Multiple products, services, or both → `listicle`.**
+  It's a validated Offer field the API stamps at save (no UI selector). It tells the renderer how to build
+  the page.
+- **`single` / `bundle`** → today's `offer_price_selector` (pick-one). **`listicle`** → a **carousel**.
+- **Listicle price = the SINGLE-UNIT price** (one unit of that product), **ignoring** bundle/upsell/downsell
+  prices. Resolver (per `AI_AND_COMMERCE` C.1): single-unit (`quantity <= 1`), exclude
+  `upsell/downsell/order_bump`, prefer discounted; tie-break `flash_sale > sale > standard`, then lowest
+  `unit_amount`. **Flash sale (NOT yet built):** when a landing-page flash-sale toggle is on, show a
+  top countdown banner + each product's **flash_sale** price; when it ends, revert to the single regular
+  price. With no flash sale, default to the single discounted price if any.
+- **Carousel UX (TikTok-Shop style):** ONE swipeable image carousel; the **price card below syncs to the
+  currently-shown item** (discount % / price / compare-at / title); an **Add to cart** button adds the
+  shown item. The customer shops several, checks out later.
+- **Listicle pages drop the fluff** — no badges / FAQ / blurbs / testimonials. Just **hero image (the
+  carousel) + headline + description + the syncing price card**. Same universal template, minimal sections.
+  - *Optional later:* a per-product blurb component **synced to the carousel position** (image +
+    subheadline + paragraph for the shown product).
+- **This phase: client-side cart only** (localStorage accumulation + a mini-cart indicator). The
+  **server-side cart** (persistence + abandonment tracking) + **multi-line checkout** are the NEXT phase —
+  the existing `handlers/checkout.py` already builds multi-line Stripe sessions, so the checkout wiring is
+  feasible when we do it.
 - **Mixed fulfillment types allowed** in a listicle/cart (physical + digital-bonus), per `AI_AND_COMMERCE`
   C.2. The transactional-vs-lead-gen restriction stays (enforced in `offers.py`).
 
 ## Phasing
 
-### L1 — `offer_type` + listicle item-carousel (no cart yet)
-- Add `offer_type` to the Offer schema + `validate_offer_document` (enum, default `single`).
-- Offers.vue: an offer-type selector; a 3-product offer can be marked `listicle`.
-- Render: when `offer.offer_type == "listicle"`, the page renders the offer's **items** as a carousel
-  (one slide per item: image/name/price), reusing the multi-offer carousel markup but iterating items.
-  For now each slide is **Buy-now** (its item's checkout) as an interim until L2 wires the cart.
-- Retire the multi-offer `product_carousel` builder element (keep the section renderer, repurposed to
-  items, until L2). Existing pages: none in prod — safe to reshape.
+### L1 — offer_type + listicle carousel (SHIPPED dev, then corrected)
+- `offer_type` promoted to a validated Offer field; retired the multi-offer carousel element. ✅
+- **Correction (this pass):** offer_type is **auto-inferred** (selector removed); listicle price is the
+  **single-unit price**; the carousel is redesigned to the **TikTok-Shop syncing-price-card** style with
+  **Add to cart** (client-side cart accumulation); listicle pages **strip the fluff**.
+
+### L2 — Server-side cart + multi-line checkout (NEXT)
+- `cart` document keyed to a client-minted session id (localStorage + sent to API) + repository +
+  endpoints (`POST /cart/items`, `GET /cart`, `PATCH`/`DELETE /cart/items/{id}`, `POST /cart/checkout`).
+- Promote the client-side cart to server-side (persistence → abandoned-cart recovery via the email system).
+- **Multi-line Stripe checkout** from the cart — `handlers/checkout.py` already emits `line_items[{index}]`,
+  so wire the cart's items through it (keep the single-offer compat path).
 
 ### L2 — Server-side cart (the deliberate project)
 - **`cart` document** keyed to a visitor/session id (a `sl_cart` id minted client-side, stored in

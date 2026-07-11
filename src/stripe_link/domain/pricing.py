@@ -8,6 +8,33 @@ class PricingError(ValueError):
     pass
 
 
+# Contexts never used for a listicle slide (funnel-only or, for now, flash_sale which needs its toggle).
+_LISTICLE_EXCLUDED_CONTEXTS = {"upsell", "downsell", "order_bump", "flash_sale"}
+# Prefer a discounted single-unit price over the regular one.
+_LISTICLE_CONTEXT_RANK = {"sale": 0, "standard": 1}
+
+
+def single_unit_price(product: dict[str, Any]) -> dict[str, Any]:
+    """The price for ONE unit of a product, for listicle slides (plans/LISTICLE_AND_CART.md).
+
+    Ignores bundle/quantity tiers (quantity > 1) and funnel contexts (upsell/downsell/order_bump), and —
+    until the flash-sale toggle exists — flash_sale too. Prefers a discounted (sale) single-unit price,
+    then the lowest unit_amount. Returns {} when the product has no eligible single-unit price.
+    """
+    candidates = [
+        price for price in (product.get("prices") or [])
+        if int(price.get("quantity") or 1) <= 1
+        and str(price.get("context") or "standard") not in _LISTICLE_EXCLUDED_CONTEXTS
+    ]
+    if not candidates:
+        return {}
+    candidates.sort(key=lambda price: (
+        _LISTICLE_CONTEXT_RANK.get(str(price.get("context") or "standard"), 2),
+        int(price.get("unit_amount") or 0),
+    ))
+    return candidates[0]
+
+
 @dataclass(frozen=True)
 class ResolvedOfferItem:
     product_id: str

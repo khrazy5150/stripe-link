@@ -646,15 +646,23 @@
               </details>
             </div>
           </template>
-          <!-- Listicle: the offer's items as a swipeable carousel, each add-to-cart. -->
-          <div v-if="isListicleOffer" class="preview-carousel">
-            <div class="preview-carousel-track">
-              <article v-for="price in previewPrices" :key="price.price_id" class="preview-carousel-slide">
-                <img v-if="price.image_url" :src="price.image_url" alt="" />
-                <strong>{{ price.label || price.product_name || "Item" }}</strong>
-                <span class="preview-carousel-price">{{ formatMoney(price.unit_amount || 0, price.currency) }}</span>
-                <span class="preview-carousel-buy">Buy now</span>
-              </article>
+          <!-- Listicle: one swipeable image carousel + a price card that syncs to the shown item. -->
+          <div v-if="isListicleOffer" class="preview-listicle">
+            <div class="preview-listicle-images">
+              <img v-for="item in listiclePreviewItems" :key="item.id" :src="item.image" :alt="item.name" />
+            </div>
+            <div class="preview-listicle-dots">
+              <span v-for="(item, i) in listiclePreviewItems" :key="i" :class="{ 'is-active': i === 0 }"></span>
+            </div>
+            <div class="preview-listicle-card" v-if="listiclePreviewItems[0]">
+              <div class="preview-listicle-pricerow">
+                <span v-if="listiclePreviewItems[0].discount" class="preview-listicle-discount">-{{ listiclePreviewItems[0].discount }}%</span>
+                <span class="preview-listicle-price">{{ formatMoney(listiclePreviewItems[0].amount, listiclePreviewItems[0].currency) }}</span>
+                <del v-if="listiclePreviewItems[0].compare_at > listiclePreviewItems[0].amount">{{ formatMoney(listiclePreviewItems[0].compare_at, listiclePreviewItems[0].currency) }}</del>
+              </div>
+              <strong>{{ listiclePreviewItems[0].name }}</strong>
+              <p>{{ listiclePreviewItems[0].description }}</p>
+              <span class="preview-carousel-buy">Add to cart</span>
             </div>
           </div>
           <!-- One CTA component, chosen by the offer's cta.type. The page never combines CTAs. -->
@@ -834,6 +842,15 @@ const selectedOfferCta = computed(() => selectedOffer.value?.presentation?.cta |
 const ctaShowsPrices = computed(() => ["buy", "booking"].includes(builderCta.value.type) && !isListicleOffer.value);
 // A listicle offer renders its items as a carousel (each add-to-cart) instead of the pick-one selector.
 const isListicleOffer = computed(() => (builderOffer.value?.offer_type || "single") === "listicle");
+// One preview slide per offer item, at an approximate single-unit price (the server uses the exact resolver).
+const listiclePreviewItems = computed(() => offerItemModels(builderOffer.value).map((model) => {
+  const cards = [...(model.priceCards || [])];
+  const single = cards.find((card) => (card.quantity || 1) <= 1) || cards[0] || {};
+  const amount = single.unit_amount || 0;
+  const compare = single.compare_at_unit_amount || 0;
+  const discount = compare > amount && compare > 0 ? Math.round(((compare - amount) / compare) * 100) : 0;
+  return { id: model.id, name: model.name, description: model.description, image: model.image, amount, currency: single.currency || "usd", compare_at: compare, discount };
+}));
 const builderProductImages = computed(() => [...new Set(builderOfferProducts.value.flatMap((product) => product.images || []).filter(Boolean))]);
 const heroMediaList = computed(() => parseLines(builder.hero_media_text));
 const previewHeroImage = computed(() => heroMediaList.value[0] || offerImage(builderOffer.value) || "");
@@ -1299,6 +1316,14 @@ function builderSections(intent) {
       subheadline: builder.subheadline || "Continue when you are ready.",
     },
   );
+  // A listicle page drops the fluff: just hero + the syncing price-card carousel + footer.
+  if (isListicleOffer.value) {
+    sections.push(
+      { id: "offer-selector", type: "offer_price_selector", offer_id: builder.offer_id },
+      { id: "legal-footer", type: "legal_footer", copyright: defaultFooterCopyrightTemplate },
+    );
+    return sections;
+  }
   if (visibleTrustBadges.value.length) {
     sections.push({
       id: "trust-badges",

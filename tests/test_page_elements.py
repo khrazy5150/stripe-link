@@ -131,18 +131,32 @@ class ListicleCarouselTests(unittest.TestCase):
                    "default_price_id": "pr2", "prices": [{"price_id": "pr2", "currency": "usd", "unit_amount": 5317, "context": "standard"}]},
         }
 
-    def test_renders_one_slide_per_item_with_cart_attrs(self):
+    def test_renders_syncing_carousel_with_single_unit_prices(self):
         html = render_listicle_carousel(
             self._listicle(), self._products(), {}, {"tenant_id": "t1", "page_id": "pg"},
             "https://checkout.example.com/pay", "https://api.example.com/dev",
         )
         self.assertIn("data-listicle", html)
-        self.assertEqual(html.count("data-cart-item"), 2)
-        self.assertIn('data-product-id="p1"', html)     # cart attrs present for L2
+        self.assertEqual(html.count("data-listicle-item"), 2)   # one carousel item per offer item
+        self.assertIn('data-product-id="p1"', html)             # cart attrs present for the add-to-cart JS
         self.assertIn('data-price-id="pr2"', html)
-        self.assertIn("$52.01", html)
-        self.assertIn("$53.17", html)
-        self.assertIn("Briefs", html)
+        self.assertIn("data-listicle-add", html)                # the Add-to-cart button
+        self.assertIn("data-listicle-price", html)              # the syncing price card
+        self.assertIn("$52.01", html)                           # first item's single-unit price in the card
+
+    def test_listicle_ignores_bundle_and_funnel_prices(self):
+        listicle = self._listicle()
+        listicle["items"] = [{"product_id": "p1", "price_id": "pr1", "quantity": 1}]
+        products = {"p1": {"product_id": "p1", "name": "Briefs", "images": ["https://img/p1.jpg"],
+                           "default_price_id": "pr1", "prices": [
+                               {"price_id": "pr1", "currency": "usd", "unit_amount": 3900, "quantity": 1, "context": "standard"},
+                               {"price_id": "pr2", "currency": "usd", "unit_amount": 6700, "quantity": 2, "context": "standard"},
+                               {"price_id": "pru", "currency": "usd", "unit_amount": 2700, "quantity": 1, "context": "upsell"},
+                           ]}}
+        html = render_listicle_carousel(listicle, products, {}, {"tenant_id": "t1"}, None, None)
+        self.assertIn("$39.00", html)       # the single-unit standard price
+        self.assertNotIn("$67.00", html)    # not the 2-pack bundle
+        self.assertNotIn("$27.00", html)    # not the upsell
 
 
 class OfferTypeValidationTests(unittest.TestCase):
