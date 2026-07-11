@@ -606,7 +606,7 @@
             <span class="preview-brand-dot" aria-hidden="true"></span>
             <span>{{ builderOffer?.name || builder.name || "Junior Bay" }}</span>
           </div>
-          <div v-if="heroMediaList.length > 1" class="preview-hero-carousel">
+          <div v-if="heroMediaList.length > 1 && !isListicleOffer" class="preview-hero-carousel">
             <img class="preview-hero-image" :src="heroMediaList[heroPreviewIndex] || heroMediaList[0]" alt="" />
             <button type="button" class="preview-hero-nav prev" @click="heroPreviewIndex = (heroPreviewIndex - 1 + heroMediaList.length) % heroMediaList.length">‹</button>
             <button type="button" class="preview-hero-nav next" @click="heroPreviewIndex = (heroPreviewIndex + 1) % heroMediaList.length">›</button>
@@ -661,6 +661,7 @@
               <img v-if="activeListicleItem" :src="activeListicleItem.image" :alt="activeListicleItem.name" />
               <button v-if="listiclePreviewItems.length > 1" type="button" class="preview-hero-nav prev" @click="listiclePreviewIndex = (listiclePreviewIndex - 1 + listiclePreviewItems.length) % listiclePreviewItems.length">‹</button>
               <button v-if="listiclePreviewItems.length > 1" type="button" class="preview-hero-nav next" @click="listiclePreviewIndex = (listiclePreviewIndex + 1) % listiclePreviewItems.length">›</button>
+              <span v-if="listiclePreviewItems.length > 1" class="preview-hero-counter">{{ listiclePreviewIndex + 1 }} / {{ listiclePreviewItems.length }}</span>
             </div>
             <div class="preview-listicle-dots">
               <span v-for="(item, i) in listiclePreviewItems" :key="i" :class="{ 'is-active': i === listiclePreviewIndex }" @click="listiclePreviewIndex = i"></span>
@@ -1314,26 +1315,23 @@ function builderSections(intent) {
       marquee: Boolean(builder.countdown.marquee),
     });
   }
-  sections.push(
-    {
-      id: "brand",
-      type: "brand_label",
-      enabled: true,
-      label: formatHeadline(builderOffer.value?.name || "Junior Bay"),
-    },
-    {
-      id: "hero-media",
-      type: "hero_media",
-      images: heroMediaList.value,
-    },
-    {
-      id: "hero",
-      type: "hero",
-      headline: formatHeadline(builder.headline || builder.name || "Landing Page"),
-      subheadline: builder.subheadline || "Continue when you are ready.",
-    },
-  );
-  // A listicle page drops the fluff: just hero + the syncing price-card carousel + footer.
+  sections.push({
+    id: "brand",
+    type: "brand_label",
+    enabled: true,
+    label: formatHeadline(builderOffer.value?.name || "Junior Bay"),
+  });
+  // A listicle's product carousel IS its hero image; a normal page gets the tenant's hero-media carousel.
+  if (!isListicleOffer.value) {
+    sections.push({ id: "hero-media", type: "hero_media", images: heroMediaList.value });
+  }
+  sections.push({
+    id: "hero",
+    type: "hero",
+    headline: formatHeadline(builder.headline || builder.name || "Landing Page"),
+    subheadline: builder.subheadline || "Continue when you are ready.",
+  });
+  // A listicle page drops the fluff: just hero text + the product carousel with syncing price card + footer.
   if (isListicleOffer.value) {
     sections.push(
       { id: "offer-selector", type: "offer_price_selector", offer_id: builder.offer_id },

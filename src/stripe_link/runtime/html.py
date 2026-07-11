@@ -389,6 +389,7 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     "    .sl-carousel-price{font-family:var(--sl-font-accent);font-weight:900;font-size:2rem;color:var(--sl-price-amount);margin-top:auto}",
     "    .sl-carousel-buy{width:auto;text-align:center}",
     "    .sl-listicle{width:min(52rem,100%);margin:0 auto;display:flex;flex-direction:column;gap:1.2rem}",
+    "    .sl-listicle-stage{position:relative}",
     "    .sl-listicle-carousel{display:flex;overflow-x:auto;scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch;scrollbar-width:none}",
     "    .sl-listicle-carousel::-webkit-scrollbar{display:none}",
     "    .sl-listicle-slide{flex:0 0 100%;scroll-snap-align:center;display:flex;align-items:center;justify-content:center}",
@@ -1042,10 +1043,20 @@ def render_listicle_carousel(
 
     first = slides[0]
     first_discount = round((first["compare_at"] - first["amount"]) / first["compare_at"] * 100) if first["compare_at"] > first["amount"] > 0 else 0
+    nav = []
+    if len(slides) > 1:
+        nav = [
+            "        <button class=\"sl-hero-nav sl-hero-prev\" type=\"button\" data-listicle-prev aria-label=\"Previous item\">‹</button>",
+            "        <button class=\"sl-hero-nav sl-hero-next\" type=\"button\" data-listicle-next aria-label=\"Next item\">›</button>",
+            f"        <span class=\"sl-hero-counter\" data-listicle-counter>1 / {len(slides)}</span>",
+        ]
     return "\n".join([
         f"    <section class=\"sl-listicle\" data-section-type=\"offer_price_selector\" data-listicle data-offer-id=\"{offer_id}\">",
-        "      <div class=\"sl-listicle-carousel\" data-listicle-track>",
+        "      <div class=\"sl-listicle-stage\">",
+        "        <div class=\"sl-listicle-carousel\" data-listicle-track>",
         *images,
+        "        </div>",
+        *nav,
         "      </div>",
         "      <div class=\"sl-listicle-dots\">",
         *dots,
@@ -1931,7 +1942,10 @@ def render_page_interactions_script(page: dict[str, Any]) -> str:
         "          if (cardEls.title) cardEls.title.textContent = d.name || '';",
         "          if (cardEls.desc) cardEls.desc.textContent = d.desc || '';",
         "          dots.forEach((dot, i) => dot.classList.toggle('is-active', i === index));",
+        "          const counter = listicle.querySelector('[data-listicle-counter]');",
+        "          if (counter) counter.textContent = (index + 1) + ' / ' + items.length;",
         "        };",
+        "        const listicleGo = (index) => { const i = Math.max(0, Math.min(items.length - 1, index)); if (track) track.scrollTo({ left: i * track.clientWidth, behavior: 'smooth' }); setActive(i); };",
         "        if (track) {",
         "          let scrollTimer = null;",
         "          track.addEventListener('scroll', () => {",
@@ -1942,7 +1956,11 @@ def render_page_interactions_script(page: dict[str, Any]) -> str:
         "            }, 60);",
         "          });",
         "        }",
-        "        dots.forEach((dot, i) => dot.addEventListener('click', () => { if (track) track.scrollTo({ left: i * track.clientWidth, behavior: 'smooth' }); setActive(i); }));",
+        "        const listiclePrev = listicle.querySelector('[data-listicle-prev]');",
+        "        const listicleNext = listicle.querySelector('[data-listicle-next]');",
+        "        if (listiclePrev) listiclePrev.addEventListener('click', () => listicleGo(activeIndex - 1));",
+        "        if (listicleNext) listicleNext.addEventListener('click', () => listicleGo(activeIndex + 1));",
+        "        dots.forEach((dot, i) => dot.addEventListener('click', () => listicleGo(i)));",
         "        if (addBtn) addBtn.addEventListener('click', () => {",
         "          const d = items[activeIndex].dataset;",
         "          const cart = readCart();",
