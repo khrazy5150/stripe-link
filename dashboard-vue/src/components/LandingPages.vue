@@ -606,7 +606,7 @@
             <span class="preview-brand-dot" aria-hidden="true"></span>
             <span>{{ builderOffer?.name || builder.name || "Junior Bay" }}</span>
           </div>
-          <div v-if="heroMediaList.length > 1 && !isListicleOffer" class="preview-hero-carousel">
+          <div v-if="heroMediaList.length > 1" class="preview-hero-carousel">
             <img class="preview-hero-image" :src="heroMediaList[heroPreviewIndex] || heroMediaList[0]" alt="" />
             <button type="button" class="preview-hero-nav prev" @click="heroPreviewIndex = (heroPreviewIndex - 1 + heroMediaList.length) % heroMediaList.length">‹</button>
             <button type="button" class="preview-hero-nav next" @click="heroPreviewIndex = (heroPreviewIndex + 1) % heroMediaList.length">›</button>
@@ -655,18 +655,9 @@
               </details>
             </div>
           </template>
-          <!-- Listicle: one swipeable image carousel + a price card that syncs to the shown item. -->
-          <div v-if="isListicleOffer" class="preview-listicle">
-            <div class="preview-listicle-stage">
-              <img v-if="activeListicleItem" :src="activeListicleItem.image" :alt="activeListicleItem.name" />
-              <button v-if="listiclePreviewItems.length > 1" type="button" class="preview-hero-nav prev" @click="listiclePreviewIndex = (listiclePreviewIndex - 1 + listiclePreviewItems.length) % listiclePreviewItems.length">‹</button>
-              <button v-if="listiclePreviewItems.length > 1" type="button" class="preview-hero-nav next" @click="listiclePreviewIndex = (listiclePreviewIndex + 1) % listiclePreviewItems.length">›</button>
-              <span v-if="listiclePreviewItems.length > 1" class="preview-hero-counter">{{ listiclePreviewIndex + 1 }} / {{ listiclePreviewItems.length }}</span>
-            </div>
-            <div class="preview-listicle-dots">
-              <span v-for="(item, i) in listiclePreviewItems" :key="i" :class="{ 'is-active': i === listiclePreviewIndex }" @click="listiclePreviewIndex = i"></span>
-            </div>
-            <div class="preview-listicle-card" v-if="activeListicleItem">
+          <!-- Listicle: no separate carousel — the hero carousel (above) drives this syncing price card. -->
+          <div v-if="isListicleOffer && activeListicleItem" class="preview-listicle">
+            <div class="preview-listicle-card">
               <div class="preview-listicle-pricerow">
                 <span v-if="activeListicleItem.discount" class="preview-listicle-discount">-{{ activeListicleItem.discount }}%</span>
                 <span class="preview-listicle-price">{{ formatMoney(activeListicleItem.amount, activeListicleItem.currency) }}</span>
@@ -863,12 +854,10 @@ const listiclePreviewItems = computed(() => offerItemModels(builderOffer.value).
   const discount = compare > amount && compare > 0 ? Math.round(((compare - amount) / compare) * 100) : 0;
   return { id: model.id, name: model.name, description: model.description, image: model.image, amount, currency: single.currency || "usd", compare_at: compare, discount };
 }));
-// Preview carousel active-slide indices — the price card / hero image / dots sync to these.
+// Preview: the hero carousel index drives everything (for a listicle the hero images ARE the products).
 const heroPreviewIndex = ref(0);
-const listiclePreviewIndex = ref(0);
-const activeListicleItem = computed(() => listiclePreviewItems.value[listiclePreviewIndex.value] || listiclePreviewItems.value[0] || null);
+const activeListicleItem = computed(() => listiclePreviewItems.value[heroPreviewIndex.value] || listiclePreviewItems.value[0] || null);
 watch(() => builder.hero_media_text, () => { heroPreviewIndex.value = 0; });
-watch(() => listiclePreviewItems.value.length, () => { listiclePreviewIndex.value = 0; });
 const builderProductImages = computed(() => [...new Set(builderOfferProducts.value.flatMap((product) => product.images || []).filter(Boolean))]);
 const heroMediaList = computed(() => parseLines(builder.hero_media_text));
 const previewHeroImage = computed(() => heroMediaList.value[0] || offerImage(builderOffer.value) || "");
@@ -1321,17 +1310,15 @@ function builderSections(intent) {
     enabled: true,
     label: formatHeadline(builderOffer.value?.name || "Junior Bay"),
   });
-  // A listicle's product carousel IS its hero image; a normal page gets the tenant's hero-media carousel.
-  if (!isListicleOffer.value) {
-    sections.push({ id: "hero-media", type: "hero_media", images: heroMediaList.value });
-  }
+  // The hero-media carousel — for a listicle it's the product images (auto-filled into the field), driving the price card.
+  sections.push({ id: "hero-media", type: "hero_media", images: heroMediaList.value });
   sections.push({
     id: "hero",
     type: "hero",
     headline: formatHeadline(builder.headline || builder.name || "Landing Page"),
     subheadline: builder.subheadline || "Continue when you are ready.",
   });
-  // A listicle page drops the fluff: just hero text + the product carousel with syncing price card + footer.
+  // A listicle page drops the fluff: hero carousel (product images) + the syncing price card + footer.
   if (isListicleOffer.value) {
     sections.push(
       { id: "offer-selector", type: "offer_price_selector", offer_id: builder.offer_id },
@@ -1797,7 +1784,13 @@ async function onBuilderOfferChange() {
   if (!builder.seo_title) builder.seo_title = offerHeadline(offer) || builder.name;
   if (!builder.seo_description) builder.seo_description = offerDescription(offer) || offer.name || "";
   if (!builder.seo_image) builder.seo_image = offerImage(offer);
-  if (!builder.hero_media_text && offerImage(offer)) builder.hero_media_text = offerImage(offer);
+  // A listicle's hero carousel IS the product images — auto-fill the hero media field with one per item.
+  if ((offer.offer_type || "single") === "listicle") {
+    const productImages = listiclePreviewItems.value.map((item) => item.image).filter(Boolean);
+    if (productImages.length) builder.hero_media_text = productImages.join("\n");
+  } else if (!builder.hero_media_text && offerImage(offer)) {
+    builder.hero_media_text = offerImage(offer);
+  }
   // The offer is the page's contract: take the CTA label it snapshotted, falling back to a sensible default.
   builder.cta_label = offer.presentation?.cta?.label || offer.presentation?.cta_label
     || (builderIntent.value === "lead_gen" ? "Continue" : "Buy Now");

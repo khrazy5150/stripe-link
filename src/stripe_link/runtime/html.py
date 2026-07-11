@@ -1015,51 +1015,34 @@ def render_listicle_carousel(
     checkout_url: str | None,
     api_base_url: str | None = None,
 ) -> str:
-    """TikTok-Shop-style listicle: ONE swipeable image carousel; the price card below SYNCS to the shown
-    item (discount % / price / compare-at / title); an Add-to-cart button adds the shown item to a
-    client-side cart (server-side cart + checkout are the next phase — plans/LISTICLE_AND_CART.md L2)."""
+    """Listicle price card. There is NO separate image carousel here — the page's hero_media carousel (auto-
+    filled with the product images) is the single carousel, and this price card SYNCS to its active slide
+    (discount % / price / compare-at / title / desc + Add-to-cart). Per-slide data is embedded on hidden
+    items the JS reads by index. Server-side cart + checkout are the next phase (plans/LISTICLE_AND_CART.md)."""
     slides = listicle_slides(offer, products_by_id, services_by_id)
     if not slides:
         return ""
     offer_id = escape(str(offer.get("offer_id") or ""))
-
-    images = []
-    dots = []
+    items = []
     for index, slide in enumerate(slides):
         discount_pct = 0
         if slide["compare_at"] > slide["amount"] > 0:
             discount_pct = round((slide["compare_at"] - slide["amount"]) / slide["compare_at"] * 100)
-        images.append("\n".join(line for line in [
-            f"        <div class=\"sl-listicle-slide\" data-listicle-item data-index=\"{index}\" "
+        items.append(
+            f"        <span data-listicle-item data-index=\"{index}\" "
             f"data-product-id=\"{escape(slide['product_id'])}\" data-service-id=\"{escape(slide['service_id'])}\" "
             f"data-price-id=\"{escape(slide['price_id'])}\" data-amount=\"{slide['amount']}\" "
             f"data-compare=\"{slide['compare_at']}\" data-discount=\"{discount_pct}\" "
             f"data-currency=\"{escape(slide['currency'])}\" data-name=\"{escape(slide['name'])}\" "
-            f"data-desc=\"{escape(slide['description'])}\">",
-            (f"          {responsive_img(slide['image'], slide['name'] or 'Product', sizes=CONTENT_BLOCK_SIZES)}" if slide["image"] else ""),
-            "        </div>",
-        ] if line))
-        dots.append(f"        <span class=\"sl-listicle-dot{' is-active' if index == 0 else ''}\" data-listicle-dot data-index=\"{index}\"></span>")
+            f"data-desc=\"{escape(slide['description'])}\"></span>"
+        )
 
     first = slides[0]
     first_discount = round((first["compare_at"] - first["amount"]) / first["compare_at"] * 100) if first["compare_at"] > first["amount"] > 0 else 0
-    nav = []
-    if len(slides) > 1:
-        nav = [
-            "        <button class=\"sl-hero-nav sl-hero-prev\" type=\"button\" data-listicle-prev aria-label=\"Previous item\">‹</button>",
-            "        <button class=\"sl-hero-nav sl-hero-next\" type=\"button\" data-listicle-next aria-label=\"Next item\">›</button>",
-            f"        <span class=\"sl-hero-counter\" data-listicle-counter>1 / {len(slides)}</span>",
-        ]
     return "\n".join([
         f"    <section class=\"sl-listicle\" data-section-type=\"offer_price_selector\" data-listicle data-offer-id=\"{offer_id}\">",
-        "      <div class=\"sl-listicle-stage\">",
-        "        <div class=\"sl-listicle-carousel\" data-listicle-track>",
-        *images,
-        "        </div>",
-        *nav,
-        "      </div>",
-        "      <div class=\"sl-listicle-dots\">",
-        *dots,
+        "      <div class=\"sl-listicle-items\" hidden>",
+        *items,
         "      </div>",
         "      <div class=\"sl-listicle-card\">",
         "        <div class=\"sl-listicle-pricerow\">",
@@ -1902,12 +1885,10 @@ def render_page_interactions_script(page: dict[str, Any]) -> str:
         "          panel.innerHTML = '<div class=\"sl-booking-banner\">Your booking is confirmed — check your email for details.</div>';",
         "        }",
         "      }",
-        # Listicle: sync the price card to the shown carousel item + a client-side cart with a mini-cart.
+        # Listicle: sync the price card to the HERO carousel's active slide + a client-side cart/mini-cart.
         "      const listicle = document.querySelector('[data-listicle]');",
         "      if (listicle) {",
-        "        const track = listicle.querySelector('[data-listicle-track]');",
         "        const items = Array.from(listicle.querySelectorAll('[data-listicle-item]'));",
-        "        const dots = Array.from(listicle.querySelectorAll('[data-listicle-dot]'));",
         "        const cardEls = {",
         "          discount: listicle.querySelector('[data-listicle-discount]'),",
         "          price: listicle.querySelector('[data-listicle-price]'),",
@@ -1941,26 +1922,19 @@ def render_page_interactions_script(page: dict[str, Any]) -> str:
         "          if (cardEls.compare) cardEls.compare.textContent = Number(d.compare) > Number(d.amount) ? fmt(d.compare, d.currency) : '';",
         "          if (cardEls.title) cardEls.title.textContent = d.name || '';",
         "          if (cardEls.desc) cardEls.desc.textContent = d.desc || '';",
-        "          dots.forEach((dot, i) => dot.classList.toggle('is-active', i === index));",
-        "          const counter = listicle.querySelector('[data-listicle-counter]');",
-        "          if (counter) counter.textContent = (index + 1) + ' / ' + items.length;",
         "        };",
-        "        const listicleGo = (index) => { const i = Math.max(0, Math.min(items.length - 1, index)); if (track) track.scrollTo({ left: i * track.clientWidth, behavior: 'smooth' }); setActive(i); };",
-        "        if (track) {",
-        "          let scrollTimer = null;",
-        "          track.addEventListener('scroll', () => {",
-        "            window.clearTimeout(scrollTimer);",
-        "            scrollTimer = window.setTimeout(() => {",
-        "              const index = Math.round(track.scrollLeft / track.clientWidth);",
+        # The hero_media carousel (product images) is the single carousel; the price card follows its scroll.
+        "        const heroTrackEl = document.querySelector('[data-hero-track]');",
+        "        if (heroTrackEl) {",
+        "          let listicleTimer = null;",
+        "          heroTrackEl.addEventListener('scroll', () => {",
+        "            window.clearTimeout(listicleTimer);",
+        "            listicleTimer = window.setTimeout(() => {",
+        "              const index = Math.round(heroTrackEl.scrollLeft / heroTrackEl.clientWidth);",
         "              if (index !== activeIndex) setActive(index);",
         "            }, 60);",
         "          });",
         "        }",
-        "        const listiclePrev = listicle.querySelector('[data-listicle-prev]');",
-        "        const listicleNext = listicle.querySelector('[data-listicle-next]');",
-        "        if (listiclePrev) listiclePrev.addEventListener('click', () => listicleGo(activeIndex - 1));",
-        "        if (listicleNext) listicleNext.addEventListener('click', () => listicleGo(activeIndex + 1));",
-        "        dots.forEach((dot, i) => dot.addEventListener('click', () => listicleGo(i)));",
         "        if (addBtn) addBtn.addEventListener('click', () => {",
         "          const d = items[activeIndex].dataset;",
         "          const cart = readCart();",

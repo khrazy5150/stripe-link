@@ -132,18 +132,21 @@ class ListicleCarouselTests(unittest.TestCase):
                    "default_price_id": "pr2", "prices": [{"price_id": "pr2", "currency": "usd", "unit_amount": 5317, "context": "standard"}]},
         }
 
-    def test_renders_syncing_carousel_with_single_unit_prices(self):
+    def test_renders_price_card_with_per_item_data(self):
+        # No image carousel here — the hero_media carousel drives this price card. It embeds one hidden
+        # data item per offer item (read by index) + shows the first item's single-unit price.
         html = render_listicle_carousel(
             self._listicle(), self._products(), {}, {"tenant_id": "t1", "page_id": "pg"},
             "https://checkout.example.com/pay", "https://api.example.com/dev",
         )
         self.assertIn("data-listicle", html)
-        self.assertEqual(html.count("data-listicle-item"), 2)   # one carousel item per offer item
+        self.assertEqual(html.count("data-listicle-item"), 2)   # one hidden data item per offer item
         self.assertIn('data-product-id="p1"', html)             # cart attrs present for the add-to-cart JS
         self.assertIn('data-price-id="pr2"', html)
         self.assertIn("data-listicle-add", html)                # the Add-to-cart button
         self.assertIn("data-listicle-price", html)              # the syncing price card
         self.assertIn("$52.01", html)                           # first item's single-unit price in the card
+        self.assertNotIn("sl-listicle-carousel", html)          # no separate image carousel
 
     def test_listicle_ignores_bundle_and_funnel_prices(self):
         listicle = self._listicle()
