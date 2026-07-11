@@ -606,7 +606,16 @@
             <span class="preview-brand-dot" aria-hidden="true"></span>
             <span>{{ builderOffer?.name || builder.name || "Junior Bay" }}</span>
           </div>
-          <img v-if="previewHeroImage" class="preview-hero-image" :src="previewHeroImage" alt="" />
+          <div v-if="heroMediaList.length > 1" class="preview-hero-carousel">
+            <img class="preview-hero-image" :src="heroMediaList[heroPreviewIndex] || heroMediaList[0]" alt="" />
+            <button type="button" class="preview-hero-nav prev" @click="heroPreviewIndex = (heroPreviewIndex - 1 + heroMediaList.length) % heroMediaList.length">‹</button>
+            <button type="button" class="preview-hero-nav next" @click="heroPreviewIndex = (heroPreviewIndex + 1) % heroMediaList.length">›</button>
+            <span class="preview-hero-counter">{{ heroPreviewIndex + 1 }} / {{ heroMediaList.length }}</span>
+            <div class="preview-hero-dots">
+              <span v-for="(image, i) in heroMediaList" :key="i" :class="{ 'is-active': i === heroPreviewIndex }" @click="heroPreviewIndex = i"></span>
+            </div>
+          </div>
+          <img v-else-if="previewHeroImage" class="preview-hero-image" :src="previewHeroImage" alt="" />
           <h1 v-html="headlineHtml(builder.headline || builder.name)"></h1>
           <p>{{ builder.subheadline }}</p>
           <div v-if="visibleTrustBadges.length" class="preview-badges">
@@ -648,20 +657,22 @@
           </template>
           <!-- Listicle: one swipeable image carousel + a price card that syncs to the shown item. -->
           <div v-if="isListicleOffer" class="preview-listicle">
-            <div class="preview-listicle-images">
-              <img v-for="item in listiclePreviewItems" :key="item.id" :src="item.image" :alt="item.name" />
+            <div class="preview-listicle-stage">
+              <img v-if="activeListicleItem" :src="activeListicleItem.image" :alt="activeListicleItem.name" />
+              <button v-if="listiclePreviewItems.length > 1" type="button" class="preview-hero-nav prev" @click="listiclePreviewIndex = (listiclePreviewIndex - 1 + listiclePreviewItems.length) % listiclePreviewItems.length">‹</button>
+              <button v-if="listiclePreviewItems.length > 1" type="button" class="preview-hero-nav next" @click="listiclePreviewIndex = (listiclePreviewIndex + 1) % listiclePreviewItems.length">›</button>
             </div>
             <div class="preview-listicle-dots">
-              <span v-for="(item, i) in listiclePreviewItems" :key="i" :class="{ 'is-active': i === 0 }"></span>
+              <span v-for="(item, i) in listiclePreviewItems" :key="i" :class="{ 'is-active': i === listiclePreviewIndex }" @click="listiclePreviewIndex = i"></span>
             </div>
-            <div class="preview-listicle-card" v-if="listiclePreviewItems[0]">
+            <div class="preview-listicle-card" v-if="activeListicleItem">
               <div class="preview-listicle-pricerow">
-                <span v-if="listiclePreviewItems[0].discount" class="preview-listicle-discount">-{{ listiclePreviewItems[0].discount }}%</span>
-                <span class="preview-listicle-price">{{ formatMoney(listiclePreviewItems[0].amount, listiclePreviewItems[0].currency) }}</span>
-                <del v-if="listiclePreviewItems[0].compare_at > listiclePreviewItems[0].amount">{{ formatMoney(listiclePreviewItems[0].compare_at, listiclePreviewItems[0].currency) }}</del>
+                <span v-if="activeListicleItem.discount" class="preview-listicle-discount">-{{ activeListicleItem.discount }}%</span>
+                <span class="preview-listicle-price">{{ formatMoney(activeListicleItem.amount, activeListicleItem.currency) }}</span>
+                <del v-if="activeListicleItem.compare_at > activeListicleItem.amount">{{ formatMoney(activeListicleItem.compare_at, activeListicleItem.currency) }}</del>
               </div>
-              <strong>{{ listiclePreviewItems[0].name }}</strong>
-              <p>{{ listiclePreviewItems[0].description }}</p>
+              <strong>{{ activeListicleItem.name }}</strong>
+              <p>{{ activeListicleItem.description }}</p>
               <span class="preview-carousel-buy">Add to cart</span>
             </div>
           </div>
@@ -851,6 +862,12 @@ const listiclePreviewItems = computed(() => offerItemModels(builderOffer.value).
   const discount = compare > amount && compare > 0 ? Math.round(((compare - amount) / compare) * 100) : 0;
   return { id: model.id, name: model.name, description: model.description, image: model.image, amount, currency: single.currency || "usd", compare_at: compare, discount };
 }));
+// Preview carousel active-slide indices — the price card / hero image / dots sync to these.
+const heroPreviewIndex = ref(0);
+const listiclePreviewIndex = ref(0);
+const activeListicleItem = computed(() => listiclePreviewItems.value[listiclePreviewIndex.value] || listiclePreviewItems.value[0] || null);
+watch(() => builder.hero_media_text, () => { heroPreviewIndex.value = 0; });
+watch(() => listiclePreviewItems.value.length, () => { listiclePreviewIndex.value = 0; });
 const builderProductImages = computed(() => [...new Set(builderOfferProducts.value.flatMap((product) => product.images || []).filter(Boolean))]);
 const heroMediaList = computed(() => parseLines(builder.hero_media_text));
 const previewHeroImage = computed(() => heroMediaList.value[0] || offerImage(builderOffer.value) || "");

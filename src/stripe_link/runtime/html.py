@@ -293,8 +293,18 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     "    .sl-headline h2{font-family:var(--sl-font-heading);font-size:clamp(2.4rem,5vw,3.2rem);line-height:1.2;font-weight:800;color:var(--sl-headline);letter-spacing:0}",
     "    .sl-subheadline{text-align:center}",
     "    .sl-subheadline p{font-size:1.5rem;line-height:1.55;color:var(--sl-subheadline-text);max-width:46rem;margin:0 auto}",
-    "    .sl-hero-media{display:flex;justify-content:center;gap:1rem;overflow-x:auto;scroll-snap-type:x mandatory;padding-top:0.8rem}",
-    "    .sl-hero-media img{flex:0 0 min(100%,52rem);width:min(100%,52rem);aspect-ratio:1/1;object-fit:cover;border-radius:var(--sl-radius);border:1px solid var(--sl-hero-border);background:var(--sl-hero-bg);scroll-snap-align:center}",
+    "    .sl-hero-media{position:relative;padding-top:0.8rem}",
+    "    .sl-hero-track{display:flex;overflow-x:auto;scroll-snap-type:x mandatory;scrollbar-width:none;border-radius:var(--sl-radius)}",
+    "    .sl-hero-track::-webkit-scrollbar{display:none}",
+    "    .sl-hero-slide{flex:0 0 100%;scroll-snap-align:center}",
+    "    .sl-hero-slide img{width:100%;aspect-ratio:1/1;object-fit:cover;border-radius:var(--sl-radius);border:1px solid var(--sl-hero-border);background:var(--sl-hero-bg)}",
+    "    .sl-hero-nav{position:absolute;top:calc(50% + 0.4rem);transform:translateY(-50%);width:3.8rem;height:3.8rem;border-radius:50%;border:0;background:rgba(255,255,255,.9);color:#111;font-size:2.2rem;line-height:1;cursor:pointer;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 8px rgba(0,0,0,.18)}",
+    "    .sl-hero-prev{left:0.8rem}",
+    "    .sl-hero-next{right:0.8rem}",
+    "    .sl-hero-counter{position:absolute;top:1.6rem;right:0.8rem;background:rgba(0,0,0,.55);color:#fff;font-size:1.3rem;font-weight:700;padding:0.3rem 0.9rem;border-radius:99.9rem}",
+    "    .sl-hero-dots{display:flex;gap:0.6rem;justify-content:center;margin-top:0.8rem}",
+    "    .sl-hero-dot{width:0.8rem;height:0.8rem;border-radius:50%;background:var(--sl-border);cursor:pointer}",
+    "    .sl-hero-dot.is-active{background:var(--sl-brand)}",
     "    .sl-trust-badges{display:flex;flex-wrap:wrap;gap:0.8rem;justify-content:center}",
     "    .sl-trust-badge{display:flex;align-items:center;gap:0.6rem;border:1px solid var(--sl-trust-badge-border);background:var(--sl-trust-badge-bg);color:var(--sl-trust-badge-text);border-radius:999px;padding:0.8rem 1.4rem;font-family:var(--sl-font-accent);font-size:1.2rem;font-weight:800}",
     "    .sl-price-options{display:grid;grid-template-columns:1fr;gap:1.4rem;width:100%;margin:0 auto}",
@@ -807,16 +817,39 @@ def render_hero_media(
         service_image = first_offer_service_image(offer, services_by_id or {})
         if service_image:
             images = [service_image]
+    if not images:
+        return ""
     alt = str(product.get("name") or offer.get("name") or "Product image")
-    rendered = [
-        "      " + responsive_img(image_url, alt, sizes=HERO_MEDIA_SIZES, eager=(index == 0))
+    section_id = escape(str(section.get("id", "hero-media")))
+    slides = [
+        f"        <div class=\"sl-hero-slide\">{responsive_img(image_url, alt, sizes=HERO_MEDIA_SIZES, eager=(index == 0))}</div>"
         for index, image_url in enumerate(images)
     ]
-    if not rendered:
-        return ""
+    # A single image needs no carousel chrome.
+    if len(images) == 1:
+        return "\n".join([
+            f"    <section class=\"sl-hero-media\" data-section-id=\"{section_id}\" data-section-type=\"hero_media\" data-media-count=\"1\">",
+            "      <div class=\"sl-hero-track\">",
+            *slides,
+            "      </div>",
+            "    </section>",
+        ])
+    # Multiple images -> a swipeable carousel with prev/next arrows, a counter, and dots.
+    dots = [
+        f"        <span class=\"sl-hero-dot{' is-active' if index == 0 else ''}\" data-hero-dot data-index=\"{index}\"></span>"
+        for index in range(len(images))
+    ]
     return "\n".join([
-        f"    <section class=\"sl-hero-media\" data-section-id=\"{escape(str(section.get('id', 'hero-media')))}\" data-section-type=\"hero_media\" data-media-count=\"{len(rendered)}\">",
-        *rendered,
+        f"    <section class=\"sl-hero-media sl-hero-carousel\" data-section-id=\"{section_id}\" data-section-type=\"hero_media\" data-media-count=\"{len(images)}\" data-hero-carousel>",
+        "      <div class=\"sl-hero-track\" data-hero-track>",
+        *slides,
+        "      </div>",
+        "      <button class=\"sl-hero-nav sl-hero-prev\" type=\"button\" data-hero-prev aria-label=\"Previous image\">‹</button>",
+        "      <button class=\"sl-hero-nav sl-hero-next\" type=\"button\" data-hero-next aria-label=\"Next image\">›</button>",
+        f"      <span class=\"sl-hero-counter\" data-hero-counter>1 / {len(images)}</span>",
+        "      <div class=\"sl-hero-dots\">",
+        *dots,
+        "      </div>",
         "    </section>",
     ])
 
@@ -1729,7 +1762,11 @@ def render_page_interactions_script(page: dict[str, Any]) -> str:
         section.get("type") == "legal_footer" and CURRENT_YEAR_TOKEN in str(section.get("copyright") or "")
         for section in page.get("sections", [])
     )
-    if not has_countdown and not has_price_selector and not has_current_year and not has_checkout_cta:
+    has_hero_carousel = any(
+        section.get("type") == "hero_media" and len(section.get("images") or []) > 1
+        for section in page.get("sections", [])
+    )
+    if not any([has_countdown, has_price_selector, has_current_year, has_checkout_cta, has_hero_carousel]):
         return ""
     page_id = escape(str(page.get("page_id") or "page"))
     return "\n".join([
@@ -1916,6 +1953,33 @@ def render_page_interactions_script(page: dict[str, Any]) -> str:
         "          addBtn.textContent = 'Added ✓'; window.setTimeout(() => { addBtn.textContent = 'Add to cart'; }, 1200);",
         "        });",
         "        renderMinicart();",
+        "      }",
+        # Hero media carousel: prev/next arrows, tappable dots, a counter, all synced to scroll position.
+        "      const heroCarousel = document.querySelector('[data-hero-carousel]');",
+        "      if (heroCarousel) {",
+        "        const heroTrack = heroCarousel.querySelector('[data-hero-track]');",
+        "        const heroDots = Array.from(heroCarousel.querySelectorAll('[data-hero-dot]'));",
+        "        const heroCounter = heroCarousel.querySelector('[data-hero-counter]');",
+        "        const heroCount = heroCarousel.querySelectorAll('.sl-hero-slide').length;",
+        "        let heroIndex = 0;",
+        "        const heroGo = (index) => { heroIndex = Math.max(0, Math.min(heroCount - 1, index)); if (heroTrack) heroTrack.scrollTo({ left: heroIndex * heroTrack.clientWidth, behavior: 'smooth' }); };",
+        "        const heroSync = (index) => {",
+        "          heroIndex = index;",
+        "          heroDots.forEach((dot, i) => dot.classList.toggle('is-active', i === index));",
+        "          if (heroCounter) heroCounter.textContent = (index + 1) + ' / ' + heroCount;",
+        "        };",
+        "        const heroPrev = heroCarousel.querySelector('[data-hero-prev]');",
+        "        const heroNext = heroCarousel.querySelector('[data-hero-next]');",
+        "        if (heroPrev) heroPrev.addEventListener('click', () => heroGo(heroIndex - 1));",
+        "        if (heroNext) heroNext.addEventListener('click', () => heroGo(heroIndex + 1));",
+        "        heroDots.forEach((dot, i) => dot.addEventListener('click', () => heroGo(i)));",
+        "        if (heroTrack) {",
+        "          let heroTimer = null;",
+        "          heroTrack.addEventListener('scroll', () => {",
+        "            window.clearTimeout(heroTimer);",
+        "            heroTimer = window.setTimeout(() => { const i = Math.round(heroTrack.scrollLeft / heroTrack.clientWidth); if (i !== heroIndex) heroSync(i); }, 60);",
+        "          });",
+        "        }",
         "      }",
         f"      const pageId = \"{page_id}\";",
         "      const money = (amount, currency) => {",

@@ -3459,13 +3459,19 @@ button:disabled {
 
 .landing-builder-form-card,
 .landing-builder-preview-card {
-  display: grid;
-  grid-template-rows: auto auto minmax(0, 1fr) auto;
   height: var(--landing-builder-pane-height);
   overflow: hidden;
 }
 
+/* Flex column so the scrollable body flexes and the footer stays pinned even when the optional
+   status banner between the header and body is absent (a fixed-row grid clipped the footer). */
+.landing-builder-form-card {
+  display: flex;
+  flex-direction: column;
+}
+
 .landing-builder-preview-card {
+  display: grid;
   grid-template-rows: auto minmax(0, 1fr);
 }
 
@@ -3493,6 +3499,7 @@ button:disabled {
 
 .landing-builder-body {
   display: grid;
+  flex: 1 1 auto;
   min-height: 0;
   overflow: auto;
   padding: 1.6rem;
@@ -3848,10 +3855,78 @@ button:disabled {
   font-size: 1.3rem;
 }
 
+/* Hero carousel preview */
+.preview-hero-carousel,
+.preview-listicle-stage {
+  position: relative;
+}
+
+.preview-hero-nav {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 3.2rem;
+  height: 3.2rem;
+  border-radius: 50%;
+  border: 0;
+  background: rgba(255, 255, 255, 0.9);
+  color: #111;
+  font-size: 1.8rem;
+  line-height: 1;
+  cursor: pointer;
+  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.2);
+}
+
+.preview-hero-nav.prev {
+  left: 0.6rem;
+}
+
+.preview-hero-nav.next {
+  right: 0.6rem;
+}
+
+.preview-hero-counter {
+  position: absolute;
+  top: 0.6rem;
+  right: 0.6rem;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  font-size: 1.1rem;
+  font-weight: 700;
+  padding: 0.2rem 0.7rem;
+  border-radius: 99.9rem;
+}
+
+.preview-hero-dots {
+  display: flex;
+  gap: 0.4rem;
+  justify-content: center;
+  margin-top: 0.6rem;
+}
+
+.preview-hero-dots span {
+  width: 0.6rem;
+  height: 0.6rem;
+  border-radius: 50%;
+  background: var(--preview-content-border);
+  cursor: pointer;
+}
+
+.preview-hero-dots span.is-active {
+  background: var(--preview-brand, #4f46e5);
+}
+
 /* Listicle preview (syncing price card) */
 .preview-listicle {
   display: grid;
   gap: 0.8rem;
+}
+
+.preview-listicle-stage img {
+  width: 100%;
+  max-height: 22rem;
+  object-fit: contain;
+  border-radius: 1rem;
 }
 
 .preview-listicle-images {
@@ -4016,10 +4091,15 @@ button:disabled {
 
 .landing-builder-footer {
   display: flex;
+  flex-shrink: 0;
   justify-content: flex-end;
   gap: 1rem;
   border-top: 1px solid var(--line);
   padding: 1.6rem 2rem;
+}
+
+.landing-builder-status {
+  flex-shrink: 0;
 }
 
 .preview-device-controls {

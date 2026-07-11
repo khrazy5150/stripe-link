@@ -4,6 +4,7 @@ import unittest
 from stripe_link.domain.documents import DocumentValidationError, validate_page_document
 from stripe_link.runtime.html import (
     render_client_marquee,
+    render_hero_media,
     render_listicle_carousel,
     render_product_carousel,
     render_rating,
@@ -157,6 +158,23 @@ class ListicleCarouselTests(unittest.TestCase):
         self.assertIn("$39.00", html)       # the single-unit standard price
         self.assertNotIn("$67.00", html)    # not the 2-pack bundle
         self.assertNotIn("$27.00", html)    # not the upsell
+
+
+class HeroMediaCarouselTests(unittest.TestCase):
+    def test_multiple_images_render_carousel_chrome(self):
+        section = {"id": "hm", "type": "hero_media", "images": ["https://i/a.jpg", "https://i/b.jpg", "https://i/c.jpg"]}
+        html = render_hero_media(section, {"name": "X"}, {})
+        self.assertIn("sl-hero-carousel", html)
+        self.assertIn("data-hero-prev", html)
+        self.assertIn("data-hero-next", html)
+        self.assertIn("1 / 3", html)          # counter
+        self.assertEqual(html.count("data-hero-dot"), 3)
+
+    def test_single_image_has_no_carousel_chrome(self):
+        section = {"id": "hm", "type": "hero_media", "images": ["https://i/a.jpg"]}
+        html = render_hero_media(section, {"name": "X"}, {})
+        self.assertNotIn("sl-hero-carousel", html)
+        self.assertNotIn("data-hero-prev", html)
 
 
 class OfferTypeValidationTests(unittest.TestCase):
