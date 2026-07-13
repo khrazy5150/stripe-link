@@ -813,11 +813,16 @@ def render_hero_media(
     services_by_id: dict[str, dict[str, Any]] | None = None,
 ) -> str:
     product = first_offer_product(offer, products_by_id)
-    images = hero_media_images(section, offer, product)
-    if not images:
-        service_image = first_offer_service_image(offer, services_by_id or {})
-        if service_image:
-            images = [service_image]
+    if str(offer.get("offer_type") or "single") == "listicle":
+        # A listicle's hero carousel IS the offer's items — one product image per slide, offer-driven so
+        # it can never fall out of sync with a manually-edited field (plans, ConversionContext direction).
+        images = [slide["image"] for slide in listicle_slides(offer, products_by_id, services_by_id or {}) if slide["image"]]
+    else:
+        images = hero_media_images(section, offer, product)
+        if not images:
+            service_image = first_offer_service_image(offer, services_by_id or {})
+            if service_image:
+                images = [service_image]
     if not images:
         return ""
     alt = str(product.get("name") or offer.get("name") or "Product image")

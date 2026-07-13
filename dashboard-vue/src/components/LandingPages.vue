@@ -606,13 +606,13 @@
             <span class="preview-brand-dot" aria-hidden="true"></span>
             <span>{{ builderOffer?.name || builder.name || "Junior Bay" }}</span>
           </div>
-          <div v-if="heroMediaList.length > 1" class="preview-hero-carousel">
-            <img class="preview-hero-image" :src="heroMediaList[heroPreviewIndex] || heroMediaList[0]" alt="" />
-            <button type="button" class="preview-hero-nav prev" @click="heroPreviewIndex = (heroPreviewIndex - 1 + heroMediaList.length) % heroMediaList.length">‹</button>
-            <button type="button" class="preview-hero-nav next" @click="heroPreviewIndex = (heroPreviewIndex + 1) % heroMediaList.length">›</button>
-            <span class="preview-hero-counter">{{ heroPreviewIndex + 1 }} / {{ heroMediaList.length }}</span>
+          <div v-if="heroCarouselImages.length > 1" class="preview-hero-carousel">
+            <img class="preview-hero-image" :src="heroCarouselImages[heroPreviewIndex] || heroCarouselImages[0]" alt="" />
+            <button type="button" class="preview-hero-nav prev" @click="heroPreviewIndex = (heroPreviewIndex - 1 + heroCarouselImages.length) % heroCarouselImages.length">‹</button>
+            <button type="button" class="preview-hero-nav next" @click="heroPreviewIndex = (heroPreviewIndex + 1) % heroCarouselImages.length">›</button>
+            <span class="preview-hero-counter">{{ heroPreviewIndex + 1 }} / {{ heroCarouselImages.length }}</span>
             <div class="preview-hero-dots">
-              <span v-for="(image, i) in heroMediaList" :key="i" :class="{ 'is-active': i === heroPreviewIndex }" @click="heroPreviewIndex = i"></span>
+              <span v-for="(image, i) in heroCarouselImages" :key="i" :class="{ 'is-active': i === heroPreviewIndex }" @click="heroPreviewIndex = i"></span>
             </div>
           </div>
           <img v-else-if="previewHeroImage" class="preview-hero-image" :src="previewHeroImage" alt="" />
@@ -856,8 +856,11 @@ const listiclePreviewItems = computed(() => offerItemModels(builderOffer.value).
 }));
 // Preview: the hero carousel index drives everything (for a listicle the hero images ARE the products).
 const heroPreviewIndex = ref(0);
+// For a listicle the hero carousel is offer-driven (one product image per item), not the manual field.
+const heroCarouselImages = computed(() =>
+  isListicleOffer.value ? listiclePreviewItems.value.map((item) => item.image).filter(Boolean) : heroMediaList.value);
 const activeListicleItem = computed(() => listiclePreviewItems.value[heroPreviewIndex.value] || listiclePreviewItems.value[0] || null);
-watch(() => builder.hero_media_text, () => { heroPreviewIndex.value = 0; });
+watch(() => heroCarouselImages.value.length, () => { heroPreviewIndex.value = 0; });
 const builderProductImages = computed(() => [...new Set(builderOfferProducts.value.flatMap((product) => product.images || []).filter(Boolean))]);
 const heroMediaList = computed(() => parseLines(builder.hero_media_text));
 const previewHeroImage = computed(() => heroMediaList.value[0] || offerImage(builderOffer.value) || "");
