@@ -1,9 +1,10 @@
+import os
 import re
 
 from stripe_link.common import error_response, json_response, parse_json_body, path_params, query_params, tenant_id_from_event
 from stripe_link.domain.documents import DocumentValidationError, validate_offer_document
-from stripe_link.domain.pricing import PricingError, resolve_offer
-from stripe_link.repositories.documents import RepositoryError, offers_repository, products_repository
+from stripe_link.domain.pricing import PricingError, expand_offer, resolve_offer
+from stripe_link.repositories.documents import RepositoryError, offers_repository, products_repository, services_repository
 
 
 def sanitize_slug(value: str) -> str:
@@ -41,7 +42,7 @@ def handler(event, context, repository=None, products_repo=None):
     if method == "GET":
         offer_id = path_params(event).get("offer_id")
         if offer_id:
-            return get_offer(event, repository, offer_id)
+            return get_offer(event, repository, offer_id, products_repo=products_repo)
         return list_offers(event, repository)
     if method == "PATCH":
         offer_id = path_params(event).get("offer_id")
@@ -98,14 +99,37 @@ def validate_offer_product_compatibility(document: dict, products_repo) -> None:
             )
 
 
-def get_offer(event, repository, offer_id: str):
+def get_offer(event, repository, offer_id: str, products_repo=None, services_repo=None):
     tenant_id = tenant_id_from_event(event)
     if not tenant_id:
         return error_response("tenant_id is required.", code="missing_tenant")
     offer = repository.get(tenant_id, offer_id)
     if not offer:
         return error_response("Offer not found.", status_code=404, code="not_found")
+    # ?expand=1 returns the ExpandedOffer (per-item product/service snapshots) the renderers consume
+    # without lookups — storage stays normalized (plans/CONVERSION_CONTEXT.md).
+    if str(query_params(event).get("expand") or "").strip() in {"1", "true"}:
+        return json_response({"offer": _expand(tenant_id, offer, products_repo, services_repo)})
     return json_response({"offer": offer})
+
+
+def _expand(tenant_id: str, offer: dict, products_repo=None, services_repo=None) -> dict:
+    products_repo = products_repo or products_repository()
+    products_by_id = {}
+    services_by_id = {}
+    for item in offer.get("items") or []:
+        product_id = str((item or {}).get("product_id") or "").strip()
+        service_id = str((item or {}).get("service_id") or "").strip()
+        if product_id and product_id not in products_by_id:
+            product = products_repo.get(tenant_id, product_id)
+            if product:
+                products_by_id[product_id] = product
+        if service_id and service_id not in services_by_id:
+            repo = services_repo or (services_repository() if os.environ.get("SERVICES_TABLE") else None)
+            service = repo.get(tenant_id, service_id) if repo else None
+            if service:
+                services_by_id[service_id] = service
+    return expand_offer(offer, products_by_id, services_by_id)
 
 
 def list_offers(event, repository):

@@ -35,6 +35,89 @@ def single_unit_price(product: dict[str, Any]) -> dict[str, Any]:
     return candidates[0]
 
 
+def _price_summary(price: dict[str, Any]) -> dict[str, Any] | None:
+    """A lightweight price the renderer can display without touching the product doc."""
+    if not price:
+        return None
+    return {
+        "price_id": str(price.get("price_id") or ""),
+        "unit_amount": int(price.get("unit_amount") or 0),
+        "compare_at_amount": int(price.get("compare_at_amount") or 0),
+        "currency": str(price.get("currency") or "usd"),
+        "label": str(price.get("label") or ""),
+        "badge": str(price.get("badge") or ""),
+        "context": str(price.get("context") or "standard"),
+    }
+
+
+def expand_offer(
+    offer: dict[str, Any],
+    products_by_id: dict[str, dict[str, Any]],
+    services_by_id: dict[str, dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Expand-on-read: turn each offer item's product_id/service_id into a self-contained snapshot the
+    landing-page renderers consume WITHOUT further lookups. Storage stays normalized — this is the single
+    source of the ExpandedOffer shape (plans/CONVERSION_CONTEXT.md). Non-item fields pass through unchanged.
+    """
+    services_by_id = services_by_id or {}
+    items: list[dict[str, Any]] = []
+    for item in offer.get("items") or []:
+        product_id = str(item.get("product_id") or "")
+        service_id = str(item.get("service_id") or "")
+        if product_id and product_id in products_by_id:
+            product = products_by_id[product_id]
+            images = [image for image in (product.get("images") or []) if image]
+            selectable = []
+            for option in item.get("selectable_prices") or []:
+                price = next((p for p in (product.get("prices") or []) if p.get("price_id") == option.get("price_id")), None)
+                if price:
+                    summary = _price_summary(price)
+                    summary["label"] = str(option.get("label") or summary["label"])
+                    summary["badge"] = str(option.get("badge") or summary["badge"])
+                    selectable.append(summary)
+            items.append({
+                "kind": "product",
+                "product": {
+                    "product_id": product_id,
+                    "headline": str(product.get("name") or ""),
+                    "subheadline": str(product.get("description") or ""),
+                    "hero_image": images[0] if images else "",
+                    "gallery": images,
+                    "badges": list(product.get("badges") or []),
+                },
+                "pricing": {
+                    "default_price_id": str(item.get("default_price_id") or item.get("price_id") or product.get("default_price_id") or ""),
+                    "single_unit_price": _price_summary(single_unit_price(product)),
+                    "selectable_prices": selectable,
+                },
+            })
+        elif service_id and service_id in services_by_id:
+            service = services_by_id[service_id]
+            presentation = service.get("presentation") or {}
+            hero_image = str(presentation.get("hero_image_url") or "")
+            svc_price = dict(service.get("price") or (service.get("prices") or [{}])[0])
+            svc_price.setdefault("price_id", item.get("price_id") or service.get("default_price_id") or "")
+            items.append({
+                "kind": "service",
+                "product": {
+                    "product_id": service_id,
+                    "headline": str(service.get("name") or ""),
+                    "subheadline": str(service.get("description") or ""),
+                    "hero_image": hero_image,
+                    "gallery": [hero_image] if hero_image else [],
+                    "badges": [],
+                },
+                "pricing": {
+                    "default_price_id": str(item.get("price_id") or service.get("default_price_id") or ""),
+                    "single_unit_price": _price_summary(svc_price),
+                    "selectable_prices": [],
+                },
+            })
+    expanded = {key: value for key, value in offer.items() if key != "items"}
+    expanded["items"] = items
+    return expanded
+
+
 @dataclass(frozen=True)
 class ResolvedOfferItem:
     product_id: str
