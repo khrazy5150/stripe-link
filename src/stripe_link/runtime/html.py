@@ -2165,12 +2165,14 @@ def render_page_interactions_script(page: dict[str, Any]) -> str:
         "        const heroCounter = heroCarousel.querySelector('[data-hero-counter]');",
         "        const heroCount = heroCarousel.querySelectorAll('.sl-hero-slide').length;",
         "        let heroIndex = 0;",
-        "        const heroGo = (index) => { heroIndex = Math.max(0, Math.min(heroCount - 1, index)); if (heroTrack) heroTrack.scrollTo({ left: heroIndex * heroTrack.clientWidth, behavior: 'smooth' }); };",
         "        const heroSync = (index) => {",
         "          heroIndex = index;",
         "          heroDots.forEach((dot, i) => dot.classList.toggle('is-active', i === index));",
         "          if (heroCounter) heroCounter.textContent = (index + 1) + ' / ' + heroCount;",
         "        };",
+        # heroGo scrolls AND syncs the dots/counter immediately — don't rely on the scroll listener, whose
+        # own guard would skip the update once heroIndex is set.
+        "        const heroGo = (index) => { const i = Math.max(0, Math.min(heroCount - 1, index)); if (heroTrack) heroTrack.scrollTo({ left: i * heroTrack.clientWidth, behavior: 'smooth' }); heroSync(i); };",
         "        const heroPrev = heroCarousel.querySelector('[data-hero-prev]');",
         "        const heroNext = heroCarousel.querySelector('[data-hero-next]');",
         "        if (heroPrev) heroPrev.addEventListener('click', () => heroGo(heroIndex - 1));",
