@@ -710,6 +710,10 @@
             <strong>{{ builderCta.label || "Learn more" }}</strong>
             <span v-if="builderCta.target" class="preview-external-url">{{ builderCta.target }}</span>
           </div>
+          <div v-else-if="builderCta.type === 'download'" class="preview-cta-card preview-external-card">
+            <strong>⬇ {{ builderCta.label || "Download" }}</strong>
+            <span v-if="builderCta.target" class="preview-external-url">{{ builderCta.target }}</span>
+          </div>
           <div v-else class="preview-cta-card preview-email-card">
             <strong>{{ builderLeadAction?.title || builderCta.label || "Get started" }}</strong>
             <span>{{ builderLeadAction?.description || "Enter your details to continue." }}</span>
@@ -852,7 +856,7 @@ const builderLeadAction = computed(() => builderOfferProducts.value.find((produc
 const builderCta = computed(() => builderOffer.value?.presentation?.cta || { type: builderIntent.value === "lead_gen" ? "email" : "buy" });
 const selectedOfferCta = computed(() => selectedOffer.value?.presentation?.cta || { type: selectedOfferIntent.value === "lead_gen" ? "email" : "buy" });
 // buy + booking (service) offers show the price cards; call/email/external render their own component instead.
-const ctaShowsPrices = computed(() => ["buy", "booking"].includes(builderCta.value.type) && !isListicleOffer.value);
+const ctaShowsPrices = computed(() => ["buy", "booking", "appointment"].includes(builderCta.value.type) && !isListicleOffer.value);
 // A listicle offer renders its items as a carousel (each add-to-cart) instead of the pick-one selector.
 const isListicleOffer = computed(() => (builderOffer.value?.offer_type || "single") === "listicle");
 // One preview slide per offer item, at an approximate single-unit price (the server uses the exact resolver).
@@ -2071,7 +2075,9 @@ function ctaTypeLabel(type) {
     call: "Call — click-to-call",
     email: "Email — inline capture form",
     external: "External link",
+    download: "Download — file",
     booking: "Booking — inline calendar",
+    appointment: "Appointment — inline calendar",
   };
   return labels[type] || "Buy — price + checkout";
 }
@@ -2082,7 +2088,9 @@ function ctaTypeDescription(type) {
     call: "Shows a tel: call button and the phone number.",
     email: "Collects the visitor's contact details inline.",
     external: "Sends the visitor to an external URL.",
+    download: "Downloads a file for the visitor.",
     booking: "Reveals a booking calendar to schedule the service.",
+    appointment: "Reveals a booking calendar to schedule the appointment.",
   };
   return descriptions[type] || descriptions.buy;
 }

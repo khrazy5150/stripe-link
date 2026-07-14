@@ -1373,7 +1373,7 @@ def render_content_blocks(section: dict[str, Any]) -> str:
     ])
 
 
-CTA_TYPES = {"buy", "call", "email", "external", "booking"}
+CTA_TYPES = {"buy", "call", "email", "external", "download", "booking", "appointment"}
 
 
 def offer_cta(offer: dict[str, Any]) -> dict[str, str]:
@@ -1542,7 +1542,10 @@ CTA_REGISTRY: dict[str, dict[str, Any]] = {
     "call": {"render": lambda c: render_call_cta(c.cta), "version": 1},
     "external": {"render": lambda c: render_external_cta(c.cta), "version": 1},
     "email": {"render": lambda c: render_email_cta(c.page, c.offer, c.cta, c.products_by_id, c.api_base_url), "version": 1},
+    "download": {"render": lambda c: render_download_cta(c.cta), "version": 1},
+    # An appointment IS a booking — reuse the inline calendar widget rather than duplicate it.
     "booking": {"render": lambda c: render_booking_cta(c.cta, c.api_base_url), "version": 1},
+    "appointment": {"render": lambda c: render_booking_cta(c.cta, c.api_base_url), "version": 1},
 }
 
 
@@ -1672,6 +1675,19 @@ def render_external_cta(cta: dict[str, str]) -> str:
     return "\n".join([
         "    <section class=\"sl-checkout-cta sl-external-cta\" data-section-type=\"checkout_cta\" data-cta-type=\"external\">",
         f"      <a class=\"sl-cta\" href=\"{href}\" target=\"_blank\" rel=\"noopener noreferrer\">{label}</a>",
+        "    </section>",
+    ])
+
+
+def render_download_cta(cta: dict[str, str]) -> str:
+    """Download CTA: a button that downloads the target file (a free lead-magnet / digital file). The
+    `download` attribute prompts a save; the browser owns execution — no JS needed."""
+    url = cta["target"].strip()
+    label = escape(cta["label"] or "Download")
+    href = escape(url) if url else "#"
+    return "\n".join([
+        "    <section class=\"sl-checkout-cta sl-download-cta\" data-section-type=\"checkout_cta\" data-cta-type=\"download\">",
+        f"      <a class=\"sl-cta\" href=\"{href}\" download rel=\"noopener\">{label}</a>",
         "    </section>",
     ])
 

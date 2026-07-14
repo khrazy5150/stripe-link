@@ -980,7 +980,13 @@ function primaryCtaContract() {
     const lc = product.lead_capture || {};
     const target = lc.target?.value || "";
     if (lc.action === "call_number") return { type: "call", label: lc.title || "Call Now", target };
-    if (lc.action === "external_url" || lc.action === "social_redirect") return { type: "external", label: lc.title || "Learn More", target };
+    if (lc.action === "external_url" || lc.action === "social_redirect") {
+      // A downloadable file target renders a download CTA; any other URL is an external link.
+      if (/\.(pdf|zip|epub|mp3|mp4|mov|docx?|xlsx?|pptx?|csv|png|jpe?g)(\?|#|$)/i.test(target)) {
+        return { type: "download", label: lc.title || "Download", target };
+      }
+      return { type: "external", label: lc.title || "Learn More", target };
+    }
     // capture_email / capture_phone / capture_email_phone / open_form -> inline collector (Phase 2)
     return { type: "email", label: lc.title || "Get Started" };
   }

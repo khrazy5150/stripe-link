@@ -342,8 +342,8 @@
           "properties": {
             "type": {
               "type": "string",
-              "enum": ["buy", "call", "email", "external", "booking"],
-              "description": "buy = price card + Stripe checkout; call = tel: button + phone banner; email = inline capture form; external = link out; booking = inline booking calendar."
+              "enum": ["buy", "call", "email", "external", "download", "booking", "appointment"],
+              "description": "buy = price card + Stripe checkout; call = tel: button + phone banner; email = inline capture form; external = link out; download = download a file; booking/appointment = inline booking calendar."
             },
             "label": {
               "type": "string",

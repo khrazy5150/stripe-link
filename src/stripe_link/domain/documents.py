@@ -780,7 +780,7 @@ def validate_offer_document(document: dict[str, Any]) -> None:
         if cta is not None:
             if not isinstance(cta, dict):
                 raise DocumentValidationError("Offer presentation.cta must be an object.")
-            require_enum(cta, "type", {"buy", "call", "email", "external", "booking"}, "Offer presentation.cta.type")
+            require_enum(cta, "type", {"buy", "call", "email", "external", "download", "booking", "appointment"}, "Offer presentation.cta.type")
             optional_string(cta, "label", "Offer presentation.cta.label")
             optional_string(cta, "target", "Offer presentation.cta.target")
 
