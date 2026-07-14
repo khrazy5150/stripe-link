@@ -532,6 +532,10 @@
                   <button class="secondary-action compact" type="button" @click="addSubItem(element, 'items', { question: '', answer: '' })">+ Add question</button>
                 </template>
 
+                <template v-else-if="element.type === 'product_details'">
+                  <p class="element-empty">Shows the current product's gallery, badges, and description — pulled from the offer and synced to the carousel. No configuration needed.</p>
+                </template>
+
               </div>
             </div>
           </section>
@@ -662,6 +666,15 @@
                 <summary v-html="headlineHtml(item.question)"></summary>
                 <p>{{ item.answer }}</p>
               </details>
+            </div>
+            <div v-else-if="entry.element.type === 'product_details' && activeTargetDetails" class="preview-product-details">
+              <p v-if="activeTargetDetails.description" class="preview-details-desc">{{ activeTargetDetails.description }}</p>
+              <div v-if="activeTargetDetails.gallery.length" class="preview-details-gallery">
+                <img v-for="(url, i) in activeTargetDetails.gallery" :key="i" :src="url" alt="" />
+              </div>
+              <div v-if="activeTargetDetails.badges.length" class="preview-details-badges">
+                <span v-for="(badge, i) in activeTargetDetails.badges" :key="i">{{ badge }}</span>
+              </div>
             </div>
           </template>
           <!-- Listicle: no separate carousel — the hero carousel (above) drives this syncing price card. -->
@@ -870,6 +883,16 @@ const currentTargetIndex = computed({
   set: (value) => { conversion.page.currentTargetIndex = value; },
 });
 const activeTarget = conversion.derived.currentTarget;
+// The current target's gallery/badges/description for the context-aware Product Details block preview.
+const activeTargetDetails = computed(() => {
+  const target = activeTarget.value;
+  if (!target) return null;
+  const product = productsById.value.get(target.product_id) || null;
+  const service = target.service_id ? servicesById.value.get(target.service_id) : null;
+  const gallery = (product ? product.images : [service?.presentation?.hero_image_url]) || [];
+  const badges = product ? (product.badges || []).map((b) => (typeof b === "string" ? b : b.label)).filter(Boolean) : [];
+  return { description: target.subheadline || "", gallery: gallery.filter(Boolean), badges };
+});
 // For a listicle the hero carousel is offer-driven (one product image per target); else the manual field.
 const heroCarouselImages = computed(() =>
   isListicleOffer.value ? conversionTargets.value.map((target) => target.hero_image).filter(Boolean) : heroMediaList.value);
@@ -1665,6 +1688,7 @@ async function handleHeroMediaPicked(event) {
 // page-level multi-offer carousel element was retired — see plans/LISTICLE_AND_CART.md.
 const ELEMENT_TYPES = [
   { type: "content_block", label: "Content" },
+  { type: "product_details", label: "Product Details" },
   { type: "testimonials", label: "Testimonials" },
   { type: "rating", label: "Rating" },
   { type: "client_marquee", label: "Client Logos" },
@@ -1682,6 +1706,7 @@ function newElement(type) {
   if (type === "rating") return { ...base, value: 5, count: 0, label: "" };
   if (type === "client_marquee") return { ...base, heading: "", logos: [{ image_url: "", name: "" }] };
   if (type === "faq") return { ...base, items: [{ question: "", answer: "" }] };
+  // product_details is fully offer-driven (current target's gallery/badges/description) — no config.
   return base;
 }
 
@@ -1766,6 +1791,9 @@ function elementSection(element) {
     if (!items.length) return null;
     return { id: element.id, type: "faq", items: items.map((item) => ({ question: formatHeadline(item.question || ""), answer: item.answer })) };
   }
+  if (element.type === "product_details") {
+    return { id: element.id, type: "product_details" };   // content is the current target (offer-driven)
+  }
   return null;
 }
 
@@ -1787,6 +1815,8 @@ function elementsFromPage(sections) {
         logos: (section.logos || []).map((logo) => ({ image_url: logo.image_url || "", name: logo.name || "" })) });
     } else if (section.type === "faq") {
       elements.push({ id: localId("el"), type: "faq", items: (section.items || []).map((item) => ({ question: item.question || "", answer: item.answer || "" })) });
+    } else if (section.type === "product_details") {
+      elements.push({ id: localId("el"), type: "product_details" });
     }
   }
   return elements;

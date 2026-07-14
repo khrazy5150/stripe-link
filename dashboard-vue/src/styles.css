@@ -3916,6 +3916,45 @@ button:disabled {
   background: var(--preview-brand, #4f46e5);
 }
 
+/* Context-aware Product Details block preview */
+.preview-product-details {
+  display: grid;
+  gap: 0.8rem;
+}
+
+.preview-details-desc {
+  color: var(--preview-content-text);
+  font-size: 1.4rem;
+}
+
+.preview-details-gallery {
+  display: flex;
+  gap: 0.6rem;
+  overflow-x: auto;
+}
+
+.preview-details-gallery img {
+  width: 6rem;
+  height: 6rem;
+  object-fit: cover;
+  border-radius: 0.6rem;
+  flex: 0 0 auto;
+}
+
+.preview-details-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.preview-details-badges span {
+  font-size: 1.2rem;
+  font-weight: 700;
+  background: var(--preview-chip-bg, #eef);
+  border-radius: 99rem;
+  padding: 0.2rem 0.8rem;
+}
+
 /* Listicle preview (syncing price card) */
 .preview-listicle {
   display: grid;

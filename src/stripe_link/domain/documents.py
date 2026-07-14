@@ -24,6 +24,7 @@ SUPPORTED_PAGE_SECTION_TYPES = {
     "legal_footer",
     "offer_price_selector",
     "product_carousel",
+    "product_details",
     "rating",
     "refund_policy",
     "seo_title",

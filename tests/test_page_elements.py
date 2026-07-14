@@ -184,6 +184,36 @@ class AnalyticsAdapterTests(unittest.TestCase):
         self.assertIn("var GA = 'G-Abx'", js)   # angle brackets stripped — the id can't break out of the script
 
 
+class ProductDetailsTests(unittest.TestCase):
+    def _offer(self):
+        return {"offer_id": "o", "tenant_id": "t1", "offer_type": "listicle",
+                "items": [{"product_id": "p1", "price_id": "pr1", "quantity": 1}]}
+
+    def _products(self):
+        return {"p1": {"product_id": "p1", "name": "A", "description": "desc A",
+                       "images": ["https://i/a1.jpg", "https://i/a2.jpg"], "badges": ["Bestseller", {"label": "New"}],
+                       "default_price_id": "pr1", "prices": [{"price_id": "pr1", "currency": "usd", "unit_amount": 5201, "quantity": 1, "context": "standard"}]}}
+
+    def test_renders_context_aware_lists(self):
+        from stripe_link.runtime.html import render_product_details
+        html = render_product_details(self._offer(), self._products(), {})
+        self.assertIn('data-conversion-section="product_details"', html)
+        self.assertIn('data-conversion-list="gallery"', html)   # re-rendered per target by the island
+        self.assertIn('data-conversion-list="badges"', html)
+        self.assertIn('data-conversion-bind="subheadline"', html)
+        self.assertIn("a1.jpg", html)          # initial (first target) gallery
+        self.assertIn("Bestseller", html)       # string badge
+        self.assertIn("New", html)              # dict badge -> label
+
+    def test_conversion_payload_carries_gallery_and_badges(self):
+        import json, re
+        from stripe_link.runtime.html import render_conversion_data
+        html = render_conversion_data(self._offer(), self._products(), {})
+        payload = json.loads(re.search(r"data-conversion-offer>(.*)</script>", html).group(1))
+        self.assertEqual(payload[0]["gallery"], ["https://i/a1.jpg", "https://i/a2.jpg"])
+        self.assertEqual(payload[0]["badges"], ["Bestseller", "New"])
+
+
 class SectionRegistryTests(unittest.TestCase):
     def test_registry_is_the_dispatch_source_of_truth(self):
         from stripe_link.runtime.html import SECTION_REGISTRY, render_section

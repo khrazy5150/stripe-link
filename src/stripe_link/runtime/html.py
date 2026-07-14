@@ -411,6 +411,13 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     "    .sl-minicart.is-visible{display:flex}",
     "    .sl-minicart-summary{font-family:var(--sl-font-accent);font-weight:800;color:var(--sl-text)}",
     "    .sl-minicart-note{font-size:1.3rem;color:var(--sl-muted)}",
+    "    .sl-product-details{width:min(52rem,100%);margin:0 auto;display:flex;flex-direction:column;gap:1rem}",
+    "    .sl-details-desc{font-size:1.4rem;color:var(--sl-price-description)}",
+    "    .sl-details-gallery{display:flex;gap:0.8rem;overflow-x:auto;scrollbar-width:none}",
+    "    .sl-details-gallery::-webkit-scrollbar{display:none}",
+    "    .sl-details-thumb{width:7rem;height:7rem;object-fit:cover;border-radius:0.8rem;border:1px solid var(--sl-price-card-border);flex:0 0 auto}",
+    "    .sl-details-badges{display:flex;flex-wrap:wrap;gap:0.6rem}",
+    "    .sl-details-badge{font-size:1.2rem;font-weight:700;color:var(--sl-chip-text);background:var(--sl-chip-bg);border:1px solid var(--sl-chip-border);border-radius:99.9rem;padding:0.3rem 0.9rem}",
     "    .sl-legal{display:flex;gap:1.2rem;flex-wrap:wrap;justify-content:center;text-align:center;font-size:1.3rem;color:var(--sl-legal-text);padding:2.4rem 0 0}",
     "    .sl-legal span{flex:0 0 100%}",
     "    .sl-legal a{color:var(--sl-legal-link)}",
@@ -684,12 +691,15 @@ def render_conversion_data(
         amount = int(price.get("unit_amount") or 0)
         compare = int(price.get("compare_at_amount") or 0)
         discount = round((compare - amount) / compare * 100) if compare > amount > 0 else 0
+        badges = [str(b.get("label") if isinstance(b, dict) else b) for b in (product.get("badges") or []) if b]
         targets.append({
             "product_id": product.get("product_id", ""),
             "price_id": price.get("price_id", ""),
             "headline": product.get("headline", ""),
             "subheadline": product.get("subheadline", ""),
             "hero_image": product.get("hero_image", ""),
+            "gallery": [str(url) for url in (product.get("gallery") or []) if url],
+            "badges": badges,
             "amount": amount,
             "compare_at": compare,
             "discount": discount,
@@ -709,6 +719,35 @@ def render_minicart() -> str:
         "    <span class=\"sl-minicart-summary\" data-minicart-summary></span>",
         "    <span class=\"sl-minicart-note\">Checkout coming soon</span>",
         "  </div>",
+    ])
+
+
+def render_product_details(
+    offer: dict[str, Any],
+    products_by_id: dict[str, dict[str, Any]],
+    services_by_id: dict[str, dict[str, Any]],
+) -> str:
+    """A context-aware block (plans/CONVERSION_CONTEXT.md "future blocks"): the current target's description,
+    gallery, and badges. It reads currentTarget, so on a multi-target/listicle page the whole block SWAPS as
+    the visitor swipes — no new plumbing, just data-conversion-bind + data-conversion-list."""
+    offer_view = expand_offer(offer, products_by_id, services_by_id or {})
+    targets = offer_view.get("items", [])
+    if not targets:
+        return ""
+    product = (targets[0].get("product") or {})
+    gallery = [url for url in (product.get("gallery") or []) if url]
+    badges = [str(b.get("label") if isinstance(b, dict) else b) for b in (product.get("badges") or []) if b]
+    description = str(product.get("subheadline") or "")
+    gallery_html = "".join(f"<img class=\"sl-details-thumb\" src=\"{escape(str(url))}\" loading=\"lazy\" alt=\"\">" for url in gallery)
+    badges_html = "".join(f"<span class=\"sl-details-badge\">{escape(str(b))}</span>" for b in badges)
+    gallery_hidden = "" if gallery else " style=\"display:none\""
+    badges_hidden = "" if badges else " style=\"display:none\""
+    return "\n".join([
+        "    <section class=\"sl-product-details\" data-section-type=\"product_details\" data-conversion-section=\"product_details\">",
+        f"      <p class=\"sl-details-desc\" data-conversion-bind=\"subheadline\">{escape(description)}</p>",
+        f"      <div class=\"sl-details-gallery\" data-conversion-list=\"gallery\"{gallery_hidden}>{gallery_html}</div>",
+        f"      <div class=\"sl-details-badges\" data-conversion-list=\"badges\"{badges_hidden}>{badges_html}</div>",
+        "    </section>",
     ])
 
 
@@ -751,6 +790,7 @@ SECTION_REGISTRY: dict[str, dict[str, Any]] = {
     "testimonials": {"render": lambda c: render_testimonials(c.section), "version": 1},
     "rating": {"render": lambda c: render_rating(c.section), "version": 1},
     "client_marquee": {"render": lambda c: render_client_marquee(c.section), "version": 1},
+    "product_details": {"render": lambda c: render_product_details(c.offer, c.products_by_id, c.services_by_id), "version": 1},
     "product_carousel": {"render": lambda c: render_product_carousel(c.section, c.page, c.offers_by_id, c.products_by_id, c.services_by_id, c.checkout_url, c.api_base_url), "version": 1},
     "checkout_cta": {"render": lambda c: render_checkout_cta(c.page, c.section, c.offer, c.resolved_offer, c.checkout_url, c.api_base_url, c.products_by_id), "version": 1},
     "legal_footer": {"render": lambda c: render_legal_footer(c.page.get("legal") or {}, c.section, c.api_base_url), "version": 1},
@@ -2058,6 +2098,19 @@ def render_page_interactions_script(page: dict[str, Any]) -> str:
         "          currentIndex = index;",
         "          const t = convTargets[index];",
         "          document.querySelectorAll('[data-conversion-bind]').forEach((el) => { const b = binders[el.dataset.conversionBind]; if (b) b(el, t); });",
+        # Context-aware lists: rebuild each [data-conversion-list] from the current target's array so
+        # blocks (gallery, badges, and later per-product reviews/FAQ) swap as the target changes.
+        "          document.querySelectorAll('[data-conversion-list]').forEach((el) => {",
+        "            const name = el.dataset.conversionList; const arr = (t && t[name]) || [];",
+        "            el.innerHTML = '';",
+        "            arr.forEach((v) => {",
+        "              let node;",
+        "              if (name === 'gallery') { node = document.createElement('img'); node.src = v; node.className = 'sl-details-thumb'; node.loading = 'lazy'; node.alt = ''; }",
+        "              else { node = document.createElement('span'); node.className = 'sl-details-badge'; node.textContent = v; }",
+        "              el.appendChild(node);",
+        "            });",
+        "            el.style.display = arr.length ? '' : 'none';",
+        "          });",
         "        };",
         "        window.slConversion = { on: on, emit: emit, targets: convTargets, get index() { return currentIndex; }, get target() { return convTargets[currentIndex]; } };",
         # The hero_media carousel is the single carousel; it drives the current target.
