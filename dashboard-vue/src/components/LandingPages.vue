@@ -607,12 +607,12 @@
             <span>{{ builderOffer?.name || builder.name || "Junior Bay" }}</span>
           </div>
           <div v-if="heroCarouselImages.length > 1" class="preview-hero-carousel">
-            <img class="preview-hero-image" :src="heroCarouselImages[heroPreviewIndex] || heroCarouselImages[0]" alt="" />
-            <button type="button" class="preview-hero-nav prev" @click="heroPreviewIndex = (heroPreviewIndex - 1 + heroCarouselImages.length) % heroCarouselImages.length">‹</button>
-            <button type="button" class="preview-hero-nav next" @click="heroPreviewIndex = (heroPreviewIndex + 1) % heroCarouselImages.length">›</button>
-            <span class="preview-hero-counter">{{ heroPreviewIndex + 1 }} / {{ heroCarouselImages.length }}</span>
+            <img class="preview-hero-image" :src="heroCarouselImages[currentTargetIndex] || heroCarouselImages[0]" alt="" />
+            <button type="button" class="preview-hero-nav prev" @click="currentTargetIndex = (currentTargetIndex - 1 + heroCarouselImages.length) % heroCarouselImages.length">‹</button>
+            <button type="button" class="preview-hero-nav next" @click="currentTargetIndex = (currentTargetIndex + 1) % heroCarouselImages.length">›</button>
+            <span class="preview-hero-counter">{{ currentTargetIndex + 1 }} / {{ heroCarouselImages.length }}</span>
             <div class="preview-hero-dots">
-              <span v-for="(image, i) in heroCarouselImages" :key="i" :class="{ 'is-active': i === heroPreviewIndex }" @click="heroPreviewIndex = i"></span>
+              <span v-for="(image, i) in heroCarouselImages" :key="i" :class="{ 'is-active': i === currentTargetIndex }" @click="currentTargetIndex = i"></span>
             </div>
           </div>
           <img v-else-if="previewHeroImage" class="preview-hero-image" :src="previewHeroImage" alt="" />
@@ -656,15 +656,15 @@
             </div>
           </template>
           <!-- Listicle: no separate carousel — the hero carousel (above) drives this syncing price card. -->
-          <div v-if="isListicleOffer && activeListicleItem" class="preview-listicle">
+          <div v-if="isListicleOffer && activeTarget" class="preview-listicle">
             <div class="preview-listicle-card">
               <div class="preview-listicle-pricerow">
-                <span v-if="activeListicleItem.discount" class="preview-listicle-discount">-{{ activeListicleItem.discount }}%</span>
-                <span class="preview-listicle-price">{{ formatMoney(activeListicleItem.amount, activeListicleItem.currency) }}</span>
-                <del v-if="activeListicleItem.compare_at > activeListicleItem.amount">{{ formatMoney(activeListicleItem.compare_at, activeListicleItem.currency) }}</del>
+                <span v-if="activeTarget.discount" class="preview-listicle-discount">-{{ activeTarget.discount }}%</span>
+                <span class="preview-listicle-price">{{ formatMoney(activeTarget.amount, activeTarget.currency) }}</span>
+                <del v-if="activeTarget.compare_at > activeTarget.amount">{{ formatMoney(activeTarget.compare_at, activeTarget.currency) }}</del>
               </div>
-              <strong>{{ activeListicleItem.name }}</strong>
-              <p>{{ activeListicleItem.description }}</p>
+              <strong>{{ activeTarget.headline }}</strong>
+              <p>{{ activeTarget.subheadline }}</p>
               <span class="preview-carousel-buy">Add to cart</span>
             </div>
           </div>
@@ -756,6 +756,7 @@
 
 <script setup>
 import { computed, reactive, ref, watch } from "vue";
+import { useConversionContext, offerViewTargets } from "../composables/useConversionContext";
 import { apiRequest, getApiBase, getApiEnvironment, getPagesBaseUrl, getPreviewPagesBaseUrl, getTenantId } from "../api/client";
 import { formatMoney } from "../stores/products";
 import { uploadImage } from "../api/uploads";
@@ -846,21 +847,20 @@ const ctaShowsPrices = computed(() => ["buy", "booking"].includes(builderCta.val
 // A listicle offer renders its items as a carousel (each add-to-cart) instead of the pick-one selector.
 const isListicleOffer = computed(() => (builderOffer.value?.offer_type || "single") === "listicle");
 // One preview slide per offer item, at an approximate single-unit price (the server uses the exact resolver).
-const listiclePreviewItems = computed(() => offerItemModels(builderOffer.value).map((model) => {
-  const cards = [...(model.priceCards || [])];
-  const single = cards.find((card) => (card.quantity || 1) <= 1) || cards[0] || {};
-  const amount = single.unit_amount || 0;
-  const compare = single.compare_at_unit_amount || 0;
-  const discount = compare > amount && compare > 0 ? Math.round(((compare - amount) / compare) * 100) : 0;
-  return { id: model.id, name: model.name, description: model.description, image: model.image, amount, currency: single.currency || "usd", compare_at: compare, discount };
-}));
-// Preview: the hero carousel index drives everything (for a listicle the hero images ARE the products).
-const heroPreviewIndex = ref(0);
-// For a listicle the hero carousel is offer-driven (one product image per item), not the manual field.
+// The Vue-side ConversionContext: OfferView targets + a shared currentTargetIndex + read-only derived
+// values (mirrors the server's expand_offer + conversion island). The preview drives everything off this.
+const conversionTargets = computed(() => offerViewTargets(offerItemModels(builderOffer.value)));
+const conversion = useConversionContext(conversionTargets);
+// Top-level aliases so the template auto-unwraps them (nested refs on `conversion` would not).
+const currentTargetIndex = computed({
+  get: () => conversion.page.currentTargetIndex,
+  set: (value) => { conversion.page.currentTargetIndex = value; },
+});
+const activeTarget = conversion.derived.currentTarget;
+// For a listicle the hero carousel is offer-driven (one product image per target); else the manual field.
 const heroCarouselImages = computed(() =>
-  isListicleOffer.value ? listiclePreviewItems.value.map((item) => item.image).filter(Boolean) : heroMediaList.value);
-const activeListicleItem = computed(() => listiclePreviewItems.value[heroPreviewIndex.value] || listiclePreviewItems.value[0] || null);
-watch(() => heroCarouselImages.value.length, () => { heroPreviewIndex.value = 0; });
+  isListicleOffer.value ? conversionTargets.value.map((target) => target.hero_image).filter(Boolean) : heroMediaList.value);
+watch(() => heroCarouselImages.value.length, () => { conversion.setTarget(0); });
 const builderProductImages = computed(() => [...new Set(builderOfferProducts.value.flatMap((product) => product.images || []).filter(Boolean))]);
 const heroMediaList = computed(() => parseLines(builder.hero_media_text));
 const previewHeroImage = computed(() => heroMediaList.value[0] || offerImage(builderOffer.value) || "");
@@ -1789,7 +1789,7 @@ async function onBuilderOfferChange() {
   if (!builder.seo_image) builder.seo_image = offerImage(offer);
   // A listicle's hero carousel IS the product images — auto-fill the hero media field with one per item.
   if ((offer.offer_type || "single") === "listicle") {
-    const productImages = listiclePreviewItems.value.map((item) => item.image).filter(Boolean);
+    const productImages = conversionTargets.value.map((target) => target.hero_image).filter(Boolean);
     if (productImages.length) builder.hero_media_text = productImages.join("\n");
   } else if (!builder.hero_media_text && offerImage(offer)) {
     builder.hero_media_text = offerImage(offer);
