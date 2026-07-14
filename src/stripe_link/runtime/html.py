@@ -299,7 +299,7 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     "    .sl-hero-track{display:flex;overflow-x:auto;scroll-snap-type:x mandatory;scrollbar-width:none;border-radius:var(--sl-radius)}",
     "    .sl-hero-track::-webkit-scrollbar{display:none}",
     "    .sl-hero-slide{flex:0 0 100%;scroll-snap-align:center}",
-    "    .sl-hero-slide img{width:100%;aspect-ratio:1/1;object-fit:cover;border-radius:var(--sl-radius);border:1px solid var(--sl-hero-border);background:var(--sl-hero-bg)}",
+    "    .sl-hero-slide img,.sl-hero-slide video{width:100%;aspect-ratio:1/1;object-fit:cover;border-radius:var(--sl-radius);border:1px solid var(--sl-hero-border);background:var(--sl-hero-bg)}",
     "    .sl-hero-nav{position:absolute;top:calc(50% + 0.4rem);transform:translateY(-50%);width:3.8rem;height:3.8rem;border-radius:50%;border:0;background:rgba(255,255,255,.9);color:#111;font-size:2.2rem;line-height:1;cursor:pointer;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 8px rgba(0,0,0,.18)}",
     "    .sl-hero-prev{left:0.8rem}",
     "    .sl-hero-next{right:0.8rem}",
@@ -859,6 +859,26 @@ def first_offer_service_image(offer: dict[str, Any], services_by_id: dict[str, d
     return ""
 
 
+VIDEO_EXTENSIONS = (".mp4", ".webm", ".mov", ".m4v", ".ogv")
+
+
+def is_video_url(url: str) -> bool:
+    return urlparse(str(url or "")).path.lower().endswith(VIDEO_EXTENSIONS)
+
+
+def render_media_slide(url: str, alt: str, *, autoplay: bool, eager: bool = False) -> str:
+    """The MediaViewer's image/video modes (plans/CONVERSION_CONTEXT.md review 4). A video URL renders a
+    <video>; autoplay implies muted+loop (browser policy), otherwise it shows controls."""
+    if is_video_url(url):
+        attrs = "muted loop autoplay playsinline" if autoplay else "controls playsinline"
+        preload = "auto" if eager else "metadata"
+        return (
+            f"<video class=\"sl-hero-video\" src=\"{escape(str(url))}\" {attrs} preload=\"{preload}\" "
+            f"aria-label=\"{escape(alt)}\"></video>"
+        )
+    return responsive_img(url, alt, sizes=HERO_MEDIA_SIZES, eager=eager)
+
+
 def render_hero_media(
     section: dict[str, Any],
     offer: dict[str, Any],
@@ -880,9 +900,10 @@ def render_hero_media(
         return ""
     alt = str(product.get("name") or offer.get("name") or "Product image")
     section_id = escape(str(section.get("id", "hero-media")))
+    autoplay = bool(section.get("autoplay"))
     slides = [
-        f"        <div class=\"sl-hero-slide\">{responsive_img(image_url, alt, sizes=HERO_MEDIA_SIZES, eager=(index == 0))}</div>"
-        for index, image_url in enumerate(images)
+        f"        <div class=\"sl-hero-slide\">{render_media_slide(url, alt, autoplay=autoplay, eager=(index == 0))}</div>"
+        for index, url in enumerate(images)
     ]
     # A single image needs no carousel chrome.
     if len(images) == 1:

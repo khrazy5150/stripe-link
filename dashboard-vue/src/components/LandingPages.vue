@@ -410,6 +410,13 @@
                 <img :src="image" alt="" />
               </button>
             </div>
+            <label class="builder-switch-row">
+              <span class="builder-switch" @click.stop>
+                <input v-model="builder.autoplay" type="checkbox" aria-label="Autoplay hero videos muted" />
+                <span aria-hidden="true"></span>
+              </span>
+              <span>Autoplay video (muted)</span>
+            </label>
           </section>
 
           <section class="builder-section">
@@ -607,7 +614,8 @@
             <span>{{ builderOffer?.name || builder.name || "Junior Bay" }}</span>
           </div>
           <div v-if="heroCarouselImages.length > 1" class="preview-hero-carousel">
-            <img class="preview-hero-image" :src="heroCarouselImages[currentTargetIndex] || heroCarouselImages[0]" alt="" />
+            <video v-if="isVideoUrl(heroCarouselImages[currentTargetIndex] || heroCarouselImages[0])" class="preview-hero-image" :src="heroCarouselImages[currentTargetIndex] || heroCarouselImages[0]" :autoplay="builder.autoplay" :muted="builder.autoplay" :controls="!builder.autoplay" loop playsinline></video>
+            <img v-else class="preview-hero-image" :src="heroCarouselImages[currentTargetIndex] || heroCarouselImages[0]" alt="" />
             <button type="button" class="preview-hero-nav prev" @click="currentTargetIndex = (currentTargetIndex - 1 + heroCarouselImages.length) % heroCarouselImages.length">‹</button>
             <button type="button" class="preview-hero-nav next" @click="currentTargetIndex = (currentTargetIndex + 1) % heroCarouselImages.length">›</button>
             <span class="preview-hero-counter">{{ currentTargetIndex + 1 }} / {{ heroCarouselImages.length }}</span>
@@ -615,6 +623,7 @@
               <span v-for="(image, i) in heroCarouselImages" :key="i" :class="{ 'is-active': i === currentTargetIndex }" @click="currentTargetIndex = i"></span>
             </div>
           </div>
+          <video v-else-if="previewHeroImage && isVideoUrl(previewHeroImage)" class="preview-hero-image" :src="previewHeroImage" :autoplay="builder.autoplay" :muted="builder.autoplay" :controls="!builder.autoplay" loop playsinline></video>
           <img v-else-if="previewHeroImage" class="preview-hero-image" :src="previewHeroImage" alt="" />
           <h1 v-html="headlineHtml(builder.headline || builder.name)"></h1>
           <p>{{ builder.subheadline }}</p>
@@ -863,6 +872,10 @@ const heroCarouselImages = computed(() =>
 watch(() => heroCarouselImages.value.length, () => { conversion.setTarget(0); });
 const builderProductImages = computed(() => [...new Set(builderOfferProducts.value.flatMap((product) => product.images || []).filter(Boolean))]);
 const heroMediaList = computed(() => parseLines(builder.hero_media_text));
+// The MediaViewer's mode check — a video URL renders <video>, else <img> (mirrors runtime/html.is_video_url).
+function isVideoUrl(url) {
+  return /\.(mp4|webm|mov|m4v|ogv)(\?|#|$)/i.test(String(url || ""));
+}
 const previewHeroImage = computed(() => heroMediaList.value[0] || offerImage(builderOffer.value) || "");
 const visibleTrustBadges = computed(() => builder.trust_badges.badges.filter((badge) => badge.enabled !== false && badge.label));
 const previewElements = computed(() => builder.elements.map((element) => ({ element, section: elementSection(element) })).filter((entry) => entry.section));
@@ -971,6 +984,7 @@ function defaultBuilderForm() {
     headline: "",
     subheadline: "",
     hero_media_text: "",
+    autoplay: false,
     cta_label: "Buy Now",
     countdown: {
       enabled: false,
@@ -1201,6 +1215,7 @@ function populateBuilderFromPage(page) {
     headline: hero.headline || sectionText(sections, "headline") || page.name || "",
     subheadline: hero.subheadline || sectionText(sections, "subheadline") || "",
     hero_media_text: (heroMedia.images || [page.seo?.image || pageImage(page)].filter(Boolean)).join("\n"),
+    autoplay: Boolean(heroMedia.autoplay),
     cta_label: cta.label || (offerIntentLabel(offer) === "Lead generation" ? "Continue" : "Buy Now"),
     elements: elementsFromPage(sections),
     google_tag_id: page.analytics?.google_tag_id || "",
@@ -1314,7 +1329,7 @@ function builderSections(intent) {
     label: formatHeadline(builderOffer.value?.name || "Junior Bay"),
   });
   // The hero-media carousel — for a listicle it's the product images (auto-filled into the field), driving the price card.
-  sections.push({ id: "hero-media", type: "hero_media", images: heroMediaList.value });
+  sections.push({ id: "hero-media", type: "hero_media", images: heroMediaList.value, autoplay: Boolean(builder.autoplay) });
   sections.push({
     id: "hero",
     type: "hero",

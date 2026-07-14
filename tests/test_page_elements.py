@@ -222,6 +222,30 @@ class ConversionPayloadTests(unittest.TestCase):
         self.assertIn("\\u003c/script>", html)
 
 
+class MediaViewerTests(unittest.TestCase):
+    def test_is_video_url(self):
+        from stripe_link.runtime.html import is_video_url
+        self.assertTrue(is_video_url("https://x/clip.mp4"))
+        self.assertTrue(is_video_url("https://x/clip.webm?token=1"))
+        self.assertFalse(is_video_url("https://x/photo.jpg"))
+        self.assertFalse(is_video_url(""))
+
+    def test_video_url_renders_video_element(self):
+        from stripe_link.runtime.html import render_hero_media
+        # autoplay -> muted+loop+autoplay (browser policy); a mixed image renders as <img>.
+        html = render_hero_media({"id": "hm", "images": ["https://x/a.mp4", "https://x/b.jpg"], "autoplay": True}, {"name": "X"}, {})
+        self.assertIn("<video", html)
+        self.assertIn("autoplay", html)
+        self.assertIn("muted", html)
+        self.assertIn("<img", html)   # the jpg slide
+
+    def test_non_autoplay_video_shows_controls(self):
+        from stripe_link.runtime.html import render_hero_media
+        html = render_hero_media({"id": "hm", "images": ["https://x/a.mp4"], "autoplay": False}, {"name": "X"}, {})
+        self.assertIn("controls", html)
+        self.assertNotIn("autoplay", html)
+
+
 class HeroMediaCarouselTests(unittest.TestCase):
     def test_multiple_images_render_carousel_chrome(self):
         section = {"id": "hm", "type": "hero_media", "images": ["https://i/a.jpg", "https://i/b.jpg", "https://i/c.jpg"]}
