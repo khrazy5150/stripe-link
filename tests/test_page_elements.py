@@ -163,6 +163,27 @@ class ListicleCarouselTests(unittest.TestCase):
         self.assertNotIn("$27.00", html)    # not the upsell
 
 
+class AnalyticsAdapterTests(unittest.TestCase):
+    def test_empty_when_unconfigured(self):
+        from stripe_link.runtime.html import render_analytics_adapters
+        self.assertEqual(render_analytics_adapters({}), "")
+
+    def test_loads_pixels_and_subscribes_to_conversion_events(self):
+        from stripe_link.runtime.html import render_analytics_adapters
+        js = render_analytics_adapters({"google_tag_id": "G-ABC123", "pixel_id": "99887766"})
+        self.assertIn("googletagmanager.com/gtag/js", js)   # GA4 base loaded
+        self.assertIn("connect.facebook.net", js)           # Meta pixel base loaded
+        self.assertIn("conversion:ctaInvoked", js)          # subscribes to the event model
+        self.assertIn("add_to_cart", js)                    # GA4 mapping
+        self.assertIn("AddToCart", js)                      # Meta mapping
+        self.assertIn("window.slConversion", js)            # via the event model, not UI coupling
+
+    def test_ids_are_sanitized(self):
+        from stripe_link.runtime.html import render_analytics_adapters
+        js = render_analytics_adapters({"google_tag_id": "G-A<b>x", "pixel_id": ""})
+        self.assertIn("var GA = 'G-Abx'", js)   # angle brackets stripped — the id can't break out of the script
+
+
 class SectionRegistryTests(unittest.TestCase):
     def test_registry_is_the_dispatch_source_of_truth(self):
         from stripe_link.runtime.html import SECTION_REGISTRY, render_section

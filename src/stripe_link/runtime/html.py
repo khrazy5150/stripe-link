@@ -634,6 +634,7 @@ def render_page(
     has_legal_footer_section = any(section.get("type") == "legal_footer" for section in page.get("sections", []))
     legal_footer = "" if has_legal_footer_section else render_legal_footer(page.get("legal") or {}, api_base_url=api_base_url)
     analytics_tags = render_analytics_tags(page.get("analytics") or {})
+    analytics_adapters = render_analytics_adapters(page.get("analytics") or {})
     # A listicle page gets a persistent mini-cart (client-side this phase; server-side cart is L2).
     minicart = render_minicart() if str(offer.get("offer_type") or "single") == "listicle" else ""
     # Hydration contract: serialize the whole OfferView once so the conversion island updates every
@@ -652,6 +653,7 @@ def render_page(
         *styles,
         "  </style>",
         analytics_tags,
+        analytics_adapters,
         render_page_interactions_script(page),
         "</head>",
         "<body>",
@@ -1795,6 +1797,57 @@ def render_analytics_tags(analytics: dict[str, Any]) -> str:
     if pixel_id:
         tags.append(f"  <meta name=\"sl-meta-pixel-id\" content=\"{escape(str(pixel_id))}\">")
     return "\n".join(tags)
+
+
+def render_analytics_adapters(analytics: dict[str, Any]) -> str:
+    """Load the configured pixels (GA4 / Meta) and subscribe them to the conversion event model — the first
+    consumer of window.slConversion (plans/CONVERSION_CONTEXT.md). Analytics is a subscriber; it never
+    touches a UI component. Maps semantic conversion:* events to standard e-commerce pixel events."""
+    ga = re.sub(r"[^A-Za-z0-9_-]", "", str(analytics.get("google_tag_id") or ""))
+    pixel = re.sub(r"[^A-Za-z0-9_-]", "", str(analytics.get("pixel_id") or ""))
+    if not ga and not pixel:
+        return ""
+    lines = ["  <script>", "    (function () {", f"      var GA = '{ga}', PIXEL = '{pixel}';"]
+    if ga:
+        lines += [
+            "      window.dataLayer = window.dataLayer || [];",
+            "      function gtag(){ window.dataLayer.push(arguments); }",
+            "      var g = document.createElement('script'); g.async = true; g.src = 'https://www.googletagmanager.com/gtag/js?id=' + GA;",
+            "      document.head.appendChild(g);",
+            "      gtag('js', new Date()); gtag('config', GA);",
+        ]
+    if pixel:
+        lines += [
+            "      (function (f, b, e, v, n, t, s) { if (f.fbq) return; n = f.fbq = function () { n.callMethod ? n.callMethod.apply(n, arguments) : n.queue.push(arguments); }; if (!f._fbq) f._fbq = n; n.push = n; n.loaded = true; n.version = '2.0'; n.queue = []; t = b.createElement(e); t.async = true; t.src = v; s = b.getElementsByTagName(e)[0]; s.parentNode.insertBefore(t, s); })(window, document, 'script', 'https://connect.facebook.net/en_US/fbevents.js');",
+            "      window.fbq('init', PIXEL); window.fbq('track', 'PageView');",
+        ]
+    lines += [
+        "      var money = function (t) { return { value: (Number((t && t.amount) || 0) / 100), currency: String((t && t.currency) || 'usd').toUpperCase() }; };",
+        "      document.addEventListener('DOMContentLoaded', function () {",
+        "        var C = window.slConversion; if (!C) return;",
+        "        C.on('conversion:itemChanged', function (e) { var t = e.target || {}, m = money(t);",
+        "          if (GA && window.gtag) gtag('event', 'view_item', { items: [{ item_id: t.product_id, price: m.value }] });",
+        "          if (PIXEL && window.fbq) fbq('track', 'ViewContent', { content_ids: [t.product_id], value: m.value, currency: m.currency });",
+        "        });",
+        "        C.on('conversion:ctaInvoked', function (e) { var t = e.target || {}, m = money(t);",
+        "          if (e.ctaType === 'add_to_cart') {",
+        "            if (GA && window.gtag) gtag('event', 'add_to_cart', { items: [{ item_id: t.product_id, price: m.value }] });",
+        "            if (PIXEL && window.fbq) fbq('track', 'AddToCart', { content_ids: [t.product_id], value: m.value, currency: m.currency });",
+        "          }",
+        "        });",
+        "        C.on('conversion:checkoutStarted', function (e) { var m = money((e.targets || [])[0]);",
+        "          if (GA && window.gtag) gtag('event', 'begin_checkout', { value: m.value, currency: m.currency });",
+        "          if (PIXEL && window.fbq) fbq('track', 'InitiateCheckout', { value: m.value, currency: m.currency });",
+        "        });",
+        "        C.on('conversion:checkoutCompleted', function (e) {",
+        "          if (GA && window.gtag) gtag('event', 'purchase', { transaction_id: e && e.orderId });",
+        "          if (PIXEL && window.fbq) fbq('track', 'Purchase', { value: (e && e.total || 0) / 100 });",
+        "        });",
+        "      });",
+        "    })();",
+        "  </script>",
+    ]
+    return "\n".join(lines)
 
 
 def render_favicon_tags(seo: dict[str, Any]) -> str:
