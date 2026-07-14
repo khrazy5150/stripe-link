@@ -1,10 +1,11 @@
 from html import escape
 from decimal import Decimal
+import json
 import re
 from typing import Any
 from urllib.parse import urlencode, urlparse
 
-from stripe_link.domain.pricing import find_price, resolve_offer, single_unit_price
+from stripe_link.domain.pricing import expand_offer, find_price, resolve_offer, single_unit_price
 from stripe_link.domain.service_pricing import resolve_service_price
 
 
@@ -634,6 +635,9 @@ def render_page(
     analytics_tags = render_analytics_tags(page.get("analytics") or {})
     # A listicle page gets a persistent mini-cart (client-side this phase; server-side cart is L2).
     minicart = render_minicart() if str(offer.get("offer_type") or "single") == "listicle" else ""
+    # Hydration contract: serialize the whole OfferView once so the conversion island updates every
+    # section from this single payload — never scraping the DOM (plans/CONVERSION_CONTEXT.md).
+    conversion_data = render_conversion_data(offer, products_by_id, services_by_id)
     return "\n".join(part for part in [
         "<!doctype html>",
         "<html lang=\"en\">",
@@ -655,9 +659,43 @@ def render_page(
         legal_footer,
         "  </main>",
         minicart,
+        conversion_data,
         "</body>",
         "</html>",
     ] if part != "")
+
+
+def render_conversion_data(
+    offer: dict[str, Any],
+    products_by_id: dict[str, dict[str, Any]],
+    services_by_id: dict[str, dict[str, Any]],
+) -> str:
+    """Serialize the OfferView's targets into one JSON payload the conversion island reads. Every per-target
+    value the page can show (headline/subheadline/image/price/compare/discount) lives here — the island
+    never re-fetches or scrapes the DOM. `<` is escaped so the JSON can't close the script early."""
+    offer_view = expand_offer(offer, products_by_id, services_by_id)
+    targets = []
+    for target in offer_view.get("items", []):
+        product = target.get("product") or {}
+        price = (target.get("pricing") or {}).get("single_unit_price") or {}
+        amount = int(price.get("unit_amount") or 0)
+        compare = int(price.get("compare_at_amount") or 0)
+        discount = round((compare - amount) / compare * 100) if compare > amount > 0 else 0
+        targets.append({
+            "product_id": product.get("product_id", ""),
+            "price_id": price.get("price_id", ""),
+            "headline": product.get("headline", ""),
+            "subheadline": product.get("subheadline", ""),
+            "hero_image": product.get("hero_image", ""),
+            "amount": amount,
+            "compare_at": compare,
+            "discount": discount,
+            "currency": price.get("currency", "usd"),
+        })
+    if not targets:
+        return ""
+    payload = json.dumps(targets, separators=(",", ":")).replace("<", "\\u003c")
+    return f"  <script type=\"application/json\" data-conversion-offer>{payload}</script>"
 
 
 def render_minicart() -> str:
@@ -930,10 +968,11 @@ def render_trust_badges(section: dict[str, Any]) -> str:
 def render_hero(section: dict[str, Any]) -> str:
     headline = render_headline_markup(section.get("headline") or "")
     subheadline = escape(str(section.get("subheadline") or ""))
+    # data-conversion-bind lets the island update these from the current target (multi-target pages).
     return "\n".join([
-        f"    <section class=\"sl-hero\" data-section-id=\"{escape(str(section.get('id', 'hero')))}\" data-section-type=\"hero\">",
-        f"      <h1>{headline}</h1>" if headline else "",
-        f"      <p>{subheadline}</p>" if subheadline else "",
+        f"    <section class=\"sl-hero\" data-section-id=\"{escape(str(section.get('id', 'hero')))}\" data-section-type=\"hero\" data-conversion-section=\"hero\">",
+        f"      <h1 data-conversion-bind=\"headline\">{headline}</h1>" if headline else "",
+        f"      <p data-conversion-bind=\"subheadline\">{subheadline}</p>" if subheadline else "",
         "    </section>",
     ])
 
@@ -1020,43 +1059,25 @@ def render_listicle_carousel(
     checkout_url: str | None,
     api_base_url: str | None = None,
 ) -> str:
-    """Listicle price card. There is NO separate image carousel here — the page's hero_media carousel (auto-
-    filled with the product images) is the single carousel, and this price card SYNCS to its active slide
-    (discount % / price / compare-at / title / desc + Add-to-cart). Per-slide data is embedded on hidden
-    items the JS reads by index. Server-side cart + checkout are the next phase (plans/LISTICLE_AND_CART.md)."""
+    """Listicle price card. No image carousel here — the hero_media carousel is the single carousel and this
+    card SYNCS to its active target via the conversion island (each field carries data-conversion-bind; the
+    per-target data comes from the embedded OfferView payload). Add-to-cart reads the current target too."""
     slides = listicle_slides(offer, products_by_id, services_by_id)
     if not slides:
         return ""
     offer_id = escape(str(offer.get("offer_id") or ""))
-    items = []
-    for index, slide in enumerate(slides):
-        discount_pct = 0
-        if slide["compare_at"] > slide["amount"] > 0:
-            discount_pct = round((slide["compare_at"] - slide["amount"]) / slide["compare_at"] * 100)
-        items.append(
-            f"        <span data-listicle-item data-index=\"{index}\" "
-            f"data-product-id=\"{escape(slide['product_id'])}\" data-service-id=\"{escape(slide['service_id'])}\" "
-            f"data-price-id=\"{escape(slide['price_id'])}\" data-amount=\"{slide['amount']}\" "
-            f"data-compare=\"{slide['compare_at']}\" data-discount=\"{discount_pct}\" "
-            f"data-currency=\"{escape(slide['currency'])}\" data-name=\"{escape(slide['name'])}\" "
-            f"data-desc=\"{escape(slide['description'])}\"></span>"
-        )
-
     first = slides[0]
     first_discount = round((first["compare_at"] - first["amount"]) / first["compare_at"] * 100) if first["compare_at"] > first["amount"] > 0 else 0
     return "\n".join([
-        f"    <section class=\"sl-listicle\" data-section-type=\"offer_price_selector\" data-listicle data-offer-id=\"{offer_id}\">",
-        "      <div class=\"sl-listicle-items\" hidden>",
-        *items,
-        "      </div>",
+        f"    <section class=\"sl-listicle\" data-section-type=\"offer_price_selector\" data-conversion-section=\"offer_selector\" data-listicle data-offer-id=\"{offer_id}\">",
         "      <div class=\"sl-listicle-card\">",
         "        <div class=\"sl-listicle-pricerow\">",
-        f"          <span class=\"sl-listicle-discount\" data-listicle-discount>{('-' + str(first_discount) + '%') if first_discount else ''}</span>",
-        f"          <span class=\"sl-listicle-price\" data-listicle-price>{escape(format_money(first['amount'], first['currency']))}</span>",
-        f"          <del class=\"sl-listicle-compare\" data-listicle-compare>{escape(format_money(first['compare_at'], first['currency'])) if first['compare_at'] > first['amount'] else ''}</del>",
+        f"          <span class=\"sl-listicle-discount\" data-conversion-bind=\"discount\">{('-' + str(first_discount) + '%') if first_discount else ''}</span>",
+        f"          <span class=\"sl-listicle-price\" data-conversion-bind=\"price\">{escape(format_money(first['amount'], first['currency']))}</span>",
+        f"          <del class=\"sl-listicle-compare\" data-conversion-bind=\"compare_at\">{escape(format_money(first['compare_at'], first['currency'])) if first['compare_at'] > first['amount'] else ''}</del>",
         "        </div>",
-        f"        <p class=\"sl-listicle-title\" data-listicle-title>{render_headline_markup(first['name'])}</p>",
-        f"        <p class=\"sl-listicle-desc\" data-listicle-desc>{escape(first['description'])}</p>",
+        f"        <p class=\"sl-listicle-title\" data-conversion-bind=\"headline\">{render_headline_markup(first['name'])}</p>",
+        f"        <p class=\"sl-listicle-desc\" data-conversion-bind=\"subheadline\">{escape(first['description'])}</p>",
         "        <button class=\"sl-cta sl-listicle-add\" type=\"button\" data-listicle-add>Add to cart</button>",
         "      </div>",
         "    </section>",
@@ -1890,66 +1911,76 @@ def render_page_interactions_script(page: dict[str, Any]) -> str:
         "          panel.innerHTML = '<div class=\"sl-booking-banner\">Your booking is confirmed — check your email for details.</div>';",
         "        }",
         "      }",
-        # Listicle: sync the price card to the HERO carousel's active slide + a client-side cart/mini-cart.
-        "      const listicle = document.querySelector('[data-listicle]');",
-        "      if (listicle) {",
-        "        const items = Array.from(listicle.querySelectorAll('[data-listicle-item]'));",
-        "        const cardEls = {",
-        "          discount: listicle.querySelector('[data-listicle-discount]'),",
-        "          price: listicle.querySelector('[data-listicle-price]'),",
-        "          compare: listicle.querySelector('[data-listicle-compare]'),",
-        "          title: listicle.querySelector('[data-listicle-title]'),",
-        "          desc: listicle.querySelector('[data-listicle-desc]'),",
-        "        };",
-        "        const addBtn = listicle.querySelector('[data-listicle-add]');",
-        "        const cartKey = 'sl_cart_' + (listicle.dataset.offerId || 'offer');",
+        # Conversion island (plans/CONVERSION_CONTEXT.md): one shared currentTargetIndex. Reads the single
+        # embedded OfferView payload; on target change writes every [data-conversion-bind] from it and emits
+        # semantic conversion:* events. Analytics/pixels subscribe via window.slConversion.on — no UI coupling.
+        "      const convEl = document.querySelector('[data-conversion-offer]');",
+        "      let convTargets = [];",
+        "      try { convTargets = JSON.parse((convEl && convEl.textContent) || '[]'); } catch (e) { convTargets = []; }",
+        "      if (convTargets.length) {",
+        "        const subs = {};",
+        "        const emit = (name, payload) => { (subs[name] || []).forEach((fn) => { try { fn(payload); } catch (e) {} }); };",
+        "        const on = (name, fn) => { (subs[name] = subs[name] || []).push(fn); return () => { subs[name] = (subs[name] || []).filter((f) => f !== fn); }; };",
+        "        let currentIndex = 0;",
         "        const fmt = (cents, currency) => { const c = String(currency||'usd').toUpperCase(); const v = (Number(cents||0)/100).toFixed(2); return c === 'USD' ? ('$'+v) : (c+' '+v); };",
-        "        const readCart = () => { try { return JSON.parse(localStorage.getItem(cartKey) || '[]'); } catch (e) { return []; } };",
-        "        const writeCart = (cart) => { try { localStorage.setItem(cartKey, JSON.stringify(cart)); } catch (e) {} };",
-        "        const minicart = document.querySelector('[data-minicart]');",
-        "        const minicartSummary = minicart && minicart.querySelector('[data-minicart-summary]');",
-        "        const renderMinicart = () => {",
-        "          if (!minicart) return;",
-        "          const cart = readCart();",
-        "          const count = cart.reduce((n, i) => n + (i.qty||1), 0);",
-        "          const total = cart.reduce((s, i) => s + (i.amount||0) * (i.qty||1), 0);",
-        "          const currency = (cart[0] && cart[0].currency) || 'usd';",
-        "          if (count > 0) { minicart.classList.add('is-visible'); if (minicartSummary) minicartSummary.textContent = 'Cart (' + count + ') · ' + fmt(total, currency); }",
-        "          else minicart.classList.remove('is-visible');",
+        "        const binders = {",
+        "          headline: (el, t) => { el.textContent = t.headline || ''; },",
+        "          subheadline: (el, t) => { el.textContent = t.subheadline || ''; },",
+        "          price: (el, t) => { el.textContent = fmt(t.amount, t.currency); },",
+        "          compare_at: (el, t) => { el.textContent = (Number(t.compare_at) > Number(t.amount)) ? fmt(t.compare_at, t.currency) : ''; },",
+        "          discount: (el, t) => { el.textContent = (Number(t.discount) > 0) ? ('-' + t.discount + '%') : ''; },",
+        "          hero_image: (el, t) => { if (t.hero_image) el.setAttribute('src', t.hero_image); },",
         "        };",
-        "        let activeIndex = 0;",
-        "        const setActive = (index) => {",
-        "          if (index < 0 || index >= items.length) return;",
-        "          activeIndex = index;",
-        "          const d = items[index].dataset;",
-        "          if (cardEls.discount) cardEls.discount.textContent = Number(d.discount) > 0 ? ('-' + d.discount + '%') : '';",
-        "          if (cardEls.price) cardEls.price.textContent = fmt(d.amount, d.currency);",
-        "          if (cardEls.compare) cardEls.compare.textContent = Number(d.compare) > Number(d.amount) ? fmt(d.compare, d.currency) : '';",
-        "          if (cardEls.title) cardEls.title.textContent = d.name || '';",
-        "          if (cardEls.desc) cardEls.desc.textContent = d.desc || '';",
+        "        const applyTarget = (index) => {",
+        "          if (index < 0 || index >= convTargets.length) return;",
+        "          currentIndex = index;",
+        "          const t = convTargets[index];",
+        "          document.querySelectorAll('[data-conversion-bind]').forEach((el) => { const b = binders[el.dataset.conversionBind]; if (b) b(el, t); });",
         "        };",
-        # The hero_media carousel (product images) is the single carousel; the price card follows its scroll.
-        "        const heroTrackEl = document.querySelector('[data-hero-track]');",
-        "        if (heroTrackEl) {",
-        "          let listicleTimer = null;",
-        "          heroTrackEl.addEventListener('scroll', () => {",
-        "            window.clearTimeout(listicleTimer);",
-        "            listicleTimer = window.setTimeout(() => {",
-        "              const index = Math.round(heroTrackEl.scrollLeft / heroTrackEl.clientWidth);",
-        "              if (index !== activeIndex) setActive(index);",
+        "        window.slConversion = { on: on, emit: emit, targets: convTargets, get index() { return currentIndex; }, get target() { return convTargets[currentIndex]; } };",
+        # The hero_media carousel is the single carousel; it drives the current target.
+        "        const convTrack = document.querySelector('[data-hero-track]');",
+        "        if (convTrack) {",
+        "          let convTimer = null;",
+        "          convTrack.addEventListener('scroll', () => {",
+        "            window.clearTimeout(convTimer);",
+        "            convTimer = window.setTimeout(() => {",
+        "              const index = Math.round(convTrack.scrollLeft / convTrack.clientWidth);",
+        "              if (index !== currentIndex) { applyTarget(index); emit('conversion:itemChanged', { index: index, target: convTargets[index] }); }",
         "            }, 60);",
         "          });",
         "        }",
-        "        if (addBtn) addBtn.addEventListener('click', () => {",
-        "          const d = items[activeIndex].dataset;",
-        "          const cart = readCart();",
-        "          const existing = cart.find((i) => i.price_id === d.priceId);",
-        "          if (existing) existing.qty = (existing.qty||1) + 1;",
-        "          else cart.push({ product_id: d.productId, service_id: d.serviceId, price_id: d.priceId, name: d.name, amount: Number(d.amount||0), currency: d.currency, qty: 1 });",
-        "          writeCart(cart); renderMinicart();",
-        "          addBtn.textContent = 'Added ✓'; window.setTimeout(() => { addBtn.textContent = 'Add to cart'; }, 1200);",
-        "        });",
-        "        renderMinicart();",
+        # Listicle client-side cart adds the CURRENT target (server-side cart + checkout are the next phase).
+        "        const listicle = document.querySelector('[data-listicle]');",
+        "        if (listicle) {",
+        "          const cartKey = 'sl_cart_' + (listicle.dataset.offerId || 'offer');",
+        "          const readCart = () => { try { return JSON.parse(localStorage.getItem(cartKey) || '[]'); } catch (e) { return []; } };",
+        "          const writeCart = (cart) => { try { localStorage.setItem(cartKey, JSON.stringify(cart)); } catch (e) {} };",
+        "          const minicart = document.querySelector('[data-minicart]');",
+        "          const minicartSummary = minicart && minicart.querySelector('[data-minicart-summary]');",
+        "          const renderMinicart = () => {",
+        "            if (!minicart) return;",
+        "            const cart = readCart();",
+        "            const count = cart.reduce((n, i) => n + (i.qty||1), 0);",
+        "            const total = cart.reduce((s, i) => s + (i.amount||0) * (i.qty||1), 0);",
+        "            const currency = (cart[0] && cart[0].currency) || 'usd';",
+        "            if (count > 0) { minicart.classList.add('is-visible'); if (minicartSummary) minicartSummary.textContent = 'Cart (' + count + ') · ' + fmt(total, currency); }",
+        "            else minicart.classList.remove('is-visible');",
+        "          };",
+        "          const addBtn = listicle.querySelector('[data-listicle-add]');",
+        "          if (addBtn) addBtn.addEventListener('click', () => {",
+        "            const t = convTargets[currentIndex];",
+        "            const cart = readCart();",
+        "            const existing = cart.find((i) => i.price_id === t.price_id);",
+        "            if (existing) existing.qty = (existing.qty||1) + 1;",
+        "            else cart.push({ product_id: t.product_id, price_id: t.price_id, name: t.headline, amount: Number(t.amount||0), currency: t.currency, qty: 1 });",
+        "            writeCart(cart); renderMinicart();",
+        "            emit('conversion:ctaInvoked', { ctaType: 'add_to_cart', target: t });",
+        "            addBtn.textContent = 'Added \\u2713'; window.setTimeout(() => { addBtn.textContent = 'Add to cart'; }, 1200);",
+        "          });",
+        "          renderMinicart();",
+        "        }",
+        "        applyTarget(0);",
         "      }",
         # Hero media carousel: prev/next arrows, tappable dots, a counter, all synced to scroll position.
         "      const heroCarousel = document.querySelector('[data-hero-carousel]');",

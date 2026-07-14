@@ -25,7 +25,7 @@ class PageRenderTests(unittest.TestCase):
     def test_render_page_outputs_semantic_sections_and_price_options(self):
         html = render_page(self.page, self.offer, self.products_by_id)
 
-        self.assertIn("<h1>Creatine Gummies</h1>", html)
+        self.assertIn(">Creatine Gummies</h1>", html)
         self.assertIn("--sl-theme-accent:#16a34a", html)
         self.assertIn("<link rel=\"icon\" href=\"https://images.juniorbay.com/icon/favicon.png\">", html)
         self.assertIn("<link rel=\"shortcut icon\" href=\"https://images.juniorbay.com/icon/favicon.png\">", html)
@@ -99,7 +99,7 @@ class PageRenderTests(unittest.TestCase):
         self.assertIn(".sl-price-option strong{font-family:var(--sl-font-heading);font-size:1.6rem", html)
         self.assertIn(".sl-price-description{color:var(--sl-price-description);font-size:1.3rem", html)
         self.assertIn("data-section-type=\"brand_label\"", html)
-        self.assertIn("<h1>Creatine Gummies</h1>", html)
+        self.assertIn(">Creatine Gummies</h1>", html)
         self.assertIn("data-section-type=\"hero_media\"", html)
         self.assertIn("data-media-count=\"1\"", html)
         self.assertIn("images/universal-bundle/creatine_gummies_1.webp", html)

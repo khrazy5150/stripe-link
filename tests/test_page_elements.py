@@ -132,20 +132,20 @@ class ListicleCarouselTests(unittest.TestCase):
                    "default_price_id": "pr2", "prices": [{"price_id": "pr2", "currency": "usd", "unit_amount": 5317, "context": "standard"}]},
         }
 
-    def test_renders_price_card_with_per_item_data(self):
-        # No image carousel here — the hero_media carousel drives this price card. It embeds one hidden
-        # data item per offer item (read by index) + shows the first item's single-unit price.
+    def test_renders_price_card_bound_to_conversion_context(self):
+        # No image carousel and no hidden per-item data — the conversion island updates this card from the
+        # single embedded OfferView payload, so the card's fields carry data-conversion-bind.
         html = render_listicle_carousel(
             self._listicle(), self._products(), {}, {"tenant_id": "t1", "page_id": "pg"},
             "https://checkout.example.com/pay", "https://api.example.com/dev",
         )
         self.assertIn("data-listicle", html)
-        self.assertEqual(html.count("data-listicle-item"), 2)   # one hidden data item per offer item
-        self.assertIn('data-product-id="p1"', html)             # cart attrs present for the add-to-cart JS
-        self.assertIn('data-price-id="pr2"', html)
+        self.assertIn('data-conversion-section="offer_selector"', html)
+        self.assertIn('data-conversion-bind="price"', html)     # bound to the current target
+        self.assertIn('data-conversion-bind="discount"', html)
         self.assertIn("data-listicle-add", html)                # the Add-to-cart button
-        self.assertIn("data-listicle-price", html)              # the syncing price card
-        self.assertIn("$52.01", html)                           # first item's single-unit price in the card
+        self.assertIn("$52.01", html)                           # first target's single-unit price (initial)
+        self.assertNotIn("data-listicle-item", html)            # no ad-hoc hidden per-item payload
         self.assertNotIn("sl-listicle-carousel", html)          # no separate image carousel
 
     def test_listicle_ignores_bundle_and_funnel_prices(self):
@@ -161,6 +161,32 @@ class ListicleCarouselTests(unittest.TestCase):
         self.assertIn("$39.00", html)       # the single-unit standard price
         self.assertNotIn("$67.00", html)    # not the 2-pack bundle
         self.assertNotIn("$27.00", html)    # not the upsell
+
+
+class ConversionPayloadTests(unittest.TestCase):
+    def test_serializes_offerview_targets_as_json(self):
+        from stripe_link.runtime.html import render_conversion_data
+        offer = {"offer_id": "o", "tenant_id": "t1", "offer_type": "listicle",
+                 "items": [{"product_id": "p1", "price_id": "pr1", "quantity": 1}]}
+        products = {"p1": {"product_id": "p1", "name": "Briefs", "description": "12 pack", "images": ["https://i/1.jpg"],
+                          "default_price_id": "pr1", "prices": [{"price_id": "pr1", "currency": "usd", "unit_amount": 3709, "compare_at_amount": 4900, "quantity": 1, "context": "standard"}]}}
+        html = render_conversion_data(offer, products, {})
+        self.assertIn('type="application/json"', html)
+        self.assertIn("data-conversion-offer", html)
+        import json, re
+        payload = json.loads(re.search(r"data-conversion-offer>(.*)</script>", html).group(1))
+        self.assertEqual(payload[0]["headline"], "Briefs")
+        self.assertEqual(payload[0]["amount"], 3709)
+        self.assertEqual(payload[0]["discount"], 24)   # round((4900-3709)/4900*100)
+
+    def test_escapes_lt_so_json_cannot_close_script(self):
+        from stripe_link.runtime.html import render_conversion_data
+        offer = {"offer_id": "o", "tenant_id": "t1", "items": [{"product_id": "p1", "price_id": "pr1"}]}
+        products = {"p1": {"product_id": "p1", "name": "A </script> x", "images": [], "default_price_id": "pr1",
+                          "prices": [{"price_id": "pr1", "currency": "usd", "unit_amount": 100, "quantity": 1, "context": "standard"}]}}
+        html = render_conversion_data(offer, products, {})
+        self.assertNotIn("</script> x", html)   # the injected close tag is neutralized
+        self.assertIn("\\u003c/script>", html)
 
 
 class HeroMediaCarouselTests(unittest.TestCase):
