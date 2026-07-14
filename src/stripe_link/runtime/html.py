@@ -1,4 +1,5 @@
 from html import escape
+from dataclasses import dataclass
 from decimal import Decimal
 import json
 import re
@@ -709,6 +710,51 @@ def render_minicart() -> str:
     ])
 
 
+@dataclass
+class SectionRenderContext:
+    """Everything a section renderer might need. Passed to each registry entry so renderers read only
+    what they use — the registry is the single dispatch source of truth (plans/CONVERSION_CONTEXT.md)."""
+    section: dict[str, Any]
+    page: dict[str, Any]
+    offer: dict[str, Any]
+    products_by_id: dict[str, dict[str, Any]]
+    resolved_offer: dict[str, Any]
+    checkout_url: str | None
+    api_base_url: str | None
+    services_by_id: dict[str, dict[str, Any]]
+    offers_by_id: dict[str, dict[str, Any]]
+
+
+def _render_offer_selector(c: "SectionRenderContext") -> str:
+    if str(c.offer.get("offer_type") or "single") == "listicle":
+        return render_listicle_carousel(c.offer, c.products_by_id, c.services_by_id, c.page, c.checkout_url, c.api_base_url)
+    return render_offer_price_selector(c.offer, c.products_by_id, c.services_by_id)
+
+
+# type -> registry entry. `render` is the adapter; `version` supports future migrations. The builder-facing
+# metadata (schema/defaults/editor) is the Vue registry's concern (the editor lives client-side).
+SECTION_REGISTRY: dict[str, dict[str, Any]] = {
+    "countdown_timer": {"render": lambda c: render_countdown_timer(c.section, c.page), "version": 1},
+    "seo_title": {"render": lambda c: render_seo_title(c.section, c.page, c.products_by_id), "version": 1},
+    "brand_label": {"render": lambda c: render_brand_label(c.section, c.page), "version": 1},
+    "hero_media": {"render": lambda c: render_hero_media(c.section, c.offer, c.products_by_id, c.services_by_id), "version": 1},
+    "headline": {"render": lambda c: render_headline(c.section), "version": 1},
+    "subheadline": {"render": lambda c: render_subheadline(c.section), "version": 1},
+    "trust_badges": {"render": lambda c: render_trust_badges(c.section), "version": 1},
+    "hero": {"render": lambda c: render_hero(c.section), "version": 1},
+    "offer_price_selector": {"render": _render_offer_selector, "version": 1},
+    "refund_policy": {"render": lambda c: render_refund_policy(c.section, c.offer, c.products_by_id), "version": 1},
+    "faq": {"render": lambda c: render_faq(c.section), "version": 1},
+    "content_block": {"render": lambda c: render_content_blocks(c.section), "version": 1},
+    "testimonials": {"render": lambda c: render_testimonials(c.section), "version": 1},
+    "rating": {"render": lambda c: render_rating(c.section), "version": 1},
+    "client_marquee": {"render": lambda c: render_client_marquee(c.section), "version": 1},
+    "product_carousel": {"render": lambda c: render_product_carousel(c.section, c.page, c.offers_by_id, c.products_by_id, c.services_by_id, c.checkout_url, c.api_base_url), "version": 1},
+    "checkout_cta": {"render": lambda c: render_checkout_cta(c.page, c.section, c.offer, c.resolved_offer, c.checkout_url, c.api_base_url, c.products_by_id), "version": 1},
+    "legal_footer": {"render": lambda c: render_legal_footer(c.page.get("legal") or {}, c.section, c.api_base_url), "version": 1},
+}
+
+
 def render_section(
     section: dict[str, Any],
     page: dict[str, Any],
@@ -720,48 +766,15 @@ def render_section(
     services_by_id: dict[str, dict[str, Any]] | None = None,
     offers_by_id: dict[str, dict[str, Any]] | None = None,
 ) -> str:
-    services_by_id = services_by_id or {}
-    offers_by_id = offers_by_id or {}
-    section_type = section.get("type")
-    if section_type == "countdown_timer":
-        return render_countdown_timer(section, page)
-    if section_type == "seo_title":
-        return render_seo_title(section, page, products_by_id)
-    if section_type == "brand_label":
-        return render_brand_label(section, page)
-    if section_type == "hero_media":
-        return render_hero_media(section, offer, products_by_id, services_by_id)
-    if section_type == "headline":
-        return render_headline(section)
-    if section_type == "subheadline":
-        return render_subheadline(section)
-    if section_type == "trust_badges":
-        return render_trust_badges(section)
-    if section_type == "hero":
-        return render_hero(section)
-    if section_type == "offer_price_selector":
-        if str(offer.get("offer_type") or "single") == "listicle":
-            return render_listicle_carousel(offer, products_by_id, services_by_id, page, checkout_url, api_base_url)
-        return render_offer_price_selector(offer, products_by_id, services_by_id)
-    if section_type == "refund_policy":
-        return render_refund_policy(section, offer, products_by_id)
-    if section_type == "faq":
-        return render_faq(section)
-    if section_type == "content_block":
-        return render_content_blocks(section)
-    if section_type == "testimonials":
-        return render_testimonials(section)
-    if section_type == "rating":
-        return render_rating(section)
-    if section_type == "client_marquee":
-        return render_client_marquee(section)
-    if section_type == "product_carousel":
-        return render_product_carousel(section, page, offers_by_id, products_by_id, services_by_id, checkout_url, api_base_url)
-    if section_type == "checkout_cta":
-        return render_checkout_cta(page, section, offer, resolved_offer, checkout_url, api_base_url, products_by_id)
-    if section_type == "legal_footer":
-        return render_legal_footer(page.get("legal") or {}, section, api_base_url)
-    return f"    <section data-section-id=\"{escape(str(section.get('id', '')))}\"></section>"
+    entry = SECTION_REGISTRY.get(section.get("type"))
+    if entry is None:
+        return f"    <section data-section-id=\"{escape(str(section.get('id', '')))}\"></section>"
+    ctx = SectionRenderContext(
+        section=section, page=page, offer=offer, products_by_id=products_by_id,
+        resolved_offer=resolved_offer, checkout_url=checkout_url, api_base_url=api_base_url,
+        services_by_id=services_by_id or {}, offers_by_id=offers_by_id or {},
+    )
+    return entry["render"](ctx)
 
 
 def first_offer_product(offer: dict[str, Any], products_by_id: dict[str, dict[str, Any]]) -> dict[str, Any]:
@@ -1487,6 +1500,29 @@ def render_product_carousel(
     ] if line)
 
 
+@dataclass
+class CtaRenderContext:
+    cta: dict[str, Any]
+    page: dict[str, Any]
+    section: dict[str, Any]
+    offer: dict[str, Any]
+    resolved_offer: dict[str, Any]
+    checkout_url: str | None
+    api_base_url: str | None
+    products_by_id: dict[str, dict[str, Any]]
+
+
+# cta.type -> registry entry. The server renders here; the plugin's validate/serialize/execute live in the
+# JS island (client), which is where a conversion is actually performed (plans/CONVERSION_CONTEXT.md).
+CTA_REGISTRY: dict[str, dict[str, Any]] = {
+    "buy": {"render": lambda c: render_buy_cta(c.page, c.section, c.offer, c.resolved_offer, c.checkout_url, c.api_base_url), "version": 1},
+    "call": {"render": lambda c: render_call_cta(c.cta), "version": 1},
+    "external": {"render": lambda c: render_external_cta(c.cta), "version": 1},
+    "email": {"render": lambda c: render_email_cta(c.page, c.offer, c.cta, c.products_by_id, c.api_base_url), "version": 1},
+    "booking": {"render": lambda c: render_booking_cta(c.cta, c.api_base_url), "version": 1},
+}
+
+
 def render_checkout_cta(
     page: dict[str, Any],
     section: dict[str, Any],
@@ -1497,16 +1533,12 @@ def render_checkout_cta(
     products_by_id: dict[str, dict[str, Any]] | None = None,
 ) -> str:
     cta = offer_cta(offer)
-    cta_type = cta["type"]
-    if cta_type == "call":
-        return render_call_cta(cta)
-    if cta_type == "external":
-        return render_external_cta(cta)
-    if cta_type == "email":
-        return render_email_cta(page, offer, cta, products_by_id or {}, api_base_url)
-    if cta_type == "booking":
-        return render_booking_cta(cta, api_base_url)
-    return render_buy_cta(page, section, offer, resolved_offer, checkout_url, api_base_url)
+    entry = CTA_REGISTRY.get(cta["type"], CTA_REGISTRY["buy"])
+    ctx = CtaRenderContext(
+        cta=cta, page=page, section=section, offer=offer, resolved_offer=resolved_offer,
+        checkout_url=checkout_url, api_base_url=api_base_url, products_by_id=products_by_id or {},
+    )
+    return entry["render"](ctx)
 
 
 LEAD_FIELD_INPUT_TYPES = {"email": "email", "phone": "tel", "tel": "tel", "number": "number"}

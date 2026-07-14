@@ -73,6 +73,17 @@ class OfferCtaTests(unittest.TestCase):
         self.assertNotIn("$150.00", html)
 
 
+class CtaRegistryTests(unittest.TestCase):
+    def test_registry_covers_every_cta_type_and_defaults_to_buy(self):
+        from stripe_link.runtime.html import CTA_REGISTRY
+        for kind in ("buy", "call", "email", "external", "booking"):
+            self.assertIn(kind, CTA_REGISTRY)
+            self.assertTrue(callable(CTA_REGISTRY[kind]["render"]))
+        # An unknown/absent cta type falls back to the buy renderer (offer_cta already normalizes to buy).
+        html = _render({"type": "buy", "label": "Buy Now"})
+        self.assertIn('data-cta-type="buy"', html)
+
+
 class OfferCtaValidationTests(unittest.TestCase):
     def _base(self):
         return {

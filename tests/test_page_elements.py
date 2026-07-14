@@ -163,6 +163,18 @@ class ListicleCarouselTests(unittest.TestCase):
         self.assertNotIn("$27.00", html)    # not the upsell
 
 
+class SectionRegistryTests(unittest.TestCase):
+    def test_registry_is_the_dispatch_source_of_truth(self):
+        from stripe_link.runtime.html import SECTION_REGISTRY, render_section
+        for kind in ("hero", "hero_media", "offer_price_selector", "checkout_cta", "faq", "testimonials",
+                     "rating", "client_marquee", "legal_footer"):
+            self.assertIn(kind, SECTION_REGISTRY)
+            self.assertTrue(callable(SECTION_REGISTRY[kind]["render"]))
+        # An unknown type renders an empty placeholder, not a crash.
+        html = render_section({"type": "does_not_exist", "id": "x"}, {}, {}, {}, {}, None)
+        self.assertIn('data-section-id="x"', html)
+
+
 class ConversionPayloadTests(unittest.TestCase):
     def test_serializes_offerview_targets_as_json(self):
         from stripe_link.runtime.html import render_conversion_data
