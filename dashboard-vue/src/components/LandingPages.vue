@@ -451,6 +451,22 @@
 
           <section class="builder-section">
             <header class="builder-section-title">
+              <h3>Page Sections</h3>
+            </header>
+            <small>Recommended sections for a {{ builderOfferType }} page are on by default. Add or remove optional ones — the preview and the published page stay in sync.</small>
+            <div class="composition-list">
+              <label v-for="key in togglableSections" :key="key" class="composition-row">
+                <input type="checkbox" :checked="isSectionEnabled(key)" @change="toggleSection(key, $event.target.checked)" />
+                <span class="composition-name">{{ sectionKeyLabel(key) }}</span>
+                <span class="composition-tag" :class="defaultVisible(builderOfferType, key) ? 'is-recommended' : 'is-optional'">
+                  {{ defaultVisible(builderOfferType, key) ? "Recommended" : "Optional" }}
+                </span>
+              </label>
+            </div>
+          </section>
+
+          <section class="builder-section">
+            <header class="builder-section-title">
               <h3>Page Elements</h3>
             </header>
             <div class="element-add-row">
@@ -613,7 +629,7 @@
             <span>{{ builder.countdown.start_icon }} {{ builder.countdown.start_text || "Offer expires in" }}</span>
             <strong>{{ Number(builder.countdown.duration_minutes || 15) }}:00</strong>
           </div>
-          <div class="preview-brand">
+          <div v-if="sectionVisible('brand_label')" class="preview-brand">
             <span class="preview-brand-dot" aria-hidden="true"></span>
             <span>{{ builderOffer?.name || builder.name || "Junior Bay" }}</span>
           </div>
@@ -790,6 +806,7 @@
 <script setup>
 import { computed, reactive, ref, watch } from "vue";
 import { useConversionContext, offerViewTargets, offerViewTargetsFromExpanded } from "../composables/useConversionContext";
+import { isSectionVisible, defaultVisible, recommendedSectionKeys, optionalSectionKeys, governedKeys } from "../composables/pageComposer";
 import { apiRequest, getApiBase, getApiEnvironment, getPagesBaseUrl, getPreviewPagesBaseUrl, getTenantId } from "../api/client";
 import { formatMoney } from "../stores/products";
 import { uploadImage } from "../api/uploads";
@@ -879,17 +896,45 @@ const selectedOfferCta = computed(() => selectedOffer.value?.presentation?.cta |
 const ctaShowsPrices = computed(() => ["buy", "booking", "appointment"].includes(builderCta.value.type) && !isListicleOffer.value);
 // A listicle offer renders its items as a carousel (each add-to-cart) instead of the pick-one selector.
 const isListicleOffer = computed(() => (builderOffer.value?.offer_type || "single") === "listicle");
-// --- Page Composer (single source of composition truth; see plans/PAGE_COMPOSER.md) ---
-// Which section types each offer_type hides BY DEFAULT. The builder preview AND the saved/published
-// section list (builderSections) BOTH consult sectionVisible(), so they can never disagree about which
-// sections exist — the renderers only obey, they never decide. Phase 2 lets the tenant opt hidden ones in.
-const OFFER_TYPE_DEFAULT_HIDDEN = {
-  // Listicle = TikTok-Shop focus: hero + price cards + CTA (the add-to-cart lives in the card) only.
-  listicle: ["trust_badges", "checkout_cta", "refund_policy", "content_block", "testimonials", "rating", "client_marquee", "faq", "product_details"],
+// --- Page Composer (see plans/PAGE_COMPOSER.md) ---
+// Visibility comes from the SHARED rules file (imported by pageComposer.js — the exact file Python reads)
+// plus the tenant's overrides. The preview AND the saved section list both call sectionVisible(), and
+// Python's compose_page() applies the same rules, so preview and published can't disagree.
+const SECTION_KEY_LABELS = {
+  brand: "Brand label",
+  hero_media: "Hero media",
+  hero: "Hero headline",
+  trust_badges: "Trust badges",
+  offer_selector: "Price cards",
+  cta: "Call to action",
+  refund_policy: "Refund policy",
+  legal_footer: "Footer",
 };
+const builderOfferType = computed(() => builderOffer.value?.offer_type || "single");
 function sectionVisible(sectionType) {
-  const offerType = builderOffer.value?.offer_type || "single";
-  return !(OFFER_TYPE_DEFAULT_HIDDEN[offerType] || []).includes(sectionType);
+  return isSectionVisible(builderOfferType.value, sectionType, builder.composition.overrides);
+}
+// Governed sections a tenant can toggle for this offer type (Recommended = on by default, Optional = off).
+const recommendedSections = computed(() => recommendedSectionKeys(builderOfferType.value));
+const optionalSections = computed(() => optionalSectionKeys(builderOfferType.value));
+// Structural sections are always present; these are the optional content sections the tenant can add/remove.
+const MANDATORY_SECTION_KEYS = new Set(["hero", "hero_media", "offer_selector", "legal_footer", "cta"]);
+const togglableSections = computed(() => governedKeys().filter((key) => !MANDATORY_SECTION_KEYS.has(key)));
+function sectionKeyLabel(key) {
+  return SECTION_KEY_LABELS[key] || key.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+}
+function isSectionEnabled(key) {
+  const override = builder.composition.overrides[key];
+  if (override && typeof override.enabled === "boolean") return override.enabled;
+  return defaultVisible(builderOfferType.value, key);
+}
+function toggleSection(key, enabled) {
+  // Only persist a deviation from the offer_type default; clearing back to default drops the override.
+  if (enabled === defaultVisible(builderOfferType.value, key)) {
+    delete builder.composition.overrides[key];
+  } else {
+    builder.composition.overrides[key] = { enabled };
+  }
 }
 // Add-to-cart label from the offer's actions[] (add_to_cart), else the default.
 const listicleAddLabel = computed(() => {
@@ -1084,6 +1129,11 @@ function defaultBuilderForm() {
     },
     refund_policy: {
       enabled: true,
+    },
+    // Page Composer overrides: the tenant's deviations from the offer_type section defaults (compact map,
+    // keyed by section key -> { enabled }). Empty = pure offer_type defaults.
+    composition: {
+      overrides: {},
     },
     elements: [],
     google_tag_id: "",
@@ -1297,6 +1347,8 @@ function populateBuilderFromPage(page) {
     created_at: page.created_at || 0,
     revision: page.revision || 1,
   });
+  // Restore the Page Composer overrides so section toggles reflect the tenant's prior choices.
+  builder.composition.overrides = { ...(page.composition?.overrides || {}) };
   Object.assign(builder.countdown, defaultBuilderForm().countdown, {
     enabled: Boolean(countdown.id),
     duration_minutes: countdown.duration_minutes || 15,
@@ -1365,6 +1417,8 @@ function buildBuilderPageDocument() {
       pixel_id: builder.pixel_id,
     },
     legal: legalLinks(),
+    // Page Composer intent: the tenant's section overrides. Python re-applies the same shared rules on top.
+    composition: { overrides: { ...builder.composition.overrides } },
     sections: builderSections(intent),
     revision: builder.revision || 1,
     created_at: createdAt,
@@ -1394,12 +1448,14 @@ function builderSections(intent) {
       marquee: Boolean(builder.countdown.marquee),
     });
   }
-  sections.push({
-    id: "brand",
-    type: "brand_label",
-    enabled: true,
-    label: formatHeadline(builderOffer.value?.name || "Junior Bay"),
-  });
+  if (sectionVisible("brand_label")) {
+    sections.push({
+      id: "brand",
+      type: "brand_label",
+      enabled: true,
+      label: formatHeadline(builderOffer.value?.name || "Junior Bay"),
+    });
+  }
   // The hero-media carousel — for a listicle it's the product images (auto-filled into the field), driving the price card.
   sections.push({ id: "hero-media", type: "hero_media", images: heroMediaList.value, autoplay: Boolean(builder.autoplay) });
   sections.push({
@@ -1435,7 +1491,9 @@ function builderSections(intent) {
       offer_id: builder.offer_id,
     });
   }
-  if (sectionVisible("checkout_cta")) {
+  // A listicle's CTA lives inside the price card (add-to-cart), so it doesn't emit a standalone checkout_cta
+  // candidate — the composer still lists "cta" as allowed for listicle, but there's no separate section.
+  if (!isListicleOffer.value && sectionVisible("checkout_cta")) {
     sections.push({
       id: "checkout-cta",
       type: "checkout_cta",

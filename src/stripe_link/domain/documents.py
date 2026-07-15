@@ -896,6 +896,14 @@ def validate_page_document(document: dict[str, Any]) -> None:
 
     validate_page_post_checkout(document.get("post_checkout"))
 
+    composition = document.get("composition")
+    if composition is not None:
+        if not isinstance(composition, dict):
+            raise DocumentValidationError("Page composition must be an object.")
+        overrides = composition.get("overrides")
+        if overrides is not None and not isinstance(overrides, dict):
+            raise DocumentValidationError("Page composition.overrides must be an object.")
+
     sections = document.get("sections")
     if not isinstance(sections, list) or not sections:
         raise DocumentValidationError("Page sections must be a non-empty array.")

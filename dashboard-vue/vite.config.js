@@ -6,6 +6,8 @@ export default defineConfig({
   server: {
     port: 5173,
     strictPort: false,
+    // Allow importing the shared composition_rules.json from ../src (Page Composer single source of truth).
+    fs: { allow: [".."] },
     proxy: {
       "/api": {
         target: "https://dev.juniorbay.com",

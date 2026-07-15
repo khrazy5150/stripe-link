@@ -1,0 +1,32 @@
+{
+  "_comment": "Single source of truth for Page Composition (plans/PAGE_COMPOSER.md). Read by the Python publisher (domain/composition.py) AND imported by the Vue builder (composables/pageComposer.js). Keep it data-only.",
+  "section_key_by_type": {
+    "brand_label": "brand",
+    "offer_price_selector": "offer_selector",
+    "checkout_cta": "cta"
+  },
+  "governed_sections": [
+    "brand",
+    "hero_media",
+    "hero",
+    "trust_badges",
+    "offer_selector",
+    "cta",
+    "refund_policy",
+    "legal_footer"
+  ],
+  "offer_types": {
+    "single": {
+      "sections": ["brand", "hero_media", "hero", "trust_badges", "offer_selector", "cta", "refund_policy", "legal_footer"],
+      "allowed_ctas": ["buy", "email_capture", "phone_call", "external"]
+    },
+    "bundle": {
+      "sections": ["brand", "hero_media", "hero", "trust_badges", "offer_selector", "cta", "refund_policy", "legal_footer"],
+      "allowed_ctas": ["buy", "email_capture", "phone_call", "external"]
+    },
+    "listicle": {
+      "sections": ["hero_media", "hero", "offer_selector", "cta", "legal_footer"],
+      "allowed_ctas": ["buy", "cart"]
+    }
+  }
+}

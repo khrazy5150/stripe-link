@@ -3681,6 +3681,44 @@ button:disabled {
   margin-bottom: 1rem;
 }
 
+.composition-list {
+  display: grid;
+  gap: 0.4rem;
+  margin-top: 0.8rem;
+}
+
+.composition-row {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  padding: 0.6rem 0.8rem;
+  border: 1px solid var(--border, #e5e7eb);
+  border-radius: 0.8rem;
+  cursor: pointer;
+}
+
+.composition-name {
+  flex: 1;
+  font-size: 1.4rem;
+}
+
+.composition-tag {
+  font-size: 1.1rem;
+  font-weight: 600;
+  padding: 0.2rem 0.7rem;
+  border-radius: 999px;
+}
+
+.composition-tag.is-recommended {
+  color: #166534;
+  background: #dcfce7;
+}
+
+.composition-tag.is-optional {
+  color: #6b7280;
+  background: #f3f4f6;
+}
+
 .element-empty {
   color: var(--text-muted, #6b7280);
   font-size: 1.3rem;

@@ -6,6 +6,7 @@ import re
 from typing import Any
 from urllib.parse import urlencode, urlparse
 
+from stripe_link.domain.composition import compose_page
 from stripe_link.domain.pricing import expand_offer, find_price, resolve_offer, single_unit_price
 from stripe_link.domain.service_pricing import resolve_service_price
 
@@ -635,11 +636,14 @@ def render_page(
     description = escape((page.get("seo") or {}).get("description") or "")
     favicon_tags = render_favicon_tags(page.get("seo") or {})
     styles = render_template_styles(page)
+    # Page Composer decides which sections render (plans/PAGE_COMPOSER.md). The renderer only iterates the
+    # composed list — it never decides visibility itself.
+    composed_sections = compose_page(offer, page)
     body = "\n".join(
         render_section(section, page, offer, products_by_id, resolved_offer, checkout_url, api_base_url, services_by_id, offers_by_id)
-        for section in page.get("sections", [])
+        for section in composed_sections
     )
-    has_legal_footer_section = any(section.get("type") == "legal_footer" for section in page.get("sections", []))
+    has_legal_footer_section = any(section.get("type") == "legal_footer" for section in composed_sections)
     legal_footer = "" if has_legal_footer_section else render_legal_footer(page.get("legal") or {}, api_base_url=api_base_url)
     analytics_tags = render_analytics_tags(page.get("analytics") or {})
     analytics_adapters = render_analytics_adapters(page.get("analytics") or {})
