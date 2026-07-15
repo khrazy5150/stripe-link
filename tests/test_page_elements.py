@@ -142,11 +142,14 @@ class ListicleCarouselTests(unittest.TestCase):
         self.assertIn("data-listicle", html)
         self.assertIn('data-conversion-section="offer_selector"', html)
         self.assertIn('data-conversion-bind="price"', html)     # bound to the current target
-        self.assertIn('data-conversion-bind="discount"', html)
+        self.assertIn('data-conversion-bind="savings"', html)   # "Save X%" like the standard card
+        self.assertIn("sl-price-option", html)                  # reuses the standard price card design
+        self.assertIn("sl-price-copy", html)
         self.assertIn("data-listicle-add", html)                # the Add-to-cart button
         self.assertIn("$52.01", html)                           # first target's single-unit price (initial)
         self.assertNotIn("data-listicle-item", html)            # no ad-hoc hidden per-item payload
         self.assertNotIn("sl-listicle-carousel", html)          # no separate image carousel
+        self.assertNotIn("sl-listicle-card", html)              # bespoke card retired for sl-price-option
 
     def test_listicle_ignores_bundle_and_funnel_prices(self):
         listicle = self._listicle()
@@ -161,6 +164,57 @@ class ListicleCarouselTests(unittest.TestCase):
         self.assertIn("$39.00", html)       # the single-unit standard price
         self.assertNotIn("$67.00", html)    # not the 2-pack bundle
         self.assertNotIn("$27.00", html)    # not the upsell
+
+
+class HeroFixedCopyTests(unittest.TestCase):
+    def test_hero_is_not_conversion_bound(self):
+        # The hero headline/subheadline are fixed page marketing copy — the carousel must NOT overwrite them
+        # with the current product's name/description. Only the price card tracks the target.
+        from stripe_link.runtime.html import render_hero
+        html = render_hero({"id": "hero", "headline": "Feel 10 Years Younger", "subheadline": "A curated set"})
+        self.assertIn("Feel 10 Years Younger", html)
+        self.assertIn("A curated set", html)
+        self.assertNotIn("data-conversion-bind", html)
+
+
+class OfferActionsTests(unittest.TestCase):
+    def _actions(self, offer):
+        from stripe_link.runtime.html import offer_actions
+        return offer_actions(offer)
+
+    def test_reads_actions_array_in_order(self):
+        offer = {"presentation": {"actions": [
+            {"type": "buy_now", "label": "Buy Now"},
+            {"type": "add_to_cart", "label": "Add to Cart"},
+        ]}}
+        actions = self._actions(offer)
+        self.assertEqual([a["type"] for a in actions], ["buy_now", "add_to_cart"])
+        self.assertEqual(actions[0]["label"], "Buy Now")
+
+    def test_falls_back_to_legacy_cta(self):
+        # No actions[] -> derive one action from presentation.cta so existing offers keep working.
+        offer = {"presentation": {"cta": {"type": "call", "label": "Ring us", "target": "+15551234567"}}}
+        actions = self._actions(offer)
+        self.assertEqual(len(actions), 1)
+        self.assertEqual(actions[0]["type"], "call_phone")
+        self.assertEqual(actions[0]["label"], "Ring us")
+        self.assertEqual(actions[0]["target"], "+15551234567")
+
+    def test_defaults_to_buy_now_when_nothing_declared(self):
+        actions = self._actions({"presentation": {}})
+        self.assertEqual(actions[0]["type"], "buy_now")
+
+    def test_labels_default_by_type(self):
+        actions = self._actions({"presentation": {"actions": [{"type": "add_to_cart"}]}})
+        self.assertEqual(actions[0]["label"], "Add to Cart")
+
+    def test_listicle_add_label_uses_action(self):
+        from stripe_link.runtime.html import listicle_add_label
+        offer = {"presentation": {"actions": [
+            {"type": "buy_now"}, {"type": "add_to_cart", "label": "Grab it"},
+        ]}}
+        self.assertEqual(listicle_add_label(offer), "Grab it")
+        self.assertEqual(listicle_add_label({"presentation": {}}), "Add to cart")
 
 
 class AnalyticsAdapterTests(unittest.TestCase):

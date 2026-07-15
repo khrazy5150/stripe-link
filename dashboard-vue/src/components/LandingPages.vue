@@ -631,7 +631,7 @@
           <img v-else-if="previewHeroImage" class="preview-hero-image" :src="previewHeroImage" alt="" />
           <h1 v-html="headlineHtml(builder.headline || builder.name)"></h1>
           <p>{{ builder.subheadline }}</p>
-          <div v-if="visibleTrustBadges.length" class="preview-badges">
+          <div v-if="sectionVisible('trust_badges') && visibleTrustBadges.length" class="preview-badges">
             <span v-for="badge in visibleTrustBadges" :key="badge.label">{{ badge.emoji }} {{ badge.label }}</span>
           </div>
           <!-- Composable elements, in the tenant's order (matches the published page). -->
@@ -678,17 +678,24 @@
             </div>
           </template>
           <!-- Listicle: no separate carousel — the hero carousel (above) drives this syncing price card. -->
-          <div v-if="isListicleOffer && activeTarget" class="preview-listicle">
-            <div class="preview-listicle-card">
-              <div class="preview-listicle-pricerow">
-                <span v-if="activeTarget.discount" class="preview-listicle-discount">-{{ activeTarget.discount }}%</span>
-                <span class="preview-listicle-price">{{ formatMoney(activeTarget.amount, activeTarget.currency) }}</span>
-                <del v-if="activeTarget.compare_at > activeTarget.amount">{{ formatMoney(activeTarget.compare_at, activeTarget.currency) }}</del>
-              </div>
-              <strong>{{ activeTarget.headline }}</strong>
-              <p>{{ activeTarget.subheadline }}</p>
-              <span class="preview-carousel-buy">Add to cart</span>
+          <!-- Listicle reuses the standard price card (preview-price-*) as a single instance that syncs to
+               the current target — same design as the pick-one selector, just reactive + add-to-cart. -->
+          <div v-if="isListicleOffer && activeTarget" class="preview-prices preview-listicle">
+            <div class="preview-price-card" :class="{ 'has-image': activeTarget.hero_image }">
+              <img v-if="activeTarget.hero_image" class="preview-price-image" :src="activeTarget.hero_image" alt="" />
+              <span class="preview-price-copy">
+                <strong class="preview-price-title">{{ activeTarget.headline }}</strong>
+                <span v-if="activeTarget.subheadline" class="preview-price-description">{{ activeTarget.subheadline }}</span>
+                <span class="preview-price-row">
+                  <span class="preview-price-amount">{{ formatMoney(activeTarget.amount, activeTarget.currency) }}</span>
+                  <del v-if="activeTarget.compare_at > activeTarget.amount" class="preview-price-regular">
+                    {{ formatMoney(activeTarget.compare_at, activeTarget.currency) }}
+                  </del>
+                  <span v-if="activeTarget.discount" class="preview-price-savings">Save {{ activeTarget.discount }}%</span>
+                </span>
+              </span>
             </div>
+            <span class="preview-carousel-buy preview-listicle-add">{{ listicleAddLabel }}</span>
           </div>
           <!-- One CTA component, chosen by the offer's cta.type. The page never combines CTAs. -->
           <div v-else-if="ctaShowsPrices" class="preview-prices">
@@ -732,7 +739,7 @@
             <span>{{ builderLeadAction?.description || "Enter your details to continue." }}</span>
             <span class="preview-email-input" aria-hidden="true">you@example.com</span>
           </div>
-          <details v-if="builder.refund_policy.enabled && previewRefundPolicy" class="preview-refund-policy">
+          <details v-if="sectionVisible('refund_policy') && builder.refund_policy.enabled && previewRefundPolicy" class="preview-refund-policy">
             <summary>{{ previewRefundPolicy.short_label || "Refund policy" }}</summary>
             <div>
               <h2>Refund Policy</h2>
@@ -782,7 +789,7 @@
 
 <script setup>
 import { computed, reactive, ref, watch } from "vue";
-import { useConversionContext, offerViewTargets } from "../composables/useConversionContext";
+import { useConversionContext, offerViewTargets, offerViewTargetsFromExpanded } from "../composables/useConversionContext";
 import { apiRequest, getApiBase, getApiEnvironment, getPagesBaseUrl, getPreviewPagesBaseUrl, getTenantId } from "../api/client";
 import { formatMoney } from "../stores/products";
 import { uploadImage } from "../api/uploads";
@@ -872,10 +879,46 @@ const selectedOfferCta = computed(() => selectedOffer.value?.presentation?.cta |
 const ctaShowsPrices = computed(() => ["buy", "booking", "appointment"].includes(builderCta.value.type) && !isListicleOffer.value);
 // A listicle offer renders its items as a carousel (each add-to-cart) instead of the pick-one selector.
 const isListicleOffer = computed(() => (builderOffer.value?.offer_type || "single") === "listicle");
-// One preview slide per offer item, at an approximate single-unit price (the server uses the exact resolver).
-// The Vue-side ConversionContext: OfferView targets + a shared currentTargetIndex + read-only derived
-// values (mirrors the server's expand_offer + conversion island). The preview drives everything off this.
-const conversionTargets = computed(() => offerViewTargets(offerItemModels(builderOffer.value)));
+// --- Page Composer (single source of composition truth; see plans/PAGE_COMPOSER.md) ---
+// Which section types each offer_type hides BY DEFAULT. The builder preview AND the saved/published
+// section list (builderSections) BOTH consult sectionVisible(), so they can never disagree about which
+// sections exist — the renderers only obey, they never decide. Phase 2 lets the tenant opt hidden ones in.
+const OFFER_TYPE_DEFAULT_HIDDEN = {
+  // Listicle = TikTok-Shop focus: hero + price cards + CTA (the add-to-cart lives in the card) only.
+  listicle: ["trust_badges", "checkout_cta", "refund_policy", "content_block", "testimonials", "rating", "client_marquee", "faq", "product_details"],
+};
+function sectionVisible(sectionType) {
+  const offerType = builderOffer.value?.offer_type || "single";
+  return !(OFFER_TYPE_DEFAULT_HIDDEN[offerType] || []).includes(sectionType);
+}
+// Add-to-cart label from the offer's actions[] (add_to_cart), else the default.
+const listicleAddLabel = computed(() => {
+  const actions = builderOffer.value?.presentation?.actions;
+  const addAction = Array.isArray(actions) ? actions.find((a) => a && a.type === "add_to_cart") : null;
+  return (addAction && addAction.label) || "Add to cart";
+});
+// The ConversionContext targets. Source of truth is the SERVER's expand_offer (fetched via ?expand=1 into
+// builderExpandedOffer) so the preview prices items with the exact same implementation as the published
+// page — no drift. Until that fetch resolves (or if it fails) we fall back to the local projection.
+const builderExpandedOffer = ref(null);
+async function loadBuilderExpandedOffer(offerId) {
+  if (!offerId) { builderExpandedOffer.value = null; return; }
+  try {
+    const body = await apiRequest(`/offers/${offerId}?expand=1`);
+    // Guard against a stale response if the user switched offers mid-flight.
+    if (builder.offer_id === offerId) builderExpandedOffer.value = body?.offer || null;
+  } catch (err) {
+    if (builder.offer_id === offerId) builderExpandedOffer.value = null;
+  }
+}
+watch(() => builder.offer_id, (offerId) => { loadBuilderExpandedOffer(offerId); }, { immediate: true });
+const conversionTargets = computed(() => {
+  const expanded = builderExpandedOffer.value;
+  if (expanded && expanded.offer_id === builder.offer_id && Array.isArray(expanded.items)) {
+    return offerViewTargetsFromExpanded(expanded.items);
+  }
+  return offerViewTargets(offerItemModels(builderOffer.value));
+});
 const conversion = useConversionContext(conversionTargets);
 // Top-level aliases so the template auto-unwraps them (nested refs on `conversion` would not).
 const currentTargetIndex = computed({
@@ -905,7 +948,9 @@ function isVideoUrl(url) {
 }
 const previewHeroImage = computed(() => heroMediaList.value[0] || offerImage(builderOffer.value) || "");
 const visibleTrustBadges = computed(() => builder.trust_badges.badges.filter((badge) => badge.enabled !== false && badge.label));
-const previewElements = computed(() => builder.elements.map((element) => ({ element, section: elementSection(element) })).filter((entry) => entry.section));
+const previewElements = computed(() => builder.elements
+  .map((element) => ({ element, section: elementSection(element) }))
+  .filter((entry) => entry.section && sectionVisible(entry.section.type)));
 const previewRefundPolicy = computed(() => builderOffer.value?.refund_policy || builderOfferProducts.value[0]?.refund_policy || null);
 const previewRefundAppliesTo = computed(() => previewPrices.value.map((price) => price.label).filter(Boolean).join(", "));
 const previewRefundReturnNote = computed(() => refundPolicyReturnNote(previewRefundPolicy.value));
@@ -944,7 +989,7 @@ const filteredPages = computed(() => {
     page.page_id,
     page.offer_id,
     page.route?.slug,
-    page.theme?.template,
+    templateLabel(page),
     page.status,
   ].filter(Boolean).join(" ").toLowerCase().includes(term));
 });
@@ -1363,15 +1408,10 @@ function builderSections(intent) {
     headline: formatHeadline(builder.headline || builder.name || "Landing Page"),
     subheadline: builder.subheadline || "Continue when you are ready.",
   });
-  // A listicle page drops the fluff: hero carousel (product images) + the syncing price card + footer.
-  if (isListicleOffer.value) {
-    sections.push(
-      { id: "offer-selector", type: "offer_price_selector", offer_id: builder.offer_id },
-      { id: "legal-footer", type: "legal_footer", copyright: defaultFooterCopyrightTemplate },
-    );
-    return sections;
-  }
-  if (visibleTrustBadges.value.length) {
+  // The Page Composer decides which optional sections exist (sectionVisible). A listicle hides the fluff
+  // (trust badges, elements, refund, sticky CTA — the add-to-cart lives in the price card); other offer
+  // types keep everything. The preview obeys the SAME rule, so the two can never disagree.
+  if (sectionVisible("trust_badges") && visibleTrustBadges.value.length) {
     sections.push({
       id: "trust-badges",
       type: "trust_badges",
@@ -1386,7 +1426,7 @@ function builderSections(intent) {
   // Composable body: the tenant's ordered elements (content, testimonials, rating, logos, FAQ).
   builder.elements.forEach((element) => {
     const section = elementSection(element);
-    if (section) sections.push(section);
+    if (section && sectionVisible(section.type)) sections.push(section);
   });
   if (intent === "transaction") {
     sections.push({
@@ -1395,24 +1435,26 @@ function builderSections(intent) {
       offer_id: builder.offer_id,
     });
   }
-  sections.push(
-    {
+  if (sectionVisible("checkout_cta")) {
+    sections.push({
       id: "checkout-cta",
       type: "checkout_cta",
       label: builder.cta_label || (intent === "transaction" ? "Buy Now" : "Continue"),
-    },
-    {
+    });
+  }
+  if (sectionVisible("refund_policy")) {
+    sections.push({
       id: "refund-policy",
       type: "refund_policy",
       enabled: builder.refund_policy.enabled !== false,
       heading: "Refund Policy",
-    },
-    {
-      id: "legal-footer",
-      type: "legal_footer",
-      copyright: defaultFooterCopyrightTemplate,
-    },
-  );
+    });
+  }
+  sections.push({
+    id: "legal-footer",
+    type: "legal_footer",
+    copyright: defaultFooterCopyrightTemplate,
+  });
   return sections;
 }
 
@@ -2046,8 +2088,12 @@ function itemCount(page) {
   return offerItemCount(offer) || "0";
 }
 
+// Every page uses the one universal_bundle template, so the template name is noise — show the PRESET
+// (the tenant's actual visual choice: Trust Blue, Rose Minimalist, ...) instead.
 function templateLabel(page) {
-  return page.theme?.template || "universal_bundle";
+  const preset = page.theme?.preset || "";
+  return universalBundlePresets.find((option) => option.value === preset)?.label
+    || (preset ? preset : "Clean Slate");
 }
 
 function statusLabel(status) {

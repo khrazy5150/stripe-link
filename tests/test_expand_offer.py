@@ -45,6 +45,35 @@ class ExpandOfferTests(unittest.TestCase):
         self.assertEqual(first["pricing"]["single_unit_price"]["unit_amount"], 5201)
         self.assertEqual(first["pricing"]["single_unit_price"]["compare_at_amount"], 6900)
 
+    def test_single_unit_price_prefers_default_over_sale(self):
+        # Real-world NAD case: standard=default $53.17, sale $37.09, flash $31.35, all quantity 1, all sharing
+        # compare_at_unit_amount $79. The listicle must show the DEFAULT ($53.17) with its discount — not the
+        # cheaper sale/flash the merchant didn't designate (khrazy's NAD bug: published showed $37.09).
+        from stripe_link.domain.pricing import single_unit_price
+        product = {"product_id": "nad", "name": "NAD+", "default_price_id": "std", "prices": [
+            {"price_id": "std", "currency": "usd", "unit_amount": 5317, "compare_at_unit_amount": 7900, "quantity": 1, "context": "standard"},
+            {"price_id": "sale", "currency": "usd", "unit_amount": 3709, "compare_at_unit_amount": 7900, "quantity": 1, "context": "sale"},
+            {"price_id": "flash", "currency": "usd", "unit_amount": 3135, "compare_at_unit_amount": 7900, "quantity": 1, "context": "flash_sale"},
+        ]}
+        selectable = ["std", "sale", "flash"]
+        self.assertEqual(single_unit_price(product, selectable, "std")["unit_amount"], 5317)
+        offer = {"offer_id": "o", "items": [{
+            "product_id": "nad", "default_price_id": "std",
+            "selectable_prices": [{"price_id": "std"}, {"price_id": "sale"}, {"price_id": "flash"}],
+        }]}
+        pricing = expand_offer(offer, {"nad": product}, {})["items"][0]["pricing"]
+        self.assertEqual(pricing["single_unit_price"]["unit_amount"], 5317)
+        # compare comes from compare_at_unit_amount (was silently read from the wrong field -> no discount).
+        self.assertEqual(pricing["single_unit_price"]["compare_at_amount"], 7900)
+
+    def test_single_unit_price_empty_selection_uses_item_price(self):
+        # Whey case: selectable_prices empty, item carries price_id -> that price is used (preview showed $0).
+        product = {"product_id": "whey", "name": "Whey", "default_price_id": "std",
+                   "prices": [{"price_id": "std", "currency": "usd", "unit_amount": 6006, "quantity": 1, "context": "standard"}]}
+        offer = {"offer_id": "o", "items": [{"product_id": "whey", "price_id": "std", "selectable_prices": []}]}
+        pricing = expand_offer(offer, {"whey": product}, {})["items"][0]["pricing"]
+        self.assertEqual(pricing["single_unit_price"]["unit_amount"], 6006)
+
     def test_selectable_prices_carry_labels(self):
         expanded = expand_offer(self._offer(), self._products(), {})
         selectable = expanded["items"][1]["pricing"]["selectable_prices"]

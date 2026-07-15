@@ -1,3 +1,4 @@
+from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any
 
@@ -10,24 +11,46 @@ class PricingError(ValueError):
 
 # Contexts never used for a listicle slide (funnel-only or, for now, flash_sale which needs its toggle).
 _LISTICLE_EXCLUDED_CONTEXTS = {"upsell", "downsell", "order_bump", "flash_sale"}
-# Prefer a discounted single-unit price over the regular one.
-_LISTICLE_CONTEXT_RANK = {"sale": 0, "standard": 1}
+# When no default is designated, prefer the regular (standard) single-unit price over an ad-hoc sale.
+_LISTICLE_CONTEXT_RANK = {"standard": 0, "sale": 1}
 
 
-def single_unit_price(product: dict[str, Any]) -> dict[str, Any]:
+def single_unit_price(
+    product: dict[str, Any],
+    allowed_price_ids: Iterable[str] | None = None,
+    default_price_id: str | None = None,
+) -> dict[str, Any]:
     """The price for ONE unit of a product, for listicle slides (plans/LISTICLE_AND_CART.md).
 
-    Ignores bundle/quantity tiers (quantity > 1) and funnel contexts (upsell/downsell/order_bump), and —
-    until the flash-sale toggle exists — flash_sale too. Prefers a discounted (sale) single-unit price,
-    then the lowest unit_amount. Returns {} when the product has no eligible single-unit price.
+    The offer is the contract, so resolution follows what the merchant designated:
+
+    1. The item's **default price** (``default_price_id``) when it is a single unit — this is the headline
+       price shown in the catalog, and what the builder preview shows. It wins even over a cheaper sale.
+    2. Otherwise the cheapest eligible single-unit price among ``allowed_price_ids`` (the item's selectable
+       prices) — or the whole catalog when no selection is given — excluding quantity tiers (> 1) and funnel
+       contexts (upsell/downsell/order_bump/flash_sale), preferring standard over sale.
+    3. Otherwise the first selected price (mirrors the preview's ``cards[0]`` fallback).
+
+    Passing only the product (no selection) scans the whole catalog and can pick a price the offer never
+    exposed, so callers on the listicle path must pass the item's selection + default.
     """
+    pool = product.get("prices") or []
+    by_id = {str(price.get("price_id") or ""): price for price in pool}
+    # 1. The merchant's designated default price, when it is a single unit.
+    default_id = str(default_price_id or "")
+    if default_id and default_id in by_id and int(by_id[default_id].get("quantity") or 1) <= 1:
+        return by_id[default_id]
+    restricted = allowed_price_ids is not None
+    if restricted:
+        allowed = [str(pid) for pid in allowed_price_ids if pid]
+        pool = [by_id[pid] for pid in allowed if pid in by_id]
     candidates = [
-        price for price in (product.get("prices") or [])
+        price for price in pool
         if int(price.get("quantity") or 1) <= 1
         and str(price.get("context") or "standard") not in _LISTICLE_EXCLUDED_CONTEXTS
     ]
     if not candidates:
-        return {}
+        return pool[0] if (restricted and pool) else {}
     candidates.sort(key=lambda price: (
         _LISTICLE_CONTEXT_RANK.get(str(price.get("context") or "standard"), 2),
         int(price.get("unit_amount") or 0),
@@ -42,7 +65,9 @@ def _price_summary(price: dict[str, Any]) -> dict[str, Any] | None:
     return {
         "price_id": str(price.get("price_id") or ""),
         "unit_amount": int(price.get("unit_amount") or 0),
-        "compare_at_amount": int(price.get("compare_at_amount") or 0),
+        # Product prices store the regular price as compare_at_unit_amount (the price selector reads that);
+        # fall back to compare_at_amount for any legacy/synthetic records.
+        "compare_at_amount": int(price.get("compare_at_unit_amount") or price.get("compare_at_amount") or 0),
         "currency": str(price.get("currency") or "usd"),
         "label": str(price.get("label") or ""),
         "badge": str(price.get("badge") or ""),
@@ -67,6 +92,10 @@ def expand_offer(
         if product_id and product_id in products_by_id:
             product = products_by_id[product_id]
             images = [image for image in (product.get("images") or []) if image]
+            # The item's designated single price + the prices it exposes (the offer is the contract).
+            item_default_price_id = str(item.get("default_price_id") or item.get("price_id") or product.get("default_price_id") or "")
+            selectable_ids = [o.get("price_id") for o in item.get("selectable_prices") or []]
+            single = single_unit_price(product, selectable_ids or ([item_default_price_id] if item_default_price_id else None), item_default_price_id)
             selectable = []
             for option in item.get("selectable_prices") or []:
                 price = next((p for p in (product.get("prices") or []) if p.get("price_id") == option.get("price_id")), None)
@@ -87,7 +116,7 @@ def expand_offer(
                 },
                 "pricing": {
                     "default_price_id": str(item.get("default_price_id") or item.get("price_id") or product.get("default_price_id") or ""),
-                    "single_unit_price": _price_summary(single_unit_price(product)),
+                    "single_unit_price": _price_summary(single),
                     "selectable_prices": selectable,
                 },
             })

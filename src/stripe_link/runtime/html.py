@@ -295,6 +295,10 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     "    .sl-headline h2{font-family:var(--sl-font-heading);font-size:clamp(2.4rem,5vw,3.2rem);line-height:1.2;font-weight:800;color:var(--sl-headline);letter-spacing:0}",
     "    .sl-subheadline{text-align:center}",
     "    .sl-subheadline p{font-size:1.5rem;line-height:1.55;color:var(--sl-subheadline-text);max-width:46rem;margin:0 auto}",
+    # Hero headline + subheadline centered, matching the builder preview (which centers them for every template).
+    "    .sl-hero{text-align:center}",
+    "    .sl-hero h1{font-family:var(--sl-font-heading);font-size:clamp(2.4rem,5vw,3.2rem);line-height:1.2;font-weight:800;color:var(--sl-headline);letter-spacing:0;max-width:52rem;margin:0 auto}",
+    "    .sl-hero p{font-size:1.5rem;line-height:1.55;color:var(--sl-subheadline-text);max-width:46rem;margin:0 auto}",
     "    .sl-hero-media{position:relative;padding-top:0.8rem}",
     "    .sl-hero-track{display:flex;overflow-x:auto;scroll-snap-type:x mandatory;scrollbar-width:none;border-radius:var(--sl-radius)}",
     "    .sl-hero-track::-webkit-scrollbar{display:none}",
@@ -399,13 +403,10 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     "    .sl-listicle-dots{display:flex;gap:0.6rem;justify-content:center}",
     "    .sl-listicle-dot{width:0.7rem;height:0.7rem;border-radius:50%;background:var(--sl-border);transition:background .2s}",
     "    .sl-listicle-dot.is-active{background:var(--sl-brand)}",
-    "    .sl-listicle-card{background:var(--sl-price-card-bg);border:1px solid var(--sl-price-card-border);border-radius:1.4rem;padding:1.6rem;display:flex;flex-direction:column;gap:0.8rem}",
-    "    .sl-listicle-pricerow{display:flex;align-items:baseline;gap:0.8rem;flex-wrap:wrap}",
-    "    .sl-listicle-discount{color:#e11d48;font-family:var(--sl-font-accent);font-weight:900;font-size:2rem}",
-    "    .sl-listicle-price{font-family:var(--sl-font-accent);font-weight:900;font-size:2.4rem;color:var(--sl-price-amount)}",
-    "    .sl-listicle-compare{color:var(--sl-price-regular);font-size:1.6rem}",
-    "    .sl-listicle-title{font-family:var(--sl-font-heading);font-weight:700;font-size:1.7rem;color:var(--sl-price-title)}",
-    "    .sl-listicle-desc{font-size:1.4rem;color:var(--sl-price-description)}",
+    # Listicle reuses the standard price card (.sl-price-option) as a single, reactive instance — no radio,
+    # so drop the third grid column; the add-to-cart button sits below.
+    "    .sl-listicle-option{grid-template-columns:9rem minmax(0,1fr);cursor:default}",
+    "    .sl-listicle-option.no-img{grid-template-columns:minmax(0,1fr)}",
     "    .sl-listicle-add{width:100%;text-align:center;margin-top:0.4rem}",
     "    .sl-minicart{position:fixed;left:0;right:0;bottom:0;z-index:20;display:none;align-items:center;justify-content:space-between;gap:1rem;padding:1.2rem 1.6rem;background:var(--sl-card);border-top:1px solid var(--sl-border);box-shadow:0 -2px 16px rgba(0,0,0,.12)}",
     "    .sl-minicart.is-visible{display:flex}",
@@ -1044,11 +1045,14 @@ def render_trust_badges(section: dict[str, Any]) -> str:
 def render_hero(section: dict[str, Any]) -> str:
     headline = render_headline_markup(section.get("headline") or "")
     subheadline = escape(str(section.get("subheadline") or ""))
-    # data-conversion-bind lets the island update these from the current target (multi-target pages).
+    # The hero headline/subheadline are FIXED page-level marketing copy — they do NOT change as the carousel
+    # scrolls (TikTok-Shop style). Only the price card + product-details track the current target. So no
+    # data-conversion-bind here: the tenant's copy ("Experience Feeling 10 Years Younger") is never
+    # overwritten by the product name.
     return "\n".join([
-        f"    <section class=\"sl-hero\" data-section-id=\"{escape(str(section.get('id', 'hero')))}\" data-section-type=\"hero\" data-conversion-section=\"hero\">",
-        f"      <h1 data-conversion-bind=\"headline\">{headline}</h1>" if headline else "",
-        f"      <p data-conversion-bind=\"subheadline\">{subheadline}</p>" if subheadline else "",
+        f"    <section class=\"sl-hero\" data-section-id=\"{escape(str(section.get('id', 'hero')))}\" data-section-type=\"hero\">",
+        f"      <h1>{headline}</h1>" if headline else "",
+        f"      <p>{subheadline}</p>" if subheadline else "",
         "    </section>",
     ])
 
@@ -1103,10 +1107,14 @@ def listicle_slides(
         service_id = str(item.get("service_id") or "")
         if product_id and product_id in products_by_id:
             product = products_by_id[product_id]
-            price = single_unit_price(product)
+            # Resolve the item's single price exactly as expand_offer does (default price first, then the
+            # offer's selection) so listicle slides match the builder preview and the conversion payload.
+            item_default_price_id = str(item.get("default_price_id") or item.get("price_id") or product.get("default_price_id") or "")
+            selectable_ids = [o.get("price_id") for o in item.get("selectable_prices") or []]
+            price = single_unit_price(product, selectable_ids or ([item_default_price_id] if item_default_price_id else None), item_default_price_id)
             if not price:
                 continue
-            compare = int(price.get("compare_at_amount") or 0)
+            compare = int(price.get("compare_at_unit_amount") or price.get("compare_at_amount") or 0)
             slides.append({
                 "product_id": product_id, "service_id": "", "price_id": str(price.get("price_id") or ""),
                 "name": str(product.get("name") or ""), "description": str(product.get("description") or ""),
@@ -1144,18 +1152,26 @@ def render_listicle_carousel(
     offer_id = escape(str(offer.get("offer_id") or ""))
     first = slides[0]
     first_discount = round((first["compare_at"] - first["amount"]) / first["compare_at"] * 100) if first["compare_at"] > first["amount"] > 0 else 0
+    image_url = str(first.get("image") or "")
+    # Plain <img> (not srcset) so the hero_image binder can swap src cleanly as the target changes.
+    image_html = f"<img data-conversion-bind=\"hero_image\" src=\"{escape(image_url)}\" alt=\"\" loading=\"lazy\" decoding=\"async\">" if image_url else ""
+    option_class = "sl-price-option sl-listicle-option" + ("" if image_url else " no-img")
+    add_label = escape(str(listicle_add_label(offer)))
     return "\n".join([
         f"    <section class=\"sl-listicle\" data-section-type=\"offer_price_selector\" data-conversion-section=\"offer_selector\" data-listicle data-offer-id=\"{offer_id}\">",
-        "      <div class=\"sl-listicle-card\">",
-        "        <div class=\"sl-listicle-pricerow\">",
-        f"          <span class=\"sl-listicle-discount\" data-conversion-bind=\"discount\">{('-' + str(first_discount) + '%') if first_discount else ''}</span>",
-        f"          <span class=\"sl-listicle-price\" data-conversion-bind=\"price\">{escape(format_money(first['amount'], first['currency']))}</span>",
-        f"          <del class=\"sl-listicle-compare\" data-conversion-bind=\"compare_at\">{escape(format_money(first['compare_at'], first['currency'])) if first['compare_at'] > first['amount'] else ''}</del>",
+        f"      <article class=\"{option_class}\" data-listicle-card>",
+        ("        " + image_html) if image_html else "",
+        "        <div class=\"sl-price-copy\">",
+        f"          <strong data-conversion-bind=\"headline\">{render_headline_markup(first['name'])}</strong>",
+        f"          <p class=\"sl-price-description\" data-conversion-bind=\"subheadline\">{escape(first['description'])}</p>",
+        "          <div class=\"sl-price-row\">",
+        f"            <span class=\"sl-price-amount\" data-conversion-bind=\"price\">{escape(format_money(first['amount'], first['currency']))}</span>",
+        f"            <span class=\"sl-regular-price\" data-conversion-bind=\"compare_at\">{escape(format_money(first['compare_at'], first['currency'])) if first['compare_at'] > first['amount'] else ''}</span>",
+        f"            <span class=\"sl-savings\" data-conversion-bind=\"savings\">{('Save ' + str(first_discount) + '%') if first_discount else ''}</span>",
+        "          </div>",
         "        </div>",
-        f"        <p class=\"sl-listicle-title\" data-conversion-bind=\"headline\">{render_headline_markup(first['name'])}</p>",
-        f"        <p class=\"sl-listicle-desc\" data-conversion-bind=\"subheadline\">{escape(first['description'])}</p>",
-        "        <button class=\"sl-cta sl-listicle-add\" type=\"button\" data-listicle-add>Add to cart</button>",
-        "      </div>",
+        "      </article>",
+        f"      <button class=\"sl-cta sl-listicle-add\" type=\"button\" data-listicle-add>{add_label}</button>",
         "    </section>",
     ])
 
@@ -1429,6 +1445,67 @@ def offer_cta(offer: dict[str, Any]) -> dict[str, str]:
         "label": str(cta.get("label") or presentation.get("cta_label") or ""),
         "target": str(cta.get("target") or ""),
     }
+
+
+# Legacy cta.type -> action.type, so existing offers (presentation.cta) resolve into the actions[] model.
+CTA_TO_ACTION = {
+    "buy": "buy_now",
+    "call": "call_phone",
+    "email": "submit_form",
+    "external": "redirect",
+    "download": "download",
+    "booking": "appointment",
+    "appointment": "appointment",
+}
+
+DEFAULT_ACTION_LABELS = {
+    "buy_now": "Buy Now",
+    "add_to_cart": "Add to Cart",
+    "submit_form": "Submit",
+    "call_phone": "Call Now",
+    "sms": "Text Us",
+    "download": "Download",
+    "appointment": "Book Now",
+    "redirect": "Visit Website",
+    "external_checkout": "Checkout",
+}
+
+
+def offer_actions(offer: dict[str, Any]) -> list[dict[str, str]]:
+    """The offer's action list (presentation.actions[]), rendered in order by the ActionBar. Falls back to
+    deriving a single action from the legacy presentation.cta so pre-actions[] offers keep working."""
+    presentation = offer.get("presentation") or {}
+    raw = presentation.get("actions")
+    actions: list[dict[str, str]] = []
+    if isinstance(raw, list):
+        for entry in raw:
+            if not isinstance(entry, dict):
+                continue
+            atype = str(entry.get("type") or "").strip().lower()
+            if not atype:
+                continue
+            actions.append({
+                "type": atype,
+                "label": str(entry.get("label") or DEFAULT_ACTION_LABELS.get(atype, "")),
+                "target": str(entry.get("target") or ""),
+            })
+    if not actions:
+        cta = offer_cta(offer)
+        atype = CTA_TO_ACTION.get(cta["type"], "buy_now")
+        actions.append({
+            "type": atype,
+            "label": cta["label"] or DEFAULT_ACTION_LABELS.get(atype, ""),
+            "target": cta["target"],
+        })
+    return actions
+
+
+def listicle_add_label(offer: dict[str, Any]) -> str:
+    """Label for the listicle add-to-cart button — from the add_to_cart action if the offer declares one."""
+    for action in offer_actions(offer):
+        if action["type"] == "add_to_cart":
+            return action["label"] or "Add to cart"
+    return "Add to cart"
 
 
 def render_testimonials(section: dict[str, Any]) -> str:
@@ -2091,6 +2168,7 @@ def render_page_interactions_script(page: dict[str, Any]) -> str:
         "          price: (el, t) => { el.textContent = fmt(t.amount, t.currency); },",
         "          compare_at: (el, t) => { el.textContent = (Number(t.compare_at) > Number(t.amount)) ? fmt(t.compare_at, t.currency) : ''; },",
         "          discount: (el, t) => { el.textContent = (Number(t.discount) > 0) ? ('-' + t.discount + '%') : ''; },",
+        "          savings: (el, t) => { el.textContent = (Number(t.discount) > 0) ? ('Save ' + t.discount + '%') : ''; },",
         "          hero_image: (el, t) => { if (t.hero_image) el.setAttribute('src', t.hero_image); },",
         "        };",
         "        const applyTarget = (index) => {",
@@ -2172,7 +2250,9 @@ def render_page_interactions_script(page: dict[str, Any]) -> str:
         "        };",
         # heroGo scrolls AND syncs the dots/counter immediately — don't rely on the scroll listener, whose
         # own guard would skip the update once heroIndex is set.
-        "        const heroGo = (index) => { const i = Math.max(0, Math.min(heroCount - 1, index)); if (heroTrack) heroTrack.scrollTo({ left: i * heroTrack.clientWidth, behavior: 'smooth' }); heroSync(i); };",
+        # Wrap around (loop) so next past the last item returns to the first and prev past the first goes to
+        # the last — matches the builder preview's modulo navigation.
+        "        const heroGo = (index) => { const i = ((index % heroCount) + heroCount) % heroCount; if (heroTrack) heroTrack.scrollTo({ left: i * heroTrack.clientWidth, behavior: 'smooth' }); heroSync(i); };",
         "        const heroPrev = heroCarousel.querySelector('[data-hero-prev]');",
         "        const heroNext = heroCarousel.querySelector('[data-hero-next]');",
         "        if (heroPrev) heroPrev.addEventListener('click', () => heroGo(heroIndex - 1));",

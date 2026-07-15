@@ -136,6 +136,54 @@ Immutable projection, mutable interaction state, read-only derived values — cl
 - **CTA** — reads `offer.presentation.cta.type`, renders the plugin from the **CTA registry**; the plugin
   reads `derived` (e.g. BuyCTA → `derived.selectedPrice`, label `derived.ctaLabel`).
 
+## Actions — `presentation.actions[]` + ActionBar (review 2026-07-14)
+
+The CTA is not one button — it's an **ordered list of actions** rendered by a generic **ActionBar**. "CTA
+Registry" is renamed **Action Registry** ("action" is broader than "button": submit a form, launch
+checkout, add to cart, start a call, copy a coupon, download, open WhatsApp — the button is just one
+presentation of it).
+
+```jsonc
+"presentation": {
+  "layout": "single | split | stack | floating",   // how the ActionBar arranges its buttons
+  "actions": [
+    { "type": "buy_now", "label": "Buy Now" },
+    { "type": "add_to_cart", "label": "Add to Cart" }   // a listicle simply has two
+  ]
+}
+```
+
+- **No special code per page type.** Normal → `[buy_now]`; listicle → `[buy_now, add_to_cart]`; lead →
+  `[submit_form]`; phone → `[call_phone]`; redirect → `[redirect]`.
+- **ActionBar** only *arranges* actions (`v-for` / a loop) by `layout`. It knows nothing about them.
+- **Each action is a plugin** in the Action Registry: `render / execute / validate` + `icon / label /
+  enabled`. `buy_now`, `add_to_cart`, `submit_form`, `call_phone`, `sms`, `download`, `appointment`,
+  `redirect`, `external_checkout`, `whatsapp`, … Adding one = one plugin, no ActionBar/schema change.
+- **The sticky footer is an ActionBar too** — one button, a split, or a non-commerce action, all the same.
+- **Back-compat, no breaking migration:** the resolver reads `presentation.actions[]` if present, else
+  derives a one-element list from the legacy `presentation.cta` (buy→buy_now, email→submit_form,
+  call→call_phone, external→redirect, download→download, booking/appointment→appointment). New offers
+  write `actions[]`.
+
+## One display price card, reused (polymorphic — review 2026-07-14)
+
+There is **one** landing-page display price card design (image / name / description / price / compare-at /
+"Save %" / border). The standard selector renders it per price tier (with a radio); the **listicle renders
+the same card as a single instance, reactive to `currentTarget`** (content updates via
+`data-conversion-bind`, the action button comes from the ActionBar). No bespoke listicle card. (`sl-price-
+option` on the server; a shared card component/markup in the preview. Note: `shared/PricingCard.vue` today
+is the price *editor* used in Products/Services — the display card is separate.)
+
+## Hero is fixed marketing copy, not target-bound (review 2026-07-14)
+
+For a listicle (and every page), the **hero headline + subheadline are FIXED page-level copy** — they do
+NOT change as the carousel scrolls. This is the TikTok-Shop pattern: the hero is the tenant's pitch ("this
+curated set solves *your* problem"), and it stays put like the trust badges. **Only the price card and the
+product-details block track `currentTarget`** (product name, description, price, image, gallery, badges).
+Binding the hero to the target was both redundant with the card and a lost marketing slot — so the hero
+carries no `data-conversion-bind`. `currentTarget` is still the shared cursor; the hero simply isn't a
+subscriber to it.
+
 ## Registries (carry metadata — review 7)
 
 Each entry is a **contract**, not just a component, because the registry becomes the source of truth for

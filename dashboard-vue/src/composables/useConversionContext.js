@@ -40,8 +40,37 @@ export function useConversionContext(targetsRef) {
   return { page, targets, derived, setTarget };
 }
 
+// Preferred source of truth: the SERVER's expand_offer() output (GET /offers/{id}?expand=1). Consuming it
+// directly means the builder preview and the published page price items with ONE implementation — no Vue
+// re-derivation that can drift (wrong compare field, sale-vs-default, empty selection -> $0). Maps the same
+// ExpandedOffer shape the published conversion island reads.
+export function offerViewTargetsFromExpanded(expandedItems) {
+  return (expandedItems || []).map((item) => {
+    const product = item.product || {};
+    const single = (item.pricing || {}).single_unit_price || {};
+    const amount = Number(single.unit_amount || 0);
+    const compare = Number(single.compare_at_amount || 0);
+    const discount = compare > amount && compare > 0 ? Math.round(((compare - amount) / compare) * 100) : 0;
+    return {
+      product_id: item.kind === "product" ? product.product_id || "" : "",
+      service_id: item.kind === "service" ? product.product_id || "" : "",
+      price_id: single.price_id || "",
+      headline: product.headline || "",
+      subheadline: product.subheadline || "",
+      hero_image: product.hero_image || "",
+      gallery: product.gallery || [],
+      badges: product.badges || [],
+      amount,
+      compare_at: compare,
+      discount,
+      currency: single.currency || "usd",
+    };
+  });
+}
+
 // Vue mirror of the server's expand_offer() single-unit projection: turn the builder's offer item models
 // into OfferView targets. `models` come from offerItemModels() (products + services, already resolved).
+// Fallback only — used until the server's ExpandedOffer (offerViewTargetsFromExpanded) has loaded.
 export function offerViewTargets(models) {
   return (models || []).map((model) => {
     const cards = [...(model.priceCards || [])];
