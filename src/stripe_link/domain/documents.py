@@ -44,6 +44,13 @@ SUPPORTED_THEME_PRESETS = {
     "fire-sale",
     "natural-calm",
     "cyber-pulse",
+    # Socialite palettes (plans/SOCIALITE_PARITY.md)
+    "linkedin-blue",
+    "instagram-gradient",
+    "tiktok-dark",
+    "youtube-red",
+    "twitter-dark",
+    "professional-gray",
 }
 SUPPORTED_FONT_SERVICES = {"system", "junior-bay"}
 SUPPORTED_FONT_FALLBACKS = {"system", "sans-serif", "serif", "monospace"}

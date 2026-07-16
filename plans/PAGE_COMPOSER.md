@@ -102,6 +102,14 @@ There is one composer decision point:
   restored, and the Page Sections opt-in panel.
 - Future: expose `allowed_ctas` to the ActionBar work; group the composable-element "Add" buttons under the
   same Recommended/Other framing.
+- Next axis: **goal / traffic source** as a second composition input (offer_type × goal), driven by a new
+  wizard step and capability packs — see plans/LANDING_PAGE_GOAL_COMPOSITION.md.
+
+## Follow-up — Socialite Parity
+
+Bring stripe-cart's popular "socialite" feel into the single template as a preset family + two elements
+(`profile_avatar`, brand `overlay`+`position`), reusing the legacy CSS/presets verbatim — see
+plans/SOCIALITE_PARITY.md. A concrete first exercise for the element taxonomy below.
 
 ## Follow-up — Landing Page Builder Reframe
 
@@ -109,4 +117,6 @@ There is one composer decision point:
 builder so naming is consistent end to end: every addable/toggleable thing is a "section" with one canonical
 key that matches the composer's `section_key` (today the builder mixes "elements" — testimonials, faq — with
 "sections" — trust badges, refund — and with governed keys that alias, e.g. brand_label→brand). One
-vocabulary across the config, the composer, the builder panels, and the saved page. Not yet built.
+vocabulary across the config, the composer, the builder panels, and the saved page. Each element should also
+declare its **themeable tokens** — that catalog is what powers Advanced Color Settings
+(plans/ADVANCED_COLOR_SETTINGS.md). Not yet built.

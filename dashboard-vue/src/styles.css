@@ -4416,6 +4416,133 @@ button:disabled {
   --preview-border: #3730a3;
 }
 
+/* Socialite palettes (plans/SOCIALITE_PARITY.md) — mirror UNIVERSAL_BUNDLE_THEME_PRESETS. */
+.landing-live-preview.linkedin-blue {
+  --preview-bg: #f3f2ef;
+  --preview-card: #ffffff;
+  --preview-text: #000000;
+  --preview-muted: #666666;
+  --preview-brand: #0077b5;
+  --preview-accent: #00a0dc;
+  --preview-headline: #000000;
+  --preview-cta-from: #0077b5;
+  --preview-cta-to: #005582;
+  --preview-cta-text: #ffffff;
+  --preview-chip-bg: rgba(0, 119, 181, 0.1);
+  --preview-chip-text: #0077b5;
+  --preview-chip-border: rgba(0, 119, 181, 0.2);
+  --preview-savings-bg: rgba(34, 197, 94, 0.1);
+  --preview-savings-text: #16a34a;
+  --preview-savings-border: rgba(34, 197, 94, 0.2);
+  --preview-featured-badge-bg: #0077b5;
+  --preview-border: #e5e7eb;
+}
+
+.landing-live-preview.instagram-gradient {
+  --preview-bg: #fafafa;
+  --preview-card: #ffffff;
+  --preview-text: #262626;
+  --preview-muted: #8e8e8e;
+  --preview-brand: #e1306c;
+  --preview-accent: #fd1d1d;
+  --preview-headline: #262626;
+  --preview-cta-from: rgb(112, 28, 242);
+  --preview-cta-to: rgb(231, 52, 139);
+  --preview-cta-text: #ffffff;
+  --preview-chip-bg: rgba(225, 48, 108, 0.1);
+  --preview-chip-text: #e1306c;
+  --preview-chip-border: rgba(225, 48, 108, 0.2);
+  --preview-savings-bg: rgba(34, 197, 94, 0.1);
+  --preview-savings-text: #16a34a;
+  --preview-savings-border: rgba(34, 197, 94, 0.2);
+  --preview-featured-badge-bg: #e1306c;
+  --preview-border: #dbdbdb;
+}
+
+.landing-live-preview.tiktok-dark {
+  --preview-bg: #000000;
+  --preview-card: #121212;
+  --preview-text: #ffffff;
+  --preview-muted: #8a8a8a;
+  --preview-brand: #ff0050;
+  --preview-accent: #00f2ea;
+  --preview-headline: #ffffff;
+  --preview-cta-from: #ff0050;
+  --preview-cta-to: #00f2ea;
+  --preview-cta-text: #ffffff;
+  --preview-chip-bg: rgba(255, 0, 80, 0.15);
+  --preview-chip-text: #ff6090;
+  --preview-chip-border: rgba(255, 0, 80, 0.3);
+  --preview-savings-bg: rgba(0, 242, 234, 0.15);
+  --preview-savings-text: #00f2ea;
+  --preview-savings-border: rgba(0, 242, 234, 0.3);
+  --preview-featured-badge-bg: #ff0050;
+  --preview-border: #2a2a2a;
+}
+
+.landing-live-preview.youtube-red {
+  --preview-bg: #ffffff;
+  --preview-card: #ffffff;
+  --preview-text: #0f0f0f;
+  --preview-muted: #606060;
+  --preview-brand: #ff0000;
+  --preview-accent: #cc0000;
+  --preview-headline: #0f0f0f;
+  --preview-cta-from: #ff0000;
+  --preview-cta-to: #cc0000;
+  --preview-cta-text: #ffffff;
+  --preview-chip-bg: rgba(255, 0, 0, 0.1);
+  --preview-chip-text: #cc0000;
+  --preview-chip-border: rgba(255, 0, 0, 0.2);
+  --preview-savings-bg: rgba(34, 197, 94, 0.1);
+  --preview-savings-text: #16a34a;
+  --preview-savings-border: rgba(34, 197, 94, 0.2);
+  --preview-featured-badge-bg: #ff0000;
+  --preview-border: #e5e7eb;
+}
+
+.landing-live-preview.twitter-dark {
+  --preview-bg: #15202b;
+  --preview-card: #192734;
+  --preview-text: #ffffff;
+  --preview-muted: #8899a6;
+  --preview-brand: #1d9bf0;
+  --preview-accent: #1a8cd8;
+  --preview-headline: #ffffff;
+  --preview-cta-from: #1d9bf0;
+  --preview-cta-to: #1a8cd8;
+  --preview-cta-text: #ffffff;
+  --preview-chip-bg: rgba(29, 155, 240, 0.15);
+  --preview-chip-text: #1d9bf0;
+  --preview-chip-border: rgba(29, 155, 240, 0.3);
+  --preview-savings-bg: rgba(0, 186, 124, 0.15);
+  --preview-savings-text: #00ba7c;
+  --preview-savings-border: rgba(0, 186, 124, 0.3);
+  --preview-featured-badge-bg: #1d9bf0;
+  --preview-border: #38444d;
+}
+
+.landing-live-preview.professional-gray {
+  --preview-bg: #f8f9fa;
+  --preview-card: #ffffff;
+  --preview-text: #212529;
+  --preview-muted: #6c757d;
+  --preview-brand: #495057;
+  --preview-accent: #6c757d;
+  --preview-headline: #212529;
+  --preview-cta-from: #343a40;
+  --preview-cta-to: #212529;
+  --preview-cta-text: #ffffff;
+  --preview-chip-bg: rgba(73, 80, 87, 0.08);
+  --preview-chip-text: #495057;
+  --preview-chip-border: rgba(73, 80, 87, 0.15);
+  --preview-savings-bg: rgba(25, 135, 84, 0.1);
+  --preview-savings-text: #198754;
+  --preview-savings-border: rgba(25, 135, 84, 0.2);
+  --preview-featured-badge-bg: #495057;
+  --preview-border: #dee2e6;
+}
+
 .preview-countdown {
   align-items: center;
   display: flex;

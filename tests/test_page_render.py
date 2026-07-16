@@ -139,6 +139,33 @@ class PageRenderTests(unittest.TestCase):
         self.assertIn("expireDiscounts()", html)
         self.assertIn("selectCard(cards.find", html)
 
+    def test_every_theme_preset_is_complete_and_validated(self):
+        # Each preset must carry the keys theme_tokens() needs (no KeyError), render cleanly, and be in the
+        # document validator's allow-list — so a saved page can actually use it.
+        from stripe_link.runtime.html import UNIVERSAL_BUNDLE_THEME_PRESETS, theme_tokens
+        from stripe_link.domain.documents import SUPPORTED_THEME_PRESETS
+        page = copy.deepcopy(load_fixture("page-universal-bundle.json"))
+        offer = load_fixture("offer-universal-bundle.json")
+        product = load_fixture("product-universal-bundle.json")
+        for preset in UNIVERSAL_BUNDLE_THEME_PRESETS:
+            self.assertIn(preset, SUPPORTED_THEME_PRESETS, f"{preset} missing from SUPPORTED_THEME_PRESETS")
+            page["theme"]["preset"] = preset
+            tokens = theme_tokens(page)  # must not KeyError on any required key
+            self.assertTrue(tokens["cta_from"] and tokens["cta_to"])
+            render_page(page, offer, {product["product_id"]: product})  # must render
+
+    def test_socialite_preset_renders_gradient_cta(self):
+        page = copy.deepcopy(load_fixture("page-universal-bundle.json"))
+        offer = load_fixture("offer-universal-bundle.json")
+        product = load_fixture("product-universal-bundle.json")
+        page["theme"]["preset"] = "tiktok-dark"
+        html = render_page(page, offer, {product["product_id"]: product})
+        self.assertIn("--sl-cta-from:#ff0050", html)
+        self.assertIn("--sl-cta-to:#00f2ea", html)
+        self.assertIn("--sl-brand:#ff0050", html)
+        # the button itself is the gradient
+        self.assertIn("background:linear-gradient(135deg,var(--sl-cta-from),var(--sl-cta-to))", html)
+
     def test_universal_bundle_theme_tokens_override_preset(self):
         page = load_fixture("page-universal-bundle.json")
         offer = load_fixture("offer-universal-bundle.json")

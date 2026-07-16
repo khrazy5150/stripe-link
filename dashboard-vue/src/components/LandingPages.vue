@@ -877,6 +877,13 @@ const universalBundlePresets = [
   { value: "fire-sale", label: "Fire Sale" },
   { value: "natural-calm", label: "Natural Calm" },
   { value: "cyber-pulse", label: "Cyber Pulse" },
+  // Socialite palettes (plans/SOCIALITE_PARITY.md)
+  { value: "linkedin-blue", label: "LinkedIn Blue" },
+  { value: "instagram-gradient", label: "Instagram Gradient" },
+  { value: "tiktok-dark", label: "TikTok Dark" },
+  { value: "youtube-red", label: "YouTube Red" },
+  { value: "twitter-dark", label: "Twitter Dark" },
+  { value: "professional-gray", label: "Professional Gray" },
 ];
 const landingPagePriceContexts = new Set(["standard", "sale", "flash_sale", "flash sale"]);
 const productsById = computed(() => new Map(products.value.map((product) => [productId(product), product])));
