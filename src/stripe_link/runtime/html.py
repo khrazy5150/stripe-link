@@ -312,6 +312,7 @@ UNIVERSAL_BUNDLE_THEME_PRESETS = {
         "featured_badge_bg": "#e1306c",
         "featured_badge_text": "#ffffff",
         "border": "#dbdbdb",
+        "avatar_ring": "linear-gradient(90deg,#833ab4,#fcb045)",
     },
     "tiktok-dark": {
         "background": "#000000",
@@ -333,6 +334,7 @@ UNIVERSAL_BUNDLE_THEME_PRESETS = {
         "featured_badge_bg": "#ff0050",
         "featured_badge_text": "#ffffff",
         "border": "#2a2a2a",
+        "avatar_ring": "linear-gradient(90deg,#ff0050,#00f2ea)",
     },
     "youtube-red": {
         "background": "#ffffff",
@@ -440,6 +442,18 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     "    .sl-hero-dots{display:flex;gap:0.6rem;justify-content:center;margin-top:0.8rem}",
     "    .sl-hero-dot{width:0.8rem;height:0.8rem;border-radius:50%;background:var(--sl-border);cursor:pointer}",
     "    .sl-hero-dot.is-active{background:var(--sl-brand)}",
+    # Socialite hero overlays (plans/SOCIALITE_PARITY.md): positionable brand chip + profile avatar.
+    "    .sl-hero-media.has-avatar{margin-bottom:6.4rem}",
+    "    .sl-hero-brand{position:absolute;display:flex;align-items:center;gap:0.8rem;background:rgba(0,0,0,.5);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);padding:0.8rem 1.4rem;border-radius:999px;font-family:var(--sl-font-accent);font-size:1.1rem;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:rgba(255,255,255,.92);z-index:6;pointer-events:none}",
+    "    .sl-hero-brand-dot{width:0.8rem;height:0.8rem;border-radius:50%;background:var(--sl-brand)}",
+    "    .sl-hero-brand--top-left{top:1.6rem;left:1.6rem}",
+    "    .sl-hero-brand--top-right{top:1.6rem;right:1.6rem}",
+    "    .sl-hero-brand--bottom-left{bottom:1.6rem;left:1.6rem}",
+    "    .sl-hero-brand--bottom-right{bottom:1.6rem;right:1.6rem}",
+    # The ring is a solid disc (border colour, or a gradient) — never transparent padding, which would reveal
+    # the page background and read as an uneven border where the avatar overhangs onto the page.
+    "    .sl-avatar-wrap{position:absolute;bottom:-5.8rem;left:2.4rem;z-index:10;width:12.3rem;height:12.3rem;border-radius:50%;padding:0.4rem;background:var(--sl-avatar-ring,var(--sl-avatar-border,#ffffff));box-shadow:0 0.4rem 1.2rem rgba(0,0,0,.15)}",
+    "    .sl-avatar{width:100%;height:100%;border-radius:50%;object-fit:cover;background:var(--sl-hero-bg);display:block}",
     "    .sl-trust-badges{display:flex;flex-wrap:wrap;gap:0.8rem;justify-content:center}",
     "    .sl-trust-badge{display:flex;align-items:center;gap:0.6rem;border:1px solid var(--sl-trust-badge-border);background:var(--sl-trust-badge-bg);color:var(--sl-trust-badge-text);border-radius:999px;padding:0.8rem 1.4rem;font-family:var(--sl-font-accent);font-size:1.2rem;font-weight:800}",
     "    .sl-price-options{display:grid;grid-template-columns:1fr;gap:1.4rem;width:100%;margin:0 auto}",
@@ -1052,6 +1066,33 @@ def render_media_slide(url: str, alt: str, *, autoplay: bool, eager: bool = Fals
     return responsive_img(url, alt, sizes=HERO_MEDIA_SIZES, eager=eager)
 
 
+HERO_BRAND_POSITIONS = {"top-left", "top-right", "bottom-left", "bottom-right"}
+
+
+def render_hero_overlays(section: dict[str, Any], offer: dict[str, Any]) -> list[str]:
+    """Socialite hero overlays (plans/SOCIALITE_PARITY.md): a positionable brand chip baked into the hero
+    image, and a circular profile avatar ("face behind the business") overhanging the bottom-left. Both live
+    inside the position:relative .sl-hero-media so toggling the brand never shifts layout."""
+    lines: list[str] = []
+    if section.get("brand_overlay"):
+        brand_text = str(section.get("brand_text") or offer.get("name") or "")
+        if brand_text:
+            position = str(section.get("brand_position") or "top-right")
+            if position not in HERO_BRAND_POSITIONS:
+                position = "top-right"
+            lines.append(
+                f"      <div class=\"sl-hero-brand sl-hero-brand--{position}\">"
+                f"<span class=\"sl-hero-brand-dot\"></span>{escape(brand_text)}</div>"
+            )
+    avatar_url = str(section.get("avatar_url") or "")
+    if avatar_url:
+        lines.append(
+            f"      <div class=\"sl-avatar-wrap\"><img class=\"sl-avatar\" src=\"{escape(avatar_url)}\" "
+            "alt=\"\" loading=\"lazy\" decoding=\"async\"></div>"
+        )
+    return lines
+
+
 def render_hero_media(
     section: dict[str, Any],
     offer: dict[str, Any],
@@ -1074,6 +1115,8 @@ def render_hero_media(
     alt = str(product.get("name") or offer.get("name") or "Product image")
     section_id = escape(str(section.get("id", "hero-media")))
     autoplay = bool(section.get("autoplay"))
+    overlays = render_hero_overlays(section, offer)
+    media_class = "sl-hero-media" + (" has-avatar" if section.get("avatar_url") else "")
     slides = [
         f"        <div class=\"sl-hero-slide\">{render_media_slide(url, alt, autoplay=autoplay, eager=(index == 0))}</div>"
         for index, url in enumerate(images)
@@ -1081,10 +1124,11 @@ def render_hero_media(
     # A single image needs no carousel chrome.
     if len(images) == 1:
         return "\n".join([
-            f"    <section class=\"sl-hero-media\" data-section-id=\"{section_id}\" data-section-type=\"hero_media\" data-media-count=\"1\">",
+            f"    <section class=\"{media_class}\" data-section-id=\"{section_id}\" data-section-type=\"hero_media\" data-media-count=\"1\">",
             "      <div class=\"sl-hero-track\">",
             *slides,
             "      </div>",
+            *overlays,
             "    </section>",
         ])
     # Multiple images -> a swipeable carousel with prev/next arrows, a counter, and dots.
@@ -1093,7 +1137,7 @@ def render_hero_media(
         for index in range(len(images))
     ]
     return "\n".join([
-        f"    <section class=\"sl-hero-media sl-hero-carousel\" data-section-id=\"{section_id}\" data-section-type=\"hero_media\" data-media-count=\"{len(images)}\" data-hero-carousel>",
+        f"    <section class=\"{media_class} sl-hero-carousel\" data-section-id=\"{section_id}\" data-section-type=\"hero_media\" data-media-count=\"{len(images)}\" data-hero-carousel>",
         "      <div class=\"sl-hero-track\" data-hero-track>",
         *slides,
         "      </div>",
@@ -1103,6 +1147,7 @@ def render_hero_media(
         "      <div class=\"sl-hero-dots\">",
         *dots,
         "      </div>",
+        *overlays,
         "    </section>",
     ])
 

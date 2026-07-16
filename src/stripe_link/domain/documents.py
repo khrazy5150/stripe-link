@@ -948,6 +948,11 @@ def validate_page_document(document: dict[str, Any]) -> None:
             optional_string(section, "label", "Brand label")
         elif section_type == "hero_media":
             optional_string_list(section, "images", "Hero media images")
+            optional_string(section, "avatar_url", "Hero avatar_url")
+            optional_string(section, "brand_text", "Hero brand_text")
+            optional_bool(section, "brand_overlay", "Hero brand_overlay")
+            if section.get("brand_position") is not None:
+                require_enum(section, "brand_position", {"top-left", "top-right", "bottom-left", "bottom-right"}, "Hero brand_position")
         elif section_type == "headline":
             require_string(section, "text", "Headline text")
         elif section_type == "subheadline":

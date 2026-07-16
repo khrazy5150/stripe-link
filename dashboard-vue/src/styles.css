@@ -3899,6 +3899,84 @@ button:disabled {
   position: relative;
 }
 
+/* Socialite hero overlays (plans/SOCIALITE_PARITY.md) — mirror the published .sl-hero-media overlays. */
+.preview-hero-media {
+  position: relative;
+}
+
+.preview-hero-media.has-avatar {
+  margin-bottom: 4.4rem;
+}
+
+.preview-hero-brand {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  background: rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(8px);
+  padding: 0.6rem 1.1rem;
+  border-radius: 999px;
+  font-size: 1rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.92);
+  z-index: 6;
+  pointer-events: none;
+}
+
+.preview-hero-brand-dot {
+  width: 0.7rem;
+  height: 0.7rem;
+  border-radius: 50%;
+  background: var(--preview-brand);
+}
+
+.preview-hero-brand--top-left { top: 1.2rem; left: 1.2rem; }
+.preview-hero-brand--top-right { top: 1.2rem; right: 1.2rem; }
+.preview-hero-brand--bottom-left { bottom: 1.2rem; left: 1.2rem; }
+.preview-hero-brand--bottom-right { bottom: 1.2rem; right: 1.2rem; }
+
+.preview-avatar-wrap {
+  position: absolute;
+  bottom: -4rem;
+  left: 2rem;
+  z-index: 10;
+  width: 9rem;
+  height: 9rem;
+  border-radius: 50%;
+  padding: 0.3rem;
+  /* Solid ring (not transparent padding) so it stays uniform where the avatar overhangs onto the page. */
+  background: var(--preview-avatar-ring, var(--preview-avatar-border, #ffffff));
+  box-shadow: 0 0.4rem 1.2rem rgba(0, 0, 0, 0.15);
+}
+
+.preview-avatar {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  object-fit: cover;
+  background: var(--preview-card);
+  display: block;
+}
+
+.builder-avatar-row {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  flex-wrap: wrap;
+  margin-top: 0.4rem;
+}
+
+.builder-avatar-preview {
+  width: 5.6rem;
+  height: 5.6rem;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 1px solid var(--border, #e5e7eb);
+}
+
 .preview-hero-nav {
   position: absolute;
   top: 50%;
@@ -4457,6 +4535,7 @@ button:disabled {
   --preview-savings-border: rgba(34, 197, 94, 0.2);
   --preview-featured-badge-bg: #e1306c;
   --preview-border: #dbdbdb;
+  --preview-avatar-ring: linear-gradient(90deg, #833ab4, #fcb045);
 }
 
 .landing-live-preview.tiktok-dark {
@@ -4478,6 +4557,7 @@ button:disabled {
   --preview-savings-border: rgba(0, 242, 234, 0.3);
   --preview-featured-badge-bg: #ff0050;
   --preview-border: #2a2a2a;
+  --preview-avatar-ring: linear-gradient(90deg, #ff0050, #00f2ea);
 }
 
 .landing-live-preview.youtube-red {

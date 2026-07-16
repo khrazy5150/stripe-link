@@ -177,6 +177,31 @@ class HeroFixedCopyTests(unittest.TestCase):
         self.assertNotIn("data-conversion-bind", html)
 
 
+class HeroOverlayTests(unittest.TestCase):
+    def test_brand_overlay_and_avatar(self):
+        from stripe_link.runtime.html import render_hero_overlays
+        html = "\n".join(render_hero_overlays(
+            {"brand_overlay": True, "brand_position": "bottom-left", "avatar_url": "https://img/a.jpg"},
+            {"name": "MinXin Chen"},
+        ))
+        self.assertIn("sl-hero-brand sl-hero-brand--bottom-left", html)
+        self.assertIn("MinXin Chen", html)
+        self.assertIn("sl-avatar-wrap", html)
+        self.assertIn("https://img/a.jpg", html)
+
+    def test_brand_falls_back_to_offer_name_and_valid_position(self):
+        from stripe_link.runtime.html import render_hero_overlays
+        html = "\n".join(render_hero_overlays({"brand_overlay": True, "brand_position": "middle"}, {"name": "Acme"}))
+        self.assertIn("sl-hero-brand--top-right", html)   # invalid position -> default
+        self.assertIn("Acme", html)
+
+    def test_empty_when_nothing_set(self):
+        from stripe_link.runtime.html import render_hero_overlays
+        self.assertEqual(render_hero_overlays({}, {}), [])
+        # brand_overlay on but no text anywhere -> nothing
+        self.assertEqual(render_hero_overlays({"brand_overlay": True}, {}), [])
+
+
 class OfferActionsTests(unittest.TestCase):
     def _actions(self, offer):
         from stripe_link.runtime.html import offer_actions

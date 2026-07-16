@@ -417,6 +417,37 @@
               </span>
               <span>Autoplay video (muted)</span>
             </label>
+
+            <label class="offer-field">
+              <span>Profile Avatar</span>
+              <small>Put a face on the page — the person behind the service. Overlaps the hero image.</small>
+              <div class="builder-avatar-row">
+                <img v-if="builder.avatar_url" :src="builder.avatar_url" class="builder-avatar-preview" alt="" />
+                <input ref="avatarFileInput" type="file" accept="image/*" hidden @change="handleAvatarPicked" />
+                <button class="secondary-action compact" type="button" :disabled="avatarUploading" @click="avatarFileInput?.click()">
+                  {{ avatarUploading ? "Uploading..." : (builder.avatar_url ? "Replace avatar" : "Upload avatar") }}
+                </button>
+                <button v-if="builder.avatar_url" class="secondary-action compact" type="button" @click="builder.avatar_url = ''">Remove</button>
+              </div>
+              <small v-if="avatarUploadError" class="builder-upload-error">{{ avatarUploadError }}</small>
+            </label>
+
+            <label class="builder-switch-row">
+              <span class="builder-switch" @click.stop>
+                <input v-model="builder.brand_overlay" type="checkbox" aria-label="Show brand name on hero image" />
+                <span aria-hidden="true"></span>
+              </span>
+              <span>Show brand on hero image</span>
+            </label>
+            <label v-if="builder.brand_overlay" class="offer-field">
+              <span>Brand position</span>
+              <select v-model="builder.brand_position">
+                <option value="top-left">Top left</option>
+                <option value="top-right">Top right</option>
+                <option value="bottom-left">Bottom left</option>
+                <option value="bottom-right">Bottom right</option>
+              </select>
+            </label>
           </section>
 
           <section class="builder-section">
@@ -629,22 +660,30 @@
             <span>{{ builder.countdown.start_icon }} {{ builder.countdown.start_text || "Offer expires in" }}</span>
             <strong>{{ Number(builder.countdown.duration_minutes || 15) }}:00</strong>
           </div>
-          <div v-if="sectionVisible('brand_label')" class="preview-brand">
+          <div v-if="sectionVisible('brand_label') && !builder.brand_overlay" class="preview-brand">
             <span class="preview-brand-dot" aria-hidden="true"></span>
             <span>{{ builderOffer?.name || builder.name || "Junior Bay" }}</span>
           </div>
-          <div v-if="heroCarouselImages.length > 1" class="preview-hero-carousel">
-            <video v-if="isVideoUrl(heroCarouselImages[currentTargetIndex] || heroCarouselImages[0])" class="preview-hero-image" :src="heroCarouselImages[currentTargetIndex] || heroCarouselImages[0]" :autoplay="builder.autoplay" :muted="builder.autoplay" :controls="!builder.autoplay" loop playsinline></video>
-            <img v-else class="preview-hero-image" :src="heroCarouselImages[currentTargetIndex] || heroCarouselImages[0]" alt="" />
-            <button type="button" class="preview-hero-nav prev" @click="currentTargetIndex = (currentTargetIndex - 1 + heroCarouselImages.length) % heroCarouselImages.length">‹</button>
-            <button type="button" class="preview-hero-nav next" @click="currentTargetIndex = (currentTargetIndex + 1) % heroCarouselImages.length">›</button>
-            <span class="preview-hero-counter">{{ currentTargetIndex + 1 }} / {{ heroCarouselImages.length }}</span>
-            <div class="preview-hero-dots">
-              <span v-for="(image, i) in heroCarouselImages" :key="i" :class="{ 'is-active': i === currentTargetIndex }" @click="currentTargetIndex = i"></span>
+          <div class="preview-hero-media" :class="{ 'has-avatar': builder.avatar_url }">
+            <div v-if="heroCarouselImages.length > 1" class="preview-hero-carousel">
+              <video v-if="isVideoUrl(heroCarouselImages[currentTargetIndex] || heroCarouselImages[0])" class="preview-hero-image" :src="heroCarouselImages[currentTargetIndex] || heroCarouselImages[0]" :autoplay="builder.autoplay" :muted="builder.autoplay" :controls="!builder.autoplay" loop playsinline></video>
+              <img v-else class="preview-hero-image" :src="heroCarouselImages[currentTargetIndex] || heroCarouselImages[0]" alt="" />
+              <button type="button" class="preview-hero-nav prev" @click="currentTargetIndex = (currentTargetIndex - 1 + heroCarouselImages.length) % heroCarouselImages.length">‹</button>
+              <button type="button" class="preview-hero-nav next" @click="currentTargetIndex = (currentTargetIndex + 1) % heroCarouselImages.length">›</button>
+              <span class="preview-hero-counter">{{ currentTargetIndex + 1 }} / {{ heroCarouselImages.length }}</span>
+              <div class="preview-hero-dots">
+                <span v-for="(image, i) in heroCarouselImages" :key="i" :class="{ 'is-active': i === currentTargetIndex }" @click="currentTargetIndex = i"></span>
+              </div>
+            </div>
+            <video v-else-if="previewHeroImage && isVideoUrl(previewHeroImage)" class="preview-hero-image" :src="previewHeroImage" :autoplay="builder.autoplay" :muted="builder.autoplay" :controls="!builder.autoplay" loop playsinline></video>
+            <img v-else-if="previewHeroImage" class="preview-hero-image" :src="previewHeroImage" alt="" />
+            <div v-if="builder.brand_overlay && (builderOffer?.name || builder.name)" class="preview-hero-brand" :class="`preview-hero-brand--${builder.brand_position}`">
+              <span class="preview-hero-brand-dot" aria-hidden="true"></span>{{ builderOffer?.name || builder.name }}
+            </div>
+            <div v-if="builder.avatar_url" class="preview-avatar-wrap">
+              <img class="preview-avatar" :src="builder.avatar_url" alt="" />
             </div>
           </div>
-          <video v-else-if="previewHeroImage && isVideoUrl(previewHeroImage)" class="preview-hero-image" :src="previewHeroImage" :autoplay="builder.autoplay" :muted="builder.autoplay" :controls="!builder.autoplay" loop playsinline></video>
-          <img v-else-if="previewHeroImage" class="preview-hero-image" :src="previewHeroImage" alt="" />
           <h1 v-html="headlineHtml(builder.headline || builder.name)"></h1>
           <p>{{ builder.subheadline }}</p>
           <div v-if="sectionVisible('trust_badges') && visibleTrustBadges.length" class="preview-badges">
@@ -842,12 +881,15 @@ const previewDevice = ref("desktop");
 const selectedPreviewPriceId = ref("");
 const faviconFileInput = ref(null);
 const heroFileInput = ref(null);
+const avatarFileInput = ref(null);
 const blurbImageInputs = ref({});
 const faviconUploading = ref(false);
 const heroUploading = ref(false);
+const avatarUploading = ref(false);
 const blurbImageUploading = reactive({});
 const faviconUploadError = ref("");
 const heroUploadError = ref("");
+const avatarUploadError = ref("");
 const blurbImageErrors = reactive({});
 const form = reactive(defaultWizardForm());
 const builder = reactive(defaultBuilderForm());
@@ -1137,6 +1179,10 @@ function defaultBuilderForm() {
     refund_policy: {
       enabled: true,
     },
+    // Socialite hero overlays (plans/SOCIALITE_PARITY.md).
+    avatar_url: "",
+    brand_overlay: false,
+    brand_position: "top-right",
     // Page Composer overrides: the tenant's deviations from the offer_type section defaults (compact map,
     // keyed by section key -> { enabled }). Empty = pure offer_type defaults.
     composition: {
@@ -1345,6 +1391,9 @@ function populateBuilderFromPage(page) {
     subheadline: hero.subheadline || sectionText(sections, "subheadline") || "",
     hero_media_text: (heroMedia.images || [page.seo?.image || pageImage(page)].filter(Boolean)).join("\n"),
     autoplay: Boolean(heroMedia.autoplay),
+    avatar_url: heroMedia.avatar_url || "",
+    brand_overlay: Boolean(heroMedia.brand_overlay),
+    brand_position: heroMedia.brand_position || "top-right",
     cta_label: cta.label || (offerIntentLabel(offer) === "Lead generation" ? "Continue" : "Buy Now"),
     elements: elementsFromPage(sections),
     google_tag_id: page.analytics?.google_tag_id || "",
@@ -1455,16 +1504,28 @@ function builderSections(intent) {
       marquee: Boolean(builder.countdown.marquee),
     });
   }
-  if (sectionVisible("brand_label")) {
+  const brandText = formatHeadline(builderOffer.value?.name || "Junior Bay");
+  // The brand overlay (on the hero) replaces the separate above-hero brand label so the brand shows once.
+  if (sectionVisible("brand_label") && !builder.brand_overlay) {
     sections.push({
       id: "brand",
       type: "brand_label",
       enabled: true,
-      label: formatHeadline(builderOffer.value?.name || "Junior Bay"),
+      label: brandText,
     });
   }
-  // The hero-media carousel — for a listicle it's the product images (auto-filled into the field), driving the price card.
-  sections.push({ id: "hero-media", type: "hero_media", images: heroMediaList.value, autoplay: Boolean(builder.autoplay) });
+  // The hero-media carousel — for a listicle it's the product images (auto-filled into the field), driving
+  // the price card. Carries the socialite overlays (avatar + brand chip) that render inside it.
+  sections.push({
+    id: "hero-media",
+    type: "hero_media",
+    images: heroMediaList.value,
+    autoplay: Boolean(builder.autoplay),
+    avatar_url: builder.avatar_url || "",
+    brand_overlay: Boolean(builder.brand_overlay),
+    brand_position: builder.brand_position || "top-right",
+    brand_text: builder.brand_overlay ? brandText : "",
+  });
   sections.push({
     id: "hero",
     type: "hero",
@@ -1786,6 +1847,21 @@ async function handleHeroMediaPicked(event) {
     heroUploadError.value = err.message || "Hero image upload failed.";
   } finally {
     heroUploading.value = false;
+  }
+}
+
+async function handleAvatarPicked(event) {
+  const file = event.target.files?.[0];
+  event.target.value = "";
+  if (!file) return;
+  avatarUploadError.value = "";
+  avatarUploading.value = true;
+  try {
+    builder.avatar_url = await uploadImage(file);
+  } catch (err) {
+    avatarUploadError.value = err.message || "Avatar upload failed.";
+  } finally {
+    avatarUploading.value = false;
   }
 }
 
