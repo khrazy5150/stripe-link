@@ -124,6 +124,26 @@ third-party security assessment is required.
 
 ## Landing Pages / SEO
 
+### BUG: client-marquee (Client logos) renders on the published page but NOT in the builder preview
+- **Symptom:** Add a Client logos section with logos. The **published page renders it** (heading + logo
+  chips), but the **Live Preview never shows it** — nothing where it should sit (between trust badges and
+  the price card).
+- **Ruled out via an in-preview debug line:** it's NOT data/filter — the debug showed
+  `previewElements = 1 [client_marquee]`, `rawEls = 1`, `marqueeLogos = 2`, so the section reaches
+  `previewElements` with its logos. NOT `elementSection` / `sectionVisible` / `builderSections` /
+  `elementsFromPage` (all verified; published uses the same path and works). NOT `v-html`/`headlineHtml`
+  nor the inline arrow-`filter` in the `v-for` (both replaced with a plain heading + `marqueeLogos()`
+  method — still missing). Container `.landing-live-preview` is `display:grid`; `.preview-marquee` is a
+  grid child.
+- **Points at:** the `v-else-if="entry.element.type === 'client_marquee'"` branch in
+  `<template v-for="entry in previewElements">` (dashboard-vue/src/components/LandingPages.vue, ~L724)
+  not matching/rendering despite the entry being present and its type matching.
+- **Fastest next steps:** (1) inspect the live DOM — is `.preview-marquee` present-but-0-height or absent?
+  (2) temporarily make that branch a standalone `v-if` (not `v-else-if`) to test whether the long
+  `v-if/v-else-if` chain silently breaks at that node; (3) check the compiled render / Vue devtools.
+- **Everything else about client_marquee works:** color logos on chips, default "Our Clients" heading,
+  centered, roll-only-if-≥5, published render, upload button, alt-text label.
+
 ### Implement an on-page SEO checklist for landing pages
 - **What:** Emit proper on-page SEO for rendered landing pages: unique `<title>`, `<meta name="description">`,
   canonical URL, **Open Graph** + **Twitter Card** tags, and **JSON-LD structured data** (e.g.,

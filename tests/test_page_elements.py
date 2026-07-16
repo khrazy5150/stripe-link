@@ -34,14 +34,24 @@ class ElementRenderTests(unittest.TestCase):
         self.assertIn("1,280 reviews", html)
         self.assertIn("on Google", html)
 
-    def test_marquee_duplicates_row_for_scroll(self):
+    def test_marquee_few_logos_static_centered_with_default_heading(self):
         html = render_client_marquee({"id": "m", "logos": [
             {"image_url": "https://img/a.png", "name": "Acme"},
             {"image_url": "", "name": "skip"},  # no image dropped
         ]})
         self.assertIn('data-section-type="client_marquee"', html)
-        self.assertEqual(html.count("https://img/a.png"), 2)  # duplicated for seamless scroll
+        self.assertIn("sl-marquee-static", html)                 # < 5 -> static, not rolling
+        self.assertNotIn("sl-marquee-track", html)
+        self.assertEqual(html.count("https://img/a.png"), 1)     # not duplicated
+        self.assertIn("Our Clients", html)                        # default heading
         self.assertNotIn("skip", html)
+
+    def test_marquee_five_or_more_logos_roll(self):
+        logos = [{"image_url": f"https://img/{i}.png", "name": f"C{i}"} for i in range(5)]
+        html = render_client_marquee({"id": "m", "heading": "Trusted By", "logos": logos})
+        self.assertIn("sl-marquee-track", html)                   # >= 5 -> rolling
+        self.assertEqual(html.count("https://img/0.png"), 2)      # duplicated for seamless scroll
+        self.assertIn("Trusted By", html)                         # explicit heading kept
 
 
 def _carousel_offer(oid, pid, price_id):

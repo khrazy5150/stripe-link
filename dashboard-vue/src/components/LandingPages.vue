@@ -484,7 +484,7 @@
             <header class="builder-section-title">
               <h3>Page Sections</h3>
             </header>
-            <small>Recommended sections for a {{ builderOfferType }} page are on by default. Add or remove optional ones — the preview and the published page stay in sync.</small>
+            <small>Everything that goes on the page, in one place. Recommended sections for a {{ builderOfferType }} page are on by default; toggle optional ones or add content blocks — preview and published stay in sync.</small>
             <div class="composition-list">
               <label v-for="key in togglableSections" :key="key" class="composition-row">
                 <input type="checkbox" :checked="isSectionEnabled(key)" @change="toggleSection(key, $event.target.checked)" />
@@ -494,12 +494,7 @@
                 </span>
               </label>
             </div>
-          </section>
-
-          <section class="builder-section">
-            <header class="builder-section-title">
-              <h3>Page Elements</h3>
-            </header>
+            <div class="composition-subhead">Add content</div>
             <div class="element-add-row">
               <button v-for="entry in ELEMENT_TYPES" :key="entry.type" class="secondary-action compact" type="button" @click="addElement(entry.type)">
                 + {{ entry.label }}
@@ -546,7 +541,15 @@
                     <textarea v-model.trim="item.quote" rows="2" placeholder="Quote"></textarea>
                     <input v-model.trim="item.author" type="text" placeholder="Author" />
                     <input v-model.trim="item.role" type="text" placeholder="Role (optional)" />
-                    <input v-model.trim="item.avatar_url" type="url" placeholder="Avatar URL (optional)" />
+                    <div class="selectable-price-image-controls" :class="{ 'has-image-preview': item.avatar_url }">
+                      <div v-if="item.avatar_url" class="selectable-price-image-preview"><img :src="item.avatar_url" alt="Avatar preview" /></div>
+                      <input :ref="(el) => setSubImageInput(subImgKey(element, 'items', i), el)" type="file" accept="image/*" hidden @change="handleSubImagePicked(item, 'avatar_url', subImgKey(element, 'items', i), $event)" />
+                      <button class="secondary-action compact" type="button" :disabled="Boolean(subImageUploading[subImgKey(element, 'items', i)])" @click.prevent="triggerSubImageUpload(subImgKey(element, 'items', i))">
+                        {{ subImageUploading[subImgKey(element, 'items', i)] ? "Uploading..." : "Upload avatar" }}
+                      </button>
+                      <input v-model.trim="item.avatar_url" type="url" placeholder="or paste avatar URL" />
+                    </div>
+                    <div v-if="subImageErrors[subImgKey(element, 'items', i)]" class="price-image-error">{{ subImageErrors[subImgKey(element, 'items', i)] }}</div>
                     <button class="danger-action compact" type="button" @click="removeSubItem(element, 'items', i)">Remove</button>
                   </div>
                   <button class="secondary-action compact" type="button" @click="addSubItem(element, 'items', { quote: '', author: '', role: '', avatar_url: '' })">+ Add testimonial</button>
@@ -563,8 +566,16 @@
                 <template v-else-if="element.type === 'client_marquee'">
                   <input v-model.trim="element.heading" type="text" placeholder="Section heading (optional)" />
                   <div v-for="(logo, i) in element.logos" :key="i" class="element-subrow">
-                    <input v-model.trim="logo.image_url" type="url" placeholder="Logo image URL" />
-                    <input v-model.trim="logo.name" type="text" placeholder="Client name (optional)" />
+                    <input v-model.trim="logo.name" type="text" placeholder="Client name (only visible by search engines - recommended for SEO)" />
+                    <div class="selectable-price-image-controls" :class="{ 'has-image-preview': logo.image_url }">
+                      <div v-if="logo.image_url" class="selectable-price-image-preview"><img :src="logo.image_url" alt="Logo preview" /></div>
+                      <input :ref="(el) => setSubImageInput(subImgKey(element, 'logos', i), el)" type="file" accept="image/*" hidden @change="handleSubImagePicked(logo, 'image_url', subImgKey(element, 'logos', i), $event)" />
+                      <button class="secondary-action compact" type="button" :disabled="Boolean(subImageUploading[subImgKey(element, 'logos', i)])" @click.prevent="triggerSubImageUpload(subImgKey(element, 'logos', i))">
+                        {{ subImageUploading[subImgKey(element, 'logos', i)] ? "Uploading..." : "Upload logo" }}
+                      </button>
+                      <input v-model.trim="logo.image_url" type="url" placeholder="or paste image URL" />
+                    </div>
+                    <div v-if="subImageErrors[subImgKey(element, 'logos', i)]" class="price-image-error">{{ subImageErrors[subImgKey(element, 'logos', i)] }}</div>
                     <button class="danger-action compact" type="button" @click="removeSubItem(element, 'logos', i)">Remove</button>
                   </div>
                   <button class="secondary-action compact" type="button" @click="addSubItem(element, 'logos', { image_url: '', name: '' })">+ Add logo</button>
@@ -711,9 +722,11 @@
               <span>{{ Number(entry.element.value || 0).toFixed(1) }}<template v-if="entry.element.count"> · {{ Number(entry.element.count).toLocaleString() }} reviews</template><template v-if="entry.element.label"> · {{ entry.element.label }}</template></span>
             </div>
             <div v-else-if="entry.element.type === 'client_marquee'" class="preview-marquee">
-              <h2 v-if="entry.element.heading" v-html="headlineHtml(entry.element.heading)"></h2>
+              <h2>{{ entry.element.heading || "Our Clients" }}</h2>
               <div class="preview-marquee-row">
-                <img v-for="(logo, i) in entry.section.logos" :key="i" :src="logo.image_url" :alt="logo.name || ''" />
+                <span v-for="(logo, i) in marqueeLogos(entry.element)" :key="i" class="preview-marquee-logo">
+                  <img :src="logo.image_url" :alt="logo.name || ''" />
+                </span>
               </div>
             </div>
             <div v-else-if="entry.element.type === 'faq'" class="preview-faqs">
@@ -845,7 +858,7 @@
 <script setup>
 import { computed, reactive, ref, watch } from "vue";
 import { useConversionContext, offerViewTargets, offerViewTargetsFromExpanded } from "../composables/useConversionContext";
-import { isSectionVisible, defaultVisible, recommendedSectionKeys, optionalSectionKeys, governedKeys } from "../composables/pageComposer";
+import { isSectionVisible, defaultVisible, recommendedSectionKeys, optionalSectionKeys, governedKeys, elementLabel, addableElements } from "../composables/pageComposer";
 import { apiRequest, getApiBase, getApiEnvironment, getPagesBaseUrl, getPreviewPagesBaseUrl, getTenantId } from "../api/client";
 import { formatMoney } from "../stores/products";
 import { uploadImage } from "../api/uploads";
@@ -891,6 +904,10 @@ const faviconUploadError = ref("");
 const heroUploadError = ref("");
 const avatarUploadError = ref("");
 const blurbImageErrors = reactive({});
+// Per-sub-item image uploads (testimonial avatars, client logos), keyed by element:list:index.
+const subImageInputs = ref({});
+const subImageUploading = reactive({});
+const subImageErrors = reactive({});
 const form = reactive(defaultWizardForm());
 const builder = reactive(defaultBuilderForm());
 const defaultFaviconUrl = "https://images.juniorbay.com/icon/favicon.png";
@@ -949,16 +966,6 @@ const isListicleOffer = computed(() => (builderOffer.value?.offer_type || "singl
 // Visibility comes from the SHARED rules file (imported by pageComposer.js — the exact file Python reads)
 // plus the tenant's overrides. The preview AND the saved section list both call sectionVisible(), and
 // Python's compose_page() applies the same rules, so preview and published can't disagree.
-const SECTION_KEY_LABELS = {
-  brand: "Brand label",
-  hero_media: "Hero media",
-  hero: "Hero headline",
-  trust_badges: "Trust badges",
-  offer_selector: "Price cards",
-  cta: "Call to action",
-  refund_policy: "Refund policy",
-  legal_footer: "Footer",
-};
 const builderOfferType = computed(() => builderOffer.value?.offer_type || "single");
 function sectionVisible(sectionType) {
   return isSectionVisible(builderOfferType.value, sectionType, builder.composition.overrides);
@@ -967,10 +974,10 @@ function sectionVisible(sectionType) {
 const recommendedSections = computed(() => recommendedSectionKeys(builderOfferType.value));
 const optionalSections = computed(() => optionalSectionKeys(builderOfferType.value));
 // Structural sections are always present; these are the optional content sections the tenant can add/remove.
-const MANDATORY_SECTION_KEYS = new Set(["hero", "hero_media", "offer_selector", "legal_footer", "cta"]);
+const MANDATORY_SECTION_KEYS = new Set(["hero", "hero_media", "offer_price_selector", "legal_footer", "checkout_cta"]);
 const togglableSections = computed(() => governedKeys().filter((key) => !MANDATORY_SECTION_KEYS.has(key)));
 function sectionKeyLabel(key) {
-  return SECTION_KEY_LABELS[key] || key.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+  return elementLabel(key);
 }
 function isSectionEnabled(key) {
   const override = builder.composition.overrides[key];
@@ -1869,26 +1876,22 @@ async function handleAvatarPicked(event) {
 // rendered page section (plans/LANDING_PAGE_CTA_AND_COMPOSITION.md phase 4).
 // A listicle is now driven by the offer (offer_type: listicle renders its items as a carousel), so the
 // page-level multi-offer carousel element was retired — see plans/LISTICLE_AND_CART.md.
-const ELEMENT_TYPES = [
-  { type: "content_block", label: "Content" },
-  { type: "product_details", label: "Product Details" },
-  { type: "testimonials", label: "Testimonials" },
-  { type: "rating", label: "Rating" },
-  { type: "client_marquee", label: "Client Logos" },
-  { type: "faq", label: "FAQ" },
-];
+// The addable body elements come from the shared element catalog (Builder Reframe) — one source, one label.
+const ELEMENT_TYPES = computed(() => addableElements());
 
-function elementLabel(type) {
-  return ELEMENT_TYPES.find((entry) => entry.type === type)?.label || type;
+// Logos with a real image, for the marquee preview (kept out of the template to avoid an inline arrow there).
+function marqueeLogos(element) {
+  return (element.logos || []).filter((logo) => logo && String(logo.image_url || "").trim());
 }
 
 function newElement(type) {
   const base = { id: localId("el"), type };
+  // Sensible default headings so the tenant isn't guessing — they can always reword them.
   if (type === "content_block") return { ...base, title: "", text: "", image_url: "" };
-  if (type === "testimonials") return { ...base, heading: "", items: [{ quote: "", author: "", role: "", avatar_url: "" }] };
+  if (type === "testimonials") return { ...base, heading: "What Our Clients Say", items: [{ quote: "", author: "", role: "", avatar_url: "" }] };
   if (type === "rating") return { ...base, value: 5, count: 0, label: "" };
-  if (type === "client_marquee") return { ...base, heading: "", logos: [{ image_url: "", name: "" }] };
-  if (type === "faq") return { ...base, items: [{ question: "", answer: "" }] };
+  if (type === "client_marquee") return { ...base, heading: "Our Clients", logos: [{ image_url: "", name: "" }] };
+  if (type === "faq") return { ...base, heading: "Frequently Asked Questions", items: [{ question: "", answer: "" }] };
   // product_details is fully offer-driven (current target's gallery/badges/description) — no config.
   return base;
 }
@@ -1945,6 +1948,32 @@ async function handleElementImagePicked(element, event) {
     blurbImageErrors[element.id] = err.message || "Image upload failed.";
   } finally {
     blurbImageUploading[element.id] = false;
+  }
+}
+
+// Reusable image upload for a sub-item field (testimonial avatar, client logo) — same uploadImage() service.
+function subImgKey(element, list, index) {
+  return `${element.id}:${list}:${index}`;
+}
+function setSubImageInput(key, el) {
+  if (el) subImageInputs.value[key] = el;
+  else delete subImageInputs.value[key];
+}
+function triggerSubImageUpload(key) {
+  subImageInputs.value[key]?.click();
+}
+async function handleSubImagePicked(target, field, key, event) {
+  const file = event.target.files?.[0];
+  event.target.value = "";
+  if (!file) return;
+  subImageErrors[key] = "";
+  subImageUploading[key] = true;
+  try {
+    target[field] = await uploadImage(file);
+  } catch (err) {
+    subImageErrors[key] = err.message || "Image upload failed.";
+  } finally {
+    subImageUploading[key] = false;
   }
 }
 

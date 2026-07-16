@@ -1,31 +1,47 @@
 {
-  "_comment": "Single source of truth for Page Composition (plans/PAGE_COMPOSER.md). Read by the Python publisher (domain/composition.py) AND imported by the Vue builder (composables/pageComposer.js). Keep it data-only.",
-  "section_key_by_type": {
-    "brand_label": "brand",
-    "offer_price_selector": "offer_selector",
-    "checkout_cta": "cta"
+  "_comment": "Single source of truth for the landing-page ELEMENT CATALOG + composition (plans/PAGE_COMPOSER.md, Builder Reframe). Read by the Python publisher (domain/composition.py) AND imported by the Vue builder (composables/pageComposer.js). One vocabulary: the canonical key is the section `type` string (no aliases). Each element declares label + ui + kind + channel + heading_role + tokens; the composer uses governed_sections + offer_types.",
+  "elements": {
+    "countdown_timer":      { "label": "Countdown timer", "ui": "toggle", "kind": "capability", "channel": "body", "heading_role": "none", "repeatable": false, "tokens": ["countdown_bg", "countdown_end_bg", "countdown_text"] },
+    "brand_label":          { "label": "Brand label",     "ui": "toggle", "kind": "capability", "channel": "body", "heading_role": "none", "repeatable": false, "tokens": ["brand_label_text", "brand_dot"] },
+    "seo_title":            { "label": "SEO title",        "ui": "fixed",  "kind": "capability", "channel": "head", "heading_role": "none", "repeatable": false, "tokens": [] },
+    "hero_media":           { "label": "Hero media",       "ui": "fixed",  "kind": "core",       "channel": "body", "heading_role": "none", "repeatable": false, "tokens": ["hero_bg", "hero_border", "avatar_ring", "avatar_border"] },
+    "hero":                 { "label": "Hero headline",    "ui": "fixed",  "kind": "core",       "channel": "body", "heading_role": "h1",   "repeatable": false, "tokens": ["headline", "subheadline_text"] },
+    "headline":             { "label": "Headline",         "ui": "fixed",  "kind": "capability", "channel": "body", "heading_role": "h2",   "repeatable": false, "tokens": ["headline"] },
+    "subheadline":          { "label": "Subheadline",      "ui": "fixed",  "kind": "capability", "channel": "body", "heading_role": "none", "repeatable": false, "tokens": ["subheadline_text"] },
+    "trust_badges":         { "label": "Trust badges",     "ui": "toggle", "kind": "capability", "channel": "body", "heading_role": "none", "repeatable": false, "tokens": ["trust_badge_bg", "trust_badge_text", "trust_badge_border"] },
+    "offer_price_selector": { "label": "Price cards",      "ui": "fixed",  "kind": "core",       "channel": "body", "heading_role": "none", "repeatable": false, "tokens": ["price_card_bg", "price_card_border", "price_card_selected_border", "price_amount", "price_regular", "price_title", "price_description", "savings_bg", "savings_text", "savings_border", "featured_badge_bg", "featured_badge_text"] },
+    "product_details":      { "label": "Product details",  "ui": "add",    "kind": "capability", "channel": "body", "heading_role": "none", "repeatable": false, "tokens": ["content_text"] },
+    "content_block":        { "label": "Content block",    "ui": "add",    "kind": "capability", "channel": "body", "heading_role": "h3",   "repeatable": true,  "tokens": ["content_heading", "content_text", "content_border"] },
+    "testimonials":         { "label": "Testimonials",     "ui": "add",    "kind": "capability", "channel": "body", "heading_role": "h2",   "repeatable": true,  "tokens": ["content_heading", "content_text", "content_border"] },
+    "rating":               { "label": "Rating",           "ui": "add",    "kind": "capability", "channel": "body", "heading_role": "none", "repeatable": false, "tokens": ["content_text"] },
+    "client_marquee":       { "label": "Client logos",     "ui": "add",    "kind": "capability", "channel": "body", "heading_role": "h2",   "repeatable": false, "tokens": ["content_heading", "content_border"] },
+    "faq":                  { "label": "FAQ",              "ui": "add",    "kind": "capability", "channel": "body", "heading_role": "h2",   "repeatable": true,  "tokens": ["faq_bg", "faq_border", "faq_summary", "faq_text"] },
+    "product_carousel":     { "label": "Product carousel",  "ui": "internal", "kind": "capability", "channel": "body", "heading_role": "none", "repeatable": false, "tokens": ["price_card_bg", "price_card_border"] },
+    "checkout_cta":         { "label": "Call to action",   "ui": "fixed",  "kind": "core",       "channel": "body", "heading_role": "none", "repeatable": false, "tokens": ["cta_from", "cta_to", "cta_text", "cta_scrim"] },
+    "refund_policy":        { "label": "Refund policy",    "ui": "toggle", "kind": "capability", "channel": "body", "heading_role": "h2",   "repeatable": false, "tokens": ["refund_bg", "refund_border", "refund_summary", "refund_title", "refund_text", "refund_applies", "refund_return"] },
+    "legal_footer":         { "label": "Footer",           "ui": "fixed",  "kind": "core",       "channel": "body", "heading_role": "none", "repeatable": false, "tokens": ["legal_text", "legal_link"] }
   },
   "governed_sections": [
-    "brand",
+    "brand_label",
     "hero_media",
     "hero",
     "trust_badges",
-    "offer_selector",
-    "cta",
+    "offer_price_selector",
+    "checkout_cta",
     "refund_policy",
     "legal_footer"
   ],
   "offer_types": {
     "single": {
-      "sections": ["brand", "hero_media", "hero", "trust_badges", "offer_selector", "cta", "refund_policy", "legal_footer"],
+      "sections": ["brand_label", "hero_media", "hero", "trust_badges", "offer_price_selector", "checkout_cta", "refund_policy", "legal_footer"],
       "allowed_ctas": ["buy", "email_capture", "phone_call", "external"]
     },
     "bundle": {
-      "sections": ["brand", "hero_media", "hero", "trust_badges", "offer_selector", "cta", "refund_policy", "legal_footer"],
+      "sections": ["brand_label", "hero_media", "hero", "trust_badges", "offer_price_selector", "checkout_cta", "refund_policy", "legal_footer"],
       "allowed_ctas": ["buy", "email_capture", "phone_call", "external"]
     },
     "listicle": {
-      "sections": ["hero_media", "hero", "offer_selector", "cta", "legal_footer"],
+      "sections": ["hero_media", "hero", "offer_price_selector", "checkout_cta", "legal_footer"],
       "allowed_ctas": ["buy", "cart"]
     }
   }

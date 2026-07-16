@@ -113,10 +113,20 @@ plans/SOCIALITE_PARITY.md. A concrete first exercise for the element taxonomy be
 
 ## Follow-up — Landing Page Builder Reframe
 
-**Reclassify each element in the builder that can be added to a landing page.** Recreate and reorganize the
-builder so naming is consistent end to end: every addable/toggleable thing is a "section" with one canonical
-key that matches the composer's `section_key` (today the builder mixes "elements" — testimonials, faq — with
-"sections" — trust badges, refund — and with governed keys that alias, e.g. brand_label→brand). One
-vocabulary across the config, the composer, the builder panels, and the saved page. Each element should also
-declare its **themeable tokens** — that catalog is what powers Advanced Color Settings
-(plans/ADVANCED_COLOR_SETTINGS.md). Not yet built.
+**Reclassify each element in the builder that can be added to a landing page.** One vocabulary across the
+config, composer, builder panels, and saved page — the canonical key is the section `type` (no aliases).
+
+- **Slice 1 (shipped):** the canonical **element catalog** now lives in `composition_rules.json` under
+  `elements` — every section declares `label / ui (fixed|toggle|add|internal) / kind (core|capability) /
+  channel (body|head|sidecar) / heading_role / repeatable / tokens`. The `section_key_by_type` aliasing is
+  retired: `section_key` is identity, `governed_sections` + `offer_types[].sections` use type strings.
+  Python (`domain/composition.py`) and Vue (`composables/pageComposer.js`) both expose `element` /
+  `element_label` / addable-elements from it; the builder's `ELEMENT_TYPES` and `SECTION_KEY_LABELS`
+  duplication is gone (labels come from the catalog). Behavior identical. (Note: a pre-existing
+  `composition.overrides` keyed by the old `brand` alias would need re-toggling to `brand_label`; other
+  keys unchanged.)
+- **Slice 2 (next):** unify the builder's separate "Page Elements" (add) and "Page Sections" (toggle) panels
+  into one catalog-driven Sections panel keyed by `ui`.
+- **Later:** the catalog's `heading_role` powers plans/SEMANTIC_HTML.md; its `tokens` power
+  plans/ADVANCED_COLOR_SETTINGS.md; `channel` powers the head/sidecar output in
+  plans/LANDING_PAGE_GOAL_COMPOSITION.md.

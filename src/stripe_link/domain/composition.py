@@ -23,17 +23,25 @@ try:
 except (OSError, ValueError):
     # Degrade safely if the rules file is somehow unbundled: nothing governed -> every section visible
     # (no composition), rather than crashing the Lambda at import.
-    RULES = {"section_key_by_type": {}, "governed_sections": [], "offer_types": {}}
+    RULES = {"elements": {}, "governed_sections": [], "offer_types": {}}
 
-_SECTION_KEY_BY_TYPE: dict[str, str] = RULES.get("section_key_by_type") or {}
+ELEMENTS: dict[str, Any] = RULES.get("elements") or {}
 _GOVERNED: set[str] = set(RULES.get("governed_sections") or [])
 _OFFER_TYPES: dict[str, Any] = RULES.get("offer_types") or {}
 
 
+def element(section_type: str) -> dict[str, Any]:
+    """Catalog metadata for a section type (label / ui / kind / channel / heading_role / tokens)."""
+    return ELEMENTS.get(str(section_type or ""), {})
+
+
+def element_label(section_type: str) -> str:
+    return str(element(section_type).get("label") or section_type)
+
+
 def section_key(section_type: str) -> str:
-    """The composition key for a section type (config uses friendly keys: brand_label -> brand)."""
-    section_type = str(section_type or "")
-    return _SECTION_KEY_BY_TYPE.get(section_type, section_type)
+    """Canonical composition key. Post-Builder-Reframe the key IS the section type (no aliasing)."""
+    return str(section_type or "")
 
 
 def _offer_type_rule(offer_type: str) -> dict[str, Any]:

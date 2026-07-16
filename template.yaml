@@ -956,6 +956,8 @@ Resources:
             TableName: !Ref OffersTable
         - DynamoDBReadPolicy:
             TableName: !Ref ProductsTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref ServicesTable
         - S3CrudPolicy:
             BucketName: !Ref PagesBucket
         - S3CrudPolicy:

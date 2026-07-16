@@ -3,13 +3,29 @@
 // composition decisions — one source of truth. See plans/PAGE_COMPOSER.md.
 import rules from "../../../src/stripe_link/composition_rules.json";
 
-const SECTION_KEY_BY_TYPE = rules.section_key_by_type || {};
+const ELEMENTS = rules.elements || {};
 const GOVERNED = new Set(rules.governed_sections || []);
 const OFFER_TYPES = rules.offer_types || {};
 
-// Config uses friendly keys (brand_label -> brand); map a section type to its composition key.
+// Canonical composition key. Post-Builder-Reframe the key IS the section type (no aliasing).
 export function sectionKey(sectionType) {
-  return SECTION_KEY_BY_TYPE[sectionType] || sectionType;
+  return sectionType;
+}
+
+// Catalog metadata for a section type (label / ui / kind / channel / heading_role / tokens).
+export function element(sectionType) {
+  return ELEMENTS[sectionType] || {};
+}
+
+export function elementLabel(sectionType) {
+  return element(sectionType).label || sectionType;
+}
+
+// Section types the tenant adds as body content (the "+ Add" menu).
+export function addableElements() {
+  return Object.entries(ELEMENTS)
+    .filter(([, meta]) => meta.ui === "add")
+    .map(([type, meta]) => ({ type, label: meta.label || type }));
 }
 
 function offerTypeRule(offerType) {

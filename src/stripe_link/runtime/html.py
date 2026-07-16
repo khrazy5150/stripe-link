@@ -526,8 +526,12 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     "    .sl-rating-meta{font-size:1.4rem;color:var(--sl-content-text)}",
     "    .sl-client-marquee{overflow:hidden}",
     "    .sl-marquee-track{display:flex;width:max-content;animation:sl-marquee 30s linear infinite}",
-    "    .sl-marquee-row{display:flex;align-items:center;gap:3.2rem;padding-right:3.2rem}",
-    "    .sl-marquee-logo img{height:4rem;width:auto;object-fit:contain;filter:grayscale(1);opacity:0.75}",
+    "    .sl-marquee-row{display:flex;align-items:center;gap:1.6rem;padding-right:1.6rem}",
+    # Few logos -> centered + static; many (>=5) -> the rolling track above.
+    "    .sl-marquee-static{display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:1.6rem}",
+    # Logos sit on a light chip so they stay visible on any theme (dark logos on a dark page vanish otherwise).
+    "    .sl-marquee-logo{display:inline-flex;align-items:center;justify-content:center;background:#ffffff;border-radius:0.8rem;padding:0.8rem 1.2rem;box-shadow:0 1px 3px rgba(0,0,0,.08)}",
+    "    .sl-marquee-logo img{height:3.2rem;width:auto;object-fit:contain}",
     "    @keyframes sl-marquee{from{transform:translateX(0)}to{transform:translateX(-50%)}}",
     "    @media (prefers-reduced-motion: reduce){.sl-marquee-track{animation:none;flex-wrap:wrap}}",
     "    .sl-carousel-track{display:flex;gap:1.6rem;overflow-x:auto;scroll-snap-type:x mandatory;padding-bottom:1.2rem;-webkit-overflow-scrolling:touch}",
@@ -1751,15 +1755,22 @@ def render_client_marquee(section: dict[str, Any]) -> str:
         f"<span class=\"sl-marquee-logo\">{responsive_img(str(logo.get('image_url')), str(logo.get('name') or 'Client'), sizes=CONTENT_BLOCK_SIZES)}</span>"
         for logo in logos
     )
-    heading = str(section.get("heading") or "").strip()
+    heading = str(section.get("heading") or "Our Clients").strip()
     heading_html = f"      <h2 class=\"sl-section-heading\">{render_headline_markup(heading)}</h2>" if heading else ""
+    # Roll only when there are enough logos to justify it (>= 5); otherwise show them centered and static.
+    if len(logos) >= 5:
+        body = [
+            "      <div class=\"sl-marquee-track\">",
+            f"        <div class=\"sl-marquee-row\">{items}</div>",
+            f"        <div class=\"sl-marquee-row\" aria-hidden=\"true\">{items}</div>",
+            "      </div>",
+        ]
+    else:
+        body = [f"      <div class=\"sl-marquee-static\">{items}</div>"]
     return "\n".join(line for line in [
         f"    <section class=\"sl-client-marquee\" data-section-id=\"{escape(str(section.get('id', 'client-marquee')))}\" data-section-type=\"client_marquee\">",
         heading_html,
-        "      <div class=\"sl-marquee-track\">",
-        f"        <div class=\"sl-marquee-row\">{items}</div>",
-        f"        <div class=\"sl-marquee-row\" aria-hidden=\"true\">{items}</div>",
-        "      </div>",
+        *body,
         "    </section>",
     ] if line)
 

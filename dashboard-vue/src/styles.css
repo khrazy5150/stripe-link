@@ -3687,6 +3687,18 @@ button:disabled {
   margin-top: 0.8rem;
 }
 
+.composition-subhead {
+  margin-top: 1.6rem;
+  margin-bottom: 0.4rem;
+  font-size: 1.15rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted, #6b7280);
+  border-top: 1px solid var(--border, #e5e7eb);
+  padding-top: 1.2rem;
+}
+
 .composition-row {
   display: flex;
   align-items: center;
@@ -3820,18 +3832,27 @@ button:disabled {
 
 .preview-marquee-row {
   display: flex;
-  gap: 2.4rem;
+  gap: 1.2rem;
   flex-wrap: wrap;
   align-items: center;
   justify-content: center;
+}
+
+/* Logos on a light chip so they stay visible on any theme (dark logos on a dark preview vanish otherwise). */
+.preview-marquee-logo {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: #ffffff;
+  border-radius: 0.8rem;
+  padding: 0.6rem 1rem;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
 }
 
 .preview-marquee-row img {
   height: 3.2rem;
   width: auto;
   object-fit: contain;
-  filter: grayscale(1);
-  opacity: 0.75;
 }
 
 .carousel-offer-picker {

@@ -3,6 +3,8 @@ import unittest
 from stripe_link.domain.composition import (
     allowed_ctas,
     compose_page,
+    element,
+    element_label,
     is_section_visible,
     optional_section_keys,
     recommended_section_keys,
@@ -27,11 +29,19 @@ class CompositionTests(unittest.TestCase):
             page["composition"] = {"overrides": overrides}
         return page
 
-    def test_section_key_alias(self):
-        self.assertEqual(section_key("brand_label"), "brand")
-        self.assertEqual(section_key("offer_price_selector"), "offer_selector")
-        self.assertEqual(section_key("checkout_cta"), "cta")
-        self.assertEqual(section_key("hero"), "hero")
+    def test_section_key_is_identity_after_reframe(self):
+        # One vocabulary: the composition key IS the section type (no aliasing).
+        self.assertEqual(section_key("brand_label"), "brand_label")
+        self.assertEqual(section_key("offer_price_selector"), "offer_price_selector")
+        self.assertEqual(section_key("checkout_cta"), "checkout_cta")
+
+    def test_element_catalog_metadata(self):
+        self.assertEqual(element_label("offer_price_selector"), "Price cards")
+        self.assertEqual(element_label("checkout_cta"), "Call to action")
+        self.assertEqual(element("hero")["heading_role"], "h1")
+        self.assertEqual(element("trust_badges")["ui"], "toggle")
+        self.assertEqual(element("faq")["ui"], "add")
+        self.assertEqual(element_label("unknown_type"), "unknown_type")  # graceful fallback
 
     def test_single_shows_governed_defaults(self):
         types = [s["type"] for s in compose_page({"offer_type": "single"}, self._page())]
