@@ -99,6 +99,29 @@ available but out of the way.
 4. Quality-baseline warnings (a11y/CLS) as a page-health checklist.
 5. Feed the composed scaffold to Build with AI.
 
+## Status — Phase 3a shipped (head channel + structured data)
+
+`channel` is now enforced: `body` sections render into `<main>`, `head` into `<head>`. **structured_data** is
+the first head section — governed, in no offer_type base, granted only by the `discoverability` pack. So
+`search_seo` finally composes differently from `paid_ads`, and the pack `sections` half is live.
+
+The JSON-LD is **derived, never entered**: `Product` + `AggregateOffer` from `landing_page_offer_prices()`
+(the same filter the price cards paint, because Google requires markup to match visible content), and
+`FAQPage` from the composed faq section through the same title-casing `render_faq` applies.
+
+**Never emitted** (both pinned by tests): `AggregateRating` — the rating element is a hand-typed number with
+no verifiable source, so marking it up would be fabricated review data (Google policy + the FTC rule on
+deceptive ratings); and `LocalBusiness`/`Service`, which needs the Business Profile's NAP.
+
+Also landed: the builder gained a **Page Goal selector** (goal was create-only, so Phase 3 could never have
+reached an existing page — changing it re-composes governed sections but never re-seeds content, which stays
+the tenant's), `seo_title`'s channel was corrected from `head` to `body` (it renders a visible `<p>`), and
+`SUPPORTED_PAGE_SECTION_TYPES` now derives from the element catalog instead of duplicating it.
+
+**Phase 3 remainder:** the sidecar channel + `llms_txt` (needs `artifact_targets` to emit a second artifact
+and `publish_page_document` to carry per-target body + content-type, plus routing), and the Discoverability
+drawer.
+
 ## Status — Phases 1 + 2 shipped
 
 `goal` is a first-class page field, the wizard asks for it, and the composer takes it as a second input.
