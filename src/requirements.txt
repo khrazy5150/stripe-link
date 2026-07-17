@@ -1,1 +1,4 @@
-boto3
+# Intentionally empty. The AWS Lambda Python runtime already provides boto3/botocore, so listing it here
+# bundled a redundant ~24MB botocore into every function package (49 of them), which dominated cold-start
+# time (~6.5s). All other imports are the standard library. If a genuine third-party dep is ever needed,
+# add it here — but never boto3.
