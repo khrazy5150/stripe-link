@@ -118,7 +118,31 @@ reached an existing page — changing it re-composes governed sections but never
 the tenant's), `seo_title`'s channel was corrected from `head` to `body` (it renders a visible `<p>`), and
 `SUPPORTED_PAGE_SECTION_TYPES` now derives from the element catalog instead of duplicating it.
 
-**Phase 3 remainder:** the Discoverability drawer, and the sidecar channel + `llms_txt`.
+**Discoverability drawer — shipped.** Non-visible (`head`/`sidecar`) sections get their own collapsed drawer
+in the builder instead of sitting in Page Sections next to visible toggles. It shows *what will be emitted*
+(mirroring `render_structured_data`'s conditions) and surfaces **structured-data health warnings** returned
+by `/pages/render` — thin markup (no image, no description, no category, unset condition, no SKU) is flagged
+as a nudge, never a publish gate. Product richness landed too: single `Offer` at the displayed price (not an
+AggregateOffer range), numeric price, product name (not the offer headline), 1920px image, humanized
+category, `sku` (auto-generated, stable) and `itemCondition` (stated, never assumed) — verified passing
+Google's Rich Results Test.
+
+**Phase 3 remainder:** the sidecar channel + `llms_txt` (blocked, see below).
+
+**Phase 4 — quality-baseline warnings — NOT built.** The plan's "three buckets" (line 45) call for a quality
+baseline surfaced as *warnings, never toggles*: accessibility (landmarks, alt text, focus order), a valid
+heading outline / semantic HTML (plans/SEMANTIC_HTML.md — one H1, ordered H2/H3, publish-time outline
+validator), and layout stability (reserved image dimensions, no CLS). The structured-data warnings shipped in
+Phase 3a are the *first* member of this checklist; the a11y / heading-outline / CLS checks are still open.
+This is the clearest unblocked next step in this plan, and it overlaps with plans/SEMANTIC_HTML.md's
+publish-time outline validator.
+
+**Phase 5 — Build with AI — NOT built** (its own plan, [[AI_AND_COMMERCE_ARCHITECTURE]]). The scaffold this
+phase produces is the brief AI fills.
+
+**Blocked on plans/BUSINESS_PROFILE_AND_GBP.md:** `LocalBusiness` / `Service` + `AggregateRating` JSON-LD.
+Phase 3a deliberately omits both — AggregateRating because the rating element is a hand-typed number with no
+verifiable source, LocalBusiness because it needs a canonical NAP. Business Profile P1 unblocks both.
 
 ### llms.txt is blocked on something owning a domain root (found 2026-07-17)
 
