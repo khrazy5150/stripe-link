@@ -55,7 +55,20 @@ def _offer_type_rule(offer_type: str) -> dict[str, Any]:
 
 
 def supported_goals() -> list[str]:
+    """Every goal a page may legally store, INCLUDING deprecated ones. Deleting a goal outright would strand
+    pages that already reference it — they would stop validating, so they could not be saved or even
+    re-rendered. Retiring is therefore additive: mark it `deprecated` and it stays valid forever while
+    disappearing from the wizard (see offerable_goals)."""
     return list(_GOALS.keys())
+
+
+def offerable_goals() -> list[str]:
+    """Goals a NEW page may choose — what the wizard lists. Excludes deprecated ones."""
+    return [name for name, meta in _GOALS.items() if not (meta or {}).get("deprecated")]
+
+
+def goal_deprecated(goal: str) -> bool:
+    return bool((_GOALS.get(str(goal or "")) or {}).get("deprecated"))
 
 
 def goal_label(goal: str) -> str:

@@ -1,13 +1,17 @@
 import unittest
+from unittest.mock import patch
 
+from stripe_link.domain import composition as composition_module
 from stripe_link.domain.composition import (
     allowed_ctas,
     compose_page,
     default_visible,
     element,
     element_label,
+    goal_deprecated,
     goal_packs,
     is_section_visible,
+    offerable_goals,
     optional_section_keys,
     pack_seeds,
     page_goal,
@@ -162,6 +166,37 @@ class GoalCompositionTests(unittest.TestCase):
         self.assertFalse(is_section_visible("listicle", "trust_badges", {}, "minimal"))
         # Ungoverned body elements ignore the goal entirely — presence is the opt-in.
         self.assertTrue(is_section_visible("single", "faq", {}, "paid_ads"))
+
+
+
+class GoalDeprecationTests(unittest.TestCase):
+    """Retiring a goal has to be additive. Deleting one outright strands every page that already stores it:
+    the page stops validating, so it can be neither saved nor re-rendered. `deprecated` hides a goal from the
+    wizard while it keeps validating and composing forever."""
+
+    DEPRECATED = {
+        "paid_ads": {"label": "Paid ads", "note": "", "packs": []},
+        "social": {"label": "Social", "note": "", "packs": ["social_proof"], "deprecated": True},
+    }
+
+    def test_nothing_is_deprecated_today(self):
+        self.assertEqual(offerable_goals(), supported_goals())
+        for goal in supported_goals():
+            self.assertFalse(goal_deprecated(goal))
+
+    def test_deprecated_goal_is_not_offered_but_stays_legal(self):
+        with patch.dict(composition_module._GOALS, self.DEPRECATED, clear=True):
+            self.assertEqual(offerable_goals(), ["paid_ads"])
+            # ...but it remains in supported_goals(), which is what the page validator enforces.
+            self.assertIn("social", supported_goals())
+            self.assertTrue(goal_deprecated("social"))
+
+    def test_deprecated_goal_still_composes_its_packs(self):
+        # An existing page keeps rendering exactly as before it was retired — deprecation is a wizard
+        # concern, never a composition one.
+        with patch.dict(composition_module._GOALS, self.DEPRECATED, clear=True):
+            self.assertEqual(goal_packs("social"), ["social_proof"])
+            self.assertEqual(pack_seeds("social"), ["testimonials", "rating", "client_marquee"])
 
 
 

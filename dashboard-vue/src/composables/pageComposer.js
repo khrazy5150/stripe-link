@@ -43,12 +43,17 @@ export function isGoverned(sectionType) {
 // where its traffic comes from, and enables capability packs on top of the offer_type base. Packs only ever
 // union, so a page with no goal composes exactly as it did before goals existed.
 // ---------------------------------------------------------------------------------------------------
+// Goals a NEW page may choose — what the wizard lists. A retired goal is marked `deprecated` rather than
+// deleted: deleting it would strand pages that already store it (they would stop validating, so they could
+// not be saved or re-rendered). Deprecated goals stay valid and keep composing; they just aren't offered.
 export function supportedGoals() {
-  return Object.entries(GOALS).map(([value, meta]) => ({
-    value,
-    label: meta.label || value,
-    note: meta.note || "",
-  }));
+  return Object.entries(GOALS)
+    .filter(([, meta]) => !meta.deprecated)
+    .map(([value, meta]) => ({
+      value,
+      label: meta.label || value,
+      note: meta.note || "",
+    }));
 }
 
 export function goalLabel(goal) {
