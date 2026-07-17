@@ -9,6 +9,7 @@ from stripe_link.domain.documents import (
 from stripe_link.domain.pricing import PricingError
 from stripe_link.runtime.html import (
     RenderError,
+    accessibility_warnings,
     heading_outline_warnings,
     render_page,
     structured_data_warnings,
@@ -87,9 +88,9 @@ def handler(event, context):
             "html": html,
             "warnings": {
                 "structured_data": structured_data_warnings(offer, products_by_id, services_by_id),
-                # Quality baseline: heading outline now, a11y/CLS later (plans/LANDING_PAGE_GOAL_COMPOSITION.md
-                # Phase 4). Checked on the rendered HTML — the source of truth for what ships.
-                "page_health": heading_outline_warnings(html),
+                # Quality baseline (plans/LANDING_PAGE_GOAL_COMPOSITION.md Phase 4): heading outline +
+                # accessibility (CLS next). Checked on the rendered HTML — the source of truth for what ships.
+                "page_health": heading_outline_warnings(html) + accessibility_warnings(html),
             },
         })
     except (DocumentValidationError, PricingError, RenderError, ValueError) as exc:

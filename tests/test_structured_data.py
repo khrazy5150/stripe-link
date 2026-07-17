@@ -3,7 +3,7 @@ import json
 import re
 import unittest
 
-from stripe_link.runtime.html import heading_outline_warnings, render_page, structured_data_warnings
+from stripe_link.runtime.html import accessibility_warnings, heading_outline_warnings, render_page, structured_data_warnings
 from tests.test_page_render import load_fixture
 
 
@@ -252,6 +252,41 @@ class HeadingOutlineWarningTests(unittest.TestCase):
     def test_head_h1_does_not_count(self):
         # Only body headings matter; a stray H1 in head must not satisfy the H1 requirement.
         self.assertTrue(any("no main heading" in w for w in heading_outline_warnings(self._body("<h2>A</h2>"))))
+
+
+
+class AccessibilityWarningTests(unittest.TestCase):
+    """Content images need alt text (plans/LANDING_PAGE_GOAL_COMPOSITION.md Phase 4). Warnings only."""
+
+    def _body(self, inner):
+        return f"<html><head></head><body><main>{inner}</main></body></html>"
+
+    def test_real_pages_have_alt_on_every_image(self):
+        # The renderer fills alt from offer/product data — hero, gallery, avatar included.
+        offer = load_fixture("offer-creatine-standard.json")
+        product = load_fixture("product-creatine-gummies.json")
+        page = load_fixture("page-creatine-standard.json")
+        html = render_page(page, offer, {product["product_id"]: product})
+        self.assertEqual(accessibility_warnings(html), [])
+
+    def test_missing_alt_attribute_is_flagged(self):
+        self.assertTrue(accessibility_warnings(self._body('<img src="x.png">')))
+
+    def test_empty_alt_is_flagged(self):
+        self.assertTrue(accessibility_warnings(self._body('<img src="x.png" alt="">')))
+        self.assertTrue(accessibility_warnings(self._body('<img src="x.png" alt="   ">')))
+
+    def test_descriptive_alt_passes(self):
+        self.assertEqual(accessibility_warnings(self._body('<img src="x.png" alt="Creatine Gummies bottle">')), [])
+
+    def test_decorative_images_opt_out(self):
+        # alt="" is correct for decorative images IF they're hidden from the a11y tree.
+        self.assertEqual(accessibility_warnings(self._body('<img src="x.png" alt="" aria-hidden="true">')), [])
+        self.assertEqual(accessibility_warnings(self._body('<img src="x.png" alt="" role="presentation">')), [])
+
+    def test_counts_multiple(self):
+        w = accessibility_warnings(self._body('<img src="a"><img src="b" alt=""><img src="c" alt="ok">'))
+        self.assertIn("2 images", w[0])
 
 
 

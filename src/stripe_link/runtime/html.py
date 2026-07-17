@@ -913,7 +913,8 @@ def render_product_details(
     gallery = [url for url in (product.get("gallery") or []) if url]
     badges = [str(b.get("label") if isinstance(b, dict) else b) for b in (product.get("badges") or []) if b]
     description = str(product.get("subheadline") or "")
-    gallery_html = "".join(f"<img class=\"sl-details-thumb\" src=\"{escape(str(url))}\" loading=\"lazy\" alt=\"\">" for url in gallery)
+    gallery_alt = escape(str(product.get("headline") or "Product image"))
+    gallery_html = "".join(f"<img class=\"sl-details-thumb\" src=\"{escape(str(url))}\" loading=\"lazy\" alt=\"{gallery_alt}\">" for url in gallery)
     badges_html = "".join(f"<span class=\"sl-details-badge\">{escape(str(b))}</span>" for b in badges)
     gallery_hidden = "" if gallery else " style=\"display:none\""
     badges_hidden = "" if badges else " style=\"display:none\""
@@ -1139,9 +1140,11 @@ def render_hero_overlays(section: dict[str, Any], offer: dict[str, Any]) -> list
             )
     avatar_url = str(section.get("avatar_url") or "")
     if avatar_url:
+        # The avatar carries brand identity, so it's a content image — name it (brand text, else the offer).
+        avatar_alt = escape(str(section.get("brand_text") or offer.get("name") or "Brand avatar"))
         lines.append(
             f"      <div class=\"sl-avatar-wrap\"><img class=\"sl-avatar\" src=\"{escape(avatar_url)}\" "
-            "alt=\"\" loading=\"lazy\" decoding=\"async\"></div>"
+            f"alt=\"{avatar_alt}\" loading=\"lazy\" decoding=\"async\"></div>"
         )
     return lines
 
@@ -1384,8 +1387,10 @@ def render_listicle_carousel(
     first = slides[0]
     first_discount = round((first["compare_at"] - first["amount"]) / first["compare_at"] * 100) if first["compare_at"] > first["amount"] > 0 else 0
     image_url = str(first.get("image") or "")
-    # Plain <img> (not srcset) so the hero_image binder can swap src cleanly as the target changes.
-    image_html = f"<img data-conversion-bind=\"hero_image\" src=\"{escape(image_url)}\" alt=\"\" loading=\"lazy\" decoding=\"async\">" if image_url else ""
+    # Plain <img> (not srcset) so the hero_image binder can swap src cleanly as the target changes. alt is the
+    # first item's name (the JS binder swaps src on target change; a descriptive default beats an empty alt).
+    hero_alt = escape(str(first.get("name") or offer.get("name") or "Product"))
+    image_html = f"<img data-conversion-bind=\"hero_image\" src=\"{escape(image_url)}\" alt=\"{hero_alt}\" loading=\"lazy\" decoding=\"async\">" if image_url else ""
     option_class = "sl-price-option sl-listicle-option" + ("" if image_url else " no-img")
     add_label = escape(str(listicle_add_label(offer)))
     return "\n".join([
@@ -1606,6 +1611,32 @@ def heading_outline_warnings(html: str) -> list[str]:
         previous = level
 
     return warnings
+
+
+_IMG_RE = re.compile(r"<img\b[^>]*>", re.IGNORECASE)
+
+
+def accessibility_warnings(html: str) -> list[str]:
+    """Accessibility checks on the rendered body (the quality baseline, plans/LANDING_PAGE_GOAL_COMPOSITION.md
+    Phase 4). Warnings, never gates.
+
+    Content images need descriptive alt text — screen readers announce it, and Google reads it. A genuinely
+    decorative image opts out the accessible way, with `alt=""` PLUS `aria-hidden="true"` or
+    `role="presentation"`; those are skipped. Everything else with a missing or empty alt is flagged. The
+    renderer fills alt from offer/product data, so this mostly catches regressions and tenant-data edge cases.
+    """
+    body = html.split("<body>", 1)[-1].split("</body>", 1)[0]
+    missing = 0
+    for tag in _IMG_RE.findall(body):
+        if re.search(r'\baria-hidden="true"', tag, re.IGNORECASE) or re.search(r'\brole="presentation"', tag, re.IGNORECASE):
+            continue  # deliberately decorative — correctly excluded from the accessibility tree
+        alt = re.search(r'\balt="([^"]*)"', tag, re.IGNORECASE)
+        if alt is None or not alt.group(1).strip():
+            missing += 1
+    if missing:
+        noun = "image is" if missing == 1 else "images are"
+        return [f"{missing} {noun} missing alt text. Describe each image so screen readers and search engines can use it."]
+    return []
 
 
 def structured_data_warnings(
