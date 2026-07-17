@@ -96,4 +96,6 @@ is the specialized case (question = `h3`, plus schema).
 - How deep sections may nest (`h3` only, or `h4` for long pages).
 - Validator strictness per rule (warn vs. block).
 - `<title>` generation: templated + derived (`[Service] in [City] | [Modifier]` from offer + Business Profile)
-  vs. manual, vs. AI-written.
+  vs. manual, vs. AI-written. **The default-content side of this — proper titles/headlines/brand/description
+  by default, not the offer's internal "… Single Offer" label — is its own future phase:
+  plans/LANDING_PAGE_DEFAULT_COPY.md.**

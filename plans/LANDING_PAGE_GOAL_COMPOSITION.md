@@ -98,6 +98,10 @@ available but out of the way.
    Discoverability drawer.
 4. Quality-baseline warnings (a11y/CLS) as a page-health checklist.
 5. Feed the composed scaffold to Build with AI.
+6. (future) **Proper default copy** — titles, headlines, brand, and description derived from the product so
+   an untouched page ships solid, instead of the offer's internal disambiguation label ("NAD Supplement
+   Single Offer") leaking into the brand, `<h1>`, `<title>`, and description. See
+   plans/LANDING_PAGE_DEFAULT_COPY.md. Front-loads quality for both tenants and the AI builder.
 
 ## Status — Phase 3a shipped (head channel + structured data)
 
