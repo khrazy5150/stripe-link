@@ -45,7 +45,7 @@ Slots directly into [[PAGE_COMPOSER]] + the goal axis ([[LANDING_PAGE_GOAL_COMPO
   the `social_proof` pack (testimonials/ratings). No new page surface; a new feed into existing slots.
 - **Structured data** — `LocalBusiness` / `Service` + `AggregateRating` JSON-LD, derived from the profile,
   emitted via the `discoverability` pack on the `head` channel. Lights up for service/appointment
-  offer_types on local/SEO goals. Zero manual entry.
+  offer_types on local/SEO goals. Zero manual entry. The richer schema shape (specific @type, geo, hours) and the BODY-side local signals (localized alt, `<figcaption>` NAP, image dimensions, NAP consistency) are plans/LOCAL_SEO_SIGNALS.md, which is gated on this profile.
 
 ## Phasing
 
