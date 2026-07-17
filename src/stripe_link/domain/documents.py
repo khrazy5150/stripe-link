@@ -2,7 +2,7 @@ import re
 from decimal import Decimal
 from typing import Any
 
-from stripe_link.domain.composition import supported_goals
+from stripe_link.domain.composition import ELEMENTS, supported_goals
 
 
 class DocumentValidationError(ValueError):
@@ -18,27 +18,13 @@ CSS_COLOR_PATTERN = re.compile(
 )
 FONT_FAMILY_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 ._-]{0,79}$")
 HTTP_URL_PATTERN = re.compile(r"^https?://[^\s\"'<>]+$")
-SUPPORTED_PAGE_SECTION_TYPES = {
-    "brand_label",
-    "checkout_cta",
-    "client_marquee",
-    "content_block",
-    "countdown_timer",
-    "faq",
-    "headline",
-    "hero",
-    "hero_media",
-    "legal_footer",
-    "offer_price_selector",
-    "product_carousel",
-    "product_details",
-    "rating",
-    "refund_policy",
-    "seo_title",
-    "subheadline",
-    "testimonials",
-    "trust_badges",
-}
+# The legal section types ARE the element catalog keys, so derive them from composition_rules.json rather
+# than keeping a second copy here. The two had been identical by hand-maintenance alone, and the drift bites
+# late and confusingly: adding an element made it composable and renderable but not *storable*, which
+# surfaced only as a 400 from /pages/render. Empty means the rules file failed to load (composition.py
+# degrades rather than raising at import) — accept any type then instead of rejecting every page; the
+# renderer already falls back to an empty section for a type it doesn't know.
+SUPPORTED_PAGE_SECTION_TYPES = set(ELEMENTS.keys())
 SUPPORTED_PAGE_TEMPLATES = {"universal_bundle"}
 # The goal enum comes from composition_rules.json — the composer's source of truth — so the goals a page may
 # store can never drift from the goals the composer understands. Empty means the rules file failed to load
@@ -937,7 +923,10 @@ def validate_page_document(document: dict[str, Any]) -> None:
         if not isinstance(section, dict):
             raise DocumentValidationError("Each page section must be an object.")
         section_id = require_string(section, "id", "Page section id")
-        section_type = require_enum(section, "type", SUPPORTED_PAGE_SECTION_TYPES, "Page section type")
+        if SUPPORTED_PAGE_SECTION_TYPES:
+            section_type = require_enum(section, "type", SUPPORTED_PAGE_SECTION_TYPES, "Page section type")
+        else:
+            section_type = require_string(section, "type", "Page section type")
         if section_id in section_ids:
             raise DocumentValidationError(f"Duplicate page section id '{section_id}'.")
         section_ids.add(section_id)

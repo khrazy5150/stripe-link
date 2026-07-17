@@ -3,7 +3,7 @@
   "elements": {
     "countdown_timer":      { "label": "Countdown timer", "ui": "toggle", "kind": "capability", "channel": "body", "heading_role": "none", "repeatable": false, "tokens": ["countdown_bg", "countdown_end_bg", "countdown_text"] },
     "brand_label":          { "label": "Brand label",     "ui": "toggle", "kind": "capability", "channel": "body", "heading_role": "none", "repeatable": false, "tokens": ["brand_label_text", "brand_dot"] },
-    "seo_title":            { "label": "SEO title",        "ui": "fixed",  "kind": "capability", "channel": "head", "heading_role": "none", "repeatable": false, "tokens": [] },
+    "seo_title":            { "label": "SEO title",        "ui": "fixed",  "kind": "capability", "channel": "body", "heading_role": "none", "repeatable": false, "tokens": [] },
     "hero_media":           { "label": "Hero media",       "ui": "fixed",  "kind": "core",       "channel": "body", "heading_role": "none", "repeatable": false, "tokens": ["hero_bg", "hero_border", "avatar_ring", "avatar_border"] },
     "hero":                 { "label": "Hero headline",    "ui": "fixed",  "kind": "core",       "channel": "body", "heading_role": "h1",   "repeatable": false, "tokens": ["headline", "subheadline_text"] },
     "headline":             { "label": "Headline",         "ui": "fixed",  "kind": "capability", "channel": "body", "heading_role": "h1",   "repeatable": false, "tokens": ["headline"] },
@@ -15,6 +15,7 @@
     "testimonials":         { "label": "Testimonials",     "ui": "add",    "kind": "capability", "channel": "body", "heading_role": "h2",   "repeatable": true,  "tokens": ["content_heading", "content_text", "content_border"] },
     "rating":               { "label": "Rating",           "ui": "add",    "kind": "capability", "channel": "body", "heading_role": "none", "repeatable": false, "tokens": ["content_text"] },
     "client_marquee":       { "label": "Client logos",     "ui": "add",    "kind": "capability", "channel": "body", "heading_role": "h2",   "repeatable": false, "tokens": ["content_heading", "content_border"] },
+    "structured_data":      { "label": "Structured data (SEO)", "ui": "toggle", "kind": "capability", "channel": "head", "heading_role": "none", "repeatable": false, "tokens": [] },
     "faq":                  { "label": "FAQ",              "ui": "add",    "kind": "capability", "channel": "body", "heading_role": "h2",   "repeatable": true,  "tokens": ["faq_bg", "faq_border", "faq_summary", "faq_text"] },
     "product_carousel":     { "label": "Product carousel",  "ui": "internal", "kind": "capability", "channel": "body", "heading_role": "none", "repeatable": false, "tokens": ["price_card_bg", "price_card_border"] },
     "checkout_cta":         { "label": "Call to action",   "ui": "fixed",  "kind": "core",       "channel": "body", "heading_role": "none", "repeatable": false, "tokens": ["cta_from", "cta_to", "cta_text", "cta_scrim"] },
@@ -51,7 +52,8 @@
     "offer_price_selector",
     "checkout_cta",
     "refund_policy",
-    "legal_footer"
+    "legal_footer",
+    "structured_data"
   ],
   "offer_types": {
     "single": {
@@ -69,7 +71,7 @@
   },
   "_goal_comment": "Second composition axis: the tenant's GOAL / traffic source (plans/LANDING_PAGE_GOAL_COMPOSITION.md). A goal enables capability PACKS on top of the offer_type base \u2014 never a hand-maintained offer_type x goal matrix. Packs are union-only: they add, never remove, so a page with no goal composes exactly as it did before goals existed (no migration). A pack has two halves because the two kinds of section behave differently. `seeds` are content-bearing body elements (faq, testimonials, ...) that render nothing until a tenant fills them in \u2014 the create wizard seeds them as empty scaffolds into builder state and they are tenant-owned from then on, so changing goal never deletes copy. `sections` are governed sections the goal turns on; that suits DERIVED head/sidecar output (structured_data, llms_txt) needing no tenant input, and is empty until those exist (Phase 3) \u2014 the mechanism is here so they slot in without a renderer change. Editing guide: docs/CONFIGURING_GOALS.md. NEVER delete or rename a goal \u2014 pages that stored it would stop validating and could no longer be saved or re-rendered. Retire one with \"deprecated\": true, which hides it from the wizard while existing pages keep validating and composing.",
   "packs": {
-    "discoverability": { "label": "Discoverability", "seeds": ["faq"], "sections": [] },
+    "discoverability": { "label": "Discoverability", "seeds": ["faq"], "sections": ["structured_data"] },
     "social_proof":    { "label": "Social proof",    "seeds": ["testimonials", "rating", "client_marquee"], "sections": [] }
   },
   "goals": {

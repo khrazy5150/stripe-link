@@ -45,6 +45,14 @@ def element_label(section_type: str) -> str:
     return str(element(section_type).get("label") or section_type)
 
 
+def element_channel(section_type: str) -> str:
+    """Where a section renders: "body" (visible markup), "head" (meta / JSON-LD) or "sidecar" (its own
+    artifact, e.g. /llms.txt). The renderer routes composed sections by this, so head sections are ordinary
+    composed sections that simply don't paint pixels (plans/LANDING_PAGE_GOAL_COMPOSITION.md). Unknown or
+    unset defaults to "body" — the safe assumption for any element predating channels."""
+    return str(element(section_type).get("channel") or "body")
+
+
 def section_key(section_type: str) -> str:
     """Canonical composition key. Post-Builder-Reframe the key IS the section type (no aliasing)."""
     return str(section_type or "")

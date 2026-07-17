@@ -313,6 +313,18 @@
                   </option>
                 </select>
               </label>
+              <!-- The goal is set in the create wizard, but it must stay editable: it drives composition, so
+                   a page frozen on its original goal could never gain (or drop) what a goal governs. -->
+              <label class="offer-field">
+                <span>Page Goal</span>
+                <select v-model="builder.goal">
+                  <option value="">Not set</option>
+                  <option v-for="option in goalOptions" :key="option.value" :value="option.value">
+                    {{ option.label }}
+                  </option>
+                </select>
+                <small>{{ builderGoalNote }}</small>
+              </label>
             </div>
 
             <div class="offer-two-column">
@@ -881,6 +893,14 @@ function sectionVisible(sectionType) {
 // sections its capability packs enable (plans/LANDING_PAGE_GOAL_COMPOSITION.md). "" = a page from before
 // goals existed, which composes from the base alone.
 const builderGoal = computed(() => builder.goal || "");
+// Changing the goal here re-composes governed sections (e.g. structured data appears for Search / SEO). It
+// deliberately does NOT re-seed content elements: seeds are a create-time starting point and become the
+// tenant's, so switching goal must never inject or delete their written copy.
+const builderGoalNote = computed(() => {
+  if (!builder.goal) return "No goal set. The page composes from the offer type alone.";
+  const option = goalOptions.value.find((entry) => entry.value === builder.goal);
+  return option ? option.note : "";
+});
 // Governed sections a tenant can toggle for this offer type + goal (Recommended = on by default).
 const recommendedSections = computed(() => recommendedSectionKeys(builderOfferType.value, builderGoal.value));
 const optionalSections = computed(() => optionalSectionKeys(builderOfferType.value, builderGoal.value));
@@ -1611,6 +1631,13 @@ function builderSections(intent) {
     type: "legal_footer",
     copyright: defaultFooterCopyrightTemplate,
   });
+  // Derived head section: carries no tenant fields — render_structured_data generates the JSON-LD from the
+  // offer and the sections the composer put on the page. It exists in sections[] only because compose_page
+  // filters rather than adds, so the section has to be present for the composer to keep it. The goal turns
+  // it on via the discoverability pack (plans/LANDING_PAGE_GOAL_COMPOSITION.md).
+  if (sectionVisible("structured_data")) {
+    sections.push({ id: "structured-data", type: "structured_data" });
+  }
   return sections;
 }
 

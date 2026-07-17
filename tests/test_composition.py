@@ -140,15 +140,20 @@ class GoalCompositionTests(unittest.TestCase):
                     f"goal {goal} must not remove base section {key}",
                 )
 
-    def test_goal_does_not_change_composition_today(self):
-        # Packs currently seed content only; no pack grants a GOVERNED section until derived head/sidecar
-        # sections land (Phase 3). This asserts the union mechanism is wired but inert, so a goal cannot
-        # silently alter an existing page's governed sections.
-        for goal in supported_goals():
-            self.assertEqual(
-                recommended_section_keys("single", goal),
-                recommended_section_keys("single", ""),
-            )
+    def test_only_search_seo_grants_structured_data(self):
+        # Phase 3 makes the pack `sections` half live: discoverability grants the derived structured_data
+        # head section. Every OTHER goal must still compose exactly like a page with no goal — the goal
+        # axis may add for the goal that asked, and nothing else.
+        base = recommended_section_keys("single", "")
+        self.assertNotIn("structured_data", base)
+        self.assertEqual(recommended_section_keys("single", "search_seo"), base + ["structured_data"])
+        for goal in ("paid_ads", "social", "email_list", "minimal"):
+            self.assertEqual(recommended_section_keys("single", goal), base, f"{goal} must not change composition")
+
+    def test_structured_data_is_off_unless_a_goal_asks(self):
+        # It is governed but in no offer_type base, so existing pages (no goal) never gain it silently.
+        self.assertFalse(default_visible("single", "structured_data", ""))
+        self.assertTrue(default_visible("single", "structured_data", "search_seo"))
 
     def test_compose_page_is_unchanged_without_a_goal(self):
         with_goal = [s["type"] for s in compose_page({"offer_type": "single"}, self._page("search_seo"))]
@@ -197,6 +202,40 @@ class GoalDeprecationTests(unittest.TestCase):
         with patch.dict(composition_module._GOALS, self.DEPRECATED, clear=True):
             self.assertEqual(goal_packs("social"), ["social_proof"])
             self.assertEqual(pack_seeds("social"), ["testimonials", "rating", "client_marquee"])
+
+
+
+class CatalogIsTheSingleSourceTests(unittest.TestCase):
+    """The element catalog in composition_rules.json is the one vocabulary. Anything that keeps its own copy
+    of the element or goal list will drift out of sync, and the failure lands far from the cause: adding
+    structured_data to the catalog made it composable and renderable but not storable, which surfaced only
+    as a 400 from /pages/render."""
+
+    def test_valid_section_types_come_from_the_catalog(self):
+        from stripe_link.domain.documents import SUPPORTED_PAGE_SECTION_TYPES
+        self.assertEqual(SUPPORTED_PAGE_SECTION_TYPES, set(composition_module.ELEMENTS.keys()))
+
+    def test_valid_goals_come_from_the_catalog(self):
+        from stripe_link.domain.documents import SUPPORTED_PAGE_GOALS
+        self.assertEqual(SUPPORTED_PAGE_GOALS, set(supported_goals()))
+
+    def test_every_governed_section_exists_in_the_catalog(self):
+        for key in composition_module.RULES.get("governed_sections", []):
+            self.assertIn(key, composition_module.ELEMENTS, f"governed section {key} has no catalog entry")
+
+    def test_every_pack_reference_resolves(self):
+        # A typo in a pack's seeds/sections fails silently — the pack just contributes nothing.
+        for name, pack in (composition_module.RULES.get("packs") or {}).items():
+            for seed in pack.get("seeds") or []:
+                self.assertIn(seed, composition_module.ELEMENTS, f"pack {name} seeds unknown element {seed}")
+            for section in pack.get("sections") or []:
+                self.assertIn(section, composition_module.ELEMENTS, f"pack {name} grants unknown section {section}")
+
+    def test_every_goal_references_a_real_pack(self):
+        packs = composition_module.RULES.get("packs") or {}
+        for goal in supported_goals():
+            for name in goal_packs(goal):
+                self.assertIn(name, packs, f"goal {goal} references unknown pack {name}")
 
 
 

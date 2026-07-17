@@ -6,7 +6,7 @@ import re
 from typing import Any
 from urllib.parse import urlencode, urlparse
 
-from stripe_link.domain.composition import compose_page
+from stripe_link.domain.composition import compose_page, element_channel
 from stripe_link.domain.pricing import expand_offer, find_price, resolve_offer, single_unit_price
 from stripe_link.domain.service_pricing import resolve_service_price
 
@@ -790,10 +790,19 @@ def render_page(
     # Page Composer decides which sections render (plans/PAGE_COMPOSER.md). The renderer only iterates the
     # composed list — it never decides visibility itself.
     composed_sections = compose_page(offer, page)
+    # Each element declares a channel (plans/LANDING_PAGE_GOAL_COMPOSITION.md): "body" paints markup, "head"
+    # emits meta/JSON-LD, "sidecar" writes its own artifact. Route by it rather than assuming everything is
+    # body — a head section rendered into <main> would be visible junk, and vice versa.
+    body_sections = [s for s in composed_sections if element_channel(str(s.get("type") or "")) == "body"]
+    head_sections = [s for s in composed_sections if element_channel(str(s.get("type") or "")) == "head"]
     body = "\n".join(
         render_section(section, page, offer, products_by_id, resolved_offer, checkout_url, api_base_url, services_by_id, offers_by_id)
-        for section in composed_sections
+        for section in body_sections
     )
+    head_extras = "\n".join(part for part in (
+        render_head_section(section, page, offer, products_by_id, services_by_id, composed_sections)
+        for section in head_sections
+    ) if part)
     has_legal_footer_section = any(section.get("type") == "legal_footer" for section in composed_sections)
     legal_footer = "" if has_legal_footer_section else render_legal_footer(page.get("legal") or {}, api_base_url=api_base_url)
     analytics_tags = render_analytics_tags(page.get("analytics") or {})
@@ -812,6 +821,7 @@ def render_page(
         f"  <title>{title}</title>",
         f"  <meta name=\"description\" content=\"{description}\">" if description else "",
         favicon_tags,
+        head_extras,
         "  <style>",
         *styles,
         "  </style>",
@@ -951,6 +961,29 @@ SECTION_REGISTRY: dict[str, dict[str, Any]] = {
     "checkout_cta": {"render": lambda c: render_checkout_cta(c.page, c.section, c.offer, c.resolved_offer, c.checkout_url, c.api_base_url, c.products_by_id), "version": 1},
     "legal_footer": {"render": lambda c: render_legal_footer(c.page.get("legal") or {}, c.section, c.api_base_url), "version": 1},
 }
+
+
+# type -> renderer for sections on the "head" channel. These are DERIVED: they take the whole composed page
+# rather than just their own section, because their content comes from the offer and from what the composer
+# put on the page — never from tenant-entered fields on the section itself.
+# Lambdas defer the name lookup to call time, as SECTION_REGISTRY does, so renderers can be defined below.
+HEAD_SECTION_REGISTRY: dict[str, Any] = {
+    "structured_data": lambda *a: render_structured_data(*a),
+}
+
+
+def render_head_section(
+    section: dict[str, Any],
+    page: dict[str, Any],
+    offer: dict[str, Any],
+    products_by_id: dict[str, dict[str, Any]],
+    services_by_id: dict[str, dict[str, Any]],
+    composed_sections: list[dict[str, Any]],
+) -> str:
+    renderer = HEAD_SECTION_REGISTRY.get(str(section.get("type") or ""))
+    if renderer is None:
+        return ""
+    return renderer(section, page, offer, products_by_id, services_by_id, composed_sections)
 
 
 def render_section(
@@ -1432,6 +1465,175 @@ def render_offer_price_selector(
 def is_landing_page_price(price: dict[str, Any]) -> bool:
     context = str(price.get("context") or "standard").strip().lower()
     return context in LANDING_PAGE_PRICE_CONTEXTS
+
+
+def landing_page_offer_prices(
+    offer: dict[str, Any],
+    products_by_id: dict[str, dict[str, Any]],
+    services_by_id: dict[str, dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
+    """Every price the page actually SHOWS, in display order — the same set render_offer_price_selector
+    paints, using the same item.selectable_prices + is_landing_page_price filter.
+
+    Structured data must never advertise a price the page doesn't display: Google requires marked-up prices
+    to match visible content, and a product can carry prices this page never shows (an `upsell`-context
+    price, say). Deriving JSON-LD from here rather than from product.prices is what keeps the two honest.
+    """
+    services_by_id = services_by_id or {}
+    prices: list[dict[str, Any]] = []
+    for item in offer.get("items") or []:
+        service_id = str(item.get("service_id") or "")
+        if service_id:
+            service = services_by_id.get(service_id)
+            if not service:
+                continue
+            svc_price = dict(service.get("price") or (service.get("prices") or [{}])[0])
+            amount = int(svc_price.get("unit_amount") or 0)
+            if amount:
+                prices.append({"unit_amount": amount, "currency": str(svc_price.get("currency") or "usd")})
+            continue
+        product = products_by_id.get(str(item.get("product_id") or ""))
+        if product is None:
+            continue
+        for option in item.get("selectable_prices") or []:
+            price = find_price(product, option.get("price_id", ""))
+            if not is_landing_page_price(price):
+                continue
+            prices.append({
+                "unit_amount": int(price.get("unit_amount") or 0),
+                "currency": str(price.get("currency") or "usd"),
+            })
+    return prices
+
+
+def render_structured_data(
+    section: dict[str, Any],
+    page: dict[str, Any],
+    offer: dict[str, Any],
+    products_by_id: dict[str, dict[str, Any]],
+    services_by_id: dict[str, dict[str, Any]],
+    composed_sections: list[dict[str, Any]],
+) -> str:
+    """JSON-LD for the page, DERIVED from the offer and the sections the composer actually put on the page.
+
+    Nothing here is hand-entered — that is the point of the goal axis: "SEO" is a mode the goal flips on,
+    not a form to fill (plans/LANDING_PAGE_GOAL_COMPOSITION.md). Two deliberate omissions:
+
+    * No AggregateRating. The `rating` element is a number a tenant typed, with no verifiable source.
+      Emitting it as review markup would be fabricated structured data — against Google's structured-data
+      policies and squarely within the FTC's rule on deceptive ratings. It stays visible-only text until a
+      real review source exists (plans/BUSINESS_PROFILE_AND_GBP.md).
+    * No LocalBusiness/Service. That needs the canonical Business Profile's NAP, which does not exist yet.
+    """
+    blocks: list[str] = []
+    product_ld = product_json_ld(page, offer, products_by_id, services_by_id)
+    if product_ld:
+        blocks.append(product_ld)
+    faq_ld = faq_json_ld(composed_sections)
+    if faq_ld:
+        blocks.append(faq_ld)
+    if not blocks:
+        return ""
+    return "\n".join(
+        f"  <script type=\"application/ld+json\">{block}</script>" for block in blocks
+    )
+
+
+def json_ld_dump(payload: dict[str, Any]) -> str:
+    """Serialize JSON-LD safely for inlining in a <script>. `</script>` inside a string would close the tag
+    early, so escape the sequence rather than trusting the data."""
+    text = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+    return text.replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026")
+
+
+def product_json_ld(
+    page: dict[str, Any],
+    offer: dict[str, Any],
+    products_by_id: dict[str, dict[str, Any]],
+    services_by_id: dict[str, dict[str, Any]],
+) -> str:
+    prices = landing_page_offer_prices(offer, products_by_id, services_by_id)
+    if not prices:
+        return ""
+    product = first_offer_product(offer, products_by_id)
+    name = str(offer_headline_text(offer, product) or "").strip()
+    if not name:
+        return ""
+    amounts = sorted(int(p["unit_amount"]) for p in prices)
+    currency = str(prices[0].get("currency") or "usd").upper()
+    payload: dict[str, Any] = {
+        "@context": "https://schema.org",
+        "@type": "Product",
+        "name": name,
+    }
+    description = str(product.get("description") or "").strip()
+    if description:
+        payload["description"] = description
+    images = [image for image in (product.get("images") or []) if image]
+    if images:
+        payload["image"] = images
+    if len(amounts) > 1 and amounts[0] != amounts[-1]:
+        # Several visible price options — AggregateOffer states the range the page shows.
+        payload["offers"] = {
+            "@type": "AggregateOffer",
+            "priceCurrency": currency,
+            "lowPrice": money_str(amounts[0]),
+            "highPrice": money_str(amounts[-1]),
+            "offerCount": len(amounts),
+            "availability": "https://schema.org/InStock",
+        }
+    else:
+        payload["offers"] = {
+            "@type": "Offer",
+            "priceCurrency": currency,
+            "price": money_str(amounts[0]),
+            "availability": "https://schema.org/InStock",
+        }
+    return json_ld_dump(payload)
+
+
+def money_str(unit_amount: int) -> str:
+    """Minor units -> a schema.org price string ("3709" -> "37.09"). Kept as a string so 37.10 can't be
+    serialized as 37.1."""
+    return f"{int(unit_amount) / 100:.2f}"
+
+
+def offer_headline_text(offer: dict[str, Any], product: dict[str, Any]) -> str:
+    presentation = offer.get("presentation") or {}
+    return str(presentation.get("headline") or offer.get("name") or product.get("name") or "")
+
+
+def headline_plain_text(text: Any) -> str:
+    """The plain text a headline actually renders as: the same Chicago title-casing render_headline_markup
+    applies, with the ** / ^^ highlight delimiters dropped rather than turned into spans.
+
+    Structured data must quote what the visitor sees. render_faq title-cases its questions, so emitting the
+    raw stored string would mark up "Is there a money-back guarantee?" while the page shows "Is There a
+    Money-Back Guarantee?" — a mismatch between markup and visible content.
+    """
+    raw = format_headline(str(text or ""))
+    return re.sub(r"\*\*(.*?)\*\*|\^\^(.*?)\^\^", lambda m: m.group(1) or m.group(2) or "", raw)
+
+
+def faq_json_ld(composed_sections: list[dict[str, Any]]) -> str:
+    """FAQPage built from the faq section the composer put on the page. Derived from what is actually
+    rendered — markup for questions a visitor cannot see would be exactly the mismatch Google penalises."""
+    entries = []
+    for section in composed_sections:
+        if section.get("type") != "faq":
+            continue
+        for item in section.get("items") or []:
+            question = headline_plain_text(item.get("question")).strip()
+            answer = str(item.get("answer") or "").strip()
+            if question and answer:
+                entries.append({
+                    "@type": "Question",
+                    "name": question,
+                    "acceptedAnswer": {"@type": "Answer", "text": answer},
+                })
+    if not entries:
+        return ""
+    return json_ld_dump({"@context": "https://schema.org", "@type": "FAQPage", "mainEntity": entries})
 
 
 def landing_page_price_quantity(price: dict[str, Any], option: dict[str, Any]) -> int | None:
