@@ -780,7 +780,6 @@ const builderFormHidden = ref(false);
 const builderExistingPageId = ref("");
 const builderOriginalPage = ref(null);
 const previewDevice = ref("desktop");
-const selectedPreviewPriceId = ref("");
 const faviconFileInput = ref(null);
 const heroFileInput = ref(null);
 const avatarFileInput = ref(null);
@@ -800,18 +799,8 @@ const subImageErrors = reactive({});
 const form = reactive(defaultWizardForm());
 const builder = reactive(defaultBuilderForm());
 const defaultFaviconUrl = "https://images.juniorbay.com/icon/favicon.png";
-function legalPageUrl(pageId) {
-  return `${getApiBase().replace(/\/$/, "")}/legal/${pageId}`;
-}
-// Preview links to the platform legal pages. Published pages resolve the same URLs at
-// publish time from the API base, so the saved document stays environment-agnostic.
-const defaultLegalLinks = computed(() => ({
-  terms_url: legalPageUrl("terms"),
-  privacy_url: legalPageUrl("privacy"),
-  refund_url: legalPageUrl("refund"),
-}));
-const currentYear = new Date().getFullYear();
-const defaultFooterCopyright = `© ${currentYear} All rights reserved.`;
+// The saved document carries no legal URLs and no resolved year: render_legal_footer builds the platform
+// /legal/* links from the api_base_url we send with each render, and expands {{current_year}} itself.
 const defaultFooterCopyrightTemplate = "© {{current_year}} All rights reserved.";
 
 const universalBundlePresets = [
@@ -843,12 +832,9 @@ const selectedLeadAction = computed(() => selectedOfferProducts.value.find((prod
 const builderOffer = computed(() => offers.value.find((offer) => offer.offer_id === builder.offer_id) || null);
 const builderOfferProducts = computed(() => offerProducts(builderOffer.value));
 const builderIntent = computed(() => builderOffer.value?.product_intent || builderOfferProducts.value[0]?.product_intent || "transaction");
-const builderLeadAction = computed(() => builderOfferProducts.value.find((product) => product.lead_capture)?.lead_capture || null);
 // The offer's snapshotted CTA contract drives the preview's on-page experience (buy/call/email/external/booking).
 const builderCta = computed(() => builderOffer.value?.presentation?.cta || { type: builderIntent.value === "lead_gen" ? "email" : "buy" });
 const selectedOfferCta = computed(() => selectedOffer.value?.presentation?.cta || { type: selectedOfferIntent.value === "lead_gen" ? "email" : "buy" });
-// buy + booking (service) offers show the price cards; call/email/external render their own component instead.
-const ctaShowsPrices = computed(() => ["buy", "booking", "appointment"].includes(builderCta.value.type) && !isListicleOffer.value);
 // A listicle offer renders its items as a carousel (each add-to-cart) instead of the pick-one selector.
 const isListicleOffer = computed(() => (builderOffer.value?.offer_type || "single") === "listicle");
 // --- Page Composer (see plans/PAGE_COMPOSER.md) ---
@@ -919,12 +905,6 @@ const previewTokenStyle = computed(() => {
     if (value) style[previewVar(token)] = value;
   }
   return style;
-});
-// Add-to-cart label from the offer's actions[] (add_to_cart), else the default.
-const listicleAddLabel = computed(() => {
-  const actions = builderOffer.value?.presentation?.actions;
-  const addAction = Array.isArray(actions) ? actions.find((a) => a && a.type === "add_to_cart") : null;
-  return (addAction && addAction.label) || "Add to cart";
 });
 // The ConversionContext targets. Source of truth is the SERVER's expand_offer (fetched via ?expand=1 into
 // builderExpandedOffer) so the preview prices items with the exact same implementation as the published
@@ -1068,27 +1048,6 @@ watch(
   { immediate: true },
 );
 const previewRefundPolicy = computed(() => builderOffer.value?.refund_policy || builderOfferProducts.value[0]?.refund_policy || null);
-const previewRefundAppliesTo = computed(() => previewPrices.value.map((price) => price.label).filter(Boolean).join(", "));
-const previewRefundReturnNote = computed(() => refundPolicyReturnNote(previewRefundPolicy.value));
-// The landing page is object-agnostic: it consumes one normalized presentation from the offer,
-// never product-vs-service. offerItemModels is the single place item types are shaped into cards.
-const previewPrices = computed(() => offerItemModels(builderOffer.value).flatMap((model) => model.priceCards).sort(compareLandingPagePrices));
-const previewDefaultPriceId = computed(() => {
-  const defaultPriceId = builderOffer.value?.items?.[0]?.default_price_id || "";
-  if (previewPrices.value.some((price) => price.price_id === defaultPriceId)) return defaultPriceId;
-  return previewPrices.value[0]?.price_id || "";
-});
-const selectedPreviewPrice = computed(() => {
-  return previewPrices.value.find((price) => price.price_id === selectedPreviewPriceId.value)
-    || previewPrices.value.find((price) => price.price_id === previewDefaultPriceId.value)
-    || previewPrices.value[0]
-    || null;
-});
-const previewCtaLabel = computed(() => {
-  const label = builder.cta_label || builderCta.value.label || (ctaShowsPrices.value ? "Buy Now" : "Continue");
-  if (!ctaShowsPrices.value || !selectedPreviewPrice.value) return label;
-  return `${label} - ${formatMoney(selectedPreviewPrice.value.unit_amount || 0, selectedPreviewPrice.value.currency)}`;
-});
 const emptyStateText = computed(() => {
   if (pages.value.length) return "No landing pages match your search.";
   return pagesLoaded.value ? "No landing pages found. Create a page to get started." : 'Click "Load Pages" to view your landing pages.';
@@ -1124,16 +1083,6 @@ const wizardOffers = computed(() => {
 const draftPage = computed(() => buildPageDocument());
 const builderPageDocument = computed(() => buildBuilderPageDocument());
 const isBuilderPublished = computed(() => builder.status === "published");
-
-watch(previewPrices, (prices) => {
-  if (!prices.length) {
-    selectedPreviewPriceId.value = "";
-    return;
-  }
-  if (!prices.some((price) => price.price_id === selectedPreviewPriceId.value)) {
-    selectedPreviewPriceId.value = previewDefaultPriceId.value || prices[0].price_id;
-  }
-}, { immediate: true });
 
 watch(() => form.template, () => {
   if (!presetOptions.value.length) {
@@ -1309,32 +1258,6 @@ function backToList() {
   builderExistingPageId.value = "";
   builderOriginalPage.value = null;
   builderFormHidden.value = false;
-}
-
-function headlineHtml(text) {
-  return processHeadlineMarkup(formatHeadline(text || ""));
-}
-
-function processHeadlineMarkup(text) {
-  return String(text || "").split(/(\*\*.*?\*\*|\^\^.*?\^\^)/g).map((part) => {
-    if (!part) return "";
-    if (part.startsWith("**") && part.endsWith("**") && part.length >= 4) {
-      return `<span class="preview-mark-text">${escapeHtml(part.slice(2, -2))}</span>`;
-    }
-    if (part.startsWith("^^") && part.endsWith("^^") && part.length >= 4) {
-      return `<span class="preview-mark-bg">${escapeHtml(part.slice(2, -2))}</span>`;
-    }
-    return escapeHtml(part);
-  }).join("");
-}
-
-function escapeHtml(value) {
-  return String(value || "")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
 }
 
 function selectOffer(offer) {
@@ -1802,40 +1725,10 @@ function landingPagePriceQuantity(price, option = {}) {
   return match ? Number(match[1]) : 0;
 }
 
-function compareLandingPagePrices(left, right) {
-  if (left.quantity && right.quantity && left.quantity !== right.quantity) {
-    return left.quantity - right.quantity;
-  }
-  if (left.quantity && !right.quantity) return -1;
-  if (!left.quantity && right.quantity) return 1;
-  return left.display_index - right.display_index;
-}
-
 function legalLinks() {
   // Persist no legal URLs on the page document; the renderer injects the platform
   // /legal/* links at publish time so pages stay environment-agnostic.
   return {};
-}
-
-function refundPolicyReturnNote(policy) {
-  if (!policy) return "";
-  if (policy.return_note) return policy.return_note;
-  const method = String(policy.return_method || "").toLowerCase();
-  if (method.includes("no return") || method.includes("customer keeps") || method.includes("no_return")) {
-    return "This item doesn't need to be returned. The customer may keep the item and dispose of it in a responsible way. The seller may still grant a refund.";
-  }
-  if (method.includes("return_required") || method.includes("return required")) {
-    return "The customer must return the item according to the seller's return instructions before the refund is completed.";
-  }
-  return "";
-}
-
-function selectPreviewPrice(priceId) {
-  selectedPreviewPriceId.value = priceId;
-}
-
-function isPreviewPriceSelected(price) {
-  return price.price_id === selectedPreviewPrice.value?.price_id;
 }
 
 function toggleHeroMedia(image) {
