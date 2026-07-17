@@ -23,10 +23,19 @@
         <div v-if="offersError" class="keys-status-banner error">{{ offersError }}</div>
         <div v-else-if="offersMessage" class="keys-status-banner">{{ offersMessage }}</div>
 
-        <div v-if="offers.length" class="offer-status-filter">
+        <div class="offer-status-filter">
+          <label>
+            <span>Search</span>
+            <input
+              v-model.trim="offerSearchQuery"
+              type="search"
+              placeholder="Name, slug, type..."
+              @focus="ensureOffersLoaded()"
+            />
+          </label>
           <label>
             <span>Status</span>
-            <select v-model="offerStatusFilter">
+            <select v-model="offerStatusFilter" @focus="ensureOffersLoaded()">
               <option value="active">Active</option>
               <option value="archived">Archived</option>
               <option value="all">All</option>
@@ -35,7 +44,7 @@
         </div>
 
         <div v-if="!offers.length" class="offer-empty-state">
-          {{ offersLoaded ? 'No offers found. Click "+ Add Offer" to configure one.' : 'Click "Load Offers" to see offers.' }}
+          {{ offersLoading ? "Loading offers..." : offersLoaded ? 'No offers found. Click "+ Add Offer" to configure one.' : 'Click "Load Offers" to see offers.' }}
         </div>
         <div v-else-if="!visibleOffers.length" class="offer-empty-state">
           No {{ offerStatusFilter === 'all' ? '' : offerStatusFilter }} offers to show.
@@ -569,12 +578,25 @@ const selectedOfferDetails = ref(null);
 const pendingDeleteOffer = ref(null);
 const deletingOffer = ref(false);
 const offerStatusFilter = ref("active");
+const offerSearchQuery = ref("");
+function offerSearchText(offer) {
+  return [offer.name, offer.slug, offer.offer_type, offer.product_intent]
+    .filter(Boolean).join(" ").toLowerCase();
+}
 const visibleOffers = computed(() => {
   const isArchived = (o) => o.status === "archived";
-  if (offerStatusFilter.value === "archived") return offers.value.filter(isArchived);
-  if (offerStatusFilter.value === "all") return offers.value;
-  return offers.value.filter((o) => !isArchived(o));
+  let list = offers.value;
+  if (offerStatusFilter.value === "active") list = list.filter((o) => !isArchived(o));
+  else if (offerStatusFilter.value === "archived") list = list.filter(isArchived);
+  const search = offerSearchQuery.value.trim().toLowerCase();
+  if (search) list = list.filter((o) => offerSearchText(o).includes(search));
+  return list;
 });
+
+// Load on first interaction so filtering "just works" without clicking Load Offers first (mirrors Products).
+function ensureOffersLoaded() {
+  if (!offersLoaded.value && !offersLoading.value) loadOffers();
+}
 const form = reactive(defaultOfferForm());
 const itemConfigs = reactive({});
 const priceImageInputs = new Map();

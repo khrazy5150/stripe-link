@@ -18,6 +18,7 @@
             type="search"
             placeholder="Search pages..."
             aria-label="Search landing pages"
+            @focus="ensurePagesLoaded()"
           />
           <button class="secondary-action" type="button" :disabled="loading" @click="loadPages">
             {{ loading ? "Loading..." : "Load Pages" }}
@@ -1321,6 +1322,11 @@ function resetWizard() {
   wizardStep.value = 1;
   wizardError.value = "";
   offerSearch.value = "";
+}
+
+// Load on first search-box focus so filtering works without clicking Load Pages first (mirrors Products).
+function ensurePagesLoaded() {
+  if (!pagesLoaded.value && !loading.value) loadPages();
 }
 
 async function loadPages() {

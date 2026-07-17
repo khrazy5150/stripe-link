@@ -21,18 +21,11 @@
       <div class="product-filter-bar">
         <label>
           Search
-          <input v-model.trim="store.filters.search" type="search" placeholder="Name, tag, keyword..." />
-        </label>
-        <label>
-          Category
-          <select v-model="store.filters.category">
-            <option value="">All Categories</option>
-            <option v-for="[value, label] in store.categoryOptions" :key="value" :value="value">{{ label }}</option>
-          </select>
+          <input v-model.trim="store.filters.search" type="search" placeholder="Name, tag, category, keyword..." @focus="store.ensureLoaded()" />
         </label>
         <label>
           Product Type
-          <select v-model="store.filters.productType">
+          <select v-model="store.filters.productType" @focus="store.ensureLoaded()">
             <option value="">All Types</option>
             <option value="physical">Physical</option>
             <option value="digital">Digital</option>
@@ -41,14 +34,13 @@
         </label>
         <label>
           Status
-          <select v-model="store.filters.status">
+          <select v-model="store.filters.status" @focus="store.ensureLoaded()">
             <option value="active">Active</option>
             <option value="archived">Archived</option>
             <option value="all">All</option>
           </select>
         </label>
         <div class="product-filter-actions">
-          <button type="button" class="primary-action" @click="store.applyFilters">Apply</button>
           <button type="button" class="secondary-action" @click="store.resetFilters">Reset</button>
         </div>
       </div>
@@ -57,7 +49,7 @@
       <div v-else class="keys-status-banner">{{ statusMessage }}</div>
 
       <div v-if="!store.filteredProducts.length" class="product-empty-state">
-        {{ store.loaded ? "No products match the current filters." : "Click Load Products to see products." }}
+        {{ store.loading ? "Loading products..." : store.loaded ? "No products match the current filters." : "Click Load Products to see products." }}
       </div>
 
       <div v-else class="product-card-list">

@@ -2,42 +2,6 @@ import { defineStore } from "pinia";
 import { apiRequest, getApiEnvironment, getTenantId } from "../api/client";
 import { buildPriceDocument, freeLeadPrice } from "./pricing";
 
-// Tenant-facing category list. Feeds schema.org `category`, which is free text — it does NOT have to be a
-// Google Product Taxonomy path — so these labels are what search engines read. Keys are stable identifiers:
-// existing products store them, so entries may be ADDED but never renamed/removed without a data migration.
-// Grouped physical / digital / service, with "Other" last as the catch-all.
-const CATEGORY_OPTIONS = [
-  // Physical goods
-  ["apparel", "Apparel"],
-  ["jewelry_accessories", "Jewelry and Accessories"],
-  ["beauty_personal_care", "Beauty and Personal Care"],
-  ["health_household", "Health and Household"],
-  ["dietary_supplement", "Dietary Supplement"],
-  ["food_beverage", "Food and Beverage"],
-  ["home_garden", "Home and Garden"],
-  ["electronics", "Electronics"],
-  ["sporting_goods", "Sporting Goods"],
-  ["toys_games", "Toys and Games"],
-  ["baby_kids", "Baby and Kids"],
-  ["pet_supplies", "Pet Supplies"],
-  ["automotive", "Automotive"],
-  ["arts_crafts", "Arts and Crafts"],
-  ["office_supplies", "Office Supplies"],
-  ["books_printed_material", "Books and Printed Material"],
-  ["music_movies", "Music and Movies"],
-  // Digital
-  ["digital_download", "Digital Download"],
-  ["software", "Software"],
-  ["software_as_a_service", "Software As A Service (SAAS)"],
-  ["course", "Course"],
-  ["membership", "Membership"],
-  // Services
-  ["professional_services", "Professional Services"],
-  ["consulting", "Consulting"],
-  // Catch-all
-  ["other", "Other"],
-];
-
 function productLifecycleStatus(product) {
   return product?.status === "archived" || product?.active === false ? "archived" : "active";
 }
@@ -49,6 +13,7 @@ function productSearchText(product) {
     product.name,
     product.description,
     product.product_category,
+    String(product.product_category || "").replace(/_/g, " "),
     product.product_type,
     ...(Array.isArray(product.tags) ? product.tags : []),
   ].filter(Boolean).join(" ").toLowerCase();
@@ -130,24 +95,18 @@ export const useProductsStore = defineStore("products", {
     message: "Click Load Products to see products.",
     filters: {
       search: "",
-      category: "",
       productType: "",
       status: "active",
     },
   }),
 
   getters: {
-    categoryOptions() {
-      return CATEGORY_OPTIONS;
-    },
-
     filteredProducts(state) {
       const search = state.filters.search.trim().toLowerCase();
       return state.products.filter((product) => {
         const status = productLifecycleStatus(product);
         if (state.filters.status === "active" && status !== "active") return false;
         if (state.filters.status === "archived" && status !== "archived") return false;
-        if (state.filters.category && product.product_category !== state.filters.category) return false;
         if (state.filters.productType && product.product_type !== state.filters.productType) return false;
         if (search && !productSearchText(product).includes(search)) return false;
         return true;
@@ -172,18 +131,15 @@ export const useProductsStore = defineStore("products", {
 
     resetFilters() {
       this.filters.search = "";
-      this.filters.category = "";
       this.filters.productType = "";
       this.filters.status = "active";
       if (!this.loaded) this.message = "Click Load Products to see products.";
     },
 
-    applyFilters() {
-      if (!this.loaded) {
-        this.message = "Click Load Products to see products.";
-        return;
-      }
-      this.message = `${this.filteredProducts.length} of ${this.products.length} product${this.products.length === 1 ? "" : "s"} shown.`;
+    // Load on first interaction so filtering "just works" — a tenant shouldn't have to click Load Products
+    // before the search box does anything. Guarded so it fires once and never races a manual load.
+    ensureLoaded() {
+      if (!this.loaded && !this.loading) this.load();
     },
 
     async load() {
