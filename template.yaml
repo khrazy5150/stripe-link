@@ -145,6 +145,7 @@ Globals:
         MEDIA_TABLE: !Ref MediaTable
         THEMES_TABLE: !Ref ThemesTable
         LEGAL_PAGES_TABLE: !Ref LegalPagesTable
+        PRODUCT_CATEGORIES_TABLE: !Ref ProductCategoriesTable
         CUSTOM_DOMAINS_TABLE: !Ref CustomDomainsTable
         CALENDAR_CONNECTIONS_TABLE: !Ref CalendarConnectionsTable
         SMS_ORIGINATION_SECRET_NAME: !Sub "jb/sms-origination/${Environment}"
@@ -394,6 +395,9 @@ Resources:
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref ProductsTable
+        # Records category usage on save (recording a distinct tenant's use of a category).
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ProductCategoriesTable
       Events:
         ProductsList:
           Type: Api
@@ -804,6 +808,30 @@ Resources:
             RestApiId: !Ref RestApi
             Path: /pages/render
             Method: POST
+
+  ProductCategoriesFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${ProjectPrefix}-product-categories-${Environment}"
+      CodeUri: src/
+      Handler: handlers.product_categories.handler
+      Description: Autocomplete over the shared product-category taxonomy (read-only).
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref ProductCategoriesTable
+      Events:
+        SearchCategories:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /product-categories
+            Method: GET
+        SearchCategoriesOptions:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /product-categories
+            Method: OPTIONS
 
   PostCheckoutFunction:
     Type: AWS::Serverless::Function
@@ -2187,6 +2215,22 @@ Resources:
           AttributeType: S
       KeySchema:
         - AttributeName: tenant_id
+          KeyType: HASH
+
+  # Shared, non-tenant-scoped taxonomy of tenant-CONTRIBUTED product categories (curated ones live in code).
+  # plans/PRODUCT_CATEGORY_AUTOCOMPLETE.md
+  ProductCategoriesTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "${ProjectPrefix}-product-categories-${Environment}"
+      BillingMode: PAY_PER_REQUEST
+      SSESpecification:
+        SSEEnabled: true
+      AttributeDefinitions:
+        - AttributeName: category_key
+          AttributeType: S
+      KeySchema:
+        - AttributeName: category_key
           KeyType: HASH
 
   ShippingConfigTable:

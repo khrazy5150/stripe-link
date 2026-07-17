@@ -30,6 +30,36 @@ tenant_ids, and `ADD` is atomic and idempotent (re-adding a member is a no-op), 
 twice counts once. (Scale note: a category used by thousands of tenants would grow the set toward the 400KB
 item limit; shard the counter if that ever bites. Fine at current scale.)
 
+## Categories are scoped by product type
+
+The choices differ by what the product *is*: a service should be offered "Plumbing" / "Consulting", not
+"Apparel"; a supplement shouldn't see "Software as a Service". So every category declares which of the three
+product types (`physical` / `digital` / `service`) it applies to, and the autocomplete only suggests
+categories valid for the product being edited. A tenant-contributed category records the type(s) of the
+products that used it, so it surfaces under the right type for others. "Other" is valid for all three.
+
+## Admin: adding curated categories (plumbing, dental, jewelry, …)
+
+Curated categories live in code — `_CURATED` in `src/stripe_link/domain/categories.py` — because they change
+rarely and should be trustworthy (they're promoted to every tenant immediately). To add one, an admin appends
+a `(label, types)` row and deploys the backend:
+
+```python
+("Plumbing", ("service",)),
+("Dental", ("service",)),
+("Jewelry and Accessories", ("physical",)),
+```
+
+- The **key is derived** as `normalize_category(label)`, so you never hand-write it and it can't drift from
+  the label. A test asserts every curated label round-trips to its own key.
+- `types` is any subset of `("physical", "digital", "service")`; use all three for a truly generic one.
+- **Never change or remove an existing label's words in a way that changes its normalized key** — products
+  store the key, so that would orphan them. Adding rows is always safe.
+- Only `./deploy/deploy.sh <env>` is needed (backend); the autocomplete reads the list through the API.
+
+Everything else — the long tail — arrives on its own via the usage threshold, so the curated list only needs
+the common, trustworthy categories; admins don't have to enumerate the world.
+
 ## Data model
 
 New shared (non-tenant-scoped) table, table-per-entity like `platform-config`:

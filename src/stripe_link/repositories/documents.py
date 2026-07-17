@@ -829,3 +829,73 @@ def custom_domains_index_repository(table: Any | None = None) -> DynamoDocumentR
         id_field="domain",
         table=table,
     )
+
+
+class ProductCategoriesRepository:
+    """Shared, non-tenant-scoped taxonomy of TENANT-CONTRIBUTED categories (curated ones live in code).
+
+    Distinct-tenant usage is counted with a DynamoDB string set: recording a usage ADDs the tenant_id, which
+    is atomic and idempotent, so a tenant re-saving the same category never double-counts. Promotion (>= N
+    distinct tenants) is derived at read time from the set size — see domain/categories.py.
+    """
+
+    def __init__(self, table_name: str, *, table: Any | None = None):
+        if not table_name:
+            raise RepositoryError("Product categories table name is required.")
+        assert_jb_resource_name(table_name)
+        self.table_name = table_name
+        self._table = table
+
+    @property
+    def table(self):
+        if self._table is None:
+            import boto3
+
+            self._table = boto3.resource("dynamodb").Table(self.table_name)
+        return self._table
+
+    def get(self, category_key: str) -> dict[str, Any] | None:
+        response = self.table.get_item(Key={"category_key": str(category_key)})
+        return response.get("Item")
+
+    def list_all(self) -> list[dict[str, Any]]:
+        """Every contributed category. The table is small and slow-changing (only the long tail lives here;
+        curated categories are code), so a scan is fine and lets the endpoint filter/dedup in one place."""
+        items: list[dict[str, Any]] = []
+        request: dict[str, Any] = {}
+        while True:
+            response = self.table.scan(**request)
+            items.extend(response.get("Items") or [])
+            key = response.get("LastEvaluatedKey")
+            if not key:
+                return items
+            request["ExclusiveStartKey"] = key
+
+    def record_usage(self, category_key: str, label: str, product_type: str, tenant_id: str, now: int) -> None:
+        """Register that `tenant_id` used this category for a `product_type` product. ADD is atomic and
+        idempotent on both sets; label/created_at are only written on first sight (if_not_exists)."""
+        category_key = str(category_key or "").strip()
+        tenant_id = str(tenant_id or "").strip()
+        if not category_key or not tenant_id:
+            return
+        expression_values: dict[str, Any] = {
+            ":t": {tenant_id},
+            ":label": str(label or category_key),
+            ":now": int(now),
+        }
+        add_parts = ["tenant_ids :t"]
+        if str(product_type or "").strip():
+            expression_values[":pt"] = {str(product_type).strip()}
+            add_parts.append("types :pt")
+        self.table.update_item(
+            Key={"category_key": category_key},
+            UpdateExpression=(
+                "ADD " + ", ".join(add_parts)
+                + " SET label = if_not_exists(label, :label), created_at = if_not_exists(created_at, :now), updated_at = :now"
+            ),
+            ExpressionAttributeValues=expression_values,
+        )
+
+
+def product_categories_repository(table: Any | None = None) -> ProductCategoriesRepository:
+    return ProductCategoriesRepository(os.environ.get("PRODUCT_CATEGORIES_TABLE", ""), table=table)

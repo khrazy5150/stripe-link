@@ -5582,3 +5582,47 @@ button:disabled {
   font-size: 1.2rem;
   color: #a16207;
 }
+
+/* Product category autocomplete (plans/PRODUCT_CATEGORY_AUTOCOMPLETE.md). */
+.category-autocomplete {
+  position: relative;
+}
+
+.category-menu {
+  position: absolute;
+  z-index: 30;
+  top: 100%;
+  left: 0;
+  right: 0;
+  margin: 0.2rem 0 0;
+  padding: 0.4rem;
+  list-style: none;
+  max-height: 24rem;
+  overflow-y: auto;
+  background: var(--panel, #fff);
+  border: 1px solid var(--line, #e2e8f0);
+  border-radius: var(--radius-md, 0.8rem);
+  box-shadow: 0 1.2rem 3rem rgba(15, 23, 42, 0.18);
+}
+
+.category-menu li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.8rem;
+  padding: 0.8rem 1rem;
+  border-radius: var(--radius-sm, 0.6rem);
+  cursor: pointer;
+  font-size: 1.4rem;
+}
+
+.category-menu li:hover,
+.category-menu li.is-selected {
+  background: var(--accent-soft, #eef2ff);
+}
+
+.category-tag {
+  font-size: 1.1rem;
+  color: var(--muted, #64748b);
+  white-space: nowrap;
+}

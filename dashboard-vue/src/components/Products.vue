@@ -201,12 +201,33 @@
               </select>
               <span class="field-note">Determines fulfillment behavior and address collection at checkout.</span>
             </label>
-            <label>
+            <!-- Autocomplete over the shared, growing taxonomy (plans/PRODUCT_CATEGORY_AUTOCOMPLETE.md).
+                 Suggestions are scoped to the product type; typing something new is allowed and becomes the
+                 tenant's category immediately (only shared with others once enough tenants use it). -->
+            <label class="category-autocomplete">
               Product Category <span class="required">*</span>
-              <select v-model="form.product_category" required>
-                <option value="">Select a category</option>
-                <option v-for="[value, label] in categoryOptionsForForm" :key="value" :value="value">{{ label }}</option>
-              </select>
+              <input
+                v-model="categoryQuery"
+                type="text"
+                placeholder="Search or type a category"
+                autocomplete="off"
+                @focus="onCategoryFocus"
+                @input="onCategoryInput"
+                @blur="onCategoryBlur"
+                @keydown.enter.prevent="commitCategoryFreeText"
+              />
+              <ul v-if="showCategoryMenu && categorySuggestions.length" class="category-menu">
+                <li
+                  v-for="suggestion in categorySuggestions"
+                  :key="suggestion.key"
+                  :class="{ 'is-selected': suggestion.key === form.product_category }"
+                  @mousedown.prevent="pickCategory(suggestion)"
+                >
+                  <span>{{ suggestion.label }}</span>
+                  <span v-if="suggestion.source === 'yours'" class="category-tag">your category</span>
+                </li>
+              </ul>
+              <span class="field-note">Pick a suggestion or type your own. New categories become suggestions for others once several sellers use them.</span>
             </label>
           </div>
 
@@ -442,6 +463,7 @@
 import { computed, h, nextTick, ref, watch } from "vue";
 import { apiRequest } from "../api/client";
 import { defaultProductPrice, formatMoney, useProductsStore } from "../stores/products";
+import { humanizeCategory, normalizeCategory, searchCategories } from "../utils/categories";
 import { defaultPriceForm, priceFormFromDocument } from "../utils/priceForm";
 import { idColorStyle } from "../utils/iconColor";
 import PricingCard from "./shared/PricingCard.vue";
@@ -488,32 +510,61 @@ const statusMessage = computed(() => {
   return `${store.shownCount} of ${store.products.length} product${store.products.length === 1 ? "" : "s"} shown.`;
 });
 
-const categoryOptionsByType = {
-  physical: [
-    ["apparel", "Apparel"],
-    ["beauty_personal_care", "Beauty and Personal Care"],
-    ["books_printed_material", "Books and Printed Material"],
-    ["dietary_supplement", "Dietary Supplement"],
-    ["electronics", "Electronics"],
-    ["toys_games", "Toys and Games"],
-    ["other", "Other"],
-  ],
-  digital: [
-    ["course", "Course"],
-    ["digital_download", "Digital Download"],
-    ["membership", "Membership"],
-    ["software", "Software"],
-    ["other", "Other"],
-  ],
-  service: [
-    ["consulting", "Consulting"],
-    ["professional_services", "Professional Services"],
-    ["software_as_a_service", "Software As A Service (SAAS)"],
-    ["other", "Other"],
-  ],
-};
+// --- Product Category autocomplete (plans/PRODUCT_CATEGORY_AUTOCOMPLETE.md) ---------------------------
+// form.product_category stores the normalized KEY; categoryQuery is the label the tenant sees/types.
+const categoryQuery = ref("");
+const categorySuggestions = ref([]);
+const showCategoryMenu = ref(false);
+let categorySearchTimer = null;
 
-const categoryOptionsForForm = computed(() => categoryOptionsByType[form.value.product_type] || categoryOptionsByType.physical);
+function initCategoryQuery() {
+  // Show the stored key's label. The proper server label arrives when the menu first opens; humanize is a
+  // fine placeholder (e.g. "dietary_supplement" -> "Dietary Supplement").
+  categoryQuery.value = form.value.product_category ? humanizeCategory(form.value.product_category) : "";
+}
+
+async function fetchCategorySuggestions() {
+  categorySuggestions.value = await searchCategories(categoryQuery.value, form.value.product_type);
+}
+
+function onCategoryFocus() {
+  showCategoryMenu.value = true;
+  fetchCategorySuggestions();
+}
+
+function onCategoryInput() {
+  showCategoryMenu.value = true;
+  clearTimeout(categorySearchTimer);
+  categorySearchTimer = setTimeout(fetchCategorySuggestions, 180);
+}
+
+function pickCategory(suggestion) {
+  form.value.product_category = suggestion.key;
+  categoryQuery.value = suggestion.label;
+  showCategoryMenu.value = false;
+}
+
+// Typed text with no pick becomes the tenant's own category: store the normalized key so it dedups with
+// existing entries (and matches what the server records). An exact-label match to a suggestion picks it.
+function commitCategoryFreeText() {
+  const typed = categoryQuery.value.trim();
+  showCategoryMenu.value = false;
+  if (!typed) {
+    form.value.product_category = "";
+    return;
+  }
+  const exact = categorySuggestions.value.find((s) => s.label.toLowerCase() === typed.toLowerCase());
+  if (exact) {
+    pickCategory(exact);
+    return;
+  }
+  form.value.product_category = normalizeCategory(typed);
+}
+
+function onCategoryBlur() {
+  // Delay so a mousedown on a suggestion (which fires before blur) can win.
+  setTimeout(() => { if (showCategoryMenu.value || categoryQuery.value) commitCategoryFreeText(); }, 150);
+}
 
 const leadTargetLabel = computed(() => leadTargetLabelFor(draftLeadAction.value.action));
 
@@ -676,6 +727,7 @@ function openCreateModal() {
   editingProduct.value = null;
   skuTouched.value = false;
   form.value = defaultProductForm();
+  initCategoryQuery();
   draftLeadAction.value = { ...defaultLeadAction };
   formError.value = "";
   uploadStatus.value = "";
@@ -692,6 +744,7 @@ async function openEditModal(product) {
   form.value = productFormFromDocument(product);
   // Products created before SKUs existed get one now, from the same name+id inputs a new product would use.
   if (!form.value.sku) form.value.sku = generateSku(product.name, product.product_id);
+  initCategoryQuery();
   draftLeadAction.value = { ...form.value.lead_capture };
   formError.value = "";
   uploadStatus.value = "";
