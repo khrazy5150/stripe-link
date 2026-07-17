@@ -140,13 +140,13 @@
         <header class="modal-card-header">
           <div>
             <h2 id="landingWizardTitle">Create Landing Page</h2>
-            <p>Step {{ wizardStep }} of 3</p>
+            <p>Step {{ wizardStep }} of 4</p>
           </div>
           <button type="button" class="modal-close" aria-label="Close landing page wizard" @click="closeWizard">×</button>
         </header>
 
         <div class="wizard-progress" aria-hidden="true">
-          <span v-for="step in 3" :key="step" :class="{ active: step <= wizardStep }"></span>
+          <span v-for="step in 4" :key="step" :class="{ active: step <= wizardStep }"></span>
         </div>
 
         <div class="landing-wizard-body">
@@ -177,11 +177,37 @@
                   <strong>{{ offer.name || "Untitled Offer" }}</strong>
                   <small>{{ offerIntentLabel(offer) }} · {{ offerItemCount(offer) }} item(s)</small>
                 </span>
+                <span class="wizard-card-check" aria-hidden="true">✓</span>
               </button>
             </div>
           </section>
 
           <section v-else-if="wizardStep === 2" class="wizard-step">
+            <header class="wizard-step-header">
+              <h3>Page Goal</h3>
+              <p>Where will this page's traffic come from? This decides what the page starts with — you can change any of it later.</p>
+            </header>
+            <div class="wizard-goal-list">
+              <button
+                v-for="option in goalOptions"
+                :key="option.value"
+                type="button"
+                class="wizard-goal-card"
+                :class="{ selected: form.goal === option.value }"
+                @click="form.goal = option.value"
+              >
+                <strong>{{ option.label }}</strong>
+                <span>{{ option.note }}</span>
+                <span v-if="goalSeedLabels(option.value).length" class="wizard-goal-adds">
+                  Starts with: {{ goalSeedLabels(option.value).join(", ") }}
+                </span>
+                <span v-else class="wizard-goal-adds is-lean">Starts with the offer only</span>
+                <span class="wizard-card-check" aria-hidden="true">✓</span>
+              </button>
+            </div>
+          </section>
+
+          <section v-else-if="wizardStep === 3" class="wizard-step">
             <header class="wizard-step-header">
               <h3>Configure Page</h3>
               <p>Pick a preset. The call-to-action is determined by the offer — the page just renders it.</p>
@@ -218,10 +244,16 @@
             <div class="wizard-review-grid">
               <div><span>Offer</span><strong>{{ selectedOffer?.name || "None selected" }}</strong></div>
               <div><span>Intent</span><strong>{{ selectedOfferIntent === "lead_gen" ? "Lead generation" : "Transaction" }}</strong></div>
+              <div><span>Goal</span><strong>{{ goalLabel(form.goal) || "Not set" }}</strong></div>
               <div><span>Template</span><strong>{{ selectedTemplateLabel }}</strong></div>
               <div><span>Preset</span><strong>{{ selectedPresetLabel }}</strong></div>
               <div><span>Page ID</span><strong>{{ form.page_id }}</strong></div>
               <div><span>Published path</span><strong>/{{ form.page_id }}/index.html</strong></div>
+            </div>
+            <!-- The composer decides the section list from offer_type x goal; show it before the builder opens. -->
+            <div class="wizard-sections-summary">
+              <span>Sections</span>
+              <strong>{{ wizardSectionLabels.join(", ") }}</strong>
             </div>
             <details class="offer-json-preview">
               <summary>Generated page JSON</summary>
@@ -236,7 +268,7 @@
           <button class="secondary-action" type="button" @click="wizardStep === 1 ? closeWizard() : wizardStep--">
             {{ wizardStep === 1 ? "Cancel" : "Back" }}
           </button>
-          <button v-if="wizardStep < 3" class="primary-action" type="button" @click="nextWizardStep">Next</button>
+          <button v-if="wizardStep < 4" class="primary-action" type="button" @click="nextWizardStep">Next</button>
           <button v-else class="primary-action" type="button" @click="startBuilderFromWizard">
             Continue to Builder
           </button>
@@ -490,8 +522,8 @@
               <label v-for="key in togglableSections" :key="key" class="composition-row">
                 <input type="checkbox" :checked="isSectionEnabled(key)" @change="toggleSection(key, $event.target.checked)" />
                 <span class="composition-name">{{ sectionKeyLabel(key) }}</span>
-                <span class="composition-tag" :class="defaultVisible(builderOfferType, key) ? 'is-recommended' : 'is-optional'">
-                  {{ defaultVisible(builderOfferType, key) ? "Recommended" : "Optional" }}
+                <span class="composition-tag" :class="defaultVisible(builderOfferType, key, builderGoal) ? 'is-recommended' : 'is-optional'">
+                  {{ defaultVisible(builderOfferType, key, builderGoal) ? "Recommended" : "Optional" }}
                 </span>
               </label>
             </div>
@@ -747,7 +779,7 @@
 <script setup>
 import { computed, reactive, ref, watch } from "vue";
 import { offerViewTargets, offerViewTargetsFromExpanded } from "../composables/useConversionContext";
-import { isSectionVisible, defaultVisible, recommendedSectionKeys, optionalSectionKeys, governedKeys, elementLabel, addableElements, tokenGroups, previewVar } from "../composables/pageComposer";
+import { isSectionVisible, defaultVisible, recommendedSectionKeys, optionalSectionKeys, governedKeys, elementLabel, addableElements, tokenGroups, previewVar, supportedGoals, goalLabel, packSeeds } from "../composables/pageComposer";
 import { apiRequest, getApiBase, getApiEnvironment, getPagesBaseUrl, getPreviewPagesBaseUrl, getTenantId } from "../api/client";
 import { formatMoney } from "../stores/products";
 import { uploadImage } from "../api/uploads";
@@ -843,11 +875,15 @@ const isListicleOffer = computed(() => (builderOffer.value?.offer_type || "singl
 // Python's compose_page() applies the same rules, so preview and published can't disagree.
 const builderOfferType = computed(() => builderOffer.value?.offer_type || "single");
 function sectionVisible(sectionType) {
-  return isSectionVisible(builderOfferType.value, sectionType, builder.composition.overrides);
+  return isSectionVisible(builderOfferType.value, sectionType, builder.composition.overrides, builderGoal.value);
 }
-// Governed sections a tenant can toggle for this offer type (Recommended = on by default, Optional = off).
-const recommendedSections = computed(() => recommendedSectionKeys(builderOfferType.value));
-const optionalSections = computed(() => optionalSectionKeys(builderOfferType.value));
+// The page's goal is the second composition axis: offer_type sets the base sections, the goal unions in the
+// sections its capability packs enable (plans/LANDING_PAGE_GOAL_COMPOSITION.md). "" = a page from before
+// goals existed, which composes from the base alone.
+const builderGoal = computed(() => builder.goal || "");
+// Governed sections a tenant can toggle for this offer type + goal (Recommended = on by default).
+const recommendedSections = computed(() => recommendedSectionKeys(builderOfferType.value, builderGoal.value));
+const optionalSections = computed(() => optionalSectionKeys(builderOfferType.value, builderGoal.value));
 // Structural sections are always present; these are the optional content sections the tenant can add/remove.
 const MANDATORY_SECTION_KEYS = new Set(["hero", "hero_media", "offer_price_selector", "legal_footer", "checkout_cta"]);
 const togglableSections = computed(() => governedKeys().filter((key) => {
@@ -865,11 +901,11 @@ function sectionKeyLabel(key) {
 function isSectionEnabled(key) {
   const override = builder.composition.overrides[key];
   if (override && typeof override.enabled === "boolean") return override.enabled;
-  return defaultVisible(builderOfferType.value, key);
+  return defaultVisible(builderOfferType.value, key, builderGoal.value);
 }
 function toggleSection(key, enabled) {
   // Only persist a deviation from the offer_type default; clearing back to default drops the override.
-  if (enabled === defaultVisible(builderOfferType.value, key)) {
+  if (enabled === defaultVisible(builderOfferType.value, key, builderGoal.value)) {
     delete builder.composition.overrides[key];
   } else {
     builder.composition.overrides[key] = { enabled };
@@ -1056,6 +1092,20 @@ const emptyStateText = computed(() => {
 const presetOptions = computed(() => universalBundlePresets);
 const selectedTemplateLabel = computed(() => "Universal Bundle");
 const selectedPresetLabel = computed(() => presetOptions.value.find((option) => option.value === form.preset)?.label || "None");
+// Goal step. Options come from composition_rules.json, so adding a goal there surfaces it here — the
+// wizard never hardcodes the list (plans/LANDING_PAGE_GOAL_COMPOSITION.md).
+const goalOptions = computed(() => supportedGoals());
+// What a goal starts the page with, in the tenant's words (element labels, not section keys).
+function goalSeedLabels(goal) {
+  return packSeeds(goal).map((type) => elementLabel(type));
+}
+// The section list the composer will produce for this offer_type + goal, shown on Review before the
+// builder opens. Governed sections come from the composer; the goal's packs add their seeded content.
+const wizardSectionLabels = computed(() => {
+  const offerType = selectedOffer.value?.offer_type || "single";
+  const governed = recommendedSectionKeys(offerType, form.goal).map((key) => elementLabel(key));
+  return [...governed, ...goalSeedLabels(form.goal)];
+});
 const filteredPages = computed(() => {
   const term = search.value.toLowerCase();
   if (!term) return pages.value;
@@ -1101,6 +1151,9 @@ function defaultWizardForm() {
     slug: "",
     template: "universal_bundle",
     preset: "clean-slate",
+    // Second composition axis: why the page exists / where its traffic comes from. Presets which capability
+    // packs the page starts with (plans/LANDING_PAGE_GOAL_COMPOSITION.md).
+    goal: "",
   };
 }
 
@@ -1114,6 +1167,8 @@ function defaultBuilderForm() {
     slug: "",
     template: "universal_bundle",
     preset: "clean-slate",
+    // "" = no goal (a page created before the goal axis) — composes from the offer_type base alone.
+    goal: "",
     favicon_url: "",
     seo_title: "",
     seo_description: "",
@@ -1275,6 +1330,10 @@ function nextWizardStep() {
     wizardError.value = "Choose an offer before continuing.";
     return;
   }
+  if (wizardStep.value === 2 && !form.goal) {
+    wizardError.value = "Choose a goal before continuing.";
+    return;
+  }
   wizardStep.value += 1;
 }
 
@@ -1286,11 +1345,23 @@ function startBuilderFromWizard() {
     return;
   }
   populateBuilderFromPage(page);
+  seedGoalElements(form.goal);
   builderExistingPageId.value = "";
   builderOriginalPage.value = null;
   builderOpen.value = true;
   builderFormHidden.value = false;
   wizardOpen.value = false;
+}
+
+// A goal's packs seed content-bearing elements as EMPTY scaffolds for the tenant to fill. They live in
+// builder state, not the draft document: an empty faq/testimonial is not a valid page section (its items
+// need answers), and builderSections() drops still-empty elements on save anyway. Once seeded they are
+// tenant-owned — nothing re-seeds or retracts them if the goal changes.
+function seedGoalElements(goal) {
+  for (const type of packSeeds(goal)) {
+    if (builder.elements.some((element) => element.type === type)) continue;
+    builder.elements.push(newElement(type));
+  }
 }
 
 async function savePage() {
@@ -1332,6 +1403,8 @@ function populateBuilderFromPage(page) {
     slug: page.route?.slug || slugify(page.name || page.page_id),
     template: page.theme?.template || "universal_bundle",
     preset: page.theme?.preset || "clean-slate",
+    // Absent on pages created before the goal axis — "" keeps them composing from the base alone.
+    goal: page.goal || "",
     favicon_url: page.seo?.favicon_url || "",
     seo_title: page.seo?.title || page.name || "",
     seo_description: page.seo?.description || "",
@@ -1411,6 +1484,7 @@ function buildBuilderPageDocument() {
       favicon_url: builder.favicon_url,
     },
     offer_id: builder.offer_id,
+    goal: builder.goal || undefined,
     theme: {
       template: "universal_bundle",
       preset: builder.preset,
@@ -1628,6 +1702,7 @@ function buildPageDocument() {
       image: offerImage(offer),
     },
     offer_id: offer.offer_id,
+    goal: form.goal || undefined,
     theme: {
       template: "universal_bundle",
       preset: form.preset || "clean-slate",

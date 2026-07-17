@@ -4497,6 +4497,7 @@ button:disabled {
 }
 
 .wizard-offer-card {
+  position: relative;
   display: grid;
   grid-template-columns: 8rem minmax(0, 1fr);
   gap: 1.2rem;
@@ -4507,13 +4508,111 @@ button:disabled {
   color: var(--text);
   cursor: pointer;
   padding: 1.2rem;
+  /* room for the check so long names never run under it */
+  padding-right: 4.4rem;
   text-align: left;
+}
+
+/* Selected-card check, matching the item picker in the Offers wizard (.offer-product-check) so a
+   selection reads the same everywhere. Scaled down for these compact horizontal cards. */
+.wizard-card-check {
+  position: absolute;
+  top: 1rem;
+  right: 1.2rem;
+  display: none;
+  width: 2.6rem;
+  height: 2.6rem;
+  place-items: center;
+  border: 2px solid #fff;
+  border-radius: 999px;
+  background: #3b82f6;
+  color: #fff;
+  box-shadow: 0 0.4rem 1.2rem rgba(15, 23, 42, 0.22);
+  font-size: 1.4rem;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.wizard-offer-card.selected .wizard-card-check,
+.wizard-goal-card.selected .wizard-card-check {
+  display: grid;
 }
 
 .wizard-offer-card:hover,
 .wizard-offer-card.selected {
   border-color: var(--accent);
   box-shadow: 0 0.8rem 2rem rgba(75, 73, 172, 0.14);
+}
+
+/* Goal step: the page's second composition axis (plans/LANDING_PAGE_GOAL_COMPOSITION.md). */
+.wizard-goal-list {
+  display: grid;
+  gap: 1rem;
+}
+
+.wizard-goal-card {
+  position: relative;
+  display: grid;
+  gap: 0.4rem;
+  border: 2px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--panel);
+  color: var(--text);
+  cursor: pointer;
+  padding: 1.2rem 1.4rem;
+  /* room for the check so the note never runs under it */
+  padding-right: 4.6rem;
+  text-align: left;
+}
+
+.wizard-goal-card:hover,
+.wizard-goal-card.selected {
+  border-color: var(--accent);
+  box-shadow: 0 0.8rem 2rem rgba(75, 73, 172, 0.14);
+}
+
+.wizard-goal-card strong {
+  font-size: 1.5rem;
+}
+
+/* The check is a span too, and this rule outranks .wizard-card-check (0,1,1 vs 0,1,0) — without the
+   :not() it repaints the tick muted grey, shrinks it, and knocks it off-centre with line-height. */
+.wizard-goal-card span:not(.wizard-card-check) {
+  font-size: 1.3rem;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.wizard-goal-adds {
+  font-weight: 700;
+  color: var(--accent) !important;
+}
+
+.wizard-goal-adds.is-lean {
+  font-weight: 400;
+  color: var(--muted) !important;
+}
+
+.wizard-sections-summary {
+  display: grid;
+  gap: 0.4rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  padding: 1.2rem 1.4rem;
+  margin-top: 1.2rem;
+}
+
+.wizard-sections-summary span {
+  font-size: 1.2rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.wizard-sections-summary strong {
+  font-size: 1.3rem;
+  font-weight: 600;
+  line-height: 1.5;
 }
 
 .wizard-offer-image {

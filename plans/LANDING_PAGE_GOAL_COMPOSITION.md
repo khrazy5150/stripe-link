@@ -99,10 +99,46 @@ available but out of the way.
 4. Quality-baseline warnings (a11y/CLS) as a page-health checklist.
 5. Feed the composed scaffold to Build with AI.
 
+## Status — Phases 1 + 2 shipped
+
+`goal` is a first-class page field, the wizard asks for it, and the composer takes it as a second input.
+
+- **Rules** (`composition_rules.json`): `goals` (label + note + packs) and `packs`. Goals are data — adding
+  one is a row, and it surfaces in the wizard, the composer, the validator, and the JSON schema for free.
+- **A pack has two halves**, because the two kinds of section behave differently:
+  - `seeds` — content-bearing body elements (faq, testimonials, rating, client_marquee). These render
+    nothing until a tenant fills them in, so a flag can't summon them: the create wizard **seeds empty
+    scaffolds into builder state**, and they are tenant-owned from that moment. Changing goal later never
+    deletes copy someone wrote. They go into builder state, *not* the draft document — an empty FAQ is not a
+    valid page section (`items` need answers), and `builderSections()` drops still-empty elements on save.
+  - `sections` — governed sections the goal turns on, unioned over the offer_type base. This is the right
+    home for **derived** `head`/`sidecar` output (structured_data, llms_txt) that needs no tenant input.
+    **Empty today**: the mechanism is wired and tested-inert so Phase 3 slots in with no renderer change.
+- **Union-only, so no migration.** A page with no `goal` composes exactly as it did before goals existed.
+  Tests pin this: no goal can remove a base section, and `recommended_section_keys(type, goal)` is currently
+  identical for every goal. Verified on dev — the same page rendered with no goal, `search_seo`, and
+  `minimal` produced byte-identical HTML (same SHA).
+- **One enum, one source.** `SUPPORTED_PAGE_GOALS` is read from the rules file, so the goals a page may
+  store cannot drift from the goals the composer understands. Python and Vue were checked to return
+  identical packs/seeds for every goal plus the `""`/unknown cases.
+- Also fixed in passing: `Page.schema.json` never declared `composition` despite `additionalProperties:
+  false`, so it had been rejecting documents the builder actually writes.
+
+**Known and intentional:** `paid_ads`, `email_list`, and `minimal` are section-identical right now — they
+enable no packs. Their real divergence (SEO scaffolding off, ad pixels, LCP budget) arrives with Phase 3.
+The five names ship now so the vocabulary is stable for Build with AI.
+
 ## Open decisions
 
-- Final **goal list** and names (starter set above).
-- Exact **pack contents** and which packs each goal enables.
-- Whether **VSL/minimal** are goals or style choices layered on any goal (leaning: video is a *pack*, minimal
-  is a *goal*).
-- Default `goal` for pages created before this exists.
+- ~~Final **goal list** and names~~ — shipped the starter five: paid_ads, search_seo, social, email_list,
+  minimal.
+- ~~Exact **pack contents**~~ — `discoverability` seeds faq; `social_proof` seeds testimonials + rating +
+  client_marquee. `urgency`/`video` deferred: countdown is driven by its own builder toggle rather than an
+  element, and there is no vsl element yet.
+- ~~Whether **VSL/minimal** are goals or style choices~~ — minimal is a goal; video stays a pack for when a
+  vsl element exists.
+- ~~Default `goal` for pages created before this exists~~ — none. Absent `goal` is a first-class state
+  meaning "base only", which is precisely the old behaviour; nothing is backfilled.
+- Still open: whether a goal should ever be able to **remove** a base section (a `hides` list). The plan is
+  union-only on purpose, but it means lean goals can't actually strip trust badges / refund policy. Revisit
+  once Phase 3 gives goals real teeth.

@@ -85,6 +85,11 @@
         "type": "string",
         "minLength": 1
       },
+    "goal": {
+      "type": "string",
+      "enum": ["paid_ads", "search_seo", "social", "email_list", "minimal"],
+      "description": "Why this page exists / where its traffic comes from. Second composition axis alongside the offer's offer_type: the goal enables capability packs on top of the offer_type base (plans/LANDING_PAGE_GOAL_COMPOSITION.md). Optional — a page without a goal composes from the base alone, exactly as pages did before the goal axis existed."
+    },
     "theme": {
       "type": "object",
       "additionalProperties": false,
@@ -222,6 +227,24 @@
         },
         "short_label": { "type": "string" },
         "full_policy": { "type": "string" }
+      }
+    },
+    "composition": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Tenant deviations from the composed defaults. Compact by design: only sections the tenant explicitly toggled appear here.",
+      "properties": {
+        "overrides": {
+          "type": "object",
+          "description": "Keyed by section type; {enabled} wins over the offer_type + goal default.",
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "enabled": { "type": "boolean" }
+            }
+          }
+        }
       }
     },
     "sections": {

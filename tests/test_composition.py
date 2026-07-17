@@ -3,12 +3,17 @@ import unittest
 from stripe_link.domain.composition import (
     allowed_ctas,
     compose_page,
+    default_visible,
     element,
     element_label,
+    goal_packs,
     is_section_visible,
     optional_section_keys,
+    pack_seeds,
+    page_goal,
     recommended_section_keys,
     section_key,
+    supported_goals,
 )
 
 
@@ -87,6 +92,77 @@ class CompositionTests(unittest.TestCase):
         self.assertTrue(is_section_visible("single", "trust_badges", {}))
         self.assertFalse(is_section_visible("listicle", "trust_badges", {}))
         self.assertTrue(is_section_visible("listicle", "trust_badges", {"trust_badges": {"enabled": True}}))
+
+
+class GoalCompositionTests(unittest.TestCase):
+    """The goal axis (plans/LANDING_PAGE_GOAL_COMPOSITION.md): offer_type says WHAT the page sells, goal says
+    WHY its traffic comes. Goals enable capability packs on top of the offer_type base, union-only."""
+
+    def _page(self, goal=None):
+        page = {"sections": [{"type": "hero"}, {"type": "trust_badges"}, {"type": "faq"}]}
+        if goal is not None:
+            page["goal"] = goal
+        return page
+
+    def test_goals_come_from_the_rules_file(self):
+        goals = supported_goals()
+        self.assertEqual(goals, ["paid_ads", "search_seo", "social", "email_list", "minimal"])
+
+    def test_goal_packs_and_seeds(self):
+        self.assertEqual(goal_packs("search_seo"), ["discoverability"])
+        self.assertEqual(pack_seeds("search_seo"), ["faq"])
+        self.assertEqual(pack_seeds("social"), ["testimonials", "rating", "client_marquee"])
+        # Lean goals start with the offer only.
+        self.assertEqual(pack_seeds("paid_ads"), [])
+        self.assertEqual(pack_seeds("minimal"), [])
+
+    def test_unknown_or_absent_goal_enables_nothing(self):
+        # A page from before the goal axis must behave exactly as it did: base sections only.
+        self.assertEqual(goal_packs(""), [])
+        self.assertEqual(goal_packs("not_a_goal"), [])
+        self.assertEqual(pack_seeds(""), [])
+
+    def test_page_goal_reads_the_document(self):
+        self.assertEqual(page_goal({"goal": "social"}), "social")
+        self.assertEqual(page_goal({}), "")
+        self.assertEqual(page_goal(None), "")
+
+    def test_goal_never_removes_a_base_section(self):
+        # Packs are union-only: no goal can take away what the offer_type already grants.
+        for goal in supported_goals():
+            for key in ("hero", "trust_badges", "checkout_cta", "legal_footer"):
+                self.assertTrue(
+                    default_visible("single", key, goal),
+                    f"goal {goal} must not remove base section {key}",
+                )
+
+    def test_goal_does_not_change_composition_today(self):
+        # Packs currently seed content only; no pack grants a GOVERNED section until derived head/sidecar
+        # sections land (Phase 3). This asserts the union mechanism is wired but inert, so a goal cannot
+        # silently alter an existing page's governed sections.
+        for goal in supported_goals():
+            self.assertEqual(
+                recommended_section_keys("single", goal),
+                recommended_section_keys("single", ""),
+            )
+
+    def test_compose_page_is_unchanged_without_a_goal(self):
+        with_goal = [s["type"] for s in compose_page({"offer_type": "single"}, self._page("search_seo"))]
+        without = [s["type"] for s in compose_page({"offer_type": "single"}, self._page())]
+        self.assertEqual(with_goal, without)
+
+    def test_overrides_still_beat_the_goal_default(self):
+        page = self._page("search_seo")
+        page["composition"] = {"overrides": {"trust_badges": {"enabled": False}}}
+        types = [s["type"] for s in compose_page({"offer_type": "single"}, page)]
+        self.assertNotIn("trust_badges", types)
+
+    def test_is_section_visible_accepts_a_goal(self):
+        self.assertTrue(is_section_visible("single", "trust_badges", {}, "minimal"))
+        self.assertFalse(is_section_visible("listicle", "trust_badges", {}, "minimal"))
+        # Ungoverned body elements ignore the goal entirely — presence is the opt-in.
+        self.assertTrue(is_section_visible("single", "faq", {}, "paid_ads"))
+
 
 
 if __name__ == "__main__":

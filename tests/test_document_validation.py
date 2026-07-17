@@ -532,6 +532,24 @@ class DocumentValidationTests(unittest.TestCase):
         with self.assertRaisesRegex(DocumentValidationError, "Trust badges"):
             validate_page_document(page)
 
+    def test_page_accepts_a_supported_goal(self):
+        # The goal axis: offer_type x goal composition (plans/LANDING_PAGE_GOAL_COMPOSITION.md).
+        page = load_fixture("page-creatine-standard.json")
+        page["goal"] = "search_seo"
+        validate_page_document(page)
+
+    def test_page_rejects_an_unknown_goal(self):
+        page = load_fixture("page-creatine-standard.json")
+        page["goal"] = "carrier_pigeon"
+        with self.assertRaisesRegex(DocumentValidationError, "Page goal"):
+            validate_page_document(page)
+
+    def test_page_without_a_goal_is_still_valid(self):
+        # Pages created before the goal axis must keep validating — goal is optional, never backfilled.
+        page = load_fixture("page-creatine-standard.json")
+        page.pop("goal", None)
+        validate_page_document(page)
+
     def test_page_rejects_invalid_faq_item(self):
         page = load_fixture("page-universal-bundle.json")
         faq = next(section for section in page["sections"] if section["type"] == "faq")

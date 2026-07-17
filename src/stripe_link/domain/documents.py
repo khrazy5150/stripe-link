@@ -2,6 +2,8 @@ import re
 from decimal import Decimal
 from typing import Any
 
+from stripe_link.domain.composition import supported_goals
+
 
 class DocumentValidationError(ValueError):
     pass
@@ -38,6 +40,11 @@ SUPPORTED_PAGE_SECTION_TYPES = {
     "trust_badges",
 }
 SUPPORTED_PAGE_TEMPLATES = {"universal_bundle"}
+# The goal enum comes from composition_rules.json — the composer's source of truth — so the goals a page may
+# store can never drift from the goals the composer understands. Empty means the rules file failed to load
+# (composition.py degrades rather than raising at import); accept any string then instead of rejecting every
+# page. See plans/LANDING_PAGE_GOAL_COMPOSITION.md.
+SUPPORTED_PAGE_GOALS = set(supported_goals())
 SUPPORTED_THEME_PRESETS = {
     "techno-green",
     "rose-minimalist",
@@ -861,6 +868,12 @@ def validate_page_document(document: dict[str, Any]) -> None:
     require_string(document, "offer_id")
     if document.get("status") is not None:
         require_enum(document, "status", {"draft", "published", "archived"})
+    # goal is optional: pages created before the goal axis simply compose from the offer_type base.
+    if document.get("goal") is not None:
+        if SUPPORTED_PAGE_GOALS:
+            require_enum(document, "goal", SUPPORTED_PAGE_GOALS, "Page goal")
+        else:
+            optional_string(document, "goal", "Page goal")
     optional_non_negative_int(document, "revision")
 
     route = document.get("route")

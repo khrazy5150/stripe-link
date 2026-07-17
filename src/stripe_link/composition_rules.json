@@ -1,5 +1,5 @@
 {
-  "_comment": "Single source of truth for the landing-page ELEMENT CATALOG + composition (plans/PAGE_COMPOSER.md, Builder Reframe). Read by the Python publisher (domain/composition.py) AND imported by the Vue builder (composables/pageComposer.js). One vocabulary: the canonical key is the section `type` string (no aliases). Each element declares label + ui + kind + channel + heading_role + tokens; the composer uses governed_sections + offer_types.",
+  "_comment": "Single source of truth for the landing-page ELEMENT CATALOG + composition (plans/PAGE_COMPOSER.md, Builder Reframe). Read by the Python publisher (domain/composition.py) AND imported by the Vue builder (composables/pageComposer.js). One vocabulary: the canonical key is the section `type` string (no aliases). Each element declares label + ui + kind + channel + heading_role + tokens; the composer uses governed_sections + offer_types (what the page sells) unioned with the packs enabled by goals (why its traffic comes \u2014 plans/LANDING_PAGE_GOAL_COMPOSITION.md).",
   "elements": {
     "countdown_timer":      { "label": "Countdown timer", "ui": "toggle", "kind": "capability", "channel": "body", "heading_role": "none", "repeatable": false, "tokens": ["countdown_bg", "countdown_end_bg", "countdown_text"] },
     "brand_label":          { "label": "Brand label",     "ui": "toggle", "kind": "capability", "channel": "body", "heading_role": "none", "repeatable": false, "tokens": ["brand_label_text", "brand_dot"] },
@@ -66,5 +66,17 @@
       "sections": ["hero_media", "hero", "offer_price_selector", "checkout_cta", "legal_footer"],
       "allowed_ctas": ["buy", "cart"]
     }
+  },
+  "_goal_comment": "Second composition axis: the tenant's GOAL / traffic source (plans/LANDING_PAGE_GOAL_COMPOSITION.md). A goal enables capability PACKS on top of the offer_type base \u2014 never a hand-maintained offer_type x goal matrix. Packs are union-only: they add, never remove, so a page with no goal composes exactly as it did before goals existed (no migration). A pack has two halves because the two kinds of section behave differently. `seeds` are content-bearing body elements (faq, testimonials, ...) that render nothing until a tenant fills them in \u2014 the create wizard seeds them as empty scaffolds into builder state and they are tenant-owned from then on, so changing goal never deletes copy. `sections` are governed sections the goal turns on; that suits DERIVED head/sidecar output (structured_data, llms_txt) needing no tenant input, and is empty until those exist (Phase 3) \u2014 the mechanism is here so they slot in without a renderer change.",
+  "packs": {
+    "discoverability": { "label": "Discoverability", "seeds": ["faq"], "sections": [] },
+    "social_proof":    { "label": "Social proof",    "seeds": ["testimonials", "rating", "client_marquee"], "sections": [] }
+  },
+  "goals": {
+    "paid_ads":   { "label": "Paid ads",     "note": "Fast and minimal. Just the offer and the CTA \u2014 no SEO weight to slow the page down.", "packs": [] },
+    "search_seo": { "label": "Search / SEO", "note": "Built to rank: adds an FAQ, and (later) structured data and llms.txt derived from the offer.", "packs": ["discoverability"] },
+    "social":     { "label": "Social",       "note": "Built to convert a scrolling audience: adds social proof \u2014 testimonials, rating, client logos.", "packs": ["social_proof"] },
+    "email_list": { "label": "Email list",   "note": "A warm audience that already knows you: minimal friction, straight to the offer.", "packs": [] },
+    "minimal":    { "label": "Minimal",      "note": "Just the offer. Nothing else.", "packs": [] }
   }
 }
