@@ -139,6 +139,23 @@ The five names ship now so the vocabulary is stable for Build with AI.
   vsl element exists.
 - ~~Default `goal` for pages created before this exists~~ — none. Absent `goal` is a first-class state
   meaning "base only", which is precisely the old behaviour; nothing is backfilled.
-- Still open: whether a goal should ever be able to **remove** a base section (a `hides` list). The plan is
-  union-only on purpose, but it means lean goals can't actually strip trust badges / refund policy. Revisit
-  once Phase 3 gives goals real teeth.
+- Still open: whether a goal should ever be able to **remove** a base section (a `hides` list). **Raised and
+  deliberately deferred (2026-07-16)** — union-only stands for now; revisit once Phase 3 gives goals real
+  teeth. The consequence is worth stating plainly: **a goal can only add.** `trust_badges`, `refund_policy`
+  and `brand_label` come from the offer_type base, so *no* goal can strip them — `minimal` renders the same
+  chrome as `search_seo`. The goal notes were reworded to promise addition, not subtraction, so the wizard
+  stops implying otherwise. Two candidate fixes when we return: a `hides` list on goals (small composer
+  change, still backward compatible since a no-goal page has no hides), or trimming the offer_type base to a
+  lean core and adding chrome back via packs (purer, but it changes defaults for existing no-goal pages and
+  needs a migration or a legacy base).
+
+## Not configurable at runtime (known)
+
+Goals are **data, but not self-service**. `composition_rules.json` ships *with the code*: Python reads it off
+disk in the Lambda bundle (`CodeUri: src/`) and Vue **inlines it at build time** (`import rules from
+"../../../src/stripe_link/composition_rules.json"`). There is no config table and no admin UI, so changing a
+goal means editing the file and running both `deploy.sh` and `deploy-dashboard.sh`. Making it truly
+tenant-configurable is a separate project: the rules would have to move to a store both renderers read at
+runtime, which means the Vue side fetches them instead of inlining — losing the compile-time guarantee that
+the two composers read the identical bytes. That guarantee is the reason preview and published can't drift,
+so it should not be traded away casually.
