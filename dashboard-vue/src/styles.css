@@ -5626,3 +5626,29 @@ button:disabled {
   color: var(--muted, #64748b);
   white-space: nowrap;
 }
+
+/* Page-health warnings (quality baseline: heading outline, a11y, CLS). Advisory, never a publish gate. */
+.page-health-warnings {
+  margin: 0 0 1.2rem;
+  padding: 1.2rem 1.4rem;
+  border: 1px solid #fcd34d;
+  border-radius: var(--radius-md, 0.8rem);
+  background: #fffbeb;
+}
+
+.page-health-warnings strong {
+  display: block;
+  font-size: 1.3rem;
+  color: #92400e;
+}
+
+.page-health-warnings ul {
+  margin: 0.6rem 0 0;
+  padding-left: 1.8rem;
+}
+
+.page-health-warnings li {
+  font-size: 1.3rem;
+  line-height: 1.6;
+  color: #92400e;
+}

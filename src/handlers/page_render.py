@@ -7,7 +7,12 @@ from stripe_link.domain.documents import (
     validate_service,
 )
 from stripe_link.domain.pricing import PricingError
-from stripe_link.runtime.html import RenderError, render_page, structured_data_warnings
+from stripe_link.runtime.html import (
+    RenderError,
+    heading_outline_warnings,
+    render_page,
+    structured_data_warnings,
+)
 
 
 def handler(event, context):
@@ -80,7 +85,12 @@ def handler(event, context):
         # result. Advisory only — the builder surfaces it, nothing blocks on it.
         return json_response({
             "html": html,
-            "warnings": {"structured_data": structured_data_warnings(offer, products_by_id, services_by_id)},
+            "warnings": {
+                "structured_data": structured_data_warnings(offer, products_by_id, services_by_id),
+                # Quality baseline: heading outline now, a11y/CLS later (plans/LANDING_PAGE_GOAL_COMPOSITION.md
+                # Phase 4). Checked on the rendered HTML — the source of truth for what ships.
+                "page_health": heading_outline_warnings(html),
+            },
         })
     except (DocumentValidationError, PricingError, RenderError, ValueError) as exc:
         return error_response(str(exc), code="render_error")

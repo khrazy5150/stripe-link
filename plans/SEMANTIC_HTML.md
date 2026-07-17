@@ -79,10 +79,17 @@ is the specialized case (question = `h3`, plus schema).
   so exactly one `<h1>`). `content_block` promoted `<h3>` → `<h2>` (it's a top-level content section — no
   more h1→h3 skip). Tests assert `count("<h1") == 1`. Catalog `heading_role` updated (headline h1,
   content_block h2).
-- **Slice 2 (deferred):** render the FAQ section's `<h2>` heading (the element carries one now but
-  `elementSection`/`render_faq` drop it); a **publish-time outline validator** (block zero/multiple `<h1>`,
-  warn on skipped levels); and the general "renderer computes the outline from position" model so any future
-  section stack stays valid without per-section hardcoding. `product_carousel` titles (`<h3>`) to review.
+- **Slice 2 (partly shipped):** the FAQ `<h2>` heading now renders. The **publish-time outline validator**
+  is shipped as `heading_outline_warnings(html)` (runtime/html.py), returned by `/pages/render` under
+  `warnings.page_health` and surfaced in the builder's always-visible "Page health" banner: flags not-exactly-
+  one-`<h1>`, empty headings, and skipped levels (H1->H3) on the rendered body (a `<head>` H1 is ignored).
+  Warnings only, never a gate (the quality-baseline stance won). It rarely fires from the BUILDER — the two
+  H1 elements (hero, headline) are `ui: fixed` and no addable element renders an H1, so the outline is correct
+  by construction. Its real value is a regression net and, importantly, a guardrail on the future AI builder
+  (which fills the semantic skeleton — this catches a malformed outline before publish). Still open: the
+  general "renderer computes the outline from position" model (currently heading_role is per-element, which is
+  enough today); `product_carousel` titles (`<h3>`) to review; whether to ever BLOCK (vs warn) on
+  zero/multiple `<h1>`.
 
 ## Open decisions
 

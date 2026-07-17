@@ -129,7 +129,14 @@ Google's Rich Results Test.
 
 **Phase 3 remainder:** the sidecar channel + `llms_txt` (blocked, see below).
 
-**Phase 4 — quality-baseline warnings — NOT built.** The plan's "three buckets" (line 45) call for a quality
+**Phase 4 — quality-baseline warnings — STARTED (heading outline shipped).** The `warnings.page_health`
+channel is live: `/pages/render` returns it and the builder shows it in an always-visible "Page health"
+banner. The first check is the **heading-outline validator** (`heading_outline_warnings`, plans/SEMANTIC_HTML.md
+Slice 2): one `<h1>`, no empty/skipped levels, `<head>` ignored. Still open in this phase: **accessibility**
+(images missing `alt`, missing landmarks) and **layout stability** (images without reserved dimensions / CLS)
+— both plug into the same `page_health` channel. The prior text below is retained for the fuller picture.
+
+**Phase 4 (original note) — NOT built.** The plan's "three buckets" (line 45) call for a quality
 baseline surfaced as *warnings, never toggles*: accessibility (landmarks, alt text, focus order), a valid
 heading outline / semantic HTML (plans/SEMANTIC_HTML.md — one H1, ordered H2/H3, publish-time outline
 validator), and layout stability (reserved image dimensions, no CLS). The structured-data warnings shipped in

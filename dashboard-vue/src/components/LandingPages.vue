@@ -787,6 +787,15 @@
              and show the returned HTML here. One JSON, one renderer, two consumers (this iframe and the
              published artifact) — there is no second implementation left to drift out of sync. -->
         <div v-if="previewError" class="preview-render-error">{{ previewError }}</div>
+        <!-- Quality-baseline nudges on the rendered page (heading outline; a11y/CLS later). Never blocks
+             publishing — the outline is correct by construction, so this usually stays hidden and only
+             appears if something regresses. plans/SEMANTIC_HTML.md -->
+        <div v-if="pageHealthWarnings.length" class="page-health-warnings">
+          <strong>Page health</strong>
+          <ul>
+            <li v-for="(warning, i) in pageHealthWarnings" :key="i">{{ warning }}</li>
+          </ul>
+        </div>
         <iframe
           v-show="previewHtml"
           ref="previewFrame"
@@ -1065,6 +1074,9 @@ const previewHtml = ref("");
 const previewError = ref("");
 // Advisory only: what would stop this page's structured data earning a rich result. Never blocks a save.
 const structuredDataWarnings = ref([]);
+// Quality-baseline warnings for the whole page (heading outline now; a11y/CLS later). Not tied to any
+// section, so shown always, not inside the Discoverability drawer.
+const pageHealthWarnings = ref([]);
 const previewFrame = ref(null);
 let previewRenderTimer = null;
 let previewRenderSeq = 0;
@@ -1145,12 +1157,14 @@ async function renderPreview() {
     // Ignore a stale response that lands after a newer edit.
     if (seq !== previewRenderSeq) return;
     const html = body?.html || "";
+    // Warnings travel with the render, so they describe the same bytes the visitor gets. Capture them
+    // before the identical-HTML early return below, or a no-op re-render would leave them stale.
+    structuredDataWarnings.value = body?.warnings?.structured_data || [];
+    pageHealthWarnings.value = body?.warnings?.page_health || [];
     if (html === previewHtml.value) return;  // nothing changed: don't reload and lose the scroll position
     capturePreviewScroll();
     previewHtml.value = html;
     previewError.value = "";
-    // Page health travels with the render, so the drawer reports on the same bytes the visitor gets.
-    structuredDataWarnings.value = body?.warnings?.structured_data || [];
   } catch (err) {
     if (seq !== previewRenderSeq) return;
     previewError.value = err.message || "Preview render failed.";

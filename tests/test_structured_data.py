@@ -3,7 +3,7 @@ import json
 import re
 import unittest
 
-from stripe_link.runtime.html import render_page, structured_data_warnings
+from stripe_link.runtime.html import heading_outline_warnings, render_page, structured_data_warnings
 from tests.test_page_render import load_fixture
 
 
@@ -212,6 +212,46 @@ class StructuredDataWarningTests(unittest.TestCase):
         html = render_page(page, offer, {product["product_id"]: product})
         self.assertIn("<h1", html)
         self.assertTrue(ld_blocks(html), "markup is still emitted, just thinner")
+
+
+
+class HeadingOutlineWarningTests(unittest.TestCase):
+    """Publish-time outline validator (plans/SEMANTIC_HTML.md): one H1, ordered, no empty/skipped levels.
+    Warnings only — the renderer builds a correct outline by construction; this catches regressions."""
+
+    def _body(self, inner):
+        # An H1 in <head> must be ignored — only the visible body is an outline.
+        return f"<html><head><h1>head noise</h1></head><body><main>{inner}</main></body></html>"
+
+    def test_valid_outline_has_no_warnings(self):
+        self.assertEqual(heading_outline_warnings(self._body("<h1>Thesis</h1><h2>A</h2><h3>a</h3><h2>B</h2>")), [])
+
+    def test_real_pages_pass(self):
+        offer = load_fixture("offer-creatine-standard.json")
+        product = load_fixture("product-creatine-gummies.json")
+        page = load_fixture("page-creatine-standard.json")
+        html = render_page(page, offer, {product["product_id"]: product})
+        self.assertEqual(heading_outline_warnings(html), [])
+
+    def test_missing_h1(self):
+        self.assertTrue(any("no main heading" in w for w in heading_outline_warnings(self._body("<h2>A</h2>"))))
+
+    def test_multiple_h1(self):
+        self.assertTrue(any("2 main headings" in w for w in heading_outline_warnings(self._body("<h1>A</h1><h1>B</h1>"))))
+
+    def test_empty_heading(self):
+        self.assertTrue(any("empty heading" in w for w in heading_outline_warnings(self._body("<h1>A</h1><h2></h2>"))))
+
+    def test_skipped_level(self):
+        self.assertTrue(any("skips from H1 to H3" in w for w in heading_outline_warnings(self._body("<h1>A</h1><h3>x</h3>"))))
+
+    def test_going_shallower_is_fine(self):
+        # H3 back to H2 closes a subsection — not a skip.
+        self.assertEqual(heading_outline_warnings(self._body("<h1>A</h1><h2>B</h2><h3>c</h3><h2>D</h2>")), [])
+
+    def test_head_h1_does_not_count(self):
+        # Only body headings matter; a stray H1 in head must not satisfy the H1 requirement.
+        self.assertTrue(any("no main heading" in w for w in heading_outline_warnings(self._body("<h2>A</h2>"))))
 
 
 

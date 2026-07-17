@@ -1565,6 +1565,49 @@ def landing_page_offer_prices(
     return prices
 
 
+_HEADING_RE = re.compile(r"<h([1-6])\b[^>]*>(.*?)</h\1>", re.IGNORECASE | re.DOTALL)
+_TAG_RE = re.compile(r"<[^>]+>")
+
+
+def heading_outline_warnings(html: str) -> list[str]:
+    """Page-health checks on the rendered document outline (plans/SEMANTIC_HTML.md, the quality baseline from
+    plans/LANDING_PAGE_GOAL_COMPOSITION.md). Warnings, never gates — a correct outline (one H1, ordered
+    H2/H3, no empty or skipped levels) is foundational for SEO, accessibility, and LLM parsing, and this
+    catches regressions the renderer's by-construction guarantees don't.
+
+    Validates the visible body only: `<head>` (meta/JSON-LD) carries no headings.
+    """
+    body = html.split("<body>", 1)[-1].split("</body>", 1)[0]
+    headings = [
+        (int(level), _TAG_RE.sub("", text).strip())
+        for level, text in _HEADING_RE.findall(body)
+    ]
+    warnings: list[str] = []
+
+    h1_count = sum(1 for level, _ in headings if level == 1)
+    if h1_count == 0:
+        warnings.append("The page has no main heading (H1). The hero headline should be the page's single H1.")
+    elif h1_count > 1:
+        warnings.append(f"The page has {h1_count} main headings (H1); a page should have exactly one.")
+
+    if any(not text for _, text in headings):
+        warnings.append("The page has an empty heading. Every heading should have text.")
+
+    # No skipped levels: a heading may go one level deeper than the previous at most (H2 then H3, never H2
+    # then H4). Going shallower is always fine (closing a subsection).
+    previous = 0
+    for level, _ in headings:
+        if previous and level > previous + 1:
+            warnings.append(
+                f"The heading order skips from H{previous} to H{level}. "
+                f"Add an H{previous + 1} section, or the outline has a gap."
+            )
+            break
+        previous = level
+
+    return warnings
+
+
 def structured_data_warnings(
     offer: dict[str, Any],
     products_by_id: dict[str, dict[str, Any]],
