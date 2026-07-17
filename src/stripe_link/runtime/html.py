@@ -7,7 +7,7 @@ from typing import Any
 from urllib.parse import urlencode, urlparse
 
 from stripe_link.domain.composition import compose_page, element_channel
-from stripe_link.domain.pricing import expand_offer, find_price, resolve_offer, single_unit_price
+from stripe_link.domain.pricing import PricingError, expand_offer, find_price, resolve_offer, single_unit_price
 from stripe_link.domain.service_pricing import resolve_service_price
 
 
@@ -779,7 +779,15 @@ def render_page(
     services_by_id = services_by_id or {}
     offers_by_id = offers_by_id or {str(offer.get("offer_id") or ""): offer}
     require_offer_products(offer, products_by_id)
-    resolved_offer = resolve_offer(offer, products_by_id, selected_prices, services_by_id=services_by_id)
+    # Resolve against the prices this PAGE shows. The offer's default_price_id may point at an upsell /
+    # downsell / order-bump price, which belongs to the post-checkout flow — letting it through made the CTA
+    # advertise an amount no price card displayed.
+    resolved_offer = resolve_offer(
+        offer,
+        products_by_id,
+        landing_page_selected_prices(offer, products_by_id, selected_prices),
+        services_by_id=services_by_id,
+    )
     # SEO title uses Chicago title case (the builder title-cases on input; format here too so
     # existing/API-set titles are consistent).
     _seo_title = (page.get("seo") or {}).get("title") or page.get("name") or "Checkout"
@@ -1418,7 +1426,9 @@ def render_offer_price_selector(
         product = products_by_id.get(product_id)
         if product is None:
             raise RenderError(f"Product '{product_id}' was not provided for offer '{offer.get('offer_id', '')}'.")
-        default_price_id = item.get("default_price_id")
+        # Same rule as the CTA: if the offer's default is a price this page doesn't show (upsell/downsell/
+        # order bump), the first displayed price is the selected one — otherwise no card renders as checked.
+        default_price_id = landing_page_default_price_id(item, product)
         for option in item.get("selectable_prices") or []:
             price = find_price(product, option.get("price_id", ""))
             if not is_landing_page_price(price):
@@ -1465,6 +1475,54 @@ def render_offer_price_selector(
 def is_landing_page_price(price: dict[str, Any]) -> bool:
     context = str(price.get("context") or "standard").strip().lower()
     return context in LANDING_PAGE_PRICE_CONTEXTS
+
+
+def landing_page_default_price_id(item: dict[str, Any], product: dict[str, Any]) -> str:
+    """The price the LANDING PAGE treats as selected for an item.
+
+    An offer's `default_price_id` may legitimately point at an upsell / downsell / order-bump price — those
+    belong to the post-checkout flow, not to this page. is_landing_page_price() already keeps them out of
+    the rendered cards, so honouring such a default meant the page's selected price was one no card showed:
+    the CTA advertised the upsell amount and no card rendered as checked. The landing page must only ever
+    resolve to a price it actually displays, so fall back to the first displayed price.
+    """
+    displayed = [
+        str(price.get("price_id") or "")
+        for option in item.get("selectable_prices") or []
+        if is_landing_page_price(price := find_price(product, option.get("price_id", "")))
+    ]
+    default_price_id = str(item.get("default_price_id") or "")
+    if default_price_id in displayed:
+        return default_price_id
+    return displayed[0] if displayed else default_price_id
+
+
+def landing_page_selected_prices(
+    offer: dict[str, Any],
+    products_by_id: dict[str, dict[str, Any]],
+    selected_prices: dict[str, str] | None,
+) -> dict[str, str]:
+    """product_id -> the price this page resolves to, for resolve_offer.
+
+    Scoped to rendering on purpose: resolve_offer is shared with checkout and the upsell handler, which
+    legitimately resolve upsell-context prices. The correction belongs to the landing page, not to pricing.
+    An explicit caller selection always wins.
+    """
+    resolved: dict[str, str] = dict(selected_prices or {})
+    for item in offer.get("items") or []:
+        product_id = str(item.get("product_id") or "")
+        if not product_id or product_id in resolved or not item.get("selectable_prices"):
+            continue
+        product = products_by_id.get(product_id)
+        if product is None:
+            continue
+        try:
+            price_id = landing_page_default_price_id(item, product)
+        except PricingError:
+            continue  # a price the offer references is gone; resolve_offer will report it properly
+        if price_id:
+            resolved[product_id] = price_id
+    return resolved
 
 
 def landing_page_offer_prices(

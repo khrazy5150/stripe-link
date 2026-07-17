@@ -1,5 +1,6 @@
 import json
 import copy
+import re
 import unittest
 from pathlib import Path
 
@@ -557,3 +558,69 @@ class ResponsiveImageTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class LandingPageIgnoresPostCheckoutPricingTests(unittest.TestCase):
+    """A landing page must price itself only from what it displays. An offer's default_price_id may point at
+    an upsell / downsell / order-bump price — those belong to the post-checkout flow. Honouring one made the
+    CTA advertise an amount no card showed ("Buy Now - $22.17" against cards of $37.09-$89.90) and left every
+    card unchecked, because is_landing_page_price() had already filtered the default out of the cards.
+    """
+
+    def _fixtures(self, default_context="upsell"):
+        offer = load_fixture("offer-creatine-standard.json")
+        product = load_fixture("product-creatine-gummies.json")
+        page = load_fixture("page-creatine-standard.json")
+        item = offer["items"][0]
+        # Give the product a post-checkout price and point the offer's default at it.
+        bump = {
+            "price_id": "price_postcheckout",
+            "unit_amount": 2217,
+            "currency": "usd",
+            "context": default_context,
+            "label": "Post-checkout only",
+        }
+        product["prices"].append(bump)
+        item["selectable_prices"].append({"price_id": "price_postcheckout", "label": "Post-checkout only"})
+        item["default_price_id"] = "price_postcheckout"
+        return page, offer, {product["product_id"]: product}
+
+    def test_cta_never_advertises_a_post_checkout_price(self):
+        for context in ("upsell", "downsell", "order_bump"):
+            with self.subTest(context=context):
+                page, offer, products = self._fixtures(context)
+                html = render_page(page, offer, products)
+                self.assertNotIn("$22.17", html, f"{context} price leaked into the page")
+                self.assertNotIn('data-cta-amount="2217"', html)
+
+    def test_cta_amount_matches_the_selected_card(self):
+        page, offer, products = self._fixtures()
+        html = render_page(page, offer, products)
+        cta = re.search(r'data-cta-amount="(\d+)"', html).group(1)
+        checked = re.search(r'data-price-id="([^"]+)"[^>]*data-default="true"[^>]*data-sale-amount="(\d+)"', html)
+        self.assertIsNotNone(checked, "some card must be the default when the offer's default is filtered out")
+        self.assertEqual(cta, checked.group(2), "CTA must advertise the selected card's price")
+
+    def test_a_displayed_default_is_still_honoured(self):
+        # The correction only kicks in when the offer's default isn't displayable — it must not override a
+        # perfectly good default.
+        offer = load_fixture("offer-creatine-standard.json")
+        product = load_fixture("product-creatine-gummies.json")
+        page = load_fixture("page-creatine-standard.json")
+        chosen = offer["items"][0]["selectable_prices"][1]["price_id"]
+        offer["items"][0]["default_price_id"] = chosen
+        html = render_page(page, offer, {product["product_id"]: product})
+        checked = re.search(r'data-price-id="([^"]+)"[^>]*data-default="true"', html)
+        self.assertEqual(checked.group(1), chosen)
+
+    def test_an_explicit_selection_still_wins_for_the_cta(self):
+        # selected_prices is the caller stating the shopper's actual choice; the correction only supplies a
+        # default when none was given, and must never override an explicit one.
+        page, offer, products = self._fixtures()
+        product_id = offer["items"][0]["product_id"]
+        chosen = offer["items"][0]["selectable_prices"][1]["price_id"]
+        chosen_amount = next(
+            p["unit_amount"] for p in products[product_id]["prices"] if p["price_id"] == chosen
+        )
+        html = render_page(page, offer, products, {product_id: chosen})
+        self.assertIn(f'data-cta-amount="{chosen_amount}"', html)
