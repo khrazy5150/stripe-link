@@ -65,3 +65,26 @@ export function optionalSectionKeys(offerType) {
 export function allowedCtas(offerType) {
   return [...(offerTypeRule(offerType).allowed_ctas || [])];
 }
+
+// Advanced Color Settings source: the token catalog grouped by `group`, preserving declaration order.
+// Each entry: { token, label, group, kind }. Adding a token to composition_rules.json surfaces it here.
+export function tokenGroups() {
+  const catalog = rules.token_catalog || {};
+  const groups = [];
+  const byName = new Map();
+  for (const [token, meta] of Object.entries(catalog)) {
+    const name = meta.group || "Other";
+    if (!byName.has(name)) {
+      const group = { name, tokens: [] };
+      byName.set(name, group);
+      groups.push(group);
+    }
+    byName.get(name).tokens.push({ token, label: meta.label || token, kind: meta.kind || "color" });
+  }
+  return groups;
+}
+
+// A theme token (e.g. cta_from) maps to the preview CSS var --preview-cta-from.
+export function previewVar(token) {
+  return `--preview-${String(token).replace(/_/g, "-")}`;
+}

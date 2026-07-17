@@ -369,7 +369,7 @@
             <h3>SEO</h3>
             <label class="offer-field">
               <span>SEO Title</span>
-              <input v-model.trim="builder.seo_title" type="text" />
+              <input :value="builder.seo_title" type="text" @input="applyTitleCaseInput((value) => { builder.seo_title = value; }, $event)" />
             </label>
             <label class="offer-field">
               <span>SEO Description</span>
@@ -471,7 +471,8 @@
             </div>
           </section>
 
-          <section class="builder-section">
+          <!-- Same rule as the Page Sections toggle: no resolvable policy copy (e.g. service offers) = no control. -->
+          <section v-if="previewRefundPolicy" class="builder-section">
             <h3>Refund Policy</h3>
             <label class="builder-toggle">
               <input v-model="builder.refund_policy.enabled" type="checkbox" />
@@ -582,6 +583,7 @@
                 </template>
 
                 <template v-else-if="element.type === 'faq'">
+                  <input :value="element.heading" type="text" placeholder="Section heading (optional)" @input="applyTitleCaseInput((value) => { element.heading = value; }, $event)" />
                   <div v-for="(item, i) in element.items" :key="i" class="element-subrow">
                     <input :value="item.question" type="text" placeholder="Question" @input="applyTitleCaseInput((value) => { item.question = value; }, $event)" />
                     <textarea v-model.trim="item.answer" rows="2" placeholder="Answer"></textarea>
@@ -626,6 +628,37 @@
           </section>
 
           <section class="builder-section">
+            <h3>Advanced Color Settings</h3>
+            <label class="builder-switch-row">
+              <span class="builder-switch" @click.stop>
+                <input v-model="builder.advanced_colors" type="checkbox" aria-label="Advanced color settings" />
+                <span aria-hidden="true"></span>
+              </span>
+              <span>Customize individual colors</span>
+            </label>
+            <div v-if="builder.advanced_colors" class="advanced-colors">
+              <div class="advanced-colors-head">
+                <small>The preset already looks good — only tweak here if you need to. Empty = use the preset.</small>
+                <button class="secondary-action compact" type="button" @click="resetThemeTokens">Reset to preset</button>
+              </div>
+              <div v-for="group in tokenGroups()" :key="group.name" class="color-group">
+                <div class="color-group-title">{{ group.name }}</div>
+                <label v-for="t in group.tokens" :key="t.token" class="color-row">
+                  <input class="color-picker" type="color" :value="pickerColor(t.token)" :title="t.label" @input="setTokenColor(t.token, $event.target.value)" />
+                  <span class="color-label">{{ t.label }}</span>
+                  <input
+                    :value="builder.theme_tokens[t.token] || ''"
+                    type="text"
+                    spellcheck="false"
+                    :placeholder="effectiveColor(t.token) || 'preset'"
+                    @input="setTokenColor(t.token, $event.target.value)"
+                  />
+                </label>
+              </div>
+            </div>
+          </section>
+
+          <section class="builder-section">
             <h3>Generated Page JSON</h3>
             <pre class="builder-json">{{ JSON.stringify(builderPageDocument, null, 2) }}</pre>
           </section>
@@ -661,171 +694,27 @@
             </div>
           </div>
         </header>
-        <div class="landing-live-preview" :class="[builder.template, builder.preset, previewDevice]">
-          <div
-            v-if="builder.countdown.enabled && builder.countdown.start_enabled"
-            class="preview-countdown"
-            :class="{ transparent: builder.countdown.transparent, marquee: builder.countdown.marquee }"
-            :style="{ '--preview-countdown-bg': builder.countdown.start_color || 'var(--preview-accent)' }"
-          >
-            <span>{{ builder.countdown.start_icon }} {{ builder.countdown.start_text || "Offer expires in" }}</span>
-            <strong>{{ Number(builder.countdown.duration_minutes || 15) }}:00</strong>
-          </div>
-          <div v-if="sectionVisible('brand_label') && !builder.brand_overlay" class="preview-brand">
-            <span class="preview-brand-dot" aria-hidden="true"></span>
-            <span>{{ builderOffer?.name || builder.name || "Junior Bay" }}</span>
-          </div>
-          <div class="preview-hero-media" :class="{ 'has-avatar': builder.avatar_url }">
-            <div v-if="heroCarouselImages.length > 1" class="preview-hero-carousel">
-              <video v-if="isVideoUrl(heroCarouselImages[currentTargetIndex] || heroCarouselImages[0])" class="preview-hero-image" :src="heroCarouselImages[currentTargetIndex] || heroCarouselImages[0]" :autoplay="builder.autoplay" :muted="builder.autoplay" :controls="!builder.autoplay" loop playsinline></video>
-              <img v-else class="preview-hero-image" :src="heroCarouselImages[currentTargetIndex] || heroCarouselImages[0]" alt="" />
-              <button type="button" class="preview-hero-nav prev" @click="currentTargetIndex = (currentTargetIndex - 1 + heroCarouselImages.length) % heroCarouselImages.length">‹</button>
-              <button type="button" class="preview-hero-nav next" @click="currentTargetIndex = (currentTargetIndex + 1) % heroCarouselImages.length">›</button>
-              <span class="preview-hero-counter">{{ currentTargetIndex + 1 }} / {{ heroCarouselImages.length }}</span>
-              <div class="preview-hero-dots">
-                <span v-for="(image, i) in heroCarouselImages" :key="i" :class="{ 'is-active': i === currentTargetIndex }" @click="currentTargetIndex = i"></span>
-              </div>
-            </div>
-            <video v-else-if="previewHeroImage && isVideoUrl(previewHeroImage)" class="preview-hero-image" :src="previewHeroImage" :autoplay="builder.autoplay" :muted="builder.autoplay" :controls="!builder.autoplay" loop playsinline></video>
-            <img v-else-if="previewHeroImage" class="preview-hero-image" :src="previewHeroImage" alt="" />
-            <div v-if="builder.brand_overlay && (builderOffer?.name || builder.name)" class="preview-hero-brand" :class="`preview-hero-brand--${builder.brand_position}`">
-              <span class="preview-hero-brand-dot" aria-hidden="true"></span>{{ builderOffer?.name || builder.name }}
-            </div>
-            <div v-if="builder.avatar_url" class="preview-avatar-wrap">
-              <img class="preview-avatar" :src="builder.avatar_url" alt="" />
-            </div>
-          </div>
-          <h1 v-html="headlineHtml(builder.headline || builder.name)"></h1>
-          <p>{{ builder.subheadline }}</p>
-          <div v-if="sectionVisible('trust_badges') && visibleTrustBadges.length" class="preview-badges">
-            <span v-for="badge in visibleTrustBadges" :key="badge.label">{{ badge.emoji }} {{ badge.label }}</span>
-          </div>
-          <!-- Composable elements, in the tenant's order (matches the published page). -->
-          <template v-for="entry in previewElements" :key="entry.element.id">
-            <article v-if="entry.element.type === 'content_block'" class="preview-blurbs">
-              <span class="preview-blurb-copy">
-                <strong v-html="headlineHtml(entry.element.title)"></strong>
-                <p>{{ entry.element.text }}</p>
-              </span>
-              <img v-if="entry.element.image_url" :src="entry.element.image_url" alt="" />
-            </article>
-            <div v-else-if="entry.element.type === 'testimonials'" class="preview-testimonials">
-              <h2 v-if="entry.element.heading" v-html="headlineHtml(entry.element.heading)"></h2>
-              <figure v-for="(item, i) in entry.section.items" :key="i">
-                <img v-if="item.avatar_url" :src="item.avatar_url" alt="" />
-                <blockquote>{{ item.quote }}</blockquote>
-                <figcaption v-if="item.author || item.role"><strong>{{ item.author }}</strong> {{ item.role }}</figcaption>
-              </figure>
-            </div>
-            <div v-else-if="entry.element.type === 'rating'" class="preview-rating">
-              <span class="preview-rating-stars">{{ "★".repeat(Math.round(Math.min(5, Math.max(0, entry.element.value || 0)))) }}</span>
-              <span>{{ Number(entry.element.value || 0).toFixed(1) }}<template v-if="entry.element.count"> · {{ Number(entry.element.count).toLocaleString() }} reviews</template><template v-if="entry.element.label"> · {{ entry.element.label }}</template></span>
-            </div>
-            <div v-else-if="entry.element.type === 'client_marquee'" class="preview-marquee">
-              <h2>{{ entry.element.heading || "Our Clients" }}</h2>
-              <div class="preview-marquee-row">
-                <span v-for="(logo, i) in marqueeLogos(entry.element)" :key="i" class="preview-marquee-logo">
-                  <img :src="logo.image_url" :alt="logo.name || ''" />
-                </span>
-              </div>
-            </div>
-            <div v-else-if="entry.element.type === 'faq'" class="preview-faqs">
-              <details v-for="(item, i) in entry.section.items" :key="i" open>
-                <summary v-html="headlineHtml(item.question)"></summary>
-                <p>{{ item.answer }}</p>
-              </details>
-            </div>
-            <div v-else-if="entry.element.type === 'product_details' && activeTargetDetails" class="preview-product-details">
-              <p v-if="activeTargetDetails.description" class="preview-details-desc">{{ activeTargetDetails.description }}</p>
-              <div v-if="activeTargetDetails.gallery.length" class="preview-details-gallery">
-                <img v-for="(url, i) in activeTargetDetails.gallery" :key="i" :src="url" alt="" />
-              </div>
-              <div v-if="activeTargetDetails.badges.length" class="preview-details-badges">
-                <span v-for="(badge, i) in activeTargetDetails.badges" :key="i">{{ badge }}</span>
-              </div>
-            </div>
-          </template>
-          <!-- Listicle: no separate carousel — the hero carousel (above) drives this syncing price card. -->
-          <!-- Listicle reuses the standard price card (preview-price-*) as a single instance that syncs to
-               the current target — same design as the pick-one selector, just reactive + add-to-cart. -->
-          <div v-if="isListicleOffer && activeTarget" class="preview-prices preview-listicle">
-            <div class="preview-price-card" :class="{ 'has-image': activeTarget.hero_image }">
-              <img v-if="activeTarget.hero_image" class="preview-price-image" :src="activeTarget.hero_image" alt="" />
-              <span class="preview-price-copy">
-                <strong class="preview-price-title">{{ activeTarget.headline }}</strong>
-                <span v-if="activeTarget.subheadline" class="preview-price-description">{{ activeTarget.subheadline }}</span>
-                <span class="preview-price-row">
-                  <span class="preview-price-amount">{{ formatMoney(activeTarget.amount, activeTarget.currency) }}</span>
-                  <del v-if="activeTarget.compare_at > activeTarget.amount" class="preview-price-regular">
-                    {{ formatMoney(activeTarget.compare_at, activeTarget.currency) }}
-                  </del>
-                  <span v-if="activeTarget.discount" class="preview-price-savings">Save {{ activeTarget.discount }}%</span>
-                </span>
-              </span>
-            </div>
-            <span class="preview-carousel-buy preview-listicle-add">{{ listicleAddLabel }}</span>
-          </div>
-          <!-- One CTA component, chosen by the offer's cta.type. The page never combines CTAs. -->
-          <div v-else-if="ctaShowsPrices" class="preview-prices">
-            <button
-              v-for="price in previewPrices"
-              :key="price.price_id"
-              type="button"
-              :class="{ selected: isPreviewPriceSelected(price), 'has-image': price.image_url }"
-              @click="selectPreviewPrice(price.price_id)"
-            >
-              <img v-if="price.image_url" class="preview-price-image" :src="price.image_url" alt="" />
-              <span class="preview-price-copy">
-                <span v-if="price.badge" class="preview-price-badge">{{ price.badge }}</span>
-                <strong class="preview-price-title">{{ price.label }}</strong>
-                <span v-if="price.description" class="preview-price-description">{{ price.description }}</span>
-                <span class="preview-price-row">
-                  <span class="preview-price-amount">{{ formatMoney(price.unit_amount || 0, price.currency) }}</span>
-                  <del v-if="price.compare_at_unit_amount" class="preview-price-regular">
-                    {{ formatMoney(price.compare_at_unit_amount, price.currency) }}
-                  </del>
-                  <span v-if="price.savings_pct" class="preview-price-savings">Save {{ price.savings_pct }}%</span>
-                </span>
-              </span>
-              <span class="preview-price-radio" aria-hidden="true"></span>
-            </button>
-          </div>
-          <div v-else-if="builderCta.type === 'call'" class="preview-cta-card preview-call-card">
-            <strong>{{ builderCta.label || "Call us" }}</strong>
-            <span v-if="builderCta.target" class="preview-call-number">{{ builderCta.target }}</span>
-          </div>
-          <div v-else-if="builderCta.type === 'external'" class="preview-cta-card preview-external-card">
-            <strong>{{ builderCta.label || "Learn more" }}</strong>
-            <span v-if="builderCta.target" class="preview-external-url">{{ builderCta.target }}</span>
-          </div>
-          <div v-else-if="builderCta.type === 'download'" class="preview-cta-card preview-external-card">
-            <strong>⬇ {{ builderCta.label || "Download" }}</strong>
-            <span v-if="builderCta.target" class="preview-external-url">{{ builderCta.target }}</span>
-          </div>
-          <div v-else class="preview-cta-card preview-email-card">
-            <strong>{{ builderLeadAction?.title || builderCta.label || "Get started" }}</strong>
-            <span>{{ builderLeadAction?.description || "Enter your details to continue." }}</span>
-            <span class="preview-email-input" aria-hidden="true">you@example.com</span>
-          </div>
-          <details v-if="sectionVisible('refund_policy') && builder.refund_policy.enabled && previewRefundPolicy" class="preview-refund-policy">
-            <summary>{{ previewRefundPolicy.short_label || "Refund policy" }}</summary>
-            <div>
-              <h2>Refund Policy</h2>
-              <p v-if="previewRefundAppliesTo">Applies to: {{ previewRefundAppliesTo }}</p>
-              <p v-if="previewRefundPolicy.full_policy">{{ previewRefundPolicy.full_policy }}</p>
-              <p v-if="previewRefundReturnNote">{{ previewRefundReturnNote }}</p>
-            </div>
-          </details>
-          <div class="preview-legal">
-            <a :href="defaultLegalLinks.terms_url" target="_blank" rel="noopener">Terms of Service</a>
-            <a :href="defaultLegalLinks.privacy_url" target="_blank" rel="noopener">Privacy Policy</a>
-            <a :href="defaultLegalLinks.refund_url" target="_blank" rel="noopener">Refund Policy</a>
-            <span>{{ defaultFooterCopyright }}</span>
-          </div>
-          <button v-if="!isListicleOffer" type="button" class="preview-cta">
-            {{ previewCtaLabel }}
-          </button>
-        </div>
+        <!-- The Live Preview IS the published renderer. We POST the draft page document to
+             /pages/render, which runs the same runtime/html.py render_page() that publishes the page,
+             and show the returned HTML here. One JSON, one renderer, two consumers (this iframe and the
+             published artifact) — there is no second implementation left to drift out of sync. -->
+        <div v-if="previewError" class="preview-render-error">{{ previewError }}</div>
+        <iframe
+          v-show="previewHtml"
+          ref="previewFrame"
+          class="landing-live-preview-frame"
+          :class="previewDevice"
+          :srcdoc="previewHtml"
+          title="Live preview"
+          sandbox="allow-scripts allow-same-origin"
+          @load="restorePreviewScroll"
+        ></iframe>
+        <p v-if="!previewHtml && !previewError" class="landing-live-preview-status">
+          {{ builder.offer_id ? "Rendering preview..." : "Select an offer to see the preview." }}
+        </p>
+        <!-- Hidden probe: Advanced Color Settings reads the active preset's effective --preview-* values
+             off this element to seed its pickers. It carries the preset classes and nothing else. -->
+        <div ref="previewEl" class="landing-live-preview preview-token-probe" :class="[builder.preset]" :style="previewTokenStyle" aria-hidden="true"></div>
       </article>
     </section>
 
@@ -857,8 +746,8 @@
 
 <script setup>
 import { computed, reactive, ref, watch } from "vue";
-import { useConversionContext, offerViewTargets, offerViewTargetsFromExpanded } from "../composables/useConversionContext";
-import { isSectionVisible, defaultVisible, recommendedSectionKeys, optionalSectionKeys, governedKeys, elementLabel, addableElements } from "../composables/pageComposer";
+import { offerViewTargets, offerViewTargetsFromExpanded } from "../composables/useConversionContext";
+import { isSectionVisible, defaultVisible, recommendedSectionKeys, optionalSectionKeys, governedKeys, elementLabel, addableElements, tokenGroups, previewVar } from "../composables/pageComposer";
 import { apiRequest, getApiBase, getApiEnvironment, getPagesBaseUrl, getPreviewPagesBaseUrl, getTenantId } from "../api/client";
 import { formatMoney } from "../stores/products";
 import { uploadImage } from "../api/uploads";
@@ -975,7 +864,15 @@ const recommendedSections = computed(() => recommendedSectionKeys(builderOfferTy
 const optionalSections = computed(() => optionalSectionKeys(builderOfferType.value));
 // Structural sections are always present; these are the optional content sections the tenant can add/remove.
 const MANDATORY_SECTION_KEYS = new Set(["hero", "hero_media", "offer_price_selector", "legal_footer", "checkout_cta"]);
-const togglableSections = computed(() => governedKeys().filter((key) => !MANDATORY_SECTION_KEYS.has(key)));
+const togglableSections = computed(() => governedKeys().filter((key) => {
+  if (MANDATORY_SECTION_KEYS.has(key)) return false;
+  // Don't offer a toggle the page can't honour: refund policy copy comes from the offer or its product
+  // (render_refund_policy does offer.refund_policy or product.refund_policy). Service offers have items
+  // keyed by service_id with no product and no policy of their own, so the section renders nothing on the
+  // published page no matter what this toggle says. Hide it rather than promise a section that can't exist.
+  if (key === "refund_policy" && !previewRefundPolicy.value) return false;
+  return true;
+}));
 function sectionKeyLabel(key) {
   return elementLabel(key);
 }
@@ -992,6 +889,37 @@ function toggleSection(key, enabled) {
     builder.composition.overrides[key] = { enabled };
   }
 }
+// --- Advanced Color Settings (plans/ADVANCED_COLOR_SETTINGS.md) ---
+const previewEl = ref(null);
+// Effective colour for a token: the override if set, else the preset's value read off the live preview.
+function effectiveColor(token) {
+  if (builder.theme_tokens[token]) return builder.theme_tokens[token];
+  if (!previewEl.value) return "";
+  return getComputedStyle(previewEl.value).getPropertyValue(previewVar(token)).trim();
+}
+function setTokenColor(token, value) {
+  const v = String(value || "").trim();
+  if (v) builder.theme_tokens[token] = v;
+  else delete builder.theme_tokens[token];   // empty = fall back to the preset
+}
+function resetThemeTokens() {
+  builder.theme_tokens = {};
+}
+// Native color inputs need a #rrggbb value; normalize the effective colour (rgba/short hex fall back).
+function pickerColor(token) {
+  const c = effectiveColor(token);
+  if (/^#[0-9a-fA-F]{6}$/.test(c)) return c;
+  if (/^#[0-9a-fA-F]{3}$/.test(c)) return "#" + c.slice(1).split("").map((x) => x + x).join("");
+  return "#000000";
+}
+// Overrides applied to the preview root as inline --preview-* vars (they win over the preset class).
+const previewTokenStyle = computed(() => {
+  const style = {};
+  for (const [token, value] of Object.entries(builder.theme_tokens || {})) {
+    if (value) style[previewVar(token)] = value;
+  }
+  return style;
+});
 // Add-to-cart label from the offer's actions[] (add_to_cart), else the default.
 const listicleAddLabel = computed(() => {
   const actions = builderOffer.value?.presentation?.actions;
@@ -1020,38 +948,125 @@ const conversionTargets = computed(() => {
   }
   return offerViewTargets(offerItemModels(builderOffer.value));
 });
-const conversion = useConversionContext(conversionTargets);
-// Top-level aliases so the template auto-unwraps them (nested refs on `conversion` would not).
-const currentTargetIndex = computed({
-  get: () => conversion.page.currentTargetIndex,
-  set: (value) => { conversion.page.currentTargetIndex = value; },
-});
-const activeTarget = conversion.derived.currentTarget;
-// The current target's gallery/badges/description for the context-aware Product Details block preview.
-const activeTargetDetails = computed(() => {
-  const target = activeTarget.value;
-  if (!target) return null;
-  const product = productsById.value.get(target.product_id) || null;
-  const service = target.service_id ? servicesById.value.get(target.service_id) : null;
-  const gallery = (product ? product.images : [service?.presentation?.hero_image_url]) || [];
-  const badges = product ? (product.badges || []).map((b) => (typeof b === "string" ? b : b.label)).filter(Boolean) : [];
-  return { description: target.subheadline || "", gallery: gallery.filter(Boolean), badges };
-});
-// For a listicle the hero carousel is offer-driven (one product image per target); else the manual field.
-const heroCarouselImages = computed(() =>
-  isListicleOffer.value ? conversionTargets.value.map((target) => target.hero_image).filter(Boolean) : heroMediaList.value);
-watch(() => heroCarouselImages.value.length, () => { conversion.setTarget(0); });
+// conversionTargets still drives the listicle hero auto-fill below. The ConversionContext itself (current
+// target index, carousel sync, per-target detail panels) existed only to drive the old Vue preview twin —
+// the server renderer owns all of that now, so it is gone along with the twin.
 const builderProductImages = computed(() => [...new Set(builderOfferProducts.value.flatMap((product) => product.images || []).filter(Boolean))]);
 const heroMediaList = computed(() => parseLines(builder.hero_media_text));
-// The MediaViewer's mode check — a video URL renders <video>, else <img> (mirrors runtime/html.is_video_url).
-function isVideoUrl(url) {
-  return /\.(mp4|webm|mov|m4v|ogv)(\?|#|$)/i.test(String(url || ""));
-}
 const previewHeroImage = computed(() => heroMediaList.value[0] || offerImage(builderOffer.value) || "");
 const visibleTrustBadges = computed(() => builder.trust_badges.badges.filter((badge) => badge.enabled !== false && badge.label));
-const previewElements = computed(() => builder.elements
-  .map((element) => ({ element, section: elementSection(element) }))
-  .filter((entry) => entry.section && sectionVisible(entry.section.type)));
+// ---------------------------------------------------------------------------------------------------
+// Live Preview = the published renderer. We send the draft page document to /pages/render, which runs the
+// same render_page() that publishes the page, and drop the HTML into an iframe. The builder no longer
+// reimplements any section, so preview and published are the same bytes by construction.
+// ---------------------------------------------------------------------------------------------------
+const previewHtml = ref("");
+const previewError = ref("");
+const previewFrame = ref(null);
+let previewRenderTimer = null;
+let previewRenderSeq = 0;
+// Swapping srcdoc reloads the iframe, which would bounce the tenant back to the top of the page on every
+// keystroke. Carry the scroll offset across the reload so editing stays where they are working.
+let previewScrollY = 0;
+
+function capturePreviewScroll() {
+  try {
+    previewScrollY = previewFrame.value?.contentWindow?.scrollY ?? previewScrollY;
+  } catch {
+    /* cross-origin frame: keep the last known offset */
+  }
+}
+
+function restorePreviewScroll() {
+  if (!previewScrollY) return;
+  try {
+    previewFrame.value?.contentWindow?.scrollTo(0, previewScrollY);
+  } catch {
+    /* nothing to restore */
+  }
+}
+
+// Reload the frame with the HTML it already has. renderPreview() skips byte-identical HTML (so ordinary
+// edits don't repaint), but a just-uploaded image needs a re-fetch even though the markup is unchanged —
+// assigning srcdoc directly forces that.
+function reloadPreviewFrame() {
+  const frame = previewFrame.value;
+  if (!frame || !previewHtml.value) return;
+  capturePreviewScroll();
+  frame.srcdoc = previewHtml.value;
+}
+
+// Image renditions are processed asynchronously and land biggest-last, so an image can still be missing
+// when the page first renders after an upload — it paints broken until something repaints the frame.
+// Repaint it ourselves a couple of times instead. We deliberately never request the pending URL to test
+// for it: the CDN answers 403 for a missing object and caches that, which would turn a self-healing race
+// into a permanently broken image.
+function schedulePreviewImageRefresh() {
+  [4000, 10000].forEach((delay) => window.setTimeout(reloadPreviewFrame, delay));
+}
+
+// Every builder upload goes through here so a freshly processed image always gets its heal repaint.
+async function uploadPageImage(file) {
+  const url = await uploadImage(file);
+  schedulePreviewImageRefresh();
+  return url;
+}
+
+// A service offer's items carry service_id (not product_id); render_page resolves those separately.
+function offerServices(offer) {
+  const items = Array.isArray(offer?.items) ? offer.items : [];
+  return items.map((item) => (item.service_id ? servicesById.value.get(item.service_id) : null)).filter(Boolean);
+}
+
+async function renderPreview() {
+  const page = buildBuilderPageDocument();
+  const offer = builderOffer.value;
+  if (!page || !offer) {
+    previewHtml.value = "";
+    return;
+  }
+  const seq = ++previewRenderSeq;
+  try {
+    const body = await apiRequest("/pages/render", {
+      method: "POST",
+      body: {
+        page,
+        offer,
+        products: builderOfferProducts.value,
+        services: offerServices(offer),
+        // The page document stores no legal URLs on purpose (legalLinks() returns {}); render_legal_footer
+        // builds the platform /legal/* hrefs from api_base_url. Without it the footer links vanish.
+        api_base_url: getApiBase(),
+      },
+    });
+    // Ignore a stale response that lands after a newer edit.
+    if (seq !== previewRenderSeq) return;
+    const html = body?.html || "";
+    if (html === previewHtml.value) return;  // nothing changed: don't reload and lose the scroll position
+    capturePreviewScroll();
+    previewHtml.value = html;
+    previewError.value = "";
+  } catch (err) {
+    if (seq !== previewRenderSeq) return;
+    previewError.value = err.message || "Preview render failed.";
+  }
+}
+
+// The builder is keystroke-reactive but the renderer is a network call, so debounce. The watch key omits
+// created_at/updated_at — buildBuilderPageDocument() stamps those on every call and would loop forever.
+watch(
+  () => {
+    const doc = buildBuilderPageDocument();
+    if (!doc) return "";
+    const { created_at, updated_at, ...stable } = doc;
+    return JSON.stringify([stable, builderOffer.value, builderOfferProducts.value]);
+  },
+  () => {
+    clearTimeout(previewRenderTimer);
+    previewRenderTimer = setTimeout(renderPreview, 400);
+  },
+  { immediate: true },
+);
 const previewRefundPolicy = computed(() => builderOffer.value?.refund_policy || builderOfferProducts.value[0]?.refund_policy || null);
 const previewRefundAppliesTo = computed(() => previewPrices.value.map((price) => price.label).filter(Boolean).join(", "));
 const previewRefundReturnNote = computed(() => refundPolicyReturnNote(previewRefundPolicy.value));
@@ -1190,6 +1205,10 @@ function defaultBuilderForm() {
     avatar_url: "",
     brand_overlay: false,
     brand_position: "top-right",
+    // Advanced Color Settings (plans/ADVANCED_COLOR_SETTINGS.md): per-token overrides on top of the preset
+    // (compact map, keyed by theme token -> hex). Empty = pure preset. Persisted as page.theme.tokens.
+    advanced_colors: false,
+    theme_tokens: {},
     // Page Composer overrides: the tenant's deviations from the offer_type section defaults (compact map,
     // keyed by section key -> { enabled }). Empty = pure offer_type defaults.
     composition: {
@@ -1412,6 +1431,9 @@ function populateBuilderFromPage(page) {
   });
   // Restore the Page Composer overrides so section toggles reflect the tenant's prior choices.
   builder.composition.overrides = { ...(page.composition?.overrides || {}) };
+  // Restore Advanced Color Settings overrides; auto-open the panel if any were set.
+  builder.theme_tokens = { ...(page.theme?.tokens || {}) };
+  builder.advanced_colors = Object.keys(builder.theme_tokens).length > 0;
   Object.assign(builder.countdown, defaultBuilderForm().countdown, {
     enabled: Boolean(countdown.id),
     duration_minutes: countdown.duration_minutes || 15,
@@ -1469,6 +1491,8 @@ function buildBuilderPageDocument() {
     theme: {
       template: "universal_bundle",
       preset: builder.preset,
+      // Advanced Color Settings overrides (the server merges theme.tokens over the preset).
+      ...(Object.keys(builder.theme_tokens || {}).length ? { tokens: { ...builder.theme_tokens } } : {}),
     },
     post_checkout: intent === "transaction" ? {
       thank_you_page: {
@@ -1575,7 +1599,9 @@ function builderSections(intent) {
       label: builder.cta_label || (intent === "transaction" ? "Buy Now" : "Continue"),
     });
   }
-  if (sectionVisible("refund_policy")) {
+  // previewRefundPolicy mirrors the server's lookup (offer.refund_policy, then the product's). With no
+  // policy to show, the server renders "" anyway — don't persist a section that can never render.
+  if (sectionVisible("refund_policy") && previewRefundPolicy.value) {
     sections.push({
       id: "refund-policy",
       type: "refund_policy",
@@ -1834,7 +1860,7 @@ async function handleFaviconPicked(event) {
   faviconUploadError.value = "";
   faviconUploading.value = true;
   try {
-    builder.favicon_url = await uploadImage(file);
+    builder.favicon_url = await uploadPageImage(file);
   } catch (err) {
     faviconUploadError.value = err.message || "Favicon upload failed.";
   } finally {
@@ -1849,7 +1875,7 @@ async function handleHeroMediaPicked(event) {
   heroUploadError.value = "";
   heroUploading.value = true;
   try {
-    appendHeroMedia(await uploadImage(file));
+    appendHeroMedia(await uploadPageImage(file));
   } catch (err) {
     heroUploadError.value = err.message || "Hero image upload failed.";
   } finally {
@@ -1864,7 +1890,7 @@ async function handleAvatarPicked(event) {
   avatarUploadError.value = "";
   avatarUploading.value = true;
   try {
-    builder.avatar_url = await uploadImage(file);
+    builder.avatar_url = await uploadPageImage(file);
   } catch (err) {
     avatarUploadError.value = err.message || "Avatar upload failed.";
   } finally {
@@ -1878,11 +1904,6 @@ async function handleAvatarPicked(event) {
 // page-level multi-offer carousel element was retired — see plans/LISTICLE_AND_CART.md.
 // The addable body elements come from the shared element catalog (Builder Reframe) — one source, one label.
 const ELEMENT_TYPES = computed(() => addableElements());
-
-// Logos with a real image, for the marquee preview (kept out of the template to avoid an inline arrow there).
-function marqueeLogos(element) {
-  return (element.logos || []).filter((logo) => logo && String(logo.image_url || "").trim());
-}
 
 function newElement(type) {
   const base = { id: localId("el"), type };
@@ -1943,7 +1964,7 @@ async function handleElementImagePicked(element, event) {
   blurbImageErrors[element.id] = "";
   blurbImageUploading[element.id] = true;
   try {
-    element.image_url = await uploadImage(file);
+    element.image_url = await uploadPageImage(file);
   } catch (err) {
     blurbImageErrors[element.id] = err.message || "Image upload failed.";
   } finally {
@@ -1969,7 +1990,7 @@ async function handleSubImagePicked(target, field, key, event) {
   subImageErrors[key] = "";
   subImageUploading[key] = true;
   try {
-    target[field] = await uploadImage(file);
+    target[field] = await uploadPageImage(file);
   } catch (err) {
     subImageErrors[key] = err.message || "Image upload failed.";
   } finally {
@@ -2001,7 +2022,12 @@ function elementSection(element) {
   if (element.type === "faq") {
     const items = (element.items || []).filter((item) => item.question && item.answer);
     if (!items.length) return null;
-    return { id: element.id, type: "faq", items: items.map((item) => ({ question: formatHeadline(item.question || ""), answer: item.answer })) };
+    return {
+      id: element.id,
+      type: "faq",
+      heading: formatHeadline(element.heading || "") || "Frequently Asked Questions",
+      items: items.map((item) => ({ question: formatHeadline(item.question || ""), answer: item.answer })),
+    };
   }
   if (element.type === "product_details") {
     return { id: element.id, type: "product_details" };   // content is the current target (offer-driven)
@@ -2026,7 +2052,7 @@ function elementsFromPage(sections) {
       elements.push({ id: localId("el"), type: "client_marquee", heading: section.heading || "",
         logos: (section.logos || []).map((logo) => ({ image_url: logo.image_url || "", name: logo.name || "" })) });
     } else if (section.type === "faq") {
-      elements.push({ id: localId("el"), type: "faq", items: (section.items || []).map((item) => ({ question: item.question || "", answer: item.answer || "" })) });
+      elements.push({ id: localId("el"), type: "faq", heading: section.heading || "Frequently Asked Questions", items: (section.items || []).map((item) => ({ question: item.question || "", answer: item.answer || "" })) });
     } else if (section.type === "product_details") {
       elements.push({ id: localId("el"), type: "product_details" });
     }

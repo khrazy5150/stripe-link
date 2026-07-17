@@ -56,6 +56,19 @@ as nudges — never blocking publish. Reinforces the "quality baseline as warnin
 - **Reuse**: the legacy panel's groups/labels are a fine starting point; we replace its hand-built form with
   the catalog-generated one and extend coverage to every token.
 
+## Status
+
+- **Shipped (v1):** the panel is **generated from a token catalog** in `composition_rules.json`
+  (`token_catalog`: `{token: {label, group, kind}}`, grouped Backgrounds/Text/Brand/CTA/Badges/Price/…).
+  Buried behind an "Advanced Color Settings" toggle; each token is a hex/CSS-color input with a live swatch,
+  its placeholder showing the preset's effective value (read off the preview via `getComputedStyle`). Overrides
+  persist as **`page.theme.tokens`** (the server already merges these over the preset — no backend change to
+  apply them), restored on edit, auto-opening the panel when present. The preview applies overrides as inline
+  `--preview-*` vars. Validation relaxed from hex-only to hex/rgb(a)/hsl(a). "Reset to preset" clears overrides.
+  Adding a token to the catalog surfaces it automatically — no per-field form work (legacy's gap fixed).
+- **Later:** gradients beyond the CTA; per-group reset; contrast warnings; auto-open on "custom" preset;
+  more tokens as needed (the catalog is currently a curated ~19).
+
 ## Open decisions
 
 - Token **granularity** per element (how fine-grained before it's overwhelming even for power users).

@@ -71,6 +71,19 @@ is the specialized case (question = `h3`, plus schema).
   and writes a keyword `<title>` separate from the benefit `<h1>`. The skeleton is the guardrail.
 - **Element taxonomy / Builder Reframe** — the semantic contract is a per-element property.
 
+## Status
+
+- **Slice 1 (shipped):** the 3-`<h1>` defect is fixed. Per the element catalog's `heading_role`:
+  `brand_label` + `seo_title` are now `<p>` (non-headings, matching the preview's `<span>`); the page's sole
+  `<h1>` is the main title — `hero` **or** the standalone `headline` section (mutually exclusive in practice,
+  so exactly one `<h1>`). `content_block` promoted `<h3>` → `<h2>` (it's a top-level content section — no
+  more h1→h3 skip). Tests assert `count("<h1") == 1`. Catalog `heading_role` updated (headline h1,
+  content_block h2).
+- **Slice 2 (deferred):** render the FAQ section's `<h2>` heading (the element carries one now but
+  `elementSection`/`render_faq` drop it); a **publish-time outline validator** (block zero/multiple `<h1>`,
+  warn on skipped levels); and the general "renderer computes the outline from position" model so any future
+  section stack stays valid without per-section hardcoding. `product_carousel` titles (`<h3>`) to review.
+
 ## Open decisions
 
 - How deep sections may nest (`h3` only, or `h4` for long pages).

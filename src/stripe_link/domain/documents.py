@@ -9,6 +9,11 @@ class DocumentValidationError(ValueError):
 
 SLUG_PATTERN = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 HEX_COLOR_PATTERN = re.compile(r"^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$")
+# Advanced Color Settings overrides accept common CSS color forms (hex, rgb/rgba, hsl/hsla) — preset tokens
+# aren't all hex (social presets use rgba), so restricting overrides to hex would reject valid colors.
+CSS_COLOR_PATTERN = re.compile(
+    r"^(#(?:[0-9a-fA-F]{3,4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})|(?:rgb|rgba|hsl|hsla)\([0-9.,%\s/]+\))$"
+)
 FONT_FAMILY_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 ._-]{0,79}$")
 HTTP_URL_PATTERN = re.compile(r"^https?://[^\s\"'<>]+$")
 SUPPORTED_PAGE_SECTION_TYPES = {
@@ -897,8 +902,8 @@ def validate_page_document(document: dict[str, Any]) -> None:
             if not isinstance(tokens, dict):
                 raise DocumentValidationError("Page theme.tokens must be an object.")
             for key, value in tokens.items():
-                if not isinstance(key, str) or not isinstance(value, str) or not HEX_COLOR_PATTERN.match(value):
-                    raise DocumentValidationError("Page theme.tokens values must be hex colors.")
+                if not isinstance(key, str) or not isinstance(value, str) or not CSS_COLOR_PATTERN.match(value):
+                    raise DocumentValidationError("Page theme.tokens values must be valid CSS colors.")
         validate_font_settings(theme.get("fonts"), "Page theme.fonts")
 
     validate_page_post_checkout(document.get("post_checkout"))

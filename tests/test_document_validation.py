@@ -444,6 +444,12 @@ class DocumentValidationTests(unittest.TestCase):
         with self.assertRaisesRegex(DocumentValidationError, "theme.tokens"):
             validate_page_document(page)
 
+    def test_page_accepts_hex_and_rgba_theme_tokens(self):
+        # Advanced Color Settings overrides: hex + rgba (preset tokens aren't all hex) are both valid.
+        page = load_fixture("page-universal-bundle.json")
+        page["theme"]["tokens"] = {"brand": "#0077b5", "trust_badge_bg": "rgba(0,119,181,.1)", "cta_from": "#005582"}
+        validate_page_document(page)  # must not raise
+
     def test_page_accepts_custom_favicon_url(self):
         page = load_fixture("page-universal-bundle.json")
         page["seo"]["favicon_url"] = "https://cdn.example.com/favicon.png"

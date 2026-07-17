@@ -25,7 +25,8 @@ class PageRenderTests(unittest.TestCase):
     def test_render_page_outputs_semantic_sections_and_price_options(self):
         html = render_page(self.page, self.offer, self.products_by_id)
 
-        self.assertIn(">Creatine Gummies</h1>", html)
+        self.assertIn(">Creatine Gummies</h1>", html)   # the hero headline is the page's sole <h1>
+        self.assertEqual(html.count("<h1"), 1)          # exactly one H1 — semantic outline invariant
         self.assertIn("--sl-theme-accent:#16a34a", html)
         self.assertIn("<link rel=\"icon\" href=\"https://images.juniorbay.com/icon/favicon.png\">", html)
         self.assertIn("<link rel=\"shortcut icon\" href=\"https://images.juniorbay.com/icon/favicon.png\">", html)
@@ -94,17 +95,18 @@ class PageRenderTests(unittest.TestCase):
         self.assertIn("main{width:100%;padding:0 0 12rem", html)
         self.assertIn("main > :not(.sl-countdown):not(.sl-checkout-cta){width:min(52rem,calc(100% - 3.2rem))", html)
         self.assertIn(".sl-countdown{width:100%", html)
-        self.assertIn(".sl-brand-label h1{font-family:var(--sl-font-accent);font-size:1.3rem", html)
-        self.assertIn(".sl-headline h2{font-family:var(--sl-font-heading);font-size:clamp(2.4rem,5vw,3.2rem)", html)
+        self.assertIn(".sl-brand-label p{font-family:var(--sl-font-accent);font-size:1.3rem", html)
+        self.assertIn(".sl-headline h1{font-family:var(--sl-font-heading);font-size:clamp(2.4rem,5vw,3.2rem)", html)
         self.assertIn(".sl-price-option strong{font-family:var(--sl-font-heading);font-size:1.6rem", html)
         self.assertIn(".sl-price-description{color:var(--sl-price-description);font-size:1.3rem", html)
         self.assertIn("data-section-type=\"brand_label\"", html)
-        self.assertIn(">Creatine Gummies</h1>", html)
+        self.assertIn(">Creatine Gummies</p>", html)
         self.assertIn("data-section-type=\"hero_media\"", html)
         self.assertIn("data-media-count=\"1\"", html)
         self.assertIn("images/universal-bundle/creatine_gummies_1.webp", html)
-        self.assertIn("<h2>Get Creatine Gummies Bundle Today</h2>", html)
-        self.assertIn("Get Creatine Gummies Bundle Today", html)
+        self.assertIn("<h1>Get Creatine Gummies Bundle Today</h1>", html)   # standalone headline = the h1
+        self.assertIn(">Creatine Gummies</p>", html)                         # brand label demoted to <p>
+        self.assertEqual(html.count("<h1"), 1)                               # exactly one H1
         self.assertIn("data-section-type=\"trust_badges\"", html)
         self.assertIn("data-price-id=\"price_universal_triple\"", html)
         self.assertIn("data-sale-amount=\"6942\"", html)
@@ -127,11 +129,14 @@ class PageRenderTests(unittest.TestCase):
         self.assertIn("Physical items may be returned within 30 days", html)
         self.assertIn("This item doesn&#x27;t need to be returned.", html)
         self.assertIn("data-section-type=\"content_block\"", html)
-        self.assertIn(".sl-content-block h3{font-family:var(--sl-font-heading);font-size:2rem", html)
+        self.assertIn(".sl-content-block h2{font-family:var(--sl-font-heading);font-size:2rem", html)
         self.assertIn(".sl-content-block p{color:var(--sl-content-text);font-size:1.5rem", html)
         self.assertIn("data-section-type=\"faq\"", html)
         self.assertIn(".sl-faq summary{cursor:pointer;font-family:var(--sl-font-heading);font-size:1.4rem", html)
         self.assertIn(".sl-faq p{color:var(--sl-faq-text);font-size:1.4rem", html)
+        # FAQ joins the heading outline: an <h2> section heading with each question as an <h3> (plans/SEMANTIC_HTML.md).
+        self.assertIn("<h2 class=\"sl-faq-heading\">", html)
+        self.assertIn("<summary><h3>", html)
         self.assertIn("Get The Bundle - $69.42", html)
         self.assertIn("Terms of Service", html)
         self.assertIn("© 2026 All rights reserved.", html)

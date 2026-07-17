@@ -3687,6 +3687,66 @@ button:disabled {
   margin-top: 0.8rem;
 }
 
+.advanced-colors {
+  margin-top: 0.8rem;
+  display: grid;
+  gap: 1.2rem;
+}
+
+.advanced-colors-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.color-group {
+  display: grid;
+  gap: 0.4rem;
+}
+
+.color-group-title {
+  font-size: 1.15rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted, #6b7280);
+}
+
+.color-row {
+  display: grid;
+  grid-template-columns: 2.4rem minmax(0, 1fr) 12rem;
+  align-items: center;
+  gap: 0.8rem;
+}
+
+.color-picker {
+  width: 2.4rem;
+  height: 2.4rem;
+  padding: 0;
+  border: 1px solid var(--border, #e5e7eb);
+  border-radius: 0.5rem;
+  background: none;
+  cursor: pointer;
+}
+.color-picker::-webkit-color-swatch-wrapper {
+  padding: 0.2rem;
+}
+.color-picker::-webkit-color-swatch {
+  border: none;
+  border-radius: 0.3rem;
+}
+
+.color-label {
+  font-size: 1.4rem;
+}
+
+.color-row input {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 1.3rem;
+}
+
 .composition-subhead {
   margin-top: 1.6rem;
   margin-bottom: 0.4rem;
@@ -3822,6 +3882,46 @@ button:disabled {
   color: #f59e0b;
   font-size: 2rem;
   letter-spacing: 0.2rem;
+}
+
+/* The Live Preview iframe holds the server's own render_page() output — the published page, verbatim. */
+.landing-live-preview-frame {
+  display: block;
+  width: 100%;
+  min-height: 64rem;
+  border: 0;
+  background: #ffffff;
+}
+
+.landing-live-preview-frame.mobile {
+  width: min(100%, 39rem);
+  margin: 0 auto;
+  border-left: 1px solid var(--border, #e2e8f0);
+  border-right: 1px solid var(--border, #e2e8f0);
+}
+
+.landing-live-preview-status {
+  padding: 3.2rem 2.4rem;
+  text-align: center;
+  color: #64748b;
+  font-size: 1.4rem;
+}
+
+.preview-render-error {
+  padding: 1.2rem 1.6rem;
+  background: #fee2e2;
+  color: #b91c1c;
+  font-size: 1.3rem;
+}
+
+/* Not rendered to the user: carries the preset classes so Advanced Color Settings can read the preset's
+   effective --preview-* values via getComputedStyle. */
+.preview-token-probe {
+  position: absolute;
+  visibility: hidden;
+  height: 0;
+  overflow: hidden;
+  pointer-events: none;
 }
 
 .preview-marquee {
@@ -4311,7 +4411,10 @@ button:disabled {
   overflow: auto;
   background: var(--preview-bg);
   color: var(--preview-text);
-  padding: 2.4rem;
+  /* Bottom clearance for the sticky .preview-cta (5.6rem tall, offset 1.6rem). Sections that come after
+     it in the DOM — refund policy, legal footer — would otherwise sit underneath the stuck button with
+     no room to scroll clear. The published page reserves the same space under its fixed CTA. */
+  padding: 2.4rem 2.4rem 9.6rem;
 }
 
 .landing-live-preview.mobile {
@@ -5003,6 +5106,13 @@ button:disabled {
   font-weight: 600;
   line-height: 1.35;
   padding: 1.6rem 2rem;
+}
+
+.preview-faqs summary h3 {
+  margin: 0;
+  font: inherit;
+  color: inherit;
+  display: inline;
 }
 
 .preview-faqs p {

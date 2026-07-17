@@ -130,3 +130,51 @@ config, composer, builder panels, and saved page — the canonical key is the se
 - **Later:** the catalog's `heading_role` powers plans/SEMANTIC_HTML.md; its `tokens` power
   plans/ADVANCED_COLOR_SETTINGS.md; `channel` powers the head/sidecar output in
   plans/LANDING_PAGE_GOAL_COMPOSITION.md.
+
+## Resolution — one renderer, not two (shipped)
+
+The Composer made preview and published *agree on which sections exist*, but they still **drew** those
+sections with two different implementations: `runtime/html.py` for the published page, and hand-written Vue
+markup for the builder's Live Preview. Every section was implemented twice, so every section could drift
+twice. That is what produced the `client_marquee` bug: the section saved correctly, `render_client_marquee`
+rendered it correctly, the composer said it was visible — and the Vue twin silently drew nothing.
+
+The Live Preview now **renders through the published renderer**:
+
+```
+Vue builder
+   | edits
+   v
+landing-page.json  (buildBuilderPageDocument)
+   |
+   +-- POST /pages/render --> render_page() --> HTML --> iframe   (Live Preview)
+   |
+   +-- Save --> PagesTable --> stream --> render_page() --> S3    (Published page)
+```
+
+One JSON, one renderer, two consumers. No backend work was required — `handlers/page_render.py`
+(`POST /pages/render`) already accepted a draft page + offer + products and returned rendered HTML; the
+builder simply had never called it. The Vue twin (~183 lines) is deleted, along with the preview-only
+ConversionContext plumbing that existed to drive it.
+
+**Consequences worth knowing:**
+
+- Preview is debounced (~400ms) instead of keystroke-instant. That is the price of "same bytes by
+  construction", and it is worth paying.
+- The render POST **must** send `api_base_url`: the page document deliberately stores no legal URLs
+  (`legalLinks()` returns `{}`) and `render_legal_footer` builds the platform `/legal/*` hrefs from it.
+  Without it the footer links silently vanish.
+- Scroll position is captured/restored across the srcdoc swap, and byte-identical HTML skips the reload.
+- Because the preview is now the real renderer, it surfaces real rendering bugs the twin used to hide —
+  e.g. `responsive_img()` emits a srcset over all five `IMAGE_RENDITION_WIDTHS`, but the processor writes
+  renditions asynchronously (`full.webp` lands last), so a just-uploaded image can 404 briefly. The builder
+  repaints the frame a few seconds after an upload to let it heal. **Do not "fix" this by probing for the
+  pending rendition:** the CDN answers 403 for a missing object and caches it, which converts a
+  self-healing race into a permanently broken image. The real fix belongs in the image pipeline (write all
+  renditions atomically, or emit a srcset of only what exists).
+
+**Follow-up:** the twin left dead code behind — the price-preview cluster (`previewPrices`,
+`selectedPreviewPrice`, `previewDefaultPriceId`, `selectPreviewPrice`, `isPreviewPriceSelected`,
+`ctaShowsPrices`, `previewCtaLabel`), `previewRefundAppliesTo` / `previewRefundReturnNote`,
+`defaultLegalLinks` / `defaultFooterCopyright`, `headlineHtml`, `listicleAddLabel`, `builderLeadAction`.
+Harmless but should be removed.

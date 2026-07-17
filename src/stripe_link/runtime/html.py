@@ -417,13 +417,13 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     "    @keyframes sl-marquee{from{transform:translateX(100%)}to{transform:translateX(-100%)}}",
     "    .sl-brand-label{display:flex;align-items:center;justify-content:center;gap:0.8rem;color:var(--sl-brand-label-text);padding-top:1.6rem}",
     "    .sl-brand-label::before{content:'';width:1rem;height:1rem;border-radius:999px;background:var(--sl-brand-dot);box-shadow:0 0 0.8rem var(--sl-brand-dot)}",
-    "    .sl-brand-label h1{font-family:var(--sl-font-accent);font-size:1.3rem;font-weight:700;letter-spacing:0.08em;line-height:1.2;text-transform:uppercase;color:var(--sl-brand-label-text)}",
+    "    .sl-brand-label p{font-family:var(--sl-font-accent);font-size:1.3rem;font-weight:700;letter-spacing:0.08em;line-height:1.2;text-transform:uppercase;color:var(--sl-brand-label-text)}",
     "    .sl-seo-title{text-align:center}",
-    "    .sl-seo-title h1{font-family:var(--sl-font-heading);font-size:clamp(2.4rem,5vw,3.2rem);line-height:1.2;color:var(--sl-headline)}",
+    "    .sl-seo-title p{font-family:var(--sl-font-heading);font-size:clamp(2.4rem,5vw,3.2rem);line-height:1.2;color:var(--sl-headline)}",
     "    .sl-mark-text{color:var(--sl-highlight-text)}",
     "    .sl-mark-bg{background:var(--sl-highlight-bg);color:var(--sl-highlight-bg-text);padding:0.1em 0.3em;border-radius:0.4rem}",
     "    .sl-headline{text-align:center;padding:0.8rem 0 0.4rem}",
-    "    .sl-headline h2{font-family:var(--sl-font-heading);font-size:clamp(2.4rem,5vw,3.2rem);line-height:1.2;font-weight:800;color:var(--sl-headline);letter-spacing:0}",
+    "    .sl-headline h1{font-family:var(--sl-font-heading);font-size:clamp(2.4rem,5vw,3.2rem);line-height:1.2;font-weight:800;color:var(--sl-headline);letter-spacing:0}",
     "    .sl-subheadline{text-align:center}",
     "    .sl-subheadline p{font-size:1.5rem;line-height:1.55;color:var(--sl-subheadline-text);max-width:46rem;margin:0 auto}",
     # Hero headline + subheadline centered, matching the builder preview (which centers them for every template).
@@ -484,11 +484,13 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     "    .sl-refund-policy-copy{padding-left:2rem}",
     "    .sl-refund-policy-return{padding-left:2rem;color:var(--sl-refund-return)!important;font-weight:800}",
     "    .sl-content-block{display:grid;grid-template-columns:minmax(0,1fr) minmax(12rem,18rem);gap:1.2rem;align-items:center;border-top:1px solid var(--sl-content-border);padding-top:1.6rem}",
-    "    .sl-content-block h3{font-family:var(--sl-font-heading);font-size:2rem;line-height:1.25;margin-bottom:0.8rem;color:var(--sl-content-heading)}",
+    "    .sl-content-block h2{font-family:var(--sl-font-heading);font-size:2rem;line-height:1.25;margin-bottom:0.8rem;color:var(--sl-content-heading)}",
     "    .sl-content-block p{color:var(--sl-content-text);font-size:1.5rem;line-height:1.6}",
     "    .sl-content-block img{width:100%;aspect-ratio:4/3;object-fit:cover;border-radius:0.8rem}",
     "    .sl-faq details{border:1px solid var(--sl-faq-border);background:var(--sl-faq-bg);border-radius:1.6rem;padding:0;overflow:hidden}",
     "    .sl-faq summary{cursor:pointer;font-family:var(--sl-font-heading);font-size:1.4rem;font-weight:600;line-height:1.35;color:var(--sl-faq-summary);display:flex;align-items:center;justify-content:space-between;gap:1.2rem;padding:1.6rem 2rem}",
+    "    .sl-faq summary h3{margin:0;font:inherit;color:inherit;flex:1}",
+    "    .sl-faq-heading{font-family:var(--sl-font-heading);font-size:1.8rem;line-height:1.25;margin-bottom:0.2rem;color:var(--sl-faq-summary)}",
     "    .sl-faq p{color:var(--sl-faq-text);font-size:1.4rem;line-height:1.6;padding:0 2rem 1.6rem}",
     "    .sl-checkout-cta{position:fixed;left:0;right:0;bottom:0;z-index:10;background:linear-gradient(transparent,var(--sl-cta-scrim) 20%);padding:1.6rem;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:0.8rem}",
     "    .sl-cta{display:inline-flex;width:min(52rem,100%);align-items:center;justify-content:center;background:linear-gradient(135deg,var(--sl-cta-from),var(--sl-cta-to));color:var(--sl-cta-text);border:0;border-radius:1rem;padding:1.5rem 1.8rem;font-family:var(--sl-font-accent);font-size:1.7rem;font-weight:900;text-decoration:none}",
@@ -569,7 +571,7 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     "    .sl-legal{display:flex;gap:1.2rem;flex-wrap:wrap;justify-content:center;text-align:center;font-size:1.3rem;color:var(--sl-legal-text);padding:2.4rem 0 0}",
     "    .sl-legal span{flex:0 0 100%}",
     "    .sl-legal a{color:var(--sl-legal-link)}",
-    "    @media (max-width: 700px){.sl-price-option{grid-template-columns:8.8rem minmax(0,1fr) 2.4rem;gap:1rem;padding:1.2rem}.sl-price-option img{width:8.8rem}.sl-content-block{grid-template-columns:1fr}.sl-headline h2{font-size:3rem}}",
+    "    @media (max-width: 700px){.sl-price-option{grid-template-columns:8.8rem minmax(0,1fr) 2.4rem;gap:1rem;padding:1.2rem}.sl-price-option img{width:8.8rem}.sl-content-block{grid-template-columns:1fr}.sl-headline h1{font-size:3rem}}",
 ]
 
 TEMPLATE_STYLES = {
@@ -778,7 +780,10 @@ def render_page(
     offers_by_id = offers_by_id or {str(offer.get("offer_id") or ""): offer}
     require_offer_products(offer, products_by_id)
     resolved_offer = resolve_offer(offer, products_by_id, selected_prices, services_by_id=services_by_id)
-    title = escape((page.get("seo") or {}).get("title") or page.get("name") or "Checkout")
+    # SEO title uses Chicago title case (the builder title-cases on input; format here too so
+    # existing/API-set titles are consistent).
+    _seo_title = (page.get("seo") or {}).get("title") or page.get("name") or "Checkout"
+    title = escape(format_headline(str(_seo_title)))
     description = escape((page.get("seo") or {}).get("description") or "")
     favicon_tags = render_favicon_tags(page.get("seo") or {})
     styles = render_template_styles(page)
@@ -1023,9 +1028,10 @@ def render_seo_title(
 ) -> str:
     product_name = next((product.get("name") for product in products_by_id.values() if product.get("name")), "")
     title = render_headline_markup(section.get("label") or (page.get("seo") or {}).get("title") or product_name or page.get("name") or "")
+    # heading_role: none in the element catalog — the hero is the page's only <h1>, so this is a <p>.
     return "\n".join([
         f"    <section class=\"sl-seo-title\" data-section-id=\"{escape(str(section.get('id', 'seo-title')))}\" data-section-type=\"seo_title\">",
-        f"      <h1>{title}</h1>",
+        f"      <p>{title}</p>",
         "    </section>",
     ])
 
@@ -1034,9 +1040,10 @@ def render_brand_label(section: dict[str, Any], page: dict[str, Any]) -> str:
     if section.get("enabled") is False:
         return ""
     label = render_headline_markup(section.get("label") or (page.get("seo") or {}).get("title") or page.get("name") or "")
+    # heading_role: none in the element catalog — a brand label is not a heading (matches the preview's span).
     return "\n".join([
         f"    <section class=\"sl-brand-label\" data-section-id=\"{escape(str(section.get('id', 'brand-label')))}\" data-section-type=\"brand_label\">",
-        f"      <h1>{label}</h1>",
+        f"      <p>{label}</p>",
         "    </section>",
     ])
 
@@ -1182,9 +1189,10 @@ def offer_uses_grouped_item_media(offer: dict[str, Any]) -> bool:
 
 
 def render_headline(section: dict[str, Any]) -> str:
+    # heading_role: h1 — a standalone headline section is the page's main title (mutually exclusive with hero).
     return "\n".join([
         f"    <section class=\"sl-headline\" data-section-id=\"{escape(str(section.get('id', 'headline')))}\" data-section-type=\"headline\">",
-        f"      <h2>{render_headline_markup(section.get('text') or '')}</h2>",
+        f"      <h1>{render_headline_markup(section.get('text') or '')}</h1>",
         "    </section>",
     ])
 
@@ -1569,10 +1577,12 @@ def refund_policy_applies_to(offer: dict[str, Any], products_by_id: dict[str, di
 
 def render_faq(section: dict[str, Any]) -> str:
     items = section.get("items") or []
+    # Each question is an <h3> under the section's <h2> heading — keeps the FAQ inside the
+    # page heading outline (h1 → h2 section → h3 question) for SEO/a11y (plans/SEMANTIC_HTML.md).
     rendered = [
         "\n".join([
             "      <details>",
-            f"        <summary>{render_headline_markup(item.get('question') or '')}</summary>",
+            f"        <summary><h3>{render_headline_markup(item.get('question') or '')}</h3></summary>",
             f"        <p>{escape(str(item.get('answer') or ''))}</p>",
             "      </details>",
         ])
@@ -1580,8 +1590,10 @@ def render_faq(section: dict[str, Any]) -> str:
     ]
     if not rendered:
         return ""
+    heading = str(section.get("heading") or "Frequently Asked Questions")
     return "\n".join([
         f"    <section class=\"sl-faq\" data-section-id=\"{escape(str(section.get('id', 'faq')))}\" data-section-type=\"faq\">",
+        f"      <h2 class=\"sl-faq-heading\">{escape(heading)}</h2>",
         *rendered,
         "    </section>",
     ])
@@ -1595,7 +1607,7 @@ def render_content_blocks(section: dict[str, Any]) -> str:
         rendered.append("\n".join([
             "      <article class=\"sl-content-block\">",
             "        <div>",
-            f"          <h3>{render_headline_markup(block.get('title') or '')}</h3>",
+            f"          <h2>{render_headline_markup(block.get('title') or '')}</h2>",
             f"          <p>{escape(str(block.get('text') or ''))}</p>",
             "        </div>",
             "        " + responsive_img(image_url, str(block.get("title") or "Content image"), sizes=CONTENT_BLOCK_SIZES) if image_url else "",
