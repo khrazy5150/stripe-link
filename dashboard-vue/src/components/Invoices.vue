@@ -17,11 +17,11 @@
       <div class="product-filter-bar">
         <label>
           Search
-          <input v-model.trim="filters.customer" type="search" placeholder="Customer name or email..." @keyup.enter="load" />
+          <input v-model.trim="filters.customer" type="search" placeholder="Customer name or email..." @input="onFilterInput" @keyup.enter="load" />
         </label>
         <label>
           Status
-          <select v-model="filters.status">
+          <select v-model="filters.status" @change="load">
             <option value="">All</option>
             <option value="draft">Draft</option>
             <option value="open">Open</option>
@@ -30,7 +30,6 @@
           </select>
         </label>
         <div class="product-filter-actions">
-          <button type="button" class="primary-action" @click="load">Apply</button>
           <button type="button" class="secondary-action" @click="resetFilters">Reset</button>
         </div>
       </div>
@@ -226,6 +225,13 @@ async function load() {
   } finally {
     loading.value = false;
   }
+}
+
+// Server-side filtering: a filter change means a re-fetch. Debounce the text field; status fetches on change.
+let filterTimer = null;
+function onFilterInput() {
+  clearTimeout(filterTimer);
+  filterTimer = setTimeout(load, 400);
 }
 
 function resetFilters() {

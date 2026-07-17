@@ -16,11 +16,11 @@
       <div class="product-filter-bar">
         <label>
           Search
-          <input v-model.trim="filters.customer" type="search" placeholder="Customer name or email..." @keyup.enter="load" />
+          <input v-model.trim="filters.customer" type="search" placeholder="Customer name or email..." @input="onFilterInput" @keyup.enter="load" />
         </label>
         <label>
           Status
-          <select v-model="filters.status">
+          <select v-model="filters.status" @change="load">
             <option value="">All</option>
             <option value="paid">Paid</option>
             <option value="refunded">Refunded</option>
@@ -28,7 +28,6 @@
           </select>
         </label>
         <div class="product-filter-actions">
-          <button type="button" class="primary-action" @click="load">Apply</button>
           <button type="button" class="secondary-action" @click="resetFilters">Reset</button>
         </div>
       </div>
@@ -144,6 +143,15 @@ async function load() {
   } finally {
     loading.value = false;
   }
+}
+
+// These screens filter SERVER-SIDE (load() sends the filters as query params), so a filter change means a
+// re-fetch. Debounce the text field so it's not one request per keystroke; the status dropdown fetches on
+// change. No Apply button — the list stays in sync with the filters.
+let filterTimer = null;
+function onFilterInput() {
+  clearTimeout(filterTimer);
+  filterTimer = setTimeout(load, 400);
 }
 
 function resetFilters() {

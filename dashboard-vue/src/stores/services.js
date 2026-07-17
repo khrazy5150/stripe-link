@@ -68,9 +68,20 @@ export const useServicesStore = defineStore("services", {
         ].filter(Boolean).join(" ").toLowerCase().includes(search);
       });
     },
+
+    // Live count, so the banner tracks the filter as you type — no Apply button needed.
+    statusMessage() {
+      if (!this.loaded) return this.message;
+      return `${this.filteredServices.length} of ${this.services.length} service${this.services.length === 1 ? "" : "s"} shown.`;
+    },
   },
 
   actions: {
+    // Load on first filter interaction so search works without clicking Load Services first (mirrors Products).
+    ensureLoaded() {
+      if (!this.loaded && !this.loading) this.load();
+    },
+
     reset() {
       this.services = [];
       this.loading = false;
@@ -80,14 +91,6 @@ export const useServicesStore = defineStore("services", {
       this.message = "";
       this.filters.search = "";
       this.filters.status = "all";
-    },
-
-    applyFilters() {
-      if (!this.loaded) {
-        this.message = "";
-        return;
-      }
-      this.message = `${this.filteredServices.length} of ${this.services.length} service${this.services.length === 1 ? "" : "s"} shown.`;
     },
 
     async load() {

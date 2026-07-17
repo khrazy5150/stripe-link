@@ -16,14 +16,13 @@
       <div class="product-filter-bar">
         <label>
           Search
-          <input v-model.trim="filters.customer" type="search" placeholder="Name, email, or phone..." @keyup.enter="load" />
+          <input v-model.trim="filters.customer" type="search" placeholder="Name, email, or phone..." @input="onFilterInput" @keyup.enter="load" />
         </label>
         <label>
           Product
-          <input v-model.trim="filters.product" type="search" placeholder="Product name or ID..." @keyup.enter="load" />
+          <input v-model.trim="filters.product" type="search" placeholder="Product name or ID..." @input="onFilterInput" @keyup.enter="load" />
         </label>
         <div class="product-filter-actions">
-          <button type="button" class="primary-action" @click="load">Apply</button>
           <button type="button" class="secondary-action" @click="resetFilters">Reset</button>
         </div>
       </div>
@@ -136,6 +135,14 @@ async function load() {
   } finally {
     loading.value = false;
   }
+}
+
+// Server-side filtering: a filter change means a re-fetch. Debounce the text fields so it's not one request
+// per keystroke. No Apply button — the list stays in sync with the filters.
+let filterTimer = null;
+function onFilterInput() {
+  clearTimeout(filterTimer);
+  filterTimer = setTimeout(load, 400);
 }
 
 function resetFilters() {

@@ -21,11 +21,11 @@
       <div class="product-filter-bar">
         <label>
           Search
-          <input v-model.trim="store.filters.search" type="search" placeholder="Name, code, coupon ID..." />
+          <input v-model.trim="store.filters.search" type="search" placeholder="Name, code, coupon ID..." @focus="store.ensureLoaded()" />
         </label>
         <label>
           Status
-          <select v-model="store.filters.status">
+          <select v-model="store.filters.status" @focus="store.ensureLoaded()">
             <option value="usable">Usable</option>
             <option value="active">Active</option>
             <option value="inactive">Inactive</option>
@@ -35,16 +35,15 @@
           </select>
         </label>
         <div class="product-filter-actions">
-          <button type="button" class="primary-action" @click="store.applyFilters">Apply</button>
           <button type="button" class="secondary-action" @click="resetFilters">Reset</button>
         </div>
       </div>
 
       <div v-if="store.error" class="keys-status-banner error">{{ store.error }}</div>
-      <div v-else class="keys-status-banner">{{ store.message }}</div>
+      <div v-else class="keys-status-banner">{{ store.statusMessage }}</div>
 
       <div v-if="!store.filteredCoupons.length" class="product-empty-state">
-        {{ store.loaded ? "No coupons found. Create a coupon before attaching one to an offer." : "Click Load Coupons to see coupons." }}
+        {{ store.loading ? "Loading coupons..." : store.loaded ? "No coupons found. Create a coupon before attaching one to an offer." : "Click Load Coupons to see coupons." }}
       </div>
 
       <div v-else class="coupon-card-grid">
@@ -287,7 +286,6 @@ async function saveCoupon() {
 function resetFilters() {
   store.filters.search = "";
   store.filters.status = "usable";
-  store.applyFilters();
 }
 
 function formFromCoupon(coupon) {

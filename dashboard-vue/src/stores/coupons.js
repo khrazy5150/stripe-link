@@ -73,6 +73,12 @@ export const useCouponsStore = defineStore("coupons", {
         ].filter(Boolean).join(" ").toLowerCase().includes(search);
       });
     },
+
+    // Live count, so the banner tracks the filter as you type — no Apply button needed.
+    statusMessage() {
+      if (!this.loaded) return this.message;
+      return `${this.filteredCoupons.length} of ${this.coupons.length} coupon${this.coupons.length === 1 ? "" : "s"} shown.`;
+    },
   },
 
   actions: {
@@ -87,12 +93,9 @@ export const useCouponsStore = defineStore("coupons", {
       this.filters.status = "usable";
     },
 
-    applyFilters() {
-      if (!this.loaded) {
-        this.message = "Click Load Coupons to see coupons.";
-        return;
-      }
-      this.message = `${this.filteredCoupons.length} of ${this.coupons.length} coupon${this.coupons.length === 1 ? "" : "s"} shown.`;
+    // Load on first filter interaction so search works without clicking Load Coupons first (mirrors Products).
+    ensureLoaded() {
+      if (!this.loaded && !this.loading) this.load({ status: "all" });
     },
 
     async load({ status = "all" } = {}) {

@@ -21,27 +21,26 @@
       <div class="product-filter-bar">
         <label>
           Search
-          <input v-model.trim="store.filters.search" type="search" placeholder="Name, description, service ID..." />
+          <input v-model.trim="store.filters.search" type="search" placeholder="Name, description, service ID..." @focus="store.ensureLoaded()" />
         </label>
         <label>
           Status
-          <select v-model="store.filters.status">
+          <select v-model="store.filters.status" @focus="store.ensureLoaded()">
             <option value="all">All</option>
             <option value="active">Active</option>
             <option value="inactive">Archived</option>
           </select>
         </label>
         <div class="product-filter-actions">
-          <button type="button" class="primary-action" @click="store.applyFilters">Apply</button>
           <button type="button" class="secondary-action" @click="resetFilters">Reset</button>
         </div>
       </div>
 
       <div v-if="store.error" class="keys-status-banner error">{{ store.error }}</div>
-      <div v-else-if="store.message" class="keys-status-banner">{{ store.message }}</div>
+      <div v-else-if="store.statusMessage" class="keys-status-banner">{{ store.statusMessage }}</div>
 
       <div v-if="!store.filteredServices.length" class="product-empty-state">
-        {{ store.loaded ? "No services found. Create a service to get started." : "Click Load Services to see services." }}
+        {{ store.loading ? "Loading services..." : store.loaded ? "No services found. Create a service to get started." : "Click Load Services to see services." }}
       </div>
 
       <div v-else class="product-card-list">
@@ -634,7 +633,6 @@ async function saveService() {
 function resetFilters() {
   store.filters.search = "";
   store.filters.status = "all";
-  store.applyFilters();
 }
 
 function formFromService(service) {
