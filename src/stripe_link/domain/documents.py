@@ -25,6 +25,14 @@ HTTP_URL_PATTERN = re.compile(r"^https?://[^\s\"'<>]+$")
 # degrades rather than raising at import) — accept any type then instead of rejecting every page; the
 # renderer already falls back to an empty section for a type it doesn't know.
 SUPPORTED_PAGE_SECTION_TYPES = set(ELEMENTS.keys())
+# schema.org itemCondition values we support, keyed by the tenant-facing value stored on the product.
+# Structured data may only state a condition the tenant chose — see product_json_ld().
+PRODUCT_CONDITIONS = {
+    "new": "https://schema.org/NewCondition",
+    "refurbished": "https://schema.org/RefurbishedCondition",
+    "used": "https://schema.org/UsedCondition",
+    "damaged": "https://schema.org/DamagedCondition",
+}
 SUPPORTED_PAGE_TEMPLATES = {"universal_bundle"}
 # The goal enum comes from composition_rules.json — the composer's source of truth — so the goals a page may
 # store can never drift from the goals the composer understands. Empty means the rules file failed to load
@@ -72,6 +80,8 @@ PRODUCT_FIELD_ORDER = [
     "product_intent",
     "product_type",
     "product_category",
+    "sku",
+    "condition",
     "refund_policy",
     "variants",
     "stripe_metadata",
@@ -549,6 +559,10 @@ def validate_product_document(document: dict[str, Any]) -> None:
         require_enum(document, "product_intent", {"transaction", "lead_gen"}, "Product product_intent")
     optional_string(document, "product_type")
     require_string(document, "product_category", "Product product_category")
+    # Both optional: they enrich structured data (sku, itemCondition) and pages without them still render.
+    optional_string(document, "sku", "Product sku")
+    if document.get("condition") is not None:
+        require_enum(document, "condition", set(PRODUCT_CONDITIONS), "Product condition")
     optional_string_list(document, "images")
     validate_product_lead_capture(document)
     if "tags" not in document:

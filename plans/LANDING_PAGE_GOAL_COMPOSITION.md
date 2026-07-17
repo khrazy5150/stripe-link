@@ -118,9 +118,28 @@ reached an existing page — changing it re-composes governed sections but never
 the tenant's), `seo_title`'s channel was corrected from `head` to `body` (it renders a visible `<p>`), and
 `SUPPORTED_PAGE_SECTION_TYPES` now derives from the element catalog instead of duplicating it.
 
-**Phase 3 remainder:** the sidecar channel + `llms_txt` (needs `artifact_targets` to emit a second artifact
-and `publish_page_document` to carry per-target body + content-type, plus routing), and the Discoverability
-drawer.
+**Phase 3 remainder:** the Discoverability drawer, and the sidecar channel + `llms_txt`.
+
+### llms.txt is blocked on something owning a domain root (found 2026-07-17)
+
+The plan lists `sidecar` as a per-section channel writing `/llms.txt`. That does not work yet, and the reason
+is worth recording rather than rediscovering:
+
+**llms.txt is a domain-root convention** (llmstxt.org) — `https://example.com/llms.txt`, like `robots.txt`.
+Nothing requests it anywhere else. But pages publish to `{pages_domain}/{page_id}/index.html`, so a per-page
+sidecar lands at `/{page_id}/llms.txt`, a path no client will ever ask for. The real root — `/llms.txt` on
+the shared pages distribution — serves every tenant's pages, so no one tenant can own it.
+
+The entity that *would* own a root is **`Site`** (`schemas/Site.schema.json`: `domain.hostname`, a slug-keyed
+`pages` map, `seo_defaults`) — but it is **schema-only**; nothing in `src/` references `site_id` and the Sites
+screen is disabled. The other candidate is a **custom domain**, which `handlers/custom_domains.py` already
+maps to a single page (`target_page_id`, `target_type: "landing_page"`) — a domain whose root *is* one landing
+page makes `/llms.txt` correct. There are currently no live custom domains to build against.
+
+So `llms_txt` waits on whichever lands first (Site, or custom domains in real use). Until then it would emit a
+correct file at a URL nothing reads. The mechanical work it needs is unchanged and small: `artifact_targets`
+gains a second artifact per page, and `publish_page_document` — which today writes one `html` body with
+`text/html` to every target — needs per-target body + content-type.
 
 ## Status — Phases 1 + 2 shipped
 

@@ -644,6 +644,49 @@
             </div>
           </section>
 
+          <!-- Discoverability: the sections that render to <head> / their own artifact rather than to the
+               page. Collapsed and out of the way because there is nothing to fill in — the output is DERIVED
+               from the offer and the composed sections ("SEO" is a mode the goal flips on, not a form).
+               plans/LANDING_PAGE_GOAL_COMPOSITION.md -->
+          <details v-if="discoverabilitySections.length" class="builder-section discoverability-drawer">
+            <summary>
+              <h3>Discoverability</h3>
+              <span class="discoverability-hint">
+                {{ isSectionEnabled("structured_data") ? "Structured data on" : "Nothing emitted" }}
+              </span>
+            </summary>
+            <small>
+              Not visible on the page — this is what search engines and AI crawlers read. It is generated from
+              your offer and the sections you have already added, so there is nothing to write here.
+            </small>
+            <div class="composition-list">
+              <label v-for="key in discoverabilitySections" :key="key" class="composition-row">
+                <input type="checkbox" :checked="isSectionEnabled(key)" @change="toggleSection(key, $event.target.checked)" />
+                <span class="composition-name">{{ sectionKeyLabel(key) }}</span>
+                <span class="composition-tag" :class="defaultVisible(builderOfferType, key, builderGoal) ? 'is-recommended' : 'is-optional'">
+                  {{ defaultVisible(builderOfferType, key, builderGoal) ? "Recommended" : "Optional" }}
+                </span>
+              </label>
+            </div>
+            <div v-if="isSectionEnabled('structured_data')" class="discoverability-emits">
+              <span>Will emit</span>
+              <strong v-if="structuredDataTypes.length">{{ structuredDataTypes.join(", ") }}</strong>
+              <strong v-else>Nothing yet — add an offer price or an FAQ</strong>
+            </div>
+            <!-- Thin markup isn't invalid, it's ignored — which is the failure a tenant can't see. Nudge,
+                 never block (plans/LANDING_PAGE_GOAL_COMPOSITION.md: warnings, not gates). -->
+            <div v-if="isSectionEnabled('structured_data') && structuredDataWarnings.length" class="discoverability-warnings">
+              <strong>To earn a rich result in search:</strong>
+              <ul>
+                <li v-for="(warning, i) in structuredDataWarnings" :key="i">{{ warning }}</li>
+              </ul>
+              <small>Your page still publishes normally — these only affect how search engines display it.</small>
+            </div>
+            <p v-if="!builderGoal" class="discoverability-note">
+              Set a Page Goal of "Search / SEO" above to turn this on by default.
+            </p>
+          </details>
+
           <section class="builder-section">
             <h3>Call to Action</h3>
             <label class="offer-field">
@@ -791,7 +834,7 @@
 <script setup>
 import { computed, reactive, ref, watch } from "vue";
 import { offerViewTargets, offerViewTargetsFromExpanded } from "../composables/useConversionContext";
-import { isSectionVisible, defaultVisible, recommendedSectionKeys, optionalSectionKeys, governedKeys, elementLabel, addableElements, tokenGroups, previewVar, supportedGoals, goalLabel, packSeeds } from "../composables/pageComposer";
+import { isSectionVisible, defaultVisible, recommendedSectionKeys, optionalSectionKeys, governedKeys, elementLabel, elementChannel, addableElements, tokenGroups, previewVar, supportedGoals, goalLabel, packSeeds } from "../composables/pageComposer";
 import { apiRequest, getApiBase, getApiEnvironment, getPagesBaseUrl, getPreviewPagesBaseUrl, getTenantId } from "../api/client";
 import { formatMoney } from "../stores/products";
 import { uploadImage } from "../api/uploads";
@@ -906,7 +949,7 @@ const recommendedSections = computed(() => recommendedSectionKeys(builderOfferTy
 const optionalSections = computed(() => optionalSectionKeys(builderOfferType.value, builderGoal.value));
 // Structural sections are always present; these are the optional content sections the tenant can add/remove.
 const MANDATORY_SECTION_KEYS = new Set(["hero", "hero_media", "offer_price_selector", "legal_footer", "checkout_cta"]);
-const togglableSections = computed(() => governedKeys().filter((key) => {
+const optionalGovernedSections = computed(() => governedKeys().filter((key) => {
   if (MANDATORY_SECTION_KEYS.has(key)) return false;
   // Don't offer a toggle the page can't honour: refund policy copy comes from the offer or its product
   // (render_refund_policy does offer.refund_policy or product.refund_policy). Service offers have items
@@ -915,6 +958,27 @@ const togglableSections = computed(() => governedKeys().filter((key) => {
   if (key === "refund_policy" && !previewRefundPolicy.value) return false;
   return true;
 }));
+// Page Sections lists what a visitor can SEE. Non-visible sections (head/sidecar — structured data, later
+// llms.txt) are real composed sections but paint no pixels, so listing them beside "Trust badges" invites a
+// tenant to hunt for something they'll never find on the page. They get their own drawer below.
+const togglableSections = computed(() =>
+  optionalGovernedSections.value.filter((key) => elementChannel(key) === "body"));
+const discoverabilitySections = computed(() =>
+  optionalGovernedSections.value.filter((key) => elementChannel(key) !== "body"));
+// Nothing in the drawer is editable — the whole point is that SEO output is DERIVED from the offer and the
+// composed sections, not typed into a form. So the drawer's job is to show what WILL be emitted. Mirrors
+// render_structured_data(): Product needs prices the page displays; FAQPage needs a filled-in faq section.
+const structuredDataTypes = computed(() => {
+  const types = [];
+  if (previewPricesExist.value) types.push("Product");
+  if (builder.elements.some((element) => element.type === "faq"
+    && (element.items || []).some((item) => item.question && item.answer))) {
+    types.push("FAQPage");
+  }
+  return types;
+});
+const previewPricesExist = computed(() =>
+  (builderOffer.value?.items || []).some((item) => (item.selectable_prices || []).length || item.service_id));
 function sectionKeyLabel(key) {
   return elementLabel(key);
 }
@@ -998,6 +1062,8 @@ const visibleTrustBadges = computed(() => builder.trust_badges.badges.filter((ba
 // ---------------------------------------------------------------------------------------------------
 const previewHtml = ref("");
 const previewError = ref("");
+// Advisory only: what would stop this page's structured data earning a rich result. Never blocks a save.
+const structuredDataWarnings = ref([]);
 const previewFrame = ref(null);
 let previewRenderTimer = null;
 let previewRenderSeq = 0;
@@ -1082,6 +1148,8 @@ async function renderPreview() {
     capturePreviewScroll();
     previewHtml.value = html;
     previewError.value = "";
+    // Page health travels with the render, so the drawer reports on the same bytes the visitor gets.
+    structuredDataWarnings.value = body?.warnings?.structured_data || [];
   } catch (err) {
     if (seq !== previewRenderSeq) return;
     previewError.value = err.message || "Preview render failed.";

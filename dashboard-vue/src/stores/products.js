@@ -2,20 +2,39 @@ import { defineStore } from "pinia";
 import { apiRequest, getApiEnvironment, getTenantId } from "../api/client";
 import { buildPriceDocument, freeLeadPrice } from "./pricing";
 
+// Tenant-facing category list. Feeds schema.org `category`, which is free text — it does NOT have to be a
+// Google Product Taxonomy path — so these labels are what search engines read. Keys are stable identifiers:
+// existing products store them, so entries may be ADDED but never renamed/removed without a data migration.
+// Grouped physical / digital / service, with "Other" last as the catch-all.
 const CATEGORY_OPTIONS = [
+  // Physical goods
   ["apparel", "Apparel"],
+  ["jewelry_accessories", "Jewelry and Accessories"],
   ["beauty_personal_care", "Beauty and Personal Care"],
-  ["books_printed_material", "Books and Printed Material"],
+  ["health_household", "Health and Household"],
   ["dietary_supplement", "Dietary Supplement"],
+  ["food_beverage", "Food and Beverage"],
+  ["home_garden", "Home and Garden"],
   ["electronics", "Electronics"],
+  ["sporting_goods", "Sporting Goods"],
   ["toys_games", "Toys and Games"],
-  ["course", "Course"],
+  ["baby_kids", "Baby and Kids"],
+  ["pet_supplies", "Pet Supplies"],
+  ["automotive", "Automotive"],
+  ["arts_crafts", "Arts and Crafts"],
+  ["office_supplies", "Office Supplies"],
+  ["books_printed_material", "Books and Printed Material"],
+  ["music_movies", "Music and Movies"],
+  // Digital
   ["digital_download", "Digital Download"],
-  ["membership", "Membership"],
   ["software", "Software"],
-  ["consulting", "Consulting"],
-  ["professional_services", "Professional Services"],
   ["software_as_a_service", "Software As A Service (SAAS)"],
+  ["course", "Course"],
+  ["membership", "Membership"],
+  // Services
+  ["professional_services", "Professional Services"],
+  ["consulting", "Consulting"],
+  // Catch-all
   ["other", "Other"],
 ];
 
@@ -41,6 +60,31 @@ function localId(prefix = "local") {
   const bytes = cryptoApi?.getRandomValues ? cryptoApi.getRandomValues(new Uint8Array(11)) : null;
   const suffix = Array.from({ length: 11 }, (_, index) => alphabet[(bytes ? bytes[index] : Math.floor(Math.random() * 62)) % alphabet.length]).join("");
   return `${prefix}_${suffix}`;
+}
+
+/**
+ * A merchant SKU: 5 chars from each of the first two name words, then product_id's unique tail.
+ * e.g. "Creatine Gummies" + local_fgt7iPiPiL3 -> CREAT-GUMMI-FGT7IPIPIL3
+ *
+ * The unique tail is not decoration. Product names collide in real catalogues (three different products
+ * named "Creatine Gummies"), and a SKU that repeats tells Google two products are one. product_id is the
+ * only component that is both unique and permanent.
+ *
+ * Generated ONCE, at creation, and stored. A SKU is an identifier: deriving it live from the name would
+ * mean renaming a product silently re-identified it.
+ */
+export function generateSku(name, productId) {
+  const words = String(name || "")
+    // Fold accents first: without this "Créatine" splits at the é and yields "CR-ATINE".
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toUpperCase()
+    .split(/[^A-Z0-9]+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((word) => word.slice(0, 5));
+  const unique = String(productId || "").replace(/^local_/i, "").toUpperCase();
+  return [...words, unique].filter(Boolean).join("-");
 }
 
 function cents(value) {
@@ -316,6 +360,10 @@ export async function buildProductDocument(form) {
     product_intent: isLeadGen ? "lead_gen" : "transaction",
     product_type: productType,
     product_category: form.product_category,
+    // Structured data only (schema.org sku / itemCondition). sku is omitted when blank so the renderer
+    // falls back to product_id; condition is always stated, never inferred.
+    ...(form.sku ? { sku: form.sku } : {}),
+    condition: form.condition || "new",
     refund_policy: refundPolicy(productType, form),
     variants: {
       size_enabled: isPhysical && !isLeadGen && Boolean(form.size_enabled),

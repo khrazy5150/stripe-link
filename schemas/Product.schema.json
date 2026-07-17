@@ -92,6 +92,17 @@
       "type": "string",
       "minLength": 1
     },
+    "sku": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Merchant-specific stock keeping unit. Optional; when absent, structured data falls back to product_id as the identifier."
+    },
+    "condition": {
+      "type": "string",
+      "enum": ["new", "refurbished", "used", "damaged"],
+      "default": "new",
+      "description": "Drives schema.org itemCondition. Stated rather than assumed: markup may only claim a condition the tenant chose."
+    },
     "refund_policy": {
       "type": "object",
       "additionalProperties": false,

@@ -5488,3 +5488,97 @@ button:disabled {
   margin-top: 0.8rem;
   font-size: 1.3rem;
 }
+/* Discoverability drawer: head/sidecar sections (structured data, later llms.txt). Collapsed by design —
+   the output is derived, so there is nothing to fill in and it should stay out of the way. */
+.discoverability-drawer > summary {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  cursor: pointer;
+  list-style: none;
+}
+
+.discoverability-drawer > summary::-webkit-details-marker {
+  display: none;
+}
+
+.discoverability-drawer > summary::after {
+  content: "+";
+  margin-left: auto;
+  font-size: 1.8rem;
+  line-height: 1;
+  color: var(--muted);
+}
+
+.discoverability-drawer[open] > summary::after {
+  content: "–";
+}
+
+.discoverability-drawer > summary h3 {
+  margin: 0;
+}
+
+.discoverability-hint {
+  font-size: 1.2rem;
+  color: var(--muted);
+}
+
+.discoverability-emits {
+  display: flex;
+  align-items: baseline;
+  gap: 0.8rem;
+  margin-top: 1.2rem;
+  padding: 1rem 1.2rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--panel);
+}
+
+.discoverability-emits span {
+  font-size: 1.1rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+
+.discoverability-emits strong {
+  font-size: 1.3rem;
+}
+
+.discoverability-note {
+  margin-top: 0.8rem;
+  font-size: 1.2rem;
+  color: var(--muted);
+}
+
+.discoverability-warnings {
+  margin-top: 1.2rem;
+  padding: 1.2rem 1.4rem;
+  border: 1px solid #fcd34d;
+  border-radius: var(--radius-md);
+  background: #fffbeb;
+}
+
+.discoverability-warnings strong {
+  display: block;
+  font-size: 1.3rem;
+  color: #92400e;
+}
+
+.discoverability-warnings ul {
+  margin: 0.6rem 0 0;
+  padding-left: 1.8rem;
+}
+
+.discoverability-warnings li {
+  font-size: 1.3rem;
+  line-height: 1.6;
+  color: #92400e;
+}
+
+.discoverability-warnings small {
+  display: block;
+  margin-top: 0.8rem;
+  font-size: 1.2rem;
+  color: #a16207;
+}

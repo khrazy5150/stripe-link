@@ -23,6 +23,12 @@ export function elementLabel(sectionType) {
   return element(sectionType).label || sectionType;
 }
 
+// Where a section renders: "body" (visible markup), "head" (meta / JSON-LD) or "sidecar" (its own artifact).
+// Mirrors element_channel() in domain/composition.py. Unknown/unset defaults to "body".
+export function elementChannel(sectionType) {
+  return element(sectionType).channel || "body";
+}
+
 // Section types the tenant adds as body content (the "+ Add" menu).
 export function addableElements() {
   return Object.entries(ELEMENTS)

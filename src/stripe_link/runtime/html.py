@@ -7,6 +7,7 @@ from typing import Any
 from urllib.parse import urlencode, urlparse
 
 from stripe_link.domain.composition import compose_page, element_channel
+from stripe_link.domain.documents import PRODUCT_CONDITIONS
 from stripe_link.domain.pricing import PricingError, expand_offer, find_price, resolve_offer, single_unit_price
 from stripe_link.domain.service_pricing import resolve_service_price
 
@@ -1564,6 +1565,38 @@ def landing_page_offer_prices(
     return prices
 
 
+def structured_data_warnings(
+    offer: dict[str, Any],
+    products_by_id: dict[str, dict[str, Any]],
+    services_by_id: dict[str, dict[str, Any]] | None = None,
+) -> list[str]:
+    """What is missing for this page's Product markup to earn a rich result.
+
+    Warnings only, never a gate — the quality baseline is surfaced as nudges, never as a block on publishing
+    (plans/LANDING_PAGE_GOAL_COMPOSITION.md). Thin markup isn't invalid, it just gets ignored by Google,
+    which is exactly the failure a tenant can't see for themselves.
+    """
+    warnings: list[str] = []
+    prices = landing_page_offer_prices(offer, products_by_id, services_by_id or {})
+    if not prices:
+        warnings.append("No price is shown on this page, so no Product markup can be emitted.")
+        return warnings
+    product = first_offer_product(offer, products_by_id)
+    if not str(product.get("name") or "").strip():
+        warnings.append("The product has no name.")
+    if not [image for image in (product.get("images") or []) if image]:
+        warnings.append("Add a product image — Google needs one to show a product rich result.")
+    if not str(product.get("description") or "").strip():
+        warnings.append("Add a product description.")
+    if not humanize_category(product.get("product_category")):
+        warnings.append("Set a product category.")
+    if not str(product.get("condition") or "").strip():
+        warnings.append("Set the product condition so the markup can state it.")
+    if not str(product.get("sku") or "").strip():
+        warnings.append("Add a SKU — the product ID is used as a fallback identifier.")
+    return warnings
+
+
 def render_structured_data(
     section: dict[str, Any],
     page: dict[str, Any],
@@ -1610,50 +1643,104 @@ def product_json_ld(
     products_by_id: dict[str, dict[str, Any]],
     services_by_id: dict[str, dict[str, Any]],
 ) -> str:
+    """Product + Offer markup for the page.
+
+    A single `Offer` at the page's selected price, not an `AggregateOffer` over the range. The page is a
+    merchant listing — a visitor buys one specific price, the one whose card is checked and whose amount the
+    CTA advertises. An AggregateOffer describes a range across sellers/variants and gave Google nothing to
+    show for a page like this.
+
+    Everything here is stated by the tenant or computed from what the page displays. `itemCondition` comes
+    from the product's `condition` field rather than assuming NewCondition: markup is a machine-readable
+    claim, and asserting an unstated one is the same mistake as emitting a hand-typed rating.
+    """
     prices = landing_page_offer_prices(offer, products_by_id, services_by_id)
     if not prices:
         return ""
     product = first_offer_product(offer, products_by_id)
-    name = str(offer_headline_text(offer, product) or "").strip()
+    # The PRODUCT's name, not the offer's headline. This is Product markup: the offer is a packaging of the
+    # product, so a headline like "Creatine Gummies Single Offer" would surface that internal label in a
+    # search result. Fall back to the offer only when the product has no name.
+    name = str(product.get("name") or "").strip() or str(offer_headline_text(offer, product) or "").strip()
     if not name:
         return ""
-    amounts = sorted(int(p["unit_amount"]) for p in prices)
-    currency = str(prices[0].get("currency") or "usd").upper()
+    selected = selected_landing_page_price(offer, products_by_id, prices)
     payload: dict[str, Any] = {
         "@context": "https://schema.org",
         "@type": "Product",
         "name": name,
     }
+    images = [seo_image_url(image) for image in (product.get("images") or []) if image]
+    if images:
+        payload["image"] = images
     description = str(product.get("description") or "").strip()
     if description:
         payload["description"] = description
-    images = [image for image in (product.get("images") or []) if image]
-    if images:
-        payload["image"] = images
-    if len(amounts) > 1 and amounts[0] != amounts[-1]:
-        # Several visible price options — AggregateOffer states the range the page shows.
-        payload["offers"] = {
-            "@type": "AggregateOffer",
-            "priceCurrency": currency,
-            "lowPrice": money_str(amounts[0]),
-            "highPrice": money_str(amounts[-1]),
-            "offerCount": len(amounts),
-            "availability": "https://schema.org/InStock",
-        }
-    else:
-        payload["offers"] = {
-            "@type": "Offer",
-            "priceCurrency": currency,
-            "price": money_str(amounts[0]),
-            "availability": "https://schema.org/InStock",
-        }
+    sku = str(product.get("sku") or "").strip() or str(product.get("product_id") or "").strip()
+    if sku:
+        payload["sku"] = sku
+    category = humanize_category(product.get("product_category"))
+    if category:
+        payload["category"] = category
+    offer_payload: dict[str, Any] = {
+        "@type": "Offer",
+        "price": money_number(selected["unit_amount"]),
+        "priceCurrency": str(selected.get("currency") or "usd").upper(),
+        "availability": "https://schema.org/InStock",
+    }
+    condition = PRODUCT_CONDITIONS.get(str(product.get("condition") or "").strip().lower())
+    if condition:
+        offer_payload["itemCondition"] = condition
+    payload["offers"] = offer_payload
     return json_ld_dump(payload)
 
 
-def money_str(unit_amount: int) -> str:
-    """Minor units -> a schema.org price string ("3709" -> "37.09"). Kept as a string so 37.10 can't be
-    serialized as 37.1."""
-    return f"{int(unit_amount) / 100:.2f}"
+def selected_landing_page_price(
+    offer: dict[str, Any],
+    products_by_id: dict[str, dict[str, Any]],
+    prices: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """The price the page presents as chosen — the checked card, which the CTA advertises. Falls back to the
+    lowest displayed price so markup always quotes something the visitor can see."""
+    for item in offer.get("items") or []:
+        product = products_by_id.get(str(item.get("product_id") or ""))
+        if product is None or not item.get("selectable_prices"):
+            continue
+        try:
+            price = find_price(product, landing_page_default_price_id(item, product))
+        except PricingError:
+            continue
+        if is_landing_page_price(price):
+            return {"unit_amount": int(price.get("unit_amount") or 0), "currency": price.get("currency") or "usd"}
+    return min(prices, key=lambda p: int(p["unit_amount"]))
+
+
+def money_number(unit_amount: int) -> float:
+    """Minor units -> a schema.org price. Google accepts a number or a string; a number matches the shape
+    that verified as passing. round() keeps 3709 -> 37.09 rather than 37.089999999999996."""
+    return round(int(unit_amount) / 100, 2)
+
+
+def seo_image_url(url: str) -> str:
+    """The largest rendition of an image, for structured data.
+
+    Stored URLs point at `small` (640w) because that is what the uploader returns, but Google wants product
+    images of at least 1200px to be eligible for rich results. The processor already writes `large` (1920w),
+    so rewrite a rendition URL to it. Non-rendition URLs pass through untouched.
+    """
+    match = _RENDITION_URL_RE.match(str(url or ""))
+    if not match:
+        return str(url or "")
+    return f"{match.group('base')}/large.webp"
+
+
+def humanize_category(value: Any) -> str:
+    """product_category is stored machine-style ("dietary_supplement"); schema.org `category` is read by
+    people and crawlers, so emit "Dietary Supplement"."""
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    return " ".join(word.capitalize() for word in re.split(r"[_\-\s]+", text) if word)
 
 
 def offer_headline_text(offer: dict[str, Any], product: dict[str, Any]) -> str:

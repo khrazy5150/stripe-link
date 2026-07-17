@@ -3,7 +3,7 @@ import json
 import re
 import unittest
 
-from stripe_link.runtime.html import render_page
+from stripe_link.runtime.html import render_page, structured_data_warnings
 from tests.test_page_render import load_fixture
 
 
@@ -118,6 +118,101 @@ class StructuredDataTests(unittest.TestCase):
         head = html.split("</head>")[0]
         self.assertNotIn("</script><script>alert(1)", head)
         self.assertTrue(ld_blocks(html), "payload must still parse as JSON")
+
+
+class ProductMarkupRichnessTests(unittest.TestCase):
+    """Thin markup is valid but ignored: Google showed no rich result for name+description+AggregateOffer.
+    A merchant listing needs a specific buyable price and enough identifying detail."""
+
+    def _render(self, **product_overrides):
+        offer = load_fixture("offer-creatine-standard.json")
+        product = load_fixture("product-creatine-gummies.json")
+        product.update(product_overrides)
+        page = load_fixture("page-creatine-standard.json")
+        page["goal"] = "search_seo"
+        page["sections"].append({"id": "structured-data", "type": "structured_data"})
+        return render_page(page, offer, {product["product_id"]: product})
+
+    def _product_ld(self, html):
+        return next(b for b in ld_blocks(html) if b["@type"] == "Product")
+
+    def test_emits_a_single_buyable_offer_not_a_range(self):
+        # AggregateOffer describes a price range across sellers/variants; this page sells one selected price.
+        offers = self._product_ld(self._render(condition="new"))["offers"]
+        self.assertEqual(offers["@type"], "Offer")
+        self.assertIn("price", offers)
+        self.assertNotIn("lowPrice", offers)
+
+    def test_price_is_a_number_matching_the_cta(self):
+        html = self._render(condition="new")
+        price = self._product_ld(html)["offers"]["price"]
+        self.assertIsInstance(price, (int, float))
+        self.assertIn(f'data-cta-amount="{int(round(price * 100))}"', html)
+
+    def test_name_is_the_product_not_the_offer_headline(self):
+        # "Creatine Gummies Single Offer" is the offer's packaging label; a search result must not show it.
+        self.assertEqual(self._product_ld(self._render())["name"], "Creatine Gummies")
+
+    def test_category_is_humanized(self):
+        ld = self._product_ld(self._render(product_category="dietary_supplement"))
+        self.assertEqual(ld["category"], "Dietary Supplement")
+
+    def test_sku_prefers_the_field_and_falls_back_to_product_id(self):
+        self.assertEqual(self._product_ld(self._render(sku="CRT-GUM-120"))["sku"], "CRT-GUM-120")
+        ld = self._product_ld(self._render())
+        self.assertEqual(ld["sku"], "prod_creatine_gummies")
+
+    def test_item_condition_is_stated_never_assumed(self):
+        # An unstated condition must not become a machine-readable claim — same rule as the rating.
+        self.assertNotIn("itemCondition", self._product_ld(self._render())["offers"])
+        self.assertEqual(
+            self._product_ld(self._render(condition="refurbished"))["offers"]["itemCondition"],
+            "https://schema.org/RefurbishedCondition",
+        )
+
+    def test_image_uses_a_rendition_large_enough_for_rich_results(self):
+        # Stored URLs point at small (640w); Google wants >=1200px.
+        ld = self._product_ld(self._render(images=["https://images.juniorbay.com/products/abc/small.webp"]))
+        self.assertEqual(ld["image"], ["https://images.juniorbay.com/products/abc/large.webp"])
+
+    def test_non_rendition_image_passes_through(self):
+        ld = self._product_ld(self._render(images=["https://example.com/custom.png"]))
+        self.assertEqual(ld["image"], ["https://example.com/custom.png"])
+
+
+class StructuredDataWarningTests(unittest.TestCase):
+    """Advisory page health — never a gate."""
+
+    def _warn(self, **overrides):
+        offer = load_fixture("offer-creatine-standard.json")
+        product = load_fixture("product-creatine-gummies.json")
+        product.update(overrides)
+        return structured_data_warnings(offer, {product["product_id"]: product})
+
+    def test_complete_product_has_only_optional_gaps(self):
+        warnings = self._warn(condition="new", sku="CRT-1", images=["https://x/y/large.webp"],
+                              description="d", product_category="dietary_supplement")
+        self.assertEqual(warnings, [])
+
+    def test_flags_what_google_needs(self):
+        self.assertTrue(any("image" in w for w in self._warn(images=[])))
+        self.assertTrue(any("description" in w for w in self._warn(description="")))
+        self.assertTrue(any("condition" in w for w in self._warn(condition=None)))
+        self.assertTrue(any("SKU" in w for w in self._warn(sku="")))
+
+    def test_warnings_never_prevent_rendering(self):
+        # The page must still publish: thin markup is a nudge, not an error.
+        offer = load_fixture("offer-creatine-standard.json")
+        product = load_fixture("product-creatine-gummies.json")
+        product["images"] = []
+        product["description"] = ""
+        page = load_fixture("page-creatine-standard.json")
+        page["goal"] = "search_seo"
+        page["sections"].append({"id": "structured-data", "type": "structured_data"})
+        html = render_page(page, offer, {product["product_id"]: product})
+        self.assertIn("<h1", html)
+        self.assertTrue(ld_blocks(html), "markup is still emitted, just thinner")
+
 
 
 if __name__ == "__main__":

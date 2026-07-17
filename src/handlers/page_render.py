@@ -7,7 +7,7 @@ from stripe_link.domain.documents import (
     validate_service,
 )
 from stripe_link.domain.pricing import PricingError
-from stripe_link.runtime.html import RenderError, render_page
+from stripe_link.runtime.html import RenderError, render_page, structured_data_warnings
 
 
 def handler(event, context):
@@ -76,6 +76,11 @@ def handler(event, context):
             page, offer, products_by_id, selected_prices, checkout_url, api_base_url,
             services_by_id=services_by_id, offers_by_id=offers_by_id,
         )
-        return json_response({"html": html})
+        # Page health, alongside the render: what would keep this page's structured data from earning a rich
+        # result. Advisory only — the builder surfaces it, nothing blocks on it.
+        return json_response({
+            "html": html,
+            "warnings": {"structured_data": structured_data_warnings(offer, products_by_id, services_by_id)},
+        })
     except (DocumentValidationError, PricingError, RenderError, ValueError) as exc:
         return error_response(str(exc), code="render_error")

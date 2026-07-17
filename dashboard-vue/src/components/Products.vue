@@ -210,6 +210,27 @@
             </label>
           </div>
 
+          <!-- Both feed the landing page's structured data (schema.org sku / itemCondition). Condition is
+               asked rather than assumed: the markup is a machine-readable claim, so it may only state what
+               the seller actually told us. -->
+          <div class="modal-inline-grid">
+            <label>
+              SKU
+              <input v-model.trim="form.sku" type="text" placeholder="Generated automatically" @input="skuTouched = true" />
+              <span class="field-note">Generated from the product name and its ID, and kept stable after that. Edit it only if you have your own stock keeping unit.</span>
+            </label>
+            <label>
+              Condition
+              <select v-model="form.condition">
+                <option value="new">New</option>
+                <option value="refurbished">Refurbished</option>
+                <option value="used">Used</option>
+                <option value="damaged">Damaged</option>
+              </select>
+              <span class="field-note">Stated in search results. Only change this if you are not selling new goods.</span>
+            </label>
+          </div>
+
           <div class="modal-inline-grid">
             <label>
               Enable Payment Gateway
@@ -432,6 +453,9 @@ const selectedProduct = ref(null);
 const pendingStatusProduct = ref(null);
 const pendingStatus = ref("archived");
 const editingProduct = ref(null);
+// A SKU is an identifier, so it is generated once and then left alone. It follows the name only while a NEW
+// product is still being named; once the product exists, renaming it must never re-identify it.
+const skuTouched = ref(false);
 const showCreateModal = ref(false);
 const showLeadPicker = ref(false);
 const tagInputVisible = ref(false);
@@ -506,6 +530,8 @@ const leadTargetPreview = computed(() => form.value.lead_capture.target || "");
 watch(() => form.value.product_type, () => {
   if (hydratingForm.value) return;
   form.value.product_category = "";
+  form.value.sku = "";
+  form.value.condition = "new";
 });
 
 watch(() => form.value.product_intent, (intent) => {
@@ -564,6 +590,8 @@ function defaultProductForm() {
     description: "",
     product_type: "physical",
     product_category: "",
+    sku: "",
+    condition: "new",
     canonical: "false",
     product_intent: "transaction",
     tags: [],
@@ -637,8 +665,16 @@ function removeColorVariant(index) {
   if (!form.value.colors.length) form.value.color_enabled = false;
 }
 
+// Auto-SKU while a new product is being named. Guarded three ways so it can never re-identify a product:
+// only when creating, only if the tenant hasn't typed their own, and never once the product exists.
+watch(() => form.value.name, (name) => {
+  if (editingProduct.value || skuTouched.value) return;
+  form.value.sku = generateSku(name, ensureProductId());
+});
+
 function openCreateModal() {
   editingProduct.value = null;
+  skuTouched.value = false;
   form.value = defaultProductForm();
   draftLeadAction.value = { ...defaultLeadAction };
   formError.value = "";
@@ -652,7 +688,10 @@ function openCreateModal() {
 async function openEditModal(product) {
   editingProduct.value = product;
   hydratingForm.value = true;
+  skuTouched.value = false;
   form.value = productFormFromDocument(product);
+  // Products created before SKUs existed get one now, from the same name+id inputs a new product would use.
+  if (!form.value.sku) form.value.sku = generateSku(product.name, product.product_id);
   draftLeadAction.value = { ...form.value.lead_capture };
   formError.value = "";
   uploadStatus.value = "";
@@ -694,6 +733,8 @@ function productFormFromDocument(product) {
     description: product.description || "",
     product_type: productType,
     product_category: product.product_category || "",
+    sku: product.sku || "",
+    condition: product.condition || "new",
     canonical: product.canonical ? "true" : "false",
     product_intent: product.lead_capture ? "lead_gen" : product.product_intent || "transaction",
     tags: customTagsFromProduct(product),
