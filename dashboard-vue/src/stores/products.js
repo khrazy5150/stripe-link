@@ -1,6 +1,7 @@
 import { defineStore } from "pinia";
 import { apiRequest, getApiEnvironment, getTenantId } from "../api/client";
 import { buildPriceDocument, freeLeadPrice } from "./pricing";
+import { imageDimsForUrls } from "../utils/imageDims";
 
 function productLifecycleStatus(product) {
   return product?.status === "archived" || product?.active === false ? "archived" : "active";
@@ -300,6 +301,9 @@ export async function buildProductDocument(form) {
   const pastedImages = String(form.images || "").split(/\n+/).map((line) => line.trim()).filter(Boolean);
   const images = [...new Set([...(form.uploaded_images || []), ...pastedImages])].slice(0, 8);
   const isLeadGen = form.product_intent === "lead_gen";
+  // Intrinsic dimensions of the images this product keeps (base-keyed), so the renderer reserves
+  // layout space and hints crawlers. Only images actually referenced are carried.
+  const imageDims = isLeadGen ? {} : imageDimsForUrls(form.image_dims, images);
   const isPhysical = productType === "physical";
   const product = {
     schema_version: "2026-05-29",
@@ -313,6 +317,7 @@ export async function buildProductDocument(form) {
     name: String(form.name || "").trim(),
     description: String(form.description || "").trim(),
     images: isLeadGen ? [] : images,
+    ...(Object.keys(imageDims).length ? { image_dims: imageDims } : {}),
     product_intent: isLeadGen ? "lead_gen" : "transaction",
     product_type: productType,
     product_category: form.product_category,

@@ -2,6 +2,7 @@ import { defineStore } from "pinia";
 import { apiRequest, getTenantId } from "../api/client";
 import { buildPriceDocument } from "./pricing";
 import { defaultPriceForm } from "../utils/priceForm";
+import { imageDimsForUrls } from "../utils/imageDims";
 
 const SERVICE_BOOKING_FLOWS = ["book_then_pay", "pay_then_book"];
 
@@ -249,6 +250,11 @@ export async function buildServiceDocument(form, base = {}) {
     if (Object.keys(rest).length) document.presentation = rest;
     else delete document.presentation;
   }
+
+  // Intrinsic dimensions of the hero image (base-keyed) so the renderer reserves layout space.
+  const imageDims = imageDimsForUrls(form.image_dims, heroImage ? [heroImage] : []);
+  if (Object.keys(imageDims).length) document.image_dims = imageDims;
+  else delete document.image_dims;
 
   return document;
 }

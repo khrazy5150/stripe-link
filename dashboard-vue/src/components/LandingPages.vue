@@ -848,6 +848,7 @@ import { isSectionVisible, defaultVisible, recommendedSectionKeys, optionalSecti
 import { apiRequest, getApiBase, getApiEnvironment, getPagesBaseUrl, getPreviewPagesBaseUrl, getTenantId } from "../api/client";
 import { formatMoney } from "../stores/products";
 import { uploadImage } from "../api/uploads";
+import { recordImageDims } from "../utils/imageDims";
 import { showIconPicker } from "../icon-picker.js";
 import { applyTitleCaseInput, formatHeadline } from "../utils/titleCase.js";
 import ConfirmDialog from "./shared/ConfirmDialog.vue";
@@ -1120,9 +1121,11 @@ function schedulePreviewImageRefresh() {
   [4000, 10000].forEach((delay) => window.setTimeout(reloadPreviewFrame, delay));
 }
 
-// Every builder upload goes through here so a freshly processed image always gets its heal repaint.
+// Every builder upload goes through here so a freshly processed image always gets its heal repaint,
+// and so its intrinsic dimensions are captured once, centrally, for every page image field.
 async function uploadPageImage(file) {
-  const url = await uploadImage(file);
+  const { url, dims } = await uploadImage(file);
+  recordImageDims(builder.image_dims, url, dims);
   schedulePreviewImageRefresh();
   return url;
 }
@@ -1273,6 +1276,8 @@ function defaultBuilderForm() {
     // "" = no goal (a page created before the goal axis) — composes from the offer_type base alone.
     goal: "",
     favicon_url: "",
+    // Intrinsic dimensions of uploaded page images (rendition-base -> [w, h]) for CLS-free rendering.
+    image_dims: {},
     seo_title: "",
     seo_description: "",
     seo_image: "",
@@ -1533,6 +1538,8 @@ function populateBuilderFromPage(page) {
     created_at: page.created_at || 0,
     revision: page.revision || 1,
   });
+  // Restore captured image dimensions so re-saving an untouched page keeps them.
+  builder.image_dims = { ...(page.image_dims || {}) };
   // Restore the Page Composer overrides so section toggles reflect the tenant's prior choices.
   builder.composition.overrides = { ...(page.composition?.overrides || {}) };
   // Restore Advanced Color Settings overrides; auto-open the panel if any were set.
@@ -1611,6 +1618,8 @@ function buildBuilderPageDocument() {
     legal: legalLinks(),
     // Page Composer intent: the tenant's section overrides. Python re-applies the same shared rules on top.
     composition: { overrides: { ...builder.composition.overrides } },
+    // Intrinsic dimensions for uploaded page images so the renderer reserves layout space (no CLS).
+    ...(Object.keys(builder.image_dims || {}).length ? { image_dims: { ...builder.image_dims } } : {}),
     sections: builderSections(intent),
     revision: builder.revision || 1,
     created_at: createdAt,

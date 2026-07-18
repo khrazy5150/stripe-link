@@ -43,6 +43,25 @@ class DocumentValidationTests(unittest.TestCase):
     def test_accepts_lead_capture_product_fixture(self):
         validate_product_document(load_fixture("product-lead-capture-email.json"))
 
+    def test_accepts_optional_image_dims_sidecar(self):
+        self.product["image_dims"] = {"https://images.juniorbay.com/products/ABC123": [1920, 1280]}
+        validate_product_document(self.product)
+
+    def test_accepts_image_dims_from_dynamodb_as_decimals(self):
+        # Numbers round-tripped through DynamoDB come back as Decimal — publish validates that shape.
+        from decimal import Decimal
+        self.product["image_dims"] = {"https://images.juniorbay.com/products/ABC123": [Decimal("1920"), Decimal("1280")]}
+        validate_product_document(self.product)
+
+    def test_rejects_malformed_image_dims(self):
+        for bad in ([1920], [1920, "tall"], [0, 100], [1920, 1280, 1], "1920x1280", [True, 100]):
+            self.product["image_dims"] = {"https://images.juniorbay.com/products/ABC123": bad}
+            with self.assertRaises(DocumentValidationError):
+                validate_product_document(self.product)
+        self.product["image_dims"] = ["not", "a", "map"]
+        with self.assertRaises(DocumentValidationError):
+            validate_product_document(self.product)
+
     def test_accepts_app_config_fixture(self):
         validate_app_config(load_fixture("app-config.json"))
 

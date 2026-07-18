@@ -456,6 +456,7 @@ import { computed, h, nextTick, ref, watch } from "vue";
 import { apiRequest } from "../api/client";
 import { defaultProductPrice, formatMoney, useProductsStore } from "../stores/products";
 import { humanizeCategory, normalizeCategory, searchCategories } from "../utils/categories";
+import { dimsFromStatus, recordImageDims } from "../utils/imageDims";
 import { defaultPriceForm, priceFormFromDocument } from "../utils/priceForm";
 import { idColorStyle } from "../utils/iconColor";
 import PricingCard from "./shared/PricingCard.vue";
@@ -648,6 +649,7 @@ function defaultProductForm() {
     refund_full_policy: "Refunds are available within 30 days of delivery in unused condition.",
     images: "",
     uploaded_images: [],
+    image_dims: {},
     digital_asset: null,
     size_enabled: false,
     color_enabled: false,
@@ -793,6 +795,7 @@ function productFormFromDocument(product) {
     refund_full_policy: refundPolicy.full_policy || base.refund_full_policy,
     uploaded_images: images,
     images: "",
+    image_dims: { ...(product.image_dims || {}) },
     digital_asset: product.digital_asset || null,
     size_enabled: Boolean(variants.size_enabled || variants.sizes?.length),
     color_enabled: Boolean(variants.color_enabled || variants.colors?.length),
@@ -995,8 +998,8 @@ async function handleImageFiles(files) {
   let completed = 0;
   for (const file of uploadFiles) {
     try {
-      const url = await uploadProductImage(file);
-      addUploadedImage(url);
+      const { url, dims } = await uploadProductImage(file);
+      addUploadedImage(url, dims);
       completed += 1;
       uploadStatus.value = `Uploaded ${completed}/${uploadFiles.length} image${uploadFiles.length === 1 ? "" : "s"}...`;
     } catch (error) {
@@ -1036,7 +1039,8 @@ async function pollProductImageUrl(imageId) {
     const body = await apiRequest(`/upload/status/${encodeURIComponent(imageId)}`).catch(() => ({}));
     if (body.status === "failed") throw new Error("Image processing failed");
     for (const url of productImageUrlCandidates(body.urls || {})) {
-      if (await imageUrlLoads(url)) return url;
+      const probe = await imageUrlLoads(url);
+      if (probe.ok) return { url, dims: dimsFromStatus(body, probe) };
     }
   }
   throw new Error("Timed out waiting for processed image");
@@ -1059,16 +1063,17 @@ function cdnImageUrl(url) {
 }
 
 function imageUrlLoads(url, timeoutMs = 4000) {
-  if (!url) return Promise.resolve(false);
+  if (!url) return Promise.resolve({ ok: false });
   return new Promise((resolve) => {
     const image = new Image();
     let done = false;
     const finish = (ok) => {
       if (done) return;
       done = true;
+      const dims = ok ? { width: image.naturalWidth, height: image.naturalHeight } : {};
       image.onload = null;
       image.onerror = null;
-      resolve(ok);
+      resolve({ ok, ...dims });
     };
     image.onload = () => finish(true);
     image.onerror = () => finish(false);
@@ -1077,10 +1082,11 @@ function imageUrlLoads(url, timeoutMs = 4000) {
   });
 }
 
-function addUploadedImage(url) {
+function addUploadedImage(url, dims) {
   if (!url) return;
   form.value.uploaded_images = [...new Set([...form.value.uploaded_images, url])].slice(0, 8);
   form.value.images = [...new Set([...String(form.value.images || "").split(/\n+/).map((line) => line.trim()).filter(Boolean), url])].slice(0, 8).join("\n");
+  recordImageDims(form.value.image_dims, url, dims);
 }
 
 function imageUrlList() {

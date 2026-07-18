@@ -1,9 +1,11 @@
 import { apiRequest } from "./client";
+import { dimsFromStatus } from "../utils/imageDims";
 
 // Shared tenant image-upload flow: presign a POST to the media bucket, upload the file,
 // then poll the processing pipeline until a rendition URL is servable. Used by the landing
 // page builder and the services catalog. basePrefix groups the object (e.g. "offers",
-// "services") within the target bucket.
+// "services") within the target bucket. Resolves to { url, dims: [w, h] | null } — dims are the
+// processor's source dimensions so callers can record them for CLS-free rendering.
 export async function uploadImage(file, { basePrefix = "offers", targetBucket = "images.juniorbay.net" } = {}) {
   if (!file.type.startsWith("image/") || file.size > 10 * 1024 * 1024) throw new Error("Use an image file up to 10MB.");
   const presigned = await apiRequest("/upload/multiple", {
@@ -32,7 +34,8 @@ async function pollImageUrl(imageId) {
     const body = await apiRequest(`/upload/status/${encodeURIComponent(imageId)}`).catch(() => ({}));
     if (body.status === "failed") throw new Error("Image processing failed.");
     for (const url of imageUrlCandidates(body.urls || {})) {
-      if (await imageUrlLoads(url)) return url;
+      const probe = await imageUrlLoads(url);
+      if (probe.ok) return { url, dims: dimsFromStatus(body, probe) };
     }
   }
   throw new Error("Timed out waiting for processed image.");
@@ -58,11 +61,12 @@ function imageUrlLoads(url, timeoutMs = 4000) {
   return new Promise((resolve) => {
     const image = new Image();
     const timeout = window.setTimeout(() => finish(false), timeoutMs);
-    function finish(result) {
+    function finish(ok) {
       window.clearTimeout(timeout);
+      const dims = ok ? { width: image.naturalWidth, height: image.naturalHeight } : {};
       image.onload = null;
       image.onerror = null;
-      resolve(result);
+      resolve({ ok, ...dims });
     }
     image.onload = () => finish(true);
     image.onerror = () => finish(false);

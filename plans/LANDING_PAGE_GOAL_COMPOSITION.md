@@ -133,12 +133,33 @@ Google's Rich Results Test.
 
 **Phase 3 remainder:** the sidecar channel + `llms_txt` (blocked, see below).
 
-**Phase 4 — quality-baseline warnings — STARTED (heading outline shipped).** The `warnings.page_health`
+**Phase 4 — quality-baseline warnings — STARTED (slices 1–3 shipped).** The `warnings.page_health`
 channel is live: `/pages/render` returns it and the builder shows it in an always-visible "Page health"
-banner. The first check is the **heading-outline validator** (`heading_outline_warnings`, plans/SEMANTIC_HTML.md
-Slice 2): one `<h1>`, no empty/skipped levels, `<head>` ignored. Still open in this phase: **accessibility**
-(images missing `alt`, missing landmarks) and **layout stability** (images without reserved dimensions / CLS)
-— both plug into the same `page_health` channel. The prior text below is retained for the fuller picture.
+banner. Slices to date:
+
+- **Slice 1 — heading-outline validator** (`heading_outline_warnings`, plans/SEMANTIC_HTML.md Slice 2): one
+  `<h1>`, no empty/skipped levels, `<head>` ignored. Shipped prod.
+- **Slice 2 — accessibility / alt text** (`accessibility_warnings` + renderer alt fixes for listicle hero,
+  gallery, brand avatar): flags `<img>` with missing/empty alt, skips `aria-hidden`/`role=presentation`.
+  Shipped prod.
+- **Slice 3 — layout stability (reserved image dimensions / CLS) — DESIGN CHANGED after investigation.**
+  The naive scope ("add width/height to fix CLS") did **not** hold: the renderer CSS *already* reserves
+  space for every image via `aspect-ratio`/fixed heights (hero 1/1, price-option 1/1, content-block 4/3,
+  carousel/testimonial/marquee/avatar fixed), so CLS was already prevented for all but the **listicle slide**
+  (`object-fit:contain; height:auto` — intentionally natural-aspect, the one unreserved case). And accurate
+  `width`/`height` needs real dimensions we did not store. **Discovery:** the image processor
+  (`../image-processing`, `getStatus.js`) *already returns* `source: {width, height}` (and per-variant dims)
+  — the proxy passes it through and the frontend simply discarded it. **No external-service change needed.**
+  So slice 3 became an **image-dimensions pipeline**: capture the processor's source dims at upload, store a
+  compact **`image_dims` sidecar** (`{ rendition-base: [w, h] }`) on product/offer/page/service docs, and have
+  `responsive_img` emit `width`/`height` from a render-scoped index. Where CSS pins aspect-ratio the attributes
+  only inform crawlers (no visual change); on the listicle `height:auto` case they reserve the box (the one
+  real CLS fix). Backward compatible (missing dims → today's behavior). Frontend capture wired for Products,
+  Services, and the landing-page builder (shared `utils/imageDims.js`); the Offers **per-price** image is
+  deliberately skipped (those thumbnails already have CSS `aspect-ratio:1/1` and usually derive from the
+  product, whose dims are captured). This also delivers plans/LOCAL_SEO_SIGNALS.md item 4 (crawler dims).
+
+The prior text below is retained for the fuller picture.
 
 **Phase 4 (original note) — NOT built.** The plan's "three buckets" (line 45) call for a quality
 baseline surfaced as *warnings, never toggles*: accessibility (landmarks, alt text, focus order), a valid

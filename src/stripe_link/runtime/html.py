@@ -780,6 +780,33 @@ def render_page(
     services_by_id = services_by_id or {}
     offers_by_id = offers_by_id or {str(offer.get("offer_id") or ""): offer}
     require_offer_products(offer, products_by_id)
+    # Intrinsic image dimensions (plans/LANDING_PAGE_GOAL_COMPOSITION.md Phase 4 CLS slice): merge every
+    # document's image_dims sidecar into the render-scoped index so responsive_img can emit width/height
+    # without threading a map through each section renderer. Cleared in the finally so the index never
+    # leaks into an unrelated render on a warm container.
+    _RENDER_DIMS_INDEX.clear()
+    _RENDER_DIMS_INDEX.update(collect_image_dims(
+        page, offer, *products_by_id.values(), *services_by_id.values(), *offers_by_id.values(),
+    ))
+    try:
+        return _render_page_body(
+            page, offer, products_by_id, selected_prices, checkout_url, api_base_url,
+            services_by_id, offers_by_id,
+        )
+    finally:
+        _RENDER_DIMS_INDEX.clear()
+
+
+def _render_page_body(
+    page: dict[str, Any],
+    offer: dict[str, Any],
+    products_by_id: dict[str, dict[str, Any]],
+    selected_prices: dict[str, str] | None,
+    checkout_url: str | None,
+    api_base_url: str | None,
+    services_by_id: dict[str, dict[str, Any]],
+    offers_by_id: dict[str, dict[str, Any]],
+) -> str:
     # Resolve against the prices this PAGE shows. The offer's default_price_id may point at an upsell /
     # downsell / order-bump price, which belongs to the post-checkout flow — letting it through made the CTA
     # advertise an amount no price card displayed.
@@ -1883,22 +1910,83 @@ IMAGE_RENDITION_WIDTHS = {"thumb": 200, "small": 640, "medium": 1080, "large": 1
 _RENDITION_URL_RE = re.compile(r"^(?P<base>.+)/(?:thumb|small|medium|large|full)\.(?:webp|jpe?g|png)$", re.IGNORECASE)
 
 
-def responsive_img(url: str, alt: str, *, sizes: str, eager: bool = False) -> str:
+def rendition_base(url: str) -> str | None:
+    """The stable base of a processor rendition URL (.../<key>/<size>.<ext> -> .../<key>).
+
+    Every rendition and format of one uploaded asset shares this base and the same aspect ratio,
+    so it is the key we store/look up intrinsic dimensions under. Non-rendition URLs return None.
+    """
+    match = _RENDITION_URL_RE.match(str(url or ""))
+    return match.group("base") if match else None
+
+
+# Render-scoped intrinsic-dimension index, keyed by rendition base -> (width, height). Populated
+# once per render_page() from each document's image_dims sidecar and consulted by responsive_img
+# so it can emit width/height without threading the map through every section renderer. The render
+# path is synchronous and non-reentrant per Lambda invocation, so a module-level index is safe; it
+# is set and cleared in render_page()'s try/finally.
+_RENDER_DIMS_INDEX: dict[str, tuple[int, int]] = {}
+
+
+def collect_image_dims(*documents: dict[str, Any] | None) -> dict[str, tuple[int, int]]:
+    """Merge the image_dims sidecars of every supplied document into one base -> (w, h) map.
+
+    Keys are globally-unique rendition bases, so merging across page/offer/products/services is
+    conflict-free. Malformed entries are skipped — dimensions are advisory, never a render blocker.
+    """
+    merged: dict[str, tuple[int, int]] = {}
+    for document in documents:
+        dims = (document or {}).get("image_dims")
+        if not isinstance(dims, dict):
+            continue
+        for key, value in dims.items():
+            base = rendition_base(str(key)) or str(key)
+            try:
+                width, height = int(value[0]), int(value[1])
+            except (TypeError, ValueError, IndexError):
+                continue
+            if width > 0 and height > 0:
+                merged[base] = (width, height)
+    return merged
+
+
+def _dims_attrs(url: str, dims: tuple[int, int] | None) -> str:
+    """width/height attributes for an <img>, from an explicit override or the render-scoped index.
+
+    The pair encodes the intrinsic aspect ratio; the browser reserves layout space from it (no CLS)
+    while CSS still governs the displayed size. Where CSS pins aspect-ratio (object-fit:cover slots)
+    the attributes only inform crawlers; where it does not (listicle contain slots) they reserve the
+    box. Absent dimensions emit nothing — identical to prior behavior.
+    """
+    if dims is None:
+        # Rendition URLs key by their shared base; external/custom URLs key by the full URL (that is how
+        # collect_image_dims normalizes them), so a non-rendition image can still carry dimensions.
+        base = rendition_base(url)
+        dims = _RENDER_DIMS_INDEX.get(base) if base else _RENDER_DIMS_INDEX.get(url)
+    if not dims:
+        return ""
+    return f' width="{int(dims[0])}" height="{int(dims[1])}"'
+
+
+def responsive_img(url: str, alt: str, *, sizes: str, eager: bool = False, dims: tuple[int, int] | None = None) -> str:
     """Render an <img> that lets the browser pick the right rendition per slot and DPR.
 
     When the URL is a processor rendition (.../<key>/<size>.webp) we emit a webp srcset over
     all renditions plus a sizes hint, so a 144px thumbnail no longer downloads the 1080px file.
     Non-rendition URLs (external/custom) fall back to a plain tag but still get lazy loading.
     Always adds loading/decoding; the first hero image opts into eager + high fetch priority
-    because it is the LCP candidate.
+    because it is the LCP candidate. Intrinsic width/height (from the image_dims sidecar, via the
+    render-scoped index or an explicit `dims` override) are emitted when known so the browser
+    reserves layout space and crawlers learn the dimensions.
     """
     url = str(url or "")
     alt_attr = escape(str(alt or ""))
     loading = "eager" if eager else "lazy"
     priority = ' fetchpriority="high"' if eager else ""
+    dims_attrs = _dims_attrs(url, dims)
     match = _RENDITION_URL_RE.match(url)
     if not match:
-        return f'<img src="{escape(url)}" alt="{alt_attr}" loading="{loading}" decoding="async"{priority}>'
+        return f'<img src="{escape(url)}" alt="{alt_attr}"{dims_attrs} loading="{loading}" decoding="async"{priority}>'
     base = match.group("base")
     srcset = ", ".join(
         f"{escape(f'{base}/{size}.webp')} {width}w"
@@ -1906,7 +1994,7 @@ def responsive_img(url: str, alt: str, *, sizes: str, eager: bool = False) -> st
     )
     return (
         f'<img src="{escape(f"{base}/medium.webp")}" srcset="{srcset}" sizes="{escape(sizes)}" '
-        f'alt="{alt_attr}" loading="{loading}" decoding="async"{priority}>'
+        f'alt="{alt_attr}"{dims_attrs} loading="{loading}" decoding="async"{priority}>'
     )
 
 

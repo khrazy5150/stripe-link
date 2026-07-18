@@ -463,6 +463,27 @@ def optional_string_list(document: dict[str, Any], field: str, label: str | None
         raise DocumentValidationError(f"{field_label} must be an array of strings.")
 
 
+def optional_image_dims(document: dict[str, Any], label: str = "image_dims") -> None:
+    """Validate the optional image_dims sidecar: a compact map of image URL/rendition-base -> [w, h].
+
+    Captured from the upload pipeline (the processor reports source dimensions) so the renderer can
+    reserve layout space and hint crawlers. Advisory metadata — kept lenient, but shape-checked so a
+    malformed map can't reach the renderer: keys are strings, values are two positive integers.
+    """
+    value = document.get("image_dims")
+    if value is None:
+        return
+    if not isinstance(value, dict):
+        raise DocumentValidationError(f"{label} must be an object mapping image URL to [width, height].")
+    for key, pair in value.items():
+        if not isinstance(key, str) or not key:
+            raise DocumentValidationError(f"{label} keys must be non-empty image URLs.")
+        # Numbers loaded from DynamoDB arrive as Decimal, so accept any positive real (bool excluded).
+        if (not isinstance(pair, list) or len(pair) != 2
+                or any(isinstance(n, bool) or not isinstance(n, (int, float, Decimal)) or n <= 0 for n in pair)):
+            raise DocumentValidationError(f"{label}['{key}'] must be [width, height] positive numbers.")
+
+
 def optional_limited_object_list(
     document: dict[str, Any],
     field: str,
@@ -564,6 +585,7 @@ def validate_product_document(document: dict[str, Any]) -> None:
     if document.get("condition") is not None:
         require_enum(document, "condition", set(PRODUCT_CONDITIONS), "Product condition")
     optional_string_list(document, "images")
+    optional_image_dims(document, "Product image_dims")
     validate_product_lead_capture(document)
     if "tags" not in document:
         raise DocumentValidationError("Product tags must be provided.")
@@ -803,6 +825,7 @@ def validate_offer_document(document: dict[str, Any]) -> None:
             require_enum(cta, "type", {"buy", "call", "email", "external", "download", "booking", "appointment"}, "Offer presentation.cta.type")
             optional_string(cta, "label", "Offer presentation.cta.label")
             optional_string(cta, "target", "Offer presentation.cta.target")
+    optional_image_dims(document, "Offer image_dims")
 
 
 def validate_coupon_document(document: dict[str, Any]) -> None:
@@ -892,6 +915,8 @@ def validate_page_document(document: dict[str, Any]) -> None:
         favicon_url = seo.get("favicon_url")
         if favicon_url is not None and (not isinstance(favicon_url, str) or not HTTP_URL_PATTERN.match(favicon_url)):
             raise DocumentValidationError("Page seo.favicon_url must be an HTTP(S) URL.")
+
+    optional_image_dims(document, "Page image_dims")
 
     theme = document.get("theme")
     if theme is not None:
@@ -1425,6 +1450,7 @@ def validate_service(document: dict[str, Any]) -> None:
         raise DocumentValidationError("Service document_type must be 'service'.")
     if not no_booking and int(document.get("duration_minutes") or 0) <= 0:
         raise DocumentValidationError("Service duration_minutes must be positive.")
+    optional_image_dims(document, "Service image_dims")
     price = document.get("price")
     if not isinstance(price, dict):
         raise DocumentValidationError("Service price must be an object.")

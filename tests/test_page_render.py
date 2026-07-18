@@ -555,6 +555,58 @@ class ResponsiveImageTests(unittest.TestCase):
         self.assertIn('src="https://cdn.example.com/pic.jpg"', markup)
         self.assertIn('loading="lazy"', markup)
 
+    def test_explicit_dims_emit_width_and_height(self):
+        markup = responsive_img(
+            "https://cdn.example.com/pic.jpg", "External", sizes="9rem", dims=(1600, 900)
+        )
+        self.assertIn(' width="1600" height="900"', markup)
+
+    def test_no_dims_emits_no_width_height(self):
+        markup = responsive_img("https://cdn.example.com/pic.jpg", "External", sizes="9rem")
+        self.assertNotIn("width=", markup)
+        self.assertNotIn("height=", markup)
+
+
+class ImageDimsSidecarTests(unittest.TestCase):
+    """The image_dims sidecar (base -> [w, h]) reserves layout space and hints crawlers. It is merged into
+    a render-scoped index so responsive_img emits width/height without threading a map everywhere."""
+
+    def test_collect_merges_and_normalizes_rendition_keys(self):
+        from stripe_link.runtime.html import collect_image_dims
+
+        base = "https://images.juniorbay.com/products/ABC123"
+        merged = collect_image_dims(
+            {"image_dims": {f"{base}/large.webp": [1920, 1280]}},  # a full rendition URL as key
+            {"image_dims": {"https://images.juniorbay.com/offers/HERO9": [800, 800]}},  # a bare base
+        )
+        # A rendition-URL key collapses to its base so any rendition of that asset resolves.
+        self.assertEqual(merged[base], (1920, 1280))
+        self.assertEqual(merged["https://images.juniorbay.com/offers/HERO9"], (800, 800))
+
+    def test_collect_skips_malformed_entries(self):
+        from stripe_link.runtime.html import collect_image_dims
+
+        merged = collect_image_dims({"image_dims": {
+            "https://x/a": [100, 200],
+            "https://x/b": [0, 200],        # non-positive -> skip
+            "https://x/c": ["wide", 200],   # non-int -> skip
+            "https://x/d": [100],           # wrong arity -> skip
+        }})
+        self.assertEqual(merged, {"https://x/a": (100, 200)})
+
+    def test_render_page_emits_dimensions_from_sidecar(self):
+        page = load_fixture("page-creatine-standard.json")
+        offer = load_fixture("offer-creatine-standard.json")
+        product = load_fixture("product-creatine-gummies.json")
+        images = [img for img in (product.get("images") or []) if "/" in img]
+        if not images:
+            self.skipTest("fixture product has no rendition image to key dims against")
+        from stripe_link.runtime.html import rendition_base
+        base = rendition_base(images[0]) or images[0]
+        product = {**product, "image_dims": {base: [1080, 720]}}
+        html = render_page(page, offer, {product["product_id"]: product})
+        self.assertIn('width="1080" height="720"', html)
+
 
 if __name__ == "__main__":
     unittest.main()

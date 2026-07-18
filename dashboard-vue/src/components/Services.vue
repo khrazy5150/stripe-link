@@ -386,6 +386,7 @@ import {
   useServicesStore,
 } from "../stores/services";
 import { uploadImage } from "../api/uploads";
+import { recordImageDims } from "../utils/imageDims";
 import { fulfillerDisplayName, useFulfillersStore } from "../stores/fulfillers";
 import { formatMoney } from "../stores/products";
 import { useCalendarStore } from "../stores/calendar";
@@ -555,7 +556,9 @@ async function handleHeroPicked(event) {
   heroUploadError.value = "";
   heroUploading.value = true;
   try {
-    form.value.hero_image_url = await uploadImage(file, { basePrefix: "services" });
+    const { url, dims } = await uploadImage(file, { basePrefix: "services" });
+    form.value.hero_image_url = url;
+    recordImageDims(form.value.image_dims, url, dims);
   } catch (error) {
     heroUploadError.value = error.message || "Hero image upload failed.";
   } finally {
@@ -575,6 +578,7 @@ function defaultServiceForm() {
     duration_minutes: 60,
     location_mode: "onsite",
     hero_image_url: "",
+    image_dims: {},
     active: true,
     default_fulfiller_id: "",
     calendar_connection_id: "",
@@ -654,6 +658,7 @@ function formFromService(service) {
     duration_minutes: Number(service.duration_minutes || 60),
     location_mode: service.location_mode || "onsite",
     hero_image_url: service.presentation?.hero_image_url || "",
+    image_dims: { ...(service.image_dims || {}) },
     active: serviceIsActive(service),
     default_fulfiller_id: service.default_fulfiller_id || "",
     calendar_connection_id: service.calendar_connection_id || "",
