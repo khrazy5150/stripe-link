@@ -89,5 +89,27 @@ from "Single Offer".
 
 ## Status
 
-Not built. Recorded 2026-07-17 as a future phase (a tenant-visible quality gap: default titles/headlines/
-brand/description are the offer's internal label, not real copy).
+**Phase 1 — templated defaults + business-identity precursor — SHIPPED (dev, 2026-07-18).** Scope chosen:
+templated defaults now, live-derived (override-when-set), no AI. What shipped:
+
+- **Business identity on the user_profile** (a lightweight precursor to plans/BUSINESS_PROFILE_AND_GBP.md;
+  GBP will later override/enrich): `business.{name, phone, brands[], address{street,locality,region,
+  postal_code,country}}`. PostalAddress-shaped so it maps straight to LocalBusiness JSON-LD when the
+  local-SEO work lands. Edited on the Profile page (new "Business" card). Address is **captured now,
+  consumed later** — it does not affect landing-page copy this phase.
+- **Offer gains `presentation.brand`** — an optional brand picked in the Offers modal from the tenant's
+  configured brands.
+- **Brand resolution (live, in the builder):** offer.presentation.brand → business name → product name.
+  Never the internal offer label. Fixed the visible leak (`brandText` had defaulted to `offer.name`).
+- **Distinct title/description defaults:** `<title>` = `<Product> — <Category>`; meta description =
+  product description trimmed to ~155 chars. H1 stays the product name.
+- **Renderer belt-and-suspenders:** `offer_brand_fallback()` — brand/avatar/lead-form fallbacks use
+  presentation.brand → presentation.headline (product name), never `offer.name`.
+
+Existing pages get the fix on next save/render (defaults are live-derived; nothing stored to migrate).
+
+**Still deferred (later phases):** benefit-led headline (needs AI or new product fields), brand from the
+canonical Business Profile / GBP, and separating the offer's internal name from customer-facing fields at
+the offer model level (this phase leaves offer.name as the internal label and derives around it).
+
+Recorded 2026-07-17; Phase 1 built 2026-07-18.

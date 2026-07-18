@@ -192,18 +192,28 @@ class HeroOverlayTests(unittest.TestCase):
         from stripe_link.runtime.html import render_hero_overlays
         html = "\n".join(render_hero_overlays(
             {"brand_overlay": True, "brand_position": "bottom-left", "avatar_url": "https://img/a.jpg"},
-            {"name": "MinXin Chen"},
+            {"presentation": {"brand": "MinXin Chen"}},
         ))
         self.assertIn("sl-hero-brand sl-hero-brand--bottom-left", html)
         self.assertIn("MinXin Chen", html)
         self.assertIn("sl-avatar-wrap", html)
         self.assertIn("https://img/a.jpg", html)
 
-    def test_brand_falls_back_to_offer_name_and_valid_position(self):
+    def test_brand_falls_back_to_product_headline_not_offer_name(self):
         from stripe_link.runtime.html import render_hero_overlays
-        html = "\n".join(render_hero_overlays({"brand_overlay": True, "brand_position": "middle"}, {"name": "Acme"}))
+        # The internal offer name ("… Single Offer") must NOT leak as brand; fall back to the
+        # product-derived headline (plans/LANDING_PAGE_DEFAULT_COPY.md).
+        offer = {"name": "Acme Single Offer", "presentation": {"headline": "Acme Widget"}}
+        html = "\n".join(render_hero_overlays({"brand_overlay": True, "brand_position": "middle"}, offer))
         self.assertIn("sl-hero-brand--top-right", html)   # invalid position -> default
-        self.assertIn("Acme", html)
+        self.assertIn("Acme Widget", html)
+        self.assertNotIn("Single Offer", html)
+
+    def test_brand_prefers_picked_brand_over_headline(self):
+        from stripe_link.runtime.html import render_hero_overlays
+        offer = {"name": "Acme Single Offer", "presentation": {"brand": "Acme Co", "headline": "Acme Widget"}}
+        html = "\n".join(render_hero_overlays({"brand_overlay": True}, offer))
+        self.assertIn("Acme Co", html)
 
     def test_empty_when_nothing_set(self):
         from stripe_link.runtime.html import render_hero_overlays

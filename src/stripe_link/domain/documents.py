@@ -817,6 +817,9 @@ def validate_offer_document(document: dict[str, Any]) -> None:
         optional_string(presentation, "subheadline", "Offer presentation.subheadline")
         optional_string(presentation, "badge", "Offer presentation.badge")
         optional_string(presentation, "cta_label", "Offer presentation.cta_label")
+        # The brand shown on the page. Optional; the tenant picks one of their business's brand names, else
+        # the renderer falls back to the business name, then the product name — never the internal offer name.
+        optional_string(presentation, "brand", "Offer presentation.brand")
         optional_string(presentation, "hero_image_url", "Offer presentation.hero_image_url")
         cta = presentation.get("cta")
         if cta is not None:
@@ -1250,6 +1253,31 @@ def validate_user_profile(document: dict[str, Any]) -> None:
     subscription = document.get("subscription")
     if subscription is not None and not isinstance(subscription, dict):
         raise DocumentValidationError("User profile subscription must be an object.")
+    validate_business_identity(document.get("business"))
+
+
+def validate_business_identity(business: Any) -> None:
+    """The tenant's business identity — name, brand(s), and NAP contact. A lightweight precursor to the
+    canonical Business Profile (plans/BUSINESS_PROFILE_AND_GBP.md); GBP will later override/enrich it.
+    All fields optional: it drives landing-page brand defaults and (later) LocalBusiness JSON-LD, and an
+    untouched profile simply falls back to the product name for brand. Kept on the user_profile for now."""
+    if business is None:
+        return
+    if not isinstance(business, dict):
+        raise DocumentValidationError("User profile business must be an object.")
+    optional_string(business, "name", "business.name")
+    optional_string(business, "phone", "business.phone")
+    brands = business.get("brands")
+    if brands is not None:
+        if not isinstance(brands, list) or any(not isinstance(brand, str) for brand in brands):
+            raise DocumentValidationError("business.brands must be an array of strings.")
+    address = business.get("address")
+    if address is not None:
+        if not isinstance(address, dict):
+            raise DocumentValidationError("business.address must be an object.")
+        # PostalAddress-shaped so it maps straight to LocalBusiness JSON-LD when the local-SEO work lands.
+        for field in ("street", "locality", "region", "postal_code", "country"):
+            optional_string(address, field, f"business.address.{field}")
 
 
 def validate_notification(document: dict[str, Any]) -> None:

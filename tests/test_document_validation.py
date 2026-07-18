@@ -13,6 +13,7 @@ from stripe_link.domain.documents import (
     validate_page_document,
     validate_product_document,
     validate_user_preferences,
+    validate_user_profile,
 )
 
 
@@ -46,6 +47,35 @@ class DocumentValidationTests(unittest.TestCase):
     def test_accepts_optional_image_dims_sidecar(self):
         self.product["image_dims"] = {"https://images.juniorbay.com/products/ABC123": [1920, 1280]}
         validate_product_document(self.product)
+
+    def _user_profile(self):
+        return {
+            "schema_version": "2026-05-29", "document_type": "user_profile",
+            "tenant_id": "t1", "user_id": "u1", "email": "a@b.com", "display_name": "Ada",
+        }
+
+    def test_accepts_business_identity_block(self):
+        doc = self._user_profile()
+        doc["business"] = {
+            "name": "Luxe Spa", "brands": ["Luxe", "Luxe Wellness"], "phone": "+1 555 0100",
+            "address": {"street": "75 S 100 E", "locality": "St. George", "region": "UT",
+                        "postal_code": "84770", "country": "US"},
+        }
+        validate_user_profile(doc)
+
+    def test_accepts_profile_without_business(self):
+        validate_user_profile(self._user_profile())
+
+    def test_rejects_malformed_business_identity(self):
+        for bad in ({"brands": "Luxe"}, {"brands": [1, 2]}, {"address": "75 S 100 E"}, {"name": 5}):
+            doc = self._user_profile()
+            doc["business"] = bad
+            with self.assertRaises(DocumentValidationError):
+                validate_user_profile(doc)
+
+    def test_accepts_offer_presentation_brand(self):
+        self.offer.setdefault("presentation", {})["brand"] = "Luxe Wellness"
+        validate_offer_document(self.offer)
 
     def test_accepts_image_dims_from_dynamodb_as_decimals(self):
         # Numbers round-tripped through DynamoDB come back as Decimal — publish validates that shape.

@@ -172,6 +172,16 @@
               </label>
             </div>
 
+            <label class="offer-field">
+              <span>Brand</span>
+              <select v-model="form.brand">
+                <option value="">No brand — use business, then product name</option>
+                <option v-for="brand in profileBrands" :key="brand" :value="brand">{{ brand }}</option>
+                <option v-if="form.brand && !profileBrands.includes(form.brand)" :value="form.brand">{{ form.brand }}</option>
+              </select>
+              <small>Optional. The brand shown on the landing page. Manage your brands in Profile → Business.</small>
+            </label>
+
             <div v-if="selectedProducts.length" class="detected-offer-type">
               <span>{{ detectedOfferTypeLabel }}</span>
               <strong>{{ detectedOfferTypeDescription }}</strong>
@@ -534,12 +544,16 @@ import { apiRequest, getApiEnvironment, getTenantId } from "../api/client";
 import { formatCouponDiscount, useCouponsStore } from "../stores/coupons";
 import { defaultProductPrice, formatMoney, useProductsStore } from "../stores/products";
 import { useServicesStore } from "../stores/services";
+import { useProfileStore } from "../stores/profile";
 import ConfirmDialog from "./shared/ConfirmDialog.vue";
 import ListCard from "./shared/ListCard.vue";
 
 const productStore = useProductsStore();
 const couponStore = useCouponsStore();
 const servicesStore = useServicesStore();
+const profileStore = useProfileStore();
+profileStore.ensureLoaded();
+const profileBrands = computed(() => profileStore.brands);
 function serviceObjFor(serviceId) {
   return servicesStore.services.find((s) => s.service_id === serviceId) || null;
 }
@@ -708,6 +722,7 @@ function defaultOfferForm() {
   return {
     name: "",
     slug: "",
+    brand: "",
     services: [{ service_id: "", price_id: "" }],
     service_booking_flow: "pay_then_book",
     service_booking_mode: "single_visit",
@@ -1110,6 +1125,7 @@ function buildOfferDocument() {
     presentation: cleanObject({
       headline: primary.name || form.name,
       subheadline: primary.description || undefined,
+      brand: form.brand || undefined,
       hero_image_url: primary.image || undefined,
       cta_label: cta.label || "Buy Now",
       cta: cleanObject({ type: cta.type, label: cta.label, target: cta.target || undefined }),
@@ -1137,6 +1153,7 @@ function loadOfferIntoForm(offer) {
   editingOfferId.value = offer.offer_id;
   form.name = offer.name || "";
   form.slug = offer.slug || slugify(offer.name);
+  form.brand = offer.presentation?.brand || "";
   form.userEditedName = true;
   form.userEditedSlug = true;
   form.discount = {

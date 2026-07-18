@@ -847,6 +847,8 @@ import { offerViewTargets, offerViewTargetsFromExpanded } from "../composables/u
 import { isSectionVisible, defaultVisible, recommendedSectionKeys, optionalSectionKeys, governedKeys, elementLabel, elementChannel, addableElements, tokenGroups, previewVar, supportedGoals, goalLabel, packSeeds } from "../composables/pageComposer";
 import { apiRequest, getApiBase, getApiEnvironment, getPagesBaseUrl, getPreviewPagesBaseUrl, getTenantId } from "../api/client";
 import { formatMoney } from "../stores/products";
+import { useProfileStore } from "../stores/profile";
+import { humanizeCategory } from "../utils/categories";
 import { uploadImage } from "../api/uploads";
 import { recordImageDims } from "../utils/imageDims";
 import { showIconPicker } from "../icon-picker.js";
@@ -855,6 +857,8 @@ import ConfirmDialog from "./shared/ConfirmDialog.vue";
 
 const pages = ref([]);
 const offers = ref([]);
+const profileStore = useProfileStore();
+profileStore.ensureLoaded();
 const products = ref([]);
 const services = ref([]);
 const search = ref("");
@@ -1593,7 +1597,7 @@ function buildBuilderPageDocument() {
       slug: slugify(builder.slug || offer?.slug || builder.name || builder.page_id),
     },
     seo: {
-      title: builder.seo_title || offerHeadline(builderOffer.value) || builder.name,
+      title: builder.seo_title || offerSeoTitleDefault(builderOffer.value) || builder.name,
       description: builder.seo_description,
       image: builder.seo_image || previewHeroImage.value,
       favicon_url: builder.favicon_url,
@@ -1649,7 +1653,7 @@ function builderSections(intent) {
       marquee: Boolean(builder.countdown.marquee),
     });
   }
-  const brandText = formatHeadline(builderOffer.value?.name || "Junior Bay");
+  const brandText = formatHeadline(offerBrandDefault(builderOffer.value));
   // The brand overlay (on the hero) replaces the separate above-hero brand label so the brand shows once.
   if (sectionVisible("brand_label") && !builder.brand_overlay) {
     sections.push({
@@ -2163,8 +2167,8 @@ async function onBuilderOfferChange() {
   if (!builder.slug) builder.slug = slugify(offer.slug || offer.name || builder.page_id);
   builder.headline = formatHeadline(offerHeadline(offer) || builder.headline || builder.name);
   builder.subheadline = offerDescription(offer) || builder.subheadline || "Choose your option and continue.";
-  if (!builder.seo_title) builder.seo_title = offerHeadline(offer) || builder.name;
-  if (!builder.seo_description) builder.seo_description = offerDescription(offer) || offer.name || "";
+  if (!builder.seo_title) builder.seo_title = offerSeoTitleDefault(offer) || builder.name;
+  if (!builder.seo_description) builder.seo_description = offerSeoDescriptionDefault(offer);
   if (!builder.seo_image) builder.seo_image = offerImage(offer);
   // A listicle's hero carousel IS the product images — auto-fill the hero media field with one per item.
   if ((offer.offer_type || "single") === "listicle") {
@@ -2346,6 +2350,43 @@ function offerHeadline(offer) {
 
 function offerDescription(offer) {
   return offer?.presentation?.subheadline || offerItemModels(offer)[0]?.description || "";
+}
+
+// The four landing-page copy fields get DISTINCT, product-derived defaults — never the internal offer
+// label ("… Single Offer"). Live-derived (plans/LANDING_PAGE_DEFAULT_COPY.md): a tenant edit overrides;
+// an untouched field falls back here.
+
+// Brand shown on the page: the offer's picked brand, else the tenant's business name, else the product name.
+// presentation.headline is the product-name snapshot stored on the offer — a robust last resort that needs
+// no product fetch and is never the internal offer label.
+function offerBrandDefault(offer) {
+  return offer?.presentation?.brand
+    || profileStore.businessName
+    || offerProducts(offer)[0]?.name
+    || offerItemModels(offer)[0]?.name
+    || offer?.presentation?.headline
+    || "";
+}
+
+// SEO <title> distinct from the H1: "<Product> — <Category>" (keyword-leaning), falling back to the name.
+function offerSeoTitleDefault(offer) {
+  const product = offerProducts(offer)[0];
+  const name = product?.name || offerHeadline(offer);
+  const category = product?.product_category ? humanizeCategory(product.product_category) : "";
+  return category && name ? `${name} — ${category}` : name;
+}
+
+// Meta description: a real sentence from the product description, trimmed — never the offer label.
+function offerSeoDescriptionDefault(offer) {
+  const text = offer?.presentation?.subheadline || offerProducts(offer)[0]?.description || "";
+  return trimForMeta(text);
+}
+
+// Trim to a SERP-friendly length at a word boundary (no mid-word cut, no trailing punctuation).
+function trimForMeta(text, max = 155) {
+  const clean = String(text || "").replace(/\s+/g, " ").trim();
+  if (clean.length <= max) return clean;
+  return clean.slice(0, clean.lastIndexOf(" ", max) > 0 ? clean.lastIndexOf(" ", max) : max).replace(/[,;:\s]+$/, "");
 }
 
 function offerProducts(offer) {

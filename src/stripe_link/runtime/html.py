@@ -1150,13 +1150,21 @@ def render_media_slide(url: str, alt: str, *, autoplay: bool, eager: bool = Fals
 HERO_BRAND_POSITIONS = {"top-left", "top-right", "bottom-left", "bottom-right"}
 
 
+def offer_brand_fallback(offer: dict[str, Any]) -> str:
+    """Brand text when the section didn't set one: the offer's picked brand, else its product-derived
+    headline — never offer.name, which is the internal disambiguation label ("… Single Offer") and must
+    not leak into customer-facing copy (plans/LANDING_PAGE_DEFAULT_COPY.md)."""
+    presentation = offer.get("presentation") or {}
+    return str(presentation.get("brand") or presentation.get("headline") or "")
+
+
 def render_hero_overlays(section: dict[str, Any], offer: dict[str, Any]) -> list[str]:
     """Socialite hero overlays (plans/SOCIALITE_PARITY.md): a positionable brand chip baked into the hero
     image, and a circular profile avatar ("face behind the business") overhanging the bottom-left. Both live
     inside the position:relative .sl-hero-media so toggling the brand never shifts layout."""
     lines: list[str] = []
     if section.get("brand_overlay"):
-        brand_text = str(section.get("brand_text") or offer.get("name") or "")
+        brand_text = str(section.get("brand_text") or offer_brand_fallback(offer))
         if brand_text:
             position = str(section.get("brand_position") or "top-right")
             if position not in HERO_BRAND_POSITIONS:
@@ -1168,7 +1176,7 @@ def render_hero_overlays(section: dict[str, Any], offer: dict[str, Any]) -> list
     avatar_url = str(section.get("avatar_url") or "")
     if avatar_url:
         # The avatar carries brand identity, so it's a content image — name it (brand text, else the offer).
-        avatar_alt = escape(str(section.get("brand_text") or offer.get("name") or "Brand avatar"))
+        avatar_alt = escape(str(section.get("brand_text") or offer_brand_fallback(offer) or "Brand avatar"))
         lines.append(
             f"      <div class=\"sl-avatar-wrap\"><img class=\"sl-avatar\" src=\"{escape(avatar_url)}\" "
             f"alt=\"{avatar_alt}\" loading=\"lazy\" decoding=\"async\"></div>"
@@ -2414,7 +2422,7 @@ def render_email_cta(
     tenant_id = escape(str(page.get("tenant_id") or offer.get("tenant_id") or ""))
     offer_id = escape(str(offer.get("offer_id") or ""))
     page_id = escape(str(page.get("page_id") or ""))
-    brand = escape(str((offer.get("presentation") or {}).get("headline") or offer.get("name") or "us"))
+    brand = escape(str(offer_brand_fallback(offer) or "us"))
 
     inputs = []
     for field in declared:
