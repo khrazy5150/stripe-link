@@ -567,6 +567,91 @@ class ResponsiveImageTests(unittest.TestCase):
         self.assertNotIn("height=", markup)
 
 
+class FixedPriceOfferTests(unittest.TestCase):
+    """A fixed-price offer item (price_id + quantity, no selectable_prices) is a valid shape. It must still
+    render a price card and emit Product structured data — the renderer used to read only selectable_prices,
+    so fixed offers showed no card and no markup even though the CTA resolved the price."""
+
+    def setUp(self):
+        self.page = load_fixture("page-creatine-standard.json")
+        self.offer = load_fixture("offer-creatine-standard.json")
+        self.product = load_fixture("product-creatine-gummies.json")
+        self.products_by_id = {self.product["product_id"]: self.product}
+        # Rewrite the first item to the fixed shape.
+        offer = copy.deepcopy(self.offer)
+        offer["items"][0] = {
+            "product_id": self.product["product_id"],
+            "price_id": self.product["default_price_id"],
+            "quantity": 1,
+        }
+        self.fixed_offer = offer
+
+    def test_fixed_price_item_renders_a_price_card(self):
+        html = render_page(self.page, self.fixed_offer, self.products_by_id)
+        self.assertIn("sl-price-option", html)
+
+    def test_fixed_price_item_is_counted_in_landing_page_prices(self):
+        from stripe_link.runtime.html import landing_page_offer_prices
+        prices = landing_page_offer_prices(self.fixed_offer, self.products_by_id, {})
+        self.assertTrue(prices)
+
+    def test_fixed_price_item_has_no_missing_price_warning(self):
+        from stripe_link.runtime.html import structured_data_warnings
+        warnings = structured_data_warnings(self.fixed_offer, self.products_by_id, {})
+        self.assertFalseIfPresent = [w for w in warnings if "No price is shown" in w]
+        self.assertEqual(self.assertFalseIfPresent, [])
+
+    def test_fixed_price_item_emits_product_json_ld(self):
+        from stripe_link.runtime.html import product_json_ld
+        self.assertTrue(product_json_ld(self.page, self.fixed_offer, self.products_by_id, {}))
+
+
+class DocumentHeadCopyTests(unittest.TestCase):
+    """The <head> <title>/<meta description> derive from the product when the page has no SEO override, and
+    never from page.name/offer.name (the internal '… Single Offer' label). plans/SEMANTIC_HTML.md +
+    plans/LANDING_PAGE_DEFAULT_COPY.md."""
+
+    def setUp(self):
+        self.page = load_fixture("page-creatine-standard.json")
+        self.offer = load_fixture("offer-creatine-standard.json")
+        self.product = load_fixture("product-creatine-gummies.json")
+        self.products_by_id = {self.product["product_id"]: self.product}
+
+    def _title(self, html):
+        return re.search(r"<title>(.*?)</title>", html).group(1)
+
+    def _meta(self, html):
+        match = re.search(r'<meta name="description" content="(.*?)">', html)
+        return match.group(1) if match else None
+
+    def test_empty_seo_title_is_product_pipe_brand_not_page_name(self):
+        offer = {**self.offer, "presentation": {**(self.offer.get("presentation") or {}), "brand": "Acme Co"}}
+        page = {**self.page, "name": "Creatine Gummies Single Offer Landing Page", "seo": {}}
+        html = render_page(page, offer, self.products_by_id)
+        self.assertNotIn("Single Offer", self._title(html))
+        self.assertEqual(self._title(html), "Creatine Gummies | Acme Co")
+
+    def test_title_brand_falls_back_to_platform_when_no_brand(self):
+        from stripe_link.runtime.html import document_title
+        offer = {"items": [{"product_id": "p"}], "presentation": {}}
+        self.assertEqual(
+            document_title({"seo": {}}, offer, {"p": {"name": "Widget"}}),
+            "Widget | Junior Bay",
+        )
+
+    def test_empty_seo_description_uses_offer_subheadline(self):
+        offer = {**self.offer, "presentation": {**(self.offer.get("presentation") or {}), "subheadline": "The best gummies around."}}
+        page = {**self.page, "seo": {}}
+        html = render_page(page, offer, self.products_by_id)
+        self.assertEqual(self._meta(html), "The best gummies around.")
+
+    def test_explicit_seo_is_respected(self):
+        page = {**self.page, "seo": {"title": "My Keyword Title", "description": "My snippet."}}
+        html = render_page(page, self.offer, self.products_by_id)
+        self.assertEqual(self._title(html), "My Keyword Title")
+        self.assertEqual(self._meta(html), "My snippet.")
+
+
 class ImageDimsSidecarTests(unittest.TestCase):
     """The image_dims sidecar (base -> [w, h]) reserves layout space and hints crawlers. It is merged into
     a render-scoped index so responsive_img emits width/height without threading a map everywhere."""

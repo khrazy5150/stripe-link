@@ -414,11 +414,13 @@
             <h3>SEO</h3>
             <label class="offer-field">
               <span>SEO Title</span>
-              <input :value="builder.seo_title" type="text" @input="applyTitleCaseInput((value) => { builder.seo_title = value; }, $event)" />
+              <input :value="builder.seo_title" :placeholder="seoTitlePlaceholder" type="text" @input="applyTitleCaseInput((value) => { builder.seo_title = value; }, $event)" />
+              <small>The browser tab / search-result title. Leave blank to use the smart default (shown above).</small>
             </label>
             <label class="offer-field">
               <span>SEO Description</span>
-              <textarea v-model.trim="builder.seo_description" rows="3"></textarea>
+              <textarea v-model.trim="builder.seo_description" :placeholder="seoDescriptionPlaceholder" rows="3"></textarea>
+              <small>The search-result snippet. Leave blank to auto-generate from the product description.</small>
             </label>
           </section>
 
@@ -848,7 +850,6 @@ import { isSectionVisible, defaultVisible, recommendedSectionKeys, optionalSecti
 import { apiRequest, getApiBase, getApiEnvironment, getPagesBaseUrl, getPreviewPagesBaseUrl, getTenantId } from "../api/client";
 import { formatMoney } from "../stores/products";
 import { useProfileStore } from "../stores/profile";
-import { humanizeCategory } from "../utils/categories";
 import { uploadImage } from "../api/uploads";
 import { recordImageDims } from "../utils/imageDims";
 import { showIconPicker } from "../icon-picker.js";
@@ -934,6 +935,10 @@ const selectedLeadAction = computed(() => selectedOfferProducts.value.find((prod
 const builderOffer = computed(() => offers.value.find((offer) => offer.offer_id === builder.offer_id) || null);
 const builderOfferProducts = computed(() => offerProducts(builderOffer.value));
 const builderIntent = computed(() => builderOffer.value?.product_intent || builderOfferProducts.value[0]?.product_intent || "transaction");
+// The smart defaults shown when the tenant leaves the SEO fields blank — the renderer derives the same
+// values live (never stored unless the tenant overrides), so the placeholder matches what publishes.
+const seoTitlePlaceholder = computed(() => offerSeoTitleDefault(builderOffer.value) || "Product — Category");
+const seoDescriptionPlaceholder = computed(() => offerSeoDescriptionDefault(builderOffer.value) || "Auto-generated from the product description");
 // The offer's snapshotted CTA contract drives the preview's on-page experience (buy/call/email/external/booking).
 const builderCta = computed(() => builderOffer.value?.presentation?.cta || { type: builderIntent.value === "lead_gen" ? "email" : "buy" });
 const selectedOfferCta = computed(() => selectedOffer.value?.presentation?.cta || { type: selectedOfferIntent.value === "lead_gen" ? "email" : "buy" });
@@ -1523,8 +1528,9 @@ function populateBuilderFromPage(page) {
     // Absent on pages created before the goal axis — "" keeps them composing from the base alone.
     goal: page.goal || "",
     favicon_url: page.seo?.favicon_url || "",
-    seo_title: page.seo?.title || page.name || "",
-    seo_description: page.seo?.description || "",
+    // Drop legacy auto-baked SEO so the page re-derives; a genuine tenant override is preserved.
+    seo_title: isAutoBakedSeoTitle(page) ? "" : page.seo.title,
+    seo_description: isAutoBakedSeoTitle(page) ? "" : (page.seo?.description || ""),
     seo_image: page.seo?.image || pageImage(page),
     headline: hero.headline || sectionText(sections, "headline") || page.name || "",
     subheadline: hero.subheadline || sectionText(sections, "subheadline") || "",
@@ -1597,8 +1603,10 @@ function buildBuilderPageDocument() {
       slug: slugify(builder.slug || offer?.slug || builder.name || builder.page_id),
     },
     seo: {
-      title: builder.seo_title || offerSeoTitleDefault(builderOffer.value) || builder.name,
-      description: builder.seo_description,
+      // Store only the tenant's explicit SEO copy; when blank, omit it so the renderer derives the same
+      // product-based default live (plans/LANDING_PAGE_DEFAULT_COPY.md — derive live, override when set).
+      title: builder.seo_title || undefined,
+      description: builder.seo_description || undefined,
       image: builder.seo_image || previewHeroImage.value,
       favicon_url: builder.favicon_url,
     },
@@ -2167,8 +2175,8 @@ async function onBuilderOfferChange() {
   if (!builder.slug) builder.slug = slugify(offer.slug || offer.name || builder.page_id);
   builder.headline = formatHeadline(offerHeadline(offer) || builder.headline || builder.name);
   builder.subheadline = offerDescription(offer) || builder.subheadline || "Choose your option and continue.";
-  if (!builder.seo_title) builder.seo_title = offerSeoTitleDefault(offer) || builder.name;
-  if (!builder.seo_description) builder.seo_description = offerSeoDescriptionDefault(offer);
+  // Leave SEO title/description blank by default so the renderer derives them live (the fields show the
+  // derived default as a placeholder). Only a tenant edit is stored.
   if (!builder.seo_image) builder.seo_image = offerImage(offer);
   // A listicle's hero carousel IS the product images — auto-fill the hero media field with one per item.
   if ((offer.offer_type || "single") === "listicle") {
@@ -2368,18 +2376,26 @@ function offerBrandDefault(offer) {
     || "";
 }
 
-// SEO <title> distinct from the H1: "<Product> — <Category>" (keyword-leaning), falling back to the name.
+// SEO <title> distinct from the H1: "<Product> | <Brand>" (brand = offer's pick / business name / platform).
+// Mirrors the renderer's document_title so the placeholder matches what publishes.
 function offerSeoTitleDefault(offer) {
-  const product = offerProducts(offer)[0];
-  const name = product?.name || offerHeadline(offer);
-  const category = product?.product_category ? humanizeCategory(product.product_category) : "";
-  return category && name ? `${name} — ${category}` : name;
+  const name = offerProducts(offer)[0]?.name || offer?.presentation?.headline || "";
+  const brand = offer?.presentation?.brand || profileStore.businessName || "Junior Bay";
+  return name ? `${name} | ${brand}` : brand;
 }
 
-// Meta description: a real sentence from the product description, trimmed — never the offer label.
+// Meta description: the offer subheadline (product description), trimmed — never the offer label.
 function offerSeoDescriptionDefault(offer) {
   const text = offer?.presentation?.subheadline || offerProducts(offer)[0]?.description || "";
   return trimForMeta(text);
+}
+
+// Old code baked the internal offer label into page.seo (title = "… Single Offer Landing Page",
+// description = product name). Treat those as non-overrides on load so the page re-derives — a genuine
+// tenant title/description is kept.
+function isAutoBakedSeoTitle(page) {
+  const title = String(page?.seo?.title || "");
+  return !title || /\bSingle Offer\b|\bBundle\b|Landing Page\s*$/i.test(title) || title === page?.name;
 }
 
 // Trim to a SERP-friendly length at a word boundary (no mid-word cut, no trailing punctuation).

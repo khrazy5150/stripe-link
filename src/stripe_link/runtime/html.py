@@ -435,7 +435,7 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     "    .sl-hero-track{display:flex;overflow-x:auto;scroll-snap-type:x mandatory;scrollbar-width:none;border-radius:var(--sl-radius)}",
     "    .sl-hero-track::-webkit-scrollbar{display:none}",
     "    .sl-hero-slide{flex:0 0 100%;scroll-snap-align:center}",
-    "    .sl-hero-slide img,.sl-hero-slide video{width:100%;aspect-ratio:1/1;object-fit:cover;border-radius:var(--sl-radius);border:1px solid var(--sl-hero-border);background:var(--sl-hero-bg)}",
+    "    .sl-hero-slide img,.sl-hero-slide video{width:100%;height:auto;aspect-ratio:1/1;object-fit:cover;border-radius:var(--sl-radius);border:1px solid var(--sl-hero-border);background:var(--sl-hero-bg)}",
     "    .sl-hero-nav{position:absolute;top:calc(50% + 0.4rem);transform:translateY(-50%);width:3.8rem;height:3.8rem;border-radius:50%;border:0;background:rgba(255,255,255,.9);color:#111;font-size:2.2rem;line-height:1;cursor:pointer;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 8px rgba(0,0,0,.18)}",
     "    .sl-hero-prev{left:0.8rem}",
     "    .sl-hero-next{right:0.8rem}",
@@ -461,7 +461,7 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     "    .sl-price-option{position:relative;display:grid;grid-template-columns:9rem minmax(0,1fr) 2.2rem;gap:1.4rem;align-items:center;border:2px solid var(--sl-price-card-border);border-radius:var(--sl-radius);padding:1.6rem 2rem;background:var(--sl-price-card-bg)}",
     "    .sl-price-option.selected{border-color:var(--sl-price-card-selected-border);box-shadow:0 0 0 3px color-mix(in srgb,var(--sl-price-card-selected-border) 13%,transparent)}",
     "    .sl-price-option input{width:2.2rem;height:2.2rem;accent-color:var(--sl-price-radio)}",
-    "    .sl-price-option img{width:9rem;aspect-ratio:1/1;object-fit:contain;border-radius:0.8rem;background:var(--sl-background)}",
+    "    .sl-price-option img{width:9rem;height:auto;aspect-ratio:1/1;object-fit:contain;border-radius:0.8rem;background:var(--sl-background)}",
     "    .sl-price-copy{display:grid;gap:0.4rem}",
     "    .sl-price-option strong{font-family:var(--sl-font-heading);font-size:1.6rem;line-height:1.2;font-weight:600;color:var(--sl-price-title)}",
     "    .sl-price-description{color:var(--sl-price-description);font-size:1.3rem;line-height:1.45}",
@@ -487,7 +487,7 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     "    .sl-content-block{display:grid;grid-template-columns:minmax(0,1fr) minmax(12rem,18rem);gap:1.2rem;align-items:center;border-top:1px solid var(--sl-content-border);padding-top:1.6rem}",
     "    .sl-content-block h2{font-family:var(--sl-font-heading);font-size:2rem;line-height:1.25;margin-bottom:0.8rem;color:var(--sl-content-heading)}",
     "    .sl-content-block p{color:var(--sl-content-text);font-size:1.5rem;line-height:1.6}",
-    "    .sl-content-block img{width:100%;aspect-ratio:4/3;object-fit:cover;border-radius:0.8rem}",
+    "    .sl-content-block img{width:100%;height:auto;aspect-ratio:4/3;object-fit:cover;border-radius:0.8rem}",
     "    .sl-faq details{border:1px solid var(--sl-faq-border);background:var(--sl-faq-bg);border-radius:1.6rem;padding:0;overflow:hidden}",
     "    .sl-faq summary{cursor:pointer;font-family:var(--sl-font-heading);font-size:1.4rem;font-weight:600;line-height:1.35;color:var(--sl-faq-summary);display:flex;align-items:center;justify-content:space-between;gap:1.2rem;padding:1.6rem 2rem}",
     "    .sl-faq summary h3{margin:0;font:inherit;color:inherit;flex:1}",
@@ -767,6 +767,47 @@ def require_offer_products(offer: dict[str, Any], products_by_id: dict[str, dict
             raise RenderError(f"Product '{product_id}' was not provided for offer '{offer.get('offer_id', '')}'.")
 
 
+# Ultimate brand fallback for the <title> when the tenant set no offer brand and no business name.
+PLATFORM_BRAND = "Junior Bay"
+
+
+def document_title(page: dict[str, Any], offer: dict[str, Any], products_by_id: dict[str, dict[str, Any]]) -> str:
+    """The <head> <title>: the tenant's SEO title if set, else "<Product> | <Brand>" — distinct from the
+    <h1> (plans/SEMANTIC_HTML.md). Brand is the offer's chosen brand (offer.presentation.brand, baked from
+    the pick or the tenant's business name), falling back to the platform name. Never page.name/offer.name,
+    which carry the internal "… Single Offer" label."""
+    explicit = str((page.get("seo") or {}).get("title") or "").strip()
+    if explicit:
+        return explicit
+    product = first_offer_product(offer, products_by_id)
+    presentation = offer.get("presentation") or {}
+    name = str(product.get("name") or presentation.get("headline") or "").strip()
+    brand = str(presentation.get("brand") or "").strip() or PLATFORM_BRAND
+    return f"{name} | {brand}" if name else brand
+
+
+def document_description(page: dict[str, Any], offer: dict[str, Any], products_by_id: dict[str, dict[str, Any]]) -> str:
+    """The <head> <meta name="description">: the tenant's text if set, else the offer's subheadline (the
+    product description), whitespace-collapsed and word-trimmed to a SERP-friendly length. Never the internal
+    offer label; empty string omits the tag."""
+    explicit = str((page.get("seo") or {}).get("description") or "").strip()
+    if explicit:
+        return explicit
+    product = first_offer_product(offer, products_by_id)
+    presentation = offer.get("presentation") or {}
+    return trim_meta(str(presentation.get("subheadline") or product.get("description") or ""))
+
+
+def trim_meta(text: str, limit: int = 155) -> str:
+    """Collapse whitespace and trim to a word boundary near `limit` — no mid-word cut, no trailing
+    punctuation. Mirrors the builder's trimForMeta so preview and published descriptions match."""
+    clean = " ".join(str(text or "").split())
+    if len(clean) <= limit:
+        return clean
+    cut = clean.rfind(" ", 0, limit)
+    return clean[: cut if cut > 0 else limit].rstrip(",;:. ")
+
+
 def render_page(
     page: dict[str, Any],
     offer: dict[str, Any],
@@ -816,11 +857,12 @@ def _render_page_body(
         landing_page_selected_prices(offer, products_by_id, selected_prices),
         services_by_id=services_by_id,
     )
-    # SEO title uses Chicago title case (the builder title-cases on input; format here too so
-    # existing/API-set titles are consistent).
-    _seo_title = (page.get("seo") or {}).get("title") or page.get("name") or "Checkout"
-    title = escape(format_headline(str(_seo_title)))
-    description = escape((page.get("seo") or {}).get("description") or "")
+    # The <head> title/description are derived here so they are correct regardless of what a page stored
+    # (plans/SEMANTIC_HTML.md, plans/LANDING_PAGE_DEFAULT_COPY.md): the tenant's value if set, else a
+    # product-derived default — never page.name/offer.name, which carry the internal "… Single Offer" label.
+    # SEO title uses Chicago title case (the builder title-cases on input; format here too for consistency).
+    title = escape(format_headline(document_title(page, offer, products_by_id)))
+    description = escape(document_description(page, offer, products_by_id))
     favicon_tags = render_favicon_tags(page.get("seo") or {})
     styles = render_template_styles(page)
     # Page Composer decides which sections render (plans/PAGE_COMPOSER.md). The renderer only iterates the
@@ -1470,11 +1512,13 @@ def render_offer_price_selector(
         # Same rule as the CTA: if the offer's default is a price this page doesn't show (upsell/downsell/
         # order bump), the first displayed price is the selected one — otherwise no card renders as checked.
         default_price_id = landing_page_default_price_id(item, product)
-        for option in item.get("selectable_prices") or []:
+        for option in item_price_options(item):
             price = find_price(product, option.get("price_id", ""))
             if not is_landing_page_price(price):
                 continue
-            label = escape(str(option.get("label") or price.get("label") or "Option"))
+            # A selectable option carries its own label; a synthesized fixed option has none, so fall back
+            # to the product name rather than a generic "Option".
+            label = escape(str(option.get("label") or price.get("label") or product.get("name") or "Option"))
             badge = escape(str(option.get("badge") or ""))
             amount = int(price.get("unit_amount", 0))
             currency = str(price.get("currency") or "usd")
@@ -1529,7 +1573,7 @@ def landing_page_default_price_id(item: dict[str, Any], product: dict[str, Any])
     """
     displayed = [
         str(price.get("price_id") or "")
-        for option in item.get("selectable_prices") or []
+        for option in item_price_options(item)
         if is_landing_page_price(price := find_price(product, option.get("price_id", "")))
     ]
     default_price_id = str(item.get("default_price_id") or "")
@@ -1566,6 +1610,20 @@ def landing_page_selected_prices(
     return resolved
 
 
+def item_price_options(item: dict[str, Any]) -> list[dict[str, Any]]:
+    """The price options a product offer item exposes on the page. A 'selectable' item lists them
+    explicitly; a 'fixed' item (schema: price_id + quantity, no selector) stores a single price — normalize
+    it to a one-entry option list so it still renders a price card and emits Product structured data.
+    Both shapes are valid per validate_offer_document; only the renderer had ignored the fixed one."""
+    options = item.get("selectable_prices")
+    if options:
+        return list(options)
+    price_id = item.get("price_id")
+    if price_id:
+        return [{"price_id": str(price_id), "quantity": item.get("quantity") or 1}]
+    return []
+
+
 def landing_page_offer_prices(
     offer: dict[str, Any],
     products_by_id: dict[str, dict[str, Any]],
@@ -1594,7 +1652,7 @@ def landing_page_offer_prices(
         product = products_by_id.get(str(item.get("product_id") or ""))
         if product is None:
             continue
-        for option in item.get("selectable_prices") or []:
+        for option in item_price_options(item):
             price = find_price(product, option.get("price_id", ""))
             if not is_landing_page_price(price):
                 continue
@@ -1785,7 +1843,9 @@ def product_json_ld(
     description = str(product.get("description") or "").strip()
     if description:
         payload["description"] = description
-    sku = str(product.get("sku") or "").strip() or str(product.get("product_id") or "").strip()
+    # Prefer the tenant's SKU; otherwise fall back to the product id, stripping the internal "local_"
+    # prefix so a client-generated id doesn't leak that implementation detail into public markup.
+    sku = str(product.get("sku") or "").strip() or re.sub(r"(?i)^local_", "", str(product.get("product_id") or "").strip())
     if sku:
         payload["sku"] = sku
     category = humanize_category(product.get("product_category"))
@@ -1813,7 +1873,7 @@ def selected_landing_page_price(
     lowest displayed price so markup always quotes something the visitor can see."""
     for item in offer.get("items") or []:
         product = products_by_id.get(str(item.get("product_id") or ""))
-        if product is None or not item.get("selectable_prices"):
+        if product is None or not item_price_options(item):
             continue
         try:
             price = find_price(product, landing_page_default_price_id(item, product))
@@ -2083,7 +2143,7 @@ def refund_policy_applies_to(offer: dict[str, Any], products_by_id: dict[str, di
     for item in offer.get("items", []):
         product = products_by_id.get(item.get("product_id", ""))
         product_name = product.get("name") if product else ""
-        for option in item.get("selectable_prices") or []:
+        for option in item_price_options(item):
             price = find_price(product, option.get("price_id", "")) if product else {}
             if not is_landing_page_price(price):
                 continue

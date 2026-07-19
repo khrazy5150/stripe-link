@@ -454,7 +454,7 @@
 <script setup>
 import { computed, h, nextTick, ref, watch } from "vue";
 import { apiRequest } from "../api/client";
-import { defaultProductPrice, formatMoney, useProductsStore } from "../stores/products";
+import { defaultProductPrice, formatMoney, generateSku, useProductsStore } from "../stores/products";
 import { humanizeCategory, normalizeCategory, searchCategories } from "../utils/categories";
 import { dimsFromStatus, recordImageDims } from "../utils/imageDims";
 import { defaultPriceForm, priceFormFromDocument } from "../utils/priceForm";

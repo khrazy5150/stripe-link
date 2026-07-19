@@ -1125,7 +1125,9 @@ function buildOfferDocument() {
     presentation: cleanObject({
       headline: primary.name || form.name,
       subheadline: primary.description || undefined,
-      brand: form.brand || undefined,
+      // The brand shown on the page + in the <title>: the tenant's pick, else their business name. The
+      // renderer falls back to the platform name when this is absent. Baked so the renderer needs no profile.
+      brand: form.brand || profileStore.businessName || undefined,
       hero_image_url: primary.image || undefined,
       cta_label: cta.label || "Buy Now",
       cta: cleanObject({ type: cta.type, label: cta.label, target: cta.target || undefined }),

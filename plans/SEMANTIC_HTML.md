@@ -91,6 +91,16 @@ is the specialized case (question = `h3`, plus schema).
   enough today); `product_carousel` titles (`<h3>`) to review; whether to ever BLOCK (vs warn) on
   zero/multiple `<h1>`.
 
+- **Slice 3 — `<head>` `<title>`/`<meta description>` (shipped dev 2026-07-18):** the renderer is now the
+  guardrail for the head tags. `document_title()` / `document_description()` (runtime/html.py) derive the
+  `<title>` (`<Product> — <Category>`, distinct from the `<h1>`, category appended only when it adds info)
+  and the `<meta description>` (product description, whitespace-collapsed and word-boundary trimmed to
+  ~155) — the tenant's SEO value wins when set, otherwise the product-derived default, **never** page.name
+  / offer.name (which carry the "… Single Offer" label). The builder no longer bakes the auto-default: the
+  SEO fields show it as a placeholder and store only a tenant override, so untouched pages derive live and
+  preview == published. This completes the `<title>` ≠ `<h1>` split for default content; keyword/local
+  enrichment (`… in [City]`) still awaits Business Profile/AI. Fully via plans/LANDING_PAGE_DEFAULT_COPY.md.
+
 ## Open decisions
 
 - How deep sections may nest (`h3` only, or `h4` for long pages).
