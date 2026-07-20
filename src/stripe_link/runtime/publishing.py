@@ -205,16 +205,7 @@ def publish_page_document(
     # URL where the page actually lives; clean root-domain paths arrive with the Site object.
     published_paths = artifact_paths(str(page.get("tenant_id") or ""), str(page.get("page_id") or ""), page_slug(page))
     canonical_url = public_url(pages_domain, published_paths["published"])
-    html = render_page(
-        page,
-        offer,
-        products_by_id,
-        checkout_url=checkout_url or checkout_base_url_for_page(page, offer, environment),
-        api_base_url=api_base_url,
-        services_by_id=services_by_id,
-        offers_by_id=offers_by_id,
-        canonical_url=canonical_url,
-    )
+    checkout = checkout_url or checkout_base_url_for_page(page, offer, environment)
     targets = artifact_targets(
         page,
         environment=environment,
@@ -224,8 +215,22 @@ def publish_page_document(
         preview_domain=preview_domain,
     )
 
+    # Render per target so the robots directive is correct per artifact (SEO-02/21): only the PUBLISHED
+    # artifact in PRODUCTION is indexable; the tenant's preview and every non-production build stay noindex.
     artifacts = []
     for target in targets:
+        indexable = target["kind"] == "published" and environment == "prod"
+        html = render_page(
+            page,
+            offer,
+            products_by_id,
+            checkout_url=checkout,
+            api_base_url=api_base_url,
+            services_by_id=services_by_id,
+            offers_by_id=offers_by_id,
+            canonical_url=canonical_url,
+            indexable=indexable,
+        )
         s3_client.put_object(
             Bucket=target["bucket"],
             Key=target["key"],

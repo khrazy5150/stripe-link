@@ -606,6 +606,47 @@ class FixedPriceOfferTests(unittest.TestCase):
         self.assertTrue(product_json_ld(self.page, self.fixed_offer, self.products_by_id, {}))
 
 
+class LandingPagePriceContextTests(unittest.TestCase):
+    """The landing page shows ONLY standard-context prices. sale / flash_sale are alternate pricing modes
+    (a future builder toggle), not extra cards — they must not render alongside the standard price."""
+
+    def setUp(self):
+        self.page = load_fixture("page-creatine-standard.json")
+        self.offer = load_fixture("offer-creatine-standard.json")
+        product = load_fixture("product-creatine-gummies.json")
+        product = copy.deepcopy(product)
+        product["prices"] = [
+            {"price_id": "p_std", "currency": "usd", "unit_amount": 5317, "quantity": 1, "context": "standard"},
+            {"price_id": "p_sale", "currency": "usd", "unit_amount": 3709, "quantity": 1, "context": "sale"},
+            {"price_id": "p_flash", "currency": "usd", "unit_amount": 3135, "quantity": 1, "context": "flash_sale"},
+        ]
+        product["default_price_id"] = "p_std"
+        self.product = product
+        offer = copy.deepcopy(self.offer)
+        offer["items"][0] = {
+            "product_id": product["product_id"],
+            "default_price_id": "p_std",
+            "selectable_prices": [
+                {"price_id": "p_std", "quantity": 1, "label": "Standard"},
+                {"price_id": "p_sale", "quantity": 1, "label": "Sale"},
+                {"price_id": "p_flash", "quantity": 1, "label": "Flash"},
+            ],
+        }
+        self.offer = offer
+        self.products_by_id = {product["product_id"]: product}
+
+    def test_only_standard_price_renders(self):
+        from stripe_link.runtime.html import landing_page_offer_prices
+        prices = landing_page_offer_prices(self.offer, self.products_by_id, {})
+        self.assertEqual([p["unit_amount"] for p in prices], [5317])
+
+    def test_sale_and_flash_cards_do_not_render(self):
+        html = render_page(self.page, self.offer, self.products_by_id)
+        self.assertEqual(html.count('data-price-id="p_std"'), 1)
+        self.assertNotIn('data-price-id="p_sale"', html)
+        self.assertNotIn('data-price-id="p_flash"', html)
+
+
 class HeadSeoTagsTests(unittest.TestCase):
     """Canonical, robots, Open Graph, and LCP hints (plans/ON_PAGE_SEO_REQUIREMENTS.md SEO-01/02/09/10)."""
 
@@ -625,11 +666,32 @@ class HeadSeoTagsTests(unittest.TestCase):
     def test_no_canonical_when_url_absent(self):
         self.assertNotIn("rel=\"canonical\"", self._head())
 
-    def test_robots_and_twitter_and_og_present(self):
-        head = self._head(canonical_url="https://axelmart.com/p/mac")
+    def test_indexable_page_gets_index_robots(self):
+        head = self._head(canonical_url="https://axelmart.com/p/mac", indexable=True)
         self.assertIn('name="robots" content="index,follow,max-image-preview:large,max-snippet:-1"', head)
+
+    def test_non_indexable_page_is_noindex_by_default(self):
+        # Preview / non-prod renders must never be indexable (SEO-02/21).
+        head = self._head(canonical_url="https://axelmart.com/p/mac")
+        self.assertIn('name="robots" content="noindex,nofollow"', head)
+
+    def test_twitter_and_og_present(self):
+        head = self._head(canonical_url="https://axelmart.com/p/mac")
         self.assertIn('name="twitter:card" content="summary_large_image"', head)
         self.assertIn('property="og:url" content="https://axelmart.com/p/mac"', head)
+
+    def test_checkout_cta_resolves_return_urls_from_canonical(self):
+        html = render_page(self.page, self.offer, self.products_by_id,
+                           checkout_url="https://dev.juniorbay.com/checkout",
+                           canonical_url="https://axelmart.com/p/mac", indexable=True)
+        self.assertNotIn("%7B%7B", html)               # no {{success_url}} placeholder leaked
+        self.assertIn("checkout%3Dsuccess", html.replace("%3D", "%3D"))  # ?checkout=success, url-encoded
+
+    def test_checkout_cta_keeps_placeholder_without_canonical(self):
+        # Without a canonical, the JS still fills it — keep the placeholder rather than a broken absolute URL.
+        html = render_page(self.page, self.offer, self.products_by_id,
+                           checkout_url="https://dev.juniorbay.com/checkout")
+        self.assertIn("%7B%7Bsuccess_url%7D%7D", html)
 
     def test_lcp_preconnect_and_preload_when_image_present(self):
         product = {**self.product, "images": ["https://images.juniorbay.com/products/AB/large.webp"]}

@@ -245,10 +245,13 @@ class PagePublishingTests(unittest.TestCase):
             environment="dev",
         )
 
+        # Only the standard-context price renders; sale / flash_sale / upsell are all filtered out. Sale and
+        # flash sale are alternate pricing MODES (a future builder toggle), not extra cards.
         html = s3.puts[0]["Body"].decode("utf-8")
+        self.assertIn("Standard Price", html)
         self.assertNotIn("Upsell Price", html)
-        self.assertLess(html.index("Sale Price"), html.index("Standard Price"))
-        self.assertLess(html.index("Standard Price"), html.index("Flash Sale Price"))
+        self.assertNotIn("Sale Price", html)
+        self.assertNotIn("Flash Sale Price", html)
 
     def test_publish_page_document_sorts_landing_page_prices_by_quantity(self):
         product = copy.deepcopy(self.product)
@@ -265,14 +268,14 @@ class PagePublishingTests(unittest.TestCase):
                 "currency": "usd",
                 "unit_amount": 6694,
                 "quantity": 2,
-                "context": "sale",
+                "context": "standard",
             },
             {
                 "price_id": "price_three",
                 "currency": "usd",
                 "unit_amount": 8990,
                 "quantity": 3,
-                "context": "flash_sale",
+                "context": "standard",
             },
             {
                 "price_id": "price_upsell",

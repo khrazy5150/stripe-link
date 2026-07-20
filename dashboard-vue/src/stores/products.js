@@ -342,9 +342,9 @@ export async function buildProductDocument(form) {
     product_intent: isLeadGen ? "lead_gen" : "transaction",
     product_type: productType,
     product_category: form.product_category,
-    // Structured data only (schema.org sku / itemCondition). sku is omitted when blank so the renderer
-    // falls back to product_id; condition is always stated, never inferred.
-    ...(form.sku ? { sku: form.sku } : {}),
+    // SKU is generated deterministically at save time (name + id) so it is ALWAYS present and stable —
+    // never dropped because the form field was momentarily blank. A tenant's own SKU wins when set.
+    sku: String(form.sku || "").trim() || generateSku(form.name, productId),
     condition: form.condition || "new",
     // Merchant-listing identifiers (SEO-06) — physical goods only (they're what appears in shopping results).
     // Omit blanks; drop an invalid GTIN rather than block the save (the form warns the tenant) — an invalid

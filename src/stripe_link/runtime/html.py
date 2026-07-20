@@ -31,7 +31,11 @@ FONT_FALLBACK_STACKS = {
 }
 DEFAULT_FAVICON_URL = "https://images.juniorbay.com/icon/favicon.png"
 CURRENT_YEAR_TOKEN = "{{current_year}}"
-LANDING_PAGE_PRICE_CONTEXTS = {"standard", "sale", "flash_sale", "flash sale"}
+# The landing page shows ONLY the product's standard-context prices. `sale` / `flash_sale` are alternate
+# pricing MODES, not extra cards — a page shows them only when the builder explicitly switches into a Sale
+# or Flash Sale mode (a future phase), at which point the active context replaces "standard" here. Upsell /
+# downsell / order-bump prices belong to the post-checkout flow and are excluded for the same reason.
+LANDING_PAGE_PRICE_CONTEXTS = {"standard"}
 HEADLINE_LOWERCASE_WORDS = {
     "a",
     "an",
@@ -905,9 +909,9 @@ def render_head_seo_tags(
     canonical = _RENDER_STATE.get("canonical") or ""
     if canonical:
         lines.append(f'  <link rel="canonical" href="{escape(canonical)}">')
-    # P0 indexing directive for a canonical page; max-image-preview:large is what puts the product image in
-    # the SERP. Funnel/upsell/thank-you noindex and non-prod noindex are Phase 2 (need funnel + env context).
-    lines.append('  <meta name="robots" content="index,follow,max-image-preview:large,max-snippet:-1">')
+    # Indexing directive: index only for the published artifact in production; preview and non-prod are
+    # noindex,nofollow (SEO-02/21). Funnel/upsell/thank-you noindex is still Phase 2 (needs funnel context).
+    lines.append(f'  <meta name="robots" content="{escape(_RENDER_STATE.get("robots") or NOINDEX_ROBOTS)}">')
 
     product = first_offer_product(offer, products_by_id)
     presentation = offer.get("presentation") or {}
@@ -978,10 +982,15 @@ def trim_meta(text: str, limit: int = 155) -> str:
     return clean[: cut if cut > 0 else limit].rstrip(",;:. ")
 
 
-# Render-scoped page context (plans/ON_PAGE_SEO_REQUIREMENTS.md): the page's canonical public URL, needed by
-# the head (canonical link, og:url) AND the Product JSON-LD (offers.url, seller). Threaded via a render-scoped
-# holder — like _RENDER_DIMS_INDEX — so head-channel elements don't each need the URL in their signature.
-_RENDER_STATE: dict[str, str] = {"canonical": ""}
+# Render-scoped page context (plans/ON_PAGE_SEO_REQUIREMENTS.md): the page's canonical public URL and its
+# robots directive, needed by the head (canonical, og:url, robots) AND the Product JSON-LD (offers.url,
+# seller) AND the checkout CTA (real success/cancel URLs). Threaded via a render-scoped holder — like
+# _RENDER_DIMS_INDEX — so head-channel elements don't each need it in their signature.
+_RENDER_STATE: dict[str, str] = {"canonical": "", "robots": "noindex,nofollow"}
+# A page is indexable only when it is the published artifact in production (SEO-02/21). Everything else —
+# the tenant's preview, any non-production environment — must be kept out of the index.
+INDEXABLE_ROBOTS = "index,follow,max-image-preview:large,max-snippet:-1"
+NOINDEX_ROBOTS = "noindex,nofollow"
 
 
 def render_page(
@@ -994,6 +1003,7 @@ def render_page(
     services_by_id: dict[str, dict[str, Any]] | None = None,
     offers_by_id: dict[str, dict[str, Any]] | None = None,
     canonical_url: str = "",
+    indexable: bool = False,
 ) -> str:
     services_by_id = services_by_id or {}
     offers_by_id = offers_by_id or {str(offer.get("offer_id") or ""): offer}
@@ -1007,6 +1017,7 @@ def render_page(
         page, offer, *products_by_id.values(), *services_by_id.values(), *offers_by_id.values(),
     ))
     _RENDER_STATE["canonical"] = canonical_page_url(canonical_url)
+    _RENDER_STATE["robots"] = INDEXABLE_ROBOTS if indexable else NOINDEX_ROBOTS
     try:
         return _render_page_body(
             page, offer, products_by_id, selected_prices, checkout_url, api_base_url,
@@ -1015,6 +1026,7 @@ def render_page(
     finally:
         _RENDER_DIMS_INDEX.clear()
         _RENDER_STATE["canonical"] = ""
+        _RENDER_STATE["robots"] = NOINDEX_ROBOTS
 
 
 def canonical_page_url(url: str) -> str:
@@ -2907,6 +2919,17 @@ def checkout_context(
     }
 
 
+def checkout_return_url(outcome: str) -> str:
+    """The Stripe return URL for the static CTA href: the page's canonical location + ?checkout=<outcome>
+    when known, else the "{{success_url}}"/"{{cancel_url}}" placeholder the interactions script fills on
+    load. Resolving it server-side keeps the out-of-the-box markup clean for crawlers and no-JS visitors."""
+    canonical = _RENDER_STATE.get("canonical") or ""
+    if canonical:
+        separator = "&" if "?" in canonical else "?"
+        return f"{canonical}{separator}checkout={outcome}"
+    return "{{success_url}}" if outcome == "success" else "{{cancel_url}}"
+
+
 def build_checkout_url(
     base_url: str,
     *,
@@ -2925,8 +2948,11 @@ def build_checkout_url(
         "product_id": product_id,
         "price_id": price_id,
         "quantity": quantity or "1",
-        "success_url": "{{success_url}}",
-        "cancel_url": "{{cancel_url}}",
+        # Real return URLs when we know the page's canonical location, so a crawler or a no-JS visitor sees a
+        # resolved link instead of "{{success_url}}" literals. The interactions script still overrides these
+        # from window.location on load (plans/ON_PAGE_SEO_REQUIREMENTS.md — clean out-of-the-box markup).
+        "success_url": checkout_return_url("success"),
+        "cancel_url": checkout_return_url("cancel"),
     }
     query = urlencode({key: value for key, value in params.items() if value})
     separator = "&" if "?" in base_url else "?"
