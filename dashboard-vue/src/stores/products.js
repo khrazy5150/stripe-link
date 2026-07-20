@@ -53,6 +53,25 @@ export function generateSku(name, productId) {
   return [...words, unique].filter(Boolean).join("-");
 }
 
+// A GTIN with a valid mod-10 check digit (plans/ON_PAGE_SEO_REQUIREMENTS.md SEO-06). Blank counts as valid
+// (the field is optional); a non-empty value must be a real UPC/EAN/ISBN/ITF-14/GTIN-8. An invalid GTIN
+// makes Google reject the whole merchant listing, so we never store one.
+export function isValidGtin(raw) {
+  const value = String(raw || "").trim();
+  if (!value) return true;
+  const digits = value.replace(/\D/g, "");
+  if (![8, 12, 13, 14].includes(digits.length)) return false;
+  const body = digits.slice(0, -1).split("").map(Number);
+  const check = Number(digits.slice(-1));
+  let sum = 0;
+  let weight = 3;
+  for (let i = body.length - 1; i >= 0; i--) {
+    sum += body[i] * weight;
+    weight = weight === 3 ? 1 : 3;
+  }
+  return (10 - (sum % 10)) % 10 === check;
+}
+
 function cents(value) {
   return Math.max(0, Math.round(Number(value || 0) * 100));
 }
@@ -312,7 +331,9 @@ export async function buildProductDocument(form) {
     product_id: productId,
     stripe_product_id: form.stripe_product_id || null,
     stripe_mode: form.stripe_mode || getApiEnvironment(),
-    canonical: !isLeadGen && form.canonical === "true",
+    // Payment gateway (Stripe sync) is derived from intent, not a separate toggle: a payment product is
+    // canonical, a lead-capture product is not. "Enable Payment Gateway" was jargon and is gone from the UI.
+    canonical: !isLeadGen,
     status: form.status === "archived" ? "archived" : "active",
     name: String(form.name || "").trim(),
     description: String(form.description || "").trim(),
@@ -325,6 +346,12 @@ export async function buildProductDocument(form) {
     // falls back to product_id; condition is always stated, never inferred.
     ...(form.sku ? { sku: form.sku } : {}),
     condition: form.condition || "new",
+    // Merchant-listing identifiers (SEO-06) — physical goods only (they're what appears in shopping results).
+    // Omit blanks; drop an invalid GTIN rather than block the save (the form warns the tenant) — an invalid
+    // GTIN would fail backend validation and reject the listing.
+    ...(isPhysical && String(form.brand || "").trim() ? { brand: String(form.brand).trim() } : {}),
+    ...(isPhysical && String(form.mpn || "").trim() ? { mpn: String(form.mpn).trim() } : {}),
+    ...(isPhysical && String(form.gtin || "").trim() && isValidGtin(form.gtin) ? { gtin: String(form.gtin).trim() } : {}),
     refund_policy: refundPolicy(productType, form),
     variants: {
       size_enabled: isPhysical && !isLeadGen && Boolean(form.size_enabled),

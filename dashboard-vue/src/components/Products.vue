@@ -226,42 +226,68 @@
           <!-- Both feed the landing page's structured data (schema.org sku / itemCondition). Condition is
                asked rather than assumed: the markup is a machine-readable claim, so it may only state what
                the seller actually told us. -->
-          <div class="modal-inline-grid">
+          <label>
+            Condition
+            <select v-model="form.condition">
+              <option value="new">New</option>
+              <option value="refurbished">Refurbished</option>
+              <option value="used">Used</option>
+              <option value="damaged">Damaged</option>
+            </select>
+            <span class="field-note">Stated in search results. Only change this if you are not selling new goods.</span>
+          </label>
+
+          <!-- Product identifiers (plans/ON_PAGE_SEO_REQUIREMENTS.md SEO-06). Optional; brand is the
+               manufacturer, not the store name. Google matches products by GTIN, or by Brand + MPN.
+               Only physical goods appear in shopping results, so hide these for digital/service products. -->
+          <fieldset v-if="form.product_type === 'physical'" class="product-identifiers">
+            <legend>Product identifiers</legend>
+            <p class="field-note">
+              Optional, but strongly recommended. Search engines match your products to shopping results using
+              either a GTIN, or a Brand and MPN together. Used and refurbished items often have no GTIN — Brand
+              plus MPN works just as well.
+            </p>
+            <div class="modal-inline-grid">
+              <label>
+                Product Brand
+                <input v-model.trim="form.brand" type="text" placeholder="Apple" maxlength="70" />
+                <span class="field-note">The manufacturer of this product — not your store name.</span>
+              </label>
+              <label>
+                MPN
+                <input v-model.trim="form.mpn" type="text" placeholder="MPXQ2LL/A" maxlength="70" />
+                <span class="field-note">Manufacturer Part Number, usually printed on the product or its box.</span>
+              </label>
+            </div>
+            <label>
+              GTIN
+              <input v-model.trim="form.gtin" type="text" placeholder="012345678905" @input="gtinTouched = true" />
+              <span class="field-note">UPC, EAN, or ISBN barcode number. Leave blank if this item has none.</span>
+              <span v-if="gtinWarning" class="field-warning">{{ gtinWarning }}</span>
+            </label>
+          </fieldset>
+
+          <details class="sku-disclosure">
+            <summary>Advanced · Stock keeping unit (SKU)</summary>
             <label>
               SKU
               <input v-model.trim="form.sku" type="text" placeholder="Generated automatically" @input="skuTouched = true" />
               <span class="field-note">Generated from the product name and its ID, and kept stable after that. Edit it only if you have your own stock keeping unit.</span>
             </label>
-            <label>
-              Condition
-              <select v-model="form.condition">
-                <option value="new">New</option>
-                <option value="refurbished">Refurbished</option>
-                <option value="used">Used</option>
-                <option value="damaged">Damaged</option>
-              </select>
-              <span class="field-note">Stated in search results. Only change this if you are not selling new goods.</span>
-            </label>
-          </div>
+          </details>
 
-          <div class="modal-inline-grid">
-            <label>
-              Enable Payment Gateway
-              <select v-model="form.canonical" :disabled="form.product_intent === 'lead_gen'">
-                <option value="false">No</option>
-                <option value="true">Yes</option>
-              </select>
-              <span class="field-note">When enabled, this product can be synced to Stripe.</span>
-            </label>
-            <label>
-              Intent
-              <select v-model="form.product_intent">
-                <option value="transaction">I want a payment</option>
-                <option value="lead_gen">I want to capture a lead</option>
-              </select>
-              <span class="field-note">Choose whether this product collects payment or captures lead information.</span>
-            </label>
-          </div>
+          <!-- Intent alone decides whether payment is collected: "I want a payment" enables the payment
+               gateway (Stripe sync); "capture a lead" turns it off. The old "Enable Payment Gateway" toggle
+               is derived from this now — "payment gateway" is jargon business owners shouldn't have to reason
+               about. -->
+          <label>
+            Intent
+            <select v-model="form.product_intent">
+              <option value="transaction">I want a payment</option>
+              <option value="lead_gen">I want to capture a lead</option>
+            </select>
+            <span class="field-note">Choose whether this product collects payment or captures lead information. Payment products are set up to charge through Stripe automatically.</span>
+          </label>
 
           <section v-if="form.product_type === 'digital' && form.product_intent === 'transaction'" class="digital-asset-field">
             <div class="field-heading"><span>Download File</span></div>
@@ -454,7 +480,7 @@
 <script setup>
 import { computed, h, nextTick, ref, watch } from "vue";
 import { apiRequest } from "../api/client";
-import { defaultProductPrice, formatMoney, generateSku, useProductsStore } from "../stores/products";
+import { defaultProductPrice, formatMoney, generateSku, isValidGtin, useProductsStore } from "../stores/products";
 import { humanizeCategory, normalizeCategory, searchCategories } from "../utils/categories";
 import { dimsFromStatus, recordImageDims } from "../utils/imageDims";
 import { defaultPriceForm, priceFormFromDocument } from "../utils/priceForm";
@@ -471,6 +497,13 @@ const editingProduct = ref(null);
 // A SKU is an identifier, so it is generated once and then left alone. It follows the name only while a NEW
 // product is still being named; once the product exists, renaming it must never re-identify it.
 const skuTouched = ref(false);
+const gtinTouched = ref(false);
+// Non-blocking GTIN warning (SEO-06): the product still saves (an invalid GTIN is simply dropped).
+const gtinWarning = computed(() =>
+  gtinTouched.value && form.value.gtin && !isValidGtin(form.value.gtin)
+    ? "This doesn't look like a valid barcode number — it won't be saved. Check the digits, or leave it blank."
+    : "",
+);
 const showCreateModal = ref(false);
 const showLeadPicker = ref(false);
 const tagInputVisible = ref(false);
@@ -636,6 +669,9 @@ function defaultProductForm() {
     product_category: "",
     sku: "",
     condition: "new",
+    brand: "",
+    mpn: "",
+    gtin: "",
     canonical: "false",
     product_intent: "transaction",
     tags: [],
@@ -720,6 +756,7 @@ watch(() => form.value.name, (name) => {
 function openCreateModal() {
   editingProduct.value = null;
   skuTouched.value = false;
+  gtinTouched.value = false;
   form.value = defaultProductForm();
   initCategoryQuery();
   draftLeadAction.value = { ...defaultLeadAction };
@@ -735,6 +772,7 @@ async function openEditModal(product) {
   editingProduct.value = product;
   hydratingForm.value = true;
   skuTouched.value = false;
+  gtinTouched.value = false;
   form.value = productFormFromDocument(product);
   // Products created before SKUs existed get one now, from the same name+id inputs a new product would use.
   if (!form.value.sku) form.value.sku = generateSku(product.name, product.product_id);
@@ -782,6 +820,9 @@ function productFormFromDocument(product) {
     product_category: product.product_category || "",
     sku: product.sku || "",
     condition: product.condition || "new",
+    brand: product.brand || "",
+    mpn: product.mpn || "",
+    gtin: product.gtin || "",
     canonical: product.canonical ? "true" : "false",
     product_intent: product.lead_capture ? "lead_gen" : product.product_intent || "transaction",
     tags: customTagsFromProduct(product),

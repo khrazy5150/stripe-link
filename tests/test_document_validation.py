@@ -44,6 +44,20 @@ class DocumentValidationTests(unittest.TestCase):
     def test_accepts_lead_capture_product_fixture(self):
         validate_product_document(load_fixture("product-lead-capture-email.json"))
 
+    def test_accepts_product_identifier_fields(self):
+        self.product.update({"brand": "Apple", "mpn": "MPXQ2LL/A", "gtin": "0190198611086"})
+        validate_product_document(self.product)
+
+    def test_rejects_invalid_gtin_check_digit(self):
+        self.product["gtin"] = "0190198611087"  # bad check digit
+        with self.assertRaises(DocumentValidationError):
+            validate_product_document(self.product)
+
+    def test_rejects_overlong_brand(self):
+        self.product["brand"] = "A" * 71
+        with self.assertRaises(DocumentValidationError):
+            validate_product_document(self.product)
+
     def test_accepts_optional_image_dims_sidecar(self):
         self.product["image_dims"] = {"https://images.juniorbay.com/products/ABC123": [1920, 1280]}
         validate_product_document(self.product)

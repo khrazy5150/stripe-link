@@ -1229,6 +1229,39 @@ textarea:focus {
   font-weight: 700;
 }
 
+.field-warning {
+  display: block;
+  margin-top: 0.4rem;
+  color: #b45309;
+  font-size: 1.35rem;
+  font-weight: 700;
+}
+
+.product-identifiers {
+  border: 1px solid var(--border, #e5e7eb);
+  border-radius: 0.8rem;
+  padding: 1.2rem 1.6rem 1.6rem;
+  margin: 0.4rem 0;
+}
+
+.product-identifiers > legend {
+  padding: 0 0.6rem;
+  font-weight: 800;
+  font-size: 1.45rem;
+}
+
+.sku-disclosure {
+  margin: 0.4rem 0;
+}
+
+.sku-disclosure > summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-weight: 700;
+  font-size: 1.4rem;
+  padding: 0.4rem 0;
+}
+
 .field-heading {
   display: flex;
   align-items: center;

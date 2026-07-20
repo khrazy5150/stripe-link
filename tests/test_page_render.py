@@ -606,6 +606,52 @@ class FixedPriceOfferTests(unittest.TestCase):
         self.assertTrue(product_json_ld(self.page, self.fixed_offer, self.products_by_id, {}))
 
 
+class HeadSeoTagsTests(unittest.TestCase):
+    """Canonical, robots, Open Graph, and LCP hints (plans/ON_PAGE_SEO_REQUIREMENTS.md SEO-01/02/09/10)."""
+
+    def setUp(self):
+        self.page = load_fixture("page-creatine-standard.json")
+        self.offer = load_fixture("offer-creatine-standard.json")
+        self.product = load_fixture("product-creatine-gummies.json")
+        self.products_by_id = {self.product["product_id"]: self.product}
+
+    def _head(self, **kw):
+        return render_page(self.page, self.offer, self.products_by_id, **kw).split("<body", 1)[0]
+
+    def test_canonical_strips_query_and_fragment(self):
+        head = self._head(canonical_url="https://axelmart.com/p/mac?checkout=success&session_id=1#top")
+        self.assertIn('<link rel="canonical" href="https://axelmart.com/p/mac">', head)
+
+    def test_no_canonical_when_url_absent(self):
+        self.assertNotIn("rel=\"canonical\"", self._head())
+
+    def test_robots_and_twitter_and_og_present(self):
+        head = self._head(canonical_url="https://axelmart.com/p/mac")
+        self.assertIn('name="robots" content="index,follow,max-image-preview:large,max-snippet:-1"', head)
+        self.assertIn('name="twitter:card" content="summary_large_image"', head)
+        self.assertIn('property="og:url" content="https://axelmart.com/p/mac"', head)
+
+    def test_lcp_preconnect_and_preload_when_image_present(self):
+        product = {**self.product, "images": ["https://images.juniorbay.com/products/AB/large.webp"]}
+        offer = {**self.offer, "items": [{"product_id": product["product_id"], "selectable_prices": self.offer["items"][0].get("selectable_prices")}]}
+        head = render_page(self.page, offer, {product["product_id"]: product},
+                           canonical_url="https://axelmart.com/p/mac").split("<body", 1)[0]
+        self.assertIn('rel="preconnect" href="https://images.juniorbay.com" crossorigin', head)
+        self.assertIn('rel="preload" as="image"', head)
+
+    def test_seller_id_anchored_to_canonical_origin(self):
+        from stripe_link.runtime.html import product_json_ld, _RENDER_STATE
+        product = {**self.product, "product_intent": "transaction"}
+        offer = {**self.offer, "presentation": {**(self.offer.get("presentation") or {}), "brand": "Axel Mart"}}
+        _RENDER_STATE["canonical"] = "https://axelmart.com/p/mac"
+        try:
+            ld = product_json_ld(self.page, offer, {product["product_id"]: product}, {})
+        finally:
+            _RENDER_STATE["canonical"] = ""
+        self.assertIn("axelmart.com/#organization", ld)
+        self.assertIn("OnlineStore", ld)
+
+
 class DocumentHeadCopyTests(unittest.TestCase):
     """The <head> <title>/<meta description> derive from the product when the page has no SEO override, and
     never from page.name/offer.name (the internal '… Single Offer' label). plans/SEMANTIC_HTML.md +
@@ -624,26 +670,46 @@ class DocumentHeadCopyTests(unittest.TestCase):
         match = re.search(r'<meta name="description" content="(.*?)">', html)
         return match.group(1) if match else None
 
-    def test_empty_seo_title_is_product_pipe_brand_not_page_name(self):
+    def test_empty_seo_title_uses_buy_formula_not_page_name(self):
+        # SEO-03: "Buy {condition} {product} | {brand_label}", never the internal page name.
+        product = {**self.product, "product_intent": "transaction", "condition": "used"}
         offer = {**self.offer, "presentation": {**(self.offer.get("presentation") or {}), "brand": "Acme Co"}}
         page = {**self.page, "name": "Creatine Gummies Single Offer Landing Page", "seo": {}}
-        html = render_page(page, offer, self.products_by_id)
+        html = render_page(page, offer, {product["product_id"]: product})
         self.assertNotIn("Single Offer", self._title(html))
-        self.assertEqual(self._title(html), "Creatine Gummies | Acme Co")
+        self.assertEqual(self._title(html), "Buy Used Creatine Gummies | Acme Co")
+
+    def test_lead_gen_title_omits_buy_prefix(self):
+        from stripe_link.runtime.html import document_title
+        offer = {"items": [{"product_id": "p"}], "presentation": {"brand": "Acme Co"}, "product_intent": "lead_gen"}
+        self.assertEqual(
+            document_title({"seo": {}}, offer, {"p": {"name": "Free Guide", "product_intent": "lead_gen"}}),
+            "Free Guide | Acme Co",
+        )
 
     def test_title_brand_falls_back_to_platform_when_no_brand(self):
         from stripe_link.runtime.html import document_title
         offer = {"items": [{"product_id": "p"}], "presentation": {}}
         self.assertEqual(
-            document_title({"seo": {}}, offer, {"p": {"name": "Widget"}}),
-            "Widget | Junior Bay",
+            document_title({"seo": {}}, offer, {"p": {"name": "Widget", "product_intent": "transaction"}}),
+            "Buy Widget | Junior Bay",
         )
 
-    def test_empty_seo_description_uses_offer_subheadline(self):
-        offer = {**self.offer, "presentation": {**(self.offer.get("presentation") or {}), "subheadline": "The best gummies around."}}
+    def test_thin_description_is_enriched_with_shop_prefix(self):
+        # SEO-04: a short description is wrapped; a long one is used verbatim (trimmed).
+        product = {**self.product, "name": "Creatine Gummies", "description": "Tasty berry gummies.", "product_intent": "transaction"}
         page = {**self.page, "seo": {}}
-        html = render_page(page, offer, self.products_by_id)
-        self.assertEqual(self._meta(html), "The best gummies around.")
+        html = render_page(page, self.offer, {product["product_id"]: product})
+        meta = self._meta(html)
+        self.assertTrue(meta.startswith("Shop Creatine Gummies."), meta)
+        self.assertIn("Tasty berry gummies", meta)
+
+    def test_long_description_is_used_verbatim(self):
+        product = {**self.product, "description": "Premium creatine monohydrate gummies. " * 5}
+        page = {**self.page, "seo": {}}
+        html = render_page(page, self.offer, {product["product_id"]: product})
+        self.assertTrue(self._meta(html).startswith("Premium creatine monohydrate gummies."))
+        self.assertNotIn("Shop", self._meta(html))
 
     def test_explicit_seo_is_respected(self):
         page = {**self.page, "seo": {"title": "My Keyword Title", "description": "My snippet."}}

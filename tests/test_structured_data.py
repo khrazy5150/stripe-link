@@ -143,11 +143,13 @@ class ProductMarkupRichnessTests(unittest.TestCase):
         self.assertIn("price", offers)
         self.assertNotIn("lowPrice", offers)
 
-    def test_price_is_a_number_matching_the_cta(self):
+    def test_price_is_a_decimal_string_matching_the_cta(self):
+        # SEO-07/22: price is emitted as a decimal string, not a float.
         html = self._render(condition="new")
         price = self._product_ld(html)["offers"]["price"]
-        self.assertIsInstance(price, (int, float))
-        self.assertIn(f'data-cta-amount="{int(round(price * 100))}"', html)
+        self.assertIsInstance(price, str)
+        self.assertRegex(price, r"^\d+\.\d{2}$")
+        self.assertIn(f'data-cta-amount="{int(round(float(price) * 100))}"', html)
 
     def test_name_is_the_product_not_the_offer_headline(self):
         # "Creatine Gummies Single Offer" is the offer's packaging label; a search result must not show it.

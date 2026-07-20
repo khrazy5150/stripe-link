@@ -769,13 +769,40 @@ def require_offer_products(offer: dict[str, Any], products_by_id: dict[str, dict
 
 # Ultimate brand fallback for the <title> when the tenant set no offer brand and no business name.
 PLATFORM_BRAND = "Junior Bay"
+TITLE_MAX = 60
+# Condition word emitted in a transactional title (plans/ON_PAGE_SEO_REQUIREMENTS.md SEO-03). "new" is the
+# assumed default and omitted (frees characters); "damaged" reads as "For Parts" to match how buyers search.
+_TITLE_CONDITION_WORD = {"used": "Used", "refurbished": "Refurbished", "new": None, "damaged": "For Parts"}
+
+
+def _title_condition_word(condition: Any, include_new: bool) -> str | None:
+    key = str(condition or "").strip().lower()
+    if key == "new" and not include_new:
+        return None
+    return _TITLE_CONDITION_WORD.get(key)
+
+
+def _dedupe_title_prefix(title: str) -> str:
+    # Guard tenants who already named the product "Buy X" or "Used X".
+    title = re.sub(r"(?i)^(?:Buy\s+)(?:Buy\s+)+", "Buy ", title)
+    title = re.sub(r"(?i)\b(Used|Refurbished|New|For Parts)\s+\1\b", r"\1", title)
+    return title
+
+
+def _truncate_at_word(text: str, limit: int) -> str:
+    if len(text) <= limit:
+        return text
+    cut = text[:limit]
+    space = cut.rfind(" ")
+    return (cut[:space] if space > 0 else cut).strip()
 
 
 def document_title(page: dict[str, Any], offer: dict[str, Any], products_by_id: dict[str, dict[str, Any]]) -> str:
-    """The <head> <title>: the tenant's SEO title if set, else "<Product> | <Brand>" — distinct from the
-    <h1> (plans/SEMANTIC_HTML.md). Brand is the offer's chosen brand (offer.presentation.brand, baked from
-    the pick or the tenant's business name), falling back to the platform name. Never page.name/offer.name,
-    which carry the internal "… Single Offer" label."""
+    """The <head> <title> (plans/ON_PAGE_SEO_REQUIREMENTS.md SEO-03). Tenant's SEO title wins; otherwise a
+    transactional formula "Buy {condition} {product.name} | {brand_label}" (lead-gen omits "Buy"). Degrades
+    to fit ~60 chars: drop the brand suffix, then truncate the name at a word boundary. brand_label is the
+    storefront brand (offer.presentation.brand); the product name carries the manufacturer. Never page.name/
+    offer.name (the internal "… Single Offer" label)."""
     explicit = str((page.get("seo") or {}).get("title") or "").strip()
     if explicit:
         return explicit
@@ -783,19 +810,162 @@ def document_title(page: dict[str, Any], offer: dict[str, Any], products_by_id: 
     presentation = offer.get("presentation") or {}
     name = str(product.get("name") or presentation.get("headline") or "").strip()
     brand = str(presentation.get("brand") or "").strip() or PLATFORM_BRAND
-    return f"{name} | {brand}" if name else brand
+    intent = str(product.get("product_intent") or offer.get("product_intent") or "transaction")
+    is_transactional = intent == "transaction"
+    include_new = bool((page.get("seo") or {}).get("include_new_in_title"))
+    condition_word = _title_condition_word(product.get("condition"), include_new) if is_transactional else None
+
+    parts = []
+    if is_transactional:
+        parts.append("Buy")
+    if condition_word:
+        parts.append(condition_word)
+    parts.append(name)
+    core = _dedupe_title_prefix(" ".join(part for part in parts if part)).strip()
+    if not core:
+        return brand
+    suffix = f" | {brand}"
+    if len(core + suffix) <= TITLE_MAX:
+        return core + suffix
+    if len(core) <= TITLE_MAX:
+        return core
+    return _truncate_at_word(core, TITLE_MAX)
+
+
+_DESC_MIN = 100
+_DESC_MAX = 155
+# Rotated deterministically by product_id so a page's CTA is stable but the corpus isn't one boilerplate
+# string (a near-duplicate footprint). A tenant can override globally via seo.description_cta.
+_DESC_CTAS = ["Get yours today!", "Order now.", "Ships fast — order today.", "In stock now."]
+
+
+def _stable_index(key: Any, length: int) -> int:
+    if length <= 0:
+        return 0
+    total = 0
+    for ch in str(key or ""):
+        total = (total * 31 + ord(ch)) & 0xFFFFFFFF
+    return total % length
+
+
+def _return_window_days(policy: dict[str, Any]) -> int:
+    match = re.search(r"(\d+)", str((policy or {}).get("refund_window") or ""))
+    return int(match.group(1)) if match else 0
 
 
 def document_description(page: dict[str, Any], offer: dict[str, Any], products_by_id: dict[str, dict[str, Any]]) -> str:
-    """The <head> <meta name="description">: the tenant's text if set, else the offer's subheadline (the
-    product description), whitespace-collapsed and word-trimmed to a SERP-friendly length. Never the internal
-    offer label; empty string omits the tag."""
+    """The <head> <meta name="description"> (plans/ON_PAGE_SEO_REQUIREMENTS.md SEO-04). Tenant's text wins
+    (capped). Otherwise the product description, and when it's thin (<100 chars) it is enriched into
+    "Shop {condition} {name}. {desc}. {return signal} {CTA}" — idempotent (no double "Shop"/".."), capped at
+    155 at a word boundary. Meta description is a CTR lever, not a ranking factor."""
     explicit = str((page.get("seo") or {}).get("description") or "").strip()
     if explicit:
-        return explicit
+        return trim_meta(explicit, _DESC_MAX)
     product = first_offer_product(offer, products_by_id)
     presentation = offer.get("presentation") or {}
-    return trim_meta(str(presentation.get("subheadline") or product.get("description") or ""))
+    desc = str(product.get("description") or presentation.get("subheadline") or "").strip()
+    if len(desc) >= _DESC_MIN:
+        return trim_meta(desc, _DESC_MAX)
+
+    already_cta = bool(re.match(r"(?i)^(shop|buy|get|order)\b", desc))
+    condition = str(product.get("condition") or "").strip().lower()
+    cond = f"{condition} " if condition and condition != "new" else ""
+    name = str(product.get("name") or presentation.get("headline") or "").strip()
+    policy = offer.get("refund_policy") or product.get("refund_policy") or {}
+    days = _return_window_days(policy)
+    site_cta = str((page.get("seo") or {}).get("description_cta") or "").strip()
+    cta = site_cta or _DESC_CTAS[_stable_index(product.get("product_id"), len(_DESC_CTAS))]
+
+    segments: list[str] = []
+    if name and not already_cta:
+        segments.append(f"Shop {cond}{name}.")
+    body = re.sub(r"[.\s]+$", "", desc)
+    if body:
+        segments.append(f"{body}.")
+    if days:
+        segments.append(f"{days}-day returns.")
+    if cta:
+        segments.append(cta)
+    text = re.sub(r"\.\s*\.", ".", re.sub(r"\s+", " ", " ".join(segments)).strip())
+    return trim_meta(text, _DESC_MAX)
+
+
+def render_head_seo_tags(
+    page: dict[str, Any],
+    offer: dict[str, Any],
+    products_by_id: dict[str, dict[str, Any]],
+    services_by_id: dict[str, dict[str, Any]],
+    title: str,
+    description: str,
+) -> list[str]:
+    """Canonical, robots, Open Graph / Twitter Card, and LCP resource hints for the <head>
+    (plans/ON_PAGE_SEO_REQUIREMENTS.md SEO-01/02/09/10). Interim: canonical/og:url come from the page's
+    published URL; clean root-domain paths and funnel/env noindex land with the Site work."""
+    lines: list[str] = []
+    canonical = _RENDER_STATE.get("canonical") or ""
+    if canonical:
+        lines.append(f'  <link rel="canonical" href="{escape(canonical)}">')
+    # P0 indexing directive for a canonical page; max-image-preview:large is what puts the product image in
+    # the SERP. Funnel/upsell/thank-you noindex and non-prod noindex are Phase 2 (need funnel + env context).
+    lines.append('  <meta name="robots" content="index,follow,max-image-preview:large,max-snippet:-1">')
+
+    product = first_offer_product(offer, products_by_id)
+    presentation = offer.get("presentation") or {}
+    brand_label = str(presentation.get("brand") or "").strip() or PLATFORM_BRAND
+    intent = str(product.get("product_intent") or offer.get("product_intent") or "transaction")
+    og_type = "product" if intent == "transaction" else "website"
+    og_title = title.split(" | ", 1)[0] if " | " in title else title
+    image = seo_image_url(next((img for img in (product.get("images") or []) if img), ""))
+    prices = landing_page_offer_prices(offer, products_by_id, services_by_id)
+    selected = selected_landing_page_price(offer, products_by_id, prices) if prices else {}
+
+    tags: list[tuple[str, str]] = [
+        ("og:type", og_type),
+        ("og:site_name", brand_label),
+        ("og:title", og_title),
+        ("og:description", description),
+    ]
+    if image:
+        tags.append(("og:image", image))
+        base = rendition_base(image)
+        dims = _RENDER_DIMS_INDEX.get(base) if base else None
+        if dims:
+            tags.append(("og:image:width", str(dims[0])))
+            tags.append(("og:image:height", str(dims[1])))
+        alt = str(product.get("name") or "").strip()
+        if alt:
+            tags.append(("og:image:alt", alt))
+    if canonical:
+        tags.append(("og:url", canonical))
+    if selected:
+        tags.append(("product:price:amount", money_string(selected["unit_amount"])))
+        tags.append(("product:price:currency", str(selected.get("currency") or "usd").upper()))
+    for prop, content in tags:
+        if content:
+            lines.append(f'  <meta property="{escape(prop)}" content="{escape(str(content))}">')
+    lines.append('  <meta name="twitter:card" content="summary_large_image">')
+
+    # LCP hints: the hero is a cross-origin image, so save the DNS+TCP+TLS handshake and preload it.
+    if image:
+        host_match = re.match(r"^(https?://[^/]+)", image)
+        host = host_match.group(1) if host_match else ""
+        if host:
+            lines.append(f'  <link rel="preconnect" href="{escape(host)}" crossorigin>')
+            lines.append(f'  <link rel="dns-prefetch" href="{escape(host)}">')
+        base = rendition_base(image)
+        if base:
+            srcset = ", ".join(
+                f"{escape(f'{base}/{size}.webp')} {width}w"
+                for size, width in IMAGE_RENDITION_WIDTHS.items()
+                if size in ("small", "medium", "large")
+            )
+            lines.append(
+                f'  <link rel="preload" as="image" href="{escape(f"{base}/medium.webp")}" '
+                f'imagesrcset="{srcset}" imagesizes="{escape(HERO_MEDIA_SIZES)}" fetchpriority="high">'
+            )
+        else:
+            lines.append(f'  <link rel="preload" as="image" href="{escape(image)}" fetchpriority="high">')
+    return lines
 
 
 def trim_meta(text: str, limit: int = 155) -> str:
@@ -808,6 +978,12 @@ def trim_meta(text: str, limit: int = 155) -> str:
     return clean[: cut if cut > 0 else limit].rstrip(",;:. ")
 
 
+# Render-scoped page context (plans/ON_PAGE_SEO_REQUIREMENTS.md): the page's canonical public URL, needed by
+# the head (canonical link, og:url) AND the Product JSON-LD (offers.url, seller). Threaded via a render-scoped
+# holder — like _RENDER_DIMS_INDEX — so head-channel elements don't each need the URL in their signature.
+_RENDER_STATE: dict[str, str] = {"canonical": ""}
+
+
 def render_page(
     page: dict[str, Any],
     offer: dict[str, Any],
@@ -817,6 +993,7 @@ def render_page(
     api_base_url: str | None = None,
     services_by_id: dict[str, dict[str, Any]] | None = None,
     offers_by_id: dict[str, dict[str, Any]] | None = None,
+    canonical_url: str = "",
 ) -> str:
     services_by_id = services_by_id or {}
     offers_by_id = offers_by_id or {str(offer.get("offer_id") or ""): offer}
@@ -829,6 +1006,7 @@ def render_page(
     _RENDER_DIMS_INDEX.update(collect_image_dims(
         page, offer, *products_by_id.values(), *services_by_id.values(), *offers_by_id.values(),
     ))
+    _RENDER_STATE["canonical"] = canonical_page_url(canonical_url)
     try:
         return _render_page_body(
             page, offer, products_by_id, selected_prices, checkout_url, api_base_url,
@@ -836,6 +1014,28 @@ def render_page(
         )
     finally:
         _RENDER_DIMS_INDEX.clear()
+        _RENDER_STATE["canonical"] = ""
+
+
+def canonical_page_url(url: str) -> str:
+    """Normalize a canonical URL for emission (SEO-01): keep only scheme+host+path, drop every query string
+    and fragment. Query params (?checkout=success, ?session_id=…) are crawlable duplicates the canonical
+    exists to collapse. Returns "" for anything that isn't an absolute http(s) URL, so callers omit the tag
+    rather than emit a broken one."""
+    raw = str(url or "").strip()
+    if not raw:
+        return ""
+    match = re.match(r"^(https?)://([^/?#]+)([^?#]*)", raw, re.IGNORECASE)
+    if not match:
+        return ""
+    scheme, host, path = match.group(1).lower(), match.group(2), match.group(3)
+    return f"{scheme}://{host}{path}"
+
+
+def canonical_origin() -> str:
+    """scheme://host of the render-scoped canonical URL — the anchor for seller/Organization @id."""
+    match = re.match(r"^(https?://[^/]+)", _RENDER_STATE.get("canonical") or "", re.IGNORECASE)
+    return match.group(1) if match else ""
 
 
 def _render_page_body(
@@ -858,10 +1058,10 @@ def _render_page_body(
         services_by_id=services_by_id,
     )
     # The <head> title/description are derived here so they are correct regardless of what a page stored
-    # (plans/SEMANTIC_HTML.md, plans/LANDING_PAGE_DEFAULT_COPY.md): the tenant's value if set, else a
-    # product-derived default — never page.name/offer.name, which carry the internal "… Single Offer" label.
-    # SEO title uses Chicago title case (the builder title-cases on input; format here too for consistency).
-    title = escape(format_headline(document_title(page, offer, products_by_id)))
+    # (plans/ON_PAGE_SEO_REQUIREMENTS.md SEO-03/04). Never page.name/offer.name (the internal "… Single
+    # Offer" label). The title is NOT re-title-cased — it preserves the product name verbatim so <title>,
+    # <h1>, and JSON-LD all read the same "MacBook" (SEO-18 case consistency).
+    title = escape(document_title(page, offer, products_by_id))
     description = escape(document_description(page, offer, products_by_id))
     favicon_tags = render_favicon_tags(page.get("seo") or {})
     styles = render_template_styles(page)
@@ -898,6 +1098,7 @@ def _render_page_body(
         "  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">",
         f"  <title>{title}</title>",
         f"  <meta name=\"description\" content=\"{description}\">" if description else "",
+        *render_head_seo_tags(page, offer, products_by_id, services_by_id, title, description),
         favicon_tags,
         head_extras,
         "  <style>",
@@ -1125,7 +1326,8 @@ def render_countdown_timer(section: dict[str, Any], page: dict[str, Any]) -> str
     style = f"--sl-countdown-bg:{start_color};background:{start_color}"
     return "\n".join([
         f"    <section class=\"sl-countdown\" data-section-id=\"{escape(str(section.get('id', 'countdown')))}\" data-section-type=\"countdown_timer\" data-duration-minutes=\"{duration}\" data-persistent=\"{str(bool(section.get('persistent'))).lower()}\" data-sticky=\"{str(bool(section.get('sticky'))).lower()}\" data-transparent=\"{str(bool(section.get('transparent'))).lower()}\" data-marquee=\"{str(bool(section.get('marquee'))).lower()}\" data-start-text=\"{label}\" data-end-text=\"{end_text}\" data-start-color=\"{start_color}\" data-end-color=\"{end_color}\" style=\"{style}\">",
-        "      <span class=\"sl-countdown-content\">",
+        # aria-live=off: the timer mutates every second; announcing every tick would flood a screen reader.
+        "      <span class=\"sl-countdown-content\" aria-live=\"off\">",
         f"        <span data-countdown-label>{label}</span>",
         f"        <time data-countdown-display>{duration}:00</time>" if duration else "",
         "      </span>",
@@ -1400,7 +1602,7 @@ def render_service_price_card(item, service_id, services_by_id, offer, display_i
         f"            <span class=\"sl-savings\">Save {int(savings_pct)}%</span>" if savings_pct else "",
         "          </div>",
         "        </div>",
-        f"        <input type=\"radio\" name=\"sl-price-{escape(service_id)}\" value=\"{escape(price_id)}\" checked>",
+        f"        <input type=\"radio\" name=\"sl-price-{escape(service_id)}\" value=\"{escape(price_id)}\" aria-label=\"{label}, {escape(format_money(amount, currency))}\" checked>",
         "      </article>",
     ])
     return (landing_page_price_sort_key(price, item, display_index), card_markup)
@@ -1543,7 +1745,7 @@ def render_offer_price_selector(
                 f"            <span class=\"sl-savings\">Save {int(savings_pct)}%</span>" if savings_pct else "",
                 "          </div>",
                 "        </div>",
-                f"        <input type=\"radio\" name=\"sl-price-{escape(product_id)}\" value=\"{escape(str(price.get('price_id', '')))}\" {'checked' if default_attr == 'true' else ''}>",
+                f"        <input type=\"radio\" name=\"sl-price-{escape(product_id)}\" value=\"{escape(str(price.get('price_id', '')))}\" aria-label=\"{label}, {escape(format_money(amount, currency))}\" {'checked' if default_attr == 'true' else ''}>",
                 "      </article>",
             ])
             cards.append((landing_page_price_sort_key(price, option, display_index), card_markup))
@@ -1848,20 +2050,66 @@ def product_json_ld(
     sku = str(product.get("sku") or "").strip() or re.sub(r"(?i)^local_", "", str(product.get("product_id") or "").strip())
     if sku:
         payload["sku"] = sku
+    # Merchant-listing identifiers (SEO-06/07): brand is the manufacturer; mpn/gtin identify the exact model.
+    # Omit any empty key — an empty required-ish field invalidates the whole item.
+    mpn = str(product.get("mpn") or "").strip()
+    if mpn:
+        payload["mpn"] = mpn
+    gtin = "".join(ch for ch in str(product.get("gtin") or "") if ch.isdigit())
+    if gtin:
+        payload["gtin"] = gtin
+    brand = str(product.get("brand") or "").strip()
+    if brand:
+        payload["brand"] = {"@type": "Brand", "name": brand}
     category = humanize_category(product.get("product_category"))
     if category:
         payload["category"] = category
     offer_payload: dict[str, Any] = {
         "@type": "Offer",
-        "price": money_number(selected["unit_amount"]),
+        # Decimal STRING, not a float (SEO-07/22).
+        "price": money_string(selected["unit_amount"]),
         "priceCurrency": str(selected.get("currency") or "usd").upper(),
         "availability": "https://schema.org/InStock",
     }
+    canonical = _RENDER_STATE.get("canonical") or ""
+    if canonical:
+        offer_payload["url"] = canonical
     condition = PRODUCT_CONDITIONS.get(str(product.get("condition") or "").strip().lower())
     if condition:
         offer_payload["itemCondition"] = condition
+    # Seller stub identifying the responsible tenant (SEO-22). @id anchors to the tenant's own root domain
+    # (interim: the page's origin); omitted rather than dangling when there's no canonical.
+    presentation = offer.get("presentation") or {}
+    brand_label = str(presentation.get("brand") or "").strip()
+    if brand_label:
+        seller: dict[str, Any] = {"@type": "OnlineStore", "name": brand_label}
+        origin = canonical_origin()
+        if origin:
+            seller["@id"] = f"{origin}/#organization"
+            seller["url"] = f"{origin}/"
+        offer_payload["seller"] = seller
+    # The refund policy already rendered on the page, made machine-readable (SEO-07). applicableCountry is
+    # interim US until the tenant profile supplies the real country.
+    return_policy = merchant_return_policy(offer.get("refund_policy") or product.get("refund_policy") or {})
+    if return_policy:
+        offer_payload["hasMerchantReturnPolicy"] = return_policy
     payload["offers"] = offer_payload
     return json_ld_dump(payload)
+
+
+def merchant_return_policy(policy: dict[str, Any]) -> dict[str, Any] | None:
+    """MerchantReturnPolicy from the page's refund policy (SEO-07). Only emitted when the policy states a
+    finite return window; applicableCountry is interim US pending the tenant profile."""
+    days = _return_window_days(policy)
+    if days <= 0:
+        return None
+    return {
+        "@type": "MerchantReturnPolicy",
+        "applicableCountry": "US",
+        "returnPolicyCategory": "https://schema.org/MerchantReturnFiniteReturnWindow",
+        "merchantReturnDays": days,
+        "returnMethod": "https://schema.org/ReturnByMail",
+    }
 
 
 def selected_landing_page_price(
@@ -1888,6 +2136,13 @@ def money_number(unit_amount: int) -> float:
     """Minor units -> a schema.org price. Google accepts a number or a string; a number matches the shape
     that verified as passing. round() keeps 3709 -> 37.09 rather than 37.089999999999996."""
     return round(int(unit_amount) / 100, 2)
+
+
+def money_string(unit_amount: int) -> str:
+    """Minor units -> a decimal price string ("353.97"). plans/ON_PAGE_SEO_REQUIREMENTS.md SEO-07/22: emit
+    JSON-LD and og price as a string, not a float — float serialization round-trips badly and the string
+    form matches Google's reference examples. No currency symbol, no thousands separator."""
+    return f"{int(unit_amount) / 100:.2f}"
 
 
 def seo_image_url(url: str) -> str:

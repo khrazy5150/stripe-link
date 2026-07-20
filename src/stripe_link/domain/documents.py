@@ -164,10 +164,34 @@ def require_string(document: dict[str, Any], field: str, label: str | None = Non
     return value
 
 
-def optional_string(document: dict[str, Any], field: str, label: str | None = None) -> None:
+def optional_string(document: dict[str, Any], field: str, label: str | None = None, *, max_length: int | None = None) -> None:
     value = document.get(field)
     if value is not None and not isinstance(value, str):
         raise DocumentValidationError(f"{label or field} must be a string.")
+    if max_length is not None and isinstance(value, str) and len(value) > max_length:
+        raise DocumentValidationError(f"{label or field} must be at most {max_length} characters.")
+
+
+def validate_gtin(value: Any) -> None:
+    """A GTIN (UPC-12 / EAN-13 / ISBN-13 / ITF-14 / GTIN-8) with a valid mod-10 check digit, when present.
+    An invalid GTIN makes Google reject the whole merchant listing, so reject it here rather than emit it
+    (plans/ON_PAGE_SEO_REQUIREMENTS.md SEO-06). Empty/absent is fine — the field is optional."""
+    if value is None:
+        return
+    if not isinstance(value, str):
+        raise DocumentValidationError("Product gtin must be a string.")
+    if not value.strip():
+        return  # blank/whitespace treated as absent
+    digits = "".join(ch for ch in value if ch.isdigit())
+    if len(digits) not in (8, 12, 13, 14):
+        raise DocumentValidationError("Product gtin must be 8, 12, 13, or 14 digits (UPC/EAN/ISBN/ITF-14/GTIN-8).")
+    body, check = digits[:-1], int(digits[-1])
+    total, weight = 0, 3
+    for digit in reversed(body):
+        total += int(digit) * weight
+        weight = 1 if weight == 3 else 3
+    if (10 - (total % 10)) % 10 != check:
+        raise DocumentValidationError("Product gtin check digit is invalid — verify the barcode number.")
 
 
 def optional_bool(document: dict[str, Any], field: str, label: str | None = None) -> None:
@@ -584,6 +608,12 @@ def validate_product_document(document: dict[str, Any]) -> None:
     optional_string(document, "sku", "Product sku")
     if document.get("condition") is not None:
         require_enum(document, "condition", set(PRODUCT_CONDITIONS), "Product condition")
+    # Merchant-listing identifiers (plans/ON_PAGE_SEO_REQUIREMENTS.md SEO-06). All optional; brand is the
+    # manufacturer (Apple) — distinct from the storefront brand. Google matches products by GTIN, or by
+    # brand+mpn together. An invalid GTIN is worse than none, so its check digit is validated when present.
+    optional_string(document, "brand", "Product brand", max_length=70)
+    optional_string(document, "mpn", "Product mpn", max_length=70)
+    validate_gtin(document.get("gtin"))
     optional_string_list(document, "images")
     optional_image_dims(document, "Product image_dims")
     validate_product_lead_capture(document)

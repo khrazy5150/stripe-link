@@ -1164,6 +1164,9 @@ async function renderPreview() {
         // The page document stores no legal URLs on purpose (legalLinks() returns {}); render_legal_footer
         // builds the platform /legal/* hrefs from api_base_url. Without it the footer links vanish.
         api_base_url: getApiBase(),
+        // The page's canonical public URL so the preview shows the same canonical/OG the published page emits
+        // (plans/ON_PAGE_SEO_REQUIREMENTS.md SEO-01; interim published-artifact URL).
+        canonical_url: artifactPageUrl({ page_id: page.page_id }),
       },
     });
     // Ignore a stale response that lands after a newer edit.
