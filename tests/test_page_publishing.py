@@ -9,7 +9,13 @@ from boto3.dynamodb.types import TypeSerializer
 
 from handlers.page_publish import handler
 from stripe_link.runtime.artifacts import artifact_paths
-from stripe_link.runtime.publishing import PublishError, artifact_targets, delete_page_artifacts, publish_page_document
+from stripe_link.runtime.publishing import (
+    PublishError,
+    artifact_targets,
+    delete_page_artifacts,
+    find_site_for_page,
+    publish_page_document,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -39,6 +45,14 @@ class FakeRepository:
     def get(self, tenant_id: str, document_id: str):
         document = self.documents.get((tenant_id, document_id))
         return copy.deepcopy(document) if document else None
+
+
+class FakeSitesRepository:
+    def __init__(self, sites: list[dict]):
+        self.sites = sites
+
+    def list_for_tenant(self, tenant_id: str):
+        return [copy.deepcopy(s) for s in self.sites if s.get("tenant_id") == tenant_id]
 
 
 class FakeS3Client:
@@ -155,6 +169,59 @@ class PagePublishingTests(unittest.TestCase):
         self.assertIn(b"https://checkout.stripe.com/c/pay/demo", self.s3.puts[0]["Body"])
         self.assertEqual([artifact["kind"] for artifact in result["artifacts"]], ["preview"])
         self.assertIsNone(result["invalidation"])
+
+    def test_find_site_for_page_matches_by_page_id(self):
+        site = {"tenant_id": "tenant_demo", "site_id": "site_x", "pages": {"/": {"page_id": "page_simple_coffee"}}}
+        repo = FakeSitesRepository([site])
+        self.assertEqual(find_site_for_page(repo, "tenant_demo", "page_simple_coffee")["site_id"], "site_x")
+        self.assertIsNone(find_site_for_page(repo, "tenant_demo", "page_other"))
+        self.assertIsNone(find_site_for_page(None, "tenant_demo", "page_simple_coffee"))
+
+    def test_publish_emits_organization_from_the_owning_site(self):
+        page = copy.deepcopy(self.page)
+        page["goal"] = "search_seo"
+        page["sections"].append({"id": "structured-data", "type": "structured_data"})
+        site = {
+            "tenant_id": "tenant_demo", "site_id": "site_x",
+            "organization": {"name": "Bean Bros", "entity_type": "OnlineStore"},
+            "pages": {"/": {"page_id": "page_simple_coffee"}},
+        }
+        publish_page_document(
+            page,
+            offers_repository=self.offers_repo,
+            products_repository=self.products_repo,
+            sites_repository=FakeSitesRepository([site]),
+            s3_client=self.s3,
+            pages_bucket="pages",
+            preview_bucket="preview",
+            environment="dev",
+            pages_domain="pages.example.com",
+            preview_domain="preview.example.com",
+            checkout_url="https://checkout.stripe.com/c/pay/demo",
+        )
+        body = self.s3.puts[0]["Body"].decode()
+        self.assertIn("/#organization", body)
+        self.assertIn("Bean Bros", body)
+        self.assertIn('"@type":"WebSite"', body)
+
+    def test_publish_without_a_site_emits_no_organization(self):
+        page = copy.deepcopy(self.page)
+        page["goal"] = "search_seo"
+        page["sections"].append({"id": "structured-data", "type": "structured_data"})
+        publish_page_document(
+            page,
+            offers_repository=self.offers_repo,
+            products_repository=self.products_repo,
+            sites_repository=FakeSitesRepository([]),
+            s3_client=self.s3,
+            pages_bucket="pages",
+            preview_bucket="preview",
+            environment="dev",
+            pages_domain="pages.example.com",
+            preview_domain="preview.example.com",
+            checkout_url="https://checkout.stripe.com/c/pay/demo",
+        )
+        self.assertNotIn("/#organization", self.s3.puts[0]["Body"].decode())
 
     def test_publish_page_document_threads_api_base_url_into_rendered_html(self):
         publish_page_document(

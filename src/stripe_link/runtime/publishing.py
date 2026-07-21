@@ -19,6 +19,22 @@ def page_slug(page: dict[str, Any]) -> str:
     return slug
 
 
+def find_site_for_page(sites_repository: Any, tenant_id: str, page_id: str) -> dict[str, Any] | None:
+    """Resolve the Site that owns `page_id` (plans/SITE_OBJECT.md §2.2). A page belongs to at most one Site,
+    so the first match is authoritative. Returns None when there's no Site yet (legacy pages) — the renderer
+    then falls back to its interim identity. Never raises: identity resolution must not block a publish."""
+    if sites_repository is None or not tenant_id or not page_id:
+        return None
+    try:
+        for site in sites_repository.list_for_tenant(tenant_id):
+            for entry in (site.get("pages") or {}).values():
+                if isinstance(entry, dict) and entry.get("page_id") == page_id:
+                    return site
+    except Exception:
+        return None
+    return None
+
+
 def artifact_targets(
     page: dict[str, Any],
     *,
@@ -182,6 +198,7 @@ def publish_page_document(
     offers_repository: Any,
     products_repository: Any,
     services_repository: Any | None = None,
+    sites_repository: Any | None = None,
     s3_client: Any,
     pages_bucket: str,
     preview_bucket: str,
@@ -205,6 +222,9 @@ def publish_page_document(
     # URL where the page actually lives; clean root-domain paths arrive with the Site object.
     published_paths = artifact_paths(str(page.get("tenant_id") or ""), str(page.get("page_id") or ""), page_slug(page))
     canonical_url = public_url(pages_domain, published_paths["published"])
+    # The Site supplies the page's public identity (Organization for the entity graph). Optional: legacy pages
+    # without a Site still publish, falling back to the interim identity (plans/SITE_OBJECT.md §2.2).
+    site = find_site_for_page(sites_repository, str(page.get("tenant_id") or ""), str(page.get("page_id") or ""))
     checkout = checkout_url or checkout_base_url_for_page(page, offer, environment)
     targets = artifact_targets(
         page,
@@ -230,6 +250,7 @@ def publish_page_document(
             offers_by_id=offers_by_id,
             canonical_url=canonical_url,
             indexable=indexable,
+            site=site,
         )
         s3_client.put_object(
             Bucket=target["bucket"],

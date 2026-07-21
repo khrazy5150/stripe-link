@@ -1286,6 +1286,83 @@ def validate_user_profile(document: dict[str, Any]) -> None:
     validate_business_identity(document.get("business"))
 
 
+_E164_RE = re.compile(r"^\+[1-9]\d{1,14}$")
+
+
+def normalize_e164(value: Any) -> str:
+    """Best-effort E.164 normalization: strip human formatting (spaces, dashes, parens, dots) and treat a
+    leading international '00' dialing prefix as '+'. Deliberately does NOT invent a country code — a number
+    typed without a leading '+' stays without one, so validation rejects it with a clear hint rather than
+    guessing (and mis-attributing) a country. E.164 is what the registration flow (Cognito) already requires
+    for the account phone; this brings the business phone / Organization telephone in line."""
+    raw = str(value or "").strip()
+    if not raw:
+        return ""
+    digits = re.sub(r"\D", "", raw)
+    if raw.startswith("+"):
+        return "+" + digits
+    if digits.startswith("00"):
+        return "+" + digits[2:]
+    # North American Numbering Plan: recover the +1 for a bare NANP number — 1 + 10 digits, or a plain 10-digit
+    # national number (the everyday US/Canada format). Non-NANP tenants enter a full "+<country>" number, guided
+    # by the field hint; a number that is neither stays without a "+" so validation asks for the country.
+    if len(digits) == 11 and digits.startswith("1"):
+        return "+" + digits
+    if len(digits) == 10:
+        return "+1" + digits
+    return digits
+
+
+def require_e164(document: dict[str, Any], field: str, label: str) -> None:
+    """An optional phone that, when present, is normalized in place to E.164 and then validated. Canonicalizing
+    at validation means downstream consumers (Organization JSON-LD, SMS) get a clean number regardless of what
+    the client sent."""
+    value = document.get(field)
+    if value in (None, ""):
+        return
+    normalized = normalize_e164(value)
+    if not _E164_RE.match(normalized):
+        raise DocumentValidationError(
+            f"{label} must be a valid phone number in international format, e.g. +12065551234."
+        )
+    document[field] = normalized
+
+
+# Common country names/aliases → ISO 3166-1 alpha-2. Not exhaustive: the dashboard offers a full country
+# picker (alpha-2), so this mainly heals legacy free-text and API input. Unrecognized values pass through.
+_COUNTRY_ALIASES = {
+    "USA": "US", "US": "US", "UNITED STATES": "US", "UNITED STATES OF AMERICA": "US", "AMERICA": "US",
+    "CANADA": "CA", "CA": "CA",
+    "UNITED KINGDOM": "GB", "UK": "GB", "GB": "GB", "GREAT BRITAIN": "GB", "ENGLAND": "GB",
+    "SCOTLAND": "GB", "WALES": "GB", "NORTHERN IRELAND": "GB",
+    "AUSTRALIA": "AU", "AU": "AU", "NEW ZEALAND": "NZ", "NZ": "NZ", "IRELAND": "IE", "IE": "IE",
+    "MEXICO": "MX", "MX": "MX", "GERMANY": "DE", "DE": "DE", "FRANCE": "FR", "FR": "FR",
+    "SPAIN": "ES", "ES": "ES", "ITALY": "IT", "IT": "IT", "NETHERLANDS": "NL", "NL": "NL",
+    "INDIA": "IN", "IN": "IN", "JAPAN": "JP", "JP": "JP", "BRAZIL": "BR", "BR": "BR",
+}
+
+
+def normalize_country(value: Any) -> str:
+    """Normalize a country to its ISO 3166-1 alpha-2 code (matches Stripe, Google Business Profile, and
+    schema.org PostalAddress.addressCountry). Recognized names/aliases map to a code; an existing 2-letter
+    code is upper-cased; anything else passes through unchanged so an unusual entry is never lost."""
+    raw = str(value or "").strip()
+    if not raw:
+        return ""
+    key = raw.replace(".", "").upper().strip()
+    if key in _COUNTRY_ALIASES:
+        return _COUNTRY_ALIASES[key]
+    if len(key) == 2 and key.isalpha():
+        return key
+    return raw
+
+
+def _normalize_address_country(address: Any) -> None:
+    """Canonicalize address.country to alpha-2 in place, so NAP stays consistent across Stripe/GBP/JSON-LD."""
+    if isinstance(address, dict) and address.get("country"):
+        address["country"] = normalize_country(address["country"])
+
+
 def validate_business_identity(business: Any) -> None:
     """The tenant's business identity — name, brand(s), and NAP contact. A lightweight precursor to the
     canonical Business Profile (plans/BUSINESS_PROFILE_AND_GBP.md); GBP will later override/enrich it.
@@ -1296,7 +1373,7 @@ def validate_business_identity(business: Any) -> None:
     if not isinstance(business, dict):
         raise DocumentValidationError("User profile business must be an object.")
     optional_string(business, "name", "business.name")
-    optional_string(business, "phone", "business.phone")
+    require_e164(business, "phone", "Business phone")
     brands = business.get("brands")
     if brands is not None:
         if not isinstance(brands, list) or any(not isinstance(brand, str) for brand in brands):
@@ -1308,6 +1385,7 @@ def validate_business_identity(business: Any) -> None:
         # PostalAddress-shaped so it maps straight to LocalBusiness JSON-LD when the local-SEO work lands.
         for field in ("street", "locality", "region", "postal_code", "country"):
             optional_string(address, field, f"business.address.{field}")
+        _normalize_address_country(address)
 
 
 def validate_notification(document: dict[str, Any]) -> None:
@@ -1495,7 +1573,7 @@ def validate_site_organization(organization: Any) -> None:
     if organization.get("entity_type") is not None:
         require_enum(organization, "entity_type", SITE_ENTITY_TYPES, "organization.entity_type")
     optional_string(organization, "description", "organization.description", max_length=500)
-    optional_string(organization, "telephone", "organization.telephone")
+    require_e164(organization, "telephone", "Organization phone")
     optional_string(organization, "email", "organization.email")
     optional_string(organization, "founding_date", "organization.founding_date")
     address = organization.get("address")
@@ -1504,6 +1582,7 @@ def validate_site_organization(organization: Any) -> None:
             raise DocumentValidationError("organization.address must be an object.")
         for field in ("street", "locality", "region", "postal_code", "country"):
             optional_string(address, field, f"organization.address.{field}")
+        _normalize_address_country(address)
     logo = organization.get("logo")
     if logo is not None and not isinstance(logo, dict):
         raise DocumentValidationError("organization.logo must be an object.")

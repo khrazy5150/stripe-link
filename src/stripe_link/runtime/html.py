@@ -813,7 +813,7 @@ def document_title(page: dict[str, Any], offer: dict[str, Any], products_by_id: 
     product = first_offer_product(offer, products_by_id)
     presentation = offer.get("presentation") or {}
     name = str(product.get("name") or presentation.get("headline") or "").strip()
-    brand = str(presentation.get("brand") or "").strip() or PLATFORM_BRAND
+    brand = resolved_brand_label(presentation)
     intent = str(product.get("product_intent") or offer.get("product_intent") or "transaction")
     is_transactional = intent == "transaction"
     include_new = bool((page.get("seo") or {}).get("include_new_in_title"))
@@ -915,7 +915,7 @@ def render_head_seo_tags(
 
     product = first_offer_product(offer, products_by_id)
     presentation = offer.get("presentation") or {}
-    brand_label = str(presentation.get("brand") or "").strip() or PLATFORM_BRAND
+    brand_label = resolved_brand_label(presentation)
     intent = str(product.get("product_intent") or offer.get("product_intent") or "transaction")
     og_type = "product" if intent == "transaction" else "website"
     og_title = title.split(" | ", 1)[0] if " | " in title else title
@@ -987,10 +987,24 @@ def trim_meta(text: str, limit: int = 155) -> str:
 # seller) AND the checkout CTA (real success/cancel URLs). Threaded via a render-scoped holder — like
 # _RENDER_DIMS_INDEX — so head-channel elements don't each need it in their signature.
 _RENDER_STATE: dict[str, str] = {"canonical": "", "robots": "noindex,nofollow"}
+# The Site's Organization identity for this render (plans/SITE_OBJECT.md §2.2) — the single source every
+# page's entity graph derives from: the Organization/WebSite JSON-LD nodes, the Offer.seller reference, and
+# the brand shown in the title suffix / og:site_name when the offer names no brand. Render-scoped like
+# _RENDER_STATE; empty when the page has no Site yet (graceful — the renderer falls back to the offer brand).
+_RENDER_ORG: dict[str, Any] = {}
 # A page is indexable only when it is the published artifact in production (SEO-02/21). Everything else —
 # the tenant's preview, any non-production environment — must be kept out of the index.
 INDEXABLE_ROBOTS = "index,follow,max-image-preview:large,max-snippet:-1"
 NOINDEX_ROBOTS = "noindex,nofollow"
+
+
+def resolved_brand_label(presentation: dict[str, Any]) -> str:
+    """The storefront brand for the title suffix / og:site_name. The offer's explicit brand wins; otherwise
+    the Site's Organization name (the single-source business identity); otherwise the platform brand."""
+    brand = str((presentation or {}).get("brand") or "").strip()
+    if brand:
+        return brand
+    return str(_RENDER_ORG.get("name") or "").strip() or PLATFORM_BRAND
 
 
 def render_page(
@@ -1004,6 +1018,7 @@ def render_page(
     offers_by_id: dict[str, dict[str, Any]] | None = None,
     canonical_url: str = "",
     indexable: bool = False,
+    site: dict[str, Any] | None = None,
 ) -> str:
     services_by_id = services_by_id or {}
     offers_by_id = offers_by_id or {str(offer.get("offer_id") or ""): offer}
@@ -1018,6 +1033,10 @@ def render_page(
     ))
     _RENDER_STATE["canonical"] = canonical_page_url(canonical_url)
     _RENDER_STATE["robots"] = INDEXABLE_ROBOTS if indexable else NOINDEX_ROBOTS
+    _RENDER_ORG.clear()
+    organization = (site or {}).get("organization")
+    if isinstance(organization, dict):
+        _RENDER_ORG.update(organization)
     try:
         return _render_page_body(
             page, offer, products_by_id, selected_prices, checkout_url, api_base_url,
@@ -1027,6 +1046,7 @@ def render_page(
         _RENDER_DIMS_INDEX.clear()
         _RENDER_STATE["canonical"] = ""
         _RENDER_STATE["robots"] = NOINDEX_ROBOTS
+        _RENDER_ORG.clear()
 
 
 def canonical_page_url(url: str) -> str:
@@ -1998,6 +2018,15 @@ def render_structured_data(
     * No LocalBusiness/Service. That needs the canonical Business Profile's NAP, which does not exist yet.
     """
     blocks: list[str] = []
+    # Organization + WebSite first: the canonical business entity (plans/SITE_OBJECT.md §2.2) the Product's
+    # seller and every other node references by @id. Emitted only when the page has a resolved Site identity.
+    origin = canonical_origin()
+    organization_ld = organization_json_ld(_RENDER_ORG, origin)
+    if organization_ld:
+        blocks.append(organization_ld)
+        website_ld = website_json_ld(_RENDER_ORG, origin)
+        if website_ld:
+            blocks.append(website_ld)
     product_ld = product_json_ld(page, offer, products_by_id, services_by_id)
     if product_ld:
         blocks.append(product_ld)
@@ -2089,12 +2118,16 @@ def product_json_ld(
     condition = PRODUCT_CONDITIONS.get(str(product.get("condition") or "").strip().lower())
     if condition:
         offer_payload["itemCondition"] = condition
-    # Seller stub identifying the responsible tenant (SEO-22). @id anchors to the tenant's own root domain
-    # (interim: the page's origin); omitted rather than dangling when there's no canonical.
+    # Seller = the responsible business (SEO-22). Prefer the Site's Organization (the single-source identity);
+    # its @id resolves to the Organization node this page also emits, so the seller is a real linked entity,
+    # not a bare stub. Fall back to the offer's brand when the page has no Site. @id anchors to the canonical
+    # origin; omitted rather than dangling when there's no canonical.
     presentation = offer.get("presentation") or {}
-    brand_label = str(presentation.get("brand") or "").strip()
-    if brand_label:
-        seller: dict[str, Any] = {"@type": "OnlineStore", "name": brand_label}
+    org_name = str(_RENDER_ORG.get("name") or "").strip()
+    seller_name = org_name or str(presentation.get("brand") or "").strip()
+    if seller_name:
+        seller_type = (str(_RENDER_ORG.get("entity_type") or "").strip() or "OnlineStore") if org_name else "OnlineStore"
+        seller: dict[str, Any] = {"@type": seller_type, "name": seller_name}
         origin = canonical_origin()
         if origin:
             seller["@id"] = f"{origin}/#organization"
@@ -2107,6 +2140,88 @@ def product_json_ld(
         offer_payload["hasMerchantReturnPolicy"] = return_policy
     payload["offers"] = offer_payload
     return json_ld_dump(payload)
+
+
+def _postal_address_ld(address: Any) -> dict[str, Any]:
+    """A schema.org PostalAddress from the Organization's address, or {} when nothing usable is present."""
+    if not isinstance(address, dict):
+        return {}
+    node: dict[str, Any] = {"@type": "PostalAddress"}
+    for source, target in (
+        ("street", "streetAddress"), ("locality", "addressLocality"), ("region", "addressRegion"),
+        ("postal_code", "postalCode"), ("country", "addressCountry"),
+    ):
+        value = str(address.get(source) or "").strip()
+        if value:
+            node[target] = value
+    return node if len(node) > 1 else {}
+
+
+def organization_json_ld(organization: dict[str, Any], origin: str) -> str:
+    """The Site's Organization node (plans/SITE_OBJECT.md §2.2, SEO-12): the single canonical business entity
+    every page references. Anchored at `{origin}/#organization` so the Offer.seller and the WebSite publisher
+    resolve to it. Emits only verifiable, tenant-stated fields; returns "" without an origin or a name."""
+    name = str((organization or {}).get("name") or "").strip()
+    if not origin or not name:
+        return ""
+    entity_type = str(organization.get("entity_type") or "").strip() or "Organization"
+    payload: dict[str, Any] = {
+        "@context": "https://schema.org",
+        "@type": entity_type,
+        "@id": f"{origin}/#organization",
+        "name": name,
+        "url": f"{origin}/",
+    }
+    legal_name = str(organization.get("legal_name") or "").strip()
+    if legal_name:
+        payload["legalName"] = legal_name
+    description = str(organization.get("description") or "").strip()
+    if description:
+        payload["description"] = description
+    logo = organization.get("logo")
+    logo_url = str(logo.get("url") or "").strip() if isinstance(logo, dict) else ""
+    if logo_url:
+        logo_node: dict[str, Any] = {"@type": "ImageObject", "url": logo_url}
+        for dim in ("width", "height"):
+            if isinstance(logo.get(dim), int) and logo[dim] > 0:
+                logo_node[dim] = logo[dim]
+        payload["logo"] = logo_node
+    telephone = str(organization.get("telephone") or "").strip()
+    if telephone:
+        payload["telephone"] = telephone
+    email = str(organization.get("email") or "").strip()
+    if email:
+        payload["email"] = email
+    founding_date = str(organization.get("founding_date") or "").strip()
+    if founding_date:
+        payload["foundingDate"] = founding_date
+    address = _postal_address_ld(organization.get("address"))
+    if address:
+        payload["address"] = address
+    area_served = [a.strip() for a in (organization.get("area_served") or []) if isinstance(a, str) and a.strip()]
+    if area_served:
+        payload["areaServed"] = area_served
+    same_as = [str(e.get("url")).strip() for e in (organization.get("same_as") or [])
+               if isinstance(e, dict) and str(e.get("url") or "").strip()]
+    if same_as:
+        payload["sameAs"] = same_as
+    return json_ld_dump(payload)
+
+
+def website_json_ld(organization: dict[str, Any], origin: str) -> str:
+    """The WebSite node (SEO-12) tying the public site to its publishing Organization. Returns "" without an
+    origin or an Organization name (the WebSite has nothing to attribute to otherwise)."""
+    name = str((organization or {}).get("name") or "").strip()
+    if not origin or not name:
+        return ""
+    return json_ld_dump({
+        "@context": "https://schema.org",
+        "@type": "WebSite",
+        "@id": f"{origin}/#website",
+        "url": f"{origin}/",
+        "name": name,
+        "publisher": {"@id": f"{origin}/#organization"},
+    })
 
 
 def merchant_return_policy(policy: dict[str, Any]) -> dict[str, Any] | None:

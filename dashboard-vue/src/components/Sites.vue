@@ -129,7 +129,12 @@
             </label>
             <label class="offer-field"><span>Description</span><textarea v-model.trim="form.org.description" rows="2" /></label>
             <div class="offer-two-column">
-              <label class="offer-field"><span>Phone</span><input v-model.trim="form.org.telephone" type="tel" placeholder="+1 555 010 0100" /></label>
+              <label class="offer-field">
+                <span>Phone</span>
+                <input v-model.trim="form.org.telephone" type="tel" placeholder="+1 555 010 0100"
+                       @blur="form.org.telephone = normalizeE164(form.org.telephone)" />
+                <small v-if="orgPhoneError" class="field-error">{{ orgPhoneError }}</small>
+              </label>
               <label class="offer-field"><span>Email</span><input v-model.trim="form.org.email" type="email" /></label>
             </div>
             <div class="offer-two-column">
@@ -166,6 +171,7 @@ import { apiRequest } from "../api/client";
 import { useSitesStore, organizationFromBusiness, suggestSubdomain } from "../stores/sites";
 import { useProfileStore } from "../stores/profile";
 import { useSubdomainCheck } from "../composables/useSubdomainCheck";
+import { normalizeE164, phoneError } from "../utils/phone";
 
 const store = useSitesStore();
 const profileStore = useProfileStore();
@@ -181,8 +187,9 @@ const editCheck = useSubdomainCheck();
 
 const form = reactive({ name: "", subdomain: "", org: { name: "", legal_name: "", entity_type: "OnlineStore", description: "", telephone: "", email: "", address: { locality: "", region: "" } } });
 
+const orgPhoneError = computed(() => phoneError(form.org.telephone));
 const canCreate = computed(() => !store.saving && createCheck.state.available);
-const canSaveEdit = computed(() => !store.saving && editCheck.state.available);
+const canSaveEdit = computed(() => !store.saving && editCheck.state.available && !orgPhoneError.value);
 
 async function loadPages() {
   try {
@@ -238,7 +245,7 @@ async function saveEdit() {
     legal_name: form.org.legal_name || undefined,
     entity_type: form.org.entity_type || undefined,
     description: form.org.description || undefined,
-    telephone: form.org.telephone || undefined,
+    telephone: form.org.telephone ? normalizeE164(form.org.telephone) : undefined,
     email: form.org.email || undefined,
     address: Object.fromEntries(Object.entries(form.org.address).filter(([, v]) => v)),
   };

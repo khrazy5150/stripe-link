@@ -120,6 +120,91 @@ class StructuredDataTests(unittest.TestCase):
         self.assertTrue(ld_blocks(html), "payload must still parse as JSON")
 
 
+class SiteOrganizationIdentityTests(unittest.TestCase):
+    """The Site's Organization is the single source of the page's entity graph (plans/SITE_OBJECT.md §2.2):
+    the Organization + WebSite JSON-LD nodes, the Offer.seller reference, and the brand fallback."""
+
+    ORG = {
+        "name": "Axel Mart",
+        "entity_type": "OnlineStore",
+        "legal_name": "Axel Mart LLC",
+        "description": "Your neighborhood shop.",
+        "telephone": "+12065654418",
+        "email": "hi@axelmart.example",
+        "address": {"street": "1493 Osage St", "locality": "Denver", "region": "Colorado",
+                    "postal_code": "80204", "country": "US"},
+        "same_as": [{"url": "https://instagram.com/axelmart"}],
+    }
+    ORIGIN = "https://axel-mart.jbay.uk"
+
+    def _render(self, site=None, canonical_url="https://axel-mart.jbay.uk/p/creatine"):
+        offer = load_fixture("offer-creatine-standard.json")
+        product = load_fixture("product-creatine-gummies.json")
+        page = load_fixture("page-creatine-standard.json")
+        page["goal"] = "search_seo"
+        page["sections"].append({"id": "structured-data", "type": "structured_data"})
+        return render_page(page, offer, {product["product_id"]: product},
+                           canonical_url=canonical_url, site=site)
+
+    def _node(self, html, type_name):
+        return next((b for b in ld_blocks(html)
+                     if b.get("@type") == type_name
+                     or (isinstance(b.get("@type"), list) and type_name in b["@type"])), None)
+
+    def test_organization_node_from_site(self):
+        org = self._node(self._render(site={"organization": self.ORG}), "OnlineStore")
+        self.assertIsNotNone(org)
+        self.assertEqual(org["@id"], f"{self.ORIGIN}/#organization")
+        self.assertEqual(org["name"], "Axel Mart")
+        self.assertEqual(org["url"], f"{self.ORIGIN}/")
+        self.assertEqual(org["legalName"], "Axel Mart LLC")
+        self.assertEqual(org["address"]["@type"], "PostalAddress")
+        self.assertEqual(org["address"]["addressLocality"], "Denver")
+        self.assertEqual(org["address"]["addressCountry"], "US")
+        self.assertEqual(org["sameAs"], ["https://instagram.com/axelmart"])
+
+    def test_website_node_publishes_organization(self):
+        website = self._node(self._render(site={"organization": self.ORG}), "WebSite")
+        self.assertIsNotNone(website)
+        self.assertEqual(website["@id"], f"{self.ORIGIN}/#website")
+        self.assertEqual(website["publisher"]["@id"], f"{self.ORIGIN}/#organization")
+
+    def test_offer_seller_resolves_to_the_organization(self):
+        html = self._render(site={"organization": self.ORG})
+        product = next(b for b in ld_blocks(html) if b.get("@type") == "Product")
+        seller = product["offers"]["seller"]
+        self.assertEqual(seller["@id"], f"{self.ORIGIN}/#organization")
+        self.assertEqual(seller["name"], "Axel Mart")
+
+    def test_no_site_emits_no_organization_or_website(self):
+        html = self._render(site=None)
+        types = [b.get("@type") for b in ld_blocks(html)]
+        self.assertNotIn("OnlineStore", types)
+        self.assertNotIn("WebSite", types)
+        # The offer names no brand and there's no Organization, so there's no seller stub to dangle either.
+        product = next(b for b in ld_blocks(html) if b.get("@type") == "Product")
+        self.assertNotIn("seller", product["offers"])
+
+    def test_org_name_is_the_og_site_name_fallback(self):
+        # The offer names no brand; the business name (not the platform) fills og:site_name.
+        head = self._render(site={"organization": self.ORG}).split("<body>")[0]
+        self.assertIn('property="og:site_name" content="Axel Mart"', head)
+
+    def test_org_name_fills_the_title_suffix_when_no_explicit_title(self):
+        # With no tenant-set title, the formula's brand suffix is the Organization name, not the platform.
+        offer = load_fixture("offer-creatine-standard.json")
+        product = load_fixture("product-creatine-gummies.json")
+        page = load_fixture("page-creatine-standard.json")
+        page.pop("seo", None)
+        html = render_page(page, offer, {product["product_id"]: product},
+                           canonical_url=f"{self.ORIGIN}/p/creatine", site={"organization": self.ORG})
+        self.assertIn("| Axel Mart</title>", html.split("<body>")[0])
+
+    def test_organization_needs_a_canonical_origin_to_anchor(self):
+        # No canonical origin → nowhere to anchor the @id, so the node is omitted rather than left dangling.
+        self.assertIsNone(self._node(self._render(site={"organization": self.ORG}, canonical_url=""), "OnlineStore"))
+
+
 class ProductMarkupRichnessTests(unittest.TestCase):
     """Thin markup is valid but ignored: Google showed no rich result for name+description+AggregateOffer.
     A merchant listing needs a specific buyable price and enough identifying detail."""

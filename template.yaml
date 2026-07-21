@@ -859,6 +859,9 @@ Resources:
       CodeUri: src/
       Handler: handlers.page_render.handler
       Description: Renders page JSON, offer JSON, and product JSON into HTML.
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref SitesTable
       Events:
         PageRender:
           Type: Api
@@ -1044,6 +1047,8 @@ Resources:
             TableName: !Ref ProductsTable
         - DynamoDBReadPolicy:
             TableName: !Ref ServicesTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref SitesTable
         - S3CrudPolicy:
             BucketName: !Ref PagesBucket
         - S3CrudPolicy:

@@ -7,6 +7,8 @@ from pathlib import Path
 from stripe_link.domain.documents import (
     canonical_product_document,
     DocumentValidationError,
+    normalize_country,
+    normalize_e164,
     validate_app_config,
     validate_global_billing_config,
     validate_offer_document,
@@ -87,6 +89,56 @@ class DocumentValidationTests(unittest.TestCase):
             doc["business"] = bad
             with self.assertRaises(DocumentValidationError):
                 validate_user_profile(doc)
+
+    def test_normalize_e164_strips_formatting_and_recovers_country_code(self):
+        self.assertEqual(normalize_e164("+1 (206) 565-4418"), "+12065654418")
+        self.assertEqual(normalize_e164("0044 20 7946 0018"), "+442079460018")
+        self.assertEqual(normalize_e164("12065654418"), "+12065654418")  # NANP: 1 + 10 digits → +1
+        self.assertEqual(normalize_e164("(206) 565-4418"), "+12065654418")  # bare 10-digit NANP → +1
+        self.assertEqual(normalize_e164(""), "")
+        self.assertEqual(normalize_e164("5554418"), "5554418")  # too short for NANP → left for validation
+
+    def test_business_phone_is_normalized_in_place_to_e164(self):
+        doc = self._user_profile()
+        doc["business"] = {"name": "Luxe Spa", "phone": "12065654418"}  # legacy value the user reported
+        validate_user_profile(doc)
+        self.assertEqual(doc["business"]["phone"], "+12065654418")
+
+    def test_business_phone_that_is_not_recoverable_is_rejected(self):
+        # A fragment too short to be a NANP number (and no +) can't be attributed to a country.
+        doc = self._user_profile()
+        doc["business"] = {"name": "Luxe Spa", "phone": "555-4418"}
+        with self.assertRaises(DocumentValidationError):
+            validate_user_profile(doc)
+
+    def test_site_organization_telephone_is_normalized_to_e164(self):
+        site = self._site(organization={"name": "Axel Mart", "telephone": "+1 206-565-4418"})
+        validate_site(site)
+        self.assertEqual(site["organization"]["telephone"], "+12065654418")
+
+    def test_site_organization_telephone_rejects_non_e164(self):
+        with self.assertRaises(DocumentValidationError):
+            validate_site(self._site(organization={"name": "Axel Mart", "telephone": "555-4418"}))
+
+    def test_normalize_country_maps_to_alpha2(self):
+        self.assertEqual(normalize_country("United States"), "US")
+        self.assertEqual(normalize_country("U.S.A."), "US")
+        self.assertEqual(normalize_country("united kingdom"), "GB")
+        self.assertEqual(normalize_country("us"), "US")
+        self.assertEqual(normalize_country("US"), "US")
+        self.assertEqual(normalize_country(""), "")
+        self.assertEqual(normalize_country("Freedonia"), "Freedonia")  # unknown passes through unchanged
+
+    def test_business_address_country_is_normalized_to_alpha2(self):
+        doc = self._user_profile()
+        doc["business"] = {"name": "Axel Mart", "address": {"locality": "Denver", "country": "United States"}}
+        validate_user_profile(doc)
+        self.assertEqual(doc["business"]["address"]["country"], "US")
+
+    def test_site_organization_address_country_is_normalized_to_alpha2(self):
+        site = self._site(organization={"name": "Axel Mart", "address": {"locality": "Denver", "country": "United States"}})
+        validate_site(site)
+        self.assertEqual(site["organization"]["address"]["country"], "US")
 
     def test_accepts_offer_presentation_brand(self):
         self.offer.setdefault("presentation", {})["brand"] = "Luxe Wellness"

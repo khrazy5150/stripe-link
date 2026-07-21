@@ -61,7 +61,10 @@
           </label>
           <label class="offer-field">
             <span>Business Phone</span>
-            <input v-model.trim="form.business.phone" type="tel" placeholder="+1 555 010 0100" />
+            <input v-model.trim="form.business.phone" type="tel" placeholder="+1 555 010 0100"
+                   @blur="form.business.phone = normalizeE164(form.business.phone)" />
+            <small v-if="businessPhoneError" class="field-error">{{ businessPhoneError }}</small>
+            <small v-else>International format, e.g. +12065551234 — same standard as your account phone.</small>
           </label>
         </div>
         <div class="offer-field">
@@ -83,7 +86,10 @@
           </div>
           <div class="offer-two-column">
             <input v-model.trim="form.business.address.postal_code" type="text" placeholder="Postal code" />
-            <input v-model.trim="form.business.address.country" type="text" placeholder="Country (e.g. US)" />
+            <select v-model="form.business.address.country" class="country-select">
+              <option value="">Country…</option>
+              <option v-for="c in countries" :key="c.code" :value="c.code">{{ c.name }} ({{ c.code }})</option>
+            </select>
           </div>
         </fieldset>
       </div>
@@ -112,6 +118,10 @@
 import { computed, reactive, ref } from "vue";
 import { apiRequest, getAuthSession, getTenantId } from "../api/client";
 import { formatEpochDate, statusLabel } from "../utils/format";
+import { normalizeE164, phoneError } from "../utils/phone";
+import { COUNTRIES, normalizeCountry } from "../utils/countries";
+
+const countries = COUNTRIES;
 
 const session = getAuthSession() || {};
 const userId = session.user_id || "";
@@ -146,7 +156,7 @@ function cleanBusiness(business) {
   );
   const result = {};
   if (business.name) result.name = business.name;
-  if (business.phone) result.phone = business.phone;
+  if (business.phone) result.phone = normalizeE164(business.phone);
   if (brands.length) result.brands = brands;
   if (Object.keys(address).length) result.address = address;
   return Object.keys(result).length ? result : null;
@@ -154,6 +164,7 @@ function cleanBusiness(business) {
 
 const formatDate = formatEpochDate;
 const displayNamePlaceholder = computed(() => `${form.first_name} ${form.last_name}`.trim() || "Your name");
+const businessPhoneError = computed(() => phoneError(form.business.phone));
 
 function applyProfile(profile) {
   rawDoc.value = profile || {};
@@ -169,7 +180,7 @@ function applyProfile(profile) {
     brands: Array.isArray(business.brands) ? [...business.brands] : [],
     address: {
       street: address.street || "", locality: address.locality || "", region: address.region || "",
-      postal_code: address.postal_code || "", country: address.country || "",
+      postal_code: address.postal_code || "", country: normalizeCountry(address.country),
     },
   };
 }
@@ -200,6 +211,10 @@ async function load() {
 async function save() {
   if (!userId) {
     error.value = "Could not determine your user account. Sign out and back in.";
+    return;
+  }
+  if (businessPhoneError.value) {
+    error.value = businessPhoneError.value;
     return;
   }
   saving.value = true;

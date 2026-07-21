@@ -1,3 +1,5 @@
+import os
+
 from stripe_link.common import error_response, json_response, parse_json_body
 from stripe_link.domain.documents import (
     DocumentValidationError,
@@ -7,6 +9,7 @@ from stripe_link.domain.documents import (
     validate_service,
 )
 from stripe_link.domain.pricing import PricingError
+from stripe_link.repositories.documents import sites_repository
 from stripe_link.runtime.html import (
     RenderError,
     accessibility_warnings,
@@ -14,9 +17,10 @@ from stripe_link.runtime.html import (
     render_page,
     structured_data_warnings,
 )
+from stripe_link.runtime.publishing import find_site_for_page
 
 
-def handler(event, context):
+def handler(event, context, *, sites_repo=None):
     try:
         body = parse_json_body(event)
         page = body.get("page")
@@ -81,9 +85,15 @@ def handler(event, context):
         for extra in carousel_offers:
             if isinstance(extra, dict) and extra.get("offer_id"):
                 offers_by_id[str(extra["offer_id"])] = extra
+        # Resolve the page's Site so the live preview shows the same Organization entity graph the published
+        # artifact will (the preview IS the published renderer). Optional/graceful — no Site, no change.
+        if sites_repo is None and os.environ.get("SITES_TABLE"):
+            sites_repo = sites_repository()
+        site = find_site_for_page(sites_repo, str(page.get("tenant_id") or ""), str(page.get("page_id") or ""))
         html = render_page(
             page, offer, products_by_id, selected_prices, checkout_url, api_base_url,
             services_by_id=services_by_id, offers_by_id=offers_by_id, canonical_url=canonical_url,
+            site=site,
         )
         # Page health, alongside the render: what would keep this page's structured data from earning a rich
         # result. Advisory only — the builder surfaces it, nothing blocks on it.

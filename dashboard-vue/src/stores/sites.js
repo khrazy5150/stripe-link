@@ -1,5 +1,6 @@
 import { defineStore } from "pinia";
 import { apiRequest, getApiEnvironment, getTenantId } from "../api/client";
+import { isE164, normalizeE164 } from "../utils/phone";
 
 const SITE_SCHEMA_VERSION = "2026-07-20";
 
@@ -17,10 +18,13 @@ function pruneEmpty(object) {
 // Consolidate the tenant's business identity (from the Profile "business" block) into a Site Organization.
 export function organizationFromBusiness(business = {}) {
   const address = business.address || {};
+  // Only carry a valid E.164 phone into the derived Organization — a legacy malformed number must not block
+  // the default-Site creation (the API validates the telephone strictly). Directly-entered phones are
+  // validated in the form instead.
   return pruneEmpty({
     name: business.name || "",
     entity_type: "OnlineStore",
-    telephone: business.phone || "",
+    telephone: isE164(business.phone) ? normalizeE164(business.phone) : "",
     email: business.email || "",
     address: pruneEmpty({
       street: address.street || "", locality: address.locality || "", region: address.region || "",
