@@ -72,8 +72,17 @@ class NormalizeAndValidateTests(unittest.TestCase):
         with self.assertRaises(CustomDomainError):
             assert_valid_domain("example")
 
+    def test_assert_valid_domain_rejects_apex(self):
+        # Apex can't hold the routing CNAME — reject until 2.6b rather than let a tenant hit a dead end.
+        for apex in ("example.com", "automizepro.com", "example.co.uk"):
+            with self.assertRaises(CustomDomainError) as ctx:
+                assert_valid_domain(apex)
+            self.assertIn("subdomain", ctx.exception.message.lower())
+
     def test_assert_valid_domain_accepts_subdomain(self):
         assert_valid_domain("shop.example.com")
+        assert_valid_domain("www.automizepro.com")
+        assert_valid_domain("shop.example.co.uk")   # subdomain under a multi-part TLD
 
 
 class CloudflareRequestTests(unittest.TestCase):

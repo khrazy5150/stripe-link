@@ -38,11 +38,33 @@ def build_domain(apex_domain: str, subdomain_label: str) -> str:
     return f"{label}.{apex}"
 
 
+# Common two-part public suffixes, so an apex like `example.co.uk` (3 labels) is treated as apex, not a
+# subdomain. Not exhaustive — the real fix is Public Suffix List handling when apex support lands (2.6b).
+_MULTIPART_TLDS = frozenset({
+    "co.uk", "org.uk", "gov.uk", "ac.uk", "me.uk", "net.uk", "ltd.uk", "plc.uk", "sch.uk",
+    "com.au", "net.au", "org.au", "edu.au", "gov.au", "co.nz", "net.nz", "org.nz",
+    "co.za", "org.za", "co.jp", "or.jp", "ne.jp", "com.br", "com.mx", "co.in", "com.sg", "com.hk", "com.tr",
+})
+
+
+def is_apex_domain(domain: str) -> bool:
+    """True if `domain` is a registrable apex (e.g. example.com, example.co.uk) rather than a subdomain. Apex
+    can't hold the routing CNAME (DNS forbids CNAME-at-apex), so it isn't supported until 2.6b."""
+    labels = domain.split(".")
+    if ".".join(labels[-2:]) in _MULTIPART_TLDS:
+        return len(labels) <= 3
+    return len(labels) <= 2
+
+
 def assert_valid_domain(domain: str) -> None:
     if not DOMAIN_PATTERN.match(domain):
         raise CustomDomainError(f"'{domain}' is not a valid domain name.", status_code=400)
-    if domain.count(".") < 1:
-        raise CustomDomainError("A subdomain is required (e.g. 'shop.example.com'), not a bare domain.", status_code=400)
+    if is_apex_domain(domain):
+        raise CustomDomainError(
+            "Apex domains aren't supported yet — use a subdomain like 'shop.example.com' or 'www.example.com'. "
+            "Apex support is coming.",
+            status_code=400,
+        )
 
 
 def cloudflare_request(

@@ -205,9 +205,28 @@ is additive (existing pages keep working throughout — incremental migration).
 - Breadcrumbs (SEO-11) + visible nav rendering from `Site.navigation`. Internal linking + collection/category
   pages (SEO-13). Thin-content gate (SEO-08).
 
+**Phase 2.5b — Storefront homepage builder (COMMITTED, not yet scheduled).**
+- A purpose-built homepage/`OnlineStore` page (brand hero, nav, lists the Site's offers/products) — a real
+  `page_type: homepage`, not a landing page repurposed at the `/` slug (today's interim). The schema already
+  reserves `homepage`/`collection`/`category`/`about` page types; this builds the editor + renderer for them.
+  Makes a Site feel like a website, not a single funnel page. Overlaps 2.5 (collection pages) and 2.7 (profile).
+
 **Phase 2.6 — Clean multi-page slug routing (the edge-infra slice).**
 - Edge route manifest (CloudFront KeyValueStore / path-aware Worker); `(hostname, path) → page_id`. Make
   `artifact_paths` slug-aware or rewrite at the edge. This is the large infra lift, kept separable.
+- **Serves the WHOLE funnel on the one custom domain:** upsell/downsell/thank-you become slugs under the Site's
+  domain (`store.example.com/upsell`, `/thank-you`). The `post-checkout/next` redirect + Stripe success/cancel
+  URLs regenerate from the Site's canonical host + slug, so the buyer never switches domains mid-funnel. Funnel
+  page_types stay `noindex,follow`. (Until 2.6, homepage-only serving means a buyer bounces from the custom
+  domain to artifact/jbay.uk URLs at checkout — the known gap this closes.)
+
+**Phase 2.6b — Apex / root domain support (COMMITTED — REQUIRED, not optional).**
+- The product is a website builder for SEO; tenants must be able to use `example.com`, not only a subdomain.
+- Blocker: our routing uses a CNAME (`domain → domains.jbay.uk`), and DNS forbids a CNAME at the apex. Needs
+  ALIAS/ANAME/CNAME-flattening handling (Route 53 ALIAS, Cloudflare flattening) with provider-specific
+  instructions, and an apex↔`www` redirect (standard SaaS pattern). Also: tighten `assert_valid_domain`, which
+  currently ACCEPTS an apex it can't route (latent dead-end — flag/reject apex clearly until 2.6b ships).
+- Subdomain custom domains (the current bridge) stay as-is; apex is additive.
 
 **Phase 2.7 — Tenant/seller profile page.**
 - `CollectionPage` / `OnlineStore` profile served from the Site's canonical domain (TP-04/05); verified
@@ -215,6 +234,17 @@ is additive (existing pages keep working throughout — incremental migration).
 
 Ordering note: **2.1–2.4 deliver the bulk of the SEO value on single-host Sites without the edge lift.** 2.6 is
 what enables clean multi-page paths and can proceed in parallel once 2.1 lands.
+
+### Documented workflows & decisions (confirmed 2026-07-21)
+
+- **Distinct domains per landing page = distinct Sites.** The Site model attaches ONE custom domain to a Site
+  (which serves its pages). To give separate landing pages their own domains (e.g. separate micro-brands), make
+  each its own **Site** (a Site can be a single page) and connect a domain to each. This is the supported
+  pattern; the current bridge already handles it. The legacy page-scoped `/custom-domains` API still exists but
+  was never surfaced in the dashboard and is superseded.
+- **Homepage is interim.** Until 2.5b, the Site "homepage" is whichever landing page is designated at the `/`
+  slug. A real homepage builder is committed (2.5b).
+- **Apex domains are committed (2.6b), required** — not a maybe. Subdomain-only is a temporary limitation.
 
 ---
 
