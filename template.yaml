@@ -16,6 +16,10 @@ Parameters:
     AllowedValues:
       - jb
     Description: Prefix used to isolate stripe-link resources from stripe-cart.
+  PlatformHostingDomain:
+    Type: String
+    Default: jbay.uk
+    Description: Registrable domain for tenant free-tier Sites (Zone B, always noindex). A tenant's platform_hostname is <name>.<this>. Must differ from the platform's own domain (juniorbay.com). See plans/SITE_OBJECT.md.
   StripeClientId:
     Type: String
     Default: ""
@@ -131,6 +135,10 @@ Globals:
         OFFERS_TABLE: !Ref OffersTable
         COUPONS_TABLE: !Ref CouponsTable
         PAGES_TABLE: !Ref PagesTable
+        SITES_TABLE: !Ref SitesTable
+        # Registrable domain for tenant free-tier Sites (Zone B, always noindex). Read from config, never
+        # hardcoded, so it can change without a code change. See plans/SITE_OBJECT.md §6.
+        PLATFORM_HOSTING_DOMAIN: !Ref PlatformHostingDomain
         CHECKOUT_SESSIONS_TABLE: !Ref CheckoutSessionsTable
         ORDERS_TABLE: !Ref OrdersTable
         REFUNDS_TABLE: !Ref RefundsTable
@@ -708,6 +716,56 @@ Resources:
           Properties:
             RestApiId: !Ref RestApi
             Path: /offers/{offer_id}/status
+            Method: PATCH
+
+  SitesFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${ProjectPrefix}-sites-api-${Environment}"
+      CodeUri: src/
+      Handler: handlers.sites.handler
+      Description: JSON-first Sites API (the public aggregate root — plans/SITE_OBJECT.md).
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref SitesTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref PagesTable
+      Events:
+        SitesList:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /sites
+            Method: GET
+        SitesCreate:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /sites
+            Method: POST
+        SitesSubdomainCheck:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /sites/subdomain
+            Method: GET
+        SitesGet:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /sites/{site_id}
+            Method: GET
+        SitesDelete:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /sites/{site_id}
+            Method: DELETE
+        SiteStatus:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /sites/{site_id}/status
             Method: PATCH
 
   CouponsFunction:
@@ -2552,6 +2610,17 @@ Resources:
         SSEEnabled: true
       StreamSpecification:
         StreamViewType: NEW_AND_OLD_IMAGES
+      AttributeDefinitions: *DocumentAttributeDefinitions
+      KeySchema: *DocumentKeySchema
+      GlobalSecondaryIndexes: *DocumentGlobalSecondaryIndexes
+
+  SitesTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "${ProjectPrefix}-sites-${Environment}"
+      BillingMode: PAY_PER_REQUEST
+      SSESpecification:
+        SSEEnabled: true
       AttributeDefinitions: *DocumentAttributeDefinitions
       KeySchema: *DocumentKeySchema
       GlobalSecondaryIndexes: *DocumentGlobalSecondaryIndexes

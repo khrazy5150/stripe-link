@@ -59,7 +59,9 @@ This keeps service catalog setup separate from appointment operations while stil
 
 `global-billing-config.json` is the S3-backed platform billing document. It owns platform fee tiers and payment processing schedules used by `/prices/calculate`, allowing fee changes without redeploying Lambda code.
 
-`Site.schema.json` is a collection document that groups one or more Pages under a shared root domain, enabling subfolder-based URL routing for SEO domain authority consolidation. A Site is the layer between a tenant and their pages when the tenant owns a custom domain and wants each page to inherit that domain's authority rather than being served from an isolated subdomain or short URL.
+`Site.schema.json` was **redesigned (v2) as the public aggregate root** — see `plans/SITE_OBJECT.md` for the full ADR + plan of action, `plans/SITE_MIGRATION.md`, and `plans/SITE_EXAMPLES.md`. A Site is now "the tenant's public website": it owns hostname(s), one explicit `organization` identity (the single source every page's structured data derives from), branding, navigation, SEO, analytics, integrations, indexing eligibility, and a slug→page route map. Tenant owns billing/users/Stripe; Page owns content/layout/offer-reference/role; Offer owns commerce. Key changes from v1: `domain` → `hosting` (platform hostname retained + optional custom domain; canonical follows the custom domain); `seo_defaults.structured_data` → a first-class `organization` object; added `navigation`, `branding`, `indexing` (eligibility gate), and per-page `page_type`. **Indexing consensus: platform hosts are always `noindex`; a Site is index-eligible only with a verified custom domain AND a verified Stripe Connect account.** The integration-mode notes below carry over unchanged.
+
+Historical v1 note (superseded): A Site was originally framed only as a collection grouping Pages under a shared domain for subfolder routing.
 
 Important separation between Site and Page:
 

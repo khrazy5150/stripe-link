@@ -12,6 +12,7 @@ from stripe_link.domain.documents import (
     validate_offer_document,
     validate_page_document,
     validate_product_document,
+    validate_site,
     validate_user_preferences,
     validate_user_profile,
 )
@@ -105,6 +106,43 @@ class DocumentValidationTests(unittest.TestCase):
         self.product["image_dims"] = ["not", "a", "map"]
         with self.assertRaises(DocumentValidationError):
             validate_product_document(self.product)
+
+    def _site(self, **kw):
+        site = {
+            "schema_version": "2026-07-20", "document_type": "site", "site_id": "site_ABC123",
+            "tenant_id": "t1", "environment": "live", "name": "Axel Mart", "status": "active",
+            "hosting": {"type": "platform", "platform_hostname": "axel-mart.jbay.uk", "custom_domain": None},
+            "organization": {"name": "Axel Mart", "entity_type": "OnlineStore"},
+            "indexing": {"eligibility": "blocked"},
+            "pages": {"/": {"page_id": "page_home01", "page_type": "landing", "enabled": True}},
+            "created_at": 1, "updated_at": 1,
+        }
+        site.update(kw)
+        return site
+
+    def test_accepts_platform_and_custom_sites(self):
+        validate_site(self._site())
+        validate_site(self._site(
+            hosting={"type": "custom", "platform_hostname": "a.jbay.uk", "custom_domain": "axelmart.com",
+                     "verification": {"verified": True}},
+            indexing={"eligibility": "eligible"}))
+
+    def test_rejects_custom_hosting_without_domain(self):
+        with self.assertRaises(DocumentValidationError):
+            validate_site(self._site(hosting={"type": "custom", "platform_hostname": "a.jbay.uk", "custom_domain": None}))
+
+    def test_accepts_site_with_no_pages(self):
+        # The Site is the aggregate root; it can exist before any pages attach.
+        validate_site(self._site(pages={}))
+        site = self._site()
+        del site["pages"]
+        validate_site(site)
+
+    def test_rejects_bad_site_shapes(self):
+        for bad in ({"status": "live"}, {"environment": "prod"}, {"pages": "not-a-map"},
+                    {"pages": {"/": {"page_id": "nope"}}}, {"site_id": "s_1"}):
+            with self.assertRaises(DocumentValidationError):
+                validate_site(self._site(**bad))
 
     def test_accepts_app_config_fixture(self):
         validate_app_config(load_fixture("app-config.json"))

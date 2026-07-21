@@ -56,6 +56,24 @@ class FakeDocumentRepository:
         views[page_id] = int(views.get(page_id, 0)) + amount
 
 
+class FakeSubdomainRegistry:
+    """In-memory stand-in for the global subdomain reservation (first-claim-wins, idempotent per site)."""
+
+    def __init__(self):
+        self.reservations = {}  # label -> site_id
+
+    def owner_of(self, label):
+        return self.reservations.get(str(label or "").strip().lower())
+
+    def reserve(self, label, *, site_id, tenant_id, now):
+        label = str(label or "").strip().lower()
+        owner = self.reservations.get(label)
+        if owner and owner != site_id:
+            return False
+        self.reservations[label] = site_id
+        return True
+
+
 class FakeSimpleRepository:
     def __init__(self, key_field):
         self.key_field = key_field

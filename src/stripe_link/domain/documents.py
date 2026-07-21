@@ -1394,6 +1394,131 @@ def validate_calendar_connection(document: dict[str, Any]) -> None:
         raise DocumentValidationError("Calendar connection status is invalid.")
 
 
+# Site (the public aggregate root — plans/SITE_OBJECT.md, schemas/Site.schema.json v2).
+SITE_STATUSES = {"draft", "active", "archived"}
+SITE_ENVIRONMENTS = {"test", "live"}
+SITE_HOSTING_TYPES = {"platform", "custom"}
+SITE_INDEXING_ELIGIBILITY = {"blocked", "pending", "eligible", "revoked"}
+SITE_ENTITY_TYPES = {
+    "Organization", "OnlineStore", "LocalBusiness", "HomeAndConstructionBusiness",
+    "HealthAndBeautyBusiness", "FoodEstablishment", "ProfessionalService", "Store",
+}
+# Page roles are metadata (JSON-LD @type / sitemap / robots / nav eligibility) — never a renderer branch.
+SITE_PAGE_TYPES = {
+    "landing", "homepage", "collection", "category", "about", "contact", "faq",
+    "legal", "checkout", "thank_you", "blog", "article", "search_results",
+}
+_HOSTNAME_RE = re.compile(r"^(?!https?://)([a-z0-9-]+\.)+[a-z]{2,}$")
+_SITE_SLUG_RE = re.compile(r"^/$|^/[a-z0-9]+(?:-[a-z0-9]+)*(?:/[a-z0-9]+(?:-[a-z0-9]+)*)*$")
+
+
+def validate_site(document: dict[str, Any]) -> None:
+    """The Site: a tenant's public website (plans/SITE_OBJECT.md). Owns hostname(s), the Organization
+    identity, navigation, SEO, indexing eligibility, and a slug->page route map. Enforces the load-bearing
+    constraints; the full shape lives in schemas/Site.schema.json v2."""
+    require_document_fields(document, "site", "site_id")
+    if not re.match(r"^site_[A-Za-z0-9]+$", str(document.get("site_id") or "")):
+        raise DocumentValidationError("Site site_id must match ^site_[A-Za-z0-9]+$.")
+    require_enum(document, "environment", SITE_ENVIRONMENTS, "Site environment")
+    require_string(document, "name", "Site name")
+    require_enum(document, "status", SITE_STATUSES, "Site status")
+
+    # hosting: the Site owns its hostname(s). platform_hostname permanent; custom_domain optional.
+    hosting = document.get("hosting")
+    if not isinstance(hosting, dict):
+        raise DocumentValidationError("Site hosting must be an object.")
+    require_enum(hosting, "type", SITE_HOSTING_TYPES, "Site hosting.type")
+    platform_hostname = hosting.get("platform_hostname")
+    if not isinstance(platform_hostname, str) or not _HOSTNAME_RE.match(platform_hostname):
+        raise DocumentValidationError("Site hosting.platform_hostname must be a bare hostname.")
+    custom_domain = hosting.get("custom_domain")
+    if custom_domain is not None and not (isinstance(custom_domain, str) and _HOSTNAME_RE.match(custom_domain)):
+        raise DocumentValidationError("Site hosting.custom_domain must be a bare hostname or null.")
+    if hosting.get("type") == "custom" and not custom_domain:
+        raise DocumentValidationError("Site hosting.type 'custom' requires a custom_domain.")
+    verification = hosting.get("verification")
+    if verification is not None and not isinstance(verification, dict):
+        raise DocumentValidationError("Site hosting.verification must be an object.")
+
+    validate_site_organization(document.get("organization"))
+
+    navigation = document.get("navigation")
+    if navigation is not None:
+        if not isinstance(navigation, dict):
+            raise DocumentValidationError("Site navigation must be an object.")
+        for key in ("primary", "footer"):
+            menu = navigation.get(key)
+            if menu is not None and (not isinstance(menu, list) or any(not (isinstance(s, str) and _SITE_SLUG_RE.match(s)) for s in menu)):
+                raise DocumentValidationError(f"Site navigation.{key} must be an array of slugs.")
+
+    indexing = document.get("indexing")
+    if indexing is not None:
+        if not isinstance(indexing, dict):
+            raise DocumentValidationError("Site indexing must be an object.")
+        if indexing.get("eligibility") is not None:
+            require_enum(indexing, "eligibility", SITE_INDEXING_ELIGIBILITY, "Site indexing.eligibility")
+
+    # pages: slug-keyed route map. May be empty — a Site can exist before any pages attach (the Site is
+    # the aggregate root; pages hang off it). A page_id belongs to at most one Site (checked at the handler).
+    pages = document.get("pages")
+    if pages is None:
+        pages = {}
+    if not isinstance(pages, dict):
+        raise DocumentValidationError("Site pages must be an object.")
+    for slug, entry in pages.items():
+        if not (isinstance(slug, str) and _SITE_SLUG_RE.match(slug)):
+            raise DocumentValidationError(f"Site page slug '{slug}' is invalid.")
+        if not isinstance(entry, dict):
+            raise DocumentValidationError(f"Site page '{slug}' must be an object.")
+        if not re.match(r"^page_[A-Za-z0-9]+$", str(entry.get("page_id") or "")):
+            raise DocumentValidationError(f"Site page '{slug}' page_id must match ^page_[A-Za-z0-9]+$.")
+        if entry.get("page_type") is not None:
+            require_enum(entry, "page_type", SITE_PAGE_TYPES, f"Site page '{slug}' page_type")
+        optional_string(entry, "label", f"Site page '{slug}' label", max_length=80)
+        optional_bool(entry, "enabled", f"Site page '{slug}' enabled")
+
+    optional_non_negative_int(document, "revision", "Site revision")
+    for field in ("created_at", "updated_at"):
+        if not isinstance(document.get(field), int):
+            raise DocumentValidationError(f"Site {field} must be an integer.")
+
+
+def validate_site_organization(organization: Any) -> None:
+    """The Site's single-source-of-truth public identity (SITE_OBJECT.md §2.1). Every field optional; only
+    verifiable data is ever emitted. Shape-checked so malformed identity can't reach the renderer."""
+    if organization is None:
+        return
+    if not isinstance(organization, dict):
+        raise DocumentValidationError("Site organization must be an object.")
+    optional_string(organization, "name", "organization.name", max_length=120)
+    optional_string(organization, "legal_name", "organization.legal_name", max_length=200)
+    if organization.get("entity_type") is not None:
+        require_enum(organization, "entity_type", SITE_ENTITY_TYPES, "organization.entity_type")
+    optional_string(organization, "description", "organization.description", max_length=500)
+    optional_string(organization, "telephone", "organization.telephone")
+    optional_string(organization, "email", "organization.email")
+    optional_string(organization, "founding_date", "organization.founding_date")
+    address = organization.get("address")
+    if address is not None:
+        if not isinstance(address, dict):
+            raise DocumentValidationError("organization.address must be an object.")
+        for field in ("street", "locality", "region", "postal_code", "country"):
+            optional_string(address, field, f"organization.address.{field}")
+    logo = organization.get("logo")
+    if logo is not None and not isinstance(logo, dict):
+        raise DocumentValidationError("organization.logo must be an object.")
+    for list_field in ("area_served", "currencies"):
+        if organization.get(list_field) is not None:
+            optional_string_list(organization, list_field, f"organization.{list_field}")
+    same_as = organization.get("same_as")
+    if same_as is not None:
+        if not isinstance(same_as, list):
+            raise DocumentValidationError("organization.same_as must be an array.")
+        for entry in same_as:
+            if not isinstance(entry, dict) or not isinstance(entry.get("url"), str):
+                raise DocumentValidationError("Each organization.same_as entry must be an object with a url.")
+
+
 def validate_route(document: dict[str, Any]) -> None:
     require_fields(document, ["schema_version", "document_type", "tenant_id", "short_code", "target_type"])
     if document.get("document_type") != "route":

@@ -197,6 +197,88 @@ def pages_repository(table: Any | None = None) -> DynamoDocumentRepository:
     )
 
 
+def sites_repository(table: Any | None = None) -> DynamoDocumentRepository:
+    return DynamoDocumentRepository(
+        os.environ.get("SITES_TABLE", ""),
+        document_type="site",
+        id_field="site_id",
+        table=table,
+    )
+
+
+class SubdomainRegistry:
+    """Global (cross-tenant) reservation of platform subdomains.
+
+    A Site's platform hostname (`{label}.jbay.uk`) is a real routable address, so its label must be
+    unique across ALL tenants, not just within one. This is enforced with sentinel items in the Sites
+    table (PK=SUBDOMAIN#{label}, SK=RESERVATION) claimed via a conditional put: the first writer wins
+    under concurrency. A reservation is never recycled — once a label points at a Site it keeps
+    pointing there even after a rename, so previously-shared hosted URLs never resolve to someone else.
+    """
+
+    def __init__(self, table_name: str, *, table: Any | None = None):
+        if not table_name:
+            raise RepositoryError("Table name is required.")
+        assert_jb_resource_name(table_name)
+        self.table_name = table_name
+        self._table = table
+
+    @property
+    def table(self):
+        if self._table is None:
+            import boto3
+
+            self._table = boto3.resource("dynamodb").Table(self.table_name)
+        return self._table
+
+    @staticmethod
+    def _key(label: str) -> dict[str, str]:
+        return {"PK": f"SUBDOMAIN#{label}", "SK": "RESERVATION"}
+
+    def owner_of(self, label: str) -> str | None:
+        """Return the site_id that currently owns `label`, or None if the label is unreserved."""
+        label = str(label or "").strip().lower()
+        if not label:
+            return None
+        item = self.table.get_item(Key=self._key(label)).get("Item")
+        return item.get("site_id") if item else None
+
+    def reserve(self, label: str, *, site_id: str, tenant_id: str, now: int) -> bool:
+        """Claim `label` for `site_id`. Return True on success, False if another Site already owns it.
+        Idempotent: re-reserving a label this same Site already owns succeeds."""
+        from botocore.exceptions import ClientError
+
+        label = str(label or "").strip().lower()
+        if not label:
+            raise RepositoryError("Subdomain label is required.")
+        if not site_id:
+            raise RepositoryError("site_id is required to reserve a subdomain.")
+        item = {
+            **self._key(label),
+            "document_type": "subdomain_reservation",
+            "subdomain": label,
+            "site_id": site_id,
+            "tenant_id": tenant_id,
+            "reserved_at": int(now),
+        }
+        try:
+            self.table.put_item(
+                Item=item,
+                ConditionExpression="attribute_not_exists(PK) OR #sid = :sid",
+                ExpressionAttributeNames={"#sid": "site_id"},
+                ExpressionAttributeValues={":sid": site_id},
+            )
+            return True
+        except ClientError as exc:
+            if exc.response.get("Error", {}).get("Code") == "ConditionalCheckFailedException":
+                return False
+            raise RepositoryError(str(exc)) from exc
+
+
+def subdomain_registry(table: Any | None = None) -> SubdomainRegistry:
+    return SubdomainRegistry(os.environ.get("SITES_TABLE", ""), table=table)
+
+
 def calendar_connections_repository(table: Any | None = None) -> DynamoDocumentRepository:
     return DynamoDocumentRepository(
         os.environ.get("CALENDAR_CONNECTIONS_TABLE", ""),

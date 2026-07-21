@@ -142,6 +142,10 @@
         v-else-if="activeView === 'landingPages'"
         :key="`landing-pages-${activeEnvironment}-${auth.session?.client_id || ''}`"
       />
+      <Sites
+        v-else-if="activeView === 'sites'"
+        :key="`sites-${activeEnvironment}-${auth.session?.client_id || ''}`"
+      />
       <ABTesting
         v-else-if="activeView === 'abTesting'"
         :key="`ab-testing-${activeEnvironment}-${auth.session?.client_id || ''}`"
@@ -183,6 +187,7 @@ import Profile from "./components/Profile.vue";
 import Refunds from "./components/Refunds.vue";
 import Services from "./components/Services.vue";
 import Shipping from "./components/Shipping.vue";
+import Sites from "./components/Sites.vue";
 import StripeKeys from "./components/StripeKeys.vue";
 import { iconPaths, menuGroupsForEnvironment } from "./config/menu";
 import { getApiEnvironment, loadAppConfigApiBase, setApiEnvironment } from "./api/client";

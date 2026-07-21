@@ -61,7 +61,7 @@ export const menuSchema = {
       label: "Sites",
       icon: "sitemap",
       view: "sites",
-      enabled: false,
+      enabled: true,
       environments: ["test", "live"],
     },
     services: {
