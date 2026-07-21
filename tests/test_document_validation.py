@@ -183,6 +183,13 @@ class DocumentValidationTests(unittest.TestCase):
         with self.assertRaises(DocumentValidationError):
             validate_site(self._site(hosting={"type": "custom", "platform_hostname": "a.jbay.uk", "custom_domain": None}))
 
+    def test_accepts_site_with_decimal_timestamps_from_dynamodb(self):
+        # A Site read back from DynamoDB (then re-validated on domain connect) carries Decimal timestamps.
+        from decimal import Decimal
+        validate_site(self._site(created_at=Decimal("1784600000"), updated_at=Decimal("1784600000")))
+        with self.assertRaises(DocumentValidationError):
+            validate_site(self._site(created_at=Decimal("1784600000.5")))
+
     def test_accepts_site_with_no_pages(self):
         # The Site is the aggregate root; it can exist before any pages attach.
         validate_site(self._site(pages={}))

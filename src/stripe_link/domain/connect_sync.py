@@ -116,6 +116,13 @@ def seed_business_identity(
     return business, changed
 
 
+def site_domain_verified(site: dict[str, Any] | None) -> bool:
+    """True when the Site has a custom domain whose Cloudflare verification is confirmed — the domain half of
+    index eligibility. The single signal read by both the webhook and the renderer."""
+    hosting = (site or {}).get("hosting") or {}
+    return bool(hosting.get("custom_domain")) and bool((hosting.get("verification") or {}).get("verified"))
+
+
 def compute_site_eligibility(
     site: dict[str, Any], *, connect_verified: bool, connect_restricted: bool, domain_verified: bool
 ) -> str:

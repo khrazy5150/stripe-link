@@ -174,25 +174,27 @@ class DnsRecordMatchesTests(unittest.TestCase):
 
 
 class DeriveStatusTests(unittest.TestCase):
-    def test_pending_dns_when_not_verified(self):
-        status, ssl_status = derive_status(dns_verified=False, cloudflare_hostname={"ssl": {"status": "pending_validation"}})
+    def test_pending_dns_when_hostname_not_active(self):
+        # Routing CNAME not yet seen by Cloudflare (hostname status not active).
+        status, ssl_status = derive_status(cloudflare_hostname={"ssl": {"status": "pending_validation"}})
         self.assertEqual(status, "pending_dns")
         self.assertEqual(ssl_status, "pending_validation")
 
-    def test_pending_ssl_when_dns_verified_but_ssl_not_active(self):
-        status, _ = derive_status(dns_verified=True, cloudflare_hostname={"ssl": {"status": "pending_issuance"}, "status": "pending"})
+    def test_pending_ssl_when_hostname_active_but_cert_not(self):
+        # The real-world state: routing works, cert still issuing (needs the _acme-challenge DCV record).
+        status, _ = derive_status(cloudflare_hostname={"ssl": {"status": "pending_validation"}, "status": "active"})
         self.assertEqual(status, "pending_ssl")
 
-    def test_active_when_dns_verified_and_ssl_active(self):
-        status, _ = derive_status(dns_verified=True, cloudflare_hostname={"ssl": {"status": "active"}, "status": "active"})
+    def test_active_when_hostname_and_ssl_active(self):
+        status, _ = derive_status(cloudflare_hostname={"ssl": {"status": "active"}, "status": "active"})
         self.assertEqual(status, "active")
 
     def test_failed_when_ssl_status_expired(self):
-        status, _ = derive_status(dns_verified=True, cloudflare_hostname={"ssl": {"status": "validation_timed_out"}, "status": "pending"})
+        status, _ = derive_status(cloudflare_hostname={"ssl": {"status": "validation_timed_out"}, "status": "pending"})
         self.assertEqual(status, "failed")
 
     def test_failed_when_hostname_moved_or_deleted(self):
-        status, _ = derive_status(dns_verified=True, cloudflare_hostname={"ssl": {"status": "active"}, "status": "moved"})
+        status, _ = derive_status(cloudflare_hostname={"ssl": {"status": "active"}, "status": "moved"})
         self.assertEqual(status, "failed")
 
 

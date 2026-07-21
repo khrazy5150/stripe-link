@@ -52,6 +52,7 @@ from stripe_link.domain.connect_sync import (
     compute_site_eligibility,
     connect_state_fields,
     seed_business_identity,
+    site_domain_verified,
 )
 from stripe_link.stripe_platform_secrets import get_platform_webhook_secret
 
@@ -332,9 +333,9 @@ def reconcile_account_updated(
     if site_repo:
         recomputed = []
         for site in site_repo.list_for_tenant(tenant_id):
-            # Custom-domain→Site bridge is deferred, so no Site has a verified domain yet (domain_verified=False).
             eligibility = compute_site_eligibility(
-                site, connect_verified=connect_verified, connect_restricted=connect_restricted, domain_verified=False,
+                site, connect_verified=connect_verified, connect_restricted=connect_restricted,
+                domain_verified=site_domain_verified(site),
             )
             if eligibility != (site.get("indexing") or {}).get("eligibility"):
                 indexing = {**(site.get("indexing") or {}), "eligibility": eligibility, "eligibility_updated_at": now}

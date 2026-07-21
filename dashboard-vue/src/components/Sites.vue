@@ -140,6 +140,74 @@
             </div>
           </fieldset>
 
+          <fieldset v-if="customDomainsEnabled" class="product-identifiers">
+            <legend>Custom domain</legend>
+            <p class="field-note">Connect your own domain to serve this Site's homepage and become eligible for search indexing. On the free {{ hostingDomainHint }} address a Site is never indexed.</p>
+            <div v-if="domainError" class="keys-status-banner error">{{ domainError }}</div>
+
+            <template v-if="!editing.hosting?.custom_domain">
+              <label class="offer-field">
+                <span>Your domain</span>
+                <input v-model.trim="domainForm.domain" type="text" placeholder="shop.yourbrand.com" autocapitalize="off" spellcheck="false" />
+              </label>
+              <label v-if="!siteHasHomepage" class="offer-field">
+                <span>Which page should the domain show?</span>
+                <select v-model="domainForm.homepage">
+                  <option value="">Choose a homepage…</option>
+                  <option v-for="(entry, slug) in editing.pages" :key="slug" :value="entry.page_id">{{ entry.label || slug }}</option>
+                </select>
+              </label>
+              <div class="button-row">
+                <button type="button" class="primary-action" :disabled="domainBusy || !domainForm.domain || (!siteHasHomepage && !domainForm.homepage)" @click="connectDomain">
+                  {{ domainBusy ? "Connecting…" : "Connect domain" }}
+                </button>
+              </div>
+            </template>
+
+            <template v-else>
+              <dl class="product-details-grid">
+                <div><dt>Domain</dt><dd class="font-mono">{{ editing.hosting.custom_domain }}</dd></div>
+                <div><dt>Status</dt><dd>{{ domainStatusLabel }}</dd></div>
+              </dl>
+              <div v-if="!editing.hosting.verification?.verified" class="domain-dns">
+                <div class="dns-provider-row">
+                  <label for="dns-provider">Add these at your DNS provider:</label>
+                  <select id="dns-provider" v-model="dnsProvider">
+                    <option v-for="p in dnsProviders" :key="p.id" :value="p.id">{{ p.label }}</option>
+                  </select>
+                </div>
+                <div class="dns-accordion">
+                  <div v-for="(rec, i) in displayRecords" :key="i" class="dns-step" :class="{ open: openStep === i }">
+                    <button type="button" class="dns-step-header" @click="openStep = openStep === i ? -1 : i">
+                      <span class="dns-badge" :class="rec.badgeClass">{{ rec.badgeIcon }}</span>
+                      <span class="dns-step-title">{{ rec.stepLabel }}</span>
+                      <span class="dns-step-status" :class="rec.badgeClass">{{ rec.statusText }}</span>
+                      <span class="dns-chevron">{{ openStep === i ? '▾' : '▸' }}</span>
+                    </button>
+                    <div class="dns-step-body">
+                      <p v-if="providerTip" class="field-note">{{ providerTip }}</p>
+                      <div class="dns-field"><span class="dns-field-label">Type</span><code>{{ rec.type }}</code></div>
+                      <div class="dns-field">
+                        <span class="dns-field-label">Name</span><code>{{ rec.displayName }}</code>
+                        <button type="button" class="copy-btn" @click="copy(rec.displayName)">{{ copied === rec.displayName ? 'Copied!' : 'Copy' }}</button>
+                      </div>
+                      <div class="dns-field">
+                        <span class="dns-field-label">Value</span><code class="dns-value">{{ rec.value }}</code>
+                        <button type="button" class="copy-btn" @click="copy(rec.value)">{{ copied === rec.value ? 'Copied!' : 'Copy' }}</button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div class="button-row">
+                <button v-if="!editing.hosting.verification?.verified" type="button" class="primary-action" :disabled="domainBusy" @click="checkDomain">
+                  {{ domainBusy ? "Checking…" : "Verify domain" }}
+                </button>
+                <button type="button" class="secondary-action" :disabled="domainBusy" @click="disconnectDomain">Disconnect</button>
+              </div>
+            </template>
+          </fieldset>
+
           <div class="offer-field">
             <span>Pages in this Site</span>
             <ul class="category-menu">
@@ -164,7 +232,7 @@
 
 <script setup>
 import { computed, onMounted, reactive, ref } from "vue";
-import { apiRequest } from "../api/client";
+import { apiRequest, getApiEnvironment } from "../api/client";
 import { useSitesStore, organizationFromBusiness, suggestSubdomain } from "../stores/sites";
 import { useProfileStore } from "../stores/profile";
 import { useSubdomainCheck } from "../composables/useSubdomainCheck";
@@ -183,6 +251,115 @@ const createCheck = useSubdomainCheck();
 const editCheck = useSubdomainCheck();
 
 const form = reactive({ name: "", subdomain: "", org: { name: "", legal_name: "", entity_type: "OnlineStore", description: "", telephone: "", email: "", address: { locality: "", region: "" } } });
+
+const domainForm = reactive({ domain: "", homepage: "" });
+const domainBusy = ref(false);
+const domainError = ref("");
+const domainDiagnostics = ref({});
+
+const dnsProviders = [
+  { id: "route53", label: "AWS Route 53", fqdn: false },
+  { id: "cloudflare", label: "Cloudflare", fqdn: false },
+  { id: "godaddy", label: "GoDaddy", fqdn: false },
+  { id: "namecheap", label: "Namecheap", fqdn: false },
+  { id: "cpanel", label: "cPanel", fqdn: true },
+  { id: "other", label: "Other / full name", fqdn: true },
+];
+// Custom-domain serving is production/Live-only (single prod edge Worker) — hide it in Test to avoid a dead end.
+const customDomainsEnabled = computed(() => getApiEnvironment() === "live");
+const dnsProvider = ref("route53");
+const openStep = ref(0);
+const copied = ref("");
+const providerFqdn = computed(() => (dnsProviders.find((p) => p.id === dnsProvider.value) || {}).fqdn);
+const providerLabel = computed(() => (dnsProviders.find((p) => p.id === dnsProvider.value) || {}).label);
+const providerTip = computed(() =>
+  providerFqdn.value
+    ? "Enter the full Name exactly as shown (including your domain)."
+    : `${providerLabel.value} adds your domain automatically — enter only the Name shown (the part before your domain).`,
+);
+
+function rootDomain(domain) {
+  const parts = String(domain || "").split(".");
+  return parts.length > 2 ? parts.slice(-2).join(".") : domain;
+}
+function hostPrefix(fullName, domain) {
+  const root = rootDomain(domain);
+  if (fullName === root) return "@";
+  return fullName.endsWith("." + root) ? fullName.slice(0, -(root.length + 1)) : fullName;
+}
+
+const displayRecords = computed(() => {
+  const domain = editing.value?.hosting?.custom_domain || "";
+  return (editing.value?.domain_provisioning?.dns_records || []).map((rec) => {
+    const diag = domainDiagnostics.value[rec.name];
+    const resolved = diag ? diag.resolved : null;
+    const isSsl = rec.name.startsWith("_acme-challenge");
+    return {
+      type: rec.type,
+      value: rec.value,
+      displayName: providerFqdn.value ? rec.name : hostPrefix(rec.name, domain),
+      stepLabel: isSsl ? "SSL certificate" : "Point your domain",
+      badgeClass: resolved === true ? "ok" : resolved === false ? "bad" : "idle",
+      badgeIcon: resolved === true ? "✓" : resolved === false ? "!" : "•",
+      statusText: resolved === true ? "Detected" : resolved === false ? (diag.note || "Not found yet") : "",
+    };
+  });
+});
+
+async function copy(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+    copied.value = text;
+    setTimeout(() => { if (copied.value === text) copied.value = ""; }, 1500);
+  } catch { /* clipboard unavailable */ }
+}
+const DOMAIN_STATUS_LABELS = { active: "Connected & verified", pending_dns: "Waiting for DNS", pending_ssl: "Issuing certificate", failed: "Verification failed" };
+const siteHasHomepage = computed(() => !!(editing.value?.pages || {})["/"]);
+const domainStatusLabel = computed(() => {
+  if (editing.value?.hosting?.verification?.verified) return "Connected & verified";
+  return DOMAIN_STATUS_LABELS[editing.value?.domain_provisioning?.status] || "Pending verification";
+});
+
+async function connectDomain() {
+  domainError.value = "";
+  domainBusy.value = true;
+  try {
+    editing.value = await store.connectDomain(editing.value.site_id, domainForm.domain, domainForm.homepage);
+    domainForm.domain = "";
+    domainForm.homepage = "";
+  } catch (error) {
+    domainError.value = error.message || "Failed to connect domain.";
+  } finally {
+    domainBusy.value = false;
+  }
+}
+
+async function checkDomain() {
+  domainError.value = "";
+  domainBusy.value = true;
+  try {
+    const { site, status, hint, diagnostics } = await store.checkDomain(editing.value.site_id);
+    editing.value = site;
+    domainDiagnostics.value = Object.fromEntries((diagnostics || []).map((d) => [d.name, d]));
+    if (status !== "active") domainError.value = hint || "Not verified yet — DNS changes can take a while to propagate. Try again shortly.";
+  } catch (error) {
+    domainError.value = error.message || "Failed to verify domain.";
+  } finally {
+    domainBusy.value = false;
+  }
+}
+
+async function disconnectDomain() {
+  domainError.value = "";
+  domainBusy.value = true;
+  try {
+    editing.value = await store.disconnectDomain(editing.value.site_id);
+  } catch (error) {
+    domainError.value = error.message || "Failed to disconnect domain.";
+  } finally {
+    domainBusy.value = false;
+  }
+}
 
 const orgPhoneError = computed(() => phoneError(form.org.telephone));
 const canCreate = computed(() => !store.saving && createCheck.state.available);
@@ -222,6 +399,10 @@ async function createDefault() {
 
 function openEdit(site) {
   editing.value = site;
+  domainError.value = "";
+  domainDiagnostics.value = {};
+  domainForm.domain = "";
+  domainForm.homepage = "";
   const org = site.organization || {};
   const address = org.address || {};
   form.name = site.name || "";
@@ -350,6 +531,91 @@ onMounted(async () => {
   border-color: var(--sl-accent, #6366f1);
   color: var(--sl-accent, #6366f1);
 }
+.dns-provider-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin: 0.3rem 0 0.6rem;
+  font-size: 1.3rem;
+  font-weight: 600;
+}
+.dns-provider-row select {
+  flex: 0 0 auto;
+  width: auto;
+  padding: 0.3rem 0.6rem;
+}
+.dns-accordion {
+  border: 1px solid var(--sl-border, #d1d5db);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.dns-step + .dns-step {
+  border-top: 1px solid var(--sl-border, #d1d5db);
+}
+.dns-step-header {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  padding: 0.7rem 0.9rem;
+  background: none;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  font-size: 1.35rem;
+}
+.dns-step-header:hover { background: var(--sl-muted-bg, #f3f4f6); }
+.dns-step-title { font-weight: 600; flex: 1 1 auto; }
+.dns-step-status { font-size: 1.2rem; }
+.dns-chevron { color: var(--sl-muted, #6b7280); }
+.dns-badge {
+  width: 1.7rem; height: 1.7rem; border-radius: 999px; flex: 0 0 auto;
+  display: inline-flex; align-items: center; justify-content: center; font-size: 1.1rem; font-weight: 700;
+}
+.dns-badge.ok { background: #dcfce7; color: #15803d; }
+.dns-badge.bad { background: #fee2e2; color: #b91c1c; }
+.dns-badge.idle { background: var(--sl-muted-bg, #e5e7eb); color: var(--sl-muted, #6b7280); }
+.dns-step-status.ok { color: #15803d; }
+.dns-step-status.bad { color: #b91c1c; }
+.dns-step-body {
+  display: none;
+  padding: 0.2rem 0.9rem 0.9rem;
+  background: var(--sl-muted-bg, #fafafa);
+}
+.dns-step.open .dns-step-body { display: block; }
+.dns-field {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin-top: 0.4rem;
+}
+.dns-field-label {
+  flex: 0 0 3.6rem;
+  font-size: 1.1rem;
+  text-transform: uppercase;
+  font-weight: 700;
+  color: var(--sl-muted, #6b7280);
+}
+.dns-field code {
+  flex: 1 1 auto;
+  font-family: ui-monospace, monospace;
+  background: #fff;
+  border: 1px solid var(--sl-border, #d1d5db);
+  border-radius: 6px;
+  padding: 0.35rem 0.6rem;
+  word-break: break-all;
+  font-size: 1.25rem;
+}
+.copy-btn {
+  flex: 0 0 auto;
+  background: none;
+  border: none;
+  color: var(--sl-accent, #6366f1);
+  font-weight: 600;
+  cursor: pointer;
+  font-size: 1.2rem;
+}
+.copy-btn:hover { text-decoration: underline; }
 .subdomain-ok {
   color: #15803d;
   font-weight: 600;

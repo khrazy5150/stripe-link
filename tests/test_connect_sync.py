@@ -89,25 +89,23 @@ class SiteEligibilityTests(unittest.TestCase):
 
 
 class RobotsDirectiveTests(unittest.TestCase):
-    def _site(self, hosting_type="platform", eligibility="blocked"):
-        return {"hosting": {"type": hosting_type}, "indexing": {"eligibility": eligibility}}
-
-    def test_platform_host_is_always_noindex_even_in_prod(self):
-        self.assertEqual(page_robots_directive(kind="published", environment="prod", site=self._site(), page_type="landing"), "noindex,nofollow")
+    def test_page_not_on_custom_domain_is_always_noindex(self):
+        # Platform host, or a non-homepage page of a custom-domain Site: never indexed even in prod.
+        self.assertEqual(page_robots_directive(kind="published", environment="prod", eligibility="eligible", page_type="landing", on_custom_domain=False), "noindex,nofollow")
 
     def test_eligible_custom_domain_landing_indexes(self):
-        d = page_robots_directive(kind="published", environment="prod", site=self._site("custom", "eligible"), page_type="landing")
+        d = page_robots_directive(kind="published", environment="prod", eligibility="eligible", page_type="landing", on_custom_domain=True)
         self.assertEqual(d, "index,follow,max-image-preview:large,max-snippet:-1")
 
     def test_eligible_checkout_page_is_crawl_not_index(self):
-        self.assertEqual(page_robots_directive(kind="published", environment="prod", site=self._site("custom", "eligible"), page_type="checkout"), "noindex,follow")
+        self.assertEqual(page_robots_directive(kind="published", environment="prod", eligibility="eligible", page_type="checkout", on_custom_domain=True), "noindex,follow")
 
     def test_pending_custom_domain_is_crawl(self):
-        self.assertEqual(page_robots_directive(kind="published", environment="prod", site=self._site("custom", "pending"), page_type="landing"), "noindex,follow")
+        self.assertEqual(page_robots_directive(kind="published", environment="prod", eligibility="pending", page_type="landing", on_custom_domain=True), "noindex,follow")
 
     def test_preview_and_nonprod_are_noindex_nofollow(self):
-        self.assertEqual(page_robots_directive(kind="preview", environment="prod", site=self._site("custom", "eligible"), page_type="landing"), "noindex,nofollow")
-        self.assertEqual(page_robots_directive(kind="published", environment="dev", site=self._site("custom", "eligible"), page_type="landing"), "noindex,nofollow")
+        self.assertEqual(page_robots_directive(kind="preview", environment="prod", eligibility="eligible", page_type="landing", on_custom_domain=True), "noindex,nofollow")
+        self.assertEqual(page_robots_directive(kind="published", environment="dev", eligibility="eligible", page_type="landing", on_custom_domain=True), "noindex,nofollow")
 
 
 class FakeKeysRepo:

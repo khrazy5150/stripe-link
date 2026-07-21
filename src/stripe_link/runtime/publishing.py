@@ -5,6 +5,7 @@ from typing import Any
 
 from stripe_link.domain.documents import validate_offer_document, validate_page_document, validate_product_document
 from stripe_link.runtime.artifacts import artifact_paths, cloudfront_path
+from stripe_link.domain.connect_sync import site_domain_verified
 from stripe_link.runtime.html import page_robots_directive, render_page
 
 
@@ -26,6 +27,13 @@ def site_page_type(site: dict[str, Any] | None, page_id: str) -> str:
         if isinstance(entry, dict) and entry.get("page_id") == page_id:
             return str(entry.get("page_type") or "landing")
     return "landing"
+
+
+def site_homepage_page_id(site: dict[str, Any] | None) -> str:
+    """The page served at the Site root ("/") — the one a verified custom domain shows (homepage-only serving,
+    plans/SITE_OBJECT.md §2.6 first slice). "" when the Site has no root page yet."""
+    root = ((site or {}).get("pages") or {}).get("/")
+    return str(root.get("page_id") or "") if isinstance(root, dict) else ""
 
 
 def find_site_for_page(sites_repository: Any, tenant_id: str, page_id: str) -> dict[str, Any] | None:
@@ -248,10 +256,21 @@ def publish_page_document(
     # production, on an eligible Site (verified custom domain + Stripe Connect), on an indexable page_type,
     # gets index,follow; everything on platform infrastructure stays noindex (plans/SITE_OBJECT.md §2.2,
     # TP-08, SEO-02). Eligibility is recomputed on the account.updated webhook and stored on the Site.
-    page_type = site_page_type(site, str(page.get("page_id") or ""))
+    page_id = str(page.get("page_id") or "")
+    page_type = site_page_type(site, page_id)
+    # Canonical + indexing switch to the Site's verified custom domain, but only for the page actually served
+    # there — the homepage ("/"). Other pages of a multi-page Site stay on the platform host (noindex) until
+    # path-aware routing (2.6). Non-homepage / unverified pages keep the interim artifact canonical.
+    on_custom_domain = site_domain_verified(site) and page_id == site_homepage_page_id(site)
+    custom_domain = ((site or {}).get("hosting") or {}).get("custom_domain")
+    page_canonical = f"https://{custom_domain}/" if on_custom_domain and custom_domain else canonical_url
+    eligibility = ((site or {}).get("indexing") or {}).get("eligibility") or "blocked"
     artifacts = []
     for target in targets:
-        robots = page_robots_directive(kind=target["kind"], environment=environment, site=site, page_type=page_type)
+        robots = page_robots_directive(
+            kind=target["kind"], environment=environment, eligibility=eligibility,
+            page_type=page_type, on_custom_domain=on_custom_domain,
+        )
         html = render_page(
             page,
             offer,
@@ -260,7 +279,7 @@ def publish_page_document(
             api_base_url=api_base_url,
             services_by_id=services_by_id,
             offers_by_id=offers_by_id,
-            canonical_url=canonical_url,
+            canonical_url=page_canonical,
             robots=robots,
             site=site,
         )

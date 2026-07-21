@@ -128,6 +128,26 @@ export const useSitesStore = defineStore("sites", {
       if (siteId) query.set("site_id", siteId);
       return apiRequest(`/sites/subdomain?${query.toString()}`);
     },
+    _replace(site) {
+      const index = this.sites.findIndex((s) => s.site_id === site.site_id);
+      if (index >= 0) this.sites.splice(index, 1, site);
+      else this.sites.push(site);
+      return site;
+    },
+    async connectDomain(siteId, domain, homepagePageId = "") {
+      const body = { domain };
+      if (homepagePageId) body.homepage_page_id = homepagePageId;
+      const res = await apiRequest(`/sites/${encodeURIComponent(siteId)}/domain`, { method: "POST", body });
+      return this._replace(res.site);
+    },
+    async checkDomain(siteId) {
+      const res = await apiRequest(`/sites/${encodeURIComponent(siteId)}/domain/check`, { method: "POST" });
+      return { site: this._replace(res.site), status: res.status, hint: res.hint, diagnostics: res.diagnostics || [] };
+    },
+    async disconnectDomain(siteId) {
+      const res = await apiRequest(`/sites/${encodeURIComponent(siteId)}/domain`, { method: "DELETE" });
+      return this._replace(res.site);
+    },
     async setStatus(site, status) {
       const body = await apiRequest(`/sites/${encodeURIComponent(site.site_id)}/status`, {
         method: "PATCH",

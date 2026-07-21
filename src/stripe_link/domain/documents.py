@@ -1565,7 +1565,10 @@ def validate_site(document: dict[str, Any]) -> None:
 
     optional_non_negative_int(document, "revision", "Site revision")
     for field in ("created_at", "updated_at"):
-        if not isinstance(document.get(field), int):
+        value = document.get(field)
+        # DynamoDB returns numbers as Decimal, so a Site re-validated after a read (e.g. connecting a domain)
+        # carries Decimal timestamps — accept an integral Decimal as well as a plain int.
+        if isinstance(value, bool) or not isinstance(value, (int, Decimal)) or (isinstance(value, Decimal) and value % 1 != 0):
             raise DocumentValidationError(f"Site {field} must be an integer.")
 
 

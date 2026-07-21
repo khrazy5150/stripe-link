@@ -730,7 +730,40 @@ Resources:
             TableName: !Ref SitesTable
         - DynamoDBReadPolicy:
             TableName: !Ref PagesTable
+        # Custom-domain bridge: write the resolver index, read Connect verification state for eligibility.
+        - DynamoDBCrudPolicy:
+            TableName: !Ref CustomDomainsTable
+        - DynamoDBReadPolicy:
+            TableName: !Sub "${ProjectPrefix}-stripe-keys-dev"
+        - DynamoDBReadPolicy:
+            TableName: !Sub "${ProjectPrefix}-stripe-keys-prod"
+        - !If
+          - HasCloudflareZone
+          - Statement:
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                Resource: !Ref CloudflareApiTokenSecret
+          - !Ref AWS::NoValue
       Events:
+        SitesConnectDomain:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /sites/{site_id}/domain
+            Method: POST
+        SitesCheckDomain:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /sites/{site_id}/domain/check
+            Method: POST
+        SitesDisconnectDomain:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /sites/{site_id}/domain
+            Method: DELETE
         SitesList:
           Type: Api
           Properties:

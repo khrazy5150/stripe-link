@@ -92,6 +92,31 @@ def create_custom_hostname(hostname: str, *, zone_id: str, api_token: str, opene
     )
 
 
+def find_custom_hostname(hostname: str, *, zone_id: str, api_token: str, opener=None) -> dict[str, Any] | None:
+    """Look up an existing Cloudflare custom hostname by name. Used to make connect idempotent: a prior
+    partial attempt (or a retry) can reuse the hostname instead of hitting a 'duplicate' error."""
+    from urllib.parse import quote
+
+    result = cloudflare_request(
+        "GET", f"/custom_hostnames?hostname={quote(hostname)}", zone_id=zone_id, api_token=api_token, opener=opener,
+    )
+    items = result if isinstance(result, list) else []
+    for item in items:
+        if item.get("hostname") == hostname:
+            return item
+    return items[0] if items else None
+
+
+def retrigger_ssl_validation(hostname_id: str, *, zone_id: str, api_token: str, opener=None) -> dict[str, Any]:
+    """Ask Cloudflare to re-run SSL DCV now instead of waiting for its next background poll. Returns the
+    refreshed custom-hostname object (often already ssl.status=active when the DCV record is in place). Safe
+    ONLY with DCV delegation, where Cloudflare owns the challenge record — a static TXT would be rotated out."""
+    return cloudflare_request(
+        "PATCH", f"/custom_hostnames/{hostname_id}", zone_id=zone_id, api_token=api_token,
+        data={"ssl": {"method": "txt", "type": "dv"}}, opener=opener,
+    )
+
+
 def get_custom_hostname(hostname_id: str, *, zone_id: str, api_token: str, opener=None) -> dict[str, Any]:
     return cloudflare_request(
         "GET",
@@ -140,22 +165,107 @@ def dns_record_matches(name: str, record_type: str, expected_value: str, *, open
     return False
 
 
-def derive_status(*, dns_verified: bool, cloudflare_hostname: dict[str, Any]) -> tuple[str, str]:
-    """Combine our own DNS check with Cloudflare's hostname/SSL state into the app-level status.
+def _dns_has_records(name: str, record_type: str, *, opener=None) -> bool:
+    """True if ANY record of `record_type` exists at `name` (value ignored) — used to detect a wrong-type
+    entry (e.g. a TXT where a CNAME is required)."""
+    if not name:
+        return False
+    opener = opener or urlopen
+    url = f"{DNS_OVER_HTTPS_URL}?{urlencode({'name': name, 'type': record_type})}"
+    request = Request(url, headers={"Accept": "application/dns-json"}, method="GET")
+    try:
+        with opener(request, timeout=10) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except Exception:
+        return False
+    return bool(payload.get("Answer"))
 
-    Returns (status, ssl_status). `status` is one of the TenantConfig custom-domain enum
-    values; `ssl_status` is Cloudflare's raw ssl.status string, stored for display/debugging.
+
+def diagnose_dns_records(records: list[dict[str, str]], *, opener=None) -> list[dict[str, Any]]:
+    """For each required DNS record, check whether it currently resolves to the expected value (via DNS-over-
+    HTTPS). Purely diagnostic — Cloudflare's status is authoritative — but it lets the UI say exactly which
+    record is missing or mistyped (the common "I made a TXT instead of a CNAME" mistake) instead of a generic
+    'not verified yet'."""
+    out: list[dict[str, Any]] = []
+    for record in records or []:
+        record_type = str(record.get("type") or "").upper()
+        resolved = dns_record_matches(record.get("name", ""), record_type, record.get("value", ""), opener=opener) \
+            if record_type in ("TXT", "CNAME") else False
+        note = ""
+        if not resolved and record_type in ("TXT", "CNAME"):
+            other_type = "TXT" if record_type == "CNAME" else "CNAME"
+            name = record.get("name", "")
+            # Only flag a type mismatch when the CORRECT type is genuinely absent. A DCV-delegation CNAME
+            # resolves to a TXT when followed, so a naive "is there a TXT here?" check would false-positive
+            # even though the record is correctly a CNAME.
+            if _dns_has_records(name, other_type, opener=opener) and not _dns_has_records(name, record_type, opener=opener):
+                note = f"found a {other_type} record here — it must be a {record_type}"
+        out.append({**record, "resolved": resolved, "note": note})
+    return out
+
+
+def derive_status(*, cloudflare_hostname: dict[str, Any], dns_verified: bool | None = None) -> tuple[str, str]:
+    """The app-level status, derived from Cloudflare's authoritative hostname + SSL state (Cloudflare polls DNS
+    itself, so its status is the source of truth — not our own probe). Returns (status, ssl_status):
+
+    - hostname `status` reflects routing/ownership (active = the CNAME is seen and ownership is confirmed).
+    - `ssl.status` reflects the certificate: active only once the SSL DCV record (see custom_hostname_dns_records)
+      is in place and the cert issues.
+
+    `dns_verified` is accepted for backward compatibility but no longer gates the result.
     """
     ssl_status = str((cloudflare_hostname.get("ssl") or {}).get("status") or "")
     hostname_status = str(cloudflare_hostname.get("status") or "")
 
-    if not dns_verified:
-        return "pending_dns", ssl_status
-
     if hostname_status in {"moved", "deleted"} or any(marker in ssl_status for marker in _FAILED_SSL_STATUSES_MARKERS):
         return "failed", ssl_status
-
     if ssl_status in _ACTIVE_SSL_STATUSES and hostname_status in {"active", ""}:
         return "active", ssl_status
+    if hostname_status != "active":
+        return "pending_dns", ssl_status   # the routing CNAME isn't visible to Cloudflare yet
+    return "pending_ssl", ssl_status         # hostname active; waiting on the SSL DCV record / cert issuance
 
-    return "pending_ssl", ssl_status
+
+_DCV_UUID_CACHE: dict[str, str] = {}
+
+
+def get_dcv_delegation_uuid(*, zone_id: str, api_token: str, opener=None) -> str:
+    """The zone's stable DCV-delegation UUID. It lets the tenant add ONE permanent CNAME
+    (`_acme-challenge.<host>` -> `<host>.<uuid>.dcv.cloudflare.com`) so Cloudflare answers the ACME challenge
+    itself — no rotating _acme-challenge TXT to chase, and certificate RENEWALS keep working automatically.
+    Cached per zone (the UUID never changes)."""
+    if zone_id in _DCV_UUID_CACHE:
+        return _DCV_UUID_CACHE[zone_id]
+    try:
+        result = cloudflare_request("GET", "/dcv_delegation/uuid", zone_id=zone_id, api_token=api_token, opener=opener)
+    except CustomDomainError:
+        return ""
+    uuid = str((result or {}).get("uuid") or "")
+    if uuid:
+        _DCV_UUID_CACHE[zone_id] = uuid
+    return uuid
+
+
+def custom_hostname_dns_records(
+    cloudflare_hostname: dict[str, Any], *, hostname: str, dns_target: str, dcv_delegation_uuid: str | None = None
+) -> list[dict[str, str]]:
+    """The DNS records the tenant must create. Preferred shape = two STABLE CNAMEs: the routing CNAME and the
+    DCV-delegation CNAME (Cloudflare then manages the ACME token + renewals). Only when no delegation UUID is
+    available do we fall back to Cloudflare's rotating ownership TXT + `_acme-challenge` DCV records."""
+    records: list[dict[str, str]] = [{"type": "CNAME", "name": hostname, "value": dns_target}]
+    if dcv_delegation_uuid:
+        records.append({
+            "type": "CNAME",
+            "name": f"_acme-challenge.{hostname}",
+            "value": f"{hostname}.{dcv_delegation_uuid}.dcv.cloudflare.com",
+        })
+        return records
+    ownership = cloudflare_hostname.get("ownership_verification") or {}
+    if ownership.get("name") and ownership.get("value"):
+        records.append({"type": str(ownership.get("type") or "TXT").upper(), "name": str(ownership["name"]), "value": str(ownership["value"])})
+    for record in (cloudflare_hostname.get("ssl") or {}).get("validation_records") or []:
+        if record.get("txt_name") and record.get("txt_value"):
+            records.append({"type": "TXT", "name": str(record["txt_name"]), "value": str(record["txt_value"])})
+        elif record.get("cname") and record.get("cname_target"):
+            records.append({"type": "CNAME", "name": str(record["cname"]), "value": str(record["cname_target"])})
+    return records

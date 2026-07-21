@@ -4,9 +4,31 @@ import secrets
 import string
 import time
 
+from stripe_link.cloudflare_secrets import get_cloudflare_api_token
 from stripe_link.common import error_response, json_response, parse_json_body, path_params, tenant_id_from_event
+from stripe_link.domain.connect_sync import compute_site_eligibility, site_domain_verified
+from stripe_link.domain.custom_domains import (
+    CustomDomainError,
+    assert_valid_domain,
+    create_custom_hostname,
+    custom_hostname_dns_records,
+    delete_custom_hostname,
+    derive_status,
+    diagnose_dns_records,
+    find_custom_hostname,
+    get_custom_hostname,
+    get_dcv_delegation_uuid,
+    normalize_domain,
+    retrigger_ssl_validation,
+)
 from stripe_link.domain.documents import DocumentValidationError, validate_site
-from stripe_link.repositories.documents import RepositoryError, sites_repository, subdomain_registry
+from stripe_link.repositories.documents import (
+    RepositoryError,
+    custom_domains_index_repository,
+    sites_repository,
+    stripe_keys_repository,
+    subdomain_registry,
+)
 
 SITE_SCHEMA_VERSION = "2026-07-20"
 _ID_ALPHABET = string.ascii_letters + string.digits
@@ -113,6 +135,20 @@ def handler(event, context, repository=None, registry=None):
         return check_subdomain(event, registry or subdomain_registry())
     if method == "PATCH" and site_id and resource.endswith("/status"):
         return update_site_status(event, repository, site_id)
+    if site_id and resource.endswith(("/domain", "/domain/check")):
+        # Custom-domain serving is handled by the single production edge Worker, so the flow is live-only.
+        # A test/dev Site can't serve a real domain — refuse rather than let a tenant reach a dead end.
+        if os.environ.get("ENVIRONMENT") != "prod":
+            return error_response(
+                "Custom domains are available on your live Site only. Switch to Live to connect a domain.",
+                status_code=403, code="custom_domains_live_only",
+            )
+        if method == "POST" and resource.endswith("/domain/check"):
+            return check_domain(event, repository, site_id)
+        if method == "POST" and resource.endswith("/domain"):
+            return connect_domain(event, repository, site_id)
+        if method == "DELETE" and resource.endswith("/domain"):
+            return disconnect_domain(event, repository, site_id)
     if method == "POST":
         return create_site(event, repository, registry)
     if method == "GET":
@@ -251,6 +287,223 @@ def delete_site(event, repository, site_id):
     if not deleted:
         return error_response("Site not found.", status_code=404, code="not_found")
     return json_response({"site": deleted})
+
+
+# ---------------------------------------------------------------------------------------------------------
+# Custom-domain bridge (plans/SITE_OBJECT.md §2.6 first slice): a Site connects its own domain, which serves
+# the Site's homepage (the "/" page) via the existing Cloudflare-for-SaaS resolver. On verification the domain
+# becomes canonical and the Site can be index-eligible. Path-aware multi-page serving is deferred.
+# ---------------------------------------------------------------------------------------------------------
+
+def _cloudflare_config():
+    zone_id = os.environ.get("CLOUDFLARE_ZONE_ID", "")
+    api_token = get_cloudflare_api_token()
+    target_host = os.environ.get("CUSTOM_DOMAIN_TARGET_HOST", "domains.jbay.uk")
+    return zone_id, api_token, target_host
+
+
+def _connect_state(tenant_id, environment):
+    """(connect_verified, connect_restricted) for the tenant, read from the Connect verification state the
+    account.updated webhook maintains on the stripe_keys doc."""
+    mode = "live" if environment == "live" else "test"
+    try:
+        keys = stripe_keys_repository().get(tenant_id, mode)
+    except Exception:
+        keys = None
+    state = str((keys or {}).get("connect_verification") or "")
+    return state == "verified", state == "restricted"
+
+
+def _ensure_homepage(document, homepage_page_id):
+    """The custom domain serves the Site's homepage — the page at slug "/". Returns its page_id, designating
+    the requested page as homepage (moving it to "/") when the Site doesn't have one yet."""
+    pages = document.get("pages") or {}
+    root = pages.get("/")
+    if isinstance(root, dict) and root.get("page_id"):
+        return root["page_id"]
+    homepage_page_id = str(homepage_page_id or "").strip()
+    if not homepage_page_id:
+        return None
+    for slug, entry in list(pages.items()):
+        if isinstance(entry, dict) and entry.get("page_id") == homepage_page_id:
+            pages.pop(slug)
+            pages["/"] = dict(entry)
+            document["pages"] = pages
+            return homepage_page_id
+    return None
+
+
+def _recompute_eligibility(site, tenant_id, now):
+    connect_verified, connect_restricted = _connect_state(tenant_id, site.get("environment"))
+    eligibility = compute_site_eligibility(
+        site, connect_verified=connect_verified, connect_restricted=connect_restricted,
+        domain_verified=site_domain_verified(site),
+    )
+    site["indexing"] = {**(site.get("indexing") or {}), "eligibility": eligibility, "eligibility_updated_at": now}
+    return eligibility
+
+
+def connect_domain(event, repository, site_id):
+    try:
+        body = parse_json_body(event)
+    except ValueError as exc:
+        return error_response(str(exc), code="invalid_domain")
+    tenant_id = tenant_id_from_event(event, body)
+    if not tenant_id:
+        return error_response("tenant_id is required.", code="missing_tenant")
+    site = repository.get(tenant_id, site_id)
+    if not site:
+        return error_response("Site not found.", status_code=404, code="not_found")
+    zone_id, api_token, target_host = _cloudflare_config()
+    if not zone_id or not api_token:
+        return error_response("Custom domains are not configured.", status_code=500, code="cloudflare_not_configured")
+    domain = normalize_domain(body.get("domain"))
+    try:
+        assert_valid_domain(domain)
+    except CustomDomainError as exc:
+        return error_response(exc.message, status_code=exc.status_code, code="invalid_domain")
+    homepage_id = _ensure_homepage(site, body.get("homepage_page_id"))
+    if not homepage_id:
+        return error_response("Choose which page your domain should show as its homepage.", code="homepage_required")
+    try:
+        cloudflare_hostname = create_custom_hostname(domain, zone_id=zone_id, api_token=api_token)
+    except CustomDomainError as exc:
+        # A prior partial attempt (or a retry) may have already created the Cloudflare hostname — reuse it so
+        # connect is idempotent instead of dead-ending on 'duplicate custom hostname'.
+        cloudflare_hostname = find_custom_hostname(domain, zone_id=zone_id, api_token=api_token)
+        if not cloudflare_hostname:
+            return error_response(exc.message, status_code=exc.status_code, code="custom_domain_error")
+    dcv_uuid = get_dcv_delegation_uuid(zone_id=zone_id, api_token=api_token)
+    dns_records = custom_hostname_dns_records(cloudflare_hostname, hostname=domain, dns_target=target_host, dcv_delegation_uuid=dcv_uuid)
+    status, ssl_status = derive_status(cloudflare_hostname=cloudflare_hostname)
+    now = int(time.time())
+    hosting = site.get("hosting") or {}
+    hosting["custom_domain"] = domain
+    hosting.setdefault("type", "platform")  # stays platform until verified — see check_domain
+    hosting["verification"] = {"verified": False, "method": "cloudflare_saas"}
+    site["hosting"] = hosting
+    site["domain_provisioning"] = {
+        "custom_hostname_id": str(cloudflare_hostname.get("id") or ""),
+        "dns_records": dns_records,
+        "dns_target": target_host,
+        "status": status,
+        "ssl_status": ssl_status,
+        "homepage_page_id": homepage_id,
+        "updated_at": now,
+    }
+    site["updated_at"] = now
+    try:
+        validate_site(site)
+        saved = repository.put(site)
+    except (DocumentValidationError, RepositoryError) as exc:
+        return error_response(str(exc), code="invalid_domain")
+    custom_domains_index_repository().put(
+        {"tenant_id": tenant_id, "domain": domain, "target_page_id": homepage_id, "status": status, "site_id": site_id}
+    )
+    return json_response(
+        {"site": saved, "dns_target": target_host, "dns_records": dns_records, "status": status},
+        status_code=201,
+    )
+
+
+def check_domain(event, repository, site_id):
+    tenant_id = tenant_id_from_event(event)
+    if not tenant_id:
+        return error_response("tenant_id is required.", code="missing_tenant")
+    site = repository.get(tenant_id, site_id)
+    if not site:
+        return error_response("Site not found.", status_code=404, code="not_found")
+    provisioning = site.get("domain_provisioning") or {}
+    hostname_id = str(provisioning.get("custom_hostname_id") or "")
+    domain = str((site.get("hosting") or {}).get("custom_domain") or "")
+    if not hostname_id or not domain:
+        return error_response("No custom domain is connected to this Site.", code="no_domain")
+    zone_id, api_token, target_host = _cloudflare_config()
+    try:
+        cloudflare_hostname = get_custom_hostname(hostname_id, zone_id=zone_id, api_token=api_token)
+    except CustomDomainError as exc:
+        return error_response(exc.message, status_code=exc.status_code, code="custom_domain_error")
+    dcv_uuid = get_dcv_delegation_uuid(zone_id=zone_id, api_token=api_token)
+    dns_records = custom_hostname_dns_records(cloudflare_hostname, hostname=domain, dns_target=provisioning.get("dns_target") or target_host, dcv_delegation_uuid=dcv_uuid)
+    status, ssl_status = derive_status(cloudflare_hostname=cloudflare_hostname)
+    # Routing is confirmed but the cert is still pending: actively re-run DCV so a "Verify" click issues the
+    # certificate now instead of waiting for Cloudflare's next poll. Only safe with delegation (dcv_uuid set),
+    # where Cloudflare owns the challenge record.
+    if status == "pending_ssl" and dcv_uuid:
+        try:
+            refreshed = retrigger_ssl_validation(hostname_id, zone_id=zone_id, api_token=api_token)
+            if refreshed:
+                status, ssl_status = derive_status(cloudflare_hostname=refreshed)
+        except CustomDomainError:
+            pass
+    now = int(time.time())
+    verified = status == "active"
+    provisioning.update({"status": status, "ssl_status": ssl_status, "dns_records": dns_records, "updated_at": now})
+    site["domain_provisioning"] = provisioning
+    hosting = site.get("hosting") or {}
+    hosting["type"] = "custom" if verified else "platform"
+    hosting["verification"] = {"verified": verified, "method": "cloudflare_saas", **({"verified_at": now} if verified else {})}
+    site["hosting"] = hosting
+    _recompute_eligibility(site, tenant_id, now)
+    site["updated_at"] = now
+    try:
+        validate_site(site)
+        saved = repository.put(site)
+    except (DocumentValidationError, RepositoryError) as exc:
+        return error_response(str(exc), code="invalid_domain")
+    custom_domains_index_repository().put(
+        {"tenant_id": tenant_id, "domain": domain, "target_page_id": provisioning.get("homepage_page_id"), "status": status, "site_id": site_id}
+    )
+    # When not yet verified, tell the tenant exactly why: a record that isn't resolving (wrong name/value) vs.
+    # records that look right but the certificate is still issuing.
+    diagnostics, hint = [], ""
+    if not verified:
+        diagnostics = diagnose_dns_records(dns_records)
+        missing = [d for d in diagnostics if not d.get("resolved")]
+        if missing:
+            parts = [f"{d['name']} ({d['note']})" if d.get("note") else d["name"] for d in missing]
+            hint = "These records aren't resolving yet — check the name, type, and value exactly as shown: " + "; ".join(parts) + "."
+        else:
+            hint = "Your DNS records look correct. Cloudflare is issuing the certificate — this can take a few minutes. Re-check shortly."
+    return json_response({"site": saved, "status": status, "dns_records": dns_records, "diagnostics": diagnostics, "hint": hint})
+
+
+def disconnect_domain(event, repository, site_id):
+    tenant_id = tenant_id_from_event(event)
+    if not tenant_id:
+        return error_response("tenant_id is required.", code="missing_tenant")
+    site = repository.get(tenant_id, site_id)
+    if not site:
+        return error_response("Site not found.", status_code=404, code="not_found")
+    provisioning = site.get("domain_provisioning") or {}
+    hostname_id = str(provisioning.get("custom_hostname_id") or "")
+    domain = str((site.get("hosting") or {}).get("custom_domain") or "")
+    zone_id, api_token, _ = _cloudflare_config()
+    if hostname_id and zone_id and api_token:
+        try:
+            delete_custom_hostname(hostname_id, zone_id=zone_id, api_token=api_token)
+        except CustomDomainError:
+            pass  # best-effort teardown; the Cloudflare hostname may already be gone
+    now = int(time.time())
+    hosting = site.get("hosting") or {}
+    hosting["custom_domain"] = None
+    hosting["type"] = "platform"
+    hosting.pop("verification", None)
+    site["hosting"] = hosting
+    site.pop("domain_provisioning", None)
+    _recompute_eligibility(site, tenant_id, now)
+    site["updated_at"] = now
+    try:
+        validate_site(site)
+        saved = repository.put(site)
+    except (DocumentValidationError, RepositoryError) as exc:
+        return error_response(str(exc), code="invalid_domain")
+    if domain:
+        try:
+            custom_domains_index_repository().delete(tenant_id, domain)
+        except RepositoryError:
+            pass
+    return json_response({"site": saved, "disconnected": True})
 
 
 def _assert_pages_unassigned(repository, document):

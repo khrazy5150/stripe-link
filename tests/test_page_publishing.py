@@ -204,6 +204,32 @@ class PagePublishingTests(unittest.TestCase):
         self.assertIn("Bean Bros", body)
         self.assertIn('"@type":"WebSite"', body)
 
+    def test_homepage_on_verified_domain_switches_canonical_and_indexes(self):
+        page = copy.deepcopy(self.page)
+        page["status"] = "published"
+        site = {
+            "tenant_id": "tenant_demo", "site_id": "site_x",
+            "hosting": {"type": "custom", "custom_domain": "shop.example.com", "verification": {"verified": True}},
+            "indexing": {"eligibility": "eligible"},
+            "pages": {"/": {"page_id": "page_simple_coffee"}},
+        }
+        publish_page_document(
+            page,
+            offers_repository=self.offers_repo,
+            products_repository=self.products_repo,
+            sites_repository=FakeSitesRepository([site]),
+            s3_client=self.s3,
+            pages_bucket="pages",
+            preview_bucket="preview",
+            environment="prod",
+            pages_domain="pages.example.com",
+            preview_domain="preview.example.com",
+            checkout_url="https://checkout.stripe.com/c/pay/demo",
+        )
+        published = [put for put in self.s3.puts if "preview/" not in put["Key"]][0]["Body"].decode()
+        self.assertIn('<link rel="canonical" href="https://shop.example.com/">', published)
+        self.assertIn('content="index,follow', published)
+
     def test_publish_without_a_site_emits_no_organization(self):
         page = copy.deepcopy(self.page)
         page["goal"] = "search_seo"
