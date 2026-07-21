@@ -1373,7 +1373,15 @@ def validate_business_identity(business: Any) -> None:
     if not isinstance(business, dict):
         raise DocumentValidationError("User profile business must be an object.")
     optional_string(business, "name", "business.name")
+    optional_string(business, "email", "business.email")
     require_e164(business, "phone", "Business phone")
+    # Per-field provenance (source: stripe|manual|gbp|derived) so an auto-seed (Stripe Connect, later GBP)
+    # never clobbers a tenant's own value. Fill-empty-only is the guarantee; this records where a value came
+    # from (plans/BUSINESS_PROFILE_AND_GBP.md).
+    sources = business.get("sources")
+    if sources is not None:
+        if not isinstance(sources, dict) or any(not isinstance(v, str) for v in sources.values()):
+            raise DocumentValidationError("business.sources must be a map of field name to source string.")
     brands = business.get("brands")
     if brands is not None:
         if not isinstance(brands, list) or any(not isinstance(brand, str) for brand in brands):

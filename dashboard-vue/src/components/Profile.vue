@@ -67,6 +67,14 @@
             <small v-else>International format, e.g. +12065551234 — same standard as your account phone.</small>
           </label>
         </div>
+        <label class="offer-field">
+          <span>Business Email</span>
+          <input v-model.trim="form.business.email" type="email" placeholder="hello@yourbusiness.com" />
+          <small>Public contact email shown in your business's structured data.</small>
+        </label>
+        <p v-if="hasStripeSourcedFields" class="field-note">
+          Some details were filled automatically from your Stripe account. Edit any field to override it.
+        </p>
         <div class="offer-field">
           <span>Brand Name(s)</span>
           <small>Optional. An offer can display one of these; otherwise it falls back to the business name, then the product name.</small>
@@ -136,8 +144,12 @@ const form = reactive({
   business: emptyBusiness(),
 });
 
+const hasStripeSourcedFields = computed(() =>
+  Object.values((rawDoc.value.business || {}).sources || {}).includes("stripe"),
+);
+
 function emptyBusiness() {
-  return { name: "", phone: "", brands: [], address: { street: "", locality: "", region: "", postal_code: "", country: "" } };
+  return { name: "", email: "", phone: "", brands: [], address: { street: "", locality: "", region: "", postal_code: "", country: "" } };
 }
 
 function addBrand() {
@@ -148,17 +160,32 @@ function removeBrand(index) {
   form.business.brands.splice(index, 1);
 }
 
-// Build the stored business block, dropping blanks so an untouched section saves nothing.
-function cleanBusiness(business) {
+// Build the stored business block, dropping blanks so an untouched section saves nothing. Preserves the
+// provenance map (business.sources) and stamps a field 'manual' when the tenant changes it, so a later
+// auto-seed (Stripe/GBP) knows the tenant owns it.
+function cleanBusiness(business, original = {}) {
   const brands = (business.brands || []).map((brand) => String(brand || "").trim()).filter(Boolean);
   const address = Object.fromEntries(
     Object.entries(business.address || {}).filter(([, value]) => String(value || "").trim()),
   );
   const result = {};
   if (business.name) result.name = business.name;
+  if (business.email) result.email = business.email;
   if (business.phone) result.phone = normalizeE164(business.phone);
   if (brands.length) result.brands = brands;
   if (Object.keys(address).length) result.address = address;
+
+  const sources = { ...(original.sources || {}) };
+  for (const key of ["name", "email", "phone"]) {
+    if ((result[key] || "") !== (original[key] || "")) sources[key] = result[key] ? "manual" : undefined;
+    if (!result[key]) delete sources[key];
+  }
+  if (JSON.stringify(result.address || null) !== JSON.stringify(original.address || null)) {
+    if (result.address) sources.address = "manual";
+    else delete sources.address;
+  }
+  const cleanedSources = Object.fromEntries(Object.entries(sources).filter(([, v]) => v));
+  if (Object.keys(cleanedSources).length) result.sources = cleanedSources;
   return Object.keys(result).length ? result : null;
 }
 
@@ -176,6 +203,7 @@ function applyProfile(profile) {
   const address = business.address || {};
   form.business = {
     name: business.name || "",
+    email: business.email || "",
     phone: business.phone || "",
     brands: Array.isArray(business.brands) ? [...business.brands] : [],
     address: {
@@ -230,7 +258,7 @@ async function save() {
     doc.first_name = form.first_name;
     doc.last_name = form.last_name;
     doc.display_name = form.display_name || `${form.first_name} ${form.last_name}`.trim() || doc.email;
-    const business = cleanBusiness(form.business);
+    const business = cleanBusiness(form.business, rawDoc.value.business || {});
     if (business) doc.business = business;
     else delete doc.business;
     doc.updated_at = Math.floor(Date.now() / 1000);

@@ -73,10 +73,7 @@
           <div><dt>Pages</dt><dd>{{ Object.keys(site.pages || {}).length }}</dd></div>
           <div><dt>Status</dt><dd>{{ site.status }}</dd></div>
         </dl>
-        <p class="field-note">
-          Custom-domain connection and search indexing (which require a verified domain + Stripe Connect) arrive
-          in a later phase. For now this Site is <strong>not indexed</strong>.
-        </p>
+        <p class="field-note">{{ indexReason(site) }}</p>
       </div>
     </div>
 
@@ -278,11 +275,19 @@ function availabilityClass(state) {
 function canonicalHost(site) {
   return site.hosting?.type === "custom" && site.hosting?.custom_domain ? site.hosting.custom_domain : site.hosting?.platform_hostname;
 }
+const ELIGIBILITY_LABELS = { eligible: "Indexed", pending: "Indexing pending", blocked: "Not indexed", revoked: "Indexing revoked" };
 function indexLabel(site) {
-  return site.indexing?.eligibility === "eligible" ? "Indexed" : "Not indexed";
+  return ELIGIBILITY_LABELS[site.indexing?.eligibility] || "Not indexed";
 }
 function indexClass(site) {
   return site.indexing?.eligibility === "eligible" ? "active" : "archived";
+}
+function indexReason(site) {
+  const state = site.indexing?.eligibility;
+  if (state === "eligible") return "This Site is eligible for search indexing.";
+  if (state === "revoked") return "Indexing was revoked because your Stripe account is restricted. Resolve it in Stripe to restore eligibility.";
+  if (state === "pending") return "Almost there — search indexing needs both a verified custom domain and a verified Stripe Connect account.";
+  return "Search indexing requires a verified custom domain and a verified Stripe Connect account. On the free address a Site is never indexed.";
 }
 
 onMounted(async () => {

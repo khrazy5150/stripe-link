@@ -1299,10 +1299,16 @@ Resources:
       Handler: handlers.stripe_webhook.handler
       Description: Receives Stripe Connect webhook events.
       Policies:
-        - DynamoDBReadPolicy:
+        # CRUD (not Read): account.updated persists Connect verification state onto the stripe_keys doc.
+        - DynamoDBCrudPolicy:
             TableName: !Sub "${ProjectPrefix}-stripe-keys-dev"
-        - DynamoDBReadPolicy:
+        - DynamoDBCrudPolicy:
             TableName: !Sub "${ProjectPrefix}-stripe-keys-prod"
+        # account.updated also auto-seeds the business NAP (user_profile) and recomputes Site eligibility.
+        - DynamoDBCrudPolicy:
+            TableName: !Ref UserProfilesTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref SitesTable
         - DynamoDBCrudPolicy:
             TableName: !Ref CheckoutSessionsTable
         - DynamoDBCrudPolicy:

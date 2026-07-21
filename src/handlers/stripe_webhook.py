@@ -41,9 +41,17 @@ from stripe_link.repositories.documents import (
     products_repository,
     refunds_repository,
     services_repository,
+    sites_repository,
     stripe_keys_repository,
     tenant_profiles_repository,
+    user_profiles_repository,
     webhook_events_repository,
+)
+from stripe_link.domain.connect_sync import (
+    business_profile_seed,
+    compute_site_eligibility,
+    connect_state_fields,
+    seed_business_identity,
 )
 from stripe_link.stripe_platform_secrets import get_platform_webhook_secret
 
@@ -127,6 +135,8 @@ def handler(
     refunds_repo=None,
     webhook_events_repo=None,
     orders_repo=None,
+    user_profiles_repo=None,
+    sites_repo=None,
     webhook_secret_loader: Callable[[str, str], str | None] = get_platform_webhook_secret,
     now_fn: Callable[[], int] = lambda: int(time.time()),
     billing_config_loader: Callable[[], dict[str, Any]] | None = None,
@@ -232,6 +242,12 @@ def handler(
             invoices_repo=invoices_repo, notifications_repo=notifications_repo,
             now_fn=now_fn, billing_config_loader=billing_config_loader,
         )
+    elif event_type == "account.updated" and tenant_document:
+        persistence = reconcile_account_updated(
+            stripe_event, mode=mode, tenant_document=tenant_document,
+            stripe_keys_repo=(repository or stripe_keys_repository()),
+            user_profiles_repo=user_profiles_repo, sites_repo=sites_repo, now_fn=now_fn,
+        )
 
     if event_id and events_repo:
         try:
@@ -263,6 +279,71 @@ def handler(
             "persistence": persistence,
         },
     })
+
+
+def _owner_user_profile(user_profiles_repo, tenant_id: str) -> dict[str, Any] | None:
+    """The tenant owner's user_profile — the NAP seed target. Self-registered owners have user_id == tenant_id
+    (auth.py), which covers today's accounts; if that's absent we don't guess (seeding the wrong user's profile
+    would be worse than not seeding), so return None and skip the seed."""
+    try:
+        return user_profiles_repo.get(tenant_id, tenant_id)
+    except RepositoryError:
+        return None
+
+
+def reconcile_account_updated(
+    stripe_event: dict[str, Any],
+    *,
+    mode: str,
+    tenant_document: dict[str, Any],
+    stripe_keys_repo,
+    user_profiles_repo=None,
+    sites_repo=None,
+    now_fn: Callable[[], int] = lambda: int(time.time()),
+) -> dict[str, Any]:
+    """Handle Stripe `account.updated` (plans/SITE_OBJECT.md Phase 2.3): persist Connect verification state,
+    auto-seed the business NAP (fill-empty-only), and recompute each of the tenant's Sites' indexing
+    eligibility. account→tenant is already resolved (tenant_document = the stripe_keys doc)."""
+    account = _event_data_object(stripe_event)
+    tenant_id = str(tenant_document.get("tenant_id") or "").strip()
+    now = int(now_fn())
+
+    # 1) Connect verification state onto the stripe_keys doc (the account→tenant record).
+    fields = connect_state_fields(account, now=now)
+    stripe_keys_repo.put({**tenant_document, **fields, "mode": mode, "updated_at": now})
+    state = fields.get("connect_verification")
+    connect_verified = state == "verified"
+    connect_restricted = state == "restricted"
+    result: dict[str, Any] = {"tenant_id": tenant_id, "connect_verification": state}
+
+    # 2) NAP auto-seed from Stripe business_profile — fill empty fields only, stamped with provenance.
+    profiles_repo = user_profiles_repo or (user_profiles_repository() if os.environ.get("USER_PROFILES_TABLE") else None)
+    if profiles_repo:
+        seed = business_profile_seed(account)
+        profile = _owner_user_profile(profiles_repo, tenant_id) if seed else None
+        if profile:
+            business, changed = seed_business_identity(profile.get("business"), seed)
+            if changed:
+                profiles_repo.put({**profile, "business": business, "updated_at": now})
+                result["nap_seeded"] = sorted(business.get("sources", {}).keys())
+
+    # 3) Recompute indexing eligibility across the tenant's Sites (Connect state changed).
+    site_repo = sites_repo or (sites_repository() if os.environ.get("SITES_TABLE") else None)
+    if site_repo:
+        recomputed = []
+        for site in site_repo.list_for_tenant(tenant_id):
+            # Custom-domain→Site bridge is deferred, so no Site has a verified domain yet (domain_verified=False).
+            eligibility = compute_site_eligibility(
+                site, connect_verified=connect_verified, connect_restricted=connect_restricted, domain_verified=False,
+            )
+            if eligibility != (site.get("indexing") or {}).get("eligibility"):
+                indexing = {**(site.get("indexing") or {}), "eligibility": eligibility, "eligibility_updated_at": now}
+                site_repo.put({**site, "indexing": indexing, "updated_at": now})
+                recomputed.append(site.get("site_id"))
+        if recomputed:
+            result["sites_recomputed"] = recomputed
+
+    return result
 
 
 def persist_checkout_session_completed(

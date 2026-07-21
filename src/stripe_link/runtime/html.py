@@ -996,6 +996,29 @@ _RENDER_ORG: dict[str, Any] = {}
 # the tenant's preview, any non-production environment — must be kept out of the index.
 INDEXABLE_ROBOTS = "index,follow,max-image-preview:large,max-snippet:-1"
 NOINDEX_ROBOTS = "noindex,nofollow"
+# Crawlable-but-not-indexed: pending Connect verification, and funnel/checkout/thank-you pages on an otherwise
+# eligible Site — let crawlers follow links without indexing the page itself (TP-08, SEO-02).
+NOINDEX_FOLLOW_ROBOTS = "noindex,follow"
+# page_type values that must never be indexed even on an eligible Site (post-checkout funnel steps).
+NONINDEXABLE_PAGE_TYPES = {"checkout", "thank_you"}
+
+
+def page_robots_directive(*, kind: str, environment: str, site: dict[str, Any] | None, page_type: str) -> str:
+    """The robots directive for a page artifact (plans/SITE_OBJECT.md §2.2, TP-08, SEO-02). Only a published
+    artifact in production, on a Site whose indexing.eligibility is 'eligible' (which requires a verified custom
+    domain AND verified Stripe Connect), on an indexable page_type, gets index,follow. Everything on platform
+    infrastructure is noindex,nofollow — the reputation-isolation floor."""
+    if kind != "published" or environment != "prod":
+        return NOINDEX_ROBOTS
+    hosting = (site or {}).get("hosting") or {}
+    if hosting.get("type") != "custom":
+        return NOINDEX_ROBOTS  # platform host: never indexed, never crawl-followed for indexing
+    eligibility = ((site or {}).get("indexing") or {}).get("eligibility") or "blocked"
+    if eligibility == "eligible":
+        return NOINDEX_FOLLOW_ROBOTS if page_type in NONINDEXABLE_PAGE_TYPES else INDEXABLE_ROBOTS
+    if eligibility == "pending":
+        return NOINDEX_FOLLOW_ROBOTS
+    return NOINDEX_ROBOTS  # blocked / revoked
 
 
 def resolved_brand_label(presentation: dict[str, Any]) -> str:
@@ -1018,6 +1041,7 @@ def render_page(
     offers_by_id: dict[str, dict[str, Any]] | None = None,
     canonical_url: str = "",
     indexable: bool = False,
+    robots: str | None = None,
     site: dict[str, Any] | None = None,
 ) -> str:
     services_by_id = services_by_id or {}
@@ -1032,7 +1056,9 @@ def render_page(
         page, offer, *products_by_id.values(), *services_by_id.values(), *offers_by_id.values(),
     ))
     _RENDER_STATE["canonical"] = canonical_page_url(canonical_url)
-    _RENDER_STATE["robots"] = INDEXABLE_ROBOTS if indexable else NOINDEX_ROBOTS
+    # The caller computes the full robots directive (it has the Site + environment); `indexable` remains a
+    # back-compat shorthand for the unit tests that exercise the head in isolation.
+    _RENDER_STATE["robots"] = robots if robots is not None else (INDEXABLE_ROBOTS if indexable else NOINDEX_ROBOTS)
     _RENDER_ORG.clear()
     organization = (site or {}).get("organization")
     if isinstance(organization, dict):

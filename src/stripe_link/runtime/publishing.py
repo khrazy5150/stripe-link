@@ -5,7 +5,7 @@ from typing import Any
 
 from stripe_link.domain.documents import validate_offer_document, validate_page_document, validate_product_document
 from stripe_link.runtime.artifacts import artifact_paths, cloudfront_path
-from stripe_link.runtime.html import render_page
+from stripe_link.runtime.html import page_robots_directive, render_page
 
 
 class PublishError(RuntimeError):
@@ -17,6 +17,15 @@ def page_slug(page: dict[str, Any]) -> str:
     if not slug:
         raise PublishError("Page route.slug or page_id is required for publishing.")
     return slug
+
+
+def site_page_type(site: dict[str, Any] | None, page_id: str) -> str:
+    """The page_type the Site records for this page (drives robots/sitemap eligibility). Defaults to 'landing'
+    when the page has no Site entry (legacy pages)."""
+    for entry in ((site or {}).get("pages") or {}).values():
+        if isinstance(entry, dict) and entry.get("page_id") == page_id:
+            return str(entry.get("page_type") or "landing")
+    return "landing"
 
 
 def find_site_for_page(sites_repository: Any, tenant_id: str, page_id: str) -> dict[str, Any] | None:
@@ -235,11 +244,14 @@ def publish_page_document(
         preview_domain=preview_domain,
     )
 
-    # Render per target so the robots directive is correct per artifact (SEO-02/21): only the PUBLISHED
-    # artifact in PRODUCTION is indexable; the tenant's preview and every non-production build stay noindex.
+    # Render per target so the robots directive is correct per artifact. Only a published artifact in
+    # production, on an eligible Site (verified custom domain + Stripe Connect), on an indexable page_type,
+    # gets index,follow; everything on platform infrastructure stays noindex (plans/SITE_OBJECT.md §2.2,
+    # TP-08, SEO-02). Eligibility is recomputed on the account.updated webhook and stored on the Site.
+    page_type = site_page_type(site, str(page.get("page_id") or ""))
     artifacts = []
     for target in targets:
-        indexable = target["kind"] == "published" and environment == "prod"
+        robots = page_robots_directive(kind=target["kind"], environment=environment, site=site, page_type=page_type)
         html = render_page(
             page,
             offer,
@@ -249,7 +261,7 @@ def publish_page_document(
             services_by_id=services_by_id,
             offers_by_id=offers_by_id,
             canonical_url=canonical_url,
-            indexable=indexable,
+            robots=robots,
             site=site,
         )
         s3_client.put_object(
