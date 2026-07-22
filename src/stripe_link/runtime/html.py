@@ -548,6 +548,15 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     "    .sl-carousel-desc{font-size:1.4rem;color:var(--sl-price-description)}",
     "    .sl-carousel-price{font-family:var(--sl-font-accent);font-weight:900;font-size:2rem;color:var(--sl-price-amount);margin-top:auto}",
     "    .sl-carousel-buy{width:auto;text-align:center}",
+    "    .sl-brand-hero{text-align:center;padding:2.4rem 0 0.8rem}",
+    "    .sl-brand-hero h1{font-family:var(--sl-font-heading);font-size:clamp(2.6rem,6vw,3.6rem);line-height:1.15;font-weight:800;color:var(--sl-headline);margin:0}",
+    "    .sl-brand-hero-tagline{font-size:1.6rem;line-height:1.5;color:var(--sl-subheadline-text);max-width:46rem;margin:0.8rem auto 0}",
+    "    .sl-catalog-grid{display:flex;flex-direction:column;gap:1.6rem}",
+    "    .sl-catalog-cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(15rem,1fr));gap:1.4rem}",
+    "    .sl-catalog-card{display:flex;flex-direction:column;gap:0.6rem;background:var(--sl-price-card-bg);border:1px solid var(--sl-price-card-border);border-radius:1.2rem;padding:1.2rem;text-decoration:none}",
+    "    .sl-catalog-card img{width:100%;aspect-ratio:1/1;object-fit:cover;border-radius:0.8rem}",
+    "    .sl-catalog-title{font-family:var(--sl-font-heading);font-weight:800;font-size:1.6rem;line-height:1.3;color:var(--sl-price-title);margin:0}",
+    "    .sl-catalog-price{font-family:var(--sl-font-accent);font-weight:900;font-size:1.8rem;color:var(--sl-price-amount);margin:0}",
     "    .sl-listicle{width:min(52rem,100%);margin:0 auto;display:flex;flex-direction:column;gap:1.2rem}",
     "    .sl-listicle-stage{position:relative}",
     "    .sl-listicle-carousel{display:flex;overflow-x:auto;scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch;scrollbar-width:none}",
@@ -1161,12 +1170,14 @@ def _render_page_body(
     # Resolve against the prices this PAGE shows. The offer's default_price_id may point at an upsell /
     # downsell / order-bump price, which belongs to the post-checkout flow — letting it through made the CTA
     # advertise an amount no price card displayed.
+    # A storefront/collection page has no primary offer (offer == {}); there's nothing to resolve or price.
+    # Its catalog_grid resolves each card's own offer from offers_by_id instead.
     resolved_offer = resolve_offer(
         offer,
         products_by_id,
         landing_page_selected_prices(offer, products_by_id, selected_prices),
         services_by_id=services_by_id,
-    )
+    ) if offer else {}
     # The <head> title/description are derived here so they are correct regardless of what a page stored
     # (plans/ON_PAGE_SEO_REQUIREMENTS.md SEO-03/04). Never page.name/offer.name (the internal "… Single
     # Offer" label). The title is NOT re-title-cased — it preserves the product name verbatim so <title>,
@@ -1357,6 +1368,8 @@ SECTION_REGISTRY: dict[str, dict[str, Any]] = {
     "client_marquee": {"render": lambda c: render_client_marquee(c.section), "version": 1},
     "product_details": {"render": lambda c: render_product_details(c.offer, c.products_by_id, c.services_by_id), "version": 1},
     "product_carousel": {"render": lambda c: render_product_carousel(c.section, c.page, c.offers_by_id, c.products_by_id, c.services_by_id, c.checkout_url, c.api_base_url), "version": 1},
+    "brand_hero": {"render": lambda c: render_brand_hero(c.section), "version": 1},
+    "catalog_grid": {"render": lambda c: render_catalog_grid(c.section, c.offers_by_id, c.products_by_id, c.services_by_id), "version": 1},
     "checkout_cta": {"render": lambda c: render_checkout_cta(c.page, c.section, c.offer, c.resolved_offer, c.checkout_url, c.api_base_url, c.products_by_id), "version": 1},
     "legal_footer": {"render": lambda c: render_legal_footer(c.page.get("legal") or {}, c.section, c.api_base_url), "version": 1},
 }
@@ -2988,6 +3001,75 @@ def render_client_marquee(section: dict[str, Any]) -> str:
         f"    <section class=\"sl-client-marquee\" data-section-id=\"{escape(str(section.get('id', 'client-marquee')))}\" data-section-type=\"client_marquee\">",
         heading_html,
         *body,
+        "    </section>",
+    ] if line)
+
+
+def render_brand_hero(section: dict[str, Any]) -> str:
+    """The storefront hero for a homepage/collection page (plans/SITE_OBJECT.md §2.5b): the store's name as the
+    page's single H1 plus an optional tagline. No product — a storefront page has no single offer. Falls back
+    to the Site Organization name when the section carries no headline."""
+    headline = str(section.get("headline") or "").strip() or str(_RENDER_ORG.get("name") or "").strip()
+    if not headline:
+        return ""
+    tagline = str(section.get("tagline") or "").strip()
+    return "\n".join(line for line in [
+        f'    <section class="sl-brand-hero" data-section-id="{escape(str(section.get("id", "brand-hero")))}" data-section-type="brand_hero">',
+        f'      <h1>{render_headline_markup(headline)}</h1>',
+        (f'      <p class="sl-brand-hero-tagline">{escape(tagline)}</p>' if tagline else ""),
+        "    </section>",
+    ] if line)
+
+
+def render_catalog_grid(
+    section: dict[str, Any],
+    offers_by_id: dict[str, dict[str, Any]],
+    products_by_id: dict[str, dict[str, Any]],
+    services_by_id: dict[str, dict[str, Any]],
+) -> str:
+    """A grid of the store's products (plans/SITE_OBJECT.md §2.5b / SEO-13): one card per curated item, each
+    an internal link to that offer's landing page slug on the Site — the crawlable catalog hierarchy that
+    makes subfolder domain authority work. Reuses the product_carousel card shape; links instead of buy-now.
+    Links resolve against the Site home host, so cards render as plain (unlinked) tiles off a custom domain."""
+    home = (_RENDER_STATE.get("home_url") or "").rstrip("/")
+    cards = []
+    for item in section.get("items") or []:
+        offer = offers_by_id.get(str((item or {}).get("offer_id") or ""))
+        if not offer:
+            continue
+        presentation = offer.get("presentation") or {}
+        name = str(presentation.get("headline") or offer.get("name") or "")
+        image = str(presentation.get("hero_image_url") or "").strip()
+        if not image:
+            product = first_offer_product(offer, products_by_id)
+            image = str((product.get("images") or [""])[0] if product else "")
+        price_html = ""
+        try:
+            resolved = resolve_offer(offer, products_by_id, None, services_by_id=services_by_id)
+            price_html = f'<p class="sl-catalog-price">{escape(format_money(int(resolved.get("subtotal", 0)), str(resolved.get("currency") or "usd")))}</p>'
+        except Exception:  # noqa: BLE001 - a broken card must not break the page
+            pass
+        inner = "\n".join(line for line in [
+            (f"        {responsive_img(image, name or 'Product', sizes=CONTENT_BLOCK_SIZES)}" if image else ""),
+            f'        <h3 class="sl-catalog-title">{render_headline_markup(name)}</h3>',
+            (f"        {price_html}" if price_html else ""),
+        ] if line)
+        slug = str((item or {}).get("slug") or "").strip()
+        href = f"{home}{slug}" if home and slug else ""
+        if href:
+            cards.append(f'      <a class="sl-catalog-card" href="{escape(href)}">\n{inner}\n      </a>')
+        else:
+            cards.append(f'      <div class="sl-catalog-card">\n{inner}\n      </div>')
+    if not cards:
+        return ""
+    heading = str(section.get("heading") or "").strip()
+    heading_html = f'      <h2 class="sl-section-heading">{render_headline_markup(heading)}</h2>' if heading else ""
+    return "\n".join(line for line in [
+        f'    <section class="sl-catalog-grid" data-section-id="{escape(str(section.get("id", "catalog-grid")))}" data-section-type="catalog_grid">',
+        heading_html,
+        '      <div class="sl-catalog-cards">',
+        *cards,
+        "      </div>",
         "    </section>",
     ] if line)
 

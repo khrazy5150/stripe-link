@@ -642,6 +642,48 @@ class PagePublishingTests(unittest.TestCase):
         self.assertEqual(result, {"batchItemFailures": [{"itemIdentifier": "record-1"}]})
 
 
+class StorefrontHomepageTests(unittest.TestCase):
+    def setUp(self):
+        self.offer = load_fixture("offer-simple-coffee.json")
+        self.product = load_fixture("product-simple-coffee.json")
+        self.offers_repo = FakeRepository("offer_id", [self.offer])
+        self.products_repo = FakeRepository("product_id", [self.product])
+        self.s3 = FakeS3Client()
+
+    def test_offerless_homepage_publishes_catalog_grid_linking_to_slugs(self):
+        # An offer-less storefront homepage: no primary offer, a brand hero + a catalog grid whose one card
+        # links to the coffee offer's landing slug on the verified custom domain.
+        page = {
+            "schema_version": "2026-01-01", "document_type": "page", "page_id": "page_home01",
+            "tenant_id": self.offer["tenant_id"],
+            "name": "Storefront", "status": "published", "route": {"slug": "home"},
+            "sections": [
+                {"id": "h", "type": "brand_hero", "headline": "Bean Co", "tagline": "Roasted to order"},
+                {"id": "g", "type": "catalog_grid", "heading": "Shop all",
+                 "items": [{"offer_id": self.offer["offer_id"], "slug": "/coffee"}]},
+                {"id": "f", "type": "legal_footer"},
+            ],
+        }
+        site = {
+            "tenant_id": self.offer["tenant_id"], "site_id": "site_x",
+            "hosting": {"type": "custom", "custom_domain": "shop.example.com", "verification": {"verified": True}},
+            "indexing": {"eligibility": "eligible"},
+            "pages": {"/": {"page_id": "page_home01", "page_type": "homepage"}},
+        }
+        publish_page_document(
+            page, offers_repository=self.offers_repo, products_repository=self.products_repo,
+            sites_repository=FakeSitesRepository([site]), s3_client=self.s3,
+            pages_bucket="pages", preview_bucket="preview", environment="prod",
+            pages_domain="pages.example.com", preview_domain="preview.example.com",
+        )
+        published = [p for p in self.s3.puts if "preview/" not in p["Key"]][0]["Body"].decode()
+        self.assertIn('data-section-type="brand_hero"', published)
+        self.assertIn('data-section-type="catalog_grid"', published)
+        # The card resolved the referenced offer (loaded despite no primary offer) and links to its Site slug.
+        self.assertIn('href="https://shop.example.com/coffee"', published)
+        self.assertIn("<h1>Bean Co</h1>", published)
+
+
 class FunnelAttachTests(unittest.TestCase):
     def test_site_page_slug_finds_and_misses(self):
         site = {"pages": {"/": {"page_id": "p_home"}, "/upsell-1": {"page_id": "p_up"}}}

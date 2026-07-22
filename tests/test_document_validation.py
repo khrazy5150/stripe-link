@@ -514,6 +514,28 @@ class DocumentValidationTests(unittest.TestCase):
         with self.assertRaisesRegex(DocumentValidationError, "must match page offer_id"):
             validate_page_document(page)
 
+    def test_storefront_page_with_catalog_grid_needs_no_offer_id(self):
+        page = copy.deepcopy(self.page)
+        page.pop("offer_id", None)
+        page["sections"] = [
+            {"id": "h", "type": "brand_hero", "headline": "My Store", "tagline": "Great stuff"},
+            {"id": "g", "type": "catalog_grid", "heading": "Shop", "items": [{"offer_id": "offer_x", "slug": "/thing"}]},
+        ]
+        validate_page_document(page)  # offer-less catalog page is valid
+
+    def test_catalog_grid_item_requires_offer_id(self):
+        page = copy.deepcopy(self.page)
+        page.pop("offer_id", None)
+        page["sections"] = [{"id": "g", "type": "catalog_grid", "items": [{"slug": "/thing"}]}]
+        with self.assertRaisesRegex(DocumentValidationError, "item offer_id"):
+            validate_page_document(page)
+
+    def test_non_catalog_page_still_requires_offer_id(self):
+        page = copy.deepcopy(self.page)
+        page.pop("offer_id", None)
+        with self.assertRaisesRegex(DocumentValidationError, "offer_id"):
+            validate_page_document(page)
+
     def test_page_rejects_preview_status(self):
         page = copy.deepcopy(self.page)
         page["status"] = "preview"

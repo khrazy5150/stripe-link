@@ -921,7 +921,16 @@ def validate_coupon_document(document: dict[str, Any]) -> None:
 def validate_page_document(document: dict[str, Any]) -> None:
     require_document_fields(document, "page", "page_id")
     require_string(document, "name")
-    require_string(document, "offer_id")
+    # A storefront/catalog page (one carrying a catalog_grid) lists other pages' offers and has no single
+    # primary offer, so offer_id is optional there (plans/SITE_OBJECT.md §2.5b). Every other page still
+    # requires one — a landing page renders exactly one offer.
+    is_catalog_page = any(
+        isinstance(s, dict) and s.get("type") == "catalog_grid" for s in (document.get("sections") or [])
+    )
+    if is_catalog_page:
+        optional_string(document, "offer_id", "Page offer_id")
+    else:
+        require_string(document, "offer_id")
     if document.get("status") is not None:
         require_enum(document, "status", {"draft", "published", "archived"})
     # goal is optional: pages created before the goal axis simply compose from the offer_type base.
@@ -1087,6 +1096,15 @@ def validate_page_document(document: dict[str, Any]) -> None:
             optional_string_list(section, "offer_ids", "Product carousel offer_ids")
             if isinstance(section.get("offer_ids"), list) and len(section["offer_ids"]) > 24:
                 raise DocumentValidationError("Product carousel supports at most 24 offers.")
+        elif section_type == "brand_hero":
+            optional_string(section, "headline", "Brand hero headline")
+            optional_string(section, "tagline", "Brand hero tagline")
+        elif section_type == "catalog_grid":
+            optional_string(section, "heading", "Catalog grid heading")
+            items = optional_limited_object_list(section, "items", 48, "Catalog grid items")
+            for item in items:
+                require_string(item, "offer_id", "Catalog grid item offer_id")
+                optional_string(item, "slug", "Catalog grid item slug")
         elif section_type == "checkout_cta":
             optional_string(section, "label", "Checkout CTA label")
         elif section_type == "legal_footer":

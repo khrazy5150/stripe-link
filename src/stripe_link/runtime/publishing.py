@@ -182,14 +182,23 @@ def strip_document_keys(document: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def carousel_offer_ids(page: dict[str, Any]) -> list[str]:
-    """Offer ids referenced by product_carousel sections (the listicle sells several offers per page)."""
+def referenced_offer_ids(page: dict[str, Any]) -> list[str]:
+    """Offer ids a page references beyond its primary offer: product_carousel slides and catalog_grid cards.
+    A storefront/collection page has no primary offer at all and sources every card from here."""
     ids: list[str] = []
+
+    def _add(offer_id: Any) -> None:
+        text = str(offer_id or "")
+        if text and text not in ids:
+            ids.append(text)
+
     for section in page.get("sections", []):
         if section.get("type") == "product_carousel":
             for offer_id in section.get("offer_ids") or []:
-                if offer_id and str(offer_id) not in ids:
-                    ids.append(str(offer_id))
+                _add(offer_id)
+        elif section.get("type") == "catalog_grid":
+            for item in section.get("items") or []:
+                _add((item or {}).get("offer_id"))
     return ids
 
 
@@ -250,14 +259,20 @@ def load_render_context(
     services_by_id: dict[str, dict[str, Any]] = {}
     offers_by_id: dict[str, dict[str, Any]] = {}
 
-    offer = _load_offer_bundle(
-        tenant_id, str(page.get("offer_id") or ""),
-        offers_repository=offers_repository, products_repository=products_repository,
-        services_repository=services_repository, products_by_id=products_by_id, services_by_id=services_by_id,
-    )
-    offers_by_id[str(offer.get("offer_id") or "")] = offer
+    # A storefront/collection page has no primary offer — it renders a grid of other pages' offers. Skip the
+    # primary-offer load then; the catalog_grid/carousel offers below are all it needs (plans/SITE_OBJECT §2.5b).
+    primary_offer_id = str(page.get("offer_id") or "")
+    if primary_offer_id:
+        offer = _load_offer_bundle(
+            tenant_id, primary_offer_id,
+            offers_repository=offers_repository, products_repository=products_repository,
+            services_repository=services_repository, products_by_id=products_by_id, services_by_id=services_by_id,
+        )
+        offers_by_id[str(offer.get("offer_id") or "")] = offer
+    else:
+        offer = {}
 
-    for referenced_id in carousel_offer_ids(page):
+    for referenced_id in referenced_offer_ids(page):
         if referenced_id in offers_by_id:
             continue
         offers_by_id[referenced_id] = _load_offer_bundle(
