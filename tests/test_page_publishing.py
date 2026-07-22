@@ -262,6 +262,12 @@ class PagePublishingTests(unittest.TestCase):
     def test_homepage_on_verified_domain_switches_canonical_and_indexes(self):
         page = copy.deepcopy(self.page)
         page["status"] = "published"
+        # An indexable page needs real content: pad past the SEO-08 thin-content floor so the gate doesn't
+        # (correctly) demote this otherwise-eligible page to noindex.
+        page.setdefault("sections", []).append({
+            "id": "about", "type": "content_block",
+            "blocks": [{"title": "About this coffee", "text": " ".join(["freshly roasted single origin beans"] * 30)}],
+        })
         site = {
             "tenant_id": "tenant_demo", "site_id": "site_x",
             "hosting": {"type": "custom", "custom_domain": "shop.example.com", "verification": {"verified": True}},
@@ -284,6 +290,27 @@ class PagePublishingTests(unittest.TestCase):
         published = [put for put in self.s3.puts if "preview/" not in put["Key"]][0]["Body"].decode()
         self.assertIn('<link rel="canonical" href="https://shop.example.com/">', published)
         self.assertIn('content="index,follow', published)
+
+    def test_thin_page_on_eligible_domain_is_demoted_to_noindex(self):
+        # SEO-08: the bare coffee fixture (a few dozen words) is below the content floor, so even on an
+        # eligible verified domain it must publish noindex,follow rather than drag the Site's ranking down.
+        page = copy.deepcopy(self.page)
+        page["status"] = "published"
+        site = {
+            "tenant_id": "tenant_demo", "site_id": "site_x",
+            "hosting": {"type": "custom", "custom_domain": "shop.example.com", "verification": {"verified": True}},
+            "indexing": {"eligibility": "eligible"},
+            "pages": {"/": {"page_id": "page_simple_coffee"}},
+        }
+        publish_page_document(
+            page, offers_repository=self.offers_repo, products_repository=self.products_repo,
+            sites_repository=FakeSitesRepository([site]), s3_client=self.s3,
+            pages_bucket="pages", preview_bucket="preview", environment="prod",
+            pages_domain="pages.example.com", preview_domain="preview.example.com",
+            checkout_url="https://checkout.stripe.com/c/pay/demo",
+        )
+        published = [put for put in self.s3.puts if "preview/" not in put["Key"]][0]["Body"].decode()
+        self.assertIn('content="noindex,follow"', published)
 
     def test_publish_without_a_site_emits_no_organization(self):
         page = copy.deepcopy(self.page)

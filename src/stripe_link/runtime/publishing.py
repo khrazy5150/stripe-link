@@ -13,7 +13,14 @@ from stripe_link.runtime.artifacts import artifact_paths, cloudfront_path
 from stripe_link.domain.connect_sync import site_domain_verified
 from stripe_link.domain.custom_domains import domain_index_record
 from stripe_link.domain.funnels import funnel_slug_entries
-from stripe_link.runtime.html import page_robots_directive, render_page
+from stripe_link.runtime.html import (
+    INDEXABLE_ROBOTS,
+    NOINDEX_FOLLOW_ROBOTS,
+    THIN_CONTENT_MIN_WORDS,
+    indexable_word_count,
+    page_robots_directive,
+    render_page,
+)
 
 
 class PublishError(RuntimeError):
@@ -334,25 +341,31 @@ def publish_page_document(
     canonical_path = "" if page_site_slug in ("", "/") else page_site_slug.lstrip("/")
     page_canonical = f"https://{custom_domain}/{canonical_path}" if on_custom_domain and custom_domain else canonical_url
     eligibility = ((site or {}).get("indexing") or {}).get("eligibility") or "blocked"
+
+    def _render(robots: str) -> str:
+        return render_page(
+            page, offer, products_by_id, checkout_url=checkout, api_base_url=api_base_url,
+            services_by_id=services_by_id, offers_by_id=offers_by_id, canonical_url=page_canonical,
+            robots=robots, site=site, page_type=page_type,
+        )
+
     artifacts = []
+    indexable_words = None
     for target in targets:
         robots = page_robots_directive(
             kind=target["kind"], environment=environment, eligibility=eligibility,
             page_type=page_type, on_custom_domain=on_custom_domain,
         )
-        html = render_page(
-            page,
-            offer,
-            products_by_id,
-            checkout_url=checkout,
-            api_base_url=api_base_url,
-            services_by_id=services_by_id,
-            offers_by_id=offers_by_id,
-            canonical_url=page_canonical,
-            robots=robots,
-            site=site,
-            page_type=page_type,
-        )
+        html = _render(robots)
+        # Thin-content gate (SEO-08): an otherwise-indexable page with too little unique body text is demoted
+        # to noindex,follow so a doorway-thin page can't drag the whole Site's ranking down. Body text is
+        # robots-invariant, so measure once and re-render only the rare indexable+thin artifact.
+        if robots == INDEXABLE_ROBOTS:
+            if indexable_words is None:
+                indexable_words = indexable_word_count(html)
+            if indexable_words < THIN_CONTENT_MIN_WORDS:
+                robots = NOINDEX_FOLLOW_ROBOTS
+                html = _render(robots)
         s3_client.put_object(
             Bucket=target["bucket"],
             Key=target["key"],

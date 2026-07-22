@@ -14,6 +14,7 @@ from stripe_link.runtime.html import (
     RenderError,
     accessibility_warnings,
     heading_outline_warnings,
+    thin_content_warnings,
     render_page,
     structured_data_warnings,
 )
@@ -102,8 +103,9 @@ def handler(event, context, *, sites_repo=None):
             "warnings": {
                 "structured_data": structured_data_warnings(offer, products_by_id, services_by_id),
                 # Quality baseline (plans/LANDING_PAGE_GOAL_COMPOSITION.md Phase 4): heading outline +
-                # accessibility (CLS next). Checked on the rendered HTML — the source of truth for what ships.
-                "page_health": heading_outline_warnings(html) + accessibility_warnings(html),
+                # accessibility (CLS next) + the SEO-08 thin-content floor. Checked on the rendered HTML —
+                # the source of truth for what ships.
+                "page_health": heading_outline_warnings(html) + accessibility_warnings(html) + thin_content_warnings(html),
             },
         })
     except (DocumentValidationError, PricingError, RenderError, ValueError) as exc:

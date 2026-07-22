@@ -1,4 +1,4 @@
-from html import escape
+from html import escape, unescape
 from dataclasses import dataclass
 from decimal import Decimal
 import json
@@ -2027,6 +2027,42 @@ def accessibility_warnings(html: str) -> list[str]:
         noun = "image is" if missing == 1 else "images are"
         return [f"{missing} {noun} missing alt text. Describe each image so screen readers and search engines can use it."]
     return []
+
+
+THIN_CONTENT_MIN_WORDS = 150
+
+# Non-content chrome stripped before counting words: scripts/styles, and the boilerplate regions identical
+# across every tenant/product (breadcrumb, legal footer, minicart). What's left is the page's own content.
+_SCRIPT_STYLE_RE = re.compile(r"<(script|style)\b[^>]*>.*?</\1>", re.IGNORECASE | re.DOTALL)
+_CHROME_BLOCK_RE = re.compile(
+    r'<nav class="sl-breadcrumb".*?</nav>|<footer class="sl-legal".*?</footer>|<div class="sl-minicart".*?</div>',
+    re.IGNORECASE | re.DOTALL,
+)
+
+
+def indexable_word_count(html: str) -> int:
+    """Approximate the page's unique indexable body text for the thin-content gate (SEO-08): strip scripts,
+    styles, and cross-tenant chrome (breadcrumb, legal footer, minicart), drop the remaining tags, and count
+    words. A floor check, not exact — precise per-tenant boilerplate subtraction and cross-page dedup within a
+    Site are later refinements; the threshold already tolerates the trust-badge/CTA text this leaves in."""
+    body = html.split("<body>", 1)[-1].split("</body>", 1)[0]
+    body = _SCRIPT_STYLE_RE.sub(" ", body)
+    body = _CHROME_BLOCK_RE.sub(" ", body)
+    text = unescape(_TAG_RE.sub(" ", body))
+    return len(text.split())
+
+
+def thin_content_warnings(html: str) -> list[str]:
+    """Builder page-health nudge (SEO-08): a page below the unique-content floor publishes as noindex, so tell
+    the tenant why and what to add. Warning, never a gate — publishing is never blocked."""
+    count = indexable_word_count(html)
+    if count >= THIN_CONTENT_MIN_WORDS:
+        return []
+    return [
+        f"This page has only about {count} words of unique content (under {THIN_CONTENT_MIN_WORDS}), so it "
+        "publishes as noindex — hidden from search — to protect your site's ranking. Add a product "
+        "description, a specifications table, an FAQ, or condition details to make it eligible."
+    ]
 
 
 def structured_data_warnings(

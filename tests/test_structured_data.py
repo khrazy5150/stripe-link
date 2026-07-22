@@ -3,7 +3,14 @@ import json
 import re
 import unittest
 
-from stripe_link.runtime.html import accessibility_warnings, heading_outline_warnings, render_page, structured_data_warnings
+from stripe_link.runtime.html import (
+    accessibility_warnings,
+    heading_outline_warnings,
+    indexable_word_count,
+    render_page,
+    structured_data_warnings,
+    thin_content_warnings,
+)
 from tests.test_page_render import load_fixture
 
 
@@ -182,6 +189,29 @@ class BreadcrumbTests(unittest.TestCase):
         html = self._render(canonical="https://shop.example.com/creatine", goal=None)
         self.assertNotIn("BreadcrumbList", json.dumps(ld_blocks(html)))
         self.assertNotEqual(self._nav(html), "")
+
+
+class ThinContentGateTests(unittest.TestCase):
+    """SEO-08: unique-content floor for indexing."""
+
+    def _doc(self, body):
+        return f"<html><body><main>{body}</main></body></html>"
+
+    def test_counts_content_words_ignoring_chrome_and_scripts(self):
+        words = " ".join(["real content word"] * 40)  # 120 words
+        html = self._doc(
+            f"<h1>Buy It</h1><p>{words}</p>"
+            "<nav class=\"sl-breadcrumb\"><ol><li>lots of breadcrumb words here padding padding</li></ol></nav>"
+            "<footer class=\"sl-legal\">many legal boilerplate words that must not be counted at all here</footer>"
+            "<script>var a = 'ignored script words that should never count toward content length';</script>"
+        )
+        count = indexable_word_count(html)
+        # The 120 content words plus the short "Buy It" heading — chrome/script excluded, so well under the 150 floor.
+        self.assertTrue(120 <= count < 140, count)
+
+    def test_warns_below_floor_and_silent_above(self):
+        self.assertTrue(thin_content_warnings(self._doc("<p>only a few words here</p>")))
+        self.assertEqual(thin_content_warnings(self._doc("<p>" + " ".join(["word"] * 200) + "</p>")), [])
 
 
 class SiteOrganizationIdentityTests(unittest.TestCase):
