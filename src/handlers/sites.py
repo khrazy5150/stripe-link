@@ -139,6 +139,8 @@ def handler(event, context, repository=None, registry=None):
         return check_subdomain(event, registry or subdomain_registry())
     if method == "PATCH" and site_id and resource.endswith("/status"):
         return update_site_status(event, repository, site_id)
+    if method == "POST" and site_id and resource.endswith("/homepage"):
+        return set_homepage(event, repository, site_id)
     if site_id and resource.endswith(("/domain", "/domain/check")):
         # Custom-domain serving is handled by the single production edge Worker, so the flow is live-only.
         # A test/dev Site can't serve a real domain — refuse rather than let a tenant reach a dead end.
@@ -162,6 +164,65 @@ def handler(event, context, repository=None, registry=None):
     if method == "DELETE" and site_id:
         return delete_site(event, repository, site_id)
     return error_response(f"Unsupported method '{method}'.", status_code=405, code="method_not_allowed")
+
+
+def _unique_slug(pages: dict, seed) -> str:
+    """A Site route slug from `seed`, not already used in `pages`."""
+    base = "/" + _slugify(seed)
+    slug, n = base, 2
+    while slug in pages:
+        slug, n = f"{base}-{n}", n + 1
+    return slug
+
+
+def set_homepage(event, repository, site_id):
+    """Make a page the Site's homepage: attach it at "/" with page_type=homepage (plans/SITE_OBJECT.md §2.5b).
+    Any different page currently at "/" moves to its own slug so it stays served — and linkable from the new
+    homepage's catalog grid. Refreshes the domain-index route table so the change serves on a custom domain."""
+    try:
+        body = parse_json_body(event)
+    except ValueError as exc:
+        return error_response(str(exc), code="invalid_request")
+    tenant_id = tenant_id_from_event(event, body)
+    if not tenant_id:
+        return error_response("tenant_id is required.", code="missing_tenant")
+    page_id = str(body.get("page_id") or "").strip()
+    if not page_id:
+        return error_response("page_id is required.", code="missing_page")
+    site = repository.get(tenant_id, site_id)
+    if not site:
+        return error_response("Site not found.", status_code=404, code="not_found")
+
+    pages = dict(site.get("pages") or {})
+    page_type = str(body.get("page_type") or "homepage").strip() or "homepage"
+    # Displace a different page at "/" to its own slug so it stays reachable.
+    current = pages.get("/")
+    if isinstance(current, dict) and current.get("page_id") and current["page_id"] != page_id:
+        pages[_unique_slug(pages, body.get("displaced_slug") or current.get("label") or current["page_id"])] = dict(current)
+    # Detach the incoming page from any other slug it occupies, preserving its label, then place it at "/".
+    label = None
+    for slug, entry in list(pages.items()):
+        if isinstance(entry, dict) and entry.get("page_id") == page_id:
+            label = entry.get("label")
+            if slug != "/":
+                pages.pop(slug)
+    new_entry = {"page_id": page_id, "page_type": page_type, "enabled": True}
+    if label:
+        new_entry["label"] = label
+    pages["/"] = new_entry
+    site["pages"] = pages
+    site["updated_at"] = int(time.time())
+    try:
+        validate_site(site)
+        saved = repository.put(site)
+    except (DocumentValidationError, RepositoryError) as exc:
+        return error_response(str(exc), code="invalid_site")
+    if (site.get("hosting") or {}).get("custom_domain"):
+        try:
+            custom_domains_index_repository().put(domain_index_record(saved))
+        except Exception:
+            pass
+    return json_response({"site": saved})
 
 
 def check_subdomain(event, registry):

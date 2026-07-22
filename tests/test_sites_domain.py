@@ -61,6 +61,46 @@ class FakeKeys:
         return document
 
 
+class SetHomepageTests(unittest.TestCase):
+    def setUp(self):
+        self.repo = FakeDocumentRepository("site_id")
+        self.site = {
+            "schema_version": "2026-07-20", "document_type": "site", "site_id": "site_H1", "tenant_id": "t1",
+            "environment": "live", "name": "Store", "status": "active",
+            "hosting": {"type": "platform", "platform_hostname": "store.jbay.uk", "custom_domain": None},
+            "organization": {"name": "Store", "entity_type": "OnlineStore"},
+            "indexing": {"eligibility": "blocked"},
+            "pages": {"/": {"page_id": "page_land01", "page_type": "landing", "label": "Course", "enabled": True}},
+            "created_at": 1, "updated_at": 1,
+        }
+        self.repo.put(self.site)
+
+    def _set(self, **body):
+        return handler({"httpMethod": "POST", "resource": "/sites/{site_id}/homepage",
+                        "pathParameters": {"site_id": "site_H1"},
+                        "body": json.dumps({"tenant_id": "t1", **body})}, None, repository=self.repo)
+
+    def test_sets_new_homepage_and_displaces_old_to_a_slug(self):
+        resp = self._set(page_id="page_home02")
+        self.assertEqual(resp["statusCode"], 200)
+        pages = json.loads(resp["body"])["site"]["pages"]
+        self.assertEqual(pages["/"]["page_id"], "page_home02")
+        self.assertEqual(pages["/"]["page_type"], "homepage")
+        moved = [slug for slug, e in pages.items() if e["page_id"] == "page_land01"]
+        self.assertEqual(len(moved), 1)
+        self.assertNotEqual(moved[0], "/")  # the old landing page stays served at its own slug
+
+    def test_promotes_an_already_attached_page_to_root(self):
+        self.site["pages"]["/deal"] = {"page_id": "page_deal", "page_type": "landing"}
+        self.repo.put(self.site)
+        pages = json.loads(self._set(page_id="page_deal")["body"])["site"]["pages"]
+        self.assertEqual(pages["/"]["page_id"], "page_deal")
+        self.assertNotIn("/deal", pages)  # moved from /deal to /, not duplicated
+
+    def test_requires_page_id(self):
+        self.assertEqual(self._set()["statusCode"], 400)
+
+
 class SitesDomainTests(unittest.TestCase):
     def setUp(self):
         self.repo = FakeDocumentRepository("site_id")

@@ -812,6 +812,12 @@ Resources:
             RestApiId: !Ref RestApi
             Path: /sites/{site_id}/status
             Method: PATCH
+        SiteHomepage:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /sites/{site_id}/homepage
+            Method: POST
 
   CouponsFunction:
     Type: AWS::Serverless::Function
