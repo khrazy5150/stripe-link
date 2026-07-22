@@ -191,6 +191,12 @@ class SitesDomainTests(unittest.TestCase):
         self.assertTrue(saved["hosting"]["verification"]["verified"])
         self.assertEqual(saved["indexing"]["eligibility"], "eligible")
 
+    def test_check_active_generates_indexnow_key(self):
+        self.repo.put(self._provisioned_site())
+        with patch.object(sites_handler, "get_custom_hostname", return_value=CF_ACTIVE):
+            self._check()
+        self.assertTrue(self.repo.get("t1", "site_D1").get("seo", {}).get("indexnow_key"))
+
     def test_check_active_with_connect_is_eligible(self):
         self.keys.verification = "verified"
         self.repo.put(self._provisioned_site())

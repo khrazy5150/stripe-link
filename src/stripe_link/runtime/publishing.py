@@ -297,6 +297,16 @@ def publish_page_document(
             "url": target["url"],
         })
 
+    # Per-Site crawl files (SEO-14/15): when the served homepage on a verified custom domain publishes, write
+    # robots.txt / sitemap.xml / {indexnow_key}.txt next to it (keyed under the homepage page_id so the
+    # path-aware resolver can serve them at the domain root) and ping IndexNow with the changed URL.
+    crawl = {}
+    if environment == "prod" and on_custom_domain and custom_domain:
+        crawl = publish_site_crawl_files(
+            site=site, homepage_page_id=page_id, custom_domain=custom_domain, page=page,
+            image_urls=_homepage_image_urls(offer, products_by_id), s3_client=s3_client, pages_bucket=pages_bucket,
+        )
+
     invalidation = invalidate_published_artifact(
         artifacts,
         cloudfront_client=cloudfront_client,
@@ -310,7 +320,54 @@ def publish_page_document(
         "status": page.get("status"),
         "artifacts": artifacts,
         "invalidation": invalidation,
+        "crawl": crawl,
     }
+
+
+def _homepage_image_urls(offer: dict[str, Any], products_by_id: dict[str, dict[str, Any]]) -> list[str]:
+    from stripe_link.runtime.html import first_offer_product, seo_image_url
+
+    product = first_offer_product(offer, products_by_id) or {}
+    return [seo_image_url(image) for image in (product.get("images") or []) if image][:5]
+
+
+def publish_site_crawl_files(*, site, homepage_page_id, custom_domain, page, image_urls, s3_client, pages_bucket, indexnow_opener=None):
+    """Generate + write the Site's crawl files under the homepage artifact key, and submit the homepage URL to
+    IndexNow. Best-effort on the IndexNow ping — never fail a publish on it."""
+    from stripe_link.domain.sitemap import robots_txt, sitemap_xml
+
+    root = f"https://{custom_domain}/"
+    sitemap = sitemap_xml([{"loc": root, "lastmod": page.get("updated_at") or page.get("published_at"), "images": image_urls}])
+    robots = robots_txt(f"https://{custom_domain}/sitemap.xml")
+    prefix = f"{homepage_page_id}/"
+    cache = "public, max-age=300"
+    s3_client.put_object(Bucket=pages_bucket, Key=prefix + "sitemap.xml", Body=sitemap.encode("utf-8"),
+                         ContentType="application/xml; charset=utf-8", CacheControl=cache)
+    s3_client.put_object(Bucket=pages_bucket, Key=prefix + "robots.txt", Body=robots.encode("utf-8"),
+                         ContentType="text/plain; charset=utf-8", CacheControl=cache)
+    key = str(((site or {}).get("seo") or {}).get("indexnow_key") or "").strip()
+    if key:
+        s3_client.put_object(Bucket=pages_bucket, Key=prefix + f"{key}.txt", Body=key.encode("utf-8"),
+                             ContentType="text/plain; charset=utf-8", CacheControl=cache)
+        submit_indexnow(custom_domain, key, [root], opener=indexnow_opener)
+    return {"root": root, "sitemap": root + "sitemap.xml", "indexnow_submitted": bool(key)}
+
+
+def submit_indexnow(host: str, key: str, urls: list[str], *, opener=None) -> bool:
+    from urllib.request import Request, urlopen
+
+    from stripe_link.domain.sitemap import INDEXNOW_ENDPOINT, indexnow_body
+
+    if not host or not key or not urls:
+        return False
+    body = json.dumps(indexnow_body(host, key, urls)).encode("utf-8")
+    request = Request(INDEXNOW_ENDPOINT, data=body, headers={"Content-Type": "application/json; charset=utf-8"}, method="POST")
+    try:
+        with (opener or urlopen)(request, timeout=10) as response:
+            response.read()
+        return True
+    except Exception:
+        return False
 
 
 def delete_page_artifacts(

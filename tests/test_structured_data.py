@@ -200,6 +200,17 @@ class SiteOrganizationIdentityTests(unittest.TestCase):
                            canonical_url=f"{self.ORIGIN}/p/creatine", site={"organization": self.ORG})
         self.assertIn("| Axel Mart</title>", html.split("<body>")[0])
 
+    def test_verification_meta_tags_from_site_seo(self):
+        site = {"organization": self.ORG, "seo": {"google_site_verification": "gtok123", "bing_site_verification": "btok456"}}
+        head = self._render(site=site).split("<body>")[0]
+        self.assertIn('<meta name="google-site-verification" content="gtok123">', head)
+        self.assertIn('<meta name="msvalidate.01" content="btok456">', head)
+
+    def test_no_verification_meta_without_site_seo(self):
+        head = self._render(site={"organization": self.ORG}).split("<body>")[0]
+        self.assertNotIn("google-site-verification", head)
+        self.assertNotIn("msvalidate.01", head)
+
     def test_organization_needs_a_canonical_origin_to_anchor(self):
         # No canonical origin → nowhere to anchor the @id, so the node is omitted rather than left dangling.
         self.assertIsNone(self._node(self._render(site={"organization": self.ORG}, canonical_url=""), "OnlineStore"))

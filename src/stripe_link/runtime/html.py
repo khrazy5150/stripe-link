@@ -912,6 +912,14 @@ def render_head_seo_tags(
     # Indexing directive: index only for the published artifact in production; preview and non-prod are
     # noindex,nofollow (SEO-02/21). Funnel/upsell/thank-you noindex is still Phase 2 (needs funnel context).
     lines.append(f'  <meta name="robots" content="{escape(_RENDER_STATE.get("robots") or NOINDEX_ROBOTS)}">')
+    # Webmaster verification tokens (SEO-16) — let a tenant verify their Site in Google/Bing Search Console
+    # so they can submit sitemaps. Emitted only when set on the Site.
+    google_verify = str(_RENDER_SEO.get("google_site_verification") or "").strip()
+    if google_verify:
+        lines.append(f'  <meta name="google-site-verification" content="{escape(google_verify)}">')
+    bing_verify = str(_RENDER_SEO.get("bing_site_verification") or "").strip()
+    if bing_verify:
+        lines.append(f'  <meta name="msvalidate.01" content="{escape(bing_verify)}">')
 
     product = first_offer_product(offer, products_by_id)
     presentation = offer.get("presentation") or {}
@@ -992,6 +1000,9 @@ _RENDER_STATE: dict[str, str] = {"canonical": "", "robots": "noindex,nofollow"}
 # the brand shown in the title suffix / og:site_name when the offer names no brand. Render-scoped like
 # _RENDER_STATE; empty when the page has no Site yet (graceful — the renderer falls back to the offer brand).
 _RENDER_ORG: dict[str, Any] = {}
+# The Site's SEO config for this render (plans/SITE_OBJECT.md §2.4): webmaster-verification tokens (SEO-16),
+# title suffix, default OG image. Render-scoped like _RENDER_ORG; empty when the page has no Site.
+_RENDER_SEO: dict[str, Any] = {}
 # A page is indexable only when it is the published artifact in production (SEO-02/21). Everything else —
 # the tenant's preview, any non-production environment — must be kept out of the index.
 INDEXABLE_ROBOTS = "index,follow,max-image-preview:large,max-snippet:-1"
@@ -1062,6 +1073,10 @@ def render_page(
     organization = (site or {}).get("organization")
     if isinstance(organization, dict):
         _RENDER_ORG.update(organization)
+    _RENDER_SEO.clear()
+    seo = (site or {}).get("seo")
+    if isinstance(seo, dict):
+        _RENDER_SEO.update(seo)
     try:
         return _render_page_body(
             page, offer, products_by_id, selected_prices, checkout_url, api_base_url,
@@ -1072,6 +1087,7 @@ def render_page(
         _RENDER_STATE["canonical"] = ""
         _RENDER_STATE["robots"] = NOINDEX_ROBOTS
         _RENDER_ORG.clear()
+        _RENDER_SEO.clear()
 
 
 def canonical_page_url(url: str) -> str:

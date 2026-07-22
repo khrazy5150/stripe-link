@@ -204,6 +204,46 @@ class PagePublishingTests(unittest.TestCase):
         self.assertIn("Bean Bros", body)
         self.assertIn('"@type":"WebSite"', body)
 
+    def test_homepage_publish_writes_crawl_files_and_submits_indexnow(self):
+        page = copy.deepcopy(self.page)
+        page["status"] = "published"
+        site = {
+            "tenant_id": "tenant_demo", "site_id": "site_x",
+            "hosting": {"type": "custom", "custom_domain": "shop.example.com", "verification": {"verified": True}},
+            "indexing": {"eligibility": "eligible"},
+            "seo": {"indexnow_key": "k1abc"},
+            "pages": {"/": {"page_id": "page_simple_coffee"}},
+        }
+        with patch("stripe_link.runtime.publishing.submit_indexnow", return_value=True) as ping:
+            publish_page_document(
+                page, offers_repository=self.offers_repo, products_repository=self.products_repo,
+                sites_repository=FakeSitesRepository([site]), s3_client=self.s3,
+                pages_bucket="pages", preview_bucket="preview", environment="prod",
+                pages_domain="pages.example.com", preview_domain="preview.example.com",
+                checkout_url="https://checkout.stripe.com/c/pay/demo",
+            )
+        keys = [put["Key"] for put in self.s3.puts]
+        self.assertIn("page_simple_coffee/sitemap.xml", keys)
+        self.assertIn("page_simple_coffee/robots.txt", keys)
+        self.assertIn("page_simple_coffee/k1abc.txt", keys)   # the IndexNow key file
+        ping.assert_called_once()
+        sitemap = [put["Body"] for put in self.s3.puts if put["Key"].endswith("sitemap.xml")][0].decode()
+        self.assertIn("<loc>https://shop.example.com/</loc>", sitemap)
+
+    def test_no_crawl_files_for_platform_host(self):
+        page = copy.deepcopy(self.page)
+        page["status"] = "published"
+        with patch("stripe_link.runtime.publishing.submit_indexnow") as ping:
+            publish_page_document(
+                page, offers_repository=self.offers_repo, products_repository=self.products_repo,
+                sites_repository=FakeSitesRepository([]), s3_client=self.s3,
+                pages_bucket="pages", preview_bucket="preview", environment="prod",
+                pages_domain="pages.example.com", preview_domain="preview.example.com",
+                checkout_url="https://checkout.stripe.com/c/pay/demo",
+            )
+        self.assertFalse([put["Key"] for put in self.s3.puts if put["Key"].endswith((".xml", ".txt"))])
+        ping.assert_not_called()
+
     def test_homepage_on_verified_domain_switches_canonical_and_indexes(self):
         page = copy.deepcopy(self.page)
         page["status"] = "published"

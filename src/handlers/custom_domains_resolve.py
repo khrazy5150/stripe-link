@@ -1,10 +1,15 @@
 import os
+import re
 
 from stripe_link.common import error_response, header_value, json_response, query_params
 from stripe_link.domain.custom_domains import normalize_domain
 from stripe_link.repositories.documents import RepositoryError, custom_domains_index_repository
 from stripe_link.runtime.artifacts import artifact_paths
 from stripe_link.runtime.publishing import public_url
+
+# A root-level well-known file (robots.txt, sitemap.xml, or an IndexNow key) — served from a sibling artifact
+# under the homepage page_id. Single path segment only: no directories, no traversal.
+_WELL_KNOWN_PATH = re.compile(r"^/[A-Za-z0-9._-]+\.(txt|xml)$")
 
 
 def handler(event, context, *, index_repo=None, pages_domain=None):
@@ -38,7 +43,16 @@ def handler(event, context, *, index_repo=None, pages_domain=None):
 
     tenant_id = str(record.get("tenant_id") or "")
     page_id = str(record.get("target_page_id") or "")
-    origin_url = public_url(pages_domain, artifact_paths(tenant_id, page_id)["published"])
+
+    # A well-known crawl file (/robots.txt, /sitemap.xml, /{key}.txt) is served from the sibling artifact the
+    # publisher wrote under the homepage page_id; anything else serves the homepage (path-blind, as before).
+    path = str(query_params(event).get("path") or "")
+    if path and _WELL_KNOWN_PATH.match(path):
+        artifact_key = f"{page_id}{path}"
+    else:
+        artifact_key = artifact_paths(tenant_id, page_id)["published"]
+
+    origin_url = public_url(pages_domain, artifact_key)
     if not origin_url:
         return error_response("Pages distribution domain is not configured.", status_code=500, code="pages_domain_not_configured")
 

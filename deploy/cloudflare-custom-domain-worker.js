@@ -50,8 +50,19 @@ async function handleShortUrl(sourceUrl) {
   return Response.redirect(route.destination_url, 302);
 }
 
+// Root-level well-known files (robots.txt, sitemap.xml, an IndexNow key) are served from a sibling artifact;
+// everything else serves the Site homepage (path-blind until path-aware routing lands in 2.6).
+const WELL_KNOWN_PATH = /^\/[A-Za-z0-9._-]+\.(txt|xml)$/;
+
 async function handleCustomDomain(request, hostname) {
-  const resolved = await resolveJson("custom-domain-router", hostname, `${CUSTOM_DOMAIN_RESOLVE}?host=${encodeURIComponent(hostname)}`);
+  const path = new URL(request.url).pathname;
+  const wellKnown = WELL_KNOWN_PATH.test(path);
+  // The resolve response differs per well-known path, so key the cache by path for those.
+  const cacheKey = wellKnown ? `${hostname}${path}` : hostname;
+  const resolveUrl = wellKnown
+    ? `${CUSTOM_DOMAIN_RESOLVE}?host=${encodeURIComponent(hostname)}&path=${encodeURIComponent(path)}`
+    : `${CUSTOM_DOMAIN_RESOLVE}?host=${encodeURIComponent(hostname)}`;
+  const resolved = await resolveJson("custom-domain-router", cacheKey, resolveUrl);
   const route = resolved && resolved.route;
   if (!route || route.type !== "origin_url" || !route.origin_url) {
     return new Response("Custom domain is not active.", { status: 404 });

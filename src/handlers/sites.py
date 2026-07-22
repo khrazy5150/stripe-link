@@ -7,6 +7,7 @@ import time
 from stripe_link.cloudflare_secrets import get_cloudflare_api_token
 from stripe_link.common import error_response, json_response, parse_json_body, path_params, tenant_id_from_event
 from stripe_link.domain.connect_sync import compute_site_eligibility, connect_state_fields, site_domain_verified
+from stripe_link.domain.sitemap import generate_indexnow_key
 from stripe_link.stripe_client import stripe_request
 from stripe_link.stripe_platform_secrets import get_platform_secret_key
 from stripe_link.domain.custom_domains import (
@@ -493,6 +494,12 @@ def check_domain(event, repository, site_id):
     hosting["type"] = "custom" if verified else "platform"
     hosting["verification"] = {"verified": verified, "method": "cloudflare_saas", **({"verified_at": now} if verified else {})}
     site["hosting"] = hosting
+    if verified:
+        # A verified Site needs an IndexNow key (hosted at /{key}.txt, submitted on publish). Generate once.
+        seo = dict(site.get("seo") or {})
+        if not seo.get("indexnow_key"):
+            seo["indexnow_key"] = generate_indexnow_key()
+            site["seo"] = seo
     _recompute_eligibility(site, tenant_id, now)
     site["updated_at"] = now
     try:

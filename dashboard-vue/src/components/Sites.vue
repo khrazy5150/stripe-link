@@ -140,6 +140,13 @@
             </div>
           </fieldset>
 
+          <fieldset class="product-identifiers">
+            <legend>Search engine verification</legend>
+            <p class="field-note">Verify your Site in Google/Bing Search Console so you can submit sitemaps. Paste the token from each provider's "HTML tag" verification method (just the content value).</p>
+            <label class="offer-field"><span>Google verification token</span><input v-model.trim="form.seo.google_site_verification" type="text" placeholder="google-site-verification content…" /></label>
+            <label class="offer-field"><span>Bing verification token</span><input v-model.trim="form.seo.bing_site_verification" type="text" placeholder="msvalidate.01 content…" /></label>
+          </fieldset>
+
           <fieldset v-if="customDomainsEnabled" class="product-identifiers">
             <legend>Custom domain</legend>
             <p class="field-note">Connect your own domain to serve this Site's homepage and become eligible for search indexing. On the free {{ hostingDomainHint }} address a Site is never indexed.</p>
@@ -254,7 +261,7 @@ const createSubdomain = ref("");
 const createCheck = useSubdomainCheck();
 const editCheck = useSubdomainCheck();
 
-const form = reactive({ name: "", subdomain: "", org: { name: "", legal_name: "", entity_type: "OnlineStore", description: "", telephone: "", email: "", address: { locality: "", region: "" } } });
+const form = reactive({ name: "", subdomain: "", org: { name: "", legal_name: "", entity_type: "OnlineStore", description: "", telephone: "", email: "", address: { locality: "", region: "" } }, seo: { google_site_verification: "", bing_site_verification: "" } });
 
 const domainForm = reactive({ domain: "", homepage: "" });
 const domainBusy = ref(false);
@@ -416,6 +423,8 @@ function openEdit(site) {
     description: org.description || "", telephone: org.telephone || "", email: org.email || "",
     address: { locality: address.locality || "", region: address.region || "", street: address.street || "", postal_code: address.postal_code || "", country: address.country || "US" },
   };
+  const seo = site.seo || {};
+  form.seo = { google_site_verification: seo.google_site_verification || "", bing_site_verification: seo.bing_site_verification || "" };
   editCheck.check(form.subdomain, site.site_id);
 }
 
@@ -431,12 +440,20 @@ async function saveEdit() {
     email: form.org.email || undefined,
     address: Object.fromEntries(Object.entries(form.org.address).filter(([, v]) => v)),
   };
+  // Preserve any existing seo fields (title_suffix, indexnow_key) and overlay the editable verification tokens.
+  const seo = Object.fromEntries(Object.entries({
+    ...editing.value.seo,
+    google_site_verification: form.seo.google_site_verification || undefined,
+    bing_site_verification: form.seo.bing_site_verification || undefined,
+  }).filter(([, v]) => v !== undefined && v !== ""));
   const doc = {
     ...editing.value,
     name: form.name || editing.value.name,
     hosting: { ...editing.value.hosting, platform_subdomain: form.subdomain || undefined },
     organization: Object.fromEntries(Object.entries(organization).filter(([, v]) => v !== undefined && !(typeof v === "object" && !Object.keys(v).length))),
+    seo: Object.keys(seo).length ? seo : undefined,
   };
+  if (!doc.seo) delete doc.seo;
   try {
     await store.save(doc);
     editing.value = null;

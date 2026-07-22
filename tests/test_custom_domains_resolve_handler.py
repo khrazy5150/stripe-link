@@ -29,6 +29,25 @@ class CustomDomainsResolveHandlerTests(unittest.TestCase):
         self.assertEqual(body["route"]["type"], "origin_url")
         self.assertEqual(body["route"]["origin_url"], "https://pages.example.com/page_1/index.html")
 
+    def test_well_known_path_resolves_to_sibling_artifact(self):
+        self.index_repo.put({"tenant_id": "tenant_demo", "domain": "shop.example.com", "target_page_id": "page_1", "status": "active"})
+        for path, expected in (("/sitemap.xml", "https://pages.example.com/page_1/sitemap.xml"),
+                               ("/robots.txt", "https://pages.example.com/page_1/robots.txt"),
+                               ("/abc123.txt", "https://pages.example.com/page_1/abc123.txt")):
+            response = handler(
+                {"httpMethod": "GET", "queryStringParameters": {"host": "shop.example.com", "path": path}},
+                None, index_repo=self.index_repo, pages_domain="pages.example.com",
+            )
+            self.assertEqual(json.loads(response["body"])["route"]["origin_url"], expected)
+
+    def test_non_well_known_path_still_serves_homepage(self):
+        self.index_repo.put({"tenant_id": "tenant_demo", "domain": "shop.example.com", "target_page_id": "page_1", "status": "active"})
+        response = handler(
+            {"httpMethod": "GET", "queryStringParameters": {"host": "shop.example.com", "path": "/../secret"}},
+            None, index_repo=self.index_repo, pages_domain="pages.example.com",
+        )
+        self.assertEqual(json.loads(response["body"])["route"]["origin_url"], "https://pages.example.com/page_1/index.html")
+
     def test_normalizes_host_before_lookup(self):
         self.index_repo.put({
             "tenant_id": "tenant_demo",
