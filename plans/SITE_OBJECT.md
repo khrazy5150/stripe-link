@@ -235,8 +235,10 @@ SEO-13 — category/collection index pages + an image related-products rail — 
   `category` resolves its cards by scanning the route map (`resolve_category_grids`). Breadcrumbs deepen to
   Home → Category → Product when the Site has a category page for the product's category. `POST /sites/{id}/pages`
   attaches a page at a slug with a page_type + optional category (generalizes the homepage endpoint).
-  **Remaining (Slice 2e, builder UI, not built):** create a category page in the builder + a route-map attach
-  UI so landing/category pages get attached (and denormalized). Engine-only until then.
+  Builder (Slice 2e, SHIPPED): a step-1 "Category page" kind (pick a category from the tenant's product
+  categories → offer-less catalog_grid) + a Sites "Attach a page" control (`POST /sites/{id}/pages`, detects a
+  category page and attaches it as page_type=category, else landing — attaching landing pages is what
+  denormalizes them so category grids find them).
 - **Slice 3 (pending)** below.
 - A purpose-built homepage/`OnlineStore` page (brand hero, nav, lists the Site's offers/products) — a real
   `page_type: homepage`, not a landing page repurposed at the `/` slug (today's interim). The schema already
