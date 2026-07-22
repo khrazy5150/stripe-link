@@ -201,9 +201,17 @@ is additive (existing pages keep working throughout — incremental migration).
 - `sitemap.xml` + `robots.txt` generated per Site (canonical, indexable URLs only; page_type/robots-aware).
 - IndexNow submission on publish/unpublish (SEO-15). Webmaster verification tokens in `<head>` (SEO-16).
 
-**Phase 2.5 — On-page structure.**
-- Breadcrumbs (SEO-11) + visible nav rendering from `Site.navigation`. Internal linking + collection/category
-  pages (SEO-13). Thin-content gate (SEO-08).
+**Phase 2.5 — On-page structure.** (breadcrumbs SHIPPED; rest in progress)
+- **Breadcrumbs (SEO-11) — SHIPPED (dev+prod).** Visible crawlable `<nav class="sl-breadcrumb">` trail +
+  matching `BreadcrumbList` JSON-LD, rendered by html.py (`breadcrumb_trail`/`breadcrumb_json_ld`/
+  `render_breadcrumb`). Gated: only on a page served at a non-root slug on the Site's verified custom domain
+  (a resolvable Home); never on the homepage (it's the root), never on post-checkout page_types
+  (funnel_step/thank_you/checkout — a Home link would leak the buyer out of the funnel). Trail is shallow
+  (Home→current) until category pages exist; a category level slots in between then. JSON-LD rides the
+  search_seo discoverability pack (like Product/FAQ); the visible trail renders regardless of goal. render_page
+  gained a `page_type` param + `_RENDER_STATE` home_url/page_type holders.
+- **Remaining:** visible nav rendering from `Site.navigation`. Internal linking + collection/category pages
+  (SEO-13). Thin-content gate (SEO-08).
 
 **Phase 2.5b — Storefront homepage builder (COMMITTED, not yet scheduled).**
 - A purpose-built homepage/`OnlineStore` page (brand hero, nav, lists the Site's offers/products) — a real
