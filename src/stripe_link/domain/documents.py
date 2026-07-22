@@ -1099,6 +1099,12 @@ def validate_page_document(document: dict[str, Any]) -> None:
         elif section_type == "brand_hero":
             optional_string(section, "headline", "Brand hero headline")
             optional_string(section, "tagline", "Brand hero tagline")
+        elif section_type == "related_products":
+            # Cards are resolved at publish from the Site's other pages in this page's category; the tenant
+            # only sets the heading (plans/SITE_OBJECT.md §2.5b Slice 3 / SEO-13).
+            optional_string(section, "heading", "Related products heading")
+            if section.get("limit") is not None:
+                require_positive_int(section, "limit", "Related products limit")
         elif section_type == "catalog_grid":
             optional_string(section, "heading", "Catalog grid heading")
             # A category-driven grid stores a category key and resolves its cards from the Site catalog at

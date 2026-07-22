@@ -733,6 +733,11 @@
                   <p class="element-empty">Shows the current product's gallery, badges, and description — pulled from the offer and synced to the carousel. No configuration needed.</p>
                 </template>
 
+                <template v-else-if="element.type === 'related_products'">
+                  <input v-model.trim="element.heading" type="text" placeholder="Section heading (optional)" />
+                  <p class="element-empty">Automatically shows other Site pages in the same category as this one — a same-category rail for internal linking. It fills itself; there's nothing to pick.</p>
+                </template>
+
               </div>
             </div>
           </section>
@@ -2249,6 +2254,7 @@ function newElement(type) {
   if (type === "rating") return { ...base, value: 5, count: 0, label: "" };
   if (type === "client_marquee") return { ...base, heading: "Our Clients", logos: [{ image_url: "", name: "" }] };
   if (type === "faq") return { ...base, heading: "Frequently Asked Questions", items: [{ question: "", answer: "" }] };
+  if (type === "related_products") return { ...base, heading: "Related products" };
   // product_details is fully offer-driven (current target's gallery/badges/description) — no config.
   return base;
 }
@@ -2368,6 +2374,9 @@ function elementSection(element) {
   if (element.type === "product_details") {
     return { id: element.id, type: "product_details" };   // content is the current target (offer-driven)
   }
+  if (element.type === "related_products") {
+    return { id: element.id, type: "related_products", heading: element.heading || undefined };  // cards resolved at publish
+  }
   return null;
 }
 
@@ -2391,6 +2400,8 @@ function elementsFromPage(sections) {
       elements.push({ id: localId("el"), type: "faq", heading: section.heading || "Frequently Asked Questions", items: (section.items || []).map((item) => ({ question: item.question || "", answer: item.answer || "" })) });
     } else if (section.type === "product_details") {
       elements.push({ id: localId("el"), type: "product_details" });
+    } else if (section.type === "related_products") {
+      elements.push({ id: localId("el"), type: "related_products", heading: section.heading || "Related products" });
     }
   }
   return elements;

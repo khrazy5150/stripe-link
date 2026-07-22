@@ -124,6 +124,32 @@ def resolve_category_grids(page: dict[str, Any], site: dict[str, Any] | None) ->
         section["items"] = items
 
 
+def resolve_related_products(page: dict[str, Any], site: dict[str, Any] | None, category: str, current_page_id: str) -> list[str]:
+    """Fill related_products sections with other Site pages in `category` (excluding this page), a same-category
+    internal-link rail (plans/SITE_OBJECT.md §2.5b Slice 3 / SEO-13). Returns the offer_ids added so the
+    publisher can bundle their offers. Empty when the page has no category or Site."""
+    if not site or not category:
+        return []
+    entries = (site or {}).get("pages") or {}
+    added: list[str] = []
+    for section in page.get("sections") or []:
+        if section.get("type") != "related_products":
+            continue
+        limit = int(section.get("limit") or 6)
+        items: list[dict[str, str]] = []
+        for slug, entry in entries.items():
+            if not isinstance(entry, dict) or entry.get("page_id") == current_page_id:
+                continue
+            offer_id = str(entry.get("offer_id") or "")
+            if offer_id and str(entry.get("category") or "") == category:
+                items.append({"offer_id": offer_id, "slug": slug})
+                added.append(offer_id)
+                if len(items) >= limit:
+                    break
+        section["items"] = items
+    return added
+
+
 def _denormalize_page_catalog(site: dict[str, Any], page_id: str, offer_id: str, category: str) -> bool:
     """Record a landing page's offer_id + product category on its Site route-map entry so category pages can
     resolve grids off the map. Returns whether anything changed."""
@@ -357,15 +383,27 @@ def publish_page_document(
         products_repository=products_repository,
         services_repository=services_repository,
     )
-    # Denormalize this landing page's offer + product category onto its Site route-map entry, so category
-    # pages can resolve their grids off the route map without loading every page. Best-effort.
-    if site and sites_repository is not None and page.get("offer_id"):
+    # Denormalize this landing page's offer + product category onto its Site route-map entry (so category
+    # pages resolve off the map), then fill any related-products rail from other pages in the same category
+    # and bundle their offers. Best-effort — never blocks the artifact publish.
+    if site and page.get("offer_id"):
         try:
             category = str(first_offer_product(offer, products_by_id).get("product_category") or "")
-            if _denormalize_page_catalog(site, page_id, str(page.get("offer_id") or ""), category):
+            if sites_repository is not None and _denormalize_page_catalog(site, page_id, str(page.get("offer_id") or ""), category):
                 validate_site(site)
                 site = sites_repository.put(site)
                 _sync_domain_index(site, domains_index_repository)
+            for related_id in resolve_related_products(page, site, category, page_id):
+                if related_id in offers_by_id:
+                    continue
+                try:
+                    offers_by_id[related_id] = _load_offer_bundle(
+                        tenant_id, related_id,
+                        offers_repository=offers_repository, products_repository=products_repository,
+                        services_repository=services_repository, products_by_id=products_by_id, services_by_id=services_by_id,
+                    )
+                except Exception:
+                    pass
         except Exception:
             pass
     # Self-referencing canonical (plans/ON_PAGE_SEO_REQUIREMENTS.md SEO-01). Interim: the published artifact

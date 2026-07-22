@@ -1378,6 +1378,7 @@ SECTION_REGISTRY: dict[str, dict[str, Any]] = {
     "product_carousel": {"render": lambda c: render_product_carousel(c.section, c.page, c.offers_by_id, c.products_by_id, c.services_by_id, c.checkout_url, c.api_base_url), "version": 1},
     "brand_hero": {"render": lambda c: render_brand_hero(c.section), "version": 1},
     "catalog_grid": {"render": lambda c: render_catalog_grid(c.section, c.offers_by_id, c.products_by_id, c.services_by_id), "version": 1},
+    "related_products": {"render": lambda c: render_catalog_grid(c.section, c.offers_by_id, c.products_by_id, c.services_by_id), "version": 1},
     "checkout_cta": {"render": lambda c: render_checkout_cta(c.page, c.section, c.offer, c.resolved_offer, c.checkout_url, c.api_base_url, c.products_by_id), "version": 1},
     "legal_footer": {"render": lambda c: render_legal_footer(c.page.get("legal") or {}, c.section, c.api_base_url), "version": 1},
 }
@@ -3081,8 +3082,9 @@ def render_catalog_grid(
         return ""
     heading = str(section.get("heading") or "").strip()
     heading_html = f'      <h2 class="sl-section-heading">{render_headline_markup(heading)}</h2>' if heading else ""
+    section_type = escape(str(section.get("type") or "catalog_grid"))
     return "\n".join(line for line in [
-        f'    <section class="sl-catalog-grid" data-section-id="{escape(str(section.get("id", "catalog-grid")))}" data-section-type="catalog_grid">',
+        f'    <section class="sl-catalog-grid" data-section-id="{escape(str(section.get("id", "catalog-grid")))}" data-section-type="{section_type}">',
         heading_html,
         '      <div class="sl-catalog-cards">',
         *cards,

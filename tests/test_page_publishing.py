@@ -18,6 +18,7 @@ from stripe_link.runtime.publishing import (
     find_site_for_page,
     publish_page_document,
     resolve_category_grids,
+    resolve_related_products,
     site_page_slug,
 )
 
@@ -707,6 +708,18 @@ class CategoryPageTests(unittest.TestCase):
         page = {"sections": [{"id": "g", "type": "catalog_grid", "items": [{"offer_id": "x", "slug": "/x"}]}]}
         resolve_category_grids(page, self._site())
         self.assertEqual(page["sections"][0]["items"], [{"offer_id": "x", "slug": "/x"}])  # no category -> untouched
+
+    def test_related_products_pulls_same_category_excluding_self(self):
+        page = {"sections": [{"id": "r", "type": "related_products", "heading": "More"}]}
+        added = resolve_related_products(page, self._site(), "supplements", "page_a")  # current page = page_a
+        items = page["sections"][0]["items"]
+        self.assertEqual({i["offer_id"] for i in items}, {"offer_b"})  # page_b only: self excluded, gear excluded
+        self.assertEqual(added, ["offer_b"])
+
+    def test_related_products_respects_limit(self):
+        page = {"sections": [{"id": "r", "type": "related_products", "limit": 1}]}
+        resolve_related_products(page, self._site(), "supplements", "page_x")  # not one of the pages -> both eligible
+        self.assertEqual(len(page["sections"][0]["items"]), 1)
 
     def test_denormalize_records_offer_and_category(self):
         site = {"pages": {"/p": {"page_id": "page_a", "page_type": "landing"}}}
