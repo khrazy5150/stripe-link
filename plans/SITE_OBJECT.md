@@ -273,7 +273,17 @@ SEO-13 — category/collection index pages + an image related-products rail — 
   reference (thank-you page_id with no published artifact) attaches a slug that 404s — a tenant data issue, not
   a routing bug; the buyer-after-purchase hop for such a funnel was already broken pre-2.6.
 
-**Phase 2.6b — Apex / root domain support (COMMITTED — REQUIRED, not optional).**
+**Phase 2.6b — Apex / root domain support. SHIPPED (dev+prod), flattening/ALIAS path; apex proxying pre-wired.**
+- Serving infra already handled apex (resolver/Worker key by hostname); the real work was the DNS-instruction
+  layer. `assert_valid_domain` no longer rejects apex. `custom_hostname_dns_records` emits an ALIAS/flattened
+  CNAME → `domains.jbay.uk` by default (works on Cloudflare's CNAME-flattening, DNSimple, ANAME/ALIAS
+  providers), or plain A/AAAA to static IPs when `CLOUDFLARE_APEX_IPV4/IPV6` are configured (apex proxying —
+  works on every provider incl. Route 53; empty until procured, then a config flip). DCV delegation unchanged
+  (on the `_acme-challenge` subdomain). Sites.vue shows provider-adaptive apex guidance.
+- **Remaining:** procure Cloudflare apex proxying (paid/enterprise static IPs) for universal A-record apex;
+  www↔apex redirect (standard SaaS) — a follow-up.
+
+**(historical) Phase 2.6b was — Apex / root domain support (COMMITTED — REQUIRED, not optional).**
 - The product is a website builder for SEO; tenants must be able to use `example.com`, not only a subdomain.
 - Blocker: our routing uses a CNAME (`domain → domains.jbay.uk`), and DNS forbids a CNAME at the apex. Needs
   ALIAS/ANAME/CNAME-flattening handling (Route 53 ALIAS, Cloudflare flattening) with provider-specific
