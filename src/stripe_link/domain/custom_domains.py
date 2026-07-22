@@ -107,14 +107,11 @@ def is_apex_domain(domain: str) -> bool:
 
 
 def assert_valid_domain(domain: str) -> None:
+    # Apex domains (example.com) are supported (plans/SITE_OBJECT.md §2.6b): they can't hold the routing
+    # CNAME, so the tenant points the apex via CNAME-flattening / ALIAS / ANAME (or A-records when apex
+    # proxying is configured) — custom_hostname_dns_records emits the right shape. See is_apex_domain.
     if not DOMAIN_PATTERN.match(domain):
         raise CustomDomainError(f"'{domain}' is not a valid domain name.", status_code=400)
-    if is_apex_domain(domain):
-        raise CustomDomainError(
-            "Apex domains aren't supported yet — use a subdomain like 'shop.example.com' or 'www.example.com'. "
-            "Apex support is coming.",
-            status_code=400,
-        )
 
 
 def cloudflare_request(
@@ -261,6 +258,13 @@ def diagnose_dns_records(records: list[dict[str, str]], *, opener=None) -> list[
     out: list[dict[str, Any]] = []
     for record in records or []:
         record_type = str(record.get("type") or "").upper()
+        if record.get("apex"):
+            # Apex routing (ALIAS/flattened-CNAME or A/AAAA) resolves to address records at the apex — there's
+            # no CNAME to compare, so just confirm the apex answers with an A/AAAA.
+            name = record.get("name", "")
+            resolved = _dns_has_records(name, "A", opener=opener) or _dns_has_records(name, "AAAA", opener=opener)
+            out.append({**record, "resolved": resolved, "note": ""})
+            continue
         resolved = dns_record_matches(record.get("name", ""), record_type, record.get("value", ""), opener=opener) \
             if record_type in ("TXT", "CNAME") else False
         note = ""
@@ -318,13 +322,34 @@ def get_dcv_delegation_uuid(*, zone_id: str, api_token: str, opener=None) -> str
     return uuid
 
 
+def _apex_routing_records(hostname: str, dns_target: str, apex_ipv4: tuple[str, ...], apex_ipv6: tuple[str, ...]) -> list[dict[str, str]]:
+    """The routing record(s) for an apex domain (plans/SITE_OBJECT.md §2.6b). DNS forbids a CNAME at the apex,
+    so either: (a) apex proxying is configured — the tenant adds plain A/AAAA records to our static IPs, which
+    works on every provider incl. Route 53; or (b) the default — the tenant uses their provider's CNAME
+    flattening / ALIAS / ANAME to point the apex at the SaaS target (works on Cloudflare, DNSimple, etc.)."""
+    if apex_ipv4 or apex_ipv6:
+        records = [{"type": "A", "name": hostname, "value": ip, "apex": "true"} for ip in apex_ipv4]
+        records += [{"type": "AAAA", "name": hostname, "value": ip, "apex": "true"} for ip in apex_ipv6]
+        return records
+    return [{
+        "type": "ALIAS", "name": hostname, "value": dns_target, "apex": "true",
+        "note": "At your domain apex a plain CNAME is not allowed. Use your DNS provider's apex feature — "
+                "an ALIAS or ANAME record, or Cloudflare's CNAME flattening — pointing to this target.",
+    }]
+
+
 def custom_hostname_dns_records(
-    cloudflare_hostname: dict[str, Any], *, hostname: str, dns_target: str, dcv_delegation_uuid: str | None = None
+    cloudflare_hostname: dict[str, Any], *, hostname: str, dns_target: str, dcv_delegation_uuid: str | None = None,
+    apex_ipv4: tuple[str, ...] = (), apex_ipv6: tuple[str, ...] = (),
 ) -> list[dict[str, str]]:
-    """The DNS records the tenant must create. Preferred shape = two STABLE CNAMEs: the routing CNAME and the
-    DCV-delegation CNAME (Cloudflare then manages the ACME token + renewals). Only when no delegation UUID is
-    available do we fall back to Cloudflare's rotating ownership TXT + `_acme-challenge` DCV records."""
-    records: list[dict[str, str]] = [{"type": "CNAME", "name": hostname, "value": dns_target}]
+    """The DNS records the tenant must create. A subdomain uses a routing CNAME; an apex uses A/AAAA (apex
+    proxying) or an ALIAS/flattened CNAME. Plus the DCV-delegation CNAME (on `_acme-challenge`, a subdomain,
+    so it works at the apex too) — Cloudflare then manages the ACME token + renewals. Only when no delegation
+    UUID is available do we fall back to Cloudflare's rotating ownership TXT + `_acme-challenge` DCV records."""
+    if is_apex_domain(hostname):
+        records: list[dict[str, str]] = _apex_routing_records(hostname, dns_target, apex_ipv4, apex_ipv6)
+    else:
+        records = [{"type": "CNAME", "name": hostname, "value": dns_target}]
     if dcv_delegation_uuid:
         records.append({
             "type": "CNAME",

@@ -187,6 +187,7 @@
                     <option v-for="p in dnsProviders" :key="p.id" :value="p.id">{{ p.label }}</option>
                   </select>
                 </div>
+                <p v-if="apexHint" class="field-note apex-hint">{{ apexHint }}</p>
                 <div class="dns-accordion">
                   <div v-for="(rec, i) in displayRecords" :key="i" class="dns-step" :class="{ open: openStep === i }">
                     <button type="button" class="dns-step-header" @click="openStep = openStep === i ? -1 : i">
@@ -206,6 +207,7 @@
                         <span class="dns-field-label">Value</span><code class="dns-value">{{ rec.value }}</code>
                         <button type="button" class="copy-btn" @click="copy(rec.value)">{{ copied === rec.value ? 'Copied!' : 'Copy' }}</button>
                       </div>
+                      <p v-if="rec.note" class="field-note">{{ rec.note }}</p>
                     </div>
                   </div>
                 </div>
@@ -388,6 +390,7 @@ const displayRecords = computed(() => {
     return {
       type: rec.type,
       value: rec.value,
+      note: rec.note || "",
       displayName: providerFqdn.value ? rec.name : hostPrefix(rec.name, domain),
       stepLabel: isSsl ? "SSL certificate" : "Point your domain",
       badgeClass: resolved === true ? "ok" : resolved === false ? "bad" : "idle",
@@ -395,6 +398,23 @@ const displayRecords = computed(() => {
       statusText: resolved === true ? "Detected" : resolved === false ? (diag.note || "Not found yet") : "",
     };
   });
+});
+
+// An apex domain (example.com) can't hold a plain CNAME. Guidance depends on the provider (§2.6b).
+const isApexDomain = computed(() =>
+  (editing.value?.domain_provisioning?.dns_records || []).some((rec) => rec.apex),
+);
+const apexHint = computed(() => {
+  if (!isApexDomain.value) return "";
+  const usingA = (editing.value?.domain_provisioning?.dns_records || []).some((rec) => rec.apex && (rec.type === "A" || rec.type === "AAAA"));
+  if (usingA) return "Your root domain uses plain A/AAAA records below — these work on any provider, including Route 53.";
+  const byProvider = {
+    cloudflare: "At the root (@), add a CNAME to the target below — Cloudflare flattens it automatically at the apex.",
+    route53: "Route 53 can't point a root domain at an external host like ours. Use a subdomain (e.g. www) for now, or move DNS to a provider with ANAME/ALIAS support — full Route 53 apex support is coming.",
+    godaddy: "Use GoDaddy's forwarding/root options or a provider with ANAME/ALIAS. A plain CNAME won't work at the root.",
+    namecheap: "Namecheap doesn't support ALIAS at the root — use a subdomain (e.g. www) for now, or a provider with ANAME/ALIAS.",
+  };
+  return byProvider[dnsProvider.value] || "At the root (@), add an ALIAS or ANAME record to the target below. A plain CNAME won't work at the apex.";
 });
 
 async function copy(text) {

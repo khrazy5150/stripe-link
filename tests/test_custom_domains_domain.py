@@ -7,7 +7,9 @@ from stripe_link.domain.custom_domains import (
     CustomDomainError,
     assert_valid_domain,
     build_domain,
+    custom_hostname_dns_records,
     domain_index_record,
+    is_apex_domain,
     normalize_route_path,
     route_table,
     cloudflare_request,
@@ -75,15 +77,45 @@ class NormalizeAndValidateTests(unittest.TestCase):
         with self.assertRaises(CustomDomainError):
             assert_valid_domain("example")
 
-    def test_assert_valid_domain_rejects_apex(self):
-        # Apex can't hold the routing CNAME — reject until 2.6b rather than let a tenant hit a dead end.
+    def test_assert_valid_domain_accepts_apex(self):
+        # Apex is supported (2.6b) via ALIAS/flattening or apex proxying — no longer rejected.
         for apex in ("example.com", "automizepro.com", "example.co.uk"):
-            with self.assertRaises(CustomDomainError) as ctx:
-                assert_valid_domain(apex)
-            self.assertIn("subdomain", ctx.exception.message.lower())
+            assert_valid_domain(apex)
 
     def test_assert_valid_domain_accepts_subdomain(self):
         assert_valid_domain("shop.example.com")
+
+
+class ApexDnsRecordTests(unittest.TestCase):
+    def test_is_apex_domain(self):
+        self.assertTrue(is_apex_domain("example.com"))
+        self.assertTrue(is_apex_domain("example.co.uk"))
+        self.assertFalse(is_apex_domain("shop.example.com"))
+        self.assertFalse(is_apex_domain("www.example.co.uk"))
+
+    def test_subdomain_uses_a_routing_cname(self):
+        records = custom_hostname_dns_records({}, hostname="shop.example.com", dns_target="domains.jbay.uk", dcv_delegation_uuid="u1")
+        self.assertEqual(records[0], {"type": "CNAME", "name": "shop.example.com", "value": "domains.jbay.uk"})
+        self.assertEqual(records[1]["name"], "_acme-challenge.shop.example.com")  # DCV delegation
+
+    def test_apex_default_uses_alias_flattening(self):
+        records = custom_hostname_dns_records({}, hostname="example.com", dns_target="domains.jbay.uk", dcv_delegation_uuid="u1")
+        routing = records[0]
+        self.assertEqual(routing["type"], "ALIAS")
+        self.assertEqual(routing["value"], "domains.jbay.uk")
+        self.assertEqual(routing["apex"], "true")
+        self.assertIn("ALIAS", routing["note"])
+        self.assertEqual(records[1]["name"], "_acme-challenge.example.com")  # DCV still a subdomain CNAME
+
+    def test_apex_with_proxy_ips_uses_a_and_aaaa(self):
+        records = custom_hostname_dns_records(
+            {}, hostname="example.com", dns_target="domains.jbay.uk", dcv_delegation_uuid="u1",
+            apex_ipv4=("192.0.2.1", "192.0.2.2"), apex_ipv6=("2606:4700::1",))
+        types = [(r["type"], r["value"]) for r in records if r.get("apex")]
+        self.assertIn(("A", "192.0.2.1"), types)
+        self.assertIn(("A", "192.0.2.2"), types)
+        self.assertIn(("AAAA", "2606:4700::1"), types)
+        self.assertTrue(any(r["name"] == "_acme-challenge.example.com" for r in records))
         assert_valid_domain("www.automizepro.com")
         assert_valid_domain("shop.example.co.uk")   # subdomain under a multi-part TLD
 

@@ -445,6 +445,15 @@ def _cloudflare_config():
     return zone_id, api_token, target_host
 
 
+def _apex_proxy_ips():
+    """The static A/AAAA IPs for apex proxying (plans/SITE_OBJECT.md §2.6b), read from config. Empty until
+    Cloudflare apex proxying is procured — then apex domains switch from ALIAS/flattening guidance to plain
+    A/AAAA records (works on every provider, incl. Route 53) with no code change."""
+    def _ips(name):
+        return tuple(ip.strip() for ip in str(os.environ.get(name) or "").split(",") if ip.strip())
+    return _ips("CLOUDFLARE_APEX_IPV4"), _ips("CLOUDFLARE_APEX_IPV6")
+
+
 def _connect_state(tenant_id, environment):
     """(connect_verified, connect_restricted) for the tenant. Prefers the Connect verification the
     account.updated webhook captured on the stripe_keys doc; if it was never captured (a pre-existing connected
@@ -542,7 +551,8 @@ def connect_domain(event, repository, site_id):
         if not cloudflare_hostname:
             return error_response(exc.message, status_code=exc.status_code, code="custom_domain_error")
     dcv_uuid = get_dcv_delegation_uuid(zone_id=zone_id, api_token=api_token)
-    dns_records = custom_hostname_dns_records(cloudflare_hostname, hostname=domain, dns_target=target_host, dcv_delegation_uuid=dcv_uuid)
+    apex_ipv4, apex_ipv6 = _apex_proxy_ips()
+    dns_records = custom_hostname_dns_records(cloudflare_hostname, hostname=domain, dns_target=target_host, dcv_delegation_uuid=dcv_uuid, apex_ipv4=apex_ipv4, apex_ipv6=apex_ipv6)
     status, ssl_status = derive_status(cloudflare_hostname=cloudflare_hostname)
     now = int(time.time())
     hosting = site.get("hosting") or {}
@@ -590,7 +600,8 @@ def check_domain(event, repository, site_id):
     except CustomDomainError as exc:
         return error_response(exc.message, status_code=exc.status_code, code="custom_domain_error")
     dcv_uuid = get_dcv_delegation_uuid(zone_id=zone_id, api_token=api_token)
-    dns_records = custom_hostname_dns_records(cloudflare_hostname, hostname=domain, dns_target=provisioning.get("dns_target") or target_host, dcv_delegation_uuid=dcv_uuid)
+    apex_ipv4, apex_ipv6 = _apex_proxy_ips()
+    dns_records = custom_hostname_dns_records(cloudflare_hostname, hostname=domain, dns_target=provisioning.get("dns_target") or target_host, dcv_delegation_uuid=dcv_uuid, apex_ipv4=apex_ipv4, apex_ipv6=apex_ipv6)
     status, ssl_status = derive_status(cloudflare_hostname=cloudflare_hostname)
     # Routing is confirmed but the cert is still pending: actively re-run DCV so a "Verify" click issues the
     # certificate now instead of waiting for Cloudflare's next poll. Only safe with delegation (dcv_uuid set),

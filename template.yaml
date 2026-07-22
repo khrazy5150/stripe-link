@@ -85,6 +85,14 @@ Parameters:
     Type: String
     Default: domains.jbay.uk
     Description: Hostname tenants CNAME their custom subdomain to (the Cloudflare for SaaS fallback origin, on the dedicated jbay.uk zone).
+  CloudflareApexIpv4:
+    Type: String
+    Default: ""
+    Description: Comma-separated static IPv4 addresses for apex proxying (Cloudflare for SaaS). Empty until procured; then apex domains use A records instead of ALIAS/flattening. See plans/SITE_OBJECT.md 2.6b.
+  CloudflareApexIpv6:
+    Type: String
+    Default: ""
+    Description: Comma-separated static IPv6 addresses for apex proxying. Empty until procured.
   ShortUrlHost:
     Type: String
     Default: go.jbay.uk
@@ -187,6 +195,10 @@ Globals:
         CLOUDFLARE_ZONE_ID: !Ref CloudflareZoneId
         CLOUDFLARE_API_TOKEN_SECRET_ARN: !If [HasCloudflareZone, !Ref CloudflareApiTokenSecret, ""]
         CUSTOM_DOMAIN_TARGET_HOST: !Ref CustomDomainTargetHost
+        # Static A/AAAA IPs for apex proxying (plans/SITE_OBJECT.md §2.6b). Empty until Cloudflare apex
+        # proxying is procured; then apex domains switch from ALIAS/flattening guidance to plain A/AAAA records.
+        CLOUDFLARE_APEX_IPV4: !Ref CloudflareApexIpv4
+        CLOUDFLARE_APEX_IPV6: !Ref CloudflareApexIpv6
         SHORT_URL_HOST: !Ref ShortUrlHost
     Tracing: Active
 
