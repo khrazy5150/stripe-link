@@ -486,10 +486,12 @@ onMounted(async () => {
 </script>
 
 <style scoped>
+/* All colors come from the app's theme tokens (--panel/--bg/--text/--line/--accent), which flip under
+   .theme-live for the dark (Live) theme — never hardcode a surface color. */
 .subdomain-input {
   display: flex;
   align-items: stretch;
-  border: 1px solid var(--sl-border, #d1d5db);
+  border: 1px solid var(--line-strong);
   border-radius: 8px;
   overflow: hidden;
 }
@@ -503,15 +505,15 @@ onMounted(async () => {
   outline: none;
 }
 .subdomain-input:focus-within {
-  border-color: var(--sl-accent, #6366f1);
-  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.15);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
 }
 .subdomain-suffix {
   display: flex;
   align-items: center;
   padding: 0 0.75rem;
-  background: var(--sl-muted-bg, #f3f4f6);
-  color: var(--sl-muted, #6b7280);
+  background: var(--bg);
+  color: var(--muted);
   font-family: ui-monospace, monospace;
   white-space: nowrap;
 }
@@ -523,8 +525,9 @@ onMounted(async () => {
   margin-top: 0.35rem;
 }
 .subdomain-chip {
-  border: 1px solid var(--sl-border, #d1d5db);
-  background: var(--sl-muted-bg, #f3f4f6);
+  border: 1px solid var(--line-strong);
+  background: var(--bg);
+  color: var(--text);
   border-radius: 999px;
   padding: 0.15rem 0.7rem;
   font-family: ui-monospace, monospace;
@@ -532,8 +535,8 @@ onMounted(async () => {
   cursor: pointer;
 }
 .subdomain-chip:hover {
-  border-color: var(--sl-accent, #6366f1);
-  color: var(--sl-accent, #6366f1);
+  border-color: var(--accent);
+  color: var(--accent);
 }
 .dns-provider-row {
   display: flex;
@@ -549,12 +552,12 @@ onMounted(async () => {
   padding: 0.3rem 0.6rem;
 }
 .dns-accordion {
-  border: 1px solid var(--sl-border, #d1d5db);
+  border: 1px solid var(--line-strong);
   border-radius: 8px;
   overflow: hidden;
 }
 .dns-step + .dns-step {
-  border-top: 1px solid var(--sl-border, #d1d5db);
+  border-top: 1px solid var(--line-strong);
 }
 .dns-step-header {
   width: 100%;
@@ -567,24 +570,25 @@ onMounted(async () => {
   cursor: pointer;
   text-align: left;
   font-size: 1.35rem;
+  color: var(--text);
 }
-.dns-step-header:hover { background: var(--sl-muted-bg, #f3f4f6); }
+.dns-step-header:hover { background: var(--accent-soft); }
 .dns-step-title { font-weight: 600; flex: 1 1 auto; }
-.dns-step-status { font-size: 1.2rem; }
-.dns-chevron { color: var(--sl-muted, #6b7280); }
+.dns-step-status { font-size: 1.2rem; color: var(--muted); }
+.dns-chevron { color: var(--muted); }
 .dns-badge {
   width: 1.7rem; height: 1.7rem; border-radius: 999px; flex: 0 0 auto;
   display: inline-flex; align-items: center; justify-content: center; font-size: 1.1rem; font-weight: 700;
 }
 .dns-badge.ok { background: #dcfce7; color: #15803d; }
 .dns-badge.bad { background: #fee2e2; color: #b91c1c; }
-.dns-badge.idle { background: var(--sl-muted-bg, #e5e7eb); color: var(--sl-muted, #6b7280); }
-.dns-step-status.ok { color: #15803d; }
-.dns-step-status.bad { color: #b91c1c; }
+.dns-badge.idle { background: var(--line); color: var(--muted); }
+.dns-step-status.ok { color: #22c55e; }
+.dns-step-status.bad { color: #f87171; }
 .dns-step-body {
   display: none;
   padding: 0.2rem 0.9rem 0.9rem;
-  background: var(--sl-muted-bg, #fafafa);
+  background: var(--bg);
 }
 .dns-step.open .dns-step-body { display: block; }
 .dns-field {
@@ -598,13 +602,14 @@ onMounted(async () => {
   font-size: 1.1rem;
   text-transform: uppercase;
   font-weight: 700;
-  color: var(--sl-muted, #6b7280);
+  color: var(--muted);
 }
 .dns-field code {
   flex: 1 1 auto;
   font-family: ui-monospace, monospace;
-  background: #fff;
-  border: 1px solid var(--sl-border, #d1d5db);
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--line-strong);
   border-radius: 6px;
   padding: 0.35rem 0.6rem;
   word-break: break-all;
@@ -614,18 +619,18 @@ onMounted(async () => {
   flex: 0 0 auto;
   background: none;
   border: none;
-  color: var(--sl-accent, #6366f1);
+  color: var(--accent);
   font-weight: 600;
   cursor: pointer;
   font-size: 1.2rem;
 }
 .copy-btn:hover { text-decoration: underline; }
 .subdomain-ok {
-  color: #15803d;
+  color: #22c55e;
   font-weight: 600;
 }
 .subdomain-bad {
-  color: #b91c1c;
+  color: #f87171;
   font-weight: 600;
 }
 </style>
