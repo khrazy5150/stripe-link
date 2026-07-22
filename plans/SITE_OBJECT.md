@@ -291,9 +291,15 @@ SEO-13 — category/collection index pages + an image related-products rail — 
   currently ACCEPTS an apex it can't route (latent dead-end — flag/reject apex clearly until 2.6b ships).
 - Subdomain custom domains (the current bridge) stay as-is; apex is additive.
 
-**Phase 2.7 — Tenant/seller profile page.**
-- `CollectionPage` / `OnlineStore` profile served from the Site's canonical domain (TP-04/05); verified
-  `sameAs` (TP §4).
+**Phase 2.7 — Tenant/seller profile page. SHIPPED (dev+prod).**
+- `seller_profile` section: a `CollectionPage` whose `mainEntity` is the full `OnlineStore` node (the seller
+  `@id` resolves here — TP-03/04/05), plus a visible identity block (description, contact, verified social
+  links `rel="nofollow ugc noopener"`, category links). Offer-less page (`page_type: about`), created via a
+  4th builder kind "Store profile". **Security fix:** `sameAs` now emits only ownership-VERIFIED entries
+  (TP §4.4 impersonation gate), host-whitelisted, ≤6. `hasOfferCatalog` derived from the Site's category
+  pages ("brands carried", not owned). `is_offerless_page` marker unifies the offer-optional gate.
+- **Follow-up:** the `sameAs` verification mechanism (OAuth / bio-token / reciprocal-link) + the social-profile
+  editor (paired — unverified socials never emit, so nothing renders until verification ships).
 
 Ordering note: **2.1–2.4 deliver the bulk of the SEO value on single-host Sites without the edge lift.** 2.6
 (clean multi-page paths + funnel-on-domain) was **pulled ahead of 2.5** and shipped, because 2.5's breadcrumbs /
