@@ -330,7 +330,11 @@ def _ensure_homepage(document, homepage_page_id):
             pages["/"] = dict(entry)
             document["pages"] = pages
             return homepage_page_id
-    return None
+    # The Site doesn't track this page yet (it was created after the Site, before the page↔Site editor exists)
+    # — attach the chosen page as the homepage so the domain has something to serve.
+    pages["/"] = {"page_id": homepage_page_id, "page_type": "landing", "enabled": True}
+    document["pages"] = pages
+    return homepage_page_id
 
 
 def _recompute_eligibility(site, tenant_id, now):

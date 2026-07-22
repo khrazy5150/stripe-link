@@ -132,6 +132,14 @@ class SitesDomainTests(unittest.TestCase):
             resp = self._connect({"tenant_id": "t1", "domain": "shop.axelmart.com"})
         self.assertEqual(resp["statusCode"], 502)
 
+    def test_connect_attaches_homepage_when_site_has_no_pages(self):
+        # A Site created before its pages existed has an empty map; connecting attaches the chosen homepage.
+        self.repo.put(base_site(pages={}))
+        with patch.object(sites_handler, "create_custom_hostname", return_value=CF_PENDING):
+            resp = self._connect({"tenant_id": "t1", "domain": "shop.axelmart.com", "homepage_page_id": "page_new1"})
+        self.assertEqual(resp["statusCode"], 201)
+        self.assertEqual(self.repo.get("t1", "site_D1")["pages"]["/"]["page_id"], "page_new1")
+
     def test_connect_requires_homepage_for_multipage_site(self):
         self.repo.put(base_site(pages={"/a": {"page_id": "page_A"}, "/b": {"page_id": "page_B"}}))
         with patch.object(sites_handler, "create_custom_hostname", return_value=CF_PENDING):

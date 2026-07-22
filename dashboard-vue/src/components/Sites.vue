@@ -154,8 +154,12 @@
                 <span>Which page should the domain show?</span>
                 <select v-model="domainForm.homepage">
                   <option value="">Choose a homepage…</option>
-                  <option v-for="(entry, slug) in editing.pages" :key="slug" :value="entry.page_id">{{ entry.label || slug }}</option>
+                  <option v-for="p in pages" :key="p.page_id" :value="p.page_id">
+                    {{ p.name || p.page_id }}{{ p.status === 'published' ? '' : ' — draft, publish to go live' }}
+                  </option>
                 </select>
+                <small v-if="!pages.length" class="field-note">This Site has no landing pages yet. Create and publish a landing page first, then connect your domain.</small>
+                <small v-else class="field-note">The homepage must be published for the domain to serve it.</small>
               </label>
               <div class="button-row">
                 <button type="button" class="primary-action" :disabled="domainBusy || !domainForm.domain || (!siteHasHomepage && !domainForm.homepage)" @click="connectDomain">
