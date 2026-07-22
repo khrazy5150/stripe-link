@@ -268,6 +268,7 @@ def _refresh_eligibility(repository, tenant_id, sites):
     now = int(time.time())
     for site in sites:
         try:
+            changed = False
             connect_verified, connect_restricted = _connect_state(tenant_id, site.get("environment"))
             eligibility = compute_site_eligibility(
                 site, connect_verified=connect_verified, connect_restricted=connect_restricted,
@@ -275,6 +276,12 @@ def _refresh_eligibility(repository, tenant_id, sites):
             )
             if eligibility != (site.get("indexing") or {}).get("eligibility"):
                 site["indexing"] = {**(site.get("indexing") or {}), "eligibility": eligibility, "eligibility_updated_at": now}
+                changed = True
+            # Backfill an IndexNow key for a verified Site that predates key generation (needed for SEO-15).
+            if site_domain_verified(site) and not ((site.get("seo") or {}).get("indexnow_key")):
+                site["seo"] = {**(site.get("seo") or {}), "indexnow_key": generate_indexnow_key()}
+                changed = True
+            if changed:
                 site["updated_at"] = now
                 repository.put(site)
         except Exception:
