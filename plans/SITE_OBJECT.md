@@ -230,7 +230,14 @@ SEO-13 — category/collection index pages + an image related-products rail — 
   (schema + publish + preview). Builder: a step-1 "Storefront homepage" branch that picks pages for the grid;
   `POST /sites/{id}/homepage` sets a page as the Site homepage (displacing the old one to its own slug).
   Follow-ups: storefront-page editing in the builder + a wizard live preview.
-- **Slice 2/3 (pending)** below.
+- **Slice 2 backend (SHIPPED dev+prod)** — auto-enumerated category index pages. Landing pages denormalize
+  their `offer_id` + `product_category` onto the Site route-map entry at publish; a `catalog_grid` with a
+  `category` resolves its cards by scanning the route map (`resolve_category_grids`). Breadcrumbs deepen to
+  Home → Category → Product when the Site has a category page for the product's category. `POST /sites/{id}/pages`
+  attaches a page at a slug with a page_type + optional category (generalizes the homepage endpoint).
+  **Remaining (Slice 2e, builder UI, not built):** create a category page in the builder + a route-map attach
+  UI so landing/category pages get attached (and denormalized). Engine-only until then.
+- **Slice 3 (pending)** below.
 - A purpose-built homepage/`OnlineStore` page (brand hero, nav, lists the Site's offers/products) — a real
   `page_type: homepage`, not a landing page repurposed at the `/` slug (today's interim). The schema already
   reserves `homepage`/`collection`/`category`/`about` page types; this builds the editor + renderer for them.
