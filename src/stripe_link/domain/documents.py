@@ -1490,9 +1490,10 @@ SITE_ENTITY_TYPES = {
     "HealthAndBeautyBusiness", "FoodEstablishment", "ProfessionalService", "Store",
 }
 # Page roles are metadata (JSON-LD @type / sitemap / robots / nav eligibility) — never a renderer branch.
+# funnel_step is a post-checkout upsell/downsell page: routable on the custom domain but always noindex.
 SITE_PAGE_TYPES = {
     "landing", "homepage", "collection", "category", "about", "contact", "faq",
-    "legal", "checkout", "thank_you", "blog", "article", "search_results",
+    "legal", "checkout", "thank_you", "funnel_step", "blog", "article", "search_results",
 }
 _HOSTNAME_RE = re.compile(r"^(?!https?://)([a-z0-9-]+\.)+[a-z]{2,}$")
 _SITE_SLUG_RE = re.compile(r"^/$|^/[a-z0-9]+(?:-[a-z0-9]+)*(?:/[a-z0-9]+(?:-[a-z0-9]+)*)*$")

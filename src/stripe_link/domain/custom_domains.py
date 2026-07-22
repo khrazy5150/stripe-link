@@ -63,6 +63,23 @@ def route_table(site: dict[str, Any]) -> dict[str, dict[str, Any]]:
     return table
 
 
+def domain_index_record(site: dict[str, Any]) -> dict[str, Any]:
+    """The denormalized record the edge resolver reads for a custom hostname, projected off the Site: the
+    homepage page_id (back-compat), the full slug→page route table, and the provisioning status. One builder
+    so the sites handler and the publisher write byte-identical records (plans/SITE_OBJECT.md §2.6)."""
+    hosting = site.get("hosting") or {}
+    root = (site.get("pages") or {}).get("/")
+    homepage = str(root.get("page_id") or "") if isinstance(root, dict) else ""
+    return {
+        "tenant_id": str(site.get("tenant_id") or ""),
+        "domain": str(hosting.get("custom_domain") or ""),
+        "target_page_id": homepage,
+        "routes": route_table(site),
+        "status": str((site.get("domain_provisioning") or {}).get("status") or ""),
+        "site_id": str(site.get("site_id") or ""),
+    }
+
+
 def build_domain(apex_domain: str, subdomain_label: str) -> str:
     apex = normalize_domain(apex_domain)
     label = str(subdomain_label or "").strip().lower()

@@ -1,8 +1,38 @@
+import re
 from typing import Any
 
 
 class FunnelError(ValueError):
     pass
+
+
+_SLUG_SEGMENT_RE = re.compile(r"[^a-z0-9]+")
+
+
+def funnel_step_slug(step_id: str) -> str:
+    """A Site route slug derived from a funnel step_id: lowercased, non-alphanumerics folded to hyphens
+    ("upsell_1" -> "/upsell-1"). Empty string when nothing usable remains."""
+    segment = _SLUG_SEGMENT_RE.sub("-", str(step_id or "").lower()).strip("-")
+    return f"/{segment}" if segment else ""
+
+
+def funnel_slug_entries(post_checkout: dict[str, Any]) -> list[dict[str, str]]:
+    """The Site.pages entries the pages of a Page's inline funnel need so the whole funnel routes on the
+    custom domain (plans/SITE_OBJECT.md §2.6): the thank-you page at /thank-you and each funnel step at a
+    slug from its step_id. All are noindex — post-checkout pages are never organic search entry points.
+    Returns [] for an external thank-you URL, a detached funnel_id, or no funnel."""
+    if not isinstance(post_checkout, dict) or post_checkout.get("funnel_id"):
+        return []
+    entries: list[dict[str, str]] = []
+    thank_you = post_checkout.get("thank_you_page") or {}
+    if thank_you.get("page_id"):
+        entries.append({"slug": "/thank-you", "page_id": str(thank_you["page_id"]), "page_type": "thank_you"})
+    for step in post_checkout.get("funnel_steps") or []:
+        page_id = str(step.get("page_id") or "")
+        slug = funnel_step_slug(step.get("step_id"))
+        if page_id and slug:
+            entries.append({"slug": slug, "page_id": page_id, "page_type": "funnel_step"})
+    return entries
 
 
 def resolve_funnel_transition(

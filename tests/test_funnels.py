@@ -1,6 +1,11 @@
 import unittest
 
-from stripe_link.domain.funnels import FunnelError, resolve_funnel_transition
+from stripe_link.domain.funnels import (
+    FunnelError,
+    funnel_slug_entries,
+    funnel_step_slug,
+    resolve_funnel_transition,
+)
 
 
 def post_checkout(**overrides):
@@ -66,6 +71,24 @@ class ResolveFunnelTransitionTests(unittest.TestCase):
     def test_missing_thank_you_configuration_raises(self):
         with self.assertRaises(FunnelError):
             resolve_funnel_transition({}, current_step_id=None, outcome="accept")
+
+
+class FunnelSlugEntriesTests(unittest.TestCase):
+    def test_step_slug_folds_to_hyphenated_slug(self):
+        self.assertEqual(funnel_step_slug("upsell_1"), "/upsell-1")
+        self.assertEqual(funnel_step_slug("Down Sell #2"), "/down-sell-2")
+        self.assertEqual(funnel_step_slug("---"), "")
+
+    def test_entries_map_thank_you_and_steps_to_noindex_types(self):
+        entries = funnel_slug_entries(post_checkout())
+        self.assertEqual(entries[0], {"slug": "/thank-you", "page_id": "page_thank_you", "page_type": "thank_you"})
+        self.assertEqual(entries[1], {"slug": "/upsell-1", "page_id": "page_upsell_1", "page_type": "funnel_step"})
+        self.assertEqual(entries[2], {"slug": "/downsell-1", "page_id": "page_downsell_1", "page_type": "funnel_step"})
+
+    def test_external_thank_you_url_and_detached_funnel_yield_no_entries(self):
+        self.assertEqual(funnel_slug_entries({"thank_you_page": {"url": "https://x.example/ty"}}), [])
+        self.assertEqual(funnel_slug_entries({"funnel_id": "fnl_1"}), [])
+        self.assertEqual(funnel_slug_entries({}), [])
 
 
 if __name__ == "__main__":

@@ -18,32 +18,61 @@
     "updated_at"
   ],
   "properties": {
-    "schema_version": { "type": "string", "description": "ISO date string identifying the schema version in use." },
-    "document_type": { "type": "string", "const": "site" },
-    "site_id": { "type": "string", "pattern": "^site_[A-Za-z0-9]+$" },
-    "tenant_id": { "type": "string", "minLength": 1 },
+    "schema_version": {
+      "type": "string",
+      "description": "ISO date string identifying the schema version in use."
+    },
+    "document_type": {
+      "type": "string",
+      "const": "site"
+    },
+    "site_id": {
+      "type": "string",
+      "pattern": "^site_[A-Za-z0-9]+$"
+    },
+    "tenant_id": {
+      "type": "string",
+      "minLength": 1
+    },
     "environment": {
       "type": "string",
       "description": "Sites are authored in test and copied to live by a later workflow (mirrors the platform's per-stack dev/prod split).",
-      "enum": ["test", "live"]
+      "enum": [
+        "test",
+        "live"
+      ]
     },
-    "name": { "type": "string", "description": "Internal dashboard display name.", "minLength": 1, "maxLength": 120 },
+    "name": {
+      "type": "string",
+      "description": "Internal dashboard display name.",
+      "minLength": 1,
+      "maxLength": 120
+    },
     "status": {
       "type": "string",
       "description": "Archived Sites must return 404 for all routes.",
-      "enum": ["draft", "active", "archived"]
+      "enum": [
+        "draft",
+        "active",
+        "archived"
+      ]
     },
-
     "hosting": {
       "type": "object",
       "description": "The Site owns its hostname(s). The platform hostname is permanent (preview/rollback/migration/support) and is NEVER recycled. A custom domain, once verified, becomes the canonical hostname. Canonical = custom_domain when type=custom, else platform_hostname. Platform hosts are ALWAYS noindex (see `indexing`).",
       "additionalProperties": false,
-      "required": ["type", "platform_hostname"],
+      "required": [
+        "type",
+        "platform_hostname"
+      ],
       "properties": {
         "type": {
           "type": "string",
           "description": "platform = served on the tenant-chosen platform subdomain only; custom = a verified custom domain is canonical.",
-          "enum": ["platform", "custom"],
+          "enum": [
+            "platform",
+            "custom"
+          ],
           "default": "platform"
         },
         "platform_hostname": {
@@ -52,7 +81,10 @@
           "pattern": "^(?!https?://)([a-z0-9-]+\\.)+[a-z]{2,}$"
         },
         "custom_domain": {
-          "type": ["string", "null"],
+          "type": [
+            "string",
+            "null"
+          ],
           "description": "The tenant's own registrable domain (e.g. axelmart.com). Null until connected. Its own eTLD+1 is the real reputation boundary.",
           "pattern": "^(?!https?://)([a-z0-9-]+\\.)+[a-z]{2,}$"
         },
@@ -61,193 +93,484 @@
           "description": "Custom-domain verification state (reuses the Cloudflare custom-hostname flow).",
           "additionalProperties": false,
           "properties": {
-            "verified": { "type": "boolean", "default": false },
-            "verified_at": { "type": ["integer", "null"], "minimum": 0 },
-            "method": { "type": ["string", "null"], "enum": ["cloudflare_saas", "dns_txt", "cname", null] }
+            "verified": {
+              "type": "boolean",
+              "default": false
+            },
+            "verified_at": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0
+            },
+            "method": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "enum": [
+                "cloudflare_saas",
+                "dns_txt",
+                "cname",
+                null
+              ]
+            }
           }
         }
       }
     },
-
     "organization": {
       "type": "object",
       "description": "The SINGLE source of truth for the merchant's public identity. Every entity claim on every page derives from here: Organization/OnlineStore/LocalBusiness JSON-LD, Offer.seller, WebSite, breadcrumb publisher, ContactPage, About, footer, <title> brand. Only verifiable fields are ever emitted; never fabricate a foundingDate or a rating.",
       "additionalProperties": false,
       "properties": {
-        "name": { "type": "string", "description": "Public storefront/brand name (the tenant.brand_label). Distinct from product.brand (manufacturer).", "maxLength": 120 },
-        "legal_name": { "type": ["string", "null"], "maxLength": 200 },
+        "name": {
+          "type": "string",
+          "description": "Public storefront/brand name (the tenant.brand_label). Distinct from product.brand (manufacturer).",
+          "maxLength": 120
+        },
+        "legal_name": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 200
+        },
         "entity_type": {
           "type": "string",
-          "description": "schema.org @type for the entity node — drives Organization vs LocalBusiness-family markup.",
-          "enum": ["Organization", "OnlineStore", "LocalBusiness", "HomeAndConstructionBusiness", "HealthAndBeautyBusiness", "FoodEstablishment", "ProfessionalService", "Store"],
+          "description": "schema.org @type for the entity node \u2014 drives Organization vs LocalBusiness-family markup.",
+          "enum": [
+            "Organization",
+            "OnlineStore",
+            "LocalBusiness",
+            "HomeAndConstructionBusiness",
+            "HealthAndBeautyBusiness",
+            "FoodEstablishment",
+            "ProfessionalService",
+            "Store"
+          ],
           "default": "OnlineStore"
         },
-        "description": { "type": ["string", "null"], "maxLength": 500 },
+        "description": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 500
+        },
         "logo": {
-          "type": ["object", "null"],
+          "type": [
+            "object",
+            "null"
+          ],
           "additionalProperties": false,
           "properties": {
-            "url": { "type": "string", "pattern": "^https?://" },
-            "width": { "type": ["integer", "null"], "minimum": 1 },
-            "height": { "type": ["integer", "null"], "minimum": 1 }
+            "url": {
+              "type": "string",
+              "pattern": "^https?://"
+            },
+            "width": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 1
+            },
+            "height": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 1
+            }
           }
         },
-        "telephone": { "type": ["string", "null"], "description": "E.164.", "pattern": "^\\+[1-9]\\d{1,14}$" },
-        "email": { "type": ["string", "null"], "format": "email" },
+        "telephone": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "E.164.",
+          "pattern": "^\\+[1-9]\\d{1,14}$"
+        },
+        "email": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "email"
+        },
         "address": {
-          "type": ["object", "null"],
+          "type": [
+            "object",
+            "null"
+          ],
           "additionalProperties": false,
           "properties": {
-            "street": { "type": "string" },
-            "locality": { "type": "string" },
-            "region": { "type": "string" },
-            "postal_code": { "type": "string" },
-            "country": { "type": "string", "minLength": 2, "maxLength": 2, "default": "US" }
+            "street": {
+              "type": "string"
+            },
+            "locality": {
+              "type": "string"
+            },
+            "region": {
+              "type": "string"
+            },
+            "postal_code": {
+              "type": "string"
+            },
+            "country": {
+              "type": "string",
+              "minLength": 2,
+              "maxLength": 2,
+              "default": "US"
+            }
           }
         },
-        "area_served": { "type": "array", "items": { "type": "string" }, "maxItems": 50 },
+        "area_served": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 50
+        },
         "same_as": {
           "type": "array",
-          "description": "Verified social/authority profiles only (TENANT_PROFILE_REQUIREMENTS §4). Each entry ownership-verified before emission; host-whitelisted; <=6.",
+          "description": "Verified social/authority profiles only (TENANT_PROFILE_REQUIREMENTS \u00a74). Each entry ownership-verified before emission; host-whitelisted; <=6.",
           "maxItems": 6,
           "items": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["url"],
+            "required": [
+              "url"
+            ],
             "properties": {
-              "url": { "type": "string", "pattern": "^https?://" },
-              "verified": { "type": "boolean", "default": false },
-              "method": { "type": ["string", "null"], "enum": ["oauth", "bio_token", "reciprocal_link", null] }
+              "url": {
+                "type": "string",
+                "pattern": "^https?://"
+              },
+              "verified": {
+                "type": "boolean",
+                "default": false
+              },
+              "method": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "enum": [
+                  "oauth",
+                  "bio_token",
+                  "reciprocal_link",
+                  null
+                ]
+              }
             }
           }
         },
-        "currencies": { "type": "array", "items": { "type": "string", "minLength": 3, "maxLength": 3 }, "maxItems": 10 },
-        "founding_date": { "type": ["string", "null"], "description": "ISO date. Optional; omit unless the tenant states it — never inferred." }
+        "currencies": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 3
+          },
+          "maxItems": 10
+        },
+        "founding_date": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "ISO date. Optional; omit unless the tenant states it \u2014 never inferred."
+        }
       }
     },
-
     "branding": {
       "type": "object",
       "description": "Visual identity applied across the Site unless a Page overrides it.",
       "additionalProperties": false,
       "properties": {
-        "favicon_url": { "type": ["string", "null"], "pattern": "^https?://" },
-        "theme_preset": { "type": ["string", "null"] },
+        "favicon_url": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^https?://"
+        },
+        "theme_preset": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "colors": {
           "type": "object",
           "additionalProperties": false,
           "properties": {
-            "primary": { "type": ["string", "null"] },
-            "accent": { "type": ["string", "null"] }
+            "primary": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "accent": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
           }
         }
       }
     },
-
     "navigation": {
       "type": "object",
       "description": "Ordered menus referencing page slugs (the Site owns the menu, not the page content). Slugs must exist as keys in `pages`.",
       "additionalProperties": false,
       "properties": {
-        "primary": { "type": "array", "items": { "$ref": "#/$defs/siteSlug" }, "uniqueItems": true },
-        "footer": { "type": "array", "items": { "$ref": "#/$defs/siteSlug" }, "uniqueItems": true }
+        "primary": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/siteSlug"
+          },
+          "uniqueItems": true
+        },
+        "footer": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/siteSlug"
+          },
+          "uniqueItems": true
+        }
       }
     },
-
     "seo": {
       "type": "object",
       "description": "Site-wide SEO configuration. Emitted only when present.",
       "additionalProperties": false,
       "properties": {
-        "title_suffix": { "type": ["string", "null"], "maxLength": 60 },
-        "default_og_image": { "type": ["string", "null"], "pattern": "^https?://" },
-        "google_site_verification": { "type": ["string", "null"] },
-        "bing_site_verification": { "type": ["string", "null"] },
-        "indexnow_key": { "type": ["string", "null"] },
-        "include_new_in_title": { "type": "boolean", "default": false },
-        "description_cta": { "type": ["string", "null"] }
+        "title_suffix": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 60
+        },
+        "default_og_image": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^https?://"
+        },
+        "google_site_verification": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "bing_site_verification": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "indexnow_key": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "include_new_in_title": {
+          "type": "boolean",
+          "default": false
+        },
+        "description_cta": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
       }
     },
-
     "indexing": {
       "type": "object",
-      "description": "Whether this Site's published pages may be indexed. Consensus (SITE_OBJECT.md §2.3): platform hosts are ALWAYS noindex; index-eligible requires BOTH a verified custom domain (own eTLD+1) AND a verified Stripe Connect account. Recomputed on domain verification and Stripe account.updated.",
+      "description": "Whether this Site's published pages may be indexed. Consensus (SITE_OBJECT.md \u00a72.3): platform hosts are ALWAYS noindex; index-eligible requires BOTH a verified custom domain (own eTLD+1) AND a verified Stripe Connect account. Recomputed on domain verification and Stripe account.updated.",
       "additionalProperties": false,
       "properties": {
         "eligibility": {
           "type": "string",
-          "enum": ["blocked", "pending", "eligible", "revoked"],
+          "enum": [
+            "blocked",
+            "pending",
+            "eligible",
+            "revoked"
+          ],
           "default": "blocked"
         },
-        "reasons": { "type": "array", "items": { "type": "string" }, "description": "Human-readable gating reasons for the admin (e.g. 'connect_unverified', 'no_custom_domain')." },
-        "evaluated_at": { "type": ["integer", "null"], "minimum": 0 }
+        "reasons": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Human-readable gating reasons for the admin (e.g. 'connect_unverified', 'no_custom_domain')."
+        },
+        "evaluated_at": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        }
       }
     },
-
     "analytics": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "google_tag_id": { "type": ["string", "null"] },
-        "pixel_id": { "type": ["string", "null"] }
-      }
-    },
-
-    "integration": {
-      "description": "How a custom domain's requests reach our page artifacts. Present only once a custom domain is being connected; a platform-only Site has none. Exactly one config block, matching mode.",
-      "oneOf": [
-        { "$ref": "#/$defs/workerIntegration" },
-        { "$ref": "#/$defs/cloudflareSaasIntegration" },
-        { "$ref": "#/$defs/cloudflarePartialIntegration" },
-        { "$ref": "#/$defs/dnsIntegration" },
-        { "$ref": "#/$defs/nginxIntegration" },
-        { "$ref": "#/$defs/wordpressIntegration" }
-      ]
-    },
-
-    "pages": {
-      "type": "object",
-      "description": "Slug-keyed route map. Object keys enforce slug uniqueness within a Site. A page_id belongs to at most one Site (API-enforced). Disabled entries return 404. May be empty: a Site can exist before any pages are attached (pages hang off the Site, not the reverse).",
-      "propertyNames": { "$ref": "#/$defs/siteSlug" },
-      "additionalProperties": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": ["page_id"],
-        "properties": {
-          "page_id": { "type": "string", "pattern": "^page_[A-Za-z0-9]+$" },
-          "page_type": {
-            "type": "string",
-            "description": "The page's ROLE — metadata only, never forks the renderer. Drives JSON-LD @type, sitemap inclusion/priority, robots defaults (checkout/thank_you -> noindex), and navigation eligibility. blog/article/category/search_results reserved for later.",
-            "enum": ["landing", "homepage", "collection", "category", "about", "contact", "faq", "legal", "checkout", "thank_you", "blog", "article", "search_results"],
-            "default": "landing"
-          },
-          "label": { "type": "string", "maxLength": 80 },
-          "enabled": { "type": "boolean", "default": true }
+        "google_tag_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "pixel_id": {
+          "type": [
+            "string",
+            "null"
+          ]
         }
       }
     },
-
+    "integration": {
+      "description": "How a custom domain's requests reach our page artifacts. Present only once a custom domain is being connected; a platform-only Site has none. Exactly one config block, matching mode.",
+      "oneOf": [
+        {
+          "$ref": "#/$defs/workerIntegration"
+        },
+        {
+          "$ref": "#/$defs/cloudflareSaasIntegration"
+        },
+        {
+          "$ref": "#/$defs/cloudflarePartialIntegration"
+        },
+        {
+          "$ref": "#/$defs/dnsIntegration"
+        },
+        {
+          "$ref": "#/$defs/nginxIntegration"
+        },
+        {
+          "$ref": "#/$defs/wordpressIntegration"
+        }
+      ]
+    },
+    "pages": {
+      "type": "object",
+      "description": "Slug-keyed route map. Object keys enforce slug uniqueness within a Site. A page_id belongs to at most one Site (API-enforced). Disabled entries return 404. May be empty: a Site can exist before any pages are attached (pages hang off the Site, not the reverse).",
+      "propertyNames": {
+        "$ref": "#/$defs/siteSlug"
+      },
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "page_id"
+        ],
+        "properties": {
+          "page_id": {
+            "type": "string",
+            "pattern": "^page_[A-Za-z0-9]+$"
+          },
+          "page_type": {
+            "type": "string",
+            "description": "The page's ROLE \u2014 metadata only, never forks the renderer. Drives JSON-LD @type, sitemap inclusion/priority, robots defaults (checkout/thank_you -> noindex), and navigation eligibility. blog/article/category/search_results reserved for later.",
+            "enum": [
+              "landing",
+              "homepage",
+              "collection",
+              "category",
+              "about",
+              "contact",
+              "faq",
+              "legal",
+              "checkout",
+              "thank_you",
+              "funnel_step",
+              "blog",
+              "article",
+              "search_results"
+            ],
+            "default": "landing"
+          },
+          "label": {
+            "type": "string",
+            "maxLength": 80
+          },
+          "enabled": {
+            "type": "boolean",
+            "default": true
+          }
+        }
+      }
+    },
     "routing": {
       "type": "object",
       "description": "Edge routing publication metadata. Runtime routing reads this via a CloudFront KeyValueStore / edge-readable manifest, not live DynamoDB. Empty = unpublished draft; when any publication field is set, all three must be present.",
       "additionalProperties": false,
       "properties": {
-        "kvs_key": { "type": ["string", "null"], "pattern": "^site:(test|live):[a-z0-9.-]+$" },
-        "published_revision": { "type": ["integer", "null"], "minimum": 1 },
-        "published_at": { "type": ["integer", "null"], "minimum": 0 }
+        "kvs_key": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^site:(test|live):[a-z0-9.-]+$"
+        },
+        "published_revision": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1
+        },
+        "published_at": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        }
       },
       "dependentRequired": {
-        "kvs_key": ["published_revision", "published_at"],
-        "published_revision": ["kvs_key", "published_at"],
-        "published_at": ["kvs_key", "published_revision"]
+        "kvs_key": [
+          "published_revision",
+          "published_at"
+        ],
+        "published_revision": [
+          "kvs_key",
+          "published_at"
+        ],
+        "published_at": [
+          "kvs_key",
+          "published_revision"
+        ]
       }
     },
-
-    "revision": { "type": "integer", "minimum": 1 },
-    "created_at": { "type": "integer", "minimum": 0 },
-    "updated_at": { "type": "integer", "minimum": 0 }
+    "revision": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "created_at": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "updated_at": {
+      "type": "integer",
+      "minimum": 0
+    }
   },
-
   "$defs": {
     "siteSlug": {
       "type": "string",
@@ -256,90 +579,237 @@
     },
     "pathArray": {
       "type": "array",
-      "items": { "$ref": "#/$defs/siteSlug" },
+      "items": {
+        "$ref": "#/$defs/siteSlug"
+      },
       "minItems": 1,
       "uniqueItems": true
     },
     "workerIntegration": {
-      "type": "object", "additionalProperties": false, "required": ["mode", "worker_config"],
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mode",
+        "worker_config"
+      ],
       "properties": {
-        "mode": { "const": "worker" },
+        "mode": {
+          "const": "worker"
+        },
         "worker_config": {
-          "type": "object", "additionalProperties": false, "required": ["zone_id", "script_id", "intercepted_paths"],
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "zone_id",
+            "script_id",
+            "intercepted_paths"
+          ],
           "properties": {
-            "zone_id": { "type": "string", "minLength": 1 },
-            "script_id": { "type": "string", "minLength": 1 },
-            "intercepted_paths": { "$ref": "#/$defs/pathArray" },
-            "deployed_at": { "type": ["integer", "null"], "minimum": 0 }
+            "zone_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "script_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "intercepted_paths": {
+              "$ref": "#/$defs/pathArray"
+            },
+            "deployed_at": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0
+            }
           }
         }
       }
     },
     "cloudflareSaasIntegration": {
-      "type": "object", "additionalProperties": false, "required": ["mode", "cloudflare_saas_config"],
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mode",
+        "cloudflare_saas_config"
+      ],
       "properties": {
-        "mode": { "const": "cloudflare_saas" },
+        "mode": {
+          "const": "cloudflare_saas"
+        },
         "cloudflare_saas_config": {
-          "type": "object", "additionalProperties": false, "required": ["proxy_hostname", "custom_hostname_id"],
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "proxy_hostname",
+            "custom_hostname_id"
+          ],
           "properties": {
-            "proxy_hostname": { "type": "string", "pattern": "^(?!https?://)([a-z0-9-]+\\.)+[a-z]{2,}$" },
-            "custom_hostname_id": { "type": "string", "minLength": 1 },
-            "ssl_status": { "type": "string", "enum": ["pending_validation", "active", "error"] }
+            "proxy_hostname": {
+              "type": "string",
+              "pattern": "^(?!https?://)([a-z0-9-]+\\.)+[a-z]{2,}$"
+            },
+            "custom_hostname_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "ssl_status": {
+              "type": "string",
+              "enum": [
+                "pending_validation",
+                "active",
+                "error"
+              ]
+            }
           }
         }
       }
     },
     "cloudflarePartialIntegration": {
-      "type": "object", "additionalProperties": false, "required": ["mode", "cloudflare_partial_config"],
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mode",
+        "cloudflare_partial_config"
+      ],
       "properties": {
-        "mode": { "const": "cloudflare_partial" },
+        "mode": {
+          "const": "cloudflare_partial"
+        },
         "cloudflare_partial_config": {
-          "type": "object", "additionalProperties": false, "required": ["subdomain", "cname_target", "cloudfront_distribution_id"],
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "subdomain",
+            "cname_target",
+            "cloudfront_distribution_id"
+          ],
           "properties": {
-            "subdomain": { "type": "string", "pattern": "^[a-z0-9-]+$" },
-            "cname_target": { "type": "string", "pattern": "^(?!https?://)([a-z0-9-]+\\.)+[a-z]{2,}$" },
-            "cloudfront_distribution_id": { "type": "string", "minLength": 1 }
+            "subdomain": {
+              "type": "string",
+              "pattern": "^[a-z0-9-]+$"
+            },
+            "cname_target": {
+              "type": "string",
+              "pattern": "^(?!https?://)([a-z0-9-]+\\.)+[a-z]{2,}$"
+            },
+            "cloudfront_distribution_id": {
+              "type": "string",
+              "minLength": 1
+            }
           }
         }
       }
     },
     "dnsIntegration": {
-      "type": "object", "additionalProperties": false, "required": ["mode", "dns_config"],
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mode",
+        "dns_config"
+      ],
       "properties": {
-        "mode": { "const": "dns" },
+        "mode": {
+          "const": "dns"
+        },
         "dns_config": {
-          "type": "object", "additionalProperties": false, "required": ["cname_target", "cloudfront_distribution_id"],
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "cname_target",
+            "cloudfront_distribution_id"
+          ],
           "properties": {
-            "cname_target": { "type": "string", "pattern": "^(?!https?://)([a-z0-9-]+\\.)+[a-z]{2,}$" },
-            "cloudfront_distribution_id": { "type": "string", "minLength": 1 }
+            "cname_target": {
+              "type": "string",
+              "pattern": "^(?!https?://)([a-z0-9-]+\\.)+[a-z]{2,}$"
+            },
+            "cloudfront_distribution_id": {
+              "type": "string",
+              "minLength": 1
+            }
           }
         }
       }
     },
     "nginxIntegration": {
-      "type": "object", "additionalProperties": false, "required": ["mode", "nginx_config"],
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mode",
+        "nginx_config"
+      ],
       "properties": {
-        "mode": { "const": "nginx" },
+        "mode": {
+          "const": "nginx"
+        },
         "nginx_config": {
-          "type": "object", "additionalProperties": false, "required": ["origin_url", "proxy_paths"],
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "origin_url",
+            "proxy_paths"
+          ],
           "properties": {
-            "origin_url": { "type": "string", "pattern": "^https?://" },
-            "proxy_paths": { "$ref": "#/$defs/pathArray" },
-            "server_type": { "type": ["string", "null"], "enum": ["nginx", "apache", null] }
+            "origin_url": {
+              "type": "string",
+              "pattern": "^https?://"
+            },
+            "proxy_paths": {
+              "$ref": "#/$defs/pathArray"
+            },
+            "server_type": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "enum": [
+                "nginx",
+                "apache",
+                null
+              ]
+            }
           }
         }
       }
     },
     "wordpressIntegration": {
-      "type": "object", "additionalProperties": false, "required": ["mode", "wordpress_config"],
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mode",
+        "wordpress_config"
+      ],
       "properties": {
-        "mode": { "const": "wordpress" },
+        "mode": {
+          "const": "wordpress"
+        },
         "wordpress_config": {
-          "type": "object", "additionalProperties": false, "required": ["cache_ttl_seconds"],
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "cache_ttl_seconds"
+          ],
           "properties": {
-            "cache_ttl_seconds": { "type": "integer", "minimum": 0, "default": 300 },
-            "plugin_version": { "type": ["string", "null"] },
-            "last_rewrite_flush": { "type": ["integer", "null"], "minimum": 0 }
+            "cache_ttl_seconds": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 300
+            },
+            "plugin_version": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "last_rewrite_flush": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0
+            }
           }
         }
       }

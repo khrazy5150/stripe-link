@@ -3,9 +3,16 @@ import os
 import time
 from typing import Any
 
-from stripe_link.domain.documents import validate_offer_document, validate_page_document, validate_product_document
+from stripe_link.domain.documents import (
+    validate_offer_document,
+    validate_page_document,
+    validate_product_document,
+    validate_site,
+)
 from stripe_link.runtime.artifacts import artifact_paths, cloudfront_path
 from stripe_link.domain.connect_sync import site_domain_verified
+from stripe_link.domain.custom_domains import domain_index_record
+from stripe_link.domain.funnels import funnel_slug_entries
 from stripe_link.runtime.html import page_robots_directive, render_page
 
 
@@ -50,6 +57,52 @@ def find_site_for_page(sites_repository: Any, tenant_id: str, page_id: str) -> d
     except Exception:
         return None
     return None
+
+
+def site_page_slug(site: dict[str, Any] | None, page_id: str) -> str:
+    """The Site route slug (map key) this page serves at — "/" for the homepage, "/upsell-1" for a funnel
+    step. "" when the page isn't attached to the Site (so it isn't served on the custom domain)."""
+    for slug, entry in ((site or {}).get("pages") or {}).items():
+        if isinstance(entry, dict) and entry.get("page_id") == page_id:
+            return str(slug)
+    return ""
+
+
+def attach_funnel_pages(site: dict[str, Any], page: dict[str, Any]) -> tuple[dict[str, Any], bool]:
+    """Attach the pages a Page's inline funnel references (upsell/downsell/thank-you) to the Site at derived
+    slugs so the whole funnel routes on the custom domain (plans/SITE_OBJECT.md §2.6). Idempotent and
+    non-destructive: a page already attached at any slug is left in place, and a slug already taken by a
+    different page is suffixed. Returns (site, changed)."""
+    entries = funnel_slug_entries(page.get("post_checkout") or {})
+    if not entries:
+        return site, False
+    pages = dict(site.get("pages") or {})
+    attached_ids = {e.get("page_id") for e in pages.values() if isinstance(e, dict)}
+    changed = False
+    for entry in entries:
+        page_id = entry["page_id"]
+        if page_id in attached_ids:
+            continue  # already routes somewhere — never move a page the tenant may have placed deliberately
+        slug, suffix = entry["slug"], 2
+        while slug in pages:
+            slug, suffix = f"{entry['slug']}-{suffix}", suffix + 1
+        pages[slug] = {"page_id": page_id, "page_type": entry["page_type"], "enabled": True}
+        attached_ids.add(page_id)
+        changed = True
+    if not changed:
+        return site, False
+    return {**site, "pages": pages}, True
+
+
+def _sync_domain_index(site: dict[str, Any], domains_index_repository: Any | None) -> None:
+    """Rewrite the denormalized domain-index record so the edge resolver sees the Site's new routes right away.
+    Uses the injected repository in tests; falls back to the real one in the Lambda. Best-effort."""
+    repo = domains_index_repository
+    if repo is None:
+        from stripe_link.repositories.documents import custom_domains_index_repository
+
+        repo = custom_domains_index_repository()
+    repo.put(domain_index_record(site))
 
 
 def artifact_targets(
@@ -216,6 +269,7 @@ def publish_page_document(
     products_repository: Any,
     services_repository: Any | None = None,
     sites_repository: Any | None = None,
+    domains_index_repository: Any | None = None,
     s3_client: Any,
     pages_bucket: str,
     preview_bucket: str,
@@ -242,6 +296,18 @@ def publish_page_document(
     # The Site supplies the page's public identity (Organization for the entity graph). Optional: legacy pages
     # without a Site still publish, falling back to the interim identity (plans/SITE_OBJECT.md §2.2).
     site = find_site_for_page(sites_repository, str(page.get("tenant_id") or ""), str(page.get("page_id") or ""))
+    # Serve the whole inline funnel on the Site's verified custom domain: attach the funnel's pages at slugs so
+    # the edge resolver can route them, and refresh the denormalized route table. Best-effort — a failure here
+    # must never block publishing the artifact itself (plans/SITE_OBJECT.md §2.6).
+    if site and sites_repository is not None and site_domain_verified(site) and page.get("post_checkout"):
+        try:
+            updated_site, changed = attach_funnel_pages(site, page)
+            if changed:
+                validate_site(updated_site)
+                site = sites_repository.put(updated_site)
+                _sync_domain_index(site, domains_index_repository)
+        except Exception:
+            pass
     checkout = checkout_url or checkout_base_url_for_page(page, offer, environment)
     targets = artifact_targets(
         page,
@@ -258,12 +324,15 @@ def publish_page_document(
     # TP-08, SEO-02). Eligibility is recomputed on the account.updated webhook and stored on the Site.
     page_id = str(page.get("page_id") or "")
     page_type = site_page_type(site, page_id)
-    # Canonical + indexing switch to the Site's verified custom domain, but only for the page actually served
-    # there — the homepage ("/"). Other pages of a multi-page Site stay on the platform host (noindex) until
-    # path-aware routing (2.6). Non-homepage / unverified pages keep the interim artifact canonical.
-    on_custom_domain = site_domain_verified(site) and page_id == site_homepage_page_id(site)
+    # Canonical + indexing switch to the Site's verified custom domain for any page actually served there —
+    # every page with a slug in the Site's route map, at its own slug (homepage at "/", funnel/collection
+    # pages at their slugs). Pages not attached to a verified Site keep the interim artifact canonical and
+    # stay noindex (plans/SITE_OBJECT.md §2.6).
+    page_site_slug = site_page_slug(site, page_id)
+    on_custom_domain = bool(site_domain_verified(site) and page_site_slug)
     custom_domain = ((site or {}).get("hosting") or {}).get("custom_domain")
-    page_canonical = f"https://{custom_domain}/" if on_custom_domain and custom_domain else canonical_url
+    canonical_path = "" if page_site_slug in ("", "/") else page_site_slug.lstrip("/")
+    page_canonical = f"https://{custom_domain}/{canonical_path}" if on_custom_domain and custom_domain else canonical_url
     eligibility = ((site or {}).get("indexing") or {}).get("eligibility") or "blocked"
     artifacts = []
     for target in targets:

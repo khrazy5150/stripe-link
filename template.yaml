@@ -949,6 +949,9 @@ Resources:
       Policies:
         - DynamoDBReadPolicy:
             TableName: !Ref PagesTable
+        # Read the owning Site so a funnel hop redirects to the custom domain slug, not the platform artifact.
+        - DynamoDBReadPolicy:
+            TableName: !Ref SitesTable
       Events:
         PostCheckoutNext:
           Type: Api
@@ -1092,8 +1095,12 @@ Resources:
             TableName: !Ref ProductsTable
         - DynamoDBReadPolicy:
             TableName: !Ref ServicesTable
-        - DynamoDBReadPolicy:
+        # Publishing a funnel entry page attaches its funnel pages to the Site and refreshes the domain-index
+        # route table so the whole funnel routes on the custom domain (plans/SITE_OBJECT.md §2.6) — needs write.
+        - DynamoDBCrudPolicy:
             TableName: !Ref SitesTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref CustomDomainsTable
         - S3CrudPolicy:
             BucketName: !Ref PagesBucket
         - S3CrudPolicy:

@@ -12,9 +12,11 @@ from stripe_link.runtime.artifacts import artifact_paths
 from stripe_link.runtime.publishing import (
     PublishError,
     artifact_targets,
+    attach_funnel_pages,
     delete_page_artifacts,
     find_site_for_page,
     publish_page_document,
+    site_page_slug,
 )
 
 
@@ -53,6 +55,19 @@ class FakeSitesRepository:
 
     def list_for_tenant(self, tenant_id: str):
         return [copy.deepcopy(s) for s in self.sites if s.get("tenant_id") == tenant_id]
+
+    def put(self, site: dict):
+        self.sites = [s for s in self.sites if s.get("site_id") != site.get("site_id")] + [copy.deepcopy(site)]
+        return copy.deepcopy(site)
+
+
+class FakeDomainsIndexRepository:
+    def __init__(self):
+        self.records = []
+
+    def put(self, record: dict):
+        self.records.append(copy.deepcopy(record))
+        return record
 
 
 class FakeS3Client:
@@ -598,6 +613,84 @@ class PagePublishingTests(unittest.TestCase):
             )
 
         self.assertEqual(result, {"batchItemFailures": [{"itemIdentifier": "record-1"}]})
+
+
+class FunnelAttachTests(unittest.TestCase):
+    def test_site_page_slug_finds_and_misses(self):
+        site = {"pages": {"/": {"page_id": "p_home"}, "/upsell-1": {"page_id": "p_up"}}}
+        self.assertEqual(site_page_slug(site, "p_up"), "/upsell-1")
+        self.assertEqual(site_page_slug(site, "p_home"), "/")
+        self.assertEqual(site_page_slug(site, "p_gone"), "")
+
+    def test_attach_adds_funnel_pages_at_derived_slugs(self):
+        site = {"pages": {"/": {"page_id": "p_home"}}}
+        page = {"post_checkout": {"thank_you_page": {"page_id": "p_ty"},
+                                  "funnel_steps": [{"step_id": "upsell_1", "page_id": "p_up"}]}}
+        updated, changed = attach_funnel_pages(site, page)
+        self.assertTrue(changed)
+        self.assertEqual(updated["pages"]["/thank-you"], {"page_id": "p_ty", "page_type": "thank_you", "enabled": True})
+        self.assertEqual(updated["pages"]["/upsell-1"], {"page_id": "p_up", "page_type": "funnel_step", "enabled": True})
+
+    def test_attach_is_idempotent_and_leaves_existing_placement(self):
+        site = {"pages": {"/": {"page_id": "p_home"}, "/deal": {"page_id": "p_up"}}}
+        page = {"post_checkout": {"funnel_steps": [{"step_id": "upsell_1", "page_id": "p_up"}]}}
+        updated, changed = attach_funnel_pages(site, page)
+        self.assertFalse(changed)  # p_up already routes at /deal; not moved to /upsell-1
+        self.assertNotIn("/upsell-1", updated["pages"])
+
+    def test_attach_suffixes_a_taken_slug(self):
+        site = {"pages": {"/": {"page_id": "p_home"}, "/thank-you": {"page_id": "p_other"}}}
+        page = {"post_checkout": {"thank_you_page": {"page_id": "p_ty"}}}
+        updated, _ = attach_funnel_pages(site, page)
+        self.assertEqual(updated["pages"]["/thank-you-2"]["page_id"], "p_ty")
+
+
+class FunnelPublishIntegrationTests(unittest.TestCase):
+    def setUp(self):
+        self.page = load_fixture("page-simple-coffee.json")
+        self.offer = load_fixture("offer-simple-coffee.json")
+        self.product = load_fixture("product-simple-coffee.json")
+        self.offers_repo = FakeRepository("offer_id", [self.offer])
+        self.products_repo = FakeRepository("product_id", [self.product])
+        self.s3 = FakeS3Client()
+
+    def test_publishing_funnel_entry_attaches_pages_and_rewrites_route_table(self):
+        page = copy.deepcopy(self.page)
+        page["page_id"] = "page_entry01"
+        page["status"] = "published"
+        page["post_checkout"] = {
+            "thank_you_page": {"page_id": "page_ty01"},
+            "funnel_steps": [{"step_id": "upsell_1", "page_id": "page_up01", "on_accept": "thank_you", "on_decline": "thank_you"}],
+        }
+        site = {
+            "schema_version": "2026-07-20", "document_type": "site", "site_id": "site_ABC123",
+            "tenant_id": "tenant_demo", "environment": "live", "name": "Demo", "status": "active",
+            "hosting": {"type": "custom", "platform_hostname": "demo.jbay.uk", "custom_domain": "shop.example.com",
+                        "verification": {"verified": True}},
+            "organization": {"name": "Demo", "entity_type": "OnlineStore"},
+            "domain_provisioning": {"status": "active"},
+            "indexing": {"eligibility": "eligible"},
+            "pages": {"/": {"page_id": "page_entry01", "page_type": "landing", "enabled": True}},
+            "created_at": 1, "updated_at": 1,
+        }
+        sites_repo = FakeSitesRepository([site])
+        domains_repo = FakeDomainsIndexRepository()
+        publish_page_document(
+            page,
+            offers_repository=self.offers_repo, products_repository=self.products_repo,
+            sites_repository=sites_repo, domains_index_repository=domains_repo,
+            s3_client=self.s3, pages_bucket="pages", preview_bucket="preview", environment="prod",
+            pages_domain="pages.example.com", preview_domain="preview.example.com",
+            checkout_url="https://checkout.stripe.com/c/pay/demo",
+        )
+        attached = sites_repo.sites[0]["pages"]
+        self.assertEqual(attached["/thank-you"], {"page_id": "page_ty01", "page_type": "thank_you", "enabled": True})
+        self.assertEqual(attached["/upsell-1"], {"page_id": "page_up01", "page_type": "funnel_step", "enabled": True})
+        # The denormalized route table the edge resolver reads was refreshed with the new slugs.
+        self.assertTrue(domains_repo.records)
+        routes = domains_repo.records[-1]["routes"]
+        self.assertEqual(routes["/upsell-1"]["page_id"], "page_up01")
+        self.assertEqual(routes["/thank-you"]["page_id"], "page_ty01")
 
 
 if __name__ == "__main__":

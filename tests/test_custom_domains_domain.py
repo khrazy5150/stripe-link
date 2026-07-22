@@ -7,6 +7,7 @@ from stripe_link.domain.custom_domains import (
     CustomDomainError,
     assert_valid_domain,
     build_domain,
+    domain_index_record,
     normalize_route_path,
     route_table,
     cloudflare_request,
@@ -232,6 +233,21 @@ class RouteTableTests(unittest.TestCase):
 
     def test_route_table_empty_when_no_pages(self):
         self.assertEqual(route_table({}), {})
+
+    def test_domain_index_record_projects_site(self):
+        site = {
+            "tenant_id": "t1", "site_id": "site_1",
+            "hosting": {"custom_domain": "shop.example.com"},
+            "domain_provisioning": {"status": "active"},
+            "pages": {"/": {"page_id": "page_home"}, "/upsell-1": {"page_id": "page_up", "enabled": True}},
+        }
+        record = domain_index_record(site)
+        self.assertEqual(record["tenant_id"], "t1")
+        self.assertEqual(record["site_id"], "site_1")
+        self.assertEqual(record["domain"], "shop.example.com")
+        self.assertEqual(record["status"], "active")
+        self.assertEqual(record["target_page_id"], "page_home")
+        self.assertEqual(record["routes"]["/upsell-1"], {"page_id": "page_up", "enabled": True})
 
 
 if __name__ == "__main__":

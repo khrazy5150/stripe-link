@@ -1011,7 +1011,7 @@ NOINDEX_ROBOTS = "noindex,nofollow"
 # eligible Site — let crawlers follow links without indexing the page itself (TP-08, SEO-02).
 NOINDEX_FOLLOW_ROBOTS = "noindex,follow"
 # page_type values that must never be indexed even on an eligible Site (post-checkout funnel steps).
-NONINDEXABLE_PAGE_TYPES = {"checkout", "thank_you"}
+NONINDEXABLE_PAGE_TYPES = {"checkout", "thank_you", "funnel_step"}
 
 
 def page_robots_directive(*, kind: str, environment: str, eligibility: str, page_type: str, on_custom_domain: bool) -> str:

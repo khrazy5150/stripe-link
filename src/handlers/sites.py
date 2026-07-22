@@ -20,10 +20,10 @@ from stripe_link.domain.custom_domains import (
     diagnose_dns_records,
     find_custom_hostname,
     get_custom_hostname,
+    domain_index_record,
     get_dcv_delegation_uuid,
     normalize_domain,
     retrigger_ssl_validation,
-    route_table,
 )
 from stripe_link.domain.documents import DocumentValidationError, validate_site
 from stripe_link.repositories.documents import (
@@ -63,21 +63,6 @@ RESERVED_SUBDOMAINS = frozenset({
 
 def generate_site_id() -> str:
     return "site_" + "".join(secrets.choice(_ID_ALPHABET) for _ in range(14))
-
-
-def _domain_index_record(tenant_id, domain, site, site_id, status):
-    """The denormalized record the edge resolver reads for a custom hostname. Carries the homepage page_id
-    (back-compat) plus the full slug→page route table projected off the Site (plans/SITE_OBJECT.md §2.6), so
-    the whole funnel routes on the custom domain without the resolver ever reading the Site document."""
-    homepage = ((site.get("pages") or {}).get("/") or {}).get("page_id") or ""
-    return {
-        "tenant_id": tenant_id,
-        "domain": domain,
-        "target_page_id": homepage,
-        "routes": route_table(site),
-        "status": status,
-        "site_id": site_id,
-    }
 
 
 def _slugify(value) -> str:
@@ -470,7 +455,7 @@ def connect_domain(event, repository, site_id):
         saved = repository.put(site)
     except (DocumentValidationError, RepositoryError) as exc:
         return error_response(str(exc), code="invalid_domain")
-    custom_domains_index_repository().put(_domain_index_record(tenant_id, domain, saved, site_id, status))
+    custom_domains_index_repository().put(domain_index_record(saved))
     return json_response(
         {"site": saved, "dns_target": target_host, "dns_records": dns_records, "status": status},
         status_code=201,
@@ -528,7 +513,7 @@ def check_domain(event, repository, site_id):
         saved = repository.put(site)
     except (DocumentValidationError, RepositoryError) as exc:
         return error_response(str(exc), code="invalid_domain")
-    custom_domains_index_repository().put(_domain_index_record(tenant_id, domain, saved, site_id, status))
+    custom_domains_index_repository().put(domain_index_record(saved))
     # When not yet verified, tell the tenant exactly why: a record that isn't resolving (wrong name/value) vs.
     # records that look right but the certificate is still issuing.
     diagnostics, hint = [], ""

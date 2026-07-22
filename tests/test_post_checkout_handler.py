@@ -134,5 +134,47 @@ class PostCheckoutHandlerTests(unittest.TestCase):
         self.assertEqual(response["statusCode"], 200)
 
 
+class _FakeSitesRepo:
+    def __init__(self, site):
+        self.site = site
+
+    def list_for_tenant(self, tenant_id):
+        return [self.site] if tenant_id == self.site.get("tenant_id") else []
+
+
+class PostCheckoutCustomDomainTests(unittest.TestCase):
+    def setUp(self):
+        self.repository = FakeDocumentRepository("page_id")
+        self.repository.put(entry_page())
+
+    def _site(self, verified=True):
+        return {
+            "tenant_id": "tenant_demo", "site_id": "site_x",
+            "hosting": {"type": "custom", "custom_domain": "shop.example.com", "verification": {"verified": verified}},
+            "pages": {"/": {"page_id": "page_entry"},
+                      "/upsell-1": {"page_id": "page_upsell_1"},
+                      "/thank-you": {"page_id": "page_thank_you"}},
+        }
+
+    def _call(self, outcome, verified):
+        return handler(
+            {"httpMethod": "GET", "pathParameters": {"page_id": "page_entry"},
+             "queryStringParameters": {"tenant_id": "tenant_demo", "outcome": outcome, "session_id": "cs_1"}},
+            None, repository=self.repository, pages_domain="pages.example.com",
+            sites_repo=_FakeSitesRepo(self._site(verified=verified)),
+        )
+
+    def test_hop_serves_on_custom_domain_slug_when_verified(self):
+        location = urlparse(self._call("accept", verified=True)["headers"]["Location"])
+        self.assertEqual(location.netloc, "shop.example.com")
+        self.assertEqual(location.path, "/upsell-1")
+        self.assertEqual(parse_qs(location.query)["session_id"], ["cs_1"])
+
+    def test_hop_falls_back_to_platform_artifact_when_domain_unverified(self):
+        location = urlparse(self._call("accept", verified=False)["headers"]["Location"])
+        self.assertEqual(location.netloc, "pages.example.com")
+        self.assertEqual(location.path, "/page_upsell_1/index.html")
+
+
 if __name__ == "__main__":
     unittest.main()

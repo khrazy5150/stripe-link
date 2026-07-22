@@ -2,13 +2,27 @@ import os
 from urllib.parse import urlencode
 
 from stripe_link.common import error_response, json_response, path_params, query_params, tenant_id_from_event
+from stripe_link.domain.connect_sync import site_domain_verified
 from stripe_link.domain.funnels import FunnelError, resolve_funnel_transition
-from stripe_link.repositories.documents import RepositoryError, pages_repository
+from stripe_link.repositories.documents import RepositoryError, pages_repository, sites_repository
 from stripe_link.runtime.artifacts import artifact_paths
-from stripe_link.runtime.publishing import public_url
+from stripe_link.runtime.publishing import find_site_for_page, public_url, site_page_slug
 
 
-def handler(event, context, *, repository=None, pages_domain=None):
+def _next_page_url(site, tenant_id, next_page_id, pages_domain):
+    """The buyer-facing URL for the funnel's next page. Prefer the Site's verified custom domain at the page's
+    own slug so the buyer never leaves the domain mid-funnel (plans/SITE_OBJECT.md §2.6); otherwise fall back
+    to the interim platform artifact URL."""
+    if site and site_domain_verified(site):
+        slug = site_page_slug(site, next_page_id)
+        custom_domain = str((site.get("hosting") or {}).get("custom_domain") or "")
+        if slug and custom_domain:
+            path = "" if slug == "/" else slug.lstrip("/")
+            return f"https://{custom_domain}/{path}"
+    return public_url(pages_domain, artifact_paths(tenant_id, next_page_id)["published"])
+
+
+def handler(event, context, *, repository=None, pages_domain=None, sites_repo=None):
     method = (event or {}).get("httpMethod", "GET").upper()
     if method == "OPTIONS":
         return json_response({})
@@ -16,6 +30,7 @@ def handler(event, context, *, repository=None, pages_domain=None):
         return error_response(f"Unsupported method '{method}'.", status_code=405, code="method_not_allowed")
 
     repository = repository or pages_repository()
+    sites_repo = sites_repo or (sites_repository() if os.environ.get("SITES_TABLE") else None)
     pages_domain = pages_domain if pages_domain is not None else os.environ.get("PAGES_DISTRIBUTION_DOMAIN", "")
 
     page_id = path_params(event).get("page_id")
@@ -50,7 +65,8 @@ def handler(event, context, *, repository=None, pages_domain=None):
 
     next_page_id = destination["page_id"]
     next_step_id = destination.get("step_id", "")
-    url = public_url(pages_domain, artifact_paths(tenant_id, next_page_id)["published"])
+    site = find_site_for_page(sites_repo, tenant_id, page_id)
+    url = _next_page_url(site, tenant_id, next_page_id, pages_domain)
     if not url:
         return error_response("Pages distribution domain is not configured.", status_code=500, code="pages_domain_not_configured")
 
