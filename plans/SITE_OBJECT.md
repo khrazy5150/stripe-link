@@ -223,7 +223,14 @@ SEO-13 — category/collection index pages + an image related-products rail — 
   (Home→current) until category pages exist; a category level slots in between then. JSON-LD rides the
   search_seo discoverability pack (like Product/FAQ); the visible trail renders regardless of goal. render_page
   gained a `page_type` param + `_RENDER_STATE` home_url/page_type holders.
-**Phase 2.5b — Storefront homepage + collection/category pages (COMMITTED, not yet scheduled).**
+**Phase 2.5b — Storefront homepage + collection/category pages. Slice 1 SHIPPED (dev+prod); Slice 2/3 pending.**
+- **Slice 1 (SHIPPED)** — the storefront homepage. Composition-respecting (no renderer fork): two ungoverned
+  sections `brand_hero` (store name as single H1, no product) + `catalog_grid` (curated cards → each offer's
+  landing slug, internal linking). Offer-less pages: `offer_id` optional when a `catalog_grid` is present
+  (schema + publish + preview). Builder: a step-1 "Storefront homepage" branch that picks pages for the grid;
+  `POST /sites/{id}/homepage` sets a page as the Site homepage (displacing the old one to its own slug).
+  Follow-ups: storefront-page editing in the builder + a wizard live preview.
+- **Slice 2/3 (pending)** below.
 - A purpose-built homepage/`OnlineStore` page (brand hero, nav, lists the Site's offers/products) — a real
   `page_type: homepage`, not a landing page repurposed at the `/` slug (today's interim). The schema already
   reserves `homepage`/`collection`/`category`/`about` page types; this builds the editor + renderer for them.
