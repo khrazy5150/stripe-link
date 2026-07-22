@@ -120,6 +120,70 @@ class StructuredDataTests(unittest.TestCase):
         self.assertTrue(ld_blocks(html), "payload must still parse as JSON")
 
 
+class BreadcrumbTests(unittest.TestCase):
+    """Breadcrumbs (SEO-11): visible crawlable trail + matching BreadcrumbList JSON-LD, only on a page served
+    at a non-root slug on the Site's verified custom domain."""
+
+    VERIFIED_SITE = {
+        "organization": {"name": "Bean Co", "entity_type": "OnlineStore"},
+        "hosting": {"type": "custom", "custom_domain": "shop.example.com", "verification": {"verified": True}},
+    }
+
+    def _render(self, *, canonical, page_type="landing", site=None, goal="search_seo"):
+        page = load_fixture("page-creatine-standard.json")
+        page["sections"].append({"id": "structured-data", "type": "structured_data"})
+        if goal:
+            page["goal"] = goal
+        offer = load_fixture("offer-creatine-standard.json")
+        product = load_fixture("product-creatine-gummies.json")
+        return render_page(page, offer, {product["product_id"]: product}, canonical_url=canonical,
+                           robots="index,follow", site=site if site is not None else self.VERIFIED_SITE,
+                           page_type=page_type)
+
+    def _nav(self, html):
+        m = re.search(r'<nav class="sl-breadcrumb".*?</nav>', html, re.S)
+        return m.group(0) if m else ""
+
+    def test_non_root_page_emits_visible_trail_and_json_ld(self):
+        html = self._render(canonical="https://shop.example.com/creatine")
+        nav = self._nav(html)
+        self.assertIn('<a href="https://shop.example.com/">Home</a>', nav)
+        self.assertIn('aria-current="page"', nav)
+        crumb = next(b for b in ld_blocks(html) if b["@type"] == "BreadcrumbList")
+        items = crumb["itemListElement"]
+        self.assertEqual(items[0]["name"], "Home")
+        self.assertEqual(items[0]["item"], "https://shop.example.com/")
+        self.assertEqual(items[-1]["position"], 2)
+        self.assertNotIn("item", items[-1], "the current page carries no item URL by design")
+
+    def test_visible_trail_matches_json_ld_leaf(self):
+        html = self._render(canonical="https://shop.example.com/creatine")
+        crumb = next(b for b in ld_blocks(html) if b["@type"] == "BreadcrumbList")
+        leaf = crumb["itemListElement"][-1]["name"]
+        self.assertIn(leaf, visible_text(html))
+        self.assertIn(f'aria-current="page">{leaf}<', self._nav(html))
+
+    def test_homepage_has_no_breadcrumb(self):
+        html = self._render(canonical="https://shop.example.com/")
+        self.assertEqual(self._nav(html), "")
+        self.assertNotIn("BreadcrumbList", json.dumps(ld_blocks(html)))
+
+    def test_funnel_step_page_has_no_breadcrumb(self):
+        html = self._render(canonical="https://shop.example.com/upsell-1", page_type="funnel_step")
+        self.assertEqual(self._nav(html), "")
+
+    def test_no_breadcrumb_off_a_verified_custom_domain(self):
+        html = self._render(canonical="https://cf.net/page_x/index.html",
+                            site={"organization": {"name": "Bean Co"}})
+        self.assertEqual(self._nav(html), "")
+
+    def test_breadcrumb_json_ld_omitted_without_seo_goal(self):
+        # JSON-LD rides the search_seo discoverability pack (like Product/FAQ); the visible trail still renders.
+        html = self._render(canonical="https://shop.example.com/creatine", goal=None)
+        self.assertNotIn("BreadcrumbList", json.dumps(ld_blocks(html)))
+        self.assertNotEqual(self._nav(html), "")
+
+
 class SiteOrganizationIdentityTests(unittest.TestCase):
     """The Site's Organization is the single source of the page's entity graph (plans/SITE_OBJECT.md §2.2):
     the Organization + WebSite JSON-LD nodes, the Offer.seller reference, and the brand fallback."""

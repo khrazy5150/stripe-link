@@ -576,6 +576,13 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     "    .sl-legal{display:flex;gap:1.2rem;flex-wrap:wrap;justify-content:center;text-align:center;font-size:1.3rem;color:var(--sl-legal-text);padding:2.4rem 0 0}",
     "    .sl-legal span{flex:0 0 100%}",
     "    .sl-legal a{color:var(--sl-legal-link)}",
+    "    .sl-breadcrumb{font-size:1.3rem;color:var(--sl-legal-text);padding:1.6rem 0 0}",
+    "    .sl-breadcrumb ol{list-style:none;display:flex;flex-wrap:wrap;align-items:center;gap:0.5rem;padding:0;margin:0}",
+    "    .sl-breadcrumb li{display:flex;align-items:center;gap:0.5rem}",
+    "    .sl-breadcrumb li+li::before{content:\"/\";opacity:0.6}",
+    "    .sl-breadcrumb a{color:var(--sl-legal-link);text-decoration:none}",
+    "    .sl-breadcrumb a:hover{text-decoration:underline}",
+    "    .sl-breadcrumb [aria-current=\"page\"]{color:var(--sl-content-text)}",
     "    @media (max-width: 700px){.sl-price-option{grid-template-columns:8.8rem minmax(0,1fr) 2.4rem;gap:1rem;padding:1.2rem}.sl-price-option img{width:8.8rem}.sl-content-block{grid-template-columns:1fr}.sl-headline h1{font-size:3rem}}",
 ]
 
@@ -994,7 +1001,7 @@ def trim_meta(text: str, limit: int = 155) -> str:
 # robots directive, needed by the head (canonical, og:url, robots) AND the Product JSON-LD (offers.url,
 # seller) AND the checkout CTA (real success/cancel URLs). Threaded via a render-scoped holder — like
 # _RENDER_DIMS_INDEX — so head-channel elements don't each need it in their signature.
-_RENDER_STATE: dict[str, str] = {"canonical": "", "robots": "noindex,nofollow"}
+_RENDER_STATE: dict[str, str] = {"canonical": "", "robots": "noindex,nofollow", "home_url": "", "page_type": ""}
 # The Site's Organization identity for this render (plans/SITE_OBJECT.md §2.2) — the single source every
 # page's entity graph derives from: the Organization/WebSite JSON-LD nodes, the Offer.seller reference, and
 # the brand shown in the title suffix / og:site_name when the offer names no brand. Render-scoped like
@@ -1053,6 +1060,7 @@ def render_page(
     indexable: bool = False,
     robots: str | None = None,
     site: dict[str, Any] | None = None,
+    page_type: str = "",
 ) -> str:
     services_by_id = services_by_id or {}
     offers_by_id = offers_by_id or {str(offer.get("offer_id") or ""): offer}
@@ -1077,6 +1085,14 @@ def render_page(
     seo = (site or {}).get("seo")
     if isinstance(seo, dict):
         _RENDER_SEO.update(seo)
+    # The Site's resolvable home — root of the breadcrumb trail (SEO-11). Only a verified custom domain serves
+    # a working "/", so a breadcrumb (and its Home link) is meaningful only there. page_type gates out
+    # post-checkout pages, where a Home link would leak the buyer out of the funnel.
+    hosting = (site or {}).get("hosting") or {}
+    custom_domain = str(hosting.get("custom_domain") or "").strip()
+    domain_verified = bool((hosting.get("verification") or {}).get("verified"))
+    _RENDER_STATE["home_url"] = f"https://{custom_domain}/" if custom_domain and domain_verified else ""
+    _RENDER_STATE["page_type"] = str(page_type or "")
     try:
         return _render_page_body(
             page, offer, products_by_id, selected_prices, checkout_url, api_base_url,
@@ -1086,6 +1102,8 @@ def render_page(
         _RENDER_DIMS_INDEX.clear()
         _RENDER_STATE["canonical"] = ""
         _RENDER_STATE["robots"] = NOINDEX_ROBOTS
+        _RENDER_STATE["home_url"] = ""
+        _RENDER_STATE["page_type"] = ""
         _RENDER_ORG.clear()
         _RENDER_SEO.clear()
 
@@ -1146,6 +1164,9 @@ def _render_page_body(
     # body — a head section rendered into <main> would be visible junk, and vice versa.
     body_sections = [s for s in composed_sections if element_channel(str(s.get("type") or "")) == "body"]
     head_sections = [s for s in composed_sections if element_channel(str(s.get("type") or "")) == "head"]
+    # A crawlable breadcrumb trail above the page content (SEO-11) — internal link equity back to the store
+    # root, matching the BreadcrumbList JSON-LD. Empty on the homepage / off a verified custom domain.
+    breadcrumb = render_breadcrumb(breadcrumb_trail(offer, products_by_id))
     body = "\n".join(
         render_section(section, page, offer, products_by_id, resolved_offer, checkout_url, api_base_url, services_by_id, offers_by_id)
         for section in body_sections
@@ -1183,6 +1204,7 @@ def _render_page_body(
         "</head>",
         "<body>",
         "  <main>",
+        breadcrumb,
         body,
         legal_footer,
         "  </main>",
@@ -2039,6 +2061,67 @@ def structured_data_warnings(
     return warnings
 
 
+def breadcrumb_leaf_name(offer: dict[str, Any], products_by_id: dict[str, dict[str, Any]]) -> str:
+    """The current page's name for the breadcrumb leaf (SEO-11). The product name — matching the Product
+    markup's `name` and the `<h1>` theme — else the offer headline. "" when nothing usable exists."""
+    product = first_offer_product(offer, products_by_id)
+    name = str(product.get("name") or "").strip()
+    if name:
+        return name
+    return headline_plain_text(offer_headline_text(offer, product)).strip()
+
+
+def breadcrumb_trail(offer: dict[str, Any], products_by_id: dict[str, dict[str, Any]]) -> list[dict[str, str]]:
+    """The breadcrumb chain for this render (SEO-11): Home → current page. Empty (no breadcrumb) unless the
+    page is served on the Site's verified custom domain (a resolvable Home), below the root (the homepage is
+    the root), and on a browseable page_type (never a post-checkout page). The trail is deliberately shallow
+    until category pages exist (SEO-13); a category level slots in between Home and the leaf then."""
+    home = _RENDER_STATE.get("home_url") or ""
+    if not home or _RENDER_STATE.get("page_type") in NONINDEXABLE_PAGE_TYPES:
+        return []
+    canonical = _RENDER_STATE.get("canonical") or ""
+    home_root = home.rstrip("/")
+    if not canonical.startswith(home_root + "/") or canonical.rstrip("/") == home_root:
+        return []  # off-host, or the homepage itself
+    leaf = breadcrumb_leaf_name(offer, products_by_id)
+    if not leaf:
+        return []
+    return [{"name": "Home", "url": home}, {"name": leaf, "url": ""}]
+
+
+def breadcrumb_json_ld(trail: list[dict[str, str]]) -> str:
+    """BreadcrumbList JSON-LD matching the visible trail (SEO-11). The final item carries no `item` URL by
+    design — it is the current page."""
+    if len(trail) < 2:
+        return ""
+    items = []
+    for position, crumb in enumerate(trail, start=1):
+        item: dict[str, Any] = {"@type": "ListItem", "position": position, "name": crumb["name"]}
+        if crumb.get("url"):
+            item["item"] = crumb["url"]
+        items.append(item)
+    return json_ld_dump({"@context": "https://schema.org", "@type": "BreadcrumbList", "itemListElement": items})
+
+
+def render_breadcrumb(trail: list[dict[str, str]]) -> str:
+    """The visible, crawlable breadcrumb trail (SEO-11/SEO-13). Real <a> links so the crawler follows them;
+    the current page is plain text with aria-current."""
+    if len(trail) < 2:
+        return ""
+    crumbs = []
+    for crumb in trail:
+        label = escape(crumb["name"])
+        if crumb.get("url"):
+            crumbs.append(f'<li><a href="{escape(crumb["url"])}">{label}</a></li>')
+        else:
+            crumbs.append(f'<li aria-current="page">{label}</li>')
+    return (
+        '  <nav class="sl-breadcrumb" aria-label="Breadcrumb">\n'
+        f'    <ol>{"".join(crumbs)}</ol>\n'
+        '  </nav>'
+    )
+
+
 def render_structured_data(
     section: dict[str, Any],
     page: dict[str, Any],
@@ -2071,6 +2154,9 @@ def render_structured_data(
     product_ld = product_json_ld(page, offer, products_by_id, services_by_id)
     if product_ld:
         blocks.append(product_ld)
+    breadcrumb_ld = breadcrumb_json_ld(breadcrumb_trail(offer, products_by_id))
+    if breadcrumb_ld:
+        blocks.append(breadcrumb_ld)
     faq_ld = faq_json_ld(composed_sections)
     if faq_ld:
         blocks.append(faq_ld)

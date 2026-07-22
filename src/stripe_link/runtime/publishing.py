@@ -351,6 +351,7 @@ def publish_page_document(
             canonical_url=page_canonical,
             robots=robots,
             site=site,
+            page_type=page_type,
         )
         s3_client.put_object(
             Bucket=target["bucket"],

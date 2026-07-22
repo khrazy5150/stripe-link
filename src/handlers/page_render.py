@@ -17,7 +17,7 @@ from stripe_link.runtime.html import (
     render_page,
     structured_data_warnings,
 )
-from stripe_link.runtime.publishing import find_site_for_page
+from stripe_link.runtime.publishing import find_site_for_page, site_page_type
 
 
 def handler(event, context, *, sites_repo=None):
@@ -93,7 +93,7 @@ def handler(event, context, *, sites_repo=None):
         html = render_page(
             page, offer, products_by_id, selected_prices, checkout_url, api_base_url,
             services_by_id=services_by_id, offers_by_id=offers_by_id, canonical_url=canonical_url,
-            site=site,
+            site=site, page_type=site_page_type(site, str(page.get("page_id") or "")),
         )
         # Page health, alongside the render: what would keep this page's structured data from earning a rich
         # result. Advisory only — the builder surfaces it, nothing blocks on it.
