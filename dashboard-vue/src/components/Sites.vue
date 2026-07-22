@@ -220,6 +220,21 @@
           </fieldset>
 
           <div class="offer-field">
+            <span>Homepage</span>
+            <div class="homepage-picker">
+              <select v-model="homepagePick">
+                <option value="">Choose a page…</option>
+                <option v-for="p in pages" :key="p.page_id" :value="p.page_id">{{ p.name || p.page_id }}</option>
+              </select>
+              <button type="button" class="secondary-action" :disabled="!homepagePick || homepageBusy" @click="setAsHomepage">
+                {{ homepageBusy ? "Setting…" : "Set as homepage" }}
+              </button>
+            </div>
+            <small>The page served at your domain root (/). Your current homepage moves to its own slug so it stays live.</small>
+            <p v-if="homepageError" class="field-error">{{ homepageError }}</p>
+          </div>
+
+          <div class="offer-field">
             <span>Pages in this Site</span>
             <ul class="category-menu">
               <li v-for="(entry, slug) in editing.pages" :key="slug">
@@ -266,6 +281,24 @@ const form = reactive({ name: "", subdomain: "", org: { name: "", legal_name: ""
 const domainForm = reactive({ domain: "", homepage: "" });
 const domainBusy = ref(false);
 const domainError = ref("");
+
+const homepagePick = ref("");
+const homepageBusy = ref(false);
+const homepageError = ref("");
+async function setAsHomepage() {
+  if (!homepagePick.value || !editing.value) return;
+  homepageBusy.value = true;
+  homepageError.value = "";
+  try {
+    const site = await store.setHomepage(editing.value.site_id, homepagePick.value, editing.value.tenant_id);
+    editing.value = { ...site };
+    homepagePick.value = "";
+  } catch (error) {
+    homepageError.value = error.message || "Failed to set homepage.";
+  } finally {
+    homepageBusy.value = false;
+  }
+}
 const domainDiagnostics = ref({});
 
 const dnsProviders = [
@@ -505,6 +538,15 @@ onMounted(async () => {
 <style scoped>
 /* All colors come from the app's theme tokens (--panel/--bg/--text/--line/--accent), which flip under
    .theme-live for the dark (Live) theme — never hardcode a surface color. */
+.homepage-picker {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.homepage-picker select {
+  flex: 1 1 12rem;
+}
 .subdomain-input {
   display: flex;
   align-items: stretch;

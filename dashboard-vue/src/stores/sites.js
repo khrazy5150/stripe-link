@@ -148,6 +148,13 @@ export const useSitesStore = defineStore("sites", {
       const res = await apiRequest(`/sites/${encodeURIComponent(siteId)}/domain`, { method: "DELETE" });
       return this._replace(res.site);
     },
+    async setHomepage(siteId, pageId, tenantId = "") {
+      const res = await apiRequest(`/sites/${encodeURIComponent(siteId)}/homepage`, {
+        method: "POST",
+        body: { tenant_id: tenantId || getTenantId(), page_id: pageId },
+      });
+      return this._replace(res.site);
+    },
     async setStatus(site, status) {
       const body = await apiRequest(`/sites/${encodeURIComponent(site.site_id)}/status`, {
         method: "PATCH",

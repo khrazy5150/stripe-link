@@ -141,22 +141,35 @@
         <header class="modal-card-header">
           <div>
             <h2 id="landingWizardTitle">Create Landing Page</h2>
-            <p>Step {{ wizardStep }} of 4</p>
+            <p>Step {{ wizardStep }} of {{ wizardTotalSteps }}</p>
           </div>
           <button type="button" class="modal-close" aria-label="Close landing page wizard" @click="closeWizard">×</button>
         </header>
 
         <div class="wizard-progress" aria-hidden="true">
-          <span v-for="step in 4" :key="step" :class="{ active: step <= wizardStep }"></span>
+          <span v-for="step in wizardTotalSteps" :key="step" :class="{ active: step <= wizardStep }"></span>
         </div>
 
         <div class="landing-wizard-body">
           <section v-if="wizardStep === 1" class="wizard-step">
-            <header class="wizard-step-header">
-              <h3>Choose an Offer</h3>
-              <p>The offer controls whether this flow is transaction checkout or lead generation.</p>
-            </header>
-            <input v-model.trim="offerSearch" class="landing-search full" type="search" placeholder="Search offers..." />
+            <div class="wizard-goal-list">
+              <button type="button" class="wizard-goal-card" :class="{ selected: form.pageKind === 'offer' }" @click="form.pageKind = 'offer'">
+                <strong>Offer page</strong>
+                <span>A landing page for a single offer — checkout or lead capture.</span>
+                <span class="wizard-card-check" aria-hidden="true">✓</span>
+              </button>
+              <button type="button" class="wizard-goal-card" :class="{ selected: form.pageKind === 'storefront' }" @click="form.pageKind = 'storefront'">
+                <strong>Storefront homepage</strong>
+                <span>A brand hero + a grid of your products, each linking to its page.</span>
+                <span class="wizard-card-check" aria-hidden="true">✓</span>
+              </button>
+            </div>
+            <template v-if="form.pageKind === 'offer'">
+              <header class="wizard-step-header">
+                <h3>Choose an Offer</h3>
+                <p>The offer controls whether this flow is transaction checkout or lead generation.</p>
+              </header>
+              <input v-model.trim="offerSearch" class="landing-search full" type="search" placeholder="Search offers..." />
             <div v-if="offersLoading || productsLoading" class="selector-load-state">Loading offers...</div>
             <div v-else-if="!wizardOffers.length" class="selector-load-state">No offers found. Create an offer first.</div>
             <div v-else class="wizard-offer-list">
@@ -180,6 +193,41 @@
                 </span>
                 <span class="wizard-card-check" aria-hidden="true">✓</span>
               </button>
+            </div>
+            </template>
+          </section>
+
+          <section v-else-if="wizardStep === 2 && form.pageKind === 'storefront'" class="wizard-step">
+            <header class="wizard-step-header">
+              <h3>Build your storefront</h3>
+              <p>Name your store, then pick which pages appear in the product grid.</p>
+            </header>
+            <label class="offer-field">
+              <span>Page name (internal)</span>
+              <input v-model.trim="form.name" type="text" placeholder="Storefront homepage" />
+            </label>
+            <label class="offer-field">
+              <span>Store name (shown as the headline)</span>
+              <input v-model.trim="form.storefront.headline" type="text" placeholder="Your store name" />
+            </label>
+            <label class="offer-field">
+              <span>Tagline (optional)</span>
+              <input v-model.trim="form.storefront.tagline" type="text" placeholder="What your store is about" />
+            </label>
+            <label class="offer-field">
+              <span>Grid heading (optional)</span>
+              <input v-model.trim="form.storefront.heading" type="text" placeholder="Shop all" />
+            </label>
+            <div class="offer-field">
+              <span>Products in the grid</span>
+              <div v-if="storefrontCandidatePages.length" class="storefront-page-picker">
+                <label v-for="page in storefrontCandidatePages" :key="page.page_id" class="storefront-page-option">
+                  <input type="checkbox" :value="page.page_id" v-model="form.storefront.items" />
+                  <span>{{ page.name || page.page_id }}</span>
+                  <em>/{{ page.route?.slug || '' }}</em>
+                </label>
+              </div>
+              <small v-else>No offer pages yet — create some offer pages first, then they can appear in the grid.</small>
             </div>
           </section>
 
@@ -269,10 +317,18 @@
           <button class="secondary-action" type="button" @click="wizardStep === 1 ? closeWizard() : wizardStep--">
             {{ wizardStep === 1 ? "Cancel" : "Back" }}
           </button>
-          <button v-if="wizardStep < 4" class="primary-action" type="button" @click="nextWizardStep">Next</button>
-          <button v-else class="primary-action" type="button" @click="startBuilderFromWizard">
-            Continue to Builder
-          </button>
+          <template v-if="form.pageKind === 'storefront'">
+            <button v-if="wizardStep === 1" class="primary-action" type="button" @click="nextWizardStep">Next</button>
+            <button v-else class="primary-action" type="button" :disabled="creatingStorefront" @click="createStorefront">
+              {{ creatingStorefront ? "Creating…" : "Create storefront homepage" }}
+            </button>
+          </template>
+          <template v-else>
+            <button v-if="wizardStep < 4" class="primary-action" type="button" @click="nextWizardStep">Next</button>
+            <button v-else class="primary-action" type="button" @click="startBuilderFromWizard">
+              Continue to Builder
+            </button>
+          </template>
         </footer>
       </section>
     </div>
@@ -1264,6 +1320,9 @@ function defaultWizardForm() {
   return {
     page_id: localId("page"),
     thank_you_page_id: localId("page"),
+    // "offer" = a landing page for one offer (the classic flow); "storefront" = an offer-less homepage that
+    // lists other pages in a catalog grid (plans/SITE_OBJECT.md §2.5b).
+    pageKind: "offer",
     offer_id: "",
     name: "",
     slug: "",
@@ -1272,6 +1331,7 @@ function defaultWizardForm() {
     // Second composition axis: why the page exists / where its traffic comes from. Presets which capability
     // packs the page starts with (plans/LANDING_PAGE_GOAL_COMPOSITION.md).
     goal: "",
+    storefront: { headline: "", tagline: "", heading: "Shop all", items: [] },
   };
 }
 
@@ -1451,6 +1511,10 @@ function selectOffer(offer) {
 
 function nextWizardStep() {
   wizardError.value = "";
+  if (form.pageKind === "storefront") {
+    wizardStep.value = 2;  // storefront is a two-step flow: pick kind, then configure + create
+    return;
+  }
   if (wizardStep.value === 1 && !selectedOffer.value) {
     wizardError.value = "Choose an offer before continuing.";
     return;
@@ -1460,6 +1524,70 @@ function nextWizardStep() {
     return;
   }
   wizardStep.value += 1;
+}
+
+const wizardTotalSteps = computed(() => (form.pageKind === "storefront" ? 2 : 4));
+
+// Pages that can appear in a storefront grid: an offer-backed page (has an offer_id) with a slug to link to.
+// Storefront pages themselves (no offer) are excluded — a grid links to sellable pages, not to other grids.
+const storefrontCandidatePages = computed(() =>
+  (pages.value || []).filter((p) => p && p.offer_id && (p.route?.slug || p.name)),
+);
+
+const creatingStorefront = ref(false);
+
+function isStorefrontPage(page) {
+  return !!(page && (page.sections || []).some((s) => s && s.type === "catalog_grid"));
+}
+
+function buildStorefrontPageDocument() {
+  const now = Math.floor(Date.now() / 1000);
+  const byId = new Map((pages.value || []).map((p) => [p.page_id, p]));
+  const items = (form.storefront.items || [])
+    .map((pageId) => byId.get(pageId))
+    .filter((p) => p && p.offer_id)
+    .map((p) => ({ offer_id: p.offer_id, slug: `/${slugify(p.route?.slug || p.name || p.page_id)}` }));
+  const headline = form.storefront.headline || form.name || "Storefront";
+  return cleanObject({
+    schema_version: "2026-05-29",
+    document_type: "page",
+    tenant_id: getTenantId(),
+    page_id: form.page_id,
+    name: form.name || "Storefront homepage",
+    status: "draft",
+    published_at: null,
+    route: { slug: slugify(form.slug || form.name || "home") },
+    seo: { title: headline },
+    theme: { template: "universal_bundle", preset: form.preset || "clean-slate" },
+    sections: [
+      { id: "brand-hero", type: "brand_hero", headline, tagline: form.storefront.tagline || undefined },
+      { id: "catalog-grid", type: "catalog_grid", heading: form.storefront.heading || undefined, items },
+    ],
+    revision: 1,
+    created_at: now,
+    updated_at: now,
+  });
+}
+
+async function createStorefront() {
+  wizardError.value = "";
+  const document = buildStorefrontPageDocument();
+  if (!document.sections[1].items.length) {
+    wizardError.value = "Pick at least one page for the product grid.";
+    return;
+  }
+  creatingStorefront.value = true;
+  try {
+    const body = await apiRequest("/pages", { method: "POST", body: document });
+    const saved = body.page || document;
+    pages.value = [saved, ...pages.value.filter((p) => p.page_id !== saved.page_id)];
+    message.value = "Storefront homepage created. Publish it, then set it as your homepage on the Sites screen.";
+    closeWizard();
+  } catch (error) {
+    wizardError.value = error.message || "Failed to create the storefront homepage.";
+  } finally {
+    creatingStorefront.value = false;
+  }
 }
 
 function startBuilderFromWizard() {
@@ -2197,6 +2325,11 @@ async function onBuilderOfferChange() {
 
 function editPage(page) {
   openMenuId.value = "";
+  if (isStorefrontPage(page)) {
+    // The storefront (offer-less) editor is a follow-up; the offer-builder can't hydrate a catalog page.
+    message.value = "Editing a storefront homepage in the builder is coming soon. You can publish it, or delete and recreate it.";
+    return;
+  }
   populateBuilderFromPage(page);
   builderExistingPageId.value = page.page_id;
   builderOriginalPage.value = { ...page };

@@ -4590,6 +4590,29 @@ button:disabled {
   gap: 1rem;
 }
 
+.storefront-page-picker {
+  display: grid;
+  gap: 0.4rem;
+  max-height: 22rem;
+  overflow-y: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  padding: 0.6rem;
+}
+
+.storefront-page-option {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.4rem 0.6rem;
+  cursor: pointer;
+}
+
+.storefront-page-option em {
+  color: var(--muted);
+  font-size: 1.2rem;
+}
+
 .wizard-goal-card {
   position: relative;
   display: grid;
