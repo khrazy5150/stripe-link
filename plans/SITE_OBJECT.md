@@ -211,14 +211,23 @@ is additive (existing pages keep working throughout — incremental migration).
   reserves `homepage`/`collection`/`category`/`about` page types; this builds the editor + renderer for them.
   Makes a Site feel like a website, not a single funnel page. Overlaps 2.5 (collection pages) and 2.7 (profile).
 
-**Phase 2.6 — Clean multi-page slug routing (the edge-infra slice).**
-- Edge route manifest (CloudFront KeyValueStore / path-aware Worker); `(hostname, path) → page_id`. Make
-  `artifact_paths` slug-aware or rewrite at the edge. This is the large infra lift, kept separable.
-- **Serves the WHOLE funnel on the one custom domain:** upsell/downsell/thank-you become slugs under the Site's
-  domain (`store.example.com/upsell`, `/thank-you`). The `post-checkout/next` redirect + Stripe success/cancel
-  URLs regenerate from the Site's canonical host + slug, so the buyer never switches domains mid-funnel. Funnel
-  page_types stay `noindex,follow`. (Until 2.6, homepage-only serving means a buyer bounces from the custom
-  domain to artifact/jbay.uk URLs at checkout — the known gap this closes.)
+**Phase 2.6 — Clean multi-page slug routing (the edge-infra slice). SHIPPED (dev+prod), pulled ahead of 2.5.**
+- Edge route manifest realized as a **denormalized `routes` table on the domain-index record** (slug→page_id),
+  projected off `Site.pages` by `custom_domains.domain_index_record`. The resolver + Worker are path-aware:
+  the Worker forwards the path on every request and caches by host+path; the resolver maps `(host, path)` →
+  slug → page_id → artifact, serving the homepage at `/`, well-known crawl files as siblings, and returning
+  404 for an unknown slug. A CloudFront KeyValueStore remains a future optimization (the record is the manifest
+  for now); `artifact_paths` still keys by page_id, so no re-keying was needed.
+- **Serves the WHOLE funnel on the one custom domain:** on publish of a funnel entry page, its upsell/downsell/
+  thank-you pages auto-attach to `Site.pages` at derived slugs (`/thank-you`, `/upsell-1`) and the route table
+  refreshes, so they route on the custom domain. The `post-checkout/next` redirect regenerates as
+  `https://{custom_domain}/{slug}`; Stripe `cancel_url` and non-funnel `success_url` already derive from
+  `window.location` client-side, so the buyer never switches domains mid-funnel. Funnel step pages carry the
+  new `funnel_step` page_type (noindex,follow, alongside `thank_you`).
+- **Known limitation:** a funnel step page published *before* the entry page attaches it keeps its interim
+  platform canonical until re-published (it's noindex regardless, so no indexing impact). A dangling funnel
+  reference (thank-you page_id with no published artifact) attaches a slug that 404s — a tenant data issue, not
+  a routing bug; the buyer-after-purchase hop for such a funnel was already broken pre-2.6.
 
 **Phase 2.6b — Apex / root domain support (COMMITTED — REQUIRED, not optional).**
 - The product is a website builder for SEO; tenants must be able to use `example.com`, not only a subdomain.
@@ -232,8 +241,10 @@ is additive (existing pages keep working throughout — incremental migration).
 - `CollectionPage` / `OnlineStore` profile served from the Site's canonical domain (TP-04/05); verified
   `sameAs` (TP §4).
 
-Ordering note: **2.1–2.4 deliver the bulk of the SEO value on single-host Sites without the edge lift.** 2.6 is
-what enables clean multi-page paths and can proceed in parallel once 2.1 lands.
+Ordering note: **2.1–2.4 deliver the bulk of the SEO value on single-host Sites without the edge lift.** 2.6
+(clean multi-page paths + funnel-on-domain) was **pulled ahead of 2.5** and shipped, because 2.5's breadcrumbs /
+visible nav / category pages need slugs that resolve on the custom domain — 2.6 makes those links real. 2.5
+(on-page structure) is now unblocked and next; 2.6b (apex domains, REQUIRED) and 2.5b (homepage builder) remain.
 
 ### Documented workflows & decisions (confirmed 2026-07-21)
 
