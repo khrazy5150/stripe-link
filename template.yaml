@@ -730,12 +730,13 @@ Resources:
             TableName: !Ref SitesTable
         - DynamoDBReadPolicy:
             TableName: !Ref PagesTable
-        # Custom-domain bridge: write the resolver index, read Connect verification state for eligibility.
+        # Custom-domain bridge: write the resolver index; CRUD on stripe-keys because eligibility self-heal
+        # captures live Connect verification back onto the doc.
         - DynamoDBCrudPolicy:
             TableName: !Ref CustomDomainsTable
-        - DynamoDBReadPolicy:
+        - DynamoDBCrudPolicy:
             TableName: !Sub "${ProjectPrefix}-stripe-keys-dev"
-        - DynamoDBReadPolicy:
+        - DynamoDBCrudPolicy:
             TableName: !Sub "${ProjectPrefix}-stripe-keys-prod"
         - !If
           - HasCloudflareZone
@@ -744,6 +745,17 @@ Resources:
                 Action:
                   - secretsmanager:GetSecretValue
                 Resource: !Ref CloudflareApiTokenSecret
+          - !Ref AWS::NoValue
+        # Read the platform Stripe secret to pull a connected account's live verification status.
+        - !If
+          - HasStripePlatformSecret
+          - Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                Resource:
+                  - !Ref StripePlatformSecretArn
           - !Ref AWS::NoValue
       Events:
         SitesConnectDomain:

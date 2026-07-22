@@ -6,7 +6,9 @@ import time
 
 from stripe_link.cloudflare_secrets import get_cloudflare_api_token
 from stripe_link.common import error_response, json_response, parse_json_body, path_params, tenant_id_from_event
-from stripe_link.domain.connect_sync import compute_site_eligibility, site_domain_verified
+from stripe_link.domain.connect_sync import compute_site_eligibility, connect_state_fields, site_domain_verified
+from stripe_link.stripe_client import stripe_request
+from stripe_link.stripe_platform_secrets import get_platform_secret_key
 from stripe_link.domain.custom_domains import (
     CustomDomainError,
     assert_valid_domain,
@@ -253,7 +255,29 @@ def list_sites(event, repository):
     tenant_id = tenant_id_from_event(event)
     if not tenant_id:
         return error_response("tenant_id is required.", code="missing_tenant")
-    return json_response({"sites": repository.list_for_tenant(tenant_id)})
+    sites = repository.list_for_tenant(tenant_id)
+    _refresh_eligibility(repository, tenant_id, sites)
+    return json_response({"sites": sites})
+
+
+def _refresh_eligibility(repository, tenant_id, sites):
+    """Recompute each Site's indexing eligibility from the live Connect + domain state and persist any change,
+    so the badge self-heals when the Sites screen loads (e.g. after a domain verified or Connect was captured).
+    Best-effort: never fail the listing on a recompute error."""
+    now = int(time.time())
+    for site in sites:
+        try:
+            connect_verified, connect_restricted = _connect_state(tenant_id, site.get("environment"))
+            eligibility = compute_site_eligibility(
+                site, connect_verified=connect_verified, connect_restricted=connect_restricted,
+                domain_verified=site_domain_verified(site),
+            )
+            if eligibility != (site.get("indexing") or {}).get("eligibility"):
+                site["indexing"] = {**(site.get("indexing") or {}), "eligibility": eligibility, "eligibility_updated_at": now}
+                site["updated_at"] = now
+                repository.put(site)
+        except Exception:
+            continue
 
 
 def update_site_status(event, repository, site_id):
@@ -303,15 +327,36 @@ def _cloudflare_config():
 
 
 def _connect_state(tenant_id, environment):
-    """(connect_verified, connect_restricted) for the tenant, read from the Connect verification state the
-    account.updated webhook maintains on the stripe_keys doc."""
+    """(connect_verified, connect_restricted) for the tenant. Prefers the Connect verification the
+    account.updated webhook captured on the stripe_keys doc; if it was never captured (a pre-existing connected
+    account that hasn't had an update) but the tenant has a connected account, pulls the live status from
+    Stripe ONCE and persists it — so eligibility reflects reality instead of a missing webhook."""
     mode = "live" if environment == "live" else "test"
     try:
-        keys = stripe_keys_repository().get(tenant_id, mode)
+        keys_repo = stripe_keys_repository()
+        keys = keys_repo.get(tenant_id, mode)
     except Exception:
-        keys = None
+        return False, False
     state = str((keys or {}).get("connect_verification") or "")
-    return state == "verified", state == "restricted"
+    if state:
+        return state == "verified", state == "restricted"
+    account_id = str((keys or {}).get("connect_account_id") or "").strip()
+    if not account_id:
+        return False, False
+    try:
+        api_key = get_platform_secret_key(mode)
+        if not api_key:
+            return False, False
+        account = stripe_request("GET", f"/accounts/{account_id}", api_key=api_key)
+    except Exception:
+        return False, False
+    fields = connect_state_fields(account, now=int(time.time()))
+    try:
+        keys_repo.put({**keys, **fields, "mode": mode})
+    except Exception:
+        pass
+    new_state = fields.get("connect_verification")
+    return new_state == "verified", new_state == "restricted"
 
 
 def _ensure_homepage(document, homepage_page_id):

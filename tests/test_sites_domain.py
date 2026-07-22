@@ -42,11 +42,23 @@ class FakeIndex:
 
 
 class FakeKeys:
-    def __init__(self, verification=None):
+    def __init__(self, verification=None, account_id=None):
         self.verification = verification
+        self.account_id = account_id
+        self.saved = None
 
     def get(self, tenant_id, mode="test"):
-        return {"connect_verification": self.verification} if self.verification else None
+        doc = {}
+        if self.verification:
+            doc["connect_verification"] = self.verification
+        if self.account_id:
+            doc["connect_account_id"] = self.account_id
+        return doc or None
+
+    def put(self, document):
+        self.saved = document
+        self.verification = document.get("connect_verification", self.verification)
+        return document
 
 
 class SitesDomainTests(unittest.TestCase):
@@ -229,6 +241,31 @@ class SitesDomainTests(unittest.TestCase):
         saved = self.repo.get("t1", "site_D1")
         self.assertFalse(saved["hosting"]["verification"]["verified"])
         self.assertEqual(saved["hosting"]["type"], "platform")
+
+    def test_list_recomputes_eligibility_and_heals_badge(self):
+        # A verified-domain Site with verified Connect should self-heal to 'eligible' when the list loads.
+        self.keys.verification = "verified"
+        site = base_site(hosting={"type": "custom", "platform_hostname": "axel-mart.jbay.uk",
+                                  "custom_domain": "shop.axelmart.com", "verification": {"verified": True}},
+                         indexing={"eligibility": "pending"}, environment="live")
+        self.repo.put(site)
+        resp = handler({"httpMethod": "GET", "queryStringParameters": {"tenant_id": "t1"}}, None, repository=self.repo)
+        sites = json.loads(resp["body"])["sites"]
+        self.assertEqual(sites[0]["indexing"]["eligibility"], "eligible")
+        self.assertEqual(self.repo.get("t1", "site_D1")["indexing"]["eligibility"], "eligible")
+
+    def test_connect_state_pulls_live_status_when_never_captured(self):
+        # No captured connect_verification, but a connected account exists → pull live status from Stripe.
+        self.keys = FakeKeys(account_id="acct_1")
+        account = {"charges_enabled": True, "payouts_enabled": True, "details_submitted": True, "requirements": {}}
+        with patch.object(sites_handler, "stripe_keys_repository", return_value=self.keys), \
+             patch.object(sites_handler, "get_platform_secret_key", return_value="sk_live_x"), \
+             patch.object(sites_handler, "stripe_request", return_value=account) as req:
+            verified, restricted = sites_handler._connect_state("t1", "live")
+        req.assert_called_once()
+        self.assertTrue(verified)
+        self.assertFalse(restricted)
+        self.assertEqual(self.keys.saved["connect_verification"], "verified")   # captured back onto the doc
 
     def test_disconnect_clears_domain_and_index(self):
         site = base_site(hosting={"type": "custom", "platform_hostname": "axel-mart.jbay.uk",
