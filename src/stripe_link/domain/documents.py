@@ -918,16 +918,26 @@ def validate_coupon_document(document: dict[str, Any]) -> None:
     optional_non_negative_int(document, "updated_at", "Coupon updated_at")
 
 
+# Sections that make a page offer-less (a storefront/catalog/profile page renders no single primary offer).
+_OFFERLESS_SECTION_TYPES = {"catalog_grid", "seller_profile", "brand_hero"}
+
+
+def is_offerless_page(document: dict[str, Any]) -> bool:
+    """True when a page carries a storefront/category/profile section and therefore needs no primary offer_id
+    (plans/SITE_OBJECT.md §2.5b/2.7)."""
+    return any(
+        isinstance(s, dict) and s.get("type") in _OFFERLESS_SECTION_TYPES
+        for s in (document.get("sections") or [])
+    )
+
+
 def validate_page_document(document: dict[str, Any]) -> None:
     require_document_fields(document, "page", "page_id")
     require_string(document, "name")
-    # A storefront/catalog page (one carrying a catalog_grid) lists other pages' offers and has no single
-    # primary offer, so offer_id is optional there (plans/SITE_OBJECT.md §2.5b). Every other page still
-    # requires one — a landing page renders exactly one offer.
-    is_catalog_page = any(
-        isinstance(s, dict) and s.get("type") == "catalog_grid" for s in (document.get("sections") or [])
-    )
-    if is_catalog_page:
+    # An offer-less page (storefront homepage / category / seller profile) has no single primary offer, so
+    # offer_id is optional there (plans/SITE_OBJECT.md §2.5b/2.7). Every other page still requires one — a
+    # landing page renders exactly one offer.
+    if is_offerless_page(document):
         optional_string(document, "offer_id", "Page offer_id")
     else:
         require_string(document, "offer_id")

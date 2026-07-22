@@ -3,6 +3,7 @@ import os
 from stripe_link.common import error_response, json_response, parse_json_body
 from stripe_link.domain.documents import (
     DocumentValidationError,
+    is_offerless_page,
     validate_offer_document,
     validate_page_document,
     validate_product_document,
@@ -34,12 +35,9 @@ def handler(event, context, *, sites_repo=None):
         canonical_url = body.get("canonical_url") or ""
         if not isinstance(page, dict):
             return error_response("Field 'page' must be an object.")
-        # A storefront/collection page has no primary offer (it renders a catalog_grid of other offers), so
-        # 'offer' is optional for one — its cards come from the 'offers' array (plans/SITE_OBJECT.md §2.5b).
-        is_catalog_page = any(
-            isinstance(s, dict) and s.get("type") == "catalog_grid" for s in (page.get("sections") or [])
-        )
-        if offer is None and is_catalog_page:
+        # An offer-less page (storefront / category / profile) has no primary offer, so 'offer' is optional
+        # for one — its content comes from the Site + the 'offers' array (plans/SITE_OBJECT.md §2.5b/2.7).
+        if offer is None and is_offerless_page(page):
             offer = {}
         if not isinstance(offer, dict):
             return error_response("Field 'offer' must be an object.")
