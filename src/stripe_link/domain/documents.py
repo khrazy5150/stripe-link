@@ -1105,6 +1105,10 @@ def validate_page_document(document: dict[str, Any]) -> None:
             optional_string(section, "heading", "Related products heading")
             if section.get("limit") is not None:
                 require_positive_int(section, "limit", "Related products limit")
+        elif section_type == "seller_profile":
+            # Content is DERIVED from the Site Organization (identity/contact/social/catalog) — the tenant
+            # only sets the heading (TENANT_PROFILE_REQUIREMENTS §4).
+            optional_string(section, "heading", "Store profile heading")
         elif section_type == "catalog_grid":
             optional_string(section, "heading", "Catalog grid heading")
             # A category-driven grid stores a category key and resolves its cards from the Site catalog at
@@ -1516,6 +1520,13 @@ SITE_ENTITY_TYPES = {
     "Organization", "OnlineStore", "LocalBusiness", "HomeAndConstructionBusiness",
     "HealthAndBeautyBusiness", "FoodEstablishment", "ProfessionalService", "Store",
 }
+# sameAs destinations are whitelisted to major social/authority hosts (TENANT_PROFILE_REQUIREMENTS §4.4):
+# an arbitrary URL asserted as the tenant's identity on our domain's markup is an impersonation/abuse vector.
+SAME_AS_HOSTS = frozenset({
+    "facebook.com", "instagram.com", "twitter.com", "x.com", "linkedin.com", "youtube.com",
+    "tiktok.com", "pinterest.com", "threads.net", "github.com", "crunchbase.com", "bbb.org",
+    "wikidata.org", "wikipedia.org", "yelp.com", "trustpilot.com",
+})
 # Page roles are metadata (JSON-LD @type / sitemap / robots / nav eligibility) — never a renderer branch.
 # funnel_step is a post-checkout upsell/downsell page: routable on the custom domain but always noindex.
 SITE_PAGE_TYPES = {
@@ -1645,9 +1656,17 @@ def validate_site_organization(organization: Any) -> None:
     if same_as is not None:
         if not isinstance(same_as, list):
             raise DocumentValidationError("organization.same_as must be an array.")
+        if len(same_as) > 6:
+            raise DocumentValidationError("organization.same_as allows at most 6 entries.")
         for entry in same_as:
             if not isinstance(entry, dict) or not isinstance(entry.get("url"), str):
                 raise DocumentValidationError("Each organization.same_as entry must be an object with a url.")
+            host = re.sub(r"^https?://", "", entry["url"].strip().lower()).split("/")[0].split(":")[0]
+            host = host[4:] if host.startswith("www.") else host
+            if not any(host == h or host.endswith("." + h) for h in SAME_AS_HOSTS):
+                raise DocumentValidationError(f"organization.same_as host '{host}' is not an allowed profile host.")
+            if entry.get("verified") is not None and not isinstance(entry.get("verified"), bool):
+                raise DocumentValidationError("organization.same_as verified must be a boolean.")
 
 
 def validate_route(document: dict[str, Any]) -> None:

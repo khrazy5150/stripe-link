@@ -172,6 +172,16 @@ class DocumentValidationTests(unittest.TestCase):
         site.update(kw)
         return site
 
+    def test_same_as_host_whitelist_and_cap(self):
+        validate_site(self._site(organization={"name": "X", "entity_type": "OnlineStore",
+                                               "same_as": [{"url": "https://instagram.com/x", "verified": True}]}))
+        with self.assertRaisesRegex(DocumentValidationError, "not an allowed profile host"):
+            validate_site(self._site(organization={"name": "X", "entity_type": "OnlineStore",
+                                                   "same_as": [{"url": "https://evil.example.com/x"}]}))
+        with self.assertRaisesRegex(DocumentValidationError, "at most 6"):
+            validate_site(self._site(organization={"name": "X", "entity_type": "OnlineStore",
+                                                   "same_as": [{"url": f"https://instagram.com/{i}"} for i in range(7)]}))
+
     def test_accepts_platform_and_custom_sites(self):
         validate_site(self._site())
         validate_site(self._site(

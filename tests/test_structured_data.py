@@ -264,6 +264,49 @@ class SiteNavigationTests(unittest.TestCase):
         self.assertNotIn('<header class="sl-siteheader"', html)
 
 
+class SellerProfileTests(unittest.TestCase):
+    """The tenant/seller profile page (TENANT_PROFILE_REQUIREMENTS §4)."""
+
+    def _render(self, *, verified_social=True):
+        site = {
+            "organization": {
+                "name": "Bean Co", "entity_type": "OnlineStore", "description": "Great coffee.",
+                "telephone": "+18015550100", "email": "hi@bean.co",
+                "same_as": [{"url": "https://instagram.com/beanco", "verified": verified_social},
+                            {"url": "https://facebook.com/impostor", "verified": False}],
+            },
+            "hosting": {"type": "custom", "custom_domain": "shop.example.com", "verification": {"verified": True}},
+            "pages": {"/about": {"page_id": "page_prof", "page_type": "about"},
+                      "/category/supps": {"page_id": "page_c", "page_type": "category", "category": "creatine", "label": "Supplements"}},
+        }
+        page = {"schema_version": "2026-01-01", "document_type": "page", "page_id": "page_prof", "tenant_id": "t1",
+                "name": "About", "route": {"slug": "about"},
+                "sections": [{"id": "h", "type": "brand_hero", "headline": "Bean Co"},
+                             {"id": "p", "type": "seller_profile", "heading": "About us"}]}
+        offer = load_fixture("offer-creatine-standard.json"); product = load_fixture("product-creatine-gummies.json")
+        return render_page(page, {}, {product["product_id"]: product}, offers_by_id={},
+                           canonical_url="https://shop.example.com/about", robots="index,follow", site=site, page_type="about")
+
+    def test_collection_page_wraps_the_resolving_online_store(self):
+        cp = next(b for b in ld_blocks(self._render()) if b["@type"] == "CollectionPage")
+        entity = cp["mainEntity"]
+        self.assertEqual(entity["@type"], "OnlineStore")
+        self.assertEqual(entity["@id"], "https://shop.example.com/#organization")  # resolves (TP-03)
+        self.assertEqual(entity["email"], "hi@bean.co")
+        self.assertEqual(entity["hasOfferCatalog"]["itemListElement"][0]["name"], "Supplements")
+
+    def test_only_verified_social_links_render_with_nofollow(self):
+        html = self._render(verified_social=True)
+        self.assertIn('href="https://instagram.com/beanco" rel="nofollow ugc noopener"', html)
+        self.assertNotIn("facebook.com/impostor", html)  # unverified never emitted (TP §4.4)
+
+    def test_unverified_social_yields_no_sameas(self):
+        html = self._render(verified_social=False)
+        self.assertNotIn("instagram.com/beanco", html)
+        cp = next(b for b in ld_blocks(html) if b["@type"] == "CollectionPage")
+        self.assertNotIn("sameAs", cp["mainEntity"])
+
+
 class ThinContentGateTests(unittest.TestCase):
     """SEO-08: unique-content floor for indexing."""
 
@@ -300,7 +343,8 @@ class SiteOrganizationIdentityTests(unittest.TestCase):
         "email": "hi@axelmart.example",
         "address": {"street": "1493 Osage St", "locality": "Denver", "region": "Colorado",
                     "postal_code": "80204", "country": "US"},
-        "same_as": [{"url": "https://instagram.com/axelmart"}],
+        "same_as": [{"url": "https://instagram.com/axelmart", "verified": True},
+                    {"url": "https://facebook.com/impostor", "verified": False}],
     }
     ORIGIN = "https://axel-mart.jbay.uk"
 

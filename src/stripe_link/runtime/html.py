@@ -557,6 +557,13 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     "    .sl-catalog-card img{width:100%;aspect-ratio:1/1;object-fit:cover;border-radius:0.8rem}",
     "    .sl-catalog-title{font-family:var(--sl-font-heading);font-weight:800;font-size:1.6rem;line-height:1.3;color:var(--sl-price-title);margin:0}",
     "    .sl-catalog-price{font-family:var(--sl-font-accent);font-weight:900;font-size:1.8rem;color:var(--sl-price-amount);margin:0}",
+    "    .sl-seller-profile{display:flex;flex-direction:column;gap:1rem}",
+    "    .sl-seller-desc{font-size:1.5rem;line-height:1.6;color:var(--sl-content-text)}",
+    "    .sl-seller-contact{font-size:1.4rem;color:var(--sl-muted);display:flex;flex-wrap:wrap;gap:0.6rem}",
+    "    .sl-seller-contact a{color:var(--sl-legal-link);text-decoration:none}",
+    "    .sl-seller-social,.sl-seller-catalog{list-style:none;display:flex;flex-wrap:wrap;gap:1rem;padding:0;margin:0}",
+    "    .sl-seller-social a,.sl-seller-catalog a{color:var(--sl-legal-link);text-decoration:none;font-size:1.4rem}",
+    "    .sl-seller-social a:hover,.sl-seller-catalog a:hover{text-decoration:underline}",
     "    .sl-listicle{width:min(52rem,100%);margin:0 auto;display:flex;flex-direction:column;gap:1.2rem}",
     "    .sl-listicle-stage{position:relative}",
     "    .sl-listicle-carousel{display:flex;overflow-x:auto;scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch;scrollbar-width:none}",
@@ -1379,6 +1386,7 @@ SECTION_REGISTRY: dict[str, dict[str, Any]] = {
     "brand_hero": {"render": lambda c: render_brand_hero(c.section), "version": 1},
     "catalog_grid": {"render": lambda c: render_catalog_grid(c.section, c.offers_by_id, c.products_by_id, c.services_by_id), "version": 1},
     "related_products": {"render": lambda c: render_catalog_grid(c.section, c.offers_by_id, c.products_by_id, c.services_by_id), "version": 1},
+    "seller_profile": {"render": lambda c: render_seller_profile(c.section), "version": 1},
     "checkout_cta": {"render": lambda c: render_checkout_cta(c.page, c.section, c.offer, c.resolved_offer, c.checkout_url, c.api_base_url, c.products_by_id), "version": 1},
     "legal_footer": {"render": lambda c: render_legal_footer(c.page.get("legal") or {}, c.section, c.api_base_url), "version": 1},
 }
@@ -2435,20 +2443,29 @@ def _postal_address_ld(address: Any) -> dict[str, Any]:
 
 
 def organization_json_ld(organization: dict[str, Any], origin: str) -> str:
+    """The Site's Organization node as a standalone <script> payload (SEO-12). "" without an origin/name."""
+    node = organization_node(organization, origin)
+    return json_ld_dump(node) if node else ""
+
+
+def organization_node(organization: dict[str, Any], origin: str, *, with_context: bool = True) -> dict[str, Any]:
     """The Site's Organization node (plans/SITE_OBJECT.md §2.2, SEO-12): the single canonical business entity
     every page references. Anchored at `{origin}/#organization` so the Offer.seller and the WebSite publisher
-    resolve to it. Emits only verifiable, tenant-stated fields; returns "" without an origin or a name."""
+    resolve to it. Emits only verifiable, tenant-stated fields; {} without an origin or a name. `with_context`
+    False when nesting the node inside another (e.g. the profile page's CollectionPage.mainEntity)."""
     name = str((organization or {}).get("name") or "").strip()
     if not origin or not name:
-        return ""
+        return {}
     entity_type = str(organization.get("entity_type") or "").strip() or "Organization"
-    payload: dict[str, Any] = {
-        "@context": "https://schema.org",
+    payload: dict[str, Any] = {}
+    if with_context:
+        payload["@context"] = "https://schema.org"
+    payload.update({
         "@type": entity_type,
         "@id": f"{origin}/#organization",
         "name": name,
         "url": f"{origin}/",
-    }
+    })
     legal_name = str(organization.get("legal_name") or "").strip()
     if legal_name:
         payload["legalName"] = legal_name
@@ -2478,11 +2495,26 @@ def organization_json_ld(organization: dict[str, Any], origin: str) -> str:
     area_served = [a.strip() for a in (organization.get("area_served") or []) if isinstance(a, str) and a.strip()]
     if area_served:
         payload["areaServed"] = area_served
+    # hasOfferCatalog = the categories the store carries (TENANT_PROFILE_REQUIREMENTS §4.4: "brands I carry",
+    # not brands I OWN). Derived from the Site's category pages — accurate + verifiable, never hand-asserted.
+    catalog_names = sorted({
+        (info.get("label") or "").strip() or humanize_category(key)
+        for key, info in _RENDER_CATEGORY_PAGES.items() if key
+    })
+    if catalog_names:
+        payload["hasOfferCatalog"] = {
+            "@type": "OfferCatalog",
+            "name": f"{name} catalog",
+            "itemListElement": [{"@type": "OfferCatalog", "name": c} for c in catalog_names],
+        }
+    # Only OWNERSHIP-VERIFIED profiles emit into sameAs (TENANT_PROFILE_REQUIREMENTS §4.4). An unverified
+    # sameAs is an impersonation vector — a tenant could assert any brand's real social profile on our domain.
+    # Capped at 6.
     same_as = [str(e.get("url")).strip() for e in (organization.get("same_as") or [])
-               if isinstance(e, dict) and str(e.get("url") or "").strip()]
+               if isinstance(e, dict) and e.get("verified") is True and str(e.get("url") or "").strip()][:6]
     if same_as:
         payload["sameAs"] = same_as
-    return json_ld_dump(payload)
+    return payload
 
 
 def website_json_ld(organization: dict[str, Any], origin: str) -> str:
@@ -3091,6 +3123,72 @@ def render_catalog_grid(
         "      </div>",
         "    </section>",
     ] if line)
+
+
+_SOCIAL_LABELS = {
+    "facebook.com": "Facebook", "instagram.com": "Instagram", "twitter.com": "Twitter", "x.com": "X",
+    "linkedin.com": "LinkedIn", "youtube.com": "YouTube", "tiktok.com": "TikTok", "pinterest.com": "Pinterest",
+    "threads.net": "Threads", "github.com": "GitHub", "yelp.com": "Yelp", "trustpilot.com": "Trustpilot",
+}
+
+
+def _social_label(url: str) -> str:
+    host = re.sub(r"^https?://", "", str(url or "").strip().lower()).split("/")[0]
+    host = host[4:] if host.startswith("www.") else host
+    for domain, label in _SOCIAL_LABELS.items():
+        if host == domain or host.endswith("." + domain):
+            return label
+    return host or "Profile"
+
+
+def render_seller_profile(section: dict[str, Any]) -> str:
+    """The tenant/seller profile block (TENANT_PROFILE_REQUIREMENTS §4): visible store identity — description,
+    contact, ownership-verified social links, and the store's categories — plus a CollectionPage whose
+    mainEntity is the full OnlineStore node (so the seller `@id` resolves here, TP-03/04/05). Social links
+    carry rel="nofollow ugc noopener" (TP-10); only verified sameAs render (TP §4.4)."""
+    org = _RENDER_ORG
+    origin = canonical_origin()
+    name = str(org.get("name") or "").strip()
+    if not name or not origin:
+        return ""
+    node = organization_node(org, origin, with_context=False)
+    canonical = _RENDER_STATE.get("canonical") or f"{origin}/about"
+    collection = {"@context": "https://schema.org", "@type": "CollectionPage", "url": canonical, "mainEntity": node}
+
+    parts = [f'    <section class="sl-seller-profile" data-section-id="{escape(str(section.get("id", "seller-profile")))}" data-section-type="seller_profile">']
+    heading = str(section.get("heading") or "").strip()
+    if heading:
+        parts.append(f'      <h2 class="sl-section-heading">{render_headline_markup(heading)}</h2>')
+    description = str(org.get("description") or "").strip()
+    if description:
+        parts.append(f'      <p class="sl-seller-desc">{escape(description)}</p>')
+    contact = []
+    tel = str(org.get("telephone") or "").strip()
+    if tel:
+        contact.append(f'<a href="tel:{escape(tel)}">{escape(tel)}</a>')
+    email = str(org.get("email") or "").strip()
+    if email:
+        contact.append(f'<a href="mailto:{escape(email)}">{escape(email)}</a>')
+    address = org.get("address") or {}
+    addr_text = ", ".join(str(address.get(f) or "").strip() for f in ("street", "locality", "region", "postal_code", "country") if str(address.get(f) or "").strip())
+    if addr_text:
+        contact.append(f"<span>{escape(addr_text)}</span>")
+    if contact:
+        parts.append('      <p class="sl-seller-contact">' + " · ".join(contact) + "</p>")
+    socials = [str(e.get("url")).strip() for e in (org.get("same_as") or [])
+               if isinstance(e, dict) and e.get("verified") is True and str(e.get("url") or "").strip()][:6]
+    if socials:
+        links = "".join(f'<li><a href="{escape(u)}" rel="nofollow ugc noopener" target="_blank">{escape(_social_label(u))}</a></li>' for u in socials)
+        parts.append(f'      <ul class="sl-seller-social">{links}</ul>')
+    home = (_RENDER_STATE.get("home_url") or "").rstrip("/")
+    if home and _RENDER_CATEGORY_PAGES:
+        cats = "".join(
+            f'<li><a href="{escape(home + info["slug"])}">{escape(info.get("label") or humanize_category(key))}</a></li>'
+            for key, info in sorted(_RENDER_CATEGORY_PAGES.items()))
+        parts.append(f'      <ul class="sl-seller-catalog">{cats}</ul>')
+    parts.append(f'      <script type="application/ld+json">{json_ld_dump(collection)}</script>')
+    parts.append("    </section>")
+    return "\n".join(parts)
 
 
 def render_product_carousel(
