@@ -223,7 +223,7 @@ SEO-13 — category/collection index pages + an image related-products rail — 
   (Home→current) until category pages exist; a category level slots in between then. JSON-LD rides the
   search_seo discoverability pack (like Product/FAQ); the visible trail renders regardless of goal. render_page
   gained a `page_type` param + `_RENDER_STATE` home_url/page_type holders.
-**Phase 2.5b — Storefront homepage + collection/category pages. Slice 1 SHIPPED (dev+prod); Slice 2/3 pending.**
+**Phase 2.5b — Storefront homepage + collection/category pages. COMPLETE (dev+prod).**
 - **Slice 1 (SHIPPED)** — the storefront homepage. Composition-respecting (no renderer fork): two ungoverned
   sections `brand_hero` (store name as single H1, no product) + `catalog_grid` (curated cards → each offer's
   landing slug, internal linking). Offer-less pages: `offer_id` optional when a `catalog_grid` is present
@@ -239,7 +239,9 @@ SEO-13 — category/collection index pages + an image related-products rail — 
   categories → offer-less catalog_grid) + a Sites "Attach a page" control (`POST /sites/{id}/pages`, detects a
   category page and attaches it as page_type=category, else landing — attaching landing pages is what
   denormalizes them so category grids find them).
-- **Slice 3 (pending)** below.
+- **Slice 3 (SHIPPED dev+prod)** — related-products rail. An addable `related_products` section renders a
+  same-category internal-link rail: at publish it fills from the Site's other pages in this page's category
+  (excluding self), reusing the catalog-grid card layout. Completes the SEO-13 internal-linking set.
 - A purpose-built homepage/`OnlineStore` page (brand hero, nav, lists the Site's offers/products) — a real
   `page_type: homepage`, not a landing page repurposed at the `/` slug (today's interim). The schema already
   reserves `homepage`/`collection`/`category`/`about` page types; this builds the editor + renderer for them.
