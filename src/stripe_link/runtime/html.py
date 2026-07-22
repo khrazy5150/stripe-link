@@ -583,6 +583,15 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     "    .sl-breadcrumb a{color:var(--sl-legal-link);text-decoration:none}",
     "    .sl-breadcrumb a:hover{text-decoration:underline}",
     "    .sl-breadcrumb [aria-current=\"page\"]{color:var(--sl-content-text)}",
+    "    .sl-siteheader{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:1rem;padding:0.8rem 0 0}",
+    "    .sl-brand{font-family:var(--sl-font-heading);font-weight:800;font-size:1.8rem;color:var(--sl-text);text-decoration:none}",
+    "    .sl-nav ul{list-style:none;display:flex;flex-wrap:wrap;gap:1.4rem;padding:0;margin:0}",
+    "    .sl-nav a{color:var(--sl-text);text-decoration:none;font-size:1.4rem}",
+    "    .sl-nav a:hover{text-decoration:underline}",
+    "    .sl-footernav{padding:1.6rem 0 0}",
+    "    .sl-footernav ul{list-style:none;display:flex;flex-wrap:wrap;justify-content:center;gap:1.4rem;padding:0;margin:0}",
+    "    .sl-footernav a{color:var(--sl-legal-link);text-decoration:none;font-size:1.3rem}",
+    "    .sl-footernav a:hover{text-decoration:underline}",
     "    @media (max-width: 700px){.sl-price-option{grid-template-columns:8.8rem minmax(0,1fr) 2.4rem;gap:1rem;padding:1.2rem}.sl-price-option img{width:8.8rem}.sl-content-block{grid-template-columns:1fr}.sl-headline h1{font-size:3rem}}",
 ]
 
@@ -1010,6 +1019,9 @@ _RENDER_ORG: dict[str, Any] = {}
 # The Site's SEO config for this render (plans/SITE_OBJECT.md §2.4): webmaster-verification tokens (SEO-16),
 # title suffix, default OG image. Render-scoped like _RENDER_ORG; empty when the page has no Site.
 _RENDER_SEO: dict[str, Any] = {}
+# The Site's resolved menus for this render (SEO-13): {"primary": [{label,url}], "footer": [...]}. Rendered as
+# visible nav only when the page is served on a verified custom domain (the slugs resolve there). Render-scoped.
+_RENDER_NAV: dict[str, list[dict[str, str]]] = {"primary": [], "footer": []}
 # A page is indexable only when it is the published artifact in production (SEO-02/21). Everything else —
 # the tenant's preview, any non-production environment — must be kept out of the index.
 INDEXABLE_ROBOTS = "index,follow,max-image-preview:large,max-snippet:-1"
@@ -1093,6 +1105,12 @@ def render_page(
     domain_verified = bool((hosting.get("verification") or {}).get("verified"))
     _RENDER_STATE["home_url"] = f"https://{custom_domain}/" if custom_domain and domain_verified else ""
     _RENDER_STATE["page_type"] = str(page_type or "")
+    # The Site's menus, resolved to {label, url} against the home host (SEO-13). Only meaningful where the
+    # slugs resolve (verified custom domain) and never on a post-checkout page (a nav would leak the buyer out).
+    _RENDER_NAV["primary"], _RENDER_NAV["footer"] = [], []
+    if _RENDER_STATE["home_url"] and str(page_type or "") not in NONINDEXABLE_PAGE_TYPES:
+        _RENDER_NAV["primary"] = site_nav_items(site, "primary", _RENDER_STATE["home_url"])
+        _RENDER_NAV["footer"] = site_nav_items(site, "footer", _RENDER_STATE["home_url"])
     try:
         return _render_page_body(
             page, offer, products_by_id, selected_prices, checkout_url, api_base_url,
@@ -1104,6 +1122,7 @@ def render_page(
         _RENDER_STATE["robots"] = NOINDEX_ROBOTS
         _RENDER_STATE["home_url"] = ""
         _RENDER_STATE["page_type"] = ""
+        _RENDER_NAV["primary"], _RENDER_NAV["footer"] = [], []
         _RENDER_ORG.clear()
         _RENDER_SEO.clear()
 
@@ -1164,8 +1183,11 @@ def _render_page_body(
     # body — a head section rendered into <main> would be visible junk, and vice versa.
     body_sections = [s for s in composed_sections if element_channel(str(s.get("type") or "")) == "body"]
     head_sections = [s for s in composed_sections if element_channel(str(s.get("type") or "")) == "head"]
-    # A crawlable breadcrumb trail above the page content (SEO-11) — internal link equity back to the store
-    # root, matching the BreadcrumbList JSON-LD. Empty on the homepage / off a verified custom domain.
+    # Storefront chrome from the Site's menus (SEO-13): a header (brand → store root + primary nav) and a
+    # footer nav. Both empty off a verified custom domain / on post-checkout pages. A crawlable breadcrumb
+    # trail (SEO-11) sits above the page content, matching the BreadcrumbList JSON-LD.
+    site_header = render_site_header()
+    footer_nav = render_footer_nav()
     breadcrumb = render_breadcrumb(breadcrumb_trail(offer, products_by_id))
     body = "\n".join(
         render_section(section, page, offer, products_by_id, resolved_offer, checkout_url, api_base_url, services_by_id, offers_by_id)
@@ -1204,8 +1226,10 @@ def _render_page_body(
         "</head>",
         "<body>",
         "  <main>",
+        site_header,
         breadcrumb,
         body,
+        footer_nav,
         legal_footer,
         "  </main>",
         minicart,
@@ -2035,7 +2059,11 @@ THIN_CONTENT_MIN_WORDS = 150
 # across every tenant/product (breadcrumb, legal footer, minicart). What's left is the page's own content.
 _SCRIPT_STYLE_RE = re.compile(r"<(script|style)\b[^>]*>.*?</\1>", re.IGNORECASE | re.DOTALL)
 _CHROME_BLOCK_RE = re.compile(
-    r'<nav class="sl-breadcrumb".*?</nav>|<footer class="sl-legal".*?</footer>|<div class="sl-minicart".*?</div>',
+    r'<header class="sl-siteheader".*?</header>'
+    r'|<nav class="sl-breadcrumb".*?</nav>'
+    r'|<nav class="sl-footernav".*?</nav>'
+    r'|<footer class="sl-legal".*?</footer>'
+    r'|<div class="sl-minicart".*?</div>',
     re.IGNORECASE | re.DOTALL,
 )
 
@@ -2095,6 +2123,61 @@ def structured_data_warnings(
     if not str(product.get("sku") or "").strip():
         warnings.append("Add a SKU — the product ID is used as a fallback identifier.")
     return warnings
+
+
+def _slug_to_label(slug: str) -> str:
+    """A readable menu label from a slug when the Site entry carries none: "/" → "Home", "/about-us" → "About
+    Us"."""
+    if slug in ("", "/"):
+        return "Home"
+    tail = slug.rstrip("/").rsplit("/", 1)[-1]
+    return tail.replace("-", " ").title()
+
+
+def site_nav_items(site: dict[str, Any] | None, menu: str, home_url: str) -> list[dict[str, str]]:
+    """Resolve a Site menu (navigation.primary / navigation.footer) into ordered {label, url} items (SEO-13).
+    Each slug must exist in Site.pages and be enabled; the label is the page entry's label or a slug-derived
+    fallback; the URL is the slug under the home host. Slugs not in pages (or disabled) are skipped."""
+    nav = ((site or {}).get("navigation") or {}).get(menu) or []
+    pages = (site or {}).get("pages") or {}
+    base = home_url.rstrip("/")
+    items: list[dict[str, str]] = []
+    for slug in nav:
+        entry = pages.get(slug)
+        if not isinstance(entry, dict) or entry.get("enabled", True) is False or not entry.get("page_id"):
+            continue
+        label = str(entry.get("label") or "").strip() or _slug_to_label(str(slug))
+        url = base + "/" if slug in ("", "/") else base + str(slug)
+        items.append({"label": label, "url": url})
+    return items
+
+
+def render_nav_list(items: list[dict[str, str]], *, css_class: str, aria_label: str) -> str:
+    """A crawlable menu of real <a> links (SEO-13). "" when there are no items."""
+    if not items:
+        return ""
+    links = "".join(f'<li><a href="{escape(i["url"])}">{escape(i["label"])}</a></li>' for i in items)
+    return f'<nav class="{css_class}" aria-label="{escape(aria_label)}"><ul>{links}</ul></nav>'
+
+
+def render_site_header() -> str:
+    """The storefront header: the Organization name linking to the store root (an internal link to the root on
+    every page, SEO-13) plus the primary menu. Rendered only when the Site's menus resolved (verified custom
+    domain). "" when there's no home host or nothing to show."""
+    home = _RENDER_STATE.get("home_url") or ""
+    if not home or _RENDER_STATE.get("page_type") in NONINDEXABLE_PAGE_TYPES:
+        return ""  # no home host, or a post-checkout page where a Home link would leak the buyer out
+    primary = render_nav_list(_RENDER_NAV.get("primary") or [], css_class="sl-nav", aria_label="Primary")
+    brand = str(_RENDER_ORG.get("name") or "").strip()
+    if not primary and not brand:
+        return ""
+    brand_html = f'<a class="sl-brand" href="{escape(home)}">{escape(brand)}</a>' if brand else ""
+    return f'  <header class="sl-siteheader">{brand_html}{primary}</header>'
+
+
+def render_footer_nav() -> str:
+    """The footer menu (SEO-13) — secondary crawlable links (about, contact, policies) back into the Site."""
+    return render_nav_list(_RENDER_NAV.get("footer") or [], css_class="sl-footernav", aria_label="Footer")
 
 
 def breadcrumb_leaf_name(offer: dict[str, Any], products_by_id: dict[str, dict[str, Any]]) -> str:

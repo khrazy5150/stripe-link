@@ -191,6 +191,58 @@ class BreadcrumbTests(unittest.TestCase):
         self.assertNotEqual(self._nav(html), "")
 
 
+class SiteNavigationTests(unittest.TestCase):
+    """Visible nav rendered from Site.navigation (SEO-13): crawlable primary/footer menus + a store-root
+    brand link, only on a verified custom domain."""
+
+    def _site(self):
+        return {
+            "organization": {"name": "Bean Co", "entity_type": "OnlineStore"},
+            "hosting": {"type": "custom", "custom_domain": "shop.example.com", "verification": {"verified": True}},
+            "navigation": {"primary": ["/about", "/shop-all", "/missing"], "footer": ["/contact"]},
+            "pages": {
+                "/": {"page_id": "page_home"},
+                "/about": {"page_id": "page_about", "label": "About Us"},
+                "/shop-all": {"page_id": "page_shop"},           # no label -> derived
+                "/contact": {"page_id": "page_c", "label": "Contact"},
+                "/hidden": {"page_id": "page_h", "enabled": False},
+            },
+        }
+
+    def _render(self, *, page_type="landing", canonical="https://shop.example.com/about", site=None):
+        page = load_fixture("page-creatine-standard.json")
+        offer = load_fixture("offer-creatine-standard.json")
+        product = load_fixture("product-creatine-gummies.json")
+        return render_page(page, offer, {product["product_id"]: product}, canonical_url=canonical,
+                           robots="index,follow", site=site if site is not None else self._site(), page_type=page_type)
+
+    def _region(self, html, pattern):
+        m = re.search(pattern, html, re.S)
+        return m.group(0) if m else ""
+
+    def test_header_has_brand_store_root_link_and_primary_menu(self):
+        header = self._region(self._render(), r'<header class="sl-siteheader">.*?</header>')
+        self.assertIn('<a class="sl-brand" href="https://shop.example.com/">Bean Co</a>', header)
+        self.assertIn('<a href="https://shop.example.com/about">About Us</a>', header)
+        self.assertIn('<a href="https://shop.example.com/shop-all">Shop All</a>', header)  # label derived from slug
+
+    def test_menu_skips_slugs_not_in_pages(self):
+        header = self._region(self._render(), r'<header class="sl-siteheader">.*?</header>')
+        self.assertNotIn("/missing", header)  # navigation lists a slug with no page entry
+
+    def test_footer_nav_renders_footer_menu(self):
+        footer = self._region(self._render(), r'<nav class="sl-footernav".*?</nav>')
+        self.assertIn('<a href="https://shop.example.com/contact">Contact</a>', footer)
+
+    def test_no_header_on_post_checkout_page(self):
+        html = self._render(page_type="funnel_step", canonical="https://shop.example.com/upsell-1")
+        self.assertNotIn('<header class="sl-siteheader"', html)
+
+    def test_no_header_off_a_verified_custom_domain(self):
+        html = self._render(canonical="https://cf.net/page_x/index.html", site={"organization": {"name": "Bean Co"}})
+        self.assertNotIn('<header class="sl-siteheader"', html)
+
+
 class ThinContentGateTests(unittest.TestCase):
     """SEO-08: unique-content floor for indexing."""
 
