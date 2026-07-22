@@ -1031,6 +1031,9 @@ _RENDER_SEO: dict[str, Any] = {}
 # The Site's resolved menus for this render (SEO-13): {"primary": [{label,url}], "footer": [...]}. Rendered as
 # visible nav only when the page is served on a verified custom domain (the slugs resolve there). Render-scoped.
 _RENDER_NAV: dict[str, list[dict[str, str]]] = {"primary": [], "footer": []}
+# The Site's category pages this render can link to (SEO-11/13): {category_key: {"slug", "label"}}. Lets a
+# landing page's breadcrumb insert its category level (Home → Category → Product). Render-scoped.
+_RENDER_CATEGORY_PAGES: dict[str, dict[str, str]] = {}
 # A page is indexable only when it is the published artifact in production (SEO-02/21). Everything else —
 # the tenant's preview, any non-production environment — must be kept out of the index.
 INDEXABLE_ROBOTS = "index,follow,max-image-preview:large,max-snippet:-1"
@@ -1120,6 +1123,10 @@ def render_page(
     if _RENDER_STATE["home_url"] and str(page_type or "") not in NONINDEXABLE_PAGE_TYPES:
         _RENDER_NAV["primary"] = site_nav_items(site, "primary", _RENDER_STATE["home_url"])
         _RENDER_NAV["footer"] = site_nav_items(site, "footer", _RENDER_STATE["home_url"])
+    _RENDER_CATEGORY_PAGES.clear()
+    for cat_slug, cat_entry in ((site or {}).get("pages") or {}).items():
+        if isinstance(cat_entry, dict) and cat_entry.get("page_type") == "category" and cat_entry.get("category"):
+            _RENDER_CATEGORY_PAGES[str(cat_entry["category"])] = {"slug": str(cat_slug), "label": str(cat_entry.get("label") or "")}
     try:
         return _render_page_body(
             page, offer, products_by_id, selected_prices, checkout_url, api_base_url,
@@ -1132,6 +1139,7 @@ def render_page(
         _RENDER_STATE["home_url"] = ""
         _RENDER_STATE["page_type"] = ""
         _RENDER_NAV["primary"], _RENDER_NAV["footer"] = [], []
+        _RENDER_CATEGORY_PAGES.clear()
         _RENDER_ORG.clear()
         _RENDER_SEO.clear()
 
@@ -2218,7 +2226,16 @@ def breadcrumb_trail(offer: dict[str, Any], products_by_id: dict[str, dict[str, 
     leaf = breadcrumb_leaf_name(offer, products_by_id)
     if not leaf:
         return []
-    return [{"name": "Home", "url": home}, {"name": leaf, "url": ""}]
+    trail = [{"name": "Home", "url": home}]
+    # Insert the category level when this page's product belongs to a Site category page (SEO-11/13). The
+    # trail deepens from Home → Product to Home → Category → Product with no change to callers.
+    category = str(first_offer_product(offer, products_by_id).get("product_category") or "")
+    category_page = _RENDER_CATEGORY_PAGES.get(category) if category else None
+    if category_page and category_page["slug"] != canonical[len(home_root):]:
+        label = category_page["label"].strip() or humanize_category(category)
+        trail.append({"name": label, "url": home_root + category_page["slug"]})
+    trail.append({"name": leaf, "url": ""})
+    return trail
 
 
 def breadcrumb_json_ld(trail: list[dict[str, str]]) -> str:

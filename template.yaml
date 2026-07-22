@@ -818,6 +818,12 @@ Resources:
             RestApiId: !Ref RestApi
             Path: /sites/{site_id}/homepage
             Method: POST
+        SiteAttachPage:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /sites/{site_id}/pages
+            Method: POST
 
   CouponsFunction:
     Type: AWS::Serverless::Function

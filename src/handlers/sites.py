@@ -23,6 +23,7 @@ from stripe_link.domain.custom_domains import (
     domain_index_record,
     get_dcv_delegation_uuid,
     normalize_domain,
+    normalize_route_path,
     retrigger_ssl_validation,
 )
 from stripe_link.domain.documents import DocumentValidationError, validate_site
@@ -141,6 +142,8 @@ def handler(event, context, repository=None, registry=None):
         return update_site_status(event, repository, site_id)
     if method == "POST" and site_id and resource.endswith("/homepage"):
         return set_homepage(event, repository, site_id)
+    if method == "POST" and site_id and resource.endswith("/pages"):
+        return attach_page(event, repository, site_id)
     if site_id and resource.endswith(("/domain", "/domain/check")):
         # Custom-domain serving is handled by the single production edge Worker, so the flow is live-only.
         # A test/dev Site can't serve a real domain — refuse rather than let a tenant reach a dead end.
@@ -175,10 +178,49 @@ def _unique_slug(pages: dict, seed) -> str:
     return slug
 
 
+def _attach_page_to_site(pages: dict, *, page_id, slug, page_type, category=None, label=None) -> None:
+    """Place `page_id` at `slug` in the route map with `page_type` (+ optional category label). A different
+    page already at `slug` is displaced to its own slug so it stays reachable; the incoming page is detached
+    from any other slug it held (its existing label is kept unless a new one is given). Mutates `pages`."""
+    occupant = pages.get(slug)
+    if isinstance(occupant, dict) and occupant.get("page_id") and occupant["page_id"] != page_id:
+        pages.pop(slug)
+        pages[_unique_slug(pages, occupant.get("label") or occupant["page_id"])] = dict(occupant)
+    existing_label = None
+    for existing_slug, entry in list(pages.items()):
+        if isinstance(entry, dict) and entry.get("page_id") == page_id:
+            existing_label = entry.get("label")
+            if existing_slug != slug:
+                pages.pop(existing_slug)
+    new_entry = {"page_id": page_id, "page_type": page_type, "enabled": True}
+    if label or existing_label:
+        new_entry["label"] = label or existing_label
+    if category:
+        new_entry["category"] = category
+    pages[slug] = new_entry
+
+
+def _save_site_pages(repository, site):
+    """Validate + persist a Site whose route map changed, and refresh the domain-index route table when a
+    custom domain serves it. Returns (saved_site, error_response|None)."""
+    site["updated_at"] = int(time.time())
+    try:
+        validate_site(site)
+        saved = repository.put(site)
+    except (DocumentValidationError, RepositoryError) as exc:
+        return None, error_response(str(exc), code="invalid_site")
+    if (site.get("hosting") or {}).get("custom_domain"):
+        try:
+            custom_domains_index_repository().put(domain_index_record(saved))
+        except Exception:
+            pass
+    return saved, None
+
+
 def set_homepage(event, repository, site_id):
     """Make a page the Site's homepage: attach it at "/" with page_type=homepage (plans/SITE_OBJECT.md §2.5b).
     Any different page currently at "/" moves to its own slug so it stays served — and linkable from the new
-    homepage's catalog grid. Refreshes the domain-index route table so the change serves on a custom domain."""
+    homepage's catalog grid."""
     try:
         body = parse_json_body(event)
     except ValueError as exc:
@@ -192,37 +234,44 @@ def set_homepage(event, repository, site_id):
     site = repository.get(tenant_id, site_id)
     if not site:
         return error_response("Site not found.", status_code=404, code="not_found")
-
     pages = dict(site.get("pages") or {})
-    page_type = str(body.get("page_type") or "homepage").strip() or "homepage"
-    # Displace a different page at "/" to its own slug so it stays reachable.
-    current = pages.get("/")
-    if isinstance(current, dict) and current.get("page_id") and current["page_id"] != page_id:
-        pages[_unique_slug(pages, body.get("displaced_slug") or current.get("label") or current["page_id"])] = dict(current)
-    # Detach the incoming page from any other slug it occupies, preserving its label, then place it at "/".
-    label = None
-    for slug, entry in list(pages.items()):
-        if isinstance(entry, dict) and entry.get("page_id") == page_id:
-            label = entry.get("label")
-            if slug != "/":
-                pages.pop(slug)
-    new_entry = {"page_id": page_id, "page_type": page_type, "enabled": True}
-    if label:
-        new_entry["label"] = label
-    pages["/"] = new_entry
+    _attach_page_to_site(pages, page_id=page_id, slug="/",
+                         page_type=str(body.get("page_type") or "homepage").strip() or "homepage")
     site["pages"] = pages
-    site["updated_at"] = int(time.time())
+    saved, error = _save_site_pages(repository, site)
+    return error or json_response({"site": saved})
+
+
+def attach_page(event, repository, site_id):
+    """Attach a page to the Site at a chosen slug with a page_type (+ optional category for a category page).
+    The generalized route-map primitive (plans/SITE_OBJECT.md §2.5b Slice 2); the storefront/category builder
+    uses it, and it seeds the full route-map editor later."""
     try:
-        validate_site(site)
-        saved = repository.put(site)
-    except (DocumentValidationError, RepositoryError) as exc:
-        return error_response(str(exc), code="invalid_site")
-    if (site.get("hosting") or {}).get("custom_domain"):
-        try:
-            custom_domains_index_repository().put(domain_index_record(saved))
-        except Exception:
-            pass
-    return json_response({"site": saved})
+        body = parse_json_body(event)
+    except ValueError as exc:
+        return error_response(str(exc), code="invalid_request")
+    tenant_id = tenant_id_from_event(event, body)
+    if not tenant_id:
+        return error_response("tenant_id is required.", code="missing_tenant")
+    page_id = str(body.get("page_id") or "").strip()
+    if not page_id:
+        return error_response("page_id is required.", code="missing_page")
+    slug = normalize_route_path(body.get("slug"))
+    if slug == "/" or not slug:
+        return error_response("Use the homepage action to place a page at the root.", code="invalid_slug")
+    site = repository.get(tenant_id, site_id)
+    if not site:
+        return error_response("Site not found.", status_code=404, code="not_found")
+    pages = dict(site.get("pages") or {})
+    _attach_page_to_site(
+        pages, page_id=page_id, slug=slug,
+        page_type=str(body.get("page_type") or "landing").strip() or "landing",
+        category=str(body.get("category") or "").strip() or None,
+        label=str(body.get("label") or "").strip() or None,
+    )
+    site["pages"] = pages
+    saved, error = _save_site_pages(repository, site)
+    return error or json_response({"site": saved})
 
 
 def check_subdomain(event, registry):

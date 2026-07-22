@@ -512,6 +512,14 @@
           "enabled": {
             "type": "boolean",
             "default": true
+          },
+          "offer_id": {
+            "type": "string",
+            "description": "Denormalized at publish: the offer a landing page renders (Slice 2 category resolution)."
+          },
+          "category": {
+            "type": "string",
+            "description": "For a landing page: its product category (denormalized). For a page_type=category page: the category it lists."
           }
         }
       }

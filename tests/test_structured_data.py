@@ -170,6 +170,27 @@ class BreadcrumbTests(unittest.TestCase):
         self.assertIn(leaf, visible_text(html))
         self.assertIn(f'aria-current="page">{leaf}<', self._nav(html))
 
+    def test_breadcrumb_deepens_with_a_matching_category_page(self):
+        # When the Site has a category page for this product's category, the trail becomes Home → Category →
+        # Product (SEO-11/13), the category linking to that category page.
+        product = load_fixture("product-creatine-gummies.json")
+        site = {
+            **self.VERIFIED_SITE,
+            "pages": {
+                "/creatine": {"page_id": "page_land", "page_type": "landing"},
+                "/category/supps": {"page_id": "page_cat", "page_type": "category",
+                                    "category": product["product_category"], "label": "Supplements"},
+            },
+        }
+        html = self._render(canonical="https://shop.example.com/creatine", site=site)
+        crumb = next(b for b in ld_blocks(html) if b["@type"] == "BreadcrumbList")
+        names = [i["name"] for i in crumb["itemListElement"]]
+        self.assertEqual(names[0], "Home")
+        self.assertEqual(names[1], "Supplements")
+        self.assertEqual(len(names), 3)
+        self.assertEqual(crumb["itemListElement"][1]["item"], "https://shop.example.com/category/supps")
+        self.assertIn('href="https://shop.example.com/category/supps">Supplements</a>', self._nav(html))
+
     def test_homepage_has_no_breadcrumb(self):
         html = self._render(canonical="https://shop.example.com/")
         self.assertEqual(self._nav(html), "")

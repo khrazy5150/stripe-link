@@ -11,11 +11,13 @@ from handlers.page_publish import handler
 from stripe_link.runtime.artifacts import artifact_paths
 from stripe_link.runtime.publishing import (
     PublishError,
+    _denormalize_page_catalog,
     artifact_targets,
     attach_funnel_pages,
     delete_page_artifacts,
     find_site_for_page,
     publish_page_document,
+    resolve_category_grids,
     site_page_slug,
 )
 
@@ -682,6 +684,36 @@ class StorefrontHomepageTests(unittest.TestCase):
         # The card resolved the referenced offer (loaded despite no primary offer) and links to its Site slug.
         self.assertIn('href="https://shop.example.com/coffee"', published)
         self.assertIn("<h1>Bean Co</h1>", published)
+
+
+class CategoryPageTests(unittest.TestCase):
+    def _site(self):
+        return {"pages": {
+            "/": {"page_id": "page_home", "page_type": "homepage"},
+            "/creatine": {"page_id": "page_a", "page_type": "landing", "offer_id": "offer_a", "category": "supplements"},
+            "/whey": {"page_id": "page_b", "page_type": "landing", "offer_id": "offer_b", "category": "supplements"},
+            "/mat": {"page_id": "page_c", "page_type": "landing", "offer_id": "offer_c", "category": "gear"},
+            "/category/supplements": {"page_id": "page_cat", "page_type": "category", "category": "supplements"},
+        }}
+
+    def test_resolve_category_grid_pulls_matching_landing_pages(self):
+        page = {"sections": [{"id": "g", "type": "catalog_grid", "category": "supplements"}]}
+        resolve_category_grids(page, self._site())
+        items = page["sections"][0]["items"]
+        self.assertEqual({i["offer_id"] for i in items}, {"offer_a", "offer_b"})   # gear excluded
+        self.assertEqual({i["slug"] for i in items}, {"/creatine", "/whey"})
+
+    def test_resolve_leaves_curated_grid_untouched(self):
+        page = {"sections": [{"id": "g", "type": "catalog_grid", "items": [{"offer_id": "x", "slug": "/x"}]}]}
+        resolve_category_grids(page, self._site())
+        self.assertEqual(page["sections"][0]["items"], [{"offer_id": "x", "slug": "/x"}])  # no category -> untouched
+
+    def test_denormalize_records_offer_and_category(self):
+        site = {"pages": {"/p": {"page_id": "page_a", "page_type": "landing"}}}
+        self.assertTrue(_denormalize_page_catalog(site, "page_a", "offer_a", "supplements"))
+        self.assertEqual(site["pages"]["/p"]["offer_id"], "offer_a")
+        self.assertEqual(site["pages"]["/p"]["category"], "supplements")
+        self.assertFalse(_denormalize_page_catalog(site, "page_a", "offer_a", "supplements"))  # idempotent
 
 
 class FunnelAttachTests(unittest.TestCase):

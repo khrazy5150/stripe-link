@@ -100,6 +100,23 @@ class SetHomepageTests(unittest.TestCase):
     def test_requires_page_id(self):
         self.assertEqual(self._set()["statusCode"], 400)
 
+    def _attach(self, **body):
+        return handler({"httpMethod": "POST", "resource": "/sites/{site_id}/pages",
+                        "pathParameters": {"site_id": "site_H1"},
+                        "body": json.dumps({"tenant_id": "t1", **body})}, None, repository=self.repo)
+
+    def test_attach_page_at_slug_with_type_and_category(self):
+        resp = self._attach(page_id="page_cat01", slug="/category/supplements", page_type="category", category="supplements", label="Supplements")
+        self.assertEqual(resp["statusCode"], 200)
+        entry = json.loads(resp["body"])["site"]["pages"]["/category/supplements"]
+        self.assertEqual(entry["page_id"], "page_cat01")
+        self.assertEqual(entry["page_type"], "category")
+        self.assertEqual(entry["category"], "supplements")
+        self.assertEqual(entry["label"], "Supplements")
+
+    def test_attach_rejects_root_slug(self):
+        self.assertEqual(self._attach(page_id="page_x", slug="/")["statusCode"], 400)
+
 
 class SitesDomainTests(unittest.TestCase):
     def setUp(self):

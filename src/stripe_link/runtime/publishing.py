@@ -17,6 +17,7 @@ from stripe_link.runtime.html import (
     INDEXABLE_ROBOTS,
     NOINDEX_FOLLOW_ROBOTS,
     THIN_CONTENT_MIN_WORDS,
+    first_offer_product,
     indexable_word_count,
     page_robots_directive,
     render_page,
@@ -99,6 +100,43 @@ def attach_funnel_pages(site: dict[str, Any], page: dict[str, Any]) -> tuple[dic
     if not changed:
         return site, False
     return {**site, "pages": pages}, True
+
+
+def resolve_category_grids(page: dict[str, Any], site: dict[str, Any] | None) -> None:
+    """Populate a category-driven catalog_grid's items from the Site route map (plans/SITE_OBJECT.md §2.5b
+    Slice 2): every landing page whose denormalized `category` matches becomes a card {offer_id, slug}. Runs
+    before offers load so the referenced offers get bundled. A grid with an explicit `category` is always
+    (re)resolved — the route map is the source of truth; curated grids (no `category`) are left untouched."""
+    if not site:
+        return
+    entries = (site or {}).get("pages") or {}
+    for section in page.get("sections") or []:
+        if section.get("type") != "catalog_grid":
+            continue
+        category = str(section.get("category") or "").strip()
+        if not category:
+            continue
+        items = [
+            {"offer_id": str(entry.get("offer_id")), "slug": slug}
+            for slug, entry in entries.items()
+            if isinstance(entry, dict) and entry.get("offer_id") and str(entry.get("category") or "") == category
+        ]
+        section["items"] = items
+
+
+def _denormalize_page_catalog(site: dict[str, Any], page_id: str, offer_id: str, category: str) -> bool:
+    """Record a landing page's offer_id + product category on its Site route-map entry so category pages can
+    resolve grids off the map. Returns whether anything changed."""
+    changed = False
+    for entry in (site.get("pages") or {}).values():
+        if isinstance(entry, dict) and entry.get("page_id") == page_id:
+            if offer_id and entry.get("offer_id") != offer_id:
+                entry["offer_id"] = offer_id
+                changed = True
+            if category and entry.get("category") != category:
+                entry["category"] = category
+                changed = True
+    return changed
 
 
 def _sync_domain_index(site: dict[str, Any], domains_index_repository: Any | None) -> None:
@@ -305,19 +343,35 @@ def publish_page_document(
 ) -> dict[str, Any]:
     page = strip_document_keys(page)
     validate_page_document(page)
+    tenant_id = str(page.get("tenant_id") or "")
+    page_id = str(page.get("page_id") or "")
+    # The Site supplies the page's public identity (Organization for the entity graph). Optional: legacy pages
+    # without a Site still publish, falling back to the interim identity (plans/SITE_OBJECT.md §2.2).
+    site = find_site_for_page(sites_repository, tenant_id, page_id)
+    # A category page's catalog_grid resolves its cards from the Site route map BEFORE offers load, so the
+    # referenced offers get bundled by load_render_context (plans/SITE_OBJECT.md §2.5b Slice 2).
+    resolve_category_grids(page, site)
     offer, products_by_id, services_by_id, offers_by_id = load_render_context(
         page,
         offers_repository=offers_repository,
         products_repository=products_repository,
         services_repository=services_repository,
     )
+    # Denormalize this landing page's offer + product category onto its Site route-map entry, so category
+    # pages can resolve their grids off the route map without loading every page. Best-effort.
+    if site and sites_repository is not None and page.get("offer_id"):
+        try:
+            category = str(first_offer_product(offer, products_by_id).get("product_category") or "")
+            if _denormalize_page_catalog(site, page_id, str(page.get("offer_id") or ""), category):
+                validate_site(site)
+                site = sites_repository.put(site)
+                _sync_domain_index(site, domains_index_repository)
+        except Exception:
+            pass
     # Self-referencing canonical (plans/ON_PAGE_SEO_REQUIREMENTS.md SEO-01). Interim: the published artifact
     # URL where the page actually lives; clean root-domain paths arrive with the Site object.
-    published_paths = artifact_paths(str(page.get("tenant_id") or ""), str(page.get("page_id") or ""), page_slug(page))
+    published_paths = artifact_paths(tenant_id, page_id, page_slug(page))
     canonical_url = public_url(pages_domain, published_paths["published"])
-    # The Site supplies the page's public identity (Organization for the entity graph). Optional: legacy pages
-    # without a Site still publish, falling back to the interim identity (plans/SITE_OBJECT.md §2.2).
-    site = find_site_for_page(sites_repository, str(page.get("tenant_id") or ""), str(page.get("page_id") or ""))
     # Serve the whole inline funnel on the Site's verified custom domain: attach the funnel's pages at slugs so
     # the edge resolver can route them, and refresh the denormalized route table. Best-effort — a failure here
     # must never block publishing the artifact itself (plans/SITE_OBJECT.md §2.6).

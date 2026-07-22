@@ -1101,6 +1101,9 @@ def validate_page_document(document: dict[str, Any]) -> None:
             optional_string(section, "tagline", "Brand hero tagline")
         elif section_type == "catalog_grid":
             optional_string(section, "heading", "Catalog grid heading")
+            # A category-driven grid stores a category key and resolves its cards from the Site catalog at
+            # publish; a curated grid stores explicit items (plans/SITE_OBJECT.md §2.5b Slice 2).
+            optional_string(section, "category", "Catalog grid category")
             items = optional_limited_object_list(section, "items", 48, "Catalog grid items")
             for item in items:
                 require_string(item, "offer_id", "Catalog grid item offer_id")
@@ -1589,6 +1592,11 @@ def validate_site(document: dict[str, Any]) -> None:
             require_enum(entry, "page_type", SITE_PAGE_TYPES, f"Site page '{slug}' page_type")
         optional_string(entry, "label", f"Site page '{slug}' label", max_length=80)
         optional_bool(entry, "enabled", f"Site page '{slug}' enabled")
+        # Denormalized at publish so a category page resolves its grid off the route map without loading every
+        # page: the offer a landing page renders, and its product category (plans/SITE_OBJECT.md §2.5b Slice 2).
+        # `category` on a page_type=category entry is instead the category that page LISTS.
+        optional_string(entry, "offer_id", f"Site page '{slug}' offer_id")
+        optional_string(entry, "category", f"Site page '{slug}' category")
 
     optional_non_negative_int(document, "revision", "Site revision")
     for field in ("created_at", "updated_at"):
