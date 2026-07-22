@@ -201,7 +201,17 @@ is additive (existing pages keep working throughout — incremental migration).
 - `sitemap.xml` + `robots.txt` generated per Site (canonical, indexable URLs only; page_type/robots-aware).
 - IndexNow submission on publish/unpublish (SEO-15). Webmaster verification tokens in `<head>` (SEO-16).
 
-**Phase 2.5 — On-page structure.** (breadcrumbs SHIPPED; rest in progress)
+**Phase 2.5 — On-page structure.** (breadcrumbs + thin-content gate + visible nav SHIPPED; category pages → 2.5b)
+- **Thin-content gate (SEO-08) — SHIPPED (dev+prod).** `indexable_word_count`/`thin_content_warnings` in
+  html.py: approximate unique body words (strip scripts/styles + chrome — breadcrumb, header, footer nav,
+  legal footer, minicart). An otherwise-indexable page below the 150-word floor is demoted to noindex,follow
+  at publish (measured once, re-render only the rare indexable+thin artifact); the builder page-health panel
+  warns with a fix checklist. NOTE: some existing thin pages (e.g. the prod homepage ~80 words) flip to
+  noindex on next publish until content is added — the intended protection.
+- **Visible nav (SEO-13 partial) — SHIPPED (dev+prod).** Storefront header (Organization name → store root +
+  primary menu) + footer nav, rendered from `Site.navigation.primary/footer` resolved against the verified
+  custom domain; crawlable `<a>` links to page slugs (label from the Site entry or slug-derived). Same gate as
+  breadcrumbs (verified domain, not post-checkout). `site_nav_items`/`render_site_header`/`render_footer_nav`.
 - **Breadcrumbs (SEO-11) — SHIPPED (dev+prod).** Visible crawlable `<nav class="sl-breadcrumb">` trail +
   matching `BreadcrumbList` JSON-LD, rendered by html.py (`breadcrumb_trail`/`breadcrumb_json_ld`/
   `render_breadcrumb`). Gated: only on a page served at a non-root slug on the Site's verified custom domain
@@ -210,8 +220,10 @@ is additive (existing pages keep working throughout — incremental migration).
   (Home→current) until category pages exist; a category level slots in between then. JSON-LD rides the
   search_seo discoverability pack (like Product/FAQ); the visible trail renders regardless of goal. render_page
   gained a `page_type` param + `_RENDER_STATE` home_url/page_type holders.
-- **Remaining:** visible nav rendering from `Site.navigation`. Internal linking + collection/category pages
-  (SEO-13). Thin-content gate (SEO-08).
+- **Remaining → 2.5b:** category/collection index pages + an image related-products rail (the rest of SEO-13)
+  need the collection/category page renderer + catalog enumeration, which is Phase 2.5b's machinery. The
+  internal-linking infrastructure that doesn't need it (store-root links via header brand + breadcrumb, the
+  primary/footer menus) shipped here.
 
 **Phase 2.5b — Storefront homepage builder (COMMITTED, not yet scheduled).**
 - A purpose-built homepage/`OnlineStore` page (brand hero, nav, lists the Site's offers/products) — a real
