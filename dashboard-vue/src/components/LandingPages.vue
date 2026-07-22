@@ -168,6 +168,11 @@
                 <span>Lists every attached page in one category — fills itself as you add products.</span>
                 <span class="wizard-card-check" aria-hidden="true">✓</span>
               </button>
+              <button type="button" class="wizard-goal-card" :class="{ selected: form.pageKind === 'profile' }" @click="form.pageKind = 'profile'">
+                <strong>Store profile</strong>
+                <span>An "about" page with your store's identity, contact, and catalog — builds trust and SEO.</span>
+                <span class="wizard-card-check" aria-hidden="true">✓</span>
+              </button>
             </div>
             <template v-if="form.pageKind === 'offer'">
               <header class="wizard-step-header">
@@ -257,6 +262,21 @@
               <input v-model.trim="form.storefront.heading" type="text" :placeholder="categoryLabel(form.categoryKey) || 'Category'" />
             </label>
             <small v-if="!storefrontCategories.length">No product categories yet — add categories to your products first.</small>
+          </section>
+
+          <section v-else-if="wizardStep === 2 && form.pageKind === 'profile'" class="wizard-step">
+            <header class="wizard-step-header">
+              <h3>Store profile page</h3>
+              <p>An "about" page. Its content — your store name, description, contact, catalog — comes from your Site's business profile, so keep that up to date on the Sites screen.</p>
+            </header>
+            <label class="offer-field">
+              <span>Page name (internal)</span>
+              <input v-model.trim="form.name" type="text" placeholder="About / Store profile" />
+            </label>
+            <label class="offer-field">
+              <span>Heading (shown on the page)</span>
+              <input v-model.trim="form.storefront.heading" type="text" placeholder="About our store" />
+            </label>
           </section>
 
           <section v-else-if="wizardStep === 2" class="wizard-step">
@@ -355,6 +375,12 @@
             <button v-if="wizardStep === 1" class="primary-action" type="button" @click="nextWizardStep">Next</button>
             <button v-else class="primary-action" type="button" :disabled="creatingStorefront || !form.categoryKey" @click="createCategory">
               {{ creatingStorefront ? "Creating…" : "Create category page" }}
+            </button>
+          </template>
+          <template v-else-if="form.pageKind === 'profile'">
+            <button v-if="wizardStep === 1" class="primary-action" type="button" @click="nextWizardStep">Next</button>
+            <button v-else class="primary-action" type="button" :disabled="creatingStorefront" @click="createProfile">
+              {{ creatingStorefront ? "Creating…" : "Create store profile" }}
             </button>
           </template>
           <template v-else>
@@ -1551,7 +1577,7 @@ function selectOffer(offer) {
 
 function nextWizardStep() {
   wizardError.value = "";
-  if (form.pageKind === "storefront" || form.pageKind === "category") {
+  if (form.pageKind !== "offer") {
     wizardStep.value = 2;  // offer-less kinds are a two-step flow: pick kind, then configure + create
     return;
   }
@@ -1597,7 +1623,10 @@ const storefrontCandidatePages = computed(() =>
 const creatingStorefront = ref(false);
 
 function isStorefrontPage(page) {
-  return !!(page && (page.sections || []).some((s) => s && s.type === "catalog_grid"));
+  // Offer-less pages (storefront / category / profile) can't hydrate the offer-builder — guard them out.
+  if (!page) return false;
+  if (!page.offer_id) return true;
+  return (page.sections || []).some((s) => s && (s.type === "catalog_grid" || s.type === "seller_profile" || s.type === "brand_hero"));
 }
 
 function buildStorefrontPageDocument() {
@@ -1673,6 +1702,48 @@ function buildCategoryPageDocument() {
     created_at: now,
     updated_at: now,
   });
+}
+
+function buildProfilePageDocument() {
+  const now = Math.floor(Date.now() / 1000);
+  const heading = form.storefront.heading || "About our store";
+  return cleanObject({
+    schema_version: "2026-05-29",
+    document_type: "page",
+    tenant_id: getTenantId(),
+    page_id: form.page_id,
+    name: form.name || "Store profile",
+    status: "draft",
+    published_at: null,
+    route: { slug: slugify(form.slug || form.name || "about") },
+    seo: { title: heading },
+    theme: { template: "universal_bundle", preset: form.preset || "clean-slate" },
+    // Offer-less: the seller_profile section derives its content from the Site Organization at publish.
+    sections: [
+      { id: "brand-hero", type: "brand_hero", headline: heading },
+      { id: "seller-profile", type: "seller_profile", heading },
+    ],
+    revision: 1,
+    created_at: now,
+    updated_at: now,
+  });
+}
+
+async function createProfile() {
+  wizardError.value = "";
+  creatingStorefront.value = true;
+  try {
+    const document = buildProfilePageDocument();
+    const body = await apiRequest("/pages", { method: "POST", body: document });
+    const saved = body.page || document;
+    pages.value = [saved, ...pages.value.filter((p) => p.page_id !== saved.page_id)];
+    message.value = "Store profile page created. Publish it, then attach it (e.g. at /about) on the Sites screen.";
+    closeWizard();
+  } catch (error) {
+    wizardError.value = error.message || "Failed to create the store profile page.";
+  } finally {
+    creatingStorefront.value = false;
+  }
 }
 
 async function createCategory() {
