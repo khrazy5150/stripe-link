@@ -30,6 +30,39 @@ def normalize_domain(value: str) -> str:
     return text
 
 
+# A Site route slug: "/" for the root, otherwise lowercase segments (letters/digits/hyphens) separated by
+# single "/". Mirrors documents._SITE_SLUG_RE, redeclared here so the hot resolve path stays off the heavy
+# document-validation import.
+ROUTE_SLUG_PATTERN = re.compile(r"^/$|^/[a-z0-9]+(?:-[a-z0-9]+)*(?:/[a-z0-9]+(?:-[a-z0-9]+)*)*$")
+
+
+def normalize_route_path(path: str) -> str:
+    """Fold a request path into a canonical Site slug: lowercased, no trailing slash (except root). Returns
+    "/" for an empty path. The result is not guaranteed valid — the caller matches it against the route table."""
+    text = str(path or "").strip().lower()
+    if not text or text == "/":
+        return "/"
+    if not text.startswith("/"):
+        text = "/" + text
+    text = text.rstrip("/")
+    return text or "/"
+
+
+def route_table(site: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    """Project a Site's slug→page map into the flat routing table denormalized onto the domain-index record
+    (plans/SITE_OBJECT.md §2.6). The edge resolver reads this, never the live Site document. Every attached
+    slug is included with its enabled flag so the resolver can 404 a disabled slug without a Site read."""
+    table: dict[str, dict[str, Any]] = {}
+    for slug, entry in (site.get("pages") or {}).items():
+        if not isinstance(entry, dict):
+            continue
+        page_id = str(entry.get("page_id") or "")
+        if not page_id:
+            continue
+        table[slug] = {"page_id": page_id, "enabled": entry.get("enabled", True) is not False}
+    return table
+
+
 def build_domain(apex_domain: str, subdomain_label: str) -> str:
     apex = normalize_domain(apex_domain)
     label = str(subdomain_label or "").strip().lower()

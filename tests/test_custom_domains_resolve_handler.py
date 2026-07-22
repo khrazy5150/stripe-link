@@ -40,13 +40,61 @@ class CustomDomainsResolveHandlerTests(unittest.TestCase):
             )
             self.assertEqual(json.loads(response["body"])["route"]["origin_url"], expected)
 
-    def test_non_well_known_path_still_serves_homepage(self):
+    def test_legacy_record_without_routes_serves_homepage_for_any_path(self):
+        # A domain-index record written before path-aware routing has no `routes` table: every path serves the
+        # homepage, preserving pre-2.6 behavior.
         self.index_repo.put({"tenant_id": "tenant_demo", "domain": "shop.example.com", "target_page_id": "page_1", "status": "active"})
         response = handler(
             {"httpMethod": "GET", "queryStringParameters": {"host": "shop.example.com", "path": "/../secret"}},
             None, index_repo=self.index_repo, pages_domain="pages.example.com",
         )
         self.assertEqual(json.loads(response["body"])["route"]["origin_url"], "https://pages.example.com/page_1/index.html")
+
+    def _put_funnel_site(self):
+        self.index_repo.put({
+            "tenant_id": "tenant_demo", "domain": "shop.example.com", "status": "active", "target_page_id": "page_home",
+            "routes": {
+                "/": {"page_id": "page_home", "enabled": True},
+                "/upsell-1": {"page_id": "page_up", "enabled": True},
+                "/thank-you": {"page_id": "page_ty", "enabled": True},
+                "/retired": {"page_id": "page_old", "enabled": False},
+            },
+        })
+
+    def test_routes_table_maps_each_slug_to_its_page(self):
+        self._put_funnel_site()
+        for path, expected_page in (("", "page_home"), ("/", "page_home"), ("/upsell-1", "page_up"),
+                                    ("/thank-you", "page_ty"), ("/thank-you/", "page_ty"), ("/UPSELL-1", "page_up")):
+            response = handler(
+                {"httpMethod": "GET", "queryStringParameters": {"host": "shop.example.com", "path": path}},
+                None, index_repo=self.index_repo, pages_domain="pages.example.com",
+            )
+            self.assertEqual(response["statusCode"], 200, path)
+            self.assertEqual(json.loads(response["body"])["route"]["origin_url"], f"https://pages.example.com/{expected_page}/index.html", path)
+
+    def test_unknown_slug_returns_404(self):
+        self._put_funnel_site()
+        response = handler(
+            {"httpMethod": "GET", "queryStringParameters": {"host": "shop.example.com", "path": "/nope"}},
+            None, index_repo=self.index_repo, pages_domain="pages.example.com",
+        )
+        self.assertEqual(response["statusCode"], 404)
+
+    def test_disabled_slug_returns_404(self):
+        self._put_funnel_site()
+        response = handler(
+            {"httpMethod": "GET", "queryStringParameters": {"host": "shop.example.com", "path": "/retired"}},
+            None, index_repo=self.index_repo, pages_domain="pages.example.com",
+        )
+        self.assertEqual(response["statusCode"], 404)
+
+    def test_well_known_file_served_under_homepage_even_with_routes(self):
+        self._put_funnel_site()
+        response = handler(
+            {"httpMethod": "GET", "queryStringParameters": {"host": "shop.example.com", "path": "/sitemap.xml"}},
+            None, index_repo=self.index_repo, pages_domain="pages.example.com",
+        )
+        self.assertEqual(json.loads(response["body"])["route"]["origin_url"], "https://pages.example.com/page_home/sitemap.xml")
 
     def test_normalizes_host_before_lookup(self):
         self.index_repo.put({

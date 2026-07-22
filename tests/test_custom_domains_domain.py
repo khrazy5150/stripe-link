@@ -7,6 +7,8 @@ from stripe_link.domain.custom_domains import (
     CustomDomainError,
     assert_valid_domain,
     build_domain,
+    normalize_route_path,
+    route_table,
     cloudflare_request,
     create_custom_hostname,
     delete_custom_hostname,
@@ -205,6 +207,31 @@ class DeriveStatusTests(unittest.TestCase):
     def test_failed_when_hostname_moved_or_deleted(self):
         status, _ = derive_status(cloudflare_hostname={"ssl": {"status": "active"}, "status": "moved"})
         self.assertEqual(status, "failed")
+
+
+class RouteTableTests(unittest.TestCase):
+    def test_normalize_route_path_folds_to_canonical_slug(self):
+        self.assertEqual(normalize_route_path(""), "/")
+        self.assertEqual(normalize_route_path("/"), "/")
+        self.assertEqual(normalize_route_path("/Upsell-1/"), "/upsell-1")
+        self.assertEqual(normalize_route_path("thank-you"), "/thank-you")
+        self.assertEqual(normalize_route_path("  /A/B/  "), "/a/b")
+
+    def test_route_table_projects_enabled_flag_and_skips_empty(self):
+        site = {"pages": {
+            "/": {"page_id": "page_home", "page_type": "landing"},
+            "/upsell-1": {"page_id": "page_up", "enabled": True},
+            "/retired": {"page_id": "page_old", "enabled": False},
+            "/broken": {"page_type": "landing"},  # no page_id -> skipped
+        }}
+        table = route_table(site)
+        self.assertEqual(table["/"], {"page_id": "page_home", "enabled": True})
+        self.assertEqual(table["/upsell-1"], {"page_id": "page_up", "enabled": True})
+        self.assertEqual(table["/retired"], {"page_id": "page_old", "enabled": False})
+        self.assertNotIn("/broken", table)
+
+    def test_route_table_empty_when_no_pages(self):
+        self.assertEqual(route_table({}), {})
 
 
 if __name__ == "__main__":
