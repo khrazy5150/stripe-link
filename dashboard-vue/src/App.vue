@@ -257,14 +257,14 @@ async function reloadActiveView() {
   products.reset();
   stripeKeys.resetForCurrentTenant();
   notifications.reset();
-  notifications.load({ silent: true });
-  if (activeView.value === "dashboard") {
-    await dashboard.load();
-  } else if (activeView.value === "products") {
-    await products.load();
-  } else if (activeView.value === "stripeKeys") {
-    await stripeKeys.load();
-  }
+  // Never let one failing/slow fetch abort the whole refresh (a thrown load left the view showing the
+  // previous environment's data). Views keyed on activeEnvironment reload themselves via remount.
+  const safe = (p) => Promise.resolve(p).catch(() => {});
+  safe(notifications.load({ silent: true }));
+  if (activeView.value === "dashboard") await safe(dashboard.load());
+  else if (activeView.value === "products") await safe(products.load());
+  else if (activeView.value === "coupons") await safe(coupons.load({ status: "all" }));
+  else if (activeView.value === "stripeKeys") await safe(stripeKeys.load());
 }
 
 function openNotifications() {
@@ -325,7 +325,11 @@ watch(activeEnvironment, async () => {
   if (!visibleItems.some((item) => item.view === activeView.value)) {
     activeView.value = "dashboard";
   }
-  await loadAppConfigApiBase(activeEnvironment.value);
+  // Bootstrap the per-env API base in the BACKGROUND — a slow or failing app-config fetch must not block the
+  // data refresh (that was the bug: the toggle repainted the badge/theme but the awaited bootstrap gated the
+  // reload, so the list kept the old environment's data). reloadActiveView falls back to the built-in per-env
+  // base, so it's correct without waiting for the bootstrap.
+  loadAppConfigApiBase(activeEnvironment.value).catch(() => {});
   await reloadActiveView();
 });
 </script>
