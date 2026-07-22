@@ -34,6 +34,13 @@ def handler(event, context, *, sites_repo=None):
         canonical_url = body.get("canonical_url") or ""
         if not isinstance(page, dict):
             return error_response("Field 'page' must be an object.")
+        # A storefront/collection page has no primary offer (it renders a catalog_grid of other offers), so
+        # 'offer' is optional for one — its cards come from the 'offers' array (plans/SITE_OBJECT.md §2.5b).
+        is_catalog_page = any(
+            isinstance(s, dict) and s.get("type") == "catalog_grid" for s in (page.get("sections") or [])
+        )
+        if offer is None and is_catalog_page:
+            offer = {}
         if not isinstance(offer, dict):
             return error_response("Field 'offer' must be an object.")
         if not isinstance(products, list):
@@ -49,11 +56,12 @@ def handler(event, context, *, sites_repo=None):
         if not isinstance(canonical_url, str):
             return error_response("Field 'canonical_url' must be a string when provided.")
         validate_page_document(page)
-        validate_offer_document(offer)
-        if page.get("tenant_id") != offer.get("tenant_id"):
-            return error_response("Page and offer tenant_id must match.", code="render_error")
-        if page.get("offer_id") != offer.get("offer_id"):
-            return error_response("Page offer_id must match offer offer_id.", code="render_error")
+        if offer:
+            validate_offer_document(offer)
+            if page.get("tenant_id") != offer.get("tenant_id"):
+                return error_response("Page and offer tenant_id must match.", code="render_error")
+            if page.get("offer_id") != offer.get("offer_id"):
+                return error_response("Page offer_id must match offer offer_id.", code="render_error")
 
         for product in products:
             if not isinstance(product, dict):
@@ -82,7 +90,7 @@ def handler(event, context, *, sites_repo=None):
         carousel_offers = body.get("offers") or []
         if not isinstance(carousel_offers, list):
             return error_response("Field 'offers' must be an array when provided.", code="render_error")
-        offers_by_id = {str(offer.get("offer_id") or ""): offer}
+        offers_by_id = {str(offer.get("offer_id")): offer} if offer.get("offer_id") else {}
         for extra in carousel_offers:
             if isinstance(extra, dict) and extra.get("offer_id"):
                 offers_by_id[str(extra["offer_id"])] = extra
