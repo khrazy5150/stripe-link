@@ -20,6 +20,16 @@ if [[ "${ENVIRONMENT}" == "dev" ]]; then
   API_CUSTOM_DOMAIN_CERTIFICATE_ARN="${API_CUSTOM_DOMAIN_CERTIFICATE_ARN:-arn:aws:acm:us-west-2:150544707159:certificate/b40bb746-6e32-4a7d-8c24-b738cd1c359a}"
 fi
 
+# Dashboard CloudFront custom domain per environment. The cert must be in us-east-1 (CloudFront requirement);
+# the *.juniorbay.com wildcard covers both. Prod is the canonical app URL; dev is a sandbox.
+if [[ "${ENVIRONMENT}" == "prod" ]]; then
+  DASHBOARD_CUSTOM_DOMAIN_NAME="${DASHBOARD_CUSTOM_DOMAIN_NAME:-app.juniorbay.com}"
+  DASHBOARD_CUSTOM_DOMAIN_CERTIFICATE_ARN="${DASHBOARD_CUSTOM_DOMAIN_CERTIFICATE_ARN:-arn:aws:acm:us-east-1:150544707159:certificate/1a72b7c6-bf14-40d2-8e07-c2d2df84c70a}"
+elif [[ "${ENVIRONMENT}" == "dev" ]]; then
+  DASHBOARD_CUSTOM_DOMAIN_NAME="${DASHBOARD_CUSTOM_DOMAIN_NAME:-sandbox.juniorbay.com}"
+  DASHBOARD_CUSTOM_DOMAIN_CERTIFICATE_ARN="${DASHBOARD_CUSTOM_DOMAIN_CERTIFICATE_ARN:-arn:aws:acm:us-east-1:150544707159:certificate/1a72b7c6-bf14-40d2-8e07-c2d2df84c70a}"
+fi
+
 "$(dirname "$0")/validate-resource-names.sh"
 sam build
 
