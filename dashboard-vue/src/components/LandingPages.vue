@@ -163,6 +163,11 @@
                 <span>A brand hero + a grid of your products, each linking to its page.</span>
                 <span class="wizard-card-check" aria-hidden="true">✓</span>
               </button>
+              <button type="button" class="wizard-goal-card" :class="{ selected: form.pageKind === 'category' }" @click="selectCategoryKind">
+                <strong>Category page</strong>
+                <span>Lists every attached page in one category — fills itself as you add products.</span>
+                <span class="wizard-card-check" aria-hidden="true">✓</span>
+              </button>
             </div>
             <template v-if="form.pageKind === 'offer'">
               <header class="wizard-step-header">
@@ -229,6 +234,29 @@
               </div>
               <small v-else>No offer pages yet — create some offer pages first, then they can appear in the grid.</small>
             </div>
+          </section>
+
+          <section v-else-if="wizardStep === 2 && form.pageKind === 'category'" class="wizard-step">
+            <header class="wizard-step-header">
+              <h3>Build a category page</h3>
+              <p>Pick a category. The page lists every page you've attached to your Site in that category — new ones appear automatically.</p>
+            </header>
+            <label class="offer-field">
+              <span>Category</span>
+              <select v-model="form.categoryKey">
+                <option value="">Choose a category…</option>
+                <option v-for="c in storefrontCategories" :key="c.key" :value="c.key">{{ c.label }}</option>
+              </select>
+            </label>
+            <label class="offer-field">
+              <span>Page name (internal)</span>
+              <input v-model.trim="form.name" type="text" :placeholder="categoryLabel(form.categoryKey) || 'Category page'" />
+            </label>
+            <label class="offer-field">
+              <span>Heading (shown on the page)</span>
+              <input v-model.trim="form.storefront.heading" type="text" :placeholder="categoryLabel(form.categoryKey) || 'Category'" />
+            </label>
+            <small v-if="!storefrontCategories.length">No product categories yet — add categories to your products first.</small>
           </section>
 
           <section v-else-if="wizardStep === 2" class="wizard-step">
@@ -321,6 +349,12 @@
             <button v-if="wizardStep === 1" class="primary-action" type="button" @click="nextWizardStep">Next</button>
             <button v-else class="primary-action" type="button" :disabled="creatingStorefront" @click="createStorefront">
               {{ creatingStorefront ? "Creating…" : "Create storefront homepage" }}
+            </button>
+          </template>
+          <template v-else-if="form.pageKind === 'category'">
+            <button v-if="wizardStep === 1" class="primary-action" type="button" @click="nextWizardStep">Next</button>
+            <button v-else class="primary-action" type="button" :disabled="creatingStorefront || !form.categoryKey" @click="createCategory">
+              {{ creatingStorefront ? "Creating…" : "Create category page" }}
             </button>
           </template>
           <template v-else>
@@ -1332,6 +1366,7 @@ function defaultWizardForm() {
     // packs the page starts with (plans/LANDING_PAGE_GOAL_COMPOSITION.md).
     goal: "",
     storefront: { headline: "", tagline: "", heading: "Shop all", items: [] },
+    categoryKey: "",
   };
 }
 
@@ -1511,8 +1546,8 @@ function selectOffer(offer) {
 
 function nextWizardStep() {
   wizardError.value = "";
-  if (form.pageKind === "storefront") {
-    wizardStep.value = 2;  // storefront is a two-step flow: pick kind, then configure + create
+  if (form.pageKind === "storefront" || form.pageKind === "category") {
+    wizardStep.value = 2;  // offer-less kinds are a two-step flow: pick kind, then configure + create
     return;
   }
   if (wizardStep.value === 1 && !selectedOffer.value) {
@@ -1526,7 +1561,27 @@ function nextWizardStep() {
   wizardStep.value += 1;
 }
 
-const wizardTotalSteps = computed(() => (form.pageKind === "storefront" ? 2 : 4));
+const wizardTotalSteps = computed(() => (form.pageKind === "offer" ? 4 : 2));
+
+// Distinct product categories the tenant actually uses (so a category page's key matches denormalized
+// landing pages). Keys stay normalized; labels are humanized for display.
+const storefrontCategories = computed(() => {
+  const seen = new Map();
+  for (const p of products.value || []) {
+    const key = String(p?.product_category || "").trim();
+    if (key && !seen.has(key)) seen.set(key, categoryLabel(key));
+  }
+  return [...seen.entries()].map(([key, label]) => ({ key, label })).sort((a, b) => a.label.localeCompare(b.label));
+});
+
+function categoryLabel(key) {
+  return String(key || "").replace(/[_-]+/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+function selectCategoryKind() {
+  form.pageKind = "category";
+  ensureProductsLoaded();  // populate the category picker
+}
 
 // Pages that can appear in a storefront grid: an offer-backed page (has an offer_id) with a slug to link to.
 // Storefront pages themselves (no offer) are excluded — a grid links to sellable pages, not to other grids.
@@ -1585,6 +1640,52 @@ async function createStorefront() {
     closeWizard();
   } catch (error) {
     wizardError.value = error.message || "Failed to create the storefront homepage.";
+  } finally {
+    creatingStorefront.value = false;
+  }
+}
+
+function buildCategoryPageDocument() {
+  const now = Math.floor(Date.now() / 1000);
+  const label = categoryLabel(form.categoryKey);
+  return cleanObject({
+    schema_version: "2026-05-29",
+    document_type: "page",
+    tenant_id: getTenantId(),
+    page_id: form.page_id,
+    name: form.name || `${label} (category)`,
+    status: "draft",
+    published_at: null,
+    route: { slug: slugify(form.slug || form.name || label || "category") },
+    seo: { title: label },
+    theme: { template: "universal_bundle", preset: form.preset || "clean-slate" },
+    sections: [
+      { id: "brand-hero", type: "brand_hero", headline: label },
+      // A category-driven grid: no items — the publisher fills them from the Site's pages in this category.
+      { id: "catalog-grid", type: "catalog_grid", heading: form.storefront.heading || label, category: form.categoryKey },
+    ],
+    revision: 1,
+    created_at: now,
+    updated_at: now,
+  });
+}
+
+async function createCategory() {
+  wizardError.value = "";
+  if (!form.categoryKey) {
+    wizardError.value = "Choose a category.";
+    return;
+  }
+  creatingStorefront.value = true;
+  try {
+    const document = buildCategoryPageDocument();
+    const body = await apiRequest("/pages", { method: "POST", body: document });
+    const saved = body.page || document;
+    pages.value = [saved, ...pages.value.filter((p) => p.page_id !== saved.page_id)];
+    message.value = "Category page created. Publish it, then attach it to your Site on the Sites screen.";
+    closeWizard();
+  } catch (error) {
+    wizardError.value = error.message || "Failed to create the category page.";
   } finally {
     creatingStorefront.value = false;
   }

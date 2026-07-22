@@ -235,11 +235,27 @@
           </div>
 
           <div class="offer-field">
+            <span>Attach a page</span>
+            <div class="homepage-picker">
+              <select v-model="attachForm.pageId">
+                <option value="">Choose a page…</option>
+                <option v-for="p in pages" :key="p.page_id" :value="p.page_id">{{ p.name || p.page_id }}</option>
+              </select>
+              <input v-model.trim="attachForm.slug" type="text" placeholder="/slug" class="attach-slug" />
+              <button type="button" class="secondary-action" :disabled="!attachForm.pageId || !attachForm.slug || attachBusy" @click="attachPage">
+                {{ attachBusy ? "Attaching…" : "Attach" }}
+              </button>
+            </div>
+            <small>Places a page at a slug so it serves on your domain. A category page is detected automatically; other pages attach as landing pages (which is what lets category pages find them).</small>
+            <p v-if="attachError" class="field-error">{{ attachError }}</p>
+          </div>
+
+          <div class="offer-field">
             <span>Pages in this Site</span>
             <ul class="category-menu">
               <li v-for="(entry, slug) in editing.pages" :key="slug">
                 <span class="font-mono">{{ slug }}</span> — {{ entry.label || entry.page_id }}
-                <em>({{ entry.page_type || 'landing' }}{{ entry.enabled === false ? ', disabled' : '' }})</em>
+                <em>({{ entry.page_type || 'landing' }}{{ entry.category ? ', ' + entry.category : '' }}{{ entry.enabled === false ? ', disabled' : '' }})</em>
               </li>
             </ul>
             <small>Page routing, slugs, and navigation get a full editor in a later phase.</small>
@@ -297,6 +313,37 @@ async function setAsHomepage() {
     homepageError.value = error.message || "Failed to set homepage.";
   } finally {
     homepageBusy.value = false;
+  }
+}
+
+const attachForm = reactive({ pageId: "", slug: "" });
+const attachBusy = ref(false);
+const attachError = ref("");
+// A category page carries a catalog_grid section with a category key; attach it as page_type=category so the
+// renderer/breadcrumbs treat it right. Everything else attaches as a landing page.
+function categoryOfPage(page) {
+  const grid = (page?.sections || []).find((s) => s && s.type === "catalog_grid" && s.category);
+  return grid ? String(grid.category) : "";
+}
+async function attachPage() {
+  if (!attachForm.pageId || !attachForm.slug || !editing.value) return;
+  attachBusy.value = true;
+  attachError.value = "";
+  try {
+    const page = pages.value.find((p) => p.page_id === attachForm.pageId) || {};
+    const category = categoryOfPage(page);
+    const site = await store.attachPage(
+      editing.value.site_id,
+      { pageId: attachForm.pageId, slug: attachForm.slug, pageType: category ? "category" : "landing", category, label: page.name },
+      editing.value.tenant_id,
+    );
+    editing.value = { ...site };
+    attachForm.pageId = "";
+    attachForm.slug = "";
+  } catch (error) {
+    attachError.value = error.message || "Failed to attach the page.";
+  } finally {
+    attachBusy.value = false;
   }
 }
 const domainDiagnostics = ref({});
@@ -546,6 +593,9 @@ onMounted(async () => {
 }
 .homepage-picker select {
   flex: 1 1 12rem;
+}
+.homepage-picker .attach-slug {
+  flex: 0 1 10rem;
 }
 .subdomain-input {
   display: flex;

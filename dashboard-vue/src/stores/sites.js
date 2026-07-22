@@ -155,6 +155,14 @@ export const useSitesStore = defineStore("sites", {
       });
       return this._replace(res.site);
     },
+    async attachPage(siteId, { pageId, slug, pageType, category, label } = {}, tenantId = "") {
+      const body = { tenant_id: tenantId || getTenantId(), page_id: pageId, slug };
+      if (pageType) body.page_type = pageType;
+      if (category) body.category = category;
+      if (label) body.label = label;
+      const res = await apiRequest(`/sites/${encodeURIComponent(siteId)}/pages`, { method: "POST", body });
+      return this._replace(res.site);
+    },
     async setStatus(site, status) {
       const body = await apiRequest(`/sites/${encodeURIComponent(site.site_id)}/status`, {
         method: "PATCH",
