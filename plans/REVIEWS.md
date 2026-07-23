@@ -95,16 +95,44 @@ filter by target/status. Rejected reviews never render and never count toward th
 
 ## Phasing
 
-- **Phase 1: store + manual entry + moderation + Product/Offer markup + visible render.** Target-agnostic
-  entity; tenant enters real reviews; moderation UI; `AggregateRating`/`Review` on Product/Offer pages
-  (organic stars); visible reviews on-page; all-ratings, exact-match. Lights up the `AggregateRating` hook the
-  renderer intentionally left dark.
-- **Phase 2: public customer submission** (Leads-style gated `POST /reviews`) + business-target reviews for
-  on-page trust + `social_proof` wiring.
+- **Phase 1 SHIPPED (2026-07-23): store + manual entry + moderation + Product markup + visible render.**
+  Target-agnostic entity; tenant enters real reviews; moderation dashboard; `AggregateRating`/`Review` on
+  Product pages (organic stars); visible reviews on-page; all-ratings, exact-match. Lit up the
+  `AggregateRating` hook the renderer intentionally left dark. (Slices: entity+API, render, dashboard.)
+- **Phase 2: post-purchase verified-review invitation + public submission** — the two are one flow (below).
+  Also: business-target reviews for on-page trust + `social_proof` wiring.
+- **Phase 2.5 (builder integration):** a **"Reviews" builder element** that *controls* the auto-rendered
+  reviews block (heading / placement / show-hide) instead of it silently auto-appending. And **re-label the
+  existing hand-typed "Rating" element** — it is NOT the reviews system; it's an *external/cited* rating
+  ("4.9 ★ on Google"), visible-text-only, no markup (the fabrication guard). Rename to e.g. "Star-rating
+  badge", and later **auto-populate it from the GBP sync** so it's derived, not hand-typed. Do NOT rename
+  "Rating" → "Reviews" (they're different things; two conflicting star displays would result).
 - **Phase 3 (optional, later): Merchant Center product-review XML feed** for Google Shopping stars — only when
   we run Merchant Center feeds and have 50+ reviews.
 - **GBP reviews** land with the **Business Profile GBP sync (that plan's Phase 2)** — display-only, never in
   our markup.
+
+## Post-purchase review invitation (Phase 2 centerpiece)
+
+Ask real buyers to review, a day or two after they receive the product/service. This is the best review
+source: it's the strongest anti-spam gate (only actual purchasers get the link) AND makes each review a
+**verified purchase** (highest trust + markup value), and it makes the whole system self-sustaining.
+
+- **Flow:** on a completed purchase we schedule a review-invite email carrying a **tokenized, one-time,
+  order-bound public link** → opens the public review form (the Phase-2 `POST /reviews` submission, which the
+  token authorizes — no separate abuse gate needed for invited reviews). The submitted review is stamped
+  `source: first_party`, `verified_purchase: true`, and the resolved `target` (product/offer).
+- **Timing (key off fulfillment, not just purchase):**
+  - Products: shipping **delivered** signal + N days; fallback to a fixed delay after purchase when there's no
+    delivery tracking.
+  - Services: N days after the **appointment/service date**.
+- **Reuse:** the appointment-**reminders engine** is the same shape (a scheduled one-shot send — EventBridge
+  Scheduler or the sweep) pointed at a purchase/delivery/service trigger; plus the existing email/notification
+  infra. Honor unsubscribe/opt-out.
+- **Anti-abuse:** the token is single-use and bound to (order, product); an invited submission skips the
+  public abuse gate but still lands `pending` unless we auto-approve verified-purchase reviews (a moderation
+  policy choice). One invite per purchased line.
+- **Payoff loop:** real buyers → verified reviews → real AggregateRating → star snippets → conversions.
 
 ## Ties into existing work
 
