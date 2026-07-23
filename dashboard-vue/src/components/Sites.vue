@@ -152,9 +152,49 @@
               </label>
               <label class="offer-field"><span>Email</span><input v-model.trim="form.org.email" type="email" /></label>
             </div>
+            <label class="offer-field"><span>Street</span><input v-model.trim="form.org.address.street" type="text" placeholder="1493 Osage St" /></label>
             <div class="offer-two-column">
               <label class="offer-field"><span>City</span><input v-model.trim="form.org.address.locality" type="text" /></label>
               <label class="offer-field"><span>Region</span><input v-model.trim="form.org.address.region" type="text" /></label>
+            </div>
+            <div class="offer-two-column">
+              <label class="offer-field"><span>Postal code</span><input v-model.trim="form.org.address.postal_code" type="text" /></label>
+              <label class="offer-field"><span>Country</span><input v-model.trim="form.org.address.country" type="text" placeholder="US" /></label>
+            </div>
+          </fieldset>
+
+          <fieldset class="product-identifiers">
+            <legend>Local business (Google &amp; local SEO)</legend>
+            <p class="field-note">For service/local businesses: hours, map location, and your Google listing power the LocalBusiness structured data and a “View on Google” link. All optional.</p>
+            <label class="offer-field"><span>Google Business Profile URL</span><input v-model.trim="form.org.gbp_url" type="url" placeholder="https://maps.google.com/… or https://g.page/…" /></label>
+            <div class="offer-two-column">
+              <label class="offer-field"><span>Google place ID</span><input v-model.trim="form.org.place_id" type="text" placeholder="ChIJ…" /></label>
+              <div></div>
+            </div>
+            <div class="offer-two-column">
+              <label class="offer-field"><span>Latitude</span><input v-model.trim="form.org.geo.latitude" type="number" step="any" placeholder="39.7392" /></label>
+              <label class="offer-field"><span>Longitude</span><input v-model.trim="form.org.geo.longitude" type="number" step="any" placeholder="-104.9903" /></label>
+            </div>
+            <div class="offer-field">
+              <span>Opening hours</span>
+              <div v-for="(row, i) in form.org.opening_hours" :key="i" class="hours-row">
+                <div class="hours-days">
+                  <button
+                    v-for="[day, short] in WEEK_DAYS"
+                    :key="day"
+                    type="button"
+                    class="day-chip"
+                    :class="{ on: row.days.includes(day) }"
+                    @click="toggleHoursDay(row, day)"
+                  >{{ short }}</button>
+                </div>
+                <input v-model="row.opens" type="time" class="hours-time" />
+                <span class="hours-dash">–</span>
+                <input v-model="row.closes" type="time" class="hours-time" />
+                <button type="button" class="link-danger-btn hours-remove" @click="removeHoursRow(i)">Remove</button>
+              </div>
+              <button type="button" class="secondary-action compact" @click="addHoursRow">+ Add hours</button>
+              <small class="field-note">Group days that share the same hours (e.g. Mon–Fri 9:00–17:00, then a separate Sat row).</small>
             </div>
           </fieldset>
 
@@ -374,7 +414,34 @@ function claimedByOther(pageId, exceptSiteId) {
 const claimedBy = (pageId) => claimedByOther(pageId, "");
 const assignablePages = computed(() => pages.value.filter((p) => !claimedByOther(p.page_id, editing.value?.site_id)));
 
-const form = reactive({ name: "", subdomain: "", org: { name: "", legal_name: "", entity_type: "OnlineStore", description: "", telephone: "", email: "", address: { locality: "", region: "" } }, seo: { google_site_verification: "", bing_site_verification: "" } });
+const form = reactive({ name: "", subdomain: "", org: { name: "", legal_name: "", entity_type: "OnlineStore", description: "", telephone: "", email: "", address: { locality: "", region: "" }, place_id: "", gbp_url: "", geo: { latitude: "", longitude: "" }, opening_hours: [] }, seo: { google_site_verification: "", bing_site_verification: "" } });
+
+const WEEK_DAYS = [
+  ["Monday", "Mon"], ["Tuesday", "Tue"], ["Wednesday", "Wed"], ["Thursday", "Thu"],
+  ["Friday", "Fri"], ["Saturday", "Sat"], ["Sunday", "Sun"],
+];
+function addHoursRow() {
+  form.org.opening_hours.push({ days: [], opens: "09:00", closes: "17:00" });
+}
+function removeHoursRow(index) {
+  form.org.opening_hours.splice(index, 1);
+}
+function toggleHoursDay(row, day) {
+  const i = row.days.indexOf(day);
+  if (i >= 0) row.days.splice(i, 1);
+  else row.days.push(day);
+}
+function geoForSave(geo) {
+  const lat = Number(geo.latitude), lng = Number(geo.longitude);
+  if (geo.latitude === "" || geo.longitude === "" || Number.isNaN(lat) || Number.isNaN(lng)) return undefined;
+  return { latitude: lat, longitude: lng };
+}
+function hoursForSave(rows) {
+  const clean = (rows || [])
+    .filter((r) => r.days.length && r.opens && r.closes)
+    .map((r) => ({ days: [...r.days], opens: r.opens, closes: r.closes }));
+  return clean.length ? clean : undefined;
+}
 
 const domainForm = reactive({ domain: "", homepage: "" });
 const domainBusy = ref(false);
@@ -638,6 +705,9 @@ function openEdit(site) {
     name: org.name || "", legal_name: org.legal_name || "", entity_type: org.entity_type || "OnlineStore",
     description: org.description || "", telephone: org.telephone || "", email: org.email || "",
     address: { locality: address.locality || "", region: address.region || "", street: address.street || "", postal_code: address.postal_code || "", country: address.country || "US" },
+    place_id: org.place_id || "", gbp_url: org.gbp_url || "",
+    geo: { latitude: org.geo?.latitude ?? "", longitude: org.geo?.longitude ?? "" },
+    opening_hours: (org.opening_hours || []).map((h) => ({ days: [...(h.days || [])], opens: h.opens || "", closes: h.closes || "" })),
   };
   const seo = site.seo || {};
   form.seo = { google_site_verification: seo.google_site_verification || "", bing_site_verification: seo.bing_site_verification || "" };
@@ -655,6 +725,10 @@ async function saveEdit() {
     telephone: form.org.telephone ? normalizeE164(form.org.telephone) : undefined,
     email: form.org.email || undefined,
     address: Object.fromEntries(Object.entries(form.org.address).filter(([, v]) => v)),
+    place_id: form.org.place_id || undefined,
+    gbp_url: form.org.gbp_url || undefined,
+    geo: geoForSave(form.org.geo),
+    opening_hours: hoursForSave(form.org.opening_hours),
   };
   // Preserve any existing seo fields (title_suffix, indexnow_key) and overlay the editable verification tokens.
   const seo = Object.fromEntries(Object.entries({
@@ -967,6 +1041,45 @@ onMounted(async () => {
 }
 .footer-spacer {
   flex: 1 1 auto;
+}
+.hours-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.hours-days {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+.day-chip {
+  min-width: 3.4rem;
+  padding: 4px 6px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel);
+  color: var(--muted);
+  font: inherit;
+  font-size: 1.2rem;
+  cursor: pointer;
+}
+.day-chip.on {
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-color: var(--accent);
+  font-weight: 700;
+}
+.hours-time {
+  width: auto;
+  min-width: 9rem;
+}
+.hours-dash {
+  color: var(--muted);
+}
+.hours-remove {
+  font-size: 1.2rem;
 }
 .link-danger-btn {
   color: #dc2626;

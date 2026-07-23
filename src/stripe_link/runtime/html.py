@@ -564,6 +564,11 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     "    .sl-seller-social,.sl-seller-catalog{list-style:none;display:flex;flex-wrap:wrap;gap:1rem;padding:0;margin:0}",
     "    .sl-seller-social a,.sl-seller-catalog a{color:var(--sl-legal-link);text-decoration:none;font-size:1.4rem}",
     "    .sl-seller-social a:hover,.sl-seller-catalog a:hover{text-decoration:underline}",
+    "    .sl-seller-hours{list-style:none;padding:0;margin:0;font-size:1.4rem;color:var(--sl-content-text)}",
+    "    .sl-seller-hours li{display:flex;gap:1.2rem;justify-content:space-between;max-width:32rem;padding:0.2rem 0}",
+    "    .sl-seller-hours li span:last-child{color:var(--sl-muted)}",
+    "    .sl-seller-gbp a{color:var(--sl-legal-link);text-decoration:none;font-weight:600}",
+    "    .sl-seller-gbp a:hover{text-decoration:underline}",
     "    .sl-listicle{width:min(52rem,100%);margin:0 auto;display:flex;flex-direction:column;gap:1.2rem}",
     "    .sl-listicle-stage{position:relative}",
     "    .sl-listicle-carousel{display:flex;overflow-x:auto;scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch;scrollbar-width:none}",
@@ -2453,6 +2458,22 @@ def organization_json_ld(organization: dict[str, Any], origin: str) -> str:
     return json_ld_dump(node) if node else ""
 
 
+def _opening_hours_ld(hours: Any) -> list[dict[str, Any]]:
+    """schema.org OpeningHoursSpecification list from the organization's opening_hours (validated upstream).
+    dayOfWeek uses full day names, which Google accepts."""
+    if not isinstance(hours, list):
+        return []
+    out: list[dict[str, Any]] = []
+    for spec in hours:
+        if not isinstance(spec, dict):
+            continue
+        days = [d for d in (spec.get("days") or []) if isinstance(d, str) and d]
+        opens, closes = str(spec.get("opens") or "").strip(), str(spec.get("closes") or "").strip()
+        if days and opens and closes:
+            out.append({"@type": "OpeningHoursSpecification", "dayOfWeek": days, "opens": opens, "closes": closes})
+    return out
+
+
 def organization_node(organization: dict[str, Any], origin: str, *, with_context: bool = True) -> dict[str, Any]:
     """The Site's Organization node (plans/SITE_OBJECT.md §2.2, SEO-12): the single canonical business entity
     every page references. Anchored at `{origin}/#organization` so the Offer.seller and the WebSite publisher
@@ -2500,6 +2521,19 @@ def organization_node(organization: dict[str, Any], origin: str, *, with_context
     area_served = [a.strip() for a in (organization.get("area_served") or []) if isinstance(a, str) and a.strip()]
     if area_served:
         payload["areaServed"] = area_served
+    # Local-business signals (Business Profile Phase 1): geo + hours turn a LocalBusiness node into a full
+    # local listing; the GBP/Maps URL is the business's own map link (hasMap). All tenant-stated facts.
+    geo = organization.get("geo")
+    if isinstance(geo, dict):
+        lat, lng = geo.get("latitude"), geo.get("longitude")
+        if isinstance(lat, (int, float)) and not isinstance(lat, bool) and isinstance(lng, (int, float)) and not isinstance(lng, bool):
+            payload["geo"] = {"@type": "GeoCoordinates", "latitude": lat, "longitude": lng}
+    opening_hours = _opening_hours_ld(organization.get("opening_hours"))
+    if opening_hours:
+        payload["openingHoursSpecification"] = opening_hours
+    gbp_url = str(organization.get("gbp_url") or "").strip()
+    if gbp_url:
+        payload["hasMap"] = gbp_url
     # hasOfferCatalog = the categories the store carries (TENANT_PROFILE_REQUIREMENTS §4.4: "brands I carry",
     # not brands I OWN). Derived from the Site's category pages — accurate + verifiable, never hand-asserted.
     catalog_names = sorted({
@@ -3180,6 +3214,15 @@ def render_seller_profile(section: dict[str, Any]) -> str:
         contact.append(f"<span>{escape(addr_text)}</span>")
     if contact:
         parts.append('      <p class="sl-seller-contact">' + " · ".join(contact) + "</p>")
+    # Visible hours + a "View on Google" link — the on-page content that mirrors the LocalBusiness JSON-LD
+    # (openingHoursSpecification / hasMap), so the two stay consistent for local SEO.
+    hours = _opening_hours_ld(org.get("opening_hours"))
+    if hours:
+        rows = "".join(f'<li><span>{escape(", ".join(h["dayOfWeek"]))}</span><span>{escape(h["opens"])}–{escape(h["closes"])}</span></li>' for h in hours)
+        parts.append(f'      <ul class="sl-seller-hours">{rows}</ul>')
+    gbp_url = str(org.get("gbp_url") or "").strip()
+    if gbp_url:
+        parts.append(f'      <p class="sl-seller-gbp"><a href="{escape(gbp_url)}" rel="nofollow noopener" target="_blank">View on Google</a></p>')
     socials = [str(e.get("url")).strip() for e in (org.get("same_as") or [])
                if isinstance(e, dict) and e.get("verified") is True and str(e.get("url") or "").strip()][:6]
     if socials:

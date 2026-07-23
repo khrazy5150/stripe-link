@@ -47,11 +47,31 @@ Slots directly into [[PAGE_COMPOSER]] + the goal axis ([[LANDING_PAGE_GOAL_COMPO
   emitted via the `discoverability` pack on the `head` channel. Lights up for service/appointment
   offer_types on local/SEO goals. Zero manual entry. The richer schema shape (specific @type, geo, hours) and the BODY-side local signals (localized alt, `<figcaption>` NAP, image dimensions, NAP consistency) are plans/LOCAL_SEO_SIGNALS.md, which is gated on this profile.
 
+## Course correction (2026-07-23): Business Profile = Site.organization (extended), NOT a separate entity
+
+This plan predates the **multi-Site** work. A tenant now has **many Sites**, each with its own
+`Site.organization` (NAP), and a page already derives identity from its **owning Site**. So "one tenant →
+many businesses" already exists, and `Site.organization` already emits `LocalBusiness`/`Organization` JSON-LD
+(via `entity_type`, which includes LocalBusiness subtypes). Building a *separate* Business Profile entity now
+would create a **second competing NAP source** — the exact inconsistency this plan set out to avoid.
+
+**Decision (user, 2026-07-23): extend `Site.organization`** with the local/GBP fields instead of a new entity.
+A Site *is* the business; GBP account→locations maps onto tenant→Sites. No `business_id` plumbing — the
+page→Site→organization chain already carries NAP. If a rare "one business across several Sites" case ever
+needs a shared source, introduce a Business entity later that Sites derive from (Site.organization as its
+cache). Reviews/AggregateRating stay deferred (the renderer refuses hand-typed AggregateRating —
+`html.py` — so it needs *real* review records, which land with GBP sync in Phase 2).
+
 ## Phasing
 
-- **Phase 1 (now): canonical Business Profile + derive.** The entity (NAP, hours, categories, service area,
-  GBP link), tenant→many, offers/pages reference a `business_id`, pages derive NAP, LocalBusiness/Service +
-  AggregateRating schema derived, "View on Google" link, reviews as a source (manual entry to start).
+- **Phase 1 SHIPPED (2026-07-23) as Site.organization extension:** added `opening_hours` (schema.org
+  OpeningHoursSpecification), `geo` {latitude, longitude}, `place_id`, `gbp_url` to `Site.organization`;
+  `organization_node` emits `geo` + `openingHoursSpecification` + `hasMap`; the seller_profile section renders
+  visible hours + a "View on Google" link (mirrors the JSON-LD); Sites editor gains the full address +
+  local-business fieldset + a day-chip opening-hours editor. **Deferred within Phase 1:** reviews as a manual
+  source + AggregateRating (needs real review records, not hand-typed — pairs with GBP sync); categories +
+  service-area radius (area_served list already exists).
+- ~~Phase 1 (original): canonical Business Profile + derive.~~ Superseded by the course correction above.
 - **Phase 2 (deferred): GBP OAuth + API sync.** Connect a Business Profile to a GBP location (reuse the
   existing Google OAuth plumbing from the calendar integration), pull NAP + reviews, flag NAP mismatches.
   Map GBP account→locations onto the tenant's Business Profiles.

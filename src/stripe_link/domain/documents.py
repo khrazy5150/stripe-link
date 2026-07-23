@@ -1537,6 +1537,10 @@ SAME_AS_HOSTS = frozenset({
     "tiktok.com", "pinterest.com", "threads.net", "github.com", "crunchbase.com", "bbb.org",
     "wikidata.org", "wikipedia.org", "yelp.com", "trustpilot.com",
 })
+# Local-business identity on Site.organization (Business Profile Phase 1): opening hours + geo let the
+# renderer emit full LocalBusiness JSON-LD. Days are schema.org DayOfWeek names; times are 24h HH:MM.
+_ORG_DAYS = {"Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"}
+_HHMM_RE = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
 # Page roles are metadata (JSON-LD @type / sitemap / robots / nav eligibility) — never a renderer branch.
 # funnel_step is a post-checkout upsell/downsell page: routable on the custom domain but always noindex.
 SITE_PAGE_TYPES = {
@@ -1677,6 +1681,33 @@ def validate_site_organization(organization: Any) -> None:
                 raise DocumentValidationError(f"organization.same_as host '{host}' is not an allowed profile host.")
             if entry.get("verified") is not None and not isinstance(entry.get("verified"), bool):
                 raise DocumentValidationError("organization.same_as verified must be a boolean.")
+
+    # Local-business fields (Business Profile Phase 1) — power full LocalBusiness JSON-LD. All optional.
+    optional_string(organization, "place_id", "organization.place_id", max_length=200)
+    gbp_url = organization.get("gbp_url")
+    if gbp_url is not None and not (isinstance(gbp_url, str) and gbp_url.startswith(("http://", "https://"))):
+        raise DocumentValidationError("organization.gbp_url must be an HTTP(S) URL.")
+    geo = organization.get("geo")
+    if geo is not None:
+        if not isinstance(geo, dict):
+            raise DocumentValidationError("organization.geo must be an object.")
+        for coord in ("latitude", "longitude"):
+            value = geo.get(coord)
+            if value is not None and (isinstance(value, bool) or not isinstance(value, (int, float))):
+                raise DocumentValidationError(f"organization.geo.{coord} must be a number.")
+    hours = organization.get("opening_hours")
+    if hours is not None:
+        if not isinstance(hours, list):
+            raise DocumentValidationError("organization.opening_hours must be an array.")
+        for spec in hours:
+            if not isinstance(spec, dict):
+                raise DocumentValidationError("Each organization.opening_hours entry must be an object.")
+            days = spec.get("days")
+            if not isinstance(days, list) or not days or any(d not in _ORG_DAYS for d in days):
+                raise DocumentValidationError("organization.opening_hours[].days must be a non-empty list of day names (Monday..Sunday).")
+            for field in ("opens", "closes"):
+                if not (isinstance(spec.get(field), str) and _HHMM_RE.match(spec.get(field, ""))):
+                    raise DocumentValidationError(f"organization.opening_hours[].{field} must be a 24h time (HH:MM).")
 
 
 def validate_route(document: dict[str, Any]) -> None:

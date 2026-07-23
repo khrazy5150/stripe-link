@@ -140,6 +140,21 @@ class DocumentValidationTests(unittest.TestCase):
         validate_site(site)
         self.assertEqual(site["organization"]["address"]["country"], "US")
 
+    def test_site_organization_local_fields_accept_valid_data(self):
+        validate_site(self._site(organization={
+            "name": "Luxe Spa", "geo": {"latitude": 39.7, "longitude": -104.9},
+            "place_id": "ChIJ123", "gbp_url": "https://maps.google.com/?cid=1",
+            "opening_hours": [{"days": ["Monday", "Friday"], "opens": "09:00", "closes": "17:30"}],
+        }))
+
+    def test_site_organization_rejects_bad_hours_and_gbp_url(self):
+        with self.assertRaises(DocumentValidationError):
+            validate_site(self._site(organization={"name": "X", "opening_hours": [{"days": ["Monday"], "opens": "9am", "closes": "5pm"}]}))
+        with self.assertRaises(DocumentValidationError):
+            validate_site(self._site(organization={"name": "X", "opening_hours": [{"days": ["Funday"], "opens": "09:00", "closes": "17:00"}]}))
+        with self.assertRaises(DocumentValidationError):
+            validate_site(self._site(organization={"name": "X", "gbp_url": "not-a-url"}))
+
     def test_accepts_offer_presentation_brand(self):
         self.offer.setdefault("presentation", {})["brand"] = "Luxe Wellness"
         validate_offer_document(self.offer)

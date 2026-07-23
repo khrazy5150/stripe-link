@@ -374,6 +374,20 @@ class SiteOrganizationIdentityTests(unittest.TestCase):
         self.assertEqual(org["address"]["addressCountry"], "US")
         self.assertEqual(org["sameAs"], ["https://instagram.com/axelmart"])
 
+    def test_local_business_fields_emit_geo_hours_and_map(self):
+        org = dict(self.ORG, entity_type="LocalBusiness",
+                   geo={"latitude": 39.74, "longitude": -104.99},
+                   gbp_url="https://maps.google.com/?cid=123",
+                   opening_hours=[{"days": ["Monday", "Tuesday"], "opens": "09:00", "closes": "17:00"}])
+        node = self._node(self._render(site={"organization": org}), "LocalBusiness")
+        self.assertIsNotNone(node)
+        self.assertEqual(node["geo"], {"@type": "GeoCoordinates", "latitude": 39.74, "longitude": -104.99})
+        self.assertEqual(node["hasMap"], "https://maps.google.com/?cid=123")
+        spec = node["openingHoursSpecification"][0]
+        self.assertEqual(spec["@type"], "OpeningHoursSpecification")
+        self.assertEqual(spec["dayOfWeek"], ["Monday", "Tuesday"])
+        self.assertEqual((spec["opens"], spec["closes"]), ("09:00", "17:00"))
+
     def test_website_node_publishes_organization(self):
         website = self._node(self._render(site={"organization": self.ORG}), "WebSite")
         self.assertIsNotNone(website)
