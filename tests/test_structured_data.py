@@ -127,6 +127,35 @@ class StructuredDataTests(unittest.TestCase):
         self.assertTrue(ld_blocks(html), "payload must still parse as JSON")
 
 
+class LocalSeoAltTests(unittest.TestCase):
+    """Localized image alt (plans/LOCAL_SEO_SIGNALS.md): the hero image weaves in the business + city, but
+    only for local/service businesses — DTC product stores keep the plain product-name alt."""
+
+    def _hero_alt(self, site):
+        offer = load_fixture("offer-creatine-standard.json")
+        product = load_fixture("product-creatine-gummies.json")
+        product.setdefault("images", ["https://img.example.com/x.webp"])
+        page = load_fixture("page-creatine-standard.json")
+        page["sections"] = [{"id": "hm", "type": "hero_media"}] + page["sections"]
+        html = render_page(page, offer, {product["product_id"]: product}, canonical_url="https://x/p", site=site)
+        m = re.search(r'sl-hero-media.*?alt="([^"]+)"', html, re.S)
+        return m.group(1) if m else None
+
+    LOCAL = {"organization": {"name": "Luxe Spa", "entity_type": "HealthAndBeautyBusiness", "address": {"locality": "St. George", "region": "Utah"}}}
+
+    def test_local_business_hero_alt_carries_business_and_city(self):
+        self.assertEqual(self._hero_alt(self.LOCAL), "Creatine Gummies at Luxe Spa in St. George, Utah")
+
+    def test_dtc_store_keeps_plain_alt(self):
+        dtc = {"organization": {"name": "Axel Mart", "entity_type": "OnlineStore", "address": {"locality": "Denver", "region": "Colorado"}}}
+        self.assertEqual(self._hero_alt(dtc), "Creatine Gummies")
+        self.assertEqual(self._hero_alt(None), "Creatine Gummies")
+
+    def test_no_locality_no_anchor(self):
+        no_city = {"organization": {"name": "Luxe Spa", "entity_type": "HealthAndBeautyBusiness"}}
+        self.assertEqual(self._hero_alt(no_city), "Creatine Gummies")
+
+
 class BreadcrumbTests(unittest.TestCase):
     """Breadcrumbs (SEO-11): visible crawlable trail + matching BreadcrumbList JSON-LD, only on a page served
     at a non-root slug on the Site's verified custom domain."""

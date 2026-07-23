@@ -1096,6 +1096,41 @@ def page_robots_directive(*, kind: str, environment: str, eligibility: str, page
     return NOINDEX_ROBOTS  # blocked / revoked
 
 
+# Local-SEO alt text (plans/LOCAL_SEO_SIGNALS.md): only local/service businesses (and physical stores) get a
+# locality anchor woven into image alt — a DTC OnlineStore reviewing "Creatine Gummies in Denver" is noise.
+_LOCAL_BUSINESS_TYPES = {
+    "LocalBusiness", "HomeAndConstructionBusiness", "HealthAndBeautyBusiness",
+    "FoodEstablishment", "ProfessionalService", "Store",
+}
+
+
+def local_business_anchor() -> str:
+    """' at {Business} in {City}, {Region}' when the page's Site is a LOCAL business with a locality — the
+    local-SEO signal woven into image alt. Empty for DTC/product stores or incomplete NAP."""
+    org = _RENDER_ORG
+    if str(org.get("entity_type") or "") not in _LOCAL_BUSINESS_TYPES:
+        return ""
+    name = str(org.get("name") or "").strip()
+    locality = str((org.get("address") or {}).get("locality") or "").strip()
+    if not name or not locality:
+        return ""
+    region = str((org.get("address") or {}).get("region") or "").strip()
+    return f" at {name} in {locality}, {region}" if region else f" at {name} in {locality}"
+
+
+def localized_alt(base_alt: str) -> str:
+    """Append the local-business anchor to a (raw, unescaped) image alt — unless the alt is empty or already
+    names the business (never keyword-stuff). Returns raw text; the caller escapes."""
+    base = str(base_alt or "").strip()
+    anchor = local_business_anchor()
+    if not base or not anchor:
+        return base
+    name = str(_RENDER_ORG.get("name") or "").strip()
+    if name and name.lower() in base.lower():
+        return base
+    return base + anchor
+
+
 def resolved_brand_label(presentation: dict[str, Any]) -> str:
     """The storefront brand for the title suffix / og:site_name. The offer's explicit brand wins; otherwise
     the Site's Organization name (the single-source business identity); otherwise the platform brand."""
@@ -1639,7 +1674,7 @@ def render_hero_media(
                 images = [service_image]
     if not images:
         return ""
-    alt = str(product.get("name") or offer.get("name") or "Product image")
+    alt = localized_alt(str(product.get("name") or offer.get("name") or "Product image"))
     section_id = escape(str(section.get("id", "hero-media")))
     autoplay = bool(section.get("autoplay"))
     overlays = render_hero_overlays(section, offer)
@@ -1860,7 +1895,7 @@ def render_listicle_carousel(
     image_url = str(first.get("image") or "")
     # Plain <img> (not srcset) so the hero_image binder can swap src cleanly as the target changes. alt is the
     # first item's name (the JS binder swaps src on target change; a descriptive default beats an empty alt).
-    hero_alt = escape(str(first.get("name") or offer.get("name") or "Product"))
+    hero_alt = escape(localized_alt(str(first.get("name") or offer.get("name") or "Product")))
     image_html = f"<img data-conversion-bind=\"hero_image\" src=\"{escape(image_url)}\" alt=\"{hero_alt}\" loading=\"lazy\" decoding=\"async\">" if image_url else ""
     option_class = "sl-price-option sl-listicle-option" + ("" if image_url else " no-img")
     add_label = escape(str(listicle_add_label(offer)))
