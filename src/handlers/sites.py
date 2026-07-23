@@ -22,6 +22,7 @@ from stripe_link.domain.custom_domains import (
     get_custom_hostname,
     domain_index_record,
     get_dcv_delegation_uuid,
+    is_apex_domain,
     normalize_domain,
     normalize_route_path,
     retrigger_ssl_validation,
@@ -510,6 +511,81 @@ def _ensure_homepage(document, homepage_page_id):
     return homepage_page_id
 
 
+def _tag_www_records(records, domain):
+    """Annotate the paired www hostname's DNS rows so the dashboard explains they set up a redirect, not a
+    second live site — the www host 301s to the apex once its cert issues."""
+    note = f"Points www at us so it 301-redirects to {domain} (your canonical root domain)."
+    for rec in records or []:
+        rec["note"] = note
+    return records or []
+
+
+def _setup_www_redirect(domain, *, zone_id, api_token, target_host, dcv_uuid, site_id, tenant_id):
+    """For an APEX custom domain, provision a `www.<apex>` custom hostname that 301-redirects to the apex (the
+    canonical, SEO — plans/SITE_OBJECT.md §2.6b). Best-effort: the apex works regardless of www. The redirect
+    is driven by a `redirect_to` field on the www domain-index record (the resolver/Worker read it). Returns
+    (www_hostname_id, www_dns_records, www_status), all empty on failure."""
+    www = f"www.{domain}"
+    try:
+        www_hostname = create_custom_hostname(www, zone_id=zone_id, api_token=api_token)
+    except CustomDomainError:
+        www_hostname = find_custom_hostname(www, zone_id=zone_id, api_token=api_token)
+    if not www_hostname:
+        return "", [], ""
+    www_records = _tag_www_records(
+        custom_hostname_dns_records(www_hostname, hostname=www, dns_target=target_host, dcv_delegation_uuid=dcv_uuid), domain
+    )
+    www_status, _ = derive_status(cloudflare_hostname=www_hostname)
+    try:
+        custom_domains_index_repository().put(
+            {"tenant_id": tenant_id, "domain": www, "redirect_to": domain, "status": www_status, "site_id": site_id}
+        )
+    except Exception:
+        pass
+    return str(www_hostname.get("id") or ""), www_records, www_status
+
+
+def _teardown_www_redirect(provisioning, domain, *, zone_id, api_token, tenant_id):
+    """Best-effort teardown of the paired www→apex redirect (Cloudflare hostname + index record) on disconnect."""
+    www_id = str((provisioning or {}).get("www_custom_hostname_id") or "")
+    if www_id and zone_id and api_token:
+        try:
+            delete_custom_hostname(www_id, zone_id=zone_id, api_token=api_token)
+        except CustomDomainError:
+            pass
+    if domain:
+        try:
+            custom_domains_index_repository().delete(tenant_id, f"www.{domain}")
+        except RepositoryError:
+            pass
+
+
+def _refresh_www_status(provisioning, domain, *, zone_id, api_token, dcv_uuid, site_id, tenant_id):
+    """Re-poll the paired www hostname's status and re-write its redirect index record, so the www→apex
+    redirect goes live once www's certificate issues. Best-effort; returns the fresh www dns_records (or [])."""
+    www_id = str((provisioning or {}).get("www_custom_hostname_id") or "")
+    if not www_id or not zone_id or not api_token:
+        return []
+    www = f"www.{domain}"
+    try:
+        www_hostname = get_custom_hostname(www_id, zone_id=zone_id, api_token=api_token)
+    except CustomDomainError:
+        return list((provisioning or {}).get("www_dns_records") or [])
+    www_status, _ = derive_status(cloudflare_hostname=www_hostname)
+    www_records = _tag_www_records(
+        custom_hostname_dns_records(www_hostname, hostname=www, dns_target=provisioning.get("dns_target") or "", dcv_delegation_uuid=dcv_uuid), domain
+    )
+    provisioning["www_status"] = www_status
+    provisioning["www_dns_records"] = www_records
+    try:
+        custom_domains_index_repository().put(
+            {"tenant_id": tenant_id, "domain": www, "redirect_to": domain, "status": www_status, "site_id": site_id}
+        )
+    except Exception:
+        pass
+    return www_records
+
+
 def _recompute_eligibility(site, tenant_id, now):
     connect_verified, connect_restricted = _connect_state(tenant_id, site.get("environment"))
     eligibility = compute_site_eligibility(
@@ -560,7 +636,7 @@ def connect_domain(event, repository, site_id):
     hosting.setdefault("type", "platform")  # stays platform until verified — see check_domain
     hosting["verification"] = {"verified": False, "method": "cloudflare_saas"}
     site["hosting"] = hosting
-    site["domain_provisioning"] = {
+    provisioning = {
         "custom_hostname_id": str(cloudflare_hostname.get("id") or ""),
         "dns_records": dns_records,
         "dns_target": target_host,
@@ -569,6 +645,20 @@ def connect_domain(event, repository, site_id):
         "homepage_page_id": homepage_id,
         "updated_at": now,
     }
+    # An apex domain also gets a www.<apex> hostname that 301s to the apex (the canonical). Best-effort; the
+    # apex serves regardless. Its DNS record is shown alongside the apex's.
+    if is_apex_domain(domain):
+        www_id, www_records, www_status = _setup_www_redirect(
+            domain, zone_id=zone_id, api_token=api_token, target_host=target_host, dcv_uuid=dcv_uuid,
+            site_id=site_id, tenant_id=tenant_id,
+        )
+        if www_id:
+            provisioning["www_custom_hostname_id"] = www_id
+            provisioning["www_dns_records"] = www_records
+            provisioning["www_status"] = www_status
+            dns_records = dns_records + www_records
+            provisioning["dns_records"] = dns_records
+    site["domain_provisioning"] = provisioning
     site["updated_at"] = now
     try:
         validate_site(site)
@@ -615,6 +705,11 @@ def check_domain(event, repository, site_id):
             pass
     now = int(time.time())
     verified = status == "active"
+    # Refresh the paired www→apex redirect hostname (apex domains only) and show its DNS record alongside.
+    if is_apex_domain(domain):
+        www_records = _refresh_www_status(provisioning, domain, zone_id=zone_id, api_token=api_token, dcv_uuid=dcv_uuid, site_id=site_id, tenant_id=tenant_id)
+        if www_records:
+            dns_records = dns_records + www_records
     provisioning.update({"status": status, "ssl_status": ssl_status, "dns_records": dns_records, "updated_at": now})
     site["domain_provisioning"] = provisioning
     hosting = site.get("hosting") or {}
@@ -665,6 +760,7 @@ def disconnect_domain(event, repository, site_id):
             delete_custom_hostname(hostname_id, zone_id=zone_id, api_token=api_token)
         except CustomDomainError:
             pass  # best-effort teardown; the Cloudflare hostname may already be gone
+    _teardown_www_redirect(provisioning, domain, zone_id=zone_id, api_token=api_token, tenant_id=tenant_id)
     now = int(time.time())
     hosting = site.get("hosting") or {}
     hosting["custom_domain"] = None

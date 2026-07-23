@@ -55,6 +55,12 @@ def handler(event, context, *, index_repo=None, pages_domain=None):
     if not record or record.get("status") != "active":
         return error_response("Domain is not active.", status_code=404, code="not_active")
 
+    # A www→apex redirect hostname: 301 to the canonical apex, preserving the path/query (the Worker appends
+    # them to this scheme+host base). plans/SITE_OBJECT.md §2.6b.
+    redirect_to = str(record.get("redirect_to") or "").strip()
+    if redirect_to:
+        return json_response({"route": {"type": "redirect", "location": f"https://{redirect_to}"}})
+
     tenant_id = str(record.get("tenant_id") or "")
     homepage_page_id = str(record.get("target_page_id") or "")
 

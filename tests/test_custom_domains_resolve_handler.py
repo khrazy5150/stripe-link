@@ -29,6 +29,25 @@ class CustomDomainsResolveHandlerTests(unittest.TestCase):
         self.assertEqual(body["route"]["type"], "origin_url")
         self.assertEqual(body["route"]["origin_url"], "https://pages.example.com/page_1/index.html")
 
+    def test_www_redirect_record_returns_redirect_route(self):
+        # A paired www→apex record carries a redirect_to; the resolver 301s to the canonical apex.
+        self.index_repo.put({
+            "tenant_id": "tenant_demo",
+            "domain": "www.example.com",
+            "redirect_to": "example.com",
+            "status": "active",
+        })
+        response = handler(
+            {"httpMethod": "GET", "queryStringParameters": {"host": "www.example.com", "path": "/shop"}},
+            None,
+            index_repo=self.index_repo,
+            pages_domain="pages.example.com",
+        )
+        self.assertEqual(response["statusCode"], 200)
+        route = json.loads(response["body"])["route"]
+        self.assertEqual(route["type"], "redirect")
+        self.assertEqual(route["location"], "https://example.com")
+
     def test_well_known_path_resolves_to_sibling_artifact(self):
         self.index_repo.put({"tenant_id": "tenant_demo", "domain": "shop.example.com", "target_page_id": "page_1", "status": "active"})
         for path, expected in (("/sitemap.xml", "https://pages.example.com/page_1/sitemap.xml"),

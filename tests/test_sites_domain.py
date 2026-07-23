@@ -185,6 +185,33 @@ class SitesDomainTests(unittest.TestCase):
         self.assertFalse(site["hosting"]["verification"]["verified"])
         self.assertEqual(self.index.records["shop.axelmart.com"]["target_page_id"], "page_home01")
 
+    def test_connect_apex_provisions_www_redirect(self):
+        self.repo.put(base_site())
+        with patch.object(sites_handler, "create_custom_hostname", return_value=CF_PENDING):
+            resp = self._connect({"tenant_id": "t1", "domain": "axelmart.com"})
+        self.assertEqual(resp["statusCode"], 201)
+        www = self.index.records.get("www.axelmart.com")
+        self.assertIsNotNone(www)                       # a paired www→apex redirect record was written
+        self.assertEqual(www["redirect_to"], "axelmart.com")
+        self.assertIn("www.axelmart.com", [r["name"] for r in json.loads(resp["body"])["dns_records"]])
+
+    def test_connect_subdomain_gets_no_www_redirect(self):
+        self.repo.put(base_site())
+        with patch.object(sites_handler, "create_custom_hostname", return_value=CF_PENDING):
+            self._connect({"tenant_id": "t1", "domain": "shop.axelmart.com"})
+        self.assertNotIn("www.shop.axelmart.com", self.index.records)
+
+    def test_disconnect_tears_down_www_redirect(self):
+        self.repo.put(base_site())
+        with patch.object(sites_handler, "create_custom_hostname", return_value=CF_PENDING):
+            self._connect({"tenant_id": "t1", "domain": "axelmart.com"})
+        self.assertIn("www.axelmart.com", self.index.records)
+        with patch.object(sites_handler, "delete_custom_hostname", return_value=None):
+            handler({"httpMethod": "DELETE", "resource": "/sites/{site_id}/domain",
+                     "pathParameters": {"site_id": "site_D1"}, "queryStringParameters": {"tenant_id": "t1"}},
+                    None, repository=self.repo)
+        self.assertNotIn("www.axelmart.com", self.index.records)   # cleaned up
+
     def test_connect_reuses_existing_hostname_on_duplicate(self):
         # A prior partial attempt already created the Cloudflare hostname; retry must reuse it, not fail.
         self.repo.put(base_site())

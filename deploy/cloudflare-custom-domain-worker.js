@@ -57,6 +57,11 @@ async function handleCustomDomain(request, hostname) {
   const resolveUrl = `${CUSTOM_DOMAIN_RESOLVE}?host=${encodeURIComponent(hostname)}&path=${encodeURIComponent(path)}`;
   const resolved = await resolveJson("custom-domain-router", `${hostname}${path}`, resolveUrl);
   const route = resolved && resolved.route;
+  // A www→apex redirect: 301 to the canonical apex, carrying the path + query through.
+  if (route && route.type === "redirect" && route.location) {
+    const url = new URL(request.url);
+    return Response.redirect(route.location.replace(/\/$/, "") + url.pathname + url.search, 301);
+  }
   if (!route || route.type !== "origin_url" || !route.origin_url) {
     return new Response("Custom domain is not active.", { status: 404 });
   }
