@@ -24,6 +24,7 @@ from stripe_link.delegation import apply_delegation
 from stripe_link.domain.ledger import refund_entry as build_ledger_refund_entry, sale_entry, sale_entry_from_order
 from stripe_link.domain.receipts import receipt_content
 from stripe_link.domain.reminders import plan_reminders
+from stripe_link.domain.review_invites import plan_invite
 from stripe_link.domain.refund_ledger import build_refund_entry, initial_payment_aggregates, set_refund_aggregates
 from stripe_link.mailer import send_email
 from stripe_link.repositories.documents import (
@@ -40,6 +41,7 @@ from stripe_link.repositories.documents import (
     platform_config_repository,
     products_repository,
     refunds_repository,
+    review_invites_repository,
     services_repository,
     sites_repository,
     stripe_keys_repository,
@@ -358,6 +360,7 @@ def persist_checkout_session_completed(
     notifications_repo=None,
     products_repo=None,
     ledger_repo=None,
+    invites_repo=None,
     now_fn: Callable[[], int] = lambda: int(time.time()),
     billing_config_loader: Callable[[], dict[str, Any]] | None = None,
     receipt_mailer: Callable[..., Any] | None = None,
@@ -375,6 +378,7 @@ def persist_checkout_session_completed(
     notifications_repo = notifications_repo or (notifications_repository() if os.environ.get("NOTIFICATIONS_TABLE") else None)
     products_repo = products_repo or (products_repository() if os.environ.get("PRODUCTS_TABLE") else None)
     ledger_repo = ledger_repo or (ledger_repository() if os.environ.get("LEDGER_TABLE") else None)
+    invites_repo = invites_repo or (review_invites_repository() if os.environ.get("REVIEWS_TABLE") else None)
 
     fees = fee_breakdown_from_session(session, billing_config_loader)
     session_record = checkout_session_record(stripe_event, session, tenant_id, now)
@@ -402,6 +406,9 @@ def persist_checkout_session_completed(
 
     if ledger_repo and record_sale_ledger_entry(order_record, ledger_repo, now):
         written.append("ledger_entry")
+
+    if plan_order_review_invite(order_record, tenant_id, products_repo, invites_repo, now):
+        written.append("review_invite")
 
     download_links = resolve_download_links(order_record, tenant_id, products_repo)
     receipt = send_order_receipt(
@@ -1068,6 +1075,30 @@ def fee_breakdown_from_session(
         billing_config=cached_billing_config(billing_config_loader),
     )
     return result["breakdown"]
+
+
+def plan_order_review_invite(order_record: dict[str, Any], tenant_id: str, products_repo, invites_repo, now: int) -> bool:
+    """Plan a post-purchase review invite for a paid order (plans/REVIEWS.md P2). Idempotent — a re-delivered
+    webhook won't overwrite an in-progress sequence (which would reset the already-sent steps). Best-effort."""
+    if not invites_repo or order_record.get("status") != "paid":
+        return False
+    customer = order_record.get("customer") or {}
+    order_product = order_record.get("product") or {}
+    product_id = str(order_product.get("product_id") or "").strip()
+    if not str(customer.get("email") or "").strip() or not product_id:
+        return False
+    invite_id = f"invite_{order_record.get('order_id', '')}"
+    try:
+        if invites_repo.get(tenant_id, invite_id):
+            return False  # already planned for this order
+        product = (products_repo.get(tenant_id, product_id) if products_repo else None) \
+            or {"product_id": product_id, "name": order_product.get("name")}
+        invite = plan_invite(tenant_id=tenant_id, invite_id=invite_id, order_id=order_record.get("order_id", ""),
+                             product=product, customer=customer, now=now)
+        invites_repo.put(invite)
+        return True
+    except Exception:  # noqa: BLE001 — invites are an enhancement; never fail order persistence on them
+        return False
 
 
 def order_record_from_session(session: dict[str, Any], tenant_id: str, now: int, fees: dict[str, Any]) -> dict[str, Any]:

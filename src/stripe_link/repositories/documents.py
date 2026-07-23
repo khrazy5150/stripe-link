@@ -818,6 +818,16 @@ def reviews_repository(table: Any | None = None) -> DynamoDocumentRepository:
     )
 
 
+def review_invites_repository(table: Any | None = None) -> DynamoDocumentRepository:
+    # Post-purchase invite records — same table as reviews, distinct document_type (own SK prefix + scan_type).
+    return DynamoDocumentRepository(
+        os.environ.get("REVIEWS_TABLE", ""),
+        document_type="review_invite",
+        id_field="invite_id",
+        table=table,
+    )
+
+
 def services_repository(table: Any | None = None) -> DynamoDocumentRepository:
     return DynamoDocumentRepository(
         os.environ.get("SERVICES_TABLE", ""),
