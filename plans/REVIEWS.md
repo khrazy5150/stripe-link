@@ -134,6 +134,26 @@ source: it's the strongest anti-spam gate (only actual purchasers get the link) 
   policy choice). One invite per purchased line.
 - **Payoff loop:** real buyers → verified reviews → real AggregateRating → star snippets → conversions.
 
+### Default follow-up sequence (email now, SMS when configured)
+
+One invite rarely converts; a short, polite nudge sequence does. Ship a **default cadence** the tenant can
+tune or disable:
+
+- **Steps (from receipt = delivery / service date):** (1) **day 1**, (2) **day 3**, (3) **day 7**, (4)
+  **day 10**. Four touches, then stop.
+- **Stop conditions (critical — never nag a done customer):** the sequence cancels the moment the buyer
+  **submits a review** (or, for the Google destination, once we can detect it via the API read-back / a link
+  click). Also stops on unsubscribe/opt-out.
+- **Same destination every step** — the tenant's chosen Junior-Bay-or-Google link (see below); the follow-ups
+  just re-send it. No sentiment branching (stays non-gating).
+- **SMS as an optional parallel channel (later):** if SMS origination is configured, mirror the sequence over
+  SMS (or a mixed cadence). Gated on the existing **10DLC / SMS origination** work (see plans/TODO.md) and its
+  opt-in + STOP/HELP handling; honor `sms_opted_out` and quiet hours. SMS is opt-in, so email is the always-on
+  default and SMS is additive.
+- **Reuse:** same scheduled-send machinery as the appointment-reminders engine (one-shot per step, cancel on
+  review/opt-out) — the sequence is just N scheduled steps instead of one. Per-step content is tenant-editable
+  copy with sensible defaults.
+
 ### Route invited buyers to Google reviews too (compliant "push", future phase)
 
 **You cannot programmatically post a review to Google** — the Business Profile API has **no create-review
