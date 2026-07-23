@@ -416,6 +416,15 @@ class SiteOrganizationIdentityTests(unittest.TestCase):
         self.assertNotIn("aggregateRating", node)
         self.assertNotIn('<section class="sl-reviews"', html)
 
+    def test_business_reviews_render_visibly_but_never_as_aggregate_rating(self):
+        # Business (self-serving) reviews are trust content only — Google suppresses their AggregateRating.
+        reviews = [{"target": {"type": "business", "id": "site_x"}, "rating": 5, "author": "Sam", "body": "Great service.", "status": "approved", "source": "manual"}]
+        html = self._render(reviews=reviews)
+        self.assertIn("sl-business-reviews", html)
+        self.assertIn("Great service.", html)
+        for block in ld_blocks(html):
+            self.assertNotIn("AggregateRating", json.dumps(block))
+
     def test_website_node_publishes_organization(self):
         website = self._node(self._render(site={"organization": self.ORG}), "WebSite")
         self.assertIsNotNone(website)

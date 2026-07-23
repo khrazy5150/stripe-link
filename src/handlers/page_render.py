@@ -99,7 +99,7 @@ def handler(event, context, *, sites_repo=None, reviews_repo=None):
         site = find_site_for_page(sites_repo, str(page.get("tenant_id") or ""), str(page.get("page_id") or ""))
         if reviews_repo is None and os.environ.get("REVIEWS_TABLE"):
             reviews_repo = reviews_repository()
-        reviews = load_page_reviews(reviews_repo, str(page.get("tenant_id") or ""), products_by_id)
+        reviews = load_page_reviews(reviews_repo, str(page.get("tenant_id") or ""), products_by_id, str((site or {}).get("site_id") or ""))
         html = render_page(
             page, offer, products_by_id, selected_prices, checkout_url, api_base_url,
             services_by_id=services_by_id, offers_by_id=offers_by_id, canonical_url=canonical_url,

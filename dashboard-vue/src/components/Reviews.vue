@@ -22,12 +22,26 @@
           Enter a genuine review a customer gave you. Only add real reviews — fabricated ratings violate Google's
           guidelines. Reviews aggregate across all approved ones; low ratings count too (no cherry-picking).
         </p>
+        <label class="offer-field">
+          <span>Review of</span>
+          <select v-model="form.target_type">
+            <option value="product">A product</option>
+            <option value="business">The business (store)</option>
+          </select>
+        </label>
         <div class="offer-two-column">
-          <label class="offer-field">
+          <label v-if="form.target_type === 'product'" class="offer-field">
             <span>Product</span>
             <select v-model="form.product_id">
               <option value="">Choose a product…</option>
               <option v-for="p in products" :key="p.product_id" :value="p.product_id">{{ p.name || p.product_id }}</option>
+            </select>
+          </label>
+          <label v-else class="offer-field">
+            <span>Business (Site)</span>
+            <select v-model="form.site_id">
+              <option value="">Choose a Site…</option>
+              <option v-for="s in sitesStore.sites" :key="s.site_id" :value="s.site_id">{{ s.name || s.site_id }}</option>
             </select>
           </label>
           <label class="offer-field">
@@ -114,25 +128,32 @@
 import { computed, onMounted, reactive, ref } from "vue";
 import { apiRequest } from "../api/client";
 import { useReviewsStore, REVIEW_STATUSES, reviewStatusLabel, reviewStatusClass } from "../stores/reviews";
+import { useSitesStore } from "../stores/sites";
 import ConfirmDialog from "./shared/ConfirmDialog.vue";
 
 const store = useReviewsStore();
+const sitesStore = useSitesStore();
 const products = ref([]);
 const pendingDelete = ref(null);
 
-const form = reactive({ product_id: "", rating: 5, author: "", title: "", body: "", review_date: "", status: "approved" });
-const canSubmit = computed(() => !!form.product_id && !!form.author && !!form.body);
+const form = reactive({ target_type: "product", product_id: "", site_id: "", rating: 5, author: "", title: "", body: "", review_date: "", status: "approved" });
+const canSubmit = computed(() =>
+  !!form.author && !!form.body && (form.target_type === "business" ? !!form.site_id : !!form.product_id));
 
 function productName(review) {
   const id = review.target?.id;
+  if (review.target?.type === "business") return sitesStore.sites.find((s) => s.site_id === id)?.name || "your store";
   return products.value.find((p) => p.product_id === id)?.name || id || "product";
 }
 
 async function submit() {
   if (!canSubmit.value) return;
+  const target = form.target_type === "business"
+    ? { type: "business", id: form.site_id }
+    : { type: "product", id: form.product_id };
   try {
     await store.create({
-      target: { type: "product", id: form.product_id },
+      target,
       rating: form.rating,
       author: form.author,
       body: form.body,
@@ -158,6 +179,7 @@ async function confirmDelete() {
 
 onMounted(async () => {
   store.ensureLoaded();
+  sitesStore.ensureLoaded();
   try {
     const body = await apiRequest("/products");
     products.value = Array.isArray(body.products) ? body.products : [];

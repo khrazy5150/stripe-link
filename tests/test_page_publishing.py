@@ -205,6 +205,22 @@ class PagePublishingTests(unittest.TestCase):
             "indexing": {"eligibility": "blocked"}, "pages": pages, "created_at": 1, "updated_at": 1,
         }
 
+    def test_load_page_reviews_includes_product_and_owning_business_only(self):
+        from stripe_link.runtime.publishing import load_page_reviews
+
+        class Repo:
+            def list_for_tenant(self, tenant_id):
+                return [
+                    {"target": {"type": "product", "id": "p1"}, "status": "approved", "source": "manual", "rating": 5},
+                    {"target": {"type": "business", "id": "site_x"}, "status": "approved", "source": "manual", "rating": 5},
+                    {"target": {"type": "business", "id": "other"}, "status": "approved", "source": "manual", "rating": 1},
+                    {"target": {"type": "product", "id": "p1"}, "status": "pending", "source": "manual", "rating": 1},
+                    {"target": {"type": "business", "id": "site_x"}, "status": "approved", "source": "gbp", "rating": 1},
+                ]
+        out = load_page_reviews(Repo(), "t1", {"p1": {}}, site_id="site_x")
+        self.assertEqual(sorted((r["target"]["type"], r["target"]["id"]) for r in out),
+                         [("business", "site_x"), ("product", "p1")])  # other-site, pending, gbp all excluded
+
     def test_detach_page_from_sites_removes_from_route_map(self):
         site = self._valid_site({"/": {"page_id": "page_home", "page_type": "homepage"},
                                  "/deal": {"page_id": "page_deal", "page_type": "landing"}})

@@ -1060,6 +1060,9 @@ _RENDER_CATEGORY_PAGES: dict[str, dict[str, str]] = {}
 # product_id -> its markup-eligible reviews for this render (plans/REVIEWS.md). Feeds the Product
 # aggregateRating/review JSON-LD AND the visible reviews block (Google requires the review text on-page).
 _RENDER_REVIEWS: dict[str, list[dict[str, Any]]] = {}
+# Business-target reviews for the page's Site — a visible trust block, NEVER a self-serving LocalBusiness
+# AggregateRating (Google suppresses those; plans/REVIEWS.md).
+_RENDER_BUSINESS_REVIEWS: list[dict[str, Any]] = []
 # A page is indexable only when it is the published artifact in production (SEO-02/21). Everything else —
 # the tenant's preview, any non-production environment — must be kept out of the index.
 INDEXABLE_ROBOTS = "index,follow,max-image-preview:large,max-snippet:-1"
@@ -1160,10 +1163,13 @@ def render_page(
         if isinstance(cat_entry, dict) and cat_entry.get("page_type") == "category" and cat_entry.get("category"):
             _RENDER_CATEGORY_PAGES[str(cat_entry["category"])] = {"slug": str(cat_slug), "label": str(cat_entry.get("label") or "")}
     _RENDER_REVIEWS.clear()
+    _RENDER_BUSINESS_REVIEWS.clear()
     for review in (reviews or []):
         target = review.get("target") or {}
         if target.get("type") == "product" and str(target.get("id") or ""):
             _RENDER_REVIEWS.setdefault(str(target["id"]), []).append(review)
+        elif target.get("type") == "business":
+            _RENDER_BUSINESS_REVIEWS.append(review)
     try:
         return _render_page_body(
             page, offer, products_by_id, selected_prices, checkout_url, api_base_url,
@@ -1178,6 +1184,7 @@ def render_page(
         _RENDER_NAV["primary"], _RENDER_NAV["footer"] = [], []
         _RENDER_CATEGORY_PAGES.clear()
         _RENDER_REVIEWS.clear()
+        _RENDER_BUSINESS_REVIEWS.clear()
         _RENDER_ORG.clear()
         _RENDER_SEO.clear()
 
@@ -1252,6 +1259,7 @@ def _render_page_body(
     )
     # First-party reviews render after the page's sections (visible content matching the Product review JSON-LD).
     reviews_block = render_reviews_block(offer, products_by_id)
+    business_reviews_block = render_business_reviews_block()
     head_extras = "\n".join(part for part in (
         render_head_section(section, page, offer, products_by_id, services_by_id, composed_sections)
         for section in head_sections
@@ -1289,6 +1297,7 @@ def _render_page_body(
         breadcrumb,
         body,
         reviews_block,
+        business_reviews_block,
         footer_nav,
         legal_footer,
         "  </main>",
@@ -2380,10 +2389,26 @@ def _review_ld(review: dict[str, Any]) -> dict[str, Any]:
     return node
 
 
+def _review_li(review: dict[str, Any]) -> str:
+    rating = max(0, min(5, int(review.get("rating") or 0)))
+    stars = "★" * rating + "☆" * (5 - rating)
+    author = escape(str(review.get("author") or "Anonymous"))
+    body = escape(str(review.get("body") or ""))
+    title = str(review.get("title") or "").strip()
+    date = str(review.get("review_date") or "").strip()
+    title_html = f'<strong class="sl-review-title">{escape(title)}</strong> ' if title else ""
+    date_html = f'<time class="sl-review-date" datetime="{escape(date)}">{escape(date)}</time>' if date else ""
+    return (
+        f'<li class="sl-review"><span class="sl-review-stars" aria-label="Rated {rating} of 5">{stars}</span>'
+        f'<span class="sl-review-author">{author}</span>{date_html}'
+        f'<p class="sl-review-body">{title_html}{body}</p></li>'
+    )
+
+
 def render_reviews_block(offer: dict[str, Any], products_by_id: dict[str, dict[str, Any]]) -> str:
-    """The VISIBLE reviews section — Google requires the review text + author in the initial HTML, matching the
-    Product review/aggregateRating JSON-LD exactly. All approved reviews render, low ratings included (no
-    cherry-picking). Empty string when the page's product has none."""
+    """The VISIBLE product reviews section — Google requires the review text + author in the initial HTML,
+    matching the Product review/aggregateRating JSON-LD exactly. All approved reviews render, low ratings
+    included (no cherry-picking). Empty string when the page's product has none."""
     product = first_offer_product(offer, products_by_id)
     reviews = markup_eligible(_RENDER_REVIEWS.get(str(product.get("product_id") or "")) or [])
     if not reviews:
@@ -2394,26 +2419,28 @@ def render_reviews_block(offer: dict[str, Any], products_by_id: dict[str, dict[s
         count = aggregate["review_count"]
         summary = (f'      <p class="sl-reviews-summary"><span class="sl-reviews-avg">{aggregate["rating_value"]}</span>'
                    f' out of 5 · {count} review{"" if count == 1 else "s"}</p>')
-    items = []
-    for review in reviews:
-        rating = max(0, min(5, int(review.get("rating") or 0)))
-        stars = "★" * rating + "☆" * (5 - rating)
-        author = escape(str(review.get("author") or "Anonymous"))
-        body = escape(str(review.get("body") or ""))
-        title = str(review.get("title") or "").strip()
-        date = str(review.get("review_date") or "").strip()
-        title_html = f'<strong class="sl-review-title">{escape(title)}</strong> ' if title else ""
-        date_html = f'<time class="sl-review-date" datetime="{escape(date)}">{escape(date)}</time>' if date else ""
-        items.append(
-            f'<li class="sl-review"><span class="sl-review-stars" aria-label="Rated {rating} of 5">{stars}</span>'
-            f'<span class="sl-review-author">{author}</span>{date_html}'
-            f'<p class="sl-review-body">{title_html}{body}</p></li>'
-        )
+    items = "".join(_review_li(review) for review in reviews)
     return (
         '    <section class="sl-reviews" data-section-type="reviews">\n'
         '      <h2 class="sl-section-heading">Customer reviews</h2>\n'
         f'{summary}\n'
-        f'      <ul class="sl-reviews-list">{"".join(items)}</ul>\n'
+        f'      <ul class="sl-reviews-list">{items}</ul>\n'
+        '    </section>'
+    )
+
+
+def render_business_reviews_block() -> str:
+    """VISIBLE business-target reviews (what customers say about the store) — trust content only, NO
+    AggregateRating markup (self-serving business ratings are suppressed by Google; plans/REVIEWS.md). Renders
+    on any page of the business's Site. All approved render; no cherry-picking. Empty when there are none."""
+    reviews = markup_eligible(_RENDER_BUSINESS_REVIEWS)
+    if not reviews:
+        return ""
+    items = "".join(_review_li(review) for review in reviews)
+    return (
+        '    <section class="sl-reviews sl-business-reviews" data-section-type="business_reviews">\n'
+        '      <h2 class="sl-section-heading">What our customers say</h2>\n'
+        f'      <ul class="sl-reviews-list">{items}</ul>\n'
         '    </section>'
     )
 

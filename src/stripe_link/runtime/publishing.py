@@ -165,22 +165,27 @@ def _denormalize_page_catalog(site: dict[str, Any], page_id: str, offer_id: str,
     return changed
 
 
-def load_page_reviews(reviews_repository: Any | None, tenant_id: str, products_by_id: dict[str, Any]) -> list[dict[str, Any]]:
-    """Approved, first-party, product-target reviews for the products on this page (plans/REVIEWS.md). Only
-    these feed the Product aggregateRating/review markup + the visible block. Best-effort."""
-    if not reviews_repository or not tenant_id or not products_by_id:
+def load_page_reviews(reviews_repository: Any | None, tenant_id: str, products_by_id: dict[str, Any], site_id: str = "") -> list[dict[str, Any]]:
+    """Approved, first-party reviews for this page (plans/REVIEWS.md): product-target reviews for the page's
+    products (→ Product aggregateRating/review markup + visible block) AND business-target reviews for the
+    owning Site (→ a visible trust block, NO self-serving AggregateRating). Best-effort."""
+    if not reviews_repository or not tenant_id:
         return []
     try:
         reviews = reviews_repository.list_for_tenant(tenant_id)
     except Exception:  # noqa: BLE001 — reviews are an enhancement; never fail a publish on them
         return []
-    return [
-        r for r in reviews
-        if isinstance(r, dict)
-        and (r.get("target") or {}).get("type") == "product"
-        and str((r.get("target") or {}).get("id") or "") in products_by_id
-        and r.get("status") == "approved" and r.get("source") != "gbp"
-    ]
+    out = []
+    for r in reviews:
+        if not isinstance(r, dict) or r.get("status") != "approved" or r.get("source") == "gbp":
+            continue
+        target = r.get("target") or {}
+        target_id = str(target.get("id") or "")
+        if target.get("type") == "product" and target_id in (products_by_id or {}):
+            out.append(r)
+        elif target.get("type") == "business" and site_id and target_id == str(site_id):
+            out.append(r)
+    return out
 
 
 def detach_page_from_sites(sites_repository: Any | None, domains_index_repository: Any | None, tenant_id: str, page_id: str) -> int:
@@ -496,7 +501,7 @@ def publish_page_document(
     eligibility = ((site or {}).get("indexing") or {}).get("eligibility") or "blocked"
     site_archived = (site or {}).get("status") == "archived"
 
-    page_reviews = load_page_reviews(reviews_repository, tenant_id, products_by_id)
+    page_reviews = load_page_reviews(reviews_repository, tenant_id, products_by_id, str((site or {}).get("site_id") or ""))
 
     def _render(robots: str) -> str:
         return render_page(
