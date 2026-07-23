@@ -140,13 +140,13 @@
       <section class="modal-card landing-wizard-modal" role="dialog" aria-modal="true" aria-labelledby="landingWizardTitle">
         <header class="modal-card-header">
           <div>
-            <h2 id="landingWizardTitle">Create Landing Page</h2>
-            <p>Step {{ wizardStep }} of {{ wizardTotalSteps }}</p>
+            <h2 id="landingWizardTitle">{{ isEditingOfferless ? "Edit page" : "Create Landing Page" }}</h2>
+            <p v-if="!isEditingOfferless">Step {{ wizardStep }} of {{ wizardTotalSteps }}</p>
           </div>
           <button type="button" class="modal-close" aria-label="Close landing page wizard" @click="closeWizard">×</button>
         </header>
 
-        <div class="wizard-progress" aria-hidden="true">
+        <div v-if="!isEditingOfferless" class="wizard-progress" aria-hidden="true">
           <span v-for="step in wizardTotalSteps" :key="step" :class="{ active: step <= wizardStep }"></span>
         </div>
 
@@ -362,25 +362,25 @@
         </div>
 
         <footer class="modal-footer">
-          <button class="secondary-action" type="button" @click="wizardStep === 1 ? closeWizard() : wizardStep--">
-            {{ wizardStep === 1 ? "Cancel" : "Back" }}
+          <button class="secondary-action" type="button" @click="(wizardStep === 1 || isEditingOfferless) ? closeWizard() : wizardStep--">
+            {{ (wizardStep === 1 || isEditingOfferless) ? "Cancel" : "Back" }}
           </button>
           <template v-if="form.pageKind === 'storefront'">
             <button v-if="wizardStep === 1" class="primary-action" type="button" @click="nextWizardStep">Next</button>
             <button v-else class="primary-action" type="button" :disabled="creatingStorefront" @click="createStorefront">
-              {{ creatingStorefront ? "Creating…" : "Create storefront homepage" }}
+              {{ creatingStorefront ? "Saving…" : isEditingOfferless ? "Save changes" : "Create storefront homepage" }}
             </button>
           </template>
           <template v-else-if="form.pageKind === 'category'">
             <button v-if="wizardStep === 1" class="primary-action" type="button" @click="nextWizardStep">Next</button>
             <button v-else class="primary-action" type="button" :disabled="creatingStorefront || !form.categoryKey" @click="createCategory">
-              {{ creatingStorefront ? "Creating…" : "Create category page" }}
+              {{ creatingStorefront ? "Saving…" : isEditingOfferless ? "Save changes" : "Create category page" }}
             </button>
           </template>
           <template v-else-if="form.pageKind === 'profile'">
             <button v-if="wizardStep === 1" class="primary-action" type="button" @click="nextWizardStep">Next</button>
             <button v-else class="primary-action" type="button" :disabled="creatingStorefront" @click="createProfile">
-              {{ creatingStorefront ? "Creating…" : "Create store profile" }}
+              {{ creatingStorefront ? "Saving…" : isEditingOfferless ? "Save changes" : "Create store profile" }}
             </button>
           </template>
           <template v-else>
@@ -1479,6 +1479,7 @@ function resetWizard() {
   wizardStep.value = 1;
   wizardError.value = "";
   offerSearch.value = "";
+  editingOfferlessOriginal.value = null;
 }
 
 // Load on first search-box focus so filtering works without clicking Load Pages first (mirrors Products).
@@ -1625,6 +1626,36 @@ const storefrontCandidatePages = computed(() =>
 );
 
 const creatingStorefront = ref(false);
+// When set, the offer-less wizard is EDITING this existing page (merge into it) rather than creating a new one.
+const editingOfferlessOriginal = ref(null);
+const isEditingOfferless = computed(() => !!editingOfferlessOriginal.value);
+
+// Build the final offer-less page doc: a fresh draft when creating, or the original page merged with the
+// edited fields (preserving id / status / created_at / theme / analytics / etc.) when editing.
+function finalizeOfferlessDoc(sections, { name, slug, title }) {
+  const now = Math.floor(Date.now() / 1000);
+  const base = editingOfferlessOriginal.value || {
+    schema_version: "2026-05-29",
+    document_type: "page",
+    tenant_id: getTenantId(),
+    page_id: form.page_id,
+    status: "draft",
+    published_at: null,
+    theme: { template: "universal_bundle", preset: form.preset || "clean-slate" },
+    created_at: now,
+    revision: 0,
+  };
+  return cleanObject({
+    ...base,
+    name,
+    route: { ...(base.route || {}), slug: slugify(slug || name) },
+    seo: { ...(base.seo || {}), title },
+    sections,
+    revision: (base.revision || 0) + 1,
+    created_at: base.created_at || now,
+    updated_at: now,
+  });
+}
 
 function isStorefrontPage(page) {
   // Offer-less pages (storefront / category / profile) can't hydrate the offer-builder — guard them out.
@@ -1634,32 +1665,16 @@ function isStorefrontPage(page) {
 }
 
 function buildStorefrontPageDocument() {
-  const now = Math.floor(Date.now() / 1000);
   const byId = new Map((pages.value || []).map((p) => [p.page_id, p]));
   const items = (form.storefront.items || [])
     .map((pageId) => byId.get(pageId))
     .filter((p) => p && p.offer_id)
     .map((p) => ({ offer_id: p.offer_id, slug: `/${slugify(p.route?.slug || p.name || p.page_id)}` }));
   const headline = form.storefront.headline || form.name || "Storefront";
-  return cleanObject({
-    schema_version: "2026-05-29",
-    document_type: "page",
-    tenant_id: getTenantId(),
-    page_id: form.page_id,
-    name: form.name || "Storefront homepage",
-    status: "draft",
-    published_at: null,
-    route: { slug: slugify(form.slug || form.name || "home") },
-    seo: { title: headline },
-    theme: { template: "universal_bundle", preset: form.preset || "clean-slate" },
-    sections: [
-      { id: "brand-hero", type: "brand_hero", headline, tagline: form.storefront.tagline || undefined },
-      { id: "catalog-grid", type: "catalog_grid", heading: form.storefront.heading || undefined, items },
-    ],
-    revision: 1,
-    created_at: now,
-    updated_at: now,
-  });
+  return finalizeOfferlessDoc([
+    { id: "brand-hero", type: "brand_hero", headline, tagline: form.storefront.tagline || undefined },
+    { id: "catalog-grid", type: "catalog_grid", heading: form.storefront.heading || undefined, items },
+  ], { name: form.name || "Storefront homepage", slug: form.slug || form.name || "home", title: headline });
 }
 
 async function createStorefront() {
@@ -1674,7 +1689,9 @@ async function createStorefront() {
     const body = await apiRequest("/pages", { method: "POST", body: document });
     const saved = body.page || document;
     pages.value = [saved, ...pages.value.filter((p) => p.page_id !== saved.page_id)];
-    message.value = "Storefront homepage created. Publish it, then set it as your homepage on the Sites screen.";
+    message.value = isEditingOfferless.value
+      ? "Storefront homepage saved."
+      : "Storefront homepage created. Publish it, then set it as your homepage on the Sites screen.";
     closeWizard();
   } catch (error) {
     wizardError.value = error.message || "Failed to create the storefront homepage.";
@@ -1684,53 +1701,21 @@ async function createStorefront() {
 }
 
 function buildCategoryPageDocument() {
-  const now = Math.floor(Date.now() / 1000);
   const label = categoryLabel(form.categoryKey);
-  return cleanObject({
-    schema_version: "2026-05-29",
-    document_type: "page",
-    tenant_id: getTenantId(),
-    page_id: form.page_id,
-    name: form.name || `${label} (category)`,
-    status: "draft",
-    published_at: null,
-    route: { slug: slugify(form.slug || form.name || label || "category") },
-    seo: { title: label },
-    theme: { template: "universal_bundle", preset: form.preset || "clean-slate" },
-    sections: [
-      { id: "brand-hero", type: "brand_hero", headline: label },
-      // A category-driven grid: no items — the publisher fills them from the Site's pages in this category.
-      { id: "catalog-grid", type: "catalog_grid", heading: form.storefront.heading || label, category: form.categoryKey },
-    ],
-    revision: 1,
-    created_at: now,
-    updated_at: now,
-  });
+  return finalizeOfferlessDoc([
+    { id: "brand-hero", type: "brand_hero", headline: label },
+    // A category-driven grid: no items — the publisher fills them from the Site's pages in this category.
+    { id: "catalog-grid", type: "catalog_grid", heading: form.storefront.heading || label, category: form.categoryKey },
+  ], { name: form.name || `${label} (category)`, slug: form.slug || form.name || label || "category", title: label });
 }
 
 function buildProfilePageDocument() {
-  const now = Math.floor(Date.now() / 1000);
   const heading = form.storefront.heading || "About our store";
-  return cleanObject({
-    schema_version: "2026-05-29",
-    document_type: "page",
-    tenant_id: getTenantId(),
-    page_id: form.page_id,
-    name: form.name || "Store profile",
-    status: "draft",
-    published_at: null,
-    route: { slug: slugify(form.slug || form.name || "about") },
-    seo: { title: heading },
-    theme: { template: "universal_bundle", preset: form.preset || "clean-slate" },
-    // Offer-less: the seller_profile section derives its content from the Site Organization at publish.
-    sections: [
-      { id: "brand-hero", type: "brand_hero", headline: heading },
-      { id: "seller-profile", type: "seller_profile", heading },
-    ],
-    revision: 1,
-    created_at: now,
-    updated_at: now,
-  });
+  // Offer-less: the seller_profile section derives its content from the Site Organization at publish.
+  return finalizeOfferlessDoc([
+    { id: "brand-hero", type: "brand_hero", headline: heading },
+    { id: "seller-profile", type: "seller_profile", heading },
+  ], { name: form.name || "Store profile", slug: form.slug || form.name || "about", title: heading });
 }
 
 async function createProfile() {
@@ -1741,7 +1726,9 @@ async function createProfile() {
     const body = await apiRequest("/pages", { method: "POST", body: document });
     const saved = body.page || document;
     pages.value = [saved, ...pages.value.filter((p) => p.page_id !== saved.page_id)];
-    message.value = "Store profile page created. Publish it, then attach it (e.g. at /about) on the Sites screen.";
+    message.value = isEditingOfferless.value
+      ? "Store profile page saved."
+      : "Store profile page created. Publish it, then attach it (e.g. at /about) on the Sites screen.";
     closeWizard();
   } catch (error) {
     wizardError.value = error.message || "Failed to create the store profile page.";
@@ -1762,7 +1749,9 @@ async function createCategory() {
     const body = await apiRequest("/pages", { method: "POST", body: document });
     const saved = body.page || document;
     pages.value = [saved, ...pages.value.filter((p) => p.page_id !== saved.page_id)];
-    message.value = "Category page created. Publish it, then attach it to your Site on the Sites screen.";
+    message.value = isEditingOfferless.value
+      ? "Category page saved."
+      : "Category page created. Publish it, then attach it to your Site on the Sites screen.";
     closeWizard();
   } catch (error) {
     wizardError.value = error.message || "Failed to create the category page.";
@@ -2510,11 +2499,42 @@ async function onBuilderOfferChange() {
   builder.preset = builder.preset || "clean-slate";
 }
 
+async function editOfferlessPage(page) {
+  const sections = page.sections || [];
+  const brandHero = sections.find((s) => s && s.type === "brand_hero");
+  const catalog = sections.find((s) => s && s.type === "catalog_grid");
+  const profile = sections.find((s) => s && s.type === "seller_profile");
+  const kind = profile ? "profile" : catalog?.category ? "category" : "storefront";
+
+  resetWizard();
+  form.pageKind = kind;
+  form.page_id = page.page_id;
+  form.name = page.name || "";
+  form.slug = page.route?.slug || "";
+  form.storefront.headline = brandHero?.headline || "";
+  form.storefront.tagline = brandHero?.tagline || "";
+  form.storefront.heading = catalog?.heading || profile?.heading || "";
+  form.categoryKey = catalog?.category || "";
+  editingOfferlessOriginal.value = { ...page };
+  wizardOpen.value = true;
+  wizardStep.value = 2;
+  try {
+    await ensureCatalogLoaded();
+    if (kind === "category") await ensureProductsLoaded();
+  } catch (err) {
+    wizardError.value = err.message || "Failed to load catalog.";
+  }
+  if (kind === "storefront") {
+    // Map the curated grid's stored {offer_id} back to page_ids for the page-picker.
+    const pageByOffer = new Map((pages.value || []).filter((p) => p.offer_id).map((p) => [p.offer_id, p.page_id]));
+    form.storefront.items = (catalog?.items || []).map((it) => pageByOffer.get(it.offer_id)).filter(Boolean);
+  }
+}
+
 function editPage(page) {
   openMenuId.value = "";
   if (isStorefrontPage(page)) {
-    // The storefront (offer-less) editor is a follow-up; the offer-builder can't hydrate a catalog page.
-    message.value = "Editing a storefront homepage in the builder is coming soon. You can publish it, or delete and recreate it.";
+    editOfferlessPage(page);
     return;
   }
   populateBuilderFromPage(page);
