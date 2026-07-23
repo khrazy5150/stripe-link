@@ -1081,16 +1081,20 @@
 
     <ConfirmDialog
       :open="!!copyPlan"
-      :title="'Copy to ' + targetEnvLabel + '?'"
-      :confirm-label="'Copy to ' + targetEnvLabel"
+      :danger="!!copyPlan?.existingTarget"
+      :title="(copyPlan?.existingTarget ? 'Replace in ' : 'Copy to ') + targetEnvLabel + '?'"
+      :confirm-label="(copyPlan?.existingTarget ? 'Replace in ' : 'Copy to ') + targetEnvLabel"
       :busy="copyBusy"
       @cancel="copyPlan = null"
       @confirm="executeCopy"
     >
       <template v-if="copyPlan">
         Copies <strong>{{ copyPlan.page.name }}</strong>{{ copyPlan.offerDocs.length ? ` plus its offer and ${copyPlan.productDocs.length} product${copyPlan.productDocs.length === 1 ? '' : 's'}` : '' }} to {{ targetEnvLabel }} (same IDs).
-        <template v-if="copyPlan.existingTarget?.status === 'published'"> The {{ targetEnvLabel }} page already exists and stays published — its content is updated.</template>
-        <template v-else-if="copyPlan.existingTarget"> The {{ targetEnvLabel }} page already exists and will be updated (kept as {{ copyPlan.existingTarget.status }}).</template>
+        <template v-if="copyPlan.existingTarget">
+          <br><strong class="copy-replace-warning">⚠ This replaces the existing {{ targetEnvLabel }} page{{ copyPlan.offerDocs.length ? ' and its catalog' : '' }} and cannot be undone.</strong>
+          <template v-if="copyPlan.existingTarget.status === 'published'"> The {{ targetEnvLabel }} page stays published; its content is overwritten.</template>
+          <template v-else> The existing {{ targetEnvLabel }} page (currently {{ copyPlan.existingTarget.status }}) is overwritten.</template>
+        </template>
         <template v-else> It lands as a new draft in {{ targetEnvLabel }}, unattached to any Site.</template>
         <template v-if="copyPlan.hasServices"> Note: this offer includes services, which aren't copied — set them up in {{ targetEnvLabel }}.</template>
         <template v-if="copyError"><br><span class="field-error">{{ copyError }}</span></template>

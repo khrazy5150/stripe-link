@@ -3486,6 +3486,13 @@ button:disabled {
   color: var(--text);
 }
 
+/* Loud, unmissable warning when a cross-env copy will overwrite an existing target page. */
+.copy-replace-warning {
+  display: inline-block;
+  margin-top: 0.4rem;
+  color: #dc2626;
+}
+
 /* Slug lives on the metrics row (kept off the crowded title row so it can't push the Site badge out). */
 .landing-page-meta .landing-page-slug {
   color: var(--accent);
