@@ -6,6 +6,7 @@
         <p>Your public website — the domain, identity, and SEO that every landing page inherits.</p>
       </div>
       <div class="button-row">
+        <button v-if="store.sites.length && !creating" class="primary-action" type="button" @click="startCreate">Add New Site</button>
         <button class="secondary-action" type="button" :disabled="store.loading" @click="reload">
           {{ store.loading ? "Loading..." : "Reload" }}
         </button>
@@ -15,15 +16,19 @@
     <div v-if="store.error" class="keys-status-banner error">{{ store.error }}</div>
     <div v-else-if="store.message" class="keys-status-banner">{{ store.message }}</div>
 
-    <div v-if="store.loaded && !store.sites.length" class="dashboard-card">
+    <div v-if="creating || (store.loaded && !store.sites.length)" class="dashboard-card">
       <div class="dashboard-card-body">
-        <h2>Create your Site</h2>
+        <h2>{{ store.sites.length ? "Add a new Site" : "Create your Site" }}</h2>
         <p class="field-note">
-          Your Site is your public website — it owns your hostname and business identity, and every page lives
-          under it. We'll seed the business identity from your Profile → Business details and attach any landing
-          pages you've already built. It starts on a free <strong>{{ hostingDomainHint }}</strong> address and
-          stays private to search engines until you connect your own custom domain.
+          A Site is a public website — it owns a hostname and business identity, and the landing pages you choose
+          live under it. The identity is seeded from your Profile → Business details. It starts on a free
+          <strong>{{ hostingDomainHint }}</strong> address and stays private to search engines until you connect
+          a custom domain. A landing page belongs to one Site at a time.
         </p>
+        <label class="offer-field">
+          <span>Site name</span>
+          <input v-model.trim="createName" type="text" placeholder="My Shop" autocapitalize="words" />
+        </label>
         <label class="offer-field">
           <span>Choose your store address</span>
           <div class="subdomain-input">
@@ -45,12 +50,25 @@
           </div>
           <small class="field-note">This address is permanent and unique to you — pick it deliberately. You can add a custom domain later.</small>
         </label>
-        <p class="field-note">
-          {{ pages.length ? `We'll attach your ${pages.length} existing landing page${pages.length === 1 ? '' : 's'}.` : "You don't have any landing pages yet — that's fine. Create your Site first, then add pages to it." }}
-        </p>
+        <div class="offer-field">
+          <span>Pages to include</span>
+          <ul v-if="pages.length" class="category-menu">
+            <li v-for="p in pages" :key="p.page_id">
+              <label class="checkbox-row" :class="{ 'is-disabled': !!claimedBy(p.page_id) }">
+                <input type="checkbox" :value="p.page_id" v-model="createPageIds" :disabled="!!claimedBy(p.page_id)" />
+                {{ p.name || p.page_id }}
+                <em v-if="claimedBy(p.page_id)">— on {{ claimedBy(p.page_id) }}</em>
+              </label>
+            </li>
+          </ul>
+          <p v-else class="field-note">You don't have any landing pages yet — that's fine. Create the Site now and add pages to it later.</p>
+          <small class="field-note">Pick which pages this Site serves. A page already on another Site is locked — remove it there first to move it here.</small>
+        </div>
+        <p v-if="formError" class="field-error">{{ formError }}</p>
         <div class="button-row">
-          <button class="primary-action" type="button" :disabled="!canCreate" @click="createDefault">
-            {{ store.saving ? "Creating..." : "Create my Site" }}
+          <button v-if="store.sites.length" class="secondary-action" type="button" @click="cancelCreate">Cancel</button>
+          <button class="primary-action" type="button" :disabled="!canCreate" @click="createSite">
+            {{ store.saving ? "Creating..." : (store.sites.length ? "Create Site" : "Create my Site") }}
           </button>
         </div>
       </div>
@@ -226,7 +244,7 @@
             <div class="homepage-picker">
               <select v-model="homepagePick">
                 <option value="">Choose a page…</option>
-                <option v-for="p in pages" :key="p.page_id" :value="p.page_id">{{ p.name || p.page_id }}</option>
+                <option v-for="p in assignablePages" :key="p.page_id" :value="p.page_id">{{ p.name || p.page_id }}</option>
               </select>
               <button type="button" class="secondary-action" :disabled="!homepagePick || homepageBusy" @click="setAsHomepage">
                 {{ homepageBusy ? "Setting…" : "Set as homepage" }}
@@ -241,7 +259,7 @@
             <div class="homepage-picker">
               <select v-model="attachForm.pageId">
                 <option value="">Choose a page…</option>
-                <option v-for="p in pages" :key="p.page_id" :value="p.page_id">{{ p.name || p.page_id }}</option>
+                <option v-for="p in assignablePages" :key="p.page_id" :value="p.page_id">{{ p.name || p.page_id }}</option>
               </select>
               <input v-model.trim="attachForm.slug" type="text" placeholder="/slug" class="attach-slug" />
               <button type="button" class="secondary-action" :disabled="!attachForm.pageId || !attachForm.slug || attachBusy" @click="attachPage">
@@ -255,12 +273,18 @@
           <div class="offer-field">
             <span>Pages in this Site</span>
             <ul class="category-menu">
-              <li v-for="(entry, slug) in editing.pages" :key="slug">
-                <span class="font-mono">{{ slug }}</span> — {{ entry.label || entry.page_id }}
-                <em>({{ entry.page_type || 'landing' }}{{ entry.category ? ', ' + entry.category : '' }}{{ entry.enabled === false ? ', disabled' : '' }})</em>
+              <li v-for="(entry, slug) in editing.pages" :key="slug" class="page-row">
+                <span>
+                  <span class="font-mono">{{ slug }}</span> — {{ entry.label || entry.page_id }}
+                  <em>({{ entry.page_type || 'landing' }}{{ entry.category ? ', ' + entry.category : '' }}{{ entry.enabled === false ? ', disabled' : '' }})</em>
+                </span>
+                <button type="button" class="link-danger" :disabled="removeBusy === entry.page_id" @click="removePage(entry.page_id)">
+                  {{ removeBusy === entry.page_id ? "Removing…" : "Remove" }}
+                </button>
               </li>
             </ul>
-            <small>Page routing, slugs, and navigation get a full editor in a later phase.</small>
+            <p v-if="removeError" class="field-error">{{ removeError }}</p>
+            <small>Removing a page frees it to join another Site. Page routing, slugs, and navigation get a full editor in a later phase.</small>
           </div>
         </div>
         <footer class="modal-card-footer">
@@ -290,9 +314,27 @@ const formError = ref("");
 const hostingDomainHint = "jbay.uk";
 const entityTypes = ["OnlineStore", "Organization", "LocalBusiness", "HomeAndConstructionBusiness", "HealthAndBeautyBusiness", "FoodEstablishment", "ProfessionalService", "Store"];
 
+const creating = ref(false);
+const createName = ref("");
 const createSubdomain = ref("");
+const createPageIds = ref([]);
 const createCheck = useSubdomainCheck();
 const editCheck = useSubdomainCheck();
+
+const removeBusy = ref("");
+const removeError = ref("");
+
+// A page belongs to at most one Site. For the create form, a page on ANY existing Site is locked.
+// In the Site editor, a page on a DIFFERENT Site is locked (its own pages stay assignable).
+function claimedByOther(pageId, exceptSiteId) {
+  for (const s of store.sites) {
+    if (exceptSiteId && s.site_id === exceptSiteId) continue;
+    if (Object.values(s.pages || {}).some((e) => e && e.page_id === pageId)) return s.name || s.site_id;
+  }
+  return "";
+}
+const claimedBy = (pageId) => claimedByOther(pageId, "");
+const assignablePages = computed(() => pages.value.filter((p) => !claimedByOther(p.page_id, editing.value?.site_id)));
 
 const form = reactive({ name: "", subdomain: "", org: { name: "", legal_name: "", entity_type: "OnlineStore", description: "", telephone: "", email: "", address: { locality: "", region: "" } }, seo: { google_site_verification: "", bing_site_verification: "" } });
 
@@ -499,12 +541,48 @@ function pickEdit(value) {
   editCheck.check(value, editing.value?.site_id);
 }
 
-async function createDefault() {
+function defaultCreateSelection() {
+  // First-ever Site sweeps in every page (unchanged one-click onboarding); an additional Site starts empty
+  // so the tenant deliberately picks — the natural path to a one-page Site.
+  return store.sites.length ? [] : pages.value.filter((p) => !claimedBy(p.page_id)).map((p) => p.page_id);
+}
+
+function startCreate() {
+  creating.value = true;
   formError.value = "";
+  createName.value = "";
+  createSubdomain.value = "";
+  createCheck.clear();
+  createPageIds.value = defaultCreateSelection();
+}
+
+function cancelCreate() {
+  creating.value = false;
+  formError.value = "";
+}
+
+async function createSite() {
+  formError.value = "";
+  const chosen = new Set(createPageIds.value);
+  const selectedPages = pages.value.filter((p) => chosen.has(p.page_id) && !claimedBy(p.page_id));
+  const business = { ...profileStore.business, name: createName.value || profileStore.business.name };
   try {
-    await store.createDefault(pages.value, profileStore.business, createCheck.state.normalized || createSubdomain.value);
+    await store.createDefault(selectedPages, business, createCheck.state.normalized || createSubdomain.value);
+    creating.value = false;
   } catch (error) {
     formError.value = error.message || "Failed to create site.";
+  }
+}
+
+async function removePage(pageId) {
+  removeError.value = "";
+  removeBusy.value = pageId;
+  try {
+    editing.value = await store.detachPage(editing.value.site_id, pageId, editing.value.tenant_id);
+  } catch (error) {
+    removeError.value = error.message || "Failed to remove page.";
+  } finally {
+    removeBusy.value = "";
   }
 }
 
@@ -595,9 +673,12 @@ function indexReason(site) {
 onMounted(async () => {
   await profileStore.ensureLoaded();
   await reload();
-  if (store.loaded && !store.sites.length && !createSubdomain.value) {
-    createSubdomain.value = suggestSubdomain(profileStore.business);
-    if (createSubdomain.value) createCheck.check(createSubdomain.value);
+  if (store.loaded && !store.sites.length) {
+    createPageIds.value = defaultCreateSelection();
+    if (!createSubdomain.value) {
+      createSubdomain.value = suggestSubdomain(profileStore.business);
+      if (createSubdomain.value) createCheck.check(createSubdomain.value);
+    }
   }
 });
 </script>
@@ -758,6 +839,31 @@ onMounted(async () => {
   color: #22c55e;
   font-weight: 600;
 }
+.checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 400;
+}
+.checkbox-row input { width: auto; margin: 0; }
+.checkbox-row.is-disabled { color: var(--muted); }
+.checkbox-row em { color: var(--muted); font-style: normal; }
+.page-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.link-danger {
+  background: none;
+  border: none;
+  color: #dc2626;
+  cursor: pointer;
+  font: inherit;
+  padding: 0;
+}
+.link-danger:hover:not(:disabled) { text-decoration: underline; }
+.link-danger:disabled { color: var(--muted); cursor: default; }
 .subdomain-bad {
   color: #f87171;
   font-weight: 600;

@@ -155,6 +155,11 @@ export const useSitesStore = defineStore("sites", {
       });
       return this._replace(res.site);
     },
+    async detachPage(siteId, pageId, tenantId = "") {
+      const query = new URLSearchParams({ tenant_id: tenantId || getTenantId(), page_id: pageId });
+      const res = await apiRequest(`/sites/${encodeURIComponent(siteId)}/pages?${query.toString()}`, { method: "DELETE" });
+      return this._replace(res.site);
+    },
     async attachPage(siteId, { pageId, slug, pageType, category, label } = {}, tenantId = "") {
       const body = { tenant_id: tenantId || getTenantId(), page_id: pageId, slug };
       if (pageType) body.page_type = pageType;

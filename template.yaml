@@ -836,6 +836,12 @@ Resources:
             RestApiId: !Ref RestApi
             Path: /sites/{site_id}/pages
             Method: POST
+        SiteDetachPage:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /sites/{site_id}/pages
+            Method: DELETE
 
   CouponsFunction:
     Type: AWS::Serverless::Function

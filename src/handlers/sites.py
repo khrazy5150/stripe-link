@@ -5,7 +5,7 @@ import string
 import time
 
 from stripe_link.cloudflare_secrets import get_cloudflare_api_token
-from stripe_link.common import error_response, json_response, parse_json_body, path_params, tenant_id_from_event
+from stripe_link.common import error_response, json_response, parse_json_body, path_params, query_params, tenant_id_from_event
 from stripe_link.domain.connect_sync import compute_site_eligibility, connect_state_fields, site_domain_verified
 from stripe_link.domain.sitemap import generate_indexnow_key
 from stripe_link.stripe_client import stripe_request
@@ -145,6 +145,8 @@ def handler(event, context, repository=None, registry=None):
         return set_homepage(event, repository, site_id)
     if method == "POST" and site_id and resource.endswith("/pages"):
         return attach_page(event, repository, site_id)
+    if method == "DELETE" and site_id and resource.endswith("/pages"):
+        return detach_page(event, repository, site_id)
     if site_id and resource.endswith(("/domain", "/domain/check")):
         # Custom-domain serving is handled by the single production edge Worker, so the flow is live-only.
         # A test/dev Site can't serve a real domain — refuse rather than let a tenant reach a dead end.
@@ -206,6 +208,7 @@ def _save_site_pages(repository, site):
     custom domain serves it. Returns (saved_site, error_response|None)."""
     site["updated_at"] = int(time.time())
     try:
+        _assert_pages_unassigned(repository, site)  # a page belongs to at most one Site — attach can't steal it
         validate_site(site)
         saved = repository.put(site)
     except (DocumentValidationError, RepositoryError) as exc:
@@ -270,6 +273,26 @@ def attach_page(event, repository, site_id):
         category=str(body.get("category") or "").strip() or None,
         label=str(body.get("label") or "").strip() or None,
     )
+    site["pages"] = pages
+    saved, error = _save_site_pages(repository, site)
+    return error or json_response({"site": saved})
+
+
+def detach_page(event, repository, site_id):
+    """Remove a page from the Site's route map, freeing it to be attached to another Site (a page belongs to
+    at most one Site — plans/SITE_OBJECT.md §2.5b). `page_id` comes from the query string. Idempotent: a page
+    not on this Site is a no-op success."""
+    tenant_id = tenant_id_from_event(event)
+    if not tenant_id:
+        return error_response("tenant_id is required.", code="missing_tenant")
+    page_id = str(query_params(event).get("page_id") or "").strip()
+    if not page_id:
+        return error_response("page_id is required.", code="missing_page")
+    site = repository.get(tenant_id, site_id)
+    if not site:
+        return error_response("Site not found.", status_code=404, code="not_found")
+    pages = {slug: entry for slug, entry in (site.get("pages") or {}).items()
+             if not (isinstance(entry, dict) and entry.get("page_id") == page_id)}
     site["pages"] = pages
     saved, error = _save_site_pages(repository, site)
     return error or json_response({"site": saved})

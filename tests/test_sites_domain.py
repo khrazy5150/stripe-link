@@ -117,6 +117,41 @@ class SetHomepageTests(unittest.TestCase):
     def test_attach_rejects_root_slug(self):
         self.assertEqual(self._attach(page_id="page_x", slug="/")["statusCode"], 400)
 
+    def _detach(self, page_id):
+        return handler({"httpMethod": "DELETE", "resource": "/sites/{site_id}/pages",
+                        "pathParameters": {"site_id": "site_H1"},
+                        "queryStringParameters": {"tenant_id": "t1", "page_id": page_id}}, None, repository=self.repo)
+
+    def test_detach_removes_page_and_frees_it(self):
+        self.site["pages"]["/deal"] = {"page_id": "page_deal", "page_type": "landing"}
+        self.repo.put(self.site)
+        resp = self._detach("page_deal")
+        self.assertEqual(resp["statusCode"], 200)
+        pages = json.loads(resp["body"])["site"]["pages"]
+        self.assertNotIn("/deal", pages)
+        self.assertTrue(all(e["page_id"] != "page_deal" for e in pages.values()))
+
+    def test_detach_is_idempotent_for_absent_page(self):
+        resp = self._detach("page_not_here")
+        self.assertEqual(resp["statusCode"], 200)
+        self.assertIn("/", json.loads(resp["body"])["site"]["pages"])  # untouched
+
+    def test_detach_requires_page_id(self):
+        resp = handler({"httpMethod": "DELETE", "resource": "/sites/{site_id}/pages",
+                        "pathParameters": {"site_id": "site_H1"},
+                        "queryStringParameters": {"tenant_id": "t1"}}, None, repository=self.repo)
+        self.assertEqual(resp["statusCode"], 400)
+
+    def test_attach_rejects_page_owned_by_another_site(self):
+        # A second Site already routes page_shared; attaching it here must be refused (one page, one Site).
+        other = dict(self.site, site_id="site_H2", hosting={"type": "platform", "platform_hostname": "other.jbay.uk"},
+                     pages={"/": {"page_id": "page_shared", "page_type": "landing"}})
+        self.repo.put(other)
+        self.repo.put(self.site)
+        resp = self._attach(page_id="page_shared", slug="/deal")
+        self.assertEqual(resp["statusCode"], 400)
+        self.assertIn("one Site", json.loads(resp["body"])["message"])
+
 
 class SitesDomainTests(unittest.TestCase):
     def setUp(self):
