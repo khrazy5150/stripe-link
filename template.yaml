@@ -112,6 +112,10 @@ Conditions:
     - !Not [!Equals [!Ref DashboardCustomDomainCertificateArn, ""]]
   HasStripePlatformSecret: !Not [!Equals [!Ref StripePlatformSecretArn, ""]]
   HasCloudflareZone: !Not [!Equals [!Ref CloudflareZoneId, ""]]
+  # Non-prod (test/dev) published pages must never be indexed. NOT applied in prod: there, the pages
+  # distribution is the origin that custom domains reverse-proxy through, and a distribution-level noindex
+  # header would leak onto indexable custom-domain pages.
+  IsNonProd: !Not [!Equals [!Ref Environment, "prod"]]
 
 Globals:
   Function:
@@ -3089,6 +3093,22 @@ Resources:
         SigningBehavior: always
         SigningProtocol: sigv4
 
+  # Emits X-Robots-Tag noindex,nofollow,noarchive on non-prod published pages so test pages can't be indexed
+  # (belt-and-suspenders over the noindex meta, and covers noarchive + every response). Created ONLY in
+  # non-prod so it can never attach to the prod pages distribution (the custom-domain proxy origin).
+  PagesNoIndexHeadersPolicy:
+    Type: AWS::CloudFront::ResponseHeadersPolicy
+    Condition: IsNonProd
+    Properties:
+      ResponseHeadersPolicyConfig:
+        Name: !Sub "${ProjectPrefix}-pages-noindex-${Environment}"
+        Comment: Keep non-prod published pages out of search engines.
+        CustomHeadersConfig:
+          Items:
+            - Header: X-Robots-Tag
+              Value: "noindex, nofollow, noarchive"
+              Override: true
+
   PagesDistribution:
     Type: AWS::CloudFront::Distribution
     Properties:
@@ -3116,6 +3136,7 @@ Resources:
             - HEAD
           Compress: true
           CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6
+          ResponseHeadersPolicyId: !If [IsNonProd, !Ref PagesNoIndexHeadersPolicy, !Ref "AWS::NoValue"]
         CustomErrorResponses:
           - ErrorCode: 403
             ResponseCode: 404
