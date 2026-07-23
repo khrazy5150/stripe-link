@@ -3217,6 +3217,21 @@ Resources:
         SigningBehavior: always
         SigningProtocol: sigv4
 
+  # Keeps the admin dashboard out of search engines. X-Robots-Tag is honored by crawlers for every path and
+  # content type (unlike a <meta> tag or robots.txt), so it covers the whole SPA. Applied in every environment
+  # — the dashboard is a login-gated admin tool that should never be indexed.
+  DashboardNoIndexHeadersPolicy:
+    Type: AWS::CloudFront::ResponseHeadersPolicy
+    Properties:
+      ResponseHeadersPolicyConfig:
+        Name: !Sub "${ProjectPrefix}-dashboard-noindex-${Environment}"
+        Comment: Emit X-Robots-Tag noindex,nofollow,noarchive on the admin dashboard.
+        CustomHeadersConfig:
+          Items:
+            - Header: X-Robots-Tag
+              Value: "noindex, nofollow, noarchive"
+              Override: true
+
   DashboardDistribution:
     Type: AWS::CloudFront::Distribution
     Properties:
@@ -3248,6 +3263,7 @@ Resources:
             - HEAD
           Compress: true
           CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
+          ResponseHeadersPolicyId: !Ref DashboardNoIndexHeadersPolicy
         CustomErrorResponses:
           - ErrorCode: 403
             ResponseCode: 200
