@@ -140,11 +140,20 @@ source: it's the strongest anti-spam gate (only actual purchasers get the link) 
 endpoint** (deliberate anti-fraud; a review must be left by the real user in their Google account). So there
 is no "push our review to Google." The achievable, high-value version:
 
-- **Route, don't push.** The post-purchase invite email offers a **"Review us on Google"** link — Google's
-  native write-review deep link `https://search.google.com/local/writereview?placeid={PLACE_ID}` — built from
-  `Site.organization.place_id` (already stored in Business Profile Phase 1). The customer leaves the review on
-  Google themselves. Offer it alongside the **"Review this product"** first-party link (two destinations, two
-  SEO surfaces: our Product AggregateRating snippets vs. the business's Google/Maps presence).
+- **Route, don't push.** Google's native write-review deep link is
+  `https://search.google.com/local/writereview?placeid={PLACE_ID}`, built from `Site.organization.place_id`
+  (already stored in Business Profile Phase 1). The customer leaves the review on Google themselves.
+- **ONE destination per invite, tenant-chosen (do NOT ask twice).** The invite routes to a *single*
+  destination — **Junior Bay** (first-party form → our Product AggregateRating snippets) OR **Google** (the
+  writereview link → the business's Google/Maps presence) — never both. The destination is a **per-Site
+  preference** (multi-Site: a product store and a service business get their own), whose **default derives from
+  `Site.organization.entity_type`**: product/`OnlineStore` → Junior Bay; `LocalBusiness`/service subtypes →
+  Google. Tenant can override. This maps to the SEO reality: products win with on-site markup, services win on
+  Google/Maps (their on-site business reviews earn no stars — self-serving rule).
+  - **Compliant, not gating:** the destination is a *uniform tenant policy*, applied to every invited buyer the
+    same way. Gating = branching on the individual customer's likely sentiment; this never does.
+  - **Guard:** destination = Google requires a valid `place_id`; if missing, fall back to Junior Bay rather
+    than send a dead link.
 - **Read back via the API** (once enabled): the Business Profile API can **read** the Google reviews into our
   store (display-only — GBP reviews never feed OUR markup) and **reply** to them (AI-managed GBP, Phase 3).
   This is the "integration" — routing out + reading back, not writing.
