@@ -58,7 +58,6 @@
                   <h3>{{ page.name || "Untitled Landing Page" }}</h3>
                   <p>
                     {{ templateLabel(page) }} <span>{{ page.page_id }}</span>
-                    <span v-if="page.route?.slug" class="landing-page-slug">Slug: /{{ page.route.slug }}</span>
                     <span v-if="siteNameForPage(page)" class="landing-page-site">{{ siteNameForPage(page) }}</span>
                     <span v-else class="landing-page-site is-unassigned">No Site</span>
                   </p>
@@ -81,6 +80,7 @@
                 <span>{{ Number(page.analytics_summary?.conversions || 0) }} conversions</span>
                 <strong>{{ formatMoney(page.analytics_summary?.revenue_cents || 0) }}</strong>
                 <span>revenue</span>
+                <span v-if="page.route?.slug" class="landing-page-slug" :title="'/' + page.route.slug">Slug: {{ displaySlug(page) }}</span>
               </div>
             </div>
 
@@ -1877,6 +1877,11 @@ function siteForPage(page) {
 }
 function siteNameForPage(page) {
   return siteForPage(page)?.name || "";
+}
+// Slug shown on the metrics row, capped so a long slug can't blow out the card (full value on hover via title).
+function displaySlug(page) {
+  const slug = `/${page.route?.slug || ""}`;
+  return slug.length > 32 ? `${slug.slice(0, 31)}…` : slug;
 }
 
 const storefrontCandidatePages = computed(() =>
