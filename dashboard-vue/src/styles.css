@@ -4590,6 +4590,64 @@ button:disabled {
   gap: 1rem;
 }
 
+/* Wizard step 1: choose-a-Site — inline "create a new Site" panel + homepage-replacement warning. */
+.wizard-inline-site-create {
+  display: grid;
+  gap: 0.8rem;
+  margin-top: 1rem;
+  padding: 1rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--bg);
+}
+
+.wizard-warning {
+  margin: 0 0 0.6rem;
+  padding: 0.7rem 0.9rem;
+  border-radius: var(--radius-md);
+  background: #fef3c7;
+  color: #92400e;
+  font-size: 1.25rem;
+  line-height: 1.4;
+}
+
+.subdomain-input {
+  display: flex;
+  align-items: stretch;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.subdomain-input input {
+  border: none;
+  border-radius: 0;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.subdomain-input input:focus {
+  outline: none;
+}
+.subdomain-input:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.subdomain-suffix {
+  display: flex;
+  align-items: center;
+  padding: 0 0.75rem;
+  background: var(--bg);
+  color: var(--muted);
+  font-family: ui-monospace, monospace;
+}
+.subdomain-ok {
+  color: #22c55e;
+  font-weight: 600;
+}
+.subdomain-bad {
+  color: #f87171;
+  font-weight: 600;
+}
+
 .storefront-page-picker {
   display: grid;
   gap: 0.4rem;

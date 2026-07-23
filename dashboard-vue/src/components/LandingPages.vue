@@ -141,17 +141,78 @@
         <header class="modal-card-header">
           <div>
             <h2 id="landingWizardTitle">{{ isEditingOfferless ? "Edit page" : "Create Landing Page" }}</h2>
-            <p v-if="!isEditingOfferless">Step {{ wizardStep }} of {{ wizardTotalSteps }}</p>
+            <p v-if="!isEditingOfferless">Step {{ displayStep }} of {{ displayTotal }}</p>
           </div>
           <button type="button" class="modal-close" aria-label="Close landing page wizard" @click="closeWizard">×</button>
         </header>
 
         <div v-if="!isEditingOfferless" class="wizard-progress" aria-hidden="true">
-          <span v-for="step in wizardTotalSteps" :key="step" :class="{ active: step <= wizardStep }"></span>
+          <span v-for="step in displayTotal" :key="step" :class="{ active: step <= displayStep }"></span>
         </div>
 
         <div class="landing-wizard-body">
-          <section v-if="wizardStep === 1" class="wizard-step">
+          <section v-if="sitePhase" class="wizard-step">
+            <header class="wizard-step-header">
+              <h3>Choose a Site</h3>
+              <p>Which website will this page live under? A landing page belongs to one Site.</p>
+            </header>
+            <div v-if="sitesStore.sites.length" class="wizard-goal-list">
+              <button
+                v-for="s in sitesStore.sites"
+                :key="s.site_id"
+                type="button"
+                class="wizard-goal-card"
+                :class="{ selected: !siteCreateOpen && selectedSiteId === s.site_id }"
+                @click="selectExistingSite(s.site_id)"
+              >
+                <strong>{{ s.name || s.site_id }}</strong>
+                <span>{{ s.hosting?.custom_domain || s.hosting?.platform_hostname || "" }}</span>
+                <span class="wizard-card-check" aria-hidden="true">✓</span>
+              </button>
+              <button
+                type="button"
+                class="wizard-goal-card"
+                :class="{ selected: siteCreateOpen }"
+                @click="openInlineSiteCreate"
+              >
+                <strong>+ New Site</strong>
+                <span>Create a new website to hold this page.</span>
+                <span class="wizard-card-check" aria-hidden="true">✓</span>
+              </button>
+            </div>
+            <div v-if="siteCreateOpen || !sitesStore.sites.length" class="wizard-inline-site-create">
+              <p v-if="!sitesStore.sites.length" class="field-note">You don't have a Site yet — create your first one to hold this page.</p>
+              <label class="offer-field">
+                <span>Site name</span>
+                <input v-model.trim="newSiteName" type="text" placeholder="My Shop" />
+              </label>
+              <label class="offer-field">
+                <span>Store address</span>
+                <div class="subdomain-input">
+                  <input
+                    v-model.trim="newSiteSubdomain"
+                    type="text"
+                    placeholder="my-shop"
+                    autocapitalize="off"
+                    autocorrect="off"
+                    spellcheck="false"
+                    @input="siteCheck.check(newSiteSubdomain)"
+                  />
+                  <span class="subdomain-suffix">.jbay.uk</span>
+                </div>
+                <small v-if="siteCheck.state.checking" class="field-note">Checking…</small>
+                <small v-else-if="siteCheck.state.checked" :class="siteCheck.state.available ? 'subdomain-ok' : 'subdomain-bad'">
+                  {{ siteCheck.state.available ? "Available" : (siteCheck.state.reason || "That address is taken.") }}
+                </small>
+              </label>
+              <button type="button" class="secondary-action" :disabled="!canCreateInlineSite" @click="createInlineSite">
+                {{ creatingSite ? "Creating…" : "Create Site" }}
+              </button>
+            </div>
+            <p v-if="siteStepError" class="field-error">{{ siteStepError }}</p>
+          </section>
+
+          <section v-else-if="wizardStep === 1" class="wizard-step">
             <div class="wizard-goal-list">
               <button type="button" class="wizard-goal-card" :class="{ selected: form.pageKind === 'offer' }" @click="form.pageKind = 'offer'">
                 <strong>Offer page</strong>
@@ -212,6 +273,9 @@
               <h3>Build your storefront</h3>
               <p>Name your store, then pick which pages appear in the product grid.</p>
             </header>
+            <p v-if="selectedSiteHomepageLabel" class="wizard-warning">
+              ⚠ {{ selectedSite?.name }} already has a homepage ({{ selectedSiteHomepageLabel }}). Creating this will replace it as the “/” page; the old one stays live at its own slug.
+            </p>
             <label class="offer-field">
               <span>Page name (internal)</span>
               <input v-model.trim="form.name" type="text" placeholder="Storefront homepage" />
@@ -362,8 +426,13 @@
         </div>
 
         <footer class="modal-footer">
-          <button class="secondary-action" type="button" @click="(wizardStep === 1 || isEditingOfferless) ? closeWizard() : wizardStep--">
-            {{ (wizardStep === 1 || isEditingOfferless) ? "Cancel" : "Back" }}
+          <template v-if="sitePhase">
+            <button class="secondary-action" type="button" @click="closeWizard">Cancel</button>
+            <button class="primary-action" type="button" :disabled="!canLeaveSiteStep" @click="leaveSiteStep">Next</button>
+          </template>
+          <template v-else>
+          <button class="secondary-action" type="button" @click="backFromStep">
+            {{ isEditingOfferless ? "Cancel" : "Back" }}
           </button>
           <template v-if="form.pageKind === 'storefront'">
             <button v-if="wizardStep === 1" class="primary-action" type="button" @click="nextWizardStep">Next</button>
@@ -388,6 +457,7 @@
             <button v-else class="primary-action" type="button" @click="startBuilderFromWizard">
               Continue to Builder
             </button>
+          </template>
           </template>
         </footer>
       </section>
@@ -971,6 +1041,8 @@ import { isSectionVisible, defaultVisible, recommendedSectionKeys, optionalSecti
 import { apiRequest, getApiBase, getApiEnvironment, getPagesBaseUrl, getPreviewPagesBaseUrl, getTenantId } from "../api/client";
 import { formatMoney } from "../stores/products";
 import { useProfileStore } from "../stores/profile";
+import { useSitesStore } from "../stores/sites";
+import { useSubdomainCheck } from "../composables/useSubdomainCheck";
 import { uploadImage } from "../api/uploads";
 import { recordImageDims } from "../utils/imageDims";
 import { showIconPicker } from "../icon-picker.js";
@@ -980,6 +1052,28 @@ import ConfirmDialog from "./shared/ConfirmDialog.vue";
 const pages = ref([]);
 const offers = ref([]);
 const profileStore = useProfileStore();
+const sitesStore = useSitesStore();
+
+// Step 0 of the create wizard: which Site will this page live under (a page belongs to one Site). Skipped
+// when editing an existing offer-less page. `pendingSiteAttach` carries the chosen Site into the offer
+// builder, whose page is created later (on Save) rather than in the wizard.
+const sitePhase = ref(false);
+const selectedSiteId = ref("");
+const pendingSiteAttach = ref("");
+const siteStepError = ref("");
+const siteCreateOpen = ref(false);
+const newSiteName = ref("");
+const newSiteSubdomain = ref("");
+const siteCheck = useSubdomainCheck();
+const creatingSite = ref(false);
+
+const selectedSite = computed(() => sitesStore.sites.find((s) => s.site_id === selectedSiteId.value) || null);
+const selectedSiteHomepageLabel = computed(() => {
+  const home = (selectedSite.value?.pages || {})["/"];
+  return home ? home.label || home.page_id : "";
+});
+const canLeaveSiteStep = computed(() => !!selectedSiteId.value);
+const canCreateInlineSite = computed(() => !!newSiteSubdomain.value && siteCheck.state.available && !creatingSite.value);
 profileStore.ensureLoaded();
 const products = ref([]);
 const services = ref([]);
@@ -1480,6 +1574,14 @@ function resetWizard() {
   wizardError.value = "";
   offerSearch.value = "";
   editingOfferlessOriginal.value = null;
+  sitePhase.value = false;
+  selectedSiteId.value = "";
+  pendingSiteAttach.value = "";
+  siteStepError.value = "";
+  siteCreateOpen.value = false;
+  newSiteName.value = "";
+  newSiteSubdomain.value = "";
+  siteCheck.clear();
 }
 
 // Load on first search-box focus so filtering works without clicking Load Pages first (mirrors Products).
@@ -1552,12 +1654,74 @@ async function ensureServicesLoaded() {
 
 async function openWizard() {
   resetWizard();
+  sitePhase.value = true;  // choose a Site before choosing a page type
   wizardOpen.value = true;
   try {
-    await ensureCatalogLoaded();
+    await Promise.all([ensureCatalogLoaded(), sitesStore.ensureLoaded(), profileStore.ensureLoaded()]);
   } catch (err) {
     wizardError.value = err.message || "Failed to load offers.";
   }
+  // Preselect the only Site so the common single-Site case is one click; force inline create when there are none.
+  if (!sitesStore.sites.length) {
+    siteCreateOpen.value = true;
+    seedInlineSiteFields();
+  } else if (sitesStore.sites.length === 1) {
+    selectedSiteId.value = sitesStore.sites[0].site_id;
+  }
+}
+
+function seedInlineSiteFields() {
+  const name = profileStore.business?.name || "";
+  if (!newSiteName.value) newSiteName.value = name;
+  if (!newSiteSubdomain.value && name) {
+    newSiteSubdomain.value = slugify(name);
+    if (newSiteSubdomain.value) siteCheck.check(newSiteSubdomain.value);
+  }
+}
+
+function selectExistingSite(siteId) {
+  selectedSiteId.value = siteId;
+  siteCreateOpen.value = false;
+  siteStepError.value = "";
+}
+
+function openInlineSiteCreate() {
+  siteCreateOpen.value = true;
+  selectedSiteId.value = "";
+  seedInlineSiteFields();
+}
+
+async function createInlineSite() {
+  siteStepError.value = "";
+  creatingSite.value = true;
+  try {
+    const business = { ...(profileStore.business || {}), name: newSiteName.value || profileStore.business?.name };
+    const site = await sitesStore.createDefault([], business, siteCheck.state.normalized || newSiteSubdomain.value);
+    selectedSiteId.value = site.site_id;
+    siteCreateOpen.value = false;
+  } catch (err) {
+    siteStepError.value = err.message || "Failed to create the Site.";
+  } finally {
+    creatingSite.value = false;
+  }
+}
+
+function leaveSiteStep() {
+  if (!selectedSiteId.value) {
+    siteStepError.value = "Choose a Site (or create one) to continue.";
+    return;
+  }
+  sitePhase.value = false;
+  wizardStep.value = 1;
+}
+
+function backFromStep() {
+  if (isEditingOfferless.value) return closeWizard();
+  if (wizardStep.value === 1) {
+    sitePhase.value = true;  // back to the Site picker
+    return;
+  }
+  wizardStep.value--;
 }
 
 function closeWizard() {
@@ -1598,6 +1762,10 @@ function nextWizardStep() {
 }
 
 const wizardTotalSteps = computed(() => (form.pageKind === "offer" ? 4 : 2));
+// The Site picker is a prepended step 1; the numbered build steps shift to 2..N+1 for display only
+// (internal wizardStep stays 1..N so the existing step logic is untouched).
+const displayTotal = computed(() => wizardTotalSteps.value + 1);
+const displayStep = computed(() => (sitePhase.value ? 1 : wizardStep.value + 1));
 
 // Distinct product categories the tenant actually uses (so a category page's key matches denormalized
 // landing pages). Keys stay normalized; labels are humanized for display.
@@ -1677,6 +1845,30 @@ function buildStorefrontPageDocument() {
   ], { name: form.name || "Storefront homepage", slug: form.slug || form.name || "home", title: headline });
 }
 
+// Bind a freshly-created page to the chosen Site (the wizard's step 1). A storefront becomes the Site's
+// homepage (slug "/"); every other kind attaches at its own slug. Non-fatal: the page is already created,
+// so a failed attach only degrades to "attach it on the Sites screen".
+async function attachCreatedPageToSite(saved, siteId, kind, category) {
+  if (!siteId || !saved?.page_id) return true;
+  try {
+    if (kind === "storefront") {
+      await sitesStore.setHomepage(siteId, saved.page_id, saved.tenant_id);
+    } else {
+      const slug = `/${slugify(saved.route?.slug || saved.name || saved.page_id)}`;
+      const pageType = kind === "category" ? "category" : kind === "profile" ? "about" : "landing";
+      await sitesStore.attachPage(
+        siteId,
+        { pageId: saved.page_id, slug, pageType, category: kind === "category" ? category : undefined },
+        saved.tenant_id,
+      );
+    }
+    return true;
+  } catch (err) {
+    wizardError.value = `Page created, but attaching it to the Site failed: ${err.message || err}. Attach it on the Sites screen.`;
+    return false;
+  }
+}
+
 async function createStorefront() {
   wizardError.value = "";
   const document = buildStorefrontPageDocument();
@@ -1689,10 +1881,11 @@ async function createStorefront() {
     const body = await apiRequest("/pages", { method: "POST", body: document });
     const saved = body.page || document;
     pages.value = [saved, ...pages.value.filter((p) => p.page_id !== saved.page_id)];
+    const attached = isEditingOfferless.value || (await attachCreatedPageToSite(saved, selectedSiteId.value, "storefront"));
     message.value = isEditingOfferless.value
       ? "Storefront homepage saved."
-      : "Storefront homepage created. Publish it, then set it as your homepage on the Sites screen.";
-    closeWizard();
+      : `Storefront homepage created and set as ${selectedSite.value?.name || "your Site"}'s homepage. Publish it to go live.`;
+    if (attached) closeWizard();
   } catch (error) {
     wizardError.value = error.message || "Failed to create the storefront homepage.";
   } finally {
@@ -1726,10 +1919,11 @@ async function createProfile() {
     const body = await apiRequest("/pages", { method: "POST", body: document });
     const saved = body.page || document;
     pages.value = [saved, ...pages.value.filter((p) => p.page_id !== saved.page_id)];
+    const attached = isEditingOfferless.value || (await attachCreatedPageToSite(saved, selectedSiteId.value, "profile"));
     message.value = isEditingOfferless.value
       ? "Store profile page saved."
-      : "Store profile page created. Publish it, then attach it (e.g. at /about) on the Sites screen.";
-    closeWizard();
+      : `Store profile page created and attached to ${selectedSite.value?.name || "your Site"}. Publish it to go live.`;
+    if (attached) closeWizard();
   } catch (error) {
     wizardError.value = error.message || "Failed to create the store profile page.";
   } finally {
@@ -1749,10 +1943,11 @@ async function createCategory() {
     const body = await apiRequest("/pages", { method: "POST", body: document });
     const saved = body.page || document;
     pages.value = [saved, ...pages.value.filter((p) => p.page_id !== saved.page_id)];
+    const attached = isEditingOfferless.value || (await attachCreatedPageToSite(saved, selectedSiteId.value, "category", form.categoryKey));
     message.value = isEditingOfferless.value
       ? "Category page saved."
-      : "Category page created. Publish it, then attach it to your Site on the Sites screen.";
-    closeWizard();
+      : `Category page created and attached to ${selectedSite.value?.name || "your Site"}. Publish it to go live.`;
+    if (attached) closeWizard();
   } catch (error) {
     wizardError.value = error.message || "Failed to create the category page.";
   } finally {
@@ -1771,6 +1966,7 @@ function startBuilderFromWizard() {
   seedGoalElements(form.goal);
   builderExistingPageId.value = "";
   builderOriginalPage.value = null;
+  pendingSiteAttach.value = selectedSiteId.value;  // attach this offer page to the chosen Site on first save
   builderOpen.value = true;
   builderFormHidden.value = false;
   wizardOpen.value = false;
@@ -1799,7 +1995,15 @@ async function savePage() {
     const saved = body.page || draftPage.value;
     pages.value = [saved, ...pages.value.filter((page) => page.page_id !== saved.page_id)];
     pagesLoaded.value = true;
-    message.value = `${saved.name} was saved.`;
+    // A page created via the wizard→builder flow attaches to the Site chosen in step 1 (once, on first save).
+    if (pendingSiteAttach.value && !builderExistingPageId.value) {
+      await attachCreatedPageToSite(saved, pendingSiteAttach.value, "offer");
+      const siteName = sitesStore.sites.find((s) => s.site_id === pendingSiteAttach.value)?.name;
+      pendingSiteAttach.value = "";
+      message.value = `${saved.name} was saved and attached to ${siteName || "your Site"}.`;
+    } else {
+      message.value = `${saved.name} was saved.`;
+    }
     wizardOpen.value = false;
   } catch (err) {
     wizardError.value = err.message || "Failed to save landing page.";
