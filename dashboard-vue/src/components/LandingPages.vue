@@ -126,6 +126,18 @@
                     </svg>
                     <span>{{ page.status === "published" ? "Unpublish" : "Publish" }}</span>
                   </button>
+                  <button v-if="siteForPage(page)" type="button" role="menuitem" @click="requestDetachSite(page)">
+                    <svg aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.5 6H18a3 3 0 0 1 0 6h-1.5m-9 0H6a3 3 0 0 1 0-6h1.5M8 9h5" />
+                    </svg>
+                    <span>Detach Site</span>
+                  </button>
+                  <button v-else type="button" role="menuitem" @click="openAttachSite(page)">
+                    <svg aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.5 6H18a3 3 0 0 1 0 6h-1.5m-9 0H6a3 3 0 0 1 0-6h1.5M8 9h8" />
+                    </svg>
+                    <span>Attach Site</span>
+                  </button>
                   <button type="button" class="danger" role="menuitem" @click="requestArchivePage(page)">
                     <svg aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 7h12m-9 0V5.5A1.5 1.5 0 0 1 10.5 4h3A1.5 1.5 0 0 1 15 5.5V7m-7 0 .75 12A2 2 0 0 0 10.75 21h2.5a2 2 0 0 0 2-2L16 7M10 11v6m4-6v6" />
@@ -1035,6 +1047,40 @@
     >
       {{ pendingArchivePage?.status === "published" ? "Archive" : "Delete" }} "{{ pendingArchivePage?.name || "this landing page" }}"?
     </ConfirmDialog>
+
+    <ConfirmDialog
+      :open="!!pendingDetachPage"
+      :title="'Detach from ' + (siteForPage(pendingDetachPage)?.name || 'its Site') + '?'"
+      confirm-label="Detach"
+      :busy="saving"
+      @cancel="pendingDetachPage = null"
+      @confirm="detachSite"
+    >
+      "{{ pendingDetachPage?.name || "This page" }}" will stop serving under {{ siteForPage(pendingDetachPage)?.name || "the Site" }} (and its custom domain, if published). The page itself is kept — you can attach it to another Site.
+    </ConfirmDialog>
+
+    <div v-if="attachTarget" class="modal-backdrop" @click.self="attachTarget = null">
+      <section class="modal-card attach-site-modal" role="dialog" aria-modal="true">
+        <header class="modal-card-header">
+          <h2>Attach to a Site</h2>
+          <button type="button" class="modal-close" aria-label="Close" @click="attachTarget = null">×</button>
+        </header>
+        <div class="modal-card-body">
+          <p class="field-note">Choose which Site "{{ attachTarget.name || "this page" }}" should live under. It attaches at its own slug (a storefront homepage takes the “/” root).</p>
+          <label v-if="sitesStore.sites.length" class="offer-field">
+            <span>Site</span>
+            <select v-model="attachSiteId">
+              <option v-for="s in sitesStore.sites" :key="s.site_id" :value="s.site_id">{{ s.name || s.site_id }}</option>
+            </select>
+          </label>
+          <p v-else class="field-note">You don't have any Sites yet — create one on the Sites screen first.</p>
+        </div>
+        <footer class="modal-footer">
+          <button type="button" class="secondary-action" @click="attachTarget = null">Cancel</button>
+          <button type="button" class="primary-action" :disabled="!attachSiteId" @click="confirmAttachSite">Attach</button>
+        </footer>
+      </section>
+    </div>
   </section>
 </template>
 
@@ -1794,18 +1840,21 @@ function selectCategoryKind() {
 
 // Pages that can appear in a storefront grid: an offer-backed page (has an offer_id) with a slug to link to.
 // Storefront pages themselves (no offer) are excluded — a grid links to sellable pages, not to other grids.
-// page_id -> owning Site name, from the Sites' route maps (a page belongs to at most one Site).
+// page_id -> owning Site {site_id, name}, from the Sites' route maps (a page belongs to at most one Site).
 const siteByPageId = computed(() => {
   const map = {};
   for (const s of sitesStore.sites) {
     for (const entry of Object.values(s.pages || {})) {
-      if (entry && entry.page_id) map[entry.page_id] = s.name || s.site_id;
+      if (entry && entry.page_id) map[entry.page_id] = { site_id: s.site_id, name: s.name || s.site_id };
     }
   }
   return map;
 });
+function siteForPage(page) {
+  return siteByPageId.value[page?.page_id] || null;
+}
 function siteNameForPage(page) {
-  return siteByPageId.value[page?.page_id] || "";
+  return siteForPage(page)?.name || "";
 }
 
 const storefrontCandidatePages = computed(() =>
@@ -1864,27 +1913,92 @@ function buildStorefrontPageDocument() {
   ], { name: form.name || "Storefront homepage", slug: form.slug || form.name || "home", title: headline });
 }
 
-// Bind a freshly-created page to the chosen Site (the wizard's step 1). A storefront becomes the Site's
-// homepage (slug "/"); every other kind attaches at its own slug. Non-fatal: the page is already created,
-// so a failed attach only degrades to "attach it on the Sites screen".
+// Attach a page to a Site's route map. A storefront becomes the Site's homepage (slug "/"); every other
+// kind attaches at its own slug. Throws on failure (callers decide how to surface it).
+function attachPageToSiteCore(page, siteId, kind, category) {
+  if (kind === "storefront") {
+    return sitesStore.setHomepage(siteId, page.page_id, page.tenant_id);
+  }
+  const slug = `/${slugify(page.route?.slug || page.name || page.page_id)}`;
+  const pageType = kind === "category" ? "category" : kind === "profile" ? "about" : "landing";
+  return sitesStore.attachPage(
+    siteId,
+    { pageId: page.page_id, slug, pageType, category: kind === "category" ? category : undefined },
+    page.tenant_id,
+  );
+}
+
+// Bind a freshly-created page to the chosen Site (the wizard's step 1). Non-fatal: the page is already
+// created, so a failed attach only degrades to "attach it on the Sites screen".
 async function attachCreatedPageToSite(saved, siteId, kind, category) {
   if (!siteId || !saved?.page_id) return true;
   try {
-    if (kind === "storefront") {
-      await sitesStore.setHomepage(siteId, saved.page_id, saved.tenant_id);
-    } else {
-      const slug = `/${slugify(saved.route?.slug || saved.name || saved.page_id)}`;
-      const pageType = kind === "category" ? "category" : kind === "profile" ? "about" : "landing";
-      await sitesStore.attachPage(
-        siteId,
-        { pageId: saved.page_id, slug, pageType, category: kind === "category" ? category : undefined },
-        saved.tenant_id,
-      );
-    }
+    await attachPageToSiteCore(saved, siteId, kind, category);
     return true;
   } catch (err) {
     wizardError.value = `Page created, but attaching it to the Site failed: ${err.message || err}. Attach it on the Sites screen.`;
     return false;
+  }
+}
+
+// Infer how an existing page should attach to a Site, from its own sections (mirrors the wizard's kinds).
+function pageAttachKind(page) {
+  const sections = page?.sections || [];
+  if (sections.some((s) => s && s.type === "seller_profile")) return "profile";
+  const grid = sections.find((s) => s && s.type === "catalog_grid");
+  if (grid?.category) return "category";
+  if (grid && sections.some((s) => s && s.type === "brand_hero")) return "storefront";
+  return "offer";
+}
+
+const attachTarget = ref(null);   // the page awaiting a Site choice in the attach modal
+const attachSiteId = ref("");
+const pendingDetachPage = ref(null);
+
+function openAttachSite(page) {
+  openMenuId.value = "";
+  attachTarget.value = page;
+  attachSiteId.value = sitesStore.sites[0]?.site_id || "";
+}
+
+async function confirmAttachSite() {
+  const page = attachTarget.value;
+  const siteId = attachSiteId.value;
+  if (!page || !siteId) return;
+  error.value = "";
+  try {
+    const kind = pageAttachKind(page);
+    const category = kind === "category" ? (page.sections.find((s) => s && s.type === "catalog_grid") || {}).category : undefined;
+    await attachPageToSiteCore(page, siteId, kind, category);
+    message.value = `Attached “${page.name || "page"}” to ${sitesStore.sites.find((s) => s.site_id === siteId)?.name || "the Site"}.`;
+    attachTarget.value = null;
+  } catch (err) {
+    error.value = err.message || "Failed to attach the page to the Site.";
+  }
+}
+
+function requestDetachSite(page) {
+  openMenuId.value = "";
+  pendingDetachPage.value = page;
+}
+
+async function detachSite() {
+  const page = pendingDetachPage.value;
+  const site = siteForPage(page);
+  if (!page || !site) {
+    pendingDetachPage.value = null;
+    return;
+  }
+  saving.value = true;
+  error.value = "";
+  try {
+    await sitesStore.detachPage(site.site_id, page.page_id, page.tenant_id);
+    message.value = `Detached “${page.name || "page"}” from ${site.name}.`;
+    pendingDetachPage.value = null;
+  } catch (err) {
+    error.value = err.message || "Failed to detach the page from its Site.";
+  } finally {
+    saving.value = false;
   }
 }
 

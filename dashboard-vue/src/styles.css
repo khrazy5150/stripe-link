@@ -3340,6 +3340,20 @@ button:disabled {
   background: var(--line);
   color: var(--muted);
 }
+.attach-site-modal {
+  max-width: 32rem;
+  width: 100%;
+}
+
+/* Live (dark) theme: --accent-soft is a dark navy, so the default chip is low-contrast — brighten it. */
+.theme-live .landing-page-title-row p span.landing-page-site {
+  background: rgba(129, 140, 248, 0.22);
+  color: #c7d2fe;
+}
+.theme-live .landing-page-title-row p span.landing-page-site.is-unassigned {
+  background: rgba(148, 163, 184, 0.18);
+  color: #cbd5e1;
+}
 
 .landing-page-badges {
   grid-column: 3;
