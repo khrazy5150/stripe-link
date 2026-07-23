@@ -52,7 +52,7 @@
         </label>
         <div class="offer-field">
           <span>Pages to include</span>
-          <ul v-if="pages.length" class="category-menu">
+          <ul v-if="pages.length" class="site-page-list">
             <li v-for="p in pages" :key="p.page_id">
               <label class="checkbox-row" :class="{ 'is-disabled': !!claimedBy(p.page_id) }">
                 <input type="checkbox" :value="p.page_id" v-model="createPageIds" :disabled="!!claimedBy(p.page_id)" />
@@ -272,8 +272,8 @@
 
           <div class="offer-field">
             <span>Pages in this Site</span>
-            <ul class="category-menu">
-              <li v-for="(entry, slug) in editing.pages" :key="slug" class="page-row">
+            <ul class="site-page-list">
+              <li v-for="(entry, slug) in editing.pages" :key="slug">
                 <span>
                   <span class="font-mono">{{ slug }}</span> — {{ entry.label || entry.page_id }}
                   <em>({{ entry.page_type || 'landing' }}{{ entry.category ? ', ' + entry.category : '' }}{{ entry.enabled === false ? ', disabled' : '' }})</em>
@@ -848,12 +848,25 @@ onMounted(async () => {
 .checkbox-row input { width: auto; margin: 0; }
 .checkbox-row.is-disabled { color: var(--muted); }
 .checkbox-row em { color: var(--muted); font-style: normal; }
-.page-row {
+.site-page-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  max-height: 240px;
+  overflow-y: auto;
+}
+.site-page-list li {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+  padding: 8px 12px;
+  font-weight: 400;
+  font-size: 1.3rem;
 }
+.site-page-list li + li { border-top: 1px solid var(--line); }
 .link-danger {
   background: none;
   border: none;
