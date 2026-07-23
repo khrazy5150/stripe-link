@@ -156,6 +156,7 @@
       />
       <Orders v-else-if="activeView === 'orders'" :key="`orders-${activeEnvironment}-${auth.session?.client_id || ''}`" />
       <Leads v-else-if="activeView === 'leads'" :key="`leads-${activeEnvironment}-${auth.session?.client_id || ''}`" />
+      <Reviews v-else-if="activeView === 'reviews'" :key="`reviews-${activeEnvironment}-${auth.session?.client_id || ''}`" />
       <Customers v-else-if="activeView === 'customers'" :key="`customers-${activeEnvironment}-${auth.session?.client_id || ''}`" />
       <Invoices v-else-if="activeView === 'invoices'" :key="`invoices-${activeEnvironment}-${auth.session?.client_id || ''}`" />
       <Refunds v-else-if="activeView === 'refunds'" :key="`refunds-${activeEnvironment}-${auth.session?.client_id || ''}`" />
@@ -178,6 +179,7 @@ import Dashboard from "./components/Dashboard.vue";
 import Invoices from "./components/Invoices.vue";
 import LandingPages from "./components/LandingPages.vue";
 import Leads from "./components/Leads.vue";
+import Reviews from "./components/Reviews.vue";
 import Notifications from "./components/Notifications.vue";
 import Offers from "./components/Offers.vue";
 import Orders from "./components/Orders.vue";

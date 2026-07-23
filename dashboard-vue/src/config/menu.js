@@ -3,7 +3,7 @@ export const menuSchema = {
   document_type: "menu",
   groups: [
     { key: "main", label: "MAIN", items: ["dashboard", "stripeKeys"] },
-    { key: "catalog", label: "CATALOG", items: ["products", "coupons", "offers", "landingPages", "sites", "services", "abTesting"] },
+    { key: "catalog", label: "CATALOG", items: ["products", "coupons", "offers", "landingPages", "sites", "services", "reviews", "abTesting"] },
     { key: "orders", label: "ORDERS", items: ["orders", "leads", "notifications", "invoices", "refunds", "shipping", "customers"] },
     { key: "settings", label: "SETTINGS", items: ["stripeConnect", "registration", "configuration", "profile", "preferences"] },
   ],
@@ -79,6 +79,14 @@ export const menuSchema = {
       view: "abTesting",
       enabled: true,
       environments: ["live"],
+    },
+    reviews: {
+      key: "reviews",
+      label: "Reviews",
+      icon: "star",
+      view: "reviews",
+      enabled: true,
+      environments: ["test", "live"],
     },
     orders: {
       key: "orders",
@@ -191,6 +199,7 @@ export function menuGroupsForEnvironment(environment) {
 }
 
 export const iconPaths = {
+  star: "M11.48 3.5a.562.562 0 0 1 1.04 0l2.125 5.111a.563.563 0 0 0 .475.345l5.518.442c.499.04.701.663.321.988l-4.204 3.602a.563.563 0 0 0-.182.557l1.285 5.385a.562.562 0 0 1-.84.61l-4.725-2.884a.562.562 0 0 0-.586 0L6.982 20.54a.562.562 0 0 1-.84-.61l1.285-5.386a.562.562 0 0 0-.182-.557l-4.204-3.602a.562.562 0 0 1 .321-.988l5.518-.442a.563.563 0 0 0 .475-.345L11.48 3.5Z",
   home: "M3 12l2-2m0 0 7-7 7 7M5 10v10a1 1 0 0 0 1 1h3m10-11 2 2m-2-2v10a1 1 0 0 1-1 1h-3m-6 0a1 1 0 0 0 1-1v-4a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v4a1 1 0 0 0 1 1m-6 0h6",
   key: "M15 7a2 2 0 0 1 2 2m4 0a6 6 0 0 1-7.743 5.743L11 17H9v2H7v2H4a1 1 0 0 1-1-1v-2.586a1 1 0 0 1 .293-.707l5.964-5.964A6 6 0 1 1 21 9z",
   box: "m21 7.5-9-4.5-9 4.5 9 4.5 9-4.5Zm0 0v9l-9 4.5m0-9v9m0-9-9-4.5m0 0v9l9 4.5",
