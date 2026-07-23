@@ -26,7 +26,7 @@ def handler(event, context, *, invites_repo=None, sites_repo=None, mailer_send=N
 
     invites = invites_repo.scan_type()
     sent = failed = 0
-    business_by_tenant: dict[str, str] = {}
+    org_by_tenant: dict[str, dict] = {}
     for invite in invites:
         if not invite_sendable(invite):
             continue
@@ -34,16 +34,17 @@ def handler(event, context, *, invites_repo=None, sites_repo=None, mailer_send=N
         if not due:
             continue
         tenant_id = str(invite.get("tenant_id") or "")
-        if tenant_id not in business_by_tenant:
-            business_by_tenant[tenant_id] = _business_name(sites_repo, tenant_id)
+        if tenant_id not in org_by_tenant:
+            org_by_tenant[tenant_id] = _tenant_organization(sites_repo, tenant_id)
+        org = org_by_tenant.get(tenant_id, {})
         current = invite
         for step in due:
             try:
-                content = invite_email(current, base_url=base_url, business_name=business_by_tenant.get(tenant_id, ""))
+                content = invite_email(current, base_url=base_url, organization=org)
                 mailer_send(
                     to=(current.get("customer") or {}).get("email", ""),
                     subject=content["subject"], html=content["html"], text=content["text"],
-                    from_name=business_by_tenant.get(tenant_id, ""),
+                    from_name=str(org.get("name") or ""),
                 )
                 current = mark_step_sent(current, step["day"], now)
                 sent += 1
@@ -57,14 +58,16 @@ def handler(event, context, *, invites_repo=None, sites_repo=None, mailer_send=N
     return {"scanned": len(invites), "sent": sent, "failed": failed}
 
 
-def _business_name(sites_repo, tenant_id):
+def _tenant_organization(sites_repo, tenant_id):
+    """The tenant's business identity for the invite email — name (from-address) + entity_type/place_id/
+    review_destination (routing). First Site with an organization; multi-Site precision is a future refinement."""
     if not sites_repo or not tenant_id:
-        return ""
+        return {}
     try:
         for site in sites_repo.list_for_tenant(tenant_id):
-            name = str(((site or {}).get("organization") or {}).get("name") or "").strip()
-            if name:
-                return name
+            org = (site or {}).get("organization")
+            if isinstance(org, dict) and str(org.get("name") or "").strip():
+                return org
     except Exception:  # noqa: BLE001
         pass
-    return ""
+    return {}

@@ -167,6 +167,15 @@
             <legend>Local business (Google &amp; local SEO)</legend>
             <p class="field-note">For service/local businesses: hours, map location, and your Google listing power the LocalBusiness structured data and a “View on Google” link. All optional.</p>
             <label class="offer-field"><span>Google Business Profile URL</span><input v-model.trim="form.org.gbp_url" type="url" placeholder="https://maps.google.com/… or https://g.page/…" /></label>
+            <label class="offer-field">
+              <span>Post-purchase review invites go to</span>
+              <select v-model="form.org.review_destination">
+                <option value="">Auto — {{ derivedDestinationLabel }} (based on business type)</option>
+                <option value="junior_bay">Junior Bay — on-page reviews (product star snippets)</option>
+                <option value="google">Google — your Maps/local listing</option>
+              </select>
+              <small class="field-note">Each buyer gets one review link. Product stores default to Junior Bay (earns on-page star snippets); service/local businesses default to Google (their stars live on Maps). Google needs the Place ID above, or it falls back to Junior Bay.</small>
+            </label>
             <div class="offer-two-column">
               <label class="offer-field"><span>Google place ID</span><input v-model.trim="form.org.place_id" type="text" placeholder="ChIJ…" /></label>
               <div></div>
@@ -414,7 +423,11 @@ function claimedByOther(pageId, exceptSiteId) {
 const claimedBy = (pageId) => claimedByOther(pageId, "");
 const assignablePages = computed(() => pages.value.filter((p) => !claimedByOther(p.page_id, editing.value?.site_id)));
 
-const form = reactive({ name: "", subdomain: "", org: { name: "", legal_name: "", entity_type: "OnlineStore", description: "", telephone: "", email: "", address: { locality: "", region: "" }, place_id: "", gbp_url: "", geo: { latitude: "", longitude: "" }, opening_hours: [] }, seo: { google_site_verification: "", bing_site_verification: "" } });
+const form = reactive({ name: "", subdomain: "", org: { name: "", legal_name: "", entity_type: "OnlineStore", description: "", telephone: "", email: "", address: { locality: "", region: "" }, place_id: "", gbp_url: "", geo: { latitude: "", longitude: "" }, opening_hours: [], review_destination: "" }, seo: { google_site_verification: "", bing_site_verification: "" } });
+
+const LOCAL_ENTITY_TYPES = ["LocalBusiness", "HomeAndConstructionBusiness", "HealthAndBeautyBusiness", "FoodEstablishment", "ProfessionalService"];
+const derivedDestinationLabel = computed(() =>
+  LOCAL_ENTITY_TYPES.includes(form.org.entity_type) ? "Google" : "Junior Bay");
 
 const WEEK_DAYS = [
   ["Monday", "Mon"], ["Tuesday", "Tue"], ["Wednesday", "Wed"], ["Thursday", "Thu"],
@@ -705,7 +718,7 @@ function openEdit(site) {
     name: org.name || "", legal_name: org.legal_name || "", entity_type: org.entity_type || "OnlineStore",
     description: org.description || "", telephone: org.telephone || "", email: org.email || "",
     address: { locality: address.locality || "", region: address.region || "", street: address.street || "", postal_code: address.postal_code || "", country: address.country || "US" },
-    place_id: org.place_id || "", gbp_url: org.gbp_url || "",
+    place_id: org.place_id || "", gbp_url: org.gbp_url || "", review_destination: org.review_destination || "",
     geo: { latitude: org.geo?.latitude ?? "", longitude: org.geo?.longitude ?? "" },
     opening_hours: (org.opening_hours || []).map((h) => ({ days: [...(h.days || [])], opens: h.opens || "", closes: h.closes || "" })),
   };
@@ -727,6 +740,7 @@ async function saveEdit() {
     address: Object.fromEntries(Object.entries(form.org.address).filter(([, v]) => v)),
     place_id: form.org.place_id || undefined,
     gbp_url: form.org.gbp_url || undefined,
+    review_destination: form.org.review_destination || undefined,
     geo: geoForSave(form.org.geo),
     opening_hours: hoursForSave(form.org.opening_hours),
   };

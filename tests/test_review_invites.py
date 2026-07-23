@@ -38,6 +38,33 @@ class InviteModelTests(unittest.TestCase):
         self.assertEqual(inv["status"], "completed")
 
 
+class DestinationTests(unittest.TestCase):
+    def test_default_by_entity_type(self):
+        from stripe_link.domain.reviews import resolve_review_destination
+        self.assertEqual(resolve_review_destination({"entity_type": "OnlineStore"}), "junior_bay")
+        self.assertEqual(resolve_review_destination({"entity_type": "LocalBusiness", "place_id": "ChIJ"}), "google")
+
+    def test_google_needs_place_id_else_falls_back(self):
+        from stripe_link.domain.reviews import resolve_review_destination
+        self.assertEqual(resolve_review_destination({"entity_type": "LocalBusiness"}), "junior_bay")
+        self.assertEqual(resolve_review_destination({"review_destination": "google"}), "junior_bay")  # no place_id
+        self.assertEqual(resolve_review_destination({"review_destination": "google", "place_id": "ChIJ"}), "google")
+
+    def test_explicit_override_wins(self):
+        from stripe_link.domain.reviews import resolve_review_destination
+        self.assertEqual(resolve_review_destination({"entity_type": "OnlineStore", "review_destination": "google", "place_id": "ChIJ"}), "google")
+        self.assertEqual(resolve_review_destination({"entity_type": "LocalBusiness", "review_destination": "junior_bay"}), "junior_bay")
+
+    def test_email_routes_to_the_chosen_destination(self):
+        from stripe_link.domain.review_invites import invite_email
+        inv = _invite(now=0)
+        google = invite_email(inv, base_url="https://x", organization={"name": "Spa", "entity_type": "HealthAndBeautyBusiness", "place_id": "ChIJ"})
+        self.assertIn("writereview?placeid=ChIJ", google["html"])
+        self.assertIn("Review us on Google", google["html"])
+        jb = invite_email(inv, base_url="https://x", organization={"name": "Mart", "entity_type": "OnlineStore"})
+        self.assertIn("/review?tenant_id", jb["html"])
+
+
 class FakeInvites:
     def __init__(self, invites=None):
         self.docs = {(i["tenant_id"], i["invite_id"]): dict(i) for i in (invites or [])}

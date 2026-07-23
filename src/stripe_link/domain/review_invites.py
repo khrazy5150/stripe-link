@@ -70,15 +70,22 @@ def review_link(base_url: str, invite: dict[str, Any]) -> str:
     return f"{str(base_url).rstrip('/')}/review?{query}"
 
 
-def invite_email(invite: dict[str, Any], *, base_url: str, business_name: str = "") -> dict[str, str]:
-    """Subject + html/text for a review-invite step. One destination (the JB form here; the Google-vs-JB choice
-    is Slice C). No sentiment branching — every buyer gets the same ask."""
+def invite_email(invite: dict[str, Any], *, base_url: str, organization: dict[str, Any] | None = None) -> dict[str, str]:
+    """Subject + html/text for a review-invite step, routed to the business's single chosen destination
+    (Junior Bay form or Google, per plans/REVIEWS.md Slice C). No sentiment branching — every buyer gets the
+    same ask and the same link."""
     import html as html_lib
+    from stripe_link.domain.reviews import google_review_link, resolve_review_destination
+    org = organization or {}
+    business_name = str(org.get("name") or "").strip()
     product = str(invite.get("product_name") or "your purchase")
     name = str((invite.get("customer") or {}).get("name") or "").strip()
     greeting = f"Hi {html_lib.escape(name.split()[0])}," if name else "Hi there,"
     who = html_lib.escape(business_name) if business_name else "us"
-    link = review_link(base_url, invite)
+    if resolve_review_destination(org) == "google":
+        link, cta = google_review_link(org.get("place_id")), "Review us on Google"
+    else:
+        link, cta = review_link(base_url, invite), "Leave a review"
     subject = f"How was your {product}?"
     html = (
         f"<div style=\"font-family:-apple-system,Segoe UI,Roboto,sans-serif;max-width:32rem;margin:0 auto;color:#1f2937\">"
@@ -86,8 +93,8 @@ def invite_email(invite: dict[str, Any], *, base_url: str, business_name: str = 
         f"<p>Thanks for choosing {who}! We'd love to hear how your <strong>{html_lib.escape(product)}</strong> is working out."
         f" It only takes a minute and helps other shoppers.</p>"
         f"<p style=\"text-align:center;margin:1.6rem 0\">"
-        f"<a href=\"{html_lib.escape(link)}\" style=\"background:#4f46b5;color:#fff;text-decoration:none;padding:.8rem 1.4rem;border-radius:8px;font-weight:700\">Leave a review</a>"
+        f"<a href=\"{html_lib.escape(link)}\" style=\"background:#4f46b5;color:#fff;text-decoration:none;padding:.8rem 1.4rem;border-radius:8px;font-weight:700\">{cta}</a>"
         f"</p><p style=\"color:#6b7280;font-size:.9rem\">If you've already reviewed, thank you — you can ignore this.</p></div>"
     )
-    text = f"{greeting}\n\nThanks for choosing {business_name or 'us'}! How was your {product}? Leave a review:\n{link}\n\nIf you've already reviewed, thank you."
+    text = f"{greeting}\n\nThanks for choosing {business_name or 'us'}! How was your {product}? {cta}:\n{link}\n\nIf you've already reviewed, thank you."
     return {"subject": subject, "html": html, "text": text}

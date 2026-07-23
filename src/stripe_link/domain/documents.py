@@ -1713,6 +1713,8 @@ def validate_site_organization(organization: Any) -> None:
 
     # Local-business fields (Business Profile Phase 1) — power full LocalBusiness JSON-LD. All optional.
     optional_string(organization, "place_id", "organization.place_id", max_length=200)
+    if organization.get("review_destination") is not None and organization.get("review_destination") not in {"junior_bay", "google"}:
+        raise DocumentValidationError("organization.review_destination must be 'junior_bay' or 'google'.")
     gbp_url = organization.get("gbp_url")
     if gbp_url is not None and not (isinstance(gbp_url, str) and gbp_url.startswith(("http://", "https://"))):
         raise DocumentValidationError("organization.gbp_url must be an HTTP(S) URL.")
