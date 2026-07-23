@@ -965,7 +965,7 @@
 </template>
 
 <script setup>
-import { computed, reactive, ref, watch } from "vue";
+import { computed, onMounted, reactive, ref, watch } from "vue";
 import { offerViewTargets, offerViewTargetsFromExpanded } from "../composables/useConversionContext";
 import { isSectionVisible, defaultVisible, recommendedSectionKeys, optionalSectionKeys, governedKeys, elementLabel, elementChannel, addableElements, tokenGroups, previewVar, supportedGoals, goalLabel, packSeeds } from "../composables/pageComposer";
 import { apiRequest, getApiBase, getApiEnvironment, getPagesBaseUrl, getPreviewPagesBaseUrl, getTenantId } from "../api/client";
@@ -1485,6 +1485,10 @@ function resetWizard() {
 function ensurePagesLoaded() {
   if (!pagesLoaded.value && !loading.value) loadPages();
 }
+
+// Auto-load the pages list on mount so it's fresh immediately — and, since this view is keyed on the
+// environment, it reloads on an env switch (Vue remounts → this re-runs). Mirrors Products.
+onMounted(ensurePagesLoaded);
 
 async function loadPages() {
   loading.value = true;

@@ -136,7 +136,7 @@
       <StripeKeys v-else-if="activeView === 'stripeKeys'" />
       <Products v-else-if="activeView === 'products'" />
       <Coupons v-else-if="activeView === 'coupons'" />
-      <Offers v-else-if="activeView === 'offers'" />
+      <Offers v-else-if="activeView === 'offers'" :key="`offers-${activeEnvironment}-${auth.session?.client_id || ''}`" />
       <Services v-else-if="activeView === 'services'" :key="`services-${activeEnvironment}-${auth.session?.client_id || ''}`" />
       <LandingPages
         v-else-if="activeView === 'landingPages'"

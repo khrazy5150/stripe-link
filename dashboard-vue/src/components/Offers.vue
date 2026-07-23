@@ -539,7 +539,7 @@
 </template>
 
 <script setup>
-import { computed, reactive, ref, watch } from "vue";
+import { computed, onMounted, reactive, ref, watch } from "vue";
 import { apiRequest, getApiEnvironment, getTenantId } from "../api/client";
 import { formatCouponDiscount, useCouponsStore } from "../stores/coupons";
 import { defaultProductPrice, formatMoney, useProductsStore } from "../stores/products";
@@ -611,6 +611,10 @@ const visibleOffers = computed(() => {
 function ensureOffersLoaded() {
   if (!offersLoaded.value && !offersLoading.value) loadOffers();
 }
+
+// Auto-load on mount so the list is fresh immediately, and reloads on an env switch (this view is keyed on
+// the environment → Vue remounts → this re-runs). The "Load Offers" button remains for a manual refresh.
+onMounted(ensureOffersLoaded);
 const form = reactive(defaultOfferForm());
 const itemConfigs = reactive({});
 const priceImageInputs = new Map();
