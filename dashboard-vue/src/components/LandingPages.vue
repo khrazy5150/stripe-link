@@ -51,7 +51,11 @@
               <div class="landing-page-title-row">
                 <div>
                   <h3>{{ page.name || "Untitled Landing Page" }}</h3>
-                  <p>{{ templateLabel(page) }} <span>{{ page.page_id }}</span></p>
+                  <p>
+                    {{ templateLabel(page) }} <span>{{ page.page_id }}</span>
+                    <span v-if="siteNameForPage(page)" class="landing-page-site">{{ siteNameForPage(page) }}</span>
+                    <span v-else class="landing-page-site is-unassigned">No Site</span>
+                  </p>
                 </div>
               </div>
 
@@ -1601,6 +1605,7 @@ async function loadPages() {
     const catalogPromise = ensureCatalogLoaded().catch((err) => {
       message.value = err.message || "Catalog context could not be loaded. Landing pages will show without offer details.";
     });
+    sitesStore.load().catch(() => {});  // resolve each page's owning Site (fresh per env; non-blocking)
     const pagesPromise = apiRequest("/pages");
     const body = await pagesPromise;
     pages.value = Array.isArray(body.pages) ? body.pages : [];
@@ -1789,6 +1794,20 @@ function selectCategoryKind() {
 
 // Pages that can appear in a storefront grid: an offer-backed page (has an offer_id) with a slug to link to.
 // Storefront pages themselves (no offer) are excluded — a grid links to sellable pages, not to other grids.
+// page_id -> owning Site name, from the Sites' route maps (a page belongs to at most one Site).
+const siteByPageId = computed(() => {
+  const map = {};
+  for (const s of sitesStore.sites) {
+    for (const entry of Object.values(s.pages || {})) {
+      if (entry && entry.page_id) map[entry.page_id] = s.name || s.site_id;
+    }
+  }
+  return map;
+});
+function siteNameForPage(page) {
+  return siteByPageId.value[page?.page_id] || "";
+}
+
 const storefrontCandidatePages = computed(() =>
   (pages.value || []).filter((p) => p && p.offer_id && (p.route?.slug || p.name)),
 );

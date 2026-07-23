@@ -3326,6 +3326,21 @@ button:disabled {
   overflow-wrap: anywhere;
 }
 
+/* The Site a page belongs to — a small chip so it reads apart from the preset/page-id. */
+.landing-page-title-row p span.landing-page-site {
+  font-family: inherit;
+  font-weight: 700;
+  font-size: 1.2rem;
+  padding: 0.1rem 0.6rem;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.landing-page-title-row p span.landing-page-site.is-unassigned {
+  background: var(--line);
+  color: var(--muted);
+}
+
 .landing-page-badges {
   grid-column: 3;
   grid-row: 1;
