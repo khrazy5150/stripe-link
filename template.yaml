@@ -3135,7 +3135,9 @@ Resources:
             - GET
             - HEAD
           Compress: true
-          CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6
+          # Non-prod (test/dev) = Managed-CachingDisabled so published pages are always fresh for iteration;
+          # prod = Managed-CachingOptimized for edge performance (tuned separately).
+          CachePolicyId: !If [IsNonProd, "4135ea2d-6df8-44a3-9df3-4b5a84be39ad", "658327ea-f89d-4fab-a63d-7e88639e58f6"]
           ResponseHeadersPolicyId: !If [IsNonProd, !Ref PagesNoIndexHeadersPolicy, !Ref "AWS::NoValue"]
         CustomErrorResponses:
           - ErrorCode: 403
