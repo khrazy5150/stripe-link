@@ -59,6 +59,22 @@ Deferred, non-blocking follow-ups. Each item notes what, why it was deferred, an
 
 ## Production setup
 
+### Optimize prod CloudFront (pages) for indexing + aggressive caching
+- **What:** Optimize prod CloudFront (`dlxn0y34f7dbz`) for indexing, follow, archiving, aggressive
+  caching, long TTLs, and optimized compression.
+- **Context:** non-prod pages are already locked down (dev pages dist `drjfn283z66uz` = X-Robots-Tag
+  noindex,nofollow,noarchive + Managed-CachingDisabled), gated on the `IsNonProd` condition in
+  `template.yaml`. Prod was deliberately left as-is: it currently uses Managed-CachingOptimized
+  (`658327ea-f89d-4fab-a63d-7e88639e58f6`) and carries **no** distribution-level robots header — correct,
+  because prod pages indexing is controlled **per-page** by the baked robots meta (`page_robots_directive`),
+  and this distribution is the **origin custom domains reverse-proxy through**, so a blanket noindex header
+  here would leak onto indexable custom-domain pages.
+- **Where to fix:** `PagesDistribution` in `template.yaml` (the prod branch of the existing `!If [IsNonProd, …]`
+  cache-policy expression). Consider a **custom CachePolicy** (longer default/max TTL than CachingOptimized's
+  defaults) rather than the managed one, tuned for the published-page artifacts + crawl files; keep
+  `Compress: true`. Do **not** add a distribution-wide noindex ResponseHeadersPolicy — indexing stays per-page.
+- **Why deferred:** user's call to tune prod separately (2026-07-23). Dev is done.
+
 ### Create a separate prod Google OAuth client (calendar)
 - **What:** Before enabling calendar sync in **prod**, create a *separate* Google OAuth 2.0 client
   for production (option #2 — isolated credentials per environment), in the same Google Cloud project
