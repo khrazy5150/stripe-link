@@ -134,6 +134,27 @@ source: it's the strongest anti-spam gate (only actual purchasers get the link) 
   policy choice). One invite per purchased line.
 - **Payoff loop:** real buyers → verified reviews → real AggregateRating → star snippets → conversions.
 
+### Route invited buyers to Google reviews too (compliant "push", future phase)
+
+**You cannot programmatically post a review to Google** — the Business Profile API has **no create-review
+endpoint** (deliberate anti-fraud; a review must be left by the real user in their Google account). So there
+is no "push our review to Google." The achievable, high-value version:
+
+- **Route, don't push.** The post-purchase invite email offers a **"Review us on Google"** link — Google's
+  native write-review deep link `https://search.google.com/local/writereview?placeid={PLACE_ID}` — built from
+  `Site.organization.place_id` (already stored in Business Profile Phase 1). The customer leaves the review on
+  Google themselves. Offer it alongside the **"Review this product"** first-party link (two destinations, two
+  SEO surfaces: our Product AggregateRating snippets vs. the business's Google/Maps presence).
+- **Read back via the API** (once enabled): the Business Profile API can **read** the Google reviews into our
+  store (display-only — GBP reviews never feed OUR markup) and **reply** to them (AI-managed GBP, Phase 3).
+  This is the "integration" — routing out + reading back, not writing.
+- **COMPLIANCE — no review gating.** Google prohibits sentiment-filtering (sending only happy customers to
+  Google / diverting unhappy ones to a private form). Every invited buyer gets the SAME ask and the SAME
+  links, unconditionally. Build the invite so it can never branch on rating/sentiment.
+- **Game-changer for small businesses:** automated post-purchase emails that reliably funnel real buyers into
+  leaving Google reviews (the top local-SEO signal) — the growth engine they can't build themselves — while
+  also collecting on-site first-party reviews for product star snippets.
+
 ## Ties into existing work
 
 - [[BUSINESS_PROFILE_AND_GBP]] — reviews are the deferred piece of that plan; business-target reviews + GBP
