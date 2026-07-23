@@ -1048,16 +1048,21 @@ NOINDEX_ROBOTS = "noindex,nofollow"
 # Crawlable-but-not-indexed: pending Connect verification, and funnel/checkout/thank-you pages on an otherwise
 # eligible Site — let crawlers follow links without indexing the page itself (TP-08, SEO-02).
 NOINDEX_FOLLOW_ROBOTS = "noindex,follow"
+# An archived Site: its pages still serve, but tell crawlers to drop them entirely — no index, no link
+# equity, no cached copy. `noarchive` suppresses the search engine's cached snapshot (plans/SITE_OBJECT.md).
+NOINDEX_ARCHIVED_ROBOTS = "noindex,nofollow,noarchive"
 # page_type values that must never be indexed even on an eligible Site (post-checkout funnel steps).
 NONINDEXABLE_PAGE_TYPES = {"checkout", "thank_you", "funnel_step"}
 
 
-def page_robots_directive(*, kind: str, environment: str, eligibility: str, page_type: str, on_custom_domain: bool) -> str:
+def page_robots_directive(*, kind: str, environment: str, eligibility: str, page_type: str, on_custom_domain: bool, site_archived: bool = False) -> str:
     """The robots directive for a page artifact (plans/SITE_OBJECT.md §2.2, TP-08, SEO-02). Only a published
     artifact in production, actually served on the Site's verified custom domain, whose Site is index-eligible
     (verified custom domain AND verified Stripe Connect), on an indexable page_type, gets index,follow.
     Everything on platform infrastructure — and any page not served on the custom domain — is noindex,nofollow,
     the reputation-isolation floor."""
+    if site_archived:
+        return NOINDEX_ARCHIVED_ROBOTS  # an archived Site de-indexes every one of its pages, everywhere
     if kind != "published" or environment != "prod":
         return NOINDEX_ROBOTS
     if not on_custom_domain:

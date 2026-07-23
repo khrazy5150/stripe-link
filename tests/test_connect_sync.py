@@ -107,6 +107,14 @@ class RobotsDirectiveTests(unittest.TestCase):
         self.assertEqual(page_robots_directive(kind="preview", environment="prod", eligibility="eligible", page_type="landing", on_custom_domain=True), "noindex,nofollow")
         self.assertEqual(page_robots_directive(kind="published", environment="dev", eligibility="eligible", page_type="landing", on_custom_domain=True), "noindex,nofollow")
 
+    def test_archived_site_de_indexes_every_page(self):
+        # An archived Site overrides everything — even an otherwise-indexable eligible custom-domain page — and
+        # adds noarchive so the cached snapshot drops too.
+        self.assertEqual(
+            page_robots_directive(kind="published", environment="prod", eligibility="eligible", page_type="landing", on_custom_domain=True, site_archived=True),
+            "noindex,nofollow,noarchive",
+        )
+
 
 class FakeKeysRepo:
     def __init__(self):

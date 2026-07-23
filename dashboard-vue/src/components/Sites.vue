@@ -287,7 +287,27 @@
             <small>Removing a page frees it to join another Site. Page routing, slugs, and navigation get a full editor in a later phase.</small>
           </div>
         </div>
+        <p v-if="archiveError" class="field-error">{{ archiveError }}</p>
         <footer class="modal-card-footer">
+          <button
+            v-if="editing.status === 'archived'"
+            type="button"
+            class="secondary-action"
+            :disabled="archiveBusy"
+            @click="pendingArchive = 'unarchive'"
+          >
+            {{ archiveBusy ? "Working…" : "Reactivate Site" }}
+          </button>
+          <button
+            v-else
+            type="button"
+            class="secondary-action link-danger-btn"
+            :disabled="archiveBusy"
+            @click="pendingArchive = 'archive'"
+          >
+            {{ archiveBusy ? "Working…" : "Archive Site" }}
+          </button>
+          <span class="footer-spacer"></span>
           <button type="button" class="secondary-action" @click="editing = null">Cancel</button>
           <button type="button" class="primary-action" :disabled="!canSaveEdit" @click="saveEdit">
             {{ store.saving ? "Saving..." : "Save Site" }}
@@ -295,6 +315,23 @@
         </footer>
       </section>
     </div>
+
+    <ConfirmDialog
+      :open="!!pendingArchive"
+      :danger="pendingArchive === 'archive'"
+      :title="pendingArchive === 'archive' ? 'Archive this Site?' : 'Reactivate this Site?'"
+      :confirm-label="pendingArchive === 'archive' ? 'Archive' : 'Reactivate'"
+      :busy="archiveBusy"
+      @cancel="pendingArchive = ''"
+      @confirm="confirmArchive"
+    >
+      <template v-if="pendingArchive === 'archive'">
+        Archiving <strong>{{ editing?.name }}</strong> tells search engines to drop all its pages (noindex, nofollow, noarchive). Its published pages are re-rendered now so it takes effect immediately. The Site keeps serving — reactivate anytime.
+      </template>
+      <template v-else>
+        Reactivating <strong>{{ editing?.name }}</strong> restores normal indexing and re-renders its published pages.
+      </template>
+    </ConfirmDialog>
   </section>
 </template>
 
@@ -305,6 +342,7 @@ import { useSitesStore, organizationFromBusiness, suggestSubdomain } from "../st
 import { useProfileStore } from "../stores/profile";
 import { useSubdomainCheck } from "../composables/useSubdomainCheck";
 import { normalizeE164, phoneError } from "../utils/phone";
+import ConfirmDialog from "./shared/ConfirmDialog.vue";
 
 const store = useSitesStore();
 const profileStore = useProfileStore();
@@ -657,17 +695,63 @@ function canonicalHost(site) {
 }
 const ELIGIBILITY_LABELS = { eligible: "Indexed", pending: "Indexing pending", blocked: "Not indexed", revoked: "Indexing revoked" };
 function indexLabel(site) {
+  if (site.status === "archived") return "Archived";
   return ELIGIBILITY_LABELS[site.indexing?.eligibility] || "Not indexed";
 }
 function indexClass(site) {
-  return site.indexing?.eligibility === "eligible" ? "active" : "archived";
+  return site.status !== "archived" && site.indexing?.eligibility === "eligible" ? "active" : "archived";
 }
 function indexReason(site) {
+  if (site.status === "archived") return "This Site is archived — its pages tell search engines noindex, nofollow, noarchive and are dropped from results. It keeps serving; reactivate anytime to restore indexing.";
   const state = site.indexing?.eligibility;
   if (state === "eligible") return "This Site is eligible for search indexing.";
   if (state === "revoked") return "Indexing was revoked because your Stripe account is restricted. Resolve it in Stripe to restore eligibility.";
   if (state === "pending") return "Almost there — search indexing needs both a verified custom domain and a verified Stripe Connect account.";
   return "Search indexing requires a verified custom domain and a verified Stripe Connect account. On the free address a Site is never indexed.";
+}
+
+// Archiving a Site de-indexes all its pages (noindex,nofollow,noarchive in prod). Robots are baked into each
+// published artifact at publish time, so flipping the status must ALSO re-render the Site's published pages —
+// orchestrated here (same pattern as attach/detach), reusing the publish endpoint.
+const pendingArchive = ref("");   // "archive" | "unarchive" while the confirm dialog is open
+const archiveBusy = ref(false);
+const archiveError = ref("");
+
+async function republishSitePages(site) {
+  const pageIds = new Set(Object.values(site.pages || {}).map((e) => e && e.page_id).filter(Boolean));
+  if (!pageIds.size) return 0;
+  const body = await apiRequest("/pages");
+  const targets = (Array.isArray(body.pages) ? body.pages : []).filter((p) => pageIds.has(p.page_id) && p.status === "published");
+  let count = 0;
+  for (const page of targets) {
+    try {
+      await apiRequest("/pages", { method: "POST", body: page });  // re-render with the fresh Site status
+      count += 1;
+    } catch { /* best-effort per page — one failure shouldn't abort the rest */ }
+  }
+  return count;
+}
+
+async function confirmArchive() {
+  const archived = pendingArchive.value === "archive";
+  const site = editing.value;
+  archiveError.value = "";
+  archiveBusy.value = true;
+  try {
+    const saved = await store.setStatus(site, archived ? "archived" : "active");  // flip status first
+    editing.value = saved;
+    const n = await republishSitePages(saved);                                    // then re-render its live pages
+    store.message = archived
+      ? `${saved.name} archived — ${n} published page${n === 1 ? "" : "s"} de-indexed.`
+      : `${saved.name} reactivated — ${n} page${n === 1 ? "" : "s"} re-published.`;
+    pendingArchive.value = "";
+    editing.value = null;
+  } catch (err) {
+    archiveError.value = err.message || "Failed to update the Site.";
+    pendingArchive.value = "";
+  } finally {
+    archiveBusy.value = false;
+  }
 }
 
 onMounted(async () => {
@@ -880,5 +964,12 @@ onMounted(async () => {
 .subdomain-bad {
   color: #f87171;
   font-weight: 600;
+}
+.footer-spacer {
+  flex: 1 1 auto;
+}
+.link-danger-btn {
+  color: #dc2626;
+  border-color: #f3c0c0;
 }
 </style>

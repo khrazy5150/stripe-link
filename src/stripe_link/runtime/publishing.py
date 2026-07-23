@@ -448,6 +448,7 @@ def publish_page_document(
     canonical_path = "" if page_site_slug in ("", "/") else page_site_slug.lstrip("/")
     page_canonical = f"https://{custom_domain}/{canonical_path}" if on_custom_domain and custom_domain else canonical_url
     eligibility = ((site or {}).get("indexing") or {}).get("eligibility") or "blocked"
+    site_archived = (site or {}).get("status") == "archived"
 
     def _render(robots: str) -> str:
         return render_page(
@@ -461,7 +462,7 @@ def publish_page_document(
     for target in targets:
         robots = page_robots_directive(
             kind=target["kind"], environment=environment, eligibility=eligibility,
-            page_type=page_type, on_custom_domain=on_custom_domain,
+            page_type=page_type, on_custom_domain=on_custom_domain, site_archived=site_archived,
         )
         html = _render(robots)
         # Thin-content gate (SEO-08): an otherwise-indexable page with too little unique body text is demoted
