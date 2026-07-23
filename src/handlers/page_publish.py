@@ -12,7 +12,7 @@ from stripe_link.repositories.documents import (
     services_repository,
     sites_repository,
 )
-from stripe_link.runtime.publishing import delete_page_artifacts, publish_page_document
+from stripe_link.runtime.publishing import delete_page_artifacts, detach_page_from_sites, publish_page_document
 
 
 logger = logging.getLogger(__name__)
@@ -89,7 +89,12 @@ def handler(event, context, *, offers_repo=None, products_repo=None, services_re
                     cloudfront_client=cloudfront_client,
                     pages_distribution_id=os.environ.get("PAGES_DISTRIBUTION_ID", ""),
                 )
-                logger.info("Deleted page artifacts: %s", result)
+                # A deleted/archived page must also leave any Site's route map, or the Site is left pointing at
+                # a gone page (a phantom slug / a homepage that 404s). Authoritative backstop for any delete path.
+                detached = detach_page_from_sites(
+                    sites_repo, domains_index_repo, str(page.get("tenant_id") or ""), str(page.get("page_id") or ""),
+                )
+                logger.info("Deleted page artifacts: %s (detached from %s site(s))", result, detached)
                 continue
 
             old_image = dynamodb_record.get("OldImage") or {}

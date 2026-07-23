@@ -15,6 +15,7 @@ from stripe_link.runtime.publishing import (
     artifact_targets,
     attach_funnel_pages,
     delete_page_artifacts,
+    detach_page_from_sites,
     find_site_for_page,
     publish_page_document,
     resolve_category_grids,
@@ -194,6 +195,30 @@ class PagePublishingTests(unittest.TestCase):
         self.assertEqual(find_site_for_page(repo, "tenant_demo", "page_simple_coffee")["site_id"], "site_x")
         self.assertIsNone(find_site_for_page(repo, "tenant_demo", "page_other"))
         self.assertIsNone(find_site_for_page(None, "tenant_demo", "page_simple_coffee"))
+
+    def _valid_site(self, pages):
+        return {
+            "schema_version": "2026-07-20", "document_type": "site", "site_id": "site_x", "tenant_id": "tenant_demo",
+            "environment": "live", "name": "Store", "status": "active",
+            "hosting": {"type": "platform", "platform_hostname": "store.jbay.uk", "custom_domain": None},
+            "organization": {"name": "Store", "entity_type": "OnlineStore"},
+            "indexing": {"eligibility": "blocked"}, "pages": pages, "created_at": 1, "updated_at": 1,
+        }
+
+    def test_detach_page_from_sites_removes_from_route_map(self):
+        site = self._valid_site({"/": {"page_id": "page_home", "page_type": "homepage"},
+                                 "/deal": {"page_id": "page_deal", "page_type": "landing"}})
+        repo = FakeSitesRepository([site])
+        n = detach_page_from_sites(repo, FakeDomainsIndexRepository(), "tenant_demo", "page_deal")
+        self.assertEqual(n, 1)
+        saved = repo.list_for_tenant("tenant_demo")[0]["pages"]
+        self.assertNotIn("/deal", saved)
+        self.assertIn("/", saved)  # other pages untouched
+
+    def test_detach_page_from_sites_is_noop_when_absent(self):
+        repo = FakeSitesRepository([self._valid_site({"/": {"page_id": "page_home", "page_type": "homepage"}})])
+        self.assertEqual(detach_page_from_sites(repo, FakeDomainsIndexRepository(), "tenant_demo", "page_gone"), 0)
+        self.assertEqual(detach_page_from_sites(None, FakeDomainsIndexRepository(), "tenant_demo", "page_home"), 0)
 
     def test_publish_emits_organization_from_the_owning_site(self):
         page = copy.deepcopy(self.page)

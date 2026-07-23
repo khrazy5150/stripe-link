@@ -21,6 +21,15 @@ class SitemapTests(unittest.TestCase):
         self.assertIn("Allow: /", r)
         self.assertIn("Sitemap: https://shop.example.com/sitemap.xml", r)
 
+    def test_robots_disallow_all_for_archived_site(self):
+        r = robots_txt("https://shop.example.com/sitemap.xml", allow=False)
+        self.assertIn("Disallow: /", r)
+        self.assertNotIn("Allow: /", r)
+        self.assertNotIn("Sitemap:", r)
+
+    def test_empty_sitemap_has_no_urls(self):
+        self.assertNotIn("<url>", sitemap_xml([]))
+
     def test_indexnow_key_is_hex(self):
         key = generate_indexnow_key()
         self.assertTrue(re.fullmatch(r"[0-9a-f]{32}", key))

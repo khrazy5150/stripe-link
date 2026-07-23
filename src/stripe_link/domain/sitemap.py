@@ -47,9 +47,12 @@ def sitemap_xml(entries: list[dict[str, Any]]) -> str:
     return "\n".join(lines) + "\n"
 
 
-def robots_txt(sitemap_url: str) -> str:
-    """Allow-crawl robots.txt pointing at the sitemap. Custom domains are the only indexable tier, so this is
-    always the allow variant; platform hosts never serve robots.txt (they're kept out via the noindex meta)."""
+def robots_txt(sitemap_url: str, *, allow: bool = True) -> str:
+    """robots.txt for a custom domain. Allow-variant (the default) points crawlers at the sitemap. An archived
+    Site serves the disallow-all variant so its whole domain is dropped from crawling (pairs with the
+    noindex,nofollow,noarchive meta on each page). Platform hosts never serve robots.txt."""
+    if not allow:
+        return "User-agent: *\nDisallow: /\n"
     return f"User-agent: *\nAllow: /\n\nSitemap: {sitemap_url.strip()}\n"
 
 

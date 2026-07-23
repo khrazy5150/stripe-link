@@ -1906,6 +1906,18 @@ function siteForPage(page) {
 function siteNameForPage(page) {
   return siteForPage(page)?.name || "";
 }
+// The page's real public URL when it's on a Site with a VERIFIED custom domain: https://domain/slug (homepage
+// at "/"). Only verified (prod) Sites qualify — custom domains are live-only — so this never shows a dead URL.
+function sitePublicUrl(page) {
+  for (const s of sitesStore.sites) {
+    const domain = s.hosting?.custom_domain;
+    if (!domain || !s.hosting?.verification?.verified) continue;
+    for (const [slug, entry] of Object.entries(s.pages || {})) {
+      if (entry?.page_id === page.page_id) return `https://${domain}${slug === "/" ? "/" : slug}`;
+    }
+  }
+  return "";
+}
 // Slug shown on the metrics row, capped so a long slug can't blow out the card (full value on hover via title).
 function displaySlug(page) {
   const slug = `/${page.route?.slug || ""}`;
@@ -3348,7 +3360,9 @@ function previewArtifactPageUrl(page) {
 }
 
 function pageUrl(page) {
-  return page.status === "published" ? artifactPageUrl(page) : previewArtifactPageUrl(page);
+  // Published + on a verified custom domain -> the real public URL; otherwise the platform artifact / preview.
+  if (page.status === "published") return sitePublicUrl(page) || artifactPageUrl(page);
+  return previewArtifactPageUrl(page);
 }
 
 function previewPageUrl(page) {

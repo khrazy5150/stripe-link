@@ -165,6 +165,33 @@ def _denormalize_page_catalog(site: dict[str, Any], page_id: str, offer_id: str,
     return changed
 
 
+def detach_page_from_sites(sites_repository: Any | None, domains_index_repository: Any | None, tenant_id: str, page_id: str) -> int:
+    """Remove page_id from the route map of any Site that references it (a page belongs to at most one Site).
+    Called server-side when a page is deleted/archived so no Site is left pointing at a gone page — the
+    authoritative backstop for the dashboard's own detach (covers direct-API deletes too). Best-effort;
+    returns the number of Sites changed."""
+    if not sites_repository or not tenant_id or not page_id:
+        return 0
+    changed = 0
+    for site in sites_repository.list_for_tenant(tenant_id):
+        pages = site.get("pages") or {}
+        remaining = {slug: entry for slug, entry in pages.items()
+                     if not (isinstance(entry, dict) and entry.get("page_id") == page_id)}
+        if len(remaining) == len(pages):
+            continue
+        site["pages"] = remaining
+        site["updated_at"] = int(time.time())
+        try:
+            validate_site(site)
+            sites_repository.put(site)
+            if (site.get("hosting") or {}).get("custom_domain"):
+                _sync_domain_index(site, domains_index_repository)
+            changed += 1
+        except Exception:  # noqa: BLE001 — one bad Site shouldn't block artifact cleanup
+            pass
+    return changed
+
+
 def _sync_domain_index(site: dict[str, Any], domains_index_repository: Any | None) -> None:
     """Rewrite the denormalized domain-index record so the edge resolver sees the Site's new routes right away.
     Uses the injected repository in tests; falls back to the real one in the Lambda. Best-effort."""
@@ -527,9 +554,12 @@ def publish_site_crawl_files(*, site, homepage_page_id, custom_domain, page, ima
     IndexNow. Best-effort on the IndexNow ping — never fail a publish on it."""
     from stripe_link.domain.sitemap import robots_txt, sitemap_xml
 
+    # An archived Site drops its whole domain from crawling: empty sitemap + disallow-all robots (paired with
+    # the noindex,nofollow,noarchive meta re-rendered onto each page). No IndexNow ping either.
+    archived = (site or {}).get("status") == "archived"
     root = f"https://{custom_domain}/"
-    sitemap = sitemap_xml([{"loc": root, "lastmod": page.get("updated_at") or page.get("published_at"), "images": image_urls}])
-    robots = robots_txt(f"https://{custom_domain}/sitemap.xml")
+    sitemap = sitemap_xml([] if archived else [{"loc": root, "lastmod": page.get("updated_at") or page.get("published_at"), "images": image_urls}])
+    robots = robots_txt(f"https://{custom_domain}/sitemap.xml", allow=not archived)
     prefix = f"{homepage_page_id}/"
     cache = "public, max-age=300"
     s3_client.put_object(Bucket=pages_bucket, Key=prefix + "sitemap.xml", Body=sitemap.encode("utf-8"),
@@ -537,7 +567,7 @@ def publish_site_crawl_files(*, site, homepage_page_id, custom_domain, page, ima
     s3_client.put_object(Bucket=pages_bucket, Key=prefix + "robots.txt", Body=robots.encode("utf-8"),
                          ContentType="text/plain; charset=utf-8", CacheControl=cache)
     key = str(((site or {}).get("seo") or {}).get("indexnow_key") or "").strip()
-    if key:
+    if key and not archived:
         s3_client.put_object(Bucket=pages_bucket, Key=prefix + f"{key}.txt", Body=key.encode("utf-8"),
                              ContentType="text/plain; charset=utf-8", CacheControl=cache)
         submit_indexnow(custom_domain, key, [root], opener=indexnow_opener)
