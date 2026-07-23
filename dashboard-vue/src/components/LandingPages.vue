@@ -2996,33 +2996,40 @@ async function resolveProductDoc(productId) {
 }
 
 const targetMode = () => (targetEnv.value === "live" ? "live" : "test");
+// Faithful clone — NOT cleanObject: these are already-valid documents, and stripping null/empty values would
+// delete schema-required-but-nullable keys (e.g. fulfillment.ship_from: null). We only touch specific fields.
+const cloneDoc = (doc) => JSON.parse(JSON.stringify(doc));
+const freshSync = () => ({ status: "pending", last_synced_at: null, error: null });
 
-// Transforms: flip stripe_mode to the target and strip the SOURCE env's Stripe object ids — the target
+// Transforms: flip stripe_mode to the target and drop the SOURCE env's Stripe object ids — the target
 // rebuilds the price inline at checkout with its own key (see the checkout mode-guard).
 function productForTarget(product) {
-  return cleanObject({
-    ...product,
-    stripe_mode: targetMode(),
-    stripe_product_id: undefined,
-    prices: (product.prices || []).map((p) => cleanObject({ ...p, stripe_price_id: undefined })),
-    updated_at: Math.floor(Date.now() / 1000),
-  });
+  const p = cloneDoc(product);
+  p.stripe_mode = targetMode();
+  delete p.stripe_product_id;
+  for (const price of p.prices || []) delete price.stripe_price_id;
+  if ("sync" in p) p.sync = freshSync();  // Stripe-sync state is per-env; reset it
+  p.updated_at = Math.floor(Date.now() / 1000);
+  return p;
 }
 function offerForTarget(offer) {
-  return cleanObject({ ...offer, stripe_mode: targetMode(), sync: undefined, updated_at: Math.floor(Date.now() / 1000) });
+  const o = cloneDoc(offer);
+  o.stripe_mode = targetMode();
+  if ("sync" in o) o.sync = freshSync();
+  o.updated_at = Math.floor(Date.now() / 1000);
+  return o;
 }
 function pageForTarget(page, existingTarget) {
   const now = Math.floor(Date.now() / 1000);
   const status = existingTarget?.status || "draft";  // D2: new -> draft; never downgrade a published target
-  return cleanObject({
-    ...page,
-    status,
-    analytics_summary: undefined,  // target keeps its own (or zero) analytics
-    published_at: status === "published" ? (existingTarget?.published_at || page.published_at || null) : null,
-    created_at: existingTarget?.created_at || page.created_at || now,
-    updated_at: now,
-    revision: (existingTarget?.revision || 0) + 1,
-  });
+  const p = cloneDoc(page);
+  p.status = status;
+  delete p.analytics_summary;  // target keeps its own (or zero) analytics
+  p.published_at = status === "published" ? (existingTarget?.published_at || page.published_at || null) : null;
+  p.created_at = existingTarget?.created_at || page.created_at || now;
+  p.updated_at = now;
+  p.revision = (existingTarget?.revision || 0) + 1;
+  return p;
 }
 
 async function copyPageToEnvironment(page) {
