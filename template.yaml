@@ -581,6 +581,40 @@ Resources:
             Path: /reviews/{review_id}/status
             Method: OPTIONS
 
+  ReviewsPublicFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${ProjectPrefix}-reviews-public-${Environment}"
+      CodeUri: src/
+      Handler: handlers.reviews_public.handler
+      Description: Public review submission — serves the customer review form and ingests submissions (pending).
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ReviewsTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref ProductsTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref SitesTable
+      Events:
+        ReviewFormGet:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /review
+            Method: GET
+        ReviewSubmit:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /review
+            Method: POST
+        ReviewFormOptions:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /review
+            Method: OPTIONS
+
   ProductSyncFunction:
     Type: AWS::Serverless::Function
     Properties:
