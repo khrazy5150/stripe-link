@@ -1046,6 +1046,7 @@
       @confirm="removePage"
     >
       {{ pendingArchivePage?.status === "published" ? "Archive" : "Delete" }} "{{ pendingArchivePage?.name || "this landing page" }}"?
+      <template v-if="siteForPage(pendingArchivePage)"> It will first be detached from {{ siteForPage(pendingArchivePage)?.name }}.</template>
     </ConfirmDialog>
 
     <ConfirmDialog
@@ -2934,6 +2935,11 @@ async function removePage() {
   error.value = "";
   message.value = "";
   try {
+    // A page leaving the catalog must also leave its Site, or the Site's route map is left pointing at a
+    // gone/stale page — a phantom slug, or a homepage that 404s on the custom domain. Detach first so the
+    // Site stays consistent even if the archive/delete below fails.
+    const site = siteForPage(page);
+    if (site) await sitesStore.detachPage(site.site_id, page.page_id, page.tenant_id);
     if (page.status === "published") {
       const archivedPage = applyPageStatus(page, "archived");
       const body = await apiRequest("/pages", { method: "POST", body: archivedPage });
