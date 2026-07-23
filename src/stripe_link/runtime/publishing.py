@@ -165,6 +165,24 @@ def _denormalize_page_catalog(site: dict[str, Any], page_id: str, offer_id: str,
     return changed
 
 
+def load_page_reviews(reviews_repository: Any | None, tenant_id: str, products_by_id: dict[str, Any]) -> list[dict[str, Any]]:
+    """Approved, first-party, product-target reviews for the products on this page (plans/REVIEWS.md). Only
+    these feed the Product aggregateRating/review markup + the visible block. Best-effort."""
+    if not reviews_repository or not tenant_id or not products_by_id:
+        return []
+    try:
+        reviews = reviews_repository.list_for_tenant(tenant_id)
+    except Exception:  # noqa: BLE001 — reviews are an enhancement; never fail a publish on them
+        return []
+    return [
+        r for r in reviews
+        if isinstance(r, dict)
+        and (r.get("target") or {}).get("type") == "product"
+        and str((r.get("target") or {}).get("id") or "") in products_by_id
+        and r.get("status") == "approved" and r.get("source") != "gbp"
+    ]
+
+
 def detach_page_from_sites(sites_repository: Any | None, domains_index_repository: Any | None, tenant_id: str, page_id: str) -> int:
     """Remove page_id from the route map of any Site that references it (a page belongs to at most one Site).
     Called server-side when a page is deleted/archived so no Site is left pointing at a gone page — the
@@ -383,6 +401,7 @@ def publish_page_document(
     services_repository: Any | None = None,
     sites_repository: Any | None = None,
     domains_index_repository: Any | None = None,
+    reviews_repository: Any | None = None,
     s3_client: Any,
     pages_bucket: str,
     preview_bucket: str,
@@ -477,11 +496,13 @@ def publish_page_document(
     eligibility = ((site or {}).get("indexing") or {}).get("eligibility") or "blocked"
     site_archived = (site or {}).get("status") == "archived"
 
+    page_reviews = load_page_reviews(reviews_repository, tenant_id, products_by_id)
+
     def _render(robots: str) -> str:
         return render_page(
             page, offer, products_by_id, checkout_url=checkout, api_base_url=api_base_url,
             services_by_id=services_by_id, offers_by_id=offers_by_id, canonical_url=page_canonical,
-            robots=robots, site=site, page_type=page_type,
+            robots=robots, site=site, page_type=page_type, reviews=page_reviews,
         )
 
     artifacts = []

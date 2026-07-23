@@ -9,6 +9,7 @@ from urllib.parse import urlencode, urlparse
 from stripe_link.domain.composition import compose_page, element_channel
 from stripe_link.domain.documents import PRODUCT_CONDITIONS
 from stripe_link.domain.pricing import PricingError, expand_offer, find_price, resolve_offer, single_unit_price
+from stripe_link.domain.reviews import aggregate_reviews, markup_eligible
 from stripe_link.domain.service_pricing import resolve_service_price
 
 
@@ -569,6 +570,16 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     "    .sl-seller-hours li span:last-child{color:var(--sl-muted)}",
     "    .sl-seller-gbp a{color:var(--sl-legal-link);text-decoration:none;font-weight:600}",
     "    .sl-seller-gbp a:hover{text-decoration:underline}",
+    "    .sl-reviews{max-width:var(--sl-content-width,72rem);margin:2.4rem auto;padding:0 1.6rem}",
+    "    .sl-reviews-summary{font-size:1.6rem;color:var(--sl-content-text);margin:0 0 1.2rem}",
+    "    .sl-reviews-avg{font-weight:800}",
+    "    .sl-reviews-list{list-style:none;padding:0;margin:0;display:grid;gap:1.4rem}",
+    "    .sl-review{border:1px solid var(--sl-line,#e5e7eb);border-radius:0.8rem;padding:1.2rem 1.4rem}",
+    "    .sl-review-stars{color:#f59e0b;letter-spacing:0.1em;margin-right:0.8rem}",
+    "    .sl-review-author{font-weight:700;color:var(--sl-content-text)}",
+    "    .sl-review-date{color:var(--sl-muted);font-size:1.3rem;margin-left:0.8rem}",
+    "    .sl-review-body{margin:0.6rem 0 0;color:var(--sl-content-text);line-height:1.6}",
+    "    .sl-review-title{color:var(--sl-content-text)}",
     "    .sl-listicle{width:min(52rem,100%);margin:0 auto;display:flex;flex-direction:column;gap:1.2rem}",
     "    .sl-listicle-stage{position:relative}",
     "    .sl-listicle-carousel{display:flex;overflow-x:auto;scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch;scrollbar-width:none}",
@@ -1046,6 +1057,9 @@ _RENDER_NAV: dict[str, list[dict[str, str]]] = {"primary": [], "footer": []}
 # The Site's category pages this render can link to (SEO-11/13): {category_key: {"slug", "label"}}. Lets a
 # landing page's breadcrumb insert its category level (Home → Category → Product). Render-scoped.
 _RENDER_CATEGORY_PAGES: dict[str, dict[str, str]] = {}
+# product_id -> its markup-eligible reviews for this render (plans/REVIEWS.md). Feeds the Product
+# aggregateRating/review JSON-LD AND the visible reviews block (Google requires the review text on-page).
+_RENDER_REVIEWS: dict[str, list[dict[str, Any]]] = {}
 # A page is indexable only when it is the published artifact in production (SEO-02/21). Everything else —
 # the tenant's preview, any non-production environment — must be kept out of the index.
 INDEXABLE_ROBOTS = "index,follow,max-image-preview:large,max-snippet:-1"
@@ -1102,6 +1116,7 @@ def render_page(
     robots: str | None = None,
     site: dict[str, Any] | None = None,
     page_type: str = "",
+    reviews: list[dict[str, Any]] | None = None,
 ) -> str:
     services_by_id = services_by_id or {}
     offers_by_id = offers_by_id or {str(offer.get("offer_id") or ""): offer}
@@ -1144,6 +1159,11 @@ def render_page(
     for cat_slug, cat_entry in ((site or {}).get("pages") or {}).items():
         if isinstance(cat_entry, dict) and cat_entry.get("page_type") == "category" and cat_entry.get("category"):
             _RENDER_CATEGORY_PAGES[str(cat_entry["category"])] = {"slug": str(cat_slug), "label": str(cat_entry.get("label") or "")}
+    _RENDER_REVIEWS.clear()
+    for review in (reviews or []):
+        target = review.get("target") or {}
+        if target.get("type") == "product" and str(target.get("id") or ""):
+            _RENDER_REVIEWS.setdefault(str(target["id"]), []).append(review)
     try:
         return _render_page_body(
             page, offer, products_by_id, selected_prices, checkout_url, api_base_url,
@@ -1157,6 +1177,7 @@ def render_page(
         _RENDER_STATE["page_type"] = ""
         _RENDER_NAV["primary"], _RENDER_NAV["footer"] = [], []
         _RENDER_CATEGORY_PAGES.clear()
+        _RENDER_REVIEWS.clear()
         _RENDER_ORG.clear()
         _RENDER_SEO.clear()
 
@@ -1229,6 +1250,8 @@ def _render_page_body(
         render_section(section, page, offer, products_by_id, resolved_offer, checkout_url, api_base_url, services_by_id, offers_by_id)
         for section in body_sections
     )
+    # First-party reviews render after the page's sections (visible content matching the Product review JSON-LD).
+    reviews_block = render_reviews_block(offer, products_by_id)
     head_extras = "\n".join(part for part in (
         render_head_section(section, page, offer, products_by_id, services_by_id, composed_sections)
         for section in head_sections
@@ -1265,6 +1288,7 @@ def _render_page_body(
         site_header,
         breadcrumb,
         body,
+        reviews_block,
         footer_nav,
         legal_footer,
         "  </main>",
@@ -2342,6 +2366,58 @@ def json_ld_dump(payload: dict[str, Any]) -> str:
     return text.replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026")
 
 
+def _review_ld(review: dict[str, Any]) -> dict[str, Any]:
+    """A schema.org Review node from a stored review (author/rating/body rendered verbatim, same as visible)."""
+    node: dict[str, Any] = {
+        "@type": "Review",
+        "author": {"@type": "Person", "name": str(review.get("author") or "Anonymous")},
+        "reviewRating": {"@type": "Rating", "ratingValue": int(review.get("rating") or 0), "bestRating": 5, "worstRating": 1},
+    }
+    for key, field in (("name", "title"), ("reviewBody", "body"), ("datePublished", "review_date")):
+        value = str(review.get(field) or "").strip()
+        if value:
+            node[key] = value
+    return node
+
+
+def render_reviews_block(offer: dict[str, Any], products_by_id: dict[str, dict[str, Any]]) -> str:
+    """The VISIBLE reviews section — Google requires the review text + author in the initial HTML, matching the
+    Product review/aggregateRating JSON-LD exactly. All approved reviews render, low ratings included (no
+    cherry-picking). Empty string when the page's product has none."""
+    product = first_offer_product(offer, products_by_id)
+    reviews = markup_eligible(_RENDER_REVIEWS.get(str(product.get("product_id") or "")) or [])
+    if not reviews:
+        return ""
+    aggregate = aggregate_reviews(reviews)
+    summary = ""
+    if aggregate:
+        count = aggregate["review_count"]
+        summary = (f'      <p class="sl-reviews-summary"><span class="sl-reviews-avg">{aggregate["rating_value"]}</span>'
+                   f' out of 5 · {count} review{"" if count == 1 else "s"}</p>')
+    items = []
+    for review in reviews:
+        rating = max(0, min(5, int(review.get("rating") or 0)))
+        stars = "★" * rating + "☆" * (5 - rating)
+        author = escape(str(review.get("author") or "Anonymous"))
+        body = escape(str(review.get("body") or ""))
+        title = str(review.get("title") or "").strip()
+        date = str(review.get("review_date") or "").strip()
+        title_html = f'<strong class="sl-review-title">{escape(title)}</strong> ' if title else ""
+        date_html = f'<time class="sl-review-date" datetime="{escape(date)}">{escape(date)}</time>' if date else ""
+        items.append(
+            f'<li class="sl-review"><span class="sl-review-stars" aria-label="Rated {rating} of 5">{stars}</span>'
+            f'<span class="sl-review-author">{author}</span>{date_html}'
+            f'<p class="sl-review-body">{title_html}{body}</p></li>'
+        )
+    return (
+        '    <section class="sl-reviews" data-section-type="reviews">\n'
+        '      <h2 class="sl-section-heading">Customer reviews</h2>\n'
+        f'{summary}\n'
+        f'      <ul class="sl-reviews-list">{"".join(items)}</ul>\n'
+        '    </section>'
+    )
+
+
 def product_json_ld(
     page: dict[str, Any],
     offer: dict[str, Any],
@@ -2400,6 +2476,17 @@ def product_json_ld(
     category = humanize_category(product.get("product_category"))
     if category:
         payload["category"] = category
+    # First-party reviews (plans/REVIEWS.md): aggregateRating + individual Review nodes, from the product's
+    # approved, non-GBP reviews only. Never a hand-typed number — this is the honest AggregateRating the
+    # renderer previously refused to emit. The visible reviews block renders the same data on-page.
+    product_reviews = markup_eligible(_RENDER_REVIEWS.get(str(product.get("product_id") or "")) or [])
+    aggregate = aggregate_reviews(product_reviews)
+    if aggregate:
+        payload["aggregateRating"] = {
+            "@type": "AggregateRating", "ratingValue": aggregate["rating_value"],
+            "reviewCount": aggregate["review_count"], "bestRating": 5, "worstRating": 1,
+        }
+        payload["review"] = [_review_ld(review) for review in product_reviews]
     offer_payload: dict[str, Any] = {
         "@type": "Offer",
         # Decimal STRING, not a float (SEO-07/22).

@@ -348,14 +348,17 @@ class SiteOrganizationIdentityTests(unittest.TestCase):
     }
     ORIGIN = "https://axel-mart.jbay.uk"
 
-    def _render(self, site=None, canonical_url="https://axel-mart.jbay.uk/p/creatine"):
+    def _render(self, site=None, canonical_url="https://axel-mart.jbay.uk/p/creatine", reviews=None):
         offer = load_fixture("offer-creatine-standard.json")
         product = load_fixture("product-creatine-gummies.json")
         page = load_fixture("page-creatine-standard.json")
         page["goal"] = "search_seo"
         page["sections"].append({"id": "structured-data", "type": "structured_data"})
         return render_page(page, offer, {product["product_id"]: product},
-                           canonical_url=canonical_url, site=site)
+                           canonical_url=canonical_url, site=site, reviews=reviews)
+
+    def _product_id(self):
+        return load_fixture("product-creatine-gummies.json")["product_id"]
 
     def _node(self, html, type_name):
         return next((b for b in ld_blocks(html)
@@ -387,6 +390,31 @@ class SiteOrganizationIdentityTests(unittest.TestCase):
         self.assertEqual(spec["@type"], "OpeningHoursSpecification")
         self.assertEqual(spec["dayOfWeek"], ["Monday", "Tuesday"])
         self.assertEqual((spec["opens"], spec["closes"]), ("09:00", "17:00"))
+
+    def test_product_reviews_emit_aggregate_review_and_visible_block(self):
+        pid = self._product_id()
+        reviews = [
+            {"target": {"type": "product", "id": pid}, "rating": 5, "author": "Jane", "body": "Excellent gummies.", "status": "approved", "source": "manual", "review_date": "2026-07-01"},
+            {"target": {"type": "product", "id": pid}, "rating": 3, "author": "Sam", "body": "Fine.", "status": "approved", "source": "manual"},
+            {"target": {"type": "product", "id": pid}, "rating": 1, "author": "Hidden", "body": "pending-body", "status": "pending", "source": "manual"},
+            {"target": {"type": "product", "id": pid}, "rating": 1, "author": "GBP", "body": "gbp-body", "status": "approved", "source": "gbp"},
+        ]
+        html = self._render(reviews=reviews)
+        node = self._node(html, "Product")
+        self.assertEqual(node["aggregateRating"], {"@type": "AggregateRating", "ratingValue": 4.0, "reviewCount": 2, "bestRating": 5, "worstRating": 1})
+        self.assertEqual(len(node["review"]), 2)  # pending + gbp excluded
+        self.assertEqual(node["review"][0]["author"], {"@type": "Person", "name": "Jane"})
+        # Visible content must be in the HTML (Google requires it), and excluded reviews must NOT appear.
+        self.assertIn('<section class="sl-reviews"', html)
+        self.assertIn("Excellent gummies.", html)
+        self.assertNotIn("pending-body", html)
+        self.assertNotIn("gbp-body", html)
+
+    def test_no_reviews_emits_no_aggregate_or_block(self):
+        html = self._render(reviews=[])
+        node = self._node(html, "Product")
+        self.assertNotIn("aggregateRating", node)
+        self.assertNotIn('<section class="sl-reviews"', html)
 
     def test_website_node_publishes_organization(self):
         website = self._node(self._render(site={"organization": self.ORG}), "WebSite")

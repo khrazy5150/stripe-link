@@ -10,7 +10,7 @@ from stripe_link.domain.documents import (
     validate_service,
 )
 from stripe_link.domain.pricing import PricingError
-from stripe_link.repositories.documents import sites_repository
+from stripe_link.repositories.documents import reviews_repository, sites_repository
 from stripe_link.runtime.html import (
     RenderError,
     accessibility_warnings,
@@ -19,10 +19,10 @@ from stripe_link.runtime.html import (
     render_page,
     structured_data_warnings,
 )
-from stripe_link.runtime.publishing import find_site_for_page, site_page_type
+from stripe_link.runtime.publishing import find_site_for_page, load_page_reviews, site_page_type
 
 
-def handler(event, context, *, sites_repo=None):
+def handler(event, context, *, sites_repo=None, reviews_repo=None):
     try:
         body = parse_json_body(event)
         page = body.get("page")
@@ -97,10 +97,13 @@ def handler(event, context, *, sites_repo=None):
         if sites_repo is None and os.environ.get("SITES_TABLE"):
             sites_repo = sites_repository()
         site = find_site_for_page(sites_repo, str(page.get("tenant_id") or ""), str(page.get("page_id") or ""))
+        if reviews_repo is None and os.environ.get("REVIEWS_TABLE"):
+            reviews_repo = reviews_repository()
+        reviews = load_page_reviews(reviews_repo, str(page.get("tenant_id") or ""), products_by_id)
         html = render_page(
             page, offer, products_by_id, selected_prices, checkout_url, api_base_url,
             services_by_id=services_by_id, offers_by_id=offers_by_id, canonical_url=canonical_url,
-            site=site, page_type=site_page_type(site, str(page.get("page_id") or "")),
+            site=site, page_type=site_page_type(site, str(page.get("page_id") or "")), reviews=reviews,
         )
         # Page health, alongside the render: what would keep this page's structured data from earning a rich
         # result. Advisory only — the builder surfaces it, nothing blocks on it.

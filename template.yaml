@@ -1002,6 +1002,8 @@ Resources:
       Policies:
         - DynamoDBReadPolicy:
             TableName: !Ref SitesTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref ReviewsTable
       Events:
         PageRender:
           Type: Api
@@ -1196,6 +1198,8 @@ Resources:
             TableName: !Ref SitesTable
         - DynamoDBCrudPolicy:
             TableName: !Ref CustomDomainsTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref ReviewsTable
         - S3CrudPolicy:
             BucketName: !Ref PagesBucket
         - S3CrudPolicy:
