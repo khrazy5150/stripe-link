@@ -142,6 +142,7 @@ Globals:
         NOTIFICATIONS_TABLE: !Ref NotificationsTable
         SERVICES_TABLE: !Ref ServicesTable
         LEADS_TABLE: !Ref LeadsTable
+        REVIEWS_TABLE: !Ref ReviewsTable
         INVOICES_TABLE: !Ref InvoicesTable
         PRODUCTS_TABLE: !Ref ProductsTable
         OFFERS_TABLE: !Ref OffersTable
@@ -518,6 +519,66 @@ Resources:
           Properties:
             RestApiId: !Ref RestApi
             Path: /leads/{lead_id}
+            Method: OPTIONS
+
+  ReviewsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${ProjectPrefix}-reviews-api-${Environment}"
+      CodeUri: src/
+      Handler: handlers.reviews.handler
+      Description: First-party reviews — tenant-scoped CRUD + moderation.
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ReviewsTable
+      Events:
+        ReviewsCreate:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /reviews
+            Method: POST
+        ReviewsList:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /reviews
+            Method: GET
+        ReviewsOptions:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /reviews
+            Method: OPTIONS
+        ReviewGet:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /reviews/{review_id}
+            Method: GET
+        ReviewDelete:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /reviews/{review_id}
+            Method: DELETE
+        ReviewOptions:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /reviews/{review_id}
+            Method: OPTIONS
+        ReviewModerate:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /reviews/{review_id}/status
+            Method: PATCH
+        ReviewModerateOptions:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /reviews/{review_id}/status
             Method: OPTIONS
 
   ProductSyncFunction:
@@ -2601,6 +2662,37 @@ Resources:
       TimeToLiveSpecification:
         AttributeName: retention_expires_at
         Enabled: true
+      AttributeDefinitions:
+        - AttributeName: PK
+          AttributeType: S
+        - AttributeName: SK
+          AttributeType: S
+        - AttributeName: GSI1PK
+          AttributeType: S
+        - AttributeName: GSI1SK
+          AttributeType: S
+      KeySchema:
+        - AttributeName: PK
+          KeyType: HASH
+        - AttributeName: SK
+          KeyType: RANGE
+      GlobalSecondaryIndexes:
+        - IndexName: GSI1
+          KeySchema:
+            - AttributeName: GSI1PK
+              KeyType: HASH
+            - AttributeName: GSI1SK
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+
+  ReviewsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "${ProjectPrefix}-reviews-${Environment}"
+      BillingMode: PAY_PER_REQUEST
+      SSESpecification:
+        SSEEnabled: true
       AttributeDefinitions:
         - AttributeName: PK
           AttributeType: S

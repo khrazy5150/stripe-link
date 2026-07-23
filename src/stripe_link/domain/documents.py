@@ -1458,6 +1458,35 @@ def validate_lead_submission(document: dict[str, Any]) -> None:
         raise DocumentValidationError("Lead submission consent must be an object.")
 
 
+REVIEW_TARGET_TYPES = {"product", "offer", "business"}
+REVIEW_STATUSES = {"pending", "approved", "rejected"}
+REVIEW_SOURCES = {"manual", "first_party", "gbp"}
+
+
+def validate_review(document: dict[str, Any]) -> None:
+    """A first-party review (plans/REVIEWS.md). Targets a product/offer/business; rating 1-5; author + body are
+    rendered verbatim in the initial HTML and the JSON-LD. Only approved, non-GBP reviews are markup-eligible
+    (Google forbids aggregating third-party/GBP reviews into your own AggregateRating)."""
+    require_fields(document, ["schema_version", "document_type", "tenant_id", "review_id", "target", "rating", "author", "body"])
+    if document.get("document_type") != "review":
+        raise DocumentValidationError("Review document_type must be 'review'.")
+    target = document.get("target")
+    if not isinstance(target, dict) or target.get("type") not in REVIEW_TARGET_TYPES or not str(target.get("id") or "").strip():
+        raise DocumentValidationError("Review target must be an object with a type (product|offer|business) and an id.")
+    rating = document.get("rating")
+    if not isinstance(rating, int) or isinstance(rating, bool) or not (1 <= rating <= 5):
+        raise DocumentValidationError("Review rating must be an integer from 1 to 5.")
+    require_string(document, "author", "Review author")
+    require_string(document, "body", "Review body")
+    optional_string(document, "title", "Review title", max_length=200)
+    optional_string(document, "response", "Review response")
+    optional_string(document, "review_date", "Review date")
+    if document.get("status", "pending") not in REVIEW_STATUSES:
+        raise DocumentValidationError("Review status must be one of: pending, approved, rejected.")
+    if document.get("source", "manual") not in REVIEW_SOURCES:
+        raise DocumentValidationError("Review source must be one of: manual, first_party, gbp.")
+
+
 def validate_refund_request(document: dict[str, Any]) -> None:
     require_fields(document, ["schema_version", "document_type", "tenant_id", "refund_request_id", "status", "customer", "order_id", "created_at"])
     if document.get("document_type") != "refund_request":

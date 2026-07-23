@@ -809,6 +809,15 @@ def leads_repository(table: Any | None = None) -> DynamoDocumentRepository:
     )
 
 
+def reviews_repository(table: Any | None = None) -> DynamoDocumentRepository:
+    return DynamoDocumentRepository(
+        os.environ.get("REVIEWS_TABLE", ""),
+        document_type="review",
+        id_field="review_id",
+        table=table,
+    )
+
+
 def services_repository(table: Any | None = None) -> DynamoDocumentRepository:
     return DynamoDocumentRepository(
         os.environ.get("SERVICES_TABLE", ""),
