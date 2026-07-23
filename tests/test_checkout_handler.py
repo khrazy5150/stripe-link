@@ -183,6 +183,41 @@ class CheckoutHandlerTests(unittest.TestCase):
         self.assertEqual(payload["metadata[tenant_plan]"], ["basic"])
         self.assertNotIn("payment_intent_data[application_fee_amount]", payload)
 
+    def _run_simple_checkout(self, offer, product):
+        return handler(
+            {"httpMethod": "GET", "queryStringParameters": {
+                "clientID": "tenant_demo", "offer": offer["offer_id"], "page_id": "page_x",
+                "product_id": product["product_id"], "price_id": product["prices"][0]["price_id"],
+                "success_url": "https://pages.example.com/thanks", "cancel_url": "https://pages.example.com/buy"}},
+            None,
+            offers_repo=FakeRepository("offer_id", [offer]),
+            products_repo=FakeRepository("product_id", [product]),
+            stripe_repo=FakeStripeKeysRepository(),
+            tenant_repo=FakeRepository("tenant_id", [{"tenant_id": "tenant_demo"}]),
+            secret_cipher=FakeCipher(), opener=self.opener)
+
+    def test_matching_mode_uses_stored_stripe_price_id(self):
+        offer = {**self.offer, "stripe_mode": "test"}
+        product = json.loads(json.dumps(self.product))
+        product["stripe_mode"] = "test"
+        product["prices"][0]["stripe_price_id"] = "price_test_curated"
+        self._run_simple_checkout(offer, product)
+        payload = parse_qs(self.requests[0].data.decode("utf-8"))
+        self.assertEqual(payload["line_items[0][price]"], ["price_test_curated"])
+        self.assertNotIn("line_items[0][price_data][unit_amount]", payload)
+
+    def test_cross_mode_stripe_price_id_is_ignored_and_priced_inline(self):
+        # A live price id lingering on a product sold through a test offer must never be sent to the test key —
+        # it self-heals to an inline price built from the stored amount.
+        offer = {**self.offer, "stripe_mode": "test"}
+        product = json.loads(json.dumps(self.product))
+        product["stripe_mode"] = "live"
+        product["prices"][0]["stripe_price_id"] = "price_live_curated"
+        self._run_simple_checkout(offer, product)
+        payload = parse_qs(self.requests[0].data.decode("utf-8"))
+        self.assertNotIn("line_items[0][price]", payload)
+        self.assertIn("line_items[0][price_data][unit_amount]", payload)
+
     def test_checkout_adds_application_fee_amount_for_connect_direct_charge(self):
         with patch.dict(os.environ, {"STRIPE_SECRET_KEY": "sk_live_platform"}, clear=False):
             handler(

@@ -118,6 +118,12 @@
                     </svg>
                     <span>Duplicate</span>
                   </button>
+                  <button type="button" role="menuitem" :disabled="copyBusy" @click="copyPageToEnvironment(page)">
+                    <svg aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7.5 21 3 16.5m0 0L7.5 12M3 16.5h13.5m0-13.5L21 7.5m0 0L16.5 12M21 7.5H7.5" />
+                    </svg>
+                    <span>Copy to {{ targetEnvLabel }}</span>
+                  </button>
                   <button type="button" role="menuitem" @click="copyPageUrl(page)">
                     <svg aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 8h10.5A1.5 1.5 0 0 1 20 9.5V20a1.5 1.5 0 0 1-1.5 1.5H8A1.5 1.5 0 0 1 6.5 20V9.5A1.5 1.5 0 0 1 8 8Z" />
@@ -1073,6 +1079,24 @@
       "{{ pendingDetachPage?.name || "This page" }}" will stop serving under {{ siteForPage(pendingDetachPage)?.name || "the Site" }} (and its custom domain, if published). The page itself is kept — you can attach it to another Site.
     </ConfirmDialog>
 
+    <ConfirmDialog
+      :open="!!copyPlan"
+      :title="'Copy to ' + targetEnvLabel + '?'"
+      :confirm-label="'Copy to ' + targetEnvLabel"
+      :busy="copyBusy"
+      @cancel="copyPlan = null"
+      @confirm="executeCopy"
+    >
+      <template v-if="copyPlan">
+        Copies <strong>{{ copyPlan.page.name }}</strong>{{ copyPlan.offerDocs.length ? ` plus its offer and ${copyPlan.productDocs.length} product${copyPlan.productDocs.length === 1 ? '' : 's'}` : '' }} to {{ targetEnvLabel }} (same IDs).
+        <template v-if="copyPlan.existingTarget?.status === 'published'"> The {{ targetEnvLabel }} page already exists and stays published — its content is updated.</template>
+        <template v-else-if="copyPlan.existingTarget"> The {{ targetEnvLabel }} page already exists and will be updated (kept as {{ copyPlan.existingTarget.status }}).</template>
+        <template v-else> It lands as a new draft in {{ targetEnvLabel }}, unattached to any Site.</template>
+        <template v-if="copyPlan.hasServices"> Note: this offer includes services, which aren't copied — set them up in {{ targetEnvLabel }}.</template>
+        <template v-if="copyError"><br><span class="field-error">{{ copyError }}</span></template>
+      </template>
+    </ConfirmDialog>
+
     <div v-if="attachTarget" class="modal-backdrop" @click.self="attachTarget = null">
       <section class="modal-card attach-site-modal" role="dialog" aria-modal="true">
         <header class="modal-card-header">
@@ -1102,7 +1126,7 @@
 import { computed, onMounted, reactive, ref, watch } from "vue";
 import { offerViewTargets, offerViewTargetsFromExpanded } from "../composables/useConversionContext";
 import { isSectionVisible, defaultVisible, recommendedSectionKeys, optionalSectionKeys, governedKeys, elementLabel, elementChannel, addableElements, tokenGroups, previewVar, supportedGoals, goalLabel, packSeeds } from "../composables/pageComposer";
-import { apiRequest, getApiBase, getApiEnvironment, getPagesBaseUrl, getPreviewPagesBaseUrl, getTenantId } from "../api/client";
+import { apiRequest, getApiBase, getApiEnvironment, getOtherEnvironment, getPagesBaseUrl, getPreviewPagesBaseUrl, getTenantId } from "../api/client";
 import { formatMoney } from "../stores/products";
 import { useProfileStore } from "../stores/profile";
 import { useSitesStore } from "../stores/sites";
@@ -2941,6 +2965,115 @@ async function duplicatePage(page) {
     error.value = err.message || "Failed to duplicate the page.";
   } finally {
     saving.value = false;
+  }
+}
+
+// ---- Copy a page (and its catalog) to the other environment (plans/COPY_TO_ENVIRONMENT.md) ----
+const targetEnv = computed(() => getOtherEnvironment());
+const targetEnvLabel = computed(() => (targetEnv.value === "live" ? "Live" : "Test"));
+const copyBusy = ref(false);
+const copyError = ref("");
+const copyPlan = ref(null);  // { page, offerDocs, productDocs, existingTarget, hasServices } while the confirm is open
+
+function offerIdsForPage(page) {
+  const ids = new Set();
+  if (page.offer_id) ids.add(page.offer_id);
+  for (const section of page.sections || []) {
+    if (section && section.type === "catalog_grid") {
+      for (const item of section.items || []) if (item.offer_id) ids.add(item.offer_id);
+    }
+  }
+  return [...ids];
+}
+
+async function resolveOfferDoc(offerId) {
+  return offers.value.find((o) => o.offer_id === offerId)
+    || apiRequest(`/offers/${encodeURIComponent(offerId)}`).then((b) => b.offer).catch(() => null);
+}
+async function resolveProductDoc(productId) {
+  return products.value.find((p) => p.product_id === productId)
+    || apiRequest(`/products/${encodeURIComponent(productId)}`).then((b) => b.product).catch(() => null);
+}
+
+const targetMode = () => (targetEnv.value === "live" ? "live" : "test");
+
+// Transforms: flip stripe_mode to the target and strip the SOURCE env's Stripe object ids — the target
+// rebuilds the price inline at checkout with its own key (see the checkout mode-guard).
+function productForTarget(product) {
+  return cleanObject({
+    ...product,
+    stripe_mode: targetMode(),
+    stripe_product_id: undefined,
+    prices: (product.prices || []).map((p) => cleanObject({ ...p, stripe_price_id: undefined })),
+    updated_at: Math.floor(Date.now() / 1000),
+  });
+}
+function offerForTarget(offer) {
+  return cleanObject({ ...offer, stripe_mode: targetMode(), sync: undefined, updated_at: Math.floor(Date.now() / 1000) });
+}
+function pageForTarget(page, existingTarget) {
+  const now = Math.floor(Date.now() / 1000);
+  const status = existingTarget?.status || "draft";  // D2: new -> draft; never downgrade a published target
+  return cleanObject({
+    ...page,
+    status,
+    analytics_summary: undefined,  // target keeps its own (or zero) analytics
+    published_at: status === "published" ? (existingTarget?.published_at || page.published_at || null) : null,
+    created_at: existingTarget?.created_at || page.created_at || now,
+    updated_at: now,
+    revision: (existingTarget?.revision || 0) + 1,
+  });
+}
+
+async function copyPageToEnvironment(page) {
+  openMenuId.value = "";
+  copyError.value = "";
+  copyBusy.value = true;
+  try {
+    await ensureCatalogLoaded().catch(() => {});
+    const offerDocs = (await Promise.all(offerIdsForPage(page).map(resolveOfferDoc))).filter(Boolean);
+    const productIds = new Set();
+    let hasServices = false;
+    for (const offer of offerDocs) {
+      for (const item of offer.items || []) {
+        if (item.product_id) productIds.add(item.product_id);
+        if (item.service_id) hasServices = true;
+      }
+    }
+    const productDocs = (await Promise.all([...productIds].map(resolveProductDoc))).filter(Boolean);
+    // Pre-flight the target PAGE (drives the draft-vs-keep-published rule + overwrite messaging).
+    const existingTarget = await apiRequest(`/pages/${encodeURIComponent(page.page_id)}`, { environment: targetEnv.value })
+      .then((b) => b.page).catch(() => null);
+    copyPlan.value = { page, offerDocs, productDocs, existingTarget, hasServices };
+  } catch (err) {
+    copyError.value = err.message || "Couldn't prepare the copy.";
+  } finally {
+    copyBusy.value = false;
+  }
+}
+
+async function executeCopy() {
+  const plan = copyPlan.value;
+  if (!plan) return;
+  const env = targetEnv.value;
+  copyError.value = "";
+  copyBusy.value = true;
+  try {
+    // Bottom-up so references resolve in the target: products -> offer(s) -> page.
+    for (const product of plan.productDocs) {
+      await apiRequest("/products", { method: "POST", body: productForTarget(product), environment: env });
+    }
+    for (const offer of plan.offerDocs) {
+      await apiRequest("/offers", { method: "POST", body: offerForTarget(offer), environment: env });
+    }
+    await apiRequest("/pages", { method: "POST", body: pageForTarget(plan.page, plan.existingTarget), environment: env });
+    const n = plan.productDocs.length;
+    message.value = `Copied “${plan.page.name}”${plan.offerDocs.length ? ` + its offer and ${n} product${n === 1 ? "" : "s"}` : ""} to ${targetEnvLabel.value}.`;
+    copyPlan.value = null;
+  } catch (err) {
+    copyError.value = err.message || "Copy failed. Some items may have been copied; re-run to finish.";
+  } finally {
+    copyBusy.value = false;
   }
 }
 

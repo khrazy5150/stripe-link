@@ -182,6 +182,10 @@ def build_checkout_payload(
 ):
     checkout = offer.get("checkout") or {}
     mode = checkout.get("mode") or "payment"
+    # The Stripe key was chosen from the offer's stripe_mode, so that IS the active key's mode. A stored
+    # stripe_price_id only belongs to the account of the same mode — if a product's own stripe_mode disagrees
+    # (a wrong-environment id from a bad copy or manual tinkering), we must NOT send it (it 500s at Stripe).
+    key_mode = "live" if offer.get("stripe_mode") == "live" else "test"
     payload = {
         "mode": "subscription" if mode == "subscription" else "payment",
         "success_url": success_url,
@@ -217,6 +221,13 @@ def build_checkout_payload(
             first_price_id = item.get("price_id") or ""
             first_product_name = product.get("name") or item.get("product_name") or "Product"
         stripe_price_id = price.get("stripe_price_id")
+        # Only honor the id when the product's mode matches the active key's. Absent stripe_mode = trust it
+        # (legacy docs); an EXPLICIT mismatch = a wrong-env id, so ignore it and price inline instead.
+        product_mode = product.get("stripe_mode")
+        if stripe_price_id and product_mode is not None and product_mode != key_mode:
+            print(f"[checkout] ignoring cross-mode stripe_price_id for product '{item.get('product_id')}' "
+                  f"(product stripe_mode={product_mode}, active key mode={key_mode}); pricing inline instead")
+            stripe_price_id = ""
         if stripe_price_id:
             payload[f"{prefix}[price]"] = stripe_price_id
         else:

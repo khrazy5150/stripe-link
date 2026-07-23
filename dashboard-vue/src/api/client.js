@@ -45,8 +45,8 @@ export function setApiEnvironment(environment) {
   localStorage.setItem(API_ENVIRONMENT_STORAGE_KEY, normalizeEnvironment(environment));
 }
 
-export function getApiBase() {
-  const environment = getApiEnvironment();
+export function getApiBase(environment = getApiEnvironment()) {
+  environment = normalizeEnvironment(environment);
   const configured = localStorage.getItem(apiBaseStorageKey(environment));
   if (configured) return configured;
   return (
@@ -54,6 +54,11 @@ export function getApiBase() {
     localStorage.getItem("stripeLinkApiBase") ||
     fallbackApiBase(environment)
   );
+}
+
+// The environment "opposite" the one currently active — the target for a cross-env copy.
+export function getOtherEnvironment(environment = getApiEnvironment()) {
+  return normalizeEnvironment(environment) === "live" ? "test" : "live";
 }
 
 export function setApiBase(value) {
@@ -168,8 +173,11 @@ export function clearAuthSession() {
   localStorage.removeItem(TENANT_ID_STORAGE_KEY);
 }
 
-export async function apiRequest(path, { method = "GET", body, params = {} } = {}) {
-  const url = new URL(`${getApiBase().replace(/\/$/, "")}${path}`, window.location.origin);
+export async function apiRequest(path, { method = "GET", body, params = {}, environment } = {}) {
+  // `environment` targets the OTHER env's API base (cross-env copy) with the same shared token; omit for the
+  // active environment.
+  const base = environment ? getApiBase(environment) : getApiBase();
+  const url = new URL(`${base.replace(/\/$/, "")}${path}`, window.location.origin);
   Object.entries({ tenant_id: getTenantId(), client_id: getClientId(), ...params }).forEach(([key, value]) => {
     if (value !== undefined && value !== null && value !== "") url.searchParams.set(key, value);
   });
