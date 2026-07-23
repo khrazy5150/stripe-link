@@ -12,6 +12,11 @@
       <header class="dashboard-card-header landing-pages-toolbar">
         <h2>Landing Pages</h2>
         <div class="landing-pages-actions">
+          <select v-if="sitesStore.sites.length" v-model="siteFilter" class="landing-site-filter" aria-label="Filter by Site">
+            <option value="">All Sites</option>
+            <option v-for="s in sitesStore.sites" :key="s.site_id" :value="s.site_id">{{ s.name || s.site_id }}</option>
+            <option value="__none__">No Site</option>
+          </select>
           <input
             v-model.trim="search"
             class="landing-search"
@@ -53,6 +58,7 @@
                   <h3>{{ page.name || "Untitled Landing Page" }}</h3>
                   <p>
                     {{ templateLabel(page) }} <span>{{ page.page_id }}</span>
+                    <span v-if="page.route?.slug" class="landing-page-slug">Slug: /{{ page.route.slug }}</span>
                     <span v-if="siteNameForPage(page)" class="landing-page-site">{{ siteNameForPage(page) }}</span>
                     <span v-else class="landing-page-site is-unassigned">No Site</span>
                   </p>
@@ -104,6 +110,13 @@
                       <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m16.862 4.487 1.688-1.688a1.875 1.875 0 1 1 2.652 2.652L8.625 18.028 3.75 19.5l1.472-4.875L16.862 4.487Z" />
                     </svg>
                     <span>Edit</span>
+                  </button>
+                  <button type="button" role="menuitem" @click="duplicatePage(page)">
+                    <svg aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 8h10.5A1.5 1.5 0 0 1 20 9.5V20a1.5 1.5 0 0 1-1.5 1.5H8A1.5 1.5 0 0 1 6.5 20V9.5A1.5 1.5 0 0 1 8 8Z" />
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16V5.5A1.5 1.5 0 0 1 5.5 4H16" />
+                    </svg>
+                    <span>Duplicate</span>
                   </button>
                   <button type="button" role="menuitem" @click="copyPageUrl(page)">
                     <svg aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1490,10 +1503,18 @@ const wizardSectionLabels = computed(() => {
   const governed = recommendedSectionKeys(offerType, form.goal).map((key) => elementLabel(key));
   return [...governed, ...goalSeedLabels(form.goal)];
 });
+const siteFilter = ref("");  // "" = all, "__none__" = unattached, else a site_id
 const filteredPages = computed(() => {
   const term = search.value.toLowerCase();
-  if (!term) return pages.value;
-  return pages.value.filter((page) => [
+  let list = pages.value;
+  if (siteFilter.value) {
+    list = list.filter((page) => {
+      const site = siteForPage(page);
+      return siteFilter.value === "__none__" ? !site : site?.site_id === siteFilter.value;
+    });
+  }
+  if (!term) return list;
+  return list.filter((page) => [
     page.name,
     page.page_id,
     page.offer_id,
@@ -2885,6 +2906,37 @@ function editPage(page) {
 function requestArchivePage(page) {
   openMenuId.value = "";
   pendingArchivePage.value = page;
+}
+
+// Clone a page into a fresh draft: new page_id, "(Copy)" name, a distinct slug, and unattached from any
+// Site (the copy is the tenant's to place). Same env — cross-environment copy is a separate action.
+async function duplicatePage(page) {
+  openMenuId.value = "";
+  const now = Math.floor(Date.now() / 1000);
+  const copy = cleanObject({
+    ...page,
+    page_id: localId("page"),
+    name: `${page.name || "Landing page"} (Copy)`,
+    route: { ...(page.route || {}), slug: slugify(`${page.route?.slug || page.name || "page"}-copy`) },
+    status: "draft",
+    published_at: null,
+    revision: 1,
+    created_at: now,
+    updated_at: now,
+  });
+  saving.value = true;
+  error.value = "";
+  message.value = "";
+  try {
+    const body = await apiRequest("/pages", { method: "POST", body: copy });
+    const saved = body.page || copy;
+    pages.value = [saved, ...pages.value.filter((p) => p.page_id !== saved.page_id)];
+    message.value = `Duplicated as “${saved.name}” (draft, no Site).`;
+  } catch (err) {
+    error.value = err.message || "Failed to duplicate the page.";
+  } finally {
+    saving.value = false;
+  }
 }
 
 async function publishPage(page) {

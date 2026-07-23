@@ -3205,6 +3205,17 @@ button:disabled {
   min-width: min(100%, 58rem);
 }
 
+.landing-site-filter {
+  min-height: 4.4rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--panel);
+  color: var(--text);
+  font: inherit;
+  font-weight: 700;
+  padding: 0 1rem;
+}
+
 .landing-search {
   width: 28rem;
   min-width: 20rem;
@@ -3324,6 +3335,13 @@ button:disabled {
   color: var(--text-muted);
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   overflow-wrap: anywhere;
+}
+
+/* The page's own slug, shown like the legacy card ("Slug: /name") — plain text, not the mono page-id. */
+.landing-page-title-row p span.landing-page-slug {
+  font-family: inherit;
+  color: var(--muted);
+  font-weight: 700;
 }
 
 /* The Site a page belongs to — a small chip so it reads apart from the preset/page-id. */
