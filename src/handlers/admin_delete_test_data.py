@@ -7,10 +7,19 @@ the commerce tables + a best-effort Stripe test-mode cleanup. Two behavioral ada
   2. **Hard dev-only gate.** Returns 403 unless `ENVIRONMENT` is a non-prod env; the API route is also
      `Condition: IsNonProd`, so it isn't even created in the prod stack (defense in depth).
 
-Excluded on purpose (account config / infrastructure, not "test data"): Stripe keys, tenant/user profiles,
-preferences, shipping config, Sites (custom domains), the services/booking family, routes, experiments,
-legal pages. Published-page S3/CloudFront artifacts are NOT cleaned here (the DB records are removed; a
-follow-up can purge orphaned HTML).
+Excluded on purpose (setup / infrastructure, not "test data"): Stripe keys, tenant/user profiles,
+preferences, shipping config, the services/booking family, routes, experiments, legal pages.
+
+**Sites are deliberately kept** (decision 2026-07-24): a Site is a tenant's hostname / organization-NAP /
+SEO *setup*, not test data — the goal is to delete test data, not factory-reset the workspace. Deleting a
+Site would also (a) leave the tenant with NO Site (none is auto-created — tenants make them by hand), and
+(b) orphan its `SubdomainRegistry` reservation (there is no release path). Custom domains are live-only, so
+none exist in test anyway. A Site's `slug->page_id` map may keep stale entries pointing at deleted test
+pages; those simply 404 and self-heal as the tenant republishes — an acceptable trade vs. the above. Do NOT
+add Site deletion here.
+
+Published-page S3/CloudFront artifacts are NOT cleaned here (the DB records are removed; a follow-up can
+purge orphaned HTML).
 """
 import logging
 import os
