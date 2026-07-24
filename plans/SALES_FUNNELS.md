@@ -1,7 +1,8 @@
 # Sales Funnels in the Sites Paradigm
 
-**Status:** design LOCKED (author-clarified 2026-07-24; only the "upsells = separate offers" resolution
-awaits a final ✓), not built. **HIGH PRIORITY.** Home: closes the loop for
+**Status:** design LOCKED (author-clarified 2026-07-24), not built. **HIGH PRIORITY.** Reuses/reconciles with
+the existing generic Funnel engine (schemas/Funnel.schema.json + domain/funnels.py — see "Relationship" below).
+Home: closes the loop for
 transaction (Stripe) landing pages. Extends — does not replace — the existing commerce pieces
 (`plans/AI_AND_COMMERCE_ARCHITECTURE.md` Part C, the price-`context` model, `handlers/upsell.py`,
 `handlers/post_checkout.py`).
@@ -17,7 +18,7 @@ slugs** within the Site, which tenants may never use for their own pages:
 | `/sale` | *context view of `/`* | The **same** sales page, Standard price replaced by the **sale**-context price + a "Sale" badge. Falls back to Standard when no sale price. |
 | `/flash-sale` | *context view of `/`* | The same sales page with the **flash_sale**-context price, a 🔥 "Flash Sale" badge, and a **countdown banner** — driven by page dates (upcoming/active/ended). Standard when no flash price, not started, or expired. |
 | `/upsell` | funnel-step page | Post-purchase, one-click: walks the main offer's `upsells[]` (separate offers) one by one. Only reachable when the offer references upsells. |
-| `/downsell` | funnel-step page | Post-purchase, one-click: walks the main offer's `downsells[]`, **after** the whole upsell chain. |
+| `/downsell` | funnel-step page | Post-purchase, one-click: after the whole upsell chain, walks the paired downsells of the upsells that were **declined**. |
 | `/thank-you` | funnel-step page | Funnel end. |
 
 Two distinct kinds of reserved slug fall out of this:
@@ -68,33 +69,67 @@ Dates on the **page** (not the price, not a campaign) so a tenant just sets a wi
 
 ## Post-purchase chain: `/upsell` → `/downsell` → `/thank-you`
 
-### Upsells/downsells are SEPARATE OFFERS, not products inside the main offer (resolves the listicle conflict)
+### Funnel products live in an IN-OFFER block — ONE offer per funnel (resolves the listicle conflict)
 
 **The conflict (author-spotted):** a multi-product offer auto-infers to `listicle`, and listicles ignore
 funnels by design — so you can't put "the main product + separate upsell products" in one offer's `items[]`
-without turning it into a listicle. **Resolution:** an upsell/downsell is **its own Offer** (`context:
-"upsell"` / `"downsell"`), referenced by the main offer — **exactly how order bumps already work**
-(`resolve_order_bumps` merges separate `context: "order_bump"` offers by id). So:
-- The main offer's `items[]` alone drive `offer_type` (single/bundle/listicle) — **untouched** by funnel steps.
-- An upsell can be an **unrelated product** (or a bundle) — it's just another Offer, with its own
-  headline/image/CTA for `/upsell`. No new `offer_type`; the existing `context` field is the marker.
-- Funnel reference on the main offer: `offer.funnel = { upsells: [offer_id…], downsells: [offer_id…] }`
-  (ordered). Order bumps stay as they are (checkout add-ons).
+without turning it into a listicle. **Resolution (honors the one-offer-per-landing-page paradigm):** add a
+funnel block *inside the single offer*, separate from `items[]`:
+
+```
+offer.funnel = {
+  upsells:   [{ product_id, price_id /* upsell context */ }, …],   // ordered
+  downsells: [{ product_id, price_id /* downsell context */ }, …], // paired to an upsell product
+}
+```
+
+- `offer_type` is inferred from **`items[]` only** → adding funnel products **does not** inflate it into a
+  listicle. `items[]` = the `/` sale (single/bundle); `funnel` = the post-purchase steps.
+- **The whole funnel is driven by that ONE offer** — every funnel page (`/upsell`, `/downsell`, `/thank-you`)
+  renders from it. No second Offer document; the "one offer per landing page" restriction holds.
+- An **unrelated product** can be an upsell: reference *its* `product_id` + *its* upsell-context `price_id`.
+- Funnel products are **product+price refs, not full Offers** (lighter). If rich per-upsell presentation or
+  bundle-upsells are ever needed, the entry can carry a presentation override — deferred (YAGNI).
 - Funnels apply to **single/bundle** main offers; **listicles ignore them** (shop mode → cart, not funnel).
+- Order bumps currently reference separate `context: order_bump` offers (already built); they can be folded
+  into `offer.funnel.order_bumps` later for consistency, or left as-is (a pre-purchase mechanism either way).
 
 ### Flow
 
 - After the `/` checkout is **paid**, the buyer is routed into the funnel (Site-aware routing already exists:
-  `handlers/post_checkout.py`). One-click charging against the saved payment method already exists
-  (`handlers/upsell.py` — `get_upsell_session` + `process_upsell`, idempotent by `sequence`).
-- **`/upsell` — one slug, a programmatic chain.** It walks the main offer's `upsells[]` array **one by one**
-  (NO `/upsell-1`/`/upsell-2` in the URL — a single `/upsell` slug advancing by an internal step index).
-  Accept → one-click charge → next upsell. Decline → next upsell.
-- **`/downsell` — one slug, after the ENTIRE upsell chain.** Once the upsell chain finishes, walk the
-  `downsells[]` array the same way, one by one, on a single `/downsell` slug.
+  `handlers/post_checkout.py`; the accept/decline→next engine `resolve_funnel_transition` is reusable). One-
+  click charging against the saved payment method already exists (`handlers/upsell.py` — `get_upsell_session`
+  + `process_upsell`, idempotent by `sequence`).
+- **`/upsell` — one slug, a programmatic chain.** It walks `offer.funnel.upsells` **one by one** (NO
+  `/upsell-1`/`-2` in the URL — a single `/upsell` slug advancing by an internal step index). Accept →
+  one-click charge → next upsell. **Decline → queue that product's paired downsell (if it has one).**
+- **`/downsell` — one slug, after the ENTIRE upsell chain.** Walk only the **declined** upsells that have a
+  paired downsell price, one by one, on a single `/downsell` slug. (A downsell is offered **only if its
+  upsell was declined.**)
 - → `/thank-you`.
-- `/upsell` / `/downsell` are **only reachable when the main offer references** such offers — mirroring
-  stripe-cart (only showed the upsell page if the offer had an upsell).
+- `/upsell` / `/downsell` are **only reachable when the offer's funnel actually has** those entries —
+  mirroring stripe-cart (only showed the upsell page if the offer had an upsell).
+
+## Relationship to the existing Funnel engine (already partly built)
+
+There is already a **generic step-graph funnel** system: `schemas/Funnel.schema.json` (a detached `Funnel`
+document), `domain/funnels.py`, `tests/test_funnels.py`, `attach_funnel_pages` in publishing, and the
+`page.post_checkout` inline (`funnel_steps`) vs detached (`funnel_id`) modes. In it, **each step is a separate
+page** with `on_accept`/`on_decline` branching, and **slugs derive from step_id** (`upsell_1` → `/upsell-1`).
+Inline routing is built; the detached `Funnel` doc is stubbed (Phase 2, `resolve_funnel_transition` raises
+"not yet supported"). **This is the "more complex" funnel design** — a fully manual, page-per-step branching
+graph that knows nothing about pricing contexts.
+
+**How the two fit together:**
+- **The context-driven funnel in THIS plan is the DEFAULT ("standard funnel").** One `/upsell` slug cycling
+  the offer's funnel products — simpler, offer/context-driven, no numbered slugs.
+- **Reuse the existing plumbing:** `resolve_funnel_transition` (accept/decline → next), `funnel_slug_entries`
+  / `attach_funnel_pages` (funnel pages into the Site route map), `post_checkout` routing, `/thank-you`.
+  The standard funnel's steps use the reserved step_ids `upsell`/`downsell`/`thank_you` → clean `/upsell`
+  `/downsell` `/thank-you` slugs (no numbers, since step_ids aren't numbered).
+- **The generic step-graph `Funnel` entity becomes a FUTURE "advanced/custom multi-page funnel" tier** (the
+  detached `funnel_id`, Phase 2) for power users who want arbitrary branching pages. Not wasted — just not the
+  default path. Do NOT force the simple case through it.
 
 ## Auto-provisioning (builder), like stripe-cart
 
@@ -130,15 +165,21 @@ arbitrary `funnel_steps` config with the reserved-slug model (reserved slugs bec
 
 1. **Upsell sequencing:** ONE `/upsell` slug, a programmatic chain over the `upsells[]` array (no
    `/upsell-1`/`-2` in the URL). ✓
-2. **Downsell:** ONE `/downsell` slug, walked **after the entire upsell chain** completes. ✓
+2. **Downsell:** ONE `/downsell` slug, walked **after the entire upsell chain**, offering the paired
+   downsell **only for upsells that were declined**. ✓
 3. **Flash-sale dates live on the Landing Page** — `flash_sale_ends_at` (required) + optional
    `flash_sale_starts_on` (no separate campaign object). `/sale` gets an optional expiration (perpetual if
    none). ✓
 4. **`/sale` and `/flash-sale` are per-page toggles** (not auto), with a warning when the product lacks the
    context; flash-sale is **blocked** without an expiration; three flash states (upcoming/active/ended). ✓
-5. **Upsells/downsells are separate Offers** (`context: upsell`/`downsell`) referenced by the main offer,
-   like order bumps — resolving the "multi-product = listicle" conflict. Listicles ignore funnels; `/sale`
-   on a listicle swaps only items that have a sale price. ✓ *(Recommendation — confirm to fully lock.)*
+5. **Upsells/downsells live in an IN-OFFER `offer.funnel` block** (product+price refs, separate from
+   `items[]`) — ONE offer per funnel, honoring the one-offer-per-landing-page paradigm, and NOT a separate
+   Offer document (that idea was retracted — a funnel across multiple offer docs is more moving parts). Keeps
+   `offer_type` clean and still allows an unrelated product as an upsell. Listicles ignore funnels; `/sale`
+   on a listicle swaps only items that have a sale price. ✓
+6. **The existing generic step-graph `Funnel` entity** (schemas/Funnel.schema.json + domain/funnels.py) is
+   the "advanced/custom multi-page funnel" FUTURE tier; the context-driven funnel here is the DEFAULT and
+   reuses its routing plumbing. ✓
 
 ## Phasing
 
