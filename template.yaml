@@ -557,6 +557,24 @@ Resources:
             RestApiId: !Ref RestApi
             Path: /cart
             Method: OPTIONS
+        CartItemPatch:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /cart/items/{line_id}
+            Method: PATCH
+        CartItemDelete:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /cart/items/{line_id}
+            Method: DELETE
+        CartItemOptions:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /cart/items/{line_id}
+            Method: OPTIONS
 
   ReviewsFunction:
     Type: AWS::Serverless::Function

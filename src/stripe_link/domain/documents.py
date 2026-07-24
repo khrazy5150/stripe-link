@@ -1463,10 +1463,11 @@ def validate_lead_submission(document: dict[str, Any]) -> None:
 def validate_cart(document: dict[str, Any]) -> None:
     """A server-side cart (plans/LISTICLE_AND_CART.md L2). Line prices are re-resolved server-side
     (domain/cart.py), so this shape-check guards persistence, not pricing trust."""
-    require_fields(document, ["schema_version", "document_type", "tenant_id", "cart_id", "offer_id", "line_items", "created_at"])
+    require_fields(document, ["schema_version", "document_type", "tenant_id", "cart_id", "offer_id", "created_at"])
     if document.get("document_type") != "cart":
         raise DocumentValidationError("Cart document_type must be 'cart'.")
     items = document.get("line_items")
+    # An emptied cart (last line removed) is valid — check the type, not truthiness.
     if not isinstance(items, list):
         raise DocumentValidationError("Cart line_items must be an array.")
     if len(items) > MAX_CART_LINES:

@@ -134,6 +134,53 @@ class CartHandlerTests(unittest.TestCase):
         )
         self.assertEqual(resp["statusCode"], 404)
 
+    def _add(self, product_id="prod_a", cart_id=None, qty=1):
+        body = {"tenant_id": "t1", "offer_id": "off_1", "product_id": product_id, "qty": qty}
+        if cart_id:
+            body["cart_id"] = cart_id
+        return json.loads(self._post(body)["body"])
+
+    def _patch(self, line_id, cart_id, qty):
+        return handler(
+            {"httpMethod": "PATCH", "pathParameters": {"line_id": line_id},
+             "body": json.dumps({"tenant_id": "t1", "cart_id": cart_id, "qty": qty})},
+            None, carts_repo=self.carts, now_fn=lambda: 2000,
+        )
+
+    def test_patch_sets_quantity(self):
+        added = self._add("prod_a")
+        line_id = added["cart"]["line_items"][0]["line_id"]
+        resp = self._patch(line_id, added["cart_id"], 5)
+        self.assertEqual(resp["statusCode"], 200)
+        cart = json.loads(resp["body"])["cart"]
+        self.assertEqual(cart["line_items"][0]["qty"], 5)
+        self.assertEqual(cart["total_amount"], 5 * 1999)
+
+    def test_patch_zero_qty_removes_line(self):
+        added = self._add("prod_a")
+        line_id = added["cart"]["line_items"][0]["line_id"]
+        cart = json.loads(self._patch(line_id, added["cart_id"], 0)["body"])["cart"]
+        self.assertEqual(cart["line_items"], [])
+        self.assertEqual(cart["total_amount"], 0)
+
+    def test_delete_removes_line(self):
+        added = self._add("prod_a", qty=2)
+        added = self._add("prod_b", cart_id=added["cart_id"])
+        line_id = added["cart"]["line_items"][0]["line_id"]
+        resp = handler(
+            {"httpMethod": "DELETE", "pathParameters": {"line_id": line_id},
+             "queryStringParameters": {"tenant_id": "t1", "cart_id": added["cart_id"]}},
+            None, carts_repo=self.carts, now_fn=lambda: 2000,
+        )
+        self.assertEqual(resp["statusCode"], 200)
+        cart = json.loads(resp["body"])["cart"]
+        self.assertEqual(len(cart["line_items"]), 1)
+
+    def test_patch_unknown_line_is_404(self):
+        added = self._add("prod_a")
+        resp = self._patch("nosuchline", added["cart_id"], 3)
+        self.assertEqual(resp["statusCode"], 404)
+
 
 if __name__ == "__main__":
     unittest.main()

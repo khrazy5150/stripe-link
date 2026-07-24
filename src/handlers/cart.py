@@ -14,6 +14,7 @@ from stripe_link.common import (
     error_response,
     json_response,
     parse_json_body,
+    path_params,
     query_params,
 )
 from stripe_link.domain.cart import (
@@ -21,7 +22,9 @@ from stripe_link.domain.cart import (
     add_line,
     clamp_qty,
     new_cart,
+    remove_line,
     resolve_cart_line,
+    set_line_qty,
 )
 from stripe_link.domain.documents import DocumentValidationError, validate_cart
 from stripe_link.repositories.documents import (
@@ -61,6 +64,11 @@ def handler(
         )
     if method == "GET":
         return get_cart(event, carts_repo)
+    if method in ("PATCH", "DELETE"):
+        line_id = str(path_params(event).get("line_id") or "").strip()
+        if not line_id:
+            return error_response("line_id is required.", code="invalid_cart")
+        return mutate_item(event, carts_repo, line_id, remove=(method == "DELETE"), now=now_fn())
     return error_response(f"Unsupported method '{method}'.", status_code=405, code="method_not_allowed")
 
 
@@ -139,6 +147,43 @@ def add_item(event, *, carts_repo, offers_repo, products_repo, services_repo, no
         return error_response(str(exc), code="invalid_cart")
 
     return json_response({"cart_id": cart_id, "cart": _public_cart(cart)}, status_code=201)
+
+
+def mutate_item(event, carts_repo, line_id, *, remove, now):
+    """PATCH sets a line's qty (qty<=0 removes); DELETE removes it. tenant_id + cart_id identify the cart —
+    a shopper can only touch a cart whose id they hold (minted for their browser)."""
+    try:
+        body = parse_json_body(event)
+    except ValueError:
+        body = {}
+    params = query_params(event)
+    tenant_id = str(body.get("tenant_id") or params.get("tenant_id") or "").strip()
+    cart_id = str(body.get("cart_id") or params.get("cart_id") or "").strip()
+    if not tenant_id or not cart_id:
+        return error_response("tenant_id and cart_id are required.", code="invalid_cart")
+    cart = carts_repo.get(tenant_id, cart_id)
+    if not cart:
+        return error_response("Cart not found.", status_code=404, code="not_found")
+    try:
+        if remove:
+            remove_line(cart, line_id)
+        else:
+            try:
+                qty = int(body.get("qty", 1))
+            except (TypeError, ValueError):
+                qty = 1
+            set_line_qty(cart, line_id, qty)  # set_line_qty clamps; qty <= 0 removes the line
+    except CartError as exc:
+        return error_response(str(exc), status_code=404, code="not_found")
+
+    cart["updated_at"] = int(now)
+    cart["retention_expires_at"] = int(now) + CART_RETENTION_SECONDS
+    try:
+        validate_cart(cart)
+        carts_repo.put(cart)
+    except (DocumentValidationError, RepositoryError) as exc:
+        return error_response(str(exc), code="invalid_cart")
+    return json_response({"cart": _public_cart(cart)})
 
 
 def get_cart(event, carts_repo):

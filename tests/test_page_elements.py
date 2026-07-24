@@ -161,6 +161,15 @@ class ListicleCarouselTests(unittest.TestCase):
         self.assertNotIn("sl-listicle-carousel", html)          # no separate image carousel
         self.assertNotIn("sl-listicle-card", html)              # bespoke card retired for sl-price-option
 
+    def test_listicle_carries_server_cart_wiring(self):
+        # The section exposes the tenant + the /cart endpoint the island posts to (L2 Slice B).
+        html = render_listicle_carousel(
+            self._listicle(), self._products(), {}, {"tenant_id": "t1", "page_id": "pg"},
+            None, "https://api.example.com/dev",
+        )
+        self.assertIn('data-tenant-id="t1"', html)
+        self.assertIn('data-cart-endpoint="https://api.example.com/dev/cart"', html)
+
     def test_listicle_ignores_bundle_and_funnel_prices(self):
         listicle = self._listicle()
         listicle["items"] = [{"product_id": "p1", "price_id": "pr1", "quantity": 1}]
