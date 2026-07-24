@@ -229,9 +229,18 @@ routing/charge plumbing; the generic step-graph becomes the opt-in advanced tier
     ("Flash Sale ended" + Standard). `/sale` with an optional `sale_ends_at` reverts to Standard after expiry
     the same way. **Checkout hardening (note):** the context-accept change lets a client select a flash price
     ID directly even post-expiry — acceptable for P1; a future guard can enforce the flash window server-side.
-  - **P1c — routing/publish:** Site route resolver mapping `/sale`//`/flash-sale` → the `/` page + context;
-    publish the context-view artifacts.
-  - **P1d — dashboard:** per-page toggles + dates + the "no context" warning + the "expiration required" block.
+  - **P1c — SHIPPED dev (commit 64c14da):** `artifact_paths` context sub-keys; `publish_page_document`
+    renders + uploads the enabled context variants (noindex); `attach_context_view_slugs` adds/retires the
+    reserved `/sale`//`/flash-sale` route entries (with `price_context`) on the Site's root page; the
+    custom-domain resolver serves the sibling artifact; `validate_site` allows `price_context` on entries.
+  - **P1d — SHIPPED dev (commit b8311e0):** a "Sale & Flash Sale" builder section (transaction pages) —
+    per-page toggles, datetime-local pickers (sale optional expiry, flash optional start + required end), the
+    "product has no Sale/Flash pricing context" warning, and the "expiration required" block (also prevents
+    save). Wires `builder.sale`/`flash_sale` into the page doc (omitted when off → routes retire) + restores
+    on edit.
+
+  **P1 COMPLETE (dev):** end-to-end — config → render (price swap + badges + flash countdown/states) →
+  checkout (charges the sale price) → publish + route (`/sale`//`/flash-sale`) → dashboard controls.
 - **P2 — Checkout: order bumps + post-purchase default funnel:**
   - **Order bumps:** `offer.funnel.order_bumps`; emit Stripe `optional_items` in `build_checkout_payload`
     (retire the `merge_resolved_offers` stopgap); reclassify `order_bump` as pre-purchase; sync guard.
