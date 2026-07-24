@@ -72,21 +72,19 @@ Deferred, non-blocking follow-ups. Each item notes what, why it was deferred, an
 
 ## Commerce
 
-### Listicle L2 — server-side cart + multi-line checkout (Slices A–C SHIPPED; D + service checkout pending)
-- **Shipped dev+prod 2026-07-23** (ad4e35a / d1c9718 / c31d8b7): server-backed cart + one multi-line Stripe
-  checkout. `domain/cart.py`, `validate_cart`, `carts_repository`, `CartsTable`; public `handlers/cart.py`
-  (`POST/GET /cart`, `PATCH/DELETE /cart/items/{line_id}`); `handlers/cart_checkout.py`
-  (`POST /cart/checkout`, reuses the single-offer checkout builders); server-backed listicle island +
-  mini-cart Checkout button. Prices always re-resolved server-side. Full detail in `plans/LISTICLE_AND_CART.md`.
+### Listicle L2 — server-side cart + multi-line checkout + recovery (Slices A–D SHIPPED)
+- **Shipped dev+prod 2026-07-23**: server-backed cart (ad4e35a/d1c9718), multi-line Stripe checkout
+  (c31d8b7), and abandoned-cart recovery via opaque-token identified links (7993aae/9c4739f/018ffb8).
+  Full detail in `plans/LISTICLE_AND_CART.md`.
 - **Still pending:**
-  - **Slice D — abandoned-cart recovery.** Prerequisite not built: the cart has **no email field**. Step 0 is
-    capturing the shopper's email (checkout-start form or lead capture); then a `scan_type("cart")` +
-    `rate()` sweep feeds the email system (mirrors reminders/invites).
   - **Service-line cart checkout.** `resolved_items_for_checkout` rejects service lines today (booking has its
     own pay-then-book/book-then-pay flow); mixing cart + booking fan-out is its own slice.
     - **(Very low priority) Service-listicle abandonment recovery.** Once service lines are cart-eligible,
-      extend Slice D's abandonment sweep to service listicles too. Deferred well behind product-cart
-      abandonment; noted so it isn't lost.
+      extend the recovery sweep to service listicles too.
+  - **Tenant-wide email suppression.** Cart-recovery unsubscribe is per-cart today; a tenant-wide email
+    opt-out list is a future refinement.
+  - **Tenant outreach campaign tooling.** The `cart_token` primitive supports identified "Items just for you"
+    links, but composing/bulk-sending them (recipient lists, templates) is a separate feature; not built.
   - **L3 order-model ripples** (per-line refunds/receipts/fees/downloads) — build only when L2 is proven.
 
 ## Business Profile & Reviews

@@ -1,8 +1,8 @@
 # Listicle Offers + Server-Side Cart
 
-Status: **L1 + L2 (Slices A–C) shipped dev+prod 2026-07-23** (server-side cart + multi-line checkout).
-L2 Slice D (abandoned-cart recovery) + service-line checkout deferred. L3 (order-model ripples) not started.
-(design author-approved 2026-07-10).
+Status: **L1 + L2 (Slices A–D) shipped dev+prod 2026-07-23** (server-side cart, multi-line checkout,
+abandoned-cart recovery). Service-line cart checkout + its abandonment deferred; L3 (order-model ripples)
+not started. (design author-approved 2026-07-10).
 Supersedes the multi-offer `product_carousel` interpretation shipped in
 `LANDING_PAGE_CTA_AND_COMPOSITION.md` phase 4c — see "Course correction" below. Extends
 `AI_AND_COMMERCE_ARCHITECTURE.md` **Part C**. L2 outline in "Phasing → L2" below.
@@ -130,11 +130,19 @@ email field, NEVER expose account data or order history. (2) Recovery emails nee
 interaction) + honor opt-out: `email_opted_out` checked by the sweep, unsubscribe footer + a one-click
 opt-out endpoint, mirroring the SMS STOP handling.
 
-**Sub-slices:**
-- **D1** — `cart.email`/`status`/`email_opted_out`, `cart_token` primitive (mint + resolve), `POST /cart`
-  accepts an explicit `email` or a `ct` token and stamps the cart, `/cart/checkout` marks `converted`.
-- **D2** — `CartRecoveryFunction` sweep + recovery email (SES) + `email_opted_out` opt-out endpoint +
-  unsubscribe, and the recovery link's cross-device cart rehydration.
+**Sub-slices (ALL SHIPPED dev+prod 2026-07-23):**
+- **D1** (7993aae) — `cart.email`/`status`/`email_opted_out`, `cart_token` primitive (`cart_token_doc` +
+  `cart_token_valid`, `cart_tokens_repository` sharing CartsTable), `POST /cart` stamps the cart from a `ct`
+  identified-link token or explicit `email`; listicle island forwards `?ct=`.
+- **D2a** (9c4739f) — the Stripe `checkout.session.completed` webhook marks the source cart (`metadata[cart_id]`)
+  `converted` (on payment, not session creation), so the sweep skips paid carts.
+- **D2b** (018ffb8) — `CartRecoveryFunction` (EventBridge `rate(15min)`): scans open carts, emails a recovery
+  nudge to eligible ones (`recoverable()`: email + items + `page_url`, quiet > `CART_ABANDON_AFTER_SECONDS`
+  (default 1h), `!email_opted_out`, under `CART_RECOVERY_MAX_ATTEMPTS` (default 1)). Each send mints a
+  recovery token → `{email, cart_id}`; `GET /cart?ct=` rehydrates the exact cart cross-device;
+  `GET /cart/unsubscribe?token=` opts the cart out. `domain/cart_recovery.py` builds the email.
+  **Known limitation:** unsubscribe is per-cart, not a tenant-wide email suppression list (a customer
+  usually has one open cart) — tenant-wide suppression is a future refinement.
 
 **Very low priority (TODO):** extend abandonment to *service* listicles once service-line cart checkout exists.
 
