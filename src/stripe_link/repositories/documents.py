@@ -818,6 +818,15 @@ def reviews_repository(table: Any | None = None) -> DynamoDocumentRepository:
     )
 
 
+def carts_repository(table: Any | None = None) -> DynamoDocumentRepository:
+    return DynamoDocumentRepository(
+        os.environ.get("CARTS_TABLE", ""),
+        document_type="cart",
+        id_field="cart_id",
+        table=table,
+    )
+
+
 def review_invites_repository(table: Any | None = None) -> DynamoDocumentRepository:
     # Post-purchase invite records — same table as reviews, distinct document_type (own SK prefix + scan_type).
     return DynamoDocumentRepository(

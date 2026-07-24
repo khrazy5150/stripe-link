@@ -3,6 +3,7 @@ from decimal import Decimal
 from typing import Any
 
 from stripe_link.domain.business_types import BUSINESS_TYPES
+from stripe_link.domain.cart import MAX_CART_LINES, MAX_LINE_QTY
 from stripe_link.domain.composition import ELEMENTS, supported_goals
 
 
@@ -1457,6 +1458,32 @@ def validate_lead_submission(document: dict[str, Any]) -> None:
     consent = document.get("consent")
     if consent is not None and not isinstance(consent, dict):
         raise DocumentValidationError("Lead submission consent must be an object.")
+
+
+def validate_cart(document: dict[str, Any]) -> None:
+    """A server-side cart (plans/LISTICLE_AND_CART.md L2). Line prices are re-resolved server-side
+    (domain/cart.py), so this shape-check guards persistence, not pricing trust."""
+    require_fields(document, ["schema_version", "document_type", "tenant_id", "cart_id", "offer_id", "line_items", "created_at"])
+    if document.get("document_type") != "cart":
+        raise DocumentValidationError("Cart document_type must be 'cart'.")
+    items = document.get("line_items")
+    if not isinstance(items, list):
+        raise DocumentValidationError("Cart line_items must be an array.")
+    if len(items) > MAX_CART_LINES:
+        raise DocumentValidationError(f"Cart may hold at most {MAX_CART_LINES} line items.")
+    for line in items:
+        if not isinstance(line, dict):
+            raise DocumentValidationError("Each cart line must be an object.")
+        if not str(line.get("product_id") or "").strip() and not str(line.get("service_id") or "").strip():
+            raise DocumentValidationError("Each cart line needs a product_id or service_id.")
+        if not str(line.get("price_id") or "").strip():
+            raise DocumentValidationError("Each cart line needs a price_id.")
+        qty = line.get("qty")
+        if not isinstance(qty, int) or isinstance(qty, bool) or not (1 <= qty <= MAX_LINE_QTY):
+            raise DocumentValidationError(f"Cart line qty must be an integer from 1 to {MAX_LINE_QTY}.")
+        amount = line.get("unit_amount")
+        if not isinstance(amount, int) or isinstance(amount, bool) or amount < 0:
+            raise DocumentValidationError("Cart line unit_amount must be a non-negative integer.")
 
 
 REVIEW_TARGET_TYPES = {"product", "offer", "business"}

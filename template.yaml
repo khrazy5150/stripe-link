@@ -143,6 +143,7 @@ Globals:
         SERVICES_TABLE: !Ref ServicesTable
         LEADS_TABLE: !Ref LeadsTable
         REVIEWS_TABLE: !Ref ReviewsTable
+        CARTS_TABLE: !Ref CartsTable
         INVOICES_TABLE: !Ref InvoicesTable
         PRODUCTS_TABLE: !Ref ProductsTable
         OFFERS_TABLE: !Ref OffersTable
@@ -519,6 +520,42 @@ Resources:
           Properties:
             RestApiId: !Ref RestApi
             Path: /leads/{lead_id}
+            Method: OPTIONS
+
+  CartFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${ProjectPrefix}-cart-api-${Environment}"
+      CodeUri: src/
+      Handler: handlers.cart.handler
+      Description: Server-side cart — public anonymous add/read; prices re-resolved server-side.
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref CartsTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref OffersTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref ProductsTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref ServicesTable
+      Events:
+        CartAdd:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /cart
+            Method: POST
+        CartGet:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /cart
+            Method: GET
+        CartOptions:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /cart
             Method: OPTIONS
 
   ReviewsFunction:
@@ -2722,6 +2759,40 @@ Resources:
     Type: AWS::DynamoDB::Table
     Properties:
       TableName: !Sub "${ProjectPrefix}-lead-capture-${Environment}"
+      BillingMode: PAY_PER_REQUEST
+      SSESpecification:
+        SSEEnabled: true
+      TimeToLiveSpecification:
+        AttributeName: retention_expires_at
+        Enabled: true
+      AttributeDefinitions:
+        - AttributeName: PK
+          AttributeType: S
+        - AttributeName: SK
+          AttributeType: S
+        - AttributeName: GSI1PK
+          AttributeType: S
+        - AttributeName: GSI1SK
+          AttributeType: S
+      KeySchema:
+        - AttributeName: PK
+          KeyType: HASH
+        - AttributeName: SK
+          KeyType: RANGE
+      GlobalSecondaryIndexes:
+        - IndexName: GSI1
+          KeySchema:
+            - AttributeName: GSI1PK
+              KeyType: HASH
+            - AttributeName: GSI1SK
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+
+  CartsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "${ProjectPrefix}-carts-${Environment}"
       BillingMode: PAY_PER_REQUEST
       SSESpecification:
         SSEEnabled: true
