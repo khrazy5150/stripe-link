@@ -418,12 +418,20 @@ Resources:
       CodeUri: src/
       Handler: handlers.products.handler
       Description: JSON-first products API.
+      Environment:
+        Variables:
+          # Auto-sync on save fires this Lambda asynchronously (plans/SALES_FUNNELS.md P1.5).
+          PRODUCT_SYNC_FUNCTION: !Sub "${ProjectPrefix}-product-sync-${Environment}"
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref ProductsTable
         # Records category usage on save (recording a distinct tenant's use of a category).
         - DynamoDBCrudPolicy:
             TableName: !Ref ProductCategoriesTable
+        - Statement:
+            Effect: Allow
+            Action: lambda:InvokeFunction
+            Resource: !GetAtt ProductSyncFunction.Arn
       Events:
         ProductsList:
           Type: Api

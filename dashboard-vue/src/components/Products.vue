@@ -124,13 +124,16 @@
               <small v-else-if="selectedProduct.stripe_product_id" class="text-muted font-mono">{{ selectedProduct.stripe_product_id }}</small>
             </div>
             <div class="button-row">
+              <!-- Products auto-sync to Stripe on save (plans/SALES_FUNNELS.md P1.5) — no separate Sync
+                   button. A manual Retry appears only when the last sync failed. -->
               <button
                 v-if="selectedProduct.stripe_product_id" type="button" class="secondary-action"
                 :disabled="syncing" @click="checkDrift(selectedProduct)"
               >Check drift</button>
-              <button type="button" class="secondary-action" :disabled="syncing" @click="syncProduct(selectedProduct)">
-                {{ syncing ? "Syncing…" : (selectedProduct.stripe_product_id ? "Re-sync to Stripe" : "Sync to Stripe") }}
-              </button>
+              <button
+                v-if="selectedProduct.sync?.status === 'failed'" type="button" class="secondary-action"
+                :disabled="syncing" @click="syncProduct(selectedProduct)"
+              >{{ syncing ? "Syncing…" : "Retry sync" }}</button>
             </div>
           </div>
           <div v-if="selectedProduct.digital_asset" class="product-details-digital">

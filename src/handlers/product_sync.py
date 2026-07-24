@@ -28,18 +28,26 @@ def handler(
     credentials_fn=checkout_credentials,
     now_fn=lambda: int(time.time()),
 ):
-    method = (event or {}).get("httpMethod", "").upper()
-    if method == "OPTIONS":
-        return json_response({})
-    if method != "POST":
-        return error_response(f"Unsupported method '{method}'.", status_code=405, code="method_not_allowed")
-
-    tenant_id = tenant_id_from_event(event)
+    event = event or {}
+    # Internal async invoke (fire-and-forget from the product save handler, plans/SALES_FUNNELS.md P1.5):
+    # a raw {internal_sync, tenant_id, product_id} payload with no httpMethod. Always a full sync; when Stripe
+    # isn't connected it SKIPS (leaves sync status untouched) rather than recording a failure.
+    internal = bool(event.get("internal_sync"))
+    if internal:
+        tenant_id = str(event.get("tenant_id") or "").strip()
+        product_id = str(event.get("product_id") or "").strip()
+    else:
+        method = event.get("httpMethod", "").upper()
+        if method == "OPTIONS":
+            return json_response({})
+        if method != "POST":
+            return error_response(f"Unsupported method '{method}'.", status_code=405, code="method_not_allowed")
+        tenant_id = tenant_id_from_event(event)
+        product_id = str(path_params(event).get("product_id") or "").strip()
     if not tenant_id:
-        return error_response("tenant_id is required.", code="missing_tenant")
-    product_id = str(path_params(event).get("product_id") or "").strip()
+        return {"skipped": "missing_tenant"} if internal else error_response("tenant_id is required.", code="missing_tenant")
     if not product_id:
-        return error_response("product_id is required.", code="missing_product")
+        return {"skipped": "missing_product"} if internal else error_response("product_id is required.", code="missing_product")
 
     repository = repository or products_repository()
     stripe_repo = stripe_repo or stripe_keys_repository()
@@ -48,18 +56,21 @@ def handler(
     try:
         product = repository.get(tenant_id, product_id)
         if not product:
-            return error_response("Product not found.", status_code=404, code="not_found")
+            return {"skipped": "not_found"} if internal else error_response("Product not found.", status_code=404, code="not_found")
 
         mode = str(product.get("stripe_mode") or "test")
         stripe_keys = stripe_repo.get(tenant_id, mode=mode) or {}
         api_key, stripe_account = credentials_fn(tenant_id, mode, stripe_keys, secret_cipher)
         if not api_key:
+            # Auto-sync before Stripe is connected is a no-op, not a failure — don't set a failed sync status.
+            if internal:
+                return {"skipped": "stripe_not_configured"}
             return error_response(
                 f"No Stripe key configured for {mode} mode. Connect Stripe or add keys first.",
                 code="stripe_not_configured",
             )
 
-        if _is_check(event):
+        if not internal and _is_check(event):
             drift = check_product_drift(product, api_key=api_key, stripe_account=stripe_account, caller=caller)
             product = _apply_drift_status(product, drift, int(now_fn()))
             repository.put(product)
@@ -70,8 +81,10 @@ def handler(
         )
         repository.put(synced)
     except RepositoryError as exc:
-        return error_response(str(exc), code="repository_error")
+        return {"skipped": "repository_error"} if internal else error_response(str(exc), code="repository_error")
 
+    if internal:
+        return {"sync": result}  # fire-and-forget: the async invoke discards this
     status_code = 200 if result.get("status") == "success" else 502
     return json_response({"product": synced, "sync": result}, status_code=status_code)
 

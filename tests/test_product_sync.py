@@ -215,6 +215,27 @@ class HandlerTests(unittest.TestCase):
         self.assertEqual(response["statusCode"], 400)
         self.assertEqual(json.loads(response["body"])["error"], "stripe_not_configured")
 
+    def _internal(self, **payload):
+        return handler(
+            {"internal_sync": True, **payload}, None,
+            repository=self.products, stripe_repo=self.keys, secret_cipher=None,
+            caller=FakeStripe(), credentials_fn=fake_credentials, now_fn=lambda: 1781230000,
+        )
+
+    def test_internal_invoke_runs_full_sync(self):
+        # A raw {internal_sync, tenant_id, product_id} payload (async invoke) does a full sync, no HTTP wrapper.
+        result = self._internal(tenant_id="tenant_demo", product_id="prod_1")
+        self.assertEqual(result["sync"]["status"], "success")
+        self.assertEqual(self.products.get("tenant_demo", "prod_1")["stripe_product_id"], "prod_stripe_1")
+
+    def test_internal_invoke_skips_when_stripe_unconfigured(self):
+        # Auto-sync before Stripe is connected is a no-op — never records a failed status.
+        self.keys.doc = {}
+        result = self._internal(tenant_id="tenant_demo", product_id="prod_1")
+        self.assertEqual(result, {"skipped": "stripe_not_configured"})
+        # The skip leaves the existing sync status untouched — never records a "failed".
+        self.assertNotEqual(self.products.get("tenant_demo", "prod_1").get("sync", {}).get("status"), "failed")
+
 
 class FakeStripeKeys:
     def __init__(self):

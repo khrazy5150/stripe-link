@@ -45,6 +45,15 @@ class ProductHandlerTests(unittest.TestCase):
         self.assertEqual(list(stored)[-1], "tags")
         self.assertEqual(stored["default_price_id"], "price_2bottle")
 
+    def test_create_product_fires_async_sync(self):
+        calls = []
+        response = handler(
+            {"httpMethod": "POST", "body": json.dumps(self.product)}, None,
+            repository=self.repository, sync_invoker=lambda tenant_id, product_id: calls.append((tenant_id, product_id)),
+        )
+        self.assertEqual(response["statusCode"], 201)
+        self.assertEqual(calls, [("tenant_demo", "prod_creatine_gummies")])
+
     def test_get_product_requires_tenant(self):
         response = handler({
             "httpMethod": "GET",

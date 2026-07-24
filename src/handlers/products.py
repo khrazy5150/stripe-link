@@ -19,7 +19,7 @@ from stripe_link.repositories.documents import (
 logger = logging.getLogger(__name__)
 
 
-def handler(event, context, repository=None):
+def handler(event, context, repository=None, sync_invoker=None):
     repository = repository or products_repository()
     method = (event or {}).get("httpMethod", "").upper()
     if method == "OPTIONS":
@@ -29,7 +29,7 @@ def handler(event, context, repository=None):
     if method == "PATCH" and product_id and resource.endswith("/status"):
         return update_product_status(event, repository, product_id)
     if method == "POST":
-        return create_product(event, repository)
+        return create_product(event, repository, sync_invoker=sync_invoker)
     if method == "GET":
         if product_id:
             return get_product(event, repository, product_id)
@@ -37,13 +37,16 @@ def handler(event, context, repository=None):
     return error_response(f"Unsupported method '{method}'.", status_code=405, code="method_not_allowed")
 
 
-def create_product(event, repository):
+def create_product(event, repository, sync_invoker=None):
     try:
         document = parse_json_body(event)
         validate_product_document(document)
         document = order_product_document(document)
         saved = repository.put(document)
         record_category_usage(saved)
+        # Auto-sync to Stripe in the background (plans/SALES_FUNNELS.md P1.5): one Save, no separate Sync
+        # button. Fire-and-forget so the save stays fast; the async sync updates the product's sync status.
+        _trigger_async_sync(saved, sync_invoker)
         return json_response(
             {
                 "product": order_product_document(saved),
@@ -53,6 +56,31 @@ def create_product(event, repository):
         )
     except (DocumentValidationError, ValueError, RepositoryError) as exc:
         return error_response(str(exc), code="invalid_product")
+
+
+def _trigger_async_sync(product, sync_invoker=None):
+    invoke = sync_invoker or _default_sync_invoker
+    try:
+        invoke(str(product.get("tenant_id") or ""), str(product.get("product_id") or ""))
+    except Exception:  # noqa: BLE001 - a sync trigger failure must never fail the product save
+        logger.warning("Failed to trigger async product sync for %s", product.get("product_id"), exc_info=True)
+
+
+def _default_sync_invoker(tenant_id, product_id):
+    """Fire-and-forget the product-sync Lambda (InvocationType=Event). No-ops without the function configured
+    (unit tests) or missing ids; the sync itself skips gracefully when Stripe isn't connected."""
+    function_name = os.environ.get("PRODUCT_SYNC_FUNCTION", "")
+    if not function_name or not tenant_id or not product_id:
+        return
+    import json
+
+    import boto3
+
+    boto3.client("lambda").invoke(
+        FunctionName=function_name,
+        InvocationType="Event",
+        Payload=json.dumps({"internal_sync": True, "tenant_id": tenant_id, "product_id": product_id}).encode("utf-8"),
+    )
 
 
 def record_category_usage(product, categories_repo=None):
