@@ -256,3 +256,11 @@ def remove_line(cart: dict[str, Any], line_id: str) -> dict[str, Any]:
     cart["line_items"] = items
     _recompute_totals(cart)
     return cart
+
+
+def mark_converted(cart: dict[str, Any], now: int) -> dict[str, Any]:
+    """Flag the cart paid so the abandonment sweep skips it. Set on the Stripe payment webhook, NOT at session
+    creation — a shopper who reaches Stripe but doesn't pay stays `open` and is a prime recovery target."""
+    cart["status"] = "converted"
+    cart["updated_at"] = int(now)
+    return cart

@@ -7,6 +7,7 @@ import time
 from typing import Any, Callable
 
 from stripe_link.common import error_response, header_value, json_response
+from stripe_link.domain.cart import mark_converted as mark_cart_converted
 from stripe_link.domain.booking import (
     appointment_line_from_purchase,
     appointment_price,
@@ -31,6 +32,7 @@ from stripe_link.repositories.documents import (
     RepositoryError,
     appointments_repository,
     calendar_connections_repository,
+    carts_repository,
     customers_repository,
     dynamodb_safe_document,
     fulfillers_repository,
@@ -349,6 +351,24 @@ def reconcile_account_updated(
     return result
 
 
+def mark_source_cart_converted(session, tenant_id, carts_repo, now) -> bool:
+    """When a paid session carries metadata[cart_id] (a multi-line cart checkout), flag that cart converted so
+    the abandonment sweep skips it. Best-effort — never fails the webhook (plans/LISTICLE_AND_CART.md D)."""
+    if not carts_repo:
+        return False
+    cart_id = str((session.get("metadata") or {}).get("cart_id") or "").strip()
+    if not cart_id:
+        return False
+    try:
+        cart = carts_repo.get(tenant_id, cart_id)
+        if not cart or cart.get("status") == "converted":
+            return False
+        carts_repo.put(mark_cart_converted(cart, now))
+        return True
+    except Exception:  # noqa: BLE001 - cart bookkeeping must never fail the payment webhook
+        return False
+
+
 def persist_checkout_session_completed(
     stripe_event: dict[str, Any],
     *,
@@ -361,6 +381,7 @@ def persist_checkout_session_completed(
     products_repo=None,
     ledger_repo=None,
     invites_repo=None,
+    carts_repo=None,
     now_fn: Callable[[], int] = lambda: int(time.time()),
     billing_config_loader: Callable[[], dict[str, Any]] | None = None,
     receipt_mailer: Callable[..., Any] | None = None,
@@ -379,6 +400,7 @@ def persist_checkout_session_completed(
     products_repo = products_repo or (products_repository() if os.environ.get("PRODUCTS_TABLE") else None)
     ledger_repo = ledger_repo or (ledger_repository() if os.environ.get("LEDGER_TABLE") else None)
     invites_repo = invites_repo or (review_invites_repository() if os.environ.get("REVIEWS_TABLE") else None)
+    carts_repo = carts_repo or (carts_repository() if os.environ.get("CARTS_TABLE") else None)
 
     fees = fee_breakdown_from_session(session, billing_config_loader)
     session_record = checkout_session_record(stripe_event, session, tenant_id, now)
@@ -409,6 +431,9 @@ def persist_checkout_session_completed(
 
     if plan_order_review_invite(order_record, tenant_id, products_repo, invites_repo, now):
         written.append("review_invite")
+
+    if mark_source_cart_converted(session, tenant_id, carts_repo, now):
+        written.append("cart_converted")
 
     download_links = resolve_download_links(order_record, tenant_id, products_repo)
     receipt = send_order_receipt(

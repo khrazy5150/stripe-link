@@ -231,5 +231,21 @@ class CartTokenDomainTests(unittest.TestCase):
         self.assertEqual(cart["email"], "")
 
 
+class CartConvertOnPaymentTests(unittest.TestCase):
+    def test_webhook_marks_source_cart_converted(self):
+        from handlers.stripe_webhook import mark_source_cart_converted
+        carts = FakeDocumentRepository("cart_id")
+        cart = new_cart("t1", "cart9", "off_1", now=1)
+        cart["line_items"] = [{"line_id": "l", "product_id": "p", "price_id": "pr", "qty": 1, "unit_amount": 100, "currency": "usd"}]
+        carts.put(cart)
+        session = {"metadata": {"cart_id": "cart9"}}
+        self.assertTrue(mark_source_cart_converted(session, "t1", carts, now=2000))
+        self.assertEqual(carts.get("t1", "cart9")["status"], "converted")
+
+    def test_no_cart_id_metadata_is_noop(self):
+        from handlers.stripe_webhook import mark_source_cart_converted
+        self.assertFalse(mark_source_cart_converted({"metadata": {}}, "t1", FakeDocumentRepository("cart_id"), now=1))
+
+
 if __name__ == "__main__":
     unittest.main()

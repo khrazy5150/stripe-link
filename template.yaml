@@ -1621,6 +1621,8 @@ Resources:
         - DynamoDBCrudPolicy:
             TableName: !Ref ReviewsTable
         - DynamoDBCrudPolicy:
+            TableName: !Ref CartsTable
+        - DynamoDBCrudPolicy:
             TableName: !Ref ServicesTable
         - DynamoDBReadPolicy:
             TableName: !Ref CalendarConnectionsTable
