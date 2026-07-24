@@ -67,6 +67,22 @@ Deferred, non-blocking follow-ups. Each item notes what, why it was deferred, an
 
 ## Commerce
 
+### ⭐ HIGH PRIORITY — Sales funnels in the Sites paradigm (plan being scoped)
+- **What:** close the loop for transaction (Stripe) landing pages with a coherent sales-funnel model under
+  the **Sites** paradigm — order bumps, sale + flash-sale pricing, one-click **upsells/downsells**, and the
+  **thank-you** page — driven by product/offer pricing **contexts**, with **reserved slugs**
+  (`upsell`, `downsell`, `thank-you`, `sale`, `flash-sale`) that tenants may never use for their own pages.
+- **Already exists (verified 2026-07-24):** offer/price `context` enum (standard/sale/flash_sale/upsell/
+  downsell/order_bump); order-bump folding into the initial Stripe checkout (`resolve_order_bumps`);
+  one-click post-purchase upsell charging via saved payment method (`handlers/upsell.py`); Site-aware
+  post-checkout routing (`handlers/post_checkout.py` + page `post_checkout.funnel_steps`/`thank_you_page`);
+  `SITE_PAGE_TYPES` already includes `thank_you` + `funnel_step`.
+- **Missing / to design:** reserved-slug reservation + the reserved-slug URL convention (`/upsell` etc.);
+  flash-sale runtime (countdown + flash pricing); `/sale` + `/flash-sale` page semantics; and a consolidated
+  design reconciling per-offer/product contexts with per-Site reserved slugs. Listicle offers deliberately
+  IGNORE upsell funnels (AI_AND_COMMERCE Part C — "focused funnel" vs "shop mode").
+- **Status:** no dedicated plan doc yet → being scoped now (clarifying Qs → `plans/SALES_FUNNELS.md`).
+
 ### Listicle L2 — server-side cart + multi-line checkout + recovery (Slices A–D SHIPPED)
 - **Shipped dev+prod 2026-07-23**: server-backed cart (ad4e35a/d1c9718), multi-line Stripe checkout
   (c31d8b7), and abandoned-cart recovery via opaque-token identified links (7993aae/9c4739f/018ffb8).
