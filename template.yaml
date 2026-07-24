@@ -2321,6 +2321,73 @@ Resources:
             Path: /invoices/{invoice_id}/send
             Method: POST
 
+  # DEV/TEST ONLY — created solely in non-prod stacks so the "delete all test data" route does not exist in
+  # prod. The handler also hard-gates on ENVIRONMENT (defense in depth). Deletes only the caller's tenant.
+  DeleteTestDataFunction:
+    Type: AWS::Serverless::Function
+    Condition: IsNonProd
+    Properties:
+      FunctionName: !Sub "${ProjectPrefix}-delete-test-data-${Environment}"
+      CodeUri: src/
+      Handler: handlers.admin_delete_test_data.handler
+      Description: DEV-ONLY destructive reset of a tenant's test data (DynamoDB + best-effort Stripe).
+      Timeout: 120
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ProductsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref OffersTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref CouponsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref PagesTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref LeadsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ReviewsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref CartsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref InvoicesTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref NotificationsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref CustomersTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref OrdersTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref RefundsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref LedgerTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref CheckoutSessionsTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref StripeKeysTable
+        - Statement:
+            Effect: Allow
+            Action:
+              - kms:Decrypt
+              - kms:DescribeKey
+            Resource: !GetAtt StripeKeysEncryptionKey.Arn
+        - Statement:
+            Effect: Allow
+            Action:
+              - secretsmanager:GetSecretValue
+            Resource: "*"
+      Events:
+        DeleteTestDataPost:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /admin/delete-test-data
+            Method: POST
+        DeleteTestDataOptions:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /admin/delete-test-data
+            Method: OPTIONS
+
   LedgerFunction:
     Type: AWS::Serverless::Function
     Properties:

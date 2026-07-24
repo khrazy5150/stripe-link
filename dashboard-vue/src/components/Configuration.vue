@@ -173,11 +173,56 @@
       </div>
     </section>
 
+    <section v-if="isTestEnv" class="dashboard-card danger-zone">
+      <header class="dashboard-card-header"><h2>Danger Zone</h2></header>
+      <div class="dashboard-card-body">
+        <p class="field-note">Permanently delete all of this workspace's <strong>test</strong> data from
+          Stripe and the database. This cannot be undone. Available in the Test environment only.</p>
+        <button class="danger-action" type="button" :disabled="deleting" @click="openDeleteModal">
+          {{ deleting ? "Deleting…" : "Delete Test Data" }}
+        </button>
+        <p v-if="deleteSummary" class="field-note delete-summary">{{ deleteSummary }}</p>
+      </div>
+    </section>
+
     <footer class="config-save-bar">
       <button class="primary-action" type="button" :disabled="saving || loading" @click="save">
         {{ saving ? "Saving..." : "Save Configuration" }}
       </button>
     </footer>
+
+    <div v-if="showDeleteModal" class="modal-backdrop" @click.self="showDeleteModal = false">
+      <section class="modal-card delete-test-data-modal" role="dialog" aria-modal="true" aria-labelledby="deleteTestDataTitle">
+        <header class="modal-card-header">
+          <h2 id="deleteTestDataTitle" class="danger-title">Delete All Test Data</h2>
+          <button type="button" class="modal-close" aria-label="Close" @click="showDeleteModal = false">×</button>
+        </header>
+        <div class="dashboard-card-body">
+          <p class="danger-text"><strong>Warning: this action cannot be undone.</strong></p>
+          <p><strong>Database</strong> — permanently deletes this workspace's:</p>
+          <ul class="delete-scope">
+            <li>Products, offers, coupons, landing pages</li>
+            <li>Orders, checkout sessions, invoices, refunds, ledger entries</li>
+            <li>Customers, leads, reviews, carts, notifications</li>
+          </ul>
+          <p><strong>Stripe (test mode)</strong> — best effort:</p>
+          <ul class="delete-scope">
+            <li>Customers &amp; coupons (deleted)</li>
+            <li>Products without prices (deleted); with prices (archived)</li>
+            <li>Prices (archived — Stripe cannot delete them)</li>
+          </ul>
+          <p class="field-note">Not touched: Stripe keys, your profile &amp; preferences, custom domains
+            (Sites), and services/bookings.</p>
+          <p v-if="deleteError" class="field-error">{{ deleteError }}</p>
+        </div>
+        <footer class="config-save-bar">
+          <button class="secondary-action" type="button" :disabled="deleting" @click="showDeleteModal = false">Cancel</button>
+          <button class="danger-action" type="button" :disabled="deleting" @click="confirmDelete">
+            {{ deleting ? "Deleting…" : "Delete All Test Data" }}
+          </button>
+        </footer>
+      </section>
+    </div>
   </section>
 </template>
 
@@ -197,6 +242,40 @@ const form = reactive(defaultForm());
 
 const apiBase = computed(() => getApiBase());
 const environmentLabel = computed(() => (getApiEnvironment() === "live" ? "Production (live)" : "Test (dev)"));
+// Danger Zone (Test-only) — delete all of this tenant's test data.
+const isTestEnv = computed(() => getApiEnvironment() !== "live");
+const showDeleteModal = ref(false);
+const deleting = ref(false);
+const deleteError = ref("");
+const deleteSummary = ref("");
+
+function openDeleteModal() {
+  deleteError.value = "";
+  showDeleteModal.value = true;
+}
+
+async function confirmDelete() {
+  deleting.value = true;
+  deleteError.value = "";
+  try {
+    const res = await apiRequest("/admin/delete-test-data", { method: "POST" });
+    const deleted = res.deleted || {};
+    const total = Object.values(deleted).reduce((sum, n) => sum + (Number(n) || 0), 0);
+    const stripe = res.stripe || {};
+    const parts = [];
+    if (stripe.customers_deleted != null) parts.push(`${stripe.customers_deleted} customers`);
+    if (stripe.products_deleted != null || stripe.products_archived != null) {
+      parts.push(`${(stripe.products_deleted || 0) + (stripe.products_archived || 0)} products`);
+    }
+    if (stripe.coupons_deleted != null) parts.push(`${stripe.coupons_deleted} coupons`);
+    deleteSummary.value = `Deleted ${total} database records${parts.length ? `; Stripe: ${parts.join(", ")}` : ""}.`;
+    showDeleteModal.value = false;
+  } catch (err) {
+    deleteError.value = err.message || "Failed to delete test data.";
+  } finally {
+    deleting.value = false;
+  }
+}
 const priceToken = "{{ upsell_price }}";
 const acceptButtonPlaceholder = `Yes, I'll Take This Deal for ${priceToken}`;
 
@@ -362,3 +441,30 @@ async function save() {
 
 onMounted(load);
 </script>
+
+<style scoped>
+.danger-zone {
+  border: 1px solid rgba(239, 68, 68, 0.35);
+}
+.danger-action {
+  border: 0;
+  border-radius: 8px;
+  background: #dc2626;
+  color: #fff;
+  font-weight: 700;
+  padding: 0.9rem 1.6rem;
+  cursor: pointer;
+}
+.danger-action:hover { background: #b91c1c; }
+.danger-action:disabled { opacity: 0.6; cursor: default; }
+.danger-title { color: #dc2626; }
+.danger-text { color: #b91c1c; }
+.delete-scope {
+  margin: 0.4rem 0 1rem 1.2rem;
+  padding: 0;
+  color: var(--text-muted);
+  line-height: 1.6;
+}
+.delete-summary { color: #16a34a; margin-top: 0.8rem; }
+.delete-test-data-modal { width: min(100%, 52rem); }
+</style>
