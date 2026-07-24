@@ -81,7 +81,13 @@ Deferred, non-blocking follow-ups. Each item notes what, why it was deferred, an
   flash-sale runtime (countdown + flash pricing); `/sale` + `/flash-sale` page semantics; and a consolidated
   design reconciling per-offer/product contexts with per-Site reserved slugs. Listicle offers deliberately
   IGNORE upsell funnels (AI_AND_COMMERCE Part C — "focused funnel" vs "shop mode").
-- **Status:** no dedicated plan doc yet → being scoped now (clarifying Qs → `plans/SALES_FUNNELS.md`).
+- **Design LOCKED (author-clarified 2026-07-24) → `plans/SALES_FUNNELS.md`.** A Site = one funnel for one
+  offer. Reserved slugs: `/` (Standard) · `/sale` + `/flash-sale` (context views of `/` — same page, swapped
+  price + Sale/🔥 badge + countdown, fall back to Standard) · `/upsell` + `/downsell` (post-purchase one-click,
+  presenting the offer's products that carry those context prices, one by one; skip products without) ·
+  `/thank-you`. Pricing context IS the funnel wiring. Extend the built skeleton. Phasing: P1 pre-purchase
+  (reserved slugs + sale/flash views, no payment change), P2 post-purchase chain, P3 polish. A few open
+  sub-decisions (upsell sequencing, downsell trigger, flash expiry storage) recommended in the plan.
 
 ### Listicle L2 — server-side cart + multi-line checkout + recovery (Slices A–D SHIPPED)
 - **Shipped dev+prod 2026-07-23**: server-backed cart (ad4e35a/d1c9718), multi-line Stripe checkout
