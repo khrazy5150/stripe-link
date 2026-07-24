@@ -164,3 +164,10 @@ third-party security assessment is required.
   vocabulary the AI emits; and product/offer data already on the page (for `Product`/`Offer` JSON-LD).
 - **Why deferred:** functional pages render today; SEO is an enhancement layer. Best done alongside the
   Phase 1 composition refactor so the metadata surface is designed once.
+- **Low-priority follow-up — localized (pretty) image URLs:** most on-page SEO signals for local/service
+  pages are **shipped** (localized alt, `<figcaption>` NAP, LocalBusiness JSON-LD incl. category→specific
+  `@type`, image dims — see `plans/LOCAL_SEO_SIGNALS.md`). The one remaining piece is **hybrid pretty image
+  URLs** via a CloudFront edge-alias — fully designed in **`plans/LOCALIZED_IMAGE_URLS.md`**, not built.
+  Lowest-leverage SEO item (incremental Image-Pack ranking only), so it waits for the higher-priority work
+  above. That plan also carries a **separate, decoupled** task: renaming the media **API** endpoint to
+  `https://media.juniorbay.com/v3` (agreed to plan, execution timing TBD).
