@@ -631,6 +631,41 @@
             </div>
           </section>
 
+          <section v-if="builderIntent === 'transaction'" class="builder-section">
+            <h3>Sale &amp; Flash Sale</h3>
+            <p>Publish <code>/sale</code> and <code>/flash-sale</code> views of this page that show your discounted pricing. Add the matching price to the product first (Products → pricing context).</p>
+            <label class="builder-toggle">
+              <input v-model="builder.sale.enabled" type="checkbox" />
+              <span>Enable Sale (<code>/sale</code>)</span>
+            </label>
+            <div v-if="builder.sale.enabled" class="builder-sale-options">
+              <p v-if="!offerHasPriceContext('sale')" class="field-error">This product doesn't have a Sale pricing context. Please go to the products page and set it there.</p>
+              <label class="offer-field">
+                <span>Expiration (optional — leave blank for a perpetual sale)</span>
+                <input v-model="saleEndsAtLocal" type="datetime-local" />
+              </label>
+            </div>
+            <label class="builder-toggle">
+              <input v-model="builder.flash_sale.enabled" type="checkbox" />
+              <span>Enable Flash Sale (<code>/flash-sale</code>)</span>
+            </label>
+            <div v-if="builder.flash_sale.enabled" class="builder-sale-options">
+              <p v-if="!offerHasPriceContext('flash_sale')" class="field-error">This product doesn't have a Flash Sale pricing context. Please go to the products page and set it there.</p>
+              <div class="offer-two-column">
+                <label class="offer-field">
+                  <span>Starts (optional)</span>
+                  <input v-model="flashStartsOnLocal" type="datetime-local" />
+                </label>
+                <label class="offer-field">
+                  <span>Ends (required)</span>
+                  <input v-model="flashEndsAtLocal" type="datetime-local" />
+                </label>
+              </div>
+              <p v-if="!builder.flash_sale.ends_at" class="field-error">You must set an expiration date in order to enable this feature.</p>
+              <p v-else-if="builder.flash_sale.starts_on && builder.flash_sale.starts_on >= builder.flash_sale.ends_at" class="field-error">The start date must be before the end date.</p>
+            </div>
+          </section>
+
           <section class="builder-section">
             <h3>SEO</h3>
             <label class="offer-field">
@@ -1248,6 +1283,28 @@ const seoTitlePlaceholder = computed(() => offerSeoTitleDefault(builderOffer.val
 const seoDescriptionPlaceholder = computed(() => offerSeoDescriptionDefault(builderOffer.value) || "Auto-generated from the product description");
 // The offer's snapshotted CTA contract drives the preview's on-page experience (buy/call/email/external/booking).
 const builderCta = computed(() => builderOffer.value?.presentation?.cta || { type: builderIntent.value === "lead_gen" ? "email" : "buy" });
+
+// Sale / Flash-Sale (plans/SALES_FUNNELS.md P1d): does any product the offer sells carry a price in `context`?
+function offerHasPriceContext(context) {
+  return builderOfferProducts.value.some((product) => (product.prices || []).some((price) => (price.context || "standard") === context));
+}
+// datetime-local <-> epoch seconds. The <input type="datetime-local"> works in the tenant's local time.
+function epochToLocalInput(secs) {
+  if (!secs) return "";
+  const d = new Date(secs * 1000);
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+function localInputToEpoch(value) {
+  if (!value) return 0;
+  const ms = new Date(value).getTime();
+  return Number.isNaN(ms) ? 0 : Math.floor(ms / 1000);
+}
+const saleEndsAtLocal = computed({ get: () => epochToLocalInput(builder.sale.ends_at), set: (v) => { builder.sale.ends_at = localInputToEpoch(v); } });
+const flashStartsOnLocal = computed({ get: () => epochToLocalInput(builder.flash_sale.starts_on), set: (v) => { builder.flash_sale.starts_on = localInputToEpoch(v); } });
+const flashEndsAtLocal = computed({ get: () => epochToLocalInput(builder.flash_sale.ends_at), set: (v) => { builder.flash_sale.ends_at = localInputToEpoch(v); } });
+// A flash sale can't be enabled without an expiration (mirrors the backend document rule).
+const flashSaleInvalid = computed(() => builder.flash_sale.enabled && !builder.flash_sale.ends_at);
 const selectedOfferCta = computed(() => selectedOffer.value?.presentation?.cta || { type: selectedOfferIntent.value === "lead_gen" ? "email" : "buy" });
 // A listicle offer renders its items as a carousel (each add-to-cart) instead of the pick-one selector.
 const isListicleOffer = computed(() => (builderOffer.value?.offer_type || "single") === "listicle");
@@ -1634,6 +1691,9 @@ function defaultBuilderForm() {
       transparent: false,
       marquee: false,
     },
+    // Sale / Flash-Sale views (plans/SALES_FUNNELS.md P1). Dates are epoch seconds; 0 = unset.
+    sale: { enabled: false, ends_at: 0 },
+    flash_sale: { enabled: false, starts_on: 0, ends_at: 0 },
     trust_badges: {
       enabled: true,
       badges: [
@@ -2260,6 +2320,9 @@ function populateBuilderFromPage(page) {
   // Restore Advanced Color Settings overrides; auto-open the panel if any were set.
   builder.theme_tokens = { ...(page.theme?.tokens || {}) };
   builder.advanced_colors = Object.keys(builder.theme_tokens).length > 0;
+  // Restore Sale / Flash-Sale toggles + dates (plans/SALES_FUNNELS.md P1d).
+  Object.assign(builder.sale, defaultBuilderForm().sale, page.sale || {});
+  Object.assign(builder.flash_sale, defaultBuilderForm().flash_sale, page.flash_sale || {});
   Object.assign(builder.countdown, defaultBuilderForm().countdown, {
     enabled: Boolean(countdown.id),
     duration_minutes: countdown.duration_minutes || 15,
@@ -2328,6 +2391,13 @@ function buildBuilderPageDocument() {
         page_id: builder.thank_you_page_id,
       },
     } : undefined,
+    // Sale / Flash-Sale views (plans/SALES_FUNNELS.md P1). Omitted (removed) when disabled.
+    sale: (intent === "transaction" && builder.sale.enabled)
+      ? { enabled: true, ...(builder.sale.ends_at ? { ends_at: builder.sale.ends_at } : {}) }
+      : undefined,
+    flash_sale: (intent === "transaction" && builder.flash_sale.enabled)
+      ? { enabled: true, ...(builder.flash_sale.starts_on ? { starts_on: builder.flash_sale.starts_on } : {}), ...(builder.flash_sale.ends_at ? { ends_at: builder.flash_sale.ends_at } : {}) }
+      : undefined,
     analytics: {
       google_tag_id: builder.google_tag_id,
       pixel_id: builder.pixel_id,
@@ -2496,6 +2566,10 @@ async function unpublishBuilderPage() {
 async function saveBuilderPageWithStatus(statusOverride = "") {
   error.value = "";
   message.value = "";
+  if (flashSaleInvalid.value) {
+    error.value = "You must set an expiration date to enable the Flash Sale.";
+    return;
+  }
   if (!builderPageDocument.value) {
     error.value = "Page could not be generated.";
     return;
