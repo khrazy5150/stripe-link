@@ -1152,6 +1152,55 @@ Resources:
             Path: /pages/{page_id}/post-checkout/next
             Method: OPTIONS
 
+  CartCheckoutFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${ProjectPrefix}-cart-checkout-api-${Environment}"
+      CodeUri: src/
+      Handler: handlers.cart_checkout.handler
+      Description: Multi-line cart checkout — one Stripe session for a whole server-side cart.
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref CartsTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref OffersTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref ProductsTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref ServicesTable
+        - DynamoDBReadPolicy:
+            TableName: !Sub "${ProjectPrefix}-stripe-keys-dev"
+        - DynamoDBReadPolicy:
+            TableName: !Sub "${ProjectPrefix}-stripe-keys-prod"
+        - DynamoDBReadPolicy:
+            TableName: !Ref TenantProfilesTable
+        - S3ReadPolicy:
+            BucketName: !Ref ConfigBucket
+        - Statement:
+            Effect: Allow
+            Action:
+              - kms:Decrypt
+              - kms:DescribeKey
+            Resource: !GetAtt StripeKeysEncryptionKey.Arn
+        - Statement:
+            Effect: Allow
+            Action:
+              - secretsmanager:GetSecretValue
+            Resource: "*"
+      Events:
+        CartCheckoutPost:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /cart/checkout
+            Method: POST
+        CartCheckoutOptions:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /cart/checkout
+            Method: OPTIONS
+
   CheckoutFunction:
     Type: AWS::Serverless::Function
     Properties:

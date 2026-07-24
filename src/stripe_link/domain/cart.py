@@ -106,6 +106,37 @@ def resolve_cart_line(
     }
 
 
+def resolved_items_for_checkout(
+    cart: dict[str, Any],
+    offer: dict[str, Any],
+    products_by_id: dict[str, dict[str, Any]],
+    services_by_id: dict[str, dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Re-resolve every cart line against the current offer/catalog and shape it for
+    `build_checkout_payload` (a `resolved`-style item). Prices are re-resolved here (not read from storage)
+    so a merchant price change between add and checkout is honored. Raises CartError on an empty cart or a
+    line that no longer resolves. Service lines are not yet cart-checkout-eligible (booking has its own flow).
+    """
+    items: list[dict[str, Any]] = []
+    for line in cart.get("line_items") or []:
+        product_id = str(line.get("product_id") or "").strip()
+        service_id = str(line.get("service_id") or "").strip()
+        if service_id:
+            raise CartError("A service in your cart must be booked individually.")
+        fresh = resolve_cart_line(offer, products_by_id, services_by_id, product_id=product_id, qty=int(line.get("qty") or 1))
+        items.append({
+            "product_id": fresh["product_id"],
+            "price_id": fresh["price_id"],
+            "currency": fresh["currency"],
+            "unit_amount": fresh["unit_amount"],
+            "quantity": fresh["qty"],
+            "product_name": fresh["name"],
+        })
+    if not items:
+        raise CartError("Your cart is empty.")
+    return items
+
+
 def new_cart(tenant_id: str, cart_id: str, offer_id: str, now: int) -> dict[str, Any]:
     return {
         "schema_version": CART_SCHEMA_VERSION,

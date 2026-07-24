@@ -608,6 +608,8 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     "    .sl-minicart-remove:hover{color:var(--sl-text)}",
     "    .sl-minicart-bar{display:flex;align-items:center;justify-content:space-between;gap:1rem}",
     "    .sl-minicart-summary{font-family:var(--sl-font-accent);font-weight:800;color:var(--sl-text)}",
+    "    .sl-minicart-checkout{margin:0;padding:0.9rem 1.8rem;white-space:nowrap}",
+    "    .sl-minicart-checkout[disabled]{opacity:.7;cursor:default}",
     "    .sl-product-details{width:min(52rem,100%);margin:0 auto;display:flex;flex-direction:column;gap:1rem}",
     "    .sl-details-desc{font-size:1.4rem;color:var(--sl-price-description)}",
     "    .sl-details-gallery{display:flex;gap:0.8rem;overflow-x:auto;scrollbar-width:none}",
@@ -1412,13 +1414,14 @@ def render_conversion_data(
 
 
 def render_minicart() -> str:
-    # A summary bar + a per-line list the island fills from the SERVER cart (add/remove/qty via /cart).
-    # The multi-line checkout button is wired in L2 Slice C (plans/LISTICLE_AND_CART.md).
+    # A summary bar + a per-line list the island fills from the SERVER cart (add/remove/qty via /cart), and a
+    # Checkout button that turns the whole cart into one Stripe session (POST /cart/checkout, L2 Slice C).
     return "\n".join([
         "  <div class=\"sl-minicart\" data-minicart>",
         "    <div class=\"sl-minicart-lines\" data-minicart-lines></div>",
         "    <div class=\"sl-minicart-bar\">",
         "      <span class=\"sl-minicart-summary\" data-minicart-summary></span>",
+        "      <button class=\"sl-cta sl-minicart-checkout\" type=\"button\" data-minicart-checkout>Checkout</button>",
         "    </div>",
         "  </div>",
     ])
@@ -4126,6 +4129,16 @@ def render_page_interactions_script(page: dict[str, Any]) -> str:
         "            addToCart(t);",
         "            emit('conversion:ctaInvoked', { ctaType: 'add_to_cart', target: t });",
         "            addBtn.textContent = 'Added \\u2713'; window.setTimeout(() => { addBtn.textContent = 'Add to cart'; }, 1200);",
+        "          });",
+        "          const checkoutBtn = minicart && minicart.querySelector('[data-minicart-checkout]');",
+        "          if (checkoutBtn && !serverEnabled) checkoutBtn.style.display = 'none';",   # checkout needs the server cart
+        "          if (checkoutBtn && serverEnabled) checkoutBtn.addEventListener('click', () => {",
+        "            const id = getCartId(); if (!id) return;",
+        "            checkoutBtn.disabled = true; checkoutBtn.textContent = 'Redirecting\\u2026';",
+        "            const ret = window.location.origin + window.location.pathname;",
+        "            fetch(cartEndpoint + '/checkout', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ tenant_id: tenantId, cart_id: id, success_url: ret + '?checkout=success', cancel_url: ret + '?checkout=cancel' }) })",
+        "              .then((r) => r.ok ? r.json() : Promise.reject(r)).then((d) => { if (d && d.url) { window.location.href = d.url; } else { throw new Error('no url'); } })",
+        "              .catch(() => { checkoutBtn.disabled = false; checkoutBtn.textContent = 'Checkout'; });",
         "          });",
         "          const existingId = getCartId();",
         "          if (existingId && serverEnabled) {",
