@@ -58,14 +58,12 @@ Deferred, non-blocking follow-ups. Each item notes what, why it was deferred, an
   Reference design written 2026-07-03, not yet built.
 
 ### Notification emitters + toasts (see docs/NOTIFICATION_EMITTERS.md)
-- **Already emit (done):** `order`/sale (completed checkout), `paid_invoice` (`invoice.paid`), `lead`.
-- **Tier 1 — build now:** `refund_request` emitter (NEW — `save_refund_request()` stores the doc but doesn't
-  notify) + "Sale" copy polish (retitle the existing `order` notification to read as a sale; keep `type:order`).
-- **Tier 3 — toasts (NEW frontend, lower priority):** transient dashboard toast pop-ups for critical events —
-  **sale**, **refund request**, **set up Stripe**. A `<ToastHost>` fed by the notifications store (diff new
-  unread on the 60s poll); "set up Stripe" driven by connection state, not a Notification record.
-- **Later (blocked on other features):** `stripe_connect` status, `system`/Stripe-key-failure, `shipping`
-  (needs shipping integration), `system`/support (needs a support system).
+- **Emitters — done:** `order`/sale (completed checkout, retitled "New sale" 2026-07-23), `paid_invoice`,
+  `lead`, and `refund_request` (shipped 2026-07-23, commit 486fece).
+- **Toasts (Tier 3) — SHIPPED 2026-07-23:** transient dashboard toasts for sale / refund request / set up
+  Stripe (`stores/toasts.js` + `ToastHost.vue`, diffed in `App.vue`). See docs/NOTIFICATION_EMITTERS.md.
+- **Still to build (blocked on other features):** `stripe_connect` status, `system`/Stripe-key-failure,
+  `shipping` (needs shipping integration), `system`/support (needs a support system).
 
 ## Commerce
 

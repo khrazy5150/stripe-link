@@ -165,6 +165,7 @@
       <Profile v-else-if="activeView === 'profile'" :key="`profile-${auth.session?.user_id || ''}`" />
       <Preferences v-else-if="activeView === 'preferences'" :key="`preferences-${auth.session?.user_id || ''}`" />
     </main>
+    <ToastHost @select="onToastSelect" />
   </div>
 </template>
 
@@ -191,6 +192,7 @@ import Services from "./components/Services.vue";
 import Shipping from "./components/Shipping.vue";
 import Sites from "./components/Sites.vue";
 import StripeKeys from "./components/StripeKeys.vue";
+import ToastHost from "./components/ToastHost.vue";
 import { iconPaths, menuGroupsForEnvironment } from "./config/menu";
 import { getApiEnvironment, loadAppConfigApiBase, setApiEnvironment } from "./api/client";
 import { useAuthStore } from "./stores/auth";
@@ -199,6 +201,7 @@ import { useDashboardStore } from "./stores/dashboard";
 import { useNotificationsStore } from "./stores/notifications";
 import { useProductsStore } from "./stores/products";
 import { useStripeKeysStore } from "./stores/stripeKeys";
+import { useToastsStore } from "./stores/toasts";
 
 const auth = useAuthStore();
 const coupons = useCouponsStore();
@@ -206,6 +209,16 @@ const dashboard = useDashboardStore();
 const notifications = useNotificationsStore();
 const products = useProductsStore();
 const stripeKeys = useStripeKeysStore();
+const toasts = useToastsStore();
+
+// Critical notification types that also pop a transient toast (plans/docs/NOTIFICATION_EMITTERS.md Tier 3).
+const TOAST_TYPES = {
+  order: { severity: "success", route: "orders", icon: "🎉" },      // 🎉 a sale
+  refund_request: { severity: "warning", route: "refunds", sticky: true },
+};
+// Toast only NEW notifications — baseline the existing backlog on first load / after any reset, no re-toast.
+let toastSeen = new Set();
+let toastBaselined = false;
 let notificationsPoll = null;
 const activeView = ref("dashboard");
 const activeEnvironment = ref(getApiEnvironment());
@@ -273,6 +286,69 @@ function openNotifications() {
   activeView.value = "notifications";
 }
 
+function onToastSelect(toast) {
+  if (toast.route) activeView.value = toast.route;
+  toasts.dismiss(toast.id);
+}
+
+// Surface a toast for each newly-arrived unread critical notification. The first load after any reset just
+// records the current ids as a baseline so an existing backlog (or an env/tenant switch) never spams toasts.
+watch(
+  () => notifications.items.map((item) => item.notification_id),
+  () => {
+    if (!notifications.loaded) return;
+    if (!toastBaselined) {
+      toastSeen = new Set(notifications.items.map((item) => item.notification_id));
+      toastBaselined = true;
+      return;
+    }
+    for (const item of notifications.items) {
+      if (toastSeen.has(item.notification_id)) continue;
+      toastSeen.add(item.notification_id);
+      const config = TOAST_TYPES[item.type];
+      if (config && item.status === "unread") {
+        toasts.push({
+          key: item.notification_id,
+          title: item.title || "Notification",
+          message: item.message || "",
+          severity: config.severity,
+          icon: config.icon || "",
+          route: config.route,
+          sticky: !!config.sticky,
+        });
+      }
+    }
+  },
+);
+
+// Reset the toast baseline whenever notifications reset (env/tenant switch), so the new context re-baselines.
+watch(
+  () => notifications.loaded,
+  (loaded) => {
+    if (!loaded) {
+      toastBaselined = false;
+      toastSeen = new Set();
+    }
+  },
+);
+
+// One-time "set up Stripe" nudge when the active environment has neither saved keys nor a connected account.
+function maybeNudgeStripeSetup() {
+  const mode = stripeKeys.modes?.[activeEnvironment.value];
+  if (!mode) return;
+  const configured = mode.saved_secret_key || mode.connect_status === "connected" || !!mode.connect_account_id;
+  if (!configured) {
+    toasts.push({
+      key: "setup-stripe",
+      title: "Finish setting up Stripe",
+      message: `Connect Stripe for ${environmentLabel.value} mode to start taking payments.`,
+      severity: "info",
+      route: "stripeKeys",
+      sticky: true,
+    });
+  }
+}
+
 function openUserView(view) {
   userMenuOpen.value = false;
   activeView.value = view;
@@ -296,7 +372,11 @@ function handleKeydown(event) {
 onMounted(() => {
   document.addEventListener("mousedown", handleDocumentClick);
   document.addEventListener("keydown", handleKeydown);
-  loadAppConfigApiBase(activeEnvironment.value).then(reloadActiveView).catch(() => {});
+  loadAppConfigApiBase(activeEnvironment.value)
+    .then(reloadActiveView)
+    .then(() => stripeKeys.load())
+    .then(maybeNudgeStripeSetup)
+    .catch(() => {});
   // Keep the bell badge fresh while the dashboard is open.
   notificationsPoll = window.setInterval(() => {
     if (auth.isAuthenticated) notifications.load({ silent: true });

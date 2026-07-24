@@ -36,19 +36,19 @@ is **`refund_request`**.
 **Tier 2 — already done:** `lead` and `paid_invoice` emit today. No work; listed so they aren't
 re-scoped. (Optional later: friendlier copy, same as the sale polish.)
 
-**Tier 3 — Toast notifications (NEW frontend capability, lower priority).** Today notifications
-only surface in the bell + Notifications screen. Add transient **toast** pop-ups in the dashboard
-for a small set of **critical** events so the tenant sees them immediately without opening the
-bell:
-   - **Sale** (a purchase just happened — the celebratory one tenants love)
-   - **Refund request** (needs attention)
-   - **Set up Stripe** (onboarding nudge when Stripe isn't connected / keys unverified)
+**Tier 3 — Toast notifications (SHIPPED dev+prod 2026-07-23).** Transient toast pop-ups in the
+dashboard for critical events, so the tenant sees them immediately without opening the bell:
+   - **Sale** (🎉, auto-dismiss, click → Orders) — from a new `order` notification
+   - **Refund request** (sticky, click → Refunds) — from a new `refund_request` notification
+   - **Set up Stripe** (sticky, click → Stripe keys) — one-time nudge when the active env has neither
+     saved keys nor a connected account
 
-   Design notes: the toast layer lives in the dashboard shell (a `<ToastHost>` fed by the same
-   notifications store). It can react to *newly-arrived* unread notifications of these types on
-   the 60s poll (diff against last-seen id), so no backend change is needed for sale/refund
-   toasts. The "Set up Stripe" toast is driven by tenant Stripe-connection state, not a
-   `Notification` record. Toasts auto-dismiss; critical ones (refund) can require a click.
+   Implementation: `stores/toasts.js` (push/dismiss, `key` de-dupe) + `components/ToastHost.vue`
+   (fixed top-right stack, auto-dismiss non-sticky after ~6.5s, theme-aware). `App.vue` diffs
+   *newly-arrived* unread notifications of the toast types against a per-context baseline (the
+   existing backlog and env/tenant switches never re-toast), so **no backend change was needed** for
+   sale/refund toasts. The "Set up Stripe" toast is driven by `stripeKeys` connection state (loaded
+   once on mount), not a `Notification`. To add another toast type, extend `TOAST_TYPES` in `App.vue`.
 
 **Later — blocked on other features (not now):**
 - **`stripe_connect`** — Connect onboarding/status-change notifications (account restricted /
