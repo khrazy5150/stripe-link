@@ -219,10 +219,16 @@ routing/charge plumbing; the generic step-graph becomes the opt-in advanced tier
   - **P1a — SHIPPED dev (commit 8717cca):** reserved-slug set (`RESERVED_SITE_SLUGS`) + `is_reserved_slug` +
     enforcement in the Site `attach_page` handler; page `sale`/`flash_sale` config blocks + validation
     (flash-enabled requires an expiration; `starts_on` < `ends_at`); Page.schema.json updated.
-  - **P1b — next:** render context views — pair-by-quantity+context price swap + Sale/🔥 badges + the
-    per-tier/whole-page Standard fallback; the three flash time-states + countdown (client-side, since pages
-    publish statically — embed both prices + dates, JS picks the state); the small checkout-accepts-sale-price
-    piece (see "Checkout implication" above).
+  - **P1b-1 — SHIPPED dev (commit 8446c9f):** `render_page(price_context=)`; the price selector swaps each
+    tier to its paired sale/flash price (pair by quantity + context), Sale/🔥 badges, strike-through, per-tier
+    + whole-page Standard fallback; the swapped `price_id` flows to checkout; `resolve_offer_item` accepts
+    `sale`/`flash_sale` for a standard offer (funnel contexts stay restricted). Standard renders byte-unchanged.
+  - **P1b-2 — next: client-side time-states.** Pages publish statically, so the flash state depends on view
+    time: embed both the flash and Standard prices + the page dates, and JS picks the state — **upcoming**
+    ("Flash Sale Coming Up on {date}" + Standard price), **active** (countdown + flash price + 🔥), **ended**
+    ("Flash Sale ended" + Standard). `/sale` with an optional `sale_ends_at` reverts to Standard after expiry
+    the same way. **Checkout hardening (note):** the context-accept change lets a client select a flash price
+    ID directly even post-expiry — acceptable for P1; a future guard can enforce the flash window server-side.
   - **P1c — routing/publish:** Site route resolver mapping `/sale`//`/flash-sale` → the `/` page + context;
     publish the context-view artifacts.
   - **P1d — dashboard:** per-page toggles + dates + the "no context" warning + the "expiration required" block.
