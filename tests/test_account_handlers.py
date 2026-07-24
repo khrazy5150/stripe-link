@@ -581,7 +581,7 @@ class AccountHandlerTests(unittest.TestCase):
         self.assertEqual(invoices_repo.documents[0]["amounts"]["amount_paid"], 3709)
         self.assertEqual(customers_repo.documents[0]["contact"]["email"], "ada@example.com")
         self.assertEqual(notifications_repo.documents[0]["type"], "order")
-        self.assertEqual(notifications_repo.documents[0]["title"], "New order")
+        self.assertEqual(notifications_repo.documents[0]["title"], "New sale")
         self.assertEqual(notifications_repo.documents[0]["related"]["page_id"], "page_demo")
         # Standard fee handling, "basic" tier, "physical" product_type (both metadata defaults):
         # stripe_fee = ceil(3709 * 2.9%) + 30 = 138, platform_fee = round(3709 * 10%) = 371.
@@ -836,6 +836,19 @@ class AccountHandlerTests(unittest.TestCase):
         self.assertEqual(saved["statusCode"], 201)
         self.assertEqual(json.loads(listed["body"])["count"], 1)
         self.assertEqual(json.loads(listed["body"])["refund_requests"][0]["refund_request_id"], "refund_req_demo123")
+
+        # Saving a refund request also emits a warning notification (Tier 1a), deep-linked to Refunds.
+        notifs = notifications_repository.list_for_tenant("tenant_demo")
+        self.assertEqual(len(notifs), 1)
+        self.assertEqual(notifs[0]["type"], "refund_request")
+        self.assertEqual(notifs[0]["severity"], "warning")
+        self.assertEqual(notifs[0]["related"]["refund_request_id"], "refund_req_demo123")
+        self.assertEqual(notifs[0]["action"]["route"], "refunds")
+        # Re-submitting the same request does not create a second notification (first-sight guard).
+        notifications_handler({
+            "httpMethod": "PUT", "path": "/notifications/refund-requests", "body": json.dumps(refund_request),
+        }, None, notifications_repo=notifications_repository, refund_requests_repo=refund_repository)
+        self.assertEqual(len(notifications_repository.list_for_tenant("tenant_demo")), 1)
 
     def test_shipping_config_create_and_get(self):
         repository = FakeSimpleRepository("tenant_id")

@@ -1280,8 +1280,8 @@ def notification_record_from_session(
         "notification_id": f"notif_{session.get('id', '')}",
         "type": "order",
         "severity": "success",
-        "title": "New order",
-        "message": f"{customer_name} purchased {product_name} for {currency} {(amount / 100):.2f}.",
+        "title": "New sale",
+        "message": f"You made a sale — {customer_name} purchased {product_name} for {currency} {(amount / 100):.2f}.",
         "status": "unread",
         "sort_priority": 100,
         "related": {

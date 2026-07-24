@@ -27,7 +27,7 @@ def handler(event, context, notifications_repo=None, refund_requests_repo=None, 
         return error_response(f"Unsupported method '{method}'.", status_code=405, code="method_not_allowed")
     if is_refund_request:
         if method in {"POST", "PUT"}:
-            return save_refund_request(event, refund_requests_repo)
+            return save_refund_request(event, refund_requests_repo, notifications_repo, int(now_fn()))
         if method == "GET":
             return list_refund_requests(event, refund_requests_repo)
     if method in {"POST", "PUT"}:
@@ -65,14 +65,65 @@ def save_notification(event, repository):
         return error_response(str(exc), code="invalid_notification")
 
 
-def save_refund_request(event, repository):
+def save_refund_request(event, repository, notifications_repo=None, now=0):
     try:
         document = parse_json_body(event)
         validate_refund_request(document)
         saved = repository.put(document)
-        return json_response({"refund_request": saved}, status_code=201)
     except (DocumentValidationError, ValueError, RepositoryError) as exc:
         return error_response(str(exc), code="invalid_refund_request")
+    _emit_refund_notification(notifications_repo, saved, now)
+    return json_response({"refund_request": saved}, status_code=201)
+
+
+def refund_request_notification(refund_request, now):
+    """A `warning` notification so the tenant is alerted the moment a customer requests a refund. Idempotent
+    per refund request, and gated on first-sight in the handler so status updates don't re-alert."""
+    customer = refund_request.get("customer") or {}
+    name = str(customer.get("name") or customer.get("email") or "A customer").strip()
+    reason = str(refund_request.get("reason") or "").strip()
+    product = str(refund_request.get("product_name") or (refund_request.get("product") or {}).get("name") or "").strip()
+    amount = refund_request.get("amount")
+    currency = str(refund_request.get("currency") or "usd").upper()
+    detail = f" for {product}" if product else ""
+    if isinstance(amount, int) and not isinstance(amount, bool) and amount > 0:
+        detail += f" ({currency} {amount / 100:.2f})"
+    rr_id = str(refund_request.get("refund_request_id") or "")
+    return {
+        "schema_version": "2026-05-29",
+        "document_type": "notification",
+        "tenant_id": str(refund_request.get("tenant_id") or ""),
+        "notification_id": f"notif_refund_{rr_id}",   # stable per refund request → idempotent
+        "type": "refund_request",
+        "severity": "warning",
+        "title": (f"Refund requested: {reason}" if reason else "Refund requested")[:120],
+        "message": f"{name} requested a refund{detail}." + (f" Reason: {reason}" if reason else ""),
+        "status": "unread",
+        "sort_priority": 200,   # above an order (100) — a refund needs a decision
+        "related": {
+            "refund_request_id": rr_id,
+            "order_id": str(refund_request.get("order_id") or ""),
+            "customer_id": str(customer.get("stripe_customer_id") or ""),
+        },
+        "action": {"label": "Review refund", "route": "refunds"},
+        "created_at": int(now),
+        "read_at": None,
+        "archived_at": None,
+    }
+
+
+def _emit_refund_notification(notifications_repo, refund_request, now):
+    """Best-effort — a notification failure must never fail the refund-request save. First-sight guard: skip if
+    a notification for this refund already exists, so re-submits / status updates don't re-alert."""
+    if not notifications_repo or not str(refund_request.get("refund_request_id") or "").strip():
+        return
+    notification = refund_request_notification(refund_request, now)
+    try:
+        if notifications_repo.get(notification["tenant_id"], notification["notification_id"]):
+            return
+        notifications_repo.put(notification)
+    except Exception:  # noqa: BLE001 - never block the refund-request save
+        pass
 
 
 def list_notifications(event, repository):
