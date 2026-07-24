@@ -106,5 +106,16 @@ family) could warn when a business page is missing NAP, or when NAP drifts betwe
 
 ## Status
 
-Not built. Recorded 2026-07-17 at user request — local pages should carry consistent NAP + local signals
-(LocalBusiness schema, localized alt, figcaptions, image dimensions). Gated on Business Profile P1.
+**Shipped (prod+dev).** Recorded 2026-07-17; delivered incrementally after Business Profile P1 unblocked it:
+
+- **#1 Richer LocalBusiness JSON-LD** — geo / openingHoursSpecification / hasMap / @type-via-entity_type
+  shipped with Business Profile P1. The **category → specific `@type`** table shipped 2026-07-23
+  (`src/stripe_link/domain/business_types.py`): optional `organization.business_type` (Dentist, Plumber,
+  DaySpa, …) refines the Organization/seller `@type`; `entity_type` stays the broad bucket + fallback +
+  local gate; dashboard exposes a filtered "Specific type" picker (`Sites.vue`).
+- **#2 Localized alt** — shipped 2026-07-23 (`local_business_anchor` / `localized_alt`, hero image only).
+- **#3 `<figure>`/`<figcaption>` NAP** — shipped 2026-07-23 (`local_business_caption`, single + carousel hero).
+- **#4 Image width/height** — shipped with the image_dims pipeline.
+- **#5 Localized filenames** — deliberately skipped (touches upload pipeline, lowest value).
+
+Optional org-node `priceRange` / `image[]` remain un-built (low priority, non-blocking).
