@@ -67,8 +67,8 @@ offer.funnel = {
 - An **unrelated product** can be an upsell: reference *its* `product_id` + *its* upsell-context `price_id`.
 - Entries are product+price refs (lighter than full Offers). A per-entry presentation override is a future
   extension if bespoke upsell layouts are ever needed (YAGNI).
-- Order bumps currently reference separate `context: order_bump` offers (already built via
-  `resolve_order_bumps`); they can fold into `offer.funnel.order_bumps` later for consistency, or stay as-is.
+- Order bumps also live in this block (`offer.funnel.order_bumps`), but they are **pre-purchase** and render
+  on **Stripe's hosted checkout page**, not on `/` — see the "Order bumps" section below.
 
 ## Pre-purchase: `/`, `/sale`, `/flash-sale`
 
@@ -86,7 +86,8 @@ only items **with** a sale/flash price change; the rest stay Standard.
   - **Active**: countdown banner to `ends_at`, price = **flash_sale** + 🔥 **"Flash Sale"** badge.
   - **Ended**: banner *"Flash Sale ended"*, price reverts to **Standard**.
 
-Order bumps (`context: order_bump`) fold into the initial `/` Stripe checkout as add-on checkboxes (built).
+Order bumps are **pre-purchase** but do NOT render on `/` — they appear on Stripe's hosted checkout page (see
+"Order bumps" below).
 
 ### Price mechanism for context views — pair by quantity + context (author-confirmed 2026-07-24)
 
@@ -115,6 +116,64 @@ resolve context-aware for the active view. Small, but it touches the checkout re
   upsells, one by one. (A downsell shows **only if its upsell was declined.**)
 - → **`/thank-you`**. `/upsell`//`/downsell` are only reachable when `offer.funnel` actually has those entries.
 
+## Order bumps — Stripe `optional_items` on the hosted checkout page (author-decided 2026-07-24)
+
+**Decision: keep Stripe's hosted Checkout; order bumps appear on Stripe's page, NOT on the landing page.**
+The alternative — a custom Stripe **Elements** checkout — would give full control over bump styling but means
+re-owning the entire checkout (payment UI, 3-DS, wallets, and critically **Stripe Tax**, which is a one-toggle
+feature on hosted Checkout). Not worth trading business-critical tax handling for bump styling. Elements is a
+possible far-future initiative, not this.
+
+**Mechanism:** a bump is a designated product+price (`context: order_bump`) rendered as a Stripe Checkout
+**`optional_items[]`** — Stripe shows an opt-in "add this?" line on its hosted page; if the buyer adds it, it's
+charged in the same session. This replaces today's stopgap.
+
+**Current state (accurate — the plan's earlier "built" note was wrong):**
+- `resolve_order_bumps` → `merge_resolved_offers` appends bump items as **mandatory `line_items`** (force-added,
+  not opt-in), and nothing feeds `order_bump_ids` anyway, so **no bump ever actually shows.** No landing-page
+  element, no `optional_items`. The render/dashboard also **mislabel** `order_bump` as post-purchase
+  ("requires prior purchase", grouped with upsell/downsell) — it is **pre-purchase**.
+
+**Build:**
+1. **Designate bumps:** `offer.funnel.order_bumps = [{product_id, price_id /* order_bump context */}]` on the
+   sales offer.
+2. **Checkout:** in `build_checkout_payload`, emit each resolved bump price as `optional_items[<i>][price] =
+   {stripe_price_id}` (+ `adjustable_quantity` as desired). **Retire** the `merge_resolved_offers` bump path.
+   Caveat: `optional_items` requires a **synced Stripe Price ID** (no inline `price_data`) — guaranteed by the
+   auto-sync below.
+3. **Reclassify** `order_bump` as **pre-purchase** in the renderer's context comments and the dashboard
+   (`Offers.vue` `requires_prior_purchase` must exclude `order_bump`).
+4. **Guard (fails loudly only on a real problem):** attaching a bump product that isn't Stripe-synced (or whose
+   sync failed) warns + offers Retry; otherwise silent.
+5. **No landing-page bump element.**
+
+## Product → Stripe auto-sync (enabler; a general product improvement)
+
+**Author-decided 2026-07-24: kill the separate "Sync to Stripe" button — one Save, sync happens automatically.**
+Today a tenant clicks **Save Product** and then a *separate* **Sync to Stripe** button — awful UX. The sync
+engine already exists and is idempotent: `POST /products/{id}/sync` (`run_product_sync`) pushes the product +
+**every price** (all contexts, incl. `order_bump`) to the tenant's Stripe account, creating a Stripe Price per
+local price and storing `stripe_price_id`; re-syncing an unchanged product is a near-no-op (it diffs).
+
+**Design — server-side, asynchronous, invisible:**
+- On product **create/edit** (the products handler, after persist), when Stripe is connected, **fire the sync
+  asynchronously** — a fire-and-forget Lambda `Event` invoke of the sync function (`{tenant_id, product_id}`
+  payload; the sync handler re-resolves Stripe creds). Save returns immediately; the tenant only ever clicks
+  **Save**. Chosen over a client-side "save then fire sync" chain because server-side **still completes if the
+  tenant closes the tab** — the "they shouldn't have to think about it" property.
+- **Status UX:** the existing `sync.status` drives a chip — *Saved · Syncing… → Synced*, or *Sync failed —
+  Retry*. The old "Sync to Stripe" button is **demoted to a Retry** shown only on failure.
+- **Idempotent + safe to over-fire:** every save re-syncs; `run_product_sync` only creates new Stripe prices
+  for new/changed local prices. (Guard against a self-trigger loop — this is a direct invoke from the save
+  path, NOT a DynamoDB-stream on the sync's own writeback, so there is no loop.)
+- **Failure = the "real problem":** a failed async sync sets `sync.status = failed`, surfaces on the product,
+  and is what the order-bump guard keys off. Optional: a `system` notification emitter for sync failures.
+- **Infra:** the products function gets permission to `lambda:InvokeFunction` on the sync function; the sync
+  function accepts an internal `{tenant_id, product_id}` invoke payload in addition to its API event.
+
+**Benefit beyond bumps:** every product stays Stripe-synced without the tenant babysitting it; order bumps
+just ride on it (the bump's `stripe_price_id` is always ready for `optional_items`).
+
 ## Reserved slugs + enforcement
 
 Reserved set: `{"" (=/), "sale", "flash-sale", "upsell", "downsell", "thank-you"}`. **Reject** them as
@@ -140,15 +199,22 @@ stripe-cart's default-page generation + "only show the upsell page if the offer 
 | `funnel_step_slug` (step_id → `/upsell-1`) | **ADVANCED-tier only.** The default uses fixed reserved slugs, not numbered derivations. |
 | `page.post_checkout.funnel_steps` (inline hand-authored graph) | **DERIVE, don't hand-author.** The default synthesizes the reserved-slug step sequence from `offer.funnel`; keep inline authoring available for the advanced tier. |
 | `schemas/Funnel.schema.json` (detached `Funnel` doc, `funnel_id`) | **DEFER → advanced tier.** Powers bespoke multi-page/branching funnels for power users (Phase 3+). Its Phase-2 resolver stays stubbed until then. |
-| price `context` enum, `resolve_order_bumps` | **REUSE** as-is. |
+| price `context` enum | **REUSE** as-is. |
+| `resolve_order_bumps` / `merge_resolved_offers` bump path | **REPLACE** with Stripe `optional_items` (see "Order bumps"); the mandatory-line-item merge was a non-functional stopgap. |
+| `run_product_sync` (`POST /products/{id}/sync`) | **REUSE**, but auto-fire it async on product save (see "Product → Stripe auto-sync"). |
 
 **Net:** one default funnel model (Site-native, offer-derived, single `/upsell`) that reuses the built
 routing/charge plumbing; the generic step-graph becomes the opt-in advanced tier.
 
 ## Plan of action (phased)
 
-- **P0 — already built (inventory):** price `context` enum; order-bump folding; one-click upsell charging;
-  Site-aware post-checkout routing + the transition engine; `SITE_PAGE_TYPES` includes `thank_you`/`funnel_step`.
+- **P0 — already built (inventory):** price `context` enum; one-click upsell charging; Site-aware
+  post-checkout routing + the transition engine; `SITE_PAGE_TYPES` includes `thank_you`/`funnel_step`; the
+  product→Stripe sync engine (`run_product_sync`, manual today). (NOT the order-bump checkout — that stopgap
+  is replaced in P2.)
+- **P1.5 — Product → Stripe auto-sync (enabler; do before/with P2 order bumps):** fire `run_product_sync`
+  async (Lambda `Event` invoke) from the products save handler; demote the manual "Sync" button to a
+  failure-only Retry; sync-status chip. Benefits all products, and makes bump Price IDs always ready.
 - **P1 — Pre-purchase (highest value / lowest risk):**
   - **P1a — SHIPPED dev (commit 8717cca):** reserved-slug set (`RESERVED_SITE_SLUGS`) + `is_reserved_slug` +
     enforcement in the Site `attach_page` handler; page `sale`/`flash_sale` config blocks + validation
@@ -160,9 +226,12 @@ routing/charge plumbing; the generic step-graph becomes the opt-in advanced tier
   - **P1c — routing/publish:** Site route resolver mapping `/sale`//`/flash-sale` → the `/` page + context;
     publish the context-view artifacts.
   - **P1d — dashboard:** per-page toggles + dates + the "no context" warning + the "expiration required" block.
-- **P2 — Post-purchase default funnel:** the `offer.funnel` block; auto-provision funnel pages from the offer;
-  wire `/upsell` (cycle upsells + one-click) then `/downsell` (declined-with-downsell) → `/thank-you` onto the
-  reused transition engine + `post_checkout` routing; gate reachability on `offer.funnel`.
+- **P2 — Checkout: order bumps + post-purchase default funnel:**
+  - **Order bumps:** `offer.funnel.order_bumps`; emit Stripe `optional_items` in `build_checkout_payload`
+    (retire the `merge_resolved_offers` stopgap); reclassify `order_bump` as pre-purchase; sync guard.
+  - **Post-purchase funnel:** the `offer.funnel` upsells/downsells; auto-provision funnel pages from the offer;
+    wire `/upsell` (cycle upsells + one-click) then `/downsell` (declined-with-downsell) → `/thank-you` onto the
+    reused transition engine + `post_checkout` routing; gate reachability on `offer.funnel`.
 - **P3 — Advanced tier + polish:** activate the detached `Funnel` doc for bespoke multi-page/branching funnels
   (power users); builder funnel UX; per-step analytics; AI-assisted funnel copy.
 
@@ -178,6 +247,16 @@ routing/charge plumbing; the generic step-graph becomes the opt-in advanced tier
    — one offer per funnel; keeps `offer_type` clean; unrelated product allowed. (Separate-offers idea retracted.)
 6. **Default funnel = Site-native, offer-derived, single `/upsell`;** the generic step-graph `Funnel` engine is
    the future advanced tier and the reused routing substrate.
+7. **`/sale` sale-price mechanism = pair by quantity + context** (schema-free; per-tier + whole-page Standard
+   fallback). Buyer converts on `/sale` → checkout charges the sale price (needs `allowed_price_contexts` / a
+   context-aware resolve).
+8. **Order bumps = Stripe `optional_items` on the hosted Checkout page** (kept hosted Checkout for Stripe Tax;
+   rejected an Elements custom checkout). Bump = designated `offer.funnel.order_bumps` product+price;
+   `order_bump` reclassified pre-purchase; retire the mandatory `merge_resolved_offers` stopgap; no
+   landing-page element. Needs synced Stripe Price IDs.
+9. **Product → Stripe auto-sync = server-side, async, on save** (fire-and-forget Lambda `Event` invoke of
+   `run_product_sync`). One Save button; the separate "Sync" button demoted to a failure-only Retry. Robust
+   (completes even if the tab closes). Benefits all products; makes bump Price IDs always ready.
 
 ## Ties
 `plans/SITE_OBJECT.md` (Site = funnel container, `SITE_PAGE_TYPES`); `plans/AI_AND_COMMERCE_ARCHITECTURE.md`
