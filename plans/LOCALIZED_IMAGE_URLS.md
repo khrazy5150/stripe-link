@@ -47,8 +47,17 @@ of why the hybrid is the right shape.
 - Served URL = `${CDN_BASE}/${destKey}` → `https://images.juniorbay.com/photos/{id}/{size}.{fmt}`.
 - **The CloudFront distribution serving `images.juniorbay.com` is owned by us but is NOT defined in the
   image-processing `template.yaml`** (no `AWS::CloudFront::Distribution` / `::Function` resource there) — it
-  was created out-of-band (console) and fronts the `images.juniorbay.net` bucket. **This is the one real
-  prerequisite** (Phase 0): the alias rewrite has to be attached to that distribution.
+  was created out-of-band (console). **This is the one real prerequisite** (Phase 0): the alias rewrite has
+  to be attached to that distribution. Confirmed live config (inspected 2026-07-23):
+  - **Distribution `E16GIH1C3GYFQE`** = `d10mrfiih71pl6.cloudfront.net`, aliases `images.juniorbay.com` +
+    `images.juniorbay.net`, origin = `images.juniorbay.net` S3 bucket. `PriceClass_100`, HTTP/2, `Compress: true`.
+  - `photos/*` (all landing-page images) is served by the **default cache behavior** → the viewer-request
+    function attaches there. No new path behavior needed.
+  - **No FunctionAssociations / Lambda@Edge today** — clean slate.
+  - Legacy-style config: default behavior uses `ForwardedValues` (not a cache policy), `MinTTL 0 /
+    DefaultTTL 86400 / MaxTTL 31536000`, ResponseHeadersPolicy `5249ba1c-…` (CORS). A CloudFront Function
+    coexists with the legacy config — **no cache-policy migration required**.
+  - One existing behavior `landing-pages/video/*` → a separate videos origin; leave it untouched.
 - `stripe-link` stores/render-emits image URLs in that canonical form and does not currently transform them.
 
 ---
@@ -115,8 +124,10 @@ def localized_image_url(url: str, slug: str) -> str:
 - **Dual-URL / duplicate image.** One object under two aliases is low-risk but not ideal for image
   canonicalization. Rule: one page → one alias. Only the rare DTC+local dual-use of the same image hits it;
   an image sitemap listing the chosen alias resolves it (Phase 2).
-- **Cache fragmentation.** CloudFront caches by incoming URI, so pretty + canonical are separate cache
-  entries for one object. Negligible at our volume; can normalize the cache key later if ever needed.
+- **Cache: no fragmentation.** A **viewer-request** function runs *before* the cache lookup, so the URI is
+  already rewritten to the canonical `{id}/{size}.{fmt}` when CloudFront computes the cache key. Pretty and
+  canonical URLs therefore collapse onto **one** cache entry — an argument for viewer-request over
+  origin-request timing. (An origin-request function would fragment the cache; don't use it here.)
 - **Backfill.** Pretty URLs apply going forward on re-render; already-published pages keep canonical URLs
   until re-published. No migration — consistent with prior render-layer changes.
 - **Vocab drift.** If the image service ever adds a new size name, the edge `SIZES` regex must learn it, or
@@ -126,9 +137,11 @@ def localized_image_url(url: str, slug: str) -> str:
 
 ## Phasing
 
-- **Phase 0 — Edge infra (prerequisite).** Add the CloudFront Function to the `images.juniorbay.com`
-  distribution. Decide first whether to **import that distribution into IaC** (image-processing stack) or
-  apply the function via console + document it. Verify canonical URLs still resolve and pretty URLs rewrite.
+- **Phase 0 — Edge infra (prerequisite).** Add a **viewer-request** CloudFront Function to the **default
+  cache behavior** of distribution `E16GIH1C3GYFQE`. Decide first whether to **import that distribution into
+  IaC** (image-processing stack) or apply the function via console + document it. Verify canonical URLs still
+  resolve and pretty URLs rewrite. Low risk: no existing function to displace, and it coexists with the
+  legacy `ForwardedValues` config (no cache-policy migration). Don't touch the `landing-pages/video/*` behavior.
 - **Phase 1 — Render + opt-in.** `localized_image_url` + slug derivation in `stripe-link`, the
   `organization.pretty_image_urls` flag (validated, auto-default-by-type), the dashboard toggle, and apply to
   the hero image. Tests: transform correctness, no-op on non-canonical URLs, opt-out stays canonical.
