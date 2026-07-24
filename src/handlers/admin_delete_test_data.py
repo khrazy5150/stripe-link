@@ -7,8 +7,11 @@ the commerce tables + a best-effort Stripe test-mode cleanup. Two behavioral ada
   2. **Hard dev-only gate.** Returns 403 unless `ENVIRONMENT` is a non-prod env; the API route is also
      `Condition: IsNonProd`, so it isn't even created in the prod stack (defense in depth).
 
+Booking: **appointments and their slot_locks ARE deleted** (booking transactions/holds, like orders), but the
+booking SETUP in the same ServicesTable — services, fulfillers, availability — is KEPT.
+
 Excluded on purpose (setup / infrastructure, not "test data"): Stripe keys, tenant/user profiles,
-preferences, shipping config, the services/booking family, routes, experiments, legal pages.
+preferences, shipping config, services/fulfillers/availability, routes, experiments, legal pages.
 
 **Sites are deliberately kept** (decision 2026-07-24): a Site is a tenant's hostname / organization-NAP /
 SEO *setup*, not test data — the goal is to delete test data, not factory-reset the workspace. Deleting a
@@ -42,6 +45,13 @@ _PK_TABLES = [
 _TENANT_ID_TABLES = ["CUSTOMERS_TABLE", "ORDERS_TABLE", "REFUNDS_TABLE", "LEDGER_TABLE"]
 # CheckoutSessions partitions on session_id (tenant_id is the sort key) → a filtered scan is required.
 _SCAN_TENANT_TABLES = ["CHECKOUT_SESSIONS_TABLE"]
+# Delete only SPECIFIC document types within a shared table (env_name, SK-prefix, result label). ServicesTable
+# holds booking SETUP (services/fulfillers/availability — KEPT) alongside booking DATA: appointments are
+# transactions like orders, and slot_locks are their transient holds. We delete only the data, by SK prefix.
+_PK_PREFIX_TABLES = [
+    ("SERVICES_TABLE", "APPOINTMENT#", "appointments"),
+    ("SERVICES_TABLE", "SLOTLOCK#", "slot_locks"),
+]
 
 
 def _label(env_name):
@@ -73,6 +83,8 @@ def handler(event, context, *, dynamodb=None, stripe_repo=None, secret_cipher=No
         deleted[_label(env_name)] = _delete_partition(dynamodb, os.environ.get(env_name, ""), "tenant_id", tenant_id)
     for env_name in _SCAN_TENANT_TABLES:
         deleted[_label(env_name)] = _delete_scan_tenant(dynamodb, os.environ.get(env_name, ""), tenant_id)
+    for env_name, sk_prefix, label in _PK_PREFIX_TABLES:
+        deleted[label] = _delete_partition(dynamodb, os.environ.get(env_name, ""), "PK", f"TENANT#{tenant_id}", sk_prefix=sk_prefix)
 
     try:
         stripe_results = _delete_stripe_test_data(tenant_id, stripe_repo, secret_cipher, opener)
@@ -89,8 +101,9 @@ def _delete_by_key(table, key_attrs, items):
             batch.delete_item(Key={attr: item[attr] for attr in key_attrs})
 
 
-def _delete_partition(dynamodb, table_name, pk_name, pk_value):
-    """Delete every item whose partition key matches — the tenant's whole slice of the table."""
+def _delete_partition(dynamodb, table_name, pk_name, pk_value, *, sk_prefix=""):
+    """Delete items in a partition — the tenant's whole slice of the table, or (when sk_prefix is given) only
+    the items whose sort key begins with that prefix (a single document_type in a shared table)."""
     if not table_name:
         return 0
     from boto3.dynamodb.conditions import Key
@@ -98,8 +111,11 @@ def _delete_partition(dynamodb, table_name, pk_name, pk_value):
         table = dynamodb.Table(table_name)
         key_attrs = [k["AttributeName"] for k in table.key_schema]
         names = {f"#k{i}": attr for i, attr in enumerate(key_attrs)}
+        condition = Key(pk_name).eq(pk_value)
+        if sk_prefix and len(key_attrs) > 1:
+            condition = condition & Key(key_attrs[1]).begins_with(sk_prefix)
         kwargs = {
-            "KeyConditionExpression": Key(pk_name).eq(pk_value),
+            "KeyConditionExpression": condition,
             "ProjectionExpression": ", ".join(names.keys()),
             "ExpressionAttributeNames": names,
         }

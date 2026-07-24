@@ -7,6 +7,21 @@ from unittest.mock import patch
 from handlers.admin_delete_test_data import handler
 
 
+def _condition_strings(condition):
+    """Collect the literal string operands from a boto3 KeyConditionExpression tree (so the fake can honor an
+    SK begins_with without a real DynamoDB)."""
+    values = []
+    get_expression = getattr(condition, "get_expression", None)
+    if not get_expression:
+        return [condition] if isinstance(condition, str) else []
+    for operand in get_expression().get("values", ()):
+        if isinstance(operand, str):
+            values.append(operand)
+        elif getattr(operand, "get_expression", None):
+            values.extend(_condition_strings(operand))
+    return values
+
+
 class FakeTable:
     def __init__(self, name, key_attrs, items, partition_style):
         self.name = name
@@ -18,10 +33,16 @@ class FakeTable:
         self.deleted = []
 
     def query(self, **kwargs):
-        # Emulate: return items whose partition attr matches the KeyConditionExpression value.
-        # We stashed the target value on the condition via a simple contains check on repr — instead, just
-        # return items tagged for this tenant (tests pre-tag items with _match=True).
-        return {"Items": [i for i in self.items if i.get("_match")]}
+        # Items are pre-tagged with _match. Honor an SK begins_with by matching the item's _sk_prefix tag so a
+        # prefix-scoped delete only hits its own document type in a shared table.
+        strings = _condition_strings(kwargs.get("KeyConditionExpression"))
+        prefixes = [s for s in strings if s.endswith("#") and s not in ("TENANT#",) and not s.startswith("TENANT#")]
+        items = [i for i in self.items if i.get("_match")]
+        if prefixes:
+            items = [i for i in items if i.get("_sk_prefix") in prefixes]
+        else:
+            items = [i for i in items if "_sk_prefix" not in i]  # whole-partition query skips prefix-only rows
+        return {"Items": items}
 
     def scan(self, **kwargs):
         return {"Items": [i for i in self.items if i.get("_match")]}
@@ -78,7 +99,8 @@ class DeleteTestDataTests(unittest.TestCase):
         env = {"ENVIRONMENT": "dev"}
         table_envs = ["PRODUCTS_TABLE", "OFFERS_TABLE", "COUPONS_TABLE", "PAGES_TABLE", "LEADS_TABLE",
                       "REVIEWS_TABLE", "CARTS_TABLE", "INVOICES_TABLE", "NOTIFICATIONS_TABLE",
-                      "CUSTOMERS_TABLE", "ORDERS_TABLE", "REFUNDS_TABLE", "LEDGER_TABLE", "CHECKOUT_SESSIONS_TABLE"]
+                      "CUSTOMERS_TABLE", "ORDERS_TABLE", "REFUNDS_TABLE", "LEDGER_TABLE",
+                      "CHECKOUT_SESSIONS_TABLE", "SERVICES_TABLE"]
         tables = {}
         for name in table_envs:
             env[name] = name.lower()
@@ -86,6 +108,13 @@ class DeleteTestDataTests(unittest.TestCase):
                 tables[name.lower()] = FakeTable(name, ["PK", "SK"], [_pk_item(), _pk_item()], "pk")
             elif name == "CHECKOUT_SESSIONS_TABLE":
                 tables[name.lower()] = FakeTable(name, ["session_id", "tenant_id"], [{"session_id": "cs1", "tenant_id": "t1", "_match": True}], "session")
+            elif name == "SERVICES_TABLE":
+                # A shared table: appointment + slot_lock are DATA (delete by prefix); service is SETUP (keep).
+                tables[name.lower()] = FakeTable(name, ["PK", "SK"], [
+                    {"PK": "TENANT#t1", "SK": "APPOINTMENT#a1", "_match": True, "_sk_prefix": "APPOINTMENT#"},
+                    {"PK": "TENANT#t1", "SK": "SLOTLOCK#f#2026", "_match": True, "_sk_prefix": "SLOTLOCK#"},
+                    {"PK": "TENANT#t1", "SK": "SERVICE#s1", "_match": True},  # setup — no prefix tag → never returned
+                ], "pk")
             elif name in ("CUSTOMERS_TABLE", "ORDERS_TABLE", "REFUNDS_TABLE", "LEDGER_TABLE"):
                 tables[name.lower()] = FakeTable(name, ["tenant_id", "id"], [], "tenant_id")
             else:
@@ -108,6 +137,12 @@ class DeleteTestDataTests(unittest.TestCase):
         self.assertEqual(body["deleted"]["products"], 2)
         self.assertEqual(body["deleted"]["checkout_sessions"], 1)
         self.assertEqual(body["deleted"]["offers"], 0)
+        # Booking DATA deleted by SK prefix; the SERVICES row (setup) in the same table is left alone.
+        self.assertEqual(body["deleted"]["appointments"], 1)
+        self.assertEqual(body["deleted"]["slot_locks"], 1)
+        services_deleted = tables["services_table"].deleted
+        self.assertTrue(all(k["SK"] != "SERVICE#s1" for k in services_deleted))
+        self.assertEqual(len(services_deleted), 2)  # appointment + slot_lock, not the service
         # No test key configured → Stripe cleanup skipped, not attempted.
         self.assertEqual(body["stripe"], {"skipped": "no_test_key"})
 

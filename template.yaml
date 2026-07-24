@@ -2361,6 +2361,8 @@ Resources:
             TableName: !Ref LedgerTable
         - DynamoDBCrudPolicy:
             TableName: !Ref CheckoutSessionsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ServicesTable
         - DynamoDBReadPolicy:
             TableName: !Ref StripeKeysTable
         - Statement:
