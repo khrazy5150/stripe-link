@@ -70,6 +70,21 @@ Deferred, non-blocking follow-ups. Each item notes what, why it was deferred, an
 - **Why deferred:** `refund_request` + `paid_invoice` are closest to done (the checkout webhook already
   builds order/invoice/customer records); `shipping` and `system` need their upstream features to exist first.
 
+## Commerce
+
+### Listicle L2 — server-side cart + multi-line checkout (prioritized)
+- **What:** promote the shipped **client-side** listicle cart (L1: `render_minicart()` + `sl_cart_{offerId}`
+  localStorage + JS island) to a **server-backed** cart, and check the whole cart out in **one** multi-line
+  Stripe session. Full outline in **`plans/LISTICLE_AND_CART.md` → Phasing → L2**.
+- **Verified state (2026-07-23):** L1 ships; `handlers/checkout.py` already emits `line_items[{index}]`
+  (multi-line-capable). **Not built:** cart document/table/repository, `/cart` endpoints, persistence.
+- **Where to fix:** new `jb-carts-{env}` table + `carts_repository` + `validate_cart`; new `handlers/cart.py`
+  (`POST/GET /cart`, `PATCH/DELETE /cart/items/{id}`, `POST /cart/checkout`) — public/anonymous, `/leads`
+  abuse posture; server re-resolves each line's single-unit price (never trusts client amounts); reuse the
+  checkout `line_items` construction, keep the single-offer compat path. Slices A–D in the plan.
+- **Why now:** the interim buy-now/localStorage cart is the one visible gap in the listicle offer type;
+  author flagged it to tackle soon (2026-07-23).
+
 ## Business Profile & Reviews
 
 ### Business Profile — GBP Phases 2 & 3 (Google Business Profile sync)

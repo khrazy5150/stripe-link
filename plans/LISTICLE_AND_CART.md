@@ -1,8 +1,9 @@
 # Listicle Offers + Server-Side Cart
 
-Status: **proposed** (design; author-approved direction 2026-07-10). Supersedes the multi-offer
-`product_carousel` interpretation shipped in `LANDING_PAGE_CTA_AND_COMPOSITION.md` phase 4c — see "Course
-correction" below. Extends `AI_AND_COMMERCE_ARCHITECTURE.md` **Part C**.
+Status: **L1 shipped (client-side cart); L2 pending & prioritized** (design author-approved 2026-07-10).
+Supersedes the multi-offer `product_carousel` interpretation shipped in
+`LANDING_PAGE_CTA_AND_COMPOSITION.md` phase 4c — see "Course correction" below. Extends
+`AI_AND_COMMERCE_ARCHITECTURE.md` **Part C**. L2 outline in "Phasing → L2" below.
 
 ## Course correction
 
@@ -48,24 +49,34 @@ renders its own items as a carousel. The multi-offer carousel element is **retir
   **single-unit price**; the carousel is redesigned to the **TikTok-Shop syncing-price-card** style with
   **Add to cart** (client-side cart accumulation); listicle pages **strip the fluff**.
 
-### L2 — Server-side cart + multi-line checkout (NEXT)
-- `cart` document keyed to a client-minted session id (localStorage + sent to API) + repository +
-  endpoints (`POST /cart/items`, `GET /cart`, `PATCH`/`DELETE /cart/items/{id}`, `POST /cart/checkout`).
-- Promote the client-side cart to server-side (persistence → abandoned-cart recovery via the email system).
-- **Multi-line Stripe checkout** from the cart — `handlers/checkout.py` already emits `line_items[{index}]`,
-  so wire the cart's items through it (keep the single-offer compat path).
+### L2 — Server-side cart + multi-line checkout (NEXT — pending, prioritized)
+**Current state (verified 2026-07-23):** L1 client-side cart is live — `render_minicart()`, the
+`sl_cart_{offerId}` localStorage store, and the listicle JS island (add/read/write) all ship in
+`runtime/html.py`. `handlers/checkout.py` already emits `line_items[{index}]`, so it is multi-line-capable.
+**Not built:** no cart document/table/repository, no `/cart` endpoints, no server persistence. L2 promotes
+the existing client-side cart to a server-backed one and checks the whole cart out in one Stripe session.
 
-### L2 — Server-side cart (the deliberate project)
-- **`cart` document** keyed to a visitor/session id (a `sl_cart` id minted client-side, stored in
-  localStorage + sent to the API). Holds `line_items[]` (product_id/price_id/qty/offer_id) + totals.
-  Unlocks abandoned-cart recovery (via the existing email system), attribution, cross-device later.
-- **Endpoints**: `POST /cart/items` (add), `GET /cart`, `PATCH /cart/items/{id}` (qty), `DELETE
-  /cart/items/{id}`, `POST /cart/checkout` (one Stripe session with **all** line items). Public
-  (anonymous shopper), same abuse posture as `/leads`.
-- **Carousel slides** get **Add to cart**; a persistent **mini-cart** ("Checkout (3) · $34.97") on the
-  page; a JS island manages the cart + calls the endpoints.
-- **Multi-line Stripe checkout**: extend the checkout path to build `line_items` from the cart (vs a
-  single product). Keep a single-product compat path.
+1. **Data model — `cart` document.** Keyed to the client-minted `sl_cart_{offerId}` id (already in
+   localStorage; start sending it to the API). Holds `line_items[]` (`product_id` / `price_id` / `qty` /
+   `offer_id`) + derived totals + `tenant_id` + timestamps. New table-per-entity (`jb-carts-{env}`, GSI1) +
+   `carts_repository` in `repositories/documents.py`; `validate_cart` in `domain/documents.py`. Server
+   **re-resolves price** per line (single-unit resolver, per "Price resolution" below) — never trusts a
+   client-sent amount.
+2. **Endpoints (public, anonymous shopper — same abuse posture as `/leads`).** `POST /cart/items` (add),
+   `GET /cart`, `PATCH /cart/items/{id}` (qty), `DELETE /cart/items/{id}`, `POST /cart/checkout` (one Stripe
+   session with **all** line items). New `handlers/cart.py`; wire routes + table perms in `template.yaml`.
+3. **Multi-line Stripe checkout.** Build the Stripe session's `line_items` from the cart's items rather than
+   a single offer — reuse the existing `line_items[{index}]` construction in `handlers/checkout.py`; **keep
+   the single-offer compat path** untouched. Attach cart_id → order for attribution.
+4. **Renderer / JS island.** Point the listicle island's add-to-cart + mini-cart at the endpoints (optimistic
+   local write, reconcile with `GET /cart`); mini-cart "Checkout (N) · $NN.NN" triggers `POST /cart/checkout`.
+   Degrade gracefully to the L1 localStorage-only behavior if the cart API is unreachable.
+5. **Abandoned-cart recovery.** A stored cart with an email (captured at checkout start or via the lead form)
+   feeds the existing email system for recovery — mirrors the reminder/invite sweep pattern
+   (`scan_type("cart")` + a `rate()` sweep). Optional within L2; the persistence in step 1 is the prerequisite.
+
+**Suggested slice order:** (A) data model + `POST`/`GET` + persist the existing client cart; (B) mutate/delete
++ mini-cart wired to the API; (C) `POST /cart/checkout` multi-line session; (D) abandoned-cart sweep.
 
 ### L3 — Order-model ripples (deferred; documented so they aren't forgotten)
 Per `AI_AND_COMMERCE` C.3, a multi-line order ripples into things already built — **refunds ledger**
