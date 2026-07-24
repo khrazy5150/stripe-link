@@ -212,6 +212,13 @@ third-party security assessment is required.
 - Related dead JS left by the same change (price-preview cluster, `headlineHtml`, `defaultLegalLinks`, …)
   is listed at the end of plans/PAGE_COMPOSER.md.
 
+### Match stripe-link's CSS style to stripe-cart's
+- **What:** bring stripe-link's rendered visual style into line with the legacy **stripe-cart** look (the
+  behavioral/visual reference). Audit where the two diverge and update stripe-link's CSS to match.
+- **Scope to confirm when picked up:** primarily the storefront/landing-page styles
+  (`src/stripe_link/runtime/html.py` style block); clarify whether the dashboard chrome is in scope too.
+- **Why:** visual parity with the legacy experience users know; per CLAUDE.md, stripe-cart is the reference.
+
 ### Implement an on-page SEO checklist for landing pages
 - **What:** Emit proper on-page SEO for rendered landing pages: unique `<title>`, `<meta name="description">`,
   canonical URL, **Open Graph** + **Twitter Card** tags, and **JSON-LD structured data** (e.g.,
