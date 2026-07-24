@@ -1,8 +1,33 @@
 # Transaction Ledger — stripe-link redesign
 
-**Status:** design, not yet built · **Home:** PRD Phase 5 (Commerce Foundations) · **Supersedes:**
+**Status:** **Core shipped; P&L completeness + canonical-consolidation + reporting pending** (see
+"Status — what's built" below) · **Home:** PRD Phase 5 (Commerce Foundations) · **Supersedes:**
 the stripe-cart `plans/TRANSACTION_LEDGER_IMPLEMENTATION.md` (behavioral reference only — do **not**
 port it verbatim; it is single-merchant, raw-boto3, and scans full partitions).
+
+## Status — what's built (verified 2026-07-23)
+
+**Shipped:**
+- `domain/ledger.py` — append-only `_entry` + `sale_entry` / `refund_entry` / `sale_entry_from_order`
+  builders and `summarize()` (pure-sum derived totals: `net`, `profit`, `tax_liability`, per-type counts).
+- `LedgerTable` + `ledger_repository` (`list_for_order`, `list_for_tenant`).
+- Recording is wired in `handlers/stripe_webhook.py`: a **sale** entry on paid checkout, **refund** entries
+  on refund reconciliation, and dispute handling (`build_ledger_refund_entry`).
+- Read-only **`GET /ledger`** API (`handlers/ledger.py` / `LedgerFunction`): entries + derived summary,
+  by `order_id` or tenant.
+- The `LedgerEntry` schema/validator supports the full type set (sale/refund/dispute/dispute_won/
+  shipping_cost/cost_adjustment/fee_adjustment/tax_remittance/adjustment).
+
+**Not built (the rest of this plan):**
+- **COGS + shipping-cost entries are never populated**, so `profit` is incomplete (only fees are netted).
+  Needs product-cost + shipping-cost inputs at sale time.
+- **Order aggregates are NOT yet demoted to a derived cache** — orders still carry mutable
+  `amount_paid`/`amount_refunded` authored by overwrite; the ledger runs *parallel*, not yet *canonical*
+  (the core principle of this plan).
+- **Tax-liability-by-jurisdiction** grouping (feeds PRD Phase 8) — `summarize` totals tax but doesn't group
+  by `metadata.tax_jurisdiction`.
+- **Rollups** (fast-dashboard rollup records), **reversing-entry corrections** flow, **migration/backfill**,
+  and a **dashboard reporting UI** (no ledger view in `dashboard-vue`).
 
 ## Why
 

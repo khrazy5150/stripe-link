@@ -82,6 +82,21 @@ Deferred, non-blocking follow-ups. Each item notes what, why it was deferred, an
     links, but composing/bulk-sending them (recipient lists, templates) is a separate feature; not built.
   - **L3 order-model ripples** (per-line refunds/receipts/fees/downloads) — build only when L2 is proven.
 
+### Transaction ledger — finish P&L, canonicalization, and reporting
+- **Core shipped:** append-only `domain/ledger.py` (sale/refund/dispute entries + `summarize()` derived
+  totals) + `LedgerTable` + `ledger_repository` + read-only `GET /ledger`; sale/refund entries recorded from
+  the Stripe webhook. Full design + accurate build state in **`plans/TRANSACTION_LEDGER_STRIPE_LINK.md`**.
+- **Still to build (in rough priority order):**
+  - **COGS + shipping-cost entries** so `profit` is real (today only fees are netted) — needs product-cost +
+    shipping-cost inputs at sale time.
+  - **Make the ledger canonical:** demote order `amount_paid`/`amount_refunded` to a *derived cache* off the
+    ledger (currently authored by overwrite, so they drift on missed/double webhooks) — the plan's core aim.
+  - **Tax-liability-by-jurisdiction** reporting (group `tax` by `metadata.tax_jurisdiction`; feeds PRD Phase 8).
+  - **Rollups**, **reversing-entry corrections**, **migration/backfill**, and a **dashboard reporting UI**
+    (no ledger view exists in `dashboard-vue`).
+- **Why deferred:** the money-movement substrate works and orders report correctly today; this is the P&L /
+  tax-reporting layer on top.
+
 ## Business Profile & Reviews
 
 ### Business Profile — GBP Phases 2 & 3 (Google Business Profile sync)
