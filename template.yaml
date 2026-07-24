@@ -575,6 +575,18 @@ Resources:
             RestApiId: !Ref RestApi
             Path: /cart/items/{line_id}
             Method: OPTIONS
+        CartUnsubscribe:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /cart/unsubscribe
+            Method: GET
+        CartUnsubscribeOptions:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /cart/unsubscribe
+            Method: OPTIONS
 
   ReviewsFunction:
     Type: AWS::Serverless::Function
@@ -2508,6 +2520,32 @@ Resources:
           Properties:
             Schedule: rate(15 minutes)
             Description: Trigger the appointment SMS reminder sweep.
+
+  CartRecoveryFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${ProjectPrefix}-cart-recovery-sweep-${Environment}"
+      CodeUri: src/
+      Handler: handlers.cart_recovery.handler
+      Description: Scheduled sweep that emails abandoned-cart recovery nudges.
+      Timeout: 120
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref CartsTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref SitesTable
+        - Statement:
+            Effect: Allow
+            Action:
+              - ses:SendEmail
+              - sesv2:SendEmail
+            Resource: "*"
+      Events:
+        CartRecoverySweep:
+          Type: Schedule
+          Properties:
+            Schedule: rate(15 minutes)
+            Description: Trigger the abandoned-cart recovery sweep.
 
   ReviewInvitesFunction:
     Type: AWS::Serverless::Function

@@ -5,6 +5,7 @@ resolved server-side from the payload IDs, and **every line price is re-resolved
 offer + catalog — the client names *what* to add, never the amount. The cart id is opaque, minted here on
 first add and echoed back for the browser to persist (localStorage).
 """
+import os
 import re
 import secrets
 import time
@@ -23,7 +24,9 @@ from stripe_link.domain.cart import (
     apply_email,
     cart_token_valid,
     clamp_qty,
+    mark_opted_out,
     new_cart,
+    normalize_page_url,
     remove_line,
     resolve_cart_line,
     set_line_qty,
@@ -57,6 +60,11 @@ def handler(
     if method == "OPTIONS":
         return json_response({})
     carts_repo = carts_repo or carts_repository()
+    if cart_tokens_repo is None and os.environ.get("CARTS_TABLE"):
+        cart_tokens_repo = cart_tokens_repository()
+    resource = str((event or {}).get("resource") or (event or {}).get("path") or "")
+    if resource.endswith("/unsubscribe"):
+        return unsubscribe(event, carts_repo, cart_tokens_repo, now_fn())
     if method == "POST":
         return add_item(
             event,
@@ -64,11 +72,11 @@ def handler(
             offers_repo=offers_repo or offers_repository(),
             products_repo=products_repo or products_repository(),
             services_repo=services_repo or services_repository(),
-            cart_tokens_repo=cart_tokens_repo if cart_tokens_repo is not None else cart_tokens_repository(),
+            cart_tokens_repo=cart_tokens_repo,
             now=now_fn(),
         )
     if method == "GET":
-        return get_cart(event, carts_repo)
+        return get_cart(event, carts_repo, cart_tokens_repo, now_fn())
     if method in ("PATCH", "DELETE"):
         line_id = str(path_params(event).get("line_id") or "").strip()
         if not line_id:
@@ -156,6 +164,9 @@ def add_item(event, *, carts_repo, offers_repo, products_repo, services_repo, ca
 
     # Identify the shopper (identified-link token or explicit email) so the cart is recovery-eligible.
     apply_email(cart, _resolve_email(body, tenant_id, cart_tokens_repo, now))
+    page_url = normalize_page_url(body.get("page_url"))
+    if page_url:
+        cart["page_url"] = page_url  # where a recovery link returns the shopper
 
     cart["updated_at"] = int(now)
     cart["retention_expires_at"] = int(now) + CART_RETENTION_SECONDS
@@ -205,16 +216,50 @@ def mutate_item(event, carts_repo, line_id, *, remove, now):
     return json_response({"cart": _public_cart(cart)})
 
 
-def get_cart(event, carts_repo):
+def get_cart(event, carts_repo, cart_tokens_repo=None, now=0):
+    """Fetch a cart by `cart_id`, or by a recovery `ct` token (token -> cart_id) so a recovery link
+    rehydrates the exact cart on ANY device (the cart_id otherwise lives only in the abandoning browser)."""
     params = query_params(event)
     tenant_id = str(params.get("tenant_id") or "").strip()
     cart_id = str(params.get("cart_id") or "").strip()
+    token = str(params.get("ct") or "").strip()
+    if tenant_id and token and not cart_id and cart_tokens_repo is not None:
+        token_doc = cart_tokens_repo.get(tenant_id, token)
+        if cart_token_valid(token_doc, now):
+            cart_id = str(token_doc.get("cart_id") or "").strip()
     if not tenant_id or not cart_id:
-        return error_response("tenant_id and cart_id are required.", code="invalid_cart")
+        return error_response("tenant_id and cart_id (or ct) are required.", code="invalid_cart")
     cart = carts_repo.get(tenant_id, cart_id)
     if not cart:
         return error_response("Cart not found.", status_code=404, code="not_found")
     return json_response({"cart": _public_cart(cart)})
+
+
+def unsubscribe(event, carts_repo, cart_tokens_repo, now):
+    """One-click unsubscribe from a recovery email — resolves the token to its cart and opts it out. Returns a
+    tiny HTML confirmation (the link is clicked in an email client). Always confirms, even on a stale token,
+    so we never leak whether a token/cart exists."""
+    params = query_params(event)
+    tenant_id = str(params.get("tenant_id") or "").strip()
+    token = str(params.get("token") or "").strip()
+    if tenant_id and token and cart_tokens_repo is not None:
+        token_doc = cart_tokens_repo.get(tenant_id, token)
+        cart_id = str((token_doc or {}).get("cart_id") or "").strip()
+        if cart_id:
+            try:
+                cart = carts_repo.get(tenant_id, cart_id)
+                if cart and not cart.get("email_opted_out"):
+                    carts_repo.put(mark_opted_out(cart, now))
+            except Exception:  # noqa: BLE001 - always confirm to the clicker
+                pass
+    body = ("<!doctype html><meta charset=utf-8><title>Unsubscribed</title>"
+            "<div style=\"font-family:system-ui,sans-serif;max-width:420px;margin:80px auto;text-align:center;color:#111;\">"
+            "<h2>You're unsubscribed</h2><p>You won't receive cart reminders for this cart anymore.</p></div>")
+    return {
+        "statusCode": 200,
+        "headers": {"Content-Type": "text/html; charset=utf-8", "Access-Control-Allow-Origin": "*"},
+        "body": body,
+    }
 
 
 def _public_cart(cart: dict) -> dict:

@@ -1492,6 +1492,10 @@ def validate_cart(document: dict[str, Any]) -> None:
         raise DocumentValidationError("Cart status must be 'open' or 'converted'.")
     if document.get("email_opted_out") is not None and not isinstance(document.get("email_opted_out"), bool):
         raise DocumentValidationError("Cart email_opted_out must be a boolean.")
+    if document.get("page_url") is not None and not isinstance(document.get("page_url"), str):
+        raise DocumentValidationError("Cart page_url must be a string.")
+    if document.get("recovery") is not None and not isinstance(document.get("recovery"), dict):
+        raise DocumentValidationError("Cart recovery must be an object.")
 
 
 def validate_cart_token(document: dict[str, Any]) -> None:

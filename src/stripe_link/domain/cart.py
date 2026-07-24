@@ -264,3 +264,41 @@ def mark_converted(cart: dict[str, Any], now: int) -> dict[str, Any]:
     cart["status"] = "converted"
     cart["updated_at"] = int(now)
     return cart
+
+
+def normalize_page_url(url: Any) -> str:
+    """The listicle page URL a recovery link points back to. HTTPS-only + length-capped; the recovery email
+    only ever goes to the cart's own email, so the blast radius is the email owner (still, gate the scheme)."""
+    value = str(url or "").strip()
+    return value if value.startswith("https://") and len(value) <= 2048 else ""
+
+
+def recoverable(cart: dict[str, Any], now: int, *, min_age_seconds: int, max_attempts: int) -> bool:
+    """Whether the abandonment sweep should email this cart: still open, has an email + items + a page to
+    return to, not opted out, gone quiet longer than the threshold, and under the send cap."""
+    if cart.get("status") != "open" or cart.get("email_opted_out"):
+        return False
+    if not normalize_email(cart.get("email")) or int(cart.get("item_count") or 0) <= 0:
+        return False
+    if not normalize_page_url(cart.get("page_url")):
+        return False
+    if int(now) - int(cart.get("updated_at") or 0) < int(min_age_seconds):
+        return False
+    return int((cart.get("recovery") or {}).get("attempts") or 0) < int(max_attempts)
+
+
+def mark_recovery_sent(cart: dict[str, Any], now: int) -> dict[str, Any]:
+    """Record a recovery send (bumps the attempt count so the cap holds). Does NOT touch `updated_at` — that
+    tracks shopper activity, not our outreach."""
+    recovery = dict(cart.get("recovery") or {})
+    recovery["attempts"] = int(recovery.get("attempts") or 0) + 1
+    recovery["last_sent_at"] = int(now)
+    cart["recovery"] = recovery
+    return cart
+
+
+def mark_opted_out(cart: dict[str, Any], now: int) -> dict[str, Any]:
+    """Honor an unsubscribe — the cart is never emailed again."""
+    cart["email_opted_out"] = True
+    cart["updated_at"] = int(now)
+    return cart
