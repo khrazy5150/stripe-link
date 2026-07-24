@@ -30,7 +30,7 @@ def _product_with_sales(sale_qtys=(1, 6), context="sale"):
 
 
 def _cards(html):
-    return re.findall(r'data-price-id="([^"]+)" data-quantity="\d+"[^>]*data-sale-amount="(\d+)"', html)
+    return re.findall(r'data-price-id="([^"]+)"[^>]*?data-sale-amount="(\d+)"', html)
 
 
 class SaleContextRenderTests(unittest.TestCase):
@@ -69,6 +69,25 @@ class SaleContextRenderTests(unittest.TestCase):
         product = load("product-creatine-gummies.json")
         self.assertEqual(_cards(self._render(product, "sale")), _cards(self._render(product, "standard")))
         self.assertNotIn(">Sale<", self._render(product, "sale"))
+
+    def test_flash_view_emits_banner_state_script_and_revert_data(self):
+        product = _product_with_sales(sale_qtys=(1, 2, 3, 6), context="flash_sale")
+        self.page["flash_sale"] = {"enabled": True, "starts_on": 1000, "ends_at": 999999999999}
+        html = self._render(product, "flash_sale")
+        self.assertIn('<div class="sl-flash-banner"', html)             # the banner element
+        self.assertIn('data-price-context="flash_sale"', html)          # state config
+        self.assertIn('data-starts-on="1000"', html)
+        self.assertIn('data-ends-at="999999999999"', html)
+        self.assertIn("const tick", html)                               # client state script
+        self.assertIn("data-standard-price-id=", html)                  # per-card revert fallback
+        self.assertIn("data-standard-amount=", html)
+
+    def test_standard_view_has_no_banner_or_state_script(self):
+        product = _product_with_sales(context="flash_sale")
+        html = self._render(product, "standard")
+        self.assertNotIn('<div class="sl-flash-banner"', html)
+        self.assertNotIn("data-price-context=", html)
+        self.assertNotIn("data-standard-price-id=", html)
 
 
 class CheckoutContextAcceptanceTests(unittest.TestCase):

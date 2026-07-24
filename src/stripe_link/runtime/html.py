@@ -597,6 +597,7 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     "    .sl-listicle-option{grid-template-columns:9rem minmax(0,1fr);cursor:default}",
     "    .sl-listicle-option.no-img{grid-template-columns:minmax(0,1fr)}",
     "    .sl-listicle-add{width:100%;text-align:center;margin-top:0.4rem}",
+    "    .sl-flash-banner{position:sticky;top:0;z-index:30;text-align:center;padding:0.8rem 1rem;font-family:var(--sl-font-accent);font-weight:800;color:#fff;background:linear-gradient(90deg,#dc2626,#f97316)}",
     "    .sl-minicart{position:fixed;left:0;right:0;bottom:0;z-index:20;display:none;flex-direction:column;gap:0.6rem;padding:1rem 1.6rem 1.2rem;background:var(--sl-card);border-top:1px solid var(--sl-border);box-shadow:0 -2px 16px rgba(0,0,0,.12)}",
     "    .sl-minicart.is-visible{display:flex}",
     "    .sl-minicart-lines{display:flex;flex-direction:column;gap:0.3rem;max-height:34vh;overflow-y:auto}",
@@ -1371,6 +1372,7 @@ def _render_page_body(
         render_page_interactions_script(page),
         "</head>",
         "<body>",
+        render_price_context_banner(page),
         "  <main>",
         site_header,
         breadcrumb,
@@ -1381,6 +1383,7 @@ def _render_page_body(
         legal_footer,
         "  </main>",
         minicart,
+        render_price_context_script(),
         conversion_data,
         "</body>",
         "</html>",
@@ -1434,6 +1437,71 @@ def render_minicart() -> str:
         "      <button class=\"sl-cta sl-minicart-checkout\" type=\"button\" data-minicart-checkout>Checkout</button>",
         "    </div>",
         "  </div>",
+    ])
+
+
+def render_price_context_banner(page: dict[str, Any]) -> str:
+    """A top-of-page state element for a Sale / Flash-Sale view (plans/SALES_FUNNELS.md P1b-2). Carries the
+    page's window (`starts_on`/`ends_at`) so the client can pick the live state; flash also shows a visible
+    banner (countdown / "coming up" / "ended"). Empty outside a sale/flash view."""
+    ctx = str(_RENDER_STATE.get("active_price_context") or "standard")
+    if ctx not in ("sale", "flash_sale"):
+        return ""
+    cfg = (page.get("flash_sale") if ctx == "flash_sale" else page.get("sale")) or {}
+    starts_on = int(cfg.get("starts_on") or 0)
+    ends_at = int(cfg.get("ends_at") or 0)
+    attrs = f"data-price-context=\"{ctx}\" data-starts-on=\"{starts_on}\" data-ends-at=\"{ends_at}\""
+    if ctx == "flash_sale":
+        return "\n".join([
+            f"  <div class=\"sl-flash-banner\" {attrs}>",
+            "    <span class=\"sl-flash-banner-text\" data-flash-banner-text>\U0001F525 Flash Sale</span>",
+            "  </div>",
+        ])
+    # Sale view: no visible banner, just the config so the client can revert after an optional expiry.
+    return f"  <div class=\"sl-price-context\" {attrs} hidden></div>"
+
+
+def render_price_context_script() -> str:
+    """Client-side Sale/Flash time-states (plans/SALES_FUNNELS.md P1b-2). Pages publish statically, so the live
+    state depends on view time: flash shows upcoming / active (countdown) / ended, and both revert the swapped
+    price cards to their Standard fallback outside the active window. Empty outside a sale/flash view."""
+    if str(_RENDER_STATE.get("active_price_context") or "standard") not in ("sale", "flash_sale"):
+        return ""
+    return "\n".join([
+        "  <script>",
+        "    (function () {",
+        "      const el = document.querySelector('[data-price-context]');",
+        "      if (!el) return;",
+        "      const mode = el.getAttribute('data-price-context');",
+        "      const startsOn = parseInt(el.getAttribute('data-starts-on') || '0', 10);",
+        "      const endsAt = parseInt(el.getAttribute('data-ends-at') || '0', 10);",
+        "      const bannerText = el.querySelector('[data-flash-banner-text]');",
+        "      const cards = Array.from(document.querySelectorAll('.sl-price-option[data-standard-price-id]'));",
+        "      const money = (cents, cur) => { try { return new Intl.NumberFormat(undefined, { style: 'currency', currency: (cur || 'usd').toUpperCase() }).format((cents || 0) / 100); } catch (e) { return '$' + ((cents || 0) / 100).toFixed(2); } };",
+        "      const fmtDate = (secs) => { try { return new Date(secs * 1000).toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' }); } catch (e) { return ''; } };",
+        # Capture both the flash (initial DOM) and Standard values so we can toggle either way.
+        "      cards.forEach((c) => { c._flashId = c.getAttribute('data-price-id'); c._flashAmt = parseInt(c.getAttribute('data-sale-amount') || '0', 10); c._stdId = c.getAttribute('data-standard-price-id'); c._stdAmt = parseInt(c.getAttribute('data-standard-amount') || '0', 10); });",
+        "      const apply = (useStandard) => {",
+        "        cards.forEach((c) => {",
+        "          const id = useStandard ? c._stdId : c._flashId; const amt = useStandard ? c._stdAmt : c._flashAmt;",
+        "          if (!id) return;",
+        "          c.setAttribute('data-price-id', id);",
+        "          const radio = c.querySelector('input[type=radio]'); if (radio) radio.value = id;",
+        "          const amtEl = c.querySelector('[data-price-amount]'); if (amtEl) amtEl.textContent = money(amt, c.getAttribute('data-currency'));",
+        "          c.querySelectorAll('.sl-badge, .sl-regular-price, .sl-savings').forEach((n) => { n.style.display = useStandard ? 'none' : ''; });",
+        "        });",
+        "      };",
+        "      const countdown = (secs) => { const d = Math.floor(secs / 86400), h = Math.floor((secs % 86400) / 3600), m = Math.floor((secs % 3600) / 60), s = secs % 60; return '\\u{1F525} Flash Sale ends in ' + (d ? d + 'd ' : '') + h + 'h ' + m + 'm ' + s + 's'; };",
+        "      const tick = () => {",
+        "        const now = Math.floor(Date.now() / 1000);",
+        "        if (endsAt && now >= endsAt) { apply(true); if (bannerText) bannerText.textContent = 'Flash Sale ended'; return false; }",
+        "        if (startsOn && now < startsOn) { apply(true); if (bannerText) bannerText.textContent = 'Flash Sale Coming Up on ' + fmtDate(startsOn); return true; }",
+        "        apply(false); if (bannerText && endsAt) bannerText.textContent = countdown(endsAt - now); return true;",
+        "      };",
+        "      if (mode === 'flash_sale') { tick(); const t = setInterval(() => { if (!tick()) clearInterval(t); }, 1000); }",
+        "      else { const now = Math.floor(Date.now() / 1000); if (endsAt && now >= endsAt) apply(true); }",  # sale: revert after expiry, no countdown
+        "    })();",
+        "  </script>",
     ])
 
 
@@ -2033,8 +2101,14 @@ def render_offer_price_selector(
                 savings_pct = discount_pct(amount, context_compare)  # Sale% off the Standard price
             if not savings_pct and compare_at_unit_amount:
                 savings_pct = discount_pct(amount, int(compare_at_unit_amount))
+            # Swapped to a sale/flash price: carry the Standard fallback so the client-side flash/expiry logic
+            # (plans/SALES_FUNNELS.md P1b-2) can revert this card to Standard in the upcoming/ended states.
+            revert_attrs = (
+                f" data-standard-price-id=\"{escape(str(price.get('price_id', '')))}\" data-standard-amount=\"{int(price.get('unit_amount') or 0)}\""
+                if context_compare is not None else ""
+            )
             card_markup = "\n".join([
-                f"      <article class=\"sl-price-option\" data-product-id=\"{escape(str(product_id))}\" data-price-id=\"{escape(str(display_price.get('price_id', '')))}\" data-quantity=\"{checkout_quantity}\" data-default=\"{default_attr}\" data-sale-amount=\"{amount}\" data-regular-amount=\"{int(compare_at_unit_amount) if compare_at_unit_amount else ''}\" data-currency=\"{escape(currency)}\" data-label=\"{label}\">",
+                f"      <article class=\"sl-price-option\" data-product-id=\"{escape(str(product_id))}\" data-price-id=\"{escape(str(display_price.get('price_id', '')))}\"{revert_attrs} data-quantity=\"{checkout_quantity}\" data-default=\"{default_attr}\" data-sale-amount=\"{amount}\" data-regular-amount=\"{int(compare_at_unit_amount) if compare_at_unit_amount else ''}\" data-currency=\"{escape(currency)}\" data-label=\"{label}\">",
                 "        " + responsive_img(image_url, str(product.get("name") or label), sizes=PRICE_OPTION_SIZES) if image_url else "",
                 "        <div class=\"sl-price-copy\">",
                 f"          <span class=\"sl-badge\">{badge}</span>" if badge else "",
