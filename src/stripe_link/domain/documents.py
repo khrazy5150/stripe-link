@@ -933,6 +933,34 @@ def is_offerless_page(document: dict[str, Any]) -> bool:
     )
 
 
+def validate_page_pricing_modes(document: dict[str, Any]) -> None:
+    """Per-Landing-Page Sale / Flash-Sale toggles (plans/SALES_FUNNELS.md P1). `/sale` and `/flash-sale` are
+    context views of `/` that swap the price context; the dates that drive them live on the page. Both blocks
+    optional; only shape + the "flash needs an expiration" rule are enforced here (the "product has no such
+    price" warning is a builder/UX concern, not a document invariant)."""
+    sale = document.get("sale")
+    if sale is not None:
+        if not isinstance(sale, dict):
+            raise DocumentValidationError("Page sale must be an object.")
+        optional_bool(sale, "enabled", "Page sale.enabled")
+        optional_non_negative_int(sale, "ends_at", "Page sale.ends_at")  # absent = perpetual
+
+    flash = document.get("flash_sale")
+    if flash is not None:
+        if not isinstance(flash, dict):
+            raise DocumentValidationError("Page flash_sale must be an object.")
+        optional_bool(flash, "enabled", "Page flash_sale.enabled")
+        optional_non_negative_int(flash, "starts_on", "Page flash_sale.starts_on")
+        optional_non_negative_int(flash, "ends_at", "Page flash_sale.ends_at")
+        if flash.get("enabled"):
+            ends_at = flash.get("ends_at")
+            if not isinstance(ends_at, (int, Decimal)) or isinstance(ends_at, bool) or int(ends_at) <= 0:
+                raise DocumentValidationError("You must set an expiration date in order to enable this feature.")
+            starts_on = flash.get("starts_on")
+            if isinstance(starts_on, (int, Decimal)) and not isinstance(starts_on, bool) and int(starts_on) >= int(ends_at):
+                raise DocumentValidationError("Page flash_sale.starts_on must be before ends_at.")
+
+
 def validate_page_document(document: dict[str, Any]) -> None:
     require_document_fields(document, "page", "page_id")
     require_string(document, "name")
@@ -999,6 +1027,7 @@ def validate_page_document(document: dict[str, Any]) -> None:
         validate_font_settings(theme.get("fonts"), "Page theme.fonts")
 
     validate_page_post_checkout(document.get("post_checkout"))
+    validate_page_pricing_modes(document)
 
     composition = document.get("composition")
     if composition is not None:

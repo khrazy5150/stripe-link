@@ -28,6 +28,7 @@ from stripe_link.domain.custom_domains import (
     retrigger_ssl_validation,
 )
 from stripe_link.domain.documents import DocumentValidationError, validate_site
+from stripe_link.domain.funnels import is_reserved_slug
 from stripe_link.repositories.documents import (
     RepositoryError,
     custom_domains_index_repository,
@@ -263,6 +264,11 @@ def attach_page(event, repository, site_id):
     slug = normalize_route_path(body.get("slug"))
     if slug == "/" or not slug:
         return error_response("Use the homepage action to place a page at the root.", code="invalid_slug")
+    if is_reserved_slug(slug):
+        return error_response(
+            f"'{slug}' is reserved for the sales funnel and can't be assigned manually.",
+            code="reserved_slug",
+        )
     site = repository.get(tenant_id, site_id)
     if not site:
         return error_response("Site not found.", status_code=404, code="not_found")

@@ -537,6 +537,35 @@ class DocumentValidationTests(unittest.TestCase):
         with self.assertRaisesRegex(DocumentValidationError, "route.slug"):
             validate_page_document(page)
 
+    def test_page_accepts_sale_and_flash_sale_blocks(self):
+        page = copy.deepcopy(self.page)
+        page["sale"] = {"enabled": True}  # no ends_at = perpetual
+        page["flash_sale"] = {"enabled": True, "starts_on": 1000, "ends_at": 2000}
+        validate_page_document(page)
+
+    def test_page_flash_sale_enabled_requires_expiration(self):
+        page = copy.deepcopy(self.page)
+        page["flash_sale"] = {"enabled": True}
+        with self.assertRaisesRegex(DocumentValidationError, "must set an expiration date"):
+            validate_page_document(page)
+
+    def test_page_flash_sale_start_must_precede_end(self):
+        page = copy.deepcopy(self.page)
+        page["flash_sale"] = {"enabled": True, "starts_on": 5000, "ends_at": 2000}
+        with self.assertRaisesRegex(DocumentValidationError, "starts_on must be before ends_at"):
+            validate_page_document(page)
+
+    def test_page_flash_sale_disabled_needs_no_expiration(self):
+        page = copy.deepcopy(self.page)
+        page["flash_sale"] = {"enabled": False}  # a saved-but-off flash sale is fine
+        validate_page_document(page)
+
+    def test_page_sale_must_be_object(self):
+        page = copy.deepcopy(self.page)
+        page["sale"] = "yes"
+        with self.assertRaisesRegex(DocumentValidationError, "Page sale must be an object"):
+            validate_page_document(page)
+
     def test_page_rejects_selector_for_different_offer(self):
         page = copy.deepcopy(self.page)
         page["sections"][1]["offer_id"] = "offer_other"

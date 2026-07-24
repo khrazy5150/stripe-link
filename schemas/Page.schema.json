@@ -146,6 +146,25 @@
         }
       }
     },
+    "sale": {
+      "type": "object",
+      "description": "Per-page Sale toggle (plans/SALES_FUNNELS.md). When enabled, the /sale context view renders this page's offer at its sale-context price with a Sale badge. Absent ends_at = perpetual.",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "ends_at": { "type": "integer", "minimum": 0, "description": "Epoch seconds; absent = perpetual." }
+      }
+    },
+    "flash_sale": {
+      "type": "object",
+      "description": "Per-page Flash Sale toggle (plans/SALES_FUNNELS.md). The /flash-sale context view renders the flash-context price + countdown. Dates live here so a tenant sets a window for a live event. ends_at is required to enable.",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "starts_on": { "type": "integer", "minimum": 0, "description": "Epoch seconds; before this the banner reads 'coming up' and price stays Standard." },
+        "ends_at": { "type": "integer", "minimum": 0, "description": "Epoch seconds; required when enabled. After this the banner reads 'ended' and price reverts to Standard." }
+      }
+    },
     "post_checkout": {
       "type": "object",
       "description": "Handles routing after a transaction. Can define inline routing owned by the page, or reference a detached Funnel document.",

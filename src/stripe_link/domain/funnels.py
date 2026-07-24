@@ -6,6 +6,17 @@ class FunnelError(ValueError):
     pass
 
 
+# Slugs the sales funnel owns — tenants may never assign a page to these manually (plans/SALES_FUNNELS.md).
+# "/" is the sales page; the others are funnel views/steps the builder auto-provisions.
+RESERVED_SITE_SLUGS = frozenset({"/", "/sale", "/flash-sale", "/upsell", "/downsell", "/thank-you"})
+
+
+def is_reserved_slug(slug: str) -> bool:
+    """True when `slug` is a funnel-reserved route. Expects a canonical slug (lowercased, no trailing slash),
+    e.g. the output of normalize_route_path."""
+    return str(slug or "").strip().lower() in RESERVED_SITE_SLUGS
+
+
 _SLUG_SEGMENT_RE = re.compile(r"[^a-z0-9]+")
 
 

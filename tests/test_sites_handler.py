@@ -39,6 +39,17 @@ class SitesHandlerTests(unittest.TestCase):
                         "queryStringParameters": params}, None, repository=self.repo, registry=self.registry)
         return json.loads(resp["body"])
 
+    def test_attach_page_rejects_reserved_funnel_slug(self):
+        site_id = json.loads(self._post(base_site())["body"])["site"]["site_id"]
+        resp = handler({
+            "httpMethod": "POST",
+            "resource": "/sites/{site_id}/pages",
+            "pathParameters": {"site_id": site_id},
+            "body": json.dumps({"tenant_id": "tenant_demo", "page_id": "page_up01", "slug": "/upsell"}),
+        }, None, repository=self.repo, registry=self.registry)
+        self.assertEqual(resp["statusCode"], 400)
+        self.assertEqual(json.loads(resp["body"])["error"], "reserved_slug")
+
     def test_create_generates_site_id_and_persists(self):
         resp = self._post(base_site())
         self.assertEqual(resp["statusCode"], 201)
