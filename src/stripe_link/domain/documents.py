@@ -2,6 +2,7 @@ import re
 from decimal import Decimal
 from typing import Any
 
+from stripe_link.domain.business_types import BUSINESS_TYPES
 from stripe_link.domain.composition import ELEMENTS, supported_goals
 
 
@@ -1678,6 +1679,8 @@ def validate_site_organization(organization: Any) -> None:
     optional_string(organization, "legal_name", "organization.legal_name", max_length=200)
     if organization.get("entity_type") is not None:
         require_enum(organization, "entity_type", SITE_ENTITY_TYPES, "organization.entity_type")
+    if organization.get("business_type") is not None:
+        require_enum(organization, "business_type", BUSINESS_TYPES, "organization.business_type")
     optional_string(organization, "description", "organization.description", max_length=500)
     require_e164(organization, "telephone", "Organization phone")
     optional_string(organization, "email", "organization.email")

@@ -136,12 +136,21 @@
               <label class="offer-field"><span>Business name</span><input v-model.trim="form.org.name" type="text" placeholder="Axel Mart" /></label>
               <label class="offer-field"><span>Legal name</span><input v-model.trim="form.org.legal_name" type="text" placeholder="Axel Mart LLC" /></label>
             </div>
-            <label class="offer-field">
-              <span>Business type</span>
-              <select v-model="form.org.entity_type">
-                <option v-for="t in entityTypes" :key="t" :value="t">{{ t }}</option>
-              </select>
-            </label>
+            <div class="offer-two-column">
+              <label class="offer-field">
+                <span>Business type</span>
+                <select v-model="form.org.entity_type">
+                  <option v-for="t in entityTypes" :key="t" :value="t">{{ t }}</option>
+                </select>
+              </label>
+              <label class="offer-field" v-if="specificTypes.length">
+                <span>Specific type <small class="field-note">(sharper local SEO)</small></span>
+                <select v-model="form.org.business_type">
+                  <option value="">General ({{ form.org.entity_type }})</option>
+                  <option v-for="t in specificTypes" :key="t" :value="t">{{ t }}</option>
+                </select>
+              </label>
+            </div>
             <label class="offer-field"><span>Description</span><textarea v-model.trim="form.org.description" rows="2" /></label>
             <div class="offer-two-column">
               <label class="offer-field">
@@ -385,7 +394,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, reactive, ref } from "vue";
+import { computed, onMounted, reactive, ref, watch } from "vue";
 import { apiRequest, getApiEnvironment } from "../api/client";
 import { useSitesStore, organizationFromBusiness, suggestSubdomain } from "../stores/sites";
 import { useProfileStore } from "../stores/profile";
@@ -423,7 +432,25 @@ function claimedByOther(pageId, exceptSiteId) {
 const claimedBy = (pageId) => claimedByOther(pageId, "");
 const assignablePages = computed(() => pages.value.filter((p) => !claimedByOther(p.page_id, editing.value?.site_id)));
 
-const form = reactive({ name: "", subdomain: "", org: { name: "", legal_name: "", entity_type: "OnlineStore", description: "", telephone: "", email: "", address: { locality: "", region: "" }, place_id: "", gbp_url: "", geo: { latitude: "", longitude: "" }, opening_hours: [], review_destination: "" }, seo: { google_site_verification: "", bing_site_verification: "" } });
+// Specific schema.org LocalBusiness subtypes, grouped by the broad entity_type bucket they show under.
+// Mirrors src/stripe_link/domain/business_types.py — keep in sync.
+const BUSINESS_TYPE_GROUPS = [
+  { parent: "HealthAndBeautyBusiness", label: "Health & beauty", types: ["BeautySalon", "DaySpa", "HairSalon", "NailSalon", "HealthClub", "TattooParlor", "Dentist", "MedicalClinic", "Optician", "Physician"] },
+  { parent: "HomeAndConstructionBusiness", label: "Home & construction", types: ["Plumber", "Electrician", "HVACBusiness", "RoofingContractor", "HousePainter", "Locksmith", "MovingCompany", "GeneralContractor"] },
+  { parent: "FoodEstablishment", label: "Food & drink", types: ["Restaurant", "CafeOrCoffeeShop", "Bakery", "BarOrPub", "IceCreamShop", "Winery"] },
+  { parent: "ProfessionalService", label: "Professional services", types: ["AccountingService", "LegalService", "Attorney", "Notary", "RealEstateAgent", "InsuranceAgency", "AutoRepair", "TravelAgency"] },
+  { parent: "Store", label: "Stores & retail", types: ["ClothingStore", "GroceryStore", "JewelryStore", "PetStore", "HardwareStore", "BookStore", "FurnitureStore", "ShoeStore", "ToyStore", "Florist", "ConvenienceStore"] },
+  { parent: "LocalBusiness", label: "Other local", types: ["ChildCare", "DryCleaningOrLaundry", "SelfStorage", "EntertainmentBusiness"] },
+];
+
+const form = reactive({ name: "", subdomain: "", org: { name: "", legal_name: "", entity_type: "OnlineStore", business_type: "", description: "", telephone: "", email: "", address: { locality: "", region: "" }, place_id: "", gbp_url: "", geo: { latitude: "", longitude: "" }, opening_hours: [], review_destination: "" }, seo: { google_site_verification: "", bing_site_verification: "" } });
+
+// The specific-type options for the chosen broad entity_type (empty for OnlineStore/Organization).
+const specificTypes = computed(() => (BUSINESS_TYPE_GROUPS.find((g) => g.parent === form.org.entity_type)?.types) || []);
+// Drop a specific type that no longer fits the selected bucket.
+watch(() => form.org.entity_type, () => {
+  if (form.org.business_type && !specificTypes.value.includes(form.org.business_type)) form.org.business_type = "";
+});
 
 const LOCAL_ENTITY_TYPES = ["LocalBusiness", "HomeAndConstructionBusiness", "HealthAndBeautyBusiness", "FoodEstablishment", "ProfessionalService"];
 const derivedDestinationLabel = computed(() =>
@@ -716,6 +743,7 @@ function openEdit(site) {
   form.subdomain = (site.hosting?.platform_hostname || "").split(".")[0] || "";
   form.org = {
     name: org.name || "", legal_name: org.legal_name || "", entity_type: org.entity_type || "OnlineStore",
+    business_type: org.business_type || "",
     description: org.description || "", telephone: org.telephone || "", email: org.email || "",
     address: { locality: address.locality || "", region: address.region || "", street: address.street || "", postal_code: address.postal_code || "", country: address.country || "US" },
     place_id: org.place_id || "", gbp_url: org.gbp_url || "", review_destination: org.review_destination || "",
@@ -734,6 +762,7 @@ async function saveEdit() {
     name: form.org.name || undefined,
     legal_name: form.org.legal_name || undefined,
     entity_type: form.org.entity_type || undefined,
+    business_type: form.org.business_type || undefined,
     description: form.org.description || undefined,
     telephone: form.org.telephone ? normalizeE164(form.org.telephone) : undefined,
     email: form.org.email || undefined,

@@ -174,6 +174,15 @@ class LocalSeoAltTests(unittest.TestCase):
         dtc = {"organization": {"name": "Axel Mart", "entity_type": "OnlineStore", "address": {"locality": "Denver"}}}
         self.assertNotIn("<figcaption class=\"sl-hero-caption\"", self._hero_html(dtc))
 
+    def test_business_type_alone_gates_as_local(self):
+        # A specific business_type marks the page local even when entity_type is the broad "Organization".
+        org = {"organization": {"name": "Bright Smile", "entity_type": "Organization", "business_type": "Dentist",
+                                "address": {"street": "1 Main", "locality": "St. George", "region": "Utah"}}}
+        html = self._hero_html(org)
+        m = re.search(r'<figcaption class="sl-hero-caption">([^<]+)</figcaption>', html)
+        self.assertIsNotNone(m)
+        self.assertEqual(m.group(1), "Bright Smile — 1 Main, St. George, Utah")
+
 
 class BreadcrumbTests(unittest.TestCase):
     """Breadcrumbs (SEO-11): visible crawlable trail + matching BreadcrumbList JSON-LD, only on a page served
@@ -438,6 +447,16 @@ class SiteOrganizationIdentityTests(unittest.TestCase):
         self.assertEqual(spec["@type"], "OpeningHoursSpecification")
         self.assertEqual(spec["dayOfWeek"], ["Monday", "Tuesday"])
         self.assertEqual((spec["opens"], spec["closes"]), ("09:00", "17:00"))
+
+    def test_business_type_refines_organization_at_type(self):
+        # A set business_type becomes the emitted @type; entity_type stays the broad fallback bucket.
+        org = dict(self.ORG, entity_type="HealthAndBeautyBusiness", business_type="Dentist")
+        html = self._render(site={"organization": org})
+        self.assertIsNotNone(self._node(html, "Dentist"))
+        self.assertIsNone(self._node(html, "HealthAndBeautyBusiness"))
+        # An unrecognized/blank business_type falls back to entity_type.
+        org2 = dict(self.ORG, entity_type="HealthAndBeautyBusiness", business_type="")
+        self.assertIsNotNone(self._node(self._render(site={"organization": org2}), "HealthAndBeautyBusiness"))
 
     def test_product_reviews_emit_aggregate_review_and_visible_block(self):
         pid = self._product_id()

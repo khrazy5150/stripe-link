@@ -155,6 +155,11 @@ class DocumentValidationTests(unittest.TestCase):
         with self.assertRaises(DocumentValidationError):
             validate_site(self._site(organization={"name": "X", "gbp_url": "not-a-url"}))
 
+    def test_site_organization_business_type_accepts_and_rejects(self):
+        validate_site(self._site(organization={"name": "X", "entity_type": "HealthAndBeautyBusiness", "business_type": "Dentist"}))
+        with self.assertRaises(DocumentValidationError):
+            validate_site(self._site(organization={"name": "X", "business_type": "NotARealType"}))
+
     def test_accepts_offer_presentation_brand(self):
         self.offer.setdefault("presentation", {})["brand"] = "Luxe Wellness"
         validate_offer_document(self.offer)

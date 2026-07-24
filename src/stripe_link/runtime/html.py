@@ -6,6 +6,7 @@ import re
 from typing import Any
 from urllib.parse import urlencode, urlparse
 
+from stripe_link.domain.business_types import BUSINESS_TYPES, resolve_entity_type
 from stripe_link.domain.composition import compose_page, element_channel
 from stripe_link.domain.documents import PRODUCT_CONDITIONS
 from stripe_link.domain.pricing import PricingError, expand_offer, find_price, resolve_offer, single_unit_price
@@ -1106,11 +1107,19 @@ _LOCAL_BUSINESS_TYPES = {
 }
 
 
+def _org_is_local(org: dict[str, Any]) -> bool:
+    """A page is a local business when its Site's broad entity_type is a LocalBusiness bucket OR it names a
+    specific LocalBusiness subtype (every business_type is local). Gates the alt/figcaption NAP signals."""
+    if str(org.get("business_type") or "") in BUSINESS_TYPES:
+        return True
+    return str(org.get("entity_type") or "") in _LOCAL_BUSINESS_TYPES
+
+
 def local_business_anchor() -> str:
     """' at {Business} in {City}, {Region}' when the page's Site is a LOCAL business with a locality — the
     local-SEO signal woven into image alt. Empty for DTC/product stores or incomplete NAP."""
     org = _RENDER_ORG
-    if str(org.get("entity_type") or "") not in _LOCAL_BUSINESS_TYPES:
+    if not _org_is_local(org):
         return ""
     name = str(org.get("name") or "").strip()
     locality = str((org.get("address") or {}).get("locality") or "").strip()
@@ -1137,7 +1146,7 @@ def local_business_caption() -> str:
     """A derived NAP figcaption for a local business hero (plans/LOCAL_SEO_SIGNALS.md) — visible text under the
     image carrying the name + full address that the alt shouldn't overstuff. Empty for non-local / no address."""
     org = _RENDER_ORG
-    if str(org.get("entity_type") or "") not in _LOCAL_BUSINESS_TYPES:
+    if not _org_is_local(org):
         return ""
     name = str(org.get("name") or "").strip()
     address = org.get("address") or {}
@@ -2595,7 +2604,7 @@ def product_json_ld(
     org_name = str(_RENDER_ORG.get("name") or "").strip()
     seller_name = org_name or str(presentation.get("brand") or "").strip()
     if seller_name:
-        seller_type = (str(_RENDER_ORG.get("entity_type") or "").strip() or "OnlineStore") if org_name else "OnlineStore"
+        seller_type = resolve_entity_type(_RENDER_ORG.get("entity_type") or "OnlineStore", _RENDER_ORG.get("business_type") or "") if org_name else "OnlineStore"
         seller: dict[str, Any] = {"@type": seller_type, "name": seller_name}
         origin = canonical_origin()
         if origin:
@@ -2656,7 +2665,7 @@ def organization_node(organization: dict[str, Any], origin: str, *, with_context
     name = str((organization or {}).get("name") or "").strip()
     if not origin or not name:
         return {}
-    entity_type = str(organization.get("entity_type") or "").strip() or "Organization"
+    entity_type = resolve_entity_type(organization.get("entity_type") or "", organization.get("business_type") or "")
     payload: dict[str, Any] = {}
     if with_context:
         payload["@context"] = "https://schema.org"
