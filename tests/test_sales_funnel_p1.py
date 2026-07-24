@@ -112,5 +112,37 @@ class CheckoutContextAcceptanceTests(unittest.TestCase):
                 resolve_offer_item(item, product, "standard")
 
 
+class ContextArtifactAndRouteTests(unittest.TestCase):
+    def test_artifact_paths_context_subpath(self):
+        from stripe_link.runtime.artifacts import artifact_paths
+        self.assertEqual(artifact_paths("t1", "page_1")["published"], "page_1/index.html")
+        self.assertEqual(artifact_paths("t1", "page_1", context="sale")["published"], "page_1/sale/index.html")
+        self.assertEqual(artifact_paths("t1", "page_1", context="flash_sale")["published"], "page_1/flash-sale/index.html")
+
+    def _site(self, root_page="page_home"):
+        return {"pages": {"/": {"page_id": root_page, "page_type": "landing", "enabled": True}}}
+
+    def test_attach_context_view_slugs_adds_and_removes(self):
+        from stripe_link.runtime.publishing import attach_context_view_slugs
+        page = {"page_id": "page_home", "sale": {"enabled": True}, "flash_sale": {"enabled": True, "ends_at": 9}}
+        site, changed = attach_context_view_slugs(self._site(), page)
+        self.assertTrue(changed)
+        self.assertEqual(site["pages"]["/sale"], {"page_id": "page_home", "page_type": "landing", "price_context": "sale", "enabled": True})
+        self.assertEqual(site["pages"]["/flash-sale"]["price_context"], "flash_sale")
+        # Toggling sale off retires just its route.
+        page2 = {"page_id": "page_home", "sale": {"enabled": False}, "flash_sale": {"enabled": True, "ends_at": 9}}
+        site2, changed2 = attach_context_view_slugs(site, page2)
+        self.assertTrue(changed2)
+        self.assertNotIn("/sale", site2["pages"])
+        self.assertIn("/flash-sale", site2["pages"])
+
+    def test_attach_skips_non_root_page(self):
+        from stripe_link.runtime.publishing import attach_context_view_slugs
+        # The page sits at /deals, not "/" -> no reserved context slugs attached.
+        site = {"pages": {"/deals": {"page_id": "page_x", "page_type": "landing", "enabled": True}}}
+        _, changed = attach_context_view_slugs(site, {"page_id": "page_x", "sale": {"enabled": True}})
+        self.assertFalse(changed)
+
+
 if __name__ == "__main__":
     unittest.main()

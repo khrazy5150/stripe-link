@@ -13,17 +13,18 @@ _WELL_KNOWN_PATH = re.compile(r"^/[A-Za-z0-9._-]+\.(txt|xml)$")
 
 
 def _resolve_slug(slug, routes, homepage_page_id):
-    """Map a normalized request slug to the page_id that serves it, reading only the denormalized route table
-    on the domain-index record (plans/SITE_OBJECT.md §2.6). A legacy record without a route table serves the
-    homepage for every path (pre-2.6 behavior); the root slug always falls back to the homepage."""
+    """Map a normalized request slug to the (page_id, price_context) that serves it, reading only the
+    denormalized route table on the domain-index record (plans/SITE_OBJECT.md §2.6). A Sale/Flash-Sale context
+    view (plans/SALES_FUNNELS.md P1c) carries a `price_context` so it serves the base page's sibling artifact.
+    A legacy record without a route table serves the homepage for every path; the root always falls back."""
     if not isinstance(routes, dict):
-        return homepage_page_id  # legacy record: homepage-only serving
+        return homepage_page_id, ""  # legacy record: homepage-only serving
     entry = routes.get(slug)
     if isinstance(entry, dict) and entry.get("enabled", True) is not False:
-        return str(entry.get("page_id") or "")
+        return str(entry.get("page_id") or ""), str(entry.get("price_context") or "")
     if slug == "/":
-        return homepage_page_id
-    return ""
+        return homepage_page_id, ""
+    return "", ""
 
 
 def handler(event, context, *, index_repo=None, pages_domain=None):
@@ -71,10 +72,10 @@ def handler(event, context, *, index_repo=None, pages_domain=None):
     if path and _WELL_KNOWN_PATH.match(path):
         artifact_key = f"{homepage_page_id}{path}"
     else:
-        page_id = _resolve_slug(normalize_route_path(path), record.get("routes"), homepage_page_id)
+        page_id, price_context = _resolve_slug(normalize_route_path(path), record.get("routes"), homepage_page_id)
         if not page_id:
             return error_response("No page is published at this path.", status_code=404, code="no_route")
-        artifact_key = artifact_paths(tenant_id, page_id)["published"]
+        artifact_key = artifact_paths(tenant_id, page_id, context=price_context)["published"]
 
     origin_url = public_url(pages_domain, artifact_key)
     if not origin_url:

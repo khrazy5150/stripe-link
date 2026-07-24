@@ -16,6 +16,7 @@ from stripe_link.domain.funnels import funnel_slug_entries
 from stripe_link.runtime.html import (
     INDEXABLE_ROBOTS,
     NOINDEX_FOLLOW_ROBOTS,
+    NOINDEX_ROBOTS,
     THIN_CONTENT_MIN_WORDS,
     first_offer_product,
     indexable_word_count,
@@ -100,6 +101,42 @@ def attach_funnel_pages(site: dict[str, Any], page: dict[str, Any]) -> tuple[dic
     if not changed:
         return site, False
     return {**site, "pages": pages}, True
+
+
+_CONTEXT_VIEW_SLUGS = (("sale", "/sale"), ("flash_sale", "/flash-sale"))
+
+
+def context_view_contexts(page: dict[str, Any]) -> list[str]:
+    """The enabled Sale/Flash-Sale contexts for a page — the context artifacts to publish (P1c)."""
+    contexts = []
+    if (page.get("sale") or {}).get("enabled"):
+        contexts.append("sale")
+    if (page.get("flash_sale") or {}).get("enabled"):
+        contexts.append("flash_sale")
+    return contexts
+
+
+def attach_context_view_slugs(site: dict[str, Any], page: dict[str, Any]) -> tuple[dict[str, Any], bool]:
+    """Add/remove the reserved `/sale` `/flash-sale` route entries for the Site's ROOT sales page based on its
+    toggles (plans/SALES_FUNNELS.md P1c). Each entry points at the same page_id + a `price_context`, so the
+    resolver serves the sibling context artifact. Only the page at the Site's "/" gets them. Returns
+    (site, changed)."""
+    page_id = str(page.get("page_id") or "")
+    if str(site_page_slug(site, page_id)) != "/":
+        return site, False
+    pages = dict(site.get("pages") or {})
+    enabled = set(context_view_contexts(page))
+    changed = False
+    for ctx, slug in _CONTEXT_VIEW_SLUGS:
+        entry = {"page_id": page_id, "page_type": "landing", "price_context": ctx, "enabled": True}
+        if ctx in enabled:
+            if pages.get(slug) != entry:
+                pages[slug] = entry
+                changed = True
+        elif isinstance(pages.get(slug), dict) and pages[slug].get("price_context") == ctx:
+            del pages[slug]  # toggled off — retire its route
+            changed = True
+    return ({**site, "pages": pages}, True) if changed else (site, False)
 
 
 def resolve_category_grids(page: dict[str, Any], site: dict[str, Any] | None) -> None:
@@ -540,6 +577,32 @@ def publish_page_document(
             "key": target["key"],
             "url": target["url"],
         })
+
+    # Sale / Flash-Sale context views (plans/SALES_FUNNELS.md P1c): publish the base page rendered in each
+    # enabled context as a sibling artifact — always noindex (it is duplicate content of "/"). On a verified
+    # custom domain root page, attach the reserved /sale //flash-sale slugs so the resolver routes them.
+    if page.get("status") == "published" and pages_bucket:
+        for ctx in context_view_contexts(page):
+            ctx_html = render_page(
+                page, offer, products_by_id, checkout_url=checkout, api_base_url=api_base_url,
+                services_by_id=services_by_id, offers_by_id=offers_by_id, canonical_url=page_canonical,
+                robots=NOINDEX_ROBOTS, site=site, page_type=page_type, reviews=page_reviews, price_context=ctx,
+            )
+            ctx_key = artifact_paths(tenant_id, page_id, context=ctx)["published"]
+            s3_client.put_object(
+                Bucket=pages_bucket, Key=ctx_key, Body=ctx_html.encode("utf-8"),
+                ContentType="text/html; charset=utf-8", CacheControl="public, max-age=300",
+            )
+            artifacts.append({"kind": f"published:{ctx}", "bucket": pages_bucket, "key": ctx_key, "url": public_url(pages_domain, ctx_key)})
+    if site and sites_repository is not None and on_custom_domain:
+        try:
+            updated_site, changed = attach_context_view_slugs(site, page)
+            if changed:
+                validate_site(updated_site)
+                site = sites_repository.put(updated_site)
+                _sync_domain_index(site, domains_index_repository)
+        except Exception:  # noqa: BLE001 - route attachment must never block the artifact publish
+            pass
 
     # Per-Site crawl files (SEO-14/15): when the served homepage on a verified custom domain publishes, write
     # robots.txt / sitemap.xml / {indexnow_key}.txt next to it (keyed under the homepage page_id so the

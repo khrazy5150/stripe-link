@@ -29,6 +29,18 @@ class CustomDomainsResolveHandlerTests(unittest.TestCase):
         self.assertEqual(body["route"]["type"], "origin_url")
         self.assertEqual(body["route"]["origin_url"], "https://pages.example.com/page_1/index.html")
 
+    def test_context_view_slug_resolves_to_sibling_artifact(self):
+        # A /sale route entry carries price_context -> serve the base page's sale-context sibling artifact.
+        self.index_repo.put({
+            "tenant_id": "tenant_demo", "domain": "shop.example.com", "target_page_id": "page_1", "status": "active",
+            "routes": {"/sale": {"page_id": "page_1", "page_type": "landing", "price_context": "sale", "enabled": True}},
+        })
+        response = handler(
+            {"httpMethod": "GET", "queryStringParameters": {"host": "shop.example.com", "path": "/sale"}},
+            None, index_repo=self.index_repo, pages_domain="pages.example.com",
+        )
+        self.assertEqual(json.loads(response["body"])["route"]["origin_url"], "https://pages.example.com/page_1/sale/index.html")
+
     def test_www_redirect_record_returns_redirect_route(self):
         # A paired www→apex record carries a redirect_to; the resolver 301s to the canonical apex.
         self.index_repo.put({

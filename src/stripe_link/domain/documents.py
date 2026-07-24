@@ -1737,6 +1737,10 @@ def validate_site(document: dict[str, Any]) -> None:
         # `category` on a page_type=category entry is instead the category that page LISTS.
         optional_string(entry, "offer_id", f"Site page '{slug}' offer_id")
         optional_string(entry, "category", f"Site page '{slug}' category")
+        # A Sale/Flash-Sale context view (plans/SALES_FUNNELS.md P1c) points at a base page but serves its
+        # sibling artifact rendered in this price context.
+        if entry.get("price_context") is not None:
+            require_enum(entry, "price_context", {"sale", "flash_sale"}, f"Site page '{slug}' price_context")
 
     optional_non_negative_int(document, "revision", "Site revision")
     for field in ("created_at", "updated_at"):
