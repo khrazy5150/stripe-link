@@ -84,6 +84,9 @@ Deferred, non-blocking follow-ups. Each item notes what, why it was deferred, an
     `rate()` sweep feeds the email system (mirrors reminders/invites).
   - **Service-line cart checkout.** `resolved_items_for_checkout` rejects service lines today (booking has its
     own pay-then-book/book-then-pay flow); mixing cart + booking fan-out is its own slice.
+    - **(Very low priority) Service-listicle abandonment recovery.** Once service lines are cart-eligible,
+      extend Slice D's abandonment sweep to service listicles too. Deferred well behind product-cart
+      abandonment; noted so it isn't lost.
   - **L3 order-model ripples** (per-line refunds/receipts/fees/downloads) — build only when L2 is proven.
 
 ## Business Profile & Reviews

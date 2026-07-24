@@ -20,6 +20,8 @@ from stripe_link.common import (
 from stripe_link.domain.cart import (
     CartError,
     add_line,
+    apply_email,
+    cart_token_valid,
     clamp_qty,
     new_cart,
     remove_line,
@@ -29,6 +31,7 @@ from stripe_link.domain.cart import (
 from stripe_link.domain.documents import DocumentValidationError, validate_cart
 from stripe_link.repositories.documents import (
     RepositoryError,
+    cart_tokens_repository,
     carts_repository,
     offers_repository,
     products_repository,
@@ -47,6 +50,7 @@ def handler(
     offers_repo=None,
     products_repo=None,
     services_repo=None,
+    cart_tokens_repo=None,
     now_fn: Callable[[], int] = lambda: int(time.time()),
 ):
     method = (event or {}).get("httpMethod", "").upper()
@@ -60,6 +64,7 @@ def handler(
             offers_repo=offers_repo or offers_repository(),
             products_repo=products_repo or products_repository(),
             services_repo=services_repo or services_repository(),
+            cart_tokens_repo=cart_tokens_repo if cart_tokens_repo is not None else cart_tokens_repository(),
             now=now_fn(),
         )
     if method == "GET":
@@ -90,7 +95,18 @@ def _load_offer_context(tenant_id, offer_id, product_id, service_id, *, offers_r
     return offer, products_by_id, services_by_id
 
 
-def add_item(event, *, carts_repo, offers_repo, products_repo, services_repo, now):
+def _resolve_email(body, tenant_id, cart_tokens_repo, now):
+    """Identify the shopper for recovery: an identified-link `ct` token (dereferenced server-side, no PII in
+    the URL) wins; otherwise an explicit `email` a checkout-start/lead form may send. '' when neither valid."""
+    token = str(body.get("ct") or "").strip()
+    if token and cart_tokens_repo is not None:
+        token_doc = cart_tokens_repo.get(tenant_id, token)
+        if cart_token_valid(token_doc, now):
+            return str(token_doc.get("email") or "")
+    return str(body.get("email") or "")
+
+
+def add_item(event, *, carts_repo, offers_repo, products_repo, services_repo, cart_tokens_repo, now):
     try:
         body = parse_json_body(event)
     except ValueError as exc:
@@ -137,6 +153,9 @@ def add_item(event, *, carts_repo, offers_repo, products_repo, services_repo, no
         add_line(cart, line)
     except CartError as exc:
         return error_response(str(exc), code="invalid_cart")
+
+    # Identify the shopper (identified-link token or explicit email) so the cart is recovery-eligible.
+    apply_email(cart, _resolve_email(body, tenant_id, cart_tokens_repo, now))
 
     cart["updated_at"] = int(now)
     cart["retention_expires_at"] = int(now) + CART_RETENTION_SECONDS

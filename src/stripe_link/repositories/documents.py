@@ -827,6 +827,16 @@ def carts_repository(table: Any | None = None) -> DynamoDocumentRepository:
     )
 
 
+def cart_tokens_repository(table: Any | None = None) -> DynamoDocumentRepository:
+    # Shares CARTS_TABLE via a distinct document_type (the reviews + review_invites precedent).
+    return DynamoDocumentRepository(
+        os.environ.get("CARTS_TABLE", ""),
+        document_type="cart_token",
+        id_field="token",
+        table=table,
+    )
+
+
 def review_invites_repository(table: Any | None = None) -> DynamoDocumentRepository:
     # Post-purchase invite records — same table as reviews, distinct document_type (own SK prefix + scan_type).
     return DynamoDocumentRepository(

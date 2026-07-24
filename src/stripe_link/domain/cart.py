@@ -18,10 +18,64 @@ from stripe_link.domain.service_pricing import resolve_service_price
 CART_SCHEMA_VERSION = 1
 MAX_CART_LINES = 50
 MAX_LINE_QTY = 99
+CART_STATUSES = {"open", "converted"}
+CART_TOKEN_TTL_SECONDS = 30 * 24 * 60 * 60  # identified/recovery links expire after 30 days
 
 
 class CartError(ValueError):
     """A cart request that can't be honored (unknown item, no price, full cart)."""
+
+
+def normalize_email(email: Any) -> str:
+    """A lightly-normalized email (trim + lowercase) or '' when it doesn't look like one. Not RFC-strict —
+    just enough to gate recovery eligibility and keep junk out of the cart."""
+    value = str(email or "").strip().lower()
+    if "@" not in value or "." not in value.split("@")[-1] or " " in value or len(value) > 254:
+        return ""
+    return value
+
+
+def apply_email(cart: dict[str, Any], email: Any) -> dict[str, Any]:
+    """Stamp a customer email onto the cart (recovery eligibility). Latest valid email wins; junk is ignored."""
+    normalized = normalize_email(email)
+    if normalized:
+        cart["email"] = normalized
+    return cart
+
+
+def cart_token_doc(
+    tenant_id: str,
+    token: str,
+    email: str,
+    offer_id: str,
+    now: int,
+    *,
+    cart_id: str = "",
+    ttl_seconds: int = CART_TOKEN_TTL_SECONDS,
+) -> dict[str, Any]:
+    """An opaque identified-link / recovery token that dereferences to a customer's email (+ optional cart).
+    Stored so the token itself carries no PII in the URL (plans/LISTICLE_AND_CART.md L2 Slice D)."""
+    return {
+        "schema_version": CART_SCHEMA_VERSION,
+        "document_type": "cart_token",
+        "tenant_id": tenant_id,
+        "token": token,
+        "email": normalize_email(email),
+        "offer_id": str(offer_id or ""),
+        "cart_id": str(cart_id or ""),
+        "created_at": int(now),
+        "expires_at": int(now) + ttl_seconds,
+        "retention_expires_at": int(now) + ttl_seconds,  # Dynamo TTL cleanup
+    }
+
+
+def cart_token_valid(token_doc: dict[str, Any] | None, now: int) -> bool:
+    """A token resolves only if it exists, carries an email, and hasn't expired."""
+    if not token_doc:
+        return False
+    if not normalize_email(token_doc.get("email")):
+        return False
+    return int(token_doc.get("expires_at") or 0) > int(now)
 
 
 def clamp_qty(qty: Any) -> int:
@@ -148,6 +202,8 @@ def new_cart(tenant_id: str, cart_id: str, offer_id: str, now: int) -> dict[str,
         "total_amount": 0,
         "item_count": 0,
         "currency": "usd",
+        "email": "",
+        "status": "open",  # -> "converted" once the cart's checkout is paid (drops it from the recovery sweep)
         "created_at": int(now),
         "updated_at": int(now),
     }

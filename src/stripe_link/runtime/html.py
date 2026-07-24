@@ -4075,6 +4075,8 @@ def render_page_interactions_script(page: dict[str, Any]) -> str:
         "          const tenantId = listicle.dataset.tenantId || '';",
         "          const cartEndpoint = listicle.dataset.cartEndpoint || '';",
         "          const serverEnabled = !!(cartEndpoint && tenantId);",
+        "          const ctToken = (new URLSearchParams(window.location.search)).get('ct') || '';",  # identified-link token
+
         "          const idKey = 'sl_cart_id_' + offerId;",              # server cart id
         "          const fallbackKey = 'sl_cart_' + offerId;",           # L1 offline items
         "          const getCartId = () => { try { return localStorage.getItem(idKey) || ''; } catch (e) { return ''; } };",
@@ -4120,6 +4122,8 @@ def render_page_interactions_script(page: dict[str, Any]) -> str:
         "            if (!serverEnabled) { addFallback(t); return; }",
         "            const body = { tenant_id: tenantId, offer_id: offerId, product_id: t.product_id || '', service_id: t.service_id || '', qty: 1 };",
         "            const id = getCartId(); if (id) body.cart_id = id;",
+        "            if (ctToken) body.ct = ctToken;",
+
         "            fetch(cartEndpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })",
         "              .then((r) => r.ok ? r.json() : Promise.reject(r)).then(applyServerCart).catch(() => addFallback(t));",
         "          };",

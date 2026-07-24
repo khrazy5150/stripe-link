@@ -87,7 +87,56 @@ Original design (delivered above):
    field** — capturing the shopper's email (checkout-start form or lead capture) is step 0 of Slice D.
 
 **Suggested slice order:** (A) data model + `POST`/`GET` + persist the existing client cart; (B) mutate/delete
-+ mini-cart wired to the API; (C) `POST /cart/checkout` multi-line session; (D) abandoned-cart sweep.
++ mini-cart wired to the API; (C) `POST /cart/checkout` multi-line session; (D) abandoned-cart recovery.
+
+### L2 Slice D — Abandoned-cart recovery via opaque-token identified links (design locked 2026-07-23)
+
+**Gate:** a cart is recovery-eligible only when it has an `email` AND is still `open` (not converted) AND is
+stale (older than a threshold). No email → never eligible; no special-casing.
+
+**Identity via opaque token, NOT email-in-URL** (author-approved). A random `cart_token` dereferences
+server-side to the customer's identity. Chosen over encrypting the email into the link because URLs leak
+(history, `Referer`, access logs, analytics); a token keeps PII off those surfaces and is revocable +
+expirable. Same shape as the existing review-invite token flow.
+
+**Data model:**
+- `cart` gains `email`, `email_opted_out` (default false), `status` (`open`|`converted`, default `open`),
+  `recovery` (`{last_sent_at, attempts}`).
+- New `cart_token` document, sharing `CartsTable` via `document_type="cart_token"` (the reviews +
+  review_invites precedent): `{token, tenant_id, email, offer_id, cart_id?, expires_at, created_at}`.
+  `cart_tokens_repository`, `id_field="token"`, keyed `TENANT#{tenant}` / `CART_TOKEN#{token}`.
+
+**Two link types, one token mechanism:**
+- **Identified listicle link** (tenant outreach — "Items just for you"): `…/listicle?ct=<token>` → token
+  carries `{email, offer}`. The page reads `ct`; the cart handler resolves it and stamps `email` onto any
+  cart created in that session. (Tenant *campaign tooling* to compose/bulk-send these is a separate, larger
+  feature — out of Slice D. Slice D ships the token primitive + a mint endpoint so an identified link CAN be
+  produced; bulk send is future.)
+- **Recovery link** (system-initiated after abandonment): carries a token → `{email, cart_id}` so the link
+  **rehydrates the exact cart on any device** (the `cart_id` otherwise lives only in the abandoning device's
+  localStorage — this is the cross-device win).
+
+**Flow:**
+1. Email arrives on the cart via (a) an identified-link `ct` token, (b) an explicit email at checkout-start,
+   or (c) the lead-capture form. Server stamps `cart.email` (+ consent).
+2. `POST /cart/checkout` marks the cart `status=converted` (so it drops out of the sweep).
+3. `CartRecoveryFunction` sweep (`scan_type("cart")` + `rate()`, mirrors reminders/invites): find `open` +
+   `email` + stale + `!email_opted_out` + under an attempt cap → send a recovery email via the tenant with a
+   recovery-token link + unsubscribe.
+4. Recovery link → listicle page rehydrates the specific cart (token→cart_id) cross-device.
+
+**Caveats baked in:** (1) a token is a **bearer** credential — it may only seed the cart's email / prefill the
+email field, NEVER expose account data or order history. (2) Recovery emails need a lawful basis (prior
+interaction) + honor opt-out: `email_opted_out` checked by the sweep, unsubscribe footer + a one-click
+opt-out endpoint, mirroring the SMS STOP handling.
+
+**Sub-slices:**
+- **D1** — `cart.email`/`status`/`email_opted_out`, `cart_token` primitive (mint + resolve), `POST /cart`
+  accepts an explicit `email` or a `ct` token and stamps the cart, `/cart/checkout` marks `converted`.
+- **D2** — `CartRecoveryFunction` sweep + recovery email (SES) + `email_opted_out` opt-out endpoint +
+  unsubscribe, and the recovery link's cross-device cart rehydration.
+
+**Very low priority (TODO):** extend abandonment to *service* listicles once service-line cart checkout exists.
 
 ### L3 — Order-model ripples (deferred; documented so they aren't forgotten)
 Per `AI_AND_COMMERCE` C.3, a multi-line order ripples into things already built — **refunds ledger**

@@ -3,7 +3,7 @@ from decimal import Decimal
 from typing import Any
 
 from stripe_link.domain.business_types import BUSINESS_TYPES
-from stripe_link.domain.cart import MAX_CART_LINES, MAX_LINE_QTY
+from stripe_link.domain.cart import CART_STATUSES, MAX_CART_LINES, MAX_LINE_QTY
 from stripe_link.domain.composition import ELEMENTS, supported_goals
 
 
@@ -1485,6 +1485,24 @@ def validate_cart(document: dict[str, Any]) -> None:
         amount = line.get("unit_amount")
         if not isinstance(amount, int) or isinstance(amount, bool) or amount < 0:
             raise DocumentValidationError("Cart line unit_amount must be a non-negative integer.")
+    # Slice D recovery fields (all optional).
+    if document.get("email") is not None and not isinstance(document.get("email"), str):
+        raise DocumentValidationError("Cart email must be a string.")
+    if document.get("status", "open") not in CART_STATUSES:
+        raise DocumentValidationError("Cart status must be 'open' or 'converted'.")
+    if document.get("email_opted_out") is not None and not isinstance(document.get("email_opted_out"), bool):
+        raise DocumentValidationError("Cart email_opted_out must be a boolean.")
+
+
+def validate_cart_token(document: dict[str, Any]) -> None:
+    """An opaque identified-link / recovery token (plans/LISTICLE_AND_CART.md L2 Slice D)."""
+    require_fields(document, ["schema_version", "document_type", "tenant_id", "token", "email", "created_at"])
+    if document.get("document_type") != "cart_token":
+        raise DocumentValidationError("Cart token document_type must be 'cart_token'.")
+    if not str(document.get("token") or "").strip():
+        raise DocumentValidationError("Cart token token is required.")
+    if "@" not in str(document.get("email") or ""):
+        raise DocumentValidationError("Cart token email must be an email address.")
 
 
 REVIEW_TARGET_TYPES = {"product", "offer", "business"}

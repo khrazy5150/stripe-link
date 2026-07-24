@@ -3,8 +3,16 @@ import json
 import unittest
 
 from handlers.cart import handler
-from stripe_link.domain.cart import CartError, add_line, new_cart, resolve_cart_line
-from stripe_link.domain.documents import DocumentValidationError, validate_cart
+from stripe_link.domain.cart import (
+    CartError,
+    add_line,
+    cart_token_doc,
+    cart_token_valid,
+    new_cart,
+    normalize_email,
+    resolve_cart_line,
+)
+from stripe_link.domain.documents import DocumentValidationError, validate_cart, validate_cart_token
 from tests.fakes import FakeDocumentRepository
 
 
@@ -63,6 +71,7 @@ class CartHandlerTests(unittest.TestCase):
         self.offers = FakeDocumentRepository("offer_id")
         self.products = FakeDocumentRepository("product_id")
         self.services = FakeDocumentRepository("service_id")
+        self.tokens = FakeDocumentRepository("token")
         self.offers.put(_offer())
         self.products.put(_product("prod_a", "price_a", 1999))
         self.products.put(_product("prod_b", "price_b", 2599))
@@ -71,7 +80,7 @@ class CartHandlerTests(unittest.TestCase):
         return handler(
             {"httpMethod": "POST", "body": json.dumps(body)}, None,
             carts_repo=self.carts, offers_repo=self.offers, products_repo=self.products,
-            services_repo=self.services, now_fn=lambda: now,
+            services_repo=self.services, cart_tokens_repo=self.tokens, now_fn=lambda: now,
         )
 
     def test_add_creates_cart_and_ignores_client_amount(self):
@@ -180,6 +189,46 @@ class CartHandlerTests(unittest.TestCase):
         added = self._add("prod_a")
         resp = self._patch("nosuchline", added["cart_id"], 3)
         self.assertEqual(resp["statusCode"], 404)
+
+    def test_explicit_email_is_stamped_on_cart(self):
+        added = self._add("prod_a")
+        # Re-post with an email; the cart persists it (not echoed in the public response).
+        self._post({"tenant_id": "t1", "offer_id": "off_1", "cart_id": added["cart_id"], "product_id": "prod_a", "email": "Buyer@Example.com "})
+        stored = self.carts.get("t1", added["cart_id"])
+        self.assertEqual(stored["email"], "buyer@example.com")
+
+    def test_identified_link_token_stamps_email(self):
+        self.tokens.put(cart_token_doc("t1", "tok_abc", "vip@example.com", "off_1", now=500))
+        added = json.loads(self._post({"tenant_id": "t1", "offer_id": "off_1", "product_id": "prod_a", "ct": "tok_abc"}, now=1000)["body"])
+        self.assertEqual(self.carts.get("t1", added["cart_id"])["email"], "vip@example.com")
+
+    def test_expired_token_does_not_stamp(self):
+        self.tokens.put(cart_token_doc("t1", "tok_old", "vip@example.com", "off_1", now=0, ttl_seconds=100))
+        added = json.loads(self._post({"tenant_id": "t1", "offer_id": "off_1", "product_id": "prod_a", "ct": "tok_old"}, now=1000)["body"])
+        self.assertEqual(self.carts.get("t1", added["cart_id"])["email"], "")
+
+
+class CartTokenDomainTests(unittest.TestCase):
+    def test_normalize_email(self):
+        self.assertEqual(normalize_email(" A@B.com "), "a@b.com")
+        self.assertEqual(normalize_email("nope"), "")
+        self.assertEqual(normalize_email("a@b"), "")
+
+    def test_token_validity(self):
+        doc = cart_token_doc("t1", "tok", "a@b.com", "off", now=1000, ttl_seconds=100)
+        self.assertTrue(cart_token_valid(doc, now=1050))
+        self.assertFalse(cart_token_valid(doc, now=2000))   # expired
+        self.assertFalse(cart_token_valid(None, now=1050))
+
+    def test_validate_cart_token(self):
+        validate_cart_token(cart_token_doc("t1", "tok", "a@b.com", "off", now=1000))
+        with self.assertRaises(DocumentValidationError):
+            validate_cart_token(cart_token_doc("t1", "tok", "not-an-email", "off", now=1000))
+
+    def test_new_cart_defaults_open(self):
+        cart = new_cart("t1", "c", "o", now=1)
+        self.assertEqual(cart["status"], "open")
+        self.assertEqual(cart["email"], "")
 
 
 if __name__ == "__main__":
