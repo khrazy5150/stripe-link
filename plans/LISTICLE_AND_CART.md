@@ -1,6 +1,8 @@
 # Listicle Offers + Server-Side Cart
 
-Status: **L1 shipped (client-side cart); L2 pending & prioritized** (design author-approved 2026-07-10).
+Status: **L1 + L2 (Slices A–C) shipped dev+prod 2026-07-23** (server-side cart + multi-line checkout).
+L2 Slice D (abandoned-cart recovery) + service-line checkout deferred. L3 (order-model ripples) not started.
+(design author-approved 2026-07-10).
 Supersedes the multi-offer `product_carousel` interpretation shipped in
 `LANDING_PAGE_CTA_AND_COMPOSITION.md` phase 4c — see "Course correction" below. Extends
 `AI_AND_COMMERCE_ARCHITECTURE.md` **Part C**. L2 outline in "Phasing → L2" below.
@@ -49,12 +51,20 @@ renders its own items as a carousel. The multi-offer carousel element is **retir
   **single-unit price**; the carousel is redesigned to the **TikTok-Shop syncing-price-card** style with
   **Add to cart** (client-side cart accumulation); listicle pages **strip the fluff**.
 
-### L2 — Server-side cart + multi-line checkout (NEXT — pending, prioritized)
-**Current state (verified 2026-07-23):** L1 client-side cart is live — `render_minicart()`, the
-`sl_cart_{offerId}` localStorage store, and the listicle JS island (add/read/write) all ship in
-`runtime/html.py`. `handlers/checkout.py` already emits `line_items[{index}]`, so it is multi-line-capable.
-**Not built:** no cart document/table/repository, no `/cart` endpoints, no server persistence. L2 promotes
-the existing client-side cart to a server-backed one and checks the whole cart out in one Stripe session.
+### L2 — Server-side cart + multi-line checkout (Slices A–C SHIPPED dev+prod 2026-07-23; D pending)
+**Shipped (commits ad4e35a / d1c9718 / c31d8b7, 971 tests):** the client-side cart is now server-backed and
+checks out. `domain/cart.py` (`resolve_cart_line` reuses `single_unit_price` so a line's price == the page's;
+add/merge/qty/remove + `resolved_items_for_checkout`), `validate_cart`, `carts_repository`, `CartsTable`
+(30-day TTL). Public `handlers/cart.py` — `POST`/`GET /cart`, `PATCH`/`DELETE /cart/items/{line_id}`,
+anonymous, prices always re-resolved server-side. `handlers/cart_checkout.py` — `POST /cart/checkout` builds
+ONE multi-line Stripe session by reusing `handlers.checkout.build_checkout_payload` +
+`create_stripe_checkout_session` (single-offer path untouched), tags `metadata[cart_id]`. The listicle JS
+island posts adds, hydrates via `GET`, per-line remove, and a mini-cart Checkout button → redirect to Stripe,
+with a localStorage fallback when the cart API is unreachable.
+**Deferred:** service lines are not yet cart-checkout-eligible (`resolved_items_for_checkout` rejects them —
+booking has its own pay-then-book/book-then-pay flow); Slice D below.
+
+Original design (delivered above):
 
 1. **Data model — `cart` document.** Keyed to the client-minted `sl_cart_{offerId}` id (already in
    localStorage; start sending it to the API). Holds `line_items[]` (`product_id` / `price_id` / `qty` /
@@ -71,9 +81,10 @@ the existing client-side cart to a server-backed one and checks the whole cart o
 4. **Renderer / JS island.** Point the listicle island's add-to-cart + mini-cart at the endpoints (optimistic
    local write, reconcile with `GET /cart`); mini-cart "Checkout (N) · $NN.NN" triggers `POST /cart/checkout`.
    Degrade gracefully to the L1 localStorage-only behavior if the cart API is unreachable.
-5. **Abandoned-cart recovery.** A stored cart with an email (captured at checkout start or via the lead form)
-   feeds the existing email system for recovery — mirrors the reminder/invite sweep pattern
-   (`scan_type("cart")` + a `rate()` sweep). Optional within L2; the persistence in step 1 is the prerequisite.
+5. **Abandoned-cart recovery (Slice D — pending).** A stored cart with an email (captured at checkout start
+   or via the lead form) feeds the existing email system for recovery — mirrors the reminder/invite sweep
+   pattern (`scan_type("cart")` + a `rate()` sweep). **Prerequisite not yet built: the cart has no email
+   field** — capturing the shopper's email (checkout-start form or lead capture) is step 0 of Slice D.
 
 **Suggested slice order:** (A) data model + `POST`/`GET` + persist the existing client cart; (B) mutate/delete
 + mini-cart wired to the API; (C) `POST /cart/checkout` multi-line session; (D) abandoned-cart sweep.

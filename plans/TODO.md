@@ -72,18 +72,19 @@ Deferred, non-blocking follow-ups. Each item notes what, why it was deferred, an
 
 ## Commerce
 
-### Listicle L2 — server-side cart + multi-line checkout (prioritized)
-- **What:** promote the shipped **client-side** listicle cart (L1: `render_minicart()` + `sl_cart_{offerId}`
-  localStorage + JS island) to a **server-backed** cart, and check the whole cart out in **one** multi-line
-  Stripe session. Full outline in **`plans/LISTICLE_AND_CART.md` → Phasing → L2**.
-- **Verified state (2026-07-23):** L1 ships; `handlers/checkout.py` already emits `line_items[{index}]`
-  (multi-line-capable). **Not built:** cart document/table/repository, `/cart` endpoints, persistence.
-- **Where to fix:** new `jb-carts-{env}` table + `carts_repository` + `validate_cart`; new `handlers/cart.py`
-  (`POST/GET /cart`, `PATCH/DELETE /cart/items/{id}`, `POST /cart/checkout`) — public/anonymous, `/leads`
-  abuse posture; server re-resolves each line's single-unit price (never trusts client amounts); reuse the
-  checkout `line_items` construction, keep the single-offer compat path. Slices A–D in the plan.
-- **Why now:** the interim buy-now/localStorage cart is the one visible gap in the listicle offer type;
-  author flagged it to tackle soon (2026-07-23).
+### Listicle L2 — server-side cart + multi-line checkout (Slices A–C SHIPPED; D + service checkout pending)
+- **Shipped dev+prod 2026-07-23** (ad4e35a / d1c9718 / c31d8b7): server-backed cart + one multi-line Stripe
+  checkout. `domain/cart.py`, `validate_cart`, `carts_repository`, `CartsTable`; public `handlers/cart.py`
+  (`POST/GET /cart`, `PATCH/DELETE /cart/items/{line_id}`); `handlers/cart_checkout.py`
+  (`POST /cart/checkout`, reuses the single-offer checkout builders); server-backed listicle island +
+  mini-cart Checkout button. Prices always re-resolved server-side. Full detail in `plans/LISTICLE_AND_CART.md`.
+- **Still pending:**
+  - **Slice D — abandoned-cart recovery.** Prerequisite not built: the cart has **no email field**. Step 0 is
+    capturing the shopper's email (checkout-start form or lead capture); then a `scan_type("cart")` +
+    `rate()` sweep feeds the email system (mirrors reminders/invites).
+  - **Service-line cart checkout.** `resolved_items_for_checkout` rejects service lines today (booking has its
+    own pay-then-book/book-then-pay flow); mixing cart + booking fan-out is its own slice.
+  - **L3 order-model ripples** (per-line refunds/receipts/fees/downloads) — build only when L2 is proven.
 
 ## Business Profile & Reviews
 
