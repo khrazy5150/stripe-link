@@ -299,7 +299,12 @@ def resolve_offer_item(
         raise PricingError(f"Price '{price.get('price_id', '')}' is not active.")
 
     price_context = price.get("context", "standard")
-    allowed_contexts = item.get("allowed_price_contexts") or [offer_context]
+    allowed_contexts = item.get("allowed_price_contexts")
+    if not allowed_contexts:
+        # `sale` / `flash_sale` are legitimate PRE-purchase prices for the standard sales offer (the /sale and
+        # /flash-sale context views select them), so a standard offer accepts them without per-item config.
+        # Funnel contexts (upsell/downsell/order_bump) stay restricted to their own offers.
+        allowed_contexts = ["standard", "sale", "flash_sale"] if offer_context == "standard" else [offer_context]
     if offer_context and price_context not in allowed_contexts:
         raise PricingError(
             f"Price '{price.get('price_id', '')}' context '{price_context}' is not valid for offer context '{offer_context}'."

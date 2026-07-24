@@ -1189,6 +1189,7 @@ def render_page(
     site: dict[str, Any] | None = None,
     page_type: str = "",
     reviews: list[dict[str, Any]] | None = None,
+    price_context: str = "standard",
 ) -> str:
     services_by_id = services_by_id or {}
     offers_by_id = offers_by_id or {str(offer.get("offer_id") or ""): offer}
@@ -1221,6 +1222,14 @@ def render_page(
     domain_verified = bool((hosting.get("verification") or {}).get("verified"))
     _RENDER_STATE["home_url"] = f"https://{custom_domain}/" if custom_domain and domain_verified else ""
     _RENDER_STATE["page_type"] = str(page_type or "")
+    # Sale / Flash-Sale context views (plans/SALES_FUNNELS.md P1). The price selector swaps each tier to its
+    # paired sale/flash price (same quantity, active context). Whole-page fallback: if no product in the offer
+    # has a price in the requested context, the view renders as Standard (i.e. /sale looks like /). The flash
+    # time-states (upcoming/ended) are applied client-side; the server render is the "active" state.
+    active_context = str(price_context or "standard").strip().lower()
+    if active_context not in ("sale", "flash_sale") or not _offer_has_price_context(offer, products_by_id, active_context):
+        active_context = "standard"
+    _RENDER_STATE["active_price_context"] = active_context
     # The Site's menus, resolved to {label, url} against the home host (SEO-13). Only meaningful where the
     # slugs resolve (verified custom domain) and never on a post-checkout page (a nav would leak the buyer out).
     _RENDER_NAV["primary"], _RENDER_NAV["footer"] = [], []
@@ -1250,6 +1259,7 @@ def render_page(
         _RENDER_STATE["robots"] = NOINDEX_ROBOTS
         _RENDER_STATE["home_url"] = ""
         _RENDER_STATE["page_type"] = ""
+        _RENDER_STATE["active_price_context"] = "standard"
         _RENDER_NAV["primary"], _RENDER_NAV["footer"] = [], []
         _RENDER_CATEGORY_PAGES.clear()
         _RENDER_REVIEWS.clear()
@@ -1997,19 +2007,34 @@ def render_offer_price_selector(
             # A selectable option carries its own label; a synthesized fixed option has none, so fall back
             # to the product name rather than a generic "Option".
             label = escape(str(option.get("label") or price.get("label") or product.get("name") or "Option"))
-            badge = escape(str(option.get("badge") or ""))
-            amount = int(price.get("unit_amount", 0))
-            currency = str(price.get("currency") or "usd")
+            # Sale / Flash-Sale context view: swap this tier to its paired sale price (same quantity), badge
+            # it, and strike through the Standard price. `default_attr` stays keyed on the STANDARD tier so the
+            # same option renders checked. `display_price` drives the amount, price_id, and checkout selection.
+            active_ctx = str(_RENDER_STATE.get("active_price_context") or "standard")
+            display_price = price
+            sale_badge = ""
+            context_compare = None
+            if active_ctx in ("sale", "flash_sale"):
+                paired = paired_context_price(product, price, active_ctx)
+                if paired:
+                    display_price = paired
+                    sale_badge = "Sale" if active_ctx == "sale" else "\U0001F525 Flash Sale"
+                    context_compare = int(price.get("unit_amount") or 0)
+            badge = escape(sale_badge or str(option.get("badge") or ""))
+            amount = int(display_price.get("unit_amount", 0))
+            currency = str(display_price.get("currency") or "usd")
             checkout_quantity = int(item.get("quantity") or 1)
             default_attr = "true" if price.get("price_id") == default_price_id else "false"
-            image_url = price_image(product, price, option)
+            image_url = price_image(product, display_price, option)
             description = escape(str(option.get("description") or price.get("description") or product.get("description") or ""))
-            compare_at_unit_amount = price.get("compare_at_unit_amount")
-            savings_pct = option.get("display_discount_pct") or price.get("discount_pct")
+            compare_at_unit_amount = context_compare if context_compare is not None else display_price.get("compare_at_unit_amount")
+            savings_pct = option.get("display_discount_pct") or display_price.get("discount_pct")
+            if context_compare is not None:
+                savings_pct = discount_pct(amount, context_compare)  # Sale% off the Standard price
             if not savings_pct and compare_at_unit_amount:
                 savings_pct = discount_pct(amount, int(compare_at_unit_amount))
             card_markup = "\n".join([
-                f"      <article class=\"sl-price-option\" data-product-id=\"{escape(str(product_id))}\" data-price-id=\"{escape(str(price.get('price_id', '')))}\" data-quantity=\"{checkout_quantity}\" data-default=\"{default_attr}\" data-sale-amount=\"{amount}\" data-regular-amount=\"{int(compare_at_unit_amount) if compare_at_unit_amount else ''}\" data-currency=\"{escape(currency)}\" data-label=\"{label}\">",
+                f"      <article class=\"sl-price-option\" data-product-id=\"{escape(str(product_id))}\" data-price-id=\"{escape(str(display_price.get('price_id', '')))}\" data-quantity=\"{checkout_quantity}\" data-default=\"{default_attr}\" data-sale-amount=\"{amount}\" data-regular-amount=\"{int(compare_at_unit_amount) if compare_at_unit_amount else ''}\" data-currency=\"{escape(currency)}\" data-label=\"{label}\">",
                 "        " + responsive_img(image_url, str(product.get("name") or label), sizes=PRICE_OPTION_SIZES) if image_url else "",
                 "        <div class=\"sl-price-copy\">",
                 f"          <span class=\"sl-badge\">{badge}</span>" if badge else "",
@@ -2021,7 +2046,7 @@ def render_offer_price_selector(
                 f"            <span class=\"sl-savings\">Save {int(savings_pct)}%</span>" if savings_pct else "",
                 "          </div>",
                 "        </div>",
-                f"        <input type=\"radio\" name=\"sl-price-{escape(product_id)}\" value=\"{escape(str(price.get('price_id', '')))}\" aria-label=\"{label}, {escape(format_money(amount, currency))}\" {'checked' if default_attr == 'true' else ''}>",
+                f"        <input type=\"radio\" name=\"sl-price-{escape(product_id)}\" value=\"{escape(str(display_price.get('price_id', '')))}\" aria-label=\"{label}, {escape(format_money(amount, currency))}\" {'checked' if default_attr == 'true' else ''}>",
                 "      </article>",
             ])
             cards.append((landing_page_price_sort_key(price, option, display_index), card_markup))
@@ -2038,6 +2063,25 @@ def render_offer_price_selector(
 def is_landing_page_price(price: dict[str, Any]) -> bool:
     context = str(price.get("context") or "standard").strip().lower()
     return context in LANDING_PAGE_PRICE_CONTEXTS
+
+
+def _offer_has_price_context(offer: dict[str, Any], products_by_id: dict[str, dict[str, Any]], context: str) -> bool:
+    """Whether any product the offer sells has a price in `context` — gates the /sale //flash-sale fallback."""
+    for item in offer.get("items") or []:
+        for price in (products_by_id.get(str(item.get("product_id") or "")) or {}).get("prices") or []:
+            if str(price.get("context") or "standard") == context:
+                return True
+    return False
+
+
+def paired_context_price(product: dict[str, Any], standard_price: dict[str, Any], context: str) -> dict[str, Any] | None:
+    """The product's price in `context` (sale/flash_sale) paired to a displayed standard tier by matching
+    `quantity` (plans/SALES_FUNNELS.md — "pair by quantity + context"). None when no such tier exists."""
+    qty = int(standard_price.get("quantity") or 1)
+    for price in product.get("prices") or []:
+        if str(price.get("context") or "standard") == context and int(price.get("quantity") or 1) == qty:
+            return price
+    return None
 
 
 def landing_page_default_price_id(item: dict[str, Any], product: dict[str, Any]) -> str:
