@@ -57,6 +57,39 @@ Deferred, non-blocking follow-ups. Each item notes what, why it was deferred, an
 - **Why deferred:** the functional path works via the Configuration form; the wizard is a UX upgrade.
   Reference design written 2026-07-03, not yet built.
 
+### Build the remaining notification emitters
+- **What:** the notification delivery plumbing (bell/badge/mark-read) is live, and emitters now exist for
+  checkout `order`, booking/delegate, invoice, and lead capture. Still **not built**: `refund_request`,
+  `paid_invoice` (subscription/renewal `invoice.paid`, distinct from the one-time order notification),
+  `shipping` (provider-connection/label failures), and `system`/support. Full list + the emit pattern in
+  **`docs/NOTIFICATION_EMITTERS.md`**.
+- **Where to fix:** write a `Notification` via `notifications_repository()` at each event source —
+  `refund_request` from `save_refund_request()` in `handlers/notifications.py` (and/or a `charge.refund*` /
+  `charge.dispute.created` branch in `stripe_webhook.py`); `paid_invoice` from an `invoice.paid` webhook
+  branch. Use a deterministic id for idempotency; reuse `notification_record_from_session()` as a template.
+- **Why deferred:** `refund_request` + `paid_invoice` are closest to done (the checkout webhook already
+  builds order/invoice/customer records); `shipping` and `system` need their upstream features to exist first.
+
+## Business Profile & Reviews
+
+### Business Profile — GBP Phases 2 & 3 (Google Business Profile sync)
+- **What:** P1 (canonical Business Profile identity + LocalBusiness derive + category→specific `@type`) is
+  **shipped**. **P2** = Google Business Profile OAuth + two-way sync (pull NAP/hours/reviews, push updates);
+  **P3** = AI-managed GBP. Design in **`plans/BUSINESS_PROFILE_AND_GBP.md`**.
+- **Verified not built** — no GBP OAuth / My Business API code exists yet.
+- **Why deferred:** P1 already covers the on-page identity + local-SEO need; live GBP sync is a separate
+  external-integration effort (Google API access + app verification), similar in shape to the calendar OAuth
+  path — best started when GBP management becomes a priority.
+
+### Reviews — future phases
+- **What:** the first-party review aggregator + post-purchase invite sequence shipped (Phases 1–2). Still
+  planned (all in **`plans/REVIEWS.md`**): Merchant Center product-review **feed** (P3); GBP/third-party
+  review **read-back** (display-only, never in markup); **per-product** invite targeting; invite
+  **timing-offset** setting; a **verified-review auto-approve** toggle; the **SMS** invite channel (gated on
+  10DLC below); and testimonials/`social_proof` auto-wiring from approved reviews.
+- **Why deferred:** core review capture + Product star snippets are live and compliant; these are additive
+  enhancements.
+
 ## Production setup
 
 ### Optimize prod CloudFront (pages) for indexing + aggressive caching
