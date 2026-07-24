@@ -212,9 +212,11 @@ routing/charge plumbing; the generic step-graph becomes the opt-in advanced tier
   post-checkout routing + the transition engine; `SITE_PAGE_TYPES` includes `thank_you`/`funnel_step`; the
   product→Stripe sync engine (`run_product_sync`, manual today). (NOT the order-bump checkout — that stopgap
   is replaced in P2.)
-- **P1.5 — Product → Stripe auto-sync (enabler; do before/with P2 order bumps):** fire `run_product_sync`
-  async (Lambda `Event` invoke) from the products save handler; demote the manual "Sync" button to a
-  failure-only Retry; sync-status chip. Benefits all products, and makes bump Price IDs always ready.
+- **P1.5 — Product → Stripe auto-sync — SHIPPED dev (commit 551a567):** the products save handler fires
+  `run_product_sync` async (fire-and-forget Lambda `Event` invoke of `{internal_sync, tenant_id, product_id}`);
+  the sync handler's internal path runs a full sync and SKIPS (no failed status) when Stripe isn't connected.
+  ProductsFunction got `lambda:InvokeFunction` + `PRODUCT_SYNC_FUNCTION`. Dashboard: manual "Sync" button
+  demoted to a failure-only "Retry sync". Benefits all products; bump Price IDs always ready.
 - **P1 — Pre-purchase (highest value / lowest risk):**
   - **P1a — SHIPPED dev (commit 8717cca):** reserved-slug set (`RESERVED_SITE_SLUGS`) + `is_reserved_slug` +
     enforcement in the Site `attach_page` handler; page `sale`/`flash_sale` config blocks + validation
