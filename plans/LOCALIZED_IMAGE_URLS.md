@@ -161,3 +161,54 @@ def localized_image_url(url: str, slug: str) -> str:
 `plans/LOCAL_SEO_SIGNALS.md` (#5, this doc completes it), `[[project_local_seo_signals]]`,
 `[[project_business_profile_gbp]]` (org identity / NAP), the image-processing service (key scheme + the
 distribution the edge function lands on).
+
+---
+
+## Answered design questions (2026-07-23)
+
+1. **Does the edge rewrite affect video?** No. Videos are served by the distribution's separate
+   `landing-pages/video/*` behavior (its own origin, no function association); CloudFront only runs the
+   function on the *matched* behavior, and ours attaches to the default (`photos/*`) behavior. The regex is
+   photos-only besides. **Future option:** a parallel rewrite on the video behavior for `VideoObject` / video
+   sitemap SEO — additive, out of scope here.
+2. **Opt-in, not default?** Yes, by design. The edge function is a **no-op on canonical URLs** (only rewrites
+   URLs already in pretty form), so deploying it changes nothing until a consumer opts in. The opt-in lives in
+   the **render layer** (`organization.pretty_image_urls`, auto-default-on for `_org_is_local`) because the
+   localization is page-contextual — the slug is built at render, nothing baked at upload. An image-service
+   API `slug` param (for a context-independent product-name slug) is a possible later convenience, not required.
+3. **Where does the opt-in belong?** Render layer (see #2), not the upload API.
+
+---
+
+## Appendix — Media API custom domain (`media.juniorbay.com`) — SEPARATE, DECOUPLED TASK
+
+Not part of the localized-URL feature; recorded here because it came up together. Renames the **upload/status
+API endpoint** (not the image CDN) from the raw `https://dph4d1c6p8.execute-api.us-west-2.amazonaws.com/v3`
+to `https://media.juniorbay.com/v3`. Independent of the edge function; can execute in either order, anytime.
+
+**Grounded facts:**
+- The API is a **regional HTTP API** (`AWS::Serverless::HttpApi`, stage `v3`) in the image-processing stack.
+- The stripe-link consumer is already indirected: `IMAGE_UPLOAD_API_BASE` env (stripe-link `template.yaml`,
+  ~L761) overrides the hardcoded default in `src/handlers/upload.py:8`. Consumer switch = one-line env change,
+  instantly reversible.
+- **`juniorbay.com` DNS is on Route 53** (confirmed) → cert validation + the domain record can be fully
+  automated in the SAM template; no manual DNS steps.
+
+**Work (image-processing repo):**
+1. ACM cert for `media.juniorbay.com` in **us-west-2** (HTTP APIs are regional-only — NOT us-east-1).
+   DNS-validated via Route 53.
+2. Custom domain + mapping via SAM's `Domain:` property on the `HttpApi` resource (creates
+   `ApiGatewayV2::DomainName` + API mapping + Route 53 alias in one shot).
+3. **Keep `/v3` as the base path** → `https://media.juniorbay.com/v3/...`, so the consumer change is a pure
+   hostname swap and the version namespace is preserved. (Root-mapping to drop `/v3` is prettier but changes
+   path shape and loses the version segment — not worth it.)
+
+**Work (stripe-link repo):** set `IMAGE_UPLOAD_API_BASE` (template.yaml) and the `upload.py` default to
+`https://media.juniorbay.com/v3`.
+
+**Cutover (zero downtime, instant rollback):** custom domain is additive — the `execute-api` URL keeps
+working. (1) Deploy the domain in image-processing, (2) verify `https://media.juniorbay.com/v3/upload/...`,
+(3) flip the stripe-link env var + redeploy, (4) revert the env var if anything's off.
+
+**Status: agreed to plan, execution timing TBD.** Note the two distinct hostnames stay meaningful:
+`media.juniorbay.com` = the media *API*; `images.juniorbay.com` = asset *delivery* CDN.
