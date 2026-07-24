@@ -1,6 +1,7 @@
 # Sales Funnels in the Sites Paradigm
 
-**Status:** design (author-clarified 2026-07-24), not built. **HIGH PRIORITY.** Home: closes the loop for
+**Status:** design LOCKED (author-clarified 2026-07-24; only the "upsells = separate offers" resolution
+awaits a final ✓), not built. **HIGH PRIORITY.** Home: closes the loop for
 transaction (Stripe) landing pages. Extends — does not replace — the existing commerce pieces
 (`plans/AI_AND_COMMERCE_ARCHITECTURE.md` Part C, the price-`context` model, `handlers/upsell.py`,
 `handlers/post_checkout.py`).
@@ -14,9 +15,9 @@ slugs** within the Site, which tenants may never use for their own pages:
 |------|------|-----------------|
 | `/` | sales page | The offer at its **Standard** price. |
 | `/sale` | *context view of `/`* | The **same** sales page, Standard price replaced by the **sale**-context price + a "Sale" badge. Falls back to Standard when no sale price. |
-| `/flash-sale` | *context view of `/`* | The same sales page with the **flash_sale**-context price, a 🔥 "Flash Sale" badge, and a **countdown banner**. Falls back to Standard when there's no flash price **or it has expired**. |
-| `/upsell` | funnel-step page | Post-purchase, one-click: presents each product in the offer that has an **upsell** price, one by one. Only reachable when the offer has ≥1 upsell price. |
-| `/downsell` | funnel-step page | Post-purchase, one-click: the **downsell**-context price, shown when an upsell is declined (if the product has one). |
+| `/flash-sale` | *context view of `/`* | The same sales page with the **flash_sale**-context price, a 🔥 "Flash Sale" badge, and a **countdown banner** — driven by page dates (upcoming/active/ended). Standard when no flash price, not started, or expired. |
+| `/upsell` | funnel-step page | Post-purchase, one-click: walks the main offer's `upsells[]` (separate offers) one by one. Only reachable when the offer references upsells. |
+| `/downsell` | funnel-step page | Post-purchase, one-click: walks the main offer's `downsells[]`, **after** the whole upsell chain. |
 | `/thank-you` | funnel-step page | Funnel end. |
 
 Two distinct kinds of reserved slug fall out of this:
@@ -44,25 +45,56 @@ minimal separate funnel config:
 
 ## Pre-purchase views: `/sale` and `/flash-sale`
 
-Render the `/` sales page, swapping only the price card:
-- Resolve the offer item's price at the requested context; if absent (or flash expired) → Standard, no badge.
-- `/sale`: show the sale price + a **"Sale"** badge on the price card.
-- `/flash-sale`: show the flash price + a **🔥 "Flash Sale"** badge + a **countdown banner** at the top of
-  the page counting down to the flash's expiry. On expiry the page is just the Standard `/` page again.
-- **Needs:** a flash-sale **expiry** (`flash_sale_ends_at`) — recommend storing it on the `flash_sale` price
-  (per-product) so the countdown + fallback are derived, not hand-managed. (Open decision below.)
+Both render the `/` sales page, swapping only the price card(s). **Both are per-Landing-Page TOGGLES** (not
+auto-enabled). When a tenant toggles one on, if the offer's product has **no** matching price context, show a
+warning: *"This product doesn't have a Sale pricing context. Please go to the products page and set it there."*
+For a multi-item (listicle) offer, only the items **with** a sale/flash price change; items without keep
+Standard.
+
+### `/sale`
+- Optional **expiration date** on the Landing Page. No expiration → **perpetual** sale.
+- Shows the `sale`-context price + a **"Sale"** badge. Past expiration (or no sale price) → Standard, no badge.
+
+### `/flash-sale` — dates live on the Landing Page (`flash_sale_starts_on?`, `flash_sale_ends_at`)
+Dates on the **page** (not the price, not a campaign) so a tenant just sets a window for a TikTok/IG Live.
+- **Expiration is REQUIRED to enable.** Toggling on without one → block with: *"You must set an expiration
+  date in order to enable this feature."*
+- **Three states** (start date optional):
+  - **Upcoming** (before `flash_sale_starts_on`): banner *"Flash Sale Coming Up on {date}"*, price stays
+    **Standard**.
+  - **Active** (between start and end, or before end when no start): banner **countdown** to `ends_at`, price
+    cards show the **flash_sale** price + a **🔥 "Flash Sale"** badge (where the Sale badge would sit).
+  - **Ended** (after `flash_sale_ends_at`): banner *"Flash Sale ended"*, price reverts to **Standard**.
 
 ## Post-purchase chain: `/upsell` → `/downsell` → `/thank-you`
+
+### Upsells/downsells are SEPARATE OFFERS, not products inside the main offer (resolves the listicle conflict)
+
+**The conflict (author-spotted):** a multi-product offer auto-infers to `listicle`, and listicles ignore
+funnels by design — so you can't put "the main product + separate upsell products" in one offer's `items[]`
+without turning it into a listicle. **Resolution:** an upsell/downsell is **its own Offer** (`context:
+"upsell"` / `"downsell"`), referenced by the main offer — **exactly how order bumps already work**
+(`resolve_order_bumps` merges separate `context: "order_bump"` offers by id). So:
+- The main offer's `items[]` alone drive `offer_type` (single/bundle/listicle) — **untouched** by funnel steps.
+- An upsell can be an **unrelated product** (or a bundle) — it's just another Offer, with its own
+  headline/image/CTA for `/upsell`. No new `offer_type`; the existing `context` field is the marker.
+- Funnel reference on the main offer: `offer.funnel = { upsells: [offer_id…], downsells: [offer_id…] }`
+  (ordered). Order bumps stay as they are (checkout add-ons).
+- Funnels apply to **single/bundle** main offers; **listicles ignore them** (shop mode → cart, not funnel).
+
+### Flow
 
 - After the `/` checkout is **paid**, the buyer is routed into the funnel (Site-aware routing already exists:
   `handlers/post_checkout.py`). One-click charging against the saved payment method already exists
   (`handlers/upsell.py` — `get_upsell_session` + `process_upsell`, idempotent by `sequence`).
-- **Which products upsell:** iterate the offer's products; each with an `upsell` price becomes an upsell step,
-  presented **one by one**. Products without an upsell price are **skipped**. Same rule for `downsell`.
-- **Accept** → one-click charge → next upsell product (or `/thank-you`). **Decline** → the product's
-  `downsell` price if present (`/downsell`), else next product → eventually `/thank-you`.
-- `/upsell` (and `/downsell`) are **only provisioned/reachable when the offer actually has** those prices —
-  mirroring stripe-cart, which only showed the upsell page if the offer had an upsell.
+- **`/upsell` — one slug, a programmatic chain.** It walks the main offer's `upsells[]` array **one by one**
+  (NO `/upsell-1`/`/upsell-2` in the URL — a single `/upsell` slug advancing by an internal step index).
+  Accept → one-click charge → next upsell. Decline → next upsell.
+- **`/downsell` — one slug, after the ENTIRE upsell chain.** Once the upsell chain finishes, walk the
+  `downsells[]` array the same way, one by one, on a single `/downsell` slug.
+- → `/thank-you`.
+- `/upsell` / `/downsell` are **only reachable when the main offer references** such offers — mirroring
+  stripe-cart (only showed the upsell page if the offer had an upsell).
 
 ## Auto-provisioning (builder), like stripe-cart
 
@@ -87,24 +119,26 @@ upsell charging (`handlers/upsell.py`); Site-aware post-checkout routing + `page
 funnel_steps/thank_you config; `SITE_PAGE_TYPES` includes `thank_you` + `funnel_step`.
 
 **Build:** reserved-slug set + enforcement; the Site route resolver for context views; `/sale` + `/flash-sale`
-render path (price swap + badges + countdown) with `flash_sale_ends_at` + expiry fallback; auto-provisioning
-of funnel pages from the offer; wiring the upsell/downsell **chain** (product-by-product, decline→downsell)
-onto the existing one-click charge; and reconciling the current arbitrary `funnel_steps` config with the
-reserved-slug model (the reserved slugs become the canonical funnel; `funnel_steps` becomes the derived
-step graph rather than hand-authored).
+render path (price swap + Sale/🔥 badges + countdown) driven by **page-level** dates
+(`flash_sale_starts_on?` / `flash_sale_ends_at`, `sale_ends_at?`) with the three flash states + toggles +
+"no context" warning + "expiration required" block; the `offer.funnel = {upsells[], downsells[]}` reference
+(separate `context: upsell/downsell` offers); auto-provisioning of funnel pages from the offer; wiring the
+`/upsell` then `/downsell` **chains** onto the existing one-click charge; and reconciling the current
+arbitrary `funnel_steps` config with the reserved-slug model (reserved slugs become the canonical funnel).
 
-## Open decisions (recommendations — confirm before Phase 2)
+## Resolved decisions (author, 2026-07-24)
 
-1. **Upsell sequencing across multiple upsell products:** one `/upsell` slug advancing by a **step index**
-   (reuse the existing `sequence`/`funnel_step`) — *recommended* — vs. numbered slugs (`/upsell`, `/upsell-2`).
-2. **Downsell trigger:** per-upsell-product (decline product A's upsell → A's downsell) — *recommended* — vs.
-   a single `/downsell` after the whole upsell chain.
-3. **Flash-sale expiry storage:** on the `flash_sale` **price** (`flash_sale_ends_at`, per product) —
-   *recommended* — vs. on the page/offer (one campaign window).
-4. **`/sale` `/flash-sale` availability:** auto-available whenever a sale/flash price exists — *recommended* —
-   vs. an explicit per-Site enable toggle.
-5. **Multiple products on `/sale`:** for a multi-item offer, does `/sale` swap every item's price to its sale
-   price (recommended), and skip items with no sale price (keep Standard)?
+1. **Upsell sequencing:** ONE `/upsell` slug, a programmatic chain over the `upsells[]` array (no
+   `/upsell-1`/`-2` in the URL). ✓
+2. **Downsell:** ONE `/downsell` slug, walked **after the entire upsell chain** completes. ✓
+3. **Flash-sale dates live on the Landing Page** — `flash_sale_ends_at` (required) + optional
+   `flash_sale_starts_on` (no separate campaign object). `/sale` gets an optional expiration (perpetual if
+   none). ✓
+4. **`/sale` and `/flash-sale` are per-page toggles** (not auto), with a warning when the product lacks the
+   context; flash-sale is **blocked** without an expiration; three flash states (upcoming/active/ended). ✓
+5. **Upsells/downsells are separate Offers** (`context: upsell`/`downsell`) referenced by the main offer,
+   like order bumps — resolving the "multi-product = listicle" conflict. Listicles ignore funnels; `/sale`
+   on a listicle swaps only items that have a sale price. ✓ *(Recommendation — confirm to fully lock.)*
 
 ## Phasing
 
