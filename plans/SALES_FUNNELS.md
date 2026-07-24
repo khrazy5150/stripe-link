@@ -88,6 +88,21 @@ only items **with** a sale/flash price change; the rest stay Standard.
 
 Order bumps (`context: order_bump`) fold into the initial `/` Stripe checkout as add-on checkboxes (built).
 
+### Price mechanism for context views — pair by quantity + context (author-confirmed 2026-07-24)
+
+An offer's price options are **quantity tiers** referencing specific *standard* price IDs; there's no built-in
+link to a "sale version." Product prices already carry both `quantity` and `context`, so the mapping is
+schema-free: **for each displayed tier (quantity Q), the `/sale`//`/flash-sale` view uses the product's price
+with `context = sale`/`flash_sale` AND `quantity = Q`; tiers with no such price fall back to Standard** (and
+carry no badge). Whole-page fallback: if no tier has a sale/flash price, the view renders as Standard.
+Implication: tenants add a sale price per quantity tier they want discounted (no per-option config on the offer).
+
+**Checkout implication (NOT free — corrects "no payment changes"):** when a buyer converts on `/sale`, the
+CTA carries the **sale** price ID, and checkout must charge it. `resolve_offer` today rejects a non-standard
+price context unless the offer's `allowed_price_contexts` includes it. So P1 must either (a) include the
+relevant contexts in `allowed_price_contexts` when a page's sale/flash toggle is on, or (b) make the checkout
+resolve context-aware for the active view. Small, but it touches the checkout resolve path — fold into P1b.
+
 ## Post-purchase: `/upsell` → `/downsell` → `/thank-you`
 
 - After `/` checkout is **paid**, the buyer enters the funnel. **Reuse** the built runtime: Site-aware routing
@@ -134,10 +149,17 @@ routing/charge plumbing; the generic step-graph becomes the opt-in advanced tier
 
 - **P0 — already built (inventory):** price `context` enum; order-bump folding; one-click upsell charging;
   Site-aware post-checkout routing + the transition engine; `SITE_PAGE_TYPES` includes `thank_you`/`funnel_step`.
-- **P1 — Pre-purchase (no payment changes; highest value / lowest risk):** reserved-slug set + enforcement +
-  Site route resolver for context views; `/sale` + `/flash-sale` render (price swap, Sale/🔥 badges, countdown)
-  driven by **page-level** dates (`flash_sale_starts_on?`/`flash_sale_ends_at`, `sale_ends_at?`) with the three
-  flash states, per-page toggles, the "no context" warning, and the "expiration required" block.
+- **P1 — Pre-purchase (highest value / lowest risk):**
+  - **P1a — SHIPPED dev (commit 8717cca):** reserved-slug set (`RESERVED_SITE_SLUGS`) + `is_reserved_slug` +
+    enforcement in the Site `attach_page` handler; page `sale`/`flash_sale` config blocks + validation
+    (flash-enabled requires an expiration; `starts_on` < `ends_at`); Page.schema.json updated.
+  - **P1b — next:** render context views — pair-by-quantity+context price swap + Sale/🔥 badges + the
+    per-tier/whole-page Standard fallback; the three flash time-states + countdown (client-side, since pages
+    publish statically — embed both prices + dates, JS picks the state); the small checkout-accepts-sale-price
+    piece (see "Checkout implication" above).
+  - **P1c — routing/publish:** Site route resolver mapping `/sale`//`/flash-sale` → the `/` page + context;
+    publish the context-view artifacts.
+  - **P1d — dashboard:** per-page toggles + dates + the "no context" warning + the "expiration required" block.
 - **P2 — Post-purchase default funnel:** the `offer.funnel` block; auto-provision funnel pages from the offer;
   wire `/upsell` (cycle upsells + one-click) then `/downsell` (declined-with-downsell) → `/thank-you` onto the
   reused transition engine + `post_checkout` routing; gate reachability on `offer.funnel`.
