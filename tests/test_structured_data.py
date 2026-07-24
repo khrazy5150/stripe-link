@@ -155,6 +155,25 @@ class LocalSeoAltTests(unittest.TestCase):
         no_city = {"organization": {"name": "Luxe Spa", "entity_type": "HealthAndBeautyBusiness"}}
         self.assertEqual(self._hero_alt(no_city), "Creatine Gummies")
 
+    def _hero_html(self, site):
+        offer = load_fixture("offer-creatine-standard.json")
+        product = load_fixture("product-creatine-gummies.json")
+        product.setdefault("images", ["https://img.example.com/x.webp"])
+        page = load_fixture("page-creatine-standard.json")
+        page["sections"] = [{"id": "hm", "type": "hero_media"}] + page["sections"]
+        return render_page(page, offer, {product["product_id"]: product}, canonical_url="https://x/p", site=site)
+
+    def test_local_business_hero_has_nap_figcaption(self):
+        local = {"organization": {"name": "Luxe Spa", "entity_type": "HealthAndBeautyBusiness", "address": {"street": "75 S 100 E", "locality": "St. George", "region": "Utah"}}}
+        html = self._hero_html(local)
+        m = re.search(r'<figcaption class="sl-hero-caption">([^<]+)</figcaption>', html)
+        self.assertIsNotNone(m)
+        self.assertEqual(m.group(1), "Luxe Spa — 75 S 100 E, St. George, Utah")
+
+    def test_dtc_hero_has_no_figcaption(self):
+        dtc = {"organization": {"name": "Axel Mart", "entity_type": "OnlineStore", "address": {"locality": "Denver"}}}
+        self.assertNotIn("<figcaption class=\"sl-hero-caption\"", self._hero_html(dtc))
+
 
 class BreadcrumbTests(unittest.TestCase):
     """Breadcrumbs (SEO-11): visible crawlable trail + matching BreadcrumbList JSON-LD, only on a page served

@@ -437,6 +437,8 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     "    .sl-hero h1{font-family:var(--sl-font-heading);font-size:clamp(2.4rem,5vw,3.2rem);line-height:1.2;font-weight:800;color:var(--sl-headline);letter-spacing:0;max-width:52rem;margin:0 auto}",
     "    .sl-hero p{font-size:1.5rem;line-height:1.55;color:var(--sl-subheadline-text);max-width:46rem;margin:0 auto}",
     "    .sl-hero-media{position:relative;padding-top:0.8rem}",
+    "    .sl-hero-figure{margin:0}",
+    "    .sl-hero-caption{font-size:1.3rem;color:var(--sl-muted);text-align:center;margin-top:0.6rem;line-height:1.4}",
     "    .sl-hero-track{display:flex;overflow-x:auto;scroll-snap-type:x mandatory;scrollbar-width:none;border-radius:var(--sl-radius)}",
     "    .sl-hero-track::-webkit-scrollbar{display:none}",
     "    .sl-hero-slide{flex:0 0 100%;scroll-snap-align:center}",
@@ -1131,6 +1133,20 @@ def localized_alt(base_alt: str) -> str:
     return base + anchor
 
 
+def local_business_caption() -> str:
+    """A derived NAP figcaption for a local business hero (plans/LOCAL_SEO_SIGNALS.md) — visible text under the
+    image carrying the name + full address that the alt shouldn't overstuff. Empty for non-local / no address."""
+    org = _RENDER_ORG
+    if str(org.get("entity_type") or "") not in _LOCAL_BUSINESS_TYPES:
+        return ""
+    name = str(org.get("name") or "").strip()
+    address = org.get("address") or {}
+    place = ", ".join(p for p in (str(address.get(f) or "").strip() for f in ("street", "locality", "region")) if p)
+    if not name or not place:
+        return ""
+    return f"{name} — {place}"
+
+
 def resolved_brand_label(presentation: dict[str, Any]) -> str:
     """The storefront brand for the title suffix / og:site_name. The offer's explicit brand wins; otherwise
     the Site's Organization name (the single-source business identity); otherwise the platform brand."""
@@ -1683,13 +1699,19 @@ def render_hero_media(
         f"        <div class=\"sl-hero-slide\">{render_media_slide(url, alt, autoplay=autoplay, eager=(index == 0))}</div>"
         for index, url in enumerate(images)
     ]
+    # A <figcaption> carrying NAP on local-business heroes (SEO: crawlers weight text around an image).
+    caption = local_business_caption()
+    caption_html = f"        <figcaption class=\"sl-hero-caption\">{escape(caption)}</figcaption>" if caption else ""
     # A single image needs no carousel chrome.
     if len(images) == 1:
         return "\n".join([
             f"    <section class=\"{media_class}\" data-section-id=\"{section_id}\" data-section-type=\"hero_media\" data-media-count=\"1\">",
-            "      <div class=\"sl-hero-track\">",
+            "      <figure class=\"sl-hero-figure\">",
+            "        <div class=\"sl-hero-track\">",
             *slides,
-            "      </div>",
+            "        </div>",
+            caption_html,
+            "      </figure>",
             *overlays,
             "    </section>",
         ])
@@ -1700,6 +1722,7 @@ def render_hero_media(
     ]
     return "\n".join([
         f"    <section class=\"{media_class} sl-hero-carousel\" data-section-id=\"{section_id}\" data-section-type=\"hero_media\" data-media-count=\"{len(images)}\" data-hero-carousel>",
+        "      <figure class=\"sl-hero-figure\">",
         "      <div class=\"sl-hero-track\" data-hero-track>",
         *slides,
         "      </div>",
@@ -1709,6 +1732,8 @@ def render_hero_media(
         "      <div class=\"sl-hero-dots\">",
         *dots,
         "      </div>",
+        caption_html,
+        "      </figure>",
         *overlays,
         "    </section>",
     ])
