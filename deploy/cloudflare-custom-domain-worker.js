@@ -1,4 +1,4 @@
-// Cloudflare Worker for the jbay.uk zone. Handles two things on the platform edge:
+// Cloudflare Worker for the jbay.uk zone (+ the test.juniorbay.com hostname). Handles the platform edge:
 //
 //  1. Short URLs on the short-URL host (go.jbay.uk/{code}): resolve the code to a
 //     destination via the routes resolve endpoint and 302-redirect the visitor. For A/B
@@ -6,12 +6,18 @@
 //     to a weighted variant.
 //  2. Tenant custom domains: resolve the hostname to a published page and reverse-proxy it
 //     verbatim, so the visitor's browser only ever sees their own custom domain.
+//  3. Test-environment shareable links (test.juniorbay.com/published/{code}[/sale|/flash-sale]):
+//     resolve the page short_code + view to its published artifact and reverse-proxy it, so a
+//     tenant can QA and share the /sale //flash-sale views without a custom domain.
 
 const API_BASE = "https://REPLACE_WITH_PUBLIC_API_BASE_URL";
 const CUSTOM_DOMAIN_RESOLVE = `${API_BASE}/custom-domains/resolve`;
 const ROUTES_RESOLVE = `${API_BASE}/routes/resolve`;
+const PAGES_RESOLVE = `${API_BASE}/pages/resolve`;
 
 const SHORT_URL_HOST = "go.jbay.uk";
+const TEST_PAGES_HOST = "test.juniorbay.com";
+const TEST_VIEWS = new Set(["", "sale", "flash-sale"]);
 const PLATFORM_HOSTS = new Set([
   "domains.jbay.uk",
 ]);
@@ -50,6 +56,30 @@ async function handleShortUrl(sourceUrl) {
   return Response.redirect(route.destination_url, 302);
 }
 
+async function handleTestPage(request, sourceUrl) {
+  // /published/{code}            -> standard view
+  // /published/{code}/sale       -> sale view
+  // /published/{code}/flash-sale -> flash-sale view
+  const parts = sourceUrl.pathname.replace(/^\/+/, "").split("/").filter(Boolean);
+  if (parts[0] !== "published" || !parts[1]) {
+    return new Response("Test page not found.", { status: 404 });
+  }
+  const code = parts[1];
+  const view = parts[2] || "";
+  if (!TEST_VIEWS.has(view)) {
+    return new Response("Test page not found.", { status: 404 });
+  }
+  const resolveUrl = `${PAGES_RESOLVE}?code=${encodeURIComponent(code)}&view=${encodeURIComponent(view)}`;
+  const resolved = await resolveJson("test-page-router", `${code}/${view}`, resolveUrl);
+  const route = resolved && resolved.route;
+  if (!route || route.type !== "origin_url" || !route.origin_url) {
+    return new Response("Test page not found.", { status: 404 });
+  }
+  const proxied = new Request(route.origin_url, request);
+  proxied.headers.set("X-Junior-Bay-Test-Host", TEST_PAGES_HOST);
+  return fetch(proxied);
+}
+
 async function handleCustomDomain(request, hostname) {
   // Resolution is path-dependent — the Site homepage at "/", funnel/collection pages at their slugs, and
   // well-known crawl files (robots.txt/sitemap.xml/{key}.txt) — so forward the path and key the cache by it.
@@ -76,6 +106,9 @@ async function handleRequest(request) {
 
   if (hostname === SHORT_URL_HOST) {
     return handleShortUrl(sourceUrl);
+  }
+  if (hostname === TEST_PAGES_HOST) {
+    return handleTestPage(request, sourceUrl);
   }
   if (PLATFORM_HOSTS.has(hostname)) {
     return fetch(request);

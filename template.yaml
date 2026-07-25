@@ -1356,6 +1356,10 @@ Resources:
             TableName: !Ref SitesTable
         - DynamoDBCrudPolicy:
             TableName: !Ref CustomDomainsTable
+        # Publishing registers a code->page route (and unpublishing removes it) so the shareable test link
+        # test.juniorbay.com/published/{short_code} resolves (plans/SALES_FUNNELS.md Phase B).
+        - DynamoDBCrudPolicy:
+            TableName: !Ref RoutesTable
         - DynamoDBReadPolicy:
             TableName: !Ref ReviewsTable
         - S3CrudPolicy:
@@ -1869,6 +1873,30 @@ Resources:
           Properties:
             RestApiId: !Ref RestApi
             Path: /routes/resolve
+            Method: OPTIONS
+
+  PagesResolveFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${ProjectPrefix}-pages-resolve-${Environment}"
+      CodeUri: src/
+      Handler: handlers.pages_resolve.handler
+      Description: Public, unauthenticated endpoint the test.juniorbay.com Cloudflare Worker calls to resolve a page short_code (+ /sale //flash-sale view) to the origin_url of its published artifact for reverse-proxying. Read-only.
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref RoutesTable
+      Events:
+        PagesResolve:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /pages/resolve
+            Method: GET
+        PagesResolveOptions:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /pages/resolve
             Method: OPTIONS
 
   ExperimentsFunction:

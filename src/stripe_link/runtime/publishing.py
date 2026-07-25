@@ -7,6 +7,7 @@ from stripe_link.domain.documents import (
     validate_offer_document,
     validate_page_document,
     validate_product_document,
+    validate_route,
     validate_site,
 )
 from stripe_link.runtime.artifacts import artifact_paths, cloudfront_path
@@ -308,6 +309,46 @@ def public_url(domain: str, key: str) -> str:
     if not domain:
         return ""
     return f"https://{domain.rstrip('/')}/{key}"
+
+
+def register_page_route(routes_repository: Any, page: dict[str, Any]) -> bool:
+    """Upsert the code->page route that lets test.juniorbay.com/published/{short_code} resolve to this page
+    (plans/SALES_FUNNELS.md Phase B). No-op without a routes repo or a short_code; idempotent on re-publish."""
+    if routes_repository is None:
+        return False
+    short_code = str(page.get("short_code") or "").strip()
+    tenant_id = str(page.get("tenant_id") or "").strip()
+    page_id = str(page.get("page_id") or "").strip()
+    if not (short_code and tenant_id and page_id):
+        return False
+    existing = routes_repository.find_by_id(short_code)
+    if existing and existing.get("target_page_id") == page_id and existing.get("tenant_id") == tenant_id:
+        return False
+    now = int(time.time())
+    document = {
+        "schema_version": "2026-05-29",
+        "document_type": "route",
+        "tenant_id": tenant_id,
+        "short_code": short_code,
+        "target_type": "page",
+        "target_page_id": page_id,
+        "created_at": int((existing or {}).get("created_at") or now),
+        "updated_at": now,
+    }
+    validate_route(document)
+    routes_repository.put(document)
+    return True
+
+
+def deregister_page_route(routes_repository: Any, page: dict[str, Any]) -> bool:
+    """Remove the code->page route so the shareable test link 404s once a page is unpublished / deleted."""
+    if routes_repository is None:
+        return False
+    short_code = str(page.get("short_code") or "").strip()
+    tenant_id = str(page.get("tenant_id") or "").strip()
+    if not (short_code and tenant_id):
+        return False
+    return bool(routes_repository.delete(tenant_id, short_code))
 
 
 def checkout_base_url_for_page(page: dict[str, Any], offer: dict[str, Any], environment: str) -> str:

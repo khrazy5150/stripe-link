@@ -1,5 +1,6 @@
 from stripe_link.common import error_response, json_response, parse_json_body, path_params, query_params, tenant_id_from_event
 from stripe_link.domain.documents import DocumentValidationError, validate_page_document
+from stripe_link.ids import generate_short_url_code
 from stripe_link.repositories.documents import RepositoryError, pages_repository
 
 
@@ -27,12 +28,29 @@ def create_page(event, repository):
     try:
         document = parse_json_body(event)
         existing = existing_page_for_document(repository, document)
+        assign_short_code(existing, document)
         validate_published_page_mutation(existing, document)
         validate_page_document(document)
         saved = repository.put(document)
         return json_response({"page": saved}, status_code=201)
     except (DocumentValidationError, ValueError, RepositoryError) as exc:
         return error_response(str(exc), code="invalid_page")
+
+
+def assign_short_code(existing: dict | None, document: dict, code_fn=generate_short_url_code) -> None:
+    """Give the page a stable snowflake short_code for its shareable test link (test.juniorbay.com/published/
+    {short_code}), assigned the FIRST time it is published and sticky across every later edit (plans/
+    SALES_FUNNELS.md Phase B). The publish stream turns this into a code->page route; here we only stamp it.
+
+    Sticky, so re-publish / unpublish keep the same URL and lifecycle_only_change stays a no-op on it.
+    """
+    inherited = str((existing or {}).get("short_code") or "").strip()
+    if inherited:
+        document.setdefault("short_code", inherited)
+        return
+    if str(document.get("status") or "") == "published" and not str(document.get("short_code") or "").strip():
+        # Snowflakes are unique by construction (time+worker+seq), so no registry collision check is needed.
+        document["short_code"] = code_fn()
 
 
 def existing_page_for_document(repository, document: dict):

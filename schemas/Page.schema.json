@@ -45,6 +45,10 @@
       "minimum": 0,
       "description": "Timestamp when status moved to published. Kept separate from updated_at for audit history and rollback UI."
     },
+    "short_code": {
+      "type": "string",
+      "description": "Stable snowflake assigned on first publish; the shareable test link is test.juniorbay.com/published/{short_code}. The publish stream registers a code->page route from it (plans/SALES_FUNNELS.md Phase B)."
+    },
       "route": {
         "type": "object",
         "additionalProperties": false,

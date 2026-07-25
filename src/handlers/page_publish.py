@@ -10,10 +10,17 @@ from stripe_link.repositories.documents import (
     reviews_repository,
     offers_repository,
     products_repository,
+    routes_repository,
     services_repository,
     sites_repository,
 )
-from stripe_link.runtime.publishing import delete_page_artifacts, detach_page_from_sites, publish_page_document
+from stripe_link.runtime.publishing import (
+    delete_page_artifacts,
+    deregister_page_route,
+    detach_page_from_sites,
+    publish_page_document,
+    register_page_route,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -55,13 +62,14 @@ def should_publish_record(record: dict[str, Any]) -> bool:
     return bool(image)
 
 
-def handler(event, context, *, offers_repo=None, products_repo=None, services_repo=None, sites_repo=None, domains_index_repo=None, reviews_repo=None, s3_client=None, cloudfront_client=None):
+def handler(event, context, *, offers_repo=None, products_repo=None, services_repo=None, sites_repo=None, domains_index_repo=None, reviews_repo=None, routes_repo=None, s3_client=None, cloudfront_client=None):
     offers_repo = offers_repo or offers_repository()
     products_repo = products_repo or products_repository()
     services_repo = services_repo or (services_repository() if os.environ.get("SERVICES_TABLE") else None)
     sites_repo = sites_repo or (sites_repository() if os.environ.get("SITES_TABLE") else None)
     domains_index_repo = domains_index_repo or (custom_domains_index_repository() if os.environ.get("CUSTOM_DOMAINS_TABLE") else None)
     reviews_repo = reviews_repo or (reviews_repository() if os.environ.get("REVIEWS_TABLE") else None)
+    routes_repo = routes_repo or (routes_repository() if os.environ.get("ROUTES_TABLE") else None)
     if s3_client is None or cloudfront_client is None:
         import boto3
 
@@ -96,6 +104,7 @@ def handler(event, context, *, offers_repo=None, products_repo=None, services_re
                 detached = detach_page_from_sites(
                     sites_repo, domains_index_repo, str(page.get("tenant_id") or ""), str(page.get("page_id") or ""),
                 )
+                deregister_page_route(routes_repo, page)  # retire the shareable test link
                 logger.info("Deleted page artifacts: %s (detached from %s site(s))", result, detached)
                 continue
 
@@ -110,6 +119,7 @@ def handler(event, context, *, offers_repo=None, products_repo=None, services_re
                     cloudfront_client=cloudfront_client,
                     pages_distribution_id=os.environ.get("PAGES_DISTRIBUTION_ID", ""),
                 )
+                deregister_page_route(routes_repo, old_page)  # unpublished → the test link 404s
                 logger.info("Deleted unpublished page artifacts: %s", result)
 
             result = publish_page_document(
@@ -131,6 +141,8 @@ def handler(event, context, *, offers_repo=None, products_repo=None, services_re
                 cloudfront_client=cloudfront_client,
                 pages_distribution_id=os.environ.get("PAGES_DISTRIBUTION_ID", ""),
             )
+            if page.get("status") == "published":
+                register_page_route(routes_repo, page)  # code->page route for test.juniorbay.com/published/{short_code}
             logger.info("Published page artifacts: %s", result)
         except Exception as exc:
             logger.exception("Failed to publish page stream record: %s", exc)

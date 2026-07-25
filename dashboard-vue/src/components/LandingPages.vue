@@ -1054,6 +1054,13 @@
             </div>
           </div>
         </header>
+        <!-- Shareable test link for the previewed view. Appears once the page is published (it then has a
+             snowflake short_code); the URL tracks the Standard/Sale/Flash-Sale toggle. -->
+        <div v-if="testShareLink" class="preview-share-link">
+          <span class="preview-share-label">Test link</span>
+          <input type="text" readonly :value="testShareLink" @focus="$event.target.select()" />
+          <button type="button" @click="copyTestShareLink">{{ testLinkCopied ? "Copied" : "Copy" }}</button>
+        </div>
         <!-- The Live Preview IS the published renderer. We POST the draft page document to
              /pages/render, which runs the same runtime/html.py render_page() that publishes the page,
              and show the returned HTML here. One JSON, one renderer, two consumers (this iframe and the
@@ -1647,6 +1654,23 @@ const draftPage = computed(() => buildPageDocument());
 const builderPageDocument = computed(() => buildBuilderPageDocument());
 const isBuilderPublished = computed(() => builder.status === "published");
 
+// The shareable test link for the currently-previewed view. Only a published page has a short_code, so the
+// link (and copy affordance) appears only once published (plans/SALES_FUNNELS.md Phase B). The view segment
+// tracks the Standard/Sale/Flash-Sale toggle.
+const TEST_PAGES_HOST = "test.juniorbay.com";
+const testShareLink = computed(() => {
+  if (!isBuilderPublished.value || !builder.short_code) return "";
+  const seg = previewContext.value === "sale" ? "/sale" : previewContext.value === "flash_sale" ? "/flash-sale" : "";
+  return `https://${TEST_PAGES_HOST}/published/${builder.short_code}${seg}`;
+});
+const testLinkCopied = ref(false);
+async function copyTestShareLink() {
+  if (!testShareLink.value || !navigator.clipboard?.writeText) return;
+  await navigator.clipboard.writeText(testShareLink.value).catch(() => {});
+  testLinkCopied.value = true;
+  setTimeout(() => { testLinkCopied.value = false; }, 1500);
+}
+
 watch(() => form.template, () => {
   if (!presetOptions.value.length) {
     form.preset = "";
@@ -1746,6 +1770,7 @@ function defaultBuilderForm() {
     pixel_id: "",
     status: "draft",
     published_at: null,
+    short_code: "",
     created_at: 0,
     revision: 1,
   };
@@ -2333,6 +2358,7 @@ function populateBuilderFromPage(page) {
     pixel_id: page.analytics?.pixel_id || "",
     status: page.status || "draft",
     published_at: page.published_at || null,
+    short_code: page.short_code || "",
     created_at: page.created_at || 0,
     revision: page.revision || 1,
   });
@@ -2390,6 +2416,9 @@ function buildBuilderPageDocument() {
     name: builder.name || `${offer?.name || "Offer"} Landing Page`,
     status: builder.status || "draft",
     published_at: builder.published_at || null,
+    // Preserve the page's sticky snowflake so re-saves keep the same shareable test link (backend also
+    // re-inherits it, but round-tripping keeps lifecycle_only_change a no-op on unpublish/edit).
+    ...(builder.short_code ? { short_code: builder.short_code } : {}),
     route: {
       slug: slugify(builder.slug || offer?.slug || builder.name || builder.page_id),
     },
@@ -2608,6 +2637,7 @@ async function saveBuilderPageWithStatus(statusOverride = "") {
     builderExistingPageId.value = saved.page_id;
     builder.status = saved.status || builder.status;
     builder.published_at = saved.published_at || builder.published_at;
+    builder.short_code = saved.short_code || builder.short_code;  // populated the moment a page is published
     builderOriginalPage.value = { ...saved };
   } catch (err) {
     error.value = err.message || "Failed to save landing page.";
