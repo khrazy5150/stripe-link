@@ -2,13 +2,30 @@
 publish stream registers a code->page route, and pages_resolve maps code (+ /sale //flash-sale view) to the
 published artifact's origin_url for the test.juniorbay.com Worker to reverse-proxy."""
 
-import json
 import unittest
 
 from handlers.pages import assign_short_code
-from handlers.pages_resolve import handler as resolve_handler
+from handlers.test_page_serve import handler as serve_handler
 from stripe_link.runtime.publishing import deregister_page_route, register_page_route
 from tests.fakes import FakeDocumentRepository
+
+
+class _FakeS3Body:
+    def __init__(self, text):
+        self._bytes = text.encode("utf-8")
+
+    def read(self):
+        return self._bytes
+
+
+class _FakeS3:
+    def __init__(self, objects):
+        self.objects = objects
+
+    def get_object(self, Bucket, Key):
+        if Key not in self.objects:
+            raise KeyError(Key)
+        return {"Body": _FakeS3Body(self.objects[Key])}
 
 
 class AssignShortCodeTests(unittest.TestCase):
@@ -58,41 +75,52 @@ class PageRouteRegistrationTests(unittest.TestCase):
         self.assertIsNone(self.repo.find_by_id("C1"))
 
 
-class PagesResolveHandlerTests(unittest.TestCase):
+class TestPageServeHandlerTests(unittest.TestCase):
     def setUp(self):
         self.repo = FakeDocumentRepository("short_code")
         self.repo.put({
             "tenant_id": "t1", "short_code": "C1", "document_type": "route",
             "target_type": "page", "target_page_id": "page_1",
         })
+        self.s3 = _FakeS3({
+            "page_1/index.html": "<html>standard view</html>",
+            "page_1/sale/index.html": "<html>sale view</html>",
+            "page_1/flash-sale/index.html": "<html>flash view</html>",
+        })
 
-    def _resolve(self, query):
-        return resolve_handler({"httpMethod": "GET", "queryStringParameters": query}, None,
-                               repository=self.repo, pages_domain="d.cloudfront.net")
+    def _serve(self, code, view=None):
+        params = {"code": code}
+        if view is not None:
+            params["view"] = view
+        return serve_handler({"httpMethod": "GET", "pathParameters": params}, None,
+                             repository=self.repo, s3_client=self.s3, pages_bucket="b")
 
-    def test_resolves_standard_view_to_base_artifact(self):
-        resp = self._resolve({"code": "C1"})
+    def test_serves_standard_view(self):
+        resp = self._serve("C1")
         self.assertEqual(resp["statusCode"], 200)
-        route = json.loads(resp["body"])["route"]
-        self.assertEqual(route["type"], "origin_url")
-        self.assertEqual(route["origin_url"], "https://d.cloudfront.net/page_1/index.html")
+        self.assertIn("standard view", resp["body"])
+        self.assertEqual(resp["headers"]["Content-Type"], "text/html; charset=utf-8")
+        self.assertIn("noindex", resp["headers"]["X-Robots-Tag"])
 
-    def test_resolves_sale_view(self):
-        route = json.loads(self._resolve({"code": "C1", "view": "sale"})["body"])["route"]
-        self.assertEqual(route["origin_url"], "https://d.cloudfront.net/page_1/sale/index.html")
+    def test_serves_sale_view(self):
+        self.assertIn("sale view", self._serve("C1", "sale")["body"])
 
-    def test_resolves_flash_view(self):
-        route = json.loads(self._resolve({"code": "C1", "view": "flash-sale"})["body"])["route"]
-        self.assertEqual(route["origin_url"], "https://d.cloudfront.net/page_1/flash-sale/index.html")
+    def test_serves_flash_view(self):
+        self.assertIn("flash view", self._serve("C1", "flash-sale")["body"])
 
     def test_unknown_code_is_404(self):
-        self.assertEqual(self._resolve({"code": "nope"})["statusCode"], 404)
+        self.assertEqual(self._serve("nope")["statusCode"], 404)
 
     def test_unknown_view_is_404(self):
-        self.assertEqual(self._resolve({"code": "C1", "view": "upsell"})["statusCode"], 404)
+        self.assertEqual(self._serve("C1", "upsell")["statusCode"], 404)
 
-    def test_missing_code_is_400(self):
-        self.assertEqual(self._resolve({})["statusCode"], 400)
+    def test_missing_artifact_is_404(self):
+        # Valid code, but this page has no sale artifact (e.g. no sale price) -> 404, not a 500.
+        self.repo.put({
+            "tenant_id": "t1", "short_code": "C2", "document_type": "route",
+            "target_type": "page", "target_page_id": "page_2",
+        })
+        self.assertEqual(self._serve("C2", "sale")["statusCode"], 404)
 
 
 if __name__ == "__main__":

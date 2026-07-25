@@ -1875,29 +1875,34 @@ Resources:
             Path: /routes/resolve
             Method: OPTIONS
 
-  PagesResolveFunction:
+  TestPageServeFunction:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: !Sub "${ProjectPrefix}-pages-resolve-${Environment}"
+      FunctionName: !Sub "${ProjectPrefix}-test-page-serve-${Environment}"
       CodeUri: src/
-      Handler: handlers.pages_resolve.handler
-      Description: Public, unauthenticated endpoint the test.juniorbay.com Cloudflare Worker calls to resolve a page short_code (+ /sale //flash-sale view) to the origin_url of its published artifact for reverse-proxying. Read-only.
+      Handler: handlers.test_page_serve.handler
+      Description: Public, unauthenticated endpoint that serves a published page (and its /sale //flash-sale views) by its snowflake short_code for the test.juniorbay.com host. Resolves code->page via the routes table and returns the S3 artifact HTML. Read-only, noindex.
+      Environment:
+        Variables:
+          PAGES_BUCKET: !Ref PagesBucket
       Policies:
         - DynamoDBReadPolicy:
             TableName: !Ref RoutesTable
+        - S3ReadPolicy:
+            BucketName: !Ref PagesBucket
       Events:
-        PagesResolve:
+        ServePage:
           Type: Api
           Properties:
             RestApiId: !Ref RestApi
-            Path: /pages/resolve
+            Path: /published/{code}
             Method: GET
-        PagesResolveOptions:
+        ServePageView:
           Type: Api
           Properties:
             RestApiId: !Ref RestApi
-            Path: /pages/resolve
-            Method: OPTIONS
+            Path: /published/{code}/{view}
+            Method: GET
 
   ExperimentsFunction:
     Type: AWS::Serverless::Function
