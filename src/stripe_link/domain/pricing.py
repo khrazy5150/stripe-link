@@ -15,7 +15,42 @@ _LISTICLE_EXCLUDED_CONTEXTS = {"upsell", "downsell", "order_bump", "flash_sale"}
 _LISTICLE_CONTEXT_RANK = {"standard": 0, "sale": 1}
 
 
+def _context_paired_price(
+    product: dict[str, Any], base_price: dict[str, Any], context: str
+) -> dict[str, Any] | None:
+    """The product's price in `context` (sale/flash_sale) paired to `base_price` by matching quantity
+    (plans/SALES_FUNNELS.md — "pair by quantity + context"). None when the product has no such tier."""
+    if not base_price:
+        return None
+    qty = int(base_price.get("quantity") or 1)
+    for price in product.get("prices") or []:
+        if str(price.get("context") or "standard") == context and int(price.get("quantity") or 1) == qty:
+            return price
+    return None
+
+
 def single_unit_price(
+    product: dict[str, Any],
+    allowed_price_ids: Iterable[str] | None = None,
+    default_price_id: str | None = None,
+    context: str = "standard",
+) -> dict[str, Any]:
+    """The single-unit price for a listicle slide, in the active pricing `context`.
+
+    Resolves the standard single-unit price (see _base_single_unit_price), then on a /sale or /flash-sale
+    view (context in {sale, flash_sale}) swaps to the paired context price of the SAME quantity tier when the
+    product carries one, falling back to standard otherwise. Standard views and products with no context
+    price are unchanged, so listicles keep ignoring funnel contexts by default (plans/SALES_FUNNELS.md P1).
+    """
+    base = _base_single_unit_price(product, allowed_price_ids, default_price_id)
+    if str(context or "standard") in ("sale", "flash_sale"):
+        paired = _context_paired_price(product, base, str(context))
+        if paired:
+            return paired
+    return base
+
+
+def _base_single_unit_price(
     product: dict[str, Any],
     allowed_price_ids: Iterable[str] | None = None,
     default_price_id: str | None = None,
@@ -79,6 +114,7 @@ def expand_offer(
     offer: dict[str, Any],
     products_by_id: dict[str, dict[str, Any]],
     services_by_id: dict[str, dict[str, Any]] | None = None,
+    context: str = "standard",
 ) -> dict[str, Any]:
     """Expand-on-read: turn each offer item's product_id/service_id into a self-contained snapshot the
     landing-page renderers consume WITHOUT further lookups. Storage stays normalized — this is the single
@@ -95,7 +131,7 @@ def expand_offer(
             # The item's designated single price + the prices it exposes (the offer is the contract).
             item_default_price_id = str(item.get("default_price_id") or item.get("price_id") or product.get("default_price_id") or "")
             selectable_ids = [o.get("price_id") for o in item.get("selectable_prices") or []]
-            single = single_unit_price(product, selectable_ids or ([item_default_price_id] if item_default_price_id else None), item_default_price_id)
+            single = single_unit_price(product, selectable_ids or ([item_default_price_id] if item_default_price_id else None), item_default_price_id, context)
             selectable = []
             for option in item.get("selectable_prices") or []:
                 price = next((p for p in (product.get("prices") or []) if p.get("price_id") == option.get("price_id")), None)

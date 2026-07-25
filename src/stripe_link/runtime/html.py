@@ -478,6 +478,7 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     "    .sl-regular-price{color:var(--sl-price-regular);text-decoration:line-through;font-size:1.4rem}",
     "    .sl-price-option[data-expired='true'] .sl-regular-price,.sl-price-option[data-expired='true'] .sl-savings{display:none}",
     "    .sl-badge{display:inline-flex;width:max-content;font-family:var(--sl-font-accent);font-size:1.1rem;font-weight:700;color:var(--sl-featured-badge-text);background:var(--sl-featured-badge-bg);padding:0.4rem 1rem;border-radius:999px}",
+    "    .sl-badge:empty{display:none}",
     "    .sl-savings{font-family:var(--sl-font-accent);font-size:1.1rem;font-weight:600;color:var(--sl-savings-text);background:var(--sl-savings-bg);border:1px solid var(--sl-savings-border);border-radius:1.2rem;padding:0.4rem 1rem}",
     "    .sl-content-blocks{display:grid;gap:1rem}",
     "    .sl-faq{display:grid;gap:1.2rem}",
@@ -1398,7 +1399,10 @@ def render_conversion_data(
     """Serialize the OfferView's targets into one JSON payload the conversion island reads. Every per-target
     value the page can show (headline/subheadline/image/price/compare/discount) lives here — the island
     never re-fetches or scrapes the DOM. `<` is escaped so the JSON can't close the script early."""
-    offer_view = expand_offer(offer, products_by_id, services_by_id)
+    # On a /sale //flash-sale view every target's single_unit_price swaps to its paired context price, so the
+    # conversion island binds the discounted amount too (plans/SALES_FUNNELS.md P1 — listicle parity).
+    active_ctx = str(_RENDER_STATE.get("active_price_context") or "standard")
+    offer_view = expand_offer(offer, products_by_id, services_by_id, active_ctx)
     targets = []
     for target in offer_view.get("items", []):
         product = target.get("product") or {}
@@ -1407,6 +1411,7 @@ def render_conversion_data(
         compare = int(price.get("compare_at_amount") or 0)
         discount = round((compare - amount) / compare * 100) if compare > amount > 0 else 0
         badges = [str(b.get("label") if isinstance(b, dict) else b) for b in (product.get("badges") or []) if b]
+        price_ctx = str(price.get("context") or "standard")
         targets.append({
             "product_id": product.get("product_id", ""),
             "price_id": price.get("price_id", ""),
@@ -1415,6 +1420,7 @@ def render_conversion_data(
             "hero_image": product.get("hero_image", ""),
             "gallery": [str(url) for url in (product.get("gallery") or []) if url],
             "badges": badges,
+            "sale_badge": _context_badge_label(price_ctx),
             "amount": amount,
             "compare_at": compare,
             "discount": discount,
@@ -1964,7 +1970,9 @@ def listicle_slides(
     products_by_id: dict[str, dict[str, Any]],
     services_by_id: dict[str, dict[str, Any]],
 ) -> list[dict[str, Any]]:
-    """One slide per offer item, priced at the SINGLE-UNIT price (bundles/funnels ignored)."""
+    """One slide per offer item, priced at the SINGLE-UNIT price (bundles/funnels ignored). On a /sale or
+    /flash-sale view the slide swaps to the item's paired context price and carries the matching badge."""
+    active_ctx = str(_RENDER_STATE.get("active_price_context") or "standard")
     slides = []
     for item in offer.get("items", []):
         product_id = str(item.get("product_id") or "")
@@ -1975,7 +1983,7 @@ def listicle_slides(
             # offer's selection) so listicle slides match the builder preview and the conversion payload.
             item_default_price_id = str(item.get("default_price_id") or item.get("price_id") or product.get("default_price_id") or "")
             selectable_ids = [o.get("price_id") for o in item.get("selectable_prices") or []]
-            price = single_unit_price(product, selectable_ids or ([item_default_price_id] if item_default_price_id else None), item_default_price_id)
+            price = single_unit_price(product, selectable_ids or ([item_default_price_id] if item_default_price_id else None), item_default_price_id, active_ctx)
             if not price:
                 continue
             compare = int(price.get("compare_at_unit_amount") or price.get("compare_at_amount") or 0)
@@ -1984,7 +1992,7 @@ def listicle_slides(
                 "name": str(product.get("name") or ""), "description": str(product.get("description") or ""),
                 "image": str((product.get("images") or [""])[0] or ""),
                 "amount": int(price.get("unit_amount") or 0), "currency": str(price.get("currency") or "usd"),
-                "compare_at": compare,
+                "compare_at": compare, "sale_badge": _context_badge_label(str(price.get("context") or "standard")),
             })
         elif service_id and service_id in services_by_id:
             service = services_by_id[service_id]
@@ -2037,6 +2045,7 @@ def render_listicle_carousel(
         f"            <span class=\"sl-price-amount\" data-conversion-bind=\"price\">{escape(format_money(first['amount'], first['currency']))}</span>",
         f"            <span class=\"sl-regular-price\" data-conversion-bind=\"compare_at\">{escape(format_money(first['compare_at'], first['currency'])) if first['compare_at'] > first['amount'] else ''}</span>",
         f"            <span class=\"sl-savings\" data-conversion-bind=\"savings\">{('Save ' + str(first_discount) + '%') if first_discount else ''}</span>",
+        f"            <span class=\"sl-badge sl-listicle-badge\" data-conversion-bind=\"sale_badge\">{escape(str(first.get('sale_badge') or ''))}</span>",
         "          </div>",
         "        </div>",
         "      </article>",
@@ -2146,6 +2155,16 @@ def _offer_has_price_context(offer: dict[str, Any], products_by_id: dict[str, di
             if str(price.get("context") or "standard") == context:
                 return True
     return False
+
+
+def _context_badge_label(context: str) -> str:
+    """The badge shown on a card whose price is in a sale/flash context. Empty for standard."""
+    ctx = str(context or "standard")
+    if ctx == "sale":
+        return "Sale"
+    if ctx == "flash_sale":
+        return "\U0001F525 Flash Sale"
+    return ""
 
 
 def paired_context_price(product: dict[str, Any], standard_price: dict[str, Any], context: str) -> dict[str, Any] | None:
@@ -4151,6 +4170,7 @@ def render_page_interactions_script(page: dict[str, Any]) -> str:
         "          compare_at: (el, t) => { el.textContent = (Number(t.compare_at) > Number(t.amount)) ? fmt(t.compare_at, t.currency) : ''; },",
         "          discount: (el, t) => { el.textContent = (Number(t.discount) > 0) ? ('-' + t.discount + '%') : ''; },",
         "          savings: (el, t) => { el.textContent = (Number(t.discount) > 0) ? ('Save ' + t.discount + '%') : ''; },",
+        "          sale_badge: (el, t) => { el.textContent = t.sale_badge || ''; },",
         "          hero_image: (el, t) => { if (t.hero_image) el.setAttribute('src', t.hero_image); },",
         "        };",
         "        const applyTarget = (index) => {",

@@ -90,6 +90,41 @@ class SaleContextRenderTests(unittest.TestCase):
         self.assertNotIn("data-standard-price-id=", html)
 
 
+class ListicleSaleContextRenderTests(unittest.TestCase):
+    """A listicle offer's cards + conversion payload must swap to the sale/flash price and show the badge on
+    the /sale //flash-sale views, at parity with the single/bundle selector (plans/SALES_FUNNELS.md P1)."""
+
+    def setUp(self):
+        self.offer = load("offer-creatine-standard.json")
+        self.offer["offer_type"] = "listicle"
+        self.page = load("page-creatine-standard.json")
+
+    def _render(self, product, price_context="standard"):
+        return render_page(
+            self.page, self.offer, {product["product_id"]: product},
+            api_base_url="https://api.x", canonical_url="https://x/p", price_context=price_context,
+        )
+
+    def test_listicle_renders_carousel(self):
+        html = self._render(_product_with_sales(sale_qtys=(1,)), "standard")
+        self.assertIn("data-listicle", html)  # confirm we're exercising the listicle path
+
+    def test_listicle_sale_view_swaps_price_and_shows_badge(self):
+        html = self._render(_product_with_sales(sale_qtys=(1,), context="sale"), "sale")
+        self.assertIn("price_sale_1", html)   # conversion payload binds the sale price
+        self.assertIn(">Sale<", html)         # card badge
+
+    def test_listicle_flash_view_uses_flash_price_and_fire_badge(self):
+        html = self._render(_product_with_sales(sale_qtys=(1,), context="flash_sale"), "flash_sale")
+        self.assertIn("price_flash_sale_1", html)
+        self.assertIn("\U0001F525 Flash Sale", html)
+
+    def test_listicle_standard_view_has_no_context_swap(self):
+        html = self._render(_product_with_sales(sale_qtys=(1,), context="sale"), "standard")
+        self.assertNotIn("price_sale_1", html)
+        self.assertNotIn(">Sale<", html)
+
+
 class CheckoutContextAcceptanceTests(unittest.TestCase):
     def _item_and_product(self, price_context):
         product = {
