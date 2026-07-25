@@ -476,6 +476,32 @@ class PageRenderTests(unittest.TestCase):
         body = json.loads(response["body"])
         self.assertIn("<!doctype html>", body["html"])
 
+    def test_render_handler_accepts_valid_price_context(self):
+        response = handler({
+            "body": json.dumps({
+                "page": self.page,
+                "offer": self.offer,
+                "products": [self.product],
+                "price_context": "sale",
+            })
+        }, None)
+
+        self.assertEqual(response["statusCode"], 200)
+        self.assertIn("<!doctype html>", json.loads(response["body"])["html"])
+
+    def test_render_handler_rejects_unknown_price_context(self):
+        response = handler({
+            "body": json.dumps({
+                "page": self.page,
+                "offer": self.offer,
+                "products": [self.product],
+                "price_context": "bogus",
+            })
+        }, None)
+
+        self.assertEqual(response["statusCode"], 400)
+        self.assertEqual(json.loads(response["body"])["error"], "render_error")
+
     def test_render_handler_rejects_mismatched_page_offer(self):
         offer = dict(self.offer)
         offer["offer_id"] = "offer_other"

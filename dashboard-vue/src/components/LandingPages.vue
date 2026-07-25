@@ -1039,6 +1039,15 @@
             <button v-if="builderFormHidden" class="secondary-action compact" type="button" @click="builderFormHidden = false">
               Show Form
             </button>
+            <div v-if="previewContextOptions.length > 1" class="preview-device-controls" aria-label="Preview pricing view">
+              <button
+                v-for="opt in previewContextOptions"
+                :key="opt.value"
+                type="button"
+                :class="{ active: previewContext === opt.value }"
+                @click="previewContext = opt.value"
+              >{{ opt.label }}</button>
+            </div>
             <div class="preview-device-controls" aria-label="Preview device">
               <button type="button" :class="{ active: previewDevice === 'desktop' }" @click="previewDevice = 'desktop'">Desktop</button>
               <button type="button" :class="{ active: previewDevice === 'mobile' }" @click="previewDevice = 'mobile'">Mobile</button>
@@ -1452,6 +1461,16 @@ const structuredDataWarnings = ref([]);
 // section, so shown always, not inside the Discoverability drawer.
 const pageHealthWarnings = ref([]);
 const previewFrame = ref(null);
+// Which pricing context the Live Preview renders. Lets tenants proof the /sale and /flash-sale views
+// without a custom domain (the pretty slugs only exist via the published resolver). Only surfaced when the
+// page actually has that context enabled.
+const previewContext = ref("standard");
+const previewContextOptions = computed(() => {
+  const opts = [{ value: "standard", label: "Standard" }];
+  if (builder.sale?.enabled) opts.push({ value: "sale", label: "Sale" });
+  if (builder.flash_sale?.enabled) opts.push({ value: "flash_sale", label: "Flash Sale" });
+  return opts;
+});
 let previewRenderTimer = null;
 let previewRenderSeq = 0;
 // Swapping srcdoc reloads the iframe, which would bounce the tenant back to the top of the page on every
@@ -1531,6 +1550,8 @@ async function renderPreview() {
         // The page's canonical public URL so the preview shows the same canonical/OG the published page emits
         // (plans/ON_PAGE_SEO_REQUIREMENTS.md SEO-01; interim published-artifact URL).
         canonical_url: artifactPageUrl({ page_id: page.page_id }),
+        // Proof the /sale or /flash-sale context view inline (no custom domain needed).
+        price_context: previewContext.value,
       },
     });
     // Ignore a stale response that lands after a newer edit.
@@ -1557,7 +1578,9 @@ watch(
     const doc = buildBuilderPageDocument();
     if (!doc) return "";
     const { created_at, updated_at, ...stable } = doc;
-    return JSON.stringify([stable, builderOffer.value, builderOfferProducts.value]);
+    // If the chosen preview context got toggled off, fall back to Standard before rendering.
+    if (!previewContextOptions.value.some((o) => o.value === previewContext.value)) previewContext.value = "standard";
+    return JSON.stringify([stable, builderOffer.value, builderOfferProducts.value, previewContext.value]);
   },
   () => {
     clearTimeout(previewRenderTimer);

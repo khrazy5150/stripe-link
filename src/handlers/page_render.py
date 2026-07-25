@@ -33,6 +33,12 @@ def handler(event, context, *, sites_repo=None, reviews_repo=None):
         checkout_url = body.get("checkout_url")
         api_base_url = body.get("api_base_url") or ""
         canonical_url = body.get("canonical_url") or ""
+        # Preview-only: render the /sale or /flash-sale context view so tenants can proof the discounted
+        # variant without a custom domain (the pretty slugs only exist via the published resolver). The
+        # renderer falls back to Standard when the offer has no such price (plans/SALES_FUNNELS.md P1).
+        price_context = body.get("price_context") or "standard"
+        if price_context not in ("standard", "sale", "flash_sale"):
+            return error_response("Field 'price_context' must be one of standard, sale, flash_sale.", code="render_error")
         if not isinstance(page, dict):
             return error_response("Field 'page' must be an object.")
         # An offer-less page (storefront / category / profile) has no primary offer, so 'offer' is optional
@@ -104,6 +110,7 @@ def handler(event, context, *, sites_repo=None, reviews_repo=None):
             page, offer, products_by_id, selected_prices, checkout_url, api_base_url,
             services_by_id=services_by_id, offers_by_id=offers_by_id, canonical_url=canonical_url,
             site=site, page_type=site_page_type(site, str(page.get("page_id") or "")), reviews=reviews,
+            price_context=price_context,
         )
         # Page health, alongside the render: what would keep this page's structured data from earning a rich
         # result. Advisory only — the builder surfaces it, nothing blocks on it.
