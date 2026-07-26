@@ -34,10 +34,10 @@ class AssignShortCodeTests(unittest.TestCase):
         assign_short_code(None, doc, code_fn=lambda: "CODE0000001")
         self.assertEqual(doc["short_code"], "CODE0000001")
 
-    def test_no_code_for_a_draft(self):
+    def test_assigns_on_first_save_even_for_a_draft(self):
         doc = {"status": "draft"}
         assign_short_code(None, doc, code_fn=lambda: "CODE0000001")
-        self.assertNotIn("short_code", doc)
+        self.assertEqual(doc["short_code"], "CODE0000001")  # drafts get a code too (preview link)
 
     def test_sticky_when_editing_a_page_that_has_one(self):
         doc = {"status": "draft"}  # an unpublish / edit round-trip that dropped the code
@@ -83,30 +83,44 @@ class TestPageServeHandlerTests(unittest.TestCase):
             "target_type": "page", "target_page_id": "page_1",
         })
         self.s3 = _FakeS3({
-            "page_1/index.html": "<html>standard view</html>",
-            "page_1/sale/index.html": "<html>sale view</html>",
-            "page_1/flash-sale/index.html": "<html>flash view</html>",
+            # published artifacts (pages bucket)
+            "page_1/index.html": "<html>published standard</html>",
+            "page_1/sale/index.html": "<html>published sale</html>",
+            "page_1/flash-sale/index.html": "<html>published flash</html>",
+            # preview artifacts (preview bucket)
+            "preview/t1/page_1/index.html": "<html>preview standard</html>",
+            "preview/t1/page_1/sale/index.html": "<html>preview sale</html>",
+            "preview/t1/page_1/flash-sale/index.html": "<html>preview flash</html>",
         })
 
-    def _serve(self, code, view=None):
+    def _serve(self, code, view=None, mode="published"):
         params = {"code": code}
+        resource = "/" + mode + "/{code}"
         if view is not None:
             params["view"] = view
-        return serve_handler({"httpMethod": "GET", "pathParameters": params}, None,
-                             repository=self.repo, s3_client=self.s3, pages_bucket="b")
+            resource += "/{view}"
+        return serve_handler({"httpMethod": "GET", "resource": resource, "pathParameters": params}, None,
+                             repository=self.repo, s3_client=self.s3, pages_bucket="b", preview_bucket="pv")
 
-    def test_serves_standard_view(self):
+    def test_serves_published_standard(self):
         resp = self._serve("C1")
         self.assertEqual(resp["statusCode"], 200)
-        self.assertIn("standard view", resp["body"])
+        self.assertIn("published standard", resp["body"])
         self.assertEqual(resp["headers"]["Content-Type"], "text/html; charset=utf-8")
         self.assertIn("noindex", resp["headers"]["X-Robots-Tag"])
 
-    def test_serves_sale_view(self):
-        self.assertIn("sale view", self._serve("C1", "sale")["body"])
+    def test_serves_published_sale_and_flash(self):
+        self.assertIn("published sale", self._serve("C1", "sale")["body"])
+        self.assertIn("published flash", self._serve("C1", "flash-sale")["body"])
 
-    def test_serves_flash_view(self):
-        self.assertIn("flash view", self._serve("C1", "flash-sale")["body"])
+    def test_serves_preview_standard(self):
+        resp = self._serve("C1", mode="preview")
+        self.assertEqual(resp["statusCode"], 200)
+        self.assertIn("preview standard", resp["body"])
+
+    def test_serves_preview_sale_and_flash(self):
+        self.assertIn("preview sale", self._serve("C1", "sale", mode="preview")["body"])
+        self.assertIn("preview flash", self._serve("C1", "flash-sale", mode="preview")["body"])
 
     def test_unknown_code_is_404(self):
         self.assertEqual(self._serve("nope")["statusCode"], 404)

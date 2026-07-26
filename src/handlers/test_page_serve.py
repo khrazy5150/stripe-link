@@ -31,19 +31,24 @@ def _html_response(body, status_code=200):
     }
 
 
-def handler(event, context, *, repository=None, s3_client=None, pages_bucket=None):
-    """Public endpoint that serves a published page (and its /sale //flash-sale views) by its snowflake
-    short_code, for the test.juniorbay.com host (plans/SALES_FUNNELS.md Phase B). Resolves the code to a page
-    via the routes table, reads that page's published artifact from S3, and returns the HTML verbatim so the
-    visitor's URL stays test.juniorbay.com/published/{short_code}. Read-only, unauthenticated; noindex.
+def handler(event, context, *, repository=None, s3_client=None, pages_bucket=None, preview_bucket=None):
+    """Public endpoint that serves a test page (and its /sale //flash-sale views) by its snowflake short_code,
+    for the test.juniorbay.com host (plans/SALES_FUNNELS.md Phase B). Resolves the code to a page via the
+    routes table, reads that page's artifact from S3, and returns the HTML verbatim so the visitor's URL stays
+    test.juniorbay.com/{preview|published}/{short_code}. Read-only, unauthenticated; noindex.
 
-    Routes: GET /published/{code} and GET /published/{code}/{view} (view = sale | flash-sale).
+    Routes:
+      GET /preview/{code}[/{view}]   -> the SAVED (draft or published) render, from the preview bucket
+      GET /published/{code}[/{view}] -> the PUBLISHED render, from the pages bucket (404 until published)
+    (view = sale | flash-sale.) A custom domain is live-only, so this is the canonical way to view test pages.
     """
     method = (event or {}).get("httpMethod", "GET").upper()
     if method == "OPTIONS":
         return _html_response("", 200)
     if method != "GET":
         return _html_response(_NOT_FOUND_HTML, 404)
+
+    is_preview = str((event or {}).get("resource") or (event or {}).get("path") or "").startswith("/preview")
 
     params = path_params(event)
     code = str(params.get("code") or "").strip()
@@ -64,8 +69,13 @@ def handler(event, context, *, repository=None, s3_client=None, pages_bucket=Non
     if not page_id or not tenant_id:
         return _html_response(_NOT_FOUND_HTML, 404)
 
-    key = artifact_paths(tenant_id, page_id, context=_VIEW_CONTEXT[view])["published"]
-    bucket = pages_bucket if pages_bucket is not None else os.environ.get("PAGES_BUCKET", "")
+    paths = artifact_paths(tenant_id, page_id, context=_VIEW_CONTEXT[view])
+    if is_preview:
+        key = paths["preview"]
+        bucket = preview_bucket if preview_bucket is not None else os.environ.get("PAGES_PREVIEW_BUCKET", "")
+    else:
+        key = paths["published"]
+        bucket = pages_bucket if pages_bucket is not None else os.environ.get("PAGES_BUCKET", "")
     if not bucket:
         return _html_response(_NOT_FOUND_HTML, 404)
     if s3_client is None:

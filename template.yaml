@@ -1881,15 +1881,18 @@ Resources:
       FunctionName: !Sub "${ProjectPrefix}-test-page-serve-${Environment}"
       CodeUri: src/
       Handler: handlers.test_page_serve.handler
-      Description: Public, unauthenticated endpoint that serves a published page (and its /sale //flash-sale views) by its snowflake short_code for the test.juniorbay.com host. Resolves code->page via the routes table and returns the S3 artifact HTML. Read-only, noindex.
+      Description: Public, unauthenticated endpoint that serves a test page (and its /sale //flash-sale views) by its snowflake short_code for the test.juniorbay.com host. /preview serves the saved render from the preview bucket; /published serves the published render from the pages bucket. Resolves code->page via the routes table. Read-only, noindex.
       Environment:
         Variables:
           PAGES_BUCKET: !Ref PagesBucket
+          PAGES_PREVIEW_BUCKET: !Ref PagesPreviewBucket
       Policies:
         - DynamoDBReadPolicy:
             TableName: !Ref RoutesTable
         - S3ReadPolicy:
             BucketName: !Ref PagesBucket
+        - S3ReadPolicy:
+            BucketName: !Ref PagesPreviewBucket
       Events:
         ServePage:
           Type: Api
@@ -1902,6 +1905,18 @@ Resources:
           Properties:
             RestApiId: !Ref RestApi
             Path: /published/{code}/{view}
+            Method: GET
+        ServePreview:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /preview/{code}
+            Method: GET
+        ServePreviewView:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /preview/{code}/{view}
             Method: GET
 
   ExperimentsFunction:

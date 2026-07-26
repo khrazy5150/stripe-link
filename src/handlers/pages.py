@@ -38,9 +38,11 @@ def create_page(event, repository):
 
 
 def assign_short_code(existing: dict | None, document: dict, code_fn=generate_short_url_code) -> None:
-    """Give the page a stable snowflake short_code for its shareable test link (test.juniorbay.com/published/
-    {short_code}), assigned the FIRST time it is published and sticky across every later edit (plans/
-    SALES_FUNNELS.md Phase B). The publish stream turns this into a code->page route; here we only stamp it.
+    """Give the page a stable snowflake short_code for its shareable test links, assigned the FIRST time it is
+    SAVED (any status) and sticky across every later edit (plans/SALES_FUNNELS.md Phase B). The code keys both
+    test.juniorbay.com/preview/{code} (draft) and /published/{code} (published); the publish stream turns it
+    into a code->page route. Assigning on save (not just publish) means a never-published draft already has a
+    working preview link.
 
     Sticky, so re-publish / unpublish keep the same URL and lifecycle_only_change stays a no-op on it.
     """
@@ -48,7 +50,7 @@ def assign_short_code(existing: dict | None, document: dict, code_fn=generate_sh
     if inherited:
         document.setdefault("short_code", inherited)
         return
-    if str(document.get("status") or "") == "published" and not str(document.get("short_code") or "").strip():
+    if not str(document.get("short_code") or "").strip():
         # Snowflakes are unique by construction (time+worker+seq), so no registry collision check is needed.
         document["short_code"] = code_fn()
 
@@ -71,7 +73,9 @@ def validate_published_page_mutation(existing: dict | None, incoming: dict) -> N
 
 
 def lifecycle_only_change(existing: dict, incoming: dict) -> bool:
-    ignored = {"status", "published_at", "archived_at", "updated_at", "PK", "SK", "GSI1PK", "GSI1SK"}
+    # short_code is a system-assigned sticky field (the shareable-link id), not user content, so a
+    # publish->draft flip that only differs by it still counts as lifecycle-only.
+    ignored = {"status", "published_at", "archived_at", "updated_at", "short_code", "PK", "SK", "GSI1PK", "GSI1SK"}
     return strip_lifecycle_fields(existing, ignored) == strip_lifecycle_fields(incoming, ignored)
 
 

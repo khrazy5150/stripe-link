@@ -119,7 +119,9 @@ def handler(event, context, *, offers_repo=None, products_repo=None, services_re
                     cloudfront_client=cloudfront_client,
                     pages_distribution_id=os.environ.get("PAGES_DISTRIBUTION_ID", ""),
                 )
-                deregister_page_route(routes_repo, old_page)  # unpublished → the test link 404s
+                # Keep the code->page route on unpublish: the page is now a draft, so its
+                # test.juniorbay.com/preview/{code} link stays live; /published/{code} 404s naturally once the
+                # published artifact above is deleted. The route is retired only on archive/delete.
                 logger.info("Deleted unpublished page artifacts: %s", result)
 
             result = publish_page_document(
@@ -141,8 +143,9 @@ def handler(event, context, *, offers_repo=None, products_repo=None, services_re
                 cloudfront_client=cloudfront_client,
                 pages_distribution_id=os.environ.get("PAGES_DISTRIBUTION_ID", ""),
             )
-            if page.get("status") == "published":
-                register_page_route(routes_repo, page)  # code->page route for test.juniorbay.com/published/{short_code}
+            # Register the code->page route for every saved (non-archived) page, draft or published, so both
+            # test.juniorbay.com/preview/{code} and /published/{code} resolve. Idempotent; no-op without a code.
+            register_page_route(routes_repo, page)
             logger.info("Published page artifacts: %s", result)
         except Exception as exc:
             logger.exception("Failed to publish page stream record: %s", exc)

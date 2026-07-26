@@ -619,16 +619,25 @@ def publish_page_document(
             "url": target["url"],
         })
 
-    # Sale / Flash-Sale context views (plans/SALES_FUNNELS.md P1c): publish the base page rendered in each
-    # enabled context as a sibling artifact — always noindex (it is duplicate content of "/"). On a verified
-    # custom domain root page, attach the reserved /sale //flash-sale slugs so the resolver routes them.
-    if page.get("status") == "published" and pages_bucket:
-        for ctx in context_view_contexts(page):
-            ctx_html = render_page(
-                page, offer, products_by_id, checkout_url=checkout, api_base_url=api_base_url,
-                services_by_id=services_by_id, offers_by_id=offers_by_id, canonical_url=page_canonical,
-                robots=NOINDEX_ROBOTS, site=site, page_type=page_type, reviews=page_reviews, price_context=ctx,
+    # Sale / Flash-Sale context views (plans/SALES_FUNNELS.md P1c): render each enabled context once and write
+    # it as a sibling artifact — always noindex (it is duplicate content of "/"). The PREVIEW context artifact
+    # is written on every save so test.juniorbay.com/preview/{code}/sale works for drafts too (Phase B); the
+    # PUBLISHED context artifact is written only when the page is published. On a verified custom domain root
+    # page, attach the reserved /sale //flash-sale slugs so the resolver routes them.
+    for ctx in context_view_contexts(page):
+        ctx_html = render_page(
+            page, offer, products_by_id, checkout_url=checkout, api_base_url=api_base_url,
+            services_by_id=services_by_id, offers_by_id=offers_by_id, canonical_url=page_canonical,
+            robots=NOINDEX_ROBOTS, site=site, page_type=page_type, reviews=page_reviews, price_context=ctx,
+        )
+        if preview_bucket:
+            pv_key = artifact_paths(tenant_id, page_id, context=ctx)["preview"]
+            s3_client.put_object(
+                Bucket=preview_bucket, Key=pv_key, Body=ctx_html.encode("utf-8"),
+                ContentType="text/html; charset=utf-8", CacheControl="no-cache, no-store, must-revalidate",
             )
+            artifacts.append({"kind": f"preview:{ctx}", "bucket": preview_bucket, "key": pv_key, "url": public_url(preview_domain, pv_key)})
+        if page.get("status") == "published" and pages_bucket:
             ctx_key = artifact_paths(tenant_id, page_id, context=ctx)["published"]
             s3_client.put_object(
                 Bucket=pages_bucket, Key=ctx_key, Body=ctx_html.encode("utf-8"),

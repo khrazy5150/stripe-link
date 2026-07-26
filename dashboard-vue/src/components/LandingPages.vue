@@ -3487,7 +3487,13 @@ function previewArtifactPageUrl(page) {
 }
 
 function pageUrl(page) {
-  // Published + on a verified custom domain -> the real public URL; otherwise the platform artifact / preview.
+  // In TEST, the platform test viewer is the canonical way to see a page: custom domains are live-only, so a
+  // Site URL won't resolve here (plans/SALES_FUNNELS.md Phase B). Draft -> /preview, published -> /published,
+  // keyed by the page's snowflake short_code. Live env keeps the real public URL / platform artifact.
+  if (getApiEnvironment() === "test" && page.short_code) {
+    const seg = page.status === "published" ? "published" : "preview";
+    return `https://${TEST_PAGES_HOST}/${seg}/${encodeURIComponent(page.short_code)}`;
+  }
   if (page.status === "published") return sitePublicUrl(page) || artifactPageUrl(page);
   return previewArtifactPageUrl(page);
 }
