@@ -1881,7 +1881,7 @@ Resources:
       FunctionName: !Sub "${ProjectPrefix}-test-page-serve-${Environment}"
       CodeUri: src/
       Handler: handlers.test_page_serve.handler
-      Description: Public, unauthenticated endpoint that serves a test page (and its /sale //flash-sale views) by its snowflake short_code for the test.juniorbay.com host. /preview serves the saved render from the preview bucket; /published serves the published render from the pages bucket. Resolves code->page via the routes table. Read-only, noindex.
+      Description: Public endpoint serving a test page (+ /sale //flash-sale views) by short_code for test.juniorbay.com. /preview reads the preview bucket, /published reads the pages bucket. Resolves code to a page via routes. Read-only, noindex.
       Environment:
         Variables:
           PAGES_BUCKET: !Ref PagesBucket
