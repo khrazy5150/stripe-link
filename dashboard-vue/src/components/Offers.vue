@@ -646,8 +646,10 @@ const selectedProducts = computed(() => activeProducts.value.filter((product) =>
 function orderBumpPrice(product) {
   return (product.prices || []).find((price) => (price.context || "standard") === "order_bump") || null;
 }
+// Any product with an order_bump-context price is eligible — including the offer's own item (its order_bump
+// price is distinct from the item's standard price, e.g. "add another box for $12").
 const orderBumpCandidates = computed(() =>
-  activeProducts.value.filter((product) => orderBumpPrice(product) && !selectedProductIds.value.includes(productId(product))));
+  activeProducts.value.filter((product) => orderBumpPrice(product)));
 function orderBumpSynced(product) {
   return Boolean(orderBumpPrice(product)?.stripe_price_id);
 }

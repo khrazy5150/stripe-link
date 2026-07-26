@@ -84,6 +84,14 @@ def handler(
             return error_response("Offer not found.", status_code=404, code="not_found")
 
         products_by_id = load_offer_products(tenant_id, offer, products_repo)
+        # Order bumps (offer.funnel.order_bumps) reference products that aren't offer items, so load them too
+        # for build_checkout_payload to emit their synced price as an optional_item (plans/SALES_FUNNELS.md P2).
+        for bump in (offer.get("funnel") or {}).get("order_bumps") or []:
+            bump_product_id = str(bump.get("product_id") or "")
+            if bump_product_id and bump_product_id not in products_by_id:
+                bump_product = products_repo.get(tenant_id, bump_product_id)
+                if bump_product:
+                    products_by_id[bump_product_id] = bump_product
         services_by_id = load_offer_services(tenant_id, offer, services_repo)
         items = resolved_items_for_checkout(cart, offer, products_by_id, services_by_id)
         # subtotal + currency feed the platform-fee calc (build_fee_context) just like resolve_offer's output.
