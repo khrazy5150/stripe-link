@@ -27,6 +27,48 @@ def funnel_step_slug(step_id: str) -> str:
     return f"/{segment}" if segment else ""
 
 
+# offer.funnel stores each context's refs under a plural key; the price's context is the singular form.
+_FUNNEL_CONTEXT_KEYS = {"upsell": "upsells", "downsell": "downsells", "order_bump": "order_bumps"}
+
+
+def funnel_context_items(offer: dict[str, Any], products_by_id: dict[str, dict[str, Any]], context: str) -> list[dict[str, Any]]:
+    """The sales offer's `offer.funnel` entries for `context` (upsell/downsell/order_bump) that resolve to a
+    real product price in that context, in author order (plans/SALES_FUNNELS.md P2b). An entry whose product
+    is missing, or whose price_id isn't one of that product's prices in `context`, is skipped — so a funnel
+    only ever presents charges that actually exist. Returns [{product_id, price_id, product, price}]."""
+    key = _FUNNEL_CONTEXT_KEYS.get(context)
+    if not key:
+        return []
+    items: list[dict[str, Any]] = []
+    for entry in (offer.get("funnel") or {}).get(key) or []:
+        product_id = str(entry.get("product_id") or "")
+        price_id = str(entry.get("price_id") or "")
+        product = products_by_id.get(product_id)
+        if not product:
+            continue
+        price = next(
+            (p for p in (product.get("prices") or [])
+             if str(p.get("price_id") or "") == price_id and str(p.get("context") or "standard") == context),
+            None,
+        )
+        if price:
+            items.append({"product_id": product_id, "price_id": price_id, "product": product, "price": price})
+    return items
+
+
+def funnel_reserved_slugs(offer: dict[str, Any], products_by_id: dict[str, dict[str, Any]]) -> list[str]:
+    """The reserved funnel slugs a sales offer's post-purchase funnel needs, in flow order (plans/
+    SALES_FUNNELS.md P2b): `/upsell` when the offer has resolvable upsells, then `/downsell` when it has
+    resolvable downsells, then always `/thank-you`. The builder auto-provisions exactly these pages."""
+    slugs: list[str] = []
+    if funnel_context_items(offer, products_by_id, "upsell"):
+        slugs.append("/upsell")
+    if funnel_context_items(offer, products_by_id, "downsell"):
+        slugs.append("/downsell")
+    slugs.append("/thank-you")
+    return slugs
+
+
 def funnel_slug_entries(post_checkout: dict[str, Any]) -> list[dict[str, str]]:
     """The Site.pages entries the pages of a Page's inline funnel need so the whole funnel routes on the
     custom domain (plans/SITE_OBJECT.md §2.6): the thank-you page at /thank-you and each funnel step at a

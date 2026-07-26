@@ -2,6 +2,8 @@ import unittest
 
 from stripe_link.domain.funnels import (
     FunnelError,
+    funnel_context_items,
+    funnel_reserved_slugs,
     funnel_slug_entries,
     funnel_step_slug,
     resolve_funnel_transition,
@@ -89,6 +91,51 @@ class FunnelSlugEntriesTests(unittest.TestCase):
         self.assertEqual(funnel_slug_entries({"thank_you_page": {"url": "https://x.example/ty"}}), [])
         self.assertEqual(funnel_slug_entries({"funnel_id": "fnl_1"}), [])
         self.assertEqual(funnel_slug_entries({}), [])
+
+
+def _product(product_id, prices):
+    return {"product_id": product_id, "name": product_id, "prices": prices}
+
+
+class FunnelDerivationTests(unittest.TestCase):
+    def setUp(self):
+        self.products = {
+            "prod_up": _product("prod_up", [
+                {"price_id": "price_up", "context": "upsell", "unit_amount": 2000, "currency": "usd"},
+                {"price_id": "price_std", "context": "standard", "unit_amount": 3000, "currency": "usd"},
+            ]),
+            "prod_down": _product("prod_down", [
+                {"price_id": "price_down", "context": "downsell", "unit_amount": 1000, "currency": "usd"},
+            ]),
+        }
+        self.offer = {"funnel": {
+            "upsells": [{"product_id": "prod_up", "price_id": "price_up"}],
+            "downsells": [{"product_id": "prod_down", "price_id": "price_down"}],
+        }}
+
+    def test_resolves_upsell_and_downsell_items(self):
+        ups = funnel_context_items(self.offer, self.products, "upsell")
+        self.assertEqual([(i["product_id"], i["price_id"]) for i in ups], [("prod_up", "price_up")])
+        downs = funnel_context_items(self.offer, self.products, "downsell")
+        self.assertEqual([(i["product_id"], i["price_id"]) for i in downs], [("prod_down", "price_down")])
+
+    def test_skips_entry_with_wrong_context_or_missing_product(self):
+        offer = {"funnel": {"upsells": [
+            {"product_id": "prod_up", "price_id": "price_std"},   # exists but NOT an upsell price
+            {"product_id": "prod_missing", "price_id": "price_x"},  # product not loaded
+            {"product_id": "prod_up", "price_id": "price_up"},    # valid
+        ]}}
+        self.assertEqual([i["price_id"] for i in funnel_context_items(offer, self.products, "upsell")], ["price_up"])
+
+    def test_reserved_slugs_in_flow_order(self):
+        self.assertEqual(funnel_reserved_slugs(self.offer, self.products), ["/upsell", "/downsell", "/thank-you"])
+
+    def test_reserved_slugs_thank_you_only_without_funnel(self):
+        self.assertEqual(funnel_reserved_slugs({}, self.products), ["/thank-you"])
+
+    def test_reserved_slugs_omit_downsell_when_none_resolvable(self):
+        offer = {"funnel": {"upsells": [{"product_id": "prod_up", "price_id": "price_up"}]}}
+        self.assertEqual(funnel_reserved_slugs(offer, self.products), ["/upsell", "/thank-you"])
 
 
 if __name__ == "__main__":
