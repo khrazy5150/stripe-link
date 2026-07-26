@@ -389,6 +389,23 @@
             </div>
           </section>
 
+          <section v-if="selectedProducts.length && productIntent === 'transaction'" class="offer-form-section">
+            <header class="offer-section-header">
+              <div>
+                <h3>Order Bumps</h3>
+                <p>Optional add-ons shown on Stripe's checkout page as an opt-in “add this?” line. A product is eligible once it has an <code>order_bump</code> price (Products → pricing context).</p>
+              </div>
+            </header>
+            <p v-if="!orderBumpCandidates.length" class="offer-hint">No products have an order-bump price yet.</p>
+            <div v-else class="offer-order-bumps">
+              <label v-for="product in orderBumpCandidates" :key="productId(product)" class="checkbox-row offer-order-bump-row">
+                <input type="checkbox" :value="productId(product)" v-model="form.order_bump_product_ids" />
+                <span>{{ product.name || "Untitled Product" }} — {{ formatBumpAmount(product) }}</span>
+                <span v-if="form.order_bump_product_ids.includes(productId(product)) && !orderBumpSynced(product)" class="field-error">Not synced to Stripe yet — it won’t appear at checkout until synced.</span>
+              </label>
+            </div>
+          </section>
+
           <div v-if="formError" class="keys-status-banner error">{{ formError }}</div>
 
           <details v-if="latestDraftOffer" class="offer-json-preview">
@@ -623,6 +640,29 @@ let productsLoadPromise = null;
 const activeProducts = computed(() => productStore.products.filter((product) => product.status !== "archived" && product.active !== false));
 const productsById = computed(() => new Map(productStore.products.map((product) => [productId(product), product])));
 const selectedProducts = computed(() => activeProducts.value.filter((product) => selectedProductIds.value.includes(productId(product))));
+
+// Order bumps (pre-purchase Stripe optional_items): any product with an order_bump-context price, other than
+// the offer's own items, can be designated. plans/SALES_FUNNELS.md P2a.
+function orderBumpPrice(product) {
+  return (product.prices || []).find((price) => (price.context || "standard") === "order_bump") || null;
+}
+const orderBumpCandidates = computed(() =>
+  activeProducts.value.filter((product) => orderBumpPrice(product) && !selectedProductIds.value.includes(productId(product))));
+function orderBumpSynced(product) {
+  return Boolean(orderBumpPrice(product)?.stripe_price_id);
+}
+function formatBumpAmount(product) {
+  const price = orderBumpPrice(product);
+  return price ? `$${(Number(price.unit_amount || 0) / 100).toFixed(2)}` : "";
+}
+function buildFunnelBlock() {
+  const orderBumps = (form.order_bump_product_ids || [])
+    .map((id) => productsById.value.get(id))
+    .filter((product) => product && orderBumpPrice(product))
+    .map((product) => ({ product_id: productId(product), price_id: orderBumpPrice(product).price_id }));
+  return orderBumps.length ? { order_bumps: orderBumps } : undefined;
+}
+
 function serviceSelectorCard(service) {
   // Shape a service into a product-compatible card so the visual selector + its helpers
   // (productId/priceText/productIntentFor/defaultProductPrice) work unchanged. Services are transactional.
@@ -744,6 +784,8 @@ function defaultOfferForm() {
       allow_promotion_codes: false,
       promotion_code: "",
     },
+    // Product ids designated as pre-purchase order bumps (offer.funnel.order_bumps) — Stripe optional_items.
+    order_bump_product_ids: [],
     userEditedName: false,
     userEditedSlug: false,
   };
@@ -1121,7 +1163,9 @@ function buildOfferDocument() {
     service_booking_mode: scheduledServiceCount.value > 1 ? form.service_booking_mode : undefined,
     discount: buildDiscountBlock(),
     eligibility: {
-      requires_prior_purchase: priceContexts.some((context) => ["upsell", "downsell", "order_bump"].includes(context)),
+      // order_bump is PRE-purchase (it rides the initial checkout as a Stripe optional_item), so it does NOT
+      // require a prior purchase — only upsell/downsell do (plans/SALES_FUNNELS.md P2).
+      requires_prior_purchase: priceContexts.some((context) => ["upsell", "downsell"].includes(context)),
       allowed_price_contexts: priceContexts,
       starts_at: null,
       ends_at: null,
@@ -1144,6 +1188,8 @@ function buildOfferDocument() {
         offer_id: offerId,
       },
     } : undefined,
+    // Pre-purchase order bumps (Stripe optional_items); omitted when none selected (cleanObject strips undefined).
+    funnel: effectiveIntent === "transaction" ? buildFunnelBlock() : undefined,
     sync: {
       status: "pending",
       last_synced_at: null,
@@ -1160,6 +1206,7 @@ function loadOfferIntoForm(offer) {
   form.name = offer.name || "";
   form.slug = offer.slug || slugify(offer.name);
   form.brand = offer.presentation?.brand || "";
+  form.order_bump_product_ids = (offer.funnel?.order_bumps || []).map((bump) => bump.product_id).filter(Boolean);
   form.userEditedName = true;
   form.userEditedSlug = true;
   form.discount = {

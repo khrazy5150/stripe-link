@@ -2893,6 +2893,20 @@ button:disabled {
   font-weight: 800;
 }
 
+.offer-order-bumps {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.offer-order-bump-row {
+  flex-wrap: wrap;
+}
+
+.offer-hint {
+  color: var(--muted);
+}
+
 .offer-checkbox-inline {
   align-self: end;
   min-height: 4.8rem;
