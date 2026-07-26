@@ -65,15 +65,9 @@
               </div>
 
               <div class="landing-page-url-row">
-                <span class="landing-page-url">{{ pageUrl(page) }}</span>
-                <button class="copy-icon-button" type="button" aria-label="Copy landing page URL" @click="copyPageUrl(page)">
-                  <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 9h9.75A1.25 1.25 0 0 1 20 10.25V20a1.25 1.25 0 0 1-1.25 1.25H9A1.25 1.25 0 0 1 7.75 20v-9.75A1.25 1.25 0 0 1 9 9Zm-5-5h9.75A1.25 1.25 0 0 1 15 5.25V7.5M4 4h9.75M4 4v9.75A1.25 1.25 0 0 0 5.25 15H7.5" />
-                  </svg>
-                </button>
-                <button class="secondary-action compact" type="button" @click="previewPage(page)">Preview</button>
-                <!-- Pricing-view picker (Standard / Sale / Flash Sale): only in test, only when the page
-                     enables a context. Copy/Preview/URL all follow the selected view. -->
+                <!-- Context cards (test env, page enables /sale or /flash-sale) lead with the pricing-view
+                     picker in place of the long URL; Copy + Preview then act on the selected view. Other
+                     cards keep the URL text. -->
                 <div v-if="cardViewOptions(page).length > 1" class="landing-page-view-picker" aria-label="Preview pricing view">
                   <button
                     v-for="opt in cardViewOptions(page)"
@@ -83,6 +77,13 @@
                     @click="setCardView(page, opt.value)"
                   >{{ opt.label }}</button>
                 </div>
+                <span v-else class="landing-page-url">{{ pageUrl(page) }}</span>
+                <button class="copy-icon-button" type="button" aria-label="Copy landing page URL" @click="copyPageUrl(page)">
+                  <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 9h9.75A1.25 1.25 0 0 1 20 10.25V20a1.25 1.25 0 0 1-1.25 1.25H9A1.25 1.25 0 0 1 7.75 20v-9.75A1.25 1.25 0 0 1 9 9Zm-5-5h9.75A1.25 1.25 0 0 1 15 5.25V7.5M4 4h9.75M4 4v9.75A1.25 1.25 0 0 0 5.25 15H7.5" />
+                  </svg>
+                </button>
+                <button class="secondary-action compact" type="button" @click="previewPage(page)">Preview</button>
               </div>
 
               <div class="landing-page-meta">
