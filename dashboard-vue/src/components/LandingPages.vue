@@ -72,6 +72,17 @@
                   </svg>
                 </button>
                 <button class="secondary-action compact" type="button" @click="previewPage(page)">Preview</button>
+                <!-- Pricing-view picker (Standard / Sale / Flash Sale): only in test, only when the page
+                     enables a context. Copy/Preview/URL all follow the selected view. -->
+                <div v-if="cardViewOptions(page).length > 1" class="landing-page-view-picker" aria-label="Preview pricing view">
+                  <button
+                    v-for="opt in cardViewOptions(page)"
+                    :key="opt.value"
+                    type="button"
+                    :class="{ active: cardView(page) === opt.value }"
+                    @click="setCardView(page, opt.value)"
+                  >{{ opt.label }}</button>
+                </div>
               </div>
 
               <div class="landing-page-meta">
@@ -3486,13 +3497,36 @@ function previewArtifactPageUrl(page) {
   return `${getPreviewPagesBaseUrl()}/preview/${tenantId}/${pageId}/index.html`;
 }
 
+// Per-card pricing-view selection (Standard / Sale / Flash Sale) for the test viewer, keyed by page_id. The
+// URL / Copy / Preview all follow the selected view, mirroring the builder's Live Preview toggle.
+const cardViews = reactive({});
+function cardViewOptions(page) {
+  // Only the test viewer has /sale //flash-sale views, and only when the page enables that context.
+  if (getApiEnvironment() !== "test" || !page.short_code) return [];
+  const opts = [{ value: "standard", label: "Standard" }];
+  if (page.sale?.enabled) opts.push({ value: "sale", label: "Sale" });
+  if (page.flash_sale?.enabled) opts.push({ value: "flash_sale", label: "Flash Sale" });
+  return opts;
+}
+function cardView(page) {
+  const chosen = cardViews[page.page_id] || "standard";
+  // If the chosen view was toggled off, fall back to Standard.
+  return cardViewOptions(page).some((o) => o.value === chosen) ? chosen : "standard";
+}
+function setCardView(page, view) {
+  cardViews[page.page_id] = view;
+}
+
 function pageUrl(page) {
   // In TEST, the platform test viewer is the canonical way to see a page: custom domains are live-only, so a
   // Site URL won't resolve here (plans/SALES_FUNNELS.md Phase B). Draft -> /preview, published -> /published,
-  // keyed by the page's snowflake short_code. Live env keeps the real public URL / platform artifact.
+  // keyed by the page's snowflake short_code, plus the selected /sale //flash-sale view segment. Live env
+  // keeps the real public URL / platform artifact.
   if (getApiEnvironment() === "test" && page.short_code) {
     const seg = page.status === "published" ? "published" : "preview";
-    return `https://${TEST_PAGES_HOST}/${seg}/${encodeURIComponent(page.short_code)}`;
+    const view = cardView(page);
+    const viewSeg = view === "sale" ? "/sale" : view === "flash_sale" ? "/flash-sale" : "";
+    return `https://${TEST_PAGES_HOST}/${seg}/${encodeURIComponent(page.short_code)}${viewSeg}`;
   }
   if (page.status === "published") return sitePublicUrl(page) || artifactPageUrl(page);
   return previewArtifactPageUrl(page);

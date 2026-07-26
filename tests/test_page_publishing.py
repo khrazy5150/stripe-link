@@ -189,6 +189,30 @@ class PagePublishingTests(unittest.TestCase):
         self.assertEqual([artifact["kind"] for artifact in result["artifacts"]], ["preview"])
         self.assertIsNone(result["invalidation"])
 
+    def test_publish_writes_preview_context_artifact_for_enabled_sale_on_a_draft(self):
+        page = copy.deepcopy(self.page)
+        page["sale"] = {"enabled": True}
+        publish_page_document(
+            page, offers_repository=self.offers_repo, products_repository=self.products_repo,
+            s3_client=self.s3, pages_bucket="pages", preview_bucket="preview", environment="dev",
+            pages_domain="p", preview_domain="pv",
+        )
+        keys = [(put["Bucket"], put["Key"]) for put in self.s3.puts]
+        # the /sale preview artifact is written for a draft; the published one is not (still a draft)
+        self.assertIn(("preview", "preview/tenant_demo/page_simple_coffee/sale/index.html"), keys)
+        self.assertNotIn(("pages", "page_simple_coffee/sale/index.html"), keys)
+
+    def test_publish_deletes_stale_context_artifacts_when_a_context_is_disabled(self):
+        # No sale/flash enabled -> their artifacts are cleaned up so /sale //flash-sale stop serving.
+        publish_page_document(
+            self.page, offers_repository=self.offers_repo, products_repository=self.products_repo,
+            s3_client=self.s3, pages_bucket="pages", preview_bucket="preview", environment="dev",
+            pages_domain="p", preview_domain="pv",
+        )
+        deletes = [(d["Bucket"], d["Key"]) for d in self.s3.deletes]
+        self.assertIn(("preview", "preview/tenant_demo/page_simple_coffee/sale/index.html"), deletes)
+        self.assertIn(("preview", "preview/tenant_demo/page_simple_coffee/flash-sale/index.html"), deletes)
+
     def test_find_site_for_page_matches_by_page_id(self):
         site = {"tenant_id": "tenant_demo", "site_id": "site_x", "pages": {"/": {"page_id": "page_simple_coffee"}}}
         repo = FakeSitesRepository([site])
@@ -649,13 +673,15 @@ class PagePublishingTests(unittest.TestCase):
             )
 
         self.assertEqual(result, {"batchItemFailures": []})
-        self.assertEqual(
-            [(item["Bucket"], item["Key"]) for item in self.s3.deletes],
-            [
-                ("preview", "preview/tenant_demo/page_simple_coffee/index.html"),
-                ("pages", "page_simple_coffee/index.html"),
-            ],
-        )
+        deletes = [(item["Bucket"], item["Key"]) for item in self.s3.deletes]
+        # The unpublish deletes the published artifact first...
+        self.assertEqual(deletes[:2], [
+            ("preview", "preview/tenant_demo/page_simple_coffee/index.html"),
+            ("pages", "page_simple_coffee/index.html"),
+        ])
+        # ...then the re-render cleans up the now-disabled /sale //flash-sale sibling artifacts.
+        self.assertIn(("preview", "preview/tenant_demo/page_simple_coffee/sale/index.html"), deletes)
+        self.assertIn(("preview", "preview/tenant_demo/page_simple_coffee/flash-sale/index.html"), deletes)
         self.assertEqual([put["Key"] for put in self.s3.puts], ["preview/tenant_demo/page_simple_coffee/index.html"])
 
     def test_stream_handler_reports_failed_records(self):

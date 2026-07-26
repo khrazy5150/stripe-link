@@ -644,6 +644,22 @@ def publish_page_document(
                 ContentType="text/html; charset=utf-8", CacheControl="public, max-age=300",
             )
             artifacts.append({"kind": f"published:{ctx}", "bucket": pages_bucket, "key": ctx_key, "url": public_url(pages_domain, ctx_key)})
+
+    # Remove stale context artifacts for contexts that are no longer enabled (e.g. Sale toggled off) so
+    # /sale //flash-sale stop serving. Best-effort — a delete of a missing key is a harmless no-op.
+    enabled_ctx = set(context_view_contexts(page))
+    for ctx in ("sale", "flash_sale"):
+        if ctx in enabled_ctx:
+            continue
+        stale = artifact_paths(tenant_id, page_id, context=ctx)
+        for bucket, key in ((preview_bucket, stale["preview"]), (pages_bucket, stale["published"])):
+            if not bucket:
+                continue
+            try:
+                s3_client.delete_object(Bucket=bucket, Key=key)
+            except Exception:  # noqa: BLE001 - stale-artifact cleanup must never block the publish
+                pass
+
     if site and sites_repository is not None and on_custom_domain:
         try:
             updated_site, changed = attach_context_view_slugs(site, page)

@@ -3446,6 +3446,29 @@ button:disabled {
   white-space: nowrap;
 }
 
+.landing-page-view-picker {
+  display: inline-flex;
+  gap: 0.4rem;
+}
+
+.landing-page-view-picker button {
+  min-height: 3rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+  color: var(--muted);
+  cursor: pointer;
+  font: inherit;
+  font-weight: 800;
+  padding: 0 0.9rem;
+  white-space: nowrap;
+}
+
+.landing-page-view-picker button.active {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
 .copy-icon-button {
   display: grid;
   width: 3.6rem;
