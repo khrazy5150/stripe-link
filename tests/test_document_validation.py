@@ -513,6 +513,20 @@ class DocumentValidationTests(unittest.TestCase):
         with self.assertRaisesRegex(DocumentValidationError, "Offer checkout.mode"):
             validate_offer_document(offer)
 
+    def test_offer_accepts_funnel_block(self):
+        offer = copy.deepcopy(self.offer)
+        offer["funnel"] = {
+            "order_bumps": [{"product_id": "prod_x", "price_id": "price_x"}],
+            "upsells": [{"product_id": "prod_y", "price_id": "price_y"}],
+        }
+        validate_offer_document(offer)  # no raise
+
+    def test_offer_rejects_funnel_entry_missing_price(self):
+        offer = copy.deepcopy(self.offer)
+        offer["funnel"] = {"order_bumps": [{"product_id": "prod_x"}]}
+        with self.assertRaisesRegex(DocumentValidationError, "order_bumps price_id"):
+            validate_offer_document(offer)
+
     def test_offer_rejects_ui_only_fields(self):
         offer = load_fixture("offer-universal-bundle.json")
         offer["offer_type"] = "single_product"

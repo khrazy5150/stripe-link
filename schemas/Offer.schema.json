@@ -440,6 +440,16 @@
         }
       }
     },
+    "funnel": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "In-offer sales funnel (plans/SALES_FUNNELS.md P2). order_bumps are PRE-purchase Stripe Checkout optional_items; upsells/downsells are POST-purchase one-click steps. Each entry references a product + one of its prices in the matching context (order_bump / upsell / downsell).",
+      "properties": {
+        "order_bumps": { "type": "array", "items": { "$ref": "#/$defs/funnelRef" } },
+        "upsells": { "type": "array", "items": { "$ref": "#/$defs/funnelRef" } },
+        "downsells": { "type": "array", "items": { "$ref": "#/$defs/funnelRef" } }
+      }
+    },
     "sync": {
       "type": "object",
       "additionalProperties": false,
@@ -468,6 +478,15 @@
     }
   },
   "$defs": {
+    "funnelRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["product_id", "price_id"],
+      "properties": {
+        "product_id": { "type": "string", "minLength": 1 },
+        "price_id": { "type": "string", "minLength": 1 }
+      }
+    },
     "subscriptionIncentive": {
       "type": "object",
       "additionalProperties": false,

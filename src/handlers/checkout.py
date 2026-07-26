@@ -11,7 +11,6 @@ from stripe_link.domain.pricing import (
     find_price,
     load_offer_products,
     load_offer_services,
-    merge_resolved_offers,
     resolve_offer,
 )
 from stripe_link.kms_secrets import KmsSecretCipher
@@ -55,9 +54,6 @@ def handler(
     page_id = str(params.get("page_id") or "").strip()
     success_url = str(params.get("success_url") or "").strip()
     cancel_url = str(params.get("cancel_url") or "").strip()
-    order_bump_offer_ids = [
-        bump_id.strip() for bump_id in str(params.get("order_bump_ids") or "").split(",") if bump_id.strip()
-    ]
 
     if not tenant_id:
         return error_response("clientID or tenant_id is required.", code="missing_tenant")
@@ -86,18 +82,18 @@ def handler(
             return error_response("Offer not found.", status_code=404, code="not_found")
 
         products_by_id = load_offer_products(tenant_id, offer, products_repo)
+        # Pre-purchase order bumps (offer.funnel.order_bumps) may reference products the offer's items don't
+        # include — load them so build_checkout_payload can emit their synced price as an optional_item.
+        for bump in (offer.get("funnel") or {}).get("order_bumps") or []:
+            bump_product_id = str(bump.get("product_id") or "")
+            if bump_product_id and bump_product_id not in products_by_id:
+                bump_product = products_repo.get(tenant_id, bump_product_id)
+                if bump_product:
+                    products_by_id[bump_product_id] = bump_product
         services_by_id = load_offer_services(tenant_id, offer, services_repo)
         selected_prices = {product_id: price_id} if product_id and price_id else {}
         resolved = resolve_offer(offer, products_by_id, selected_prices, services_by_id=services_by_id)
 
-        resolved, products_by_id = resolve_order_bumps(
-            tenant_id=tenant_id,
-            resolved=resolved,
-            products_by_id=products_by_id,
-            order_bump_offer_ids=order_bump_offer_ids,
-            offers_repo=offers_repo,
-            products_repo=products_repo,
-        )
         mode = "live" if offer.get("stripe_mode") == "live" else "test"
         stripe_keys = stripe_repo.get(tenant_id, mode=mode) or {}
         api_key, stripe_account = checkout_credentials(tenant_id, mode, stripe_keys, secret_cipher)
@@ -122,7 +118,6 @@ def handler(
             page_id=page_id,
             fee_context=fee_context,
             apply_application_fee=bool(stripe_account),
-            order_bump_offer_ids=order_bump_offer_ids,
         )
         stripe_response = create_stripe_checkout_session(
             checkout_payload,
@@ -142,29 +137,28 @@ def handler(
         return error_response(str(exc), status_code=500, code="checkout_error")
 
 
-def resolve_order_bumps(*, tenant_id, resolved, products_by_id, order_bump_offer_ids, offers_repo, products_repo):
-    """Fold optional order-bump offers into the same checkout session as extra line items.
+def order_bump_optional_items(offer, products_by_id, key_mode):
+    """The offer's pre-purchase order bumps, resolved to Stripe optional_items (opt-in "add this?" lines on
+    the hosted Checkout page). Each bump references a product + one of its prices in the order_bump context;
+    Stripe forbids inline price_data for optional_items, so an un-synced bump (no matching-mode
+    stripe_price_id) is SKIPPED with a warning — the dashboard guard flags it before publish
+    (plans/SALES_FUNNELS.md P2). Returns [(stripe_price_id, price_id)] in order.
 
-    Each order-bump offer_id references a distinct Offer document (context/price-context
-    "order_bump"), resolved the same way as any other offer so its own active/eligibility
-    checks apply. Unlike a one-click upsell, order bumps join the *initial* checkout session
-    rather than triggering a separate follow-up charge.
+    Order bumps are PRE-purchase: they ride the initial Checkout session, unlike the post-purchase one-click
+    upsell/downsell steps.
     """
-    if not order_bump_offer_ids:
-        return resolved, products_by_id
-
-    merged_products_by_id = dict(products_by_id)
-    resolved_bumps = []
-    for bump_offer_id in order_bump_offer_ids:
-        bump_offer = offers_repo.get(tenant_id, bump_offer_id)
-        if not bump_offer:
-            raise PricingError(f"Order bump offer '{bump_offer_id}' was not found.")
-        bump_products_by_id = load_offer_products(tenant_id, bump_offer, products_repo)
-        bump_resolved = resolve_offer(bump_offer, bump_products_by_id)
-        resolved_bumps.append(bump_resolved)
-        merged_products_by_id.update(bump_products_by_id)
-
-    return merge_resolved_offers(resolved, resolved_bumps), merged_products_by_id
+    bumps = []
+    for bump in (offer.get("funnel") or {}).get("order_bumps") or []:
+        product = products_by_id.get(bump.get("product_id")) or {}
+        price = find_price(product, bump.get("price_id") or "")
+        stripe_price_id = price.get("stripe_price_id")
+        product_mode = product.get("stripe_mode")
+        if not stripe_price_id or (product_mode is not None and product_mode != key_mode):
+            print(f"[checkout] skipping order bump product='{bump.get('product_id')}' price='{bump.get('price_id')}' "
+                  f"— not Stripe-synced for mode '{key_mode}' (optional_items require a synced price)")
+            continue
+        bumps.append((stripe_price_id, str(bump.get("price_id") or "")))
+    return bumps
 
 
 def build_checkout_payload(
@@ -178,7 +172,6 @@ def build_checkout_payload(
     page_id="",
     fee_context=None,
     apply_application_fee=False,
-    order_bump_offer_ids=None,
 ):
     checkout = offer.get("checkout") or {}
     mode = checkout.get("mode") or "payment"
@@ -273,6 +266,13 @@ def build_checkout_payload(
     if collect_shipping and payload["mode"] == "payment":
         payload["shipping_address_collection[allowed_countries][0]"] = "US"
         payload["shipping_address_collection[allowed_countries][1]"] = "CA"
+    # Pre-purchase order bumps → Stripe optional_items (opt-in on the hosted page; charged in the same
+    # session if the buyer adds them). plans/SALES_FUNNELS.md P2.
+    order_bumps = order_bump_optional_items(offer, products_by_id, key_mode)
+    for index, (stripe_price_id, _price_id) in enumerate(order_bumps):
+        payload[f"optional_items[{index}][price]"] = stripe_price_id
+        payload[f"optional_items[{index}][quantity]"] = "1"
+
     payload["metadata[clientID]"] = tenant_id
     payload["metadata[client_id]"] = tenant_id
     payload["metadata[product_id]"] = first_product_id
@@ -280,7 +280,8 @@ def build_checkout_payload(
     payload["metadata[product_name]"] = first_product_name
     payload["metadata[page_id]"] = str(page_id or "")
     payload["metadata[funnel_id]"] = ""
-    payload["metadata[order_bump_ids]"] = ",".join(order_bump_offer_ids or [])
+    # The bump PRICE ids offered (what was actually purchased comes from the session's line_items at fulfillment).
+    payload["metadata[order_bump_ids]"] = ",".join(price_id for _sid, price_id in order_bumps)
     payload["metadata[post_checkout_entry]"] = "thank_you"
 
     if fee_context:

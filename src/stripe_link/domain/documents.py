@@ -719,6 +719,27 @@ def validate_product_document(document: dict[str, Any]) -> None:
         raise DocumentValidationError("Product default_price_id must reference one of its prices.")
 
 
+def validate_offer_funnel(document: dict[str, Any]) -> None:
+    """The optional in-offer funnel: order_bumps (pre-purchase optional_items) + upsells/downsells
+    (post-purchase one-click). Each entry references a product + one of its prices (plans/SALES_FUNNELS.md P2)."""
+    funnel = document.get("funnel")
+    if funnel is None:
+        return
+    if not isinstance(funnel, dict):
+        raise DocumentValidationError("Offer funnel must be an object.")
+    for key in ("order_bumps", "upsells", "downsells"):
+        entries = funnel.get(key)
+        if entries is None:
+            continue
+        if not isinstance(entries, list):
+            raise DocumentValidationError(f"Offer funnel {key} must be an array.")
+        for entry in entries:
+            if not isinstance(entry, dict):
+                raise DocumentValidationError(f"Each offer funnel {key} entry must be an object.")
+            require_string(entry, "product_id", f"offer funnel {key} product_id")
+            require_string(entry, "price_id", f"offer funnel {key} price_id")
+
+
 def validate_offer_document(document: dict[str, Any]) -> None:
     require_document_fields(document, "offer", "offer_id")
     ui_only_fields = sorted(field for field in OFFER_UI_ONLY_FIELDS if field in document)
@@ -739,6 +760,7 @@ def validate_offer_document(document: dict[str, Any]) -> None:
     # into one appointment; separate_visits gives each its own). Optional; defaults to single_visit.
     if document.get("service_booking_mode") is not None:
         require_enum(document, "service_booking_mode", {"single_visit", "separate_visits"}, "Offer service_booking_mode")
+    validate_offer_funnel(document)
     items = document.get("items")
     if not isinstance(items, list) or not items:
         raise DocumentValidationError("Offer items must be a non-empty array.")
