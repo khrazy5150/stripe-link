@@ -4,7 +4,9 @@ import hmac
 import json
 import os
 import time
+from base64 import b64encode
 from typing import Any, Callable
+from urllib.request import Request, urlopen
 
 from stripe_link.common import error_response, header_value, json_response
 from stripe_link.domain.cart import mark_converted as mark_cart_converted
@@ -58,6 +60,8 @@ from stripe_link.domain.connect_sync import (
     seed_business_identity,
     site_domain_verified,
 )
+from stripe_link.kms_secrets import KmsSecretCipher
+from stripe_link.stripe_platform_secrets import checkout_credentials
 from stripe_link.stripe_platform_secrets import get_platform_webhook_secret
 
 
@@ -147,6 +151,8 @@ def handler(
     billing_config_loader: Callable[[], dict[str, Any]] | None = None,
     receipt_mailer: Callable[..., Any] | None = None,
     email_context_loader: Callable[[str], dict[str, str]] | None = None,
+    secret_cipher=None,
+    line_items_fetcher: Callable[..., list[dict[str, Any]]] | None = None,
 ):
     method = event.get("httpMethod", "")
     if method == "OPTIONS":
@@ -219,6 +225,14 @@ def handler(
                 notifications_repo=notifications_repo, now_fn=now_fn, billing_config_loader=billing_config_loader,
             )
         else:
+            # Fetch the session's line items so an opted-in order bump is itemized on the order (P2). The
+            # webhook event never carries line items; best-effort, so a failure just drops the itemization.
+            session_line_items = _fetch_line_items_for_session(
+                session, tenant_id,
+                repository=repository,
+                secret_cipher=secret_cipher,
+                fetcher=line_items_fetcher,
+            )
             persistence = persist_checkout_session_completed(
                 stripe_event,
                 tenant_id=tenant_id,
@@ -232,6 +246,7 @@ def handler(
                 billing_config_loader=billing_config_loader,
                 receipt_mailer=receipt_mailer,
                 email_context_loader=email_context_loader,
+                line_items=session_line_items,
             )
             # A paid service-offer purchase (pay_then_book) also creates an awaiting_schedule
             # appointment the customer schedules later (STORY-5.1 / STORY-6.2).
@@ -386,6 +401,7 @@ def persist_checkout_session_completed(
     billing_config_loader: Callable[[], dict[str, Any]] | None = None,
     receipt_mailer: Callable[..., Any] | None = None,
     email_context_loader: Callable[[str], dict[str, str]] | None = None,
+    line_items: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     session = _event_data_object(stripe_event)
     if not session:
@@ -404,7 +420,7 @@ def persist_checkout_session_completed(
 
     fees = fee_breakdown_from_session(session, billing_config_loader)
     session_record = checkout_session_record(stripe_event, session, tenant_id, now)
-    order_record = order_record_from_session(session, tenant_id, now, fees)
+    order_record = order_record_from_session(session, tenant_id, now, fees, line_items=line_items)
     invoice_record = invoice_record_from_session(session, tenant_id, now, fees)
     customer_record = customer_record_from_session(session, tenant_id, now)
     notification_record = notification_record_from_session(session, tenant_id, order_record, invoice_record, now)
@@ -1126,12 +1142,81 @@ def plan_order_review_invite(order_record: dict[str, Any], tenant_id: str, produ
         return False
 
 
-def order_record_from_session(session: dict[str, Any], tenant_id: str, now: int, fees: dict[str, Any]) -> dict[str, Any]:
+STRIPE_LINE_ITEMS_URL = "https://api.stripe.com/v1/checkout/sessions/{}/line_items"
+
+
+def fetch_session_line_items(session_id: str, *, api_key: str, stripe_account: str = "", opener=None) -> list[dict[str, Any]]:
+    """GET a completed Checkout Session's line items from Stripe (price expanded), so a fulfilled order can
+    itemize opted-in order bumps (plans/SALES_FUNNELS.md P2). The webhook event never carries line items.
+    Best-effort — returns [] on ANY failure so a missing itemization never blocks order recording."""
+    if not session_id or not api_key:
+        return []
+    opener = opener or urlopen
+    url = STRIPE_LINE_ITEMS_URL.format(session_id) + "?limit=100&expand[]=data.price"
+    headers = {
+        "Authorization": f"Basic {b64encode((api_key + ':').encode('utf-8')).decode('ascii')}",
+        "Stripe-Version": "2024-06-20",
+    }
+    if stripe_account:
+        headers["Stripe-Account"] = stripe_account
+    try:
+        request = Request(url, headers=headers, method="GET")
+        with opener(request, timeout=15) as response:
+            data = json.loads(response.read().decode("utf-8"))
+        return data.get("data") or []
+    except Exception:  # noqa: BLE001 - itemization is best-effort; never break fulfillment over it
+        return []
+
+
+def _fetch_line_items_for_session(session, tenant_id, *, repository=None, secret_cipher=None, fetcher=None) -> list[dict[str, Any]]:
+    """Resolve the tenant's Stripe creds for the session's mode and fetch its line items (best-effort). A
+    `fetcher` override (tests) short-circuits the Stripe call. Never raises — a failure (incl. no keys table)
+    just drops the itemization."""
+    if fetcher is not None:
+        try:
+            return list(fetcher(session) or [])
+        except Exception:  # noqa: BLE001
+            return []
+    session_id = str(session.get("id") or "")
+    if not session_id:
+        return []
+    mode = "live" if session.get("livemode") else "test"
+    try:
+        stripe_repo = repository or stripe_keys_repository()
+        stripe_keys = stripe_repo.get(tenant_id, mode=mode) or {}
+        api_key, stripe_account = checkout_credentials(tenant_id, mode, stripe_keys, secret_cipher or KmsSecretCipher())
+    except Exception:  # noqa: BLE001 - can't load creds -> skip itemization, keep the order
+        return []
+    return fetch_session_line_items(session_id, api_key=api_key, stripe_account=stripe_account)
+
+
+def order_line_items_from_stripe(line_items: list[dict[str, Any]] | None, bump_price_ids: set[str], currency: str) -> list[dict[str, Any]]:
+    """Normalize Stripe line items into the order's line_items, flagging which were pre-purchase order bumps
+    (their Stripe price id was offered as an optional_item). plans/SALES_FUNNELS.md P2."""
+    items = []
+    for line in line_items or []:
+        price = line.get("price") if isinstance(line.get("price"), dict) else {}
+        stripe_price_id = str(price.get("id") or "")
+        items.append({
+            "name": line.get("description") or "",
+            "amount_subtotal": int(line.get("amount_subtotal") or 0),
+            "amount_total": int(line.get("amount_total") or 0),
+            "quantity": int(line.get("quantity") or 1),
+            "currency": str(line.get("currency") or currency or "usd"),
+            "stripe_price_id": stripe_price_id,
+            "is_order_bump": bool(stripe_price_id) and stripe_price_id in bump_price_ids,
+        })
+    return items
+
+
+def order_record_from_session(session: dict[str, Any], tenant_id: str, now: int, fees: dict[str, Any], line_items: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     metadata = session.get("metadata") if isinstance(session.get("metadata"), dict) else {}
     details = customer_details(session)
     product_name = metadata.get("product_name") or "Checkout"
     created = int(session.get("created") or now)
     session_id = session.get("id", "")
+    bump_price_ids = {pid for pid in str(metadata.get("order_bump_ids") or "").split(",") if pid}
+    resolved_line_items = order_line_items_from_stripe(line_items, bump_price_ids, session.get("currency") or "usd")
     return {
         "tenant_id": tenant_id,
         "order_id": f"order_{session_id}",
@@ -1155,6 +1240,10 @@ def order_record_from_session(session: dict[str, Any], tenant_id: str, now: int,
             "price_id": metadata.get("price_id", ""),
             "name": product_name,
         },
+        # Itemized purchase incl. any opted-in pre-purchase order bumps (empty when line items couldn't be
+        # fetched — the primary product above + amount_total still record the sale). plans/SALES_FUNNELS.md P2.
+        "line_items": resolved_line_items,
+        "has_order_bumps": any(item.get("is_order_bump") for item in resolved_line_items),
         "fees": fees,
         "attribution": attribution_from_metadata(metadata),
         "metadata": metadata,

@@ -280,8 +280,9 @@ def build_checkout_payload(
     payload["metadata[product_name]"] = first_product_name
     payload["metadata[page_id]"] = str(page_id or "")
     payload["metadata[funnel_id]"] = ""
-    # The bump PRICE ids offered (what was actually purchased comes from the session's line_items at fulfillment).
-    payload["metadata[order_bump_ids]"] = ",".join(price_id for _sid, price_id in order_bumps)
+    # The bumps' STRIPE price ids offered, so fulfillment can flag which completed line items were bumps
+    # (what was actually purchased comes from the session's line_items). plans/SALES_FUNNELS.md P2.
+    payload["metadata[order_bump_ids]"] = ",".join(stripe_price_id for stripe_price_id, _price_id in order_bumps)
     payload["metadata[post_checkout_entry]"] = "thank_you"
 
     if fee_context:

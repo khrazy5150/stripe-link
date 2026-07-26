@@ -285,7 +285,7 @@ class CheckoutHandlerTests(unittest.TestCase):
         self.assertEqual(payload["optional_items[0][price]"], ["price_stripe_bump"])
         self.assertEqual(payload["optional_items[0][quantity]"], ["1"])
         self.assertNotIn("line_items[1][price_data][unit_amount]", payload)
-        self.assertEqual(payload["metadata[order_bump_ids]"], ["price_bump_thermos"])
+        self.assertEqual(payload["metadata[order_bump_ids]"], ["price_stripe_bump"])  # STRIPE id, for fulfillment matching
         self.assertEqual(payload["metadata[product_id]"], ["prod_simple_coffee"])
 
     def test_checkout_skips_unsynced_order_bump(self):
