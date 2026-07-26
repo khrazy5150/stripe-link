@@ -3,17 +3,13 @@ import os
 from stripe_link.common import path_params
 from stripe_link.repositories.documents import RepositoryError, routes_repository
 from stripe_link.runtime.artifacts import artifact_paths
+from stripe_link.runtime.error_pages import render_error_page
 
 
 # The URL segment the visitor uses maps to the price context the artifact was published under.
 _VIEW_CONTEXT = {"": "", "sale": "sale", "flash-sale": "flash_sale"}
 
-_NOT_FOUND_HTML = (
-    "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">"
-    "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">"
-    "<title>Page not found</title></head><body style=\"font-family:system-ui;text-align:center;padding:4rem 1rem\">"
-    "<h1>Page not found</h1><p>This test link is no longer available.</p></body></html>"
-)
+_NOT_FOUND_HTML = render_error_page(404, "This test link is no longer available.", title="Page not found", badge="Test Environment")
 
 
 def _html_response(body, status_code=200):
