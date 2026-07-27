@@ -88,6 +88,15 @@ placement:
 The one bit not derivable from count alone — *fixed multi-product bundle (one checkout)* vs *shop (cart)* —
 lives in **placement grouping**, not a type field. Everything else the renderer infers.
 
+> **Author decision (2026-07-16):** for now, **N distinct landing products → shop (cart)** is the ONLY
+> multi-product path the editor offers. A *fixed bundle of distinct products in one checkout* (e.g. Creatine
+> Powder + Whey) is an **advanced feature not built yet** — today tenants approximate it via order bumps. When
+> we do build it, revisit the word "bundle": today "bundle" means *one product, tiered prices*; the
+> industry-standard meaning is *several distinct products sold as one unit*. A future plan should reconcile the
+> two (likely: rename today's tiered case to "tiers/variants", reserve "bundle" for the multi-product-one-
+> checkout case). The `placement.group` field already reserves the data slot for it, so no model change is
+> needed to add it later.
+
 > This also folds in Sale/Flash: those are **price contexts** on a landing opportunity's prices
 > (`standard/sale/flash_sale`), orthogonal to stage/placement. Unchanged by this redesign.
 

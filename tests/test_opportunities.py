@@ -50,6 +50,9 @@ class LegacyAdapterTests(unittest.TestCase):
         self.assertEqual(by_surface["upsell"]["placement"]["strategy"], "sequence")  # default per plan
         self.assertEqual(by_surface["downsell"]["stage"], STAGE_POST_PURCHASE)
         self.assertEqual(by_surface["order_bump"]["product_id"], "bump")
+        # Funnel opportunities carry a single-unit quantity so each is a valid offer item.
+        self.assertEqual(by_surface["order_bump"]["quantity"], 1)
+        self.assertEqual(by_surface["upsell"]["quantity"], 1)
 
     def test_stage_filter(self):
         offer = _legacy_offer(
@@ -112,6 +115,32 @@ class NewModelTests(unittest.TestCase):
         self.assertEqual(opportunities_from_offer({}), [])
         self.assertEqual(opportunities_from_offer(None), [])
         self.assertEqual(landing_presentation({}), {"kind": "none", "checkout": "single"})
+
+
+class DualWriteValidityTests(unittest.TestCase):
+    """The P2b editor writes purchase_opportunities as the adapter would derive them (a JS mirror of
+    opportunities_from_offer). This guards that mirror's target: every opportunity the adapter produces from a
+    legacy offer is itself a VALID purchase opportunity — so the dual-written array always validates."""
+
+    def test_adapter_output_passes_opportunity_validation(self):
+        from stripe_link.domain.documents import validate_purchase_opportunities
+
+        offer = _legacy_offer(
+            [
+                {"product_id": "p1", "price_id": "price_1", "quantity": 1},
+                {"product_id": "p2", "default_price_id": "a", "selectable_prices": [
+                    {"price_id": "a", "quantity": 1}, {"price_id": "b", "quantity": 3},
+                ]},
+            ],
+            funnel={
+                "order_bumps": [{"product_id": "bump", "price_id": "price_bump"}],
+                "upsells": [{"product_id": "up", "price_id": "price_up"}],
+                "downsells": [{"product_id": "down", "price_id": "price_down"}],
+            },
+        )
+        opps = opportunities_from_offer(offer)
+        # Must not raise — the exact array the editor dual-writes onto the document.
+        validate_purchase_opportunities({"product_intent": "transaction"}, opps)
 
 
 if __name__ == "__main__":

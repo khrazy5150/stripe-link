@@ -2903,6 +2903,32 @@ button:disabled {
   flex-wrap: wrap;
 }
 
+.offer-funnel-search {
+  margin-bottom: 0.6rem;
+}
+
+.offer-order-bumps {
+  max-height: 18rem;
+  overflow-y: auto;
+}
+
+.offer-funnel-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.offer-funnel-group + .offer-funnel-group {
+  margin-top: 1.2rem;
+  padding-top: 1.2rem;
+  border-top: 1px solid var(--line);
+}
+
+.offer-funnel-group-label {
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
 .offer-hint {
   color: var(--muted);
 }

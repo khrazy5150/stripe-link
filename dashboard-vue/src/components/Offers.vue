@@ -392,17 +392,65 @@
           <section v-if="selectedProducts.length && productIntent === 'transaction'" class="offer-form-section">
             <header class="offer-section-header">
               <div>
-                <h3>Order Bumps</h3>
+                <h3>At Checkout — Order Bumps</h3>
                 <p>Optional add-ons shown on Stripe's checkout page as an opt-in “add this?” line. A product is eligible once it has an <code>order_bump</code> price (Products → pricing context).</p>
               </div>
             </header>
-            <p v-if="!orderBumpCandidates.length" class="offer-hint">No products have an order-bump price yet.</p>
-            <div v-else class="offer-order-bumps">
-              <label v-for="product in orderBumpCandidates" :key="productId(product)" class="checkbox-row offer-order-bump-row">
-                <input type="checkbox" :value="productId(product)" v-model="form.order_bump_product_ids" />
-                <span>{{ product.name || "Untitled Product" }} — {{ formatBumpAmount(product) }}</span>
-                <span v-if="form.order_bump_product_ids.includes(productId(product)) && !orderBumpSynced(product)" class="field-error">Not synced to Stripe yet — it won’t appear at checkout until synced.</span>
-              </label>
+            <p v-if="!form.order_bump_product_ids.length && !contextCandidates('order_bump', '').length" class="offer-hint">No products have an order-bump price yet.</p>
+            <template v-else>
+              <input v-model.trim="bumpSearch" class="offer-product-search offer-funnel-search" type="search" placeholder="Search order-bump products..." />
+              <p v-if="form.order_bump_product_ids.length" class="offer-hint">{{ form.order_bump_product_ids.length }} selected</p>
+              <div class="offer-order-bumps">
+                <label v-for="product in orderBumpCandidates" :key="productId(product)" class="checkbox-row offer-order-bump-row">
+                  <input type="checkbox" :value="productId(product)" v-model="form.order_bump_product_ids" />
+                  <span>{{ product.name || "Untitled Product" }} — {{ formatBumpAmount(product) }}</span>
+                  <span v-if="form.order_bump_product_ids.includes(productId(product)) && !orderBumpSynced(product)" class="field-error">Not synced to Stripe yet — it won’t appear at checkout until synced.</span>
+                </label>
+                <p v-if="!orderBumpCandidates.length" class="offer-hint">No order-bump products match “{{ bumpSearch }}”.</p>
+              </div>
+            </template>
+          </section>
+
+          <section v-if="selectedProducts.length && productIntent === 'transaction'" class="offer-form-section">
+            <header class="offer-section-header">
+              <div>
+                <h3>After Purchase — Upsells &amp; Downsells</h3>
+                <p>Products offered one-click after checkout. A product is eligible once it has an <code>upsell</code> or <code>downsell</code> price (Products → pricing context). The page copy, image, and countdown are edited in the landing page's <strong>Post-Checkout Flow</strong>.</p>
+              </div>
+            </header>
+
+            <div class="offer-funnel-group">
+              <span class="offer-funnel-group-label">Upsells</span>
+              <p v-if="!form.upsell_product_ids.length && !contextCandidates('upsell', '').length" class="offer-hint">No products have an upsell price yet.</p>
+              <template v-else>
+                <input v-model.trim="upsellSearch" class="offer-product-search offer-funnel-search" type="search" placeholder="Search upsell products..." />
+                <p v-if="form.upsell_product_ids.length" class="offer-hint">{{ form.upsell_product_ids.length }} selected</p>
+                <div class="offer-order-bumps">
+                  <label v-for="product in upsellCandidates" :key="productId(product)" class="checkbox-row offer-order-bump-row">
+                    <input type="checkbox" :value="productId(product)" v-model="form.upsell_product_ids" />
+                    <span>{{ product.name || "Untitled Product" }} — {{ formatContextAmount(product, 'upsell') }}</span>
+                    <span v-if="form.upsell_product_ids.includes(productId(product)) && !contextSynced(product, 'upsell')" class="field-error">Not synced to Stripe yet — the one-click charge needs a synced price.</span>
+                  </label>
+                  <p v-if="!upsellCandidates.length" class="offer-hint">No upsell products match “{{ upsellSearch }}”.</p>
+                </div>
+              </template>
+            </div>
+
+            <div class="offer-funnel-group">
+              <span class="offer-funnel-group-label">Downsells</span>
+              <p v-if="!form.downsell_product_ids.length && !contextCandidates('downsell', '').length" class="offer-hint">No products have a downsell price yet.</p>
+              <template v-else>
+                <input v-model.trim="downsellSearch" class="offer-product-search offer-funnel-search" type="search" placeholder="Search downsell products..." />
+                <p v-if="form.downsell_product_ids.length" class="offer-hint">{{ form.downsell_product_ids.length }} selected</p>
+                <div class="offer-order-bumps">
+                  <label v-for="product in downsellCandidates" :key="productId(product)" class="checkbox-row offer-order-bump-row">
+                    <input type="checkbox" :value="productId(product)" v-model="form.downsell_product_ids" />
+                    <span>{{ product.name || "Untitled Product" }} — {{ formatContextAmount(product, 'downsell') }}</span>
+                    <span v-if="form.downsell_product_ids.includes(productId(product)) && !contextSynced(product, 'downsell')" class="field-error">Not synced to Stripe yet — the one-click charge needs a synced price.</span>
+                  </label>
+                  <p v-if="!downsellCandidates.length" class="offer-hint">No downsell products match “{{ downsellSearch }}”.</p>
+                </div>
+              </template>
             </div>
           </section>
 
@@ -641,28 +689,91 @@ const activeProducts = computed(() => productStore.products.filter((product) => 
 const productsById = computed(() => new Map(productStore.products.map((product) => [productId(product), product])));
 const selectedProducts = computed(() => activeProducts.value.filter((product) => selectedProductIds.value.includes(productId(product))));
 
-// Order bumps (pre-purchase Stripe optional_items): any product with an order_bump-context price, other than
-// the offer's own items, can be designated. plans/SALES_FUNNELS.md P2a.
-function orderBumpPrice(product) {
-  return (product.prices || []).find((price) => (price.context || "standard") === "order_bump") || null;
+// Funnel opportunities (order bumps + post-purchase upsells/downsells) all follow the same rule: a product is
+// eligible for a given surface once it has a price in that pricing context (Products → pricing context). The
+// software picks the context price; the tenant only picks the product. plans/OFFER_MODEL_REDESIGN.md.
+function contextPrice(product, context) {
+  return (product.prices || []).find((price) => (price.context || "standard") === context) || null;
 }
-// Any product with an order_bump-context price is eligible — including the offer's own item (its order_bump
-// price is distinct from the item's standard price, e.g. "add another box for $12").
-const orderBumpCandidates = computed(() =>
-  activeProducts.value.filter((product) => orderBumpPrice(product)));
-function orderBumpSynced(product) {
-  return Boolean(orderBumpPrice(product)?.stripe_price_id);
+function contextCandidates(context, search) {
+  const term = String(search || "").trim().toLowerCase();
+  return activeProducts.value.filter((product) => {
+    if (!contextPrice(product, context)) return false;
+    if (!term) return true;
+    return String(product.name || "").toLowerCase().includes(term);
+  });
 }
-function formatBumpAmount(product) {
-  const price = orderBumpPrice(product);
+function contextSynced(product, context) {
+  return Boolean(contextPrice(product, context)?.stripe_price_id);
+}
+function formatContextAmount(product, context) {
+  const price = contextPrice(product, context);
   return price ? `$${(Number(price.unit_amount || 0) / 100).toFixed(2)}` : "";
 }
-function buildFunnelBlock() {
-  const orderBumps = (form.order_bump_product_ids || [])
+// Search terms let the candidate lists scale past a handful of products (a tenant may have hundreds with a
+// bump/upsell price). Each list stays a simple filtered checkbox list, not a modal.
+const bumpSearch = ref("");
+const upsellSearch = ref("");
+const downsellSearch = ref("");
+const orderBumpCandidates = computed(() => contextCandidates("order_bump", bumpSearch.value));
+const upsellCandidates = computed(() => contextCandidates("upsell", upsellSearch.value));
+const downsellCandidates = computed(() => contextCandidates("downsell", downsellSearch.value));
+// Back-compat helpers used by the existing order-bump template rows.
+function orderBumpSynced(product) {
+  return contextSynced(product, "order_bump");
+}
+function formatBumpAmount(product) {
+  return formatContextAmount(product, "order_bump");
+}
+function funnelEntriesFor(productIds, context) {
+  return (productIds || [])
     .map((id) => productsById.value.get(id))
-    .filter((product) => product && orderBumpPrice(product))
-    .map((product) => ({ product_id: productId(product), price_id: orderBumpPrice(product).price_id }));
-  return orderBumps.length ? { order_bumps: orderBumps } : undefined;
+    .filter((product) => product && contextPrice(product, context))
+    .map((product) => ({ product_id: productId(product), price_id: contextPrice(product, context).price_id }));
+}
+function buildFunnelBlock() {
+  const block = {};
+  const orderBumps = funnelEntriesFor(form.order_bump_product_ids, "order_bump");
+  if (orderBumps.length) block.order_bumps = orderBumps;
+  const upsells = funnelEntriesFor(form.upsell_product_ids, "upsell");
+  if (upsells.length) block.upsells = upsells;
+  const downsells = funnelEntriesFor(form.downsell_product_ids, "downsell");
+  if (downsells.length) block.downsells = downsells;
+  return Object.keys(block).length ? block : undefined;
+}
+
+// Mirror of domain/opportunities.opportunities_from_offer's legacy mapping (plans/OFFER_MODEL_REDESIGN.md):
+// normalize items[] + funnel.* into one purchase_opportunities[] so the offer carries the new model directly.
+// Built from the SAME items/funnel we still write, so the Python read-side adapter (which prefers this array)
+// sees identical data — dual-write during migration; P4 drops the legacy fields.
+function buildPurchaseOpportunities(items, funnel) {
+  const opportunities = [];
+  (items || []).forEach((item, index) => {
+    opportunities.push({
+      ...item,
+      opportunity_id: `opp_landing_primary_${index}`,
+      stage: "landing",
+      placement: { surface: "primary", group: "main_offer", order: index, strategy: "" },
+    });
+  });
+  const funnelStage = {
+    order_bumps: ["checkout", "order_bump", "single"],
+    upsells: ["post_purchase", "upsell", "sequence"],
+    downsells: ["post_purchase", "downsell", "single"],
+  };
+  Object.entries(funnelStage).forEach(([key, [stage, surface, strategy]]) => {
+    (funnel?.[key] || []).forEach((entry, index) => {
+      opportunities.push({
+        opportunity_id: `opp_${stage}_${surface}_${index}`,
+        stage,
+        placement: { surface, group: surface, order: index, strategy },
+        product_id: entry.product_id || "",
+        price_id: entry.price_id || "",
+        quantity: 1,
+      });
+    });
+  });
+  return opportunities;
 }
 
 function serviceSelectorCard(service) {
@@ -788,6 +899,10 @@ function defaultOfferForm() {
     },
     // Product ids designated as pre-purchase order bumps (offer.funnel.order_bumps) — Stripe optional_items.
     order_bump_product_ids: [],
+    // Post-purchase opportunities (offer.funnel.upsells/downsells); their PRESENTATION is edited in the
+    // landing page's Post-Checkout Flow. Here the offer only declares WHICH products they are.
+    upsell_product_ids: [],
+    downsell_product_ids: [],
     userEditedName: false,
     userEditedSlug: false,
   };
@@ -1148,6 +1263,10 @@ function buildOfferDocument() {
   // landing page (suggestions the tenant/AI can override later). Only price stays resolved-live.
   const primary = primaryOfferItemDisplay();
   const cta = primaryCtaContract();
+  const funnel = effectiveIntent === "transaction" ? buildFunnelBlock() : undefined;
+  // The offer carries the normalized model directly (source of truth for the read side) alongside the legacy
+  // items/funnel that pre-migration consumers still read (plans/OFFER_MODEL_REDESIGN.md P2b dual-write).
+  const purchaseOpportunities = buildPurchaseOpportunities(items, funnel);
 
   const offer = cleanObject({
     schema_version: "2026-05-29",
@@ -1161,6 +1280,7 @@ function buildOfferDocument() {
     offer_type: inferOfferType(),
     stripe_mode: getApiEnvironment(),
     items,
+    purchase_opportunities: purchaseOpportunities,
     // Only meaningful with 2+ scheduled services; omit otherwise to keep the document clean.
     service_booking_mode: scheduledServiceCount.value > 1 ? form.service_booking_mode : undefined,
     discount: buildDiscountBlock(),
@@ -1190,8 +1310,8 @@ function buildOfferDocument() {
         offer_id: offerId,
       },
     } : undefined,
-    // Pre-purchase order bumps (Stripe optional_items); omitted when none selected (cleanObject strips undefined).
-    funnel: effectiveIntent === "transaction" ? buildFunnelBlock() : undefined,
+    // Order bumps + post-purchase upsells/downsells; omitted when none selected (cleanObject strips undefined).
+    funnel,
     sync: {
       status: "pending",
       last_synced_at: null,
@@ -1209,6 +1329,8 @@ function loadOfferIntoForm(offer) {
   form.slug = offer.slug || slugify(offer.name);
   form.brand = offer.presentation?.brand || "";
   form.order_bump_product_ids = (offer.funnel?.order_bumps || []).map((bump) => bump.product_id).filter(Boolean);
+  form.upsell_product_ids = (offer.funnel?.upsells || []).map((entry) => entry.product_id).filter(Boolean);
+  form.downsell_product_ids = (offer.funnel?.downsells || []).map((entry) => entry.product_id).filter(Boolean);
   form.userEditedName = true;
   form.userEditedSlug = true;
   form.discount = {
@@ -1549,13 +1671,14 @@ function generateOfferLabel(products, type) {
   return `${baseName} ${type === "bundle" ? "Bundle" : "Single Offer"}`;
 }
 
-// Auto-label from the unified item set (products + services). Names off the first item for now;
-// multi-item naming is a known follow-up. A single item -> "… Single Offer"; multiple -> "… Bundle".
+// Internal offer name — brainless by default: just the primary item's product name, NO type suffix
+// (offer_type is derived now, so "… Single Offer / … Bundle" is gone). Sticky until the tenant edits it.
+// This is the tenant's dashboard label only; the customer-facing headline is offer.presentation.headline.
+// plans/OFFER_MODEL_REDESIGN.md §7.
 function offerLabelForItems() {
   const items = selectedItems.value;
   if (!items.length) return "";
-  const baseName = String(items[0].name || "Item").split(" - ")[0].trim() || "Item";
-  return `${baseName} ${items.length > 1 ? "Bundle" : "Single Offer"}`;
+  return String(items[0].name || "Item").split(" - ")[0].trim() || "Item";
 }
 
 function contextLabel(value) {

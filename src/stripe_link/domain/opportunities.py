@@ -75,6 +75,9 @@ def opportunities_from_offer(offer: dict[str, Any]) -> list[dict[str, Any]]:
                 "placement": {"surface": surface, "group": surface, "order": index, "strategy": strategy},
                 "product_id": entry.get("product_id", ""),
                 "price_id": entry.get("price_id", ""),
+                # Bumps/upsells/downsells are always single-unit; carrying it keeps every derived opportunity a
+                # valid offer item (_validate_offer_item requires a positive quantity).
+                "quantity": 1,
             })
     return opportunities
 
