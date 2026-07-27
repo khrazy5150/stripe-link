@@ -2971,6 +2971,7 @@ button:disabled {
   display: flex;
   flex-wrap: wrap;
   gap: 0.6rem;
+  justify-content: center;
 }
 
 .funnel-card {
@@ -2978,6 +2979,8 @@ button:disabled {
   min-width: 12rem;
   display: flex;
   flex-direction: column;
+  align-items: center;
+  text-align: center;
   gap: 0.4rem;
   padding: 0.7rem 0.8rem;
   border: 1px solid var(--line);
@@ -3004,7 +3007,7 @@ button:disabled {
 }
 
 .intent-badge {
-  align-self: flex-start;
+  align-self: center;
   font-size: 0.68rem;
   font-weight: 600;
   text-transform: uppercase;
@@ -3022,6 +3025,7 @@ button:disabled {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
+  justify-content: center;
   gap: 0.4rem;
   padding-top: 0.4rem;
   margin-top: 0.15rem;
