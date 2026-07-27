@@ -226,6 +226,13 @@ drop the legacy fields last.
   and each upsell's downsell fallback. So the tenant *sees* the flow without choosing it.
   `LandingPages.vue` `isListicleOffer` / offer-type branches derive from the adapter instead.
 
+  **Funnel placement (author decision, 2026-07-27):** the rich visual Purchase Flow funnel **moves to the
+  Landing Page builder** (the funnel is a journey/business concern; the page is the funnel), where it becomes
+  the **clickable spine of the post-checkout editor** (P3.5) — click a node to edit that step's presentation
+  (thank-you copy, the upsell "Wait!" scaffold). The Offer editor keeps only a **slim one-line inferred-roles
+  note** ("Inferred: 1 order bump · 1 upsell (↓ downsell)"). Build both halves together in P3.5 so the funnel is
+  never orphaned.
+
   **Intent (author idea, 2026-07-27):** a friendly label naming WHY a product sits at its stage —
   `primary` (main buy) · `cross_sell` (order bump) · `upgrade` (upsell) · `recovery` (downsell). Currently
   **DERIVED 1:1 from `placement.surface`** (no new stored field); if we ever want intent decoupled from surface,

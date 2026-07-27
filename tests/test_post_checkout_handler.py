@@ -21,6 +21,66 @@ def entry_page(**post_checkout_overrides):
     }
 
 
+class SequenceRoutingTests(unittest.TestCase):
+    """Offer-derived, sequence-indexed upsell routing (plans/OFFER_MODEL_REDESIGN.md §6, P3.2b)."""
+
+    def setUp(self):
+        self.pages = FakeDocumentRepository("page_id")
+        self.pages.put({
+            "tenant_id": "tenant_demo", "page_id": "page_entry", "offer_id": "offer_up",
+            "post_checkout": {"thank_you_page": {"page_id": "page_thank_you"}},
+        })
+        self.offers = FakeDocumentRepository("offer_id")
+        self.offers.put({"tenant_id": "tenant_demo", "offer_id": "offer_up", "funnel": {"upsells": [
+            {"product_id": "prod_a", "price_id": "price_a_up"},
+            {"product_id": "prod_b", "price_id": "price_b_up"},
+        ]}})
+        self.products = FakeDocumentRepository("product_id")
+        for pid, price_id in (("prod_a", "price_a_up"), ("prod_b", "price_b_up")):
+            self.products.put({"tenant_id": "tenant_demo", "product_id": pid, "prices": [
+                {"price_id": price_id, "context": "upsell", "unit_amount": 1000, "currency": "usd"},
+            ]})
+
+    def call(self, outcome=None, step_id=None, session_id=None):
+        params = {"tenant_id": "tenant_demo"}
+        if outcome is not None:
+            params["outcome"] = outcome
+        if step_id is not None:
+            params["step_id"] = step_id
+        if session_id is not None:
+            params["session_id"] = session_id
+        return handler(
+            {"httpMethod": "GET", "pathParameters": {"page_id": "page_entry"}, "queryStringParameters": params},
+            None, repository=self.pages, pages_domain="pages.example.com",
+            offers_repo=self.offers, products_repo=self.products,
+        )
+
+    def test_first_hop_serves_upsell_1(self):
+        response = self.call(outcome="accept", session_id="cs_1")
+        location = urlparse(response["headers"]["Location"])
+        self.assertEqual(location.path, "/page_entry__upsell_1/index.html")
+        query = parse_qs(location.query)
+        self.assertEqual(query["funnel_step"], ["1"])
+        self.assertEqual(query["funnel_page"], ["page_entry"])
+        self.assertEqual(query["session_id"], ["cs_1"])
+
+    def test_accept_advances_to_next_upsell(self):
+        location = urlparse(self.call(outcome="accept", step_id="1")["headers"]["Location"])
+        self.assertEqual(location.path, "/page_entry__upsell_2/index.html")
+        self.assertEqual(parse_qs(location.query)["funnel_step"], ["2"])
+
+    def test_decline_also_advances_in_p32b(self):
+        location = urlparse(self.call(outcome="decline", step_id="1")["headers"]["Location"])
+        self.assertEqual(location.path, "/page_entry__upsell_2/index.html")
+
+    def test_past_last_upsell_goes_to_thank_you(self):
+        location = urlparse(self.call(outcome="accept", step_id="2")["headers"]["Location"])
+        self.assertEqual(location.path, "/page_thank_you/index.html")
+
+    def test_bad_outcome_rejected_on_the_sequence_path(self):
+        self.assertEqual(self.call(outcome="maybe", step_id="1")["statusCode"], 400)
+
+
 class PostCheckoutHandlerTests(unittest.TestCase):
     def setUp(self):
         self.repository = FakeDocumentRepository("page_id")

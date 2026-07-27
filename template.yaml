@@ -1151,13 +1151,18 @@ Resources:
       FunctionName: !Sub "${ProjectPrefix}-post-checkout-${Environment}"
       CodeUri: src/
       Handler: handlers.post_checkout.handler
-      Description: Resolves and redirects Phase 1 inline funnel routing (post-checkout upsell/downsell/thank-you sequencing) owned by a Page document. Pure routing only — never touches Offer, Product, or Stripe state.
+      Description: Redirects post-checkout funnel hops. Sequence-indexed upsell routing derived from the offer's post_purchase_plan (reads Offer + Product, never charges), falling back to legacy page-step routing. Never touches Stripe state.
       Policies:
         - DynamoDBReadPolicy:
             TableName: !Ref PagesTable
         # Read the owning Site so a funnel hop redirects to the custom domain slug, not the platform artifact.
         - DynamoDBReadPolicy:
             TableName: !Ref SitesTable
+        # Derive the post-purchase plan (which upsell screens exist, in order) from the offer + its products.
+        - DynamoDBReadPolicy:
+            TableName: !Ref OffersTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref ProductsTable
       Events:
         PostCheckoutNext:
           Type: Api
