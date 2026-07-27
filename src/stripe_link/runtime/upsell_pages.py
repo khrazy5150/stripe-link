@@ -20,6 +20,7 @@ DEFAULT_UPSELL_SCAFFOLD: dict[str, Any] = {
     "subheadline": "Exclusive One-Time Offer Just For You",
     "accept_label": "Yes, I'll Take This Deal for {{ upsell_price }}",
     "decline_label": "No, Thank You! Let's Move On",
+    "downsell_headline": "Wait — Here's a Smaller Option",
     "countdown_enabled": True,
     "countdown_minutes": 1,
     "savings_badge": True,
@@ -109,15 +110,31 @@ def synthesize_upsell_page(
             "label": "This offer expires in", "start_text": "This offer expires in", "end_text": "Offer expired",
             "sticky": True,
         })
+    # The accept label already carries the price (…for $22.17) so hide the CTA's own amount; the decline link
+    # uses the scaffold's copy. When this upsell's product has a downsell price, bake it in so the island can
+    # swap the price + CTA IN PLACE on decline / countdown expiry (§6) rather than navigating to a downsell page.
+    checkout_section = {
+        "id": "checkout", "type": "checkout_cta", "label": presentation["cta_label"],
+        "hide_amount": True, "decline_label": scaffold["decline_label"],
+    }
+    downsell = entry.get("downsell")
+    if downsell:
+        ds_price = downsell.get("price") or {}
+        ds_amount = int(ds_price.get("unit_amount") or 0)
+        ds_currency = str(ds_price.get("currency") or "usd")
+        checkout_section.update({
+            "downsell_price_id": downsell.get("price_id"),
+            "downsell_amount": ds_amount,
+            "downsell_currency": ds_currency,
+            "downsell_label": _fill_price(scaffold["accept_label"], ds_amount, ds_currency),
+            "downsell_headline": scaffold.get("downsell_headline") or "",
+        })
     sections.extend([
         {"id": "hero-media", "type": "hero_media"},
         {"id": "headline", "type": "headline", "text": presentation["headline"]},
         {"id": "subheadline", "type": "subheadline", "text": presentation["subheadline"]},
         {"id": "offer-selector", "type": "offer_price_selector", "offer_id": offer["offer_id"]},
-        # The accept label already carries the price (…for $22.17) so hide the CTA's own amount; the decline
-        # link uses the scaffold's copy.
-        {"id": "checkout", "type": "checkout_cta", "label": presentation["cta_label"],
-         "hide_amount": True, "decline_label": scaffold["decline_label"]},
+        checkout_section,
     ])
 
     theme = deepcopy(source_page.get("theme") or {})

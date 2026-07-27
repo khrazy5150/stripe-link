@@ -3749,6 +3749,18 @@ def render_buy_cta(
     decline_label = escape(str(section.get("decline_label") or "No thanks, continue"))
     cta_text = label if hide_amount else f"{label} - {escape(format_money(subtotal, currency))}"
     hide_attr = " data-cta-hide-amount=\"true\"" if hide_amount else ""
+    # An upsell CTA can carry its product's downsell price; the island swaps to it in place on decline/expiry.
+    downsell_price_id = str(section.get("downsell_price_id") or "")
+    downsell_attr = ""
+    if downsell_price_id:
+        downsell_attr = (
+            f" data-downsell-price-id=\"{escape(downsell_price_id)}\""
+            f" data-downsell-amount=\"{int(section.get('downsell_amount') or 0)}\""
+            f" data-downsell-currency=\"{escape(str(section.get('downsell_currency') or 'usd'))}\""
+            f" data-downsell-label=\"{escape(str(section.get('downsell_label') or ''))}\""
+            f" data-downsell-headline=\"{escape(str(section.get('downsell_headline') or ''))}\""
+        )
+    hide_attr += downsell_attr
     checkout = checkout_context(page, offer, resolved_offer, checkout_url, api_base_url)
     href = escape(checkout["href"])
     data_attrs = " ".join(
@@ -4432,13 +4444,39 @@ def render_page_interactions_script(page: dict[str, Any]) -> str:
         "      selectCard(cards.find((card) => card.dataset.default === 'true') || cards[0]);",
         "      let upsellCustomerId = '';",
         "      let upsellCustomerInfo = {};",
+        # Shared by the countdown block: on a funnel step, a countdown expiry does what a decline does.
+        "      let funnelDeclineOrExpire = null;",
         "      if (isFunnelStep) {",
+        # In-place downsell swap (§6): decline / countdown expiry swaps the price card + CTA to the same
+        # product's downsell price rather than navigating to a separate page. A second decline advances.
+        "        const swapToDownsell = () => {",
+        "          const dsPrice = cta.dataset.downsellPriceId;",
+        "          if (!dsPrice) return;",
+        "          cta.dataset.checkoutPriceId = dsPrice;",
+        "          cta.dataset.ctaHideAmount = 'true';",
+        "          const dsLabel = cta.dataset.downsellLabel || cta.dataset.ctaDefaultLabel || cta.textContent;",
+        "          cta.textContent = dsLabel; cta.dataset.ctaDefaultLabel = dsLabel;",
+        "          const card = document.querySelector('.sl-price-option');",
+        "          if (card) {",
+        "            card.dataset.priceId = dsPrice;",
+        "            const amtEl = card.querySelector('[data-price-amount]');",
+        "            if (amtEl) amtEl.textContent = money(cta.dataset.downsellAmount, cta.dataset.downsellCurrency || 'usd');",
+        "            const reg = card.querySelector('.sl-regular-price'); if (reg) reg.style.display = 'none';",
+        "            const sav = card.querySelector('.sl-savings'); if (sav) sav.style.display = 'none';",
+        "            const radio = card.querySelector('input[type=\"radio\"]'); if (radio) radio.value = dsPrice;",
+        "          }",
+        "          const dsHead = cta.dataset.downsellHeadline;",
+        "          if (dsHead) { const h = document.querySelector('.sl-headline h1') || document.querySelector('.sl-headline'); if (h) h.textContent = dsHead; }",
+        "        };",
+        "        let downsellShown = false;",
+        "        const goDownsellOrAdvance = () => {",
+        "          if (cta.dataset.downsellPriceId && !downsellShown) { downsellShown = true; swapToDownsell(); return; }",
+        "          window.location.assign(postCheckoutNextUrl('decline', funnelStepId));",
+        "        };",
+        "        funnelDeclineOrExpire = goDownsellOrAdvance;",
         "        if (declineCta) {",
         "          declineCta.style.display = '';",
-        "          declineCta.addEventListener('click', (event) => {",
-        "            event.preventDefault();",
-        "            window.location.assign(postCheckoutNextUrl('decline', funnelStepId));",
-        "          });",
+        "          declineCta.addEventListener('click', (event) => { event.preventDefault(); goDownsellOrAdvance(); });",
         "        }",
         "        cta.setAttribute('aria-disabled', 'true');",
         "        cta.dataset.ctaDefaultLabel = cta.textContent;",
@@ -4527,6 +4565,9 @@ def render_page_interactions_script(page: dict[str, Any]) -> str:
         "            section.style.background = section.dataset.endColor || '#ef4444';",
         "            if (persistent) localStorage.setItem(storageKey, 'expired');",
         "            expireDiscounts();",
+        # On a funnel step, an expired upsell timer does what a decline does: swap to the downsell in place, or
+        # advance to the next step / thank-you (§6, #4). No-op on ordinary pages.
+        "            if (funnelDeclineOrExpire) funnelDeclineOrExpire();",
         "            return false;",
         "          }",
         "          return true;",

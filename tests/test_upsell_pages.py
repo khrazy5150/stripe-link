@@ -61,6 +61,33 @@ class SynthesizeUpsellPageTests(unittest.TestCase):
         )
         self.assertEqual(offer["presentation"]["cta_label"], "Yes, I'll Take This Deal for $27.00")
 
+    def test_downsell_is_baked_in_for_the_in_place_swap(self):
+        # Give the upsell product a downsell price; the synthesized page carries it for the island's swap (§6).
+        self.product["prices"].append({"price_id": "price_down", "context": "downsell", "unit_amount": 1200, "currency": "usd", "quantity": 1})
+        self.source_offer["funnel"]["downsells"] = [{"product_id": self.product["product_id"], "price_id": "price_down"}]
+        entry = post_purchase_plan(self.source_offer, self.products_by_id)["upsells"][0]
+        page, offer = synthesize_upsell_page(
+            entry, source_page=self.source_page, source_offer=self.source_offer, scaffold=upsell_scaffold(self.source_page),
+        )
+        html = render_page(
+            page, offer, self.products_by_id, selected_prices={"prod_creatine_gummies": "price_upsell_1bottle"},
+            page_type="funnel_step",
+        )
+        self.assertIn('data-downsell-price-id="price_down"', html)
+        self.assertIn('data-downsell-amount="1200"', html)
+        self.assertIn("Take This Deal for $12.00", html.replace("&#x27;", "'"))
+        # The island swaps in place on decline/expiry rather than navigating to a separate downsell page.
+        self.assertIn("swapToDownsell", html)
+        self.assertIn("if (funnelDeclineOrExpire) funnelDeclineOrExpire();", html)
+
+    def test_no_downsell_attributes_when_product_has_no_downsell_price(self):
+        entry = post_purchase_plan(self.source_offer, self.products_by_id)["upsells"][0]
+        page, offer = synthesize_upsell_page(
+            entry, source_page=self.source_page, source_offer=self.source_offer, scaffold=upsell_scaffold(self.source_page),
+        )
+        html = render_page(page, offer, self.products_by_id, selected_prices={"prod_creatine_gummies": "price_upsell_1bottle"}, page_type="funnel_step")
+        self.assertNotIn("data-downsell-price-id", html)
+
     def test_renders_through_the_universal_bundle_pipeline(self):
         page, offer = synthesize_upsell_page(
             self.entry, source_page=self.source_page, source_offer=self.source_offer,
