@@ -124,16 +124,17 @@
               <small v-else-if="selectedProduct.stripe_product_id" class="text-muted font-mono">{{ selectedProduct.stripe_product_id }}</small>
             </div>
             <div class="button-row">
-              <!-- Products auto-sync to Stripe on save (plans/SALES_FUNNELS.md P1.5) — no separate Sync
-                   button. A manual Retry appears only when the last sync failed. -->
+              <!-- Products auto-sync to Stripe on save (plans/SALES_FUNNELS.md P1.5). A manual sync button
+                   appears whenever a payment product isn't successfully synced yet — pending (grandfathered,
+                   created before auto-sync) or failed — so it never needs a dummy edit-and-save. -->
               <button
                 v-if="selectedProduct.stripe_product_id" type="button" class="secondary-action"
                 :disabled="syncing" @click="checkDrift(selectedProduct)"
               >Check drift</button>
               <button
-                v-if="selectedProduct.sync?.status === 'failed'" type="button" class="secondary-action"
+                v-if="canSyncProduct(selectedProduct)" type="button" class="secondary-action"
                 :disabled="syncing" @click="syncProduct(selectedProduct)"
-              >{{ syncing ? "Syncing…" : "Retry sync" }}</button>
+              >{{ syncing ? "Syncing…" : (selectedProduct.sync?.status === 'failed' ? "Retry sync" : "Sync to Stripe") }}</button>
             </div>
           </div>
           <div v-if="selectedProduct.digital_asset" class="product-details-digital">
@@ -971,6 +972,14 @@ async function onDigitalFileChange(event) {
     uploadingAsset.value = false;
     event.target.value = "";
   }
+}
+
+function canSyncProduct(product) {
+  // Payment products push to Stripe; lead-gen (non-canonical) products never sync. Offer a manual sync whenever
+  // the product isn't successfully synced yet — this covers grandfathered products stuck in "pending" (created
+  // before auto-sync existed) as well as "failed" retries, so neither needs a dummy edit-and-save.
+  if (product?.product_intent === "lead_gen" || product?.canonical === false) return false;
+  return product?.sync?.status !== "success";
 }
 
 async function syncProduct(product) {
