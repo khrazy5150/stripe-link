@@ -115,6 +115,21 @@ def handler(event, context, *, repository=None, pages_domain=None, sites_repo=No
 
     next_page_id = destination["page_id"]
     next_step_id = destination.get("step_id", "")
+    # A dangling or unpublished thank-you page (the editor can reference one that was never created/published)
+    # would 404 the buyer at the very end of the funnel. Fall back to the entry page's success state — its
+    # artifact is always published — rather than dead-ending them (P3.5 makes the thank-you page real).
+    if next_step_id == "thank_you":
+        try:
+            thanks = repository.get(tenant_id, next_page_id) if next_page_id else None
+        except RepositoryError:
+            thanks = None
+        if not thanks or thanks.get("status") != "published":
+            entry_url = _next_page_url(site, tenant_id, page_id, pages_domain)
+            if not entry_url:
+                return error_response("Pages distribution domain is not configured.", status_code=500, code="pages_domain_not_configured")
+            separator = "&" if "?" in entry_url else "?"
+            return redirect_response(f"{entry_url}{separator}checkout=success")
+
     url = _next_page_url(site, tenant_id, next_page_id, pages_domain)
     if not url:
         return error_response("Pages distribution domain is not configured.", status_code=500, code="pages_domain_not_configured")

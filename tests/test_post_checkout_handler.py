@@ -35,6 +35,7 @@ class SequenceRoutingTests(unittest.TestCase):
             {"product_id": "prod_a", "price_id": "price_a_up"},
             {"product_id": "prod_b", "price_id": "price_b_up"},
         ]}})
+        self.pages.put({"tenant_id": "tenant_demo", "page_id": "page_thank_you", "status": "published"})
         self.products = FakeDocumentRepository("product_id")
         for pid, price_id in (("prod_a", "price_a_up"), ("prod_b", "price_b_up")):
             self.products.put({"tenant_id": "tenant_demo", "product_id": pid, "prices": [
@@ -80,11 +81,24 @@ class SequenceRoutingTests(unittest.TestCase):
     def test_bad_outcome_rejected_on_the_sequence_path(self):
         self.assertEqual(self.call(outcome="maybe", step_id="1")["statusCode"], 400)
 
+    def test_missing_thank_you_page_falls_back_to_entry_success(self):
+        # The thank-you page referenced by post_checkout doesn't exist / isn't published: rather than 404 the
+        # buyer at the end of the funnel, redirect to the always-published entry page's success state.
+        self.pages.put({
+            "tenant_id": "tenant_demo", "page_id": "page_entry", "offer_id": "offer_up",
+            "post_checkout": {"thank_you_page": {"page_id": "page_ghost"}},  # never created
+        })
+        location = urlparse(self.call(outcome="accept", step_id="2")["headers"]["Location"])
+        self.assertEqual(location.path, "/page_entry/index.html")
+        self.assertEqual(parse_qs(location.query)["checkout"], ["success"])
+
 
 class PostCheckoutHandlerTests(unittest.TestCase):
     def setUp(self):
         self.repository = FakeDocumentRepository("page_id")
         self.repository.put(entry_page())
+        # A real, PUBLISHED thank-you page so the funnel terminus resolves (a dangling/draft one falls back).
+        self.repository.put({"tenant_id": "tenant_demo", "page_id": "page_thank_you", "status": "published"})
 
     def call(self, outcome=None, step_id=None, session_id=None, pages_domain="pages.example.com"):
         params = {"tenant_id": "tenant_demo"}
@@ -206,6 +220,8 @@ class PostCheckoutCustomDomainTests(unittest.TestCase):
     def setUp(self):
         self.repository = FakeDocumentRepository("page_id")
         self.repository.put(entry_page())
+        # A real, PUBLISHED thank-you page so the funnel terminus resolves (a dangling/draft one falls back).
+        self.repository.put({"tenant_id": "tenant_demo", "page_id": "page_thank_you", "status": "published"})
 
     def _site(self, verified=True):
         return {

@@ -6,7 +6,7 @@ from urllib.request import Request, urlopen
 from stripe_link.common import error_response, json_response, query_params, tenant_id_from_event
 from stripe_link.domain.billing_status import BillingStatusError, assert_billing_in_good_standing
 from stripe_link.domain.fees import build_fee_context
-from stripe_link.domain.opportunities import STAGE_CHECKOUT, stage_opportunities
+from stripe_link.domain.opportunities import STAGE_CHECKOUT, STAGE_POST_PURCHASE, stage_opportunities
 from stripe_link.domain.pricing import (
     PricingError,
     find_price,
@@ -285,6 +285,14 @@ def build_checkout_payload(
     # (what was actually purchased comes from the session's line_items). plans/SALES_FUNNELS.md P2.
     payload["metadata[order_bump_ids]"] = ",".join(stripe_price_id for stripe_price_id, _price_id in order_bumps)
     payload["metadata[post_checkout_entry]"] = "thank_you"
+
+    # One-click post-purchase upsells charge OFF-SESSION against the buyer's saved card, so when this offer has
+    # a post-purchase opportunity the checkout must create a customer and save the payment method for reuse
+    # (otherwise the upsell page has no customer to charge). Subscription mode already creates a customer +
+    # saves the PM; only payment mode needs these flags (plans/OFFER_MODEL_REDESIGN.md §6).
+    if payload.get("mode") == "payment" and stage_opportunities(offer, STAGE_POST_PURCHASE):
+        payload["customer_creation"] = "always"
+        payload["payment_intent_data[setup_future_usage]"] = "off_session"
 
     if fee_context:
         payload["metadata[product_type]"] = fee_context.get("product_type", "")

@@ -276,6 +276,23 @@ class CheckoutHandlerTests(unittest.TestCase):
             opener=self.opener,
         )
 
+    def test_checkout_saves_customer_and_pm_when_offer_has_post_purchase_upsell(self):
+        # One-click upsells charge off-session, so a payment-mode checkout with a post-purchase opportunity must
+        # create a customer + save the payment method for reuse (plans/OFFER_MODEL_REDESIGN.md §6, P3.2c).
+        offer = dict(self.offer)
+        offer["funnel"] = {"upsells": [{"product_id": "prod_simple_coffee", "price_id": "price_upsell_coffee"}]}
+        self._checkout_with_bump(offer, self.product)
+        payload = parse_qs(self.requests[0].data.decode("utf-8"))
+        self.assertEqual(payload["mode"], ["payment"])
+        self.assertEqual(payload["customer_creation"], ["always"])
+        self.assertEqual(payload["payment_intent_data[setup_future_usage]"], ["off_session"])
+
+    def test_checkout_without_upsell_does_not_save_payment_method(self):
+        self._checkout_with_bump(dict(self.offer), self.product)
+        payload = parse_qs(self.requests[0].data.decode("utf-8"))
+        self.assertNotIn("customer_creation", payload)
+        self.assertNotIn("payment_intent_data[setup_future_usage]", payload)
+
     def test_checkout_emits_order_bump_as_optional_item(self):
         _bump_offer, bump_product = order_bump_fixtures()
         self._checkout_with_bump(self._offer_with_bump(), bump_product)
