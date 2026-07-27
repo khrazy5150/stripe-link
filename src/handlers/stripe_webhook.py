@@ -238,6 +238,7 @@ def handler(
                 tenant_id=tenant_id,
                 checkout_sessions_table=checkout_sessions_table,
                 orders_table=orders_table,
+                orders_repo=orders_repo,
                 customers_repo=customers_repo,
                 invoices_repo=invoices_repo,
                 notifications_repo=notifications_repo,
@@ -390,6 +391,7 @@ def persist_checkout_session_completed(
     tenant_id: str,
     checkout_sessions_table=None,
     orders_table=None,
+    orders_repo=None,
     customers_repo=None,
     invoices_repo=None,
     notifications_repo=None,
@@ -417,6 +419,7 @@ def persist_checkout_session_completed(
     ledger_repo = ledger_repo or (ledger_repository() if os.environ.get("LEDGER_TABLE") else None)
     invites_repo = invites_repo or (review_invites_repository() if os.environ.get("REVIEWS_TABLE") else None)
     carts_repo = carts_repo or (carts_repository() if os.environ.get("CARTS_TABLE") else None)
+    orders_repo = orders_repo or (orders_repository() if os.environ.get("ORDERS_TABLE") else None)
 
     fees = fee_breakdown_from_session(session, billing_config_loader)
     session_record = checkout_session_record(stripe_event, session, tenant_id, now)
@@ -425,6 +428,19 @@ def persist_checkout_session_completed(
     customer_record = customer_record_from_session(session, tenant_id, now)
     notification_record = notification_record_from_session(session, tenant_id, order_record, invoice_record, now)
 
+    # The same checkout session can arrive as two Stripe events under Connect (delivered to the platform AND
+    # the connected account, each with its own event_id), so the event-id dedup upstream doesn't catch it. The
+    # order_id is session-derived, so an already-stored order means this session was already fully processed —
+    # (re)write the idempotent order/session records to keep them fresh, but fire every other side effect (the
+    # receipt email above all, plus notification/invoice/ledger/review-invite) only the FIRST time.
+    order_id = str(order_record.get("order_id") or "")
+    already_delivered = False
+    if orders_repo and order_id:
+        try:
+            already_delivered = orders_repo.get(tenant_id, order_id) is not None
+        except Exception:  # noqa: BLE001 - never block persistence on the dedup probe
+            already_delivered = False
+
     written = []
     if checkout_sessions_table:
         checkout_sessions_table.put_item(Item=dynamodb_safe_document(session_record))
@@ -432,6 +448,14 @@ def persist_checkout_session_completed(
     if orders_table:
         orders_table.put_item(Item=dynamodb_safe_document(order_record))
         written.append("order")
+    if already_delivered:
+        return {
+            "status": "duplicate",
+            "session_id": session.get("id", ""),
+            "order_id": order_id,
+            "written": written,
+            "receipt": {"status": "skipped", "reason": "duplicate_delivery"},
+        }
     if invoice_record and invoices_repo:
         invoices_repo.put(invoice_record)
         written.append("invoice")

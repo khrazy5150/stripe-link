@@ -103,5 +103,53 @@ class WebhookReceiptHookTests(unittest.TestCase):
         self.assertIn("SES down", result["error"])
 
 
+class DuplicateDeliveryDedupTests(unittest.TestCase):
+    """Under Stripe Connect the same checkout session arrives as two events (platform + connected account),
+    each with its own event_id, so the event-id dedup misses it. The receipt must be emailed only once."""
+
+    class _FakeTable:
+        def __init__(self):
+            self.puts = []
+
+        def put_item(self, Item=None, **kwargs):
+            self.puts.append(Item)
+
+    class _FakeOrders:
+        def __init__(self):
+            self.exists = False
+
+        def get(self, tenant_id, order_id):
+            return {"order_id": order_id} if self.exists else None
+
+    def _event(self):
+        return {"data": {"object": {
+            "id": "cs_dup", "amount_total": 4909, "currency": "usd",
+            "customer_details": {"email": "ada@example.com", "name": "Ada"},
+            "metadata": {"offer_id": "offer_x"},
+        }}}
+
+    def test_receipt_sent_once_across_duplicate_connect_deliveries(self):
+        from handlers.stripe_webhook import persist_checkout_session_completed
+
+        sent = []
+        orders = self._FakeOrders()
+        kwargs = dict(
+            tenant_id="tenant_demo",
+            checkout_sessions_table=self._FakeTable(),
+            orders_table=self._FakeTable(),
+            orders_repo=orders,
+            receipt_mailer=lambda **kw: sent.append(kw),
+            email_context_loader=lambda tid: {"business_name": "Acme", "support_email": "h@a.com"},
+        )
+        first = persist_checkout_session_completed(self._event(), **kwargs)
+        orders.exists = True  # the first delivery stored the session-derived order
+        second = persist_checkout_session_completed(self._event(), **kwargs)
+
+        self.assertEqual(first["status"], "stored")
+        self.assertEqual(second["status"], "duplicate")
+        self.assertEqual(second["receipt"]["reason"], "duplicate_delivery")
+        self.assertEqual(len(sent), 1)  # exactly one receipt across the two deliveries
+
+
 if __name__ == "__main__":
     unittest.main()
