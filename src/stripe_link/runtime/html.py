@@ -4358,8 +4358,9 @@ def render_page_interactions_script(page: dict[str, Any]) -> str:
         "          const next = new URLSearchParams();",
         "          next.set('outcome', 'accept');",
         "          if (cta.dataset.checkoutTenantId) next.set('tenant_id', cta.dataset.checkoutTenantId);",
-        "          next.set('session_id', '{CHECKOUT_SESSION_ID}');",
-        "          return `${cta.dataset.checkoutApiBaseUrl}/pages/${cta.dataset.checkoutPageId}/post-checkout/next?${next.toString()}`;",
+        # Append the Stripe placeholder UNENCODED — URLSearchParams would percent-encode the braces and Stripe
+        # would never substitute the real Checkout Session id (it looks for the literal {CHECKOUT_SESSION_ID}).
+        "          return `${cta.dataset.checkoutApiBaseUrl}/pages/${cta.dataset.checkoutPageId}/post-checkout/next?${next.toString()}&session_id={CHECKOUT_SESSION_ID}`;",
         "        }",
         "        return `${current}?checkout=success`;",
         "      };",
