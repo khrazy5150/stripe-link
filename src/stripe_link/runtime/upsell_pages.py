@@ -114,7 +114,10 @@ def synthesize_upsell_page(
         {"id": "headline", "type": "headline", "text": presentation["headline"]},
         {"id": "subheadline", "type": "subheadline", "text": presentation["subheadline"]},
         {"id": "offer-selector", "type": "offer_price_selector", "offer_id": offer["offer_id"]},
-        {"id": "checkout", "type": "checkout_cta", "label": presentation["cta_label"]},
+        # The accept label already carries the price (…for $22.17) so hide the CTA's own amount; the decline
+        # link uses the scaffold's copy.
+        {"id": "checkout", "type": "checkout_cta", "label": presentation["cta_label"],
+         "hide_amount": True, "decline_label": scaffold["decline_label"]},
     ])
 
     theme = deepcopy(source_page.get("theme") or {})

@@ -506,7 +506,7 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     "    .sl-checkout-cta{position:fixed;left:0;right:0;bottom:0;z-index:10;background:linear-gradient(transparent,var(--sl-cta-scrim) 20%);padding:1.6rem;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:0.8rem}",
     "    .sl-cta{display:inline-flex;width:min(52rem,100%);align-items:center;justify-content:center;background:linear-gradient(135deg,var(--sl-cta-from),var(--sl-cta-to));color:var(--sl-cta-text);border:0;border-radius:1rem;padding:1.5rem 1.8rem;font-family:var(--sl-font-accent);font-size:1.7rem;font-weight:900;text-decoration:none}",
     "    .sl-cta.is-connecting{opacity:.72;cursor:wait;pointer-events:none}",
-    "    .sl-decline-cta{width:auto;background:none;color:var(--sl-cta-text);text-decoration:underline;font-weight:600;font-size:1.3rem;padding:0.4rem}",
+    "    .sl-decline-cta{width:auto;background:none;color:var(--sl-muted);text-decoration:underline;font-weight:600;font-size:1.3rem;padding:0.4rem}",
     "    .sl-call-number{width:auto;color:var(--sl-cta-text);font-family:var(--sl-font-accent);font-weight:900;font-size:2.2rem;letter-spacing:0.02em;text-decoration:none}",
     "    .sl-lead-form{display:flex;flex-direction:column;gap:1rem;width:min(52rem,100%);background:var(--sl-price-card-bg);border:1px solid var(--sl-price-card-border);border-radius:1.2rem;padding:1.6rem}",
     "    .sl-lead-title{font-family:var(--sl-font-heading);font-weight:800;font-size:1.8rem;color:var(--sl-price-title)}",
@@ -3742,6 +3742,13 @@ def render_buy_cta(
     label = escape(str(section.get("label") or (offer.get("presentation") or {}).get("cta_label") or "Checkout"))
     subtotal = int(resolved_offer.get("subtotal", 0))
     currency = str(resolved_offer.get("currency") or "usd")
+    # An upsell screen bakes the price into its accept label ("… for $22.17"), so it suppresses the CTA's own
+    # amount to avoid "$22.17 - $22.17". The flag is echoed to the island so its updateCta doesn't re-append it.
+    # The decline link's text is the scaffold's decline_label (falls back to the generic default).
+    hide_amount = bool(section.get("hide_amount"))
+    decline_label = escape(str(section.get("decline_label") or "No thanks, continue"))
+    cta_text = label if hide_amount else f"{label} - {escape(format_money(subtotal, currency))}"
+    hide_attr = " data-cta-hide-amount=\"true\"" if hide_amount else ""
     checkout = checkout_context(page, offer, resolved_offer, checkout_url, api_base_url)
     href = escape(checkout["href"])
     data_attrs = " ".join(
@@ -3751,8 +3758,8 @@ def render_buy_cta(
     )
     return "\n".join([
         "    <section class=\"sl-checkout-cta\" data-section-type=\"checkout_cta\" data-cta-type=\"buy\">",
-        f"      <a class=\"sl-cta\" href=\"{href}\" data-cta-label=\"{label}\" data-cta-currency=\"{escape(currency)}\" data-cta-amount=\"{subtotal}\" {data_attrs}>{label} - {escape(format_money(subtotal, currency))}</a>",
-        "      <a class=\"sl-cta sl-decline-cta\" href=\"#decline\" data-role=\"decline\" style=\"display:none\">No thanks, continue</a>",
+        f"      <a class=\"sl-cta\" href=\"{href}\" data-cta-label=\"{label}\"{hide_attr} data-cta-currency=\"{escape(currency)}\" data-cta-amount=\"{subtotal}\" {data_attrs}>{cta_text}</a>",
+        f"      <a class=\"sl-cta sl-decline-cta\" href=\"#decline\" data-role=\"decline\" style=\"display:none\">{decline_label}</a>",
         "    </section>",
     ])
 
@@ -4390,7 +4397,8 @@ def render_page_interactions_script(page: dict[str, Any]) -> str:
         "        const label = cta.dataset.ctaLabel || 'Checkout';",
         "        cta.dataset.ctaAmount = amount || '0';",
         "        cta.href = checkoutHref(card);",
-        "        cta.textContent = `${label} - ${money(amount, currency)}`;",
+        # An upsell CTA bakes the price into its label, so don't re-append the amount (avoids '$X - $X').
+        "        cta.textContent = cta.dataset.ctaHideAmount === 'true' ? label : `${label} - ${money(amount, currency)}`;",
         "      };",
         "      if (cta && cta.dataset.checkoutBaseUrl) cta.href = checkoutHref(document.querySelector('.sl-price-option.selected') || cards[0]);",
         "      const selectCard = (card) => {",

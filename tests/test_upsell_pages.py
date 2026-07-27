@@ -73,8 +73,12 @@ class SynthesizeUpsellPageTests(unittest.TestCase):
         )
         self.assertIn("Wait! Before You Go", html)
         self.assertIn("Yes, I&#x27;ll Take This Deal for $27.00", html)
-        # The decline affordance the island reveals on a funnel step.
+        # The price is baked into the accept label; the CTA must not re-append it ("… $27.00 - $27.00").
+        self.assertNotIn("$27.00 - $27.00", html)
+        self.assertIn('data-cta-hide-amount="true"', html)
+        # The decline affordance the island reveals on a funnel step, carrying the scaffold's copy.
         self.assertIn("sl-decline-cta", html)
+        self.assertIn("No, Thank You! Let&#x27;s Move On", html)
         # A funnel step is never indexed.
         self.assertIn("noindex", html)
 
