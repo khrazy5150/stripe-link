@@ -131,18 +131,35 @@ by product auto-sync (`plans/SALES_FUNNELS.md` P1.5). Unsynced bump → skipped 
 
 ---
 
-## 6. Post-purchase: sequence OR carousel (tenant's choice)
+## 6. Post-purchase: sequence OR carousel — DERIVED from count, capped (author-locked 2026-07-27)
 
 Both reuse the same idempotent one-click charge (`process_upsell`, off-session PaymentIntent, keyed by
-`sequence`). The difference is presentation strategy on the post_purchase placement:
+`sequence`). Strategy is **not a free tenant toggle** — it's derived from the number of upsell slots, with a
+hard cap on serialized screens so a tenant can't march a customer through 7 "No thanks" clicks:
 
-- **`sequence`** (default) — one upsell at a time: *Yes, add it!* (one-click charge) / *No thanks* → next →
-  … → thank-you. Highest AOV; the classic one-click funnel.
-- **`carousel`** — a "bargains just for you" grid of upsell-priced items, each with a one-click **Add**, plus a
-  single **"No thanks, I'm good!"** dismiss. Friendlier; one decision surface. Each Add fires a one-click
-  charge for that item.
+- **`MAX_SEQUENTIAL_UPSELLS = 3`** (named constant, tunable).
+- **≤ 3 upsell slots → `sequence`.** One upsell at a time: *Yes, add it!* (one-click charge) / *No thanks* →
+  its downsell swaps in **in place** (see below) → next slot → … → thank-you. Highest AOV.
+- **≥ 4 upsell slots → `carousel`** (forced — sequence is not offered past the cap). **ALL** upsells show in
+  ONE "bargains just for you" grid (never "3 sequenced then the rest carouselled" — it's all-or-nothing at the
+  cap). Each card has a one-click **Add**; a single **"No thanks, I'm good!"** dismisses the whole grid.
 
-Downsell (`surface: downsell`) is presented after the upsell placement resolves, same machinery.
+### Upsell ↔ downsell pairing (author-locked 2026-07-27)
+A downsell is **the same product's `downsell`-context price** — NOT a separately-picked product. An upsell slot
+is a product with an `upsell` price; if the tenant also set a `downsell` price on that product, declining the
+upsell shows that cheaper price of the **same product** in place ("ok, just 1 more for $12?"). No downsell
+price → the decline just advances. Pairing is by `product_id`. The editor therefore only picks **upsell
+products**; the downsell rides along automatically.
+
+- **Sequence mode:** decline the upsell → same slot swaps to the product's downsell price (one screen, no
+  separate downsell page) → decide → next slot.
+- **Carousel mode:** the single "No thanks, I'm good!" dismiss has no per-card decline, so on dismiss — IF any
+  of the shown products carry a downsell price — show ONE **downsell carousel** (those products' downsell
+  prices) with its own single dismiss → thank-you. Bounds carousel mode to **≤ 2 post-purchase screens**.
+
+**Documented gap (accepted):** a product with a `downsell` price but **no** `upsell` price is **never shown**.
+The old design would have surfaced it on a standalone downsell page; we accept the gap for the simpler model.
+Downsells only exist as the fallback of a chosen upsell product.
 
 ---
 

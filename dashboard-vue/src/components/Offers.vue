@@ -414,44 +414,25 @@
           <section v-if="selectedProducts.length && productIntent === 'transaction'" class="offer-form-section">
             <header class="offer-section-header">
               <div>
-                <h3>After Purchase — Upsells &amp; Downsells</h3>
-                <p>Products offered one-click after checkout. A product is eligible once it has an <code>upsell</code> or <code>downsell</code> price (Products → pricing context). The page copy, image, and countdown are edited in the landing page's <strong>Post-Checkout Flow</strong>.</p>
+                <h3>After Purchase — Upsells</h3>
+                <p>Products offered one-click after checkout. A product is eligible once it has an <code>upsell</code> price (Products → pricing context). If that same product also has a <code>downsell</code> price, it's shown automatically as a second-chance when the upsell is declined. The page copy, image, and countdown are edited in the landing page's <strong>Post-Checkout Flow</strong>.</p>
               </div>
             </header>
-
-            <div class="offer-funnel-group">
-              <span class="offer-funnel-group-label">Upsells</span>
-              <p v-if="!form.upsell_product_ids.length && !contextCandidates('upsell', '').length" class="offer-hint">No products have an upsell price yet.</p>
-              <template v-else>
-                <input v-model.trim="upsellSearch" class="offer-product-search offer-funnel-search" type="search" placeholder="Search upsell products..." />
-                <p v-if="form.upsell_product_ids.length" class="offer-hint">{{ form.upsell_product_ids.length }} selected</p>
-                <div class="offer-order-bumps">
-                  <label v-for="product in upsellCandidates" :key="productId(product)" class="checkbox-row offer-order-bump-row">
-                    <input type="checkbox" :value="productId(product)" v-model="form.upsell_product_ids" />
-                    <span>{{ product.name || "Untitled Product" }} — {{ formatContextAmount(product, 'upsell') }}</span>
-                    <span v-if="form.upsell_product_ids.includes(productId(product)) && !contextSynced(product, 'upsell')" class="field-error">Not synced to Stripe yet — the one-click charge needs a synced price.</span>
-                  </label>
-                  <p v-if="!upsellCandidates.length" class="offer-hint">No upsell products match “{{ upsellSearch }}”.</p>
-                </div>
-              </template>
-            </div>
-
-            <div class="offer-funnel-group">
-              <span class="offer-funnel-group-label">Downsells</span>
-              <p v-if="!form.downsell_product_ids.length && !contextCandidates('downsell', '').length" class="offer-hint">No products have a downsell price yet.</p>
-              <template v-else>
-                <input v-model.trim="downsellSearch" class="offer-product-search offer-funnel-search" type="search" placeholder="Search downsell products..." />
-                <p v-if="form.downsell_product_ids.length" class="offer-hint">{{ form.downsell_product_ids.length }} selected</p>
-                <div class="offer-order-bumps">
-                  <label v-for="product in downsellCandidates" :key="productId(product)" class="checkbox-row offer-order-bump-row">
-                    <input type="checkbox" :value="productId(product)" v-model="form.downsell_product_ids" />
-                    <span>{{ product.name || "Untitled Product" }} — {{ formatContextAmount(product, 'downsell') }}</span>
-                    <span v-if="form.downsell_product_ids.includes(productId(product)) && !contextSynced(product, 'downsell')" class="field-error">Not synced to Stripe yet — the one-click charge needs a synced price.</span>
-                  </label>
-                  <p v-if="!downsellCandidates.length" class="offer-hint">No downsell products match “{{ downsellSearch }}”.</p>
-                </div>
-              </template>
-            </div>
+            <p v-if="!form.upsell_product_ids.length && !contextCandidates('upsell', '').length" class="offer-hint">No products have an upsell price yet.</p>
+            <template v-else>
+              <input v-model.trim="upsellSearch" class="offer-product-search offer-funnel-search" type="search" placeholder="Search upsell products..." />
+              <p v-if="form.upsell_product_ids.length" class="offer-hint">{{ form.upsell_product_ids.length }} selected</p>
+              <div class="offer-order-bumps">
+                <label v-for="product in upsellCandidates" :key="productId(product)" class="checkbox-row offer-order-bump-row">
+                  <input type="checkbox" :value="productId(product)" v-model="form.upsell_product_ids" />
+                  <span>{{ product.name || "Untitled Product" }} — {{ formatContextAmount(product, 'upsell') }}</span>
+                  <small v-if="contextPrice(product, 'downsell')" class="offer-downsell-note">↳ downsell if declined: {{ formatContextAmount(product, 'downsell') }}</small>
+                  <span v-if="form.upsell_product_ids.includes(productId(product)) && !contextSynced(product, 'upsell')" class="field-error">Not synced to Stripe yet — the one-click charge needs a synced price.</span>
+                  <span v-else-if="form.upsell_product_ids.includes(productId(product)) && contextPrice(product, 'downsell') && !contextSynced(product, 'downsell')" class="field-error">Downsell price isn't synced to Stripe yet — it won't charge until synced.</span>
+                </label>
+                <p v-if="!upsellCandidates.length" class="offer-hint">No upsell products match “{{ upsellSearch }}”.</p>
+              </div>
+            </template>
           </section>
 
           <div v-if="formError" class="keys-status-banner error">{{ formError }}</div>
@@ -714,10 +695,8 @@ function formatContextAmount(product, context) {
 // bump/upsell price). Each list stays a simple filtered checkbox list, not a modal.
 const bumpSearch = ref("");
 const upsellSearch = ref("");
-const downsellSearch = ref("");
 const orderBumpCandidates = computed(() => contextCandidates("order_bump", bumpSearch.value));
 const upsellCandidates = computed(() => contextCandidates("upsell", upsellSearch.value));
-const downsellCandidates = computed(() => contextCandidates("downsell", downsellSearch.value));
 // Back-compat helpers used by the existing order-bump template rows.
 function orderBumpSynced(product) {
   return contextSynced(product, "order_bump");
@@ -737,7 +716,11 @@ function buildFunnelBlock() {
   if (orderBumps.length) block.order_bumps = orderBumps;
   const upsells = funnelEntriesFor(form.upsell_product_ids, "upsell");
   if (upsells.length) block.upsells = upsells;
-  const downsells = funnelEntriesFor(form.downsell_product_ids, "downsell");
+  // Downsells are NOT picked separately — each is the SAME upsell product's downsell-context price, the
+  // in-place second-chance shown when its upsell is declined. A downsell-only product (downsell price, no
+  // upsell price) is intentionally never surfaced (documented gap, plans/OFFER_MODEL_REDESIGN.md §6). Pairing
+  // between an upsell and its downsell is by product_id.
+  const downsells = funnelEntriesFor(form.upsell_product_ids, "downsell");
   if (downsells.length) block.downsells = downsells;
   return Object.keys(block).length ? block : undefined;
 }
@@ -899,10 +882,10 @@ function defaultOfferForm() {
     },
     // Product ids designated as pre-purchase order bumps (offer.funnel.order_bumps) — Stripe optional_items.
     order_bump_product_ids: [],
-    // Post-purchase opportunities (offer.funnel.upsells/downsells); their PRESENTATION is edited in the
-    // landing page's Post-Checkout Flow. Here the offer only declares WHICH products they are.
+    // Post-purchase upsell products (offer.funnel.upsells); their PRESENTATION is edited in the landing
+    // page's Post-Checkout Flow. The downsell is NOT picked separately — it's the SAME product's
+    // downsell-context price, derived on save (plans/OFFER_MODEL_REDESIGN.md §6).
     upsell_product_ids: [],
-    downsell_product_ids: [],
     userEditedName: false,
     userEditedSlug: false,
   };
@@ -1330,7 +1313,6 @@ function loadOfferIntoForm(offer) {
   form.brand = offer.presentation?.brand || "";
   form.order_bump_product_ids = (offer.funnel?.order_bumps || []).map((bump) => bump.product_id).filter(Boolean);
   form.upsell_product_ids = (offer.funnel?.upsells || []).map((entry) => entry.product_id).filter(Boolean);
-  form.downsell_product_ids = (offer.funnel?.downsells || []).map((entry) => entry.product_id).filter(Boolean);
   form.userEditedName = true;
   form.userEditedSlug = true;
   form.discount = {
