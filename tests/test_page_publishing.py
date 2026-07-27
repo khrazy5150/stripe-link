@@ -202,6 +202,39 @@ class PagePublishingTests(unittest.TestCase):
         self.assertIn(("preview", "preview/tenant_demo/page_simple_coffee/sale/index.html"), keys)
         self.assertNotIn(("pages", "page_simple_coffee/sale/index.html"), keys)
 
+    def test_publish_writes_an_upsell_screen_artifact_per_plan_entry(self):
+        # An offer with an upsell-context price gets a Universal Bundle upsell artifact at {page_id}__upsell_1.
+        product = copy.deepcopy(self.product)
+        product["prices"].append({
+            "price_id": "price_up", "stripe_price_id": "sp_up", "context": "upsell",
+            "unit_amount": 500, "currency": "usd", "quantity": 1,
+        })
+        offer = copy.deepcopy(self.offer)
+        offer["funnel"] = {"upsells": [{"product_id": product["product_id"], "price_id": "price_up"}]}
+        page = copy.deepcopy(self.page)
+        page["status"] = "published"
+        publish_page_document(
+            page,
+            offers_repository=FakeRepository("offer_id", [offer]),
+            products_repository=FakeRepository("product_id", [product]),
+            s3_client=self.s3, pages_bucket="pages", preview_bucket="preview", environment="dev",
+            pages_domain="p", preview_domain="pv",
+        )
+        up_id = f"{page['page_id']}__upsell_1"
+        keys = [(put["Bucket"], put["Key"]) for put in self.s3.puts]
+        self.assertIn(("pages", artifact_paths("tenant_demo", up_id)["published"]), keys)
+        self.assertIn(("preview", artifact_paths("tenant_demo", up_id)["preview"]), keys)
+        upsell_body = next(put["Body"] for put in self.s3.puts if put["Key"] == artifact_paths("tenant_demo", up_id)["published"])
+        self.assertIn(b"Wait! Before You Go", upsell_body)
+
+    def test_publish_writes_no_upsell_artifact_for_an_ordinary_offer(self):
+        publish_page_document(
+            copy.deepcopy(self.page), offers_repository=self.offers_repo, products_repository=self.products_repo,
+            s3_client=self.s3, pages_bucket="pages", preview_bucket="preview", environment="dev",
+            pages_domain="p", preview_domain="pv",
+        )
+        self.assertFalse(any("__upsell_" in put["Key"] for put in self.s3.puts))
+
     def test_publish_deletes_stale_context_artifacts_when_a_context_is_disabled(self):
         # No sale/flash enabled -> their artifacts are cleaned up so /sale //flash-sale stop serving.
         publish_page_document(

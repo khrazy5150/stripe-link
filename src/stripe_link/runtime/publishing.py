@@ -4,6 +4,7 @@ import time
 from typing import Any
 
 from stripe_link.domain.documents import (
+    DocumentValidationError,
     validate_offer_document,
     validate_page_document,
     validate_product_document,
@@ -13,8 +14,9 @@ from stripe_link.domain.documents import (
 from stripe_link.runtime.artifacts import artifact_paths, cloudfront_path
 from stripe_link.domain.connect_sync import site_domain_verified
 from stripe_link.domain.custom_domains import domain_index_record
-from stripe_link.domain.funnels import funnel_slug_entries
-from stripe_link.domain.opportunities import STAGE_LANDING, stage_opportunities
+from stripe_link.domain.funnels import funnel_slug_entries, post_purchase_plan
+from stripe_link.domain.opportunities import STAGE_LANDING, STAGE_POST_PURCHASE, stage_opportunities
+from stripe_link.runtime.upsell_pages import synthesize_upsell_page, upsell_scaffold
 from stripe_link.runtime.html import (
     INDEXABLE_ROBOTS,
     NOINDEX_FOLLOW_ROBOTS,
@@ -437,6 +439,20 @@ def _load_offer_bundle(
         if product.get("tenant_id") != tenant_id:
             raise PublishError("Page and product tenant_id must match.")
         products_by_id[product_id] = product
+    # Also load post-purchase (upsell/downsell) products so the funnel's upsell screens can render (P3.2b).
+    # Best-effort: a dangling funnel product is skipped by post_purchase_plan, so it must not fail the publish.
+    for item in stage_opportunities(offer, STAGE_POST_PURCHASE):
+        product_id = str(item.get("product_id") or "")
+        if not product_id or product_id in products_by_id:
+            continue
+        product = products_repository.get(tenant_id, product_id)
+        if not product or product.get("tenant_id") != tenant_id:
+            continue
+        try:
+            validate_product_document(product)
+        except DocumentValidationError:
+            continue
+        products_by_id[product_id] = product
     return offer
 
 
@@ -645,6 +661,38 @@ def publish_page_document(
                 ContentType="text/html; charset=utf-8", CacheControl="public, max-age=300",
             )
             artifacts.append({"kind": f"published:{ctx}", "bucket": pages_bucket, "key": ctx_key, "url": public_url(pages_domain, ctx_key)})
+
+    # Post-purchase upsell screens (plans/OFFER_MODEL_REDESIGN.md §6, P3.2b): each upsell in the offer's plan
+    # is rendered as a Universal Bundle artifact (synthetic page + single-item offer at the upsell price,
+    # inheriting this page's theme) so the sequence-indexed post-checkout router can serve it at
+    # {page_id}__upsell_{n}. Always noindex — a funnel step is never an organic entry point. Empty for any
+    # offer without upsell-context prices, so this is a no-op for ordinary pages.
+    scaffold = upsell_scaffold(page)
+    for entry in post_purchase_plan(offer, products_by_id)["upsells"]:
+        up_page, up_offer = synthesize_upsell_page(
+            entry, source_page=page, source_offer=offer, scaffold=scaffold,
+        )
+        up_html = render_page(
+            up_page, up_offer, {entry["product_id"]: entry["product"]},
+            selected_prices={entry["product_id"]: entry["price_id"]},
+            checkout_url=checkout, api_base_url=api_base_url,
+            robots=NOINDEX_ROBOTS, site=site, page_type="funnel_step",
+        )
+        up_page_id = str(up_page["page_id"])
+        if preview_bucket:
+            pv_key = artifact_paths(tenant_id, up_page_id)["preview"]
+            s3_client.put_object(
+                Bucket=preview_bucket, Key=pv_key, Body=up_html.encode("utf-8"),
+                ContentType="text/html; charset=utf-8", CacheControl="no-cache, no-store, must-revalidate",
+            )
+            artifacts.append({"kind": f"preview:upsell_{entry['sequence']}", "bucket": preview_bucket, "key": pv_key, "url": public_url(preview_domain, pv_key)})
+        if page.get("status") == "published" and pages_bucket:
+            up_key = artifact_paths(tenant_id, up_page_id)["published"]
+            s3_client.put_object(
+                Bucket=pages_bucket, Key=up_key, Body=up_html.encode("utf-8"),
+                ContentType="text/html; charset=utf-8", CacheControl="public, max-age=300",
+            )
+            artifacts.append({"kind": f"published:upsell_{entry['sequence']}", "bucket": pages_bucket, "key": up_key, "url": public_url(pages_domain, up_key)})
 
     # Remove stale context artifacts for contexts that are no longer enabled (e.g. Sale toggled off) so
     # /sale //flash-sale stop serving. Best-effort — a delete of a missing key is a harmless no-op.
