@@ -429,26 +429,39 @@ def persist_checkout_session_completed(
     notification_record = notification_record_from_session(session, tenant_id, order_record, invoice_record, now)
 
     # The same checkout session can arrive as two Stripe events under Connect (delivered to the platform AND
-    # the connected account, each with its own event_id), so the event-id dedup upstream doesn't catch it. The
-    # order_id is session-derived, so an already-stored order means this session was already fully processed —
-    # (re)write the idempotent order/session records to keep them fresh, but fire every other side effect (the
-    # receipt email above all, plus notification/invoice/ledger/review-invite) only the FIRST time.
+    # the connected account, each with its own event_id, within milliseconds), so the event-id dedup upstream
+    # doesn't catch it and a read-then-write check races. Atomically CLAIM the session-derived order with a
+    # conditional put: exactly one concurrent delivery writes it (attribute_not_exists), the loser gets
+    # ConditionalCheckFailedException and returns as a duplicate — so every one-time side effect (the receipt
+    # email above all, plus notification/invoice/ledger/review-invite) fires exactly once.
     order_id = str(order_record.get("order_id") or "")
-    already_delivered = False
-    if orders_repo and order_id:
-        try:
-            already_delivered = orders_repo.get(tenant_id, order_id) is not None
-        except Exception:  # noqa: BLE001 - never block persistence on the dedup probe
-            already_delivered = False
 
     written = []
     if checkout_sessions_table:
         checkout_sessions_table.put_item(Item=dynamodb_safe_document(session_record))
         written.append("checkout_session")
+
+    first_delivery = True
     if orders_table:
-        orders_table.put_item(Item=dynamodb_safe_document(order_record))
-        written.append("order")
-    if already_delivered:
+        from botocore.exceptions import ClientError
+        try:
+            orders_table.put_item(
+                Item=dynamodb_safe_document(order_record),
+                ConditionExpression="attribute_not_exists(order_id)",
+            )
+            written.append("order")
+        except ClientError as exc:
+            if exc.response.get("Error", {}).get("Code") == "ConditionalCheckFailedException":
+                first_delivery = False  # a concurrent delivery already claimed this order
+            else:
+                raise
+    elif orders_repo and order_id:  # no raw table (unit tests): best-effort non-atomic probe
+        try:
+            first_delivery = orders_repo.get(tenant_id, order_id) is None
+        except Exception:  # noqa: BLE001 - never block persistence on the dedup probe
+            first_delivery = True
+
+    if not first_delivery:
         return {
             "status": "duplicate",
             "session_id": session.get("id", ""),

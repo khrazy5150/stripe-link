@@ -107,19 +107,23 @@ class DuplicateDeliveryDedupTests(unittest.TestCase):
     """Under Stripe Connect the same checkout session arrives as two events (platform + connected account),
     each with its own event_id, so the event-id dedup misses it. The receipt must be emailed only once."""
 
-    class _FakeTable:
-        def __init__(self):
-            self.puts = []
-
+    class _PlainTable:
         def put_item(self, Item=None, **kwargs):
-            self.puts.append(Item)
+            pass
 
-    class _FakeOrders:
+    class _ConditionalOrdersTable:
+        """Emulates DynamoDB: a conditional put with attribute_not_exists fails once the key is present."""
+
         def __init__(self):
-            self.exists = False
+            self.claimed = set()
 
-        def get(self, tenant_id, order_id):
-            return {"order_id": order_id} if self.exists else None
+        def put_item(self, Item=None, ConditionExpression=None, **kwargs):
+            from botocore.exceptions import ClientError
+
+            order_id = (Item or {}).get("order_id")
+            if ConditionExpression and order_id in self.claimed:
+                raise ClientError({"Error": {"Code": "ConditionalCheckFailedException"}}, "PutItem")
+            self.claimed.add(order_id)
 
     def _event(self):
         return {"data": {"object": {
@@ -132,18 +136,16 @@ class DuplicateDeliveryDedupTests(unittest.TestCase):
         from handlers.stripe_webhook import persist_checkout_session_completed
 
         sent = []
-        orders = self._FakeOrders()
+        orders_table = self._ConditionalOrdersTable()  # shared across both deliveries, like the real table
         kwargs = dict(
             tenant_id="tenant_demo",
-            checkout_sessions_table=self._FakeTable(),
-            orders_table=self._FakeTable(),
-            orders_repo=orders,
+            checkout_sessions_table=self._PlainTable(),
+            orders_table=orders_table,
             receipt_mailer=lambda **kw: sent.append(kw),
             email_context_loader=lambda tid: {"business_name": "Acme", "support_email": "h@a.com"},
         )
         first = persist_checkout_session_completed(self._event(), **kwargs)
-        orders.exists = True  # the first delivery stored the session-derived order
-        second = persist_checkout_session_completed(self._event(), **kwargs)
+        second = persist_checkout_session_completed(self._event(), **kwargs)  # concurrent Connect twin
 
         self.assertEqual(first["status"], "stored")
         self.assertEqual(second["status"], "duplicate")
