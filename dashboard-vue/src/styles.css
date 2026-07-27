@@ -2893,28 +2893,44 @@ button:disabled {
   font-weight: 800;
 }
 
-.offer-order-bumps {
-  display: flex;
-  flex-direction: column;
-  gap: 0.6rem;
-}
-
-.offer-order-bump-row {
-  flex-wrap: wrap;
-}
-
-.offer-funnel-search {
-  margin-bottom: 0.6rem;
-}
-
-.offer-order-bumps {
-  max-height: 18rem;
-  overflow-y: auto;
-}
-
 .offer-downsell-note {
   color: var(--muted);
   font-style: italic;
+}
+
+/* Read-only inferred funnel summary (order bumps + post-purchase upsells/downsells). */
+.offer-inferred-flow {
+  gap: 1rem;
+}
+
+.offer-inferred-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.offer-inferred-group + .offer-inferred-group {
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--line);
+}
+
+.offer-inferred-label {
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
+.offer-inferred-label em {
+  font-weight: 400;
+  font-style: normal;
+  color: var(--muted);
+}
+
+.offer-inferred-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: baseline;
 }
 
 .offer-hint {

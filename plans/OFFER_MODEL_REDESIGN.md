@@ -212,9 +212,16 @@ drop the legacy fields last.
   `optional_items` from checkout opportunities. Retire `offer.funnel` reads.
 - **Post-purchase** (`upsell.py`, `post_checkout.py`, `funnels.py`): drive from post_purchase opportunities +
   strategy; reuse `process_upsell` + `resolve_funnel_transition`.
-- **Dashboard**: `Offers.vue` becomes an **opportunities editor** (add a product → pick stage + placement);
-  the P2a "Order Bumps" section and the auto-inferred `offer_type` UI are subsumed. `LandingPages.vue`
-  `isListicleOffer` / offer-type branches derive from the adapter instead.
+- **Dashboard**: `Offers.vue` is a **pure-inference editor** (author-locked 2026-07-27). The tenant picks
+  products ONCE in the unified "Select Items" list; **every role is inferred from each product's pricing
+  contexts** — the tenant never re-decides bumps/upsells/downsells per offer (they did that work assigning
+  contexts on the Products screen). Rules: `standard/sale/flash_sale` → landing card · `order_bump` → checkout
+  bump · `upsell` → post-purchase upsell · `downsell` → that upsell's in-place fallback. A product may fill
+  several roles (standard + order_bump = landing card that can also be bumped). A **funnel-only** product
+  (bump/upsell/downsell price, NO landing price) is selected in the offer but is never a landing card. The
+  dedicated bump/upsell/downsell pickers are **removed**; a compact **read-only "Inferred Flow" summary** shows
+  what was derived (incl. the ≤3 sequence / ≥4 carousel strategy) so the tenant sees it without choosing.
+  `LandingPages.vue` `isListicleOffer` / offer-type branches derive from the adapter instead.
 - **Migration**: every persisted offer.
 
 ---
