@@ -740,6 +740,79 @@ def validate_offer_funnel(document: dict[str, Any]) -> None:
             require_string(entry, "price_id", f"offer funnel {key} price_id")
 
 
+def _validate_offer_item(document: dict[str, Any], item: dict[str, Any]) -> None:
+    """Validate one product/service line — the price/product rules shared by a legacy item and a purchase
+    opportunity (they carry the same product_id/service_id + price_id or selectable_prices shape)."""
+    if not isinstance(item, dict):
+        raise DocumentValidationError("Each offer item must be an object.")
+    # An item references exactly one of a product or a service (STORY-2.1).
+    has_product = bool(item.get("product_id"))
+    has_service = bool(item.get("service_id"))
+    if has_product == has_service:
+        raise DocumentValidationError("Offer item must reference exactly one of product_id or service_id.")
+    if has_service:
+        require_string(item, "service_id", "offer item service_id")
+        if item.get("selectable_prices"):
+            raise DocumentValidationError("Service offer items must use price_id, not selectable_prices.")
+        require_string(item, "price_id", "offer item price_id")
+        require_positive_int(item, "quantity", "offer item quantity")
+        if item.get("booking_flow") is not None:
+            require_enum(item, "booking_flow", {"book_then_pay", "pay_then_book"}, "offer item booking_flow")
+        if document.get("product_intent") != "transaction":
+            raise DocumentValidationError("Service offer items require product_intent 'transaction'.")
+        optional_string(item, "presentation_context", "offer item presentation_context")
+        return
+    require_string(item, "product_id", "offer item product_id")
+    optional_string(item, "presentation_context", "offer item presentation_context")
+    has_fixed_price = bool(item.get("price_id"))
+    has_selectable_prices = bool(item.get("selectable_prices"))
+    if has_fixed_price == has_selectable_prices:
+        raise DocumentValidationError("Offer item must use either price_id or selectable_prices, but not both.")
+    if has_fixed_price:
+        require_string(item, "price_id", "offer item price_id")
+        require_positive_int(item, "quantity", "offer item quantity")
+    if has_selectable_prices:
+        selectable_prices = item.get("selectable_prices")
+        if not isinstance(selectable_prices, list) or not selectable_prices:
+            raise DocumentValidationError("selectable_prices must be a non-empty array.")
+        selectable_price_ids = set()
+        for price in selectable_prices:
+            if not isinstance(price, dict):
+                raise DocumentValidationError("Each selectable price must be an object.")
+            require_string(price, "price_id", "selectable price price_id")
+            require_positive_int(price, "quantity", "selectable price quantity")
+            optional_string(price, "label", "selectable price label")
+            optional_string(price, "badge", "selectable price badge")
+            optional_string(price, "description", "selectable price description")
+            optional_string(price, "image_url", "selectable price image_url")
+            optional_non_negative_int(price, "display_discount_pct", "selectable price display_discount_pct")
+            if price.get("price_id") in selectable_price_ids:
+                raise DocumentValidationError(f"Duplicate selectable price_id '{price.get('price_id')}'.")
+            selectable_price_ids.add(price.get("price_id"))
+        if not selectable_price_ids:
+            raise DocumentValidationError("selectable_prices must include at least one price_id.")
+        if item.get("default_price_id") not in selectable_price_ids:
+            raise DocumentValidationError("default_price_id must reference one of selectable_prices.")
+
+
+def validate_purchase_opportunities(document: dict[str, Any], opportunities: list[Any]) -> None:
+    """Validate the normalized offer model (plans/OFFER_MODEL_REDESIGN.md): each opportunity carries a stage,
+    an optional placement, and one product/service line (validated by _validate_offer_item)."""
+    for opp in opportunities:
+        if not isinstance(opp, dict):
+            raise DocumentValidationError("Each purchase opportunity must be an object.")
+        require_enum(opp, "stage", {"landing", "checkout", "post_purchase"}, "purchase opportunity stage")
+        placement = opp.get("placement")
+        if placement is not None:
+            if not isinstance(placement, dict):
+                raise DocumentValidationError("Purchase opportunity placement must be an object.")
+            if placement.get("surface") is not None:
+                require_enum(placement, "surface", {"primary", "order_bump", "upsell", "downsell"}, "opportunity placement surface")
+            if placement.get("strategy") not in (None, "", "single", "carousel", "sequence"):
+                raise DocumentValidationError("Opportunity placement strategy must be 'single', 'carousel', or 'sequence'.")
+        _validate_offer_item(document, opp)
+
+
 def validate_offer_document(document: dict[str, Any]) -> None:
     require_document_fields(document, "offer", "offer_id")
     ui_only_fields = sorted(field for field in OFFER_UI_ONLY_FIELDS if field in document)
@@ -761,64 +834,17 @@ def validate_offer_document(document: dict[str, Any]) -> None:
     if document.get("service_booking_mode") is not None:
         require_enum(document, "service_booking_mode", {"single_visit", "separate_visits"}, "Offer service_booking_mode")
     validate_offer_funnel(document)
-    items = document.get("items")
-    if not isinstance(items, list) or not items:
-        raise DocumentValidationError("Offer items must be a non-empty array.")
-
-    for item in items:
-        if not isinstance(item, dict):
-            raise DocumentValidationError("Each offer item must be an object.")
-        # An item references exactly one of a product or a service (STORY-2.1).
-        has_product = bool(item.get("product_id"))
-        has_service = bool(item.get("service_id"))
-        if has_product == has_service:
-            raise DocumentValidationError("Offer item must reference exactly one of product_id or service_id.")
-        if has_service:
-            # An offer may carry N service items; the Offer's service_booking_mode coordinates how the
-            # scheduled ones are grouped into appointments (STORY-2.1).
-            require_string(item, "service_id", "offer item service_id")
-            # Service items use the fixed price_id path only (no selectable_prices / packages).
-            if item.get("selectable_prices"):
-                raise DocumentValidationError("Service offer items must use price_id, not selectable_prices.")
-            require_string(item, "price_id", "offer item price_id")
-            require_positive_int(item, "quantity", "offer item quantity")
-            if item.get("booking_flow") is not None:
-                require_enum(item, "booking_flow", {"book_then_pay", "pay_then_book"}, "offer item booking_flow")
-            if document.get("product_intent") != "transaction":
-                raise DocumentValidationError("Service offer items require product_intent 'transaction'.")
-            optional_string(item, "presentation_context", "offer item presentation_context")
-            continue
-        require_string(item, "product_id", "offer item product_id")
-        optional_string(item, "presentation_context", "offer item presentation_context")
-        has_fixed_price = bool(item.get("price_id"))
-        has_selectable_prices = bool(item.get("selectable_prices"))
-        if has_fixed_price == has_selectable_prices:
-            raise DocumentValidationError("Offer item must use either price_id or selectable_prices, but not both.")
-        if has_fixed_price:
-            require_string(item, "price_id", "offer item price_id")
-            require_positive_int(item, "quantity", "offer item quantity")
-        if has_selectable_prices:
-            selectable_prices = item.get("selectable_prices")
-            if not isinstance(selectable_prices, list) or not selectable_prices:
-                raise DocumentValidationError("selectable_prices must be a non-empty array.")
-            selectable_price_ids = set()
-            for price in selectable_prices:
-                if not isinstance(price, dict):
-                    raise DocumentValidationError("Each selectable price must be an object.")
-                require_string(price, "price_id", "selectable price price_id")
-                require_positive_int(price, "quantity", "selectable price quantity")
-                optional_string(price, "label", "selectable price label")
-                optional_string(price, "badge", "selectable price badge")
-                optional_string(price, "description", "selectable price description")
-                optional_string(price, "image_url", "selectable price image_url")
-                optional_non_negative_int(price, "display_discount_pct", "selectable price display_discount_pct")
-                if price.get("price_id") in selectable_price_ids:
-                    raise DocumentValidationError(f"Duplicate selectable price_id '{price.get('price_id')}'.")
-                selectable_price_ids.add(price.get("price_id"))
-            if not selectable_price_ids:
-                raise DocumentValidationError("selectable_prices must include at least one price_id.")
-            if item.get("default_price_id") not in selectable_price_ids:
-                raise DocumentValidationError("default_price_id must reference one of selectable_prices.")
+    # New model (purchase_opportunities) is the source of truth when present; otherwise validate legacy items.
+    # An offer must carry one or the other (plans/OFFER_MODEL_REDESIGN.md).
+    opportunities = document.get("purchase_opportunities")
+    if isinstance(opportunities, list) and opportunities:
+        validate_purchase_opportunities(document, opportunities)
+    else:
+        items = document.get("items")
+        if not isinstance(items, list) or not items:
+            raise DocumentValidationError("Offer must have purchase_opportunities or a non-empty items array.")
+        for item in items:
+            _validate_offer_item(document, item)
 
     discount = document.get("discount")
     if not isinstance(discount, dict):

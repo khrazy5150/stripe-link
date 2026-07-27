@@ -527,6 +527,34 @@ class DocumentValidationTests(unittest.TestCase):
         with self.assertRaisesRegex(DocumentValidationError, "order_bumps price_id"):
             validate_offer_document(offer)
 
+    def _opportunity_offer(self, opportunities):
+        offer = copy.deepcopy(self.offer)
+        offer.pop("items", None)
+        offer["purchase_opportunities"] = opportunities
+        return offer
+
+    def test_offer_accepts_purchase_opportunities_instead_of_items(self):
+        validate_offer_document(self._opportunity_offer([
+            {"stage": "landing", "placement": {"surface": "primary"}, "product_id": "p", "price_id": "pr", "quantity": 1},
+            {"stage": "checkout", "placement": {"surface": "order_bump"}, "product_id": "b", "price_id": "pb", "quantity": 1},
+        ]))  # no raise
+
+    def test_offer_requires_items_or_opportunities(self):
+        offer = copy.deepcopy(self.offer)
+        offer.pop("items", None)
+        with self.assertRaisesRegex(DocumentValidationError, "purchase_opportunities or a non-empty items"):
+            validate_offer_document(offer)
+
+    def test_opportunity_rejects_bad_stage(self):
+        with self.assertRaisesRegex(DocumentValidationError, "stage"):
+            validate_offer_document(self._opportunity_offer([{"stage": "wat", "product_id": "p", "price_id": "pr", "quantity": 1}]))
+
+    def test_opportunity_rejects_bad_placement_surface(self):
+        with self.assertRaisesRegex(DocumentValidationError, "surface"):
+            validate_offer_document(self._opportunity_offer([
+                {"stage": "checkout", "placement": {"surface": "wat"}, "product_id": "p", "price_id": "pr", "quantity": 1},
+            ]))
+
     def test_offer_rejects_ui_only_fields(self):
         offer = load_fixture("offer-universal-bundle.json")
         offer["offer_type"] = "single_product"
