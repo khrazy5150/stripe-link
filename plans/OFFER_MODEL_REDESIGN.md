@@ -219,9 +219,17 @@ drop the legacy fields last.
   bump · `upsell` → post-purchase upsell · `downsell` → that upsell's in-place fallback. A product may fill
   several roles (standard + order_bump = landing card that can also be bumped). A **funnel-only** product
   (bump/upsell/downsell price, NO landing price) is selected in the offer but is never a landing card. The
-  dedicated bump/upsell/downsell pickers are **removed**; a compact **read-only "Inferred Flow" summary** shows
-  what was derived (incl. the ≤3 sequence / ≥4 carousel strategy) so the tenant sees it without choosing.
+  dedicated bump/upsell/downsell pickers are **removed**; a read-only **visual purchase funnel** ("Purchase
+  Flow") renders what was derived — a top-down diagram *Offer → Landing → At checkout → After purchase →
+  Thank-you*, each stage showing opportunity cards with an **intent badge**, product name, and pricing-option
+  chips (standard / N quantity tiers / subscription / sale / flash), plus the ≤3-sequence / ≥4-carousel label
+  and each upsell's downsell fallback. So the tenant *sees* the flow without choosing it.
   `LandingPages.vue` `isListicleOffer` / offer-type branches derive from the adapter instead.
+
+  **Intent (author idea, 2026-07-27):** a friendly label naming WHY a product sits at its stage —
+  `primary` (main buy) · `cross_sell` (order bump) · `upgrade` (upsell) · `recovery` (downsell). Currently
+  **DERIVED 1:1 from `placement.surface`** (no new stored field); if we ever want intent decoupled from surface,
+  promote it to a stored `placement.intent`.
 - **Migration**: every persisted offer.
 
 ---

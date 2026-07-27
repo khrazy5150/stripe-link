@@ -390,32 +390,49 @@
             </div>
           </section>
 
-          <section v-if="landingProducts.length && productIntent === 'transaction' && (inferredOrderBumps.length || inferredUpsells.length)" class="offer-form-section offer-inferred-flow">
+          <section v-if="landingProducts.length && productIntent === 'transaction'" class="offer-form-section">
             <header class="offer-section-header">
               <div>
-                <h3>Inferred Flow</h3>
-                <p>Read-only. Order bumps, upsells, and downsells are inferred from your selected products' pricing contexts (assigned in Products → pricing context) — there's nothing to choose here.</p>
+                <h3>Purchase Flow</h3>
+                <p>Read-only. Every step is inferred from your selected products' pricing contexts (set in Products → pricing context) — nothing to choose here.</p>
               </div>
             </header>
 
-            <div v-if="inferredOrderBumps.length" class="offer-inferred-group">
-              <span class="offer-inferred-label">At checkout — order bump{{ inferredOrderBumps.length > 1 ? "s" : "" }}</span>
-              <div v-for="product in inferredOrderBumps" :key="'bump-' + productId(product)" class="offer-inferred-row">
-                <span>{{ product.name || "Untitled Product" }} — {{ formatContextAmount(product, 'order_bump') }}</span>
-                <span v-if="!contextSynced(product, 'order_bump')" class="field-error">Not synced to Stripe — won't appear at checkout until synced.</span>
+            <div class="funnel-diagram">
+              <div class="funnel-node funnel-offer">
+                <span class="funnel-node-kind">Offer</span>
+                <strong>{{ form.name || "Untitled offer" }}</strong>
               </div>
-            </div>
 
-            <div v-if="inferredUpsells.length" class="offer-inferred-group">
-              <span class="offer-inferred-label">
-                After purchase — upsell{{ inferredUpsells.length > 1 ? "s" : "" }}
-                <em>· {{ inferredUpsellStrategy === "carousel" ? `shown as a carousel (${inferredUpsells.length} > ${MAX_SEQUENTIAL_UPSELLS})` : "shown one at a time" }}</em>
-              </span>
-              <div v-for="product in inferredUpsells" :key="'up-' + productId(product)" class="offer-inferred-row">
-                <span>{{ product.name || "Untitled Product" }} — {{ formatContextAmount(product, 'upsell') }}</span>
-                <small v-if="contextPrice(product, 'downsell')" class="offer-downsell-note">↳ downsell if declined: {{ formatContextAmount(product, 'downsell') }}</small>
-                <span v-if="!contextSynced(product, 'upsell')" class="field-error">Not synced to Stripe — the one-click charge needs a synced price.</span>
-                <span v-else-if="contextPrice(product, 'downsell') && !contextSynced(product, 'downsell')" class="field-error">Downsell price isn't synced to Stripe — it won't charge until synced.</span>
+              <template v-for="stage in offerFunnelStages" :key="stage.key">
+                <div class="funnel-connector" aria-hidden="true"></div>
+                <div class="funnel-stage">
+                  <div class="funnel-stage-head">
+                    <span class="funnel-stage-label">{{ stage.label }}</span>
+                    <span class="funnel-stage-hint">{{ stage.hint }}</span>
+                  </div>
+                  <div class="funnel-cards">
+                    <article v-for="item in stage.items" :key="item.key" class="funnel-card">
+                      <span class="intent-badge" :class="'intent-' + item.intent" :title="INTENT_META[item.intent].desc">{{ INTENT_META[item.intent].label }}</span>
+                      <strong class="funnel-card-name">{{ item.product.name || "Untitled Product" }}</strong>
+                      <div class="funnel-pricing">
+                        <span v-for="chip in (item.chips || [item.amount])" :key="chip" class="price-chip">{{ chip }}</span>
+                      </div>
+                      <span v-if="item.synced === false" class="field-error">Not synced to Stripe — needs a synced price.</span>
+                      <div v-if="item.downsell" class="funnel-downsell">
+                        <span class="intent-badge intent-recovery" :title="INTENT_META.recovery.desc">{{ INTENT_META.recovery.label }}</span>
+                        <span>if declined — {{ item.downsell.amount }}</span>
+                        <span v-if="!item.downsell.synced" class="field-error">Not synced.</span>
+                      </div>
+                    </article>
+                  </div>
+                </div>
+              </template>
+
+              <div class="funnel-connector" aria-hidden="true"></div>
+              <div class="funnel-node funnel-thankyou">
+                <span class="funnel-node-kind">Always</span>
+                <strong>Thank-you page</strong>
               </div>
             </div>
           </section>
@@ -685,6 +702,58 @@ const inferredUpsells = computed(() => selectedProducts.value.filter((product) =
 // Sequence for ≤ MAX_SEQUENTIAL_UPSELLS upsell slots; a forced carousel of ALL upsells above it (§6).
 const MAX_SEQUENTIAL_UPSELLS = 3;
 const inferredUpsellStrategy = computed(() => (inferredUpsells.value.length > MAX_SEQUENTIAL_UPSELLS ? "carousel" : "sequence"));
+
+// Intent = a friendly, DERIVED label over placement.surface (no new stored field) — it names WHY a product is
+// at its stage. primary=main buy · cross_sell=order bump · upgrade=upsell · recovery=downsell.
+const INTENT_META = {
+  primary: { label: "Primary", desc: "main purchase" },
+  cross_sell: { label: "Cross-sell", desc: "order bump" },
+  upgrade: { label: "Upgrade", desc: "upsell" },
+  recovery: { label: "Recovery", desc: "downsell" },
+};
+
+// Pricing-option chips for a landing product (standard / N quantity tiers / subscription / sale / flash).
+function landingPricingChips(product) {
+  const config = itemConfig(product);
+  const prices = landingPrices(product);
+  const chips = [];
+  const tierCount = (config.selectable_price_ids || []).length;
+  chips.push(config.mode === "selectable" && tierCount > 1 ? `${tierCount} quantity tiers` : "standard");
+  if (prices.some((price) => ["recurring", "subscription"].includes(price.pricing_model))) chips.push("subscription");
+  const contexts = new Set(prices.map((price) => price.context || "standard"));
+  if (contexts.has("sale")) chips.push("sale");
+  if (contexts.has("flash_sale")) chips.push("flash sale");
+  return chips;
+}
+
+// The offer's purchase flow as staged nodes — a visual funnel over the SAME inferred data (§6). Read-only.
+const offerFunnelStages = computed(() => {
+  const stages = [];
+  const landing = landingProducts.value.map((product) => ({
+    key: productId(product), intent: "primary", product, chips: landingPricingChips(product),
+  }));
+  if (landing.length) stages.push({ key: "landing", label: "Landing page", hint: "what the customer buys", items: landing });
+
+  const bumps = inferredOrderBumps.value.map((product) => ({
+    key: productId(product), intent: "cross_sell", product,
+    amount: formatContextAmount(product, "order_bump"), synced: contextSynced(product, "order_bump"),
+  }));
+  if (bumps.length) stages.push({ key: "checkout", label: "At checkout", hint: "Stripe order bump", items: bumps });
+
+  const upsells = inferredUpsells.value.map((product) => ({
+    key: productId(product), intent: "upgrade", product,
+    amount: formatContextAmount(product, "upsell"), synced: contextSynced(product, "upsell"),
+    downsell: contextPrice(product, "downsell")
+      ? { amount: formatContextAmount(product, "downsell"), synced: contextSynced(product, "downsell") }
+      : null,
+  }));
+  if (upsells.length) stages.push({
+    key: "post_purchase", label: "After purchase",
+    hint: inferredUpsellStrategy.value === "carousel" ? `carousel · ${upsells.length} upsells` : "one at a time",
+    items: upsells,
+  });
+  return stages;
+});
 
 function funnelEntriesFromProducts(context, requireUpsell = false) {
   return selectedProducts.value
