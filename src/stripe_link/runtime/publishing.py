@@ -14,6 +14,7 @@ from stripe_link.runtime.artifacts import artifact_paths, cloudfront_path
 from stripe_link.domain.connect_sync import site_domain_verified
 from stripe_link.domain.custom_domains import domain_index_record
 from stripe_link.domain.funnels import funnel_slug_entries
+from stripe_link.domain.opportunities import STAGE_LANDING, stage_opportunities
 from stripe_link.runtime.html import (
     INDEXABLE_ROBOTS,
     NOINDEX_FOLLOW_ROBOTS,
@@ -412,7 +413,7 @@ def _load_offer_bundle(
     validate_offer_document(offer)
     if offer.get("tenant_id") != tenant_id:
         raise PublishError("Page and offer tenant_id must match.")
-    for item in offer.get("items", []):
+    for item in stage_opportunities(offer, STAGE_LANDING):
         service_id = str(item.get("service_id") or "")
         if service_id:
             if service_id in services_by_id:

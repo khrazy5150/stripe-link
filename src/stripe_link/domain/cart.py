@@ -12,6 +12,7 @@ from __future__ import annotations
 import hashlib
 from typing import Any
 
+from stripe_link.domain.opportunities import STAGE_LANDING, stage_opportunities
 from stripe_link.domain.pricing import single_unit_price
 from stripe_link.domain.service_pricing import resolve_service_price
 
@@ -94,7 +95,7 @@ def _line_id(product_id: str, service_id: str, price_id: str) -> str:
 def _find_offer_item(offer: dict[str, Any], product_id: str, service_id: str) -> dict[str, Any] | None:
     """The offer item that exposes this product/service — the offer is the contract; a client can't add an
     item the offer never listed."""
-    for item in offer.get("items") or []:
+    for item in stage_opportunities(offer, STAGE_LANDING):
         if product_id and str((item or {}).get("product_id") or "") == product_id:
             return item
         if service_id and str((item or {}).get("service_id") or "") == service_id:

@@ -21,6 +21,7 @@ from stripe_link.common import (
     tenant_id_from_event,
 )
 from stripe_link.domain.documents import DocumentValidationError, validate_lead_submission
+from stripe_link.domain.opportunities import STAGE_LANDING, stage_opportunities
 from stripe_link.domain.leads import (
     LeadValidationError,
     build_consent,
@@ -107,7 +108,7 @@ def ingest_lead(event, *, leads_repo, offers_repo, products_repo, notifications_
         return error_response("Offer not found.", status_code=404, code="not_found")
 
     products_by_id = {}
-    for item in offer.get("items") or []:
+    for item in stage_opportunities(offer, STAGE_LANDING):
         product_id = str((item or {}).get("product_id") or "").strip()
         if product_id and product_id not in products_by_id:
             product = products_repo.get(tenant_id, product_id)

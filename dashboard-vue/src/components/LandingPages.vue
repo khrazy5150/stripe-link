@@ -1334,13 +1334,22 @@ const flashEndsAtLocal = computed({ get: () => epochToLocalInput(builder.flash_s
 // A flash sale can't be enabled without an expiration (mirrors the backend document rule).
 const flashSaleInvalid = computed(() => builder.flash_sale.enabled && !builder.flash_sale.ends_at);
 const selectedOfferCta = computed(() => selectedOffer.value?.presentation?.cta || { type: selectedOfferIntent.value === "lead_gen" ? "email" : "buy" });
+// offer_type is being retired (plans/OFFER_MODEL_REDESIGN.md): read it through a derive helper — the stored
+// field wins during migration, else infer from the landing items — so this keeps working once it's dropped.
+function deriveOfferType(offer) {
+  if (offer?.offer_type) return offer.offer_type;
+  const items = Array.isArray(offer?.items) ? offer.items : [];
+  if (items.length > 1) return "listicle";
+  if (items.length === 1 && Array.isArray(items[0]?.selectable_prices) && items[0].selectable_prices.length > 1) return "bundle";
+  return "single";
+}
 // A listicle offer renders its items as a carousel (each add-to-cart) instead of the pick-one selector.
-const isListicleOffer = computed(() => (builderOffer.value?.offer_type || "single") === "listicle");
+const isListicleOffer = computed(() => deriveOfferType(builderOffer.value) === "listicle");
 // --- Page Composer (see plans/PAGE_COMPOSER.md) ---
 // Visibility comes from the SHARED rules file (imported by pageComposer.js — the exact file Python reads)
 // plus the tenant's overrides. The preview AND the saved section list both call sectionVisible(), and
 // Python's compose_page() applies the same rules, so preview and published can't disagree.
-const builderOfferType = computed(() => builderOffer.value?.offer_type || "single");
+const builderOfferType = computed(() => deriveOfferType(builderOffer.value));
 function sectionVisible(sectionType) {
   return isSectionVisible(builderOfferType.value, sectionType, builder.composition.overrides, builderGoal.value);
 }
@@ -1626,7 +1635,7 @@ function goalSeedLabels(goal) {
 // The section list the composer will produce for this offer_type + goal, shown on Review before the
 // builder opens. Governed sections come from the composer; the goal's packs add their seeded content.
 const wizardSectionLabels = computed(() => {
-  const offerType = selectedOffer.value?.offer_type || "single";
+  const offerType = deriveOfferType(selectedOffer.value);
   const governed = recommendedSectionKeys(offerType, form.goal).map((key) => elementLabel(key));
   return [...governed, ...goalSeedLabels(form.goal)];
 });
@@ -3029,7 +3038,7 @@ async function onBuilderOfferChange() {
   // derived default as a placeholder). Only a tenant edit is stored.
   if (!builder.seo_image) builder.seo_image = offerImage(offer);
   // A listicle's hero carousel IS the product images — auto-fill the hero media field with one per item.
-  if ((offer.offer_type || "single") === "listicle") {
+  if (deriveOfferType(offer) === "listicle") {
     const productImages = conversionTargets.value.map((target) => target.hero_image).filter(Boolean);
     if (productImages.length) builder.hero_media_text = productImages.join("\n");
   } else if (!builder.hero_media_text && offerImage(offer)) {

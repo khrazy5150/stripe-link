@@ -3,6 +3,7 @@ import re
 
 from stripe_link.common import error_response, json_response, parse_json_body, path_params, query_params, tenant_id_from_event
 from stripe_link.domain.documents import DocumentValidationError, validate_offer_document
+from stripe_link.domain.opportunities import STAGE_LANDING, stage_opportunities
 from stripe_link.domain.pricing import PricingError, expand_offer, resolve_offer
 from stripe_link.repositories.documents import RepositoryError, offers_repository, products_repository, services_repository
 
@@ -117,7 +118,7 @@ def _expand(tenant_id: str, offer: dict, products_repo=None, services_repo=None)
     products_repo = products_repo or products_repository()
     products_by_id = {}
     services_by_id = {}
-    for item in offer.get("items") or []:
+    for item in stage_opportunities(offer, STAGE_LANDING):
         product_id = str((item or {}).get("product_id") or "").strip()
         service_id = str((item or {}).get("service_id") or "").strip()
         if product_id and product_id not in products_by_id:

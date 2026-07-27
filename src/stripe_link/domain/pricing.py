@@ -2,6 +2,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any
 
+from stripe_link.domain.opportunities import STAGE_LANDING, stage_opportunities
 from stripe_link.domain.service_pricing import resolve_service_price, service_booking_flow
 
 
@@ -122,7 +123,7 @@ def expand_offer(
     """
     services_by_id = services_by_id or {}
     items: list[dict[str, Any]] = []
-    for item in offer.get("items") or []:
+    for item in stage_opportunities(offer, STAGE_LANDING):
         product_id = str(item.get("product_id") or "")
         service_id = str(item.get("service_id") or "")
         if product_id and product_id in products_by_id:
@@ -206,7 +207,7 @@ class ResolvedOfferItem:
 
 def load_offer_products(tenant_id: str, offer: dict[str, Any], products_repo: Any) -> dict[str, dict[str, Any]]:
     products_by_id = {}
-    for item in offer.get("items", []):
+    for item in stage_opportunities(offer, STAGE_LANDING):
         product_id = str(item.get("product_id") or "")
         if not product_id:
             continue  # service items are loaded separately
@@ -219,7 +220,7 @@ def load_offer_products(tenant_id: str, offer: dict[str, Any], products_repo: An
 
 def load_offer_services(tenant_id: str, offer: dict[str, Any], services_repo: Any) -> dict[str, dict[str, Any]]:
     services_by_id = {}
-    for item in offer.get("items", []):
+    for item in stage_opportunities(offer, STAGE_LANDING):
         service_id = str(item.get("service_id") or "")
         if not service_id:
             continue
@@ -244,7 +245,7 @@ def booking_groups_for(offer: dict[str, Any], services_by_id: dict[str, dict[str
     mode = str((offer or {}).get("service_booking_mode") or "single_visit")
     scheduled = [
         item
-        for item in (offer.get("items") or [])
+        for item in (stage_opportunities(offer, STAGE_LANDING))
         if str(item.get("service_id") or "")
         and service_fulfillment_mode(services_by_id.get(str(item.get("service_id") or ""))) != "no_booking"
     ]
@@ -380,7 +381,7 @@ def resolve_offer(
     services_by_id = services_by_id or {}
 
     resolved_items: list[ResolvedOfferItem] = []
-    for item in offer.get("items", []):
+    for item in stage_opportunities(offer, STAGE_LANDING):
         service_id = str(item.get("service_id") or "")
         if service_id:
             service = services_by_id.get(service_id)

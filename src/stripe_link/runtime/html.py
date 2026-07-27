@@ -9,7 +9,7 @@ from urllib.parse import urlencode, urlparse
 from stripe_link.domain.business_types import BUSINESS_TYPES, resolve_entity_type
 from stripe_link.domain.composition import compose_page, element_channel
 from stripe_link.domain.documents import PRODUCT_CONDITIONS
-from stripe_link.domain.opportunities import derived_offer_type
+from stripe_link.domain.opportunities import STAGE_LANDING, derived_offer_type, stage_opportunities
 from stripe_link.domain.pricing import PricingError, expand_offer, find_price, resolve_offer, single_unit_price
 from stripe_link.domain.reviews import aggregate_reviews, markup_eligible
 from stripe_link.domain.service_pricing import resolve_service_price
@@ -826,7 +826,7 @@ def render_headline_markup(text: Any) -> str:
 
 
 def require_offer_products(offer: dict[str, Any], products_by_id: dict[str, dict[str, Any]]) -> None:
-    for item in offer.get("items", []):
+    for item in stage_opportunities(offer, STAGE_LANDING):
         if item.get("service_id"):
             continue  # service items are resolved against services_by_id, not products
         product_id = item.get("product_id", "")
@@ -1638,7 +1638,7 @@ def render_section(
 
 
 def first_offer_product(offer: dict[str, Any], products_by_id: dict[str, dict[str, Any]]) -> dict[str, Any]:
-    for item in offer.get("items", []):
+    for item in stage_opportunities(offer, STAGE_LANDING):
         product = products_by_id.get(item.get("product_id", ""))
         if product:
             return product
@@ -1647,7 +1647,7 @@ def first_offer_product(offer: dict[str, Any], products_by_id: dict[str, dict[st
 
 def first_offer_lead_capture(offer: dict[str, Any], products_by_id: dict[str, dict[str, Any]]) -> dict[str, Any]:
     """The lead_capture block of the offer's primary lead-gen product — drives the inline form fields."""
-    for item in offer.get("items", []):
+    for item in stage_opportunities(offer, STAGE_LANDING):
         product = products_by_id.get(str((item or {}).get("product_id") or ""))
         capture = (product or {}).get("lead_capture")
         if isinstance(capture, dict):
@@ -1712,7 +1712,7 @@ def render_brand_label(section: dict[str, Any], page: dict[str, Any]) -> str:
 
 
 def first_offer_service_image(offer: dict[str, Any], services_by_id: dict[str, dict[str, Any]]) -> str:
-    for item in offer.get("items", []):
+    for item in stage_opportunities(offer, STAGE_LANDING):
         service = services_by_id.get(item.get("service_id", ""))
         image = (service or {}).get("presentation", {}).get("hero_image_url") if service else ""
         if image:
@@ -1866,7 +1866,7 @@ def hero_media_images(
 
 
 def offer_uses_grouped_item_media(offer: dict[str, Any]) -> bool:
-    items = offer.get("items") or []
+    items = stage_opportunities(offer, STAGE_LANDING)
     return len(items) > 1 or any(item.get("selectable_prices") for item in items if isinstance(item, dict))
 
 
@@ -1975,7 +1975,7 @@ def listicle_slides(
     /flash-sale view the slide swaps to the item's paired context price and carries the matching badge."""
     active_ctx = str(_RENDER_STATE.get("active_price_context") or "standard")
     slides = []
-    for item in offer.get("items", []):
+    for item in stage_opportunities(offer, STAGE_LANDING):
         product_id = str(item.get("product_id") or "")
         service_id = str(item.get("service_id") or "")
         if product_id and product_id in products_by_id:
@@ -2063,7 +2063,7 @@ def render_offer_price_selector(
     services_by_id = services_by_id or {}
     cards: list[tuple[tuple[int, int, int], str]] = []
     display_index = 0
-    for item in offer.get("items", []):
+    for item in stage_opportunities(offer, STAGE_LANDING):
         service_id = item.get("service_id", "")
         if service_id:
             card = render_service_price_card(item, service_id, services_by_id, offer, display_index)
@@ -2151,7 +2151,7 @@ def is_landing_page_price(price: dict[str, Any]) -> bool:
 
 def _offer_has_price_context(offer: dict[str, Any], products_by_id: dict[str, dict[str, Any]], context: str) -> bool:
     """Whether any product the offer sells has a price in `context` — gates the /sale //flash-sale fallback."""
-    for item in offer.get("items") or []:
+    for item in stage_opportunities(offer, STAGE_LANDING):
         for price in (products_by_id.get(str(item.get("product_id") or "")) or {}).get("prices") or []:
             if str(price.get("context") or "standard") == context:
                 return True
@@ -2210,7 +2210,7 @@ def landing_page_selected_prices(
     An explicit caller selection always wins.
     """
     resolved: dict[str, str] = dict(selected_prices or {})
-    for item in offer.get("items") or []:
+    for item in stage_opportunities(offer, STAGE_LANDING):
         product_id = str(item.get("product_id") or "")
         if not product_id or product_id in resolved or not item.get("selectable_prices"):
             continue
@@ -2254,7 +2254,7 @@ def landing_page_offer_prices(
     """
     services_by_id = services_by_id or {}
     prices: list[dict[str, Any]] = []
-    for item in offer.get("items") or []:
+    for item in stage_opportunities(offer, STAGE_LANDING):
         service_id = str(item.get("service_id") or "")
         if service_id:
             service = services_by_id.get(service_id)
@@ -2930,7 +2930,7 @@ def selected_landing_page_price(
 ) -> dict[str, Any]:
     """The price the page presents as chosen — the checked card, which the CTA advertises. Falls back to the
     lowest displayed price so markup always quotes something the visitor can see."""
-    for item in offer.get("items") or []:
+    for item in stage_opportunities(offer, STAGE_LANDING):
         product = products_by_id.get(str(item.get("product_id") or ""))
         if product is None or not item_price_options(item):
             continue
@@ -3206,7 +3206,7 @@ def refund_policy_return_note(policy: dict[str, Any]) -> str:
 
 def refund_policy_applies_to(offer: dict[str, Any], products_by_id: dict[str, dict[str, Any]]) -> list[str]:
     labels: list[str] = []
-    for item in offer.get("items", []):
+    for item in stage_opportunities(offer, STAGE_LANDING):
         product = products_by_id.get(item.get("product_id", ""))
         product_name = product.get("name") if product else ""
         for option in item_price_options(item):
