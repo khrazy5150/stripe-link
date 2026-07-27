@@ -82,6 +82,12 @@ class DerivationTests(unittest.TestCase):
         self.assertEqual(landing_presentation(offer), {"kind": "carousel", "checkout": "cart"})
         self.assertEqual(derived_offer_type(offer), "listicle")
 
+    def test_stored_offer_type_wins_when_present(self):
+        # Migration shim: an explicit stored offer_type is preserved (behavior-preserving), even if the
+        # opportunities alone would derive differently.
+        self.assertEqual(derived_offer_type({"offer_type": "listicle", "items": []}), "listicle")
+        self.assertEqual(derived_offer_type({"offer_type": "bundle", "items": [{"product_id": "p", "price_id": "x", "quantity": 1}]}), "bundle")
+
     def test_derived_type_matches_legacy_inference_ignoring_funnel(self):
         # A bump/upsell must NOT inflate the landing presentation (they aren't landing opportunities).
         offer = _legacy_offer(

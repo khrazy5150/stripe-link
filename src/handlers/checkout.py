@@ -6,6 +6,7 @@ from urllib.request import Request, urlopen
 from stripe_link.common import error_response, json_response, query_params, tenant_id_from_event
 from stripe_link.domain.billing_status import BillingStatusError, assert_billing_in_good_standing
 from stripe_link.domain.fees import build_fee_context
+from stripe_link.domain.opportunities import STAGE_CHECKOUT, stage_opportunities
 from stripe_link.domain.pricing import (
     PricingError,
     find_price,
@@ -84,7 +85,7 @@ def handler(
         products_by_id = load_offer_products(tenant_id, offer, products_repo)
         # Pre-purchase order bumps (offer.funnel.order_bumps) may reference products the offer's items don't
         # include — load them so build_checkout_payload can emit their synced price as an optional_item.
-        for bump in (offer.get("funnel") or {}).get("order_bumps") or []:
+        for bump in stage_opportunities(offer, STAGE_CHECKOUT):
             bump_product_id = str(bump.get("product_id") or "")
             if bump_product_id and bump_product_id not in products_by_id:
                 bump_product = products_repo.get(tenant_id, bump_product_id)
@@ -148,7 +149,7 @@ def order_bump_optional_items(offer, products_by_id, key_mode):
     upsell/downsell steps.
     """
     bumps = []
-    for bump in (offer.get("funnel") or {}).get("order_bumps") or []:
+    for bump in stage_opportunities(offer, STAGE_CHECKOUT):
         product = products_by_id.get(bump.get("product_id")) or {}
         price = find_price(product, bump.get("price_id") or "")
         stripe_price_id = price.get("stripe_price_id")

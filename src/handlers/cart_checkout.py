@@ -12,6 +12,7 @@ from stripe_link.common import error_response, json_response, parse_json_body
 from stripe_link.domain.billing_status import BillingStatusError, assert_billing_in_good_standing
 from stripe_link.domain.cart import CartError, resolved_items_for_checkout
 from stripe_link.domain.fees import build_fee_context
+from stripe_link.domain.opportunities import STAGE_CHECKOUT, stage_opportunities
 from stripe_link.domain.pricing import PricingError, load_offer_products, load_offer_services
 from stripe_link.kms_secrets import KmsSecretCipher
 from stripe_link.repositories.documents import (
@@ -84,9 +85,9 @@ def handler(
             return error_response("Offer not found.", status_code=404, code="not_found")
 
         products_by_id = load_offer_products(tenant_id, offer, products_repo)
-        # Order bumps (offer.funnel.order_bumps) reference products that aren't offer items, so load them too
-        # for build_checkout_payload to emit their synced price as an optional_item (plans/SALES_FUNNELS.md P2).
-        for bump in (offer.get("funnel") or {}).get("order_bumps") or []:
+        # Order bumps (checkout-stage opportunities) reference products that aren't landing items, so load them
+        # too for build_checkout_payload to emit their synced price as an optional_item (SALES_FUNNELS.md P2).
+        for bump in stage_opportunities(offer, STAGE_CHECKOUT):
             bump_product_id = str(bump.get("product_id") or "")
             if bump_product_id and bump_product_id not in products_by_id:
                 bump_product = products_repo.get(tenant_id, bump_product_id)

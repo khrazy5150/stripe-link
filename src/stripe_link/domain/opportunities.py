@@ -103,8 +103,14 @@ def landing_presentation(offer: dict[str, Any]) -> dict[str, str]:
 
 
 def derived_offer_type(offer: dict[str, Any]) -> str:
-    """The legacy offer_type value (single/bundle/listicle), DERIVED from the opportunities — a drop-in for
-    `offer.get("offer_type")` so consumers can stop reading the stored field."""
+    """The offer_type value (single/bundle/listicle) — a drop-in for `offer.get("offer_type")` so consumers
+    stop reading the stored field directly. Read-time adapter during migration: it PREFERS an explicit stored
+    `offer_type` when present (behavior-preserving for every legacy offer), and DERIVES from the opportunities
+    only when it's absent (new offers, once the field is dropped in P4)."""
+    if isinstance(offer, dict):
+        stored = str(offer.get("offer_type") or "").strip()
+        if stored:
+            return stored
     kind = landing_presentation(offer)["kind"]
     if kind == "tiered":
         return "bundle"

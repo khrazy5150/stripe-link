@@ -9,6 +9,7 @@ from urllib.parse import urlencode, urlparse
 from stripe_link.domain.business_types import BUSINESS_TYPES, resolve_entity_type
 from stripe_link.domain.composition import compose_page, element_channel
 from stripe_link.domain.documents import PRODUCT_CONDITIONS
+from stripe_link.domain.opportunities import derived_offer_type
 from stripe_link.domain.pricing import PricingError, expand_offer, find_price, resolve_offer, single_unit_price
 from stripe_link.domain.reviews import aggregate_reviews, markup_eligible
 from stripe_link.domain.service_pricing import resolve_service_price
@@ -1350,7 +1351,7 @@ def _render_page_body(
     analytics_tags = render_analytics_tags(page.get("analytics") or {})
     analytics_adapters = render_analytics_adapters(page.get("analytics") or {})
     # A listicle page gets a persistent mini-cart (client-side this phase; server-side cart is L2).
-    minicart = render_minicart() if str(offer.get("offer_type") or "single") == "listicle" else ""
+    minicart = render_minicart() if derived_offer_type(offer) == "listicle" else ""
     # Hydration contract: serialize the whole OfferView once so the conversion island updates every
     # section from this single payload — never scraping the DOM (plans/CONVERSION_CONTEXT.md).
     conversion_data = render_conversion_data(offer, products_by_id, services_by_id)
@@ -1557,7 +1558,7 @@ class SectionRenderContext:
 
 
 def _render_offer_selector(c: "SectionRenderContext") -> str:
-    if str(c.offer.get("offer_type") or "single") == "listicle":
+    if derived_offer_type(c.offer) == "listicle":
         return render_listicle_carousel(c.offer, c.products_by_id, c.services_by_id, c.page, c.checkout_url, c.api_base_url)
     return render_offer_price_selector(c.offer, c.products_by_id, c.services_by_id)
 
@@ -1783,7 +1784,7 @@ def render_hero_media(
     services_by_id: dict[str, dict[str, Any]] | None = None,
 ) -> str:
     product = first_offer_product(offer, products_by_id)
-    if str(offer.get("offer_type") or "single") == "listicle":
+    if derived_offer_type(offer) == "listicle":
         # A listicle's hero carousel IS the offer's items — one product image per slide, offer-driven so
         # it can never fall out of sync with a manually-edited field (plans, ConversionContext direction).
         images = [slide["image"] for slide in listicle_slides(offer, products_by_id, services_by_id or {}) if slide["image"]]

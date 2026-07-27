@@ -18,6 +18,8 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+
+from stripe_link.domain.opportunities import derived_offer_type
 from typing import Any
 
 _RULES_PATH = Path(__file__).resolve().parent.parent / "composition_rules.json"
@@ -153,7 +155,7 @@ def page_goal(page: dict[str, Any]) -> str:
 def compose_page(offer: dict[str, Any], page: dict[str, Any]) -> list[dict[str, Any]]:
     """The Renderable Page Model: page.sections filtered to those the composer deems visible. The renderer
     only iterates this — it never decides."""
-    offer_type = str((offer or {}).get("offer_type") or "single")
+    offer_type = derived_offer_type(offer or {})
     overrides = page_overrides(page)
     goal = page_goal(page)
     return [
