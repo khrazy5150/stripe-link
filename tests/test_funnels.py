@@ -6,6 +6,7 @@ from stripe_link.domain.funnels import (
     funnel_reserved_slugs,
     funnel_slug_entries,
     funnel_step_slug,
+    post_purchase_plan,
     resolve_funnel_transition,
 )
 
@@ -136,6 +137,64 @@ class FunnelDerivationTests(unittest.TestCase):
     def test_reserved_slugs_omit_downsell_when_none_resolvable(self):
         offer = {"funnel": {"upsells": [{"product_id": "prod_up", "price_id": "price_up"}]}}
         self.assertEqual(funnel_reserved_slugs(offer, self.products), ["/upsell", "/thank-you"])
+
+
+class PostPurchasePlanTests(unittest.TestCase):
+    def _price(self, price_id, context, amount):
+        return {"price_id": price_id, "context": context, "unit_amount": amount, "currency": "usd"}
+
+    def test_upsell_pairs_same_products_downsell_in_place(self):
+        # §6: the downsell is the SAME product's downsell-context price, paired by product_id.
+        products = {"prod_a": _product("prod_a", [
+            self._price("price_a_up", "upsell", 2217),
+            self._price("price_a_down", "downsell", 1200),
+            self._price("price_a_std", "standard", 3709),
+        ])}
+        offer = {"funnel": {
+            "upsells": [{"product_id": "prod_a", "price_id": "price_a_up"}],
+            "downsells": [{"product_id": "prod_a", "price_id": "price_a_down"}],
+        }}
+        plan = post_purchase_plan(offer, products)
+        self.assertEqual(plan["strategy"], "sequence")
+        self.assertEqual(len(plan["upsells"]), 1)
+        entry = plan["upsells"][0]
+        self.assertEqual(entry["sequence"], 1)
+        self.assertEqual(entry["price_id"], "price_a_up")
+        self.assertEqual(entry["downsell"]["price_id"], "price_a_down")
+
+    def test_upsell_without_downsell_has_none(self):
+        products = {"prod_a": _product("prod_a", [self._price("price_a_up", "upsell", 2000)])}
+        offer = {"funnel": {"upsells": [{"product_id": "prod_a", "price_id": "price_a_up"}]}}
+        plan = post_purchase_plan(offer, products)
+        self.assertIsNone(plan["upsells"][0]["downsell"])
+
+    def test_downsell_only_product_is_never_surfaced(self):
+        # A product with a downsell price but no upsell never appears (documented gap): no upsell to attach to.
+        products = {"prod_d": _product("prod_d", [self._price("price_d_down", "downsell", 900)])}
+        offer = {"funnel": {"downsells": [{"product_id": "prod_d", "price_id": "price_d_down"}]}}
+        plan = post_purchase_plan(offer, products)
+        self.assertEqual(plan["upsells"], [])
+
+    def test_four_or_more_upsells_force_carousel_strategy(self):
+        products, upsells = {}, []
+        for i in range(4):
+            pid = f"prod_{i}"
+            products[pid] = _product(pid, [self._price(f"price_{i}_up", "upsell", 1000 + i)])
+            upsells.append({"product_id": pid, "price_id": f"price_{i}_up"})
+        plan = post_purchase_plan({"funnel": {"upsells": upsells}}, products)
+        self.assertEqual(plan["strategy"], "carousel")
+        self.assertEqual([u["sequence"] for u in plan["upsells"]], [1, 2, 3, 4])
+
+    def test_three_upsells_stay_sequence(self):
+        products, upsells = {}, []
+        for i in range(3):
+            pid = f"prod_{i}"
+            products[pid] = _product(pid, [self._price(f"price_{i}_up", "upsell", 1000 + i)])
+            upsells.append({"product_id": pid, "price_id": f"price_{i}_up"})
+        self.assertEqual(post_purchase_plan({"funnel": {"upsells": upsells}}, products)["strategy"], "sequence")
+
+    def test_no_upsells_yields_empty_sequence_plan(self):
+        self.assertEqual(post_purchase_plan({}, {}), {"strategy": "sequence", "upsells": []})
 
 
 if __name__ == "__main__":

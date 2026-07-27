@@ -54,6 +54,47 @@ def funnel_context_items(offer: dict[str, Any], products_by_id: dict[str, dict[s
     return items
 
 
+# The customer-facing cap on serialized upsell screens: <= this many upsell slots render one-at-a-time
+# (sequence); more than this render as a single carousel of ALL upsells (plans/OFFER_MODEL_REDESIGN.md §6).
+# Mirrored by the dashboard (Offers.vue MAX_SEQUENTIAL_UPSELLS) so the editor's funnel preview agrees.
+MAX_SEQUENTIAL_UPSELLS = 3
+
+
+def post_purchase_plan(
+    offer: dict[str, Any], products_by_id: dict[str, dict[str, Any]]
+) -> dict[str, Any]:
+    """The offer's post-purchase experience, DERIVED from its upsell opportunities (plans/OFFER_MODEL_REDESIGN.md
+    §6). This is the single source of truth the sequencer, the renderer, and the one-click charge all obey.
+
+    Returns {"strategy": "sequence"|"carousel", "upsells": [entry, ...]} where each entry is
+    {"sequence", "product_id", "price_id", "product", "price", "downsell"}. `sequence` is 1-based and is the
+    idempotency key `process_upsell` charges under. `downsell` is the SAME product's downsell-context price
+    (the in-place second-chance shown when that upsell is declined) or None — paired by product_id, so a
+    downsell-only product is never surfaced (the documented gap). `strategy` is `carousel` when there are more
+    than MAX_SEQUENTIAL_UPSELLS upsells (all shown at once), else `sequence` (one at a time). No upsells ->
+    {"strategy": "sequence", "upsells": []}.
+    """
+    downsells_by_product = {
+        item["product_id"]: item
+        for item in funnel_context_items(offer, products_by_id, "downsell")
+    }
+    upsells: list[dict[str, Any]] = []
+    for index, item in enumerate(funnel_context_items(offer, products_by_id, "upsell"), start=1):
+        downsell = downsells_by_product.get(item["product_id"])
+        upsells.append({
+            "sequence": index,
+            "product_id": item["product_id"],
+            "price_id": item["price_id"],
+            "product": item["product"],
+            "price": item["price"],
+            "downsell": {
+                "price_id": downsell["price_id"], "price": downsell["price"], "product": downsell["product"],
+            } if downsell else None,
+        })
+    strategy = "carousel" if len(upsells) > MAX_SEQUENTIAL_UPSELLS else "sequence"
+    return {"strategy": strategy, "upsells": upsells}
+
+
 def funnel_reserved_slugs(offer: dict[str, Any], products_by_id: dict[str, dict[str, Any]]) -> list[str]:
     """The reserved funnel slugs a sales offer's post-purchase funnel needs, in flow order (plans/
     SALES_FUNNELS.md P2b): `/upsell` when the offer has resolvable upsells, then `/downsell` when it has
