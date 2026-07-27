@@ -12,6 +12,7 @@ from stripe_link.runtime.artifacts import artifact_paths
 from stripe_link.runtime.publishing import (
     PublishError,
     _denormalize_page_catalog,
+    _prune_unrenderable_landing_items,
     artifact_targets,
     attach_funnel_pages,
     delete_page_artifacts,
@@ -201,6 +202,36 @@ class PagePublishingTests(unittest.TestCase):
         # the /sale preview artifact is written for a draft; the published one is not (still a draft)
         self.assertIn(("preview", "preview/tenant_demo/page_simple_coffee/sale/index.html"), keys)
         self.assertNotIn(("pages", "page_simple_coffee/sale/index.html"), keys)
+
+    def test_prune_drops_landing_items_with_dangling_prices(self):
+        products = {"p1": {"product_id": "p1", "prices": [{"price_id": "good"}]}}
+        offer = {"offer_id": "o", "items": [
+            {"product_id": "p1", "price_id": "good", "quantity": 1},          # keep
+            {"product_id": "p1", "price_id": "gone", "quantity": 1},          # drop: price removed
+            {"product_id": "missing", "price_id": "x", "quantity": 1},        # drop: product not loaded
+            {"service_id": "svc", "price_id": "y", "quantity": 1},            # keep: service untouched
+        ]}
+        pruned = _prune_unrenderable_landing_items(offer, products)
+        self.assertEqual(
+            [(i.get("product_id"), i.get("service_id")) for i in pruned["items"]],
+            [("p1", None), (None, "svc")],
+        )
+
+    def test_prune_keeps_valid_tiers_and_fixes_default(self):
+        products = {"p1": {"product_id": "p1", "prices": [{"price_id": "a"}, {"price_id": "b"}]}}
+        offer = {"offer_id": "o", "items": [{
+            "product_id": "p1", "default_price_id": "gone",
+            "selectable_prices": [{"price_id": "a"}, {"price_id": "gone"}, {"price_id": "b"}],
+        }]}
+        pruned = _prune_unrenderable_landing_items(offer, products)
+        item = pruned["items"][0]
+        self.assertEqual([sp["price_id"] for sp in item["selectable_prices"]], ["a", "b"])
+        self.assertEqual(item["default_price_id"], "a")  # dangling default repointed to a surviving tier
+
+    def test_prune_is_a_noop_when_everything_resolves(self):
+        products = {"p1": {"product_id": "p1", "prices": [{"price_id": "good"}]}}
+        offer = {"offer_id": "o", "items": [{"product_id": "p1", "price_id": "good", "quantity": 1}]}
+        self.assertIs(_prune_unrenderable_landing_items(offer, products), offer)
 
     def test_publish_writes_an_upsell_screen_artifact_per_plan_entry(self):
         # An offer with an upsell-context price gets a Universal Bundle upsell artifact at {page_id}__upsell_1.

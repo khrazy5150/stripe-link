@@ -493,6 +493,53 @@ def load_render_context(
     return offer, products_by_id, services_by_id, offers_by_id
 
 
+def _prune_unrenderable_landing_items(offer: dict[str, Any], products_by_id: dict[str, dict[str, Any]]) -> dict[str, Any]:
+    """Drop legacy landing items that reference a price no longer on their product (a dangling reference from a
+    since-edited product). Such an item makes render_offer_price_selector / resolve_offer raise, which fails the
+    whole page publish AND — on the DynamoDB stream — jams the shard, blocking route registration for every
+    other page. A stale offer must degrade gracefully (render without the dead item), never take down publishing.
+    Services and new-model purchase_opportunities are left untouched; a re-save through the offer editor is the
+    real cleanup (plans/OFFER_MODEL_REDESIGN.md P4)."""
+    items = offer.get("items")
+    if not isinstance(items, list) or not items:
+        return offer
+    kept: list[Any] = []
+    changed = False
+    for item in items:
+        if not isinstance(item, dict) or item.get("service_id"):
+            kept.append(item)
+            continue
+        product = products_by_id.get(str(item.get("product_id") or ""))
+        if product is None:
+            changed = True  # missing product would raise in the selector — drop it
+            continue
+        price_ids = {str(p.get("price_id")) for p in (product.get("prices") or []) if isinstance(p, dict)}
+        selectable = item.get("selectable_prices")
+        if isinstance(selectable, list) and selectable:
+            valid = [sp for sp in selectable if isinstance(sp, dict) and str(sp.get("price_id")) in price_ids]
+            if not valid:
+                changed = True  # no renderable tier remains — drop the item
+                continue
+            if len(valid) == len(selectable):
+                kept.append(item)
+                continue
+            pruned_item = dict(item)
+            pruned_item["selectable_prices"] = valid
+            if str(pruned_item.get("default_price_id") or "") not in {str(sp.get("price_id")) for sp in valid}:
+                pruned_item["default_price_id"] = valid[0].get("price_id")
+            kept.append(pruned_item)
+            changed = True
+        elif str(item.get("price_id") or "") in price_ids:
+            kept.append(item)
+        else:
+            changed = True  # fixed price is a dangling reference — drop the item
+    if not changed:
+        return offer
+    pruned = dict(offer)
+    pruned["items"] = kept
+    return pruned
+
+
 def publish_page_document(
     page: dict[str, Any],
     *,
@@ -529,6 +576,11 @@ def publish_page_document(
         products_repository=products_repository,
         services_repository=services_repository,
     )
+    # Guard against a stale offer (a landing item pointing at a since-removed price) crashing the render and
+    # jamming the publish stream (plans/OFFER_MODEL_REDESIGN.md P4). Prune the primary offer + its map entry.
+    offer = _prune_unrenderable_landing_items(offer, products_by_id)
+    if offer.get("offer_id"):
+        offers_by_id[str(offer["offer_id"])] = offer
     # Denormalize this landing page's offer + product category onto its Site route-map entry (so category
     # pages resolve off the map), then fill any related-products rail from other pages in the same category
     # and bundle their offers. Best-effort — never blocks the artifact publish.
