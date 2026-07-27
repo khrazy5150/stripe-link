@@ -100,7 +100,14 @@ def handler(event, context, *, repository=None, pages_domain=None, sites_repo=No
                 if session_id:
                     query["session_id"] = session_id
                 return redirect_response(f"{url}?{urlencode(query)}")
-            destination = _thank_you_destination(page.get("post_checkout") or {})
+            # Past the last upsell → the synthesized thank-you screen, published alongside the funnel at
+            # {page_id}__thank_you (plans/OFFER_MODEL_REDESIGN.md §6). Both accept-through and decline land here.
+            ty_url = _next_page_url(site, tenant_id, f"{page_id}__thank_you", pages_domain)
+            if not ty_url:
+                return error_response("Pages distribution domain is not configured.", status_code=500, code="pages_domain_not_configured")
+            if session_id:
+                ty_url = f"{ty_url}?{urlencode({'session_id': session_id})}"
+            return redirect_response(ty_url)
         else:
             destination = resolve_funnel_transition(
                 page.get("post_checkout") or {}, current_step_id=current_step_id, outcome=outcome,

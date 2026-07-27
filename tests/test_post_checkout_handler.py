@@ -74,23 +74,27 @@ class SequenceRoutingTests(unittest.TestCase):
         location = urlparse(self.call(outcome="decline", step_id="1")["headers"]["Location"])
         self.assertEqual(location.path, "/page_entry__upsell_2/index.html")
 
-    def test_past_last_upsell_goes_to_thank_you(self):
+    def test_past_last_upsell_goes_to_synthesized_thank_you(self):
+        # The funnel terminus is the thank-you screen synthesized alongside the funnel, not the landing page.
         location = urlparse(self.call(outcome="accept", step_id="2")["headers"]["Location"])
-        self.assertEqual(location.path, "/page_thank_you/index.html")
+        self.assertEqual(location.path, "/page_entry__thank_you/index.html")
+
+    def test_decline_of_last_upsell_also_goes_to_thank_you(self):
+        location = urlparse(self.call(outcome="decline", step_id="2")["headers"]["Location"])
+        self.assertEqual(location.path, "/page_entry__thank_you/index.html")
 
     def test_bad_outcome_rejected_on_the_sequence_path(self):
         self.assertEqual(self.call(outcome="maybe", step_id="1")["statusCode"], 400)
 
-    def test_missing_thank_you_page_falls_back_to_entry_success(self):
-        # The thank-you page referenced by post_checkout doesn't exist / isn't published: rather than 404 the
-        # buyer at the end of the funnel, redirect to the always-published entry page's success state.
+    def test_funnel_terminus_ignores_a_dangling_tenant_thank_you_ref(self):
+        # Even if the page references a thank-you page that was never created, the funnel uses its own
+        # synthesized thank-you screen — no landing-page fallback, no 404.
         self.pages.put({
             "tenant_id": "tenant_demo", "page_id": "page_entry", "offer_id": "offer_up",
-            "post_checkout": {"thank_you_page": {"page_id": "page_ghost"}},  # never created
+            "post_checkout": {"thank_you_page": {"page_id": "page_ghost"}},
         })
         location = urlparse(self.call(outcome="accept", step_id="2")["headers"]["Location"])
-        self.assertEqual(location.path, "/page_entry/index.html")
-        self.assertEqual(parse_qs(location.query)["checkout"], ["success"])
+        self.assertEqual(location.path, "/page_entry__thank_you/index.html")
 
 
 class PostCheckoutHandlerTests(unittest.TestCase):
@@ -155,6 +159,13 @@ class PostCheckoutHandlerTests(unittest.TestCase):
         location = urlparse(response["headers"]["Location"])
         self.assertEqual(location.path, "/page_thank_you/index.html")
         self.assertEqual(location.query, "")
+
+    def test_unpublished_thank_you_falls_back_to_entry_success(self):
+        # Legacy (no offer-derived upsells) path: a dangling/unpublished thank-you must not 404 the buyer.
+        self.repository.put({"tenant_id": "tenant_demo", "page_id": "page_thank_you", "status": "draft"})
+        location = urlparse(self.call(outcome="accept", step_id="upsell_1")["headers"]["Location"])
+        self.assertEqual(location.path, "/page_entry/index.html")
+        self.assertEqual(parse_qs(location.query)["checkout"], ["success"])
 
     def test_external_thank_you_url_redirects_directly(self):
         self.repository.put(entry_page(thank_you_page={"url": "https://example.com/thanks"}))

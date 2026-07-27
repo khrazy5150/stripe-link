@@ -134,3 +134,64 @@ def synthesize_upsell_page(
         "sections": sections,
     }
     return page, offer
+
+
+# Default thank-you copy — the funnel's terminus (P3.5 makes it editable).
+DEFAULT_THANK_YOU = {
+    "headline": "Thank You for Your Purchase!",
+    "subheadline": "Your order is confirmed — a receipt is on its way to your inbox.",
+    "message": "We're getting your order ready. You'll get an email with the details shortly.",
+}
+
+
+def thank_you_config(page: dict[str, Any]) -> dict[str, Any]:
+    """Thank-you copy: defaults overlaid with page.post_checkout.thank_you_page overrides (blanks ignored)."""
+    config = dict(DEFAULT_THANK_YOU)
+    override = ((page or {}).get("post_checkout") or {}).get("thank_you_page")
+    if isinstance(override, dict):
+        config.update({key: value for key, value in override.items() if key in config and value not in (None, "")})
+    return config
+
+
+def synthesize_thank_you_page(
+    source_page: dict[str, Any], source_offer: dict[str, Any]
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Return (page, offer): the funnel's terminal thank-you screen on the Universal Bundle template, inheriting
+    the source page's theme. It sells nothing (no price/CTA), so its offer carries no items — render_page only
+    lays out the headline/subheadline/message. Served at {page_id}__thank_you."""
+    config = thank_you_config(source_page)
+    offer_id = str(source_offer.get("offer_id") or "offer")
+    offer = {
+        "schema_version": source_offer.get("schema_version", "2026-05-29"),
+        "document_type": "offer",
+        "tenant_id": source_offer.get("tenant_id", ""),
+        "offer_id": offer_id,
+        "name": "Thank You",
+        "status": "active",
+        "product_intent": "transaction",
+        "stripe_mode": source_offer.get("stripe_mode", "test"),
+        "offer_type": "single",
+        "items": [],
+        "presentation": {"headline": config["headline"]},
+        "discount": {"mode": "none"},
+    }
+    theme = deepcopy(source_page.get("theme") or {})
+    theme.setdefault("template", "universal_bundle")
+    sections: list[dict[str, Any]] = [
+        {"id": "headline", "type": "headline", "text": config["headline"]},
+        {"id": "subheadline", "type": "subheadline", "text": config["subheadline"]},
+    ]
+    if config.get("message"):
+        sections.append({"id": "content", "type": "content_block", "blocks": [{"title": "", "text": config["message"]}]})
+    page = {
+        "schema_version": source_page.get("schema_version", "2026-05-29"),
+        "document_type": "page",
+        "tenant_id": source_page.get("tenant_id", ""),
+        "page_id": f"{source_page.get('page_id', 'page')}__thank_you",
+        "name": "Thank You",
+        "status": "published",
+        "offer_id": offer_id,
+        "theme": theme,
+        "sections": sections,
+    }
+    return page, offer

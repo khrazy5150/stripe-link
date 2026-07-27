@@ -16,7 +16,7 @@ from stripe_link.domain.connect_sync import site_domain_verified
 from stripe_link.domain.custom_domains import domain_index_record
 from stripe_link.domain.funnels import funnel_slug_entries, post_purchase_plan
 from stripe_link.domain.opportunities import STAGE_LANDING, STAGE_POST_PURCHASE, stage_opportunities
-from stripe_link.runtime.upsell_pages import synthesize_upsell_page, upsell_scaffold
+from stripe_link.runtime.upsell_pages import synthesize_thank_you_page, synthesize_upsell_page, upsell_scaffold
 from stripe_link.runtime.html import (
     INDEXABLE_ROBOTS,
     NOINDEX_FOLLOW_ROBOTS,
@@ -719,8 +719,25 @@ def publish_page_document(
     # inheriting this page's theme) so the sequence-indexed post-checkout router can serve it at
     # {page_id}__upsell_{n}. Always noindex — a funnel step is never an organic entry point. Empty for any
     # offer without upsell-context prices, so this is a no-op for ordinary pages.
+    def _write_funnel_artifact(fp_page_id: str, fp_html: str, kind: str) -> None:
+        if preview_bucket:
+            pv_key = artifact_paths(tenant_id, fp_page_id)["preview"]
+            s3_client.put_object(
+                Bucket=preview_bucket, Key=pv_key, Body=fp_html.encode("utf-8"),
+                ContentType="text/html; charset=utf-8", CacheControl="no-cache, no-store, must-revalidate",
+            )
+            artifacts.append({"kind": f"preview:{kind}", "bucket": preview_bucket, "key": pv_key, "url": public_url(preview_domain, pv_key)})
+        if page.get("status") == "published" and pages_bucket:
+            pub_key = artifact_paths(tenant_id, fp_page_id)["published"]
+            s3_client.put_object(
+                Bucket=pages_bucket, Key=pub_key, Body=fp_html.encode("utf-8"),
+                ContentType="text/html; charset=utf-8", CacheControl="public, max-age=300",
+            )
+            artifacts.append({"kind": f"published:{kind}", "bucket": pages_bucket, "key": pub_key, "url": public_url(pages_domain, pub_key)})
+
     scaffold = upsell_scaffold(page)
-    for entry in post_purchase_plan(offer, products_by_id)["upsells"]:
+    upsell_entries = post_purchase_plan(offer, products_by_id)["upsells"]
+    for entry in upsell_entries:
         up_page, up_offer = synthesize_upsell_page(
             entry, source_page=page, source_offer=offer, scaffold=scaffold,
         )
@@ -730,21 +747,18 @@ def publish_page_document(
             checkout_url=checkout, api_base_url=api_base_url,
             robots=NOINDEX_ROBOTS, site=site, page_type="funnel_step",
         )
-        up_page_id = str(up_page["page_id"])
-        if preview_bucket:
-            pv_key = artifact_paths(tenant_id, up_page_id)["preview"]
-            s3_client.put_object(
-                Bucket=preview_bucket, Key=pv_key, Body=up_html.encode("utf-8"),
-                ContentType="text/html; charset=utf-8", CacheControl="no-cache, no-store, must-revalidate",
-            )
-            artifacts.append({"kind": f"preview:upsell_{entry['sequence']}", "bucket": preview_bucket, "key": pv_key, "url": public_url(preview_domain, pv_key)})
-        if page.get("status") == "published" and pages_bucket:
-            up_key = artifact_paths(tenant_id, up_page_id)["published"]
-            s3_client.put_object(
-                Bucket=pages_bucket, Key=up_key, Body=up_html.encode("utf-8"),
-                ContentType="text/html; charset=utf-8", CacheControl="public, max-age=300",
-            )
-            artifacts.append({"kind": f"published:upsell_{entry['sequence']}", "bucket": pages_bucket, "key": up_key, "url": public_url(pages_domain, up_key)})
+        _write_funnel_artifact(str(up_page["page_id"]), up_html, f"upsell_{entry['sequence']}")
+
+    # A funnel needs a terminus: synthesize the thank-you screen (Universal Bundle, no price) alongside the
+    # upsells so accept-through and decline both land on a real "Thank you" at {page_id}__thank_you instead of
+    # the landing page. P3.5 makes its copy editable.
+    if upsell_entries:
+        ty_page, ty_offer = synthesize_thank_you_page(page, offer)
+        ty_html = render_page(
+            ty_page, ty_offer, {}, checkout_url=checkout, api_base_url=api_base_url,
+            robots=NOINDEX_ROBOTS, site=site, page_type="thank_you",
+        )
+        _write_funnel_artifact(str(ty_page["page_id"]), ty_html, "thank_you")
 
     # Remove stale context artifacts for contexts that are no longer enabled (e.g. Sale toggled off) so
     # /sale //flash-sale stop serving. Best-effort — a delete of a missing key is a harmless no-op.

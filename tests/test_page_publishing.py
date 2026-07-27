@@ -257,6 +257,11 @@ class PagePublishingTests(unittest.TestCase):
         self.assertIn(("preview", artifact_paths("tenant_demo", up_id)["preview"]), keys)
         upsell_body = next(put["Body"] for put in self.s3.puts if put["Key"] == artifact_paths("tenant_demo", up_id)["published"])
         self.assertIn(b"Wait! Before You Go", upsell_body)
+        # A funnel also gets a synthesized thank-you terminus artifact.
+        ty_id = f"{page['page_id']}__thank_you"
+        self.assertIn(("pages", artifact_paths("tenant_demo", ty_id)["published"]), keys)
+        ty_body = next(put["Body"] for put in self.s3.puts if put["Key"] == artifact_paths("tenant_demo", ty_id)["published"])
+        self.assertIn(b"Thank You for Your Purchase", ty_body)
 
     def test_publish_writes_no_upsell_artifact_for_an_ordinary_offer(self):
         publish_page_document(
