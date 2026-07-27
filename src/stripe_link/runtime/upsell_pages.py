@@ -53,7 +53,10 @@ def synthesize_upsell_offer(
     amount = int(price.get("unit_amount") or 0)
     currency = str(price.get("currency") or "usd")
     accept_label = _fill_price(scaffold["accept_label"], amount, currency)
-    offer_id = f"{source_offer.get('offer_id', 'offer')}__upsell_{entry['sequence']}"
+    # Reuse the MAIN offer id so the funnel screen's CTA carries it: the one-click charge (process_upsell) loads
+    # the real offer by this id and charges the upsell product@price standalone. Per-upsell identity lives on the
+    # PAGE id + the sequence, not the offer id.
+    offer_id = str(source_offer.get("offer_id") or "offer")
     return {
         "schema_version": source_offer.get("schema_version", "2026-05-29"),
         "document_type": "offer",

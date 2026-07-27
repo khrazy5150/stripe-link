@@ -166,9 +166,27 @@ def process_upsell(
         if not offer:
             return error_response("Offer not found.", status_code=404, code="not_found")
 
-        products_by_id = load_offer_products(tenant_id, offer, products_repo)
-        selected_prices = {product_id: price_id} if product_id and price_id else {}
-        resolved = resolve_offer(offer, products_by_id, selected_prices)
+        # An upsell product is a POST-PURCHASE opportunity of the offer, not a landing item, so resolving the
+        # offer's landing items wouldn't price it. When the caller names the product + price (the funnel screen
+        # does), charge that specific product@price as a standalone one-item upsell (plans/OFFER_MODEL_REDESIGN.md
+        # §6). Falls back to resolving the offer itself when unnamed (legacy callers).
+        if product_id and price_id:
+            upsell_product = products_repo.get(tenant_id, product_id)
+            if not upsell_product:
+                return error_response("Upsell product not found.", status_code=404, code="not_found")
+            products_by_id = {product_id: upsell_product}
+            fee_offer = {
+                "offer_id": offer_id, "tenant_id": tenant_id, "status": "active",
+                "product_intent": "transaction", "context": "upsell",
+                "items": [{"product_id": product_id, "price_id": price_id, "quantity": 1}],
+                "eligibility": {"allowed_price_contexts": ["upsell"]},
+                "discount": {"mode": "none"},
+            }
+            resolved = resolve_offer(fee_offer, products_by_id, {})
+        else:
+            products_by_id = load_offer_products(tenant_id, offer, products_repo)
+            resolved = resolve_offer(offer, products_by_id, {})
+            fee_offer = offer
 
         stripe_keys = stripe_repo.get(tenant_id, mode=mode) or {}
         api_key, stripe_account = checkout_credentials(tenant_id, mode, stripe_keys, secret_cipher)
@@ -177,7 +195,7 @@ def process_upsell(
 
         fee_context = build_fee_context(
             tenant_id=tenant_id,
-            offer=offer,
+            offer=fee_offer,
             products_by_id=products_by_id,
             resolved=resolved,
             tenant_repo=tenant_repo,
