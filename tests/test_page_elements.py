@@ -160,6 +160,14 @@ class ListicleCarouselTests(unittest.TestCase):
         self.assertNotIn("data-conversion-bind", html)          # blocks are self-contained, not synced-single-card
         self.assertNotIn("sl-listicle-card", html)              # bespoke synced card retired for per-product tiers
 
+    def test_omits_redundant_product_header(self):
+        # The target-bound hero now shows the current product's name + description, so the tier block no longer
+        # repeats it above the price cards (the "Why is this here?" duplication).
+        html = render_listicle_carousel(
+            self._listicle(), self._products(), {}, {"tenant_id": "t1"}, None, None,
+        )
+        self.assertNotIn("sl-listicle-name", html)
+
     def test_listicle_carries_server_cart_wiring(self):
         # The section exposes the tenant + the /cart endpoint the island posts to (L2 Slice B).
         html = render_listicle_carousel(
@@ -184,14 +192,51 @@ class ListicleCarouselTests(unittest.TestCase):
         self.assertNotIn("$27.00", html)    # not the upsell
 
 
-class HeroFixedCopyTests(unittest.TestCase):
-    def test_hero_is_not_conversion_bound(self):
-        # The hero headline/subheadline are fixed page marketing copy — the carousel must NOT overwrite them
-        # with the current product's name/description. Only the price card tracks the target.
+class HeroCopyTests(unittest.TestCase):
+    def _listicle_offer(self):
+        offer = {"offer_id": "o", "tenant_id": "t1", "product_intent": "transaction", "offer_type": "listicle",
+                 "status": "active", "stripe_mode": "test", "discount": {"mode": "none"},
+                 "checkout": {"mode": "payment"},
+                 "items": [{"product_id": "p1", "price_id": "pr1", "quantity": 1},
+                           {"product_id": "p2", "price_id": "pr2", "quantity": 1}]}
+        products = {
+            "p1": {"product_id": "p1", "name": "Creatine Gummies", "description": "5000mg per serving.",
+                   "images": ["https://img/p1.jpg"], "default_price_id": "pr1",
+                   "prices": [{"price_id": "pr1", "currency": "usd", "unit_amount": 3709, "context": "standard"}]},
+            "p2": {"product_id": "p2", "name": "NAD+", "description": "For longevity.", "images": ["https://img/p2.jpg"],
+                   "default_price_id": "pr2",
+                   "prices": [{"price_id": "pr2", "currency": "usd", "unit_amount": 5317, "context": "standard"}]},
+        }
+        return offer, products
+
+    def test_explicit_hero_copy_is_never_conversion_bound(self):
+        # Explicit hero copy is fixed page marketing text — the carousel must NOT overwrite it. True whether or
+        # not the offer is a listicle (explicit always wins).
         from stripe_link.runtime.html import render_hero
-        html = render_hero({"id": "hero", "headline": "Feel 10 Years Younger", "subheadline": "A curated set"})
+        offer, products = self._listicle_offer()
+        html = render_hero({"id": "hero", "headline": "Feel 10 Years Younger", "subheadline": "A curated set"},
+                           offer, products, {})
         self.assertIn("Feel 10 Years Younger", html)
         self.assertIn("A curated set", html)
+        self.assertNotIn("data-conversion-bind", html)
+
+    def test_blank_listicle_hero_binds_to_current_target(self):
+        # A blank hero on a listicle inherits the CURRENT product's copy — seeded with the first product and
+        # swapped per slide by the conversion island. This is the "static hero" fix.
+        from stripe_link.runtime.html import render_hero
+        offer, products = self._listicle_offer()
+        html = render_hero({"id": "hero"}, offer, products, {})
+        self.assertIn('<h1 data-conversion-bind="headline">Creatine Gummies</h1>', html)
+        self.assertIn('data-conversion-bind="subheadline"', html)
+        self.assertIn("5000mg per serving.", html)  # first product's description, not one fixed blurb
+
+    def test_blank_hero_on_non_listicle_stays_inert(self):
+        # A non-listicle (single product) offer keeps the old behavior: a blank hero binds to nothing.
+        from stripe_link.runtime.html import render_hero
+        offer, products = self._listicle_offer()
+        offer["offer_type"] = "single"
+        offer["items"] = [offer["items"][0]]
+        html = render_hero({"id": "hero"}, offer, products, {})
         self.assertNotIn("data-conversion-bind", html)
 
 

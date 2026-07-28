@@ -696,12 +696,13 @@
             <h3>Hero</h3>
             <label class="offer-field">
               <span>Hero Headline</span>
-              <input :value="builder.headline" type="text" @input="applyTitleCaseInput((value) => { builder.headline = value; }, $event)" />
+              <input :value="builder.headline" type="text" :placeholder="isListicleOffer ? 'Leave blank to show each product’s name as you swipe' : ''" @input="applyTitleCaseInput((value) => { builder.headline = value; }, $event)" />
             </label>
             <label class="offer-field">
               <span>Hero Subheadline</span>
-              <textarea v-model.trim="builder.subheadline" rows="3"></textarea>
+              <textarea v-model.trim="builder.subheadline" rows="3" :placeholder="isListicleOffer ? 'Leave blank to show each product’s description as you swipe' : ''"></textarea>
             </label>
+            <small v-if="isListicleOffer">This landing page shows several products. Leave the hero blank and it follows the product you’re viewing; fill it in to pin one headline across all slides.</small>
             <label class="offer-field">
               <span>Hero Media URLs</span>
               <div class="builder-upload-stack">
@@ -2531,11 +2532,19 @@ function builderSections(intent) {
     brand_position: builder.brand_position || "top-right",
     brand_text: builder.brand_overlay ? brandText : "",
   });
+  // Hero copy. On a listicle a BLANK field is sent through empty on purpose: the renderer then makes the hero
+  // TARGET-BOUND — it inherits each carousel product's own name/description and swaps per slide, instead of
+  // one product's copy sitting static on every slide. Other offer types keep the name/default fallback so a
+  // single-product hero is never empty.
   sections.push({
     id: "hero",
     type: "hero",
-    headline: formatHeadline(builder.headline || builder.name || "Landing Page"),
-    subheadline: builder.subheadline || "Continue when you are ready.",
+    headline: isListicleOffer.value
+      ? formatHeadline(builder.headline || "")
+      : formatHeadline(builder.headline || builder.name || "Landing Page"),
+    subheadline: isListicleOffer.value
+      ? builder.subheadline || ""
+      : builder.subheadline || "Continue when you are ready.",
   });
   // The Page Composer decides which optional sections exist (sectionVisible). A listicle hides the fluff
   // (trust badges, elements, refund, sticky CTA — the add-to-cart lives in the price card); other offer
@@ -3032,8 +3041,13 @@ async function onBuilderOfferChange() {
   builder.offerName = offer.name || "";
   if (!builder.name) builder.name = `${offer.name || "Offer"} Landing Page`;
   if (!builder.slug) builder.slug = slugify(offer.slug || offer.name || builder.page_id);
-  builder.headline = formatHeadline(offerHeadline(offer) || builder.headline || builder.name);
-  builder.subheadline = offerDescription(offer) || builder.subheadline || "Choose your option and continue.";
+  // A listicle sells several distinct products, so seeding the hero with ONE product's copy makes it wrong on
+  // every other slide. Leave the hero blank instead — the renderer makes it target-bound (each product's own
+  // name/description, swapped per slide). Other offer types seed the single product's copy as before.
+  if (deriveOfferType(offer) !== "listicle") {
+    builder.headline = formatHeadline(offerHeadline(offer) || builder.headline || builder.name);
+    builder.subheadline = offerDescription(offer) || builder.subheadline || "Choose your option and continue.";
+  }
   // Leave SEO title/description blank by default so the renderer derives them live (the fields show the
   // derived default as a placeholder). Only a tenant edit is stored.
   if (!builder.seo_image) builder.seo_image = offerImage(offer);
