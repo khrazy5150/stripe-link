@@ -694,15 +694,19 @@
 
           <section class="builder-section">
             <h3>Hero</h3>
-            <label class="offer-field">
-              <span>Hero Headline</span>
-              <input :value="builder.headline" type="text" :placeholder="isListicleOffer ? 'Leave blank to show each product’s name as you swipe' : ''" @input="applyTitleCaseInput((value) => { builder.headline = value; }, $event)" />
-            </label>
-            <label class="offer-field">
-              <span>Hero Subheadline</span>
-              <textarea v-model.trim="builder.subheadline" rows="3" :placeholder="isListicleOffer ? 'Leave blank to show each product’s description as you swipe' : ''"></textarea>
-            </label>
-            <small v-if="isListicleOffer">This landing page shows several products. Leave the hero blank and it follows the product you’re viewing; fill it in to pin one headline across all slides.</small>
+            <template v-if="isListicleOffer">
+              <small>This landing page shows several products in a carousel. The hero headline and subheadline follow the product you’re viewing — each product’s own name and description — so there’s nothing to set here.</small>
+            </template>
+            <template v-else>
+              <label class="offer-field">
+                <span>Hero Headline</span>
+                <input :value="builder.headline" type="text" @input="applyTitleCaseInput((value) => { builder.headline = value; }, $event)" />
+              </label>
+              <label class="offer-field">
+                <span>Hero Subheadline</span>
+                <textarea v-model.trim="builder.subheadline" rows="3"></textarea>
+              </label>
+            </template>
             <label class="offer-field">
               <span>Hero Media URLs</span>
               <div class="builder-upload-stack">
@@ -2532,19 +2536,14 @@ function builderSections(intent) {
     brand_position: builder.brand_position || "top-right",
     brand_text: builder.brand_overlay ? brandText : "",
   });
-  // Hero copy. On a listicle a BLANK field is sent through empty on purpose: the renderer then makes the hero
-  // TARGET-BOUND — it inherits each carousel product's own name/description and swaps per slide, instead of
-  // one product's copy sitting static on every slide. Other offer types keep the name/default fallback so a
-  // single-product hero is never empty.
+  // Hero copy. A listicle's hero is TARGET-BOUND (the renderer fills it with each carousel product's own
+  // name/description and swaps per slide), so its stored copy is always empty — a fixed hero would sit static
+  // and wrong on every other slide. Other offer types keep the name/default fallback so the hero is never empty.
   sections.push({
     id: "hero",
     type: "hero",
-    headline: isListicleOffer.value
-      ? formatHeadline(builder.headline || "")
-      : formatHeadline(builder.headline || builder.name || "Landing Page"),
-    subheadline: isListicleOffer.value
-      ? builder.subheadline || ""
-      : builder.subheadline || "Continue when you are ready.",
+    headline: isListicleOffer.value ? "" : formatHeadline(builder.headline || builder.name || "Landing Page"),
+    subheadline: isListicleOffer.value ? "" : (builder.subheadline || "Continue when you are ready."),
   });
   // The Page Composer decides which optional sections exist (sectionVisible). A listicle hides the fluff
   // (trust badges, elements, refund, sticky CTA — the add-to-cart lives in the price card); other offer

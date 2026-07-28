@@ -209,26 +209,38 @@ class HeroCopyTests(unittest.TestCase):
         }
         return offer, products
 
-    def test_explicit_hero_copy_is_never_conversion_bound(self):
-        # Explicit hero copy is fixed page marketing text — the carousel must NOT overwrite it. True whether or
-        # not the offer is a listicle (explicit always wins).
+    def test_non_listicle_explicit_hero_copy_is_fixed(self):
+        # For a single-product offer, explicit hero copy is fixed page marketing text — never conversion-bound.
         from stripe_link.runtime.html import render_hero
         offer, products = self._listicle_offer()
+        offer["offer_type"] = "single"
+        offer["items"] = [offer["items"][0]]
         html = render_hero({"id": "hero", "headline": "Feel 10 Years Younger", "subheadline": "A curated set"},
                            offer, products, {})
         self.assertIn("Feel 10 Years Younger", html)
         self.assertIn("A curated set", html)
         self.assertNotIn("data-conversion-bind", html)
 
-    def test_blank_listicle_hero_binds_to_current_target(self):
-        # A blank hero on a listicle inherits the CURRENT product's copy — seeded with the first product and
-        # swapped per slide by the conversion island. This is the "static hero" fix.
+    def test_listicle_hero_is_always_target_bound(self):
+        # A listicle hero ALWAYS follows the current product (seeded with the first, swapped per slide). The
+        # blank case and the polluted-override case both resolve to the same dynamic hero.
         from stripe_link.runtime.html import render_hero
         offer, products = self._listicle_offer()
         html = render_hero({"id": "hero"}, offer, products, {})
-        self.assertIn('<h1 data-conversion-bind="headline">Creatine Gummies</h1>', html)
+        self.assertIn('<h1 data-conversion-bind="headline">Creatine Gummies</h1>', html)  # first product
         self.assertIn('data-conversion-bind="subheadline"', html)
-        self.assertIn("5000mg per serving.", html)  # first product's description, not one fixed blurb
+        self.assertIn("5000mg per serving.", html)
+
+    def test_listicle_hero_ignores_stored_product_snapshot(self):
+        # The old builder auto-seeded the hero with the first product's name/description (offer.presentation
+        # snapshot). That stored copy must NOT pin the hero — a listicle hero stays target-bound regardless.
+        from stripe_link.runtime.html import render_hero
+        offer, products = self._listicle_offer()
+        html = render_hero({"id": "hero", "headline": "Pinned Title", "subheadline": "Pinned sub."},
+                           offer, products, {})
+        self.assertNotIn("Pinned Title", html)   # stored copy ignored on a listicle
+        self.assertIn('data-conversion-bind="headline"', html)   # still bound, not a fixed pin
+        self.assertIn('data-conversion-bind="subheadline"', html)
 
     def test_blank_hero_on_non_listicle_stays_inert(self):
         # A non-listicle (single product) offer keeps the old behavior: a blank hero binds to nothing.

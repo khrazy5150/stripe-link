@@ -1965,30 +1965,25 @@ def render_hero(
     products_by_id: dict[str, dict[str, Any]] | None = None,
     services_by_id: dict[str, dict[str, Any]] | None = None,
 ) -> str:
-    """The hero headline (h1) + subheadline. Explicit section copy is FIXED marketing text ("Feel 10 Years
-    Younger") that the carousel never overwrites. But on a LISTICLE, a BLANK field instead inherits the
-    current carousel target's copy — seeded server-side with the first product and swapped per slide by the
-    conversion island (data-conversion-bind) — so the hero always matches the shown product rather than
-    describing one product on every slide (plans/CONVERSION_CONTEXT.md, plans/LANDING_CAROUSEL_FIXES.md)."""
-    explicit_headline = str(section.get("headline") or "").strip()
-    explicit_sub = str(section.get("subheadline") or "").strip()
+    """The hero headline (h1) + subheadline.
+
+    On a LISTICLE the hero always follows the CURRENT carousel product — it inherits each product's own
+    name/description, seeded server-side with the first product and swapped per slide by the conversion island
+    (data-conversion-bind). A multi-product carousel has no single fixed hero, so any stored hero copy (often
+    just an auto-seeded product-name snapshot) is deliberately ignored. Other offer types render the section's
+    fixed marketing copy verbatim (plans/CONVERSION_CONTEXT.md, plans/LANDING_CAROUSEL_FIXES.md)."""
     listicle = bool(offer) and derived_offer_type(offer) == "listicle"
-    dyn_headline, dyn_sub = (_first_target_copy(offer, products_by_id or {}, services_by_id or {})
-                             if listicle else ("", ""))
-
-    if explicit_headline:
-        headline_html, headline_attr = render_headline_markup(explicit_headline), ""
-    elif listicle and dyn_headline:
-        headline_html, headline_attr = escape(dyn_headline), " data-conversion-bind=\"headline\""
+    if listicle:
+        dyn_headline, dyn_sub = _first_target_copy(offer, products_by_id or {}, services_by_id or {})
+        headline_html, headline_attr = (
+            (escape(dyn_headline), " data-conversion-bind=\"headline\"") if dyn_headline else ("", ""))
+        sub_html, sub_attr = (
+            (escape(dyn_sub), " data-conversion-bind=\"subheadline\"") if dyn_sub else ("", ""))
     else:
-        headline_html, headline_attr = "", ""
-
-    if explicit_sub:
-        sub_html, sub_attr = escape(explicit_sub), ""
-    elif listicle and dyn_sub:
-        sub_html, sub_attr = escape(dyn_sub), " data-conversion-bind=\"subheadline\""
-    else:
-        sub_html, sub_attr = "", ""
+        explicit_headline = str(section.get("headline") or "").strip()
+        explicit_sub = str(section.get("subheadline") or "").strip()
+        headline_html, headline_attr = (render_headline_markup(explicit_headline), "") if explicit_headline else ("", "")
+        sub_html, sub_attr = (escape(explicit_sub), "") if explicit_sub else ("", "")
 
     return "\n".join([
         f"    <section class=\"sl-hero\" data-section-id=\"{escape(str(section.get('id', 'hero')))}\" data-section-type=\"hero\">",
