@@ -139,7 +139,8 @@ def add_item(event, *, carts_repo, offers_repo, products_repo, services_repo, ca
     try:
         line = resolve_cart_line(
             offer, products_by_id, services_by_id,
-            product_id=product_id, service_id=service_id, qty=clamp_qty(body.get("qty", 1)),
+            product_id=product_id, service_id=service_id,
+            price_id=str(body.get("price_id") or "").strip(), qty=clamp_qty(body.get("qty", 1)),
         )
     except CartError as exc:
         return error_response(str(exc), code="invalid_cart")

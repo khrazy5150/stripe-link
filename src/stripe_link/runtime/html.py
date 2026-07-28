@@ -554,6 +554,19 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     "    .sl-carousel-desc{font-size:1.4rem;color:var(--sl-price-description)}",
     "    .sl-carousel-price{font-family:var(--sl-font-accent);font-weight:900;font-size:2rem;color:var(--sl-price-amount);margin-top:auto}",
     "    .sl-carousel-buy{width:auto;text-align:center}",
+    "    .sl-pp-carousel{width:min(64rem,100%);margin:0 auto;display:flex;flex-direction:column;gap:1.2rem;text-align:center}",
+    "    .sl-pp-carousel-heading{font-family:var(--sl-font-heading);font-weight:800;font-size:2.4rem;color:var(--sl-heading)}",
+    "    .sl-pp-carousel-sub{font-size:1.5rem;color:var(--sl-muted)}",
+    "    .sl-pp-carousel-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(20rem,1fr));gap:1.2rem}",
+    "    .sl-pp-card{display:flex;flex-direction:column;gap:0.6rem;background:var(--sl-price-card-bg);border:1px solid var(--sl-price-card-border);border-radius:1.2rem;padding:1.4rem;text-align:left}",
+    "    .sl-pp-card img{width:100%;height:13rem;object-fit:cover;border-radius:0.8rem}",
+    "    .sl-pp-card-title{font-family:var(--sl-font-heading);font-weight:800;font-size:1.7rem;color:var(--sl-price-title)}",
+    "    .sl-pp-card-desc{font-size:1.35rem;color:var(--sl-price-description)}",
+    "    .sl-pp-card-price{font-family:var(--sl-font-accent);font-weight:900;font-size:1.9rem;color:var(--sl-price-amount)}",
+    "    .sl-pp-add{margin-top:auto;width:100%;text-align:center}",
+    "    .sl-pp-add.is-added{background:#16a34a;border-color:#16a34a;cursor:default}",
+    "    .sl-pp-card.is-added{opacity:0.72}",
+    "    .sl-pp-dismiss{background:none;border:none;color:var(--sl-muted);cursor:pointer;font-size:1.45rem;text-decoration:underline;padding:0.8rem}",
     "    .sl-brand-hero{text-align:center;padding:2.4rem 0 0.8rem}",
     "    .sl-brand-hero h1{font-family:var(--sl-font-heading);font-size:clamp(2.6rem,6vw,3.6rem);line-height:1.15;font-weight:800;color:var(--sl-headline);margin:0}",
     "    .sl-brand-hero-tagline{font-size:1.6rem;line-height:1.5;color:var(--sl-subheadline-text);max-width:46rem;margin:0.8rem auto 0}",
@@ -586,6 +599,9 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     "    .sl-review-body{margin:0.6rem 0 0;color:var(--sl-content-text);line-height:1.6}",
     "    .sl-review-title{color:var(--sl-content-text)}",
     "    .sl-listicle{width:min(52rem,100%);margin:0 auto;display:flex;flex-direction:column;gap:1.2rem}",
+    "    .sl-listicle-tiers{display:flex;flex-direction:column;gap:0.8rem}",
+    "    .sl-listicle-tiers[hidden]{display:none}",
+    "    .sl-listicle-name{font-family:var(--sl-font-heading);font-weight:800;font-size:1.9rem;color:var(--sl-heading);text-align:center}",
     "    .sl-listicle-stage{position:relative}",
     "    .sl-listicle-carousel{display:flex;overflow-x:auto;scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch;scrollbar-width:none}",
     "    .sl-listicle-carousel::-webkit-scrollbar{display:none}",
@@ -1583,6 +1599,7 @@ SECTION_REGISTRY: dict[str, dict[str, Any]] = {
     "client_marquee": {"render": lambda c: render_client_marquee(c.section), "version": 1},
     "product_details": {"render": lambda c: render_product_details(c.offer, c.products_by_id, c.services_by_id), "version": 1},
     "product_carousel": {"render": lambda c: render_product_carousel(c.section, c.page, c.offers_by_id, c.products_by_id, c.services_by_id, c.checkout_url, c.api_base_url), "version": 1},
+    "post_purchase_carousel": {"render": lambda c: render_post_purchase_carousel(c.section, c.page, c.api_base_url), "version": 1},
     "brand_hero": {"render": lambda c: render_brand_hero(c.section), "version": 1},
     "catalog_grid": {"render": lambda c: render_catalog_grid(c.section, c.offers_by_id, c.products_by_id, c.services_by_id), "version": 1},
     "related_products": {"render": lambda c: render_catalog_grid(c.section, c.offers_by_id, c.products_by_id, c.services_by_id), "version": 1},
@@ -2016,43 +2033,127 @@ def render_listicle_carousel(
     checkout_url: str | None,
     api_base_url: str | None = None,
 ) -> str:
-    """Listicle price card. No image carousel here — the hero_media carousel is the single carousel and this
-    card SYNCS to its active target via the conversion island (each field carries data-conversion-bind; the
-    per-target data comes from the embedded OfferView payload). Add-to-cart reads the current target too."""
-    slides = listicle_slides(offer, products_by_id, services_by_id)
-    if not slides:
-        return ""
+    """Listicle carousel (fixed hero + synced tiers, plans/LANDING_CAROUSEL_FIXES.md). The hero_media image
+    carousel is the single image carousel and drives the current product; this section renders EVERY landing
+    product's tier selector as a block and shows only the active one — the conversion island toggles them as the
+    hero is swiped (conversion:itemChanged). One Add-to-cart adds the SHOWN product at its SELECTED tier to the
+    server cart. Handles single- or multi-tier products per slide (each block reuses the single-product selector
+    via _item_price_option_cards)."""
+    services_by_id = services_by_id or {}
     offer_id = escape(str(offer.get("offer_id") or ""))
-    first = slides[0]
-    first_discount = round((first["compare_at"] - first["amount"]) / first["compare_at"] * 100) if first["compare_at"] > first["amount"] > 0 else 0
-    image_url = str(first.get("image") or "")
-    # Plain <img> (not srcset) so the hero_image binder can swap src cleanly as the target changes. alt is the
-    # first item's name (the JS binder swaps src on target change; a descriptive default beats an empty alt).
-    hero_alt = escape(localized_alt(str(first.get("name") or offer.get("name") or "Product")))
-    image_html = f"<img data-conversion-bind=\"hero_image\" src=\"{escape(image_url)}\" alt=\"{hero_alt}\" loading=\"lazy\" decoding=\"async\">" if image_url else ""
-    option_class = "sl-price-option sl-listicle-option" + ("" if image_url else " no-img")
     add_label = escape(str(listicle_add_label(offer)))
+    blocks: list[str] = []
+    display_index = 0
+    index = 0
+    for item in stage_opportunities(offer, STAGE_LANDING):
+        if item.get("service_id"):
+            continue  # services aren't cart-checkout-eligible yet (LISTICLE_AND_CART.md L2 deferred)
+        product_id = str(item.get("product_id") or "")
+        product = products_by_id.get(product_id)
+        if product is None:
+            continue
+        item_cards, display_index = _item_price_option_cards(item, product, offer, display_index)
+        if not item_cards:
+            continue
+        cards_html = [markup for _, markup in sorted(item_cards, key=lambda card: card[0])]
+        name = str(product.get("headline") or product.get("name") or "Product")
+        description = str(product.get("description") or "")
+        blocks.append("\n".join(line for line in [
+            f"      <div class=\"sl-listicle-tiers\" data-listicle-tiers data-index=\"{index}\" data-product-id=\"{escape(product_id)}\"{'' if index == 0 else ' hidden'}>",
+            f"        <strong class=\"sl-listicle-name\">{render_headline_markup(name)}</strong>",
+            (f"        <p class=\"sl-price-description\">{escape(description)}</p>" if description else ""),
+            "        <div class=\"sl-price-options\">",
+            *cards_html,
+            "        </div>",
+            "      </div>",
+        ] if line))
+        index += 1
+    if not blocks:
+        return ""
     # Server-cart wiring (L2): the island posts to {api_base}/cart with the page's tenant + this offer.
     cart_tenant_id = escape(str(page.get("tenant_id") or offer.get("tenant_id") or ""))
     cart_endpoint = escape(f"{str(api_base_url or '').rstrip('/')}/cart") if api_base_url else ""
+    # Post-purchase routing (§6): when the page has a post-checkout funnel, the cart's Checkout lands on
+    # {api}/pages/{page_id}/post-checkout/next (like the single-product CTA), not back on the landing page.
+    cart_page_id = escape(str(page.get("page_id") or ""))
+    cart_has_post_checkout = "true" if page.get("post_checkout") else "false"
     return "\n".join([
-        f"    <section class=\"sl-listicle\" data-section-type=\"offer_price_selector\" data-conversion-section=\"offer_selector\" data-listicle data-offer-id=\"{offer_id}\" data-tenant-id=\"{cart_tenant_id}\" data-cart-endpoint=\"{cart_endpoint}\">",
-        f"      <article class=\"{option_class}\" data-listicle-card>",
-        ("        " + image_html) if image_html else "",
-        "        <div class=\"sl-price-copy\">",
-        f"          <strong data-conversion-bind=\"headline\">{render_headline_markup(first['name'])}</strong>",
-        f"          <p class=\"sl-price-description\" data-conversion-bind=\"subheadline\">{escape(first['description'])}</p>",
-        "          <div class=\"sl-price-row\">",
-        f"            <span class=\"sl-price-amount\" data-conversion-bind=\"price\">{escape(format_money(first['amount'], first['currency']))}</span>",
-        f"            <span class=\"sl-regular-price\" data-conversion-bind=\"compare_at\">{escape(format_money(first['compare_at'], first['currency'])) if first['compare_at'] > first['amount'] else ''}</span>",
-        f"            <span class=\"sl-savings\" data-conversion-bind=\"savings\">{('Save ' + str(first_discount) + '%') if first_discount else ''}</span>",
-        f"            <span class=\"sl-badge sl-listicle-badge\" data-conversion-bind=\"sale_badge\">{escape(str(first.get('sale_badge') or ''))}</span>",
-        "          </div>",
-        "        </div>",
-        "      </article>",
+        f"    <section class=\"sl-listicle\" data-section-type=\"offer_price_selector\" data-conversion-section=\"offer_selector\" data-listicle data-offer-id=\"{offer_id}\" data-tenant-id=\"{cart_tenant_id}\" data-cart-endpoint=\"{cart_endpoint}\" data-page-id=\"{cart_page_id}\" data-has-post-checkout=\"{cart_has_post_checkout}\">",
+        *blocks,
         f"      <button class=\"sl-cta sl-listicle-add\" type=\"button\" data-listicle-add>{add_label}</button>",
         "    </section>",
     ])
+
+
+def _item_price_option_cards(
+    item: dict[str, Any], product: dict[str, Any], offer: dict[str, Any], display_index: int
+) -> tuple[list[tuple[tuple[int, int, int], str]], int]:
+    """The `sl-price-option` radio cards for ONE landing item's tiers — the exact markup the single-product
+    selector renders. Shared so a listicle carousel slide reuses the tier selector verbatim (plans/
+    LANDING_CAROUSEL_FIXES.md). Returns (cards, next_display_index); each card is (sort_key, markup)."""
+    product_id = item.get("product_id", "")
+    # Same rule as the CTA: if the offer's default is a price this page doesn't show (upsell/downsell/
+    # order bump), the first displayed price is the selected one — otherwise no card renders as checked.
+    default_price_id = landing_page_default_price_id(item, product)
+    cards: list[tuple[tuple[int, int, int], str]] = []
+    for option in item_price_options(item):
+        price = find_price(product, option.get("price_id", ""))
+        if not is_landing_page_price(price):
+            continue
+        # A selectable option carries its own label; a synthesized fixed option has none, so fall back
+        # to the product name rather than a generic "Option".
+        label = escape(str(option.get("label") or price.get("label") or product.get("name") or "Option"))
+        # Sale / Flash-Sale context view: swap this tier to its paired sale price (same quantity), badge
+        # it, and strike through the Standard price. `default_attr` stays keyed on the STANDARD tier so the
+        # same option renders checked. `display_price` drives the amount, price_id, and checkout selection.
+        active_ctx = str(_RENDER_STATE.get("active_price_context") or "standard")
+        display_price = price
+        sale_badge = ""
+        context_compare = None
+        if active_ctx in ("sale", "flash_sale"):
+            paired = paired_context_price(product, price, active_ctx)
+            if paired:
+                display_price = paired
+                sale_badge = "Sale" if active_ctx == "sale" else "\U0001F525 Flash Sale"
+                context_compare = int(price.get("unit_amount") or 0)
+        badge = escape(sale_badge or str(option.get("badge") or ""))
+        amount = int(display_price.get("unit_amount", 0))
+        currency = str(display_price.get("currency") or "usd")
+        checkout_quantity = int(item.get("quantity") or 1)
+        default_attr = "true" if price.get("price_id") == default_price_id else "false"
+        image_url = price_image(product, display_price, option)
+        description = escape(str(option.get("description") or price.get("description") or product.get("description") or ""))
+        compare_at_unit_amount = context_compare if context_compare is not None else display_price.get("compare_at_unit_amount")
+        savings_pct = option.get("display_discount_pct") or display_price.get("discount_pct")
+        if context_compare is not None:
+            savings_pct = discount_pct(amount, context_compare)  # Sale% off the Standard price
+        if not savings_pct and compare_at_unit_amount:
+            savings_pct = discount_pct(amount, int(compare_at_unit_amount))
+        # Swapped to a sale/flash price: carry the Standard fallback so the client-side flash/expiry logic
+        # (plans/SALES_FUNNELS.md P1b-2) can revert this card to Standard in the upcoming/ended states.
+        revert_attrs = (
+            f" data-standard-price-id=\"{escape(str(price.get('price_id', '')))}\" data-standard-amount=\"{int(price.get('unit_amount') or 0)}\""
+            if context_compare is not None else ""
+        )
+        card_markup = "\n".join([
+            f"      <article class=\"sl-price-option\" data-product-id=\"{escape(str(product_id))}\" data-price-id=\"{escape(str(display_price.get('price_id', '')))}\"{revert_attrs} data-quantity=\"{checkout_quantity}\" data-default=\"{default_attr}\" data-sale-amount=\"{amount}\" data-regular-amount=\"{int(compare_at_unit_amount) if compare_at_unit_amount else ''}\" data-currency=\"{escape(currency)}\" data-label=\"{label}\">",
+            "        " + responsive_img(image_url, str(product.get("name") or label), sizes=PRICE_OPTION_SIZES) if image_url else "",
+            "        <div class=\"sl-price-copy\">",
+            f"          <span class=\"sl-badge\">{badge}</span>" if badge else "",
+            f"          <strong>{label}</strong>",
+            f"          <p class=\"sl-price-description\">{description}</p>" if description else "",
+            "          <div class=\"sl-price-row\">",
+            f"            <span class=\"sl-price-amount\" data-price-amount>{escape(format_money(amount, currency))}</span>",
+            f"            <span class=\"sl-regular-price\">{escape(format_money(int(compare_at_unit_amount), currency))}</span>" if compare_at_unit_amount else "",
+            f"            <span class=\"sl-savings\">Save {int(savings_pct)}%</span>" if savings_pct else "",
+            "          </div>",
+            "        </div>",
+            f"        <input type=\"radio\" name=\"sl-price-{escape(product_id)}\" value=\"{escape(str(display_price.get('price_id', '')))}\" aria-label=\"{label}, {escape(format_money(amount, currency))}\" {'checked' if default_attr == 'true' else ''}>",
+            "      </article>",
+        ])
+        cards.append((landing_page_price_sort_key(price, option, display_index), card_markup))
+        display_index += 1
+    return cards, display_index
 
 
 def render_offer_price_selector(
@@ -2075,66 +2176,8 @@ def render_offer_price_selector(
         product = products_by_id.get(product_id)
         if product is None:
             raise RenderError(f"Product '{product_id}' was not provided for offer '{offer.get('offer_id', '')}'.")
-        # Same rule as the CTA: if the offer's default is a price this page doesn't show (upsell/downsell/
-        # order bump), the first displayed price is the selected one — otherwise no card renders as checked.
-        default_price_id = landing_page_default_price_id(item, product)
-        for option in item_price_options(item):
-            price = find_price(product, option.get("price_id", ""))
-            if not is_landing_page_price(price):
-                continue
-            # A selectable option carries its own label; a synthesized fixed option has none, so fall back
-            # to the product name rather than a generic "Option".
-            label = escape(str(option.get("label") or price.get("label") or product.get("name") or "Option"))
-            # Sale / Flash-Sale context view: swap this tier to its paired sale price (same quantity), badge
-            # it, and strike through the Standard price. `default_attr` stays keyed on the STANDARD tier so the
-            # same option renders checked. `display_price` drives the amount, price_id, and checkout selection.
-            active_ctx = str(_RENDER_STATE.get("active_price_context") or "standard")
-            display_price = price
-            sale_badge = ""
-            context_compare = None
-            if active_ctx in ("sale", "flash_sale"):
-                paired = paired_context_price(product, price, active_ctx)
-                if paired:
-                    display_price = paired
-                    sale_badge = "Sale" if active_ctx == "sale" else "\U0001F525 Flash Sale"
-                    context_compare = int(price.get("unit_amount") or 0)
-            badge = escape(sale_badge or str(option.get("badge") or ""))
-            amount = int(display_price.get("unit_amount", 0))
-            currency = str(display_price.get("currency") or "usd")
-            checkout_quantity = int(item.get("quantity") or 1)
-            default_attr = "true" if price.get("price_id") == default_price_id else "false"
-            image_url = price_image(product, display_price, option)
-            description = escape(str(option.get("description") or price.get("description") or product.get("description") or ""))
-            compare_at_unit_amount = context_compare if context_compare is not None else display_price.get("compare_at_unit_amount")
-            savings_pct = option.get("display_discount_pct") or display_price.get("discount_pct")
-            if context_compare is not None:
-                savings_pct = discount_pct(amount, context_compare)  # Sale% off the Standard price
-            if not savings_pct and compare_at_unit_amount:
-                savings_pct = discount_pct(amount, int(compare_at_unit_amount))
-            # Swapped to a sale/flash price: carry the Standard fallback so the client-side flash/expiry logic
-            # (plans/SALES_FUNNELS.md P1b-2) can revert this card to Standard in the upcoming/ended states.
-            revert_attrs = (
-                f" data-standard-price-id=\"{escape(str(price.get('price_id', '')))}\" data-standard-amount=\"{int(price.get('unit_amount') or 0)}\""
-                if context_compare is not None else ""
-            )
-            card_markup = "\n".join([
-                f"      <article class=\"sl-price-option\" data-product-id=\"{escape(str(product_id))}\" data-price-id=\"{escape(str(display_price.get('price_id', '')))}\"{revert_attrs} data-quantity=\"{checkout_quantity}\" data-default=\"{default_attr}\" data-sale-amount=\"{amount}\" data-regular-amount=\"{int(compare_at_unit_amount) if compare_at_unit_amount else ''}\" data-currency=\"{escape(currency)}\" data-label=\"{label}\">",
-                "        " + responsive_img(image_url, str(product.get("name") or label), sizes=PRICE_OPTION_SIZES) if image_url else "",
-                "        <div class=\"sl-price-copy\">",
-                f"          <span class=\"sl-badge\">{badge}</span>" if badge else "",
-                f"          <strong>{label}</strong>",
-                f"          <p class=\"sl-price-description\">{description}</p>" if description else "",
-                "          <div class=\"sl-price-row\">",
-                f"            <span class=\"sl-price-amount\" data-price-amount>{escape(format_money(amount, currency))}</span>",
-                f"            <span class=\"sl-regular-price\">{escape(format_money(int(compare_at_unit_amount), currency))}</span>" if compare_at_unit_amount else "",
-                f"            <span class=\"sl-savings\">Save {int(savings_pct)}%</span>" if savings_pct else "",
-                "          </div>",
-                "        </div>",
-                f"        <input type=\"radio\" name=\"sl-price-{escape(product_id)}\" value=\"{escape(str(display_price.get('price_id', '')))}\" aria-label=\"{label}, {escape(format_money(amount, currency))}\" {'checked' if default_attr == 'true' else ''}>",
-                "      </article>",
-            ])
-            cards.append((landing_page_price_sort_key(price, option, display_index), card_markup))
-            display_index += 1
+        item_cards, display_index = _item_price_option_cards(item, product, offer, display_index)
+        cards.extend(item_cards)
     return "\n".join([
         "    <section class=\"sl-price-selector\" data-section-type=\"offer_price_selector\">",
         "      <div class=\"sl-price-options\">",
@@ -3628,6 +3671,53 @@ def render_product_carousel(
     ] if line)
 
 
+def render_post_purchase_carousel(section: dict[str, Any], page: dict[str, Any], api_base_url: str | None) -> str:
+    """Carousel-mode post-purchase screen (plans/OFFER_MODEL_REDESIGN.md §6): a grid of self-contained upsell (or
+    downsell) cards, each a one-click Add wired to /upsell/charge by the island, plus a single dismiss. The
+    section carries everything the island needs (offer/tenant/api on the container, product/price/sequence per
+    card) so no per-card offer resolution happens here. Empty when the section has no cards."""
+    cards = section.get("cards") or []
+    if not cards:
+        return ""
+    card_html = []
+    for card in cards:
+        image = str(card.get("image_url") or "").strip()
+        title = str(card.get("title") or "")
+        desc = str(card.get("description") or "")
+        amount = int(card.get("amount") or 0)
+        currency = str(card.get("currency") or "usd")
+        add_label = str(card.get("add_label") or "Add")
+        card_html.append("\n".join(line for line in [
+            f"      <article class=\"sl-pp-card\" data-pp-card data-sequence=\"{escape(str(card.get('sequence', '')))}\" data-product-id=\"{escape(str(card.get('product_id', '')))}\" data-price-id=\"{escape(str(card.get('price_id', '')))}\">",
+            (f"        {responsive_img(image, title or 'Offer', sizes=CONTENT_BLOCK_SIZES)}" if image else ""),
+            f"        <h3 class=\"sl-pp-card-title\">{escape(title)}</h3>",
+            (f"        <p class=\"sl-pp-card-desc\">{escape(desc)}</p>" if desc else ""),
+            f"        <p class=\"sl-pp-card-price\">{escape(format_money(amount, currency))}</p>",
+            f"        <button class=\"sl-cta sl-pp-add\" type=\"button\" data-pp-add>{escape(add_label)}</button>",
+            "      </article>",
+        ] if line))
+    heading = str(section.get("headline") or "")
+    sub = str(section.get("subheadline") or "")
+    dismiss = str(section.get("dismiss_label") or "No thanks")
+    proceed = str(section.get("proceed_label") or "")
+    funnel_page_id = str(section.get("funnel_page_id") or page.get("page_id") or "")
+    return "\n".join(line for line in [
+        (
+            f"    <section class=\"sl-pp-carousel\" data-section-id=\"{escape(str(section.get('id', 'pp-carousel')))}\""
+            f" data-section-type=\"post_purchase_carousel\" data-surface=\"{escape(str(section.get('surface', 'upsell')))}\""
+            f" data-offer-id=\"{escape(str(section.get('offer_id', '')))}\" data-tenant-id=\"{escape(str(page.get('tenant_id', '')))}\""
+            f" data-page-id=\"{escape(funnel_page_id)}\" data-api-base-url=\"{escape(str(api_base_url or ''))}\">"
+        ),
+        (f"      <h2 class=\"sl-pp-carousel-heading\">{render_headline_markup(heading)}</h2>" if heading else ""),
+        (f"      <p class=\"sl-pp-carousel-sub\">{escape(sub)}</p>" if sub else ""),
+        "      <div class=\"sl-pp-carousel-grid\">",
+        *card_html,
+        "      </div>",
+        f"      <button class=\"sl-pp-dismiss\" type=\"button\" data-pp-dismiss data-pp-proceed-label=\"{escape(proceed)}\">{escape(dismiss)}</button>",
+        "    </section>",
+    ] if line)
+
+
 @dataclass
 class CtaRenderContext:
     cta: dict[str, Any]
@@ -4046,7 +4136,8 @@ def render_page_interactions_script(page: dict[str, Any]) -> str:
         section.get("type") == "hero_media" and len(section.get("images") or []) > 1
         for section in page.get("sections", [])
     )
-    if not any([has_countdown, has_price_selector, has_current_year, has_checkout_cta, has_hero_carousel]):
+    has_pp_carousel = any(section.get("type") == "post_purchase_carousel" for section in page.get("sections", []))
+    if not any([has_countdown, has_price_selector, has_current_year, has_checkout_cta, has_hero_carousel, has_pp_carousel]):
         return ""
     page_id = escape(str(page.get("page_id") or "page"))
     return "\n".join([
@@ -4279,16 +4370,32 @@ def render_page_interactions_script(page: dict[str, Any]) -> str:
         "          };",
         "          const addToCart = (t) => {",
         "            if (!serverEnabled) { addFallback(t); return; }",
-        "            const body = { tenant_id: tenantId, offer_id: offerId, product_id: t.product_id || '', service_id: t.service_id || '', qty: 1, page_url: window.location.origin + window.location.pathname };",
+        "            const body = { tenant_id: tenantId, offer_id: offerId, product_id: t.product_id || '', price_id: t.price_id || '', service_id: t.service_id || '', qty: 1, page_url: window.location.origin + window.location.pathname };",
         "            const id = getCartId(); if (id) body.cart_id = id;",
         "            if (ctToken) body.ct = ctToken;",
 
         "            fetch(cartEndpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })",
         "              .then((r) => r.ok ? r.json() : Promise.reject(r)).then(applyServerCart).catch(() => addFallback(t));",
         "          };",
+        # Per-product tier blocks: the hero_media carousel drives the current product; show only its tier block
+        # (toggled on conversion:itemChanged) so each product exposes its OWN tiers. Add reads the SHOWN block's
+        # selected tier — so a multi-product carousel adds distinct products at chosen tiers (LANDING_CAROUSEL_FIXES).
+        "          const tierBlocks = Array.from(listicle.querySelectorAll('[data-listicle-tiers]'));",
+        "          const showTierBlock = (index) => { tierBlocks.forEach((b) => { b.hidden = Number(b.dataset.index || 0) !== index; }); };",
+        "          const activeTierBlock = () => tierBlocks.find((b) => !b.hidden) || tierBlocks[0];",
+        "          on('conversion:itemChanged', (e) => { if (e && typeof e.index === 'number') showTierBlock(e.index); });",
         "          const addBtn = listicle.querySelector('[data-listicle-add]');",
         "          if (addBtn) addBtn.addEventListener('click', () => {",
-        "            const t = convTargets[currentIndex];",
+        "            const block = activeTierBlock(); if (!block) return;",
+        "            const checked = block.querySelector('input[type=\"radio\"]:checked') || block.querySelector('input[type=\"radio\"]');",
+        "            const card = checked ? checked.closest('.sl-price-option') : block.querySelector('.sl-price-option');",
+        "            const t = {",
+        "              product_id: block.dataset.productId || '',",
+        "              price_id: (checked && checked.value) || (card && card.dataset.priceId) || '',",
+        "              amount: card ? Number(card.dataset.saleAmount || 0) : 0,",
+        "              currency: (card && card.dataset.currency) || 'usd',",
+        "              headline: (card && card.dataset.label) || '',",
+        "            };",
         "            addToCart(t);",
         "            emit('conversion:ctaInvoked', { ctaType: 'add_to_cart', target: t });",
         "            addBtn.textContent = 'Added \\u2713'; window.setTimeout(() => { addBtn.textContent = 'Add to cart'; }, 1200);",
@@ -4299,8 +4406,22 @@ def render_page_interactions_script(page: dict[str, Any]) -> str:
         "            const id = getCartId(); if (!id) return;",
         "            checkoutBtn.disabled = true; checkoutBtn.textContent = 'Redirecting\\u2026';",
         "            const ret = window.location.origin + window.location.pathname;",
-        "            fetch(cartEndpoint + '/checkout', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ tenant_id: tenantId, cart_id: id, success_url: ret + '?checkout=success', cancel_url: ret + '?checkout=cancel' }) })",
-        "              .then((r) => r.ok ? r.json() : Promise.reject(r)).then((d) => { if (d && d.url) { window.location.href = d.url; } else { throw new Error('no url'); } })",
+        # When the page has a post-checkout funnel, route success through {api}/pages/{page_id}/post-checkout/next
+        # (mirrors the single-product CTA) so multi-product buyers enter the upsell/downsell funnel instead of
+        # bouncing back to the landing page. {CHECKOUT_SESSION_ID} stays UNENCODED (Stripe substitutes it).
+        "            let cartSuccessUrl = ret + '?checkout=success';",
+        "            const cartApiBase = cartEndpoint.replace(/\\/cart$/, '');",
+        "            const cartPageId = listicle.dataset.pageId || '';",
+        "            if (listicle.dataset.hasPostCheckout === 'true' && cartApiBase && cartPageId) {",
+        "              const nextp = new URLSearchParams(); nextp.set('outcome', 'accept'); if (tenantId) nextp.set('tenant_id', tenantId);",
+        "              cartSuccessUrl = `${cartApiBase}/pages/${cartPageId}/post-checkout/next?${nextp.toString()}&session_id={CHECKOUT_SESSION_ID}`;",
+        "            }",
+        "            fetch(cartEndpoint + '/checkout', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ tenant_id: tenantId, cart_id: id, success_url: cartSuccessUrl, cancel_url: ret + '?checkout=cancel' }) })",
+        # Clear the LOCAL cart ONLY once Stripe hands off (we have a redirect url) so returning to the page shows
+        # an empty cart, not the just-purchased items. The .catch keeps it on failure (retry still works). The
+        # SERVER cart persists — the webhook marks it converted on payment via metadata[cart_id], or it stays
+        # open for abandoned-cart recovery.
+        "              .then((r) => r.ok ? r.json() : Promise.reject(r)).then((d) => { if (d && d.url) { try { localStorage.removeItem(idKey); localStorage.removeItem(fallbackKey); } catch (e) {} serverCart = null; window.location.href = d.url; } else { throw new Error('no url'); } })",
         "              .catch(() => { checkoutBtn.disabled = false; checkoutBtn.textContent = 'Checkout'; });",
         "          });",
         "          const hydrateFrom = (url) => fetch(url).then((r) => r.ok ? r.json() : Promise.reject(r)).then((d) => { if (d && d.cart) { serverCart = d.cart; if (d.cart.cart_id) setCartId(d.cart.cart_id); } renderMinicart(); }).catch(renderMinicart);",
@@ -4577,6 +4698,83 @@ def render_page_interactions_script(page: dict[str, Any]) -> str:
         "          if (!render()) window.clearInterval(interval);",
         "        }, 1000);",
         "      });",
+        # Post-purchase carousel (§6): a grid of independent one-click Adds + a single dismiss. Each Add charges
+        # its card via /upsell/charge (idempotent by sequence) and marks the card Added in place; the dismiss
+        # advances the funnel (post-checkout router → downsell carousel or thank-you). Self-contained: charge
+        # context comes off the section container + each card, funnel context off the URL. No-op on other pages.
+        "      const ppCarousel = document.querySelector('[data-section-type=\"post_purchase_carousel\"]');",
+        "      if (ppCarousel) {",
+        "        const ppApi = ppCarousel.dataset.apiBaseUrl || '';",
+        "        const ppTenant = ppCarousel.dataset.tenantId || '';",
+        "        const ppOffer = ppCarousel.dataset.offerId || '';",
+        "        const ppSurface = ppCarousel.dataset.surface || 'upsell';",
+        "        const ppSession = funnelParams.get('session_id') || '';",
+        "        const ppPage = funnelParams.get('funnel_page') || ppCarousel.dataset.pageId || '';",
+        "        const ppDismissUrl = () => {",
+        "          const next = new URLSearchParams();",
+        "          next.set('outcome', 'decline');",
+        "          next.set('step_id', `${ppSurface}_carousel`);",
+        "          if (ppTenant) next.set('tenant_id', ppTenant);",
+        "          if (ppSession) next.set('session_id', ppSession);",
+        "          return `${ppApi}/pages/${ppPage}/post-checkout/next?${next.toString()}`;",
+        "        };",
+        "        const ppDismiss = ppCarousel.querySelector('[data-pp-dismiss]');",
+        "        if (ppDismiss) ppDismiss.addEventListener('click', (event) => { event.preventDefault(); window.location.assign(ppDismissUrl()); });",
+        "        const ppAdds = Array.from(ppCarousel.querySelectorAll('[data-pp-add]'));",
+        "        let ppCustomerId = '';",
+        "        let ppCustomerInfo = {};",
+        "        ppAdds.forEach((b) => { b.setAttribute('aria-disabled', 'true'); });",
+        "        fetch(`${ppApi}/upsell/session?session_id=${encodeURIComponent(ppSession)}&clientID=${encodeURIComponent(ppTenant)}`)",
+        "          .then((response) => response.json())",
+        "          .then((body) => {",
+        "            const session = (body && body.session) || {};",
+        "            ppCustomerId = session.customer_id || '';",
+        "            ppCustomerInfo = { name: session.customer_name || '', email: session.customer_email || '', phone: session.customer_phone || '' };",
+        "            ppAdds.forEach((b) => { if (b.dataset.added !== 'true') b.removeAttribute('aria-disabled'); });",
+        "          })",
+        "          .catch(() => {});",
+        "        ppAdds.forEach((btn) => {",
+        "          const card = btn.closest('[data-pp-card]');",
+        "          btn.addEventListener('click', (event) => {",
+        "            event.preventDefault();",
+        "            if (btn.dataset.added === 'true' || btn.dataset.connecting === 'true' || !ppCustomerId) return;",
+        "            btn.dataset.connecting = 'true';",
+        "            btn.setAttribute('aria-disabled', 'true');",
+        "            btn.textContent = 'Processing...';",
+        "            fetch(`${ppApi}/upsell/charge`, {",
+        "              method: 'POST',",
+        "              headers: { 'Content-Type': 'application/json' },",
+        "              body: JSON.stringify({",
+        "                tenant_id: ppTenant,",
+        "                session_id: ppSession,",
+        "                offer_id: ppOffer,",
+        "                product_id: (card && card.dataset.productId) || '',",
+        "                price_id: (card && card.dataset.priceId) || '',",
+        "                sequence: (card && card.dataset.sequence) || '',",
+        "                customer_id: ppCustomerId,",
+        "                customer: ppCustomerInfo,",
+        "              }),",
+        "            })",
+        "              .then((response) => response.json().then((body) => ({ ok: response.ok, body })))",
+        "              .then(({ ok, body }) => {",
+        "                if (!ok) throw new Error((body && body.message) || 'Payment failed');",
+        "                btn.dataset.added = 'true';",
+        "                btn.dataset.connecting = 'false';",
+        "                btn.classList.add('is-added');",
+        "                btn.textContent = 'Added \\u2713';",
+        "                if (card) card.classList.add('is-added');",
+        # Once ANY card is added, the dismiss stops reading as 'No thanks' (which sounds like undoing the
+        # just-made purchases) and becomes 'Continue…' — same funnel-advance, clearer intent.
+        "                if (ppDismiss && ppDismiss.dataset.ppProceedLabel && ppDismiss.textContent !== ppDismiss.dataset.ppProceedLabel) ppDismiss.textContent = ppDismiss.dataset.ppProceedLabel;",
+        "              })",
+        "              .catch(() => {",
+        "                btn.dataset.connecting = 'false';",
+        "                btn.removeAttribute('aria-disabled');",
+        "                btn.textContent = 'Card declined - try again';",
+        "              });",
+        "          });",
+        "        });",
+        "      }",
         "    });",
         "  </script>",
     ])

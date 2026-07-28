@@ -263,6 +263,47 @@ class PagePublishingTests(unittest.TestCase):
         ty_body = next(put["Body"] for put in self.s3.puts if put["Key"] == artifact_paths("tenant_demo", ty_id)["published"])
         self.assertIn(b"Thank You for Your Purchase", ty_body)
 
+    def test_publish_writes_carousel_artifacts_for_four_or_more_upsells(self):
+        # >3 upsells -> carousel strategy: ONE __upsell_carousel (+ __downsell_carousel when any upsell product
+        # carries a downsell price) instead of per-sequence __upsell_N pages (plans/OFFER_MODEL_REDESIGN.md §6).
+        products = [copy.deepcopy(self.product)]
+        upsells, downsells = [], []
+        for i in range(4):
+            p = copy.deepcopy(self.product)
+            p["product_id"] = f"prod_up_{i}"
+            p["prices"].append({"price_id": f"price_up_{i}", "stripe_price_id": f"sp_up_{i}", "context": "upsell",
+                                "unit_amount": 500 + i, "currency": "usd", "quantity": 1})
+            if i < 2:  # two of the four also carry a downsell price
+                p["prices"].append({"price_id": f"price_down_{i}", "stripe_price_id": f"sp_down_{i}",
+                                    "context": "downsell", "unit_amount": 200 + i, "currency": "usd", "quantity": 1})
+                downsells.append({"product_id": f"prod_up_{i}", "price_id": f"price_down_{i}"})
+            products.append(p)
+            upsells.append({"product_id": f"prod_up_{i}", "price_id": f"price_up_{i}"})
+        offer = copy.deepcopy(self.offer)
+        offer["funnel"] = {"upsells": upsells, "downsells": downsells}
+        page = copy.deepcopy(self.page)
+        page["status"] = "published"
+        publish_page_document(
+            page,
+            offers_repository=FakeRepository("offer_id", [offer]),
+            products_repository=FakeRepository("product_id", products),
+            s3_client=self.s3, pages_bucket="pages", preview_bucket="preview", environment="dev",
+            pages_domain="p", preview_domain="pv",
+        )
+        keys = [put["Key"] for put in self.s3.puts]
+        uc_key = artifact_paths("tenant_demo", f"{page['page_id']}__upsell_carousel")["published"]
+        dc_key = artifact_paths("tenant_demo", f"{page['page_id']}__downsell_carousel")["published"]
+        self.assertIn(uc_key, keys)
+        self.assertIn(dc_key, keys)
+        # Carousel mode emits NO per-sequence upsell pages, but still the thank-you terminus.
+        self.assertFalse(any("__upsell_1" in k for k in keys))
+        self.assertIn(artifact_paths("tenant_demo", f"{page['page_id']}__thank_you")["published"], keys)
+        # One card per upsell on the grid; the downsell carousel only has the two products that carry a downsell.
+        uc_body = next(put["Body"] for put in self.s3.puts if put["Key"] == uc_key)
+        dc_body = next(put["Body"] for put in self.s3.puts if put["Key"] == dc_key)
+        self.assertEqual(uc_body.count(b'class="sl-pp-card"'), 4)
+        self.assertEqual(dc_body.count(b'class="sl-pp-card"'), 2)
+
     def test_publish_writes_no_upsell_artifact_for_an_ordinary_offer(self):
         publish_page_document(
             copy.deepcopy(self.page), offers_repository=self.offers_repo, products_repository=self.products_repo,

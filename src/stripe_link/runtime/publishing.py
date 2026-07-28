@@ -16,7 +16,13 @@ from stripe_link.domain.connect_sync import site_domain_verified
 from stripe_link.domain.custom_domains import domain_index_record
 from stripe_link.domain.funnels import funnel_slug_entries, post_purchase_plan
 from stripe_link.domain.opportunities import STAGE_LANDING, STAGE_POST_PURCHASE, stage_opportunities
-from stripe_link.runtime.upsell_pages import synthesize_thank_you_page, synthesize_upsell_page, upsell_scaffold
+from stripe_link.runtime.upsell_pages import (
+    synthesize_downsell_carousel_page,
+    synthesize_thank_you_page,
+    synthesize_upsell_carousel_page,
+    synthesize_upsell_page,
+    upsell_scaffold,
+)
 from stripe_link.runtime.html import (
     INDEXABLE_ROBOTS,
     NOINDEX_FOLLOW_ROBOTS,
@@ -736,18 +742,42 @@ def publish_page_document(
             artifacts.append({"kind": f"published:{kind}", "bucket": pages_bucket, "key": pub_key, "url": public_url(pages_domain, pub_key)})
 
     scaffold = upsell_scaffold(page)
-    upsell_entries = post_purchase_plan(offer, products_by_id)["upsells"]
-    for entry in upsell_entries:
-        up_page, up_offer = synthesize_upsell_page(
-            entry, source_page=page, source_offer=offer, scaffold=scaffold,
+    plan = post_purchase_plan(offer, products_by_id)
+    upsell_entries = plan["upsells"]
+    if plan["strategy"] == "carousel":
+        # Carousel mode (>= MAX_SEQUENTIAL_UPSELLS upsells, §6): ONE grid of ALL upsells at {page_id}__upsell_
+        # carousel — never the per-sequence pages — plus, when any upsell product carries a downsell price, ONE
+        # downsell carousel at {page_id}__downsell_carousel. The self-contained section needs no product map.
+        uc_page, uc_offer = synthesize_upsell_carousel_page(
+            plan, source_page=page, source_offer=offer, scaffold=scaffold,
         )
-        up_html = render_page(
-            up_page, up_offer, {entry["product_id"]: entry["product"]},
-            selected_prices={entry["product_id"]: entry["price_id"]},
-            checkout_url=checkout, api_base_url=api_base_url,
+        uc_html = render_page(
+            uc_page, uc_offer, {}, checkout_url=checkout, api_base_url=api_base_url,
             robots=NOINDEX_ROBOTS, site=site, page_type="funnel_step",
         )
-        _write_funnel_artifact(str(up_page["page_id"]), up_html, f"upsell_{entry['sequence']}")
+        _write_funnel_artifact(str(uc_page["page_id"]), uc_html, "upsell_carousel")
+        downsell_carousel = synthesize_downsell_carousel_page(
+            plan, source_page=page, source_offer=offer, scaffold=scaffold,
+        )
+        if downsell_carousel:
+            dc_page, dc_offer = downsell_carousel
+            dc_html = render_page(
+                dc_page, dc_offer, {}, checkout_url=checkout, api_base_url=api_base_url,
+                robots=NOINDEX_ROBOTS, site=site, page_type="funnel_step",
+            )
+            _write_funnel_artifact(str(dc_page["page_id"]), dc_html, "downsell_carousel")
+    else:
+        for entry in upsell_entries:
+            up_page, up_offer = synthesize_upsell_page(
+                entry, source_page=page, source_offer=offer, scaffold=scaffold,
+            )
+            up_html = render_page(
+                up_page, up_offer, {entry["product_id"]: entry["product"]},
+                selected_prices={entry["product_id"]: entry["price_id"]},
+                checkout_url=checkout, api_base_url=api_base_url,
+                robots=NOINDEX_ROBOTS, site=site, page_type="funnel_step",
+            )
+            _write_funnel_artifact(str(up_page["page_id"]), up_html, f"upsell_{entry['sequence']}")
 
     # A funnel needs a terminus: synthesize the thank-you screen (Universal Bundle, no price) alongside the
     # upsells so accept-through and decline both land on a real "Thank you" at {page_id}__thank_you instead of

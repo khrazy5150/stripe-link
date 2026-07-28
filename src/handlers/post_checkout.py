@@ -80,34 +80,46 @@ def handler(event, context, *, repository=None, pages_domain=None, sites_repo=No
             return error_response("Page not found.", status_code=404, code="not_found")
 
         site = find_site_for_page(sites_repo, tenant_id, page_id)
-        upsells = _load_post_purchase_plan(tenant_id, page, offers_repo, products_repo)["upsells"]
+        plan = _load_post_purchase_plan(tenant_id, page, offers_repo, products_repo)
+        upsells = plan["upsells"]
 
-        # Sequence-indexed routing when the offer derives upsells (plans/OFFER_MODEL_REDESIGN.md §6): the plan is
-        # the source of truth, recomputed each hop. `step_id` carries the current 1-based sequence; the first
-        # hop (from Stripe success_url) has none, so it resolves to upsell 1. Both accept and decline advance to
-        # the next slot in P3.2b (P3.3 inserts the in-place downsell on decline). Past the last upsell ->
-        # thank-you.
+        def _funnel_redirect(next_page_id, extra_query=None):
+            """Redirect to a funnel artifact ({page_id}__…), carrying funnel_page/session so the next screen's
+            island keeps the funnel context. Returns a 500 when the pages domain isn't configured."""
+            url = _next_page_url(site, tenant_id, next_page_id, pages_domain)
+            if not url:
+                return error_response("Pages distribution domain is not configured.", status_code=500, code="pages_domain_not_configured")
+            query = dict(extra_query or {})
+            if session_id:
+                query["session_id"] = session_id
+            if query:
+                sep = "&" if "?" in url else "?"
+                url = f"{url}{sep}{urlencode(query)}"
+            return redirect_response(url)
+
+        # Post-purchase routing when the offer derives upsells (plans/OFFER_MODEL_REDESIGN.md §6): the plan is the
+        # source of truth, recomputed each hop. Strategy is derived from the upsell count.
         if upsells:
             if outcome not in ("accept", "decline"):
                 return error_response("outcome must be 'accept' or 'decline'.", code="funnel_error")
+            if plan["strategy"] == "carousel":
+                # Carousel: the first hop (no step_id, from the Stripe success_url) → the upsell carousel. Its
+                # single dismiss (step_id="upsell_carousel") → the downsell carousel when any upsell product
+                # carries a downsell price, else thank-you; the downsell carousel's dismiss → thank-you. Per-card
+                # Adds charge via /upsell/charge and stay on the grid, so only the dismiss reaches this router.
+                if not current_step_id:
+                    return _funnel_redirect(f"{page_id}__upsell_carousel", {"funnel_page": page_id})
+                if current_step_id == "upsell_carousel" and any(e.get("downsell") for e in upsells):
+                    return _funnel_redirect(f"{page_id}__downsell_carousel", {"funnel_page": page_id})
+                return _funnel_redirect(f"{page_id}__thank_you")
+            # Sequence: `step_id` carries the current 1-based sequence; the first hop has none, so it resolves to
+            # upsell 1. Accept advances; decline swaps to the in-place downsell client-side then advances. Past
+            # the last upsell → the synthesized thank-you screen at {page_id}__thank_you.
             current_seq = int(current_step_id) if (current_step_id or "").isdigit() else 0
             next_seq = current_seq + 1
             if next_seq <= len(upsells):
-                url = _next_page_url(site, tenant_id, f"{page_id}__upsell_{next_seq}", pages_domain)
-                if not url:
-                    return error_response("Pages distribution domain is not configured.", status_code=500, code="pages_domain_not_configured")
-                query = {"funnel_page": page_id, "funnel_step": str(next_seq)}
-                if session_id:
-                    query["session_id"] = session_id
-                return redirect_response(f"{url}?{urlencode(query)}")
-            # Past the last upsell → the synthesized thank-you screen, published alongside the funnel at
-            # {page_id}__thank_you (plans/OFFER_MODEL_REDESIGN.md §6). Both accept-through and decline land here.
-            ty_url = _next_page_url(site, tenant_id, f"{page_id}__thank_you", pages_domain)
-            if not ty_url:
-                return error_response("Pages distribution domain is not configured.", status_code=500, code="pages_domain_not_configured")
-            if session_id:
-                ty_url = f"{ty_url}?{urlencode({'session_id': session_id})}"
-            return redirect_response(ty_url)
+                return _funnel_redirect(f"{page_id}__upsell_{next_seq}", {"funnel_page": page_id, "funnel_step": str(next_seq)})
+            return _funnel_redirect(f"{page_id}__thank_you")
         else:
             destination = resolve_funnel_transition(
                 page.get("post_checkout") or {}, current_step_id=current_step_id, outcome=outcome,

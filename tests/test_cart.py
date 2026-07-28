@@ -36,6 +36,29 @@ def _offer():
     }
 
 
+def _tiered_product():
+    return {
+        "schema_version": "2026-05-29", "document_type": "product", "tenant_id": "t1", "product_id": "prod_t",
+        "name": "Tiered", "images": ["https://img.example.com/t.webp"], "default_price_id": "price_1",
+        "prices": [
+            {"price_id": "price_1", "unit_amount": 1000, "currency": "usd", "quantity": 1, "context": "standard"},
+            {"price_id": "price_2", "unit_amount": 1800, "currency": "usd", "quantity": 2, "context": "standard"},
+            {"price_id": "price_up", "unit_amount": 500, "currency": "usd", "quantity": 1, "context": "upsell"},
+        ],
+    }
+
+
+def _tiered_offer():
+    return {
+        "schema_version": "2026-05-29", "document_type": "offer", "tenant_id": "t1", "offer_id": "off_t",
+        "name": "Tiered", "offer_type": "listicle", "product_intent": "transactional",
+        "stripe_mode": "test", "status": "active",
+        "items": [{"product_id": "prod_t", "default_price_id": "price_1", "selectable_prices": [
+            {"price_id": "price_1", "quantity": 1}, {"price_id": "price_2", "quantity": 2},
+        ]}],
+    }
+
+
 class CartDomainTests(unittest.TestCase):
     def test_resolve_line_uses_server_single_unit_price(self):
         line = resolve_cart_line(_offer(), {"prod_a": _product()}, {}, product_id="prod_a", qty=2)
@@ -48,6 +71,19 @@ class CartDomainTests(unittest.TestCase):
         with self.assertRaises(CartError):
             resolve_cart_line(_offer(), {"prod_z": _product("prod_z")}, {}, product_id="prod_z")
 
+    def test_resolve_line_honors_a_chosen_offered_tier(self):
+        # A multi-tier product: the buyer's chosen tier (a selectable landing price) is honored, re-priced from
+        # the catalog (plans/LANDING_CAROUSEL_FIXES.md Bug 2).
+        line = resolve_cart_line(_tiered_offer(), {"prod_t": _tiered_product()}, {}, product_id="prod_t", price_id="price_2", qty=1)
+        self.assertEqual(line["price_id"], "price_2")
+        self.assertEqual(line["unit_amount"], 1800)
+
+    def test_resolve_line_ignores_a_price_the_offer_does_not_offer(self):
+        # An upsell (non-landing, not a selectable tier) price is NOT honored -> single-unit fallback, unchanged.
+        line = resolve_cart_line(_tiered_offer(), {"prod_t": _tiered_product()}, {}, product_id="prod_t", price_id="price_up", qty=1)
+        self.assertEqual(line["price_id"], "price_1")
+        self.assertEqual(line["unit_amount"], 1000)
+
     def test_add_line_merges_quantity_and_totals(self):
         cart = new_cart("t1", "cart1", "off_1", now=1000)
         line = resolve_cart_line(_offer(), {"prod_a": _product()}, {}, product_id="prod_a", qty=2)
@@ -57,6 +93,20 @@ class CartDomainTests(unittest.TestCase):
         self.assertEqual(cart["line_items"][0]["qty"], 3)
         self.assertEqual(cart["total_amount"], 3 * 1999)
         self.assertEqual(cart["item_count"], 3)
+
+    def test_add_to_a_reloaded_cart_with_decimal_numbers_stays_valid(self):
+        # A cart loaded from DynamoDB carries qty/unit_amount as Decimal. Adding a SECOND product must coerce the
+        # existing line back to int so validate_cart passes (the live multi-add bug, LANDING_CAROUSEL_FIXES.md).
+        from decimal import Decimal
+        cart = new_cart("t1", "cart1", "off_1", now=1000)
+        add_line(cart, resolve_cart_line(_offer(), {"prod_a": _product()}, {}, product_id="prod_a", qty=1))
+        for ln in cart["line_items"]:  # simulate the DynamoDB round-trip
+            ln["qty"] = Decimal(str(ln["qty"]))
+            ln["unit_amount"] = Decimal(str(ln["unit_amount"]))
+        add_line(cart, resolve_cart_line(_offer(), {"prod_b": _product("prod_b", "price_b", 2599)}, {}, product_id="prod_b", qty=1))
+        validate_cart(cart)  # must not raise
+        self.assertEqual(len(cart["line_items"]), 2)
+        self.assertTrue(all(isinstance(ln["qty"], int) and isinstance(ln["unit_amount"], int) for ln in cart["line_items"]))
 
     def test_validate_cart_rejects_bad_qty(self):
         cart = new_cart("t1", "cart1", "off_1", now=1000)

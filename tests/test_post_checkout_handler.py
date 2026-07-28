@@ -97,6 +97,64 @@ class SequenceRoutingTests(unittest.TestCase):
         self.assertEqual(location.path, "/page_entry__thank_you/index.html")
 
 
+class CarouselRoutingTests(unittest.TestCase):
+    """Carousel-mode post-purchase routing (>3 upsells, plans/OFFER_MODEL_REDESIGN.md §6)."""
+
+    def _setup(self, downsell_products=("prod_a", "prod_c")):
+        self.pages = FakeDocumentRepository("page_id")
+        self.pages.put({"tenant_id": "tenant_demo", "page_id": "page_entry", "offer_id": "offer_up"})
+        self.pages.put({"tenant_id": "tenant_demo", "page_id": "page_thank_you", "status": "published"})
+        upsells = [{"product_id": f"prod_{c}", "price_id": f"price_{c}_up"} for c in "abcd"]
+        downsells = [{"product_id": p, "price_id": f"price_{p[-1]}_down"} for p in downsell_products]
+        self.offers = FakeDocumentRepository("offer_id")
+        self.offers.put({"tenant_id": "tenant_demo", "offer_id": "offer_up",
+                         "funnel": {"upsells": upsells, "downsells": downsells}})
+        self.products = FakeDocumentRepository("product_id")
+        for c in "abcd":
+            prices = [{"price_id": f"price_{c}_up", "context": "upsell", "unit_amount": 1000, "currency": "usd"}]
+            if f"prod_{c}" in downsell_products:
+                prices.append({"price_id": f"price_{c}_down", "context": "downsell", "unit_amount": 500, "currency": "usd"})
+            self.products.put({"tenant_id": "tenant_demo", "product_id": f"prod_{c}", "prices": prices})
+
+    def setUp(self):
+        self._setup()
+
+    def call(self, outcome=None, step_id=None, session_id=None):
+        params = {"tenant_id": "tenant_demo"}
+        if outcome is not None:
+            params["outcome"] = outcome
+        if step_id is not None:
+            params["step_id"] = step_id
+        if session_id is not None:
+            params["session_id"] = session_id
+        return handler(
+            {"httpMethod": "GET", "pathParameters": {"page_id": "page_entry"}, "queryStringParameters": params},
+            None, repository=self.pages, pages_domain="pages.example.com",
+            offers_repo=self.offers, products_repo=self.products,
+        )
+
+    def test_first_hop_serves_the_upsell_carousel(self):
+        location = urlparse(self.call(outcome="accept", session_id="cs_1")["headers"]["Location"])
+        self.assertEqual(location.path, "/page_entry__upsell_carousel/index.html")
+        query = parse_qs(location.query)
+        self.assertEqual(query["funnel_page"], ["page_entry"])
+        self.assertEqual(query["session_id"], ["cs_1"])
+        self.assertNotIn("funnel_step", query)  # carousel has no per-sequence step
+
+    def test_dismiss_upsell_carousel_goes_to_downsell_carousel_when_downsells_exist(self):
+        location = urlparse(self.call(outcome="decline", step_id="upsell_carousel")["headers"]["Location"])
+        self.assertEqual(location.path, "/page_entry__downsell_carousel/index.html")
+
+    def test_dismiss_downsell_carousel_goes_to_thank_you(self):
+        location = urlparse(self.call(outcome="decline", step_id="downsell_carousel")["headers"]["Location"])
+        self.assertEqual(location.path, "/page_entry__thank_you/index.html")
+
+    def test_dismiss_upsell_carousel_skips_to_thank_you_when_no_downsells(self):
+        self._setup(downsell_products=())
+        location = urlparse(self.call(outcome="decline", step_id="upsell_carousel")["headers"]["Location"])
+        self.assertEqual(location.path, "/page_entry__thank_you/index.html")
+
+
 class PostCheckoutHandlerTests(unittest.TestCase):
     def setUp(self):
         self.repository = FakeDocumentRepository("page_id")

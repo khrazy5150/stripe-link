@@ -36,6 +36,39 @@ def _cart(lines):
     }
 
 
+def _tiered_product():
+    return {
+        "schema_version": "2026-05-29", "document_type": "product", "tenant_id": "t1", "product_id": "prod_t",
+        "name": "Tiered", "product_type": "physical", "status": "active", "default_price_id": "price_1",
+        "prices": [
+            {"price_id": "price_1", "stripe_price_id": None, "currency": "usd", "unit_amount": 1000, "quantity": 1, "context": "standard"},
+            {"price_id": "price_3", "stripe_price_id": None, "currency": "usd", "unit_amount": 2400, "quantity": 3, "context": "standard"},
+        ],
+    }
+
+
+def _tiered_offer():
+    return {
+        "schema_version": "2026-05-29", "document_type": "offer", "tenant_id": "t1", "offer_id": "off_1",
+        "name": "Tiered", "offer_type": "listicle", "product_intent": "transaction",
+        "stripe_mode": "test", "status": "active", "discount": {"mode": "none"}, "checkout": {"mode": "payment"},
+        "items": [{"product_id": "prod_t", "default_price_id": "price_1", "selectable_prices": [
+            {"price_id": "price_1", "quantity": 1}, {"price_id": "price_3", "quantity": 3},
+        ]}],
+    }
+
+
+class ResolvedItemsForCheckoutTests(unittest.TestCase):
+    def test_chosen_tier_reaches_checkout_not_single_unit(self):
+        # A cart line at the 3-pack tier must check out at that tier's price, NOT collapse to single-unit
+        # (plans/LANDING_CAROUSEL_FIXES.md — the tier the buyer picked must reach Stripe).
+        cart = _cart([{"product_id": "prod_t", "service_id": "", "price_id": "price_3", "qty": 1,
+                       "unit_amount": 2400, "currency": "usd", "line_id": "l1"}])
+        items = resolved_items_for_checkout(cart, _tiered_offer(), {"prod_t": _tiered_product()}, {})
+        self.assertEqual(items[0]["price_id"], "price_3")
+        self.assertEqual(items[0]["unit_amount"], 2400)
+
+
 class FakeRepo:
     def __init__(self, id_field, documents):
         self.id_field = id_field

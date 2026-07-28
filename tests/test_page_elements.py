@@ -142,24 +142,23 @@ class ListicleCarouselTests(unittest.TestCase):
                    "default_price_id": "pr2", "prices": [{"price_id": "pr2", "currency": "usd", "unit_amount": 5317, "context": "standard"}]},
         }
 
-    def test_renders_price_card_bound_to_conversion_context(self):
-        # No image carousel and no hidden per-item data — the conversion island updates this card from the
-        # single embedded OfferView payload, so the card's fields carry data-conversion-bind.
+    def test_renders_a_synced_tier_block_per_product(self):
+        # Each landing product gets its OWN tier selector block; the hero_media carousel drives which is shown
+        # (the island toggles them on conversion:itemChanged). First visible, the rest hidden. One shared Add.
         html = render_listicle_carousel(
             self._listicle(), self._products(), {}, {"tenant_id": "t1", "page_id": "pg"},
             "https://checkout.example.com/pay", "https://api.example.com/dev",
         )
         self.assertIn("data-listicle", html)
-        self.assertIn('data-conversion-section="offer_selector"', html)
-        self.assertIn('data-conversion-bind="price"', html)     # bound to the current target
-        self.assertIn('data-conversion-bind="savings"', html)   # "Save X%" like the standard card
+        self.assertEqual(html.count('class="sl-listicle-tiers"'), 2)   # one block per product
+        self.assertIn('data-index="0" data-product-id="p1"', html)
+        self.assertIn('data-index="1" data-product-id="p2" hidden>', html)  # non-active block hidden
         self.assertIn("sl-price-option", html)                  # reuses the standard price card design
-        self.assertIn("sl-price-copy", html)
-        self.assertIn("data-listicle-add", html)                # the Add-to-cart button
-        self.assertIn("$52.01", html)                           # first target's single-unit price (initial)
-        self.assertNotIn("data-listicle-item", html)            # no ad-hoc hidden per-item payload
-        self.assertNotIn("sl-listicle-carousel", html)          # no separate image carousel
-        self.assertNotIn("sl-listicle-card", html)              # bespoke card retired for sl-price-option
+        self.assertEqual(html.count('class="sl-cta sl-listicle-add"'), 1)   # one shared Add-to-cart
+        self.assertIn("$52.01", html)                           # product 1's price
+        self.assertIn("$53.17", html)                           # product 2's price (its own block, pre-rendered)
+        self.assertNotIn("data-conversion-bind", html)          # blocks are self-contained, not synced-single-card
+        self.assertNotIn("sl-listicle-card", html)              # bespoke synced card retired for per-product tiers
 
     def test_listicle_carries_server_cart_wiring(self):
         # The section exposes the tenant + the /cart endpoint the island posts to (L2 Slice B).

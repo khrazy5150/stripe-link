@@ -110,13 +110,16 @@ def resolve_cart_line(
     *,
     product_id: str = "",
     service_id: str = "",
+    price_id: str = "",
     qty: int = 1,
 ) -> dict[str, Any]:
     """Re-resolve one cart line from the offer + catalog. Returns the authoritative line dict or raises
-    CartError. The pricing mirrors `listicle_slides()` exactly (single-unit price for products; the service's
-    designated price for services) so the cart price == the page price."""
+    CartError. Pricing is always re-derived from the catalog (never a client amount): the buyer's chosen tier
+    (`price_id`) is honored ONLY when it's a tier this offer offers for the product, otherwise it falls back to
+    the single-unit price — so the cart price == the page price (plans/LANDING_CAROUSEL_FIXES.md Bug 2)."""
     product_id = str(product_id or "").strip()
     service_id = str(service_id or "").strip()
+    chosen_price_id = str(price_id or "").strip()
     if not product_id and not service_id:
         raise CartError("A product_id or service_id is required.")
     item = _find_offer_item(offer, product_id, service_id)
@@ -129,14 +132,20 @@ def resolve_cart_line(
         if not product:
             raise CartError("Product not found.")
         item_default = str(item.get("default_price_id") or item.get("price_id") or product.get("default_price_id") or "")
-        selectable_ids = [o.get("price_id") for o in item.get("selectable_prices") or []]
-        price = single_unit_price(product, selectable_ids or ([item_default] if item_default else None), item_default)
+        selectable_ids = [str(o.get("price_id") or "") for o in item.get("selectable_prices") or []]
+        # Honor the buyer's chosen tier when the offer actually offers it for this product; re-priced from the
+        # catalog. Anything else (unknown/upsell/not-offered id) falls back to the single-unit default.
+        price = None
+        if chosen_price_id and (chosen_price_id in selectable_ids or chosen_price_id == item_default):
+            price = next((p for p in product.get("prices") or [] if str(p.get("price_id") or "") == chosen_price_id), None)
+        if not price:
+            price = single_unit_price(product, selectable_ids or ([item_default] if item_default else None), item_default)
         if not price:
             raise CartError("No price available for this product.")
-        price_id = str(price.get("price_id") or "")
+        resolved_price_id = str(price.get("price_id") or "")
         return {
-            "line_id": _line_id(product_id, "", price_id),
-            "product_id": product_id, "service_id": "", "price_id": price_id,
+            "line_id": _line_id(product_id, "", resolved_price_id),
+            "product_id": product_id, "service_id": "", "price_id": resolved_price_id,
             "name": str(product.get("name") or ""),
             "image": str((product.get("images") or [""])[0] or ""),
             "unit_amount": int(price.get("unit_amount") or 0),
@@ -178,7 +187,13 @@ def resolved_items_for_checkout(
         service_id = str(line.get("service_id") or "").strip()
         if service_id:
             raise CartError("A service in your cart must be booked individually.")
-        fresh = resolve_cart_line(offer, products_by_id, services_by_id, product_id=product_id, qty=int(line.get("qty") or 1))
+        # Pass the line's stored price_id so the buyer's CHOSEN tier is re-resolved (re-priced from the catalog,
+        # honoring a merchant price change) rather than collapsing to the single-unit price at checkout
+        # (plans/LANDING_CAROUSEL_FIXES.md — the chosen tier must reach Stripe, not the cheapest).
+        fresh = resolve_cart_line(
+            offer, products_by_id, services_by_id,
+            product_id=product_id, price_id=str(line.get("price_id") or ""), qty=int(line.get("qty") or 1),
+        )
         items.append({
             "product_id": fresh["product_id"],
             "price_id": fresh["price_id"],
@@ -212,8 +227,14 @@ def new_cart(tenant_id: str, cart_id: str, offer_id: str, now: int) -> dict[str,
 
 def _recompute_totals(cart: dict[str, Any]) -> None:
     items = cart.get("line_items") or []
-    cart["total_amount"] = sum(int(i.get("unit_amount") or 0) * int(i.get("qty") or 1) for i in items)
-    cart["item_count"] = sum(int(i.get("qty") or 1) for i in items)
+    # Coerce line numbers to int in place: a cart loaded from DynamoDB carries qty/unit_amount as Decimal, which
+    # fails validate_cart's isinstance(int) check on the NEXT add (the existing line is re-validated). This is the
+    # single mutation chokepoint (add/qty/remove all call it), so normalizing here keeps every persisted line int.
+    for i in items:
+        i["qty"] = int(i.get("qty") or 1)
+        i["unit_amount"] = int(i.get("unit_amount") or 0)
+    cart["total_amount"] = sum(i["unit_amount"] * i["qty"] for i in items)
+    cart["item_count"] = sum(i["qty"] for i in items)
     cart["currency"] = str((items[0].get("currency") if items else cart.get("currency")) or "usd")
 
 

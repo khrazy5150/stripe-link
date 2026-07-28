@@ -16,6 +16,61 @@ def load_fixture(name: str):
         return json.load(handle)
 
 
+class ListicleCartFunnelTests(unittest.TestCase):
+    """A multi-product landing (listicle carousel) with a post-checkout funnel must route its cart Checkout to
+    the post-purchase funnel, like the single-product CTA (plans/LANDING_CAROUSEL_FIXES.md Bug 3)."""
+
+    def _render(self, with_post_checkout):
+        product_a = load_fixture("product-creatine-gummies.json")
+        product_b = copy.deepcopy(product_a)
+        product_b["product_id"] = "prod_second"
+        product_b["name"] = "Second Product"
+        product_b["default_price_id"] = "price_1bottle_b"
+        for price in product_b["prices"]:
+            price["price_id"] = price["price_id"] + "_b"
+        offer = load_fixture("offer-creatine-standard.json")
+        offer["offer_type"] = None
+        offer["items"] = [  # two distinct landing products -> listicle carousel; product A keeps its 4 tiers
+            offer["items"][0],
+            {"product_id": "prod_second", "price_id": "price_1bottle_b", "quantity": 1},
+        ]
+        page = load_fixture("page-creatine-standard.json")
+        if with_post_checkout:
+            page["post_checkout"] = {"thank_you_page": {"page_id": "page_ty"}}
+        else:
+            page.pop("post_checkout", None)
+        products = {"prod_creatine_gummies": product_a, "prod_second": product_b}
+        return render_page(page, offer, products, api_base_url="https://api-dev.example.com")
+
+    def test_cart_routes_to_funnel_when_page_has_post_checkout(self):
+        html = self._render(with_post_checkout=True)
+        self.assertIn("data-listicle", html)  # rendered as the listicle carousel
+        self.assertIn('data-has-post-checkout="true"', html)
+        self.assertIn("data-page-id=", html)
+        # The cart's Checkout builds the funnel entry success_url (unencoded Stripe token), not a bare landing return.
+        self.assertIn("post-checkout/next", html)
+        self.assertIn("{CHECKOUT_SESSION_ID}", html)
+        # On a successful handoff to Stripe the local cart is cleared, so returning to the page shows no items.
+        self.assertIn("localStorage.removeItem(idKey)", html)
+
+    def test_cart_uses_plain_success_when_no_post_checkout(self):
+        html = self._render(with_post_checkout=False)
+        self.assertIn("data-listicle", html)
+        self.assertIn('data-has-post-checkout="false"', html)
+
+    def test_carousel_renders_one_tier_block_per_product_with_a_single_add(self):
+        html = self._render(with_post_checkout=False)
+        # One tier block per landing product; the first visible, the rest hidden (synced to the hero on swipe).
+        self.assertEqual(html.count('class="sl-listicle-tiers"'), 2)
+        self.assertIn('data-index="0"', html)
+        self.assertIn('data-index="1" data-product-id="prod_second" hidden>', html)
+        # Product A exposes its FULL tier selector (multiple tiers), not just the first (Bug 2).
+        self.assertIn(">1 Bottle</strong>", html)
+        self.assertIn(">6 Bottles</strong>", html)
+        # Exactly one shared Add-to-cart (adds the shown product at its selected tier).
+        self.assertEqual(html.count('class="sl-cta sl-listicle-add"'), 1)
+
+
 class PageRenderTests(unittest.TestCase):
     def setUp(self):
         self.page = load_fixture("page-creatine-standard.json")

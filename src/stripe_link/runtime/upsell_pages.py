@@ -24,6 +24,17 @@ DEFAULT_UPSELL_SCAFFOLD: dict[str, Any] = {
     "countdown_enabled": True,
     "countdown_minutes": 1,
     "savings_badge": True,
+    # Carousel-mode copy (>= MAX_SEQUENTIAL_UPSELLS upsells): one grid of all upsells, a single dismiss, and an
+    # optional downsell-carousel second screen (plans/OFFER_MODEL_REDESIGN.md §6). {{ upsell_price }} in
+    # carousel_add_label is filled per card with that card's own price at synthesis. Editable per-page (P3.5).
+    "carousel_headline": "Special Deals — Just For You",
+    "carousel_subheadline": "One-time offers at checkout prices. Add any you like, then continue.",
+    "carousel_add_label": "Add for {{ upsell_price }}",
+    "carousel_dismiss_label": "No thanks, I'm good!",
+    # After the buyer adds ANY card, the dismiss link relabels to this — it advances the funnel identically, but
+    # reads as continuing WITH the (already-charged) purchases rather than declining them.
+    "carousel_proceed_label": "Continue to the next step",
+    "downsell_carousel_headline": "Before You Go — A Lower-Priced Option",
 }
 
 _PRICE_TOKEN = "{{ upsell_price }}"
@@ -151,6 +162,126 @@ def synthesize_upsell_page(
         "sections": sections,
     }
     return page, offer
+
+
+def _carousel_card(sequence: int, product_id: str, product: dict[str, Any], price: dict[str, Any], scaffold: dict[str, Any]) -> dict[str, Any]:
+    """One denormalized card for a post-purchase carousel: everything the renderer needs to lay out the card and
+    everything the island needs to fire the one-click /upsell/charge (product_id, price_id, sequence, amount).
+    `sequence` is the SAME 1-based key the sequence-mode charge uses, so process_upsell stays idempotent per
+    card regardless of add order."""
+    amount = int(price.get("unit_amount") or 0)
+    currency = str(price.get("currency") or "usd")
+    return {
+        "sequence": sequence,
+        "product_id": product_id,
+        "price_id": str(price.get("price_id") or ""),
+        "title": str(product.get("name") or f"Offer {sequence}"),
+        "description": str(product.get("description") or ""),
+        "image_url": (product.get("images") or [""])[0] or "",
+        "amount": amount,
+        "currency": currency,
+        "compare_at_amount": int(price.get("compare_at_amount") or 0),
+        "add_label": _fill_price(scaffold["carousel_add_label"], amount, currency),
+    }
+
+
+def _carousel_page(
+    source_page: dict[str, Any], source_offer: dict[str, Any], suffix: str, section: dict[str, Any]
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """A Universal Bundle page carrying a single self-contained post_purchase_carousel section, plus a minimal
+    empty-items offer (the section denormalizes its own card data, so the renderer needs no per-card offer
+    resolution — like the thank-you page). Inherits the source page theme. Served at {page_id}__{suffix}."""
+    offer_id = str(source_offer.get("offer_id") or "offer")
+    offer = {
+        "schema_version": source_offer.get("schema_version", "2026-05-29"),
+        "document_type": "offer",
+        "tenant_id": source_offer.get("tenant_id", ""),
+        "offer_id": offer_id,
+        "name": section.get("headline") or "Special Deals",
+        "status": "active",
+        "product_intent": "transaction",
+        "stripe_mode": source_offer.get("stripe_mode", "test"),
+        "offer_type": "single",
+        "items": [],
+        "presentation": {"headline": section.get("headline") or ""},
+        "discount": {"mode": "none"},
+    }
+    theme = deepcopy(source_page.get("theme") or {})
+    theme.setdefault("template", "universal_bundle")
+    page = {
+        "schema_version": source_page.get("schema_version", "2026-05-29"),
+        "document_type": "page",
+        "tenant_id": source_page.get("tenant_id", ""),
+        "page_id": f"{source_page.get('page_id', 'page')}__{suffix}",
+        "name": section.get("headline") or suffix,
+        "status": "published",
+        "offer_id": offer_id,
+        "theme": theme,
+        "sections": [section],
+    }
+    return page, offer
+
+
+def synthesize_upsell_carousel_page(
+    plan: dict[str, Any],
+    *,
+    source_page: dict[str, Any],
+    source_offer: dict[str, Any],
+    scaffold: dict[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Return (page, offer): the carousel-mode upsell screen (plans/OFFER_MODEL_REDESIGN.md §6) — ONE grid of
+    ALL of the plan's upsells, each an independent one-click Add, with a single dismiss. Used when the plan's
+    strategy is `carousel` (> MAX_SEQUENTIAL_UPSELLS upsells). Served at {page_id}__upsell_carousel."""
+    cards = [
+        _carousel_card(e["sequence"], e["product_id"], e["product"], e["price"], scaffold)
+        for e in (plan.get("upsells") or [])
+    ]
+    section = {
+        "id": "upsell-carousel",
+        "type": "post_purchase_carousel",
+        "surface": "upsell",
+        "offer_id": str(source_offer.get("offer_id") or "offer"),
+        "funnel_page_id": str(source_page.get("page_id") or ""),
+        "headline": scaffold["carousel_headline"],
+        "subheadline": scaffold.get("carousel_subheadline") or "",
+        "dismiss_label": scaffold["carousel_dismiss_label"],
+        "proceed_label": scaffold["carousel_proceed_label"],
+        "cards": cards,
+    }
+    return _carousel_page(source_page, source_offer, "upsell_carousel", section)
+
+
+def synthesize_downsell_carousel_page(
+    plan: dict[str, Any],
+    *,
+    source_page: dict[str, Any],
+    source_offer: dict[str, Any],
+    scaffold: dict[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any]] | None:
+    """Return (page, offer) for the carousel-mode downsell screen, or None when no upsell product carries a
+    downsell price. On the single upsell-carousel dismiss, the buyer sees ONE downsell carousel of the
+    downsell-context prices of the upsell products that have one (§6), with its own single dismiss → thank-you.
+    Served at {page_id}__downsell_carousel."""
+    cards = [
+        _carousel_card(e["sequence"], e["product_id"], e["downsell"]["product"], e["downsell"]["price"], scaffold)
+        for e in (plan.get("upsells") or [])
+        if e.get("downsell")
+    ]
+    if not cards:
+        return None
+    section = {
+        "id": "downsell-carousel",
+        "type": "post_purchase_carousel",
+        "surface": "downsell",
+        "offer_id": str(source_offer.get("offer_id") or "offer"),
+        "funnel_page_id": str(source_page.get("page_id") or ""),
+        "headline": scaffold["downsell_carousel_headline"],
+        "subheadline": "",
+        "dismiss_label": scaffold["carousel_dismiss_label"],
+        "proceed_label": scaffold["carousel_proceed_label"],
+        "cards": cards,
+    }
+    return _carousel_page(source_page, source_offer, "downsell_carousel", section)
 
 
 # Default thank-you copy — the funnel's terminus (P3.5 makes it editable).
