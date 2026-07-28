@@ -860,6 +860,54 @@ class DocumentHeadCopyTests(unittest.TestCase):
         self.assertEqual(self._title(html), "My Keyword Title")
         self.assertEqual(self._meta(html), "My snippet.")
 
+    # --- Offer Semantic Model P2: title + meta name the same subject as the offer label / slug ------------
+
+    def _bundle(self, cats, brand="Acme Co"):
+        # Two-product offer; each product in cats[i]. Shared category -> "Creatine Bundle"; mixed -> "A + B".
+        prods = {}
+        for i, cat in enumerate(cats):
+            pid = f"prod_b{i}"
+            prods[pid] = {"product_id": pid, "name": f"Item {i}", "product_category": cat,
+                          "product_type": "physical", "product_intent": "transaction",
+                          "description": "Short.", "default_price_id": f"{pid}_p",
+                          "prices": [{"price_id": f"{pid}_p", "unit_amount": 1000, "currency": "usd",
+                                      "quantity": 1, "context": "standard"}]}
+        offer = {"product_intent": "transaction", "presentation": {"brand": brand},
+                 "items": [{"product_id": pid, "quantity": 1} for pid in prods]}
+        return offer, prods
+
+    def test_bundle_title_names_the_bundle_not_first_product(self):
+        # A shared-category bundle is titled by its subject, coherent with label_from_model ("Creatine Bundle").
+        from stripe_link.runtime.html import document_title
+        offer, prods = self._bundle(["creatine", "creatine"])
+        self.assertEqual(document_title({"seo": {}}, offer, prods), "Buy Creatine Bundle | Acme Co")
+
+    def test_bundle_meta_shops_the_bundle_subject(self):
+        from stripe_link.runtime.html import document_description
+        offer, prods = self._bundle(["creatine", "creatine"])
+        self.assertTrue(document_description({"seo": {}}, offer, prods).startswith("Shop Creatine Bundle."))
+
+    def test_mixed_bundle_title_names_both_products(self):
+        from stripe_link.runtime.html import document_title
+        offer, prods = self._bundle(["creatine", "protein"])
+        self.assertEqual(document_title({"seo": {}}, offer, prods), "Buy Item 0 + Item 1 Bundle | Acme Co")
+
+    def test_bundle_title_suppresses_per_product_condition_word(self):
+        # "Used" describes one product, not a mixed bundle — it must not leak into the bundle title.
+        from stripe_link.runtime.html import document_title
+        offer, prods = self._bundle(["creatine", "creatine"])
+        for p in prods.values():
+            p["condition"] = "used"
+        self.assertEqual(document_title({"seo": {}}, offer, prods), "Buy Creatine Bundle | Acme Co")
+
+    def test_single_product_title_is_unchanged_by_the_repoint(self):
+        # Golden guard: a single product still uses product.name verbatim (byte-identical to pre-P2).
+        from stripe_link.runtime.html import document_title
+        product = {**self.product, "product_intent": "transaction", "condition": "used"}
+        offer = {**self.offer, "presentation": {**(self.offer.get("presentation") or {}), "brand": "Acme Co"}}
+        self.assertEqual(document_title({"seo": {}}, offer, {product["product_id"]: product}),
+                         "Buy Used Creatine Gummies | Acme Co")
+
 
 class ImageDimsSidecarTests(unittest.TestCase):
     """The image_dims sidecar (base -> [w, h]) reserves layout space and hints crawlers. It is merged into

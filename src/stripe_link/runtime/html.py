@@ -11,6 +11,7 @@ from stripe_link.domain.composition import compose_page, element_channel
 from stripe_link.domain.documents import PRODUCT_CONDITIONS
 from stripe_link.domain.opportunities import STAGE_LANDING, derived_offer_type, stage_opportunities
 from stripe_link.domain.pricing import PricingError, expand_offer, find_price, resolve_offer, single_unit_price
+from stripe_link.domain.semantic import analyze_offer, is_bundle, subject_from_model
 from stripe_link.domain.reviews import aggregate_reviews, markup_eligible
 from stripe_link.domain.service_pricing import resolve_service_price
 
@@ -891,12 +892,19 @@ def document_title(page: dict[str, Any], offer: dict[str, Any], products_by_id: 
         return explicit
     product = first_offer_product(offer, products_by_id)
     presentation = offer.get("presentation") or {}
-    name = str(product.get("name") or presentation.get("headline") or "").strip()
+    model = analyze_offer(offer, products_by_id)
+    bundle = is_bundle(model)
+    # Coherence with the offer label + slug (Offer Semantic Model P2): a multi-product offer is titled by its
+    # bundle subject ("Dietary Supplement Bundle"), not just the first product. A single product is unchanged
+    # — same product.name, with the presentation.headline fallback preserved.
+    name = subject_from_model(model) if bundle else str(product.get("name") or presentation.get("headline") or "").strip()
     brand = resolved_brand_label(presentation)
     intent = str(product.get("product_intent") or offer.get("product_intent") or "transaction")
     is_transactional = intent == "transaction"
     include_new = bool((page.get("seo") or {}).get("include_new_in_title"))
-    condition_word = _title_condition_word(product.get("condition"), include_new) if is_transactional else None
+    # A condition word ("Used", "Refurbished") describes one product, not a mixed bundle — suppress for bundles.
+    condition_word = (_title_condition_word(product.get("condition"), include_new)
+                      if is_transactional and not bundle else None)
 
     parts = []
     if is_transactional:
@@ -946,14 +954,17 @@ def document_description(page: dict[str, Any], offer: dict[str, Any], products_b
         return trim_meta(explicit, _DESC_MAX)
     product = first_offer_product(offer, products_by_id)
     presentation = offer.get("presentation") or {}
+    model = analyze_offer(offer, products_by_id)
+    bundle = is_bundle(model)
     desc = str(product.get("description") or presentation.get("subheadline") or "").strip()
     if len(desc) >= _DESC_MIN:
         return trim_meta(desc, _DESC_MAX)
 
     already_cta = bool(re.match(r"(?i)^(shop|buy|get|order)\b", desc))
-    condition = str(product.get("condition") or "").strip().lower()
+    condition = "" if bundle else str(product.get("condition") or "").strip().lower()
     cond = f"{condition} " if condition and condition != "new" else ""
-    name = str(product.get("name") or presentation.get("headline") or "").strip()
+    # Same subject as the <title> and label: the enriched "Shop {subject}." names the bundle, not one product.
+    name = subject_from_model(model) if bundle else str(product.get("name") or presentation.get("headline") or "").strip()
     policy = offer.get("refund_policy") or product.get("refund_policy") or {}
     days = _return_window_days(policy)
     site_cta = str((page.get("seo") or {}).get("description_cta") or "").strip()

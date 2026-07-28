@@ -211,3 +211,17 @@ def label_from_model(model: dict) -> str:
         return f"{hierarchy[-1]} Bundle"
     names = [str(primary.get("name") or "")] + [str(secondary[0].get("name") or "")]
     return " + ".join(n for n in names if n) + " Bundle"
+
+
+def is_bundle(model: dict) -> bool:
+    """True when the offer bundles more than one distinct entity (secondary[] populated). Prose generators
+    branch on this to name the whole bundle rather than its first product."""
+    entities = (model.get("facts") or {}).get("entities") or {}
+    return bool(entities.get("secondary"))
+
+
+def subject_from_model(model: dict) -> str:
+    """The offer's primary subject as prose generators (page <title>, meta description) should name it.
+    Identical to the offer label by design — that identity IS the coherence the model exists to guarantee:
+    the <title>, the offer label, and the slug all describe the same subject rather than diverging."""
+    return label_from_model(model)
