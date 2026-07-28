@@ -3021,6 +3021,16 @@ button:disabled {
 .intent-upgrade   { background: rgba(168, 85, 247, 0.16);  color: #7e22ce; }
 .intent-recovery  { background: rgba(245, 158, 11, 0.18);  color: #b45309; }
 
+.funnel-extra-warning {
+  color: #b45309;
+  font-size: 0.72rem;
+  max-width: 22rem;
+}
+
+@media (prefers-color-scheme: dark) {
+  .funnel-extra-warning { color: #fcd34d; }
+}
+
 .funnel-downsell {
   display: flex;
   flex-wrap: wrap;

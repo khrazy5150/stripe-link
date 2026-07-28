@@ -419,10 +419,12 @@
                         <span v-for="chip in (item.chips || [item.amount])" :key="chip" class="price-chip">{{ chip }}</span>
                       </div>
                       <span v-if="item.synced === false" class="field-error">Not synced to Stripe — needs a synced price.</span>
+                      <small v-if="item.extra" class="funnel-extra-warning">⚠ {{ item.extra }} {{ INTENT_META[item.intent].desc }} prices on this product — only the first ({{ item.amount }}) is used. Put additional upsells on separate products.</small>
                       <div v-if="item.downsell" class="funnel-downsell">
                         <span class="intent-badge intent-recovery" :title="INTENT_META.recovery.desc">{{ INTENT_META.recovery.label }}</span>
                         <span>if declined — {{ item.downsell.amount }}</span>
                         <span v-if="!item.downsell.synced" class="field-error">Not synced.</span>
+                        <small v-if="item.downsell.extra" class="funnel-extra-warning">⚠ {{ item.downsell.extra }} downsell prices — only the first is used.</small>
                       </div>
                     </article>
                   </div>
@@ -681,6 +683,11 @@ const FUNNEL_CONTEXTS = ["order_bump", "upsell", "downsell"];
 function contextPrice(product, context) {
   return (product.prices || []).find((price) => (price.context || "standard") === context) || null;
 }
+// Only the FIRST price in a funnel context is used per product (contextPrice above). Count them so the funnel
+// can warn a tenant when extras are being silently ignored — multiple upsells belong on multiple products.
+function contextPriceCount(product, context) {
+  return (product.prices || []).filter((price) => (price.context || "standard") === context).length;
+}
 function contextSynced(product, context) {
   return Boolean(contextPrice(product, context)?.stripe_price_id);
 }
@@ -737,14 +744,19 @@ const offerFunnelStages = computed(() => {
   const bumps = inferredOrderBumps.value.map((product) => ({
     key: productId(product), intent: "cross_sell", product,
     amount: formatContextAmount(product, "order_bump"), synced: contextSynced(product, "order_bump"),
+    extra: contextPriceCount(product, "order_bump") > 1 ? contextPriceCount(product, "order_bump") : 0,
   }));
   if (bumps.length) stages.push({ key: "checkout", label: "At checkout", hint: "Stripe order bump", items: bumps });
 
   const upsells = inferredUpsells.value.map((product) => ({
     key: productId(product), intent: "upgrade", product,
     amount: formatContextAmount(product, "upsell"), synced: contextSynced(product, "upsell"),
+    extra: contextPriceCount(product, "upsell") > 1 ? contextPriceCount(product, "upsell") : 0,
     downsell: contextPrice(product, "downsell")
-      ? { amount: formatContextAmount(product, "downsell"), synced: contextSynced(product, "downsell") }
+      ? {
+          amount: formatContextAmount(product, "downsell"), synced: contextSynced(product, "downsell"),
+          extra: contextPriceCount(product, "downsell") > 1 ? contextPriceCount(product, "downsell") : 0,
+        }
       : null,
   }));
   if (upsells.length) stages.push({
