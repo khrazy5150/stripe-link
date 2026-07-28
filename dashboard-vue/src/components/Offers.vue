@@ -895,24 +895,51 @@ const detectedOfferTypeDescription = computed(() => {
   return descriptions[detectedOfferType.value] || "";
 });
 
+// SEO-descriptive slug preview — a JS MIRROR of the server's smart_offer_slug (src/handlers/offers.py). The
+// server is authoritative on save; this just shows the tenant the slug they'll get, so it must stay in parity.
+// single product -> [brand] + product name; bundle w/ shared category -> [brand] + category + "bundle"; bundle
+// mixed -> [brand] + top-2 product names + "bundle".
+const SLUG_STOP_WORDS = new Set(["the","a","an","and","or","for","of","with","to","in","on","at","by","from","your","you","our","my","this","that","is","are","plus"]);
+function slugTokens(text, limit) {
+  const words = String(text || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").split(" ").filter((w) => w && !SLUG_STOP_WORDS.has(w));
+  return limit ? words.slice(0, limit) : words;
+}
+function smartOfferSlug() {
+  const products = landingProducts.value || [];
+  const brandTokens = slugTokens(form.brand || profileStore.businessName || "", 2);
+  let core = [], suffix = [];
+  if (products.length <= 1) {
+    core = slugTokens(products[0]?.name || form.name || "offer", 5);
+  } else {
+    const cats = products.map((p) => String(p.product_category || "").trim().toLowerCase());
+    const shared = cats.length && cats.every((c) => c) && new Set(cats).size === 1;
+    if (shared) core = slugTokens(cats[0]);
+    else products.slice(0, 2).forEach((p) => { core = core.concat(slugTokens(p.name, 3)); });
+    suffix = ["bundle"];
+  }
+  const seen = new Set(), tokens = [];
+  [...brandTokens, ...core].forEach((t) => { if (!seen.has(t)) { seen.add(t); tokens.push(t); } });
+  return tokens.slice(0, 6 - suffix.length).concat(suffix).join("-") || "offer";
+}
+
 watch(selectedItems, () => {
   syncItemConfigs(landingProducts.value);
   if (!selectedItems.value.length) return;
-  const label = offerLabelForItems();
-  if (!form.name || !form.userEditedName) {
-    form.name = label;
-    form.slug = slugify(label);
-  }
+  if (!form.name || !form.userEditedName) form.name = offerLabelForItems();
+  if (!form.userEditedSlug) form.slug = smartOfferSlug();  // product-driven SEO slug
 }, { immediate: true });
 
 watch(() => form.name, (value, oldValue) => {
   if (!oldValue || value === offerLabelForItems()) return;
-  form.userEditedName = true;
-  if (!form.userEditedSlug) form.slug = slugify(value);
+  form.userEditedName = true;  // the slug is product-driven, so renaming the offer does not touch it
+});
+
+watch(() => form.brand, () => {
+  if (!form.userEditedSlug) form.slug = smartOfferSlug();
 });
 
 watch(() => form.slug, (value, oldValue) => {
-  if (oldValue && value !== slugify(form.name)) form.userEditedSlug = true;
+  if (oldValue && value !== smartOfferSlug()) form.userEditedSlug = true;
 });
 
 watch(productIntent, (intent) => {
@@ -1317,7 +1344,10 @@ function buildOfferDocument() {
     document_type: "offer",
     tenant_id: getTenantId(),
     offer_id: offerId,
-    slug: form.slug,
+    // Leave the slug empty unless the tenant actually edited it, so the SERVER generates a smart, SEO-descriptive
+    // slug from the products (source of truth). A manual edit (userEditedSlug) is sent + respected; an existing
+    // offer keeps its slug server-side (loadOfferIntoForm marks it edited), so published URLs stay stable.
+    slug: form.userEditedSlug ? form.slug : "",
     name: form.name,
     status: "active",
     product_intent: effectiveIntent,

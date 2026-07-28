@@ -54,6 +54,20 @@ class OfferCrudHandlerTests(unittest.TestCase):
         self.assertEqual(json.loads(first["body"])["offer"]["slug"], "combo")
         self.assertEqual(json.loads(again["body"])["offer"]["slug"], "combo")
 
+    def test_no_slug_gets_a_smart_seo_slug_from_products(self):
+        offer = {**self.offer, "offer_id": "offer_smart"}
+        offer.pop("slug", None)
+        slug = json.loads(self._post(offer)["body"])["offer"]["slug"]
+        self.assertIn("creatine-gummies", slug)  # keyword-rich from the product, not empty/first-id
+
+    def test_existing_slug_is_preserved_when_none_sent(self):
+        # Editing an offer without touching the slug must NOT churn the published-page URL.
+        self._post({**self.offer, "offer_id": "offer_x", "slug": "my-custom-slug"})
+        offer = {**self.offer, "offer_id": "offer_x"}
+        offer.pop("slug", None)
+        resp = self._post(offer)
+        self.assertEqual(json.loads(resp["body"])["offer"]["slug"], "my-custom-slug")
+
     def test_update_offer_status_archives_and_restores(self):
         self.repository.put(self.offer)
         tenant_id = self.offer["tenant_id"]
