@@ -63,6 +63,7 @@
           <option v-for="[value, label] in contexts" :key="value" :value="value">{{ label }}</option>
         </select>
       </label>
+      <small v-if="redundancyWarning(price, index)" class="price-context-warning">⚠ {{ redundancyWarning(price, index) }}</small>
 
       <div v-if="price.pricing_model === 'customer_chooses'" class="modal-inline-grid">
         <label>Minimum amount
@@ -112,6 +113,24 @@ const emit = defineEmits(["update:defaultIndex"]);
 
 function previewFor(price) {
   return pricePreviewFor(price, props.productType);
+}
+
+// Only the FIRST price in a non-standard context is used per product. Standard may have many (quantity tiers);
+// Sale/Flash pair to those tiers so they're one-PER-QUANTITY; funnel contexts are one per product. Flag the
+// redundant (ignored) extras — the earlier duplicate wins.
+function redundancyWarning(price, index) {
+  const context = price.context || "standard";
+  if (context === "standard") return "";
+  const perQuantity = context === "sale" || context === "flash_sale";
+  const quantity = Number(price.quantity || 1);
+  const earlierDuplicate = props.prices.slice(0, index).some((other) =>
+    (other.context || "standard") === context && (!perQuantity || Number(other.quantity || 1) === quantity),
+  );
+  if (!earlierDuplicate) return "";
+  const label = (props.contexts.find(([value]) => value === context) || [context, context])[1];
+  return perQuantity
+    ? `Only the first ${label} price for quantity ${quantity} is used — this one is ignored.`
+    : `Only the first ${label} price is used — this one is ignored. Put additional ${label.toLowerCase()}s on separate products.`;
 }
 
 function addPrice() {
