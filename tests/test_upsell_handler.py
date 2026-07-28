@@ -262,6 +262,37 @@ class ProcessUpsellTests(unittest.TestCase):
         # Idempotency is keyed on the real offer_id + the sequence (distinct slots don't collide).
         self.assertEqual(opener.requests[-1].headers.get("Idempotency-key"), "upsell:tenant_demo:cs_test_123:offer_funnel:2")
 
+    def test_charges_a_downsell_price(self):
+        # The in-place downsell swap charges the SAME product at its downsell price; process_upsell must accept
+        # the downsell context (a rejection here surfaces on the funnel screen as a misleading "card declined").
+        self.product["prices"].append({"price_id": "price_down", "context": "downsell", "unit_amount": 1200, "currency": "usd", "quantity": 1})
+        offer = {
+            "offer_id": "offer_funnel", "tenant_id": "tenant_demo", "status": "active", "product_intent": "transaction",
+            "items": [{"product_id": "prod_landing", "price_id": "price_landing", "quantity": 1}],
+            "funnel": {
+                "upsells": [{"product_id": "prod_creatine_gummies", "price_id": "price_upsell_1bottle"}],
+                "downsells": [{"product_id": "prod_creatine_gummies", "price_id": "price_down"}],
+            },
+            "eligibility": {"allowed_price_contexts": ["standard"]}, "discount": {"mode": "none"},
+        }
+        opener = FakeStripeOpener({
+            ("GET", "/v1/customers/cus_123"): {"id": "cus_123", "invoice_settings": {"default_payment_method": {"id": "pm_123"}}},
+            ("POST", "/v1/payment_intents"): {"id": "pi_ds", "status": "succeeded"},
+        })
+        response = handler(
+            self.base_event(offer_id="offer_funnel", product_id="prod_creatine_gummies", price_id="price_down", sequence=1),
+            None,
+            offers_repo=FakeRepository("offer_id", [offer]),
+            products_repo=FakeRepository("product_id", [self.product]),
+            stripe_repo=FakeStripeKeysRepository(), tenant_repo=self.tenant_repo,
+            orders_repo=self.orders_repo, customers_repo=self.customers_repo,
+            secret_cipher=FakeCipher(), opener=opener,
+        )
+        self.assertEqual(response["statusCode"], 201)
+        order = self.orders_repo.get("tenant_demo", "order_cs_test_123_upsell_1")
+        self.assertEqual(order["amount_total"], 1200)  # the DOWNSELL price, resolved without a context rejection
+        self.assertEqual(order["product"]["price_id"], "price_down")
+
     def test_process_upsell_adds_application_fee_amount_for_connect_direct_charge(self):
         opener = FakeStripeOpener({
             ("GET", "/v1/customers/cus_123"): {

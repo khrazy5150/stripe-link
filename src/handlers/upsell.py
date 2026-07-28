@@ -175,11 +175,18 @@ def process_upsell(
             if not upsell_product:
                 return error_response("Upsell product not found.", status_code=404, code="not_found")
             products_by_id = {product_id: upsell_product}
+            # A post-purchase charge is either the upsell price OR that product's downsell (the in-place swap on
+            # decline/expiry, §6), so accept BOTH contexts. resolve_offer_item reads the item-level
+            # allowed_price_contexts; without this a downsell price is rejected as an invalid context (which the
+            # funnel screen surfaces as a misleading "card declined").
             fee_offer = {
                 "offer_id": offer_id, "tenant_id": tenant_id, "status": "active",
                 "product_intent": "transaction", "context": "upsell",
-                "items": [{"product_id": product_id, "price_id": price_id, "quantity": 1}],
-                "eligibility": {"allowed_price_contexts": ["upsell"]},
+                "items": [{
+                    "product_id": product_id, "price_id": price_id, "quantity": 1,
+                    "allowed_price_contexts": ["upsell", "downsell"],
+                }],
+                "eligibility": {"allowed_price_contexts": ["upsell", "downsell"]},
                 "discount": {"mode": "none"},
             }
             resolved = resolve_offer(fee_offer, products_by_id, {})
