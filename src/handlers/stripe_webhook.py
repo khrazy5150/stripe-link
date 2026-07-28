@@ -182,6 +182,13 @@ def handler(
     if not isinstance(stripe_event, dict):
         return error_response("Stripe webhook payload must be an object.", 400, code="invalid_json")
 
+    # A Stripe event belongs to exactly one mode. Each environment must process only its own mode:
+    # otherwise a test purchase delivered to both the dev and prod webhook endpoints is persisted and
+    # receipted twice -- once per environment -- because the dedup guard is per-environment (per-table).
+    # Ack with 200 so Stripe records the delivery and does not retry the (correctly) ignored event.
+    if bool(stripe_event.get("livemode")) != (mode == "live"):
+        return json_response({"status": "ignored", "reason": "mode_mismatch"})
+
     account_id = str(stripe_event.get("account") or "").strip()
     tenant_document = None
     if account_id:

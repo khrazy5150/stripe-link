@@ -595,6 +595,47 @@ class AccountHandlerTests(unittest.TestCase):
         self.assertEqual(invoices_repo.documents[0]["amounts"]["platform_fee"], 371)
         self.assertEqual(invoices_repo.documents[0]["amounts"]["net_payout"], 3200)
 
+    def test_stripe_webhook_ignores_event_from_the_other_mode(self):
+        # A test-mode event (livemode=False) delivered to a prod (live) environment must be ignored,
+        # not persisted -- otherwise a single purchase delivered to both the dev and prod webhook
+        # endpoints is recorded and receipted once per environment (the dedup guard is per-table).
+        class FakeTable:
+            def __init__(self):
+                self.items = []
+
+            def put_item(self, Item, **kwargs):
+                self.items.append(Item)
+                return {}
+
+        orders_table = FakeTable()
+        payload = {
+            "id": "evt_wrong_mode",
+            "type": "checkout.session.completed",
+            "livemode": False,
+            "data": {"object": {"id": "cs_test_123", "metadata": {"tenant_id": "tenant_demo"}}},
+        }
+        body = json.dumps(payload, separators=(",", ":"))
+        timestamp = 1781230000
+        signature = hmac.new(
+            b"whsec_stable_test", f"{timestamp}.{body}".encode("utf-8"), hashlib.sha256,
+        ).hexdigest()
+
+        with patch.dict(os.environ, {"ENVIRONMENT": "prod"}, clear=False):
+            response = stripe_webhook_handler({
+                "httpMethod": "POST",
+                "path": "/webhook/stripe",
+                "headers": {"Stripe-Signature": f"t={timestamp},v1={signature}"},
+                "body": body,
+            }, None,
+                orders_table=orders_table,
+                webhook_secret_loader=lambda kind, mode: "whsec_stable_test",
+                now_fn=lambda: timestamp,
+            )
+
+        self.assertEqual(response["statusCode"], 200)
+        self.assertEqual(json.loads(response["body"])["reason"], "mode_mismatch")
+        self.assertEqual(orders_table.items, [])  # nothing persisted
+
     def test_stripe_webhook_rejects_invalid_signature(self):
         body = json.dumps({"id": "evt_bad", "type": "invoice.paid"})
         timestamp = 1781230000
