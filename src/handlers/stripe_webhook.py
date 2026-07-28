@@ -2,11 +2,15 @@ import base64
 import hashlib
 import hmac
 import json
+import logging
 import os
 import time
 from base64 import b64encode
 from typing import Any, Callable
 from urllib.request import Request, urlopen
+
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
 
 from stripe_link.common import error_response, header_value, json_response
 from stripe_link.domain.cart import mark_converted as mark_cart_converted
@@ -193,6 +197,12 @@ def handler(
     tenant_id = str((tenant_document or {}).get("tenant_id") or "").strip() or _metadata_tenant_id(stripe_event)
     event_type = stripe_event.get("type")
     event_id = str(stripe_event.get("id") or "").strip()
+    # TEMP diagnostic (duplicate-receipt investigation): one line per delivery so we can count deliveries of the
+    # same event/session and see whether they carry different event_ids/accounts (Connect dual-endpoint).
+    logger.info(
+        "webhook received type=%s event_id=%s account=%s tenant=%s",
+        event_type, event_id, stripe_event.get("account") or "", tenant_id,
+    )
 
     # Idempotency: Stripe redelivers events; skip any we've already processed.
     events_repo = webhook_events_repo or (webhook_events_repository() if os.environ.get("WEBHOOK_EVENTS_TABLE") else None)
@@ -1087,6 +1097,7 @@ def send_order_receipt(
     email = str(((order.get("customer") or {}).get("email")) or "").strip()
     if not email:
         return {"status": "skipped", "reason": "no_customer_email"}
+    logger.info("send_order_receipt order=%s to=%s", order.get("order_id", ""), email)  # TEMP diagnostic
     try:
         context = (context_loader or load_tenant_email_context)(tenant_id)
         content = receipt_content(
