@@ -134,8 +134,10 @@ so previews match published output — the slug JS-mirror pattern, generalized.
 - **P2 — Title + MetaDescription** re-pointed (coherent label/slug/title/description).
 - **P3 — Schema / Breadcrumb / OpenGraph / Canonical** re-pointed, with **golden-output regression tests
   written FIRST** so live SEO markup can't silently regress.
-- **P4 — AI enrichment tier** (LLM fills `interpretation` + nuanced facts; validated against the schema;
-  deterministic fallback always), then new consumers: Merchant feed, ads assets, AI content.
+- **P4 — AI enrichment tier + new consumers** (LLM fills `interpretation` + nuanced facts; validated against the
+  schema; deterministic fallback always), then Merchant feed, ads assets, AI content. **Planned in full in
+  [`OFFER_SEMANTIC_P4.md`](OFFER_SEMANTIC_P4.md)** — tagged to `AI_AND_COMMERCE_ARCHITECTURE.md` (the enrichment
+  tier reuses that plan's provider adapter; it does not build its own AI stack). P1–P3 shipped to prod.
 
 ## Guardrails
 - The model is **meaning only** — never formatting, URLs, routes, indexing, or channel logic.

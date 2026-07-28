@@ -272,3 +272,17 @@ platform-key AI credits · Stripe Tax *filing* automation.
 These two are why the AI plan reorders the remaining migration backlog: build them as AI-enablers
 before the AI MVP. The other remaining migration items (page-view analytics, services booking, the
 Sites flow) are independent and can slot in anytime.
+
+---
+
+## Shared with the Offer Semantic Model (P4)
+
+The **provider adapter** (A.2), **BYO keys** (A.1), and **versioned generation policy** (A.5) defined here are
+**not AI-page-gen-only** — they are the platform's single AI stack. The `OfferSemanticModel`'s **AI enrichment
+tier** ([`OFFER_SEMANTIC_P4.md`](OFFER_SEMANTIC_P4.md)) is another `generate_structured` consumer, and that
+plan's **ad-copy** and **AI-content** generators *are* the "AI content" surface of Part A — now reading the
+canonical model instead of an ad-hoc brief. **Build the adapter once; both consume it.** The semantic model also
+supplies the brand/category/concept context Part A.3 needs, so the two plans meet at Phase 1: the adapter lands
+here, the enrichment tier and its consumers land in P4 on top of it. Guardrail carried across: the AI enriches
+**meaning, never verifiable/markup-eligible facts** (brand/gtin/price/rating) — the same rule that keeps
+fabricated structured data off the page.
