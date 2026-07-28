@@ -5,6 +5,7 @@ from stripe_link.common import error_response, json_response, parse_json_body, p
 from stripe_link.domain.documents import DocumentValidationError, validate_offer_document
 from stripe_link.domain.opportunities import STAGE_LANDING, stage_opportunities
 from stripe_link.domain.pricing import PricingError, expand_offer, resolve_offer
+from stripe_link.domain.semantic import analyze_offer, label_from_model, slug_from_model
 from stripe_link.repositories.documents import RepositoryError, offers_repository, products_repository, services_repository
 
 
@@ -14,79 +15,11 @@ def sanitize_slug(value: str) -> str:
     return slug or "offer"
 
 
-# Words that add no SEO signal in a slug — dropped so the keywords lead.
-_SLUG_STOP_WORDS = frozenset({
-    "the", "a", "an", "and", "or", "for", "of", "with", "to", "in", "on", "at", "by", "from",
-    "your", "you", "our", "my", "this", "that", "is", "are", "&", "plus",
-})
-
-
-def _slug_tokens(text, limit=None):
-    """Lowercased alphanumeric keyword tokens from `text`, stop-words removed. A machine-style category
-    ("dietary_supplement") splits naturally into ["dietary", "supplement"]."""
-    words = [w for w in re.sub(r"[^a-z0-9]+", " ", str(text or "").lower()).split() if w and w not in _SLUG_STOP_WORDS]
-    return words[:limit] if limit else words
-
-
-def _dedupe_tokens(tokens):
-    """Drop duplicate tokens preserving order — so a brand that repeats a product's leading word
-    (brand "VYHTHV" + product "VYHTHV Whey Protein") isn't stuttered in the slug."""
-    seen, out = set(), []
-    for token in tokens:
-        if token not in seen:
-            seen.add(token)
-            out.append(token)
-    return out
-
-
-def _shared_category(products):
-    """The single machine-style product_category shared by ALL of `products`, else "". Used to name a bundle
-    by its category ("dietary-supplement-bundle") when the products are homogeneous."""
-    cats = [str((p or {}).get("product_category") or "").strip().lower() for p in products]
-    if cats and all(cats) and len(set(cats)) == 1:
-        return cats[0]
-    return ""
-
-
-_SLUG_MAX_TOKENS = 6  # keep URLs short + readable (Google favors concise slugs); leaves room for the descriptor
-
-
 def smart_offer_slug(offer: dict, products_by_id: dict) -> str:
-    """An SEO-descriptive slug BASE derived from the offer's landing products, resolved brand, and shape —
-    so the software ships a good keyword slug by default and the tenant rarely needs to touch it. NOT deduped
-    (the caller runs unique_offer_slug for the `-2` uniqueness net). Deterministic; an AI-refined tier is a
-    future enhancement (plans/TODO.md).
-
-    - single product          -> [brand] + product name           ("vyhthv-whey-protein")
-    - bundle, shared category -> [brand] + category + "bundle"     ("axel-mart-dietary-supplement-bundle")
-    - bundle, mixed products  -> [brand] + top-2 product names + "bundle"  ("whey-protein-creatine-bundle")
-
-    Brand comes from `offer.presentation.brand` (already resolved to the tenant's pick or business name by the
-    save path); it's de-duped away when it merely repeats the product's leading word.
-    """
-    landing = [
-        products_by_id.get(str((opp or {}).get("product_id") or ""))
-        for opp in stage_opportunities(offer, STAGE_LANDING)
-    ]
-    landing = [p for p in landing if p]
-    brand_tokens = _slug_tokens(((offer.get("presentation") or {}).get("brand")), limit=2)
-
-    if len(landing) <= 1:
-        source = (landing[0].get("name") if landing else offer.get("name")) or "offer"
-        core, suffix = _slug_tokens(source, limit=5), []
-    else:
-        category = _shared_category(landing)
-        if category:
-            core = _slug_tokens(category)
-        else:
-            core = []
-            for product in landing[:2]:
-                core += _slug_tokens(product.get("name"), limit=3)
-        suffix = ["bundle"]
-
-    tokens = _dedupe_tokens(brand_tokens + core)
-    tokens = tokens[: _SLUG_MAX_TOKENS - len(suffix)] + suffix  # trim to budget but always keep the descriptor
-    return "-".join(tokens) or "offer"
+    """SEO slug BASE from the offer's semantic model (plans/OFFER_SEMANTIC_ANALYZER.md — the slug is the pilot
+    consumer). Thin wrapper: the OfferSemanticModel is the single source of meaning (shared with the label so
+    they can't diverge); NOT deduped — the caller runs unique_offer_slug for the `-N` net."""
+    return slug_from_model(analyze_offer(offer, products_by_id))
 
 
 def unique_offer_slug(desired: str, *, tenant_id: str, offer_id: str, repository) -> str:
@@ -150,20 +83,32 @@ def create_offer(event, repository, products_repo=None):
     try:
         document = parse_json_body(event)
         products_repo = products_repo or products_repository()
-        # Server owns the slug. Precedence: (1) an explicit slug the client sends is respected (a tenant
-        # override, or a legacy client that always sends one); (2) otherwise an EXISTING offer keeps its slug so
-        # published-page URLs stay stable across edits; (3) a brand-new offer with no slug gets a smart,
-        # SEO-descriptive slug derived from its products (plans/TODO.md). Then dedupe with the -N uniqueness net.
+        # Server owns the offer's LABEL and SLUG — both from ONE OfferSemanticModel so they can't diverge
+        # (plans/OFFER_SEMANTIC_ANALYZER.md; slug is the pilot consumer). Precedence for each: an explicit client
+        # value wins (tenant override / legacy client); else an EXISTING offer keeps its value so published URLs +
+        # naming stay stable across edits; else a NEW offer gets the smart semantic default. The slug then runs
+        # the -N uniqueness net.
         tenant_id = str(document.get("tenant_id") or "")
         offer_id = str(document.get("offer_id") or "")
-        sent_slug = str(document.get("slug") or "").strip()
         existing = repository.get(tenant_id, offer_id) if offer_id else None
+        _cache: dict = {}
+
+        def _model():
+            if "m" not in _cache:
+                _cache["m"] = analyze_offer(document, _landing_products(document, products_repo))
+            return _cache["m"]
+
+        if not str(document.get("name") or "").strip():
+            document["name"] = (str(existing["name"]) if existing and str(existing.get("name") or "").strip()
+                                else label_from_model(_model()))
+
+        sent_slug = str(document.get("slug") or "").strip()
         if sent_slug:
             desired = sent_slug
         elif existing and str(existing.get("slug") or "").strip():
             desired = str(existing["slug"])
         else:
-            desired = smart_offer_slug(document, _landing_products(document, products_repo))
+            desired = slug_from_model(_model())
         document["slug"] = unique_offer_slug(desired, tenant_id=tenant_id, offer_id=offer_id, repository=repository)
         validate_offer_document(document)
         validate_offer_product_compatibility(document, products_repo or products_repository())

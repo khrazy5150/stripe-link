@@ -162,13 +162,13 @@
             <div class="offer-two-column">
               <label class="offer-field">
                 <span>Offer Label <strong>*</strong></span>
-                <input v-model.trim="form.name" type="text" placeholder="Name this offer..." required />
+                <input v-model.trim="form.name" type="text" placeholder="Name this offer..." required @input="form.userEditedName = true" />
                 <small>Auto-generated label (you can modify it)</small>
               </label>
 
               <label class="offer-field">
                 <span>Slug <strong>*</strong></span>
-                <input v-model.trim="form.slug" class="font-mono" type="text" placeholder="auto-generated-from-label" required />
+                <input v-model.trim="form.slug" class="font-mono" type="text" placeholder="auto-generated-from-label" required @input="form.userEditedSlug = true" />
                 <small>URL-friendly identifier</small>
               </label>
             </div>
@@ -921,25 +921,36 @@ function smartOfferSlug() {
   [...brandTokens, ...core].forEach((t) => { if (!seen.has(t)) { seen.add(t); tokens.push(t); } });
   return tokens.slice(0, 6 - suffix.length).concat(suffix).join("-") || "offer";
 }
+function humanizeCat(machine) {
+  return String(machine || "").toLowerCase().split(/[^a-z0-9]+/).filter(Boolean)
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(" ");
+}
+// JS MIRROR of the server's label_from_model (domain/semantic.py) — reads the SAME model as the slug, so the
+// label and slug can't diverge and a bundle gets a representative label, not just product #1.
+function smartOfferLabel() {
+  const products = landingProducts.value || [];
+  if (products.length <= 1) {
+    const serviceName = serviceRows.value[0] ? (serviceObjFor(serviceRows.value[0].service_id)?.name || "") : "";
+    return products[0]?.name || serviceName || form.name || "Offer";
+  }
+  const cats = products.map((p) => String(p.product_category || "").trim().toLowerCase());
+  const shared = cats.length && cats.every((c) => c) && new Set(cats).size === 1;
+  if (shared) return humanizeCat(cats[0]) + " Bundle";
+  return [products[0]?.name, products[1]?.name].filter(Boolean).join(" + ") + " Bundle";
+}
 
 watch(selectedItems, () => {
   syncItemConfigs(landingProducts.value);
   if (!selectedItems.value.length) return;
-  if (!form.name || !form.userEditedName) form.name = offerLabelForItems();
-  if (!form.userEditedSlug) form.slug = smartOfferSlug();  // product-driven SEO slug
+  if (!form.userEditedName) form.name = smartOfferLabel();
+  if (!form.userEditedSlug) form.slug = smartOfferSlug();  // product-driven SEO slug/label from the model
 }, { immediate: true });
 
-watch(() => form.name, (value, oldValue) => {
-  if (!oldValue || value === offerLabelForItems()) return;
-  form.userEditedName = true;  // the slug is product-driven, so renaming the offer does not touch it
-});
-
+// A tenant edit is flagged by the field's own @input (see the Label/Slug inputs), NOT a value-compare watcher:
+// the latter races with these programmatic auto-fills and can wrongly mark the slug "edited", freezing it empty
+// (observed on rapid multi-select). Brand changes still re-derive the slug while it's auto.
 watch(() => form.brand, () => {
   if (!form.userEditedSlug) form.slug = smartOfferSlug();
-});
-
-watch(() => form.slug, (value, oldValue) => {
-  if (oldValue && value !== smartOfferSlug()) form.userEditedSlug = true;
 });
 
 watch(productIntent, (intent) => {
@@ -1344,11 +1355,11 @@ function buildOfferDocument() {
     document_type: "offer",
     tenant_id: getTenantId(),
     offer_id: offerId,
-    // Leave the slug empty unless the tenant actually edited it, so the SERVER generates a smart, SEO-descriptive
-    // slug from the products (source of truth). A manual edit (userEditedSlug) is sent + respected; an existing
-    // offer keeps its slug server-side (loadOfferIntoForm marks it edited), so published URLs stay stable.
+    // Leave slug + name empty unless the tenant actually edited them, so the SERVER derives both from one
+    // OfferSemanticModel (source of truth; they stay coherent). A manual edit is sent + respected; an existing
+    // offer keeps its slug/name server-side (loadOfferIntoForm marks them edited), so URLs + naming stay stable.
     slug: form.userEditedSlug ? form.slug : "",
-    name: form.name,
+    name: form.userEditedName ? form.name : "",
     status: "active",
     product_intent: effectiveIntent,
     offer_type: inferOfferType(),

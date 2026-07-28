@@ -68,6 +68,13 @@ class OfferCrudHandlerTests(unittest.TestCase):
         resp = self._post(offer)
         self.assertEqual(json.loads(resp["body"])["offer"]["slug"], "my-custom-slug")
 
+    def test_no_name_gets_a_smart_label_from_the_model(self):
+        # The offer label is server-derived from the same semantic model as the slug (so they can't diverge).
+        offer = {**self.offer, "offer_id": "offer_label"}
+        offer.pop("name", None)
+        name = json.loads(self._post(offer)["body"])["offer"]["name"]
+        self.assertIn("Creatine", name)  # a representative label, not empty / not the first product-id
+
     def test_update_offer_status_archives_and_restores(self):
         self.repository.put(self.offer)
         tenant_id = self.offer["tenant_id"]
