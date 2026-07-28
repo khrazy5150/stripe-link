@@ -2566,8 +2566,13 @@ def render_footer_nav() -> str:
 
 
 def breadcrumb_leaf_name(offer: dict[str, Any], products_by_id: dict[str, dict[str, Any]]) -> str:
-    """The current page's name for the breadcrumb leaf (SEO-11). The product name — matching the Product
-    markup's `name` and the `<h1>` theme — else the offer headline. "" when nothing usable exists."""
+    """The current page's name for the breadcrumb leaf (SEO-11). The page's SUBJECT (Offer Semantic Model P3),
+    so the leaf reads the same as the <title>, offer label, and slug: a single product is its own name; a
+    bundle is its bundle subject ("Dietary Supplement Bundle"). Single products are unchanged — Product markup
+    still names the real product, but the breadcrumb describes the PAGE. "" when nothing usable exists."""
+    model = analyze_offer(offer, products_by_id)
+    if is_bundle(model):
+        return subject_from_model(model).strip()
     product = first_offer_product(offer, products_by_id)
     name = str(product.get("name") or "").strip()
     if name:

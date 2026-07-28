@@ -184,6 +184,52 @@ class LocalSeoAltTests(unittest.TestCase):
         self.assertEqual(m.group(1), "Bright Smile — 1 Main, St. George, Utah")
 
 
+class BreadcrumbLeafSemanticTests(unittest.TestCase):
+    """P3: the breadcrumb leaf names the page's SUBJECT (Offer Semantic Model) — coherent with the <title>,
+    offer label, and slug. Single products are unchanged; a bundle reads as its bundle subject. Also locks the
+    deliberate NON-change: Product JSON-LD keeps naming the real product, not the abstract bundle subject."""
+
+    def _prod(self, pid, name, category):
+        return {"product_id": pid, "name": name, "product_category": category, "product_type": "physical",
+                "product_intent": "transaction", "default_price_id": f"{pid}_p", "description": f"{name} desc.",
+                "prices": [{"price_id": f"{pid}_p", "unit_amount": 1000, "currency": "usd", "quantity": 1,
+                            "context": "standard"}]}
+
+    def _offer(self, ids):
+        return {"offer_id": "o", "tenant_id": "t1", "product_intent": "transaction", "presentation": {},
+                "items": [{"product_id": p, "price_id": f"{p}_p", "quantity": 1} for p in ids]}
+
+    def test_single_product_leaf_is_the_product_name(self):
+        from stripe_link.runtime.html import breadcrumb_leaf_name
+        offer, products = self._offer(["p1"]), {"p1": self._prod("p1", "Creatine Gummies", "creatine")}
+        self.assertEqual(breadcrumb_leaf_name(offer, products), "Creatine Gummies")
+
+    def test_shared_category_bundle_leaf_is_the_bundle_subject(self):
+        from stripe_link.runtime.html import breadcrumb_leaf_name
+        offer = self._offer(["p1", "p2"])
+        products = {"p1": self._prod("p1", "Whey Protein", "dietary_supplement"),
+                    "p2": self._prod("p2", "Creatine", "dietary_supplement")}
+        self.assertEqual(breadcrumb_leaf_name(offer, products), "Dietary Supplement Bundle")
+
+    def test_mixed_bundle_leaf_names_both_products(self):
+        from stripe_link.runtime.html import breadcrumb_leaf_name
+        offer = self._offer(["p1", "p2"])
+        products = {"p1": self._prod("p1", "Whey Protein", "dietary_supplement"),
+                    "p2": self._prod("p2", "Yoga Mat", "fitness_gear")}
+        self.assertEqual(breadcrumb_leaf_name(offer, products), "Whey Protein + Yoga Mat Bundle")
+
+    def test_product_json_ld_still_names_the_real_first_product(self):
+        # Guard the deliberate NON-re-point: Product markup describes a real product Google can show, never the
+        # abstract "… Bundle" subject (that would be fabricated markup). Locked against a future drift.
+        from stripe_link.runtime.html import product_json_ld
+        offer = self._offer(["p1", "p2"])
+        products = {"p1": self._prod("p1", "Whey Protein", "dietary_supplement"),
+                    "p2": self._prod("p2", "Creatine", "dietary_supplement")}
+        raw = product_json_ld({}, offer, products, {})
+        ld = json.loads(raw.replace("\\u003c", "<").replace("\\u003e", ">").replace("\\u0026", "&"))
+        self.assertEqual(ld["name"], "Whey Protein")
+
+
 class BreadcrumbTests(unittest.TestCase):
     """Breadcrumbs (SEO-11): visible crawlable trail + matching BreadcrumbList JSON-LD, only on a page served
     at a non-root slug on the Site's verified custom domain."""
