@@ -2036,7 +2036,18 @@ function ensurePagesLoaded() {
 
 // Auto-load the pages list on mount so it's fresh immediately — and, since this view is keyed on the
 // environment, it reloads on an env switch (Vue remounts → this re-runs). Mirrors Products.
-onMounted(ensurePagesLoaded);
+// The tenant's Configuration → Page Defaults, used to seed a page's funnel copy (SALES_FUNNELS.md P3.5). Loaded
+// once so new pages inherit the tenant's preferred wording instead of the platform defaults.
+const tenantPageDefaults = ref({});
+async function loadTenantPageDefaults() {
+  try {
+    const body = await apiRequest("/config");
+    tenantPageDefaults.value = (body.config || {}).page_defaults || {};
+  } catch {
+    tenantPageDefaults.value = {};
+  }
+}
+onMounted(() => { ensurePagesLoaded(); loadTenantPageDefaults(); });
 
 async function loadPages() {
   loading.value = true;
@@ -2685,24 +2696,55 @@ function upsellScaffoldOverrides() {
   return Object.keys(out).length ? out : null;
 }
 
+// Map the tenant's Configuration page_defaults onto the builder's funnel fields (config uses a few different
+// field names: thank-you `subtitle` -> `subheadline`; upsell `*_button_text` -> `*_label`).
+function configThankYouSeed() {
+  const c = tenantPageDefaults.value.thank_you || {};
+  const seed = {};
+  const map = {
+    headline: "headline", headline_icon: "headline_icon", subtitle: "subheadline", message: "message",
+    next_steps_title: "next_steps_title", footer_headline: "footer_headline", footer_message: "footer_message",
+    home_button_text: "home_button_text", download_button_text: "download_button_text", download_url: "download_url",
+  };
+  for (const [configKey, builderKey] of Object.entries(map)) {
+    if (c[configKey] != null && c[configKey] !== "") seed[builderKey] = c[configKey];
+  }
+  ["enable_celebration", "enable_next_steps", "enable_footer", "show_home_button", "enable_download"]
+    .forEach((k) => { if (c[k] != null) seed[k] = c[k]; });
+  if (Array.isArray(c.next_steps) && c.next_steps.length) {
+    seed.next_steps = c.next_steps.map((x) => ({ icon: x.icon || "", title: x.title || "", desc: x.desc || "" }));
+  }
+  return seed;
+}
+function configUpsellSeed() {
+  const c = tenantPageDefaults.value.upsell || {};
+  const seed = {};
+  if (c.headline) seed.headline = c.headline;
+  if (c.subheadline) seed.subheadline = c.subheadline;
+  if (c.accept_button_text) seed.accept_label = c.accept_button_text;
+  if (c.decline_button_text) seed.decline_label = c.decline_button_text;
+  return seed;
+}
+
 function loadPostPurchase(page) {
   const base = defaultBuilderForm().post_purchase;
   const postCheckout = page.post_checkout || {};
   const thankYou = postCheckout.thank_you_page || {};
   const scaffold = postCheckout.upsell_scaffold || {};
-  const savedCards = Array.isArray(thankYou.next_steps) && thankYou.next_steps.length
+  const cfgThankYou = configThankYouSeed();
+  // Precedence: the page's own saved override > the tenant's Configuration default > the platform default.
+  // page_id is not an editor field; next_steps (a list) is layered explicitly below.
+  const savedThankYou = Object.fromEntries(
+    Object.entries(thankYou).filter(([k, v]) => k !== "page_id" && k !== "next_steps" && v != null));
+  const thank_you = { ...base.thank_you, ...cfgThankYou, ...savedThankYou };
+  thank_you.next_steps = Array.isArray(thankYou.next_steps) && thankYou.next_steps.length
     ? thankYou.next_steps.map((c) => ({ icon: c.icon || "", title: c.title || "", desc: c.desc || "" }))
-    : base.thank_you.next_steps;
-  return {
-    // Overlay the stored overrides on the defaults so un-overridden fields stay blank (placeholder = default);
-    // page_id is not an editor field. next_steps is handled separately (list, not a scalar).
-    thank_you: {
-      ...base.thank_you,
-      ...Object.fromEntries(Object.entries(thankYou).filter(([k, v]) => k !== "page_id" && k !== "next_steps" && v != null)),
-      next_steps: savedCards,
-    },
-    upsell: { ...base.upsell, ...Object.fromEntries(Object.entries(scaffold).filter(([, v]) => v != null)) },
+    : (cfgThankYou.next_steps || base.thank_you.next_steps);
+  const upsell = {
+    ...base.upsell, ...configUpsellSeed(),
+    ...Object.fromEntries(Object.entries(scaffold).filter(([, v]) => v != null)),
   };
+  return { thank_you, upsell };
 }
 
 function addNextStepCard() {

@@ -107,20 +107,53 @@
     <section class="dashboard-card">
       <header class="dashboard-card-header"><h2>Thank You Page Defaults</h2></header>
       <div class="dashboard-card-body">
-        <div class="offer-two-column">
-          <label class="offer-field">
-            <span>Headline</span>
-            <input v-model.trim="form.page_defaults.thank_you.headline" type="text" placeholder="Thank You for Your Purchase!" />
-          </label>
-          <label class="offer-field">
-            <span>Subtitle</span>
-            <input v-model.trim="form.page_defaults.thank_you.subtitle" type="text" placeholder="Your Order Has Been Confirmed!" />
-          </label>
+        <div class="ty-field-row">
+          <label class="offer-field ty-emoji"><span>Emoji</span>
+            <input v-model.trim="form.page_defaults.thank_you.headline_icon" type="text" maxlength="4" placeholder="🎉" /></label>
+          <label class="offer-field"><span>Headline</span>
+            <input v-model.trim="form.page_defaults.thank_you.headline" type="text" placeholder="Thank You for Your Purchase!" /></label>
         </div>
-        <label class="offer-field">
-          <span>Message</span>
-          <textarea v-model.trim="form.page_defaults.thank_you.message" rows="3" placeholder="Look for an email from us with further details on your order."></textarea>
-        </label>
+        <label class="offer-field"><span>Subtitle</span>
+          <input v-model.trim="form.page_defaults.thank_you.subtitle" type="text" placeholder="Your Order Has Been Confirmed!" /></label>
+        <label class="offer-field"><span>Message</span>
+          <textarea v-model.trim="form.page_defaults.thank_you.message" rows="2" placeholder="Look for an email from us with further details on your order."></textarea></label>
+
+        <label class="builder-toggle"><input v-model="form.page_defaults.thank_you.enable_celebration" type="checkbox" /><span>Show the celebration animation</span></label>
+
+        <label class="builder-toggle"><input v-model="form.page_defaults.thank_you.enable_next_steps" type="checkbox" /><span>Show a “What’s Next?” section</span></label>
+        <template v-if="form.page_defaults.thank_you.enable_next_steps">
+          <label class="offer-field"><span>Section title</span>
+            <input v-model.trim="form.page_defaults.thank_you.next_steps_title" type="text" placeholder="What's Next?" /></label>
+          <div v-for="(card, i) in form.page_defaults.thank_you.next_steps" :key="i" class="ty-card-editor">
+            <div class="ty-field-row">
+              <label class="offer-field ty-emoji"><span>Icon</span><input v-model.trim="card.icon" type="text" maxlength="4" placeholder="📧" /></label>
+              <label class="offer-field"><span>Card title</span><input v-model.trim="card.title" type="text" placeholder="Check Your Email" /></label>
+              <button type="button" class="ty-card-remove" title="Remove card" @click="removeThankYouCard(i)">✕</button>
+            </div>
+            <label class="offer-field"><span>Card text</span><input v-model.trim="card.desc" type="text" placeholder="Confirmation and tracking details…" /></label>
+          </div>
+          <button v-if="form.page_defaults.thank_you.next_steps.length < 6" type="button" class="secondary-action compact" @click="addThankYouCard">+ Add card</button>
+        </template>
+
+        <label class="builder-toggle"><input v-model="form.page_defaults.thank_you.enable_footer" type="checkbox" /><span>Show a footer message</span></label>
+        <template v-if="form.page_defaults.thank_you.enable_footer">
+          <label class="offer-field"><span>Footer headline</span>
+            <input v-model.trim="form.page_defaults.thank_you.footer_headline" type="text" placeholder="The Ball Is in Our Court" /></label>
+          <label class="offer-field"><span>Footer message</span>
+            <input v-model.trim="form.page_defaults.thank_you.footer_message" type="text" placeholder="Look for an email with tracking information." /></label>
+        </template>
+
+        <label class="builder-toggle"><input v-model="form.page_defaults.thank_you.show_home_button" type="checkbox" /><span>Show a “Back to Home” link</span></label>
+        <label v-if="form.page_defaults.thank_you.show_home_button" class="offer-field"><span>Home link text</span>
+          <input v-model.trim="form.page_defaults.thank_you.home_button_text" type="text" placeholder="Back to Home" /></label>
+
+        <label class="builder-toggle"><input v-model="form.page_defaults.thank_you.enable_download" type="checkbox" /><span>Show a download button</span></label>
+        <template v-if="form.page_defaults.thank_you.enable_download">
+          <label class="offer-field"><span>Download URL</span>
+            <input v-model.trim="form.page_defaults.thank_you.download_url" type="url" placeholder="https://…" /></label>
+          <label class="offer-field"><span>Download button text</span>
+            <input v-model.trim="form.page_defaults.thank_you.download_button_text" type="text" placeholder="Download Your Product" /></label>
+        </template>
       </div>
     </section>
 
@@ -292,6 +325,19 @@ const THANK_YOU_DEFAULTS = {
   subtitle: "Your Order Has Been Confirmed!",
   message: "Look for an email from us with further details on your order.",
 };
+// The platform's default "What's Next?" cards (mirror of upsell_pages.DEFAULT_THANK_YOU.next_steps). Seeded so
+// the tenant sees them; the payload only persists them when the tenant changes them.
+const CONFIG_THANK_YOU_CARDS = [
+  { icon: "📧", title: "Check Your Email", desc: "Confirmation and tracking details are on the way to your inbox." },
+  { icon: "📦", title: "Free Shipping", desc: "Your order will arrive within 5–7 business days." },
+  { icon: "🚀", title: "Start Your Journey", desc: "Begin your routine as soon as it arrives." },
+];
+function addThankYouCard() {
+  form.page_defaults.thank_you.next_steps.push({ icon: "", title: "", desc: "" });
+}
+function removeThankYouCard(index) {
+  form.page_defaults.thank_you.next_steps.splice(index, 1);
+}
 
 function defaultForm() {
   return {
@@ -300,7 +346,14 @@ function defaultForm() {
     checkout: { phone_number_collection_enabled: false, default_success_url: "", default_cancel_url: "" },
     page_defaults: {
       upsell: { headline: "", subheadline: "", accept_button_text: "", decline_button_text: "" },
-      thank_you: { headline: "", subtitle: "", message: "" },
+      thank_you: {
+        headline: "", headline_icon: "", subtitle: "", message: "",
+        enable_celebration: true, enable_next_steps: true, next_steps_title: "",
+        next_steps: CONFIG_THANK_YOU_CARDS.map((card) => ({ ...card })),
+        enable_footer: false, footer_headline: "", footer_message: "",
+        show_home_button: false, home_button_text: "",
+        enable_download: false, download_button_text: "", download_url: "",
+      },
     },
     legal_defaults: { terms_url: "", privacy_url: "", refund_url: "" },
     analytics_defaults: { google_tag_id: "", pixel_id: "" },
@@ -333,8 +386,23 @@ function applyConfig(config) {
     },
     thank_you: {
       headline: thankYou.headline || "",
+      headline_icon: thankYou.headline_icon || "",
       subtitle: thankYou.subtitle || "",
       message: thankYou.message || "",
+      enable_celebration: thankYou.enable_celebration !== false,
+      enable_next_steps: thankYou.enable_next_steps !== false,
+      next_steps_title: thankYou.next_steps_title || "",
+      next_steps: Array.isArray(thankYou.next_steps) && thankYou.next_steps.length
+        ? thankYou.next_steps.map((c) => ({ icon: c.icon || "", title: c.title || "", desc: c.desc || "" }))
+        : CONFIG_THANK_YOU_CARDS.map((card) => ({ ...card })),
+      enable_footer: thankYou.enable_footer === true,
+      footer_headline: thankYou.footer_headline || "",
+      footer_message: thankYou.footer_message || "",
+      show_home_button: thankYou.show_home_button === true,
+      home_button_text: thankYou.home_button_text || "",
+      enable_download: thankYou.enable_download === true,
+      download_button_text: thankYou.download_button_text || "",
+      download_url: thankYou.download_url || "",
     },
   };
   form.legal_defaults = { terms_url: legal.terms_url || "", privacy_url: legal.privacy_url || "", refund_url: legal.refund_url || "" };
@@ -377,6 +445,26 @@ function setOrDelete(target, key, value) {
 // Returns a complete section (every field filled from entry or default) if the tenant
 // entered anything, otherwise null so the whole section is omitted. Mirrors the backend's
 // all-or-nothing requirement for page_defaults.upsell / thank_you.
+// Thank-you defaults: persist only non-blank text, deviating toggles, and edited cards (null when untouched),
+// mirroring how a landing page stores its own thank-you override.
+function thankYouDefaultsPayload() {
+  const ty = form.page_defaults.thank_you;
+  const out = {};
+  ["headline", "headline_icon", "subtitle", "message", "next_steps_title",
+   "footer_headline", "footer_message", "home_button_text", "download_button_text", "download_url"]
+    .forEach((k) => { const v = String(ty[k] || "").trim(); if (v) out[k] = v; });
+  if (ty.enable_celebration === false) out.enable_celebration = false;
+  if (ty.enable_next_steps === false) out.enable_next_steps = false;
+  if (ty.enable_footer === true) out.enable_footer = true;
+  if (ty.show_home_button === true) out.show_home_button = true;
+  if (ty.enable_download === true) out.enable_download = true;
+  const cards = (ty.next_steps || [])
+    .map((c) => ({ icon: (c.icon || "").trim(), title: (c.title || "").trim(), desc: (c.desc || "").trim() }))
+    .filter((c) => c.title || c.desc);
+  if (JSON.stringify(cards) !== JSON.stringify(CONFIG_THANK_YOU_CARDS)) out.next_steps = cards;
+  return Object.keys(out).length ? out : null;
+}
+
 function completeOrNull(formSection, defaults) {
   const anyEntered = Object.values(formSection).some((value) => String(value || "").trim() !== "");
   if (!anyEntered) return null;
@@ -408,7 +496,7 @@ function buildPayload() {
 
   const pageDefaults = {};
   setOrDelete(pageDefaults, "upsell", completeOrNull(form.page_defaults.upsell, UPSELL_DEFAULTS));
-  setOrDelete(pageDefaults, "thank_you", completeOrNull(form.page_defaults.thank_you, THANK_YOU_DEFAULTS));
+  setOrDelete(pageDefaults, "thank_you", thankYouDefaultsPayload());
   setOrDelete(doc, "page_defaults", pageDefaults);
 
   setOrDelete(doc, "legal_defaults", prunedStrings(form.legal_defaults));

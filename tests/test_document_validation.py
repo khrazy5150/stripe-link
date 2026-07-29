@@ -40,6 +40,28 @@ class DocumentValidationTests(unittest.TestCase):
         validate_offer_document(self.offer)
         validate_page_document(self.page)
 
+    def test_tenant_config_accepts_extended_thank_you_page_defaults(self):
+        from stripe_link.domain.documents import validate_tenant_config
+        validate_tenant_config({
+            "schema_version": "2026-05-29", "document_type": "tenant_config", "tenant_id": "t1",
+            "page_defaults": {
+                "upsell": {"headline": "Wait"},  # partial now allowed (was required-complete)
+                "thank_you": {
+                    "headline": "Cheers", "headline_icon": "🎉", "enable_celebration": False,
+                    "next_steps_title": "Next", "next_steps": [{"icon": "⭐", "title": "Do", "desc": "it"}],
+                    "enable_download": True, "download_url": "https://x/y.pdf",
+                },
+            },
+        })  # no raise
+
+    def test_tenant_config_rejects_malformed_thank_you_cards(self):
+        from stripe_link.domain.documents import validate_tenant_config
+        with self.assertRaises(DocumentValidationError):
+            validate_tenant_config({
+                "schema_version": "2026-05-29", "document_type": "tenant_config", "tenant_id": "t1",
+                "page_defaults": {"thank_you": {"next_steps": "not-a-list"}},
+            })
+
     def test_offer_accepts_a_well_formed_semantic_model_cache(self):
         # P4.0: offer.semantic_model is reserved (server-owned). When present it must be a valid model.
         from stripe_link.domain.semantic import analyze_offer

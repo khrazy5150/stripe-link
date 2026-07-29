@@ -1313,16 +1313,33 @@ def validate_tenant_config(document: dict[str, Any]) -> None:
     if page_defaults is not None:
         if not isinstance(page_defaults, dict):
             raise DocumentValidationError("Tenant config page_defaults must be an object.")
+        # page_defaults hold the tenant's DEFAULT funnel-page copy (Configuration → seeds new landing pages,
+        # SALES_FUNNELS.md P3.5). Every field is optional so a tenant can fill in only what they care about.
         upsell = page_defaults.get("upsell")
         if upsell is not None:
             if not isinstance(upsell, dict):
                 raise DocumentValidationError("Tenant config page_defaults.upsell must be an object.")
-            require_fields(upsell, ["headline", "subheadline", "accept_button_text", "decline_button_text"])
+            for field in ("headline", "subheadline", "accept_button_text", "decline_button_text"):
+                optional_string(upsell, field, f"page_defaults.upsell.{field}", max_length=300)
         thank_you = page_defaults.get("thank_you")
         if thank_you is not None:
             if not isinstance(thank_you, dict):
                 raise DocumentValidationError("Tenant config page_defaults.thank_you must be an object.")
-            require_fields(thank_you, ["headline", "subtitle", "message"])
+            for field in ("headline", "subtitle", "message", "headline_icon", "next_steps_title",
+                          "footer_headline", "footer_message", "home_button_text", "download_button_text", "download_url"):
+                optional_string(thank_you, field, f"page_defaults.thank_you.{field}", max_length=300)
+            for field in ("enable_celebration", "enable_next_steps", "enable_footer", "show_home_button", "enable_download"):
+                optional_bool(thank_you, field, f"page_defaults.thank_you.{field}")
+            if thank_you.get("next_steps") is not None:
+                cards = thank_you.get("next_steps")
+                if not isinstance(cards, list) or len(cards) > 6:
+                    raise DocumentValidationError("page_defaults.thank_you.next_steps must be an array of at most 6 cards.")
+                for index, card in enumerate(cards):
+                    if not isinstance(card, dict):
+                        raise DocumentValidationError(f"page_defaults.thank_you.next_steps[{index}] must be an object.")
+                    optional_string(card, "icon", f"page_defaults.thank_you.next_steps[{index}].icon", max_length=16)
+                    optional_string(card, "title", f"page_defaults.thank_you.next_steps[{index}].title", max_length=120)
+                    optional_string(card, "desc", f"page_defaults.thank_you.next_steps[{index}].desc", max_length=300)
     checkout = document.get("checkout")
     if checkout is not None:
         if not isinstance(checkout, dict):
