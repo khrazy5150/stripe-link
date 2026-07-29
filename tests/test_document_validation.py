@@ -39,6 +39,19 @@ class DocumentValidationTests(unittest.TestCase):
         validate_offer_document(self.offer)
         validate_page_document(self.page)
 
+    def test_offer_accepts_a_well_formed_semantic_model_cache(self):
+        # P4.0: offer.semantic_model is reserved (server-owned). When present it must be a valid model.
+        from stripe_link.domain.semantic import analyze_offer
+        offer = copy.deepcopy(self.offer)
+        offer["semantic_model"] = analyze_offer(offer, {self.product["product_id"]: self.product})
+        validate_offer_document(offer)  # no raise
+
+    def test_offer_rejects_a_malformed_semantic_model_cache(self):
+        offer = copy.deepcopy(self.offer)
+        offer["semantic_model"] = {"facts": {}, "interpretation": {"source": "vibes"}}
+        with self.assertRaises(DocumentValidationError):
+            validate_offer_document(offer)
+
     def test_accepts_universal_bundle_fixtures(self):
         validate_product_document(load_fixture("product-universal-bundle.json"))
         validate_offer_document(load_fixture("offer-universal-bundle.json"))

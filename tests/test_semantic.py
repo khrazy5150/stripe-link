@@ -100,31 +100,23 @@ class SlugMatchesLabelSourceTests(unittest.TestCase):
         self.assertEqual(label_from_model(m), "Dietary Supplement Bundle")
 
 
-def _assert_conforms(test, model):
-    """Dependency-free structural conformance against schemas/OfferSemanticModel.schema.json (the repo keeps
-    third-party deps out, so no jsonschema): at every documented object level, all `required` keys are present
-    and — where `additionalProperties` is false — there are no undocumented keys. Plus the two enums. Catches
-    the realistic drift (a field added to the model but not the schema, or renamed) without a JSON-Schema lib."""
-    def check(inst, schema, path):
-        props = schema.get("properties", {})
-        if schema.get("additionalProperties") is False and isinstance(inst, dict):
-            test.assertEqual(set(inst) - set(props), set(), f"{path}: undocumented keys")
-        for key in schema.get("required", []):
-            test.assertIn(key, inst, f"{path}: missing required '{key}'")
-        for key, subschema in props.items():
-            if isinstance(inst, dict) and key in inst and subschema.get("type") == "object" and "properties" in subschema:
-                check(inst[key], subschema, f"{path}.{key}")
-    check(model, _SCHEMA, "model")
-    entity_enum = _SCHEMA["$defs"]["entity"]["properties"]["type"]["enum"]
-    test.assertIn(model["facts"]["entities"]["primary"]["type"], entity_enum)
-    test.assertIn(model["interpretation"]["source"],
-                  _SCHEMA["properties"]["interpretation"]["properties"]["source"]["enum"])
+def _strip_annotations(node):
+    """Recursively drop JSON-Schema documentation keywords ($schema/$id/title/description) so the DOCUMENTED
+    JSON file can be compared against the lean code schema on VALIDATION structure alone — descriptions may
+    differ freely; constraints may not."""
+    from stripe_link.domain.semantic_schema import ANNOTATION_KEYWORDS
+    if isinstance(node, dict):
+        return {k: _strip_annotations(v) for k, v in node.items() if k not in ANNOTATION_KEYWORDS}
+    if isinstance(node, list):
+        return [_strip_annotations(v) for v in node]
+    return node
 
 
 class SchemaConformanceTests(unittest.TestCase):
-    """P4.0: the deterministic analyzer output IS the contract — it must conform to the JSON Schema
-    (schemas/OfferSemanticModel.schema.json, what the AI tier's output is checked against) AND pass the runtime
-    validate_semantic_model. Locks code and contract together so neither drifts."""
+    """P4.0 drift close-out: the code schema (OFFER_SEMANTIC_MODEL_SCHEMA) is the single source of truth the
+    runtime validator enforces; the JSON file mirrors it. Both are locked here: the deterministic analyzer
+    output passes the validator, and the documented JSON file equals the code schema minus annotations — so the
+    validator, the schema, and the file can never drift."""
 
     CASES = [
         ("single", ["p1"], {"p1": _prod("p1", "Whey Protein", "dietary_supplement")}, "Axel Mart"),
@@ -135,18 +127,22 @@ class SchemaConformanceTests(unittest.TestCase):
         ("subscription", ["p1"], {"p1": _prod("p1", "Membership", "software", recurring=True)}, ""),
     ]
 
-    def test_deterministic_output_matches_schema_and_validator(self):
+    def test_deterministic_output_passes_the_validator(self):
         for name, ids, products, brand in self.CASES:
             with self.subTest(case=name):
                 model = analyze_offer(_offer(ids, brand=brand), products)
-                _assert_conforms(self, model)     # structural JSON-Schema conformance
-                validate_semantic_model(model)    # runtime contract agrees
+                validate_semantic_model(model)  # the schema-driven runtime contract
                 self.assertEqual(model["interpretation"]["version"], MODEL_VERSION)
 
-    def test_lead_gen_output_conforms(self):
+    def test_lead_gen_output_passes_the_validator(self):
         model = analyze_offer(_offer(["p1"], intent="lead_generation"), {"p1": _prod("p1", "Free Guide", "ebook")})
-        _assert_conforms(self, model)
         validate_semantic_model(model)
+
+    def test_json_schema_file_matches_the_code_schema(self):
+        # Single source of truth: the documented schemas/*.json file must equal the code schema (minus the
+        # human-readable annotations). Editing one without the other fails here.
+        from stripe_link.domain.semantic_schema import OFFER_SEMANTIC_MODEL_SCHEMA
+        self.assertEqual(_strip_annotations(_SCHEMA), OFFER_SEMANTIC_MODEL_SCHEMA)
 
 
 class ValidateSemanticModelTests(unittest.TestCase):

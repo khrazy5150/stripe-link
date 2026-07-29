@@ -506,6 +506,10 @@
     "updated_at": {
       "type": "integer",
       "minimum": 0
+    },
+    "semantic_model": {
+      "$ref": "OfferSemanticModel.schema.json",
+      "description": "Server-owned denormalized cache of the OfferSemanticModel (plans/OFFER_SEMANTIC_P4.md). Reserved in P4.0; the WRITE path lands with the AI enrichment tier. Never sent by the dashboard — it is server-authoritative and recomputed deterministically on read when absent."
     }
   },
   "$defs": {

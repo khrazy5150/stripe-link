@@ -282,34 +282,19 @@ third-party security assessment is required.
 
 ## Offer Semantic Model
 
-### Look more closely at JSON-Schema ↔ model drift
-- **What:** `schemas/OfferSemanticModel.schema.json` (P4.0) is a full JSON Schema, but the runtime contract is
-  the hand-written `validate_semantic_model` (`src/stripe_link/domain/documents.py`), and the test that ties the
-  two together (`tests/test_semantic.py :: SchemaConformanceTests`) is a **dependency-free structural walk**, not
-  a real JSON-Schema validation — the repo keeps third-party deps out (`src/requirements.txt` intentionally
-  empty), so there is no `jsonschema` at runtime or in tests. The structural walk only checks, at each documented
-  object level, that `required` keys are present, that `additionalProperties:false` levels carry no undocumented
-  keys, and the two enums (`entity.type`, `interpretation.source`). It does **not** check leaf types, numeric
-  bounds, array-item shapes, `oneOf`, etc. So the schema file and the code can still drift on anything the walk
-  doesn't cover.
-- **Why it matters:** in **P4.1** the same JSON Schema becomes the **AI provider's structured-output contract**
-  (OpenAI `response_format: json_schema`, Anthropic tool schema, Gemini `responseSchema`). If the schema has
-  drifted from what `validate_semantic_model` (and the deterministic analyzer) actually produce/accept, the AI
-  tier will emit objects that pass the provider but fail our validator, or vice-versa.
-- **Where to look:** decide how to enforce agreement without adding a dep — options: (a) a small in-repo,
-  dependency-free JSON-Schema-subset validator shared by the test and `validate_semantic_model` (single source of
-  truth); (b) generate one artifact from the other; (c) accept a bundled `jsonschema` in **tests only** if the
-  no-deps rule is relaxed for the test path. Revisit before building P4.1.
-- **Why deferred:** P4.0's structural check is enough to catch the realistic drift (a field added/renamed) today;
-  the tighter enforcement only becomes load-bearing when the AI tier consumes the schema. Flagged 2026-07-28.
+### JSON-Schema ↔ model drift — RESOLVED 2026-07-28
+- **Done (option (a) from the original note):** the model schema now lives in code as the single source of truth
+  (`OFFER_SEMANTIC_MODEL_SCHEMA` in `src/stripe_link/domain/semantic_schema.py`), enforced by a small in-repo,
+  dependency-free `check_schema` interpreter. `validate_semantic_model` now *is* the schema (no separate
+  hand-written rules to drift), and a test locks `schemas/OfferSemanticModel.schema.json` equal to the code
+  schema minus annotations — so validator, schema, and file cannot disagree. This is the contract P4.1 will hand
+  to the AI provider's structured-output mode. No `jsonschema` dependency added.
 
-### Semantic-model caching — defer until the model is finalized
-- **What:** `resolve_semantic_model` (`src/stripe_link/domain/semantic.py`) already **reads** an
-  `offer.semantic_model` cache (returning it only when `source=="ai"` and `version==MODEL_VERSION`, else
-  recomputing deterministically), and the render consumers route through it — but **nothing writes the cache
-  yet**. The write path, `generated_at` stamping, and invalidation-on-offer/product/brand-change were
-  deliberately left for later.
-- **Why deferred:** the deterministic model is cheap to recompute, so the cache only earns its keep once the
-  **expensive AI enrichment** (P4.1) exists — and the caching/invalidation design shouldn't be finalized until
-  the model shape and the enrichment flow are settled. Per decision 2026-07-28: **worry about cache when
-  everything else is finalized.** The read seam is in place so adding the write later is a localized change.
+### Semantic-model caching — write path still deferred to P4.1
+- **Done in P4.0:** the `offer.semantic_model` field is now **reserved** — validated when present
+  (`validate_offer_document`) and documented in `schemas/Offer.schema.json` — and the `resolve_semantic_model`
+  read seam recomputes deterministically when it's absent/stale.
+- **Still deferred (intentionally):** the cache **write** at offer-save, `generated_at` stamping, and
+  invalidation-on-offer/product/brand-change. The deterministic model is cheap to recompute, so the cache only
+  earns its keep once the **expensive AI enrichment** (P4.1) exists — build the write path then, alongside the
+  enrichment flow, per the 2026-07-28 decision ("worry about cache when everything else is finalized").
