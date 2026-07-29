@@ -271,6 +271,13 @@ const message = ref("");
 // system, etc.) survive a save -- this screen only owns a subset of TenantConfig.
 const rawConfig = ref({});
 
+// The platform's default "What's Next?" cards (mirror of upsell_pages.DEFAULT_THANK_YOU.next_steps). Declared
+// BEFORE `form` because defaultForm() reads it — a const referenced before its line throws a TDZ error.
+const CONFIG_THANK_YOU_CARDS = [
+  { icon: "📧", title: "Check Your Email", desc: "Confirmation and tracking details are on the way to your inbox." },
+  { icon: "📦", title: "Free Shipping", desc: "Your order will arrive within 5–7 business days." },
+  { icon: "🚀", title: "Start Your Journey", desc: "Begin your routine as soon as it arrives." },
+];
 const form = reactive(defaultForm());
 
 const apiBase = computed(() => getApiBase());
@@ -325,13 +332,6 @@ const THANK_YOU_DEFAULTS = {
   subtitle: "Your Order Has Been Confirmed!",
   message: "Look for an email from us with further details on your order.",
 };
-// The platform's default "What's Next?" cards (mirror of upsell_pages.DEFAULT_THANK_YOU.next_steps). Seeded so
-// the tenant sees them; the payload only persists them when the tenant changes them.
-const CONFIG_THANK_YOU_CARDS = [
-  { icon: "📧", title: "Check Your Email", desc: "Confirmation and tracking details are on the way to your inbox." },
-  { icon: "📦", title: "Free Shipping", desc: "Your order will arrive within 5–7 business days." },
-  { icon: "🚀", title: "Start Your Journey", desc: "Begin your routine as soon as it arrives." },
-];
 function addThankYouCard() {
   form.page_defaults.thank_you.next_steps.push({ icon: "", title: "", desc: "" });
 }
