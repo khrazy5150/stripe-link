@@ -84,6 +84,12 @@ class SynthesizeUpsellPageTests(unittest.TestCase):
         # The island swaps in place on decline/expiry rather than navigating to a separate downsell page.
         self.assertIn("swapToDownsell", html)
         self.assertIn("if (funnelDeclineOrExpire) funnelDeclineOrExpire();", html)
+        # The swap updates the featured_price card (which replaced the price selector) and re-arms the countdown
+        # so the downsell's own expiry advances the funnel (Phase 1c).
+        self.assertIn("querySelector('.sl-featured-price')", html)
+        self.assertIn("data-fp-compare-at=", html)
+        self.assertIn("funnelCountdownRestarts.push", html)
+        self.assertIn("funnelCountdownRestarts.forEach", html)
 
     def test_no_downsell_attributes_when_product_has_no_downsell_price(self):
         entry = post_purchase_plan(self.source_offer, self.products_by_id)["upsells"][0]
@@ -277,7 +283,7 @@ class RenderFunnelStepPreviewTests(unittest.TestCase):
         self.assertNotIn('data-section-type="offer_price_selector"', html)  # empty for upsell context; replaced
         self.assertIn("Yours for only", html)
         self.assertIn("$27.00", html)
-        self.assertNotIn("You save", html)  # no regular price on the fixture, so no savings pill
+        self.assertNotIn('class="sl-featured-price-pills"', html)  # no regular price on the fixture, so no savings pill
 
     def test_upsell_price_shows_savings_when_a_regular_price_is_higher(self):
         pid = self.product["product_id"]
@@ -292,7 +298,7 @@ class RenderFunnelStepPreviewTests(unittest.TestCase):
         page = deepcopy(self.page)
         page["post_checkout"]["upsell_scaffold"]["savings_badge"] = False
         off = render_funnel_step_html("upsell:0", page, self.offer, {pid: product})
-        self.assertNotIn("You save", off)
+        self.assertNotIn('class="sl-featured-price-pills"', off)  # ("You save " also appears in the downsell swap JS)
         self.assertNotIn("$65.00", off)
 
     def test_upsell_out_of_range_raises(self):

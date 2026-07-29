@@ -3423,7 +3423,7 @@ def render_featured_price(section: dict[str, Any]) -> str:
             "      </div>",
         ])
     return "\n".join(line for line in [
-        f"    <section class=\"sl-featured-price\" data-section-id=\"{escape(str(section.get('id', 'featured-price')))}\" data-section-type=\"featured_price\">",
+        f"    <section class=\"sl-featured-price\" data-section-id=\"{escape(str(section.get('id', 'featured-price')))}\" data-section-type=\"featured_price\" data-fp-compare-at=\"{compare_at}\" data-fp-currency=\"{escape(currency)}\">",
         "      <div class=\"sl-featured-price-card\">",
         (f"        <p class=\"sl-featured-price-label\">{escape(label)}</p>" if label else ""),
         f"        <div class=\"sl-featured-price-amount\">{escape(format_money(amount, currency))}</div>",
@@ -4758,27 +4758,50 @@ def render_page_interactions_script(page: dict[str, Any]) -> str:
         "      let upsellCustomerInfo = {};",
         # Shared by the countdown block: on a funnel step, a countdown expiry does what a decline does.
         "      let funnelDeclineOrExpire = null;",
+        # Restart callbacks the countdown loop registers (below) so the downsell swap can re-arm the timer.
+        "      const funnelCountdownRestarts = [];",
         "      if (isFunnelStep) {",
         # In-place downsell swap (§6): decline / countdown expiry swaps the price card + CTA to the same
         # product's downsell price rather than navigating to a separate page. A second decline advances.
         "        const swapToDownsell = () => {",
         "          const dsPrice = cta.dataset.downsellPriceId;",
         "          if (!dsPrice) return;",
+        "          const dsAmount = Number(cta.dataset.downsellAmount || 0);",
+        "          const dsCurrency = cta.dataset.downsellCurrency || 'usd';",
         "          cta.dataset.checkoutPriceId = dsPrice;",
         "          cta.dataset.ctaHideAmount = 'true';",
         "          const dsLabel = cta.dataset.downsellLabel || cta.dataset.ctaDefaultLabel || cta.textContent;",
         "          cta.textContent = dsLabel; cta.dataset.ctaDefaultLabel = dsLabel;",
+        # The featured_price card replaced the offer_price_selector on the upsell page, so swap ITS amount to the
+        # downsell price and recompute the savings pill against the (unchanged) regular price — a downsell is a
+        # bigger discount, so the pill should reflect that. Legacy .sl-price-option kept as a fallback.
+        "          const fp = document.querySelector('.sl-featured-price');",
+        "          if (fp) {",
+        "            const amtEl = fp.querySelector('.sl-featured-price-amount');",
+        "            if (amtEl) amtEl.textContent = money(dsAmount, dsCurrency);",
+        "            const pills = fp.querySelector('.sl-featured-price-pills');",
+        "            const compareAt = Number(fp.dataset.fpCompareAt || 0);",
+        "            if (pills) {",
+        "              if (compareAt > dsAmount && dsAmount > 0) {",
+        "                const saveEl = pills.querySelector('.sl-featured-price-save');",
+        "                if (saveEl) saveEl.textContent = 'You save ' + Math.round((compareAt - dsAmount) / compareAt * 100) + '%';",
+        "              } else { pills.style.display = 'none'; }",
+        "            }",
+        "          }",
         "          const card = document.querySelector('.sl-price-option');",
         "          if (card) {",
         "            card.dataset.priceId = dsPrice;",
         "            const amtEl = card.querySelector('[data-price-amount]');",
-        "            if (amtEl) amtEl.textContent = money(cta.dataset.downsellAmount, cta.dataset.downsellCurrency || 'usd');",
+        "            if (amtEl) amtEl.textContent = money(dsAmount, dsCurrency);",
         "            const reg = card.querySelector('.sl-regular-price'); if (reg) reg.style.display = 'none';",
         "            const sav = card.querySelector('.sl-savings'); if (sav) sav.style.display = 'none';",
         "            const radio = card.querySelector('input[type=\"radio\"]'); if (radio) radio.value = dsPrice;",
         "          }",
         "          const dsHead = cta.dataset.downsellHeadline;",
         "          if (dsHead) { const h = document.querySelector('.sl-headline h1') || document.querySelector('.sl-headline'); if (h) h.textContent = dsHead; }",
+        # Restart the countdown for the downsell: when it expires again, funnelDeclineOrExpire advances (the
+        # downsell is already shown) instead of swapping a second time.
+        "          funnelCountdownRestarts.forEach((restart) => restart());",
         "        };",
         "        let downsellShown = false;",
         "        const goDownsellOrAdvance = () => {",
@@ -4860,6 +4883,7 @@ def render_page_interactions_script(page: dict[str, Any]) -> str:
         "        const persistent = section.dataset.persistent === 'true';",
         "        const storageKey = `stripe-link:${pageId}:countdown:${section.dataset.sectionId || 'timer'}`;",
         "        let deadline = Date.now() + duration * 1000;",
+        "        let interval = null;",
         "        if (persistent) {",
         "          const stored = localStorage.getItem(storageKey);",
         "          if (stored === 'expired') deadline = Date.now();",
@@ -4884,10 +4908,24 @@ def render_page_interactions_script(page: dict[str, Any]) -> str:
         "          }",
         "          return true;",
         "        };",
-        "        if (!render()) return;",
-        "        const interval = window.setInterval(() => {",
-        "          if (!render()) window.clearInterval(interval);",
-        "        }, 1000);",
+        "        const startTimer = () => {",
+        "          if (!render()) return;",
+        "          interval = window.setInterval(() => {",
+        "            if (!render()) window.clearInterval(interval);",
+        "          }, 1000);",
+        "        };",
+        # Re-arm the timer for the downsell: fresh deadline, reset label + start color, so it counts down anew and
+        # its next expiry advances the funnel (the downsell is already showing).
+        "        funnelCountdownRestarts.push(() => {",
+        "          if (interval) window.clearInterval(interval);",
+        "          deadline = Date.now() + duration * 1000;",
+        "          if (label) label.textContent = section.dataset.startText || label.textContent;",
+        "          section.style.setProperty('--sl-countdown-bg', section.dataset.startColor || '');",
+        "          section.style.background = section.dataset.startColor || '';",
+        "          if (persistent) localStorage.setItem(storageKey, String(deadline));",
+        "          startTimer();",
+        "        });",
+        "        startTimer();",
         "      });",
         # Post-purchase carousel (§6): a grid of independent one-click Adds + a single dismiss. Each Add charges
         # its card via /upsell/charge (idempotent by sequence) and marks the card Added in place; the dismiss
