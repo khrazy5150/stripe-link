@@ -3929,6 +3929,39 @@ button:disabled {
   padding: 0.2rem 0.4rem;
 }
 
+/* Thank-you editor bits (Phase 2): emoji + field rows, "What's Next?" card editors. */
+.ty-field-row {
+  display: flex;
+  gap: 0.8rem;
+  align-items: flex-end;
+}
+.ty-field-row .offer-field {
+  flex: 1;
+}
+.ty-field-row .ty-emoji {
+  flex: 0 0 5rem;
+}
+.ty-card-editor {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: 0.8rem;
+  display: grid;
+  gap: 0.6rem;
+  background: var(--panel);
+}
+.ty-card-remove {
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 1.3rem;
+  padding: 0 0.4rem;
+  align-self: center;
+}
+.ty-card-remove:hover {
+  color: var(--text);
+}
+
 .builder-inline-media {
   display: grid;
   grid-template-columns: 5.2rem minmax(0, 1fr);

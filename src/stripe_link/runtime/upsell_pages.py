@@ -284,16 +284,36 @@ def synthesize_downsell_carousel_page(
     return _carousel_page(source_page, source_offer, "downsell_carousel", section)
 
 
-# Default thank-you copy — the funnel's terminus (P3.5 makes it editable).
+# Default thank-you copy + optional sections — the funnel's terminus (SALES_FUNNELS.md P3.5). Every field is
+# tenant-editable; the toggles (enable_*) turn the celebration burst, the "What's Next?" cards, and the footer
+# on or off. Ported from stripe-cart's thank-you template (Phase 2 parity).
 DEFAULT_THANK_YOU = {
     "headline": "Thank You for Your Purchase!",
+    "headline_icon": "🎉",
     "subheadline": "Your order is confirmed — a receipt is on its way to your inbox.",
     "message": "We're getting your order ready. You'll get an email with the details shortly.",
+    "enable_celebration": True,
+    "enable_next_steps": True,
+    "next_steps_title": "What's Next?",
+    "next_steps": [
+        {"icon": "📧", "title": "Check Your Email", "desc": "Confirmation and tracking details are on the way to your inbox."},
+        {"icon": "📦", "title": "Free Shipping", "desc": "Your order will arrive within 5–7 business days."},
+        {"icon": "🚀", "title": "Start Your Journey", "desc": "Begin your routine as soon as it arrives."},
+    ],
+    "enable_footer": False,
+    "footer_headline": "The Ball Is in Our Court",
+    "footer_message": "Look for an email from us with tracking information about your order.",
+    "show_home_button": False,
+    "home_button_text": "Back to Home",
+    "enable_download": False,
+    "download_button_text": "Download Your Product",
+    "download_url": "",
 }
 
 
 def thank_you_config(page: dict[str, Any]) -> dict[str, Any]:
-    """Thank-you copy: defaults overlaid with page.post_checkout.thank_you_page overrides (blanks ignored)."""
+    """Thank-you config: defaults overlaid with page.post_checkout.thank_you_page overrides (blank strings
+    ignored so a partially-filled override still gets defaults; a `False` toggle IS applied)."""
     config = dict(DEFAULT_THANK_YOU)
     override = ((page or {}).get("post_checkout") or {}).get("thank_you_page")
     if isinstance(override, dict):
@@ -325,12 +345,30 @@ def synthesize_thank_you_page(
     }
     theme = deepcopy(source_page.get("theme") or {})
     theme.setdefault("template", "universal_bundle")
-    sections: list[dict[str, Any]] = [
-        {"id": "headline", "type": "headline", "text": config["headline"]},
-        {"id": "subheadline", "type": "subheadline", "text": config["subheadline"]},
-    ]
+    sections: list[dict[str, Any]] = []
+    if config.get("enable_celebration"):
+        sections.append({"id": "celebration", "type": "celebration"})
+    icon = str(config.get("headline_icon") or "").strip()
+    headline_text = f"{icon} {config['headline']}".strip() if icon and icon != "—" else config["headline"]
+    sections.append({"id": "headline", "type": "headline", "text": headline_text})
+    sections.append({"id": "subheadline", "type": "subheadline", "text": config["subheadline"]})
     if config.get("message"):
         sections.append({"id": "content", "type": "content_block", "blocks": [{"title": "", "text": config["message"]}]})
+    if config.get("enable_next_steps"):
+        cards = [c for c in (config.get("next_steps") or []) if isinstance(c, dict) and (c.get("title") or c.get("desc"))]
+        if cards:
+            sections.append({"id": "next-steps", "type": "next_steps",
+                             "title": config.get("next_steps_title") or "What's Next?", "cards": cards})
+    download_on = bool(config.get("enable_download") and config.get("download_url"))
+    if config.get("enable_footer") or config.get("show_home_button") or download_on:
+        sections.append({
+            "id": "ty-footer", "type": "thank_you_footer",
+            "headline": config["footer_headline"] if config.get("enable_footer") else "",
+            "message": config["footer_message"] if config.get("enable_footer") else "",
+            "home_button_text": config["home_button_text"] if config.get("show_home_button") else "",
+            "download_button_text": config["download_button_text"] if download_on else "",
+            "download_url": config["download_url"] if download_on else "",
+        })
     page = {
         "schema_version": source_page.get("schema_version", "2026-05-29"),
         "document_type": "page",

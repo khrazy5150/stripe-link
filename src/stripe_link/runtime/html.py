@@ -499,6 +499,25 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     "    .sl-content-block h2{font-family:var(--sl-font-heading);font-size:2rem;line-height:1.25;margin-bottom:0.8rem;color:var(--sl-content-heading)}",
     "    .sl-content-block p{color:var(--sl-content-text);font-size:1.5rem;line-height:1.6}",
     "    .sl-content-block img{width:100%;height:auto;aspect-ratio:4/3;object-fit:cover;border-radius:0.8rem}",
+    # Thank-you page extras (SALES_FUNNELS.md P3.5 Phase 2): celebration burst, "What's Next?" cards, footer.
+    "    .sl-celebration{display:flex;justify-content:center;margin:0 auto 0.4rem}",
+    "    .sl-celebration-mark svg{width:6.4rem;height:6.4rem}",
+    "    .sl-celebration-ring{fill:none;stroke:var(--sl-brand);stroke-width:2;opacity:0.35}",
+    "    .sl-celebration-check{fill:none;stroke:var(--sl-brand);stroke-width:4;stroke-linecap:round;stroke-linejoin:round;stroke-dasharray:48;stroke-dashoffset:48;animation:sl-ty-check 0.6s ease-out 0.15s forwards}",
+    "    @keyframes sl-ty-check{to{stroke-dashoffset:0}}",
+    "    .sl-next-steps{text-align:center;display:grid;gap:1.6rem;margin-top:1.6rem}",
+    "    .sl-next-steps-title{font-family:var(--sl-font-heading);font-size:2rem;color:var(--sl-headline)}",
+    "    .sl-next-steps-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(15rem,1fr));gap:1.2rem}",
+    "    .sl-next-step{background:var(--sl-card);border:1px solid var(--sl-content-border);border-radius:var(--sl-radius);padding:1.6rem;display:grid;gap:0.5rem;text-align:center}",
+    "    .sl-next-step-icon{font-size:2.4rem}",
+    "    .sl-next-step strong{font-family:var(--sl-font-heading);font-size:1.5rem;color:var(--sl-headline)}",
+    "    .sl-next-step p{color:var(--sl-content-text);font-size:1.35rem;line-height:1.5}",
+    "    .sl-ty-footer{text-align:center;display:grid;gap:1rem;margin-top:2.4rem;padding-top:2rem;border-top:1px solid var(--sl-content-border)}",
+    "    .sl-ty-footer h2{font-family:var(--sl-font-heading);font-size:1.8rem;color:var(--sl-headline)}",
+    "    .sl-ty-footer p{color:var(--sl-content-text);font-size:1.45rem;line-height:1.6}",
+    "    .sl-ty-download{justify-self:center}",
+    "    .sl-ty-home{color:var(--sl-brand);text-decoration:none;font-weight:600;font-size:1.4rem}",
+    "    .sl-ty-home:hover{text-decoration:underline}",
     "    .sl-faq details{border:1px solid var(--sl-faq-border);background:var(--sl-faq-bg);border-radius:1.6rem;padding:0;overflow:hidden}",
     "    .sl-faq summary{cursor:pointer;font-family:var(--sl-font-heading);font-size:1.4rem;font-weight:600;line-height:1.35;color:var(--sl-faq-summary);display:flex;align-items:center;justify-content:space-between;gap:1.2rem;padding:1.6rem 2rem}",
     "    .sl-faq summary h3{margin:0;font:inherit;color:inherit;flex:1}",
@@ -1606,6 +1625,10 @@ SECTION_REGISTRY: dict[str, dict[str, Any]] = {
     "refund_policy": {"render": lambda c: render_refund_policy(c.section, c.offer, c.products_by_id), "version": 1},
     "faq": {"render": lambda c: render_faq(c.section), "version": 1},
     "content_block": {"render": lambda c: render_content_blocks(c.section), "version": 1},
+    # Thank-you page extras (SALES_FUNNELS.md P3.5 Phase 2) — emitted by synthesize_thank_you_page only.
+    "celebration": {"render": lambda c: render_celebration(c.section), "version": 1},
+    "next_steps": {"render": lambda c: render_next_steps(c.section), "version": 1},
+    "thank_you_footer": {"render": lambda c: render_thank_you_footer(c.section), "version": 1},
     "testimonials": {"render": lambda c: render_testimonials(c.section), "version": 1},
     "rating": {"render": lambda c: render_rating(c.section), "version": 1},
     "client_marquee": {"render": lambda c: render_client_marquee(c.section), "version": 1},
@@ -3356,6 +3379,72 @@ def render_content_blocks(section: dict[str, Any]) -> str:
     return "\n".join([
         f"    <section class=\"sl-content-blocks\" data-section-id=\"{escape(str(section.get('id', 'content-blocks')))}\" data-section-type=\"content_block\">",
         *rendered,
+        "    </section>",
+    ])
+
+
+def render_celebration(section: dict[str, Any]) -> str:
+    """A CSS-only celebration burst (an animated check mark) atop the thank-you page (SALES_FUNNELS.md P3.5,
+    stripe-cart parity). No config — synthesize_thank_you_page emits it only when enabled."""
+    return "\n".join([
+        f"    <section class=\"sl-celebration\" data-section-id=\"{escape(str(section.get('id', 'celebration')))}\" data-section-type=\"celebration\" aria-hidden=\"true\">",
+        "      <div class=\"sl-celebration-mark\">"
+        "<svg viewBox=\"0 0 52 52\"><circle class=\"sl-celebration-ring\" cx=\"26\" cy=\"26\" r=\"24\"/>"
+        "<path class=\"sl-celebration-check\" d=\"M14 27l7 7 16-16\"/></svg></div>",
+        "    </section>",
+    ])
+
+
+def render_next_steps(section: dict[str, Any]) -> str:
+    """The "What's Next?" cards on the thank-you page — a titled grid of {icon, title, desc} cards."""
+    cards = [c for c in (section.get("cards") or []) if isinstance(c, dict) and (c.get("title") or c.get("desc"))]
+    if not cards:
+        return ""
+    title = str(section.get("title") or "")
+    card_html = []
+    for card in cards:
+        icon = str(card.get("icon") or "").strip()
+        icon_html = f"<span class=\"sl-next-step-icon\">{escape(icon)}</span>" if icon and icon != "—" else ""
+        card_html.append("\n".join(line for line in [
+            "      <article class=\"sl-next-step\">",
+            f"        {icon_html}" if icon_html else "",
+            f"        <strong>{escape(str(card.get('title') or ''))}</strong>",
+            f"        <p>{escape(str(card.get('desc') or ''))}</p>",
+            "      </article>",
+        ] if line))
+    return "\n".join(line for line in [
+        f"    <section class=\"sl-next-steps\" data-section-id=\"{escape(str(section.get('id', 'next-steps')))}\" data-section-type=\"next_steps\">",
+        (f"      <h2 class=\"sl-next-steps-title\">{render_headline_markup(title)}</h2>" if title else ""),
+        "      <div class=\"sl-next-steps-grid\">",
+        *card_html,
+        "      </div>",
+        "    </section>",
+    ] if line)
+
+
+def render_thank_you_footer(section: dict[str, Any]) -> str:
+    """The thank-you footer: an optional headline + message, an optional download button, and an optional
+    'Back to Home' link (to the Site home when there is one, else '/')."""
+    headline = str(section.get("headline") or "")
+    message = str(section.get("message") or "")
+    home_label = str(section.get("home_button_text") or "")
+    download_label = str(section.get("download_button_text") or "")
+    download_url = str(section.get("download_url") or "")
+    home_url = _RENDER_STATE.get("home_url") or "/"
+    content = []
+    if headline:
+        content.append(f"      <h2>{render_headline_markup(headline)}</h2>")
+    if message:
+        content.append(f"      <p>{escape(message)}</p>")
+    if download_label and download_url:
+        content.append(f"      <a class=\"sl-cta sl-ty-download\" href=\"{escape(download_url)}\">{escape(download_label)}</a>")
+    if home_label:
+        content.append(f"      <a class=\"sl-ty-home\" href=\"{escape(str(home_url))}\">{escape(home_label)}</a>")
+    if not content:
+        return ""
+    return "\n".join([
+        f"    <section class=\"sl-ty-footer\" data-section-id=\"{escape(str(section.get('id', 'ty-footer')))}\" data-section-type=\"thank_you_footer\">",
+        *content,
         "    </section>",
     ])
 

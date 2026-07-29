@@ -1042,12 +1042,52 @@
                 <div v-if="openFunnelStep === step.key" class="funnel-acc-body">
                   <!-- Thank-you page -->
                   <template v-if="step.kind === 'thank_you'">
-                    <label class="offer-field"><span>Headline</span>
-                      <input v-model.trim="builder.post_purchase.thank_you.headline" type="text" :placeholder="SCAFFOLD_PLACEHOLDERS.ty_headline" /></label>
+                    <div class="ty-field-row">
+                      <label class="offer-field ty-emoji"><span>Emoji</span>
+                        <input v-model.trim="builder.post_purchase.thank_you.headline_icon" type="text" maxlength="4" :placeholder="SCAFFOLD_PLACEHOLDERS.ty_headline_icon" /></label>
+                      <label class="offer-field"><span>Headline</span>
+                        <input v-model.trim="builder.post_purchase.thank_you.headline" type="text" :placeholder="SCAFFOLD_PLACEHOLDERS.ty_headline" /></label>
+                    </div>
                     <label class="offer-field"><span>Subheadline</span>
                       <input v-model.trim="builder.post_purchase.thank_you.subheadline" type="text" :placeholder="SCAFFOLD_PLACEHOLDERS.ty_subheadline" /></label>
                     <label class="offer-field"><span>Message</span>
                       <textarea v-model.trim="builder.post_purchase.thank_you.message" rows="2" :placeholder="SCAFFOLD_PLACEHOLDERS.ty_message"></textarea></label>
+                    <label class="builder-toggle"><input v-model="builder.post_purchase.thank_you.enable_celebration" type="checkbox" /><span>Show the celebration animation</span></label>
+
+                    <label class="builder-toggle"><input v-model="builder.post_purchase.thank_you.enable_next_steps" type="checkbox" /><span>Show a “What’s Next?” section</span></label>
+                    <template v-if="builder.post_purchase.thank_you.enable_next_steps">
+                      <label class="offer-field"><span>Section title</span>
+                        <input v-model.trim="builder.post_purchase.thank_you.next_steps_title" type="text" :placeholder="SCAFFOLD_PLACEHOLDERS.ty_next_steps_title" /></label>
+                      <div v-for="(card, i) in builder.post_purchase.thank_you.next_steps" :key="i" class="ty-card-editor">
+                        <div class="ty-field-row">
+                          <label class="offer-field ty-emoji"><span>Icon</span><input v-model.trim="card.icon" type="text" maxlength="4" placeholder="📧" /></label>
+                          <label class="offer-field"><span>Card title</span><input v-model.trim="card.title" type="text" placeholder="Check Your Email" /></label>
+                          <button type="button" class="ty-card-remove" title="Remove card" @click="removeNextStepCard(i)">✕</button>
+                        </div>
+                        <label class="offer-field"><span>Card text</span><input v-model.trim="card.desc" type="text" placeholder="Confirmation and tracking details…" /></label>
+                      </div>
+                      <button v-if="builder.post_purchase.thank_you.next_steps.length < 6" type="button" class="secondary-action compact" @click="addNextStepCard">+ Add card</button>
+                    </template>
+
+                    <label class="builder-toggle"><input v-model="builder.post_purchase.thank_you.enable_footer" type="checkbox" /><span>Show a footer message</span></label>
+                    <template v-if="builder.post_purchase.thank_you.enable_footer">
+                      <label class="offer-field"><span>Footer headline</span>
+                        <input v-model.trim="builder.post_purchase.thank_you.footer_headline" type="text" :placeholder="SCAFFOLD_PLACEHOLDERS.ty_footer_headline" /></label>
+                      <label class="offer-field"><span>Footer message</span>
+                        <input v-model.trim="builder.post_purchase.thank_you.footer_message" type="text" :placeholder="SCAFFOLD_PLACEHOLDERS.ty_footer_message" /></label>
+                    </template>
+
+                    <label class="builder-toggle"><input v-model="builder.post_purchase.thank_you.show_home_button" type="checkbox" /><span>Show a “Back to Home” link</span></label>
+                    <label v-if="builder.post_purchase.thank_you.show_home_button" class="offer-field"><span>Home link text</span>
+                      <input v-model.trim="builder.post_purchase.thank_you.home_button_text" type="text" :placeholder="SCAFFOLD_PLACEHOLDERS.ty_home_button_text" /></label>
+
+                    <label class="builder-toggle"><input v-model="builder.post_purchase.thank_you.enable_download" type="checkbox" /><span>Show a download button</span></label>
+                    <template v-if="builder.post_purchase.thank_you.enable_download">
+                      <label class="offer-field"><span>Download URL</span>
+                        <input v-model.trim="builder.post_purchase.thank_you.download_url" type="url" placeholder="https://…" /></label>
+                      <label class="offer-field"><span>Download button text</span>
+                        <input v-model.trim="builder.post_purchase.thank_you.download_button_text" type="text" :placeholder="SCAFFOLD_PLACEHOLDERS.ty_download_button_text" /></label>
+                    </template>
                   </template>
 
                   <!-- Sequential upsell page (copy shared across upsell steps) -->
@@ -1404,7 +1444,21 @@ const SCAFFOLD_PLACEHOLDERS = {
   carousel_dismiss_label: "No thanks, I'm good!",
   carousel_proceed_label: "Continue to the next step",
   downsell_carousel_headline: "Before You Go — A Lower-Priced Option",
+  // Thank-you extras (Phase 2 — mirrors upsell_pages.DEFAULT_THANK_YOU).
+  ty_headline_icon: "🎉",
+  ty_next_steps_title: "What's Next?",
+  ty_footer_headline: "The Ball Is in Our Court",
+  ty_footer_message: "Look for an email from us with tracking information about your order.",
+  ty_home_button_text: "Back to Home",
+  ty_download_button_text: "Download Your Product",
 };
+// The runtime's default "What's Next?" cards (mirror of upsell_pages.DEFAULT_THANK_YOU.next_steps) — seeded so
+// the editor shows them; the build only persists them if the tenant changes them.
+const THANK_YOU_DEFAULT_CARDS = [
+  { icon: "📧", title: "Check Your Email", desc: "Confirmation and tracking details are on the way to your inbox." },
+  { icon: "📦", title: "Free Shipping", desc: "Your order will arrive within 5–7 business days." },
+  { icon: "🚀", title: "Start Your Journey", desc: "Begin your routine as soon as it arrives." },
+];
 // Post-Checkout Flow accordion (SALES_FUNNELS.md P3.5): opening a step switches the Live Preview to render
 // THAT funnel page (via /pages/render funnel_step). null = the landing page.
 const openFunnelStep = ref(null);
@@ -1908,7 +1962,15 @@ function defaultBuilderForm() {
     // post_checkout.upsell_scaffold. Only the upsell/downsell/carousel copy matters when offer.funnel carries
     // upsells/downsells; the thank-you copy applies to every transaction funnel.
     post_purchase: {
-      thank_you: { headline: "", subheadline: "", message: "" },
+      thank_you: {
+        headline: "", headline_icon: "", subheadline: "", message: "",
+        enable_celebration: true,
+        enable_next_steps: true, next_steps_title: "",
+        next_steps: THANK_YOU_DEFAULT_CARDS.map((card) => ({ ...card })),
+        enable_footer: false, footer_headline: "", footer_message: "",
+        show_home_button: false, home_button_text: "",
+        enable_download: false, download_button_text: "", download_url: "",
+      },
       upsell: {
         headline: "", subheadline: "", accept_label: "", decline_label: "", downsell_headline: "",
         countdown_enabled: true, countdown_minutes: 1, savings_badge: true,
@@ -2590,10 +2652,22 @@ const UPSELL_SCAFFOLD_TEXT_FIELDS = [
 function thankYouCopyOverrides() {
   const thankYou = builder.post_purchase?.thank_you || {};
   const out = {};
-  ["headline", "subheadline", "message"].forEach((key) => {
-    const value = (thankYou[key] || "").trim();
-    if (value) out[key] = value;
-  });
+  // Text fields: sent only when non-blank (blank falls back to the runtime default).
+  ["headline", "headline_icon", "subheadline", "message", "next_steps_title",
+   "footer_headline", "footer_message", "home_button_text", "download_button_text", "download_url"]
+    .forEach((key) => { const value = (thankYou[key] || "").trim(); if (value) out[key] = value; });
+  // Toggles: sent only when they DEVIATE from the runtime default (celebration/next-steps on; footer/home/
+  // download off), so an untouched thank-you page persists nothing.
+  if (thankYou.enable_celebration === false) out.enable_celebration = false;
+  if (thankYou.enable_next_steps === false) out.enable_next_steps = false;
+  if (thankYou.enable_footer === true) out.enable_footer = true;
+  if (thankYou.show_home_button === true) out.show_home_button = true;
+  if (thankYou.enable_download === true) out.enable_download = true;
+  // "What's Next?" cards: sent only when edited away from the defaults.
+  const cards = (thankYou.next_steps || [])
+    .map((c) => ({ icon: (c.icon || "").trim(), title: (c.title || "").trim(), desc: (c.desc || "").trim() }))
+    .filter((c) => c.title || c.desc);
+  if (JSON.stringify(cards) !== JSON.stringify(THANK_YOU_DEFAULT_CARDS)) out.next_steps = cards;
   return out;
 }
 
@@ -2616,15 +2690,26 @@ function loadPostPurchase(page) {
   const postCheckout = page.post_checkout || {};
   const thankYou = postCheckout.thank_you_page || {};
   const scaffold = postCheckout.upsell_scaffold || {};
+  const savedCards = Array.isArray(thankYou.next_steps) && thankYou.next_steps.length
+    ? thankYou.next_steps.map((c) => ({ icon: c.icon || "", title: c.title || "", desc: c.desc || "" }))
+    : base.thank_you.next_steps;
   return {
+    // Overlay the stored overrides on the defaults so un-overridden fields stay blank (placeholder = default);
+    // page_id is not an editor field. next_steps is handled separately (list, not a scalar).
     thank_you: {
-      headline: thankYou.headline || "",
-      subheadline: thankYou.subheadline || "",
-      message: thankYou.message || "",
+      ...base.thank_you,
+      ...Object.fromEntries(Object.entries(thankYou).filter(([k, v]) => k !== "page_id" && k !== "next_steps" && v != null)),
+      next_steps: savedCards,
     },
-    // Overlay the stored overrides on the defaults so un-overridden fields stay blank (placeholder = default).
     upsell: { ...base.upsell, ...Object.fromEntries(Object.entries(scaffold).filter(([, v]) => v != null)) },
   };
+}
+
+function addNextStepCard() {
+  builder.post_purchase.thank_you.next_steps.push({ icon: "", title: "", desc: "" });
+}
+function removeNextStepCard(index) {
+  builder.post_purchase.thank_you.next_steps.splice(index, 1);
 }
 
 function buildBuilderPageDocument() {

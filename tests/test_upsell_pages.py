@@ -260,5 +260,51 @@ class RenderFunnelStepPreviewTests(unittest.TestCase):
         self.assertEqual(preview, published)
 
 
+class ThankYouExtrasTests(unittest.TestCase):
+    """Thank-you page extras (SALES_FUNNELS.md P3.5 Phase 2, stripe-cart parity): celebration burst, the
+    "What's Next?" cards, footer, home link, download."""
+
+    def _offer(self):
+        return {"offer_id": "o", "tenant_id": "t", "stripe_mode": "test", "presentation": {"brand": "Axel"}, "funnel": {"upsells": []}}
+
+    def _render(self, thank_you):
+        page = {"page_id": "p", "tenant_id": "t", "theme": {"template": "universal_bundle"},
+                "post_checkout": {"thank_you_page": {"page_id": "ty", **thank_you}}}
+        return render_funnel_step_html("thank_you", page, self._offer(), {})
+
+    # Assert on the rendered ELEMENT (data-section-type) — the CSS class names always appear in the <style>.
+    def test_defaults_show_celebration_and_next_steps(self):
+        html = self._render({})
+        self.assertIn('data-section-type="celebration"', html)
+        self.assertIn('data-section-type="next_steps"', html)
+        self.assertIn("Check Your Email", html)      # default card
+        self.assertIn("🎉", html)                     # default headline icon
+
+    def test_toggles_off_remove_sections(self):
+        html = self._render({"enable_celebration": False, "enable_next_steps": False})
+        self.assertNotIn('data-section-type="celebration"', html)
+        self.assertNotIn('data-section-type="next_steps"', html)
+
+    def test_custom_cards_and_title(self):
+        html = self._render({"next_steps_title": "Here's the plan",
+                             "next_steps": [{"icon": "⭐", "title": "One thing", "desc": "Do it"}]})
+        self.assertIn("One thing", html)         # card title (escaped verbatim, not title-cased)
+        self.assertNotIn("Check Your Email", html)
+
+    def test_footer_home_and_download(self):
+        html = self._render({"enable_footer": True, "footer_message": "Talk soon here.",
+                             "show_home_button": True, "home_button_text": "Go home",
+                             "enable_download": True, "download_url": "https://x/g.pdf", "download_button_text": "Get it"})
+        self.assertIn('data-section-type="thank_you_footer"', html)
+        self.assertIn("Talk soon here.", html)
+        self.assertIn("Go home", html)
+        self.assertIn("https://x/g.pdf", html)
+        self.assertIn("Get it", html)
+
+    def test_download_without_url_is_omitted(self):
+        html = self._render({"enable_download": True, "download_url": ""})
+        self.assertNotIn("sl-ty-download\"", html)   # the <a>, not the always-present CSS rule
+
+
 if __name__ == "__main__":
     unittest.main()

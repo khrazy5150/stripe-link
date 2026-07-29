@@ -236,10 +236,24 @@ def validate_thank_you_page(value: Any, label: str) -> None:
         url = require_string(value, "url", f"{label}.url")
         if not HTTP_URL_PATTERN.match(url):
             raise DocumentValidationError(f"{label}.url must be an HTTP(S) URL.")
-    # Editable thank-you copy (SALES_FUNNELS.md P3.5) — overrides the synthesized terminus's defaults. Only
-    # meaningful for a page_id (self-hosted) terminus; harmless on a url terminus.
-    for field in ("headline", "subheadline", "message"):
+    # Editable thank-you copy + optional sections (SALES_FUNNELS.md P3.5) — overrides the synthesized terminus's
+    # defaults. Only meaningful for a page_id (self-hosted) terminus; harmless on a url terminus.
+    for field in ("headline", "subheadline", "message", "next_steps_title", "footer_headline",
+                  "footer_message", "home_button_text", "download_button_text", "download_url"):
         optional_string(value, field, f"{label}.{field}", max_length=300)
+    optional_string(value, "headline_icon", f"{label}.headline_icon", max_length=16)
+    for field in ("enable_celebration", "enable_next_steps", "enable_footer", "show_home_button", "enable_download"):
+        optional_bool(value, field, f"{label}.{field}")
+    if value.get("next_steps") is not None:
+        cards = value.get("next_steps")
+        if not isinstance(cards, list) or len(cards) > 6:
+            raise DocumentValidationError(f"{label}.next_steps must be an array of at most 6 cards.")
+        for index, card in enumerate(cards):
+            if not isinstance(card, dict):
+                raise DocumentValidationError(f"{label}.next_steps[{index}] must be an object.")
+            optional_string(card, "icon", f"{label}.next_steps[{index}].icon", max_length=16)
+            optional_string(card, "title", f"{label}.next_steps[{index}].title", max_length=120)
+            optional_string(card, "desc", f"{label}.next_steps[{index}].desc", max_length=300)
 
 
 # The customer-facing copy for the synthesized post-purchase pages (upsell_pages.DEFAULT_UPSELL_SCAFFOLD).
