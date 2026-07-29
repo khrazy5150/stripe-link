@@ -101,6 +101,22 @@
             <input v-model.trim="form.page_defaults.upsell.decline_button_text" type="text" placeholder="No, Thank You! Let's Move On" />
           </label>
         </div>
+        <div class="offer-two-column">
+          <label class="offer-field">
+            <span>Price Label</span>
+            <input v-model.trim="form.page_defaults.upsell.price_label" type="text" placeholder="Yours for only" />
+            <small>Shown above the price on the upsell page.</small>
+          </label>
+          <label class="offer-field">
+            <span>Downsell Headline</span>
+            <input v-model.trim="form.page_defaults.upsell.downsell_headline" type="text" placeholder="Wait — Here's a Smaller Option" />
+          </label>
+        </div>
+        <label class="offer-field">
+          <span>Downsell Note</span>
+          <input v-model.trim="form.page_defaults.upsell.downsell_note" type="text" placeholder="This offer will not be shown again." />
+          <small>A last-chance line above the button, shown when the downsell appears.</small>
+        </label>
       </div>
     </section>
 
@@ -326,6 +342,9 @@ const UPSELL_DEFAULTS = {
   subheadline: "Exclusive One-Time Offer Just For You",
   accept_button_text: acceptButtonPlaceholder,
   decline_button_text: "No, Thank You! Let's Move On",
+  price_label: "Yours for only",
+  downsell_headline: "Wait — Here's a Smaller Option",
+  downsell_note: "This offer will not be shown again.",
 };
 const THANK_YOU_DEFAULTS = {
   headline: "Thank You for Your Purchase!",
@@ -345,7 +364,10 @@ function defaultForm() {
     support: { email: "", phone: "", sms_notification_phone: "" },
     checkout: { phone_number_collection_enabled: false, default_success_url: "", default_cancel_url: "" },
     page_defaults: {
-      upsell: { headline: "", subheadline: "", accept_button_text: "", decline_button_text: "" },
+      upsell: {
+        headline: "", subheadline: "", accept_button_text: "", decline_button_text: "",
+        price_label: "", downsell_headline: "", downsell_note: "",
+      },
       thank_you: {
         headline: "", headline_icon: "", subtitle: "", message: "",
         enable_celebration: true, enable_next_steps: true, next_steps_title: "",
@@ -383,6 +405,9 @@ function applyConfig(config) {
       subheadline: upsell.subheadline || "",
       accept_button_text: upsell.accept_button_text || "",
       decline_button_text: upsell.decline_button_text || "",
+      price_label: upsell.price_label || "",
+      downsell_headline: upsell.downsell_headline || "",
+      downsell_note: upsell.downsell_note || "",
     },
     thank_you: {
       headline: thankYou.headline || "",

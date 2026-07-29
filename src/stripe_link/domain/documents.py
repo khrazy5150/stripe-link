@@ -1321,7 +1321,8 @@ def validate_tenant_config(document: dict[str, Any]) -> None:
         if upsell is not None:
             if not isinstance(upsell, dict):
                 raise DocumentValidationError("Tenant config page_defaults.upsell must be an object.")
-            for field in ("headline", "subheadline", "accept_button_text", "decline_button_text"):
+            for field in ("headline", "subheadline", "accept_button_text", "decline_button_text",
+                          "price_label", "downsell_headline", "downsell_note"):
                 optional_string(upsell, field, f"page_defaults.upsell.{field}", max_length=300)
         thank_you = page_defaults.get("thank_you")
         if thank_you is not None:

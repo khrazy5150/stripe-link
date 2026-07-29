@@ -4924,9 +4924,13 @@ def render_page_interactions_script(page: dict[str, Any]) -> str:
         "        };",
         "        const startTimer = () => {",
         "          if (!render()) return;",
-        "          interval = window.setInterval(() => {",
-        "            if (!render()) window.clearInterval(interval);",
+        # Capture THIS run's timer id locally so its own tick clears only itself. The expiry render() restarts the
+        # countdown synchronously (downsell swap), reassigning `interval` to the fresh timer; clearing the shared
+        # variable here would kill that fresh timer instead of the expired one.
+        "          const timer = window.setInterval(() => {",
+        "            if (!render()) window.clearInterval(timer);",
         "          }, 1000);",
+        "          interval = timer;",
         "        };",
         # Re-arm the timer for the downsell: fresh deadline, reset label + start color, so it counts down anew and
         # its next expiry advances the funnel (the downsell is already showing).

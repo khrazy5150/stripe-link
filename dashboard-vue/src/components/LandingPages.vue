@@ -2791,6 +2791,9 @@ function configUpsellSeed() {
   if (c.subheadline) seed.subheadline = c.subheadline;
   if (c.accept_button_text) seed.accept_label = c.accept_button_text;
   if (c.decline_button_text) seed.decline_label = c.decline_button_text;
+  if (c.price_label) seed.price_label = c.price_label;
+  if (c.downsell_headline) seed.downsell_headline = c.downsell_headline;
+  if (c.downsell_note) seed.downsell_note = c.downsell_note;
   return seed;
 }
 
