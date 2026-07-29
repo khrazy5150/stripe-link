@@ -82,7 +82,9 @@ def synthesize_upsell_offer(
         "items": [{"product_id": entry["product_id"], "price_id": entry["price_id"], "quantity": 1}],
         "presentation": {
             "headline": scaffold["headline"],
-            "subheadline": scaffold.get("subheadline") or product.get("description", ""),
+            # The hook subheadline only — the product's own description now renders as its own block on the page
+            # (synthesize_upsell_page), so it must not double as the subheadline.
+            "subheadline": scaffold.get("subheadline") or "",
             "hero_image_url": (product.get("images") or [""])[0] or "",
             "brand": (source_offer.get("presentation") or {}).get("brand", ""),
             "cta_label": accept_label,
@@ -140,10 +142,22 @@ def synthesize_upsell_page(
             "downsell_label": _fill_price(scaffold["accept_label"], ds_amount, ds_currency),
             "downsell_headline": scaffold.get("downsell_headline") or "",
         })
+    # Give an unfamiliar upsell product proper context (SALES_FUNNELS.md P3.5 Phase 1): the whole image gallery
+    # (not one image) + a description block from the product itself. An upsell is now often a DIFFERENT product
+    # (or a service) the buyer doesn't know, so it needs its own sales context — derived from the product the
+    # tenant already maintains, so no per-upsell editing is required for the basics.
+    product = entry["product"]
+    gallery = [image for image in (product.get("images") or []) if image]
+    description = str(product.get("description") or "").strip()
     sections.extend([
-        {"id": "hero-media", "type": "hero_media"},
+        {"id": "hero-media", "type": "hero_media", "images": gallery},
         {"id": "headline", "type": "headline", "text": presentation["headline"]},
         {"id": "subheadline", "type": "subheadline", "text": presentation["subheadline"]},
+    ])
+    if description:
+        sections.append({"id": "product-details", "type": "content_block",
+                         "blocks": [{"title": str(product.get("name") or ""), "text": description}]})
+    sections.extend([
         {"id": "offer-selector", "type": "offer_price_selector", "offer_id": offer["offer_id"]},
         checkout_section,
     ])

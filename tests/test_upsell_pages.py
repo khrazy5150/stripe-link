@@ -243,6 +243,18 @@ class RenderFunnelStepPreviewTests(unittest.TestCase):
         self.assertIn("Custom Upsell", html)
         self.assertTrue(re.search(r"Grab it for \$", html), "the {{ upsell_price }} token is filled with the price")
 
+    def test_upsell_page_shows_the_product_description_and_gallery(self):
+        # Phase 1: an unfamiliar upsell product gets its own context — a description block + the full image
+        # gallery (not one image) — derived from the product, no per-upsell editing needed.
+        product = dict(self.product)
+        product["description"] = "5000mg pure creatine per serving. Great for recovery."
+        product["images"] = ["https://img/a.jpg", "https://img/b.jpg", "https://img/c.jpg"]
+        html = render_funnel_step_html("upsell:0", self.page, self.offer, {product["product_id"]: product})
+        self.assertIn('data-section-type="content_block"', html)   # description renders as its own block
+        self.assertIn("Great for recovery", html)
+        self.assertIn("https://img/b.jpg", html)                   # gallery, not just the first image
+        self.assertIn("https://img/c.jpg", html)
+
     def test_upsell_out_of_range_raises(self):
         with self.assertRaises(RenderError):
             render_funnel_step_html("upsell:5", self.page, self.offer, self.products_by_id)

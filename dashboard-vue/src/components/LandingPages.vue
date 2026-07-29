@@ -1027,7 +1027,10 @@
           </section>
 
           <section v-if="builderIntent === 'transaction'" class="builder-section">
-            <h3>Post-Checkout Flow</h3>
+            <div class="builder-section-title">
+              <h3>Post-Checkout Flow</h3>
+              <button type="button" class="secondary-action compact" @click="showPurchaseFlow = true">View purchase flow</button>
+            </div>
             <p>Configure the pages customers see after checkout. Open a step to edit it — the Live Preview switches to that page. Leave a field blank to use the default (shown as the placeholder). Put <code>{{ PRICE_TOKEN }}</code> in a button label to insert that product's price.</p>
 
             <div class="funnel-accordion">
@@ -1300,6 +1303,20 @@
         </footer>
       </section>
     </div>
+
+    <!-- Read-only purchase-flow reference (same diagram as the Offer editor), from the current offer. -->
+    <div v-if="showPurchaseFlow" class="modal-backdrop" @click.self="showPurchaseFlow = false">
+      <section class="modal-card" role="dialog" aria-modal="true" aria-labelledby="purchaseFlowTitle">
+        <header class="modal-card-header">
+          <h2 id="purchaseFlowTitle">Purchase Flow</h2>
+          <button type="button" class="modal-close" aria-label="Close purchase flow" @click="showPurchaseFlow = false">×</button>
+        </header>
+        <div class="modal-card-body">
+          <p class="funnel-shared-note">Read-only. Every step is inferred from this offer's products and their pricing contexts (set in Products → pricing context). Configure it in the offer.</p>
+          <PurchaseFlowDiagram :offer-name="builderOffer?.name || builder.offerName" :stages="funnelFlowStages" />
+        </div>
+      </section>
+    </div>
   </section>
 </template>
 
@@ -1309,6 +1326,7 @@ import { offerViewTargets, offerViewTargetsFromExpanded } from "../composables/u
 import { isSectionVisible, defaultVisible, recommendedSectionKeys, optionalSectionKeys, governedKeys, elementLabel, elementChannel, addableElements, tokenGroups, previewVar, supportedGoals, goalLabel, packSeeds } from "../composables/pageComposer";
 import { apiRequest, getApiBase, getApiEnvironment, getOtherEnvironment, getPagesBaseUrl, getPreviewPagesBaseUrl, getTenantId } from "../api/client";
 import { formatMoney } from "../stores/products";
+import PurchaseFlowDiagram from "./PurchaseFlowDiagram.vue";
 import { useProfileStore } from "../stores/profile";
 import { useSitesStore } from "../stores/sites";
 import { useSubdomainCheck } from "../composables/useSubdomainCheck";
@@ -1432,6 +1450,48 @@ const builderIntent = computed(() => builderOffer.value?.product_intent || build
 const funnelUpsellCount = computed(() => (builderOffer.value?.funnel?.upsells || []).length);
 const funnelDownsellCount = computed(() => (builderOffer.value?.funnel?.downsells || []).length);
 const hasPostPurchaseFunnel = computed(() => funnelUpsellCount.value + funnelDownsellCount.value > 0);
+// The offer's purchase flow, computed from the SAVED offer (items + funnel) for the read-only reference diagram
+// (shared PurchaseFlowDiagram, same as the Offer editor). plans/SALES_FUNNELS.md.
+const showPurchaseFlow = ref(false);
+function funnelPriceRef(product, priceId) {
+  const price = (product?.prices || []).find((p) => p.price_id === priceId);
+  return price ? formatMoney(Number(price.unit_amount || 0), price.currency) : "";
+}
+const funnelFlowStages = computed(() => {
+  const offer = builderOffer.value;
+  if (!offer) return [];
+  const stages = [];
+  const landing = (offer.items || []).map((item, i) => {
+    const product = productsById.value.get(item.product_id);
+    const tiers = (item.selectable_prices || []).length;
+    return { key: `${item.product_id}-${i}`, intent: "primary", product: product || { name: item.product_id },
+             chips: [tiers > 1 ? `${tiers} quantity tiers` : "standard"] };
+  }).filter((x) => x.product);
+  if (landing.length) stages.push({ key: "landing", label: "Landing page", hint: "what the customer buys", items: landing });
+
+  const funnel = offer.funnel || {};
+  const bumps = (funnel.order_bumps || []).map((b, i) => {
+    const product = productsById.value.get(b.product_id);
+    return { key: `${b.product_id}-${i}`, intent: "cross_sell", product: product || { name: b.product_id },
+             amount: funnelPriceRef(product, b.price_id) };
+  }).filter((x) => x.product);
+  if (bumps.length) stages.push({ key: "checkout", label: "At checkout", hint: "Stripe order bump", items: bumps });
+
+  const downsellByProduct = {};
+  (funnel.downsells || []).forEach((d) => { downsellByProduct[d.product_id] = d; });
+  const upsells = (funnel.upsells || []).map((u, i) => {
+    const product = productsById.value.get(u.product_id);
+    const ds = downsellByProduct[u.product_id];
+    return { key: `${u.product_id}-${i}`, intent: "upgrade", product: product || { name: u.product_id },
+             amount: funnelPriceRef(product, u.price_id),
+             downsell: ds ? { amount: funnelPriceRef(product, ds.price_id) } : null };
+  }).filter((x) => x.product);
+  if (upsells.length) stages.push({
+    key: "post_purchase", label: "After purchase",
+    hint: upsells.length > 3 ? `carousel · ${upsells.length} upsells` : "one at a time", items: upsells,
+  });
+  return stages;
+});
 // The runtime default copy shown as editor placeholders (mirrors upsell_pages.py DEFAULT_UPSELL_SCAFFOLD /
 // DEFAULT_THANK_YOU). PRICE_TOKEN is interpolated as literal text (a bare {{ }} in the template would break
 // the parser). {{ upsell_price }} in a button label is replaced with the product's price at render.
