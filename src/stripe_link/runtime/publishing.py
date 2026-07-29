@@ -777,6 +777,9 @@ def publish_page_document(
                 selected_prices={entry["product_id"]: entry["price_id"]},
                 checkout_url=checkout, api_base_url=api_base_url,
                 robots=NOINDEX_ROBOTS, site=site, page_type="funnel_step",
+                # The upsell product's own reviews surface on its page too (Phase 1b); page_reviews already
+                # covers every offer product (it's loaded from products_by_id, which includes the funnel ones).
+                reviews=page_reviews,
             )
             _write_funnel_artifact(str(up_page["page_id"]), up_html, f"upsell_{entry['sequence']}")
 
@@ -852,6 +855,7 @@ def render_funnel_step_html(
     checkout_url: str | None = None,
     api_base_url: str = "",
     site: dict[str, Any] | None = None,
+    reviews: list[dict[str, Any]] | None = None,
 ) -> str:
     """Render ONE post-purchase funnel step to HTML for the dashboard Live Preview (SALES_FUNNELS.md P3.5).
 
@@ -860,7 +864,9 @@ def render_funnel_step_html(
     calls, same render_page args — so the preview is byte-identical to the published funnel page (one renderer).
     It only renders; it never writes artifacts. Raises RenderError for an unknown or unavailable step."""
     scaffold = upsell_scaffold(page)
-    common = dict(checkout_url=checkout_url, api_base_url=api_base_url, robots=NOINDEX_ROBOTS, site=site)
+    # Reviews for the upsell product surface on its page too (Phase 1b) — the reviews list is keyed by product,
+    # so render_reviews_block shows only the upsell product's; the thank-you page (no product) ignores it.
+    common = dict(checkout_url=checkout_url, api_base_url=api_base_url, robots=NOINDEX_ROBOTS, site=site, reviews=reviews)
     if step == "thank_you":
         ty_page, ty_offer = synthesize_thank_you_page(page, offer)
         return render_page(ty_page, ty_offer, {}, page_type="thank_you", **common)

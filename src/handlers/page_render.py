@@ -117,7 +117,7 @@ def handler(event, context, *, sites_repo=None, reviews_repo=None):
                 return error_response("A funnel-step preview requires the page's offer.", code="render_error")
             funnel_html = render_funnel_step_html(
                 funnel_step, page, offer, products_by_id,
-                checkout_url=checkout_url, api_base_url=api_base_url, site=site,
+                checkout_url=checkout_url, api_base_url=api_base_url, site=site, reviews=reviews,
             )
             return json_response({"html": funnel_html, "warnings": {"structured_data": [], "page_health": []}})
         html = render_page(

@@ -256,6 +256,18 @@ class RenderFunnelStepPreviewTests(unittest.TestCase):
         self.assertIn("https://img/b.jpg", html)                   # gallery, not just the first image
         self.assertIn("https://img/c.jpg", html)
 
+    def test_upsell_page_shows_the_products_reviews(self):
+        # Phase 1b: the upsell product's own reviews render on its page (social proof for a cold upsell). Keyed
+        # by product, so only the upsell product's show; passing none renders no block.
+        pid = self.product["product_id"]
+        reviews = [{"review_id": "r1", "tenant_id": "t", "target": {"type": "product", "id": pid},
+                    "rating": 5, "author": "Alex", "body": "Best creatine ever!", "status": "approved", "source": "first_party"}]
+        html = render_funnel_step_html("upsell:0", self.page, self.offer, {pid: self.product}, reviews=reviews)
+        self.assertIn('data-section-type="reviews"', html)
+        self.assertIn("Best creatine ever!", html)
+        self.assertNotIn('data-section-type="reviews"',
+                         render_funnel_step_html("upsell:0", self.page, self.offer, {pid: self.product}))
+
     def test_upsell_out_of_range_raises(self):
         with self.assertRaises(RenderError):
             render_funnel_step_html("upsell:5", self.page, self.offer, self.products_by_id)
