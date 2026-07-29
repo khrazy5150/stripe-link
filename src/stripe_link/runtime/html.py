@@ -539,6 +539,7 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     "    .sl-cta{display:inline-flex;width:min(52rem,100%);align-items:center;justify-content:center;background:linear-gradient(135deg,var(--sl-cta-from),var(--sl-cta-to));color:var(--sl-cta-text);border:0;border-radius:1rem;padding:1.5rem 1.8rem;font-family:var(--sl-font-accent);font-size:1.7rem;font-weight:900;text-decoration:none}",
     "    .sl-cta.is-connecting{opacity:.72;cursor:wait;pointer-events:none}",
     "    .sl-decline-cta{width:auto;background:none;color:var(--sl-muted);text-decoration:underline;font-weight:600;font-size:1.3rem;padding:0.4rem}",
+    "    .sl-downsell-note{text-align:center;color:var(--sl-muted);font-size:1.4rem;font-weight:600;margin-bottom:0.4rem}",
     "    .sl-call-number{width:auto;color:var(--sl-cta-text);font-family:var(--sl-font-accent);font-weight:900;font-size:2.2rem;letter-spacing:0.02em;text-decoration:none}",
     "    .sl-lead-form{display:flex;flex-direction:column;gap:1rem;width:min(52rem,100%);background:var(--sl-price-card-bg);border:1px solid var(--sl-price-card-border);border-radius:1.2rem;padding:1.6rem}",
     "    .sl-lead-title{font-family:var(--sl-font-heading);font-weight:800;font-size:1.8rem;color:var(--sl-price-title)}",
@@ -1404,7 +1405,11 @@ def _render_page_body(
         for section in head_sections
     ) if part)
     has_legal_footer_section = any(section.get("type") == "legal_footer" for section in composed_sections)
-    legal_footer = "" if has_legal_footer_section else render_legal_footer(page.get("legal") or {}, api_base_url=api_base_url)
+    # Post-purchase funnel pages (upsell / downsell / thank-you) drop the auto legal footer: they are one-click
+    # continuations of an already-completed checkout, not standalone sales pages, so the Terms/Privacy/Refund
+    # links are noise there (user request). An explicitly-authored legal_footer section still renders.
+    suppress_legal_footer = str(_RENDER_STATE.get("page_type") or "") in ("funnel_step", "thank_you")
+    legal_footer = "" if (has_legal_footer_section or suppress_legal_footer) else render_legal_footer(page.get("legal") or {}, api_base_url=api_base_url)
     analytics_tags = render_analytics_tags(page.get("analytics") or {})
     analytics_adapters = render_analytics_adapters(page.get("analytics") or {})
     # A listicle page gets a persistent mini-cart (client-side this phase; server-side cart is L2).
@@ -4042,6 +4047,13 @@ def render_buy_cta(
             f" data-downsell-headline=\"{escape(str(section.get('downsell_headline') or ''))}\""
         )
     hide_attr += downsell_attr
+    # A last-chance note the island reveals once the downsell is showing (its final second-chance offer won't
+    # come back). Hidden until then, and only emitted when this CTA actually carries a downsell.
+    downsell_note = str(section.get("downsell_note") or "")
+    note_html = (
+        f"      <p class=\"sl-downsell-note\" data-downsell-note hidden>{escape(downsell_note)}</p>"
+        if downsell_price_id and downsell_note else ""
+    )
     checkout = checkout_context(page, offer, resolved_offer, checkout_url, api_base_url)
     href = escape(checkout["href"])
     data_attrs = " ".join(
@@ -4049,12 +4061,13 @@ def render_buy_cta(
         for key, value in checkout["data"].items()
         if value is not None and value != ""
     )
-    return "\n".join([
+    return "\n".join(line for line in [
         "    <section class=\"sl-checkout-cta\" data-section-type=\"checkout_cta\" data-cta-type=\"buy\">",
+        note_html,
         f"      <a class=\"sl-cta\" href=\"{href}\" data-cta-label=\"{label}\"{hide_attr} data-cta-currency=\"{escape(currency)}\" data-cta-amount=\"{subtotal}\" {data_attrs}>{cta_text}</a>",
         f"      <a class=\"sl-cta sl-decline-cta\" href=\"#decline\" data-role=\"decline\" style=\"display:none\">{decline_label}</a>",
         "    </section>",
-    ])
+    ] if line)
 
 
 def render_call_cta(cta: dict[str, str]) -> str:
@@ -4799,6 +4812,7 @@ def render_page_interactions_script(page: dict[str, Any]) -> str:
         "          }",
         "          const dsHead = cta.dataset.downsellHeadline;",
         "          if (dsHead) { const h = document.querySelector('.sl-headline h1') || document.querySelector('.sl-headline'); if (h) h.textContent = dsHead; }",
+        "          const dsNote = document.querySelector('[data-downsell-note]'); if (dsNote) dsNote.hidden = false;",
         # Restart the countdown for the downsell: when it expires again, funnelDeclineOrExpire advances (the
         # downsell is already shown) instead of swapping a second time.
         "          funnelCountdownRestarts.forEach((restart) => restart());",

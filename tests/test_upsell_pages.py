@@ -90,6 +90,22 @@ class SynthesizeUpsellPageTests(unittest.TestCase):
         self.assertIn("data-fp-compare-at=", html)
         self.assertIn("funnelCountdownRestarts.push", html)
         self.assertIn("funnelCountdownRestarts.forEach", html)
+        # A last-chance note sits hidden above the CTA and the swap reveals it (the second-chance won't return).
+        self.assertIn("data-downsell-note hidden", html)
+        self.assertIn("This offer will not be shown again.", html)
+        self.assertIn("dsNote.hidden = false", html)
+
+    def test_funnel_pages_drop_the_legal_footer(self):
+        # Post-purchase pages are one-click continuations of a completed checkout, not standalone sales pages, so
+        # the Terms/Privacy/Refund footer is suppressed on both the upsell and thank-you steps (user request).
+        entry = post_purchase_plan(self.source_offer, self.products_by_id)["upsells"][0]
+        up_page, up_offer = synthesize_upsell_page(
+            entry, source_page=self.source_page, source_offer=self.source_offer, scaffold=upsell_scaffold(self.source_page),
+        )
+        up = render_page(up_page, up_offer, self.products_by_id,
+                         selected_prices={"prod_creatine_gummies": "price_upsell_1bottle"}, page_type="funnel_step")
+        self.assertNotIn("Terms of Service", up)
+        self.assertNotIn('class="sl-legal"', up)
 
     def test_no_downsell_attributes_when_product_has_no_downsell_price(self):
         entry = post_purchase_plan(self.source_offer, self.products_by_id)["upsells"][0]
@@ -244,6 +260,7 @@ class RenderFunnelStepPreviewTests(unittest.TestCase):
         html = render_funnel_step_html("thank_you", self.page, self.offer, self.products_by_id)
         self.assertIn("Custom Thanks", html)
         self.assertIn("See you soon.", html)
+        self.assertNotIn("Terms of Service", html)  # post-purchase page drops the legal footer
 
     def test_upsell_step_renders_scaffold_copy_and_substituted_price(self):
         html = render_funnel_step_html("upsell:0", self.page, self.offer, self.products_by_id)

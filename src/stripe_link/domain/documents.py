@@ -259,7 +259,8 @@ def validate_thank_you_page(value: Any, label: str) -> None:
 # The customer-facing copy for the synthesized post-purchase pages (upsell_pages.DEFAULT_UPSELL_SCAFFOLD).
 # Blank overrides fall back to the runtime defaults, so every field is optional here.
 UPSELL_SCAFFOLD_TEXT_FIELDS = (
-    "headline", "subheadline", "accept_label", "decline_label", "downsell_headline",
+    "headline", "subheadline", "accept_label", "decline_label", "price_label",
+    "downsell_headline", "downsell_note",
     "carousel_headline", "carousel_subheadline", "carousel_add_label", "carousel_dismiss_label",
     "carousel_proceed_label", "downsell_carousel_headline",
 )

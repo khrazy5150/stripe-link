@@ -21,6 +21,7 @@ DEFAULT_UPSELL_SCAFFOLD: dict[str, Any] = {
     "accept_label": "Yes, I'll Take This Deal for {{ upsell_price }}",
     "decline_label": "No, Thank You! Let's Move On",
     "downsell_headline": "Wait — Here's a Smaller Option",
+    "downsell_note": "This offer will not be shown again.",
     "countdown_enabled": True,
     "countdown_minutes": 1,
     "savings_badge": True,
@@ -142,6 +143,7 @@ def synthesize_upsell_page(
             "downsell_currency": ds_currency,
             "downsell_label": _fill_price(scaffold["accept_label"], ds_amount, ds_currency),
             "downsell_headline": scaffold.get("downsell_headline") or "",
+            "downsell_note": scaffold.get("downsell_note") or "",
         })
     # Give an unfamiliar upsell product proper context (SALES_FUNNELS.md P3.5 Phase 1): the whole image gallery
     # (not one image) + a description block from the product itself. An upsell is now often a DIFFERENT product
