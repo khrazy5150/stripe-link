@@ -1384,6 +1384,13 @@ const subImageInputs = ref({});
 const subImageUploading = reactive({});
 const subImageErrors = reactive({});
 const form = reactive(defaultWizardForm());
+// The default "What's Next?" cards (mirror of upsell_pages.DEFAULT_THANK_YOU.next_steps). Declared BEFORE
+// `builder` because defaultBuilderForm() reads it — a const referenced before its line throws a TDZ error.
+const THANK_YOU_DEFAULT_CARDS = [
+  { icon: "📧", title: "Check Your Email", desc: "Confirmation and tracking details are on the way to your inbox." },
+  { icon: "📦", title: "Free Shipping", desc: "Your order will arrive within 5–7 business days." },
+  { icon: "🚀", title: "Start Your Journey", desc: "Begin your routine as soon as it arrives." },
+];
 const builder = reactive(defaultBuilderForm());
 const defaultFaviconUrl = "https://images.juniorbay.com/icon/favicon.png";
 // The saved document carries no legal URLs and no resolved year: render_legal_footer builds the platform
@@ -1452,13 +1459,6 @@ const SCAFFOLD_PLACEHOLDERS = {
   ty_home_button_text: "Back to Home",
   ty_download_button_text: "Download Your Product",
 };
-// The runtime's default "What's Next?" cards (mirror of upsell_pages.DEFAULT_THANK_YOU.next_steps) — seeded so
-// the editor shows them; the build only persists them if the tenant changes them.
-const THANK_YOU_DEFAULT_CARDS = [
-  { icon: "📧", title: "Check Your Email", desc: "Confirmation and tracking details are on the way to your inbox." },
-  { icon: "📦", title: "Free Shipping", desc: "Your order will arrive within 5–7 business days." },
-  { icon: "🚀", title: "Start Your Journey", desc: "Begin your routine as soon as it arrives." },
-];
 // Post-Checkout Flow accordion (SALES_FUNNELS.md P3.5): opening a step switches the Live Preview to render
 // THAT funnel page (via /pages/render funnel_step). null = the landing page.
 const openFunnelStep = ref(null);
