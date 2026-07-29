@@ -1,9 +1,11 @@
 import json
 import pathlib
+import re
 import unittest
 
 from stripe_link.domain.funnels import post_purchase_plan
-from stripe_link.runtime.html import render_page
+from stripe_link.runtime.html import RenderError, render_page
+from stripe_link.runtime.publishing import render_funnel_step_html
 from stripe_link.runtime.upsell_pages import (
     DEFAULT_UPSELL_SCAFFOLD,
     synthesize_downsell_carousel_page,
@@ -209,6 +211,53 @@ class SynthesizeCarouselTests(unittest.TestCase):
         self.assertIn("/upsell/charge", html)
         self.assertIn("post-checkout/next", html)
         self.assertIn("noindex", html)
+
+
+class RenderFunnelStepPreviewTests(unittest.TestCase):
+    """render_funnel_step_html (SALES_FUNNELS.md P3.5) — the builder's per-step Live Preview. It mirrors the
+    publish-time synthesis, so a step renders the same page a buyer would see."""
+
+    def setUp(self):
+        self.product = _load("product-creatine-gummies.json")
+        self.products_by_id = {self.product["product_id"]: self.product}
+        self.offer = {
+            "offer_id": "offer_main", "tenant_id": "tenant_demo", "stripe_mode": "test",
+            "presentation": {"brand": "JuniorBay"},
+            "funnel": {"upsells": [{"product_id": self.product["product_id"], "price_id": "price_upsell_1bottle"}]},
+        }
+        self.page = {
+            "page_id": "page_main", "tenant_id": "tenant_demo", "theme": {"template": "universal_bundle"},
+            "post_checkout": {
+                "thank_you_page": {"page_id": "ty", "headline": "Custom Thanks", "message": "See you soon."},
+                "upsell_scaffold": {"headline": "Wait Custom Upsell", "accept_label": "Grab it for {{ upsell_price }}"},
+            },
+        }
+
+    def test_thank_you_step_renders_editable_copy(self):
+        html = render_funnel_step_html("thank_you", self.page, self.offer, self.products_by_id)
+        self.assertIn("Custom Thanks", html)
+        self.assertIn("See you soon.", html)
+
+    def test_upsell_step_renders_scaffold_copy_and_substituted_price(self):
+        html = render_funnel_step_html("upsell:0", self.page, self.offer, self.products_by_id)
+        self.assertIn("Custom Upsell", html)
+        self.assertTrue(re.search(r"Grab it for \$", html), "the {{ upsell_price }} token is filled with the price")
+
+    def test_upsell_out_of_range_raises(self):
+        with self.assertRaises(RenderError):
+            render_funnel_step_html("upsell:5", self.page, self.offer, self.products_by_id)
+
+    def test_unknown_step_raises(self):
+        with self.assertRaises(RenderError):
+            render_funnel_step_html("nope", self.page, self.offer, self.products_by_id)
+
+    def test_preview_matches_published_bytes_for_thank_you(self):
+        # The preview IS the published renderer: the thank-you step equals what publish would synthesize+render.
+        from stripe_link.runtime.upsell_pages import synthesize_thank_you_page
+        ty_page, ty_offer = synthesize_thank_you_page(self.page, self.offer)
+        published = render_page(ty_page, ty_offer, {}, robots="noindex,nofollow", page_type="thank_you")
+        preview = render_funnel_step_html("thank_you", self.page, self.offer, self.products_by_id)
+        self.assertEqual(preview, published)
 
 
 if __name__ == "__main__":

@@ -27,6 +27,7 @@ from stripe_link.runtime.html import (
     INDEXABLE_ROBOTS,
     NOINDEX_FOLLOW_ROBOTS,
     NOINDEX_ROBOTS,
+    RenderError,
     THIN_CONTENT_MIN_WORDS,
     first_offer_product,
     indexable_word_count,
@@ -840,6 +841,55 @@ def publish_page_document(
         "invalidation": invalidation,
         "crawl": crawl,
     }
+
+
+def render_funnel_step_html(
+    step: str,
+    page: dict[str, Any],
+    offer: dict[str, Any],
+    products_by_id: dict[str, dict[str, Any]],
+    *,
+    checkout_url: str | None = None,
+    api_base_url: str = "",
+    site: dict[str, Any] | None = None,
+) -> str:
+    """Render ONE post-purchase funnel step to HTML for the dashboard Live Preview (SALES_FUNNELS.md P3.5).
+
+    `step` is 'thank_you', 'upsell:N' (the Nth sequential upsell, 0-based), 'upsell_carousel', or
+    'downsell_carousel'. This MIRRORS the publish-time synthesis in publish_page_document — same synthesize_*
+    calls, same render_page args — so the preview is byte-identical to the published funnel page (one renderer).
+    It only renders; it never writes artifacts. Raises RenderError for an unknown or unavailable step."""
+    scaffold = upsell_scaffold(page)
+    common = dict(checkout_url=checkout_url, api_base_url=api_base_url, robots=NOINDEX_ROBOTS, site=site)
+    if step == "thank_you":
+        ty_page, ty_offer = synthesize_thank_you_page(page, offer)
+        return render_page(ty_page, ty_offer, {}, page_type="thank_you", **common)
+    plan = post_purchase_plan(offer, products_by_id)
+    if step == "upsell_carousel" or (step.startswith("upsell:") and plan["strategy"] == "carousel"):
+        # More than MAX_SEQUENTIAL_UPSELLS upsells render as ONE grid — there are no per-index upsell pages.
+        uc_page, uc_offer = synthesize_upsell_carousel_page(plan, source_page=page, source_offer=offer, scaffold=scaffold)
+        return render_page(uc_page, uc_offer, {}, page_type="funnel_step", **common)
+    if step == "downsell_carousel":
+        result = synthesize_downsell_carousel_page(plan, source_page=page, source_offer=offer, scaffold=scaffold)
+        if not result:
+            raise RenderError("This funnel has no downsell carousel.")
+        dc_page, dc_offer = result
+        return render_page(dc_page, dc_offer, {}, page_type="funnel_step", **common)
+    if step.startswith("upsell:"):
+        try:
+            index = int(step.split(":", 1)[1])
+        except ValueError as exc:
+            raise RenderError(f"Invalid funnel step '{step}'.") from exc
+        entries = plan["upsells"]
+        if not (0 <= index < len(entries)):
+            raise RenderError(f"Upsell step {index} is out of range.")
+        entry = entries[index]
+        up_page, up_offer = synthesize_upsell_page(entry, source_page=page, source_offer=offer, scaffold=scaffold)
+        return render_page(
+            up_page, up_offer, {entry["product_id"]: entry["product"]},
+            selected_prices={entry["product_id"]: entry["price_id"]}, page_type="funnel_step", **common,
+        )
+    raise RenderError(f"Unknown funnel step '{step}'.")
 
 
 def _homepage_image_urls(offer: dict[str, Any], products_by_id: dict[str, dict[str, Any]]) -> list[str]:

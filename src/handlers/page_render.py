@@ -19,7 +19,7 @@ from stripe_link.runtime.html import (
     render_page,
     structured_data_warnings,
 )
-from stripe_link.runtime.publishing import find_site_for_page, load_page_reviews, site_page_type
+from stripe_link.runtime.publishing import find_site_for_page, load_page_reviews, render_funnel_step_html, site_page_type
 
 
 def handler(event, context, *, sites_repo=None, reviews_repo=None):
@@ -39,6 +39,12 @@ def handler(event, context, *, sites_repo=None, reviews_repo=None):
         price_context = body.get("price_context") or "standard"
         if price_context not in ("standard", "sale", "flash_sale"):
             return error_response("Field 'price_context' must be one of standard, sale, flash_sale.", code="render_error")
+        # Preview-only: render ONE post-purchase funnel step (thank_you / upsell:N / *_carousel) instead of the
+        # landing page, so the builder's accordion editor can show each funnel page live (plans/SALES_FUNNELS.md
+        # P3.5). Synthesized from the same code that publishes them — the preview is the published bytes.
+        funnel_step = body.get("funnel_step")
+        if funnel_step is not None and not isinstance(funnel_step, str):
+            return error_response("Field 'funnel_step' must be a string when provided.", code="render_error")
         if not isinstance(page, dict):
             return error_response("Field 'page' must be an object.")
         # An offer-less page (storefront / category / profile) has no primary offer, so 'offer' is optional
@@ -106,6 +112,14 @@ def handler(event, context, *, sites_repo=None, reviews_repo=None):
         if reviews_repo is None and os.environ.get("REVIEWS_TABLE"):
             reviews_repo = reviews_repository()
         reviews = load_page_reviews(reviews_repo, str(page.get("tenant_id") or ""), products_by_id, str((site or {}).get("site_id") or ""))
+        if funnel_step:
+            if not offer:
+                return error_response("A funnel-step preview requires the page's offer.", code="render_error")
+            funnel_html = render_funnel_step_html(
+                funnel_step, page, offer, products_by_id,
+                checkout_url=checkout_url, api_base_url=api_base_url, site=site,
+            )
+            return json_response({"html": funnel_html, "warnings": {"structured_data": [], "page_health": []}})
         html = render_page(
             page, offer, products_by_id, selected_prices, checkout_url, api_base_url,
             services_by_id=services_by_id, offers_by_id=offers_by_id, canonical_url=canonical_url,
