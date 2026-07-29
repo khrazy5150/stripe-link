@@ -24,6 +24,7 @@ DEFAULT_UPSELL_SCAFFOLD: dict[str, Any] = {
     "countdown_enabled": True,
     "countdown_minutes": 1,
     "savings_badge": True,
+    "price_label": "Yours for only",
     # Carousel-mode copy (>= MAX_SEQUENTIAL_UPSELLS upsells): one grid of all upsells, a single dismiss, and an
     # optional downsell-carousel second screen (plans/OFFER_MODEL_REDESIGN.md §6). {{ upsell_price }} in
     # carousel_add_label is filled per card with that card's own price at synthesis. Editable per-page (P3.5).
@@ -157,10 +158,19 @@ def synthesize_upsell_page(
     if description:
         sections.append({"id": "product-details", "type": "content_block", "centered": True,
                          "blocks": [{"title": str(product.get("name") or ""), "text": description}]})
-    sections.extend([
-        {"id": "offer-selector", "type": "offer_price_selector", "offer_id": offer["offer_id"]},
-        checkout_section,
-    ])
+    # Show the upsell price prominently on the page, not only inside the CTA button. The upsell price is in the
+    # 'upsell' context, which offer_price_selector filters out (it renders only 'standard' prices), so a dedicated
+    # featured_price card carries the amount + optional savings. Denormalized from this entry's price.
+    price = entry["price"]
+    sections.append({
+        "id": "price", "type": "featured_price",
+        "label": scaffold.get("price_label") or "",
+        "amount": int(price.get("unit_amount") or 0),
+        "currency": str(price.get("currency") or "usd"),
+        "compare_at_amount": int(price.get("compare_at_unit_amount") or price.get("compare_at_amount") or 0),
+        "show_savings": bool(scaffold.get("savings_badge")),
+    })
+    sections.append(checkout_section)
 
     theme = deepcopy(source_page.get("theme") or {})
     theme.setdefault("template", "universal_bundle")

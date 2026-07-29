@@ -2,6 +2,7 @@ import json
 import pathlib
 import re
 import unittest
+from copy import deepcopy
 
 from stripe_link.domain.funnels import post_purchase_plan
 from stripe_link.runtime.html import RenderError, render_page
@@ -267,6 +268,32 @@ class RenderFunnelStepPreviewTests(unittest.TestCase):
         self.assertIn("Best creatine ever!", html)
         self.assertNotIn('data-section-type="reviews"',
                          render_funnel_step_html("upsell:0", self.page, self.offer, {pid: self.product}))
+
+    def test_upsell_page_shows_the_price_prominently(self):
+        # Phase 1c: the upsell price is in the 'upsell' context, which offer_price_selector filters out, so a
+        # dedicated featured_price card carries the amount + its label — not only the CTA button.
+        html = render_funnel_step_html("upsell:0", self.page, self.offer, self.products_by_id)
+        self.assertIn('data-section-type="featured_price"', html)
+        self.assertNotIn('data-section-type="offer_price_selector"', html)  # empty for upsell context; replaced
+        self.assertIn("Yours for only", html)
+        self.assertIn("$27.00", html)
+        self.assertNotIn("You save", html)  # no regular price on the fixture, so no savings pill
+
+    def test_upsell_price_shows_savings_when_a_regular_price_is_higher(self):
+        pid = self.product["product_id"]
+        product = deepcopy(self.product)
+        for price in product["prices"]:
+            if price["price_id"] == "price_upsell_1bottle":
+                price["compare_at_unit_amount"] = 6500  # regular $65 vs upsell $27 -> save 58%
+        html = render_funnel_step_html("upsell:0", self.page, self.offer, {pid: product})
+        self.assertIn("$65.00", html)
+        self.assertIn("You save 58%", html)
+        # The savings badge is a toggle: with it off, neither the regular price nor the savings pill show.
+        page = deepcopy(self.page)
+        page["post_checkout"]["upsell_scaffold"]["savings_badge"] = False
+        off = render_funnel_step_html("upsell:0", page, self.offer, {pid: product})
+        self.assertNotIn("You save", off)
+        self.assertNotIn("$65.00", off)
 
     def test_upsell_out_of_range_raises(self):
         with self.assertRaises(RenderError):

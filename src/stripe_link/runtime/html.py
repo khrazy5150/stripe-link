@@ -478,6 +478,14 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     "    .sl-price-row{display:flex;align-items:center;gap:1rem;flex-wrap:wrap;margin-top:1rem}",
     "    .sl-price-amount{font-family:var(--sl-font-accent);font-size:2rem;font-weight:700;color:var(--sl-price-amount)}",
     "    .sl-regular-price{color:var(--sl-price-regular);text-decoration:line-through;font-size:1.4rem}",
+    "    .sl-featured-price{display:flex;justify-content:center}",
+    "    .sl-featured-price-card{width:min(42rem,100%);text-align:center;border:2px solid var(--sl-price-card-border);border-radius:var(--sl-radius);background:var(--sl-price-card-bg);padding:2rem 2.4rem;display:grid;gap:1rem;justify-items:center}",
+    "    .sl-featured-price-label{font-size:1.3rem;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:var(--sl-muted)}",
+    "    .sl-featured-price-amount{font-family:var(--sl-font-accent);font-size:clamp(3.6rem,12vw,5.4rem);line-height:1;font-weight:800;color:var(--sl-price-amount)}",
+    "    .sl-featured-price-pills{display:flex;flex-wrap:wrap;gap:0.8rem;justify-content:center}",
+    "    .sl-featured-price-pill{font-size:1.4rem;font-weight:700;padding:0.5rem 1.2rem;border-radius:999px;border:1px solid var(--sl-price-card-border)}",
+    "    .sl-featured-price-was{color:var(--sl-price-regular);text-decoration:line-through}",
+    "    .sl-featured-price-save{color:var(--sl-price-amount);border-color:color-mix(in srgb,var(--sl-price-amount) 40%,transparent)}",
     "    .sl-price-option[data-expired='true'] .sl-regular-price,.sl-price-option[data-expired='true'] .sl-savings{display:none}",
     "    .sl-badge{display:inline-flex;width:max-content;font-family:var(--sl-font-accent);font-size:1.1rem;font-weight:700;color:var(--sl-featured-badge-text);background:var(--sl-featured-badge-bg);padding:0.4rem 1rem;border-radius:999px}",
     "    .sl-badge:empty{display:none}",
@@ -1626,6 +1634,9 @@ SECTION_REGISTRY: dict[str, dict[str, Any]] = {
     "trust_badges": {"render": lambda c: render_trust_badges(c.section), "version": 1},
     "hero": {"render": lambda c: render_hero(c.section, c.offer, c.products_by_id, c.services_by_id), "version": 1},
     "offer_price_selector": {"render": _render_offer_selector, "version": 1},
+    # A standalone prominent price card (SALES_FUNNELS.md P3.5) — used by the upsell page, whose 'upsell'-context
+    # price the offer_price_selector filters out, so the amount would otherwise show only in the CTA button.
+    "featured_price": {"render": lambda c: render_featured_price(c.section), "version": 1},
     "refund_policy": {"render": lambda c: render_refund_policy(c.section, c.offer, c.products_by_id), "version": 1},
     "faq": {"render": lambda c: render_faq(c.section), "version": 1},
     "content_block": {"render": lambda c: render_content_blocks(c.section), "version": 1},
@@ -3386,6 +3397,40 @@ def render_content_blocks(section: dict[str, Any]) -> str:
         *rendered,
         "    </section>",
     ])
+
+
+def render_featured_price(section: dict[str, Any]) -> str:
+    """A prominent, standalone price display: a bordered card with a small label, the big headline price, and
+    (when show_savings is on and there is a higher regular price) a struck original + a "You save N%" pill.
+
+    Denormalized — it carries its own amount/currency/compare_at rather than resolving an offer — so it works
+    on any page regardless of price context. The upsell page uses it because the upsell price lives in the
+    'upsell' context, which the standard offer_price_selector filters out (it only shows 'standard' prices), so
+    that selector renders nothing and the amount would otherwise appear only inside the CTA button. Colors come
+    from the shared price tokens, so it matches whatever preset the template carries.
+    """
+    amount = int(section.get("amount") or 0)
+    currency = str(section.get("currency") or "usd")
+    label = str(section.get("label") or "").strip()
+    compare_at = int(section.get("compare_at_amount") or 0)
+    pills = ""
+    if section.get("show_savings") and compare_at > amount > 0:
+        percent = round((compare_at - amount) / compare_at * 100)
+        pills = "\n".join([
+            "      <div class=\"sl-featured-price-pills\">",
+            f"        <span class=\"sl-featured-price-pill sl-featured-price-was\">{escape(format_money(compare_at, currency))}</span>",
+            f"        <span class=\"sl-featured-price-pill sl-featured-price-save\">You save {percent}%</span>",
+            "      </div>",
+        ])
+    return "\n".join(line for line in [
+        f"    <section class=\"sl-featured-price\" data-section-id=\"{escape(str(section.get('id', 'featured-price')))}\" data-section-type=\"featured_price\">",
+        "      <div class=\"sl-featured-price-card\">",
+        (f"        <p class=\"sl-featured-price-label\">{escape(label)}</p>" if label else ""),
+        f"        <div class=\"sl-featured-price-amount\">{escape(format_money(amount, currency))}</div>",
+        pills,
+        "      </div>",
+        "    </section>",
+    ] if line)
 
 
 def render_celebration(section: dict[str, Any]) -> str:

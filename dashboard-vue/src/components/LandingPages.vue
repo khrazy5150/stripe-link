@@ -1105,6 +1105,8 @@
                       <input v-model.trim="builder.post_purchase.upsell.accept_label" type="text" :placeholder="SCAFFOLD_PLACEHOLDERS.accept_label" /></label>
                     <label class="offer-field"><span>Decline link</span>
                       <input v-model.trim="builder.post_purchase.upsell.decline_label" type="text" :placeholder="SCAFFOLD_PLACEHOLDERS.decline_label" /></label>
+                    <label class="offer-field"><span>Price label (above the price)</span>
+                      <input v-model.trim="builder.post_purchase.upsell.price_label" type="text" :placeholder="SCAFFOLD_PLACEHOLDERS.price_label" /></label>
                     <label v-if="funnelDownsellCount" class="offer-field"><span>Downsell headline (shown in-place on decline)</span>
                       <input v-model.trim="builder.post_purchase.upsell.downsell_headline" type="text" :placeholder="SCAFFOLD_PLACEHOLDERS.downsell_headline" /></label>
                     <label class="builder-toggle"><input v-model="builder.post_purchase.upsell.savings_badge" type="checkbox" /><span>Show a savings badge</span></label>
@@ -1505,6 +1507,7 @@ const SCAFFOLD_PLACEHOLDERS = {
   subheadline: "Exclusive One-Time Offer Just For You",
   accept_label: "Yes, I'll Take This Deal for {{ upsell_price }}",
   decline_label: "No, Thank You! Let's Move On",
+  price_label: "Yours for only",
   downsell_headline: "Wait — Here's a Smaller Option",
   carousel_headline: "Special Deals — Just For You",
   carousel_subheadline: "One-time offers at checkout prices. Add any you like, then continue.",
@@ -2033,7 +2036,7 @@ function defaultBuilderForm() {
         enable_download: false, download_button_text: "", download_url: "",
       },
       upsell: {
-        headline: "", subheadline: "", accept_label: "", decline_label: "", downsell_headline: "",
+        headline: "", subheadline: "", accept_label: "", decline_label: "", price_label: "", downsell_headline: "",
         countdown_enabled: true, countdown_minutes: 1, savings_badge: true,
         carousel_headline: "", carousel_subheadline: "", carousel_add_label: "",
         carousel_dismiss_label: "", carousel_proceed_label: "", downsell_carousel_headline: "",
@@ -2716,7 +2719,7 @@ function populateBuilderFromPage(page) {
 // upsell_pages defaults); the countdown/badge toggles are sent only when they DEVIATE from the runtime
 // defaults (countdown on, 1 minute, savings badge on), so an untouched funnel persists no scaffold at all.
 const UPSELL_SCAFFOLD_TEXT_FIELDS = [
-  "headline", "subheadline", "accept_label", "decline_label", "downsell_headline",
+  "headline", "subheadline", "accept_label", "decline_label", "price_label", "downsell_headline",
   "carousel_headline", "carousel_subheadline", "carousel_add_label", "carousel_dismiss_label",
   "carousel_proceed_label", "downsell_carousel_headline",
 ];
