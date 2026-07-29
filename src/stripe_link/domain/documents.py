@@ -1615,6 +1615,70 @@ def validate_review(document: dict[str, Any]) -> None:
         raise DocumentValidationError("Review source must be one of: manual, first_party, gbp.")
 
 
+SEMANTIC_ENTITY_TYPES = {"product", "service", "bundle", "listicle", "membership", "lead_generation"}
+SEMANTIC_SOURCES = {"deterministic", "ai"}
+
+
+def _validate_semantic_entity(entity: Any, label: str) -> None:
+    if (not isinstance(entity, dict) or entity.get("type") not in SEMANTIC_ENTITY_TYPES
+            or not isinstance(entity.get("name"), str)):
+        raise DocumentValidationError(f"{label} must be an object with a valid type and a string name.")
+
+
+def validate_semantic_model(model: Any) -> None:
+    """The OfferSemanticModel (plans/OFFER_SEMANTIC_ANALYZER.md, schemas/OfferSemanticModel.schema.json). Pure
+    meaning — `facts` (stable values) + `interpretation` (opinions). This is the runtime contract the AI
+    enrichment tier's output is validated against (plans/OFFER_SEMANTIC_P4.md); the deterministic analyzer
+    already conforms. Checks the load-bearing shape, not every leaf — the AI must not hallucinate the structure
+    (missing entities, a bogus entity type, a non-numeric weight, an unknown source)."""
+    if not isinstance(model, dict):
+        raise DocumentValidationError("Semantic model must be an object.")
+    facts, interp = model.get("facts"), model.get("interpretation")
+    if not isinstance(facts, dict) or not isinstance(interp, dict):
+        raise DocumentValidationError("Semantic model must have object 'facts' and 'interpretation'.")
+    entities = facts.get("entities")
+    if not isinstance(entities, dict):
+        raise DocumentValidationError("Semantic model facts.entities must be an object.")
+    _validate_semantic_entity(entities.get("primary"), "facts.entities.primary")
+    secondary = entities.get("secondary")
+    if not isinstance(secondary, list):
+        raise DocumentValidationError("Semantic model facts.entities.secondary must be an array.")
+    for index, entity in enumerate(secondary):
+        _validate_semantic_entity(entity, f"facts.entities.secondary[{index}]")
+    brand = facts.get("brand")
+    if brand is not None and not (isinstance(brand, dict) and isinstance(brand.get("name"), str)):
+        raise DocumentValidationError("Semantic model facts.brand must be null or an object with a name.")
+    taxonomy = facts.get("taxonomy")
+    if not isinstance(taxonomy, dict) or not isinstance(taxonomy.get("hierarchy"), list):
+        raise DocumentValidationError("Semantic model facts.taxonomy.hierarchy must be an array.")
+    intent = facts.get("intent")
+    if not isinstance(intent, dict) or not isinstance(intent.get("commercial"), str) or not intent.get("commercial").strip():
+        raise DocumentValidationError("Semantic model facts.intent.commercial must be a non-empty string.")
+    commerce = facts.get("commerce")
+    funnel = commerce.get("funnel") if isinstance(commerce, dict) else None
+    if not isinstance(commerce, dict) or not isinstance(funnel, dict):
+        raise DocumentValidationError("Semantic model facts.commerce (with a funnel object) is required.")
+    for key in ("upsells", "downsells"):
+        value = funnel.get(key)
+        if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+            raise DocumentValidationError(f"Semantic model facts.commerce.funnel.{key} must be a non-negative integer.")
+    if not isinstance(facts.get("attributes"), list):
+        raise DocumentValidationError("Semantic model facts.attributes must be an array.")
+    if interp.get("source") not in SEMANTIC_SOURCES:
+        raise DocumentValidationError("Semantic model interpretation.source must be 'deterministic' or 'ai'.")
+    version = interp.get("version")
+    if not isinstance(version, int) or isinstance(version, bool) or version < 1:
+        raise DocumentValidationError("Semantic model interpretation.version must be a positive integer.")
+    concepts = interp.get("key_concepts")
+    if not isinstance(concepts, list):
+        raise DocumentValidationError("Semantic model interpretation.key_concepts must be an array.")
+    for index, concept in enumerate(concepts):
+        if (not isinstance(concept, dict) or not isinstance(concept.get("value"), str)
+                or not isinstance(concept.get("weight"), (int, float)) or isinstance(concept.get("weight"), bool)):
+            raise DocumentValidationError(
+                f"Semantic model interpretation.key_concepts[{index}] must have a string value and numeric weight.")
+
+
 def validate_refund_request(document: dict[str, Any]) -> None:
     require_fields(document, ["schema_version", "document_type", "tenant_id", "refund_request_id", "status", "customer", "order_id", "created_at"])
     if document.get("document_type") != "refund_request":

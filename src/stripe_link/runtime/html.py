@@ -11,7 +11,7 @@ from stripe_link.domain.composition import compose_page, element_channel
 from stripe_link.domain.documents import PRODUCT_CONDITIONS
 from stripe_link.domain.opportunities import STAGE_LANDING, derived_offer_type, stage_opportunities
 from stripe_link.domain.pricing import PricingError, expand_offer, find_price, resolve_offer, single_unit_price
-from stripe_link.domain.semantic import analyze_offer, is_bundle, subject_from_model
+from stripe_link.domain.semantic import is_bundle, resolve_semantic_model, subject_from_model
 from stripe_link.domain.reviews import aggregate_reviews, markup_eligible
 from stripe_link.domain.service_pricing import resolve_service_price
 
@@ -891,7 +891,7 @@ def document_title(page: dict[str, Any], offer: dict[str, Any], products_by_id: 
         return explicit
     product = first_offer_product(offer, products_by_id)
     presentation = offer.get("presentation") or {}
-    model = analyze_offer(offer, products_by_id)
+    model = resolve_semantic_model(offer, products_by_id)
     bundle = is_bundle(model)
     # Coherence with the offer label + slug (Offer Semantic Model P2): a multi-product offer is titled by its
     # bundle subject ("Dietary Supplement Bundle"), not just the first product. A single product is unchanged
@@ -953,7 +953,7 @@ def document_description(page: dict[str, Any], offer: dict[str, Any], products_b
         return trim_meta(explicit, _DESC_MAX)
     product = first_offer_product(offer, products_by_id)
     presentation = offer.get("presentation") or {}
-    model = analyze_offer(offer, products_by_id)
+    model = resolve_semantic_model(offer, products_by_id)
     bundle = is_bundle(model)
     desc = str(product.get("description") or presentation.get("subheadline") or "").strip()
     if len(desc) >= _DESC_MIN:
@@ -2570,7 +2570,7 @@ def breadcrumb_leaf_name(offer: dict[str, Any], products_by_id: dict[str, dict[s
     so the leaf reads the same as the <title>, offer label, and slug: a single product is its own name; a
     bundle is its bundle subject ("Dietary Supplement Bundle"). Single products are unchanged — Product markup
     still names the real product, but the breadcrumb describes the PAGE. "" when nothing usable exists."""
-    model = analyze_offer(offer, products_by_id)
+    model = resolve_semantic_model(offer, products_by_id)
     if is_bundle(model):
         return subject_from_model(model).strip()
     product = first_offer_product(offer, products_by_id)

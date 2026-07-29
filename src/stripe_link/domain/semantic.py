@@ -20,6 +20,10 @@ from stripe_link.domain.opportunities import (
     stage_opportunities,
 )
 
+# Bump when the model's SHAPE or deterministic derivation changes in a way a cached AI model should be
+# considered stale for (resolve_semantic_model falls back to a fresh compute on a version mismatch).
+MODEL_VERSION = 1
+
 _STOP_WORDS = frozenset({
     "the", "a", "an", "and", "or", "for", "of", "with", "to", "in", "on", "at", "by", "from",
     "your", "you", "our", "my", "this", "that", "is", "are", "plus",
@@ -153,9 +157,23 @@ def analyze_offer(offer: dict, products_by_id: dict) -> dict:
                 "taxonomy.hierarchy": 0.8 if shared_cat else (0.4 if hierarchy else 0.0),
             },
             "source": "deterministic",
-            "version": 1,
+            "version": MODEL_VERSION,
         },
     }
+
+
+def resolve_semantic_model(offer: dict, products_by_id: dict) -> dict:
+    """The read seam for the model (plans/OFFER_SEMANTIC_P4.md, P4.0). Return the offer's CACHED model only when
+    it is a current AI-enriched one; otherwise recompute the deterministic model. Deterministic recompute is
+    cheap, so the cache exists ONLY to preserve expensive AI enrichment — an absent, stale-version, or merely
+    deterministic cache just recomputes. The cache WRITE lands in P4.1 (the AI tier); this makes consumers safe
+    to route through today with zero behaviour change."""
+    cached = offer.get("semantic_model")
+    if isinstance(cached, dict):
+        interpretation = cached.get("interpretation") or {}
+        if interpretation.get("source") == "ai" and interpretation.get("version") == MODEL_VERSION:
+            return cached
+    return analyze_offer(offer, products_by_id)
 
 
 def _attributes(pricing_model: str, purchase_model: str) -> list[dict]:

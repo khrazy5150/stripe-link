@@ -1,0 +1,123 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.juniorbay.com/stripe-link/OfferSemanticModel.schema.json",
+  "title": "OfferSemanticModel",
+  "description": "The canonical understanding of an offer — 'what is this?' answered once for the whole platform (plans/OFFER_SEMANTIC_ANALYZER.md). Pure MEANING: no SEO, URL, formatting, or channel logic. Split into `facts` (stable values the offer has) and `interpretation` (opinions: weights/confidence/source, isolated so improving them never touches facts). The deterministic core populates the honestly-derivable subset; the AI enrichment tier (plans/OFFER_SEMANTIC_P4.md) fills the soft fields (audience, urgency, deep taxonomy, extracted attributes, tuned concepts) and is validated against this contract. Consumers degrade gracefully on missing / low-confidence fields.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["facts", "interpretation"],
+  "properties": {
+    "facts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["entities", "taxonomy", "intent", "commerce", "attributes"],
+      "properties": {
+        "entities": {
+          "type": "object",
+          "description": "The offer's subject(s). primary is the headline entity; secondary exposes every other landing product so a consumer can decide whether to use them.",
+          "additionalProperties": false,
+          "required": ["primary", "secondary"],
+          "properties": {
+            "primary": { "$ref": "#/$defs/entity" },
+            "secondary": { "type": "array", "items": { "$ref": "#/$defs/entity" } }
+          }
+        },
+        "brand": {
+          "description": "The storefront brand, already resolved. null when the offer has no brand.",
+          "oneOf": [
+            { "type": "null" },
+            { "type": "object", "additionalProperties": false, "required": ["name"], "properties": { "name": { "type": "string" } } }
+          ]
+        },
+        "taxonomy": {
+          "type": "object",
+          "description": "The category hierarchy, recursive/variable-depth (the breadcrumb IS the hierarchy). Deterministic core is shallow (one humanized category, or empty for a mixed bundle); the AI tier deepens it.",
+          "additionalProperties": false,
+          "required": ["hierarchy"],
+          "properties": { "hierarchy": { "type": "array", "items": { "type": "string" } } }
+        },
+        "intent": {
+          "type": "object",
+          "description": "Broad, channel-neutral intent. commercial is deterministic; audience/fulfillment/acquisition/urgency are reserved for the AI tier (empty strings until then).",
+          "additionalProperties": false,
+          "required": ["commercial"],
+          "properties": {
+            "commercial": { "type": "string" },
+            "audience": { "type": "string" },
+            "fulfillment": { "type": "string" },
+            "acquisition": { "type": "string" },
+            "urgency": { "type": "string" }
+          }
+        },
+        "commerce": {
+          "type": "object",
+          "description": "Fully deterministic; useful far beyond SEO (analytics, funnel tooling). Counts, not booleans, where a range matters.",
+          "additionalProperties": false,
+          "required": ["pricing_model", "purchase_model", "funnel"],
+          "properties": {
+            "pricing_model": { "type": "string" },
+            "purchase_model": { "type": "string" },
+            "funnel": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["landing", "order_bump", "upsells", "downsells"],
+              "properties": {
+                "landing": { "type": "boolean" },
+                "order_bump": { "type": "boolean" },
+                "upsells": { "type": "integer", "minimum": 0 },
+                "downsells": { "type": "integer", "minimum": 0 }
+              }
+            }
+          }
+        },
+        "attributes": {
+          "type": "array",
+          "description": "Unweighted facts: quantity-pricing, subscription; later flavor/size/quantity extracted from names.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "value"],
+            "properties": { "name": { "type": "string" }, "value": {} }
+          }
+        }
+      }
+    },
+    "interpretation": {
+      "type": "object",
+      "description": "Opinions, isolated from facts. key_concepts, confidence, and the provenance of this model.",
+      "additionalProperties": false,
+      "required": ["key_concepts", "confidence", "source", "version"],
+      "properties": {
+        "key_concepts": {
+          "type": "array",
+          "description": "The offer's important concepts, weighted. Domain-neutral (feeds AI/ads, not just SEO).",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["value", "weight"],
+            "properties": { "value": { "type": "string" }, "weight": { "type": "number" } }
+          }
+        },
+        "confidence": {
+          "type": "object",
+          "description": "Per-field confidence (dotted field path -> 0..1), NOT one global score.",
+          "additionalProperties": { "type": "number", "minimum": 0, "maximum": 1 }
+        },
+        "source": { "type": "string", "enum": ["deterministic", "ai"] },
+        "version": { "type": "integer", "minimum": 1 },
+        "generated_at": { "type": "integer", "minimum": 0, "description": "Epoch seconds; stamped when a model is cached (AI tier). Absent on a freshly-computed deterministic model (a pure function)." }
+      }
+    }
+  },
+  "$defs": {
+    "entity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "name"],
+      "properties": {
+        "type": { "type": "string", "enum": ["product", "service", "bundle", "listicle", "membership", "lead_generation"] },
+        "name": { "type": "string" }
+      }
+    }
+  }
+}
