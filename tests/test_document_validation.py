@@ -81,6 +81,16 @@ class DocumentValidationTests(unittest.TestCase):
         self.assertEqual(scaffold["headline"], "Custom")
         self.assertEqual(scaffold["subheadline"], DEFAULT_UPSELL_SCAFFOLD["subheadline"])
 
+    def test_accepts_a_blank_target_bound_hero(self):
+        # A listicle's hero is target-bound (blank static copy; the H1 is filled from the product at render).
+        # A blank hero section must validate, not raise "requires headline or subheadline".
+        page = copy.deepcopy(self.page)
+        for section in page["sections"]:
+            if section.get("type") == "hero":
+                section["headline"] = ""
+                section["subheadline"] = ""
+        validate_page_document(page)  # no raise
+
     def test_accepts_universal_bundle_fixtures(self):
         validate_product_document(load_fixture("product-universal-bundle.json"))
         validate_offer_document(load_fixture("offer-universal-bundle.json"))

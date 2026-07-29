@@ -1137,10 +1137,11 @@ def validate_page_document(document: dict[str, Any]) -> None:
             raise DocumentValidationError(f"Duplicate page section id '{section_id}'.")
         section_ids.add(section_id)
         if section_type == "hero":
+            # Both optional: a listicle's hero is TARGET-BOUND — its static copy is blank and the H1/subheadline
+            # are filled from the offer's current product at render (see runtime/html.render_hero). So a blank
+            # hero section is a valid document, not an error; a missing H1 is a quality WARNING, not a hard fail.
             optional_string(section, "headline", "Hero section headline")
             optional_string(section, "subheadline", "Hero section subheadline")
-            if not (section.get("headline") or section.get("subheadline")):
-                raise DocumentValidationError("Hero section requires headline or subheadline.")
         elif section_type == "countdown_timer":
             optional_bool(section, "enabled", "Countdown timer enabled")
             optional_bool(section, "sticky", "Countdown timer sticky")
