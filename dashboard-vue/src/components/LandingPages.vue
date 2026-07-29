@@ -679,91 +679,67 @@
           </section>
 
           <section v-if="builderIntent === 'transaction'" class="builder-section">
-            <h3>Post-purchase pages</h3>
-            <p>Customize the thank-you page and, when this offer has a post-purchase funnel, the one-click upsell/downsell screens. Leave a field blank to use the default shown in the placeholder. Put <code>{{ PRICE_TOKEN }}</code> in a button label to insert that product's price.</p>
+            <h3>Post-Checkout Flow</h3>
+            <p>Configure the pages customers see after checkout. Open a step to edit it — the Live Preview switches to that page. Leave a field blank to use the default (shown as the placeholder). Put <code>{{ PRICE_TOKEN }}</code> in a button label to insert that product's price.</p>
 
-            <h4>Thank-you page</h4>
-            <label class="offer-field">
-              <span>Headline</span>
-              <input v-model.trim="builder.post_purchase.thank_you.headline" type="text" :placeholder="SCAFFOLD_PLACEHOLDERS.ty_headline" />
-            </label>
-            <label class="offer-field">
-              <span>Subheadline</span>
-              <input v-model.trim="builder.post_purchase.thank_you.subheadline" type="text" :placeholder="SCAFFOLD_PLACEHOLDERS.ty_subheadline" />
-            </label>
-            <label class="offer-field">
-              <span>Message</span>
-              <textarea v-model.trim="builder.post_purchase.thank_you.message" rows="2" :placeholder="SCAFFOLD_PLACEHOLDERS.ty_message"></textarea>
-            </label>
+            <div class="funnel-accordion">
+              <div v-for="step in funnelSteps" :key="step.key" class="funnel-acc-item" :class="{ open: openFunnelStep === step.key }">
+                <button type="button" class="funnel-acc-head" @click="toggleFunnelStep(step.key)">
+                  <span class="funnel-acc-caret">{{ openFunnelStep === step.key ? "▾" : "▸" }}</span>
+                  <span class="funnel-acc-num" :class="step.kind">{{ step.num }}</span>
+                  <span class="funnel-acc-label">{{ step.label }}</span>
+                  <span class="funnel-acc-hint">{{ openFunnelStep === step.key ? "Previewing" : "" }}</span>
+                </button>
 
-            <template v-if="hasPostPurchaseFunnel">
-              <h4>Upsell screen</h4>
-              <label class="offer-field">
-                <span>Headline</span>
-                <input v-model.trim="builder.post_purchase.upsell.headline" type="text" :placeholder="SCAFFOLD_PLACEHOLDERS.headline" />
-              </label>
-              <label class="offer-field">
-                <span>Subheadline</span>
-                <input v-model.trim="builder.post_purchase.upsell.subheadline" type="text" :placeholder="SCAFFOLD_PLACEHOLDERS.subheadline" />
-              </label>
-              <label class="offer-field">
-                <span>Accept button</span>
-                <input v-model.trim="builder.post_purchase.upsell.accept_label" type="text" :placeholder="SCAFFOLD_PLACEHOLDERS.accept_label" />
-              </label>
-              <label class="offer-field">
-                <span>Decline link</span>
-                <input v-model.trim="builder.post_purchase.upsell.decline_label" type="text" :placeholder="SCAFFOLD_PLACEHOLDERS.decline_label" />
-              </label>
-              <label class="builder-toggle">
-                <input v-model="builder.post_purchase.upsell.savings_badge" type="checkbox" />
-                <span>Show a savings badge</span>
-              </label>
-              <label class="builder-toggle">
-                <input v-model="builder.post_purchase.upsell.countdown_enabled" type="checkbox" />
-                <span>Show a countdown timer</span>
-              </label>
-              <label v-if="builder.post_purchase.upsell.countdown_enabled" class="offer-field">
-                <span>Countdown minutes</span>
-                <input v-model.number="builder.post_purchase.upsell.countdown_minutes" type="number" min="1" max="60" />
-              </label>
+                <div v-if="openFunnelStep === step.key" class="funnel-acc-body">
+                  <!-- Thank-you page -->
+                  <template v-if="step.kind === 'thank_you'">
+                    <label class="offer-field"><span>Headline</span>
+                      <input v-model.trim="builder.post_purchase.thank_you.headline" type="text" :placeholder="SCAFFOLD_PLACEHOLDERS.ty_headline" /></label>
+                    <label class="offer-field"><span>Subheadline</span>
+                      <input v-model.trim="builder.post_purchase.thank_you.subheadline" type="text" :placeholder="SCAFFOLD_PLACEHOLDERS.ty_subheadline" /></label>
+                    <label class="offer-field"><span>Message</span>
+                      <textarea v-model.trim="builder.post_purchase.thank_you.message" rows="2" :placeholder="SCAFFOLD_PLACEHOLDERS.ty_message"></textarea></label>
+                  </template>
 
-              <template v-if="funnelDownsellCount">
-                <h4>Downsell screen</h4>
-                <label class="offer-field">
-                  <span>Headline</span>
-                  <input v-model.trim="builder.post_purchase.upsell.downsell_headline" type="text" :placeholder="SCAFFOLD_PLACEHOLDERS.downsell_headline" />
-                </label>
-              </template>
+                  <!-- Sequential upsell page (copy shared across upsell steps) -->
+                  <template v-else-if="step.kind === 'upsell'">
+                    <small v-if="funnelUpsellCount > 1" class="funnel-shared-note">This copy is shared across all upsell steps; each step previews its own product.</small>
+                    <label class="offer-field"><span>Headline</span>
+                      <input v-model.trim="builder.post_purchase.upsell.headline" type="text" :placeholder="SCAFFOLD_PLACEHOLDERS.headline" /></label>
+                    <label class="offer-field"><span>Subheadline</span>
+                      <input v-model.trim="builder.post_purchase.upsell.subheadline" type="text" :placeholder="SCAFFOLD_PLACEHOLDERS.subheadline" /></label>
+                    <label class="offer-field"><span>Accept button</span>
+                      <input v-model.trim="builder.post_purchase.upsell.accept_label" type="text" :placeholder="SCAFFOLD_PLACEHOLDERS.accept_label" /></label>
+                    <label class="offer-field"><span>Decline link</span>
+                      <input v-model.trim="builder.post_purchase.upsell.decline_label" type="text" :placeholder="SCAFFOLD_PLACEHOLDERS.decline_label" /></label>
+                    <label v-if="funnelDownsellCount" class="offer-field"><span>Downsell headline (shown in-place on decline)</span>
+                      <input v-model.trim="builder.post_purchase.upsell.downsell_headline" type="text" :placeholder="SCAFFOLD_PLACEHOLDERS.downsell_headline" /></label>
+                    <label class="builder-toggle"><input v-model="builder.post_purchase.upsell.savings_badge" type="checkbox" /><span>Show a savings badge</span></label>
+                    <label class="builder-toggle"><input v-model="builder.post_purchase.upsell.countdown_enabled" type="checkbox" /><span>Show a countdown timer</span></label>
+                    <label v-if="builder.post_purchase.upsell.countdown_enabled" class="offer-field"><span>Countdown minutes</span>
+                      <input v-model.number="builder.post_purchase.upsell.countdown_minutes" type="number" min="1" max="60" /></label>
+                  </template>
 
-              <details v-if="showsUpsellCarousel">
-                <summary>Carousel screen (shown when there are 4+ upsells)</summary>
-                <label class="offer-field">
-                  <span>Headline</span>
-                  <input v-model.trim="builder.post_purchase.upsell.carousel_headline" type="text" :placeholder="SCAFFOLD_PLACEHOLDERS.carousel_headline" />
-                </label>
-                <label class="offer-field">
-                  <span>Subheadline</span>
-                  <input v-model.trim="builder.post_purchase.upsell.carousel_subheadline" type="text" :placeholder="SCAFFOLD_PLACEHOLDERS.carousel_subheadline" />
-                </label>
-                <label class="offer-field">
-                  <span>Add button</span>
-                  <input v-model.trim="builder.post_purchase.upsell.carousel_add_label" type="text" :placeholder="SCAFFOLD_PLACEHOLDERS.carousel_add_label" />
-                </label>
-                <label class="offer-field">
-                  <span>Dismiss link</span>
-                  <input v-model.trim="builder.post_purchase.upsell.carousel_dismiss_label" type="text" :placeholder="SCAFFOLD_PLACEHOLDERS.carousel_dismiss_label" />
-                </label>
-                <label class="offer-field">
-                  <span>Proceed link (after adding any)</span>
-                  <input v-model.trim="builder.post_purchase.upsell.carousel_proceed_label" type="text" :placeholder="SCAFFOLD_PLACEHOLDERS.carousel_proceed_label" />
-                </label>
-                <label class="offer-field">
-                  <span>Downsell carousel headline</span>
-                  <input v-model.trim="builder.post_purchase.upsell.downsell_carousel_headline" type="text" :placeholder="SCAFFOLD_PLACEHOLDERS.downsell_carousel_headline" />
-                </label>
-              </details>
-            </template>
-            <small v-else>Add upsell or downsell products to this offer (Offers → the funnel) to customize the one-click upsell screens.</small>
+                  <!-- Carousel screen (4+ upsells) -->
+                  <template v-else-if="step.kind === 'carousel'">
+                    <label class="offer-field"><span>Headline</span>
+                      <input v-model.trim="builder.post_purchase.upsell.carousel_headline" type="text" :placeholder="SCAFFOLD_PLACEHOLDERS.carousel_headline" /></label>
+                    <label class="offer-field"><span>Subheadline</span>
+                      <input v-model.trim="builder.post_purchase.upsell.carousel_subheadline" type="text" :placeholder="SCAFFOLD_PLACEHOLDERS.carousel_subheadline" /></label>
+                    <label class="offer-field"><span>Add button</span>
+                      <input v-model.trim="builder.post_purchase.upsell.carousel_add_label" type="text" :placeholder="SCAFFOLD_PLACEHOLDERS.carousel_add_label" /></label>
+                    <label class="offer-field"><span>Dismiss link</span>
+                      <input v-model.trim="builder.post_purchase.upsell.carousel_dismiss_label" type="text" :placeholder="SCAFFOLD_PLACEHOLDERS.carousel_dismiss_label" /></label>
+                    <label class="offer-field"><span>Proceed link (after adding any)</span>
+                      <input v-model.trim="builder.post_purchase.upsell.carousel_proceed_label" type="text" :placeholder="SCAFFOLD_PLACEHOLDERS.carousel_proceed_label" /></label>
+                    <label class="offer-field"><span>Downsell carousel headline</span>
+                      <input v-model.trim="builder.post_purchase.upsell.downsell_carousel_headline" type="text" :placeholder="SCAFFOLD_PLACEHOLDERS.downsell_carousel_headline" /></label>
+                  </template>
+                </div>
+              </div>
+            </div>
+            <small v-if="!hasPostPurchaseFunnel" class="funnel-shared-note">Add upsell or downsell products to this offer (Offers → the funnel) to add one-click upsell steps.</small>
           </section>
 
           <section class="builder-section">
@@ -1141,6 +1117,11 @@
         <header class="dashboard-card-header landing-builder-preview-header">
           <h2>Live Preview</h2>
           <div class="preview-header-actions">
+            <!-- Which page the preview is showing: the landing page, or a Post-Checkout Flow step. -->
+            <div v-if="openFunnelStep" class="preview-funnel-badge">
+              <span>{{ activeFunnelStepLabel }}</span>
+              <button type="button" title="Back to the landing page" @click="openFunnelStep = null">✕</button>
+            </div>
             <button v-if="builderFormHidden" class="secondary-action compact" type="button" @click="builderFormHidden = false">
               Show Form
             </button>
@@ -1404,7 +1385,6 @@ const builderIntent = computed(() => builderOffer.value?.product_intent || build
 const funnelUpsellCount = computed(() => (builderOffer.value?.funnel?.upsells || []).length);
 const funnelDownsellCount = computed(() => (builderOffer.value?.funnel?.downsells || []).length);
 const hasPostPurchaseFunnel = computed(() => funnelUpsellCount.value + funnelDownsellCount.value > 0);
-const showsUpsellCarousel = computed(() => funnelUpsellCount.value >= 4);
 // The runtime default copy shown as editor placeholders (mirrors upsell_pages.py DEFAULT_UPSELL_SCAFFOLD /
 // DEFAULT_THANK_YOU). PRICE_TOKEN is interpolated as literal text (a bare {{ }} in the template would break
 // the parser). {{ upsell_price }} in a button label is replaced with the product's price at render.
@@ -1425,6 +1405,43 @@ const SCAFFOLD_PLACEHOLDERS = {
   carousel_proceed_label: "Continue to the next step",
   downsell_carousel_headline: "Before You Go — A Lower-Priced Option",
 };
+// Post-Checkout Flow accordion (SALES_FUNNELS.md P3.5): opening a step switches the Live Preview to render
+// THAT funnel page (via /pages/render funnel_step). null = the landing page.
+const openFunnelStep = ref(null);
+// Every product the offer references (landing items + funnel upsells/downsells) — the funnel-step preview needs
+// the upsell products in its products map, not just the landing items.
+const builderOfferAllProducts = computed(() => {
+  const ids = new Set();
+  (builderOffer.value?.items || []).forEach((i) => i.product_id && ids.add(i.product_id));
+  const funnel = builderOffer.value?.funnel || {};
+  [...(funnel.upsells || []), ...(funnel.downsells || [])].forEach((u) => u.product_id && ids.add(u.product_id));
+  return [...ids].map((id) => productsById.value.get(id)).filter(Boolean);
+});
+// The accordion steps: one per sequential upsell (named by product), then Thank You. >3 upsells collapse to a
+// single carousel step (MAX_SEQUENTIAL_UPSELLS in the runtime). `key` doubles as the /pages/render funnel_step.
+const funnelSteps = computed(() => {
+  const steps = [];
+  const upsells = builderOffer.value?.funnel?.upsells || [];
+  if (upsells.length > 3) {
+    steps.push({ key: "upsell_carousel", num: "★", label: "Upsell offers (carousel)", kind: "carousel" });
+  } else {
+    upsells.forEach((u, i) => {
+      const name = productsById.value.get(u.product_id)?.name || "Upsell";
+      steps.push({ key: `upsell:${i}`, num: String(i + 1), label: `Upsell ${i + 1}: ${name}`, kind: "upsell" });
+    });
+  }
+  steps.push({ key: "thank_you", num: "TY", label: "Thank You Page", kind: "thank_you" });
+  return steps;
+});
+const activeFunnelStepLabel = computed(() => funnelSteps.value.find((s) => s.key === openFunnelStep.value)?.label || "");
+
+function toggleFunnelStep(key) {
+  openFunnelStep.value = openFunnelStep.value === key ? null : key;
+}
+// If the funnel changes (offer switched, upsell removed) so the open step no longer exists, collapse to landing.
+watch(funnelSteps, (steps) => {
+  if (openFunnelStep.value && !steps.some((s) => s.key === openFunnelStep.value)) openFunnelStep.value = null;
+});
 // The smart defaults shown when the tenant leaves the SEO fields blank — the renderer derives the same
 // values live (never stored unless the tenant overrides), so the placeholder matches what publishes.
 const seoTitlePlaceholder = computed(() => offerSeoTitleDefault(builderOffer.value) || "Product — Category");
@@ -1690,8 +1707,11 @@ async function renderPreview() {
       body: {
         page,
         offer,
-        products: builderOfferProducts.value,
+        // A funnel-step preview needs the upsell products too; the landing preview only needs its own items.
+        products: openFunnelStep.value ? builderOfferAllProducts.value : builderOfferProducts.value,
         services: offerServices(offer),
+        // When a Post-Checkout Flow step is open, render THAT funnel page instead of the landing page.
+        funnel_step: openFunnelStep.value || undefined,
         // The page document stores no legal URLs on purpose (legalLinks() returns {}); render_legal_footer
         // builds the platform /legal/* hrefs from api_base_url. Without it the footer links vanish.
         api_base_url: getApiBase(),
@@ -1728,7 +1748,7 @@ watch(
     const { created_at, updated_at, ...stable } = doc;
     // If the chosen preview context got toggled off, fall back to Standard before rendering.
     if (!previewContextOptions.value.some((o) => o.value === previewContext.value)) previewContext.value = "standard";
-    return JSON.stringify([stable, builderOffer.value, builderOfferProducts.value, previewContext.value]);
+    return JSON.stringify([stable, builderOffer.value, builderOfferProducts.value, previewContext.value, openFunnelStep.value]);
   },
   () => {
     clearTimeout(previewRenderTimer);

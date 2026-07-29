@@ -3834,6 +3834,101 @@ button:disabled {
   gap: 1rem;
 }
 
+/* Post-Checkout Flow accordion (plans/SALES_FUNNELS.md P3.5): one step per accordion; opening one switches
+   the Live Preview to that funnel page. */
+.funnel-accordion {
+  display: grid;
+  gap: 0.8rem;
+}
+.funnel-acc-item {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+.funnel-acc-item.open {
+  border-color: var(--accent);
+}
+.funnel-acc-head {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  width: 100%;
+  padding: 1rem 1.2rem;
+  background: var(--panel);
+  border: 0;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+  color: var(--text);
+}
+.funnel-acc-head:hover {
+  background: var(--input-bg);
+}
+.funnel-acc-caret {
+  color: var(--muted);
+  width: 1rem;
+  flex: 0 0 auto;
+}
+.funnel-acc-num {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.6rem;
+  height: 2.6rem;
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 1.2rem;
+  font-weight: 700;
+}
+.funnel-acc-num.thank_you {
+  background: var(--success-strong);
+}
+.funnel-acc-label {
+  flex: 1;
+  font-weight: 600;
+  font-size: 1.4rem;
+  color: var(--text);
+}
+.funnel-acc-hint {
+  color: var(--accent);
+  font-size: 1.2rem;
+  font-weight: 600;
+}
+.funnel-acc-body {
+  display: grid;
+  gap: 1rem;
+  padding: 1.2rem;
+  border-top: 1px solid var(--line);
+}
+.funnel-shared-note {
+  color: var(--muted);
+  font-size: 1.25rem;
+}
+
+/* Which page the Live Preview is currently showing (a Post-Checkout Flow step). */
+.preview-funnel-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.3rem 0.3rem 0.3rem 0.9rem;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 1.2rem;
+  font-weight: 700;
+}
+.preview-funnel-badge button {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font-size: 1.3rem;
+  line-height: 1;
+  padding: 0.2rem 0.4rem;
+}
+
 .builder-inline-media {
   display: grid;
   grid-template-columns: 5.2rem minmax(0, 1fr);
