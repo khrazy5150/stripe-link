@@ -678,70 +678,6 @@
             </div>
           </section>
 
-          <section v-if="builderIntent === 'transaction'" class="builder-section">
-            <h3>Post-Checkout Flow</h3>
-            <p>Configure the pages customers see after checkout. Open a step to edit it — the Live Preview switches to that page. Leave a field blank to use the default (shown as the placeholder). Put <code>{{ PRICE_TOKEN }}</code> in a button label to insert that product's price.</p>
-
-            <div class="funnel-accordion">
-              <div v-for="step in funnelSteps" :key="step.key" class="funnel-acc-item" :class="{ open: openFunnelStep === step.key }">
-                <button type="button" class="funnel-acc-head" @click="toggleFunnelStep(step.key)">
-                  <span class="funnel-acc-caret">{{ openFunnelStep === step.key ? "▾" : "▸" }}</span>
-                  <span class="funnel-acc-num" :class="step.kind">{{ step.num }}</span>
-                  <span class="funnel-acc-label">{{ step.label }}</span>
-                  <span class="funnel-acc-hint">{{ openFunnelStep === step.key ? "Previewing" : "" }}</span>
-                </button>
-
-                <div v-if="openFunnelStep === step.key" class="funnel-acc-body">
-                  <!-- Thank-you page -->
-                  <template v-if="step.kind === 'thank_you'">
-                    <label class="offer-field"><span>Headline</span>
-                      <input v-model.trim="builder.post_purchase.thank_you.headline" type="text" :placeholder="SCAFFOLD_PLACEHOLDERS.ty_headline" /></label>
-                    <label class="offer-field"><span>Subheadline</span>
-                      <input v-model.trim="builder.post_purchase.thank_you.subheadline" type="text" :placeholder="SCAFFOLD_PLACEHOLDERS.ty_subheadline" /></label>
-                    <label class="offer-field"><span>Message</span>
-                      <textarea v-model.trim="builder.post_purchase.thank_you.message" rows="2" :placeholder="SCAFFOLD_PLACEHOLDERS.ty_message"></textarea></label>
-                  </template>
-
-                  <!-- Sequential upsell page (copy shared across upsell steps) -->
-                  <template v-else-if="step.kind === 'upsell'">
-                    <small v-if="funnelUpsellCount > 1" class="funnel-shared-note">This copy is shared across all upsell steps; each step previews its own product.</small>
-                    <label class="offer-field"><span>Headline</span>
-                      <input v-model.trim="builder.post_purchase.upsell.headline" type="text" :placeholder="SCAFFOLD_PLACEHOLDERS.headline" /></label>
-                    <label class="offer-field"><span>Subheadline</span>
-                      <input v-model.trim="builder.post_purchase.upsell.subheadline" type="text" :placeholder="SCAFFOLD_PLACEHOLDERS.subheadline" /></label>
-                    <label class="offer-field"><span>Accept button</span>
-                      <input v-model.trim="builder.post_purchase.upsell.accept_label" type="text" :placeholder="SCAFFOLD_PLACEHOLDERS.accept_label" /></label>
-                    <label class="offer-field"><span>Decline link</span>
-                      <input v-model.trim="builder.post_purchase.upsell.decline_label" type="text" :placeholder="SCAFFOLD_PLACEHOLDERS.decline_label" /></label>
-                    <label v-if="funnelDownsellCount" class="offer-field"><span>Downsell headline (shown in-place on decline)</span>
-                      <input v-model.trim="builder.post_purchase.upsell.downsell_headline" type="text" :placeholder="SCAFFOLD_PLACEHOLDERS.downsell_headline" /></label>
-                    <label class="builder-toggle"><input v-model="builder.post_purchase.upsell.savings_badge" type="checkbox" /><span>Show a savings badge</span></label>
-                    <label class="builder-toggle"><input v-model="builder.post_purchase.upsell.countdown_enabled" type="checkbox" /><span>Show a countdown timer</span></label>
-                    <label v-if="builder.post_purchase.upsell.countdown_enabled" class="offer-field"><span>Countdown minutes</span>
-                      <input v-model.number="builder.post_purchase.upsell.countdown_minutes" type="number" min="1" max="60" /></label>
-                  </template>
-
-                  <!-- Carousel screen (4+ upsells) -->
-                  <template v-else-if="step.kind === 'carousel'">
-                    <label class="offer-field"><span>Headline</span>
-                      <input v-model.trim="builder.post_purchase.upsell.carousel_headline" type="text" :placeholder="SCAFFOLD_PLACEHOLDERS.carousel_headline" /></label>
-                    <label class="offer-field"><span>Subheadline</span>
-                      <input v-model.trim="builder.post_purchase.upsell.carousel_subheadline" type="text" :placeholder="SCAFFOLD_PLACEHOLDERS.carousel_subheadline" /></label>
-                    <label class="offer-field"><span>Add button</span>
-                      <input v-model.trim="builder.post_purchase.upsell.carousel_add_label" type="text" :placeholder="SCAFFOLD_PLACEHOLDERS.carousel_add_label" /></label>
-                    <label class="offer-field"><span>Dismiss link</span>
-                      <input v-model.trim="builder.post_purchase.upsell.carousel_dismiss_label" type="text" :placeholder="SCAFFOLD_PLACEHOLDERS.carousel_dismiss_label" /></label>
-                    <label class="offer-field"><span>Proceed link (after adding any)</span>
-                      <input v-model.trim="builder.post_purchase.upsell.carousel_proceed_label" type="text" :placeholder="SCAFFOLD_PLACEHOLDERS.carousel_proceed_label" /></label>
-                    <label class="offer-field"><span>Downsell carousel headline</span>
-                      <input v-model.trim="builder.post_purchase.upsell.downsell_carousel_headline" type="text" :placeholder="SCAFFOLD_PLACEHOLDERS.downsell_carousel_headline" /></label>
-                  </template>
-                </div>
-              </div>
-            </div>
-            <small v-if="!hasPostPurchaseFunnel" class="funnel-shared-note">Add upsell or downsell products to this offer (Offers → the funnel) to add one-click upsell steps.</small>
-          </section>
-
           <section class="builder-section">
             <h3>SEO</h3>
             <label class="offer-field">
@@ -1088,6 +1024,70 @@
                 </label>
               </div>
             </div>
+          </section>
+
+          <section v-if="builderIntent === 'transaction'" class="builder-section">
+            <h3>Post-Checkout Flow</h3>
+            <p>Configure the pages customers see after checkout. Open a step to edit it — the Live Preview switches to that page. Leave a field blank to use the default (shown as the placeholder). Put <code>{{ PRICE_TOKEN }}</code> in a button label to insert that product's price.</p>
+
+            <div class="funnel-accordion">
+              <div v-for="step in funnelSteps" :key="step.key" class="funnel-acc-item" :class="{ open: openFunnelStep === step.key }">
+                <button type="button" class="funnel-acc-head" @click="toggleFunnelStep(step.key)">
+                  <span class="funnel-acc-caret">{{ openFunnelStep === step.key ? "▾" : "▸" }}</span>
+                  <span class="funnel-acc-num" :class="step.kind">{{ step.num }}</span>
+                  <span class="funnel-acc-label">{{ step.label }}</span>
+                  <span class="funnel-acc-hint">{{ openFunnelStep === step.key ? "Previewing" : "" }}</span>
+                </button>
+
+                <div v-if="openFunnelStep === step.key" class="funnel-acc-body">
+                  <!-- Thank-you page -->
+                  <template v-if="step.kind === 'thank_you'">
+                    <label class="offer-field"><span>Headline</span>
+                      <input v-model.trim="builder.post_purchase.thank_you.headline" type="text" :placeholder="SCAFFOLD_PLACEHOLDERS.ty_headline" /></label>
+                    <label class="offer-field"><span>Subheadline</span>
+                      <input v-model.trim="builder.post_purchase.thank_you.subheadline" type="text" :placeholder="SCAFFOLD_PLACEHOLDERS.ty_subheadline" /></label>
+                    <label class="offer-field"><span>Message</span>
+                      <textarea v-model.trim="builder.post_purchase.thank_you.message" rows="2" :placeholder="SCAFFOLD_PLACEHOLDERS.ty_message"></textarea></label>
+                  </template>
+
+                  <!-- Sequential upsell page (copy shared across upsell steps) -->
+                  <template v-else-if="step.kind === 'upsell'">
+                    <small v-if="funnelUpsellCount > 1" class="funnel-shared-note">This copy is shared across all upsell steps; each step previews its own product.</small>
+                    <label class="offer-field"><span>Headline</span>
+                      <input v-model.trim="builder.post_purchase.upsell.headline" type="text" :placeholder="SCAFFOLD_PLACEHOLDERS.headline" /></label>
+                    <label class="offer-field"><span>Subheadline</span>
+                      <input v-model.trim="builder.post_purchase.upsell.subheadline" type="text" :placeholder="SCAFFOLD_PLACEHOLDERS.subheadline" /></label>
+                    <label class="offer-field"><span>Accept button</span>
+                      <input v-model.trim="builder.post_purchase.upsell.accept_label" type="text" :placeholder="SCAFFOLD_PLACEHOLDERS.accept_label" /></label>
+                    <label class="offer-field"><span>Decline link</span>
+                      <input v-model.trim="builder.post_purchase.upsell.decline_label" type="text" :placeholder="SCAFFOLD_PLACEHOLDERS.decline_label" /></label>
+                    <label v-if="funnelDownsellCount" class="offer-field"><span>Downsell headline (shown in-place on decline)</span>
+                      <input v-model.trim="builder.post_purchase.upsell.downsell_headline" type="text" :placeholder="SCAFFOLD_PLACEHOLDERS.downsell_headline" /></label>
+                    <label class="builder-toggle"><input v-model="builder.post_purchase.upsell.savings_badge" type="checkbox" /><span>Show a savings badge</span></label>
+                    <label class="builder-toggle"><input v-model="builder.post_purchase.upsell.countdown_enabled" type="checkbox" /><span>Show a countdown timer</span></label>
+                    <label v-if="builder.post_purchase.upsell.countdown_enabled" class="offer-field"><span>Countdown minutes</span>
+                      <input v-model.number="builder.post_purchase.upsell.countdown_minutes" type="number" min="1" max="60" /></label>
+                  </template>
+
+                  <!-- Carousel screen (4+ upsells) -->
+                  <template v-else-if="step.kind === 'carousel'">
+                    <label class="offer-field"><span>Headline</span>
+                      <input v-model.trim="builder.post_purchase.upsell.carousel_headline" type="text" :placeholder="SCAFFOLD_PLACEHOLDERS.carousel_headline" /></label>
+                    <label class="offer-field"><span>Subheadline</span>
+                      <input v-model.trim="builder.post_purchase.upsell.carousel_subheadline" type="text" :placeholder="SCAFFOLD_PLACEHOLDERS.carousel_subheadline" /></label>
+                    <label class="offer-field"><span>Add button</span>
+                      <input v-model.trim="builder.post_purchase.upsell.carousel_add_label" type="text" :placeholder="SCAFFOLD_PLACEHOLDERS.carousel_add_label" /></label>
+                    <label class="offer-field"><span>Dismiss link</span>
+                      <input v-model.trim="builder.post_purchase.upsell.carousel_dismiss_label" type="text" :placeholder="SCAFFOLD_PLACEHOLDERS.carousel_dismiss_label" /></label>
+                    <label class="offer-field"><span>Proceed link (after adding any)</span>
+                      <input v-model.trim="builder.post_purchase.upsell.carousel_proceed_label" type="text" :placeholder="SCAFFOLD_PLACEHOLDERS.carousel_proceed_label" /></label>
+                    <label class="offer-field"><span>Downsell carousel headline</span>
+                      <input v-model.trim="builder.post_purchase.upsell.downsell_carousel_headline" type="text" :placeholder="SCAFFOLD_PLACEHOLDERS.downsell_carousel_headline" /></label>
+                  </template>
+                </div>
+              </div>
+            </div>
+            <small v-if="!hasPostPurchaseFunnel" class="funnel-shared-note">Add upsell or downsell products to this offer (Offers → the funnel) to add one-click upsell steps.</small>
           </section>
 
           <section class="builder-section">
