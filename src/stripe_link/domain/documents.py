@@ -236,6 +236,34 @@ def validate_thank_you_page(value: Any, label: str) -> None:
         url = require_string(value, "url", f"{label}.url")
         if not HTTP_URL_PATTERN.match(url):
             raise DocumentValidationError(f"{label}.url must be an HTTP(S) URL.")
+    # Editable thank-you copy (SALES_FUNNELS.md P3.5) — overrides the synthesized terminus's defaults. Only
+    # meaningful for a page_id (self-hosted) terminus; harmless on a url terminus.
+    for field in ("headline", "subheadline", "message"):
+        optional_string(value, field, f"{label}.{field}", max_length=300)
+
+
+# The customer-facing copy for the synthesized post-purchase pages (upsell_pages.DEFAULT_UPSELL_SCAFFOLD).
+# Blank overrides fall back to the runtime defaults, so every field is optional here.
+UPSELL_SCAFFOLD_TEXT_FIELDS = (
+    "headline", "subheadline", "accept_label", "decline_label", "downsell_headline",
+    "carousel_headline", "carousel_subheadline", "carousel_add_label", "carousel_dismiss_label",
+    "carousel_proceed_label", "downsell_carousel_headline",
+)
+
+
+def validate_upsell_scaffold(value: Any, label: str) -> None:
+    """The per-page post-purchase copy overrides (SALES_FUNNELS.md P3.5). All fields optional — a blank field
+    falls back to the runtime default (upsell_pages.upsell_scaffold)."""
+    if not isinstance(value, dict):
+        raise DocumentValidationError(f"{label} must be an object.")
+    for field in UPSELL_SCAFFOLD_TEXT_FIELDS:
+        optional_string(value, field, f"{label}.{field}", max_length=300)
+    optional_bool(value, "countdown_enabled", f"{label}.countdown_enabled")
+    optional_bool(value, "savings_badge", f"{label}.savings_badge")
+    if value.get("countdown_minutes") is not None:
+        minutes = value.get("countdown_minutes")
+        if not isinstance(minutes, int) or isinstance(minutes, bool) or not (1 <= minutes <= 60):
+            raise DocumentValidationError(f"{label}.countdown_minutes must be an integer from 1 to 60.")
 
 
 def validate_funnel_steps(value: Any, label: str) -> None:
@@ -279,6 +307,8 @@ def validate_page_post_checkout(value: Any) -> None:
     validate_thank_you_page(value.get("thank_you_page"), "Page post_checkout.thank_you_page")
     if "funnel_steps" in value:
         validate_funnel_steps(value.get("funnel_steps"), "Page post_checkout.funnel_steps")
+    if "upsell_scaffold" in value:
+        validate_upsell_scaffold(value.get("upsell_scaffold"), "Page post_checkout.upsell_scaffold")
 
 
 def require_positive_int(document: dict[str, Any], field: str, label: str | None = None) -> int:

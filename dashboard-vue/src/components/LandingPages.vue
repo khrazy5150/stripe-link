@@ -678,6 +678,94 @@
             </div>
           </section>
 
+          <section v-if="builderIntent === 'transaction'" class="builder-section">
+            <h3>Post-purchase pages</h3>
+            <p>Customize the thank-you page and, when this offer has a post-purchase funnel, the one-click upsell/downsell screens. Leave a field blank to use the default shown in the placeholder. Put <code>{{ PRICE_TOKEN }}</code> in a button label to insert that product's price.</p>
+
+            <h4>Thank-you page</h4>
+            <label class="offer-field">
+              <span>Headline</span>
+              <input v-model.trim="builder.post_purchase.thank_you.headline" type="text" :placeholder="SCAFFOLD_PLACEHOLDERS.ty_headline" />
+            </label>
+            <label class="offer-field">
+              <span>Subheadline</span>
+              <input v-model.trim="builder.post_purchase.thank_you.subheadline" type="text" :placeholder="SCAFFOLD_PLACEHOLDERS.ty_subheadline" />
+            </label>
+            <label class="offer-field">
+              <span>Message</span>
+              <textarea v-model.trim="builder.post_purchase.thank_you.message" rows="2" :placeholder="SCAFFOLD_PLACEHOLDERS.ty_message"></textarea>
+            </label>
+
+            <template v-if="hasPostPurchaseFunnel">
+              <h4>Upsell screen</h4>
+              <label class="offer-field">
+                <span>Headline</span>
+                <input v-model.trim="builder.post_purchase.upsell.headline" type="text" :placeholder="SCAFFOLD_PLACEHOLDERS.headline" />
+              </label>
+              <label class="offer-field">
+                <span>Subheadline</span>
+                <input v-model.trim="builder.post_purchase.upsell.subheadline" type="text" :placeholder="SCAFFOLD_PLACEHOLDERS.subheadline" />
+              </label>
+              <label class="offer-field">
+                <span>Accept button</span>
+                <input v-model.trim="builder.post_purchase.upsell.accept_label" type="text" :placeholder="SCAFFOLD_PLACEHOLDERS.accept_label" />
+              </label>
+              <label class="offer-field">
+                <span>Decline link</span>
+                <input v-model.trim="builder.post_purchase.upsell.decline_label" type="text" :placeholder="SCAFFOLD_PLACEHOLDERS.decline_label" />
+              </label>
+              <label class="builder-toggle">
+                <input v-model="builder.post_purchase.upsell.savings_badge" type="checkbox" />
+                <span>Show a savings badge</span>
+              </label>
+              <label class="builder-toggle">
+                <input v-model="builder.post_purchase.upsell.countdown_enabled" type="checkbox" />
+                <span>Show a countdown timer</span>
+              </label>
+              <label v-if="builder.post_purchase.upsell.countdown_enabled" class="offer-field">
+                <span>Countdown minutes</span>
+                <input v-model.number="builder.post_purchase.upsell.countdown_minutes" type="number" min="1" max="60" />
+              </label>
+
+              <template v-if="funnelDownsellCount">
+                <h4>Downsell screen</h4>
+                <label class="offer-field">
+                  <span>Headline</span>
+                  <input v-model.trim="builder.post_purchase.upsell.downsell_headline" type="text" :placeholder="SCAFFOLD_PLACEHOLDERS.downsell_headline" />
+                </label>
+              </template>
+
+              <details v-if="showsUpsellCarousel">
+                <summary>Carousel screen (shown when there are 4+ upsells)</summary>
+                <label class="offer-field">
+                  <span>Headline</span>
+                  <input v-model.trim="builder.post_purchase.upsell.carousel_headline" type="text" :placeholder="SCAFFOLD_PLACEHOLDERS.carousel_headline" />
+                </label>
+                <label class="offer-field">
+                  <span>Subheadline</span>
+                  <input v-model.trim="builder.post_purchase.upsell.carousel_subheadline" type="text" :placeholder="SCAFFOLD_PLACEHOLDERS.carousel_subheadline" />
+                </label>
+                <label class="offer-field">
+                  <span>Add button</span>
+                  <input v-model.trim="builder.post_purchase.upsell.carousel_add_label" type="text" :placeholder="SCAFFOLD_PLACEHOLDERS.carousel_add_label" />
+                </label>
+                <label class="offer-field">
+                  <span>Dismiss link</span>
+                  <input v-model.trim="builder.post_purchase.upsell.carousel_dismiss_label" type="text" :placeholder="SCAFFOLD_PLACEHOLDERS.carousel_dismiss_label" />
+                </label>
+                <label class="offer-field">
+                  <span>Proceed link (after adding any)</span>
+                  <input v-model.trim="builder.post_purchase.upsell.carousel_proceed_label" type="text" :placeholder="SCAFFOLD_PLACEHOLDERS.carousel_proceed_label" />
+                </label>
+                <label class="offer-field">
+                  <span>Downsell carousel headline</span>
+                  <input v-model.trim="builder.post_purchase.upsell.downsell_carousel_headline" type="text" :placeholder="SCAFFOLD_PLACEHOLDERS.downsell_carousel_headline" />
+                </label>
+              </details>
+            </template>
+            <small v-else>Add upsell or downsell products to this offer (Offers → the funnel) to customize the one-click upsell screens.</small>
+          </section>
+
           <section class="builder-section">
             <h3>SEO</h3>
             <label class="offer-field">
@@ -1310,6 +1398,33 @@ const selectedLeadAction = computed(() => selectedOfferProducts.value.find((prod
 const builderOffer = computed(() => offers.value.find((offer) => offer.offer_id === builder.offer_id) || null);
 const builderOfferProducts = computed(() => offerProducts(builderOffer.value));
 const builderIntent = computed(() => builderOffer.value?.product_intent || builderOfferProducts.value[0]?.product_intent || "transaction");
+// Post-purchase funnel gating (P3.5): the upsell/downsell/carousel copy only matters when the offer carries a
+// funnel; the thank-you copy applies to every transaction funnel. MAX_SEQUENTIAL_UPSELLS=4 → the grid/carousel
+// screen (matches upsell_pages.py); expose the carousel copy only when there are that many upsells.
+const funnelUpsellCount = computed(() => (builderOffer.value?.funnel?.upsells || []).length);
+const funnelDownsellCount = computed(() => (builderOffer.value?.funnel?.downsells || []).length);
+const hasPostPurchaseFunnel = computed(() => funnelUpsellCount.value + funnelDownsellCount.value > 0);
+const showsUpsellCarousel = computed(() => funnelUpsellCount.value >= 4);
+// The runtime default copy shown as editor placeholders (mirrors upsell_pages.py DEFAULT_UPSELL_SCAFFOLD /
+// DEFAULT_THANK_YOU). PRICE_TOKEN is interpolated as literal text (a bare {{ }} in the template would break
+// the parser). {{ upsell_price }} in a button label is replaced with the product's price at render.
+const PRICE_TOKEN = "{{ upsell_price }}";
+const SCAFFOLD_PLACEHOLDERS = {
+  ty_headline: "Thank You for Your Purchase!",
+  ty_subheadline: "Your order is confirmed — a receipt is on its way to your inbox.",
+  ty_message: "We're getting your order ready. You'll get an email with the details shortly.",
+  headline: "Wait! Before You Go…",
+  subheadline: "Exclusive One-Time Offer Just For You",
+  accept_label: "Yes, I'll Take This Deal for {{ upsell_price }}",
+  decline_label: "No, Thank You! Let's Move On",
+  downsell_headline: "Wait — Here's a Smaller Option",
+  carousel_headline: "Special Deals — Just For You",
+  carousel_subheadline: "One-time offers at checkout prices. Add any you like, then continue.",
+  carousel_add_label: "Add for {{ upsell_price }}",
+  carousel_dismiss_label: "No thanks, I'm good!",
+  carousel_proceed_label: "Continue to the next step",
+  downsell_carousel_headline: "Before You Go — A Lower-Priced Option",
+};
 // The smart defaults shown when the tenant leaves the SEO fields blank — the renderer derives the same
 // values live (never stored unless the tenant overrides), so the placeholder matches what publishes.
 const seoTitlePlaceholder = computed(() => offerSeoTitleDefault(builderOffer.value) || "Product — Category");
@@ -1767,6 +1882,20 @@ function defaultBuilderForm() {
     // Sale / Flash-Sale views (plans/SALES_FUNNELS.md P1). Dates are epoch seconds; 0 = unset.
     sale: { enabled: false, ends_at: 0 },
     flash_sale: { enabled: false, starts_on: 0, ends_at: 0 },
+    // Post-purchase funnel page copy (plans/SALES_FUNNELS.md P3.5). Every text field is a per-page OVERRIDE:
+    // blank falls back to the runtime defaults (upsell_pages.DEFAULT_UPSELL_SCAFFOLD / DEFAULT_THANK_YOU), so
+    // placeholders in the editor show the default. thank_you -> post_checkout.thank_you_page copy; upsell ->
+    // post_checkout.upsell_scaffold. Only the upsell/downsell/carousel copy matters when offer.funnel carries
+    // upsells/downsells; the thank-you copy applies to every transaction funnel.
+    post_purchase: {
+      thank_you: { headline: "", subheadline: "", message: "" },
+      upsell: {
+        headline: "", subheadline: "", accept_label: "", decline_label: "", downsell_headline: "",
+        countdown_enabled: true, countdown_minutes: 1, savings_badge: true,
+        carousel_headline: "", carousel_subheadline: "", carousel_add_label: "",
+        carousel_dismiss_label: "", carousel_proceed_label: "", downsell_carousel_headline: "",
+      },
+    },
     trust_badges: {
       enabled: true,
       badges: [
@@ -2358,6 +2487,7 @@ function populateBuilderFromPage(page) {
   Object.assign(builder, defaultBuilderForm(), {
     page_id: page.page_id || localId("page"),
     thank_you_page_id: page.post_checkout?.thank_you_page?.page_id || localId("page"),
+    post_purchase: loadPostPurchase(page),
     offer_id: page.offer_id || "",
     offerName: offer?.name || "",
     name: page.name || "",
@@ -2428,6 +2558,55 @@ function populateBuilderFromPage(page) {
   });
 }
 
+// P3.5 post-purchase copy. Text fields are sent only when non-blank (the runtime fills the rest from
+// upsell_pages defaults); the countdown/badge toggles are sent only when they DEVIATE from the runtime
+// defaults (countdown on, 1 minute, savings badge on), so an untouched funnel persists no scaffold at all.
+const UPSELL_SCAFFOLD_TEXT_FIELDS = [
+  "headline", "subheadline", "accept_label", "decline_label", "downsell_headline",
+  "carousel_headline", "carousel_subheadline", "carousel_add_label", "carousel_dismiss_label",
+  "carousel_proceed_label", "downsell_carousel_headline",
+];
+
+function thankYouCopyOverrides() {
+  const thankYou = builder.post_purchase?.thank_you || {};
+  const out = {};
+  ["headline", "subheadline", "message"].forEach((key) => {
+    const value = (thankYou[key] || "").trim();
+    if (value) out[key] = value;
+  });
+  return out;
+}
+
+function upsellScaffoldOverrides() {
+  const upsell = builder.post_purchase?.upsell || {};
+  const out = {};
+  UPSELL_SCAFFOLD_TEXT_FIELDS.forEach((key) => {
+    const value = (upsell[key] || "").trim();
+    if (value) out[key] = value;
+  });
+  if (upsell.countdown_enabled === false) out.countdown_enabled = false;
+  if (upsell.savings_badge === false) out.savings_badge = false;
+  const minutes = Number(upsell.countdown_minutes);
+  if (minutes && minutes !== 1) out.countdown_minutes = minutes;
+  return Object.keys(out).length ? out : null;
+}
+
+function loadPostPurchase(page) {
+  const base = defaultBuilderForm().post_purchase;
+  const postCheckout = page.post_checkout || {};
+  const thankYou = postCheckout.thank_you_page || {};
+  const scaffold = postCheckout.upsell_scaffold || {};
+  return {
+    thank_you: {
+      headline: thankYou.headline || "",
+      subheadline: thankYou.subheadline || "",
+      message: thankYou.message || "",
+    },
+    // Overlay the stored overrides on the defaults so un-overridden fields stay blank (placeholder = default).
+    upsell: { ...base.upsell, ...Object.fromEntries(Object.entries(scaffold).filter(([, v]) => v != null)) },
+  };
+}
+
 function buildBuilderPageDocument() {
   if (!builder.offer_id) return null;
   const now = Math.floor(Date.now() / 1000);
@@ -2467,7 +2646,9 @@ function buildBuilderPageDocument() {
     post_checkout: intent === "transaction" ? {
       thank_you_page: {
         page_id: builder.thank_you_page_id,
+        ...thankYouCopyOverrides(),
       },
+      ...(upsellScaffoldOverrides() ? { upsell_scaffold: upsellScaffoldOverrides() } : {}),
     } : undefined,
     // Sale / Flash-Sale views (plans/SALES_FUNNELS.md P1). Omitted (removed) when disabled.
     sale: (intent === "transaction" && builder.sale.enabled)

@@ -13,6 +13,7 @@ from stripe_link.domain.documents import (
     validate_global_billing_config,
     validate_offer_document,
     validate_page_document,
+    validate_page_post_checkout,
     validate_product_document,
     validate_site,
     validate_user_preferences,
@@ -51,6 +52,34 @@ class DocumentValidationTests(unittest.TestCase):
         offer["semantic_model"] = {"facts": {}, "interpretation": {"source": "vibes"}}
         with self.assertRaises(DocumentValidationError):
             validate_offer_document(offer)
+
+    # --- Post-purchase scaffold copy (SALES_FUNNELS.md P3.5) ---------------------------------------------
+
+    def test_post_checkout_accepts_editable_thank_you_and_upsell_copy(self):
+        validate_page_post_checkout({
+            "thank_you_page": {"page_id": "pg_ty", "headline": "Thanks!", "subheadline": "You rock", "message": "Soon."},
+            "upsell_scaffold": {"headline": "Wait!", "accept_label": "Yes for {{ upsell_price }}",
+                                "countdown_enabled": False, "countdown_minutes": 5, "savings_badge": True},
+        })  # no raise
+
+    def test_post_checkout_rejects_out_of_range_countdown(self):
+        for bad in (0, 61, "5", 1.5):
+            with self.assertRaises(DocumentValidationError):
+                validate_page_post_checkout({"thank_you_page": {"page_id": "pg"},
+                                             "upsell_scaffold": {"countdown_minutes": bad}})
+
+    def test_post_checkout_rejects_non_string_scaffold_field(self):
+        with self.assertRaises(DocumentValidationError):
+            validate_page_post_checkout({"thank_you_page": {"page_id": "pg"},
+                                         "upsell_scaffold": {"headline": 123}})
+
+    def test_blank_scaffold_copy_falls_back_to_runtime_defaults(self):
+        # A blank override must not clobber the default (the editor sends only non-blank fields, but guard it).
+        from stripe_link.runtime.upsell_pages import DEFAULT_UPSELL_SCAFFOLD, upsell_scaffold
+        page = {"post_checkout": {"upsell_scaffold": {"headline": "Custom", "subheadline": ""}}}
+        scaffold = upsell_scaffold(page)
+        self.assertEqual(scaffold["headline"], "Custom")
+        self.assertEqual(scaffold["subheadline"], DEFAULT_UPSELL_SCAFFOLD["subheadline"])
 
     def test_accepts_universal_bundle_fixtures(self):
         validate_product_document(load_fixture("product-universal-bundle.json"))
