@@ -499,6 +499,10 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     "    .sl-content-block h2{font-family:var(--sl-font-heading);font-size:2rem;line-height:1.25;margin-bottom:0.8rem;color:var(--sl-content-heading)}",
     "    .sl-content-block p{color:var(--sl-content-text);font-size:1.5rem;line-height:1.6}",
     "    .sl-content-block img{width:100%;height:auto;aspect-ratio:4/3;object-fit:cover;border-radius:0.8rem}",
+    # Centered variant (SALES_FUNNELS.md P3.5): a single centered column — used for the upsell product blurb and
+    # any content block a tenant opts to center.
+    "    .sl-content-blocks--centered .sl-content-block{grid-template-columns:minmax(0,1fr);text-align:center;justify-items:center}",
+    "    .sl-content-blocks--centered .sl-content-block p{max-width:46rem;margin:0 auto}",
     # Thank-you page extras (SALES_FUNNELS.md P3.5 Phase 2): celebration burst, "What's Next?" cards, footer.
     "    .sl-celebration{display:flex;justify-content:center;margin:0 auto 0.4rem}",
     "    .sl-celebration-mark svg{width:6.4rem;height:6.4rem}",
@@ -3376,8 +3380,9 @@ def render_content_blocks(section: dict[str, Any]) -> str:
         ]))
     if not rendered:
         return ""
+    centered = " sl-content-blocks--centered" if section.get("centered") else ""
     return "\n".join([
-        f"    <section class=\"sl-content-blocks\" data-section-id=\"{escape(str(section.get('id', 'content-blocks')))}\" data-section-type=\"content_block\">",
+        f"    <section class=\"sl-content-blocks{centered}\" data-section-id=\"{escape(str(section.get('id', 'content-blocks')))}\" data-section-type=\"content_block\">",
         *rendered,
         "    </section>",
     ])

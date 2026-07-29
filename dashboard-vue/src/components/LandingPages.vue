@@ -854,6 +854,7 @@
                     <input v-model.trim="element.image_url" type="url" placeholder="Optional image URL" />
                   </div>
                   <div v-if="blurbImageErrors[element.id]" class="price-image-error">{{ blurbImageErrors[element.id] }}</div>
+                  <label class="builder-toggle"><input v-model="element.centered" type="checkbox" /><span>Center this block</span></label>
                 </template>
 
                 <template v-else-if="element.type === 'testimonials'">
@@ -3261,7 +3262,7 @@ const ELEMENT_TYPES = computed(() => addableElements());
 function newElement(type) {
   const base = { id: localId("el"), type };
   // Sensible default headings so the tenant isn't guessing — they can always reword them.
-  if (type === "content_block") return { ...base, title: "", text: "", image_url: "" };
+  if (type === "content_block") return { ...base, title: "", text: "", image_url: "", centered: false };
   if (type === "testimonials") return { ...base, heading: "What Our Clients Say", items: [{ quote: "", author: "", role: "", avatar_url: "" }] };
   if (type === "rating") return { ...base, value: 5, count: 0, label: "" };
   if (type === "client_marquee") return { ...base, heading: "Our Clients", logos: [{ image_url: "", name: "" }] };
@@ -3356,7 +3357,7 @@ async function handleSubImagePicked(target, field, key, event) {
 function elementSection(element) {
   if (element.type === "content_block") {
     if (!element.title && !element.text && !element.image_url) return null;
-    return { id: element.id, type: "content_block", blocks: [{ title: formatHeadline(element.title || ""), text: element.text || "", image_url: element.image_url || undefined }] };
+    return { id: element.id, type: "content_block", ...(element.centered ? { centered: true } : {}), blocks: [{ title: formatHeadline(element.title || ""), text: element.text || "", image_url: element.image_url || undefined }] };
   }
   if (element.type === "testimonials") {
     const items = (element.items || []).filter((item) => (item.quote || "").trim());
@@ -3398,7 +3399,7 @@ function elementsFromPage(sections) {
   for (const section of sections || []) {
     if (section.type === "content_block") {
       for (const block of section.blocks || []) {
-        elements.push({ id: localId("el"), type: "content_block", title: block.title || "", text: block.text || "", image_url: block.image_url || "" });
+        elements.push({ id: localId("el"), type: "content_block", title: block.title || "", text: block.text || "", image_url: block.image_url || "", centered: Boolean(section.centered) });
       }
     } else if (section.type === "testimonials") {
       elements.push({ id: localId("el"), type: "testimonials", heading: section.heading || "",

@@ -155,7 +155,7 @@ def synthesize_upsell_page(
         {"id": "subheadline", "type": "subheadline", "text": presentation["subheadline"]},
     ])
     if description:
-        sections.append({"id": "product-details", "type": "content_block",
+        sections.append({"id": "product-details", "type": "content_block", "centered": True,
                          "blocks": [{"title": str(product.get("name") or ""), "text": description}]})
     sections.extend([
         {"id": "offer-selector", "type": "offer_price_selector", "offer_id": offer["offer_id"]},

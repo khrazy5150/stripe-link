@@ -1021,6 +1021,10 @@ main {
   box-shadow: 0 2.4rem 7rem rgba(15, 23, 42, 0.28);
 }
 
+.modal-card-body {
+  padding: 1.8rem 2.4rem 2.4rem;
+}
+
 .modal-card-header {
   display: flex;
   align-items: center;

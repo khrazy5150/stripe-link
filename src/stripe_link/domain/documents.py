@@ -1204,6 +1204,7 @@ def validate_page_document(document: dict[str, Any]) -> None:
                 require_string(item, "question", "FAQ question")
                 require_string(item, "answer", "FAQ answer")
         elif section_type == "content_block":
+            optional_bool(section, "centered", "Content block centered")
             blocks = optional_limited_object_list(section, "blocks", 10, "Content blocks")
             for block in blocks:
                 require_string(block, "title", "Content block title")

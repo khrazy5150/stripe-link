@@ -251,6 +251,7 @@ class RenderFunnelStepPreviewTests(unittest.TestCase):
         product["images"] = ["https://img/a.jpg", "https://img/b.jpg", "https://img/c.jpg"]
         html = render_funnel_step_html("upsell:0", self.page, self.offer, {product["product_id"]: product})
         self.assertIn('data-section-type="content_block"', html)   # description renders as its own block
+        self.assertIn("sl-content-blocks--centered", html)         # centered on the upsell page (not left-indented)
         self.assertIn("Great for recovery", html)
         self.assertIn("https://img/b.jpg", html)                   # gallery, not just the first image
         self.assertIn("https://img/c.jpg", html)
