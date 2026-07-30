@@ -1241,6 +1241,7 @@ def validate_page_document(document: dict[str, Any]) -> None:
         elif section_type == "brand_hero":
             optional_string(section, "headline", "Brand hero headline")
             optional_string(section, "tagline", "Brand hero tagline")
+            optional_string(section, "logo_url", "Brand hero logo URL")
         elif section_type == "related_products":
             # Cards are resolved at publish from the Site's other pages in this page's category; the tenant
             # only sets the heading (plans/SITE_OBJECT.md §2.5b Slice 3 / SEO-13).

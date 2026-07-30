@@ -45,8 +45,11 @@
           <article v-for="page in filteredPages" :key="page.page_id" class="landing-page-card">
             <div class="landing-page-image">
               <img v-if="pageImage(page)" :src="pageImage(page)" :alt="page.name || 'Landing page image'" />
-              <div v-else class="landing-page-placeholder" aria-hidden="true">
-                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <div v-else class="landing-page-placeholder" :class="{ 'storefront-placeholder': isStorefrontPage(page) }" aria-hidden="true">
+                <svg v-if="isStorefrontPage(page)" viewBox="0 0 20 20" fill="currentColor">
+                  <path d="M10.707 2.293a1 1 0 00-1.414 0l-7 7a1 1 0 001.414 1.414L4 10.414V17a1 1 0 001 1h2a1 1 0 001-1v-2a1 1 0 011-1h2a1 1 0 011 1v2a1 1 0 001 1h2a1 1 0 001-1v-6.586l.293.293a1 1 0 001.414-1.414l-7-7z" />
+                </svg>
+                <svg v-else fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5.25 18.75c4.75-.25 8.75-2.5 12-6.75m0 0 1.5 1.5m-1.5-1.5-1.5-1.5M6.75 14.25 4.5 19.5l5.25-2.25M12 3.75c3.5 1.25 6.25 4 7.5 7.5-4.75.5-8.25-1-10.5-4.5A10 10 0 0 1 12 3.75Z" />
                 </svg>
               </div>
@@ -339,11 +342,33 @@
                 <option v-for="b in storeBrands" :key="b" :value="b">{{ b }}</option>
               </select>
               <input v-else v-model.trim="form.storefront.headline" type="text" placeholder="Your store name" />
+              <small v-if="showDupNameWarning" class="storefront-dup-warning">
+                ⚠ Another of your storefronts already uses “{{ duplicateStoreName }}”. You can still use it.
+                <button type="button" class="link-btn" @click="dupNameDismissed = duplicateStoreName">Dismiss</button>
+              </small>
             </div>
             <label class="offer-field">
               <span>Tagline (optional)</span>
               <input v-model.trim="form.storefront.tagline" type="text" placeholder="What your store is about" />
             </label>
+            <div class="offer-field">
+              <span>Logo (optional)</span>
+              <div class="storefront-logo-field">
+                <div class="storefront-logo-preview" :class="{ faux: !form.storefront.logo_url }">
+                  <img v-if="form.storefront.logo_url" :src="form.storefront.logo_url" alt="Store logo preview" />
+                  <svg v-else viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path d="M10.707 2.293a1 1 0 00-1.414 0l-7 7a1 1 0 001.414 1.414L4 10.414V17a1 1 0 001 1h2a1 1 0 001-1v-2a1 1 0 011-1h2a1 1 0 011 1v2a1 1 0 001 1h2a1 1 0 001-1v-6.586l.293.293a1 1 0 001.414-1.414l-7-7z" /></svg>
+                </div>
+                <div class="storefront-logo-actions">
+                  <input ref="storefrontLogoInput" type="file" accept="image/*" class="visually-hidden" @change="onStorefrontLogoPicked" />
+                  <button type="button" class="secondary-action compact" :disabled="storefrontLogoUploading" @click="$refs.storefrontLogoInput.click()">
+                    {{ storefrontLogoUploading ? "Uploading…" : (form.storefront.logo_url ? "Replace logo" : "Upload logo") }}
+                  </button>
+                  <button v-if="form.storefront.logo_url" type="button" class="link-danger-btn" @click="form.storefront.logo_url = ''">Remove</button>
+                  <small class="field-note">No logo? We'll show a clean placeholder mark.</small>
+                  <small v-if="storefrontLogoError" class="field-error">{{ storefrontLogoError }}</small>
+                </div>
+              </div>
+            </div>
             <label class="offer-field">
               <span>Grid heading (optional)</span>
               <input v-model.trim="form.storefront.heading" type="text" placeholder="Shop all" />
@@ -1998,7 +2023,7 @@ function defaultWizardForm() {
     // Second composition axis: why the page exists / where its traffic comes from. Presets which capability
     // packs the page starts with (plans/LANDING_PAGE_GOAL_COMPOSITION.md).
     goal: "",
-    storefront: { headline: "", brand: "", nameMode: "", tagline: "", heading: "Shop all", items: [], autoFill: true },
+    storefront: { headline: "", brand: "", nameMode: "", tagline: "", heading: "Shop all", logo_url: "", items: [], autoFill: true },
     categoryKey: "",
   };
 }
@@ -2432,6 +2457,40 @@ function setStorefrontNameMode(mode) {
   form.storefront.nameMode = mode;
 }
 
+// Soft, non-blocking notice when another of the tenant's storefronts already uses this store name. There's no
+// hard uniqueness on the display name (two Sites can legitimately differ by address, not name), so we only warn.
+const dupNameDismissed = ref("");
+const duplicateStoreName = computed(() => {
+  if (form.pageKind !== "storefront") return "";
+  const name = (storefrontName.value || "").trim().toLowerCase();
+  if (!name) return "";
+  const clash = (pages.value || []).some((p) => {
+    if (p.page_id === form.page_id || !isStorefrontPage(p)) return false;
+    const bh = (p.sections || []).find((s) => s && s.type === "brand_hero");
+    return String(bh?.headline || "").trim().toLowerCase() === name;
+  });
+  return clash ? storefrontName.value : "";
+});
+const showDupNameWarning = computed(() => !!duplicateStoreName.value && duplicateStoreName.value !== dupNameDismissed.value);
+
+// Storefront logo upload — reuses the shared uploadImage() service (same as builder/sub-item images).
+const storefrontLogoUploading = ref(false);
+const storefrontLogoError = ref("");
+async function onStorefrontLogoPicked(event) {
+  const file = event.target.files?.[0];
+  event.target.value = "";
+  if (!file) return;
+  storefrontLogoError.value = "";
+  storefrontLogoUploading.value = true;
+  try {
+    form.storefront.logo_url = await uploadPageImage(file);
+  } catch (err) {
+    storefrontLogoError.value = err.message || "Logo upload failed.";
+  } finally {
+    storefrontLogoUploading.value = false;
+  }
+}
+
 function buildStorefrontPageDocument() {
   const byId = new Map((pages.value || []).map((p) => [p.page_id, p]));
   const items = (form.storefront.items || [])
@@ -2446,7 +2505,7 @@ function buildStorefrontPageDocument() {
   const grid = { id: "catalog-grid", type: "catalog_grid", heading: form.storefront.heading || undefined, items: auto ? [] : items };
   if (auto) grid.scope = "all";
   return finalizeOfferlessDoc([
-    { id: "brand-hero", type: "brand_hero", headline, tagline: form.storefront.tagline || undefined },
+    { id: "brand-hero", type: "brand_hero", headline, tagline: form.storefront.tagline || undefined, logo_url: form.storefront.logo_url || undefined },
     grid,
   ], { name: form.name || "Storefront homepage", slug: form.slug || form.name || "home", title: headline });
 }
@@ -3216,6 +3275,10 @@ function pageSections(intent, offer, leadAction) {
 }
 
 function pageImage(page) {
+  // A storefront's card image is its brand logo (if uploaded); with none, the card shows the house placeholder.
+  if (isStorefrontPage(page)) {
+    return (page.sections || []).find((s) => s && s.type === "brand_hero")?.logo_url || "";
+  }
   const offer = offers.value.find((item) => item.offer_id === page.offer_id);
   return page.seo?.image || offerImage(offer) || "";
 }
@@ -3534,6 +3597,7 @@ async function editOfferlessPage(page) {
     form.storefront.headline = savedHeadline;
   }
   form.storefront.tagline = brandHero?.tagline || "";
+  form.storefront.logo_url = brandHero?.logo_url || "";
   form.storefront.heading = catalog?.heading || profile?.heading || "";
   form.categoryKey = catalog?.category || "";
   editingOfferlessOriginal.value = { ...page };

@@ -5112,6 +5112,86 @@ button:disabled {
   color: var(--accent-contrast, #fff);
 }
 
+/* Storefront logo uploader (brand mark). */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.storefront-logo-field {
+  display: flex;
+  gap: 1rem;
+  align-items: flex-start;
+}
+
+.storefront-logo-preview {
+  flex: 0 0 auto;
+  width: 5.6rem;
+  height: 5.6rem;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--line);
+  background: var(--input-bg);
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+}
+
+.storefront-logo-preview img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.storefront-logo-preview.faux {
+  background: var(--accent);
+  color: var(--accent-contrast, #fff);
+  border-color: transparent;
+}
+
+.storefront-logo-preview.faux svg {
+  width: 55%;
+  height: 55%;
+}
+
+.storefront-logo-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  align-items: flex-start;
+}
+
+.link-btn,
+.link-danger-btn {
+  border: 0;
+  background: none;
+  padding: 0;
+  cursor: pointer;
+  font: inherit;
+  text-decoration: underline;
+  color: var(--accent);
+}
+
+.link-danger-btn {
+  color: var(--danger, #c0392b);
+}
+
+.storefront-dup-warning {
+  display: block;
+  margin-top: 0.4rem;
+  color: var(--warning, #b7791f);
+}
+
+.storefront-placeholder {
+  color: var(--accent);
+}
+
 .storefront-page-option {
   display: flex;
   align-items: center;

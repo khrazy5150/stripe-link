@@ -1059,3 +1059,24 @@ class LandingPageIgnoresPostCheckoutPricingTests(unittest.TestCase):
         )
         html = render_page(page, offer, products, {product_id: chosen})
         self.assertIn(f'data-cta-amount="{chosen_amount}"', html)
+
+
+class BrandHeroLogoTests(unittest.TestCase):
+    """Storefront brand mark (SITE_OBJECT §2.5b): the tenant's uploaded logo, else an auto-generated faux
+    house logo — so every storefront has a mark."""
+
+    def test_uploaded_logo_renders_as_image(self):
+        from stripe_link.runtime.html import render_brand_hero
+        html = render_brand_hero({"id": "h", "type": "brand_hero", "headline": "Nutri-Pro",
+                                  "logo_url": "https://cdn.example/logo.png"})
+        self.assertIn('<img class="sl-brand-logo" src="https://cdn.example/logo.png"', html)
+        self.assertIn('alt="Nutri-Pro logo"', html)
+        self.assertNotIn("sl-brand-logo-faux", html)
+        self.assertIn("<h1>", html)
+
+    def test_missing_logo_renders_faux_house(self):
+        from stripe_link.runtime.html import render_brand_hero
+        html = render_brand_hero({"id": "h", "type": "brand_hero", "headline": "Nutri-Pro"})
+        self.assertIn("sl-brand-logo sl-brand-logo-faux", html)
+        self.assertIn("<svg", html)
+        self.assertNotIn("<img", html)

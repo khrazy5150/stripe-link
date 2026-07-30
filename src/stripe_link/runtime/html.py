@@ -602,6 +602,9 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     "    .sl-pp-card.is-added{opacity:0.72}",
     "    .sl-pp-dismiss{background:none;border:none;color:var(--sl-muted);cursor:pointer;font-size:1.45rem;text-decoration:underline;padding:0.8rem}",
     "    .sl-brand-hero{text-align:center;padding:2.4rem 0 0.8rem}",
+    "    .sl-brand-logo{display:block;height:7.2rem;width:auto;max-width:22rem;margin:0 auto 1.2rem;object-fit:contain}",
+    "    .sl-brand-logo-faux{display:flex;align-items:center;justify-content:center;height:7.2rem;width:7.2rem;border-radius:1.6rem;background:var(--sl-cta-bg,var(--sl-headline));color:var(--sl-cta-text,#fff)}",
+    "    .sl-brand-logo-faux svg{height:4rem;width:4rem}",
     "    .sl-brand-hero h1{font-family:var(--sl-font-heading);font-size:clamp(2.6rem,6vw,3.6rem);line-height:1.15;font-weight:800;color:var(--sl-headline);margin:0}",
     "    .sl-brand-hero-tagline{font-size:1.6rem;line-height:1.5;color:var(--sl-subheadline-text);max-width:46rem;margin:0.8rem auto 0}",
     "    .sl-catalog-grid{display:flex;flex-direction:column;gap:1.6rem}",
@@ -3722,10 +3725,29 @@ def render_brand_hero(section: dict[str, Any]) -> str:
     tagline = str(section.get("tagline") or "").strip()
     return "\n".join(line for line in [
         f'    <section class="sl-brand-hero" data-section-id="{escape(str(section.get("id", "brand-hero")))}" data-section-type="brand_hero">',
+        brand_logo_markup(str(section.get("logo_url") or "").strip(), headline),
         f'      <h1>{render_headline_markup(headline)}</h1>',
         (f'      <p class="sl-brand-hero-tagline">{escape(tagline)}</p>' if tagline else ""),
         "    </section>",
     ] if line)
+
+
+# A generic "home"/storefront glyph (Heroicons house, solid) — the faux logo when the store has no uploaded one,
+# mirroring how product cards fall back to an auto-generated icon tile.
+_FAUX_STORE_LOGO_SVG = (
+    '<svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">'
+    '<path d="M10.707 2.293a1 1 0 00-1.414 0l-7 7a1 1 0 001.414 1.414L4 10.414V17a1 1 0 001 1h2a1 1 0 001-1v-2a1 1 0 011-1h2a1 1 0 011 1v2a1 1 0 001 1h2a1 1 0 001-1v-6.586l.293.293a1 1 0 001.414-1.414l-7-7z"/>'
+    '</svg>'
+)
+
+
+def brand_logo_markup(logo_url: str, name: str) -> str:
+    """The storefront's brand mark above the headline: the tenant's uploaded logo when set, otherwise an
+    auto-generated "faux" logo — a house glyph on an accent tile — so every storefront has a mark (SITE_OBJECT
+    §2.5b). The CSS caps the height, so a missing intrinsic size can't shift layout."""
+    if logo_url:
+        return f'      <img class="sl-brand-logo" src="{escape(logo_url)}" alt="{escape(name)} logo" loading="lazy">'
+    return f'      <div class="sl-brand-logo sl-brand-logo-faux" aria-hidden="true">{_FAUX_STORE_LOGO_SVG}</div>'
 
 
 def render_catalog_grid(
