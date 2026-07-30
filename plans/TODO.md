@@ -122,6 +122,21 @@ Deferred, non-blocking follow-ups. Each item notes what, why it was deferred, an
   becomes the future ADVANCED tier. Phasing: **P1 pre-purchase** (reserved slugs + sale/flash views, no
   payment change) → **P2 post-purchase default funnel** → **P3 advanced tier + polish**.
 
+### ⭐ Platform-hostname Site serving (`*.jbay.uk`) — navigable free/test stores + env parity
+- **What:** serve every Site on its free `{label}.jbay.uk` platform hostname in BOTH environments, so storefronts
+  / offer pages / funnels / sale views are fully navigable (clean slugs) without a custom domain. Fixes the core
+  sticking point that clean-slug nav only exists on a live custom domain (prod) — the reason a storefront can't
+  be built/previewed in test and its cards die (`mart.automizepro.com` NXDOMAIN, 2026-07-30). "Go live" becomes
+  "connect a custom domain" (the indexed upgrade); unlocks free-tier stores + a clean test→live promote flow.
+- **Design greenlit 2026-07-30 → `plans/PLATFORM_HOSTNAME_SERVING.md`.** Key point: it REUSES the custom-domain
+  resolver, route table, funnel/context slugs, SEO toggle, and re-publish — additive, not a rewrite; the ~1218
+  tests fence the custom-domain behavior. Low infra: we own the jbay.uk zone and Universal SSL covers one-level
+  `*.jbay.uk` (no per-tenant cert). Careful area = decoupling `home_url` (navigable chrome) from indexing
+  (platform host stays `noindex`). Phases: P1 serve on platform host (index record + `*.jbay.uk` Worker route +
+  home_url decouple + host-relative links + host-aware funnel redirects) → P2 Site-level copy test→live → P3
+  free-tier surface + dashboard store URL.
+- **Not built.** Next step is the scoping pass on the open decisions in the plan.
+
 ### Draggable upsell order (tenant-controlled funnel sequence)
 - **What:** let the tenant choose the order in which upsells are presented, by dragging the accordion steps in
   the builder's **Post-Checkout Flow** panel. Today the order is implicit — whatever order the upsell-context
