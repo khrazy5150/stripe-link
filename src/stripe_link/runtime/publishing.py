@@ -88,6 +88,29 @@ def site_page_slug(site: dict[str, Any] | None, page_id: str) -> str:
     return ""
 
 
+def platform_serving_enabled() -> bool:
+    """Whether Sites are served on their free platform host ({label}.<hosting-domain>). Gated
+    (plans/PLATFORM_HOSTNAME_SERVING.md Slice 2) so a platform-only Site doesn't render storefront chrome +
+    relative internal links that dead-end before the *.jbay.uk/*.jbay.be edge Worker is wired. Default off;
+    flip PLATFORM_SERVING_ENABLED on per environment once the edge route is live (the ops slice)."""
+    return str(os.environ.get("PLATFORM_SERVING_ENABLED") or "").strip().lower() in ("1", "true", "yes", "on")
+
+
+def site_serving_origin(site: dict[str, Any] | None, page_site_slug: str) -> str:
+    """The absolute origin the page is served from — the anchor for its canonical/og:url, storefront chrome, and
+    breadcrumb root. A verified custom domain (indexed, branded) when the page is routed there; else the free
+    platform host (navigable, always noindex) once platform serving is wired. "" when neither applies — the page
+    keeps its interim artifact identity and renders no chrome (plans/PLATFORM_HOSTNAME_SERVING.md Slice 2)."""
+    hosting = (site or {}).get("hosting") or {}
+    custom_domain = str(hosting.get("custom_domain") or "").strip()
+    if site_domain_verified(site) and custom_domain and page_site_slug:
+        return f"https://{custom_domain}"
+    platform_hostname = str(hosting.get("platform_hostname") or "").strip()
+    if platform_hostname and page_site_slug and platform_serving_enabled():
+        return f"https://{platform_hostname}"
+    return ""
+
+
 def attach_funnel_pages(site: dict[str, Any], page: dict[str, Any]) -> tuple[dict[str, Any], bool]:
     """Attach the pages a Page's inline funnel references (upsell/downsell/thank-you) to the Site at derived
     slugs so the whole funnel routes on the custom domain (plans/SITE_OBJECT.md §2.6). Idempotent and
@@ -700,8 +723,13 @@ def publish_page_document(
     page_site_slug = site_page_slug(site, page_id)
     on_custom_domain = bool(site_domain_verified(site) and page_site_slug)
     custom_domain = ((site or {}).get("hosting") or {}).get("custom_domain")
+    # The Site's serving origin — a verified custom domain (indexed) or, once wired, the free platform host
+    # (navigable, noindex). Drives canonical/og:url AND home_url (the storefront chrome + breadcrumb root), so
+    # the two always share an origin — the breadcrumb's home-detection depends on that alignment (Slice 2).
+    serving_origin = site_serving_origin(site, page_site_slug)
     canonical_path = "" if page_site_slug in ("", "/") else page_site_slug.lstrip("/")
-    page_canonical = f"https://{custom_domain}/{canonical_path}" if on_custom_domain and custom_domain else canonical_url
+    page_canonical = f"{serving_origin}/{canonical_path}" if serving_origin else canonical_url
+    page_home_url = f"{serving_origin}/" if serving_origin else ""
     eligibility = ((site or {}).get("indexing") or {}).get("eligibility") or "blocked"
     site_archived = (site or {}).get("status") == "archived"
     seo_enabled = site_seo_enabled(site)  # Site-level "discover in search" switch; off → force noindex + no crawl
@@ -712,7 +740,7 @@ def publish_page_document(
         return render_page(
             page, offer, products_by_id, checkout_url=checkout, api_base_url=api_base_url,
             services_by_id=services_by_id, offers_by_id=offers_by_id, canonical_url=page_canonical,
-            robots=robots, site=site, page_type=page_type, reviews=page_reviews,
+            robots=robots, site=site, page_type=page_type, reviews=page_reviews, home_url=page_home_url,
         )
 
     artifacts = []
@@ -757,6 +785,7 @@ def publish_page_document(
             page, offer, products_by_id, checkout_url=checkout, api_base_url=api_base_url,
             services_by_id=services_by_id, offers_by_id=offers_by_id, canonical_url=page_canonical,
             robots=NOINDEX_ROBOTS, site=site, page_type=page_type, reviews=page_reviews, price_context=ctx,
+            home_url=page_home_url,
         )
         if preview_bucket:
             pv_key = artifact_paths(tenant_id, page_id, context=ctx)["preview"]

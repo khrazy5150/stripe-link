@@ -257,12 +257,12 @@ class BreadcrumbTests(unittest.TestCase):
     def test_non_root_page_emits_visible_trail_and_json_ld(self):
         html = self._render(canonical="https://shop.example.com/creatine")
         nav = self._nav(html)
-        self.assertIn('<a href="https://shop.example.com/">Home</a>', nav)
+        self.assertIn('<a href="/">Home</a>', nav)  # visible link is host-relative (Slice 2)
         self.assertIn('aria-current="page"', nav)
         crumb = next(b for b in ld_blocks(html) if b["@type"] == "BreadcrumbList")
         items = crumb["itemListElement"]
         self.assertEqual(items[0]["name"], "Home")
-        self.assertEqual(items[0]["item"], "https://shop.example.com/")
+        self.assertEqual(items[0]["item"], "https://shop.example.com/")  # JSON-LD item stays absolute
         self.assertEqual(items[-1]["position"], 2)
         self.assertNotIn("item", items[-1], "the current page carries no item URL by design")
 
@@ -291,8 +291,8 @@ class BreadcrumbTests(unittest.TestCase):
         self.assertEqual(names[0], "Home")
         self.assertEqual(names[1], "Supplements")
         self.assertEqual(len(names), 3)
-        self.assertEqual(crumb["itemListElement"][1]["item"], "https://shop.example.com/category/supps")
-        self.assertIn('href="https://shop.example.com/category/supps">Supplements</a>', self._nav(html))
+        self.assertEqual(crumb["itemListElement"][1]["item"], "https://shop.example.com/category/supps")  # JSON-LD absolute
+        self.assertIn('href="/category/supps">Supplements</a>', self._nav(html))  # visible link relative
 
     def test_homepage_has_no_breadcrumb(self):
         html = self._render(canonical="https://shop.example.com/")
@@ -346,9 +346,9 @@ class SiteNavigationTests(unittest.TestCase):
 
     def test_header_has_brand_store_root_link_and_primary_menu(self):
         header = self._region(self._render(), r'<header class="sl-siteheader">.*?</header>')
-        self.assertIn('<a class="sl-brand" href="https://shop.example.com/">Bean Co</a>', header)
-        self.assertIn('<a href="https://shop.example.com/about">About Us</a>', header)
-        self.assertIn('<a href="https://shop.example.com/shop-all">Shop All</a>', header)  # label derived from slug
+        self.assertIn('<a class="sl-brand" href="/">Bean Co</a>', header)  # host-relative store root (Slice 2)
+        self.assertIn('<a href="/about">About Us</a>', header)
+        self.assertIn('<a href="/shop-all">Shop All</a>', header)  # label derived from slug
 
     def test_menu_skips_slugs_not_in_pages(self):
         header = self._region(self._render(), r'<header class="sl-siteheader">.*?</header>')
@@ -356,7 +356,7 @@ class SiteNavigationTests(unittest.TestCase):
 
     def test_footer_nav_renders_footer_menu(self):
         footer = self._region(self._render(), r'<nav class="sl-footernav".*?</nav>')
-        self.assertIn('<a href="https://shop.example.com/contact">Contact</a>', footer)
+        self.assertIn('<a href="/contact">Contact</a>', footer)
 
     def test_no_header_on_post_checkout_page(self):
         html = self._render(page_type="funnel_step", canonical="https://shop.example.com/upsell-1")

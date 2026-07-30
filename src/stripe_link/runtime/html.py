@@ -1270,6 +1270,7 @@ def render_page(
     page_type: str = "",
     reviews: list[dict[str, Any]] | None = None,
     price_context: str = "standard",
+    home_url: str | None = None,
 ) -> str:
     services_by_id = services_by_id or {}
     offers_by_id = offers_by_id or {str(offer.get("offer_id") or ""): offer}
@@ -1297,10 +1298,19 @@ def render_page(
     # The Site's resolvable home — root of the breadcrumb trail (SEO-11). Only a verified custom domain serves
     # a working "/", so a breadcrumb (and its Home link) is meaningful only there. page_type gates out
     # post-checkout pages, where a Home link would leak the buyer out of the funnel.
-    hosting = (site or {}).get("hosting") or {}
-    custom_domain = str(hosting.get("custom_domain") or "").strip()
-    domain_verified = bool((hosting.get("verification") or {}).get("verified"))
-    _RENDER_STATE["home_url"] = f"https://{custom_domain}/" if custom_domain and domain_verified else ""
+    # The Site's canonical serving origin. When the caller computes it (publishing, which knows whether the page
+    # is served on a verified custom domain vs. the free platform host, and whether platform serving is wired),
+    # it passes home_url explicitly. Otherwise fall back to the verified-custom-domain derivation — the shape the
+    # unit tests and live preview rely on. Internal Site links render RELATIVE regardless (one artifact serves
+    # every host); home_url only supplies the absolute origin for the breadcrumb JSON-LD and gates whether the
+    # storefront chrome renders at all (plans/PLATFORM_HOSTNAME_SERVING.md Slice 2).
+    if home_url is not None:
+        _RENDER_STATE["home_url"] = home_url
+    else:
+        hosting = (site or {}).get("hosting") or {}
+        custom_domain = str(hosting.get("custom_domain") or "").strip()
+        domain_verified = bool((hosting.get("verification") or {}).get("verified"))
+        _RENDER_STATE["home_url"] = f"https://{custom_domain}/" if custom_domain and domain_verified else ""
     _RENDER_STATE["page_type"] = str(page_type or "")
     # SEO opt-out (Site-level "discover in search" switch): when off, the storefront chrome renders in its plain
     # no-SEO form (breadcrumb hidden, brand centered) via a body marker CSS keys off. Robots noindex is applied
@@ -2585,21 +2595,28 @@ def _slug_to_label(slug: str) -> str:
     return tail.replace("-", " ").title()
 
 
+def internal_href(slug: str) -> str:
+    """A host-relative link to a Site slug (plans/PLATFORM_HOSTNAME_SERVING.md Slice 2). Emitting `/slug` (and
+    `/` for the root) instead of an absolute custom-domain URL lets ONE published artifact navigate correctly on
+    the custom domain, the free platform host, and the preview — and fixes the dead-link bug where cards pointed
+    at a not-yet-live custom domain."""
+    slug = str(slug or "").strip()
+    return "/" if slug in ("", "/") else ("/" + slug.lstrip("/"))
+
+
 def site_nav_items(site: dict[str, Any] | None, menu: str, home_url: str) -> list[dict[str, str]]:
     """Resolve a Site menu (navigation.primary / navigation.footer) into ordered {label, url} items (SEO-13).
     Each slug must exist in Site.pages and be enabled; the label is the page entry's label or a slug-derived
-    fallback; the URL is the slug under the home host. Slugs not in pages (or disabled) are skipped."""
+    fallback; the URL is the slug as a host-relative link. Slugs not in pages (or disabled) are skipped."""
     nav = ((site or {}).get("navigation") or {}).get(menu) or []
     pages = (site or {}).get("pages") or {}
-    base = home_url.rstrip("/")
     items: list[dict[str, str]] = []
     for slug in nav:
         entry = pages.get(slug)
         if not isinstance(entry, dict) or entry.get("enabled", True) is False or not entry.get("page_id"):
             continue
         label = str(entry.get("label") or "").strip() or _slug_to_label(str(slug))
-        url = base + "/" if slug in ("", "/") else base + str(slug)
-        items.append({"label": label, "url": url})
+        items.append({"label": label, "url": internal_href(str(slug))})
     return items
 
 
@@ -2622,7 +2639,7 @@ def render_site_header() -> str:
     brand = str(_RENDER_ORG.get("name") or "").strip()
     if not primary and not brand:
         return ""
-    brand_html = f'<a class="sl-brand" href="{escape(home)}">{escape(brand)}</a>' if brand else ""
+    brand_html = f'<a class="sl-brand" href="/">{escape(brand)}</a>' if brand else ""
     return f'  <header class="sl-siteheader">{brand_html}{primary}</header>'
 
 
@@ -2661,15 +2678,17 @@ def breadcrumb_trail(offer: dict[str, Any], products_by_id: dict[str, dict[str, 
     leaf = breadcrumb_leaf_name(offer, products_by_id)
     if not leaf:
         return []
-    trail = [{"name": "Home", "url": home}]
+    # Each crumb carries an absolute `url` (for the BreadcrumbList JSON-LD `item`, which Google wants absolute)
+    # and a host-relative `href` (the visible <a>, so one artifact navigates on any host — Slice 2).
+    trail = [{"name": "Home", "url": home, "href": "/"}]
     # Insert the category level when this page's product belongs to a Site category page (SEO-11/13). The
     # trail deepens from Home → Product to Home → Category → Product with no change to callers.
     category = str(first_offer_product(offer, products_by_id).get("product_category") or "")
     category_page = _RENDER_CATEGORY_PAGES.get(category) if category else None
     if category_page and category_page["slug"] != canonical[len(home_root):]:
         label = category_page["label"].strip() or humanize_category(category)
-        trail.append({"name": label, "url": home_root + category_page["slug"]})
-    trail.append({"name": leaf, "url": ""})
+        trail.append({"name": label, "url": home_root + category_page["slug"], "href": internal_href(category_page["slug"])})
+    trail.append({"name": leaf, "url": "", "href": ""})
     return trail
 
 
@@ -2696,7 +2715,8 @@ def render_breadcrumb(trail: list[dict[str, str]]) -> str:
     for crumb in trail:
         label = escape(crumb["name"])
         if crumb.get("url"):
-            crumbs.append(f'<li><a href="{escape(crumb["url"])}">{label}</a></li>')
+            href = crumb.get("href") or crumb["url"]  # visible link is host-relative; JSON-LD keeps the absolute url
+            crumbs.append(f'<li><a href="{escape(href)}">{label}</a></li>')
         else:
             crumbs.append(f'<li aria-current="page">{label}</li>')
     return (
@@ -3508,7 +3528,7 @@ def render_thank_you_footer(section: dict[str, Any]) -> str:
     home_label = str(section.get("home_button_text") or "")
     download_label = str(section.get("download_button_text") or "")
     download_url = str(section.get("download_url") or "")
-    home_url = _RENDER_STATE.get("home_url") or "/"
+    home_url = "/"  # host-relative store root (Slice 2) — works on the platform host and the custom domain alike
     content = []
     if headline:
         content.append(f"      <h2>{render_headline_markup(headline)}</h2>")
@@ -3742,7 +3762,7 @@ def render_catalog_grid(
             (f"        {price_html}" if price_html else ""),
         ] if line)
         slug = str((item or {}).get("slug") or "").strip()
-        href = f"{home}{slug}" if home and slug else ""
+        href = internal_href(slug) if home and slug else ""  # host-relative so the card works on any serving host
         if href:
             cards.append(f'      <a class="sl-catalog-card" href="{escape(href)}">\n{inner}\n      </a>')
         else:
@@ -3829,7 +3849,7 @@ def render_seller_profile(section: dict[str, Any]) -> str:
     home = (_RENDER_STATE.get("home_url") or "").rstrip("/")
     if home and _RENDER_CATEGORY_PAGES:
         cats = "".join(
-            f'<li><a href="{escape(home + info["slug"])}">{escape(info.get("label") or humanize_category(key))}</a></li>'
+            f'<li><a href="{escape(internal_href(info["slug"]))}">{escape(info.get("label") or humanize_category(key))}</a></li>'
             for key, info in sorted(_RENDER_CATEGORY_PAGES.items()))
         parts.append(f'      <ul class="sl-seller-catalog">{cats}</ul>')
     parts.append(f'      <script type="application/ld+json">{json_ld_dump(collection)}</script>')

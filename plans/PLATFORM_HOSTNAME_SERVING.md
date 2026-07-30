@@ -122,6 +122,21 @@ With both environments serving Sites identically, the promote story simplifies:
 - **Build order = safest first.** Slice 1 (index record + resolver header) is additive and leaves the shipped
   custom-domain render byte-identical; the render changes (Slice 2) come next, fenced by the existing tests.
 
+## Progress
+
+- **Slice 1 — SHIPPED dev.** Platform domain-index record per Site + `host_kind: "platform"` → resolver
+  `X-Robots-Tag: noindex` header. Test env flipped to `jbay.be`; dev Axel Mart Site migrated `.jbay.uk`→`.jbay.be`.
+- **Slice 2 — BUILT (this pass), flag OFF.** (a) All internal Site links now render **host-relative**
+  (`internal_href`): catalog cards, `sl-brand`, breadcrumb visible `<a>`, nav/footer menus, seller-profile
+  catalog, thank-you home. Breadcrumb **JSON-LD `item` stays absolute** (Google wants absolute). This is
+  behaviour-preserving on a custom domain (relative resolves to the same URL) and fixes the dead-link bug.
+  (b) `home_url` decoupled: `render_page(home_url=…)` override; `publishing.site_serving_origin()` computes the
+  Site's serving origin (verified custom domain → else platform host **gated by `PLATFORM_SERVING_ENABLED`**),
+  and `canonical` + `home_url` are both derived from it so they always share an origin (breadcrumb depends on
+  that). Flag defaults **off** → platform-only Sites stay chrome-less until the edge is wired (no silent change).
+  **Deferred to ops:** wire `PLATFORM_SERVING_ENABLED` as a SAM parameter / Lambda env var so it can be flipped
+  on per environment when the `*.jbay.*` Worker route goes live.
+
 ## Open decisions (resolve during scoping)
 
 1. **Index-record-per-platform-host vs. registry lookup in the resolver.** Lean **index record** — reuses the

@@ -921,9 +921,72 @@ class StorefrontHomepageTests(unittest.TestCase):
         published = [p for p in self.s3.puts if "preview/" not in p["Key"]][0]["Body"].decode()
         self.assertIn('data-section-type="brand_hero"', published)
         self.assertIn('data-section-type="catalog_grid"', published)
-        # The card resolved the referenced offer (loaded despite no primary offer) and links to its Site slug.
-        self.assertIn('href="https://shop.example.com/coffee"', published)
+        # The card resolved the referenced offer (loaded despite no primary offer) and links to its Site slug
+        # as a host-relative link (Slice 2 — one artifact navigates on any serving host).
+        self.assertIn('href="/coffee"', published)
         self.assertIn("<h1>Bean Co</h1>", published)
+
+
+class PlatformHostServingTests(unittest.TestCase):
+    """Serving a Site on its free platform host ({label}.jbay.uk / .jbay.be) — navigable chrome + relative
+    links, always noindex, gated behind PLATFORM_SERVING_ENABLED (plans/PLATFORM_HOSTNAME_SERVING.md Slice 2)."""
+
+    def setUp(self):
+        self.offer = load_fixture("offer-simple-coffee.json")
+        self.product = load_fixture("product-simple-coffee.json")
+        self.offers_repo = FakeRepository("offer_id", [self.offer])
+        self.products_repo = FakeRepository("product_id", [self.product])
+        self.s3 = FakeS3Client()
+
+    def _page(self):
+        return {
+            "schema_version": "2026-01-01", "document_type": "page", "page_id": "page_home01",
+            "tenant_id": self.offer["tenant_id"], "name": "Storefront", "status": "published",
+            "route": {"slug": "home"},
+            "sections": [
+                {"id": "h", "type": "brand_hero", "headline": "Bean Co", "tagline": "Roasted to order"},
+                {"id": "g", "type": "catalog_grid", "heading": "Shop all",
+                 "items": [{"offer_id": self.offer["offer_id"], "slug": "/coffee"}]},
+            ],
+        }
+
+    def _platform_site(self):
+        # A platform-only Site: no custom domain, but a reserved free platform host.
+        return {
+            "tenant_id": self.offer["tenant_id"], "site_id": "site_p",
+            "organization": {"name": "Bean Co", "entity_type": "OnlineStore"},
+            "hosting": {"type": "platform", "platform_hostname": "bean-co.jbay.uk", "custom_domain": None},
+            "indexing": {"eligibility": "blocked"},
+            "pages": {"/": {"page_id": "page_home01", "page_type": "homepage"}},
+        }
+
+    def _publish(self, site):
+        publish_page_document(
+            self._page(), offers_repository=self.offers_repo, products_repository=self.products_repo,
+            sites_repository=FakeSitesRepository([site]), s3_client=self.s3,
+            pages_bucket="pages", preview_bucket="preview", environment="prod",
+            pages_domain="pages.example.com", preview_domain="preview.example.com",
+        )
+        return [p for p in self.s3.puts if "preview/" not in p["Key"]][0]["Body"].decode()
+
+    def test_platform_serving_on_renders_navigable_chrome_and_platform_canonical(self):
+        with patch.dict(os.environ, {"PLATFORM_SERVING_ENABLED": "true"}, clear=False):
+            published = self._publish(self._platform_site())
+        # canonical points at the platform host, chrome renders (card + brand are real relative links)...
+        self.assertIn('<link rel="canonical" href="https://bean-co.jbay.uk/">', published)
+        self.assertIn('href="/coffee"', published)
+        self.assertIn('<a class="sl-brand" href="/">Bean Co</a>', published)
+        # ...but the platform host is never indexed (reputation floor).
+        self.assertIn('<meta name="robots" content="noindex', published)
+
+    def test_platform_serving_off_leaves_platform_site_chromeless(self):
+        # Default (flag off): the platform-only Site keeps its interim artifact identity — no chrome, the card is
+        # a plain unlinked tile — so nothing sprouts navigation before the *.jbay.* edge Worker is wired.
+        published = self._publish(self._platform_site())
+        self.assertNotIn('href="/coffee"', published)
+        self.assertIn('<div class="sl-catalog-card">', published)
+        self.assertNotIn("bean-co.jbay.uk", published)
+        self.assertIn('<meta name="robots" content="noindex', published)
 
 
 class CategoryPageTests(unittest.TestCase):
