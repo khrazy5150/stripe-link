@@ -58,6 +58,15 @@ class ListicleCartFunnelTests(unittest.TestCase):
         self.assertIn("data-listicle", html)
         self.assertIn('data-has-post-checkout="false"', html)
 
+    def test_cart_checkout_surfaces_blocks_in_a_themed_notice_not_alert(self):
+        # A blocked cart checkout (e.g. the publish guard) shows the reason in a themed in-page modal (the
+        # server page can't mount ConfirmDialog.vue), never the browser's window.alert.
+        html = self._render(with_post_checkout=False)
+        self.assertIn("const slNotice = (message)", html)
+        self.assertIn("slNotice(err && err.message", html)   # the checkout catch surfaces the server message
+        self.assertNotIn("window.alert", html)
+        self.assertIn(".sl-notice-card{", html)              # themed with the page tokens
+
     def test_carousel_renders_one_tier_block_per_product_with_a_single_add(self):
         html = self._render(with_post_checkout=False)
         # One tier block per landing product; the first visible, the rest hidden (synced to the hero on swipe).
