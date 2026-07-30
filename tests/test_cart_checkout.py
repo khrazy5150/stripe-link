@@ -129,7 +129,7 @@ class CartCheckoutHandlerTests(unittest.TestCase):
         self.requests.append(request)
         return FakeResponse()
 
-    def _call(self, cart, body_extra=None):
+    def _call(self, cart, body_extra=None, pages_repo=None):
         body = {"tenant_id": "t1", "cart_id": "cartabc123",
                 "success_url": "https://p.example.com/thanks", "cancel_url": "https://p.example.com/buy"}
         body.update(body_extra or {})
@@ -141,6 +141,7 @@ class CartCheckoutHandlerTests(unittest.TestCase):
             services_repo=FakeRepo("service_id", []),
             stripe_repo=FakeStripeKeysRepository(),
             tenant_repo=FakeRepo("tenant_id", [{"tenant_id": "t1", "billing_status": "active"}]),
+            pages_repo=pages_repo,
             secret_cipher=FakeCipher(),
             opener=self.opener,
         )
@@ -177,6 +178,33 @@ class CartCheckoutHandlerTests(unittest.TestCase):
         )
         self.assertEqual(resp["statusCode"], 402)
         self.assertEqual(self.requests, [])
+
+    def test_draft_page_blocks_cart_checkout(self):
+        # The cart CTA now sends its page_id; a draft page must refuse the transaction (403, no Stripe call).
+        cart = _cart([{"line_id": "l1", "product_id": "prod_a", "price_id": "price_a", "qty": 1, "unit_amount": 1999, "currency": "usd"}])
+        resp = handler(
+            {"httpMethod": "POST", "body": json.dumps({
+                "tenant_id": "t1", "cart_id": "cartabc123", "page_id": "page_draft",
+                "success_url": "https://p/s", "cancel_url": "https://p/c"})},
+            None,
+            carts_repo=FakeRepo("cart_id", [cart]),
+            offers_repo=FakeRepo("offer_id", [_offer()]),
+            products_repo=FakeRepo("product_id", [_product("prod_a", "price_a", 1999)]),
+            services_repo=FakeRepo("service_id", []),
+            stripe_repo=FakeStripeKeysRepository(),
+            tenant_repo=FakeRepo("tenant_id", [{"tenant_id": "t1", "billing_status": "active"}]),
+            pages_repo=FakeRepo("page_id", [{"tenant_id": "t1", "page_id": "page_draft", "status": "draft"}]),
+            secret_cipher=FakeCipher(), opener=self.opener,
+        )
+        self.assertEqual(resp["statusCode"], 403)
+        self.assertEqual(json.loads(resp["body"])["error"], "page_not_published")
+        self.assertEqual(self.requests, [])
+
+    def test_published_page_allows_cart_checkout(self):
+        cart = _cart([{"line_id": "l1", "product_id": "prod_a", "price_id": "price_a", "qty": 1, "unit_amount": 1999, "currency": "usd"}])
+        resp = self._call(cart, body_extra={"page_id": "page_live"},
+                          pages_repo=FakeRepo("page_id", [{"tenant_id": "t1", "page_id": "page_live", "status": "published"}]))
+        self.assertEqual(resp["statusCode"], 200)
 
     def test_empty_cart_is_404(self):
         resp = self._call(_cart([]))

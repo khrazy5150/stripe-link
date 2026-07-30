@@ -4620,7 +4620,7 @@ def render_page_interactions_script(page: dict[str, Any]) -> str:
         "              const nextp = new URLSearchParams(); nextp.set('outcome', 'accept'); if (tenantId) nextp.set('tenant_id', tenantId);",
         "              cartSuccessUrl = `${cartApiBase}/pages/${cartPageId}/post-checkout/next?${nextp.toString()}&session_id={CHECKOUT_SESSION_ID}`;",
         "            }",
-        "            fetch(cartEndpoint + '/checkout', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ tenant_id: tenantId, cart_id: id, success_url: cartSuccessUrl, cancel_url: ret + '?checkout=cancel' }) })",
+        "            fetch(cartEndpoint + '/checkout', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ tenant_id: tenantId, cart_id: id, page_id: cartPageId, success_url: cartSuccessUrl, cancel_url: ret + '?checkout=cancel' }) })",
         # Clear the LOCAL cart ONLY once Stripe hands off (we have a redirect url) so returning to the page shows
         # an empty cart, not the just-purchased items. The .catch keeps it on failure (retry still works). The
         # SERVER cart persists — the webhook marks it converted on payment via metadata[cart_id], or it stays
