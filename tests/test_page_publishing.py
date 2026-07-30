@@ -1117,6 +1117,38 @@ class FunnelPublishIntegrationTests(unittest.TestCase):
         self.assertEqual(routes["/upsell-1"]["page_id"], "page_up01")
         self.assertEqual(routes["/thank-you"]["page_id"], "page_ty01")
 
+    def test_republish_without_slug_changes_still_syncs_platform_index_record(self):
+        # Regression (PLATFORM_HOSTNAME_SERVING.md): the domain index — including the free platform-hostname
+        # record — must be (re)written on EVERY publish, not only when a slug is newly attached. A page with no
+        # funnel/context slugs to attach (nothing changes) previously skipped the sync, so {label}.jbay.uk never
+        # got its resolver record and stayed unresolvable.
+        page = copy.deepcopy(self.page)
+        page["page_id"] = "page_home01"
+        page["status"] = "published"
+        page.pop("post_checkout", None)  # no funnel -> attach produces no change
+        site = {
+            "schema_version": "2026-07-20", "document_type": "site", "site_id": "site_PLAT",
+            "tenant_id": "tenant_demo", "environment": "live", "name": "Demo", "status": "active",
+            "hosting": {"type": "custom", "platform_hostname": "demo.jbay.uk", "custom_domain": "shop.example.com",
+                        "verification": {"verified": True}},
+            "organization": {"name": "Demo", "entity_type": "OnlineStore"},
+            "domain_provisioning": {"status": "active"},
+            "indexing": {"eligibility": "eligible"},
+            "pages": {"/": {"page_id": "page_home01", "page_type": "homepage", "enabled": True}},
+            "created_at": 1, "updated_at": 1,
+        }
+        domains_repo = FakeDomainsIndexRepository()
+        publish_page_document(
+            page, offers_repository=self.offers_repo, products_repository=self.products_repo,
+            sites_repository=FakeSitesRepository([site]), domains_index_repository=domains_repo,
+            s3_client=self.s3, pages_bucket="pages", preview_bucket="preview", environment="prod",
+            pages_domain="pages.example.com", preview_domain="preview.example.com",
+        )
+        platform = [r for r in domains_repo.records if r.get("host_kind") == "platform"]
+        self.assertTrue(platform, "the platform-hostname index record must be written even with no slug change")
+        self.assertEqual(platform[-1]["domain"], "demo.jbay.uk")
+        self.assertEqual(platform[-1]["status"], "active")
+
 
 if __name__ == "__main__":
     unittest.main()

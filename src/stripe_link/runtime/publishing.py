@@ -901,26 +901,24 @@ def publish_page_document(
             except Exception:  # noqa: BLE001 - stale-artifact cleanup must never block the publish
                 pass
 
-    if site and sites_repository is not None and serving_origin:
+    if site and sites_repository is not None:
         try:
-            updated_site, changed_ctx = attach_context_view_slugs(site, page)
-            # Post-purchase funnel slugs (/upsell //downsell //thank-you) so the funnel stays on the serving host
-            # (custom domain or platform host); derived from the offer's plan, retired when the funnel goes away
-            # (P2b, PLATFORM_HOSTNAME_SERVING.md Slice 3).
-            updated_site, changed_funnel = attach_funnel_slugs(updated_site, page, offer, products_by_id)
-            if changed_ctx or changed_funnel:
-                validate_site(updated_site)
-                site = sites_repository.put(updated_site)
-                _sync_domain_index(site, domains_index_repository)
-        except Exception:  # noqa: BLE001 - route attachment must never block the artifact publish
-            pass
-    elif site and sites_repository is not None:
-        # No custom domain (or not the root page): still index the Site's free platform hostname so it serves on
-        # {label}.<hosting-domain> (navigable free/test stores, plans/PLATFORM_HOSTNAME_SERVING.md). The on_custom
-        # _domain branch above already syncs both records. Best-effort — never block the publish.
-        try:
+            if serving_origin:
+                updated_site, changed_ctx = attach_context_view_slugs(site, page)
+                # Post-purchase funnel slugs (/upsell //downsell //thank-you) so the funnel stays on the serving
+                # host (custom domain or platform host); derived from the offer's plan, retired when the funnel
+                # goes away (P2b, PLATFORM_HOSTNAME_SERVING.md Slice 3).
+                updated_site, changed_funnel = attach_funnel_slugs(updated_site, page, offer, products_by_id)
+                if changed_ctx or changed_funnel:
+                    validate_site(updated_site)
+                    site = sites_repository.put(updated_site)
+            # Always refresh the denormalized domain-index record(s) — the custom domain (if any) AND the free
+            # platform hostname — so the edge resolver reflects the Site's current routes on EVERY publish, not
+            # only when a slug was newly attached. Without this, re-publishing a page whose slugs were already
+            # attached never (re)writes the platform-host record, so {label}.<hosting-domain> stays unresolvable
+            # (plans/PLATFORM_HOSTNAME_SERVING.md). Idempotent; the custom record stays inactive until verified.
             _sync_domain_index(site, domains_index_repository)
-        except Exception:  # noqa: BLE001
+        except Exception:  # noqa: BLE001 - route attach/sync must never block the artifact publish
             pass
 
     # Per-Site crawl files (SEO-14/15): when the served homepage on a verified custom domain publishes, write
