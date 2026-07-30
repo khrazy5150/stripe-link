@@ -148,6 +148,27 @@ With both environments serving Sites identically, the promote story simplifies:
   change to shipped behaviour; the only always-on change is the harmless `origin` query param on funnel URLs.
   **P1 (the core) is now code-complete — only the Cloudflare ops + the flag flip remain to light it up.**
 
+## SHIPPED — live on both environments (2026-07-30)
+
+Platform-hostname serving is **fully live and validated on test AND prod**:
+- **Test (`jbay.be`):** `axel-mart.jbay.be` serves `200` + `x-robots-tag: noindex, nofollow` + storefront chrome
+  + relative internal links + self-canonical (fake `mart.automizepro.com` custom domain disconnected → true
+  free-tier store).
+- **Prod (`jbay.uk`):** `axel-mart.jbay.uk/vyhthv-whey-protein` serves `200` + edge `noindex`; canonical → its
+  custom domain (by design — platform host is a noindex mirror).
+- **Edge (both zones, one Cloudflare account):** `jbay.be` `*/*` → `jb-custom-domain-router-dev`; `jbay.uk` `*/*`
+  → `jb-custom-domain-router-prod` (both Workers stamp `X-Robots-Tag` on `route.noindex`); wildcard
+  `*.jbay.be` / `*.jbay.uk` A → `192.0.2.1` (Proxied). API token widened to all-zones-on-account.
+- **`PLATFORM_SERVING_ENABLED=true`** on both stacks.
+- **Bug fixed during prod validation:** `publish_page_document` synced the domain index only when a funnel/
+  context slug changed, so a re-published page whose slugs were already attached never (re)wrote its platform-
+  hostname record — `{label}.<hosting-domain>` stayed unresolvable. Now the domain index is refreshed on EVERY
+  publish (idempotent); regression test added; validated live (delete record → re-publish → publish recreates it
+  in ~6s). commit after 0d25854.
+
+Remaining: **P2** (Site-level copy test→live) and **P3** (dashboard "Visit store" link + point the builder Live
+Preview at the real platform-host URL).
+
 ## Ops runbook — lighting it up (Cloudflare + flag flip)
 
 Everything in the app is code-complete behind `PLATFORM_SERVING_ENABLED` (off). The edge is the last mile.
