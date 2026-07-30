@@ -6,7 +6,7 @@ import time
 
 from stripe_link.cloudflare_secrets import get_cloudflare_api_token
 from stripe_link.common import error_response, json_response, parse_json_body, path_params, query_params, tenant_id_from_event
-from stripe_link.domain.connect_sync import compute_site_eligibility, connect_state_fields, site_domain_verified
+from stripe_link.domain.connect_sync import compute_site_eligibility, connect_state_fields, site_domain_verified, site_seo_enabled
 from stripe_link.domain.sitemap import generate_indexnow_key
 from stripe_link.stripe_client import stripe_request
 from stripe_link.stripe_platform_secrets import get_platform_secret_key
@@ -353,7 +353,12 @@ def create_site(event, repository, registry=None):
         validate_site(document)
         _assert_pages_unassigned(repository, document)
         _reserve_subdomain(registry, document)
+        # An edit that flips the Site's search visibility (seo_enabled) must re-render the pages, since robots +
+        # the storefront chrome are baked into each artifact at publish time (mirrors archive re-render).
+        existing = repository.get(str(document.get("tenant_id") or ""), str(document.get("site_id") or ""))
         saved = repository.put(document)
+        if existing is not None and site_seo_enabled(existing) != site_seo_enabled(saved):
+            _republish_site_pages(str(saved.get("tenant_id") or ""), saved)
         return json_response({"site": saved}, status_code=201)
     except (DocumentValidationError, ValueError, RepositoryError) as exc:
         return error_response(str(exc), code="invalid_site")
@@ -444,13 +449,18 @@ def update_site_status(event, repository, site_id):
     site = repository.get(tenant_id, site_id)
     if not site:
         return error_response("Site not found.", status_code=404, code="not_found")
+    status_changed = str(site.get("status") or "") != status
     site["status"] = status
     site["updated_at"] = int(time.time())
     try:
         saved = repository.put(site)
-        return json_response({"site": saved})
     except RepositoryError as exc:
         return error_response(str(exc), code="invalid_site_status")
+    # Archiving/reactivating changes each page's robots directive (noindex when archived), so re-render the
+    # Site's pages immediately — the dashboard tells the tenant it takes effect now.
+    if status_changed:
+        _republish_site_pages(tenant_id, saved)
+    return json_response({"site": saved})
 
 
 def delete_site(event, repository, site_id):

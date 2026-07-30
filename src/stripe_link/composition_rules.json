@@ -79,8 +79,8 @@
     "social_proof":    { "label": "Social proof",    "seeds": ["testimonials", "rating", "client_marquee"], "sections": [] }
   },
   "goals": {
-    "paid_ads":   { "label": "Paid ads",     "note": "Ad traffic converts fast or bounces. Adds nothing extra \u2014 no FAQ, no SEO weight.", "packs": [] },
-    "search_seo": { "label": "Search / SEO", "note": "Built to rank: adds an FAQ, and (later) structured data and llms.txt derived from the offer.", "packs": ["discoverability"] },
+    "paid_ads":   { "label": "Paid ads",     "note": "Ad traffic converts fast or bounces. Adds no extra sections \u2014 just the offer.", "packs": [] },
+    "search_seo": { "label": "Search-friendly", "note": "Adds search-friendly content: an FAQ, plus (later) structured data and llms.txt from the offer.", "packs": ["discoverability"] },
     "social":     { "label": "Social",       "note": "Built to convert a scrolling audience: adds social proof \u2014 testimonials, rating, client logos.", "packs": ["social_proof"] },
     "email_list": { "label": "Email list",   "note": "A warm audience that already knows you. Adds nothing extra \u2014 straight to the offer.", "packs": [] },
     "minimal":    { "label": "Minimal",      "note": "No extras of any kind. The offer's standard page, with nothing added on top.", "packs": [] }

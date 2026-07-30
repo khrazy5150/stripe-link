@@ -784,6 +784,24 @@ class HeadSeoTagsTests(unittest.TestCase):
         self.assertIn('name="twitter:card" content="summary_large_image"', head)
         self.assertIn('property="og:url" content="https://axelmart.com/p/mac"', head)
 
+    def test_seo_off_stamps_body_marker(self):
+        # Site-level SEO opt-out: the render stamps a body marker CSS keys off to switch the storefront header to
+        # its plain no-SEO form (breadcrumb hidden, brand centered). Robots noindex is separate (publish-time).
+        site = {"hosting": {"custom_domain": "shop.x.com", "verification": {"verified": True}},
+                "organization": {"name": "Axel Mart"}, "indexing": {"eligibility": "eligible", "seo_enabled": False},
+                "pages": {"/": {"page_id": self.page["page_id"]}}}
+        html = render_page(self.page, self.offer, self.products_by_id, site=site, page_type="landing")
+        self.assertIn('<body data-seo="off">', html)
+        self.assertIn('body[data-seo="off"] .sl-breadcrumb{display:none}', html)   # off-state CSS present
+
+    def test_seo_on_body_has_no_marker(self):
+        site = {"hosting": {"custom_domain": "shop.x.com", "verification": {"verified": True}},
+                "organization": {"name": "Axel Mart"}, "indexing": {"eligibility": "eligible"},
+                "pages": {"/": {"page_id": self.page["page_id"]}}}
+        html = render_page(self.page, self.offer, self.products_by_id, site=site, page_type="landing")
+        import re as _re
+        self.assertEqual(_re.search(r"<body[^>]*>", html).group(0), "<body>")
+
     def test_checkout_cta_resolves_return_urls_from_canonical(self):
         html = render_page(self.page, self.offer, self.products_by_id,
                            checkout_url="https://dev.juniorbay.com/checkout",

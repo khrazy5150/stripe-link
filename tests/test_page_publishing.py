@@ -460,6 +460,31 @@ class PagePublishingTests(unittest.TestCase):
         sitemap = [put["Body"] for put in self.s3.puts if put["Key"].endswith("sitemap.xml")][0].decode()
         self.assertIn("<loc>https://shop.example.com/</loc>", sitemap)
 
+    def test_seo_disabled_site_is_noindex_disallow_and_no_indexnow(self):
+        # Site-level SEO opt-out: every page renders noindex, robots.txt disallows, sitemap is empty, no IndexNow.
+        page = copy.deepcopy(self.page)
+        page["status"] = "published"
+        site = {
+            "tenant_id": "tenant_demo", "site_id": "site_x",
+            "hosting": {"type": "custom", "custom_domain": "shop.example.com", "verification": {"verified": True}},
+            "indexing": {"eligibility": "eligible", "seo_enabled": False},
+            "seo": {"indexnow_key": "k1abc"},
+            "pages": {"/": {"page_id": "page_simple_coffee"}},
+        }
+        with patch("stripe_link.runtime.publishing.submit_indexnow") as ping:
+            publish_page_document(
+                page, offers_repository=self.offers_repo, products_repository=self.products_repo,
+                sites_repository=FakeSitesRepository([site]), s3_client=self.s3,
+                pages_bucket="pages", preview_bucket="preview", environment="prod",
+                pages_domain="pages.example.com", preview_domain="preview.example.com",
+                checkout_url="https://checkout.stripe.com/c/pay/demo",
+            )
+        ping.assert_not_called()  # no IndexNow ping when search visibility is off
+        published = next(p["Body"] for p in self.s3.puts if p["Key"] == artifact_paths("tenant_demo", "page_simple_coffee")["published"]).decode()
+        self.assertIn('name="robots" content="noindex,nofollow"', published)
+        robots = next(p["Body"] for p in self.s3.puts if p["Key"].endswith("robots.txt")).decode()
+        self.assertIn("Disallow: /", robots)
+
     def test_no_crawl_files_for_platform_host(self):
         page = copy.deepcopy(self.page)
         page["status"] = "published"

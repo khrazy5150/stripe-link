@@ -217,6 +217,14 @@
           </fieldset>
 
           <fieldset class="product-identifiers">
+            <legend>Search visibility</legend>
+            <label class="builder-toggle"><input v-model="form.seo_enabled" type="checkbox" /><span>Let search engines find this site</span></label>
+            <p class="field-note">
+              When off, every page tells search engines <strong>noindex</strong> and the storefront header switches to its plain form (no breadcrumb, centered brand) — a visible cue that SEO is off. Navigation stays. Applies once your custom domain is verified; on the free {{ hostingDomainHint }} address a Site is never indexed regardless.
+            </p>
+          </fieldset>
+
+          <fieldset class="product-identifiers">
             <legend>Search engine verification</legend>
             <p class="field-note">Verify your Site in Google/Bing Search Console so you can submit sitemaps. Paste the token from each provider's "HTML tag" verification method (just the content value).</p>
             <label class="offer-field"><span>Google verification token</span><input v-model.trim="form.seo.google_site_verification" type="text" placeholder="google-site-verification content…" /></label>
@@ -443,7 +451,7 @@ const BUSINESS_TYPE_GROUPS = [
   { parent: "LocalBusiness", label: "Other local", types: ["ChildCare", "DryCleaningOrLaundry", "SelfStorage", "EntertainmentBusiness"] },
 ];
 
-const form = reactive({ name: "", subdomain: "", org: { name: "", legal_name: "", entity_type: "OnlineStore", business_type: "", description: "", telephone: "", email: "", address: { locality: "", region: "" }, place_id: "", gbp_url: "", geo: { latitude: "", longitude: "" }, opening_hours: [], review_destination: "" }, seo: { google_site_verification: "", bing_site_verification: "" } });
+const form = reactive({ name: "", subdomain: "", org: { name: "", legal_name: "", entity_type: "OnlineStore", business_type: "", description: "", telephone: "", email: "", address: { locality: "", region: "" }, place_id: "", gbp_url: "", geo: { latitude: "", longitude: "" }, opening_hours: [], review_destination: "" }, seo: { google_site_verification: "", bing_site_verification: "" }, seo_enabled: true });
 
 // The specific-type options for the chosen broad entity_type (empty for OnlineStore/Organization).
 const specificTypes = computed(() => (BUSINESS_TYPE_GROUPS.find((g) => g.parent === form.org.entity_type)?.types) || []);
@@ -752,6 +760,7 @@ function openEdit(site) {
   };
   const seo = site.seo || {};
   form.seo = { google_site_verification: seo.google_site_verification || "", bing_site_verification: seo.bing_site_verification || "" };
+  form.seo_enabled = site.indexing?.seo_enabled !== false;  // default on
   editCheck.check(form.subdomain, site.site_id);
 }
 
@@ -785,6 +794,9 @@ async function saveEdit() {
     hosting: { ...editing.value.hosting, platform_subdomain: form.subdomain || undefined },
     organization: Object.fromEntries(Object.entries(organization).filter(([, v]) => v !== undefined && !(typeof v === "object" && !Object.keys(v).length))),
     seo: Object.keys(seo).length ? seo : undefined,
+    // Search visibility toggle (default on). Persisted on indexing alongside the computed eligibility; the
+    // backend re-renders the pages when it flips (robots + storefront chrome are baked into each artifact).
+    indexing: { ...editing.value.indexing, seo_enabled: form.seo_enabled },
   };
   if (!doc.seo) delete doc.seo;
   try {

@@ -123,6 +123,17 @@ def site_domain_verified(site: dict[str, Any] | None) -> bool:
     return bool(hosting.get("custom_domain")) and bool((hosting.get("verification") or {}).get("verified"))
 
 
+def site_seo_enabled(site: dict[str, Any] | None) -> bool:
+    """Whether the Site opts into search/SEO — the tenant-facing "discover in search" switch (SITE_OBJECT.md).
+    Default True: a verified Site is discoverable unless the tenant turns it off. When False, every page is
+    forced noindex, robots.txt disallows + no IndexNow, and the storefront header renders in its plain no-SEO
+    form (breadcrumb hidden, brand centered). Indexing is a Site-level posture; there is no per-page override."""
+    indexing = (site or {}).get("indexing")
+    if not isinstance(indexing, dict):
+        return True
+    return indexing.get("seo_enabled", True) is not False
+
+
 def compute_site_eligibility(
     site: dict[str, Any], *, connect_verified: bool, connect_restricted: bool, domain_verified: bool
 ) -> str:

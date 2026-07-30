@@ -1839,6 +1839,9 @@ def validate_site(document: dict[str, Any]) -> None:
             raise DocumentValidationError("Site indexing must be an object.")
         if indexing.get("eligibility") is not None:
             require_enum(indexing, "eligibility", SITE_INDEXING_ELIGIBILITY, "Site indexing.eligibility")
+        # The tenant's "discover in search" switch (default True): when False every page is noindex and the
+        # storefront chrome renders in its plain no-SEO form. See connect_sync.site_seo_enabled.
+        optional_bool(indexing, "seo_enabled", "Site indexing.seo_enabled")
 
     # seo: site-wide SEO config — webmaster verification tokens (SEO-16), title suffix, IndexNow key.
     seo = document.get("seo")

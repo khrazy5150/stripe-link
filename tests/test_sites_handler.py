@@ -140,6 +140,30 @@ class SitesHandlerTests(unittest.TestCase):
                          None, repository=self.repo)
         self.assertEqual(len(json.loads(listed["body"])["sites"]), 1)
 
+    def test_status_change_republishes_pages(self):
+        from unittest.mock import patch
+        from handlers import sites as sites_handler
+        self._post(base_site(site_id="site_AAAA1"))
+        pages = FakeDocumentRepository("page_id")
+        pages.put({"tenant_id": "tenant_demo", "page_id": "page_home01", "status": "published", "updated_at": 1})
+        with patch.object(sites_handler, "pages_repository", return_value=pages):
+            handler({"httpMethod": "PATCH", "resource": "/sites/{site_id}/status",
+                     "pathParameters": {"site_id": "site_AAAA1"},
+                     "body": json.dumps({"tenant_id": "tenant_demo", "status": "archived"})}, None, repository=self.repo)
+        self.assertNotEqual(pages.get("tenant_demo", "page_home01")["updated_at"], 1)  # re-rendered on archive
+
+    def test_toggling_seo_enabled_republishes_pages(self):
+        from unittest.mock import patch
+        from handlers import sites as sites_handler
+        self._post(base_site(site_id="site_AAAA1"))  # seo_enabled absent -> defaults on
+        pages = FakeDocumentRepository("page_id")
+        pages.put({"tenant_id": "tenant_demo", "page_id": "page_home01", "status": "published", "updated_at": 1})
+        flipped = base_site(site_id="site_AAAA1")
+        flipped["indexing"] = {"eligibility": "blocked", "seo_enabled": False}
+        with patch.object(sites_handler, "pages_repository", return_value=pages):
+            self._post(flipped)
+        self.assertNotEqual(pages.get("tenant_demo", "page_home01")["updated_at"], 1)  # re-rendered when SEO flips
+
     def test_status_and_delete(self):
         self._post(base_site(site_id="site_AAAA1"))
         arch = handler({"httpMethod": "PATCH", "resource": "/sites/{site_id}/status",

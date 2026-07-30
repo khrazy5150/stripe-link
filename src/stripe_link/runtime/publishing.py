@@ -12,7 +12,7 @@ from stripe_link.domain.documents import (
     validate_site,
 )
 from stripe_link.runtime.artifacts import artifact_paths, cloudfront_path
-from stripe_link.domain.connect_sync import site_domain_verified
+from stripe_link.domain.connect_sync import site_domain_verified, site_seo_enabled
 from stripe_link.domain.custom_domains import domain_index_record
 from stripe_link.domain.funnels import funnel_slug_entries, post_purchase_plan
 from stripe_link.domain.opportunities import STAGE_LANDING, STAGE_POST_PURCHASE, stage_opportunities
@@ -694,6 +694,7 @@ def publish_page_document(
     page_canonical = f"https://{custom_domain}/{canonical_path}" if on_custom_domain and custom_domain else canonical_url
     eligibility = ((site or {}).get("indexing") or {}).get("eligibility") or "blocked"
     site_archived = (site or {}).get("status") == "archived"
+    seo_enabled = site_seo_enabled(site)  # Site-level "discover in search" switch; off → force noindex + no crawl
 
     page_reviews = load_page_reviews(reviews_repository, tenant_id, products_by_id, str((site or {}).get("site_id") or ""))
 
@@ -710,6 +711,7 @@ def publish_page_document(
         robots = page_robots_directive(
             kind=target["kind"], environment=environment, eligibility=eligibility,
             page_type=page_type, on_custom_domain=on_custom_domain, site_archived=site_archived,
+            seo_enabled=seo_enabled,
         )
         html = _render(robots)
         # Thin-content gate (SEO-08): an otherwise-indexable page with too little unique body text is demoted
@@ -953,12 +955,13 @@ def publish_site_crawl_files(*, site, homepage_page_id, custom_domain, page, ima
     IndexNow. Best-effort on the IndexNow ping — never fail a publish on it."""
     from stripe_link.domain.sitemap import robots_txt, sitemap_xml
 
-    # An archived Site drops its whole domain from crawling: empty sitemap + disallow-all robots (paired with
-    # the noindex,nofollow,noarchive meta re-rendered onto each page). No IndexNow ping either.
-    archived = (site or {}).get("status") == "archived"
+    # An archived Site — or a Site whose tenant turned search visibility OFF (seo_enabled False) — drops its whole
+    # domain from crawling: empty sitemap + disallow-all robots (paired with the noindex meta re-rendered onto
+    # each page). No IndexNow ping either.
+    suppress = (site or {}).get("status") == "archived" or not site_seo_enabled(site)
     root = f"https://{custom_domain}/"
-    sitemap = sitemap_xml([] if archived else [{"loc": root, "lastmod": page.get("updated_at") or page.get("published_at"), "images": image_urls}])
-    robots = robots_txt(f"https://{custom_domain}/sitemap.xml", allow=not archived)
+    sitemap = sitemap_xml([] if suppress else [{"loc": root, "lastmod": page.get("updated_at") or page.get("published_at"), "images": image_urls}])
+    robots = robots_txt(f"https://{custom_domain}/sitemap.xml", allow=not suppress)
     prefix = f"{homepage_page_id}/"
     cache = "public, max-age=300"
     s3_client.put_object(Bucket=pages_bucket, Key=prefix + "sitemap.xml", Body=sitemap.encode("utf-8"),
@@ -966,11 +969,11 @@ def publish_site_crawl_files(*, site, homepage_page_id, custom_domain, page, ima
     s3_client.put_object(Bucket=pages_bucket, Key=prefix + "robots.txt", Body=robots.encode("utf-8"),
                          ContentType="text/plain; charset=utf-8", CacheControl=cache)
     key = str(((site or {}).get("seo") or {}).get("indexnow_key") or "").strip()
-    if key and not archived:
+    if key and not suppress:
         s3_client.put_object(Bucket=pages_bucket, Key=prefix + f"{key}.txt", Body=key.encode("utf-8"),
                              ContentType="text/plain; charset=utf-8", CacheControl=cache)
         submit_indexnow(custom_domain, key, [root], opener=indexnow_opener)
-    return {"root": root, "sitemap": root + "sitemap.xml", "indexnow_submitted": bool(key)}
+    return {"root": root, "sitemap": root + "sitemap.xml", "indexnow_submitted": bool(key) and not suppress}
 
 
 def submit_indexnow(host: str, key: str, urls: list[str], *, opener=None) -> bool:

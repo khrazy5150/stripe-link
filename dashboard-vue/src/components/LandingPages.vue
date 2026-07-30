@@ -394,6 +394,7 @@
             <header class="wizard-step-header">
               <h3>Page Goal</h3>
               <p>Where will this page's traffic come from? This decides what the page starts with — you can change any of it later.</p>
+              <p class="field-note">This only sets what's <em>on</em> the page. Whether it appears in search is a Site-level setting (Sites → search visibility), not a per-page choice.</p>
             </header>
             <div class="wizard-goal-list">
               <button

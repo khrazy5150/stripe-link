@@ -8,6 +8,7 @@ from urllib.parse import urlencode, urlparse
 
 from stripe_link.domain.business_types import BUSINESS_TYPES, resolve_entity_type
 from stripe_link.domain.composition import compose_page, element_channel
+from stripe_link.domain.connect_sync import site_seo_enabled
 from stripe_link.domain.documents import PRODUCT_CONDITIONS
 from stripe_link.domain.opportunities import STAGE_LANDING, STAGE_POST_PURCHASE, derived_offer_type, stage_opportunities
 from stripe_link.domain.pricing import PricingError, expand_offer, find_price, resolve_offer, single_unit_price
@@ -692,6 +693,13 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     "    .sl-nav ul{list-style:none;display:flex;flex-wrap:wrap;gap:1.4rem;padding:0;margin:0}",
     "    .sl-nav a{color:var(--sl-text);text-decoration:none;font-size:1.4rem}",
     "    .sl-nav a:hover{text-decoration:underline}",
+    # SEO turned off (Site-level opt-out): the storefront header drops its breadcrumb and its brand renders as the
+    # plain no-SEO brand cue — centered, uppercase, dotted (matching .sl-brand-label). The nav stays (it's
+    # navigation, not SEO). Purely visual; the noindex robots directive is applied server-side at publish.
+    "    body[data-seo=\"off\"] .sl-breadcrumb{display:none}",
+    "    body[data-seo=\"off\"] .sl-siteheader{justify-content:center;padding-top:1.6rem}",
+    "    body[data-seo=\"off\"] .sl-brand{display:inline-flex;align-items:center;gap:0.8rem;font-family:var(--sl-font-accent);font-size:1.3rem;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:var(--sl-brand-label-text)}",
+    "    body[data-seo=\"off\"] .sl-brand::before{content:'';width:1rem;height:1rem;border-radius:999px;background:var(--sl-brand-dot);box-shadow:0 0 0.8rem var(--sl-brand-dot)}",
     "    .sl-footernav{padding:1.6rem 0 0}",
     "    .sl-footernav ul{list-style:none;display:flex;flex-wrap:wrap;justify-content:center;gap:1.4rem;padding:0;margin:0}",
     "    .sl-footernav a{color:var(--sl-legal-link);text-decoration:none;font-size:1.3rem}",
@@ -1159,7 +1167,7 @@ NOINDEX_ARCHIVED_ROBOTS = "noindex,nofollow,noarchive"
 NONINDEXABLE_PAGE_TYPES = {"checkout", "thank_you", "funnel_step"}
 
 
-def page_robots_directive(*, kind: str, environment: str, eligibility: str, page_type: str, on_custom_domain: bool, site_archived: bool = False) -> str:
+def page_robots_directive(*, kind: str, environment: str, eligibility: str, page_type: str, on_custom_domain: bool, site_archived: bool = False, seo_enabled: bool = True) -> str:
     """The robots directive for a page artifact (plans/SITE_OBJECT.md §2.2, TP-08, SEO-02). Only a published
     artifact in production, actually served on the Site's verified custom domain, whose Site is index-eligible
     (verified custom domain AND verified Stripe Connect), on an indexable page_type, gets index,follow.
@@ -1167,6 +1175,8 @@ def page_robots_directive(*, kind: str, environment: str, eligibility: str, page
     the reputation-isolation floor."""
     if site_archived:
         return NOINDEX_ARCHIVED_ROBOTS  # an archived Site de-indexes every one of its pages, everywhere
+    if not seo_enabled:
+        return NOINDEX_ROBOTS  # the tenant turned search visibility off for this Site (Site-level opt-out)
     if kind != "published" or environment != "prod":
         return NOINDEX_ROBOTS
     if not on_custom_domain:
@@ -1292,6 +1302,10 @@ def render_page(
     domain_verified = bool((hosting.get("verification") or {}).get("verified"))
     _RENDER_STATE["home_url"] = f"https://{custom_domain}/" if custom_domain and domain_verified else ""
     _RENDER_STATE["page_type"] = str(page_type or "")
+    # SEO opt-out (Site-level "discover in search" switch): when off, the storefront chrome renders in its plain
+    # no-SEO form (breadcrumb hidden, brand centered) via a body marker CSS keys off. Robots noindex is applied
+    # separately at publish. Default on, so nothing changes for a Site that hasn't toggled it.
+    _RENDER_STATE["seo_enabled"] = site_seo_enabled(site)
     # Sale / Flash-Sale context views (plans/SALES_FUNNELS.md P1). The price selector swaps each tier to its
     # paired sale/flash price (same quantity, active context). Whole-page fallback: if no product in the offer
     # has a price in the requested context, the view renders as Standard (i.e. /sale looks like /). The flash
@@ -1444,7 +1458,7 @@ def _render_page_body(
         analytics_adapters,
         render_page_interactions_script(page),
         "</head>",
-        "<body>",
+        ("<body>" if _RENDER_STATE.get("seo_enabled", True) else "<body data-seo=\"off\">"),
         render_price_context_banner(page),
         "  <main>",
         site_header,
