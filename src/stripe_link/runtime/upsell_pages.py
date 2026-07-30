@@ -124,6 +124,9 @@ def synthesize_upsell_page(
             "duration_minutes": int(scaffold.get("countdown_minutes") or 1),
             "label": "This offer expires in", "start_text": "This offer expires in", "end_text": "Offer expired",
             "sticky": True,
+            # Persist across refresh: a one-time upsell timer that resets on reload would let the buyer stall the
+            # offer indefinitely, so the deadline is stored per page (localStorage) and resumes where it left off.
+            "persistent": True,
         })
     # The accept label already carries the price (…for $22.17) so hide the CTA's own amount; the decline link
     # uses the scaffold's copy. When this upsell's product has a downsell price, bake it in so the island can

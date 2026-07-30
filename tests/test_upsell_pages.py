@@ -107,6 +107,17 @@ class SynthesizeUpsellPageTests(unittest.TestCase):
         self.assertNotIn("Terms of Service", up)
         self.assertNotIn('class="sl-legal"', up)
 
+    def test_upsell_countdown_persists_across_refresh(self):
+        # A one-time upsell timer that reset on reload would let the buyer stall the offer, so it persists.
+        page, offer = synthesize_upsell_page(
+            self.entry, source_page=self.source_page, source_offer=self.source_offer, scaffold=upsell_scaffold(self.source_page),
+        )
+        countdown = next(s for s in page["sections"] if s["type"] == "countdown_timer")
+        self.assertTrue(countdown["persistent"])
+        html = render_page(page, offer, self.products_by_id,
+                           selected_prices={"prod_creatine_gummies": "price_upsell_1bottle"}, page_type="funnel_step")
+        self.assertIn('data-persistent="true"', html)
+
     def test_no_downsell_attributes_when_product_has_no_downsell_price(self):
         entry = post_purchase_plan(self.source_offer, self.products_by_id)["upsells"][0]
         page, offer = synthesize_upsell_page(
