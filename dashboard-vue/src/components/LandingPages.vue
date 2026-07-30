@@ -245,7 +245,7 @@
                     spellcheck="false"
                     @input="siteCheck.check(newSiteSubdomain)"
                   />
-                  <span class="subdomain-suffix">.jbay.uk</span>
+                  <span class="subdomain-suffix">.{{ sitesStore.hostingDomain || "jbay.uk" }}</span>
                 </div>
                 <small v-if="siteCheck.state.checking" class="field-note">Checking…</small>
                 <small v-else-if="siteCheck.state.checked" :class="siteCheck.state.available ? 'subdomain-ok' : 'subdomain-bad'">

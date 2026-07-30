@@ -38,6 +38,14 @@ PARAMETER_OVERRIDES=(
   "ProjectPrefix=jb"
 )
 
+# Free-tier Site hosting domain (Zone B, always noindex): prod serves on jbay.uk, test on jbay.be — separate
+# zones so a test wildcard can never touch prod (plans/PLATFORM_HOSTNAME_SERVING.md).
+if [[ "${ENVIRONMENT}" == "prod" ]]; then
+  PARAMETER_OVERRIDES+=("PlatformHostingDomain=jbay.uk")
+else
+  PARAMETER_OVERRIDES+=("PlatformHostingDomain=jbay.be")
+fi
+
 if [[ -n "${API_CUSTOM_DOMAIN_NAME}" ]]; then
   PARAMETER_OVERRIDES+=("ApiCustomDomainName=${API_CUSTOM_DOMAIN_NAME}")
 fi

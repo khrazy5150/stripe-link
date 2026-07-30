@@ -417,7 +417,9 @@ def list_sites(event, repository):
         return error_response("tenant_id is required.", code="missing_tenant")
     sites = repository.list_for_tenant(tenant_id)
     _refresh_eligibility(repository, tenant_id, sites)
-    return json_response({"sites": sites})
+    # Tell the dashboard THIS environment's free-tier hosting domain (prod jbay.uk / test jbay.be) so the
+    # "store address" suffix + copy reflect the env instead of a hardcoded value.
+    return json_response({"sites": sites, "hosting_domain": hosting_domain()})
 
 
 def _refresh_eligibility(repository, tenant_id, sites):

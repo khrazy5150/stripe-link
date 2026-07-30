@@ -138,7 +138,17 @@ class SitesHandlerTests(unittest.TestCase):
         self.assertEqual(got["statusCode"], 200)
         listed = handler({"httpMethod": "GET", "queryStringParameters": {"tenant_id": "tenant_demo"}},
                          None, repository=self.repo)
-        self.assertEqual(len(json.loads(listed["body"])["sites"]), 1)
+        body = json.loads(listed["body"])
+        self.assertEqual(len(body["sites"]), 1)
+        self.assertEqual(body["hosting_domain"], "jbay.uk")  # env's free-tier domain, surfaced to the dashboard
+
+    def test_list_reflects_env_hosting_domain(self):
+        import os
+        from unittest.mock import patch
+        with patch.dict(os.environ, {"PLATFORM_HOSTING_DOMAIN": "jbay.be"}):
+            listed = handler({"httpMethod": "GET", "queryStringParameters": {"tenant_id": "tenant_demo"}},
+                             None, repository=self.repo)
+        self.assertEqual(json.loads(listed["body"])["hosting_domain"], "jbay.be")
 
     def test_status_change_republishes_pages(self):
         from unittest.mock import patch

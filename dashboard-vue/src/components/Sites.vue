@@ -415,7 +415,7 @@ const profileStore = useProfileStore();
 const pages = ref([]);
 const editing = ref(null);
 const formError = ref("");
-const hostingDomainHint = "jbay.uk";
+const hostingDomainHint = computed(() => store.hostingDomain || "jbay.uk");
 const entityTypes = ["OnlineStore", "Organization", "LocalBusiness", "HomeAndConstructionBusiness", "HealthAndBeautyBusiness", "FoodEstablishment", "ProfessionalService", "Store"];
 
 const creating = ref(false);

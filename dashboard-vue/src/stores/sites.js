@@ -79,6 +79,7 @@ export const useSitesStore = defineStore("sites", {
     saving: false,
     error: "",
     message: "",
+    hostingDomain: "jbay.uk",  // this environment's free-tier Site domain; overwritten from the API (jbay.be in test)
   }),
   getters: {
     hasSites: (state) => state.sites.length > 0,
@@ -93,6 +94,7 @@ export const useSitesStore = defineStore("sites", {
       try {
         const body = await apiRequest("/sites");
         this.sites = Array.isArray(body.sites) ? body.sites : [];
+        if (body.hosting_domain) this.hostingDomain = body.hosting_domain;
         this.loaded = true;
       } catch (error) {
         this.error = error.message || "Failed to load sites.";
