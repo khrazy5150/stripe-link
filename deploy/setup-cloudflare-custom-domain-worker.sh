@@ -1,10 +1,19 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Uploads deploy/cloudflare-custom-domain-worker.js as a Cloudflare Worker and routes it
-# in front of the custom domain fallback origin (CustomDomainTargetHost, e.g.
-# domains.jbay.uk). Run this once after the stripe-link stack is deployed, and again
-# whenever the worker script changes.
+# Uploads deploy/cloudflare-custom-domain-worker.js as a Cloudflare Worker and binds it to a
+# zone-wide route so it fronts BOTH tenant custom domains and the free platform-host stores
+# ({label}.jbay.uk in prod, {label}.jbay.be in test). Run this once after the stripe-link stack
+# is deployed, and again whenever the worker script changes.
+#
+# TWO ZONES: the same script serves both platform-hosting zones. Run it once per zone, passing
+# that zone's id, e.g.:
+#     CLOUDFLARE_ZONE_ID=<jbay.uk zone id> STACK_NAME=jb-stripe-link-stack-prod ENVIRONMENT=prod ./deploy/setup-cloudflare-custom-domain-worker.sh
+#     CLOUDFLARE_ZONE_ID=<jbay.be zone id> STACK_NAME=jb-stripe-link-stack-dev  ENVIRONMENT=dev  ./deploy/setup-cloudflare-custom-domain-worker.sh
+# The default `*/*` route matches every hostname in the zone; the worker passes RESERVED_HOSTS
+# (apex, www, domains.) straight through and resolves everything else as a Site store. Prereq for
+# the .be zone: move jbay.be onto the same Cloudflare account and clean up leftover stripe-cart
+# subdomains (or add them to RESERVED_HOSTS). See plans/PLATFORM_HOSTNAME_SERVING.md.
 #
 # Requires: aws CLI (to read the API token secret + stack output), jq, curl.
 # Requires: CLOUDFLARE_API_TOKEN_SECRET_ID pointing at the secret created by template.yaml
@@ -103,4 +112,6 @@ else
   fi
 fi
 
-echo "Done. Tenants can now CNAME their subdomain to the CustomDomainTargetHost."
+echo "Done. Tenants can CNAME their custom subdomain to the CustomDomainTargetHost, and free"
+echo "platform-host stores on this zone now resolve through the worker (noindex-stamped)."
+echo "Next: flip the app switch with  PLATFORM_SERVING_ENABLED=true ./deploy/deploy.sh ${ENVIRONMENT}  and re-publish a Site's pages."

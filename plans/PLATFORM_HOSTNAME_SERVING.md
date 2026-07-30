@@ -148,6 +148,32 @@ With both environments serving Sites identically, the promote story simplifies:
   change to shipped behaviour; the only always-on change is the harmless `origin` query param on funnel URLs.
   **P1 (the core) is now code-complete — only the Cloudflare ops + the flag flip remain to light it up.**
 
+## Ops runbook — lighting it up (Cloudflare + flag flip)
+
+Everything in the app is code-complete behind `PLATFORM_SERVING_ENABLED` (off). The edge is the last mile.
+The Worker + setup script already handle platform hosts (`deploy/cloudflare-custom-domain-worker.js` stamps
+`X-Robots-Tag: noindex, nofollow` when the resolver flags `route.noindex`; the setup script binds a zone-wide
+`*/*` route and is parameterized by `CLOUDFLARE_ZONE_ID`).
+
+1. **Move the `jbay.be` zone** onto the Cloudflare account that holds `jbay.uk`. Confirm Universal SSL covers
+   `*.jbay.be` (one label under the apex — free, no Advanced Certificate Manager). Delete/relocate any leftover
+   stripe-cart subdomains on `jbay.be`, or add them to `RESERVED_HOSTS` in the Worker so they pass through.
+2. **Deploy the Worker to both zones** (same script, once per zone id):
+   - prod / `jbay.uk`: `CLOUDFLARE_ZONE_ID=<jbay.uk zone> STACK_NAME=jb-stripe-link-stack-prod ENVIRONMENT=prod ./deploy/setup-cloudflare-custom-domain-worker.sh`
+   - test / `jbay.be`: `CLOUDFLARE_ZONE_ID=<jbay.be zone> STACK_NAME=jb-stripe-link-stack-dev ENVIRONMENT=dev ./deploy/setup-cloudflare-custom-domain-worker.sh`
+   (The `jbay.uk` zone likely already has the custom-domain route; re-running just re-uploads the updated
+   script and is idempotent on the route.)
+3. **Flip the app switch** per environment and re-publish so chrome + platform index records regenerate:
+   `PLATFORM_SERVING_ENABLED=true ./deploy/deploy.sh dev` (then prod). Re-put a Site's pages (bump `updated_at`)
+   to trigger re-publish via the PagesTable stream.
+4. **Smoke test:** `curl -sI https://axel-mart.jbay.be/` → 200 + `x-robots-tag: noindex, nofollow`; the storefront
+   renders chrome with relative links; an offer page, `/upsell`, `/downsell`, `/thank-you`, `/sale` all resolve;
+   a test purchase's funnel stays on `axel-mart.jbay.be` end to end.
+
+**Rollback:** re-deploy with `PLATFORM_SERVING_ENABLED` unset (default off) — pages revert to chrome-less interim
+identity on the next publish; the Worker route can stay (a platform host with the flag off simply has no attached
+routes and 404s, which is the pre-feature state).
+
 ## Open decisions (resolve during scoping)
 
 1. **Index-record-per-platform-host vs. registry lookup in the resolver.** Lean **index record** — reuses the
