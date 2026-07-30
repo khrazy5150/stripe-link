@@ -93,6 +93,29 @@ def domain_index_record(site: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def platform_domain_index_record(site: dict[str, Any]) -> dict[str, Any] | None:
+    """The domain-index record for the Site's free platform hostname (`{label}.<hosting-domain>`), so the edge
+    resolver serves the Site there too — navigable free/test stores (plans/PLATFORM_HOSTNAME_SERVING.md). Always
+    `active` (no verification — it's platform infra we own) and tagged `host_kind="platform"` so the edge marks
+    every response `noindex` (the reputation-isolation floor). Same `route_table` as the custom-domain record, so
+    the existing resolver serves it unchanged. None when the Site has no platform hostname."""
+    hosting = site.get("hosting") or {}
+    platform_hostname = str(hosting.get("platform_hostname") or "").strip()
+    if not platform_hostname:
+        return None
+    root = (site.get("pages") or {}).get("/")
+    homepage = str(root.get("page_id") or "") if isinstance(root, dict) else ""
+    return {
+        "tenant_id": str(site.get("tenant_id") or ""),
+        "domain": platform_hostname,
+        "target_page_id": homepage,
+        "routes": route_table(site),
+        "status": "active",
+        "site_id": str(site.get("site_id") or ""),
+        "host_kind": "platform",
+    }
+
+
 def build_domain(apex_domain: str, subdomain_label: str) -> str:
     apex = normalize_domain(apex_domain)
     label = str(subdomain_label or "").strip().lower()

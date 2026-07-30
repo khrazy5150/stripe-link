@@ -13,7 +13,7 @@ from stripe_link.domain.documents import (
 )
 from stripe_link.runtime.artifacts import artifact_paths, cloudfront_path
 from stripe_link.domain.connect_sync import site_domain_verified, site_seo_enabled
-from stripe_link.domain.custom_domains import domain_index_record
+from stripe_link.domain.custom_domains import domain_index_record, platform_domain_index_record
 from stripe_link.domain.funnels import funnel_slug_entries, post_purchase_plan
 from stripe_link.domain.opportunities import STAGE_LANDING, STAGE_POST_PURCHASE, stage_opportunities
 from stripe_link.runtime.upsell_pages import (
@@ -308,14 +308,20 @@ def detach_page_from_sites(sites_repository: Any | None, domains_index_repositor
 
 
 def _sync_domain_index(site: dict[str, Any], domains_index_repository: Any | None) -> None:
-    """Rewrite the denormalized domain-index record so the edge resolver sees the Site's new routes right away.
-    Uses the injected repository in tests; falls back to the real one in the Lambda. Best-effort."""
+    """Rewrite the denormalized domain-index record(s) so the edge resolver sees the Site's new routes right
+    away — the custom-domain record (only when one is connected) AND the Site's free platform-hostname record
+    (always, for navigable free/test stores, plans/PLATFORM_HOSTNAME_SERVING.md). Uses the injected repository
+    in tests; falls back to the real one in the Lambda. Best-effort."""
     repo = domains_index_repository
     if repo is None:
         from stripe_link.repositories.documents import custom_domains_index_repository
 
         repo = custom_domains_index_repository()
-    repo.put(domain_index_record(site))
+    if ((site.get("hosting") or {}).get("custom_domain") or "").strip():
+        repo.put(domain_index_record(site))
+    platform = platform_domain_index_record(site)
+    if platform:
+        repo.put(platform)
 
 
 def artifact_targets(
@@ -866,6 +872,14 @@ def publish_page_document(
                 site = sites_repository.put(updated_site)
                 _sync_domain_index(site, domains_index_repository)
         except Exception:  # noqa: BLE001 - route attachment must never block the artifact publish
+            pass
+    elif site and sites_repository is not None:
+        # No custom domain (or not the root page): still index the Site's free platform hostname so it serves on
+        # {label}.<hosting-domain> (navigable free/test stores, plans/PLATFORM_HOSTNAME_SERVING.md). The on_custom
+        # _domain branch above already syncs both records. Best-effort — never block the publish.
+        try:
+            _sync_domain_index(site, domains_index_repository)
+        except Exception:  # noqa: BLE001
             pass
 
     # Per-Site crawl files (SEO-14/15): when the served homepage on a verified custom domain publishes, write

@@ -9,6 +9,7 @@ from stripe_link.domain.custom_domains import (
     build_domain,
     custom_hostname_dns_records,
     domain_index_record,
+    platform_domain_index_record,
     is_apex_domain,
     normalize_route_path,
     route_table,
@@ -293,6 +294,24 @@ class RouteTableTests(unittest.TestCase):
         self.assertEqual(record["status"], "active")
         self.assertEqual(record["target_page_id"], "page_home")
         self.assertEqual(record["routes"]["/upsell-1"], {"page_id": "page_up", "enabled": True})
+
+    def test_platform_domain_index_record(self):
+        # The free platform hostname gets its own always-active, noindex-tagged record with the same routes,
+        # so the resolver serves the Site there too (plans/PLATFORM_HOSTNAME_SERVING.md).
+        site = {
+            "tenant_id": "t1", "site_id": "site_1",
+            "hosting": {"platform_hostname": "axel-mart.jbay.be", "custom_domain": None},
+            "pages": {"/": {"page_id": "page_home"}, "/whey": {"page_id": "page_w", "offer_id": "off_w"}},
+        }
+        record = platform_domain_index_record(site)
+        self.assertEqual(record["domain"], "axel-mart.jbay.be")
+        self.assertEqual(record["status"], "active")          # no verification — it's platform infra
+        self.assertEqual(record["host_kind"], "platform")     # edge stamps noindex off this
+        self.assertEqual(record["target_page_id"], "page_home")
+        self.assertEqual(record["routes"]["/whey"], {"page_id": "page_w", "enabled": True})
+
+    def test_platform_domain_index_record_none_without_hostname(self):
+        self.assertIsNone(platform_domain_index_record({"hosting": {}}))
 
 
 if __name__ == "__main__":

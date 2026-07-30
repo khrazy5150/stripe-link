@@ -110,4 +110,10 @@ def handler(event, context, *, index_repo=None, pages_domain=None):
     if not origin_url:
         return error_response("Pages distribution domain is not configured.", status_code=500, code="pages_domain_not_configured")
 
-    return json_response({"route": {"type": "origin_url", "origin_url": origin_url}})
+    route = {"type": "origin_url", "origin_url": origin_url}
+    # The free platform hostname ({label}.<hosting-domain>) is a navigable but NEVER-indexed store surface
+    # (reputation-isolation floor). Tell the Worker to stamp X-Robots-Tag so the same artifact is noindex here
+    # even when its HTML says index,follow on the custom domain (plans/PLATFORM_HOSTNAME_SERVING.md).
+    if record.get("host_kind") == "platform":
+        route["noindex"] = True
+    return json_response({"route": route})

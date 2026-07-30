@@ -79,6 +79,28 @@ class CustomDomainsResolveHandlerTests(unittest.TestCase):
         self.assertEqual(json.loads(u["body"])["route"]["origin_url"], "https://pages.example.com/page_1__upsell_carousel/index.html")
         self.assertEqual(json.loads(d["body"])["route"]["origin_url"], "https://pages.example.com/page_1__downsell_carousel/index.html")
 
+    def test_platform_host_serves_with_noindex_flag(self):
+        # A platform-hostname record (host_kind=platform) serves the Site but signals the Worker to stamp
+        # noindex — navigable free/test store, never indexed (plans/PLATFORM_HOSTNAME_SERVING.md).
+        self.index_repo.put({
+            "tenant_id": "tenant_demo", "domain": "axel-mart.jbay.be", "target_page_id": "page_home",
+            "status": "active", "host_kind": "platform",
+            "routes": {"/whey": {"page_id": "page_w", "enabled": True}},
+        })
+        resp = handler({"httpMethod": "GET", "queryStringParameters": {"host": "axel-mart.jbay.be", "path": "/whey"}},
+                       None, index_repo=self.index_repo, pages_domain="pages.example.com")
+        route = json.loads(resp["body"])["route"]
+        self.assertEqual(route["origin_url"], "https://pages.example.com/page_w/index.html")
+        self.assertTrue(route["noindex"])
+
+    def test_custom_domain_serves_without_noindex_flag(self):
+        self.index_repo.put({
+            "tenant_id": "tenant_demo", "domain": "shop.example.com", "target_page_id": "page_1", "status": "active",
+        })
+        resp = handler({"httpMethod": "GET", "queryStringParameters": {"host": "shop.example.com"}},
+                       None, index_repo=self.index_repo, pages_domain="pages.example.com")
+        self.assertNotIn("noindex", json.loads(resp["body"])["route"])
+
     def test_www_redirect_record_returns_redirect_route(self):
         # A paired www→apex record carries a redirect_to; the resolver 301s to the canonical apex.
         self.index_repo.put({

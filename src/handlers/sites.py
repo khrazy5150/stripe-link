@@ -21,6 +21,7 @@ from stripe_link.domain.custom_domains import (
     find_custom_hostname,
     get_custom_hostname,
     domain_index_record,
+    platform_domain_index_record,
     get_dcv_delegation_uuid,
     is_apex_domain,
     normalize_domain,
@@ -205,6 +206,21 @@ def _attach_page_to_site(pages: dict, *, page_id, slug, page_type, category=None
     pages[slug] = new_entry
 
 
+def _put_site_index_records(saved: dict) -> None:
+    """Sync the denormalized edge-resolver records for a Site: the custom-domain record (only when one is
+    connected) AND the free platform-hostname record (always) so the Site serves on `{label}.<hosting-domain>`
+    too (navigable free/test stores, plans/PLATFORM_HOSTNAME_SERVING.md). Best-effort — never fail a save on it."""
+    try:
+        repo = custom_domains_index_repository()
+        if ((saved.get("hosting") or {}).get("custom_domain") or "").strip():
+            repo.put(domain_index_record(saved))
+        platform = platform_domain_index_record(saved)
+        if platform:
+            repo.put(platform)
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def _save_site_pages(repository, site):
     """Validate + persist a Site whose route map changed, and refresh the domain-index route table when a
     custom domain serves it. Returns (saved_site, error_response|None)."""
@@ -215,11 +231,7 @@ def _save_site_pages(repository, site):
         saved = repository.put(site)
     except (DocumentValidationError, RepositoryError) as exc:
         return None, error_response(str(exc), code="invalid_site")
-    if (site.get("hosting") or {}).get("custom_domain"):
-        try:
-            custom_domains_index_repository().put(domain_index_record(saved))
-        except Exception:
-            pass
+    _put_site_index_records(saved)  # custom-domain (if any) + the free platform-hostname record
     return saved, None
 
 
@@ -705,7 +717,7 @@ def connect_domain(event, repository, site_id):
         saved = repository.put(site)
     except (DocumentValidationError, RepositoryError) as exc:
         return error_response(str(exc), code="invalid_domain")
-    custom_domains_index_repository().put(domain_index_record(saved))
+    _put_site_index_records(saved)
     return json_response(
         {"site": saved, "dns_target": target_host, "dns_records": dns_records, "status": status},
         status_code=201,
@@ -793,7 +805,7 @@ def check_domain(event, repository, site_id, pages_repo=None):
         saved = repository.put(site)
     except (DocumentValidationError, RepositoryError) as exc:
         return error_response(str(exc), code="invalid_domain")
-    custom_domains_index_repository().put(domain_index_record(saved))
+    _put_site_index_records(saved)
     # First verification: re-publish the Site's pages so publish-time, verified-domain-gated work (reserved
     # /sale //flash-sale + funnel slugs, per-page canonical/robots/index-eligibility) attaches for pages that
     # were published before the domain verified. The index above still reflects pre-verify pages.routes; the

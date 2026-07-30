@@ -104,6 +104,24 @@ With both environments serving Sites identically, the promote story simplifies:
 - **The one careful area** is the `home_url` ↔ indexing decoupling (P1.3), because it sits near the SEO toggle.
   It's a clean split, and the existing SEO-toggle + robots tests guard the boundaries.
 
+## Resolved implementation decisions (2026-07-30, build start)
+
+- **One artifact per page + `noindex` via edge response header** (NOT per-host artifacts). A verified custom
+  domain serves the page `index,follow` from the HTML; the platform-host resolver path adds
+  `X-Robots-Tag: noindex, nofollow` so the same artifact is `noindex` there (more-restrictive wins). For a
+  platform-only Site the artifact is *already* `noindex` (`on_custom_domain` false), so the header is
+  belt-and-suspenders. Avoids doubling artifacts.
+- **Relative internal Site links** (catalog cards, `sl-brand` header, breadcrumb, nav) so ONE artifact
+  navigates correctly on the platform host AND the custom domain. Absolute stays only for `canonical`/`og:url`
+  (→ the primary home) and the server-side funnel redirect (host-aware, Slice 3).
+- **`home_url` = the Site's canonical origin** — custom domain if verified, else the platform host — used for
+  `canonical`/`og:url` and to gate whether the storefront chrome renders. **Gated behind platform-serving-
+  enabled** so existing pages don't sprout chrome until the feature is on (no silent change to shipped output).
+- **Index-record-per-platform-host**: publish writes a domain-index record keyed by `{label}.<hosting-domain>`
+  with the same `route_table`, tagged `host_kind: "platform"`, so the existing resolver serves it unchanged.
+- **Build order = safest first.** Slice 1 (index record + resolver header) is additive and leaves the shipped
+  custom-domain render byte-identical; the render changes (Slice 2) come next, fenced by the existing tests.
+
 ## Open decisions (resolve during scoping)
 
 1. **Index-record-per-platform-host vs. registry lookup in the resolver.** Lean **index record** — reuses the
