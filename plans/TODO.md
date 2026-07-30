@@ -92,6 +92,26 @@ Deferred, non-blocking follow-ups. Each item notes what, why it was deferred, an
   becomes the future ADVANCED tier. Phasing: **P1 pre-purchase** (reserved slugs + sale/flash views, no
   payment change) → **P2 post-purchase default funnel** → **P3 advanced tier + polish**.
 
+### Draggable upsell order (tenant-controlled funnel sequence)
+- **What:** let the tenant choose the order in which upsells are presented, by dragging the accordion steps in
+  the builder's **Post-Checkout Flow** panel. Today the order is implicit — whatever order the upsell-context
+  opportunities happen to sit in on the offer.
+- **Current behavior:** `post_purchase_plan` (`src/stripe_link/domain/funnels.py`) builds the upsell list from
+  `funnel_context_items(offer, …, "upsell")`, which walks `opportunities_from_offer(offer)` in document order
+  and `enumerate(…, start=1)` assigns the 1-based **`sequence`**. So the sequence follows the offer's
+  `funnel.upsells` array order — there is no UI to reorder it.
+- **Where to build:** the Post-Checkout Flow accordion lives in `LandingPages.vue` (the `funnelSteps` computed +
+  `openFunnelStep`/`toggleFunnelStep`); add drag-to-reorder over the **upsell** steps only (not thank-you).
+  **Key architectural note:** the order is a property of the **offer** (`offer.funnel.upsells`), not the page,
+  so a reorder must persist to the **offer document** (Offers.vue / the offer save path), not `page.post_checkout`.
+  The builder edits a page; it would need to write the reordered `funnel.upsells` back to the owning offer (or
+  surface the reorder control on the offer editor and mirror it read-only in the builder).
+- **Watch out:** `sequence` is the idempotency key `process_upsell` charges under (`handlers/upsell.py`), so
+  renumbering is fine for new funnel runs but must not silently rebind an in-flight session's already-charged
+  sequence. Downsells pair to upsells **by product_id** (not sequence), so they follow the reorder for free.
+- **Why deferred:** enhancement only; the software-chosen order is correct, just not tenant-adjustable. Noted
+  2026-07-29 at author request.
+
 ### Listicle L2 — server-side cart + multi-line checkout + recovery (Slices A–D SHIPPED)
 - **Shipped dev+prod 2026-07-23**: server-backed cart (ad4e35a/d1c9718), multi-line Stripe checkout
   (c31d8b7), and abandoned-cart recovery via opaque-token identified links (7993aae/9c4739f/018ffb8).
