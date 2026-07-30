@@ -67,7 +67,37 @@ Deferred, non-blocking follow-ups. Each item notes what, why it was deferred, an
 
 ## Commerce
 
-### ⭐ HIGH PRIORITY — Sales funnels in the Sites paradigm (plan being scoped)
+### Sales funnels in the Sites paradigm — P1 + order bumps + P2b SHIPPED (2026-07-29)
+- **Now shipped (dev):** on top of the P1 pre-purchase work (below), the post-purchase funnel is Sites-native.
+  A 3-agent code audit (2026-07-29) found the plan doc badly stale — far more was already built than it said:
+  P1a–d **including P1b-2 flash client-side time-states**, and **order bumps via Stripe `optional_items`**
+  end-to-end (model → validation → both checkout handlers → sync-skip guard → builder inference; the old
+  `merge_resolved_offers`/`resolve_order_bumps` stopgap is retired — `merge_resolved_offers` is now dead code,
+  a cleanup candidate). The post-purchase funnel ENGINE + synthesis was also done but served ONLY on the
+  platform host via internal `{page_id}__upsell_N` artifact ids (custom-domain buyers bounced off their domain).
+- **P2b — reserved-slug custom-domain funnel (this session):** `route_table` now carries resolver-visible
+  entry fields (fixes a real bug: `price_context` was dropped, so `/sale`//`/flash-sale` broke on custom
+  domains via the index); `attach_funnel_slugs` (publishing.py) attaches `/upsell` (+ `/downsell` in carousel
+  mode) + `/thank-you` to the Site root with `funnel_role`+`strategy`; the resolver derives the synthetic
+  artifact from role+strategy+`funnel_step`; the post_checkout router emits custom-domain reserved-slug URLs;
+  the checkout entry gate is offer-aware (`_offer_has_upsell_funnel`). +10 tests.
+- **Still to do (funnel):**
+  - **Re-publish / re-sync on domain verification.** Funnel + `/sale` slugs attach only at publish when the page
+    is already `on_custom_domain`; a publish-then-verify ordering leaves them unattached until the next publish.
+    Also `check_domain` (handlers/custom_domains.py:179) writes a minimal domain-index record (no `routes`),
+    which can transiently wipe routes. PRE-EXISTING, shared with the P1c `/sale` slugs — affects all Site slugs,
+    not just funnels. Fix: on verify-transition-to-active, re-sync the full `domain_index_record` (+ trigger a
+    re-publish so on_custom_domain-gated slugs attach).
+  - **Editable funnel Page docs (stripe-cart parity, plan §Auto-provisioning / P2).** Today the funnel steps are
+    ephemeral synthesized S3 artifacts, not tenant-customizable Page docs. Converges with the Upsell Phase 2
+    "scoped landing builder" idea. Deliberately deferred (user chose reserved-slug routing over editable pages).
+  - **P3 advanced tier** — the detached `Funnel` doc (`schemas/Funnel.schema.json`, `funnel_id`) for bespoke
+    multi-page/branching funnels; its resolver is stubbed (`funnels.py` raises "not yet supported").
+  - **Server-side flash-window guard** — a crafted request can still post an expired flash `price_id` (P1 client
+    guard only; plan flags this acceptable for P1).
+- Original plan (now partly historical): `plans/SALES_FUNNELS.md`.
+
+### ⭐ (historical) Sales funnels — original scoping note
 - **What:** close the loop for transaction (Stripe) landing pages with a coherent sales-funnel model under
   the **Sites** paradigm — order bumps, sale + flash-sale pricing, one-click **upsells/downsells**, and the
   **thank-you** page — driven by product/offer pricing **contexts**, with **reserved slugs**

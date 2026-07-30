@@ -244,11 +244,22 @@ routing/charge plumbing; the generic step-graph becomes the opt-in advanced tier
   **P1 COMPLETE (dev):** end-to-end — config → render (price swap + badges + flash countdown/states) →
   checkout (charges the sale price) → publish + route (`/sale`//`/flash-sale`) → dashboard controls.
 - **P2 — Checkout: order bumps + post-purchase default funnel:**
-  - **Order bumps:** `offer.funnel.order_bumps`; emit Stripe `optional_items` in `build_checkout_payload`
-    (retire the `merge_resolved_offers` stopgap); reclassify `order_bump` as pre-purchase; sync guard.
-  - **Post-purchase funnel:** the `offer.funnel` upsells/downsells; auto-provision funnel pages from the offer;
-    wire `/upsell` (cycle upsells + one-click) then `/downsell` (declined-with-downsell) → `/thank-you` onto the
-    reused transition engine + `post_checkout` routing; gate reachability on `offer.funnel`.
+  - **Order bumps — SHIPPED:** `offer.funnel.order_bumps` → Stripe `optional_items` in `build_checkout_payload`
+    (both single + cart checkout); `order_bump` reclassified pre-purchase (STAGE_CHECKOUT); un-synced bumps
+    skipped with a warning; the `merge_resolved_offers`/`resolve_order_bumps` stopgap retired. Builder designates
+    bumps by product pricing-context inference (Offers.vue), not a per-offer picker.
+  - **Post-purchase funnel ENGINE — SHIPPED (earlier):** offer-derived `post_purchase_plan` (sequence/carousel,
+    downsell paired by product_id), publish-time synthesis of `__upsell_N`/`__upsell_carousel`/
+    `__downsell_carousel`/`__thank_you` artifacts, platform-host post-checkout routing + one-click charge,
+    reachability gating.
+  - **P2b — reserved-slug custom-domain serving — SHIPPED dev (2026-07-29):** the funnel serves on the verified
+    custom domain at `/upsell` (single slug, step in `funnel_step`) → `/downsell` (carousel only) → `/thank-you`,
+    keeping the buyer on-domain. `route_table` carries resolver fields (fixes the `price_context` drop bug too);
+    `attach_funnel_slugs` attaches them at publish (role+strategy, retire-on-removal); the resolver derives the
+    synthetic artifact; the router maps synthetic ids → reserved slugs; the checkout entry gate is offer-aware.
+  - **Still open:** re-publish/re-sync on domain verification (slugs attach only at publish when already
+    on_custom_domain; pre-existing, shared with P1c); editable funnel Page docs (stripe-cart parity — deferred,
+    user chose reserved-slug routing).
 - **P3 — Advanced tier + polish:** activate the detached `Funnel` doc for bespoke multi-page/branching funnels
   (power users); builder funnel UX; per-step analytics; AI-assisted funnel copy.
 
