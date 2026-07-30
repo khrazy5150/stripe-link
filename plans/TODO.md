@@ -330,6 +330,30 @@ third-party security assessment is required.
   above. That plan also carries a **separate, decoupled** task: renaming the media **API** endpoint to
   `https://media.juniorbay.com/v3` (agreed to plan, execution timing TBD).
 
+### Future enhancement — SEO page analyzer with a score
+- **What:** an SEO analyzer that checks every critical on-page SEO point for a landing page and returns a
+  **score** (e.g. 0–100) plus a per-check breakdown with pass/warn/fail + a fix hint. Think Yoast/RankMath's
+  content analysis, adapted to our renderer.
+- **What it would check (build on signals we already compute):** title present + length + Buy-formula;
+  meta description present + length; canonical; OG/Twitter tags; complete `Product`/`Offer` JSON-LD
+  (`structured_data_warnings`); heading outline (one H1, ordered H2/H3 — `heading_outline_warnings`);
+  image alt/dims; **thin-content word count vs the 150 floor** (`indexable_word_count`/`THIN_CONTENT_MIN_WORDS`,
+  `thin_content_warnings`); the effective **robots state** (`page_robots_directive`) + WHY it's noindex
+  (thin / eligibility pending / SEO toggle off / funnel page_type); internal links / breadcrumb; and Site-level
+  eligibility (verified domain + Connect + `indexing.seo_enabled`).
+- **Where:** the per-check pieces mostly EXIST as `*_warnings` helpers in `src/stripe_link/runtime/html.py`
+  and are already returned by `/pages/render` as `warnings.page_health`. The analyzer would consolidate them
+  into one scored report and surface it in the builder (and, if wanted, drive the deferred list-card SEO badge
+  below).
+- **Deferred sub-idea (2026-07-30 discussion): a per-page SEO/indexing BADGE on the Landing Pages list card**
+  (Indexed / Thin — not indexed / Not indexed). Blocked on the same thing: the effective robots/thin status is
+  computed at publish from the rendered HTML and is NOT on the page doc the list reads. To badge it, persist a
+  tiny SEO summary on the page at publish (robots + `thin` flag + word count) **with a stream-filter guard** so
+  writing it back doesn't re-trigger publish (page write → `should_publish_record` → re-publish loop). Chose
+  "let it be" for now — the builder page-health panel already surfaces thin content when editing.
+- **Why deferred:** nothing is broken; the raw signals already surface in the builder page-health panel. This
+  is a visibility/UX polish layer. Noted 2026-07-30 at author request.
+
 ## Offer Semantic Model
 
 ### JSON-Schema ↔ model drift — RESOLVED 2026-07-28
