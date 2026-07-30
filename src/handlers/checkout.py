@@ -17,6 +17,7 @@ from stripe_link.domain.pricing import (
 from stripe_link.kms_secrets import KmsSecretCipher
 from stripe_link.repositories.documents import (
     offers_repository,
+    pages_repository,
     products_repository,
     services_repository,
     stripe_keys_repository,
@@ -37,6 +38,7 @@ def handler(
     services_repo=None,
     stripe_repo=None,
     tenant_repo=None,
+    pages_repo=None,
     secret_cipher=None,
     opener=None,
     billing_config_loader=None,
@@ -77,6 +79,18 @@ def handler(
 
     try:
         assert_billing_in_good_standing(tenant_repo.get(tenant_id, tenant_id))
+
+        # A checkout initiated from a page may only transact when that page is published. The preview render
+        # already shows a "DRAFT" screen instead of a working CTA, but this is the authoritative server-side
+        # guard: a draft/unknown page_id cannot start a real transaction even if the API is called directly.
+        if page_id:
+            pages_repo = pages_repo or pages_repository()
+            page = pages_repo.get(tenant_id, page_id)
+            if not page or page.get("status") != "published":
+                return error_response(
+                    "This page is not published. Transactions are only available on published pages.",
+                    status_code=403, code="page_not_published",
+                )
 
         offer = offers_repo.get(tenant_id, offer_id)
         if not offer:

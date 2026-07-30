@@ -70,6 +70,13 @@ class FakeRepository:
         return self.documents.get((tenant_id, document_id))
 
 
+class FakePublishedPagesRepository:
+    """Every page_id resolves to a published page — the checkout publish-guard's happy path."""
+
+    def get(self, tenant_id, page_id):
+        return {"tenant_id": tenant_id, "page_id": page_id, "status": "published"}
+
+
 class FakeStripeKeysRepository:
     def get(self, tenant_id, mode="test"):
         return {
@@ -136,6 +143,7 @@ class CheckoutHandlerTests(unittest.TestCase):
             products_repo=FakeRepository("product_id", [self.product]),
             stripe_repo=FakeStripeKeysRepository(),
             tenant_repo=FakeRepository("tenant_id", [{"tenant_id": "tenant_demo", "billing_status": "past_due"}]),
+            pages_repo=FakePublishedPagesRepository(),
             secret_cipher=FakeCipher(),
             opener=self.opener,
         )
@@ -163,6 +171,7 @@ class CheckoutHandlerTests(unittest.TestCase):
             products_repo=FakeRepository("product_id", [self.product]),
             stripe_repo=FakeStripeKeysRepository(),
             tenant_repo=FakeRepository("tenant_id", [{"tenant_id": "tenant_demo"}]),
+            pages_repo=FakePublishedPagesRepository(),
             secret_cipher=FakeCipher(),
             opener=self.opener,
         )
@@ -184,6 +193,38 @@ class CheckoutHandlerTests(unittest.TestCase):
         self.assertEqual(payload["metadata[tenant_plan]"], ["basic"])
         self.assertNotIn("payment_intent_data[application_fee_amount]", payload)
 
+    def _checkout_with_pages_repo(self, pages_repo):
+        return handler(
+            {"httpMethod": "GET", "queryStringParameters": {
+                "clientID": "tenant_demo", "offer": "offer_simple_coffee", "page_id": "page_simple_coffee",
+                "product_id": "prod_simple_coffee", "price_id": "price_simple_coffee",
+                "success_url": "https://pages.example.com/thanks", "cancel_url": "https://pages.example.com/buy",
+            }},
+            None,
+            offers_repo=FakeRepository("offer_id", [self.offer]),
+            products_repo=FakeRepository("product_id", [self.product]),
+            stripe_repo=FakeStripeKeysRepository(),
+            tenant_repo=FakeRepository("tenant_id", [{"tenant_id": "tenant_demo"}]),
+            pages_repo=pages_repo,
+            secret_cipher=FakeCipher(),
+            opener=self.opener,
+        )
+
+    def test_checkout_blocked_when_page_is_a_draft(self):
+        # The publish guard: a transaction from an unpublished page is refused server-side, no Stripe call made.
+        draft_repo = FakeRepository("page_id", [{"tenant_id": "tenant_demo", "page_id": "page_simple_coffee", "status": "draft"}])
+        response = self._checkout_with_pages_repo(draft_repo)
+        self.assertEqual(response["statusCode"], 403)
+        self.assertEqual(json.loads(response["body"])["error"], "page_not_published")
+        self.assertEqual(self.requests, [])
+
+    def test_checkout_blocked_when_page_is_missing(self):
+        missing_repo = FakeRepository("page_id", [])  # page_id supplied but no such page
+        response = self._checkout_with_pages_repo(missing_repo)
+        self.assertEqual(response["statusCode"], 403)
+        self.assertEqual(json.loads(response["body"])["error"], "page_not_published")
+        self.assertEqual(self.requests, [])
+
     def _run_simple_checkout(self, offer, product):
         return handler(
             {"httpMethod": "GET", "queryStringParameters": {
@@ -195,6 +236,7 @@ class CheckoutHandlerTests(unittest.TestCase):
             products_repo=FakeRepository("product_id", [product]),
             stripe_repo=FakeStripeKeysRepository(),
             tenant_repo=FakeRepository("tenant_id", [{"tenant_id": "tenant_demo"}]),
+            pages_repo=FakePublishedPagesRepository(),
             secret_cipher=FakeCipher(), opener=self.opener)
 
     def test_matching_mode_uses_stored_stripe_price_id(self):
@@ -239,6 +281,7 @@ class CheckoutHandlerTests(unittest.TestCase):
                 products_repo=FakeRepository("product_id", [self.product]),
                 stripe_repo=FakeConnectStripeKeysRepository(),
                 tenant_repo=FakeRepository("tenant_id", [{"tenant_id": "tenant_demo"}]),
+                pages_repo=FakePublishedPagesRepository(),
                 secret_cipher=FakeCipher(),
                 opener=self.opener,
             )
@@ -272,6 +315,7 @@ class CheckoutHandlerTests(unittest.TestCase):
             products_repo=FakeRepository("product_id", [self.product, bump_product]),
             stripe_repo=stripe_repo or FakeStripeKeysRepository(),
             tenant_repo=FakeRepository("tenant_id", [{"tenant_id": "tenant_demo"}]),
+            pages_repo=FakePublishedPagesRepository(),
             secret_cipher=FakeCipher(),
             opener=self.opener,
         )
@@ -345,6 +389,7 @@ class CheckoutHandlerTests(unittest.TestCase):
             products_repo=FakeRepository("product_id", [product]),
             stripe_repo=FakeStripeKeysRepository(),
             tenant_repo=FakeRepository("tenant_id", [{"tenant_id": "tenant_demo"}]),
+            pages_repo=FakePublishedPagesRepository(),
             secret_cipher=FakeCipher(),
             opener=self.opener,
         )

@@ -18,6 +18,7 @@ from stripe_link.kms_secrets import KmsSecretCipher
 from stripe_link.repositories.documents import (
     carts_repository,
     offers_repository,
+    pages_repository,
     products_repository,
     services_repository,
     stripe_keys_repository,
@@ -36,6 +37,7 @@ def handler(
     services_repo=None,
     stripe_repo=None,
     tenant_repo=None,
+    pages_repo=None,
     secret_cipher=None,
     opener=None,
     billing_config_loader=None,
@@ -76,6 +78,17 @@ def handler(
 
     try:
         assert_billing_in_good_standing(tenant_repo.get(tenant_id, tenant_id))
+
+        # Transactions are only allowed from a published page (same guard as the single-offer checkout): a draft
+        # or unknown page_id cannot start a cart checkout even if the API is called directly.
+        if page_id:
+            pages_repo = pages_repo or pages_repository()
+            page = pages_repo.get(tenant_id, page_id)
+            if not page or page.get("status") != "published":
+                return error_response(
+                    "This page is not published. Transactions are only available on published pages.",
+                    status_code=403, code="page_not_published",
+                )
 
         cart = carts_repo.get(tenant_id, cart_id)
         if not cart or not (cart.get("line_items") or []):
