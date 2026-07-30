@@ -1947,7 +1947,14 @@ const isBuilderPublished = computed(() => builder.status === "published");
 // tracks the Standard/Sale/Flash-Sale toggle.
 const TEST_PAGES_HOST = "test.juniorbay.com";
 const testShareLink = computed(() => {
-  if (!isBuilderPublished.value || !builder.short_code) return "";
+  if (!isBuilderPublished.value) return "";
+  // Prefer the real, navigable store URL (Standard view) on the Site's platform host / custom domain — a page
+  // attached to a Site now serves there in both environments (plans/PLATFORM_HOSTNAME_SERVING.md P3).
+  if (previewContext.value === "standard") {
+    const siteUrl = sitePublicUrl({ page_id: builder.page_id });
+    if (siteUrl) return siteUrl;
+  }
+  if (!builder.short_code) return "";
   const seg = previewContext.value === "sale" ? "/sale" : previewContext.value === "flash_sale" ? "/flash-sale" : "";
   return `https://${TEST_PAGES_HOST}/published/${builder.short_code}${seg}`;
 });
@@ -2340,10 +2347,13 @@ function siteNameForPage(page) {
 // at "/"). Only verified (prod) Sites qualify — custom domains are live-only — so this never shows a dead URL.
 function sitePublicUrl(page) {
   for (const s of sitesStore.sites) {
-    const domain = s.hosting?.custom_domain;
-    if (!domain || !s.hosting?.verification?.verified) continue;
+    const hosting = s.hosting || {};
+    // The Site's navigable host: a verified custom domain if connected, else its free platform host
+    // ({label}.jbay.uk / .jbay.be), which now serves in BOTH environments (platform-hostname serving).
+    const host = (hosting.custom_domain && hosting.verification?.verified) ? hosting.custom_domain : hosting.platform_hostname;
+    if (!host) continue;
     for (const [slug, entry] of Object.entries(s.pages || {})) {
-      if (entry?.page_id === page.page_id) return `https://${domain}${slug === "/" ? "/" : slug}`;
+      if (entry?.page_id === page.page_id) return `https://${host}${slug === "/" ? "/" : slug}`;
     }
   }
   return "";
@@ -3884,13 +3894,18 @@ function setCardView(page, view) {
 }
 
 function pageUrl(page) {
-  // In TEST, the platform test viewer is the canonical way to see a page: custom domains are live-only, so a
-  // Site URL won't resolve here (plans/SALES_FUNNELS.md Phase B). Draft -> /preview, published -> /published,
-  // keyed by the page's snowflake short_code, plus the selected /sale //flash-sale view segment. Live env
-  // keeps the real public URL / platform artifact.
+  // A published, Site-attached page is served on the Site's navigable host — a verified custom domain or its
+  // free platform host ({label}.jbay.uk / .jbay.be), which now resolves in BOTH environments. Prefer that real,
+  // navigable store URL (Standard view) over the single-page test viewer, so links land on the actual store
+  // where the buyer can navigate (plans/PLATFORM_HOSTNAME_SERVING.md P3).
+  const view = cardView(page);
+  if (page.status === "published" && view === "standard") {
+    const siteUrl = sitePublicUrl(page);
+    if (siteUrl) return siteUrl;
+  }
+  // Sale/Flash-Sale preview views + unattached/draft pages: the platform test viewer, keyed by short_code.
   if (getApiEnvironment() === "test" && page.short_code) {
     const seg = page.status === "published" ? "published" : "preview";
-    const view = cardView(page);
     const viewSeg = view === "sale" ? "/sale" : view === "flash_sale" ? "/flash-sale" : "";
     return `https://${TEST_PAGES_HOST}/${seg}/${encodeURIComponent(page.short_code)}${viewSeg}`;
   }

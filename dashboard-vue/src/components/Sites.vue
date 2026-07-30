@@ -79,6 +79,7 @@
         <h2>{{ site.name }}</h2>
         <div class="button-row">
           <span class="product-status" :class="indexClass(site)">{{ indexLabel(site) }}</span>
+          <a v-if="siteStoreUrl(site)" class="secondary-action" :href="siteStoreUrl(site)" target="_blank" rel="noopener noreferrer">Visit store ↗</a>
           <button class="secondary-action" type="button" :disabled="copyBusy" @click="copySiteToEnvironment(site)">
             {{ copyBusy ? "Preparing…" : `Copy to ${targetEnvLabel}` }}
           </button>
@@ -87,7 +88,7 @@
       </header>
       <div class="dashboard-card-body">
         <dl class="product-details-grid">
-          <div><dt>Canonical hostname</dt><dd class="font-mono">{{ canonicalHost(site) }}</dd></div>
+          <div><dt>Canonical hostname</dt><dd class="font-mono"><a v-if="siteStoreUrl(site)" :href="siteStoreUrl(site)" target="_blank" rel="noopener noreferrer">{{ canonicalHost(site) }}</a><template v-else>{{ canonicalHost(site) }}</template></dd></div>
           <div><dt>Platform host</dt><dd class="font-mono">{{ site.hosting?.platform_hostname }}</dd></div>
           <div><dt>Custom domain</dt><dd>{{ site.hosting?.custom_domain || "Not connected" }}</dd></div>
           <div><dt>Organization</dt><dd>{{ site.organization?.name || "—" }}</dd></div>
@@ -924,6 +925,13 @@ function availabilityClass(state) {
 
 function canonicalHost(site) {
   return site.hosting?.type === "custom" && site.hosting?.custom_domain ? site.hosting.custom_domain : site.hosting?.platform_hostname;
+}
+// The Site's live, navigable store URL: a verified custom domain if connected, else its free platform host
+// ({label}.jbay.uk / .jbay.be), which now serves in both environments (plans/PLATFORM_HOSTNAME_SERVING.md P3).
+function siteStoreUrl(site) {
+  const h = site.hosting || {};
+  const host = (h.custom_domain && h.verification?.verified) ? h.custom_domain : h.platform_hostname;
+  return host ? `https://${host}/` : "";
 }
 const ELIGIBILITY_LABELS = { eligible: "Indexed", pending: "Indexing pending", blocked: "Not indexed", revoked: "Indexing revoked" };
 function indexLabel(site) {
