@@ -4819,19 +4819,21 @@ def render_page_interactions_script(page: dict[str, Any]) -> str:
         "        };",
         # Persist that the buyer reached the downsell: the server re-renders the UPSELL on reload (the swap is
         # client-side), so without this a refresh reverts to the upsell price and grants another shot at it.
-        "        const downsellKey = `stripe-link:${pageId}:downsell`;",
+        # Scoped to the funnel SESSION, not just the page: a new purchase gets a new session_id and therefore a
+        # clean slate (starts at the upsell), while a refresh within the same session keeps the downsell.
+        "        const downsellKey = `stripe-link:${pageId}:${funnelSessionId}:downsell`;",
         "        let downsellShown = false;",
         "        const goDownsellOrAdvance = () => {",
         "          if (cta.dataset.downsellPriceId && !downsellShown) {",
         "            downsellShown = true;",
-        "            try { localStorage.setItem(downsellKey, '1'); } catch (e) {}",
+        "            try { if (funnelSessionId) localStorage.setItem(downsellKey, '1'); } catch (e) {}",
         "            swapToDownsell(true);",
         "            return;",
         "          }",
         "          window.location.assign(postCheckoutNextUrl('decline', funnelStepId));",
         "        };",
         # Reload during the downsell: restore it immediately (no timer restart) so it never reverts to the upsell.
-        "        if (cta.dataset.downsellPriceId && localStorage.getItem(downsellKey) === '1') {",
+        "        if (funnelSessionId && cta.dataset.downsellPriceId && localStorage.getItem(downsellKey) === '1') {",
         "          downsellShown = true;",
         "          swapToDownsell(false);",
         "        }",
@@ -4908,7 +4910,10 @@ def render_page_interactions_script(page: dict[str, Any]) -> str:
         "        const label = section.querySelector('[data-countdown-label]');",
         "        if (!duration || !display) return;",
         "        const persistent = section.dataset.persistent === 'true';",
-        "        const storageKey = `stripe-link:${pageId}:countdown:${section.dataset.sectionId || 'timer'}`;",
+        # Funnel-step timers scope to the session so a NEW purchase gets a fresh clock (a prior run may have
+        # stored 'expired'); landing-page persist timers stay page-scoped, persisting across visits as intended.
+        "        const cdScope = (isFunnelStep && funnelSessionId) ? ':' + funnelSessionId : '';",
+        "        const storageKey = `stripe-link:${pageId}${cdScope}:countdown:${section.dataset.sectionId || 'timer'}`;",
         "        let deadline = Date.now() + duration * 1000;",
         "        let interval = null;",
         "        if (persistent) {",
