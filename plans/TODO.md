@@ -81,13 +81,13 @@ Deferred, non-blocking follow-ups. Each item notes what, why it was deferred, an
   mode) + `/thank-you` to the Site root with `funnel_role`+`strategy`; the resolver derives the synthetic
   artifact from role+strategy+`funnel_step`; the post_checkout router emits custom-domain reserved-slug URLs;
   the checkout entry gate is offer-aware (`_offer_has_upsell_funnel`). +10 tests.
+- **Re-publish on domain verification — SHIPPED dev (2026-07-30):** the Site `check_domain` (handlers/sites.py),
+  on the FIRST verified transition, re-puts every page attached to the Site → fires the publish stream → each
+  page re-publishes with the verified domain in effect, so the funnel + `/sale` slugs and canonical/robots
+  attach even for pages published BEFORE verification. Best-effort; no-op on re-checks of an already-verified
+  domain. SitesFunction gained PagesTable write. (Note: the legacy TenantConfig `custom_domains.py:179` minimal
+  index write is a separate, pre-Sites path; the Site flow syncs the full `domain_index_record`.)
 - **Still to do (funnel):**
-  - **Re-publish / re-sync on domain verification.** Funnel + `/sale` slugs attach only at publish when the page
-    is already `on_custom_domain`; a publish-then-verify ordering leaves them unattached until the next publish.
-    Also `check_domain` (handlers/custom_domains.py:179) writes a minimal domain-index record (no `routes`),
-    which can transiently wipe routes. PRE-EXISTING, shared with the P1c `/sale` slugs — affects all Site slugs,
-    not just funnels. Fix: on verify-transition-to-active, re-sync the full `domain_index_record` (+ trigger a
-    re-publish so on_custom_domain-gated slugs attach).
   - **Editable funnel Page docs (stripe-cart parity, plan §Auto-provisioning / P2).** Today the funnel steps are
     ephemeral synthesized S3 artifacts, not tenant-customizable Page docs. Converges with the Upsell Phase 2
     "scoped landing builder" idea. Deliberately deferred (user chose reserved-slug routing over editable pages).
