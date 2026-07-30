@@ -96,6 +96,16 @@ def platform_serving_enabled() -> bool:
     return str(os.environ.get("PLATFORM_SERVING_ENABLED") or "").strip().lower() in ("1", "true", "yes", "on")
 
 
+def site_is_served(site: dict[str, Any] | None) -> bool:
+    """Whether the Site is reachable at a clean host — a verified custom domain, or (once wired) the free
+    platform host — so funnel/context slugs are worth attaching and the resolver route table should carry them
+    (plans/PLATFORM_HOSTNAME_SERVING.md Slice 3). Page-independent (cf. site_serving_origin, which needs a slug)."""
+    if site_domain_verified(site):
+        return True
+    platform_hostname = str(((site or {}).get("hosting") or {}).get("platform_hostname") or "").strip()
+    return bool(platform_hostname and platform_serving_enabled())
+
+
 def site_serving_origin(site: dict[str, Any] | None, page_site_slug: str) -> str:
     """The absolute origin the page is served from — the anchor for its canonical/og:url, storefront chrome, and
     breadcrumb root. A verified custom domain (indexed, branded) when the page is routed there; else the free
@@ -688,10 +698,11 @@ def publish_page_document(
     # URL where the page actually lives; clean root-domain paths arrive with the Site object.
     published_paths = artifact_paths(tenant_id, page_id, page_slug(page))
     canonical_url = public_url(pages_domain, published_paths["published"])
-    # Serve the whole inline funnel on the Site's verified custom domain: attach the funnel's pages at slugs so
-    # the edge resolver can route them, and refresh the denormalized route table. Best-effort — a failure here
-    # must never block publishing the artifact itself (plans/SITE_OBJECT.md §2.6).
-    if site and sites_repository is not None and site_domain_verified(site) and page.get("post_checkout"):
+    # Serve the whole inline funnel on the Site's clean host (verified custom domain OR the free platform host):
+    # attach the funnel's pages at slugs so the edge resolver can route them, and refresh the denormalized route
+    # table. Best-effort — a failure here must never block publishing the artifact itself (plans/SITE_OBJECT.md
+    # §2.6, PLATFORM_HOSTNAME_SERVING.md Slice 3).
+    if site and sites_repository is not None and site_is_served(site) and page.get("post_checkout"):
         try:
             updated_site, changed = attach_funnel_pages(site, page)
             if changed:
@@ -890,11 +901,12 @@ def publish_page_document(
             except Exception:  # noqa: BLE001 - stale-artifact cleanup must never block the publish
                 pass
 
-    if site and sites_repository is not None and on_custom_domain:
+    if site and sites_repository is not None and serving_origin:
         try:
             updated_site, changed_ctx = attach_context_view_slugs(site, page)
-            # Post-purchase funnel slugs (/upsell //downsell //thank-you) so the funnel stays on the custom
-            # domain; derived from the offer's plan, retired when the funnel goes away (P2b).
+            # Post-purchase funnel slugs (/upsell //downsell //thank-you) so the funnel stays on the serving host
+            # (custom domain or platform host); derived from the offer's plan, retired when the funnel goes away
+            # (P2b, PLATFORM_HOSTNAME_SERVING.md Slice 3).
             updated_site, changed_funnel = attach_funnel_slugs(updated_site, page, offer, products_by_id)
             if changed_ctx or changed_funnel:
                 validate_site(updated_site)

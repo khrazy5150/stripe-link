@@ -136,6 +136,17 @@ With both environments serving Sites identically, the promote story simplifies:
   that). Flag defaults **off** → platform-only Sites stay chrome-less until the edge is wired (no silent change).
   **Deferred to ops:** wire `PLATFORM_SERVING_ENABLED` as a SAM parameter / Lambda env var so it can be flipped
   on per environment when the `*.jbay.*` Worker route goes live.
+- **Slice 3 — BUILT (this pass), flag OFF.** Host-aware funnel redirects. (a) Every client-side
+  `post-checkout/next` builder (funnel-island dismiss, checkout `success_url`, cart success, pp-carousel
+  dismiss) now carries `origin=window.location.origin`. (b) `post_checkout._next_page_url` reads that origin and
+  keeps the funnel on it — but only after `_redirect_base` validates it against the Site's known origins
+  (verified custom domain + platform host when serving is on), so a forged `origin` can't open-redirect the
+  buyer; otherwise it falls back to the custom domain, then the interim artifact. (c) `publishing.site_is_served`
+  broadens the funnel/context **slug-attach + route-table** gates from "verified custom domain" to "served"
+  (custom domain OR platform host when the flag is on), so `/upsell //downsell //thank-you //sale //flash-sale`
+  resolve on the platform host too. Everything platform-side is behind `PLATFORM_SERVING_ENABLED` (off) → no
+  change to shipped behaviour; the only always-on change is the harmless `origin` query param on funnel URLs.
+  **P1 (the core) is now code-complete — only the Cloudflare ops + the flag flip remain to light it up.**
 
 ## Open decisions (resolve during scoping)
 

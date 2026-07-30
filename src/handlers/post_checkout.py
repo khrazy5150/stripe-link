@@ -14,7 +14,7 @@ from stripe_link.repositories.documents import (
     sites_repository,
 )
 from stripe_link.runtime.artifacts import artifact_paths
-from stripe_link.runtime.publishing import find_site_for_page, public_url, site_page_slug
+from stripe_link.runtime.publishing import find_site_for_page, platform_serving_enabled, public_url, site_page_slug
 
 
 # A synthetic post-purchase funnel artifact id (`{base}__…`) maps to a reserved funnel slug so the funnel serves
@@ -32,22 +32,52 @@ def _funnel_reserved_slug(next_page_id):
     return "/upsell" if _SEQ_UPSELL_RE.match(next_page_id) else None
 
 
-def _next_page_url(site, tenant_id, next_page_id, pages_domain):
-    """The buyer-facing URL for the funnel's next page. Prefer the Site's verified custom domain so the buyer
-    never leaves the domain mid-funnel (plans/SITE_OBJECT.md §2.6): a synthetic funnel artifact serves at its
-    reserved slug (/upsell //downsell //thank-you, P2b) when that slug is attached; a real page at its own slug;
-    otherwise fall back to the interim platform artifact URL."""
-    if site and site_domain_verified(site):
-        custom_domain = str((site.get("hosting") or {}).get("custom_domain") or "")
-        pages = site.get("pages") or {}
+def _site_allowed_origins(site):
+    """The absolute origins this Site is legitimately served from — the allow-list a buyer-supplied `origin`
+    must match before we redirect the funnel to it (open-redirect guard). A verified custom domain and, once
+    platform serving is wired, the free platform host both qualify (plans/PLATFORM_HOSTNAME_SERVING.md Slice 3)."""
+    hosting = (site or {}).get("hosting") or {}
+    origins = []
+    custom_domain = str(hosting.get("custom_domain") or "").strip()
+    if site_domain_verified(site) and custom_domain:
+        origins.append(f"https://{custom_domain}")
+    platform_hostname = str(hosting.get("platform_hostname") or "").strip()
+    if platform_hostname and platform_serving_enabled():
+        origins.append(f"https://{platform_hostname}")
+    return origins
+
+
+def _redirect_base(site, origin_host):
+    """The host to keep the funnel on. Prefer the buyer's own origin (a funnel entered on the platform host stays
+    there; one entered on the custom domain stays there) — but ONLY when it's a legitimate Site origin, so a
+    forged `origin` can't open-redirect the buyer off-Site. Falls back to the verified custom domain, then to ""
+    (interim artifact URL)."""
+    origin_host = str(origin_host or "").strip().rstrip("/")
+    allowed = _site_allowed_origins(site)
+    if origin_host and origin_host in allowed:
+        return origin_host
+    custom_domain = str(((site or {}).get("hosting") or {}).get("custom_domain") or "")
+    if site_domain_verified(site) and custom_domain:
+        return f"https://{custom_domain}"
+    return ""
+
+
+def _next_page_url(site, tenant_id, next_page_id, pages_domain, origin_host=None):
+    """The buyer-facing URL for the funnel's next page. Keep the buyer on the host they entered on (validated
+    custom domain or platform host) so they never leave mid-funnel (plans/SITE_OBJECT.md §2.6): a synthetic
+    funnel artifact serves at its reserved slug (/upsell //downsell //thank-you, P2b) when that slug is attached;
+    a real page at its own slug; otherwise fall back to the interim platform artifact URL."""
+    base = _redirect_base(site, origin_host)
+    if base:
+        pages = (site or {}).get("pages") or {}
         reserved = _funnel_reserved_slug(next_page_id)
         # Only route to the reserved slug if this Site actually has the funnel attached there (published).
-        if custom_domain and reserved and isinstance(pages.get(reserved), dict) and pages[reserved].get("funnel_role"):
-            return f"https://{custom_domain}{reserved}"
+        if reserved and isinstance(pages.get(reserved), dict) and pages[reserved].get("funnel_role"):
+            return f"{base}{reserved}"
         slug = site_page_slug(site, next_page_id)
-        if slug and custom_domain:
+        if slug:
             path = "" if slug == "/" else slug.lstrip("/")
-            return f"https://{custom_domain}/{path}"
+            return f"{base}/{path}"
     return public_url(pages_domain, artifact_paths(tenant_id, next_page_id)["published"])
 
 
@@ -90,6 +120,9 @@ def handler(event, context, *, repository=None, pages_domain=None, sites_repo=No
     outcome = str(params.get("outcome") or "").strip().lower()
     current_step_id = str(params.get("step_id") or "").strip() or None
     session_id = str(params.get("session_id") or "").strip()
+    # The buyer's entry host (window.location.origin), so the funnel stays on the platform host or custom domain
+    # they came in on (Slice 3). Validated against the Site's known origins before use — never trusted directly.
+    origin_host = str(params.get("origin") or "").strip()
 
     if not tenant_id:
         return error_response("tenant_id is required.", code="missing_tenant")
@@ -108,7 +141,7 @@ def handler(event, context, *, repository=None, pages_domain=None, sites_repo=No
         def _funnel_redirect(next_page_id, extra_query=None):
             """Redirect to a funnel artifact ({page_id}__…), carrying funnel_page/session so the next screen's
             island keeps the funnel context. Returns a 500 when the pages domain isn't configured."""
-            url = _next_page_url(site, tenant_id, next_page_id, pages_domain)
+            url = _next_page_url(site, tenant_id, next_page_id, pages_domain, origin_host)
             if not url:
                 return error_response("Pages distribution domain is not configured.", status_code=500, code="pages_domain_not_configured")
             query = dict(extra_query or {})
@@ -165,13 +198,13 @@ def handler(event, context, *, repository=None, pages_domain=None, sites_repo=No
         except RepositoryError:
             thanks = None
         if not thanks or thanks.get("status") != "published":
-            entry_url = _next_page_url(site, tenant_id, page_id, pages_domain)
+            entry_url = _next_page_url(site, tenant_id, page_id, pages_domain, origin_host)
             if not entry_url:
                 return error_response("Pages distribution domain is not configured.", status_code=500, code="pages_domain_not_configured")
             separator = "&" if "?" in entry_url else "?"
             return redirect_response(f"{entry_url}{separator}checkout=success")
 
-    url = _next_page_url(site, tenant_id, next_page_id, pages_domain)
+    url = _next_page_url(site, tenant_id, next_page_id, pages_domain, origin_host)
     if not url:
         return error_response("Pages distribution domain is not configured.", status_code=500, code="pages_domain_not_configured")
 

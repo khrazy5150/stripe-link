@@ -1,4 +1,6 @@
+import os
 import unittest
+from unittest.mock import patch
 from urllib.parse import parse_qs, urlparse
 
 from handlers.post_checkout import handler
@@ -380,6 +382,89 @@ class PostCheckoutOfferDerivedReservedSlugTests(unittest.TestCase):
 
     def test_unverified_domain_falls_back_to_platform_artifact(self):
         location = urlparse(self._call("accept", verified=False)["headers"]["Location"])
+        self.assertEqual(location.netloc, "pages.example.com")
+        self.assertEqual(location.path, "/page_entry__upsell_1/index.html")
+
+
+class PostCheckoutOriginAwareTests(unittest.TestCase):
+    """The funnel stays on the host the buyer entered on — platform host OR custom domain — validated against the
+    Site's known origins so a forged `origin` can't open-redirect them off-Site (PLATFORM_HOSTNAME_SERVING Slice 3)."""
+
+    def setUp(self):
+        self.pages = FakeDocumentRepository("page_id")
+        self.pages.put({"tenant_id": "tenant_demo", "page_id": "page_entry", "offer_id": "offer_up",
+                        "post_checkout": {"thank_you_page": {"page_id": "page_thank_you"}}})
+        self.pages.put({"tenant_id": "tenant_demo", "page_id": "page_thank_you", "status": "published"})
+        self.offers = FakeDocumentRepository("offer_id")
+        self.offers.put({"tenant_id": "tenant_demo", "offer_id": "offer_up", "funnel": {"upsells": [
+            {"product_id": "prod_a", "price_id": "price_a_up"}, {"product_id": "prod_b", "price_id": "price_b_up"},
+        ]}})
+        self.products = FakeDocumentRepository("product_id")
+        for pid, price_id in (("prod_a", "price_a_up"), ("prod_b", "price_b_up")):
+            self.products.put({"tenant_id": "tenant_demo", "product_id": pid,
+                               "prices": [{"price_id": price_id, "context": "upsell", "unit_amount": 1000, "currency": "usd"}]})
+
+    def _site(self, *, custom=True, platform=True):
+        hosting = {"type": "custom", "platform_hostname": "bean-co.jbay.uk" if platform else None}
+        if custom:
+            hosting["custom_domain"] = "shop.example.com"
+            hosting["verification"] = {"verified": True}
+        return {
+            "tenant_id": "tenant_demo", "site_id": "site_o", "hosting": hosting,
+            "pages": {"/": {"page_id": "page_entry"},
+                      "/upsell": {"page_id": "page_entry", "funnel_role": "upsell", "strategy": "sequence", "enabled": True},
+                      "/thank-you": {"page_id": "page_entry", "funnel_role": "thank_you", "strategy": "sequence", "enabled": True}},
+        }
+
+    def _call(self, *, origin=None, site=None, serving=True):
+        params = {"tenant_id": "tenant_demo", "outcome": "accept", "session_id": "cs_1"}
+        if origin is not None:
+            params["origin"] = origin
+        env = {"PLATFORM_SERVING_ENABLED": "true"} if serving else {"PLATFORM_SERVING_ENABLED": ""}
+        with patch.dict(os.environ, env, clear=False):
+            resp = handler(
+                {"httpMethod": "GET", "pathParameters": {"page_id": "page_entry"}, "queryStringParameters": params},
+                None, repository=self.pages, pages_domain="pages.example.com",
+                offers_repo=self.offers, products_repo=self.products,
+                sites_repo=_FakeSitesRepo(site if site is not None else self._site()),
+            )
+        return urlparse(resp["headers"]["Location"])
+
+    def test_buyer_on_platform_host_keeps_funnel_on_platform_host(self):
+        # Entered the funnel on the free platform host → the next hop serves at the reserved slug on THAT host,
+        # even though the Site also has a verified custom domain.
+        location = self._call(origin="https://bean-co.jbay.uk")
+        self.assertEqual(location.netloc, "bean-co.jbay.uk")
+        self.assertEqual(location.path, "/upsell")
+
+    def test_buyer_on_custom_domain_stays_on_custom_domain(self):
+        location = self._call(origin="https://shop.example.com")
+        self.assertEqual(location.netloc, "shop.example.com")
+        self.assertEqual(location.path, "/upsell")
+
+    def test_no_origin_defaults_to_custom_domain(self):
+        # Back-compat: an older published page sends no origin → the verified custom domain, exactly as before.
+        location = self._call(origin=None)
+        self.assertEqual(location.netloc, "shop.example.com")
+
+    def test_forged_origin_is_ignored_and_falls_back_to_custom_domain(self):
+        # Open-redirect guard: an origin that isn't one of the Site's own hosts is never honored.
+        location = self._call(origin="https://evil.example.com")
+        self.assertEqual(location.netloc, "shop.example.com")
+
+    def test_platform_origin_ignored_when_serving_disabled(self):
+        # With platform serving off the platform host isn't a valid origin, so it falls back to the custom domain.
+        location = self._call(origin="https://bean-co.jbay.uk", serving=False)
+        self.assertEqual(location.netloc, "shop.example.com")
+
+    def test_platform_only_site_serves_funnel_on_platform_host(self):
+        location = self._call(origin="https://bean-co.jbay.uk", site=self._site(custom=False))
+        self.assertEqual(location.netloc, "bean-co.jbay.uk")
+        self.assertEqual(location.path, "/upsell")
+
+    def test_platform_only_site_forged_origin_falls_back_to_interim_artifact(self):
+        # No verified custom domain to fall back to → the interim platform artifact URL (never the forged host).
+        location = self._call(origin="https://evil.example.com", site=self._site(custom=False))
         self.assertEqual(location.netloc, "pages.example.com")
         self.assertEqual(location.path, "/page_entry__upsell_1/index.html")
 

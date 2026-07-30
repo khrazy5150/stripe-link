@@ -4672,7 +4672,7 @@ def render_page_interactions_script(page: dict[str, Any]) -> str:
         "            const cartApiBase = cartEndpoint.replace(/\\/cart$/, '');",
         "            const cartPageId = listicle.dataset.pageId || '';",
         "            if (listicle.dataset.hasPostCheckout === 'true' && cartApiBase && cartPageId) {",
-        "              const nextp = new URLSearchParams(); nextp.set('outcome', 'accept'); if (tenantId) nextp.set('tenant_id', tenantId);",
+        "              const nextp = new URLSearchParams(); nextp.set('outcome', 'accept'); if (tenantId) nextp.set('tenant_id', tenantId); nextp.set('origin', window.location.origin);",
         "              cartSuccessUrl = `${cartApiBase}/pages/${cartPageId}/post-checkout/next?${nextp.toString()}&session_id={CHECKOUT_SESSION_ID}`;",
         "            }",
         "            fetch(cartEndpoint + '/checkout', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ tenant_id: tenantId, cart_id: id, page_id: cartPageId, success_url: cartSuccessUrl, cancel_url: ret + '?checkout=cancel' }) })",
@@ -4769,6 +4769,10 @@ def render_page_interactions_script(page: dict[str, Any]) -> str:
         "        if (stepId) next.set('step_id', stepId);",
         "        if (cta.dataset.checkoutTenantId) next.set('tenant_id', cta.dataset.checkoutTenantId);",
         "        if (funnelSessionId) next.set('session_id', funnelSessionId);",
+        # Carry the buyer's current host so the router redirects the funnel back to the SAME host (platform host
+        # or custom domain), never leaking them off the host they entered on (plans/PLATFORM_HOSTNAME_SERVING.md
+        # Slice 3). The server validates it against the Site's known origins before honoring it.
+        "        next.set('origin', window.location.origin);",
         "        return `${cta.dataset.checkoutApiBaseUrl}/pages/${funnelPageId || cta.dataset.checkoutPageId}/post-checkout/next?${next.toString()}`;",
         "      };",
         "      const successUrl = () => {",
@@ -4777,6 +4781,7 @@ def render_page_interactions_script(page: dict[str, Any]) -> str:
         "          const next = new URLSearchParams();",
         "          next.set('outcome', 'accept');",
         "          if (cta.dataset.checkoutTenantId) next.set('tenant_id', cta.dataset.checkoutTenantId);",
+        "          next.set('origin', window.location.origin);",  # keep the funnel on the buyer's entry host (Slice 3)
         # Append the Stripe placeholder UNENCODED — URLSearchParams would percent-encode the braces and Stripe
         # would never substitute the real Checkout Session id (it looks for the literal {CHECKOUT_SESSION_ID}).
         "          return `${cta.dataset.checkoutApiBaseUrl}/pages/${cta.dataset.checkoutPageId}/post-checkout/next?${next.toString()}&session_id={CHECKOUT_SESSION_ID}`;",
@@ -5056,6 +5061,7 @@ def render_page_interactions_script(page: dict[str, Any]) -> str:
         "          next.set('step_id', `${ppSurface}_carousel`);",
         "          if (ppTenant) next.set('tenant_id', ppTenant);",
         "          if (ppSession) next.set('session_id', ppSession);",
+        "          next.set('origin', window.location.origin);",  # keep the carousel funnel on the buyer's host (Slice 3)
         "          return `${ppApi}/pages/${ppPage}/post-checkout/next?${next.toString()}`;",
         "        };",
         "        const ppDismiss = ppCarousel.querySelector('[data-pp-dismiss]');",
