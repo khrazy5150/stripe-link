@@ -4776,7 +4776,7 @@ def render_page_interactions_script(page: dict[str, Any]) -> str:
         "      if (isFunnelStep) {",
         # In-place downsell swap (§6): decline / countdown expiry swaps the price card + CTA to the same
         # product's downsell price rather than navigating to a separate page. A second decline advances.
-        "        const swapToDownsell = () => {",
+        "        const swapToDownsell = (restartTimer) => {",
         "          const dsPrice = cta.dataset.downsellPriceId;",
         "          if (!dsPrice) return;",
         "          const dsAmount = Number(cta.dataset.downsellAmount || 0);",
@@ -4813,15 +4813,28 @@ def render_page_interactions_script(page: dict[str, Any]) -> str:
         "          const dsHead = cta.dataset.downsellHeadline;",
         "          if (dsHead) { const h = document.querySelector('.sl-headline h1') || document.querySelector('.sl-headline'); if (h) h.textContent = dsHead; }",
         "          const dsNote = document.querySelector('[data-downsell-note]'); if (dsNote) dsNote.hidden = false;",
-        # Restart the countdown for the downsell: when it expires again, funnelDeclineOrExpire advances (the
-        # downsell is already shown) instead of swapping a second time.
-        "          funnelCountdownRestarts.forEach((restart) => restart());",
+        # Restart the countdown ONLY on the live transition to the downsell (restartTimer). On a reload-restore we
+        # resume the persisted downsell deadline instead — restarting would hand back a fresh window to stall.
+        "          if (restartTimer) funnelCountdownRestarts.forEach((restart) => restart());",
         "        };",
+        # Persist that the buyer reached the downsell: the server re-renders the UPSELL on reload (the swap is
+        # client-side), so without this a refresh reverts to the upsell price and grants another shot at it.
+        "        const downsellKey = `stripe-link:${pageId}:downsell`;",
         "        let downsellShown = false;",
         "        const goDownsellOrAdvance = () => {",
-        "          if (cta.dataset.downsellPriceId && !downsellShown) { downsellShown = true; swapToDownsell(); return; }",
+        "          if (cta.dataset.downsellPriceId && !downsellShown) {",
+        "            downsellShown = true;",
+        "            try { localStorage.setItem(downsellKey, '1'); } catch (e) {}",
+        "            swapToDownsell(true);",
+        "            return;",
+        "          }",
         "          window.location.assign(postCheckoutNextUrl('decline', funnelStepId));",
         "        };",
+        # Reload during the downsell: restore it immediately (no timer restart) so it never reverts to the upsell.
+        "        if (cta.dataset.downsellPriceId && localStorage.getItem(downsellKey) === '1') {",
+        "          downsellShown = true;",
+        "          swapToDownsell(false);",
+        "        }",
         "        funnelDeclineOrExpire = goDownsellOrAdvance;",
         "        if (declineCta) {",
         "          declineCta.style.display = '';",

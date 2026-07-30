@@ -90,6 +90,12 @@ class SynthesizeUpsellPageTests(unittest.TestCase):
         self.assertIn("data-fp-compare-at=", html)
         self.assertIn("funnelCountdownRestarts.push", html)
         self.assertIn("funnelCountdownRestarts.forEach", html)
+        # Reaching the downsell persists a flag so a reload restores the downsell (no revert to the upsell) and
+        # resumes the timer rather than restarting it — otherwise a refresh grants another shot at the upsell.
+        self.assertIn("setItem(downsellKey, '1')", html)
+        self.assertIn("localStorage.getItem(downsellKey) === '1'", html)
+        self.assertIn("swapToDownsell(false)", html)  # reload-restore: no timer restart
+        self.assertIn("swapToDownsell(true)", html)   # live transition: restart
         # A last-chance note sits hidden above the CTA and the swap reveals it (the second-chance won't return).
         self.assertIn("data-downsell-note hidden", html)
         self.assertIn("This offer will not be shown again.", html)
