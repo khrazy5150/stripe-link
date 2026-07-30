@@ -15,6 +15,7 @@ from stripe_link.domain.pricing import (
     resolve_offer,
 )
 from stripe_link.kms_secrets import KmsSecretCipher
+from stripe_link.runtime.error_pages import render_error_page
 from stripe_link.repositories.documents import (
     offers_repository,
     pages_repository,
@@ -87,6 +88,18 @@ def handler(
             pages_repo = pages_repo or pages_repository()
             page = pages_repo.get(tenant_id, page_id)
             if not page or page.get("status") != "published":
+                # GET /checkout is the CTA's own href — a browser lands here directly — so serve the branded
+                # error page rather than raw JSON. (POST is the fetch/API path and keeps the JSON error.)
+                if method == "GET":
+                    return {
+                        "statusCode": 403,
+                        "headers": {"Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store"},
+                        "body": render_error_page(
+                            403, "This page has not been published yet. Transactions are only available on "
+                            "published pages — publish it from the dashboard first.",
+                            title="Not published", badge="Draft",
+                        ),
+                    }
                 return error_response(
                     "This page is not published. Transactions are only available on published pages.",
                     status_code=403, code="page_not_published",

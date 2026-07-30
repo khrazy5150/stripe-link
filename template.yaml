@@ -1194,6 +1194,8 @@ Resources:
         - DynamoDBReadPolicy:
             TableName: !Ref ServicesTable
         - DynamoDBReadPolicy:
+            TableName: !Ref PagesTable
+        - DynamoDBReadPolicy:
             TableName: !Sub "${ProjectPrefix}-stripe-keys-dev"
         - DynamoDBReadPolicy:
             TableName: !Sub "${ProjectPrefix}-stripe-keys-prod"
@@ -1240,6 +1242,8 @@ Resources:
             TableName: !Ref ProductsTable
         - DynamoDBReadPolicy:
             TableName: !Ref ServicesTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref PagesTable
         - DynamoDBReadPolicy:
             TableName: !Sub "${ProjectPrefix}-stripe-keys-dev"
         - DynamoDBReadPolicy:

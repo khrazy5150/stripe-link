@@ -212,15 +212,39 @@ class CheckoutHandlerTests(unittest.TestCase):
 
     def test_checkout_blocked_when_page_is_a_draft(self):
         # The publish guard: a transaction from an unpublished page is refused server-side, no Stripe call made.
+        # GET is the browser-facing CTA href, so it gets the branded HTML page (not JSON).
         draft_repo = FakeRepository("page_id", [{"tenant_id": "tenant_demo", "page_id": "page_simple_coffee", "status": "draft"}])
         response = self._checkout_with_pages_repo(draft_repo)
         self.assertEqual(response["statusCode"], 403)
-        self.assertEqual(json.loads(response["body"])["error"], "page_not_published")
+        self.assertEqual(response["headers"]["Content-Type"], "text/html; charset=utf-8")
+        self.assertIn("not been published", response["body"])
         self.assertEqual(self.requests, [])
 
     def test_checkout_blocked_when_page_is_missing(self):
         missing_repo = FakeRepository("page_id", [])  # page_id supplied but no such page
         response = self._checkout_with_pages_repo(missing_repo)
+        self.assertEqual(response["statusCode"], 403)
+        self.assertIn("not been published", response["body"])
+        self.assertEqual(self.requests, [])
+
+    def test_checkout_post_blocked_from_draft_returns_json(self):
+        # POST is the fetch/API path, so the guard returns a JSON error the caller can parse.
+        draft_repo = FakeRepository("page_id", [{"tenant_id": "tenant_demo", "page_id": "page_simple_coffee", "status": "draft"}])
+        response = handler(
+            {"httpMethod": "POST", "queryStringParameters": {
+                "clientID": "tenant_demo", "offer": "offer_simple_coffee", "page_id": "page_simple_coffee",
+                "product_id": "prod_simple_coffee", "price_id": "price_simple_coffee",
+                "success_url": "https://pages.example.com/thanks", "cancel_url": "https://pages.example.com/buy",
+            }},
+            None,
+            offers_repo=FakeRepository("offer_id", [self.offer]),
+            products_repo=FakeRepository("product_id", [self.product]),
+            stripe_repo=FakeStripeKeysRepository(),
+            tenant_repo=FakeRepository("tenant_id", [{"tenant_id": "tenant_demo"}]),
+            pages_repo=draft_repo,
+            secret_cipher=FakeCipher(),
+            opener=self.opener,
+        )
         self.assertEqual(response["statusCode"], 403)
         self.assertEqual(json.loads(response["body"])["error"], "page_not_published")
         self.assertEqual(self.requests, [])
