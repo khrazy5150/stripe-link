@@ -108,6 +108,14 @@ class TestPageServeHandlerTests(unittest.TestCase):
         self.assertIn("published standard", resp["body"])
         self.assertEqual(resp["headers"]["Content-Type"], "text/html; charset=utf-8")
         self.assertIn("noindex", resp["headers"]["X-Robots-Tag"])
+        self.assertEqual(resp["headers"]["Cache-Control"], "public, max-age=60")  # a real hit is cacheable
+
+    def test_not_found_is_never_cached(self):
+        # Publishing is async, so a just-published link 404s briefly; caching that 404 made it stick after the
+        # page went live. A not-found must not be cached, so the next refresh serves the now-published page.
+        resp = self._serve("nope")
+        self.assertEqual(resp["statusCode"], 404)
+        self.assertEqual(resp["headers"]["Cache-Control"], "no-store")
 
     def test_serves_published_sale_and_flash(self):
         self.assertIn("published sale", self._serve("C1", "sale")["body"])

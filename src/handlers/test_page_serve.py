@@ -13,11 +13,15 @@ _NOT_FOUND_HTML = render_error_page(404, "This test link is no longer available.
 
 
 def _html_response(body, status_code=200):
+    # Publishing is asynchronous (a DynamoDB stream drives the render), so a freshly-published link 404s for a
+    # few seconds until its artifact lands in S3. Caching that 404 (max-age) made the "no longer available" page
+    # stick long after the page went live, so a not-found is never cached — only a real hit is.
+    cache_control = "public, max-age=60" if status_code == 200 else "no-store"
     return {
         "statusCode": status_code,
         "headers": {
             "Content-Type": "text/html; charset=utf-8",
-            "Cache-Control": "public, max-age=60",
+            "Cache-Control": cache_control,
             # Test pages must never be indexed, whatever host serves them.
             "X-Robots-Tag": "noindex, nofollow, noarchive",
             "Access-Control-Allow-Origin": "*",
