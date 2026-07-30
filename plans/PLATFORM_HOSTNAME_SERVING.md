@@ -110,8 +110,12 @@ With both environments serving Sites identically, the promote story simplifies:
    resolver untouched, denormalized like custom domains, consistent mental model.
 2. **Relative vs. host-aware-absolute internal links.** Lean **relative** for the artifact; **absolute only**
    for the server-side funnel redirect (which carries the origin host).
-3. **Wildcard cert scope.** Confirm Universal SSL covers `{label}.jbay.uk` (one level under the apex — it does).
-   Keep platform hostnames to a single label; a two-level scheme would need an advanced/ACM cert.
+3. **Wildcard cert scope — RESOLVED 2026-07-30.** Prod platform host = `{label}.jbay.uk`; **test platform host =
+   `{label}.jbay.be`** (author-owned, freed by sunsetting stripe-cart). Both are single-label under their apex,
+   so Cloudflare **Universal SSL covers `*.jbay.uk` and `*.jbay.be` for free** — no Advanced Certificate
+   Manager. `PLATFORM_HOSTING_DOMAIN` = `jbay.uk` in prod, `jbay.be` in the dev/test stack. **Setup:** move the
+   `jbay.be` zone onto the Cloudflare account that holds `jbay.uk`; clean up / exclude any leftover stripe-cart
+   subdomains on `jbay.be` so they don't collide with the `*.jbay.be` store Worker route.
 4. **Worker topology.** One Worker with a `*.jbay.uk` route + reserved-host exclusions, vs. a sibling Worker.
 
 ## Ties
