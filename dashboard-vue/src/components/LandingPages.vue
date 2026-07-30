@@ -327,10 +327,19 @@
               <span>Page name (internal)</span>
               <input v-model.trim="form.name" type="text" placeholder="Storefront homepage" />
             </label>
-            <label class="offer-field">
+            <div class="offer-field">
               <span>Store name (shown as the headline)</span>
-              <input v-model.trim="form.storefront.headline" type="text" placeholder="Your store name" />
-            </label>
+              <!-- Choose an existing brand OR a custom name — mutually exclusive. The toggle appears only when the
+                   business has brands set up; with none, only the custom-name box shows. -->
+              <div v-if="storeBrands.length" class="storefront-name-modes">
+                <button type="button" class="storefront-name-mode" :class="{ active: storefrontNameMode === 'brand' }" @click="setStorefrontNameMode('brand')">Use a brand</button>
+                <button type="button" class="storefront-name-mode" :class="{ active: storefrontNameMode === 'custom' }" @click="setStorefrontNameMode('custom')">Custom name</button>
+              </div>
+              <select v-if="storeBrands.length && storefrontNameMode === 'brand'" v-model="storefrontBrand">
+                <option v-for="b in storeBrands" :key="b" :value="b">{{ b }}</option>
+              </select>
+              <input v-else v-model.trim="form.storefront.headline" type="text" placeholder="Your store name" />
+            </div>
             <label class="offer-field">
               <span>Tagline (optional)</span>
               <input v-model.trim="form.storefront.tagline" type="text" placeholder="What your store is about" />
@@ -1989,7 +1998,7 @@ function defaultWizardForm() {
     // Second composition axis: why the page exists / where its traffic comes from. Presets which capability
     // packs the page starts with (plans/LANDING_PAGE_GOAL_COMPOSITION.md).
     goal: "",
-    storefront: { headline: "", tagline: "", heading: "Shop all", items: [], autoFill: true },
+    storefront: { headline: "", brand: "", nameMode: "", tagline: "", heading: "Shop all", items: [], autoFill: true },
     categoryKey: "",
   };
 }
@@ -2407,13 +2416,29 @@ function isStorefrontPage(page) {
   return (page.sections || []).some((s) => s && (s.type === "catalog_grid" || s.type === "seller_profile" || s.type === "brand_hero"));
 }
 
+// Storefront headline source: an existing business brand (dropdown) OR a typed custom store name (textbox) —
+// mutually exclusive. With no brands set up, it's always the custom name; when brands exist the tenant chooses.
+const storeBrands = computed(() => profileStore.brands || []);
+// Effective mode: honor an explicit choice, else default to "brand" when brands exist, "custom" otherwise.
+const storefrontNameMode = computed(() => form.storefront.nameMode || (storeBrands.value.length ? "brand" : "custom"));
+// The selected brand, defaulting to the first one so the dropdown is never blank.
+const storefrontBrand = computed({
+  get: () => form.storefront.brand || storeBrands.value[0] || "",
+  set: (v) => { form.storefront.brand = v; },
+});
+// The resolved store name for the brand_hero headline + <title>.
+const storefrontName = computed(() => (storefrontNameMode.value === "brand" ? storefrontBrand.value : form.storefront.headline));
+function setStorefrontNameMode(mode) {
+  form.storefront.nameMode = mode;
+}
+
 function buildStorefrontPageDocument() {
   const byId = new Map((pages.value || []).map((p) => [p.page_id, p]));
   const items = (form.storefront.items || [])
     .map((pageId) => byId.get(pageId))
     .filter((p) => p && p.offer_id)
     .map((p) => ({ offer_id: p.offer_id, slug: `/${slugify(p.route?.slug || p.name || p.page_id)}` }));
-  const headline = form.storefront.headline || form.name || "Storefront";
+  const headline = storefrontName.value || form.name || "Storefront";
   // Auto-fill (default): the grid resolves to EVERY offer page on the Site at publish (scope="all"), so the
   // homepage can be created brand-first with no offers and fills itself as offer pages are added. Manual mode
   // keeps the curated items the tenant picked.
@@ -3498,7 +3523,16 @@ async function editOfferlessPage(page) {
   form.page_id = page.page_id;
   form.name = page.name || "";
   form.slug = page.route?.slug || "";
-  form.storefront.headline = brandHero?.headline || "";
+  // Restore the store-name mode: if the saved headline is one of the business's brands, edit it as a brand
+  // selection; otherwise it's a custom name.
+  const savedHeadline = brandHero?.headline || "";
+  if (savedHeadline && storeBrands.value.includes(savedHeadline)) {
+    form.storefront.nameMode = "brand";
+    form.storefront.brand = savedHeadline;
+  } else {
+    form.storefront.nameMode = "custom";
+    form.storefront.headline = savedHeadline;
+  }
   form.storefront.tagline = brandHero?.tagline || "";
   form.storefront.heading = catalog?.heading || profile?.heading || "";
   form.categoryKey = catalog?.category || "";

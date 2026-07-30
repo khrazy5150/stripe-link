@@ -5084,6 +5084,34 @@ button:disabled {
   padding: 0.6rem;
 }
 
+/* Segmented toggle for the storefront store-name source (existing brand vs custom name). */
+.storefront-name-modes {
+  display: inline-flex;
+  gap: 0;
+  margin-bottom: 0.5rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.storefront-name-mode {
+  padding: 0.4rem 0.9rem;
+  border: 0;
+  background: var(--panel);
+  color: var(--text);
+  cursor: pointer;
+  font: inherit;
+}
+
+.storefront-name-mode + .storefront-name-mode {
+  border-left: 1px solid var(--line);
+}
+
+.storefront-name-mode.active {
+  background: var(--accent);
+  color: var(--accent-contrast, #fff);
+}
+
 .storefront-page-option {
   display: flex;
   align-items: center;
