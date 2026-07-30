@@ -914,7 +914,10 @@ Resources:
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref SitesTable
-        - DynamoDBReadPolicy:
+        # Read pages for editor/nav resolution; write to re-put (re-publish) the Site's pages when a custom
+        # domain first verifies, so verified-domain-gated publish work (funnel + /sale slugs, canonical/robots)
+        # attaches for pages published before verification.
+        - DynamoDBCrudPolicy:
             TableName: !Ref PagesTable
         # Custom-domain bridge: write the resolver index; CRUD on stripe-keys because eligibility self-heal
         # captures live Connect verification back onto the doc.

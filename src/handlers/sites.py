@@ -32,6 +32,7 @@ from stripe_link.domain.funnels import is_reserved_slug
 from stripe_link.repositories.documents import (
     RepositoryError,
     custom_domains_index_repository,
+    pages_repository,
     sites_repository,
     stripe_keys_repository,
     subdomain_registry,
@@ -701,13 +702,37 @@ def connect_domain(event, repository, site_id):
     )
 
 
-def check_domain(event, repository, site_id):
+def _republish_site_pages(tenant_id, site, pages_repo=None):
+    """Re-publish every page attached to the Site by re-putting its page doc, firing the publish stream. Called
+    when a custom domain FIRST verifies: the reserved /sale //flash-sale + post-purchase funnel slugs, and each
+    page's canonical/robots/index-eligibility, are computed at publish time gated on the domain being verified
+    (`on_custom_domain`), so without this a page published BEFORE verification never picks them up until the
+    tenant manually re-saves (plans/SALES_FUNNELS.md P2b). Best-effort — a verify must never fail on this."""
+    try:
+        pages_repo = pages_repo or pages_repository()
+        seen = set()
+        now = int(time.time())
+        for entry in (site.get("pages") or {}).values():
+            page_id = str(entry.get("page_id") or "") if isinstance(entry, dict) else ""
+            if not page_id or page_id in seen:
+                continue
+            seen.add(page_id)
+            page = pages_repo.get(tenant_id, page_id)
+            if page:
+                page["updated_at"] = now
+                pages_repo.put(page)  # a MODIFY fires page_publish, which re-runs publish_page_document
+    except Exception:  # noqa: BLE001 - re-publish is a best-effort side effect of verification
+        pass
+
+
+def check_domain(event, repository, site_id, pages_repo=None):
     tenant_id = tenant_id_from_event(event)
     if not tenant_id:
         return error_response("tenant_id is required.", code="missing_tenant")
     site = repository.get(tenant_id, site_id)
     if not site:
         return error_response("Site not found.", status_code=404, code="not_found")
+    was_verified = bool(((site.get("hosting") or {}).get("verification") or {}).get("verified"))
     provisioning = site.get("domain_provisioning") or {}
     hostname_id = str(provisioning.get("custom_hostname_id") or "")
     domain = str((site.get("hosting") or {}).get("custom_domain") or "")
@@ -759,6 +784,12 @@ def check_domain(event, repository, site_id):
     except (DocumentValidationError, RepositoryError) as exc:
         return error_response(str(exc), code="invalid_domain")
     custom_domains_index_repository().put(domain_index_record(saved))
+    # First verification: re-publish the Site's pages so publish-time, verified-domain-gated work (reserved
+    # /sale //flash-sale + funnel slugs, per-page canonical/robots/index-eligibility) attaches for pages that
+    # were published before the domain verified. The index above still reflects pre-verify pages.routes; the
+    # re-publish updates pages.routes and re-syncs the index right after.
+    if verified and not was_verified:
+        _republish_site_pages(tenant_id, saved, pages_repo)
     # When not yet verified, tell the tenant exactly why: a record that isn't resolving (wrong name/value) vs.
     # records that look right but the certificate is still issuing.
     diagnostics, hint = [], ""

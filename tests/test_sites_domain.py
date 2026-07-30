@@ -158,12 +158,15 @@ class SitesDomainTests(unittest.TestCase):
         self.repo = FakeDocumentRepository("site_id")
         self.index = FakeIndex()
         self.keys = FakeKeys()
+        self.pages = FakeDocumentRepository("page_id")
+        self.pages.put({"tenant_id": "t1", "page_id": "page_home01", "status": "published", "updated_at": 1})
         self._env = patch.dict(os.environ, {"CLOUDFLARE_ZONE_ID": "zone1", "CUSTOM_DOMAIN_TARGET_HOST": "domains.jbay.uk", "ENVIRONMENT": "prod"})
         self._env.start()
         self._patches = [
             patch.object(sites_handler, "get_cloudflare_api_token", return_value="cf-token"),
             patch.object(sites_handler, "custom_domains_index_repository", return_value=self.index),
             patch.object(sites_handler, "stripe_keys_repository", return_value=self.keys),
+            patch.object(sites_handler, "pages_repository", return_value=self.pages),
             # Avoid real DNS-over-HTTPS calls in the not-verified diagnostic path.
             patch.object(sites_handler, "diagnose_dns_records", return_value=[]),
             # Stable DCV delegation UUID (avoids a real Cloudflare call).
@@ -309,6 +312,29 @@ class SitesDomainTests(unittest.TestCase):
         saved = self.repo.get("t1", "site_D1")
         self.assertTrue(saved["hosting"]["verification"]["verified"])
         self.assertEqual(saved["indexing"]["eligibility"], "eligible")
+
+    def test_first_verification_republishes_site_pages(self):
+        # Verified-domain-gated publish work (funnel + /sale slugs, canonical/robots) attaches at publish; on the
+        # FIRST verification we re-put the Site's pages so those attach for pages published before verification.
+        self.repo.put(self._provisioned_site())
+        with patch.object(sites_handler, "get_custom_hostname", return_value=CF_ACTIVE):
+            self._check()
+        self.assertNotEqual(self.pages.get("t1", "page_home01")["updated_at"], 1)  # re-put fires the publish stream
+
+    def test_recheck_of_already_verified_domain_does_not_republish(self):
+        site = self._provisioned_site()
+        site["hosting"]["verification"] = {"verified": True, "method": "cloudflare_saas"}
+        self.repo.put(site)
+        with patch.object(sites_handler, "get_custom_hostname", return_value=CF_ACTIVE):
+            self._check()
+        self.assertEqual(self.pages.get("t1", "page_home01")["updated_at"], 1)  # already verified -> no re-publish
+
+    def test_still_unverified_check_does_not_republish(self):
+        self.repo.put(self._provisioned_site())
+        pending = {"id": "cf_123", "status": "pending", "ssl": {"status": "pending_validation"}}
+        with patch.object(sites_handler, "get_custom_hostname", return_value=pending):
+            self._check()
+        self.assertEqual(self.pages.get("t1", "page_home01")["updated_at"], 1)  # not verified yet -> no re-publish
 
     def test_check_active_generates_indexnow_key(self):
         self.repo.put(self._provisioned_site())
