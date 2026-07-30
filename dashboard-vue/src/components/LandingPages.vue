@@ -44,12 +44,19 @@
         <div v-else class="landing-page-list">
           <article v-for="page in filteredPages" :key="page.page_id" class="landing-page-card">
             <div class="landing-page-image">
-              <img v-if="pageImage(page)" :src="pageImage(page)" :alt="page.name || 'Landing page image'" />
-              <div v-else class="landing-page-placeholder" :class="{ 'storefront-placeholder': isStorefrontPage(page) }" aria-hidden="true">
-                <svg v-if="isStorefrontPage(page)" viewBox="0 0 20 20" fill="currentColor">
-                  <path d="M10.707 2.293a1 1 0 00-1.414 0l-7 7a1 1 0 001.414 1.414L4 10.414V17a1 1 0 001 1h2a1 1 0 001-1v-2a1 1 0 011-1h2a1 1 0 011 1v2a1 1 0 001 1h2a1 1 0 001-1v-6.586l.293.293a1 1 0 001.414-1.414l-7-7z" />
-                </svg>
-                <svg v-else fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <!-- Storefront pages show a circular brand mark: the logo (contained, never distorted) or a
+                   product-style deterministic colored tile with a house glyph when there's no logo. -->
+              <div v-if="isStorefrontPage(page)" class="landing-page-mark">
+                <div class="landing-page-mark-inner" :class="{ faux: !pageImage(page) }" :style="pageImage(page) ? null : idColorStyle(page.page_id || page.name)">
+                  <img v-if="pageImage(page)" :src="pageImage(page)" :alt="page.name || 'Store logo'" />
+                  <svg v-else viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                    <path d="M10.707 2.293a1 1 0 00-1.414 0l-7 7a1 1 0 001.414 1.414L4 10.414V17a1 1 0 001 1h2a1 1 0 001-1v-2a1 1 0 011-1h2a1 1 0 011 1v2a1 1 0 001 1h2a1 1 0 001-1v-6.586l.293.293a1 1 0 001.414-1.414l-7-7z" />
+                  </svg>
+                </div>
+              </div>
+              <img v-else-if="pageImage(page)" :src="pageImage(page)" :alt="page.name || 'Landing page image'" />
+              <div v-else class="landing-page-placeholder" aria-hidden="true">
+                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5.25 18.75c4.75-.25 8.75-2.5 12-6.75m0 0 1.5 1.5m-1.5-1.5-1.5-1.5M6.75 14.25 4.5 19.5l5.25-2.25M12 3.75c3.5 1.25 6.25 4 7.5 7.5-4.75.5-8.25-1-10.5-4.5A10 10 0 0 1 12 3.75Z" />
                 </svg>
               </div>
@@ -1375,6 +1382,7 @@ import { useProfileStore } from "../stores/profile";
 import { useSitesStore } from "../stores/sites";
 import { useSubdomainCheck } from "../composables/useSubdomainCheck";
 import { resolvePageDeps, copyCatalogToEnv, pageForTarget } from "../composables/environmentCopy";
+import { idColorStyle } from "../utils/iconColor";
 import { uploadImage } from "../api/uploads";
 import { recordImageDims } from "../utils/imageDims";
 import { showIconPicker } from "../icon-picker.js";

@@ -5188,8 +5188,34 @@ button:disabled {
   color: var(--warning, #b7791f);
 }
 
-.storefront-placeholder {
-  color: var(--accent);
+/* Storefront brand mark inside a landing-page list card: a centered circular badge holding the logo
+   (contained, never distorted) or a deterministic colored tile + house glyph when there's no logo. */
+.landing-page-mark {
+  width: 100%;
+  height: 100%;
+  display: grid;
+  place-items: center;
+  background: var(--input-bg);
+}
+
+.landing-page-mark-inner {
+  width: 8.4rem;
+  height: 8.4rem;
+  border-radius: 50%;
+  overflow: hidden;
+  display: grid;
+  place-items: center;
+}
+
+.landing-page-mark-inner img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.landing-page-mark-inner.faux svg {
+  width: 3.8rem;
+  height: 3.8rem;
 }
 
 .storefront-page-option {
