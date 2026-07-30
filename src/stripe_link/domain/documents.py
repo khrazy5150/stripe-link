@@ -1254,8 +1254,11 @@ def validate_page_document(document: dict[str, Any]) -> None:
         elif section_type == "catalog_grid":
             optional_string(section, "heading", "Catalog grid heading")
             # A category-driven grid stores a category key and resolves its cards from the Site catalog at
-            # publish; a curated grid stores explicit items (plans/SITE_OBJECT.md §2.5b Slice 2).
+            # publish; a scope="all" grid resolves to EVERY offer page on the Site (a brand-first storefront
+            # homepage that fills itself); a curated grid stores explicit items (plans/SITE_OBJECT.md §2.5b).
             optional_string(section, "category", "Catalog grid category")
+            if section.get("scope") is not None:
+                require_enum(section, "scope", {"all"}, "Catalog grid scope")
             items = optional_limited_object_list(section, "items", 48, "Catalog grid items")
             for item in items:
                 require_string(item, "offer_id", "Catalog grid item offer_id")

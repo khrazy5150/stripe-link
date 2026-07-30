@@ -191,23 +191,27 @@ def attach_funnel_slugs(
 
 
 def resolve_category_grids(page: dict[str, Any], site: dict[str, Any] | None) -> None:
-    """Populate a category-driven catalog_grid's items from the Site route map (plans/SITE_OBJECT.md §2.5b
-    Slice 2): every landing page whose denormalized `category` matches becomes a card {offer_id, slug}. Runs
-    before offers load so the referenced offers get bundled. A grid with an explicit `category` is always
-    (re)resolved — the route map is the source of truth; curated grids (no `category`) are left untouched."""
+    """Populate an auto-filling catalog_grid's items from the Site route map (plans/SITE_OBJECT.md §2.5b
+    Slice 2). Two auto modes, both (re)resolved from the route map (the source of truth) at publish so the grid
+    stays current as offer pages are added: `scope="all"` → EVERY offer page on the Site (a brand-first
+    storefront homepage that fills itself, so no offers are needed to create it); a `category` → offer pages in
+    that category. Curated grids (neither scope nor category) keep their explicit items. Runs before offers load
+    so the referenced offers get bundled."""
     if not site:
         return
     entries = (site or {}).get("pages") or {}
     for section in page.get("sections") or []:
         if section.get("type") != "catalog_grid":
             continue
+        scope = str(section.get("scope") or "").strip()
         category = str(section.get("category") or "").strip()
-        if not category:
-            continue
+        if scope != "all" and not category:
+            continue  # curated grid — leave the tenant's explicit items untouched
         items = [
             {"offer_id": str(entry.get("offer_id")), "slug": slug}
             for slug, entry in entries.items()
-            if isinstance(entry, dict) and entry.get("offer_id") and str(entry.get("category") or "") == category
+            if isinstance(entry, dict) and entry.get("offer_id")
+            and (scope == "all" or str(entry.get("category") or "") == category)
         ]
         section["items"] = items
 

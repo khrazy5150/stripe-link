@@ -341,14 +341,18 @@
             </label>
             <div class="offer-field">
               <span>Products in the grid</span>
-              <div v-if="storefrontCandidatePages.length" class="storefront-page-picker">
-                <label v-for="page in storefrontCandidatePages" :key="page.page_id" class="storefront-page-option">
-                  <input type="checkbox" :value="page.page_id" v-model="form.storefront.items" />
-                  <span>{{ page.name || page.page_id }}</span>
-                  <em>/{{ page.route?.slug || '' }}</em>
-                </label>
-              </div>
-              <small v-else>No offer pages yet — create some offer pages first, then they can appear in the grid.</small>
+              <label class="builder-toggle"><input v-model="form.storefront.autoFill" type="checkbox" /><span>Show all my products automatically</span></label>
+              <small v-if="form.storefront.autoFill" class="field-note">The grid fills itself with every offer page on this Site and stays current as you add more — you can create this homepage now with no offers yet.</small>
+              <template v-else>
+                <div v-if="storefrontCandidatePages.length" class="storefront-page-picker">
+                  <label v-for="page in storefrontCandidatePages" :key="page.page_id" class="storefront-page-option">
+                    <input type="checkbox" :value="page.page_id" v-model="form.storefront.items" />
+                    <span>{{ page.name || page.page_id }}</span>
+                    <em>/{{ page.route?.slug || '' }}</em>
+                  </label>
+                </div>
+                <small v-else>No offer pages yet — turn on “Show all my products,” or create some offer pages first to curate them here.</small>
+              </template>
             </div>
           </section>
 
@@ -1977,7 +1981,7 @@ function defaultWizardForm() {
     // Second composition axis: why the page exists / where its traffic comes from. Presets which capability
     // packs the page starts with (plans/LANDING_PAGE_GOAL_COMPOSITION.md).
     goal: "",
-    storefront: { headline: "", tagline: "", heading: "Shop all", items: [] },
+    storefront: { headline: "", tagline: "", heading: "Shop all", items: [], autoFill: true },
     categoryKey: "",
   };
 }
@@ -2399,9 +2403,15 @@ function buildStorefrontPageDocument() {
     .filter((p) => p && p.offer_id)
     .map((p) => ({ offer_id: p.offer_id, slug: `/${slugify(p.route?.slug || p.name || p.page_id)}` }));
   const headline = form.storefront.headline || form.name || "Storefront";
+  // Auto-fill (default): the grid resolves to EVERY offer page on the Site at publish (scope="all"), so the
+  // homepage can be created brand-first with no offers and fills itself as offer pages are added. Manual mode
+  // keeps the curated items the tenant picked.
+  const auto = form.storefront.autoFill !== false;
+  const grid = { id: "catalog-grid", type: "catalog_grid", heading: form.storefront.heading || undefined, items: auto ? [] : items };
+  if (auto) grid.scope = "all";
   return finalizeOfferlessDoc([
     { id: "brand-hero", type: "brand_hero", headline, tagline: form.storefront.tagline || undefined },
-    { id: "catalog-grid", type: "catalog_grid", heading: form.storefront.heading || undefined, items },
+    grid,
   ], { name: form.name || "Storefront homepage", slug: form.slug || form.name || "home", title: headline });
 }
 
@@ -2497,8 +2507,9 @@ async function detachSite() {
 async function createStorefront() {
   wizardError.value = "";
   const document = buildStorefrontPageDocument();
-  if (!document.sections[1].items.length) {
-    wizardError.value = "Pick at least one page for the product grid.";
+  // Auto-fill needs no upfront items (the grid fills itself from the Site at publish); only curated mode does.
+  if (form.storefront.autoFill === false && !document.sections[1].items.length) {
+    wizardError.value = "Pick at least one page for the product grid, or switch on “Show all my products.”";
     return;
   }
   creatingStorefront.value = true;
@@ -3490,6 +3501,8 @@ async function editOfferlessPage(page) {
     wizardError.value = err.message || "Failed to load catalog.";
   }
   if (kind === "storefront") {
+    // scope="all" is auto-fill; a stored curated grid keeps the manual picker with its items restored.
+    form.storefront.autoFill = catalog?.scope === "all";
     // Map the curated grid's stored {offer_id} back to page_ids for the page-picker.
     const pageByOffer = new Map((pages.value || []).filter((p) => p.offer_id).map((p) => [p.offer_id, p.page_id]));
     form.storefront.items = (catalog?.items || []).map((it) => pageByOffer.get(it.offer_id)).filter(Boolean);

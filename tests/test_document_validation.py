@@ -698,6 +698,23 @@ class DocumentValidationTests(unittest.TestCase):
         ]
         validate_page_document(page)  # offer-less catalog page is valid
 
+    def test_scope_all_grid_needs_no_items(self):
+        # A brand-first storefront (scope="all") auto-fills at publish, so it's valid with an empty grid.
+        page = copy.deepcopy(self.page)
+        page.pop("offer_id", None)
+        page["sections"] = [
+            {"id": "h", "type": "brand_hero", "headline": "My Store"},
+            {"id": "g", "type": "catalog_grid", "heading": "Shop", "scope": "all", "items": []},
+        ]
+        validate_page_document(page)
+
+    def test_catalog_grid_scope_rejects_unknown_value(self):
+        page = copy.deepcopy(self.page)
+        page.pop("offer_id", None)
+        page["sections"] = [{"id": "g", "type": "catalog_grid", "scope": "everything", "items": []}]
+        with self.assertRaisesRegex(DocumentValidationError, "scope"):
+            validate_page_document(page)
+
     def test_catalog_grid_item_requires_offer_id(self):
         page = copy.deepcopy(self.page)
         page.pop("offer_id", None)

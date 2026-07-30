@@ -948,6 +948,15 @@ class CategoryPageTests(unittest.TestCase):
         resolve_category_grids(page, self._site())
         self.assertEqual(page["sections"][0]["items"], [{"offer_id": "x", "slug": "/x"}])  # no category -> untouched
 
+    def test_resolve_scope_all_pulls_every_offer_page(self):
+        # A brand-first storefront homepage (scope="all") auto-fills with EVERY offer page on the Site,
+        # regardless of category; non-offer pages (homepage, category page) are excluded.
+        page = {"sections": [{"id": "g", "type": "catalog_grid", "scope": "all", "items": []}]}
+        resolve_category_grids(page, self._site())
+        items = page["sections"][0]["items"]
+        self.assertEqual({i["offer_id"] for i in items}, {"offer_a", "offer_b", "offer_c"})  # all offers, all categories
+        self.assertNotIn("page_home", {i.get("page_id") for i in items})  # the homepage itself isn't a card
+
     def test_related_products_pulls_same_category_excluding_self(self):
         page = {"sections": [{"id": "r", "type": "related_products", "heading": "More"}]}
         added = resolve_related_products(page, self._site(), "supplements", "page_a")  # current page = page_a
