@@ -9,7 +9,7 @@ from urllib.parse import urlencode, urlparse
 from stripe_link.domain.business_types import BUSINESS_TYPES, resolve_entity_type
 from stripe_link.domain.composition import compose_page, element_channel
 from stripe_link.domain.documents import PRODUCT_CONDITIONS
-from stripe_link.domain.opportunities import STAGE_LANDING, derived_offer_type, stage_opportunities
+from stripe_link.domain.opportunities import STAGE_LANDING, STAGE_POST_PURCHASE, derived_offer_type, stage_opportunities
 from stripe_link.domain.pricing import PricingError, expand_offer, find_price, resolve_offer, single_unit_price
 from stripe_link.domain.semantic import is_bundle, resolve_semantic_model, subject_from_model
 from stripe_link.domain.reviews import aggregate_reviews, markup_eligible
@@ -4143,6 +4143,16 @@ def render_booking_cta(cta: dict[str, str], api_base_url: str | None) -> str:
     ])
 
 
+def _offer_has_upsell_funnel(offer: dict[str, Any]) -> bool:
+    """Whether the offer derives a post-purchase upsell funnel (offer.funnel.upsells → post-purchase upsell
+    opportunities). Drives the checkout success_url into /post-checkout/next even when the page carries no inline
+    post_checkout block, so an offer-derived funnel actually starts (plans/SALES_FUNNELS.md P2b)."""
+    return any(
+        str((opp.get("placement") or {}).get("surface") or "") == "upsell"
+        for opp in stage_opportunities(offer or {}, STAGE_POST_PURCHASE)
+    )
+
+
 def checkout_context(
     page: dict[str, Any],
     offer: dict[str, Any],
@@ -4180,7 +4190,9 @@ def checkout_context(
             "checkout-price-id": price_id,
             "checkout-quantity": quantity,
             "checkout-api-base-url": str(api_base_url or "").rstrip("/"),
-            "checkout-has-post-checkout": "true" if page.get("post_checkout") else "false",
+            # Enter the funnel when the page has an inline post_checkout block OR the offer derives an upsell
+            # funnel — so an offer-derived funnel starts even with no page.post_checkout (P2b).
+            "checkout-has-post-checkout": "true" if (page.get("post_checkout") or _offer_has_upsell_funnel(offer)) else "false",
         },
     }
 

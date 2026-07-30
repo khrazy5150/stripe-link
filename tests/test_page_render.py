@@ -518,6 +518,20 @@ class PageRenderTests(unittest.TestCase):
         self.assertIn("data-checkout-has-post-checkout=\"false\"", html)
         self.assertIn("window.location.assign(href)", html)
 
+    def test_offer_derived_funnel_enters_even_without_page_post_checkout(self):
+        # An offer with funnel.upsells but NO page.post_checkout block still routes checkout success into the
+        # funnel (SALES_FUNNELS.md P2b) — the entry gate is offer-aware, not page-block-only.
+        page = copy.deepcopy(self.page)
+        page.pop("post_checkout", None)
+        offer = copy.deepcopy(self.offer)
+        offer["funnel"] = {"upsells": [{"product_id": "prod_up", "price_id": "price_up"}]}
+        html = render_page(
+            page, offer, self.products_by_id,
+            checkout_url="https://dev.juniorbay.com/checkout", api_base_url="https://api.example.com/dev",
+        )
+        self.assertIn("data-checkout-has-post-checkout=\"true\"", html)
+        self.assertIn("post-checkout/next", html)
+
     def test_render_page_rejects_missing_offer_product(self):
         with self.assertRaisesRegex(RenderError, "was not provided"):
             render_page(self.page, self.offer, {})
