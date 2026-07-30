@@ -20,6 +20,13 @@ Parameters:
     Type: String
     Default: jbay.uk
     Description: Registrable domain for tenant free-tier Sites (Zone B, always noindex). A tenant's platform_hostname is <name>.<this>. Must differ from the platform's own domain (juniorbay.com). See plans/SITE_OBJECT.md.
+  PlatformServingEnabled:
+    Type: String
+    Default: "false"
+    AllowedValues:
+      - "true"
+      - "false"
+    Description: Whether Sites are served on their free platform host (<name>.<PlatformHostingDomain>). Gates storefront chrome, relative-link home_url, and funnel slug-attach on the platform host. Keep "false" until the *.<PlatformHostingDomain> Cloudflare Worker route is live, then flip per environment. See plans/PLATFORM_HOSTNAME_SERVING.md.
   StripeClientId:
     Type: String
     Default: ""
@@ -153,6 +160,9 @@ Globals:
         # Registrable domain for tenant free-tier Sites (Zone B, always noindex). Read from config, never
         # hardcoded, so it can change without a code change. See plans/SITE_OBJECT.md §6.
         PLATFORM_HOSTING_DOMAIN: !Ref PlatformHostingDomain
+        # Master switch for serving Sites on their free platform host. Off until the *.<PlatformHostingDomain>
+        # Cloudflare Worker route is live; then flip per environment. See plans/PLATFORM_HOSTNAME_SERVING.md.
+        PLATFORM_SERVING_ENABLED: !Ref PlatformServingEnabled
         CHECKOUT_SESSIONS_TABLE: !Ref CheckoutSessionsTable
         ORDERS_TABLE: !Ref OrdersTable
         REFUNDS_TABLE: !Ref RefundsTable

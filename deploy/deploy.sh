@@ -46,6 +46,11 @@ else
   PARAMETER_OVERRIDES+=("PlatformHostingDomain=jbay.be")
 fi
 
+# Master switch for serving Sites on the free platform host. Default OFF until the *.jbay.uk / *.jbay.be
+# Cloudflare Worker route is live (plans/PLATFORM_HOSTNAME_SERVING.md). Flip per env by exporting
+# PLATFORM_SERVING_ENABLED=true before the deploy, e.g. `PLATFORM_SERVING_ENABLED=true ./deploy/deploy.sh dev`.
+PARAMETER_OVERRIDES+=("PlatformServingEnabled=${PLATFORM_SERVING_ENABLED:-false}")
+
 if [[ -n "${API_CUSTOM_DOMAIN_NAME}" ]]; then
   PARAMETER_OVERRIDES+=("ApiCustomDomainName=${API_CUSTOM_DOMAIN_NAME}")
 fi
