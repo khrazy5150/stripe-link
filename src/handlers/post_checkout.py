@@ -1,4 +1,5 @@
 import os
+import re
 from urllib.parse import urlencode
 
 from stripe_link.common import error_response, json_response, path_params, query_params, tenant_id_from_event
@@ -16,13 +17,34 @@ from stripe_link.runtime.artifacts import artifact_paths
 from stripe_link.runtime.publishing import find_site_for_page, public_url, site_page_slug
 
 
+# A synthetic post-purchase funnel artifact id (`{base}__…`) maps to a reserved funnel slug so the funnel serves
+# on the custom domain (plans/SALES_FUNNELS.md P2b). The sequential upsell's step is carried separately as the
+# funnel_step query param by the caller, so the slug is stepless here.
+_FUNNEL_SUFFIX_SLUGS = (("__thank_you", "/thank-you"), ("__upsell_carousel", "/upsell"), ("__downsell_carousel", "/downsell"))
+_SEQ_UPSELL_RE = re.compile(r"^(?P<base>.+)__upsell_(?P<seq>\d+)$")
+
+
+def _funnel_reserved_slug(next_page_id):
+    """The reserved funnel slug for a synthetic funnel artifact id, or None if it isn't one."""
+    for suffix, slug in _FUNNEL_SUFFIX_SLUGS:
+        if next_page_id.endswith(suffix):
+            return slug
+    return "/upsell" if _SEQ_UPSELL_RE.match(next_page_id) else None
+
+
 def _next_page_url(site, tenant_id, next_page_id, pages_domain):
-    """The buyer-facing URL for the funnel's next page. Prefer the Site's verified custom domain at the page's
-    own slug so the buyer never leaves the domain mid-funnel (plans/SITE_OBJECT.md §2.6); otherwise fall back
-    to the interim platform artifact URL."""
+    """The buyer-facing URL for the funnel's next page. Prefer the Site's verified custom domain so the buyer
+    never leaves the domain mid-funnel (plans/SITE_OBJECT.md §2.6): a synthetic funnel artifact serves at its
+    reserved slug (/upsell //downsell //thank-you, P2b) when that slug is attached; a real page at its own slug;
+    otherwise fall back to the interim platform artifact URL."""
     if site and site_domain_verified(site):
-        slug = site_page_slug(site, next_page_id)
         custom_domain = str((site.get("hosting") or {}).get("custom_domain") or "")
+        pages = site.get("pages") or {}
+        reserved = _funnel_reserved_slug(next_page_id)
+        # Only route to the reserved slug if this Site actually has the funnel attached there (published).
+        if custom_domain and reserved and isinstance(pages.get(reserved), dict) and pages[reserved].get("funnel_role"):
+            return f"https://{custom_domain}{reserved}"
+        slug = site_page_slug(site, next_page_id)
         if slug and custom_domain:
             path = "" if slug == "/" else slug.lstrip("/")
             return f"https://{custom_domain}/{path}"

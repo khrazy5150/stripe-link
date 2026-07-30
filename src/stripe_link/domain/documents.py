@@ -1875,6 +1875,13 @@ def validate_site(document: dict[str, Any]) -> None:
         # sibling artifact rendered in this price context.
         if entry.get("price_context") is not None:
             require_enum(entry, "price_context", {"sale", "flash_sale"}, f"Site page '{slug}' price_context")
+        # A reserved post-purchase funnel slug (/upsell //downsell //thank-you, plans/SALES_FUNNELS.md P2b)
+        # points at the base sales page but serves a synthetic funnel artifact the resolver derives from the
+        # role + the offer's sequence/carousel strategy.
+        if entry.get("funnel_role") is not None:
+            require_enum(entry, "funnel_role", {"upsell", "downsell", "thank_you"}, f"Site page '{slug}' funnel_role")
+        if entry.get("strategy") is not None:
+            require_enum(entry, "strategy", {"sequence", "carousel"}, f"Site page '{slug}' strategy")
 
     optional_non_negative_int(document, "revision", "Site revision")
     for field in ("created_at", "updated_at"):

@@ -321,5 +321,68 @@ class PostCheckoutCustomDomainTests(unittest.TestCase):
         self.assertEqual(location.path, "/page_upsell_1/index.html")
 
 
+class PostCheckoutOfferDerivedReservedSlugTests(unittest.TestCase):
+    """The offer-derived funnel serves on the custom domain at its RESERVED slugs (/upsell, /thank-you) so the
+    buyer never bounces to the platform host mid-funnel (plans/SALES_FUNNELS.md P2b)."""
+
+    def setUp(self):
+        self.pages = FakeDocumentRepository("page_id")
+        self.pages.put({"tenant_id": "tenant_demo", "page_id": "page_entry", "offer_id": "offer_up",
+                        "post_checkout": {"thank_you_page": {"page_id": "page_thank_you"}}})
+        self.pages.put({"tenant_id": "tenant_demo", "page_id": "page_thank_you", "status": "published"})
+        self.offers = FakeDocumentRepository("offer_id")
+        self.offers.put({"tenant_id": "tenant_demo", "offer_id": "offer_up", "funnel": {"upsells": [
+            {"product_id": "prod_a", "price_id": "price_a_up"}, {"product_id": "prod_b", "price_id": "price_b_up"},
+        ]}})
+        self.products = FakeDocumentRepository("product_id")
+        for pid, price_id in (("prod_a", "price_a_up"), ("prod_b", "price_b_up")):
+            self.products.put({"tenant_id": "tenant_demo", "product_id": pid,
+                               "prices": [{"price_id": price_id, "context": "upsell", "unit_amount": 1000, "currency": "usd"}]})
+
+    def _site(self, verified=True):
+        return {
+            "tenant_id": "tenant_demo", "site_id": "site_r",
+            "hosting": {"type": "custom", "custom_domain": "shop.example.com", "verification": {"verified": verified}},
+            "pages": {"/": {"page_id": "page_entry"},
+                      "/upsell": {"page_id": "page_entry", "funnel_role": "upsell", "strategy": "sequence", "enabled": True},
+                      "/thank-you": {"page_id": "page_entry", "funnel_role": "thank_you", "strategy": "sequence", "enabled": True}},
+        }
+
+    def _call(self, outcome, step_id=None, verified=True):
+        params = {"tenant_id": "tenant_demo", "outcome": outcome, "session_id": "cs_1"}
+        if step_id is not None:
+            params["step_id"] = step_id
+        return handler(
+            {"httpMethod": "GET", "pathParameters": {"page_id": "page_entry"}, "queryStringParameters": params},
+            None, repository=self.pages, pages_domain="pages.example.com",
+            offers_repo=self.offers, products_repo=self.products, sites_repo=_FakeSitesRepo(self._site(verified=verified)),
+        )
+
+    def test_first_upsell_serves_at_reserved_slug_with_step(self):
+        location = urlparse(self._call("accept")["headers"]["Location"])
+        self.assertEqual(location.netloc, "shop.example.com")
+        self.assertEqual(location.path, "/upsell")   # single reserved slug, step in the query
+        query = parse_qs(location.query)
+        self.assertEqual(query["funnel_step"], ["1"])
+        self.assertEqual(query["session_id"], ["cs_1"])
+
+    def test_advance_stays_on_reserved_upsell_slug(self):
+        location = urlparse(self._call("accept", step_id="1")["headers"]["Location"])
+        self.assertEqual(location.netloc, "shop.example.com")
+        self.assertEqual(location.path, "/upsell")
+        self.assertEqual(parse_qs(location.query)["funnel_step"], ["2"])
+
+    def test_past_last_upsell_serves_reserved_thank_you_slug(self):
+        location = urlparse(self._call("accept", step_id="2")["headers"]["Location"])
+        self.assertEqual(location.netloc, "shop.example.com")
+        self.assertEqual(location.path, "/thank-you")
+        self.assertEqual(parse_qs(location.query)["session_id"], ["cs_1"])
+
+    def test_unverified_domain_falls_back_to_platform_artifact(self):
+        location = urlparse(self._call("accept", verified=False)["headers"]["Location"])
+        self.assertEqual(location.netloc, "pages.example.com")
+        self.assertEqual(location.path, "/page_entry__upsell_1/index.html")
+
+
 if __name__ == "__main__":
     unittest.main()

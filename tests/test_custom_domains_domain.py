@@ -263,6 +263,19 @@ class RouteTableTests(unittest.TestCase):
         self.assertEqual(table["/retired"], {"page_id": "page_old", "enabled": False})
         self.assertNotIn("/broken", table)
 
+    def test_route_table_carries_price_context_for_sale_slugs(self):
+        # The resolver serves /sale //flash-sale from the sibling artifact by reading price_context off the
+        # denormalized index — so the projection MUST carry it (was dropped, breaking context views on domains).
+        site = {"pages": {
+            "/": {"page_id": "page_home"},
+            "/sale": {"page_id": "page_home", "price_context": "sale", "enabled": True},
+            "/flash-sale": {"page_id": "page_home", "price_context": "flash_sale", "enabled": True},
+        }}
+        table = route_table(site)
+        self.assertEqual(table["/sale"], {"page_id": "page_home", "enabled": True, "price_context": "sale"})
+        self.assertEqual(table["/flash-sale"]["price_context"], "flash_sale")
+        self.assertNotIn("price_context", table["/"])  # only carried when present
+
     def test_route_table_empty_when_no_pages(self):
         self.assertEqual(route_table({}), {})
 

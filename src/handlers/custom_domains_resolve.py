@@ -12,16 +12,41 @@ from stripe_link.runtime.publishing import public_url
 _WELL_KNOWN_PATH = re.compile(r"^/[A-Za-z0-9._-]+\.(txt|xml)$")
 
 
-def _resolve_slug(slug, routes, homepage_page_id):
+def _funnel_artifact_page_id(base_page_id, entry, funnel_step):
+    """The synthetic post-purchase funnel artifact a reserved funnel slug serves (plans/SALES_FUNNELS.md P2b).
+    Derived from the base sales page_id + the entry's `funnel_role`/`strategy` + the request's funnel_step, to
+    match what the publisher synthesizes: `{base}__upsell_{n}` (sequence, n from funnel_step, 1-based) or
+    `{base}__upsell_carousel` (carousel); `{base}__downsell_carousel`; `{base}__thank_you`."""
+    role = str(entry.get("funnel_role") or "")
+    strategy = str(entry.get("strategy") or "sequence")
+    if role == "thank_you":
+        return f"{base_page_id}__thank_you"
+    if role == "downsell":
+        return f"{base_page_id}__downsell_carousel"  # only attached in carousel mode
+    if role == "upsell":
+        if strategy == "carousel":
+            return f"{base_page_id}__upsell_carousel"
+        step = str(funnel_step or "").strip()
+        n = step if (step.isdigit() and int(step) >= 1) else "1"
+        return f"{base_page_id}__upsell_{n}"
+    return base_page_id
+
+
+def _resolve_slug(slug, routes, homepage_page_id, funnel_step=""):
     """Map a normalized request slug to the (page_id, price_context) that serves it, reading only the
     denormalized route table on the domain-index record (plans/SITE_OBJECT.md §2.6). A Sale/Flash-Sale context
     view (plans/SALES_FUNNELS.md P1c) carries a `price_context` so it serves the base page's sibling artifact.
-    A legacy record without a route table serves the homepage for every path; the root always falls back."""
+    A reserved funnel slug (P2b) carries a `funnel_role`, so it serves a synthetic funnel artifact derived from
+    the base page_id + the request's funnel_step (funnel artifacts are never context-varied). A legacy record
+    without a route table serves the homepage for every path; the root always falls back."""
     if not isinstance(routes, dict):
         return homepage_page_id, ""  # legacy record: homepage-only serving
     entry = routes.get(slug)
     if isinstance(entry, dict) and entry.get("enabled", True) is not False:
-        return str(entry.get("page_id") or ""), str(entry.get("price_context") or "")
+        base_page_id = str(entry.get("page_id") or "")
+        if entry.get("funnel_role"):
+            return _funnel_artifact_page_id(base_page_id, entry, funnel_step), ""
+        return base_page_id, str(entry.get("price_context") or "")
     if slug == "/":
         return homepage_page_id, ""
     return "", ""
@@ -68,11 +93,15 @@ def handler(event, context, *, index_repo=None, pages_domain=None):
     # A well-known crawl file (/robots.txt, /sitemap.xml, /{key}.txt) is served from the sibling artifact the
     # publisher wrote under the homepage page_id. Every other path routes through the Site's slug map: the
     # homepage at "/", funnel/collection pages at their slugs, an unknown slug is a 404.
-    path = str(query_params(event).get("path") or "")
+    qp = query_params(event)
+    path = str(qp.get("path") or "")
     if path and _WELL_KNOWN_PATH.match(path):
         artifact_key = f"{homepage_page_id}{path}"
     else:
-        page_id, price_context = _resolve_slug(normalize_route_path(path), record.get("routes"), homepage_page_id)
+        # funnel_step selects which sequential upsell a reserved /upsell slug serves (P2b); the Worker forwards
+        # the buyer's query string, so it arrives here alongside path.
+        funnel_step = str(qp.get("funnel_step") or "")
+        page_id, price_context = _resolve_slug(normalize_route_path(path), record.get("routes"), homepage_page_id, funnel_step)
         if not page_id:
             return error_response("No page is published at this path.", status_code=404, code="no_route")
         artifact_key = artifact_paths(tenant_id, page_id, context=price_context)["published"]

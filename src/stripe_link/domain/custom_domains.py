@@ -48,10 +48,19 @@ def normalize_route_path(path: str) -> str:
     return text or "/"
 
 
+# Entry fields the edge resolver needs carried into the denormalized index alongside page_id/enabled. The
+# resolver reads only this table (never the live Site), so anything it must act on has to be projected here.
+# `price_context` drives the /sale //flash-sale sibling-artifact serving (plans/SALES_FUNNELS.md P1c);
+# `funnel_role`/`strategy` let it compute the synthetic post-purchase funnel artifact for /upsell//downsell/
+# /thank-you (P2b) from the base page_id + the request's funnel_step.
+_RESOLVER_ENTRY_FIELDS = ("price_context", "funnel_role", "strategy")
+
+
 def route_table(site: dict[str, Any]) -> dict[str, dict[str, Any]]:
     """Project a Site's slug→page map into the flat routing table denormalized onto the domain-index record
     (plans/SITE_OBJECT.md §2.6). The edge resolver reads this, never the live Site document. Every attached
-    slug is included with its enabled flag so the resolver can 404 a disabled slug without a Site read."""
+    slug is included with its enabled flag so the resolver can 404 a disabled slug without a Site read, plus the
+    resolver-visible fields (`_RESOLVER_ENTRY_FIELDS`) it must act on — e.g. `price_context` for context views."""
     table: dict[str, dict[str, Any]] = {}
     for slug, entry in (site.get("pages") or {}).items():
         if not isinstance(entry, dict):
@@ -59,7 +68,11 @@ def route_table(site: dict[str, Any]) -> dict[str, dict[str, Any]]:
         page_id = str(entry.get("page_id") or "")
         if not page_id:
             continue
-        table[slug] = {"page_id": page_id, "enabled": entry.get("enabled", True) is not False}
+        row: dict[str, Any] = {"page_id": page_id, "enabled": entry.get("enabled", True) is not False}
+        for field in _RESOLVER_ENTRY_FIELDS:
+            if entry.get(field):
+                row[field] = str(entry[field])
+        table[slug] = row
     return table
 
 

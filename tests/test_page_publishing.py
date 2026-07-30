@@ -15,6 +15,7 @@ from stripe_link.runtime.publishing import (
     _prune_unrenderable_landing_items,
     artifact_targets,
     attach_funnel_pages,
+    attach_funnel_slugs,
     delete_page_artifacts,
     detach_page_from_sites,
     find_site_for_page,
@@ -262,6 +263,42 @@ class PagePublishingTests(unittest.TestCase):
         self.assertIn(("pages", artifact_paths("tenant_demo", ty_id)["published"]), keys)
         ty_body = next(put["Body"] for put in self.s3.puts if put["Key"] == artifact_paths("tenant_demo", ty_id)["published"])
         self.assertIn(b"Thank You for Your Purchase", ty_body)
+
+    def test_attach_funnel_slugs_sequence_and_retire(self):
+        # A sequence funnel attaches /upsell + /thank-you to the root page (no /downsell — in-place swap), each
+        # carrying funnel_role + strategy so the resolver can serve them on the custom domain (P2b).
+        product = copy.deepcopy(self.product)
+        product["prices"].append({"price_id": "price_up", "stripe_price_id": "sp_up", "context": "upsell",
+                                  "unit_amount": 500, "currency": "usd", "quantity": 1})
+        offer = copy.deepcopy(self.offer)
+        offer["funnel"] = {"upsells": [{"product_id": product["product_id"], "price_id": "price_up"}]}
+        page_id = self.page["page_id"]
+        site = {"tenant_id": "tenant_demo", "pages": {"/": {"page_id": page_id, "page_type": "landing"}}}
+
+        updated, changed = attach_funnel_slugs(site, {"page_id": page_id}, offer, {product["product_id"]: product})
+        self.assertTrue(changed)
+        self.assertEqual(sorted(updated["pages"]), ["/", "/thank-you", "/upsell"])
+        self.assertEqual(updated["pages"]["/upsell"]["funnel_role"], "upsell")
+        self.assertEqual(updated["pages"]["/upsell"]["strategy"], "sequence")
+        self.assertEqual(updated["pages"]["/thank-you"]["funnel_role"], "thank_you")
+
+        # Remove the funnel (no upsells) -> our reserved slugs retire; a tenant's own same-named page is untouched.
+        offer["funnel"] = {"upsells": []}
+        updated["pages"]["/upsell-guide"] = {"page_id": "page_Guide"}  # not ours (no funnel_role)
+        retired, changed2 = attach_funnel_slugs(updated, {"page_id": page_id}, offer, {product["product_id"]: product})
+        self.assertTrue(changed2)
+        self.assertNotIn("/upsell", retired["pages"])
+        self.assertNotIn("/thank-you", retired["pages"])
+        self.assertIn("/upsell-guide", retired["pages"])
+
+    def test_attach_funnel_slugs_only_on_root_page(self):
+        offer = copy.deepcopy(self.offer)
+        offer["funnel"] = {"upsells": [{"product_id": self.product["product_id"], "price_id": "price_up"}]}
+        # The page is attached at a non-root slug -> no funnel slugs (funnel lives on the Site's "/").
+        site = {"tenant_id": "tenant_demo", "pages": {"/other": {"page_id": self.page["page_id"]}}}
+        updated, changed = attach_funnel_slugs(site, {"page_id": self.page["page_id"]}, offer, {self.product["product_id"]: self.product})
+        self.assertFalse(changed)
+        self.assertEqual(updated, site)
 
     def test_publish_writes_carousel_artifacts_for_four_or_more_upsells(self):
         # >3 upsells -> carousel strategy: ONE __upsell_carousel (+ __downsell_carousel when any upsell product

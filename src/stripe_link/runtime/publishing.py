@@ -150,6 +150,46 @@ def attach_context_view_slugs(site: dict[str, Any], page: dict[str, Any]) -> tup
     return ({**site, "pages": pages}, True) if changed else (site, False)
 
 
+def attach_funnel_slugs(
+    site: dict[str, Any], page: dict[str, Any], offer: dict[str, Any], products_by_id: dict[str, dict[str, Any]]
+) -> tuple[dict[str, Any], bool]:
+    """Add/remove the reserved post-purchase funnel slugs (`/upsell`, `/downsell`, `/thank-you`) for the Site's
+    ROOT sales page so the funnel stays on the custom domain instead of bouncing to the platform host
+    (plans/SALES_FUNNELS.md P2b). Each entry points at the base page_id + a `funnel_role` + the offer's
+    sequence/carousel `strategy`; the resolver derives the synthetic funnel artifact (`{page_id}__upsell_N`,
+    `__upsell_carousel`, `__downsell_carousel`, `__thank_you`) from those + the request's funnel_step.
+
+    Only the page at the Site's "/" owns them, and only when the offer actually has a post-purchase funnel
+    (resolvable upsells). `/downsell` gets its own slug ONLY in carousel mode — in sequence mode the downsell is
+    an in-place swap on the upsell page, not a separate artifact. Returns (site, changed)."""
+    page_id = str(page.get("page_id") or "")
+    if str(site_page_slug(site, page_id)) != "/":
+        return site, False
+    plan = post_purchase_plan(offer, products_by_id)
+    upsells = plan.get("upsells") or []
+    strategy = str(plan.get("strategy") or "sequence")
+    desired: dict[str, dict[str, Any]] = {}
+    if upsells:  # a funnel exists only when there are upsells (thank-you is synthesized off them too)
+        desired["/upsell"] = {"page_id": page_id, "page_type": "funnel_step", "funnel_role": "upsell", "strategy": strategy, "enabled": True}
+        if strategy == "carousel" and any(entry.get("downsell") for entry in upsells):
+            desired["/downsell"] = {"page_id": page_id, "page_type": "funnel_step", "funnel_role": "downsell", "strategy": strategy, "enabled": True}
+        desired["/thank-you"] = {"page_id": page_id, "page_type": "thank_you", "funnel_role": "thank_you", "strategy": strategy, "enabled": True}
+    pages = dict(site.get("pages") or {})
+    changed = False
+    for slug, entry in desired.items():
+        if pages.get(slug) != entry:
+            pages[slug] = entry
+            changed = True
+    # Retire any of OUR funnel slugs (identified by funnel_role) no longer desired — e.g. upsells removed, or a
+    # carousel→sequence change that drops /downsell. Never touch a tenant's own same-named page (no funnel_role).
+    for slug in ("/upsell", "/downsell", "/thank-you"):
+        existing = pages.get(slug)
+        if slug not in desired and isinstance(existing, dict) and existing.get("funnel_role"):
+            del pages[slug]
+            changed = True
+    return ({**site, "pages": pages}, True) if changed else (site, False)
+
+
 def resolve_category_grids(page: dict[str, Any], site: dict[str, Any] | None) -> None:
     """Populate a category-driven catalog_grid's items from the Site route map (plans/SITE_OBJECT.md §2.5b
     Slice 2): every landing page whose denormalized `category` matches becomes a card {offer_id, slug}. Runs
@@ -811,8 +851,11 @@ def publish_page_document(
 
     if site and sites_repository is not None and on_custom_domain:
         try:
-            updated_site, changed = attach_context_view_slugs(site, page)
-            if changed:
+            updated_site, changed_ctx = attach_context_view_slugs(site, page)
+            # Post-purchase funnel slugs (/upsell //downsell //thank-you) so the funnel stays on the custom
+            # domain; derived from the offer's plan, retired when the funnel goes away (P2b).
+            updated_site, changed_funnel = attach_funnel_slugs(updated_site, page, offer, products_by_id)
+            if changed_ctx or changed_funnel:
                 validate_site(updated_site)
                 site = sites_repository.put(updated_site)
                 _sync_domain_index(site, domains_index_repository)
