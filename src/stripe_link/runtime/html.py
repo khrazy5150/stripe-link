@@ -4625,8 +4625,11 @@ def render_page_interactions_script(page: dict[str, Any]) -> str:
         # an empty cart, not the just-purchased items. The .catch keeps it on failure (retry still works). The
         # SERVER cart persists — the webhook marks it converted on payment via metadata[cart_id], or it stays
         # open for abandoned-cart recovery.
-        "              .then((r) => r.ok ? r.json() : Promise.reject(r)).then((d) => { if (d && d.url) { try { localStorage.removeItem(idKey); localStorage.removeItem(fallbackKey); } catch (e) {} serverCart = null; window.location.href = d.url; } else { throw new Error('no url'); } })",
-        "              .catch(() => { checkoutBtn.disabled = false; checkoutBtn.textContent = 'Checkout'; });",
+        # Always read the body (empty on parse failure) so a non-2xx carries its reason. A blocked checkout (e.g.
+        # 403 from the publish guard) must SAY why, not fail silently — surface the server's message to the buyer.
+        "              .then((r) => r.json().catch(() => ({})).then((d) => ({ ok: r.ok, d })))",
+        "              .then(({ ok, d }) => { if (!ok) throw new Error((d && d.message) || 'Checkout is unavailable right now.'); if (d && d.url) { try { localStorage.removeItem(idKey); localStorage.removeItem(fallbackKey); } catch (e) {} serverCart = null; window.location.href = d.url; } else { throw new Error('Checkout is unavailable right now.'); } })",
+        "              .catch((err) => { checkoutBtn.disabled = false; checkoutBtn.textContent = 'Checkout'; window.alert(err && err.message ? err.message : 'Checkout is unavailable right now.'); });",
         "          });",
         "          const hydrateFrom = (url) => fetch(url).then((r) => r.ok ? r.json() : Promise.reject(r)).then((d) => { if (d && d.cart) { serverCart = d.cart; if (d.cart.cart_id) setCartId(d.cart.cart_id); } renderMinicart(); }).catch(renderMinicart);",
         "          const existingId = getCartId();",
