@@ -79,6 +79,9 @@
         <h2>{{ site.name }}</h2>
         <div class="button-row">
           <span class="product-status" :class="indexClass(site)">{{ indexLabel(site) }}</span>
+          <button class="secondary-action" type="button" :disabled="copyBusy" @click="copySiteToEnvironment(site)">
+            {{ copyBusy ? "Preparing…" : `Copy to ${targetEnvLabel}` }}
+          </button>
           <button class="secondary-action" type="button" @click="openEdit(site)">Edit</button>
         </div>
       </header>
@@ -398,15 +401,37 @@
         Reactivating <strong>{{ editing?.name }}</strong> restores normal indexing and re-renders its published pages.
       </template>
     </ConfirmDialog>
+
+    <ConfirmDialog
+      :open="!!copyPlan"
+      :danger="!!copyPlan?.existingSite"
+      :title="(copyPlan?.existingSite ? 'Replace in ' : 'Copy to ') + targetEnvLabel + '?'"
+      :confirm-label="copyBusy ? 'Copying…' : ((copyPlan?.existingSite ? 'Replace in ' : 'Copy to ') + targetEnvLabel)"
+      :busy="copyBusy"
+      @cancel="copyPlan = null"
+      @confirm="executeSiteCopy"
+    >
+      <template v-if="copyPlan">
+        Copies <strong>{{ copyPlan.site.name }}</strong> — {{ copyPlan.pages.length }} page{{ copyPlan.pages.length === 1 ? '' : 's' }}, {{ copyPlan.offerDocs.length }} offer{{ copyPlan.offerDocs.length === 1 ? '' : 's' }}, {{ copyPlan.productDocs.length }} product{{ copyPlan.productDocs.length === 1 ? '' : 's' }} — to {{ targetEnvLabel }} (same IDs).
+        <br>The custom domain is <strong>not</strong> copied; the {{ targetEnvLabel }} Site is navigable on its own free platform host.
+        <template v-if="copyPlan.existingSite">
+          <br><strong class="copy-replace-warning">⚠ This overwrites the existing {{ targetEnvLabel }} Site and its pages/catalog, and cannot be undone.</strong>
+        </template>
+        <template v-if="copyPlan.subdomainConflict"><br><strong class="copy-replace-warning">⚠ The subdomain “{{ copyPlan.label }}” is already taken in {{ targetEnvLabel }} by another Site. Rename this Site's store address before copying.</strong></template>
+        <template v-if="copyPlan.hasServices"><br>Note: offers that include services aren't fully copied — set services up in {{ targetEnvLabel }}.</template>
+        <template v-if="copyError"><br><strong class="copy-replace-warning">{{ copyError }}</strong></template>
+      </template>
+    </ConfirmDialog>
   </section>
 </template>
 
 <script setup>
 import { computed, onMounted, reactive, ref, watch } from "vue";
-import { apiRequest, getApiEnvironment } from "../api/client";
+import { apiRequest, getApiEnvironment, getOtherEnvironment } from "../api/client";
 import { useSitesStore, organizationFromBusiness, suggestSubdomain } from "../stores/sites";
 import { useProfileStore } from "../stores/profile";
 import { useSubdomainCheck } from "../composables/useSubdomainCheck";
+import { resolvePageDoc, resolvePageDeps, copyCatalogToEnv, pageForTarget, siteForTarget } from "../composables/environmentCopy";
 import { normalizeE164, phoneError } from "../utils/phone";
 import ConfirmDialog from "./shared/ConfirmDialog.vue";
 
@@ -427,6 +452,84 @@ const editCheck = useSubdomainCheck();
 
 const removeBusy = ref("");
 const removeError = ref("");
+
+// Cross-environment Site copy (plans/PLATFORM_HOSTNAME_SERVING.md P2): clone a whole Site — its pages, their
+// offers + products, and the Site doc itself (route map, org, SEO) — to the opposite environment, same IDs. The
+// custom domain is NOT copied; the target Site is immediately navigable on its own free platform host.
+const targetEnv = computed(() => getOtherEnvironment());
+const targetEnvLabel = computed(() => (targetEnv.value === "live" ? "Live" : "Test"));
+const copyBusy = ref(false);
+const copyError = ref("");
+const copyPlan = ref(null);  // { site, pages:[{page,existingTarget}], offerDocs, productDocs, existingSite, hasServices }
+
+async function copySiteToEnvironment(site) {
+  copyError.value = "";
+  copyBusy.value = true;
+  try {
+    const env = targetEnv.value;
+    const pageIds = [...new Set(Object.values(site.pages || {}).map((e) => e && e.page_id).filter(Boolean))];
+    const pageDocs = (await Promise.all(pageIds.map((id) => resolvePageDoc(id)))).filter(Boolean);
+    // Aggregate the whole catalog across every page, deduped by id.
+    const offerById = new Map();
+    const productById = new Map();
+    let hasServices = false;
+    const pages = [];
+    for (const page of pageDocs) {
+      const deps = await resolvePageDeps(page);
+      deps.offerDocs.forEach((o) => offerById.set(o.offer_id, o));
+      deps.productDocs.forEach((p) => productById.set(p.product_id, p));
+      hasServices = hasServices || deps.hasServices;
+      // Per-page pre-flight so each page keeps the draft-vs-published rule on the target.
+      const existingTarget = await apiRequest(`/pages/${encodeURIComponent(page.page_id)}`, { environment: env })
+        .then((b) => b.page).catch(() => null);
+      pages.push({ page, existingTarget });
+    }
+    const existingSite = await apiRequest(`/sites/${encodeURIComponent(site.site_id)}`, { environment: env })
+      .then((b) => b.site).catch(() => null);
+    // If this Site is new to the target, its platform subdomain must be free there — otherwise the copy would
+    // write the pages/catalog and then fail claiming the label (a different Site already owns it in that env).
+    const label = String(site.hosting?.platform_hostname || "").split(".")[0];
+    let subdomainConflict = false;
+    if (!existingSite && label) {
+      const check = await apiRequest(`/sites/subdomain?name=${encodeURIComponent(label)}`, { environment: env }).catch(() => null);
+      subdomainConflict = !!check && check.available === false;
+    }
+    copyPlan.value = {
+      site, pages, existingSite, hasServices, label, subdomainConflict,
+      offerDocs: [...offerById.values()], productDocs: [...productById.values()],
+    };
+  } catch (err) {
+    copyError.value = err.message || "Couldn't prepare the copy.";
+  } finally {
+    copyBusy.value = false;
+  }
+}
+
+async function executeSiteCopy() {
+  const plan = copyPlan.value;
+  if (!plan) return;
+  if (plan.subdomainConflict) {
+    copyError.value = `The subdomain “${plan.label}” is already taken in ${targetEnvLabel.value}. Rename this Site's store address first.`;
+    return;
+  }
+  const env = targetEnv.value;
+  copyError.value = "";
+  copyBusy.value = true;
+  try {
+    // Bottom-up so references resolve in the target: products -> offers -> pages -> Site.
+    await copyCatalogToEnv(plan.productDocs, plan.offerDocs, env);
+    for (const { page, existingTarget } of plan.pages) {
+      await apiRequest("/pages", { method: "POST", body: pageForTarget(page, existingTarget, env), environment: env });
+    }
+    await apiRequest("/sites", { method: "POST", body: siteForTarget(plan.site, plan.existingSite, env), environment: env });
+    store.message = `Copied “${plan.site.name}” (${plan.pages.length} page${plan.pages.length === 1 ? "" : "s"}) to ${targetEnvLabel.value}.`;
+    copyPlan.value = null;
+  } catch (err) {
+    copyError.value = err.message || "Copy failed partway. Re-run to finish — it's idempotent.";
+  } finally {
+    copyBusy.value = false;
+  }
+}
 
 // A page belongs to at most one Site. For the create form, a page on ANY existing Site is locked.
 // In the Site editor, a page on a DIFFERENT Site is locked (its own pages stay assignable).
@@ -899,6 +1002,9 @@ onMounted(async () => {
 <style scoped>
 /* All colors come from the app's theme tokens (--panel/--bg/--text/--line/--accent), which flip under
    .theme-live for the dark (Live) theme — never hardcode a surface color. */
+.copy-replace-warning {
+  color: var(--danger, #c0392b);
+}
 .homepage-picker {
   display: flex;
   gap: 8px;
