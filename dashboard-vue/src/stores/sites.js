@@ -85,6 +85,15 @@ export const useSitesStore = defineStore("sites", {
     hasSites: (state) => state.sites.length > 0,
   },
   actions: {
+    // Drop cached sites + hosting domain so the next load re-fetches — called on an environment/tenant switch,
+    // otherwise the `loaded` guard keeps the previous env's sites AND its hosting domain (.jbay.uk vs .jbay.be).
+    reset() {
+      this.sites = [];
+      this.loaded = false;
+      this.hostingDomain = "jbay.uk";
+      this.error = "";
+      this.message = "";
+    },
     async ensureLoaded() {
       if (!this.loaded && !this.loading) await this.load();
     },

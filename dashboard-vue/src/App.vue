@@ -200,6 +200,7 @@ import { useCouponsStore } from "./stores/coupons";
 import { useDashboardStore } from "./stores/dashboard";
 import { useNotificationsStore } from "./stores/notifications";
 import { useProductsStore } from "./stores/products";
+import { useSitesStore } from "./stores/sites";
 import { useStripeKeysStore } from "./stores/stripeKeys";
 import { useToastsStore } from "./stores/toasts";
 
@@ -208,6 +209,7 @@ const coupons = useCouponsStore();
 const dashboard = useDashboardStore();
 const notifications = useNotificationsStore();
 const products = useProductsStore();
+const sites = useSitesStore();
 const stripeKeys = useStripeKeysStore();
 const toasts = useToastsStore();
 
@@ -270,6 +272,7 @@ async function reloadActiveView() {
   dashboard.reset();
   coupons.reset();
   products.reset();
+  sites.reset();  // drop the previous env's sites + hosting domain (.jbay.uk vs .jbay.be) so they repaint
   stripeKeys.resetForCurrentTenant();
   notifications.reset();
   // Never let one failing/slow fetch abort the whole refresh (a thrown load left the view showing the
@@ -280,6 +283,7 @@ async function reloadActiveView() {
   else if (activeView.value === "products") await safe(products.load());
   else if (activeView.value === "coupons") await safe(coupons.load({ status: "all" }));
   else if (activeView.value === "stripeKeys") await safe(stripeKeys.load());
+  else if (activeView.value === "sites") await safe(sites.load());  // repaints the env's hosting domain immediately
 }
 
 function openNotifications() {
