@@ -102,7 +102,7 @@
               <div v-if="!editing.members.length" class="product-empty-state compact">No pages yet — add one below.</div>
               <ol v-else class="member-list">
                 <li v-for="(pid, i) in editing.members" :key="pid" class="member-row">
-                  <span class="member-name">{{ pageName(pid) }}<em>/{{ pageSlug(pid) }}</em></span>
+                  <span class="member-name">{{ pageName(pid) }}<em>/{{ pageSlug(pid) }} · <span class="page-picker-id">{{ pid }}</span></em></span>
                   <span class="member-controls">
                     <button type="button" class="icon-btn" :disabled="i === 0" title="Move up" @click="moveMember(i, -1)">↑</button>
                     <button type="button" class="icon-btn" :disabled="i === editing.members.length - 1" title="Move down" @click="moveMember(i, 1)">↓</button>
@@ -115,7 +115,7 @@
               <span>Add a page</span>
               <select :value="''" @change="addMember($event.target.value)">
                 <option value="">{{ addablePages.length ? "Choose a page to add…" : "No more pages on this Site" }}</option>
-                <option v-for="p in addablePages" :key="p.page_id" :value="p.page_id">{{ p.name || p.page_id }} /{{ p.route?.slug || '' }}</option>
+                <option v-for="p in addablePages" :key="p.page_id" :value="p.page_id">{{ p.name || p.page_id }} · /{{ p.route?.slug || '' }} · {{ p.page_id }}{{ p.status !== 'published' ? ' · draft' : '' }}</option>
               </select>
               <small v-if="!editing.site_id" class="field-note">Pick a Site first to choose its pages.</small>
             </label>

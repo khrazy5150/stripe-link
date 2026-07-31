@@ -5231,6 +5231,27 @@ button:disabled {
   font-size: 1.2rem;
 }
 
+/* Disambiguators in page pickers — the page_id (the true unique key) + a draft marker, so two
+   identically-named pages with near-identical slugs are tellable apart. */
+.page-picker-id {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.95em;
+  opacity: 0.85;
+}
+
+.page-picker-draft {
+  margin-left: 0.5rem;
+  padding: 0.05rem 0.4rem;
+  border-radius: 0.4rem;
+  background: var(--line);
+  color: var(--muted);
+  font-size: 1rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  vertical-align: middle;
+}
+
 .wizard-goal-card {
   position: relative;
   display: grid;

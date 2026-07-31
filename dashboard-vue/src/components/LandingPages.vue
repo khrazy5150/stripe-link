@@ -402,8 +402,8 @@
                   <div v-if="storefrontCandidatePages.length" class="storefront-page-picker">
                     <label v-for="page in storefrontCandidatePages" :key="page.page_id" class="storefront-page-option">
                       <input type="checkbox" :value="page.page_id" v-model="form.storefront.items" />
-                      <span>{{ page.name || page.page_id }}</span>
-                      <em>/{{ page.route?.slug || '' }}</em>
+                      <span>{{ page.name || page.page_id }}<span v-if="page.status !== 'published'" class="page-picker-draft">draft</span></span>
+                      <em>/{{ page.route?.slug || '' }} · <span class="page-picker-id">{{ page.page_id }}</span></em>
                     </label>
                   </div>
                   <small v-else>No products on this Site yet — attach an offer page to this Site (or turn on “Show all my products”). Only products on this Site can appear in the grid, so their cards link to real store pages.</small>
