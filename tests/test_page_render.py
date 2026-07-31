@@ -1080,3 +1080,36 @@ class BrandHeroLogoTests(unittest.TestCase):
         self.assertIn("sl-brand-logo sl-brand-logo-faux", html)
         self.assertIn("<svg", html)
         self.assertNotIn("<img", html)
+
+
+class BnplMessagingRenderTests(unittest.TestCase):
+    """On-page Stripe Payment Method Messaging Element below the price (plans/BNPL_PAYMENT_METHODS.md P3)."""
+
+    def setUp(self):
+        self.page = load_fixture("page-creatine-standard.json")
+        self.offer = load_fixture("offer-creatine-standard.json")
+        self.product = load_fixture("product-creatine-gummies.json")
+        self.products_by_id = {self.product["product_id"]: self.product}
+        self.msg = {"publishable_key": "pk_test_abc", "payment_method_types": ["klarna", "affirm"], "country": "US"}
+
+    def test_messaging_element_rendered_with_config(self):
+        html = render_page(self.page, self.offer, self.products_by_id, bnpl_messaging=self.msg)
+        self.assertIn('id="sl-bnpl-message"', html)                       # the mount div, below the price
+        self.assertIn("https://js.stripe.com/v3/", html)                 # Stripe.js loaded
+        self.assertIn('Stripe("pk_test_abc")', html)                     # tenant publishable key
+        self.assertIn("paymentMethodMessaging", html)                    # the messaging element
+        self.assertIn('paymentMethodTypes: ["klarna", "affirm"]', html)  # enabled+supported methods
+        self.assertIn('opts.countryCode = "US"', html)                   # account country
+        self.assertIn("amount: 6700", html)                              # resolved default subtotal ($67.00)
+        self.assertIn('currency: "USD"', html)
+
+    def test_no_messaging_without_config(self):
+        html = render_page(self.page, self.offer, self.products_by_id)
+        self.assertNotIn('id="sl-bnpl-message"', html)   # the .sl-bnpl-message CSS rule is always present; the div is not
+        self.assertNotIn("js.stripe.com", html)
+
+    def test_no_messaging_when_no_methods(self):
+        html = render_page(self.page, self.offer, self.products_by_id,
+                           bnpl_messaging={"publishable_key": "pk_test", "payment_method_types": []})
+        self.assertNotIn('id="sl-bnpl-message"', html)
+        self.assertNotIn("js.stripe.com", html)

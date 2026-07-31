@@ -88,6 +88,11 @@ def _read(tenant_id, mode, stripe_repo, stripe_caller, platform_key_loader):
             "countries": sorted(spec["countries"]),
         })
 
+    # Cache the account country so publish-time on-page BNPL messaging can set the element's countryCode without
+    # a live Stripe call (plans/BNPL_PAYMENT_METHODS.md P3).
+    if account_country and (keys.get("payment_methods") or {}).get("account_country") != account_country:
+        keys.setdefault("payment_methods", {})["account_country"] = account_country
+        changed = True
     if changed:
         keys.setdefault("payment_methods", {})["bnpl"] = stored
         _persist(keys, stripe_repo)

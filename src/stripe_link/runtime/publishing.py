@@ -22,6 +22,7 @@ from stripe_link.domain.documents import (
     validate_site,
 )
 from stripe_link.runtime.artifacts import artifact_paths, cloudfront_path
+from stripe_link.domain.bnpl import messaging_method_types
 from stripe_link.domain.connect_sync import site_domain_verified, site_seo_enabled
 from stripe_link.domain.custom_domains import domain_index_record, platform_domain_index_record
 from stripe_link.domain.funnels import funnel_slug_entries, post_purchase_plan
@@ -879,6 +880,29 @@ def _prune_unrenderable_landing_items(offer: dict[str, Any], products_by_id: dic
     return pruned
 
 
+def _bnpl_messaging_config(stripe_keys_repository: Any, tenant_id: str, offer: dict[str, Any]) -> dict[str, Any] | None:
+    """On-page BNPL messaging config from the tenant's stripe_keys for the offer's Stripe mode (P3,
+    plans/BNPL_PAYMENT_METHODS.md): {publishable_key, payment_method_types, country}, or None when there's no
+    publishable key or no enabled+active installment method. The renderer fills amount/currency from the resolved
+    offer. Best-effort — a lookup failure just omits the messaging, never blocks the publish."""
+    if stripe_keys_repository is None or not (offer or {}).get("offer_id"):
+        return None
+    try:
+        mode = "live" if str(offer.get("stripe_mode") or "").strip().lower() == "live" else "test"
+        keys = stripe_keys_repository.get(tenant_id, mode=mode) or {}
+        publishable_key = str(keys.get("publishable_key") or "").strip()
+        types = messaging_method_types((keys.get("payment_methods") or {}).get("bnpl"))
+        if not publishable_key or not types:
+            return None
+        return {
+            "publishable_key": publishable_key,
+            "payment_method_types": types,
+            "country": str((keys.get("payment_methods") or {}).get("account_country") or ""),
+        }
+    except Exception:  # noqa: BLE001 — messaging is an enhancement; never fail a publish on it
+        return None
+
+
 def publish_page_document(
     page: dict[str, Any],
     *,
@@ -890,6 +914,7 @@ def publish_page_document(
     domains_index_repository: Any | None = None,
     reviews_repository: Any | None = None,
     collections_repository: Any | None = None,
+    stripe_keys_repository: Any | None = None,
     s3_client: Any,
     pages_bucket: str,
     preview_bucket: str,
@@ -1013,11 +1038,14 @@ def publish_page_document(
 
     page_reviews = load_page_reviews(reviews_repository, tenant_id, products_by_id, str((site or {}).get("site_id") or ""))
 
+    bnpl_messaging = _bnpl_messaging_config(stripe_keys_repository, tenant_id, offer)
+
     def _render(robots: str) -> str:
         return render_page(
             page, offer, products_by_id, checkout_url=checkout, api_base_url=api_base_url,
             services_by_id=services_by_id, offers_by_id=offers_by_id, canonical_url=page_canonical,
             robots=robots, site=site, page_type=page_type, reviews=page_reviews, home_url=page_home_url,
+            bnpl_messaging=bnpl_messaging,
         )
 
     artifacts = []
@@ -1062,7 +1090,7 @@ def publish_page_document(
             page, offer, products_by_id, checkout_url=checkout, api_base_url=api_base_url,
             services_by_id=services_by_id, offers_by_id=offers_by_id, canonical_url=page_canonical,
             robots=NOINDEX_ROBOTS, site=site, page_type=page_type, reviews=page_reviews, price_context=ctx,
-            home_url=page_home_url,
+            home_url=page_home_url, bnpl_messaging=bnpl_messaging,
         )
         if preview_bucket:
             pv_key = artifact_paths(tenant_id, page_id, context=ctx)["preview"]

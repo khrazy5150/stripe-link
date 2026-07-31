@@ -1408,3 +1408,49 @@ class FunnelPublishIntegrationTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class _FakeKeysRepo:
+    def __init__(self, doc):
+        self.doc = doc
+    def get(self, tenant_id, mode="test"):
+        return dict(self.doc) if self.doc else None
+
+
+class BnplPublishMessagingTests(unittest.TestCase):
+    """publish_page_document injects the on-page BNPL messaging when the tenant has installments enabled
+    (plans/BNPL_PAYMENT_METHODS.md P3)."""
+
+    def setUp(self):
+        self.offer = load_fixture("offer-simple-coffee.json")
+        self.product = load_fixture("product-simple-coffee.json")
+        self.page = load_fixture("page-simple-coffee.json")
+        self.page["status"] = "published"
+        self.offers_repo = FakeRepository("offer_id", [self.offer])
+        self.products_repo = FakeRepository("product_id", [self.product])
+        self.s3 = FakeS3Client()
+
+    def _publish(self, keys_repo=None):
+        publish_page_document(
+            self.page, offers_repository=self.offers_repo, products_repository=self.products_repo,
+            stripe_keys_repository=keys_repo, s3_client=self.s3, pages_bucket="pages", preview_bucket="preview",
+            environment="prod", pages_domain="pages.example.com", preview_domain="preview.example.com")
+        return [p for p in self.s3.puts if "preview/" not in p["Key"]][0]["Body"].decode()
+
+    def test_messaging_injected_when_enabled(self):
+        keys = {"tenant_id": self.offer["tenant_id"], "mode": "test", "publishable_key": "pk_test_x",
+                "payment_methods": {"account_country": "US",
+                                    "bnpl": {"klarna": {"enabled": True, "capability_status": "active"}}}}
+        published = self._publish(_FakeKeysRepo(keys))
+        self.assertIn("js.stripe.com", published)
+        self.assertIn('Stripe("pk_test_x")', published)
+        self.assertIn('paymentMethodTypes: ["klarna"]', published)
+        self.assertIn('id="sl-bnpl-message"', published)
+
+    def test_no_messaging_when_disabled(self):
+        keys = {"tenant_id": self.offer["tenant_id"], "mode": "test", "publishable_key": "pk_test_x",
+                "payment_methods": {"bnpl": {"klarna": {"enabled": False, "capability_status": "active"}}}}
+        self.assertNotIn("js.stripe.com", self._publish(_FakeKeysRepo(keys)))
+
+    def test_no_messaging_without_keys_repo(self):
+        self.assertNotIn("js.stripe.com", self._publish(None))

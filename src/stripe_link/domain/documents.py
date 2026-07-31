@@ -1317,6 +1317,7 @@ def validate_stripe_keys_document(document: dict[str, Any]) -> None:
     if payment_methods is not None:
         if not isinstance(payment_methods, dict):
             raise DocumentValidationError("Stripe keys payment_methods must be an object.")
+        optional_string(payment_methods, "account_country", "payment_methods.account_country", max_length=2)
         bnpl = payment_methods.get("bnpl")
         if bnpl is not None:
             if not isinstance(bnpl, dict):

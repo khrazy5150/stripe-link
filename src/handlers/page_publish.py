@@ -15,6 +15,7 @@ from stripe_link.repositories.documents import (
     routes_repository,
     services_repository,
     sites_repository,
+    stripe_keys_repository,
 )
 from stripe_link.runtime.publishing import (
     delete_page_artifacts,
@@ -64,12 +65,13 @@ def should_publish_record(record: dict[str, Any]) -> bool:
     return bool(image)
 
 
-def handler(event, context, *, offers_repo=None, products_repo=None, services_repo=None, sites_repo=None, pages_repo=None, domains_index_repo=None, reviews_repo=None, collections_repo=None, routes_repo=None, s3_client=None, cloudfront_client=None):
+def handler(event, context, *, offers_repo=None, products_repo=None, services_repo=None, sites_repo=None, pages_repo=None, domains_index_repo=None, reviews_repo=None, collections_repo=None, routes_repo=None, stripe_keys_repo=None, s3_client=None, cloudfront_client=None):
     offers_repo = offers_repo or offers_repository()
     products_repo = products_repo or products_repository()
     services_repo = services_repo or (services_repository() if os.environ.get("SERVICES_TABLE") else None)
     sites_repo = sites_repo or (sites_repository() if os.environ.get("SITES_TABLE") else None)
     pages_repo = pages_repo or (pages_repository() if os.environ.get("PAGES_TABLE") else None)
+    stripe_keys_repo = stripe_keys_repo or (stripe_keys_repository() if os.environ.get("STRIPE_KEYS_TABLE_DEV") else None)
     domains_index_repo = domains_index_repo or (custom_domains_index_repository() if os.environ.get("CUSTOM_DOMAINS_TABLE") else None)
     reviews_repo = reviews_repo or (reviews_repository() if os.environ.get("REVIEWS_TABLE") else None)
     collections_repo = collections_repo or (collections_repository() if os.environ.get("COLLECTIONS_TABLE") else None)
@@ -136,6 +138,7 @@ def handler(event, context, *, offers_repo=None, products_repo=None, services_re
                 sites_repository=sites_repo,
                 pages_repository=pages_repo,
                 collections_repository=collections_repo,
+                stripe_keys_repository=stripe_keys_repo,
                 domains_index_repository=domains_index_repo,
                 reviews_repository=reviews_repo,
                 s3_client=s3_client,

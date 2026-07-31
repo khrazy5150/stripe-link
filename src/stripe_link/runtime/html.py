@@ -469,6 +469,7 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     "    .sl-trust-badges{display:flex;flex-wrap:wrap;gap:0.8rem;justify-content:center}",
     "    .sl-trust-badge{display:flex;align-items:center;gap:0.6rem;border:1px solid var(--sl-trust-badge-border);background:var(--sl-trust-badge-bg);color:var(--sl-trust-badge-text);border-radius:999px;padding:0.8rem 1.4rem;font-family:var(--sl-font-accent);font-size:1.2rem;font-weight:800}",
     "    .sl-price-options{display:grid;grid-template-columns:1fr;gap:1.4rem;width:100%;margin:0 auto}",
+    "    .sl-bnpl-message{margin:1rem auto 0;width:min(42rem,100%);min-height:1.2rem}",
     "    .sl-price-option{position:relative;display:grid;grid-template-columns:9rem minmax(0,1fr) 2.2rem;gap:1.4rem;align-items:center;border:2px solid var(--sl-price-card-border);border-radius:var(--sl-radius);padding:1.6rem 2rem;background:var(--sl-price-card-bg)}",
     "    .sl-price-option.selected{border-color:var(--sl-price-card-selected-border);box-shadow:0 0 0 3px color-mix(in srgb,var(--sl-price-card-selected-border) 13%,transparent)}",
     "    .sl-price-option input{width:2.2rem;height:2.2rem;accent-color:var(--sl-price-radio)}",
@@ -1143,6 +1144,11 @@ _RENDER_STATE: dict[str, str] = {"canonical": "", "robots": "noindex,nofollow", 
 # the brand shown in the title suffix / og:site_name when the offer names no brand. Render-scoped like
 # _RENDER_STATE; empty when the page has no Site yet (graceful — the renderer falls back to the offer brand).
 _RENDER_ORG: dict[str, Any] = {}
+# On-page BNPL messaging config for this render (plans/BNPL_PAYMENT_METHODS.md P3): {publishable_key,
+# payment_method_types, country} threaded from publish (the tenant's stripe_keys), plus amount/currency the
+# renderer fills from the resolved offer. Drives Stripe's Payment Method Messaging Element below the price.
+# Render-scoped like _RENDER_ORG; empty when the tenant has no enabled installment methods / no publishable key.
+_RENDER_BNPL: dict[str, Any] = {}
 # The Site's SEO config for this render (plans/SITE_OBJECT.md §2.4): webmaster-verification tokens (SEO-16),
 # title suffix, default OG image. Render-scoped like _RENDER_ORG; empty when the page has no Site.
 _RENDER_SEO: dict[str, Any] = {}
@@ -1276,6 +1282,7 @@ def render_page(
     reviews: list[dict[str, Any]] | None = None,
     price_context: str = "standard",
     home_url: str | None = None,
+    bnpl_messaging: dict[str, Any] | None = None,
 ) -> str:
     services_by_id = services_by_id or {}
     offers_by_id = offers_by_id or {str(offer.get("offer_id") or ""): offer}
@@ -1329,6 +1336,9 @@ def render_page(
     if active_context not in ("sale", "flash_sale") or not _offer_has_price_context(offer, products_by_id, active_context):
         active_context = "standard"
     _RENDER_STATE["active_price_context"] = active_context
+    _RENDER_BNPL.clear()
+    if bnpl_messaging and bnpl_messaging.get("publishable_key") and bnpl_messaging.get("payment_method_types"):
+        _RENDER_BNPL.update(bnpl_messaging)   # amount/currency get filled from the resolved offer in the body
     # The Site's menus, resolved to {label, url} against the home host (SEO-13). Only meaningful where the
     # slugs resolve (verified custom domain) and never on a post-checkout page (a nav would leak the buyer out).
     _RENDER_NAV["primary"], _RENDER_NAV["footer"] = [], []
@@ -1359,6 +1369,7 @@ def render_page(
         _RENDER_STATE["home_url"] = ""
         _RENDER_STATE["page_type"] = ""
         _RENDER_STATE["active_price_context"] = "standard"
+        _RENDER_BNPL.clear()
         _RENDER_NAV["primary"], _RENDER_NAV["footer"] = [], []
         _RENDER_CATEGORY_PAGES.clear()
         _RENDER_REVIEWS.clear()
@@ -1409,6 +1420,11 @@ def _render_page_body(
         landing_page_selected_prices(offer, products_by_id, selected_prices),
         services_by_id=services_by_id,
     ) if offer else {}
+    # On-page BNPL messaging (P3): fill the displayed amount/currency from the resolved offer so Stripe's
+    # Payment Method Messaging Element below the price shows "As low as N payments of $X" for the right total.
+    if _RENDER_BNPL.get("publishable_key") and resolved_offer:
+        _RENDER_BNPL["amount"] = int(resolved_offer.get("subtotal") or 0)
+        _RENDER_BNPL["currency"] = str(resolved_offer.get("currency") or "usd")
     # The <head> title/description are derived here so they are correct regardless of what a page stored
     # (plans/ON_PAGE_SEO_REQUIREMENTS.md SEO-03/04). Never page.name/offer.name (the internal "… Single
     # Offer" label). The title is NOT re-title-cased — it preserves the product name verbatim so <title>,
@@ -1487,6 +1503,7 @@ def _render_page_body(
         minicart,
         render_price_context_script(),
         conversion_data,
+        *render_bnpl_messaging_scripts(),
         "</body>",
         "</html>",
     ] if part != "")
@@ -2306,13 +2323,54 @@ def render_offer_price_selector(
             raise RenderError(f"Product '{product_id}' was not provided for offer '{offer.get('offer_id', '')}'.")
         item_cards, display_index = _item_price_option_cards(item, product, offer, display_index)
         cards.extend(item_cards)
-    return "\n".join([
+    return "\n".join(part for part in [
         "    <section class=\"sl-price-selector\" data-section-type=\"offer_price_selector\">",
         "      <div class=\"sl-price-options\">",
         *(card for _, card in sorted(cards, key=lambda item: item[0])),
         "      </div>",
+        render_bnpl_messaging_div(),
         "    </section>",
-    ])
+    ] if part != "")
+
+
+def render_bnpl_messaging_div() -> str:
+    """Mount point for Stripe's Payment Method Messaging Element, placed below the price stack (P3,
+    plans/BNPL_PAYMENT_METHODS.md). Empty unless the render state carries a publishable key + a displayed amount
+    + supported methods; sets `_active` so render_bnpl_messaging_scripts emits the matching Stripe.js init."""
+    if not (_RENDER_BNPL.get("publishable_key")
+            and int(_RENDER_BNPL.get("amount") or 0) > 0
+            and _RENDER_BNPL.get("payment_method_types")):
+        return ""
+    _RENDER_BNPL["_active"] = True
+    return "      <div class=\"sl-bnpl-message\" id=\"sl-bnpl-message\"></div>"
+
+
+def render_bnpl_messaging_scripts() -> list[str]:
+    """Stripe.js + the inline init for the Payment Method Messaging Element, emitted at the end of <body> only
+    when the messaging div was rendered. Keeps hosted Checkout — this is a messaging widget, not Elements
+    checkout. Fails silent (try/catch) so a Stripe.js hiccup never breaks the page."""
+    if not _RENDER_BNPL.get("_active"):
+        return []
+    pk = json.dumps(str(_RENDER_BNPL.get("publishable_key") or ""))
+    amount = int(_RENDER_BNPL.get("amount") or 0)
+    currency = json.dumps(str(_RENDER_BNPL.get("currency") or "usd").upper())
+    methods = json.dumps(list(_RENDER_BNPL.get("payment_method_types") or []))
+    country = str(_RENDER_BNPL.get("country") or "").strip().upper()
+    return [
+        "  <script src=\"https://js.stripe.com/v3/\"></script>",
+        "  <script>",
+        "  (function(){",
+        "    var el = document.getElementById('sl-bnpl-message');",
+        "    if (!el || !window.Stripe) return;",
+        "    try {",
+        f"      var stripe = Stripe({pk});",
+        f"      var opts = {{ amount: {amount}, currency: {currency}, paymentMethodTypes: {methods} }};",
+        (f"      opts.countryCode = {json.dumps(country)};" if country else ""),
+        "      stripe.elements().create('paymentMethodMessaging', opts).mount('#sl-bnpl-message');",
+        "    } catch (e) {}",
+        "  })();",
+        "  </script>",
+    ]
 
 
 def is_landing_page_price(price: dict[str, Any]) -> bool:

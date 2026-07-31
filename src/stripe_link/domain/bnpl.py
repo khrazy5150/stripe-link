@@ -48,6 +48,10 @@ BNPL_METHODS: dict[str, dict[str, Any]] = {
 # The capability states Stripe returns (Account.capabilities values).
 CAPABILITY_STATUSES = {"active", "pending", "inactive", "unrequested"}
 
+# Stripe's Payment Method Messaging Element ("As low as 4 payments of $X") supports these (Zip is not supported
+# by the messaging element) — used for the on-page BNPL messaging (plans/BNPL_PAYMENT_METHODS.md P3).
+MESSAGING_METHODS = {"klarna", "afterpay_clearpay", "affirm"}
+
 
 def is_valid_method(method: str) -> bool:
     return method in BNPL_METHODS
@@ -77,5 +81,21 @@ def checkout_payment_method_types(bnpl_config: dict[str, Any] | None, currency: 
         if (entry.get("enabled")
                 and entry.get("capability_status") == "active"
                 and currency_eligible(method, currency)):
+            out.append(spec["payment_method_type"])
+    return out
+
+
+def messaging_method_types(bnpl_config: dict[str, Any] | None) -> list[str]:
+    """Stripe `payment_method_type` strings for the on-page Payment Method Messaging Element — the tenant's
+    ENABLED + capability-ACTIVE methods that the messaging element supports (Klarna/Afterpay/Affirm; not Zip).
+    No currency gate here — the messaging element itself filters plans by amount/currency/buyer. Empty → render
+    no messaging."""
+    config = bnpl_config or {}
+    out: list[str] = []
+    for method, spec in BNPL_METHODS.items():
+        if method not in MESSAGING_METHODS:
+            continue
+        entry = config.get(method) or {}
+        if entry.get("enabled") and entry.get("capability_status") == "active":
             out.append(spec["payment_method_type"])
     return out

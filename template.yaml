@@ -1476,6 +1476,12 @@ Resources:
         # (plans/SITE_COLLECTIONS.md P1) — read-only.
         - DynamoDBReadPolicy:
             TableName: !Ref CollectionsTable
+        # On-page BNPL messaging (plans/BNPL_PAYMENT_METHODS.md P3) reads the tenant's publishable key + enabled
+        # installment methods from the stripe_keys doc at publish — read-only.
+        - DynamoDBReadPolicy:
+            TableName: !Sub "${ProjectPrefix}-stripe-keys-dev"
+        - DynamoDBReadPolicy:
+            TableName: !Sub "${ProjectPrefix}-stripe-keys-prod"
         # Publishing a page that embeds a manual collection auto-publishes its selected draft members
         # (plans/SITE_COLLECTIONS.md) — needs to READ the members and WRITE their published status back. The
         # handler otherwise gets pages only from the stream, so this is the only direct PagesTable access.
