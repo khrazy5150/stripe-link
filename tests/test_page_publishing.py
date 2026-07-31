@@ -1132,15 +1132,15 @@ class CascadePublishDraftMembersTests(unittest.TestCase):
         # ...and THIS render already links its card (offer_id was denormalized onto the in-memory Site first).
         self.assertIn('href="/coffee"', published)
 
-    def test_deliberately_unpublished_member_is_not_resurrected(self):
-        # A member with a prior published_at was unpublished on purpose — publishing the storefront must NOT
-        # bring it back.
+    def test_once_published_since_unpublished_member_is_republished(self):
+        # A member that was live before and is now a draft (unpublished to edit, then forgot to re-publish) IS
+        # brought back — the tenant shouldn't have to remember which pages were once published.
         pages = FakeDocumentRepository("page_id")
         pages.put(self._member(status="draft", published_at=1700000000))
         sites = FakeSitesRepository([self._site()])
         published = self._publish(pages, sites)
-        self.assertEqual(pages.get(self.tenant, "page_coffee")["status"], "draft")  # left alone
-        self.assertNotIn('href="/coffee"', published)  # still dropped from the grid
+        self.assertEqual(pages.get(self.tenant, "page_coffee")["status"], "published")  # republished
+        self.assertIn('href="/coffee"', published)  # and back in the grid
 
     def test_already_published_member_untouched_so_cascade_terminates(self):
         # An already-live member produces no write — this is what stops the member's own publish stream from

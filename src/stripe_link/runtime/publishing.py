@@ -457,10 +457,11 @@ def cascade_publish_collection_drafts(page: dict[str, Any], collections_by_id: d
     published (its own PagesTable write re-enters the publish stream and renders its artifact) and denormalize its
     offer_id onto the in-memory Site route entry, so THIS page's grid includes it in the current render.
 
-    Only members that have NEVER been published (no `published_at`) are touched — a page the tenant deliberately
-    unpublished keeps its `published_at`, so it is left alone (no surprise resurrection). Best-effort per member;
-    a bad member never blocks the parent publish. Returns {"published": [page_id...], "site_changed": bool}.
-    Terminates: an already-published member is skipped, so the member's own publish stream produces no re-cascade."""
+    EVERY draft member is published, regardless of whether it was live before: published pages can't be edited, so
+    a tenant unpublishes → edits → previews → routinely forgets to re-publish; asking them to remember which pages
+    were once live isn't reasonable. Archived members are left alone. Best-effort per member; a bad member never
+    blocks the parent publish. Returns {"published": [page_id...], "site_changed": bool}. Terminates: an
+    already-published member produces no write, so the member's own publish stream can't re-cascade."""
     published: list[str] = []
     site_changed = False
     if not pages_repository:
@@ -485,9 +486,9 @@ def cascade_publish_collection_drafts(page: dict[str, Any], collections_by_id: d
             member = pages_repository.get(tenant_id, pid)
         except Exception:  # noqa: BLE001 — one unreadable member must not block the parent publish
             member = None
-        # Only NEVER-published drafts: skip already-live members and any page the tenant deliberately unpublished
-        # (which keeps its published_at).
-        if not member or member.get("status") != "draft" or member.get("published_at"):
+        # Publish any draft member (skip already-live members — that's also what terminates the cascade — and
+        # archived ones). A once-published, since-unpublished member IS republished: the tenant likely just forgot.
+        if not member or member.get("status") != "draft":
             continue
         member["status"] = "published"
         member["published_at"] = now
