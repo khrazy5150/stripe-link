@@ -1437,6 +1437,11 @@ Resources:
         # (plans/SITE_COLLECTIONS.md P1) — read-only.
         - DynamoDBReadPolicy:
             TableName: !Ref CollectionsTable
+        # Publishing a page that embeds a manual collection auto-publishes its selected draft members
+        # (plans/SITE_COLLECTIONS.md) — needs to READ the members and WRITE their published status back. The
+        # handler otherwise gets pages only from the stream, so this is the only direct PagesTable access.
+        - DynamoDBCrudPolicy:
+            TableName: !Ref PagesTable
         - S3CrudPolicy:
             BucketName: !Ref PagesBucket
         - S3CrudPolicy:

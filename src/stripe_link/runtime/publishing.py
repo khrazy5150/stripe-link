@@ -1,7 +1,10 @@
 import copy
 import json
+import logging
 import os
 import time
+
+logger = logging.getLogger(__name__)
 from typing import Any
 
 from stripe_link.domain.documents import (
@@ -485,6 +488,7 @@ def cascade_publish_collection_drafts(page: dict[str, Any], collections_by_id: d
         try:
             member = pages_repository.get(tenant_id, pid)
         except Exception:  # noqa: BLE001 — one unreadable member must not block the parent publish
+            logger.warning("cascade: could not read collection member %s", pid, exc_info=True)
             member = None
         # Publish any draft member (skip already-live members — that's also what terminates the cascade — and
         # archived ones). A once-published, since-unpublished member IS republished: the tenant likely just forgot.
@@ -496,6 +500,7 @@ def cascade_publish_collection_drafts(page: dict[str, Any], collections_by_id: d
         try:
             pages_repository.put(member)
         except Exception:  # noqa: BLE001
+            logger.warning("cascade: could not publish draft member %s", pid, exc_info=True)
             continue
         published.append(pid)
         # Reflect the member on the in-memory Site map so THIS render's grid links it now (its own stream will
