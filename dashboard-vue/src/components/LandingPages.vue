@@ -2719,6 +2719,7 @@ async function createStorefront() {
     const body = await apiRequest("/pages", { method: "POST", body: document });
     const saved = body.page || document;
     pages.value = [saved, ...pages.value.filter((p) => p.page_id !== saved.page_id)];
+    await reflectCascadedMembers(saved);  // editing a published storefront re-publishes it → reflect the cascade
     const attached = isEditingOfferless.value || (await attachCreatedPageToSite(saved, selectedSiteId.value, "storefront"));
     message.value = isEditingOfferless.value
       ? "Storefront homepage saved."
@@ -3843,6 +3844,27 @@ async function executeCopy() {
   }
 }
 
+// When the dashboard publishes a page that embeds a manual collection, the server auto-publishes that collection's
+// draft members (the cascade in runtime/publishing.py). That runs asynchronously via the publish stream, so those
+// members keep showing DRAFT in this list until a manual reload. Reflect it optimistically — mark the collection's
+// draft members published locally now. A reload reconciles from the server (the source of truth); this only clears
+// the transient stale badge, mirroring the cascade's deterministic rule (manual collection → its draft members).
+async function reflectCascadedMembers(savedPage) {
+  if (!savedPage || savedPage.status !== "published") return;
+  const memberIds = new Set();
+  for (const section of savedPage.sections || []) {
+    if (section?.type !== "catalog_grid" || !section.collection_id) continue;
+    const collection = await collectionsStore.get(section.collection_id).catch(() => null);
+    if (collection?.rule === "manual") (collection.members || []).forEach((id) => memberIds.add(String(id)));
+  }
+  if (!memberIds.size) return;
+  const now = Math.floor(Date.now() / 1000);
+  pages.value = pages.value.map((p) =>
+    memberIds.has(p.page_id) && p.status === "draft"
+      ? { ...p, status: "published", published_at: p.published_at || now }
+      : p);
+}
+
 async function publishPage(page) {
   openMenuId.value = "";
   const publishedPage = applyPageStatus(page, "published");
@@ -3853,6 +3875,7 @@ async function publishPage(page) {
     const body = await apiRequest("/pages", { method: "POST", body: publishedPage });
     const saved = body.page || publishedPage;
     pages.value = pages.value.map((item) => item.page_id === saved.page_id ? saved : item);
+    await reflectCascadedMembers(saved);  // reflect the server-side draft-member cascade in the list badges
     message.value = `${saved.name || "Landing page"} was published.`;
   } catch (err) {
     error.value = err.message || "Failed to publish landing page.";
