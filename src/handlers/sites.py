@@ -292,9 +292,29 @@ def attach_page(event, repository, site_id):
         category=str(body.get("category") or "").strip() or None,
         label=str(body.get("label") or "").strip() or None,
     )
+    _record_offer_link_on_attach(pages, page_id, tenant_id)
     site["pages"] = pages
     saved, error = _save_site_pages(repository, site)
     return error or json_response({"site": saved})
+
+
+def _record_offer_link_on_attach(pages: dict, page_id: str, tenant_id: str) -> None:
+    """Record a just-attached PUBLISHED offer page's offer_id on its route-map entry immediately, so it's
+    eligible for storefront grids without waiting for a re-publish. (Publishing denormalizes the same link via
+    _denormalize_page_catalog; this makes attach-a-product-then-see-it-in-the-store work in one step. Only
+    published pages qualify — a draft has no live artifact to link to.) Best-effort: never block the attach."""
+    try:
+        page = pages_repository().get(tenant_id, page_id)
+    except Exception:  # noqa: BLE001 - a lookup failure just defers the link to the next publish
+        return
+    if not page or page.get("status") != "published":
+        return
+    offer_id = str(page.get("offer_id") or "")
+    if not offer_id:
+        return
+    for entry in pages.values():
+        if isinstance(entry, dict) and entry.get("page_id") == page_id:
+            entry["offer_id"] = offer_id
 
 
 def detach_page(event, repository, site_id):

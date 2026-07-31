@@ -50,6 +50,36 @@ class SitesHandlerTests(unittest.TestCase):
         self.assertEqual(resp["statusCode"], 400)
         self.assertEqual(json.loads(resp["body"])["error"], "reserved_slug")
 
+    def _attach(self, site_id, page_id, slug):
+        return handler({
+            "httpMethod": "POST", "resource": "/sites/{site_id}/pages",
+            "pathParameters": {"site_id": site_id},
+            "body": json.dumps({"tenant_id": "tenant_demo", "page_id": page_id, "slug": slug}),
+        }, None, repository=self.repo, registry=self.registry)
+
+    def test_attach_published_offer_page_records_offer_link(self):
+        # Attaching a PUBLISHED offer page records its offer_id on the entry right away, so it's storefront-grid
+        # eligible without a re-publish (attach-a-product-then-see-it-in-the-store works in one step).
+        from unittest.mock import patch
+        from handlers import sites as sites_handler
+        site_id = json.loads(self._post(base_site())["body"])["site"]["site_id"]
+        pages = FakeDocumentRepository("page_id")
+        pages.put({"tenant_id": "tenant_demo", "page_id": "page_prod", "status": "published", "offer_id": "offer_1"})
+        with patch.object(sites_handler, "pages_repository", return_value=pages):
+            resp = self._attach(site_id, "page_prod", "/prod")
+        self.assertEqual(json.loads(resp["body"])["site"]["pages"]["/prod"]["offer_id"], "offer_1")
+
+    def test_attach_draft_page_does_not_record_offer_link(self):
+        # A draft has no live artifact, so it must NOT become grid-eligible on attach (would dead-link).
+        from unittest.mock import patch
+        from handlers import sites as sites_handler
+        site_id = json.loads(self._post(base_site())["body"])["site"]["site_id"]
+        pages = FakeDocumentRepository("page_id")
+        pages.put({"tenant_id": "tenant_demo", "page_id": "page_draft", "status": "draft", "offer_id": "offer_2"})
+        with patch.object(sites_handler, "pages_repository", return_value=pages):
+            resp = self._attach(site_id, "page_draft", "/draft")
+        self.assertNotIn("offer_id", json.loads(resp["body"])["site"]["pages"]["/draft"])
+
     def test_create_generates_site_id_and_persists(self):
         resp = self._post(base_site())
         self.assertEqual(resp["statusCode"], 201)
