@@ -17,6 +17,7 @@ from stripe_link.runtime.publishing import (
     artifact_targets,
     attach_funnel_pages,
     attach_funnel_slugs,
+    cascade_publish_collection_drafts,
     delete_page_artifacts,
     detach_page_from_sites,
     find_site_for_page,
@@ -1069,6 +1070,98 @@ class GridToCollectionMigrationTests(unittest.TestCase):
         self.assertEqual(summary["pages_migrated"], 1)  # reported...
         self.assertNotIn("collection_id", pages.get("t1", "page_store")["sections"][0])  # ...but nothing written
         self.assertIsNone(colls.get("t1", "coll_1"))
+
+
+class CascadePublishDraftMembersTests(unittest.TestCase):
+    """Auto-publish never-published draft members of a manual collection when the embedding page publishes
+    (plans/SITE_COLLECTIONS.md — kill the hunt-down-drafts friction)."""
+
+    def setUp(self):
+        self.offer = load_fixture("offer-simple-coffee.json")
+        self.product = load_fixture("product-simple-coffee.json")
+        self.tenant = self.offer["tenant_id"]
+        self.offers_repo = FakeRepository("offer_id", [self.offer])
+        self.products_repo = FakeRepository("product_id", [self.product])
+        self.s3 = FakeS3Client()
+
+    def _member(self, status="draft", **extra):
+        # A draft offer page attached to the Site, selected into the storefront's collection.
+        return {"schema_version": "2026-01-01", "document_type": "page", "page_id": "page_coffee",
+                "tenant_id": self.tenant, "name": "Coffee", "status": status, "route": {"slug": "coffee"},
+                "offer_id": self.offer["offer_id"],
+                "sections": [{"id": "hero", "type": "hero", "html": "Coffee"}], **extra}
+
+    def _storefront(self):
+        return {"schema_version": "2026-01-01", "document_type": "page", "page_id": "page_home01",
+                "tenant_id": self.tenant, "name": "Storefront", "status": "published", "route": {"slug": "home"},
+                "sections": [
+                    {"id": "h", "type": "brand_hero", "headline": "Bean Co"},
+                    {"id": "g", "type": "catalog_grid", "heading": "Shop all", "collection_id": "coll_m"},
+                ]}
+
+    def _site(self):
+        # The member is attached to the Site (its slug exists) but its route entry has NO offer_id yet — it's a
+        # draft, so the grid would drop it until it's published.
+        return {"tenant_id": self.tenant, "site_id": "site_x",
+                "hosting": {"type": "custom", "custom_domain": "shop.example.com", "verification": {"verified": True}},
+                "indexing": {"eligibility": "eligible"},
+                "pages": {"/": {"page_id": "page_home01", "page_type": "homepage"},
+                          "/coffee": {"page_id": "page_coffee", "page_type": "landing"}}}
+
+    def _publish(self, pages_repo, sites_repo):
+        colls = FakeDocumentRepository("collection_id")
+        colls.put({"tenant_id": self.tenant, "collection_id": "coll_m", "site_id": "site_x",
+                   "rule": "manual", "members": ["page_coffee"]})
+        publish_page_document(
+            self._storefront(), offers_repository=self.offers_repo, products_repository=self.products_repo,
+            sites_repository=sites_repo, pages_repository=pages_repo, collections_repository=colls, s3_client=self.s3,
+            pages_bucket="pages", preview_bucket="preview", environment="prod",
+            pages_domain="pages.example.com", preview_domain="preview.example.com",
+        )
+        return [p for p in self.s3.puts if "preview/" not in p["Key"]][0]["Body"].decode()
+
+    def test_draft_member_is_published_and_appears_in_grid(self):
+        pages = FakeDocumentRepository("page_id")
+        pages.put(self._member())
+        sites = FakeSitesRepository([self._site()])
+        published = self._publish(pages, sites)
+        # The member flipped to published (its own stream would then render its artifact)...
+        member = pages.get(self.tenant, "page_coffee")
+        self.assertEqual(member["status"], "published")
+        self.assertTrue(member["published_at"])
+        # ...and THIS render already links its card (offer_id was denormalized onto the in-memory Site first).
+        self.assertIn('href="/coffee"', published)
+
+    def test_deliberately_unpublished_member_is_not_resurrected(self):
+        # A member with a prior published_at was unpublished on purpose — publishing the storefront must NOT
+        # bring it back.
+        pages = FakeDocumentRepository("page_id")
+        pages.put(self._member(status="draft", published_at=1700000000))
+        sites = FakeSitesRepository([self._site()])
+        published = self._publish(pages, sites)
+        self.assertEqual(pages.get(self.tenant, "page_coffee")["status"], "draft")  # left alone
+        self.assertNotIn('href="/coffee"', published)  # still dropped from the grid
+
+    def test_already_published_member_untouched_so_cascade_terminates(self):
+        # An already-live member produces no write — this is what stops the member's own publish stream from
+        # re-cascading forever.
+        pages = FakeDocumentRepository("page_id")
+        pages.put(self._member(status="published", published_at=1700000000))
+        colls = {"coll_m": {"collection_id": "coll_m", "rule": "manual", "members": ["page_coffee"]}}
+        result = cascade_publish_collection_drafts(
+            self._storefront(), colls, self._site(), pages_repository=pages, now=123)
+        self.assertEqual(result["published"], [])
+        self.assertFalse(result["site_changed"])
+
+    def test_no_cascade_for_all_rule_collection(self):
+        # An 'all' collection has no hand-selected members; nothing to auto-publish.
+        pages = FakeDocumentRepository("page_id")
+        pages.put(self._member())
+        colls = {"coll_m": {"collection_id": "coll_m", "rule": "all"}}
+        result = cascade_publish_collection_drafts(
+            self._storefront(), colls, self._site(), pages_repository=pages, now=123)
+        self.assertEqual(result["published"], [])
+        self.assertEqual(pages.get(self.tenant, "page_coffee")["status"], "draft")
 
 
 class CategoryPageTests(unittest.TestCase):

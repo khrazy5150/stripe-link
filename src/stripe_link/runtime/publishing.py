@@ -449,6 +449,61 @@ def _denormalize_page_catalog(site: dict[str, Any], page_id: str, offer_id: str,
     return changed
 
 
+def cascade_publish_collection_drafts(page: dict[str, Any], collections_by_id: dict[str, Any],
+                                      site: dict[str, Any] | None, *, pages_repository: Any, now: int) -> dict[str, Any]:
+    """Auto-publish the never-published draft member pages the tenant selected into any MANUAL collection this
+    page embeds (plans/SITE_COLLECTIONS.md). The tenant already picked them into the collection; don't make them
+    hunt each draft down and publish it by hand before it shows in the grid. For each such member: flip it to
+    published (its own PagesTable write re-enters the publish stream and renders its artifact) and denormalize its
+    offer_id onto the in-memory Site route entry, so THIS page's grid includes it in the current render.
+
+    Only members that have NEVER been published (no `published_at`) are touched — a page the tenant deliberately
+    unpublished keeps its `published_at`, so it is left alone (no surprise resurrection). Best-effort per member;
+    a bad member never blocks the parent publish. Returns {"published": [page_id...], "site_changed": bool}.
+    Terminates: an already-published member is skipped, so the member's own publish stream produces no re-cascade."""
+    published: list[str] = []
+    site_changed = False
+    if not pages_repository:
+        return {"published": published, "site_changed": site_changed}
+    tenant_id = str(page.get("tenant_id") or "")
+    # The explicitly selected member page_ids across every embedded manual collection (deduped, order-preserving).
+    member_ids: list[str] = []
+    seen: set[str] = set()
+    for section in page.get("sections") or []:
+        if not (isinstance(section, dict) and section.get("type") == "catalog_grid"):
+            continue
+        collection = collections_by_id.get(str(section.get("collection_id") or ""))
+        if not collection or collection.get("rule") != "manual":
+            continue
+        for pid in collection.get("members") or []:
+            pid = str(pid)
+            if pid and pid not in seen:
+                seen.add(pid)
+                member_ids.append(pid)
+    for pid in member_ids:
+        try:
+            member = pages_repository.get(tenant_id, pid)
+        except Exception:  # noqa: BLE001 — one unreadable member must not block the parent publish
+            member = None
+        # Only NEVER-published drafts: skip already-live members and any page the tenant deliberately unpublished
+        # (which keeps its published_at).
+        if not member or member.get("status") != "draft" or member.get("published_at"):
+            continue
+        member["status"] = "published"
+        member["published_at"] = now
+        member["updated_at"] = now
+        try:
+            pages_repository.put(member)
+        except Exception:  # noqa: BLE001
+            continue
+        published.append(pid)
+        # Reflect the member on the in-memory Site map so THIS render's grid links it now (its own stream will
+        # denormalize too, idempotently). Needs only the offer_id already on the member doc — no offer/product load.
+        if site and member.get("offer_id") and _denormalize_page_catalog(site, pid, str(member.get("offer_id") or ""), ""):
+            site_changed = True
+    return {"published": published, "site_changed": site_changed}
+
+
 def load_page_reviews(reviews_repository: Any | None, tenant_id: str, products_by_id: dict[str, Any], site_id: str = "") -> list[dict[str, Any]]:
     """Approved, first-party reviews for this page (plans/REVIEWS.md): product-target reviews for the page's
     products (→ Product aggregateRating/review markup + visible block) AND business-target reviews for the
@@ -796,6 +851,7 @@ def publish_page_document(
     products_repository: Any,
     services_repository: Any | None = None,
     sites_repository: Any | None = None,
+    pages_repository: Any | None = None,
     domains_index_repository: Any | None = None,
     reviews_repository: Any | None = None,
     collections_repository: Any | None = None,
@@ -821,6 +877,19 @@ def publish_page_document(
     # load, so the referenced offers get bundled by load_render_context (plans/SITE_OBJECT.md §2.5b Slice 2,
     # plans/SITE_COLLECTIONS.md P1). Collections referenced by the page are loaded here.
     collections_by_id = load_page_collections(collections_repository, tenant_id, page)
+    # When this page goes live, auto-publish the never-published draft members the tenant selected into any
+    # embedded manual collection, so the grid fills itself instead of the tenant hunting each draft down
+    # (plans/SITE_COLLECTIONS.md). Denormalizes them onto the in-memory Site first so THIS render includes them.
+    if page.get("status") == "published" and pages_repository is not None:
+        cascade = cascade_publish_collection_drafts(
+            page, collections_by_id, site, pages_repository=pages_repository, now=int(time.time()))
+        if cascade["site_changed"] and site and sites_repository is not None:
+            try:
+                validate_site(site)
+                site = sites_repository.put(site)
+                _sync_domain_index(site, domains_index_repository)
+            except Exception:  # noqa: BLE001 — the parent artifact must publish even if the Site write fails
+                pass
     resolve_category_grids(page, site, collections_by_id)
     offer, products_by_id, services_by_id, offers_by_id = load_render_context(
         page,
