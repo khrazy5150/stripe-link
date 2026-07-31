@@ -146,6 +146,10 @@
         v-else-if="activeView === 'sites'"
         :key="`sites-${activeEnvironment}-${auth.session?.client_id || ''}`"
       />
+      <Collections
+        v-else-if="activeView === 'collections'"
+        :key="`collections-${activeEnvironment}-${auth.session?.client_id || ''}`"
+      />
       <ABTesting
         v-else-if="activeView === 'abTesting'"
         :key="`ab-testing-${activeEnvironment}-${auth.session?.client_id || ''}`"
@@ -174,6 +178,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import ABTesting from "./components/ABTesting.vue";
 import AuthPage from "./components/AuthPage.vue";
 import Configuration from "./components/Configuration.vue";
+import Collections from "./components/Collections.vue";
 import Coupons from "./components/Coupons.vue";
 import Customers from "./components/Customers.vue";
 import Dashboard from "./components/Dashboard.vue";
@@ -196,6 +201,7 @@ import ToastHost from "./components/ToastHost.vue";
 import { iconPaths, menuGroupsForEnvironment } from "./config/menu";
 import { getApiEnvironment, loadAppConfigApiBase, setApiEnvironment } from "./api/client";
 import { useAuthStore } from "./stores/auth";
+import { useCollectionsStore } from "./stores/collections";
 import { useCouponsStore } from "./stores/coupons";
 import { useDashboardStore } from "./stores/dashboard";
 import { useNotificationsStore } from "./stores/notifications";
@@ -205,6 +211,7 @@ import { useStripeKeysStore } from "./stores/stripeKeys";
 import { useToastsStore } from "./stores/toasts";
 
 const auth = useAuthStore();
+const collections = useCollectionsStore();
 const coupons = useCouponsStore();
 const dashboard = useDashboardStore();
 const notifications = useNotificationsStore();
@@ -273,6 +280,7 @@ async function reloadActiveView() {
   coupons.reset();
   products.reset();
   sites.reset();  // drop the previous env's sites + hosting domain (.jbay.uk vs .jbay.be) so they repaint
+  collections.reset();  // collections are per-env too; drop them so the Collections screen refetches the new env
   stripeKeys.resetForCurrentTenant();
   notifications.reset();
   // Never let one failing/slow fetch abort the whole refresh (a thrown load left the view showing the
@@ -284,6 +292,7 @@ async function reloadActiveView() {
   else if (activeView.value === "coupons") await safe(coupons.load({ status: "all" }));
   else if (activeView.value === "stripeKeys") await safe(stripeKeys.load());
   else if (activeView.value === "sites") await safe(sites.load());  // repaints the env's hosting domain immediately
+  else if (activeView.value === "collections") await safe(collections.load());
 }
 
 function openNotifications() {
