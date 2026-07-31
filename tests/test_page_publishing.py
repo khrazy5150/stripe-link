@@ -910,7 +910,9 @@ class StorefrontHomepageTests(unittest.TestCase):
             "tenant_id": self.offer["tenant_id"], "site_id": "site_x",
             "hosting": {"type": "custom", "custom_domain": "shop.example.com", "verification": {"verified": True}},
             "indexing": {"eligibility": "eligible"},
-            "pages": {"/": {"page_id": "page_home01", "page_type": "homepage"}},
+            # The coffee offer's page is on the Site at /coffee (offer_id recorded), so its grid card resolves.
+            "pages": {"/": {"page_id": "page_home01", "page_type": "homepage"},
+                      "/coffee": {"page_id": "page_coffee", "page_type": "landing", "offer_id": self.offer["offer_id"]}},
         }
         publish_page_document(
             page, offers_repository=self.offers_repo, products_repository=self.products_repo,
@@ -957,7 +959,9 @@ class PlatformHostServingTests(unittest.TestCase):
             "organization": {"name": "Bean Co", "entity_type": "OnlineStore"},
             "hosting": {"type": "platform", "platform_hostname": "bean-co.jbay.uk", "custom_domain": None},
             "indexing": {"eligibility": "blocked"},
-            "pages": {"/": {"page_id": "page_home01", "page_type": "homepage"}},
+            # The coffee offer's page is on the Site at /coffee so its grid card resolves to a real store page.
+            "pages": {"/": {"page_id": "page_home01", "page_type": "homepage"},
+                      "/coffee": {"page_id": "page_coffee", "page_type": "landing", "offer_id": self.offer["offer_id"]}},
         }
 
     def _publish(self, site):
@@ -1006,10 +1010,23 @@ class CategoryPageTests(unittest.TestCase):
         self.assertEqual({i["offer_id"] for i in items}, {"offer_a", "offer_b"})   # gear excluded
         self.assertEqual({i["slug"] for i in items}, {"/creatine", "/whey"})
 
-    def test_resolve_leaves_curated_grid_untouched(self):
-        page = {"sections": [{"id": "g", "type": "catalog_grid", "items": [{"offer_id": "x", "slug": "/x"}]}]}
+    def test_resolve_curated_grid_keeps_on_site_offers_repointed_and_drops_others(self):
+        # A curated grid resolves against the Site route map: an item whose offer is a published page on the
+        # Site is re-pointed to that page's real Site slug (its stored slug is ignored); an item whose offer
+        # isn't on the Site is dropped, so a card never links to a dead path.
+        page = {"sections": [{"id": "g", "type": "catalog_grid", "items": [
+            {"offer_id": "offer_b", "slug": "/some-old-landing-slug"},  # on-Site -> re-pointed to /whey
+            {"offer_id": "offer_missing", "slug": "/x"},                # not on Site -> dropped
+        ]}]}
         resolve_category_grids(page, self._site())
-        self.assertEqual(page["sections"][0]["items"], [{"offer_id": "x", "slug": "/x"}])  # no category -> untouched
+        self.assertEqual(page["sections"][0]["items"], [{"offer_id": "offer_b", "slug": "/whey"}])
+
+    def test_resolve_curated_grid_preserves_order(self):
+        page = {"sections": [{"id": "g", "type": "catalog_grid", "items": [
+            {"offer_id": "offer_c", "slug": "/x"}, {"offer_id": "offer_a", "slug": "/y"},
+        ]}]}
+        resolve_category_grids(page, self._site())
+        self.assertEqual([i["slug"] for i in page["sections"][0]["items"]], ["/mat", "/creatine"])  # tenant order kept
 
     def test_resolve_scope_all_pulls_every_offer_page(self):
         # A brand-first storefront homepage (scope="all") auto-fills with EVERY offer page on the Site,

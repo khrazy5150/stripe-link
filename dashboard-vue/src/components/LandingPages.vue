@@ -392,7 +392,7 @@
                     <em>/{{ page.route?.slug || '' }}</em>
                   </label>
                 </div>
-                <small v-else>No offer pages yet — turn on “Show all my products,” or create some offer pages first to curate them here.</small>
+                <small v-else>No products on this Site yet — attach an offer page to this Site (or turn on “Show all my products”). Only products on this Site can appear in the grid, so their cards link to real store pages.</small>
               </template>
             </div>
           </section>
@@ -2406,9 +2406,25 @@ function displaySlug(page) {
   return slug.length > 32 ? `${slug.slice(0, 31)}…` : slug;
 }
 
-const storefrontCandidatePages = computed(() =>
-  (pages.value || []).filter((p) => p && p.offer_id && (p.route?.slug || p.name)),
-);
+// The Site this storefront belongs to (editing) or is being attached to (creating, once chosen). Its route map
+// is the source of truth for which products can appear in the grid + at what slug.
+const storefrontSite = computed(() => selectedSite.value || (form.page_id ? siteByPageId.value[form.page_id] : null) || null);
+const siteSlugByPageId = computed(() => {
+  const m = new Map();
+  for (const [slug, entry] of Object.entries(storefrontSite.value?.pages || {})) {
+    if (entry?.page_id) m.set(entry.page_id, slug);
+  }
+  return m;
+});
+// Only pages attached to THIS Site can appear in the grid — the published grid links to Site slugs, so an
+// off-Site page would dead-end (the publisher drops it). Until a Site is chosen (create flow) we can't filter,
+// so show all offer pages; the backend still resolves against the Site at publish.
+const storefrontCandidatePages = computed(() => {
+  const all = (pages.value || []).filter((p) => p && p.offer_id && (p.route?.slug || p.name));
+  const site = storefrontSite.value;
+  if (!site) return all;
+  return all.filter((p) => siteSlugByPageId.value.has(p.page_id));
+});
 
 const creatingStorefront = ref(false);
 // When set, the offer-less wizard is EDITING this existing page (merge into it) rather than creating a new one.
@@ -2501,10 +2517,12 @@ async function onStorefrontLogoPicked(event) {
 
 function buildStorefrontPageDocument() {
   const byId = new Map((pages.value || []).map((p) => [p.page_id, p]));
+  // Link each picked product to its real Site slug (where it's attached in the route map) — not its own landing
+  // slug — so the card resolves on the store. The publisher re-resolves this against the Site at publish too.
   const items = (form.storefront.items || [])
     .map((pageId) => byId.get(pageId))
     .filter((p) => p && p.offer_id)
-    .map((p) => ({ offer_id: p.offer_id, slug: `/${slugify(p.route?.slug || p.name || p.page_id)}` }));
+    .map((p) => ({ offer_id: p.offer_id, slug: siteSlugByPageId.value.get(p.page_id) || `/${slugify(p.route?.slug || p.name || p.page_id)}` }));
   const headline = storefrontName.value || form.name || "Storefront";
   // Auto-fill (default): the grid resolves to EVERY offer page on the Site at publish (scope="all"), so the
   // homepage can be created brand-first with no offers and fills itself as offer pages are added. Manual mode

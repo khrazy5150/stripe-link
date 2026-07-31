@@ -224,29 +224,42 @@ def attach_funnel_slugs(
 
 
 def resolve_category_grids(page: dict[str, Any], site: dict[str, Any] | None) -> None:
-    """Populate an auto-filling catalog_grid's items from the Site route map (plans/SITE_OBJECT.md §2.5b
-    Slice 2). Two auto modes, both (re)resolved from the route map (the source of truth) at publish so the grid
-    stays current as offer pages are added: `scope="all"` → EVERY offer page on the Site (a brand-first
-    storefront homepage that fills itself, so no offers are needed to create it); a `category` → offer pages in
-    that category. Curated grids (neither scope nor category) keep their explicit items. Runs before offers load
-    so the referenced offers get bundled."""
+    """Populate a catalog_grid's items from the Site route map (plans/SITE_OBJECT.md §2.5b Slice 2) so every
+    card links to a real, navigable Site page. All modes (re)resolve from the route map (the source of truth) at
+    publish: `scope="all"` → EVERY offer page on the Site (a brand-first storefront that fills itself); a
+    `category` → offer pages in that category; a CURATED grid → the tenant's picked offers, kept ONLY when the
+    offer is a published page on this Site and re-pointed to that page's Site slug (a picked page that isn't on
+    the Site — or isn't published — is dropped so the grid never links to a dead path). An entry carries its
+    offer_id once the page has published on the Site (_denormalize_page_catalog). Runs before offers load so the
+    referenced offers get bundled."""
     if not site:
         return
     entries = (site or {}).get("pages") or {}
+    # offer_id -> Site slug, for the offer pages published on this Site (the navigable ones).
+    slug_by_offer = {
+        str(entry["offer_id"]): slug
+        for slug, entry in entries.items()
+        if isinstance(entry, dict) and entry.get("offer_id")
+    }
     for section in page.get("sections") or []:
         if section.get("type") != "catalog_grid":
             continue
         scope = str(section.get("scope") or "").strip()
         category = str(section.get("category") or "").strip()
-        if scope != "all" and not category:
-            continue  # curated grid — leave the tenant's explicit items untouched
-        items = [
-            {"offer_id": str(entry.get("offer_id")), "slug": slug}
-            for slug, entry in entries.items()
-            if isinstance(entry, dict) and entry.get("offer_id")
-            and (scope == "all" or str(entry.get("category") or "") == category)
-        ]
-        section["items"] = items
+        if scope == "all" or category:
+            section["items"] = [
+                {"offer_id": str(entry.get("offer_id")), "slug": slug}
+                for slug, entry in entries.items()
+                if isinstance(entry, dict) and entry.get("offer_id")
+                and (scope == "all" or str(entry.get("category") or "") == category)
+            ]
+        else:  # curated — keep the tenant's order, drop off-Site/unpublished, re-point to the Site slug
+            section["items"] = [
+                {"offer_id": oid, "slug": slug_by_offer[oid]}
+                for item in (section.get("items") or [])
+                for oid in [str((item or {}).get("offer_id") or "")]
+                if oid in slug_by_offer
+            ]
 
 
 def resolve_related_products(page: dict[str, Any], site: dict[str, Any] | None, category: str, current_page_id: str) -> list[str]:
