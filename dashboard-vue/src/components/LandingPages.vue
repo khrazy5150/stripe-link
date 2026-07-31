@@ -2408,7 +2408,12 @@ function displaySlug(page) {
 
 // The Site this storefront belongs to (editing) or is being attached to (creating, once chosen). Its route map
 // is the source of truth for which products can appear in the grid + at what slug.
-const storefrontSite = computed(() => selectedSite.value || (form.page_id ? siteByPageId.value[form.page_id] : null) || null);
+const storefrontSite = computed(() => {
+  if (selectedSite.value) return selectedSite.value;  // full Site chosen in the attach phase (create flow)
+  // Editing: resolve the FULL Site that owns this storefront page (siteByPageId only holds {site_id, name}).
+  const siteId = form.page_id ? siteByPageId.value[form.page_id]?.site_id : "";
+  return siteId ? sitesStore.sites.find((s) => s.site_id === siteId) || null : null;
+});
 const siteSlugByPageId = computed(() => {
   const m = new Map();
   for (const [slug, entry] of Object.entries(storefrontSite.value?.pages || {})) {
