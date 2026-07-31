@@ -382,17 +382,32 @@
             </label>
             <div class="offer-field">
               <span>Products in the grid</span>
-              <label class="builder-toggle"><input v-model="form.storefront.autoFill" type="checkbox" /><span>Show all my products automatically</span></label>
-              <small v-if="form.storefront.autoFill" class="field-note">The grid fills itself with every offer page on this Site and stays current as you add more — you can create this homepage now with no offers yet.</small>
+              <!-- Reuse: embed a collection that already exists on this Site instead of defining products here.
+                   Only offered when the Site has collections to pick (plans/SITE_COLLECTIONS.md — reusable playlists). -->
+              <div v-if="siteCollections.length" class="storefront-name-modes">
+                <button type="button" class="storefront-name-mode" :class="{ active: form.storefront.source !== 'existing' }" @click="form.storefront.source = 'new'">Define products here</button>
+                <button type="button" class="storefront-name-mode" :class="{ active: form.storefront.source === 'existing' }" @click="form.storefront.source = 'existing'">Use an existing collection</button>
+              </div>
+              <template v-if="form.storefront.source === 'existing'">
+                <select v-model="form.storefront.existingCollectionId">
+                  <option value="">Choose a collection…</option>
+                  <option v-for="c in siteCollections" :key="c.collection_id" :value="c.collection_id">{{ c.name || c.collection_id }} · {{ collectionRuleLabel(c) }}</option>
+                </select>
+                <small class="field-note">This page shows that collection's products. Edit its contents on the Collections screen — changes apply everywhere the collection is used.</small>
+              </template>
               <template v-else>
-                <div v-if="storefrontCandidatePages.length" class="storefront-page-picker">
-                  <label v-for="page in storefrontCandidatePages" :key="page.page_id" class="storefront-page-option">
-                    <input type="checkbox" :value="page.page_id" v-model="form.storefront.items" />
-                    <span>{{ page.name || page.page_id }}</span>
-                    <em>/{{ page.route?.slug || '' }}</em>
-                  </label>
-                </div>
-                <small v-else>No products on this Site yet — attach an offer page to this Site (or turn on “Show all my products”). Only products on this Site can appear in the grid, so their cards link to real store pages.</small>
+                <label class="builder-toggle"><input v-model="form.storefront.autoFill" type="checkbox" /><span>Show all my products automatically</span></label>
+                <small v-if="form.storefront.autoFill" class="field-note">The grid fills itself with every offer page on this Site and stays current as you add more — you can create this homepage now with no offers yet.</small>
+                <template v-else>
+                  <div v-if="storefrontCandidatePages.length" class="storefront-page-picker">
+                    <label v-for="page in storefrontCandidatePages" :key="page.page_id" class="storefront-page-option">
+                      <input type="checkbox" :value="page.page_id" v-model="form.storefront.items" />
+                      <span>{{ page.name || page.page_id }}</span>
+                      <em>/{{ page.route?.slug || '' }}</em>
+                    </label>
+                  </div>
+                  <small v-else>No products on this Site yet — attach an offer page to this Site (or turn on “Show all my products”). Only products on this Site can appear in the grid, so their cards link to real store pages.</small>
+                </template>
               </template>
             </div>
           </section>
@@ -2033,7 +2048,7 @@ function defaultWizardForm() {
     // Second composition axis: why the page exists / where its traffic comes from. Presets which capability
     // packs the page starts with (plans/LANDING_PAGE_GOAL_COMPOSITION.md).
     goal: "",
-    storefront: { headline: "", brand: "", nameMode: "", tagline: "", heading: "Shop all", logo_url: "", items: [], autoFill: true, collection_id: "" },
+    storefront: { headline: "", brand: "", nameMode: "", tagline: "", heading: "Shop all", logo_url: "", items: [], autoFill: true, collection_id: "", source: "new", existingCollectionId: "" },
     categoryKey: "",
   };
 }
@@ -2239,7 +2254,7 @@ async function openWizard() {
   sitePhase.value = true;  // choose a Site before choosing a page type
   wizardOpen.value = true;
   try {
-    await Promise.all([ensureCatalogLoaded(), sitesStore.ensureLoaded(), profileStore.ensureLoaded()]);
+    await Promise.all([ensureCatalogLoaded(), sitesStore.ensureLoaded(), profileStore.ensureLoaded(), collectionsStore.ensureLoaded()]);
   } catch (err) {
     wizardError.value = err.message || "Failed to load offers.";
   }
@@ -2432,6 +2447,28 @@ const storefrontCandidatePages = computed(() => {
   if (!site) return all;
   return all.filter((p) => siteSlugByPageId.value.has(p.page_id));
 });
+
+// Existing collections on the storefront's Site — so a new storefront page can EMBED one that already exists
+// (reuse) instead of always minting its own (plans/SITE_COLLECTIONS.md — collections are reusable playlists).
+const siteCollections = computed(() => {
+  const siteId = storefrontSite.value?.site_id || selectedSiteId.value;
+  return siteId ? collectionsStore.forSite(siteId) : [];
+});
+function collectionRuleLabel(c) {
+  if (c.rule === "all") return "all products";
+  if (c.rule === "category") return `category: ${categoryLabel(c.category || "—")}`;
+  return `${(c.members || []).length} pages`;
+}
+// How many published/draft pages embed a given collection — so editing a SHARED collection routes through the
+// reference (don't silently mutate a collection other pages depend on).
+function collectionUsageCount(collectionId) {
+  if (!collectionId) return 0;
+  let n = 0;
+  for (const p of pages.value || []) {
+    if ((p.sections || []).some((s) => s && s.type === "catalog_grid" && s.collection_id === collectionId)) n += 1;
+  }
+  return n;
+}
 
 const creatingStorefront = ref(false);
 // When set, the offer-less wizard is EDITING this existing page (merge into it) rather than creating a new one.
@@ -2660,17 +2697,25 @@ async function detachSite() {
 
 async function createStorefront() {
   wizardError.value = "";
+  const reusing = form.storefront.source === "existing";
+  if (reusing && !form.storefront.existingCollectionId) {
+    wizardError.value = "Choose an existing collection, or switch to “Define products here.”";
+    return;
+  }
   // Auto-fill needs no upfront items (the grid fills itself from the Site at publish); only curated mode does.
-  if (form.storefront.autoFill === false && !(form.storefront.items || []).length) {
+  if (!reusing && form.storefront.autoFill === false && !(form.storefront.items || []).length) {
     wizardError.value = "Pick at least one page for the product grid, or switch on “Show all my products.”";
     return;
   }
   creatingStorefront.value = true;
   try {
-    // Save the Collection first (it's the grid's source of truth), then the page that embeds it.
-    const collection = await collectionsStore.save(buildOfferlessCollection("storefront"));
-    form.storefront.collection_id = collection.collection_id;
-    const document = buildStorefrontPageDocument(collection.collection_id);
+    // Reuse: embed an existing Collection by reference (mint nothing). Otherwise save this page's own Collection
+    // first (it's the grid's source of truth), then the page that embeds it.
+    const collectionId = reusing
+      ? form.storefront.existingCollectionId
+      : (await collectionsStore.save(buildOfferlessCollection("storefront"))).collection_id;
+    form.storefront.collection_id = reusing ? "" : collectionId;
+    const document = buildStorefrontPageDocument(collectionId);
     const body = await apiRequest("/pages", { method: "POST", body: document });
     const saved = body.page || document;
     pages.value = [saved, ...pages.value.filter((p) => p.page_id !== saved.page_id)];
@@ -3647,6 +3692,7 @@ async function editOfferlessPage(page) {
   // The grid embeds a Collection (its source of truth). Load it to determine kind (category vs storefront) and
   // restore the grid config. A legacy INLINE grid (pre-migration) has no collection_id — read its inline config;
   // saving then mints a Collection and migrates the page (plans/SITE_COLLECTIONS.md P1e).
+  collectionsStore.ensureLoaded();  // populate the list so the "use an existing collection" picker has options
   const collection = catalog?.collection_id ? await collectionsStore.get(catalog.collection_id).catch(() => null) : null;
   const kind = profile ? "profile"
     : collection ? (collection.rule === "category" ? "category" : "storefront")
@@ -3675,6 +3721,12 @@ async function editOfferlessPage(page) {
     else {
       form.storefront.autoFill = collection.rule === "all";
       form.storefront.items = collection.rule === "manual" ? [...(collection.members || [])] : [];
+      // A storefront embedding a collection SHARED by other pages edits it by reference (source=existing), so a
+      // tweak here can't silently rewrite what those other pages show; a 1:1 owned collection stays inline.
+      if (collectionUsageCount(collection.collection_id) > 1) {
+        form.storefront.source = "existing";
+        form.storefront.existingCollectionId = collection.collection_id;
+      }
     }
   } else {
     form.storefront.heading = catalog?.heading || profile?.heading || "";
