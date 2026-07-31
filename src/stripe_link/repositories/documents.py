@@ -818,6 +818,17 @@ def reviews_repository(table: Any | None = None) -> DynamoDocumentRepository:
     )
 
 
+def collections_repository(table: Any | None = None) -> DynamoDocumentRepository:
+    """Collections — ordered, curated groups of a Site's pages (plans/SITE_COLLECTIONS.md). Tenant-scoped like
+    every other document; a Collection carries its own site_id."""
+    return DynamoDocumentRepository(
+        os.environ.get("COLLECTIONS_TABLE", ""),
+        document_type="collection",
+        id_field="collection_id",
+        table=table,
+    )
+
+
 def carts_repository(table: Any | None = None) -> DynamoDocumentRepository:
     return DynamoDocumentRepository(
         os.environ.get("CARTS_TABLE", ""),

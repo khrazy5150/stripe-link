@@ -1690,6 +1690,38 @@ def validate_review(document: dict[str, Any]) -> None:
         raise DocumentValidationError("Review source must be one of: manual, first_party, gbp.")
 
 
+COLLECTION_RULES = {"manual", "all", "category"}
+
+
+def validate_collection(document: dict[str, Any]) -> None:
+    """A Collection (plans/SITE_COLLECTIONS.md): an ordered, curated group of a Site's landing pages with its own
+    presentation. Reusable as a page section (a collection-embed) and — via the Site routing table, NEVER on this
+    entity — optionally reachable at a path. Pure data: a Collection is URL-unaware (no slug, no `routable`). Its
+    members are page references derived by `rule`: `manual` (explicit ordered members[]), `all` (every offer page
+    on the Site), or `category` (offer pages in `category`)."""
+    require_fields(document, ["schema_version", "document_type", "tenant_id", "collection_id", "site_id", "name"])
+    if document.get("document_type") != "collection":
+        raise DocumentValidationError("Collection document_type must be 'collection'.")
+    require_string(document, "collection_id", "Collection id")
+    require_string(document, "site_id", "Collection site_id")
+    require_string(document, "name", "Collection name")
+    if document.get("environment") is not None:
+        require_enum(document, "environment", {"live", "test"}, "Collection environment")
+    rule = document.get("rule", "manual")
+    if rule not in COLLECTION_RULES:
+        raise DocumentValidationError("Collection rule must be one of: manual, all, category.")
+    if rule == "category":
+        require_string(document, "category", "Collection category")
+    else:
+        optional_string(document, "category", "Collection category")
+    optional_string_list(document, "members", "Collection members")  # ordered page_id references (manual rule)
+    presentation = document.get("presentation")
+    if presentation is not None:
+        if not isinstance(presentation, dict):
+            raise DocumentValidationError("Collection presentation must be an object.")
+        optional_string(presentation, "heading", "Collection heading")
+
+
 def validate_semantic_model(model: Any) -> None:
     """The OfferSemanticModel (plans/OFFER_SEMANTIC_ANALYZER.md). Pure meaning — `facts` (stable values) +
     `interpretation` (opinions). This is the runtime contract the AI enrichment tier's output is validated

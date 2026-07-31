@@ -1,0 +1,39 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://juniorbay.com/schemas/Collection.schema.json",
+  "title": "Collection",
+  "description": "An ordered, curated group of a Site's landing pages with its own presentation (plans/SITE_COLLECTIONS.md). Reusable as a page section (a collection-embed) and — via the Site routing table, NEVER on this entity — optionally reachable at a path. Pure data: a Collection is URL-unaware (no slug, no `routable`). The Python validator (domain/documents.py: validate_collection) is the source of truth; this file is reference documentation.",
+  "type": "object",
+  "required": ["schema_version", "document_type", "tenant_id", "collection_id", "site_id", "name"],
+  "additionalProperties": true,
+  "properties": {
+    "schema_version": { "type": "string" },
+    "document_type": { "const": "collection" },
+    "tenant_id": { "type": "string" },
+    "collection_id": { "type": "string", "description": "coll_<id>." },
+    "site_id": { "type": "string", "description": "The Site this collection belongs to. Its members are pages on that Site." },
+    "environment": { "type": "string", "enum": ["live", "test"] },
+    "name": { "type": "string", "description": "Internal + display name (e.g. 'Supplements')." },
+    "rule": {
+      "type": "string",
+      "enum": ["manual", "all", "category"],
+      "default": "manual",
+      "description": "How members resolve at publish: 'manual' = the explicit ordered members[]; 'all' = every offer page on the Site; 'category' = offer pages in `category`. The publisher resolves against the Site route map so a card only links to a real, navigable Site page."
+    },
+    "category": { "type": "string", "description": "Required when rule='category'." },
+    "members": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Ordered page_id references (rule='manual'). Playlist semantics — references, never ownership; a page can be in many collections."
+    },
+    "presentation": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "heading": { "type": "string" }
+      }
+    },
+    "created_at": { "type": "integer" },
+    "updated_at": { "type": "integer" }
+  }
+}

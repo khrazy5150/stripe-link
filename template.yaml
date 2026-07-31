@@ -150,6 +150,7 @@ Globals:
         SERVICES_TABLE: !Ref ServicesTable
         LEADS_TABLE: !Ref LeadsTable
         REVIEWS_TABLE: !Ref ReviewsTable
+        COLLECTIONS_TABLE: !Ref CollectionsTable
         CARTS_TABLE: !Ref CartsTable
         INVOICES_TABLE: !Ref InvoicesTable
         PRODUCTS_TABLE: !Ref ProductsTable
@@ -664,6 +665,54 @@ Resources:
           Properties:
             RestApiId: !Ref RestApi
             Path: /reviews/{review_id}/status
+            Method: OPTIONS
+
+  CollectionsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${ProjectPrefix}-collections-api-${Environment}"
+      CodeUri: src/
+      Handler: handlers.collections.handler
+      Description: Collections — ordered, curated groups of a Site's pages (tenant-scoped CRUD).
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref CollectionsTable
+      Events:
+        CollectionsCreate:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /collections
+            Method: POST
+        CollectionsList:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /collections
+            Method: GET
+        CollectionsOptions:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /collections
+            Method: OPTIONS
+        CollectionGet:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /collections/{collection_id}
+            Method: GET
+        CollectionDelete:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /collections/{collection_id}
+            Method: DELETE
+        CollectionOptions:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /collections/{collection_id}
             Method: OPTIONS
 
   ReviewsPublicFunction:
@@ -3081,6 +3130,37 @@ Resources:
     Type: AWS::DynamoDB::Table
     Properties:
       TableName: !Sub "${ProjectPrefix}-reviews-${Environment}"
+      BillingMode: PAY_PER_REQUEST
+      SSESpecification:
+        SSEEnabled: true
+      AttributeDefinitions:
+        - AttributeName: PK
+          AttributeType: S
+        - AttributeName: SK
+          AttributeType: S
+        - AttributeName: GSI1PK
+          AttributeType: S
+        - AttributeName: GSI1SK
+          AttributeType: S
+      KeySchema:
+        - AttributeName: PK
+          KeyType: HASH
+        - AttributeName: SK
+          KeyType: RANGE
+      GlobalSecondaryIndexes:
+        - IndexName: GSI1
+          KeySchema:
+            - AttributeName: GSI1PK
+              KeyType: HASH
+            - AttributeName: GSI1SK
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+
+  CollectionsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "${ProjectPrefix}-collections-${Environment}"
       BillingMode: PAY_PER_REQUEST
       SSESpecification:
         SSEEnabled: true
