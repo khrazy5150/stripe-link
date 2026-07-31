@@ -137,8 +137,9 @@
               Not available in your country
               <button type="button" class="bnpl-info" :aria-label="`Where ${m.label} is available`" @click="toggleInfo(m.method)">ⓘ</button>
             </p>
-            <p v-if="m.enabled && m.capability_status === 'pending'" class="bnpl-note">
-              Stripe is reviewing your account for {{ m.label }}. It goes live once approved.
+            <p v-if="m.enabled && m.country_eligible && m.capability_status !== 'active'" class="bnpl-note">
+              <template v-if="m.capability_status === 'pending'">Stripe is reviewing your account for {{ m.label }} — it appears at checkout once approved.</template>
+              <template v-else>{{ m.label }} isn't active on your Stripe account yet. Enable it in your Stripe dashboard and it will appear at checkout.</template>
             </p>
             <p v-if="openInfo === m.method" class="bnpl-countries">
               Available when your Stripe account is based in: {{ m.countries.join(", ") }}

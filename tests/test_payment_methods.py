@@ -52,28 +52,27 @@ class PaymentMethodsHandlerTests(unittest.TestCase):
         return handler({"httpMethod": "PUT", "body": json.dumps(body)}, None,
                        stripe_repo=repo, stripe_caller=caller, platform_key_loader=_key_loader)
 
-    def test_enable_klarna_requests_capability_and_persists(self):
+    def test_enable_klarna_reads_status_and_persists_intent(self):
+        # Standard accounts self-manage capabilities (Klarna active by default). Enabling stores DISPLAY intent +
+        # the live status we READ — it must NOT POST a capability request (that's live-only / restricted).
         repo = FakeStripeKeysRepo([CONNECTED])
         record = []
-        caller = make_caller(record=record)
+        caller = make_caller(capabilities={"klarna_payments": "active"}, record=record)
         resp = self._put({"tenant_id": "t1", "mode": "test", "method": "klarna", "enabled": True}, repo, caller)
         self.assertEqual(resp["statusCode"], 200)
-        body = json.loads(resp["body"])
-        self.assertEqual(body["capability_status"], "pending")
-        # It POSTed the capability request with the platform key, no Stripe-Account header (edits the account).
-        self.assertEqual(record[0]["path"], "/accounts/acct_123")
-        self.assertEqual(record[0]["data"], {"capabilities": {"klarna_payments": {"requested": True}}})
-        self.assertEqual(record[0]["api_key"], "sk_platform_test")
-        # Persisted on the stripe_keys doc.
+        self.assertEqual(json.loads(resp["body"])["capability_status"], "active")
+        self.assertTrue(any(c["method"] == "GET" for c in record))         # read the account
+        self.assertFalse(any(c["method"] == "POST" for c in record))       # never requested a capability
         saved = repo.get("t1", "test")["payment_methods"]["bnpl"]["klarna"]
-        self.assertEqual((saved["enabled"], saved["capability_status"]), (True, "pending"))
+        self.assertEqual((saved["enabled"], saved["capability_status"]), (True, "active"))
 
-    def test_disable_revokes(self):
+    def test_disable_stops_offering(self):
         repo = FakeStripeKeysRepo([{**CONNECTED, "payment_methods": {"bnpl": {"klarna": {"enabled": True, "capability_status": "active"}}}}])
         record = []
-        resp = self._put({"tenant_id": "t1", "method": "klarna", "enabled": False}, repo, make_caller(capabilities={"klarna_payments": "active"}, record=record))
+        resp = self._put({"tenant_id": "t1", "method": "klarna", "enabled": False}, repo,
+                         make_caller(capabilities={"klarna_payments": "active"}, record=record))
         self.assertEqual(resp["statusCode"], 200)
-        self.assertEqual(record[0]["data"], {"capabilities": {"klarna_payments": {"requested": False}}})
+        self.assertFalse(any(c["method"] == "POST" for c in record))       # no capability revoke POST
         self.assertIs(repo.get("t1", "test")["payment_methods"]["bnpl"]["klarna"]["enabled"], False)
 
     def test_unknown_method_rejected(self):
@@ -88,12 +87,16 @@ class PaymentMethodsHandlerTests(unittest.TestCase):
         self.assertEqual(resp["statusCode"], 400)
         self.assertEqual(json.loads(resp["body"])["error"], "stripe_not_connected")
 
-    def test_stripe_error_surfaces(self):
+    def test_stripe_read_failure_degrades_not_errors(self):
+        # If we can't read the account, the toggle still records the tenant's intent (status falls to unrequested);
+        # a later screen load refreshes it. It must not fail the toggle.
         def boom(*a, **k):
-            raise StripeApiError(400, "capability not available")
+            raise StripeApiError(400, "unreachable")
         resp = self._put({"tenant_id": "t1", "method": "klarna", "enabled": True}, FakeStripeKeysRepo([CONNECTED]), boom)
-        self.assertEqual(resp["statusCode"], 400)
-        self.assertEqual(json.loads(resp["body"])["error"], "capability_error")
+        self.assertEqual(resp["statusCode"], 200)
+        body = json.loads(resp["body"])
+        self.assertTrue(body["enabled"])
+        self.assertEqual(body["capability_status"], "unrequested")
 
     def test_get_returns_status_and_country_eligibility_and_refreshes_cache(self):
         repo = FakeStripeKeysRepo([CONNECTED])

@@ -100,14 +100,14 @@ def _toggle(tenant_id, mode, method_key, enabled, stripe_repo, stripe_caller, pl
     if not keys or not acct:
         return error_response("Connect a Stripe account before enabling installment methods.",
                               code="stripe_not_connected")
-    cap = capability_name(method_key)
-    try:
-        account = stripe_caller("POST", f"/accounts/{acct}", api_key=platform_key_loader(mode),
-                                data={"capabilities": {cap: {"requested": enabled}}})
-    except StripeApiError as exc:
-        return error_response(f"Stripe could not update the {method_key} capability: {exc.message}",
-                              code="capability_error")
-    status = (account.get("capabilities") or {}).get(cap, "pending" if enabled else "unrequested")
+    # Connected accounts here are Standard accounts, which SELF-MANAGE their capabilities — eligible BNPL methods
+    # are active by default, and the platform can't reliably request them via the API (POST /accounts is
+    # live-only / restricted). So the toggle stores the tenant's DISPLAY intent and records the live capability
+    # status we read; checkout offers the method only when enabled AND capability-active AND currency-eligible.
+    # A method that isn't active on the account (rare — needs merchant activation in their Stripe dashboard) can
+    # still be toggled on, but won't appear at checkout until Stripe reports it active.
+    _country, capabilities = _fetch_account(stripe_caller, platform_key_loader, mode, acct)
+    status = capabilities.get(capability_name(method_key), "unrequested")
 
     bnpl = dict((keys.get("payment_methods") or {}).get("bnpl") or {})
     bnpl[method_key] = {"enabled": enabled, "capability_status": status, "updated_at": int(time.time())}

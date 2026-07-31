@@ -26,15 +26,20 @@ as additional toggles. Buyers see the method(s) on the hosted Stripe Checkout pa
 
 ## The two moving parts
 
-1. **Enable (capability):** toggling a method ON requests the matching capability on the tenant's connected
-   account — `klarna_payments` / `afterpay_clearpay_payments` / `affirm_payments` / `zip_payments`. Activation is
-   **eligibility-gated + asynchronous**: Stripe returns `active` | `pending` | `inactive` | `unrequested` based on
-   the account's country, currency, MCC, and underwriting. The toggle reflects that live status — it is NOT a
-   plain local boolean.
+1. **Display intent (toggle):** **CORRECTED from live testing 2026-07-31.** Connected accounts here are
+   **Standard** accounts, which **self-manage their capabilities** — eligible BNPL capabilities are **active by
+   default** (Klarna came back `active` on a fresh US test account), and the platform **cannot** reliably request
+   them via the API (`POST /v1/accounts/{acct}` returns *"Only live keys can access this method"* in test, and is
+   restricted for Standard generally). So the toggle **reads** the live capability status and stores the tenant's
+   **display intent** — it does NOT POST a capability request. A method that isn't `active` on the account (rare —
+   needs the merchant to enable it in their own Stripe dashboard) can still be toggled on, but won't appear at
+   checkout until Stripe reports it `active`; the UI guides the merchant there. Status still reflects Stripe
+   (`active` | `pending` | `inactive` | `unrequested`), read on toggle + screen load.
 2. **Display (checkout):** `build_checkout_payload` emits an explicit `payment_method_types` = `['card']` + each
    enabled BNPL method whose capability is `active` **and** whose supported-currency set contains the checkout
-   currency. (Amount-out-of-range → Stripe just doesn't render the method; currency-mismatch with explicit
-   `payment_method_types` can error, so we gate on currency.) See "Checkout mechanism" for the pmc alternative.
+   currency (payment mode only). This IS the platform control: even though the capability is active, the method
+   only appears when we include it. (Amount-out-of-range → Stripe just doesn't render it; currency-mismatch with
+   explicit `payment_method_types` can error, so we gate on currency.)
 
 ## Data model — the `stripe_keys` doc (per tenant+mode)
 
@@ -158,7 +163,9 @@ and triggers the capability request; a `GET` returns toggles + refreshed capabil
 1. **Menu:** rename "Stripe Keys" → **"Payments"** (one home for Connect + BNPL). ✓
 2. **Checkout mechanism:** explicit **`payment_method_types`** (v1); `payment_method_configuration` deferred to
    P3 if multi-currency edge cases appear. (Buyer still chooses their method on Stripe's page either way.) ✓
-3. **Toggle-off:** fully **revoke** the capability (`requested=false`) on off. ✓
+3. **Toggle-off:** originally "revoke the capability," but since we don't manage Standard-account capabilities
+   (see corrected part 1), toggle-off simply **stops offering** the method at checkout (`enabled=false`); the
+   account keeps its (self-managed) capability. Same user-visible result: the method disappears from checkout.
 
 ## Post-BNPL follow-up (look into later — not now)
 
