@@ -437,6 +437,19 @@ def resolve_related_products(page: dict[str, Any], site: dict[str, Any] | None, 
     return added
 
 
+def _enable_site_route(site: dict[str, Any], page_id: str) -> bool:
+    """Flip a page's Site route entry(ies) to enabled. The dashboard sets `enabled = (status == "published")` at
+    attach time, so a draft page's route is disabled and the edge resolver 404s it ("store not active"). When a
+    page is published server-side (e.g. the collection-draft cascade) with no dashboard round-trip, its route
+    must be re-enabled here or the storefront card that links to it dead-ends. Returns whether anything changed."""
+    changed = False
+    for entry in (site.get("pages") or {}).values():
+        if isinstance(entry, dict) and entry.get("page_id") == page_id and entry.get("enabled") is not True:
+            entry["enabled"] = True
+            changed = True
+    return changed
+
+
 def _denormalize_page_catalog(site: dict[str, Any], page_id: str, offer_id: str, category: str) -> bool:
     """Record a landing page's offer_id + product category on its Site route-map entry so category pages can
     resolve grids off the map. Returns whether anything changed."""
@@ -503,8 +516,12 @@ def cascade_publish_collection_drafts(page: dict[str, Any], collections_by_id: d
             logger.warning("cascade: could not publish draft member %s", pid, exc_info=True)
             continue
         published.append(pid)
-        # Reflect the member on the in-memory Site map so THIS render's grid links it now (its own stream will
-        # denormalize too, idempotently). Needs only the offer_id already on the member doc — no offer/product load.
+        # Reflect the member on the in-memory Site map so THIS render's grid links it now, and so the edge
+        # resolver serves it (its own stream will denormalize too, idempotently):
+        #   - enable its route entry — a draft's route is disabled, so its card would 404 "store not active";
+        #   - denormalize its offer_id (needed for grid resolution) — already on the member doc, no extra load.
+        if site and _enable_site_route(site, pid):
+            site_changed = True
         if site and member.get("offer_id") and _denormalize_page_catalog(site, pid, str(member.get("offer_id") or ""), ""):
             site_changed = True
     return {"published": published, "site_changed": site_changed}

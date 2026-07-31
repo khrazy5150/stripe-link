@@ -1100,13 +1100,18 @@ class CascadePublishDraftMembersTests(unittest.TestCase):
                 ]}
 
     def _site(self):
-        # The member is attached to the Site (its slug exists) but its route entry has NO offer_id yet — it's a
-        # draft, so the grid would drop it until it's published.
-        return {"tenant_id": self.tenant, "site_id": "site_x",
-                "hosting": {"type": "custom", "custom_domain": "shop.example.com", "verification": {"verified": True}},
-                "indexing": {"eligibility": "eligible"},
-                "pages": {"/": {"page_id": "page_home01", "page_type": "homepage"},
-                          "/coffee": {"page_id": "page_coffee", "page_type": "landing"}}}
+        # The member is attached to the Site (its slug exists) but as a DRAFT: no offer_id yet, and its route
+        # entry is disabled (the dashboard sets enabled = status=='published'). So the grid would drop it AND the
+        # edge resolver would 404 its card until it's published.
+        return {"schema_version": "2026-07-20", "document_type": "site", "site_id": "site_x",
+                "tenant_id": self.tenant, "environment": "live", "name": "Shop", "status": "active",
+                "hosting": {"type": "custom", "platform_hostname": "shop.jbay.uk",
+                            "custom_domain": "shop.example.com", "verification": {"verified": True}},
+                "organization": {"name": "Shop", "entity_type": "OnlineStore"},
+                "domain_provisioning": {"status": "active"},
+                "indexing": {"eligibility": "eligible"}, "created_at": 1, "updated_at": 1,
+                "pages": {"/": {"page_id": "page_home01", "page_type": "landing", "enabled": True},
+                          "/coffee": {"page_id": "page_coffee", "page_type": "landing", "enabled": False}}}
 
     def _publish(self, pages_repo, sites_repo):
         colls = FakeDocumentRepository("collection_id")
@@ -1131,6 +1136,17 @@ class CascadePublishDraftMembersTests(unittest.TestCase):
         self.assertTrue(member["published_at"])
         # ...and THIS render already links its card (offer_id was denormalized onto the in-memory Site first).
         self.assertIn('href="/coffee"', published)
+        # ...and its Site route was re-enabled + persisted, so the edge resolver serves it (not "store not active").
+        site = sites.list_for_tenant(self.tenant)[0]
+        self.assertIs(site["pages"]["/coffee"]["enabled"], True)
+        self.assertEqual(site["pages"]["/coffee"]["offer_id"], self.offer["offer_id"])
+
+    def test_enable_site_route_flips_disabled_entry(self):
+        from stripe_link.runtime.publishing import _enable_site_route
+        site = {"pages": {"/x": {"page_id": "p1", "enabled": False}, "/y": {"page_id": "p2", "enabled": True}}}
+        self.assertTrue(_enable_site_route(site, "p1"))
+        self.assertIs(site["pages"]["/x"]["enabled"], True)
+        self.assertFalse(_enable_site_route(site, "p2"))  # already enabled → no change
 
     def test_once_published_since_unpublished_member_is_republished(self):
         # A member that was live before and is now a draft (unpublished to edit, then forgot to re-publish) IS
