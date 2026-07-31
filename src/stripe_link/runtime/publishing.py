@@ -5,6 +5,12 @@ import os
 import time
 
 logger = logging.getLogger(__name__)
+
+# Cache-Control for a PUBLISHED page artifact. The browser must revalidate every load (max-age=0) so a re-publish
+# is visible without a hard refresh — the old `max-age=300` let the browser serve a 5-minute-stale copy. The CDN
+# still caches it (s-maxage=300) for speed, and a publish invalidates the CDN, so the browser's revalidation
+# (a cheap ETag 304 when unchanged) fetches the new artifact the moment it's live.
+PUBLISHED_PAGE_CACHE_CONTROL = "public, max-age=0, s-maxage=300, must-revalidate"
 from typing import Any
 
 from stripe_link.domain.documents import (
@@ -631,7 +637,7 @@ def artifact_targets(
             "kind": "published",
             "bucket": pages_bucket,
             "key": paths["published"],
-            "cache_control": "public, max-age=300",
+            "cache_control": PUBLISHED_PAGE_CACHE_CONTROL,
             "url": public_url(pages_domain, paths["published"]),
         })
 
@@ -1069,7 +1075,7 @@ def publish_page_document(
             ctx_key = artifact_paths(tenant_id, page_id, context=ctx)["published"]
             s3_client.put_object(
                 Bucket=pages_bucket, Key=ctx_key, Body=ctx_html.encode("utf-8"),
-                ContentType="text/html; charset=utf-8", CacheControl="public, max-age=300",
+                ContentType="text/html; charset=utf-8", CacheControl=PUBLISHED_PAGE_CACHE_CONTROL,
             )
             artifacts.append({"kind": f"published:{ctx}", "bucket": pages_bucket, "key": ctx_key, "url": public_url(pages_domain, ctx_key)})
 
@@ -1090,7 +1096,7 @@ def publish_page_document(
             pub_key = artifact_paths(tenant_id, fp_page_id)["published"]
             s3_client.put_object(
                 Bucket=pages_bucket, Key=pub_key, Body=fp_html.encode("utf-8"),
-                ContentType="text/html; charset=utf-8", CacheControl="public, max-age=300",
+                ContentType="text/html; charset=utf-8", CacheControl=PUBLISHED_PAGE_CACHE_CONTROL,
             )
             artifacts.append({"kind": f"published:{kind}", "bucket": pages_bucket, "key": pub_key, "url": public_url(pages_domain, pub_key)})
 

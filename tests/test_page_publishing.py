@@ -154,6 +154,11 @@ class PagePublishingTests(unittest.TestCase):
 
         self.assertEqual([target["kind"] for target in targets], ["preview", "published"])
         self.assertEqual(targets[1]["key"], "page_simple_coffee/index.html")
+        # The published artifact makes the BROWSER revalidate (max-age=0) so a re-publish shows without a hard
+        # refresh, while the CDN still caches it (s-maxage); the preview is never cached.
+        self.assertIn("max-age=0", targets[1]["cache_control"])
+        self.assertIn("s-maxage=", targets[1]["cache_control"])
+        self.assertIn("no-store", targets[0]["cache_control"])
 
     def test_delete_page_artifacts_removes_preview_and_public_keys(self):
         result = delete_page_artifacts(
