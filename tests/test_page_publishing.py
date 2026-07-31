@@ -8,6 +8,7 @@ from unittest.mock import patch
 from boto3.dynamodb.types import TypeSerializer
 
 from handlers.page_publish import handler
+from tests.fakes import FakeDocumentRepository
 from stripe_link.runtime.artifacts import artifact_paths
 from stripe_link.runtime.publishing import (
     PublishError,
@@ -20,6 +21,7 @@ from stripe_link.runtime.publishing import (
     detach_page_from_sites,
     find_site_for_page,
     publish_page_document,
+    catalog_grid_to_collection,
     resolve_category_grids,
     resolve_related_products,
     site_page_slug,
@@ -991,6 +993,82 @@ class PlatformHostServingTests(unittest.TestCase):
         self.assertIn('<div class="sl-catalog-card">', published)
         self.assertNotIn("bean-co.jbay.uk", published)
         self.assertIn('<meta name="robots" content="noindex', published)
+
+
+class GridToCollectionMigrationTests(unittest.TestCase):
+    """P1d migration (plans/SITE_COLLECTIONS.md): convert an inline catalog_grid into a Collection + embed."""
+
+    def _site(self):
+        return {"site_id": "site_x", "pages": {
+            "/creatine": {"page_id": "page_a", "offer_id": "offer_a", "category": "supplements"},
+            "/whey": {"page_id": "page_b", "offer_id": "offer_b", "category": "supplements"},
+            "/mat": {"page_id": "page_c", "offer_id": "offer_c", "category": "gear"},
+        }}
+
+    def test_scope_all_grid_becomes_all_collection(self):
+        section = {"type": "catalog_grid", "scope": "all", "heading": "Shop all", "items": []}
+        coll = catalog_grid_to_collection(section, self._site(), "t1", "coll_1")
+        self.assertEqual((coll["rule"], coll["name"], coll["site_id"]), ("all", "Shop all", "site_x"))
+        self.assertEqual(coll["presentation"], {"heading": "Shop all"})
+        self.assertEqual(section["collection_id"], "coll_1")
+        self.assertNotIn("scope", section)  # inline config now lives on the Collection
+
+    def test_category_grid_becomes_category_collection(self):
+        section = {"type": "catalog_grid", "category": "gear"}
+        coll = catalog_grid_to_collection(section, self._site(), "t1", "coll_1")
+        self.assertEqual((coll["rule"], coll["category"]), ("category", "gear"))
+        self.assertNotIn("category", section)
+
+    def test_curated_grid_becomes_manual_with_page_members(self):
+        section = {"type": "catalog_grid", "items": [{"offer_id": "offer_b"}, {"offer_id": "offer_a"}, {"offer_id": "gone"}]}
+        coll = catalog_grid_to_collection(section, self._site(), "t1", "coll_1")
+        self.assertEqual(coll["rule"], "manual")
+        self.assertEqual(coll["members"], ["page_b", "page_a"])  # offer_id->page_id, order kept, off-Site dropped
+        self.assertNotIn("items", section)
+
+    def test_idempotent_when_already_a_collection_embed(self):
+        section = {"type": "catalog_grid", "collection_id": "coll_existing"}
+        self.assertIsNone(catalog_grid_to_collection(section, self._site(), "t1", "coll_1"))
+        self.assertEqual(section["collection_id"], "coll_existing")
+
+    def test_migration_is_behavior_preserving(self):
+        # Migrating a curated grid then resolving via its Collection yields the SAME items as resolving the
+        # original inline grid — the whole point of the migration.
+        site = self._site()
+        inline = {"sections": [{"id": "g", "type": "catalog_grid",
+                                "items": [{"offer_id": "offer_b", "slug": "/x"}, {"offer_id": "offer_a", "slug": "/y"}]}]}
+        before = copy.deepcopy(inline)
+        resolve_category_grids(before, site)
+        coll = catalog_grid_to_collection(inline["sections"][0], site, "t1", "coll_1")
+        resolve_category_grids(inline, site, {"coll_1": coll})
+        self.assertEqual(inline["sections"][0]["items"], before["sections"][0]["items"])
+
+    def _backfill_fixtures(self):
+        pages = FakeDocumentRepository("page_id")
+        pages.put({"tenant_id": "t1", "page_id": "page_store",
+                   "sections": [{"id": "g", "type": "catalog_grid", "scope": "all", "heading": "Shop all"}]})
+        pages.put({"tenant_id": "t1", "page_id": "page_plain", "sections": [{"id": "h", "type": "brand_hero"}]})
+        sites = FakeSitesRepository([{"tenant_id": "t1", "site_id": "site_x", "pages": {"/": {"page_id": "page_store"}}}])
+        return pages, sites, FakeDocumentRepository("collection_id")
+
+    def test_backfill_migrates_page_and_is_idempotent(self):
+        from stripe_link.runtime.publishing import backfill_page_collections
+        pages, sites, colls = self._backfill_fixtures()
+        ids = iter(["coll_1", "coll_2"])
+        summary = backfill_page_collections(pages, sites, colls, "t1", id_factory=lambda: next(ids), dry_run=False)
+        self.assertEqual((summary["pages_migrated"], summary["collections_created"]), (1, 1))
+        self.assertEqual(pages.get("t1", "page_store")["sections"][0]["collection_id"], "coll_1")  # page rewritten
+        self.assertEqual(colls.get("t1", "coll_1")["rule"], "all")  # collection persisted (rule from scope)
+        again = backfill_page_collections(pages, sites, colls, "t1", id_factory=lambda: "coll_x", dry_run=False)
+        self.assertEqual(again["pages_migrated"], 0)  # already migrated -> skipped
+
+    def test_backfill_dry_run_writes_nothing(self):
+        from stripe_link.runtime.publishing import backfill_page_collections
+        pages, sites, colls = self._backfill_fixtures()
+        summary = backfill_page_collections(pages, sites, colls, "t1", id_factory=lambda: "coll_1", dry_run=True)
+        self.assertEqual(summary["pages_migrated"], 1)  # reported...
+        self.assertNotIn("collection_id", pages.get("t1", "page_store")["sections"][0])  # ...but nothing written
+        self.assertIsNone(colls.get("t1", "coll_1"))
 
 
 class CategoryPageTests(unittest.TestCase):

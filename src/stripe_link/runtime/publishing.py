@@ -1,3 +1,4 @@
+import copy
 import json
 import os
 import time
@@ -266,6 +267,89 @@ def _collection_grid_items(collection: dict[str, Any], entries: dict[str, Any],
             slug, offer_id = hit
             items.append({"offer_id": offer_id, "slug": slug})
     return items
+
+
+def catalog_grid_to_collection(section: dict[str, Any], site: dict[str, Any] | None, tenant_id: str,
+                               collection_id: str) -> dict[str, Any] | None:
+    """Convert one inline catalog_grid section into a Collection document, rewriting the section into a
+    collection-embed that references it (plans/SITE_COLLECTIONS.md P1d migration). Idempotent: a section that
+    already carries a collection_id yields None (already migrated). The Collection's rule is derived from the
+    inline config — scope='all' → 'all', a category → 'category', else the curated items → 'manual' with members
+    resolved to page_ids via the Site route map (offer_id → page_id). Mutates the section: sets collection_id
+    and drops the now-migrated inline scope/category/items. The caller persists the returned Collection FIRST,
+    then the rewritten page, so the reference always resolves."""
+    if not isinstance(section, dict) or section.get("type") != "catalog_grid" or section.get("collection_id"):
+        return None
+    heading = str(section.get("heading") or "").strip()
+    collection: dict[str, Any] = {
+        "document_type": "collection", "tenant_id": tenant_id,
+        "site_id": str((site or {}).get("site_id") or ""),
+        "collection_id": collection_id, "name": heading or "Products",
+    }
+    scope = str(section.get("scope") or "").strip()
+    category = str(section.get("category") or "").strip()
+    if scope == "all":
+        collection["rule"] = "all"
+    elif category:
+        collection["rule"] = "category"
+        collection["category"] = category
+    else:
+        collection["rule"] = "manual"
+        page_by_offer = {
+            str(e["offer_id"]): str(e["page_id"])
+            for e in ((site or {}).get("pages") or {}).values()
+            if isinstance(e, dict) and e.get("offer_id") and e.get("page_id")
+        }
+        collection["members"] = [
+            page_by_offer[oid]
+            for item in (section.get("items") or [])
+            for oid in [str((item or {}).get("offer_id") or "")]
+            if oid in page_by_offer
+        ]
+    if heading:
+        collection["presentation"] = {"heading": heading}
+    section["collection_id"] = collection_id
+    for inline in ("scope", "category", "items"):
+        section.pop(inline, None)
+    return collection
+
+
+def backfill_page_collections(pages_repository: Any, sites_repository: Any, collections_repository: Any,
+                              tenant_id: str, *, id_factory, dry_run: bool = True) -> dict[str, Any]:
+    """Migrate a tenant's inline catalog_grids to Collections (plans/SITE_COLLECTIONS.md P1d). For each page with
+    a catalog_grid lacking a collection_id, mint a Collection from its inline config and rewrite the section.
+    Persists each Collection FIRST, then the changed page, so the embed always resolves. Idempotent — a re-run
+    skips already-migrated grids. `dry_run` reports the plan without writing. Returns a summary."""
+    summary: dict[str, Any] = {"pages_scanned": 0, "pages_migrated": 0, "collections_created": 0, "collections": []}
+    for stored in pages_repository.list_for_tenant(tenant_id):
+        summary["pages_scanned"] += 1
+        page_id = str(stored.get("page_id") or "")
+        if not any(isinstance(s, dict) and s.get("type") == "catalog_grid" and not s.get("collection_id")
+                   for s in (stored.get("sections") or [])):
+            continue
+        # Work on a copy so the repo's object is never mutated (esp. in dry_run); we only persist our own copy.
+        page = copy.deepcopy(stored)
+        grids = [s for s in (page.get("sections") or [])
+                 if isinstance(s, dict) and s.get("type") == "catalog_grid" and not s.get("collection_id")]
+        site = find_site_for_page(sites_repository, tenant_id, page_id)
+        new_collections = []
+        for section in grids:
+            collection = catalog_grid_to_collection(section, site, tenant_id, id_factory())
+            if collection:
+                collection.setdefault("schema_version", "2026-07-31")
+                new_collections.append(collection)
+        if not new_collections:
+            continue
+        if not dry_run:
+            for collection in new_collections:
+                collections_repository.put(collection)
+            pages_repository.put(page)
+        summary["pages_migrated"] += 1
+        summary["collections_created"] += len(new_collections)
+        summary["collections"].extend(
+            {"collection_id": c["collection_id"], "page_id": page_id, "rule": c["rule"],
+             "members": len(c.get("members") or [])} for c in new_collections)
+    return summary
 
 
 def resolve_category_grids(page: dict[str, Any], site: dict[str, Any] | None,
