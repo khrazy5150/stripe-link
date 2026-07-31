@@ -1254,6 +1254,9 @@ def validate_page_document(document: dict[str, Any]) -> None:
             optional_string(section, "heading", "Store profile heading")
         elif section_type == "catalog_grid":
             optional_string(section, "heading", "Catalog grid heading")
+            # A collection-embed: the grid's items come from the referenced Collection at publish
+            # (plans/SITE_COLLECTIONS.md P1), instead of the inline scope/category/items below.
+            optional_string(section, "collection_id", "Catalog grid collection_id")
             # A category-driven grid stores a category key and resolves its cards from the Site catalog at
             # publish; a scope="all" grid resolves to EVERY offer page on the Site (a brand-first storefront
             # homepage that fills itself); a curated grid stores explicit items (plans/SITE_OBJECT.md §2.5b).

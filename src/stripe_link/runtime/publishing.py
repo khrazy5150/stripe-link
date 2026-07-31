@@ -223,7 +223,53 @@ def attach_funnel_slugs(
     return ({**site, "pages": pages}, True) if changed else (site, False)
 
 
-def resolve_category_grids(page: dict[str, Any], site: dict[str, Any] | None) -> None:
+def load_page_collections(collections_repository: Any, tenant_id: str, page: dict[str, Any]) -> dict[str, Any]:
+    """Load the Collections a page's catalog_grid sections reference (collection-embeds, plans/SITE_COLLECTIONS.md
+    P1), keyed by collection_id. Best-effort: a missing collection just leaves that grid to its inline config."""
+    if collections_repository is None:
+        return {}
+    ids = {
+        str(s.get("collection_id") or "")
+        for s in (page.get("sections") or [])
+        if isinstance(s, dict) and s.get("type") == "catalog_grid" and s.get("collection_id")
+    }
+    ids.discard("")
+    out: dict[str, Any] = {}
+    for cid in ids:
+        try:
+            collection = collections_repository.get(tenant_id, cid)
+        except Exception:  # noqa: BLE001 - a load failure just falls back to the grid's inline config
+            collection = None
+        if collection:
+            out[cid] = collection
+    return out
+
+
+def _collection_grid_items(collection: dict[str, Any], entries: dict[str, Any],
+                           slug_offer_by_page: dict[str, tuple[str, str]]) -> list[dict[str, str]]:
+    """Resolve a Collection's members to grid items ({offer_id, Site slug}) against the Site route map — the same
+    "only real, navigable, published Site pages" guarantee as the other grid modes. `all`/`category` pull from
+    the map; `manual` keeps the tenant's ordered page references, dropping any not published on the Site."""
+    rule = str(collection.get("rule") or "manual")
+    if rule == "all":
+        return [{"offer_id": str(e["offer_id"]), "slug": slug}
+                for slug, e in entries.items() if isinstance(e, dict) and e.get("offer_id")]
+    if rule == "category":
+        cat = str(collection.get("category") or "")
+        return [{"offer_id": str(e["offer_id"]), "slug": slug}
+                for slug, e in entries.items()
+                if isinstance(e, dict) and e.get("offer_id") and str(e.get("category") or "") == cat]
+    items = []
+    for page_id in collection.get("members") or []:
+        hit = slug_offer_by_page.get(str(page_id))
+        if hit:
+            slug, offer_id = hit
+            items.append({"offer_id": offer_id, "slug": slug})
+    return items
+
+
+def resolve_category_grids(page: dict[str, Any], site: dict[str, Any] | None,
+                           collections_by_id: dict[str, Any] | None = None) -> None:
     """Populate a catalog_grid's items from the Site route map (plans/SITE_OBJECT.md §2.5b Slice 2) so every
     card links to a real, navigable Site page. All modes (re)resolve from the route map (the source of truth) at
     publish: `scope="all"` → EVERY offer page on the Site (a brand-first storefront that fills itself); a
@@ -235,14 +281,30 @@ def resolve_category_grids(page: dict[str, Any], site: dict[str, Any] | None) ->
     if not site:
         return
     entries = (site or {}).get("pages") or {}
+    collections_by_id = collections_by_id or {}
     # offer_id -> Site slug, for the offer pages published on this Site (the navigable ones).
     slug_by_offer = {
         str(entry["offer_id"]): slug
         for slug, entry in entries.items()
         if isinstance(entry, dict) and entry.get("offer_id")
     }
+    # page_id -> (Site slug, offer_id), for resolving a Collection's ordered page-id members.
+    slug_offer_by_page = {
+        str(entry["page_id"]): (slug, str(entry["offer_id"]))
+        for slug, entry in entries.items()
+        if isinstance(entry, dict) and entry.get("page_id") and entry.get("offer_id")
+    }
     for section in page.get("sections") or []:
         if section.get("type") != "catalog_grid":
+            continue
+        # A collection-embed: the grid's items come from the referenced Collection's rule, not its inline config.
+        collection = collections_by_id.get(str(section.get("collection_id") or ""))
+        if collection is not None:
+            section["items"] = _collection_grid_items(collection, entries, slug_offer_by_page)
+            if not str(section.get("heading") or "").strip():
+                heading = str((collection.get("presentation") or {}).get("heading") or "").strip()
+                if heading:
+                    section["heading"] = heading
             continue
         scope = str(section.get("scope") or "").strip()
         category = str(section.get("category") or "").strip()
@@ -652,6 +714,7 @@ def publish_page_document(
     sites_repository: Any | None = None,
     domains_index_repository: Any | None = None,
     reviews_repository: Any | None = None,
+    collections_repository: Any | None = None,
     s3_client: Any,
     pages_bucket: str,
     preview_bucket: str,
@@ -670,9 +733,11 @@ def publish_page_document(
     # The Site supplies the page's public identity (Organization for the entity graph). Optional: legacy pages
     # without a Site still publish, falling back to the interim identity (plans/SITE_OBJECT.md §2.2).
     site = find_site_for_page(sites_repository, tenant_id, page_id)
-    # A category page's catalog_grid resolves its cards from the Site route map BEFORE offers load, so the
-    # referenced offers get bundled by load_render_context (plans/SITE_OBJECT.md §2.5b Slice 2).
-    resolve_category_grids(page, site)
+    # A catalog_grid (including a collection-embed) resolves its cards from the Site route map BEFORE offers
+    # load, so the referenced offers get bundled by load_render_context (plans/SITE_OBJECT.md §2.5b Slice 2,
+    # plans/SITE_COLLECTIONS.md P1). Collections referenced by the page are loaded here.
+    collections_by_id = load_page_collections(collections_repository, tenant_id, page)
+    resolve_category_grids(page, site, collections_by_id)
     offer, products_by_id, services_by_id, offers_by_id = load_render_context(
         page,
         offers_repository=offers_repository,

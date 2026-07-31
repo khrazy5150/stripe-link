@@ -1433,6 +1433,10 @@ Resources:
             TableName: !Ref RoutesTable
         - DynamoDBReadPolicy:
             TableName: !Ref ReviewsTable
+        # A page's collection-embed grids resolve their cards from the referenced Collection at publish
+        # (plans/SITE_COLLECTIONS.md P1) — read-only.
+        - DynamoDBReadPolicy:
+            TableName: !Ref CollectionsTable
         - S3CrudPolicy:
             BucketName: !Ref PagesBucket
         - S3CrudPolicy:

@@ -1049,6 +1049,43 @@ class CategoryPageTests(unittest.TestCase):
         resolve_related_products(page, self._site(), "supplements", "page_x")  # not one of the pages -> both eligible
         self.assertEqual(len(page["sections"][0]["items"]), 1)
 
+    def test_collection_embed_manual_keeps_order_and_drops_off_site(self):
+        # A catalog_grid referencing a Collection resolves its members (page ids) to real Site slugs, in the
+        # collection's order, dropping any not published on the Site (plans/SITE_COLLECTIONS.md P1).
+        coll = {"collection_id": "c1", "rule": "manual", "members": ["page_b", "page_a", "page_missing"]}
+        page = {"sections": [{"id": "g", "type": "catalog_grid", "collection_id": "c1"}]}
+        resolve_category_grids(page, self._site(), {"c1": coll})
+        self.assertEqual([i["slug"] for i in page["sections"][0]["items"]], ["/whey", "/creatine"])
+
+    def test_collection_embed_all_rule_pulls_every_offer_page(self):
+        page = {"sections": [{"id": "g", "type": "catalog_grid", "collection_id": "c1"}]}
+        resolve_category_grids(page, self._site(), {"c1": {"collection_id": "c1", "rule": "all"}})
+        self.assertEqual({i["offer_id"] for i in page["sections"][0]["items"]}, {"offer_a", "offer_b", "offer_c"})
+
+    def test_collection_embed_category_rule(self):
+        coll = {"collection_id": "c1", "rule": "category", "category": "gear"}
+        page = {"sections": [{"id": "g", "type": "catalog_grid", "collection_id": "c1"}]}
+        resolve_category_grids(page, self._site(), {"c1": coll})
+        self.assertEqual([i["slug"] for i in page["sections"][0]["items"]], ["/mat"])
+
+    def test_collection_embed_heading_falls_back_to_presentation(self):
+        coll = {"collection_id": "c1", "rule": "all", "presentation": {"heading": "Shop all"}}
+        page = {"sections": [{"id": "g", "type": "catalog_grid", "collection_id": "c1"}]}
+        resolve_category_grids(page, self._site(), {"c1": coll})
+        self.assertEqual(page["sections"][0]["heading"], "Shop all")
+
+    def test_load_page_collections_gathers_referenced_ids(self):
+        from stripe_link.runtime.publishing import load_page_collections
+
+        class Repo:
+            def get(self, tenant_id, cid):
+                return {"collection_id": cid, "rule": "all"} if cid == "c1" else None
+        page = {"sections": [{"type": "catalog_grid", "collection_id": "c1"},
+                             {"type": "catalog_grid"}, {"type": "brand_hero"}]}
+        out = load_page_collections(Repo(), "t1", page)
+        self.assertEqual(list(out.keys()), ["c1"])
+        self.assertEqual(load_page_collections(None, "t1", page), {})
+
     def test_denormalize_records_offer_and_category(self):
         site = {"pages": {"/p": {"page_id": "page_a", "page_type": "landing"}}}
         self.assertTrue(_denormalize_page_catalog(site, "page_a", "offer_a", "supplements"))
