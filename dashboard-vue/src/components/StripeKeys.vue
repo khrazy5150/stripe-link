@@ -2,8 +2,8 @@
   <section class="page">
     <header class="page-header">
       <div>
-        <h1>Stripe Keys</h1>
-        <p>Manage tenant Stripe API keys using the StripeKeys schema.</p>
+        <h1>Payments</h1>
+        <p>Connect Stripe, manage your keys, and choose which payment methods buyers can use.</p>
       </div>
     </header>
 
@@ -101,6 +101,51 @@
           {{ modeLabel }} account restricted in Stripe. Action required: {{ restrictionReason }}.
         </div>
         <div v-if="store.connectError" class="keys-status-banner error">{{ store.connectError }}</div>
+      </div>
+    </section>
+
+    <section v-if="isConnected" class="dashboard-card bnpl-card">
+      <header class="dashboard-card-header">
+        <div>
+          <h2>Installments — Buy Now, Pay Later</h2>
+          <p>Let buyers pay over time. You're paid in full upfront; the usual platform fee still applies.</p>
+        </div>
+        <span class="tier-pill">{{ modeLabel }}</span>
+      </header>
+      <div class="connect-card-body">
+        <div v-if="pm.loading" class="connect-muted">Loading installment options…</div>
+        <ul v-else class="bnpl-list">
+          <li v-for="m in pm.methods" :key="m.method" class="bnpl-row">
+            <div class="bnpl-row-head">
+              <div class="bnpl-row-name">
+                <span class="bnpl-label">{{ m.label }}</span>
+                <span v-if="m.enabled && m.capability_status !== 'unrequested'" :class="['bnpl-status', m.capability_status]">
+                  {{ bnplStatusLabel(m.capability_status) }}
+                </span>
+              </div>
+              <label class="bnpl-toggle" :class="{ disabled: !m.country_eligible }">
+                <input
+                  type="checkbox"
+                  :checked="m.enabled"
+                  :disabled="!m.country_eligible || pm.savingMethod === m.method"
+                  @change="pm.toggle(m.method, $event.target.checked)"
+                />
+                <span class="bnpl-switch" aria-hidden="true"></span>
+              </label>
+            </div>
+            <p v-if="!m.country_eligible" class="bnpl-note">
+              Not available in your country
+              <button type="button" class="bnpl-info" :aria-label="`Where ${m.label} is available`" @click="toggleInfo(m.method)">ⓘ</button>
+            </p>
+            <p v-if="m.enabled && m.capability_status === 'pending'" class="bnpl-note">
+              Stripe is reviewing your account for {{ m.label }}. It goes live once approved.
+            </p>
+            <p v-if="openInfo === m.method" class="bnpl-countries">
+              Available when your Stripe account is based in: {{ m.countries.join(", ") }}
+            </p>
+          </li>
+        </ul>
+        <div v-if="pm.error" class="keys-status-banner error">{{ pm.error }}</div>
       </div>
     </section>
 
@@ -224,11 +269,23 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import StripeKeyPanel from "./StripeKeyPanel.vue";
 import { useStripeKeysStore } from "../stores/stripeKeys";
+import { usePaymentMethodsStore } from "../stores/paymentMethods";
 
 const store = useStripeKeysStore();
+const pm = usePaymentMethodsStore();
+const openInfo = ref("");
+
+function toggleInfo(method) {
+  openInfo.value = openInfo.value === method ? "" : method;
+}
+
+const BNPL_STATUS_LABELS = { active: "Active", pending: "Pending review", inactive: "Inactive" };
+function bnplStatusLabel(status) {
+  return BNPL_STATUS_LABELS[status] || status;
+}
 const wizardMaxStep = 4;
 const wizardOpen = ref(false);
 const wizardStep = ref(1);
@@ -360,9 +417,45 @@ async function handleConnectReturn() {
   window.history.replaceState({}, document.title, cleanUrl);
 }
 
+// BNPL toggles are per Stripe mode (test/live) — reload them whenever the viewed mode changes, and once connected.
+watch(() => store.verifyMode, (mode) => {
+  if (isConnected.value) pm.load(mode);
+});
+watch(isConnected, (connected) => {
+  if (connected) pm.load(store.verifyMode);
+});
+
 onMounted(async () => {
   store.resetForCurrentTenant();
+  pm.reset();
   await store.load();
   await handleConnectReturn();
+  if (isConnected.value) pm.load(store.verifyMode);
 });
 </script>
+
+<style scoped>
+.bnpl-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 1rem; }
+.bnpl-row { border: 1px solid var(--line); border-radius: 10px; padding: 1rem 1.2rem; }
+.bnpl-row-head { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
+.bnpl-row-name { display: flex; align-items: center; gap: 0.6rem; }
+.bnpl-label { font-weight: 700; font-size: 1.5rem; }
+.bnpl-status { font-size: 1.1rem; font-weight: 600; padding: 0.1rem 0.5rem; border-radius: 0.4rem; text-transform: uppercase; letter-spacing: 0.03em; }
+.bnpl-status.active { background: #dcfce7; color: #166534; }
+.bnpl-status.pending { background: #fef9c3; color: #854d0e; }
+.bnpl-status.inactive { background: var(--line); color: var(--muted); }
+.bnpl-note { margin: 0.6rem 0 0; color: var(--muted); font-size: 1.3rem; }
+.bnpl-countries { margin: 0.5rem 0 0; color: var(--muted); font-size: 1.25rem; line-height: 1.5; }
+.bnpl-info { background: none; border: none; cursor: pointer; color: var(--muted); font-size: 1.3rem; padding: 0 0.2rem; }
+.bnpl-info:hover { color: var(--text); }
+
+/* Toggle switch */
+.bnpl-toggle { position: relative; display: inline-flex; width: 4.4rem; height: 2.4rem; flex: none; }
+.bnpl-toggle.disabled { opacity: 0.45; }
+.bnpl-toggle input { position: absolute; inset: 0; opacity: 0; margin: 0; cursor: pointer; }
+.bnpl-toggle input:disabled { cursor: not-allowed; }
+.bnpl-switch { position: absolute; inset: 0; border-radius: 999px; background: var(--line); transition: background 0.15s ease; }
+.bnpl-switch::after { content: ""; position: absolute; top: 0.3rem; left: 0.3rem; width: 1.8rem; height: 1.8rem; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,.3); transition: transform 0.15s ease; }
+.bnpl-toggle input:checked + .bnpl-switch { background: var(--brand, #4f46e5); }
+.bnpl-toggle input:checked + .bnpl-switch::after { transform: translateX(2rem); }
+</style>

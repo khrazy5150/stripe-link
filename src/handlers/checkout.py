@@ -5,6 +5,7 @@ from urllib.request import Request, urlopen
 
 from stripe_link.common import error_response, json_response, query_params, tenant_id_from_event
 from stripe_link.domain.billing_status import BillingStatusError, assert_billing_in_good_standing
+from stripe_link.domain.bnpl import checkout_payment_method_types
 from stripe_link.domain.fees import build_fee_context
 from stripe_link.domain.opportunities import STAGE_CHECKOUT, STAGE_POST_PURCHASE, stage_opportunities
 from stripe_link.domain.pricing import (
@@ -136,6 +137,11 @@ def handler(
             tenant_repo=tenant_repo,
             billing_config_loader=billing_config_loader,
         )
+        # Direct-charge (Connect) tenants can offer their enabled BNPL methods; legacy own-key tenants keep their
+        # own Stripe account's payment-method settings untouched (plans/BNPL_PAYMENT_METHODS.md).
+        bnpl_types = checkout_payment_method_types(
+            (stripe_keys.get("payment_methods") or {}).get("bnpl"), resolved.get("currency"),
+        ) if stripe_account else []
         checkout_payload = build_checkout_payload(
             tenant_id=tenant_id,
             offer=offer,
@@ -146,6 +152,7 @@ def handler(
             page_id=page_id,
             fee_context=fee_context,
             apply_application_fee=bool(stripe_account),
+            bnpl_payment_method_types=bnpl_types,
         )
         stripe_response = create_stripe_checkout_session(
             checkout_payload,
@@ -200,6 +207,7 @@ def build_checkout_payload(
     page_id="",
     fee_context=None,
     apply_application_fee=False,
+    bnpl_payment_method_types=None,
 ):
     checkout = offer.get("checkout") or {}
     mode = checkout.get("mode") or "payment"
@@ -332,6 +340,15 @@ def build_checkout_payload(
                 payload["subscription_data[application_fee_percent]"] = f"{percent:.4f}"
             else:
                 payload["payment_intent_data[application_fee_amount]"] = str(platform_fee)
+
+    # BNPL / installment methods the tenant enabled + that are capability-active + currency-eligible for this
+    # session (plans/BNPL_PAYMENT_METHODS.md). Setting payment_method_types is explicit, so we must include card;
+    # only override when there's at least one BNPL method to add, and only for one-time payment mode (BNPL
+    # doesn't do recurring). Otherwise leave payment methods to the account's Stripe defaults, as before.
+    if bnpl_payment_method_types and payload.get("mode") == "payment":
+        types = ["card"] + [t for t in bnpl_payment_method_types if t and t != "card"]
+        for index, pmt in enumerate(types):
+            payload[f"payment_method_types[{index}]"] = pmt
     return payload
 
 

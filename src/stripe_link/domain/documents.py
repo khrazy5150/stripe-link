@@ -1312,6 +1312,23 @@ def validate_stripe_keys_document(document: dict[str, Any]) -> None:
         raise DocumentValidationError("Stripe keys mode must be 'test' or 'live'.")
     if not (document.get("publishable_key") or document.get("connect_account_id")):
         raise DocumentValidationError("Stripe keys require publishable_key or connect_account_id.")
+    # Per-tenant BNPL toggles + cached Stripe capability status (plans/BNPL_PAYMENT_METHODS.md). Optional.
+    payment_methods = document.get("payment_methods")
+    if payment_methods is not None:
+        if not isinstance(payment_methods, dict):
+            raise DocumentValidationError("Stripe keys payment_methods must be an object.")
+        bnpl = payment_methods.get("bnpl")
+        if bnpl is not None:
+            if not isinstance(bnpl, dict):
+                raise DocumentValidationError("Stripe keys payment_methods.bnpl must be an object.")
+            for method, entry in bnpl.items():
+                if not isinstance(entry, dict):
+                    raise DocumentValidationError(f"payment_methods.bnpl.{method} must be an object.")
+                if not isinstance(entry.get("enabled", False), bool):
+                    raise DocumentValidationError(f"payment_methods.bnpl.{method}.enabled must be boolean.")
+                status = entry.get("capability_status")
+                if status is not None and status not in {"active", "pending", "inactive", "unrequested"}:
+                    raise DocumentValidationError(f"payment_methods.bnpl.{method}.capability_status is invalid.")
 
 
 def validate_tenant_config(document: dict[str, Any]) -> None:

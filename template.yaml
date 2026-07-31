@@ -1345,6 +1345,45 @@ Resources:
             Path: /checkout
             Method: OPTIONS
 
+  PaymentMethodsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${ProjectPrefix}-payment-methods-api-${Environment}"
+      CodeUri: src/
+      Handler: handlers.payment_methods.handler
+      Description: Per-tenant BNPL/installment payment-method toggles (Klarna etc.) — requests the Stripe capability on the tenant's connected Standard account and caches the status on the stripe_keys doc (plans/BNPL_PAYMENT_METHODS.md).
+      Policies:
+        # Read + WRITE the stripe_keys doc (persist the toggle + cached capability status), per mode.
+        - DynamoDBCrudPolicy:
+            TableName: !Sub "${ProjectPrefix}-stripe-keys-dev"
+        - DynamoDBCrudPolicy:
+            TableName: !Sub "${ProjectPrefix}-stripe-keys-prod"
+        # The platform secret key (Secrets Manager) — used to request capabilities on the connected account.
+        - Statement:
+            Effect: Allow
+            Action:
+              - secretsmanager:GetSecretValue
+            Resource: "*"
+      Events:
+        PaymentMethodsGet:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /payment-methods
+            Method: GET
+        PaymentMethodsPut:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /payment-methods
+            Method: PUT
+        PaymentMethodsOptions:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /payment-methods
+            Method: OPTIONS
+
   UpsellFunction:
     Type: AWS::Serverless::Function
     Properties:

@@ -45,6 +45,10 @@ Deferred, non-blocking follow-ups. Each item notes what, why it was deferred, an
 
 ## Dashboard / UX
 
+### Consolidate the side menu into collapsible groups
+- The side menu has grown cluttered and lost its original simplicity. Look into grouping items into collapsible
+  sections. Deferred to AFTER BNPL ships (plans/BNPL_PAYMENT_METHODS.md) — the right grouping will be clearer then.
+
 ### Build the beginner-friendly custom-domain wizard
 - **What:** Replace the current bare custom-domain form with the guided, auto-polling wizard designed
   in **`docs/CUSTOM_DOMAIN_WIZARD.md`** (single flow for beginners + power users; reveals DNS records
@@ -67,60 +71,19 @@ Deferred, non-blocking follow-ups. Each item notes what, why it was deferred, an
 
 ## Commerce
 
-### Sales funnels in the Sites paradigm — P1 + order bumps + P2b SHIPPED (2026-07-29)
-- **Now shipped (dev):** on top of the P1 pre-purchase work (below), the post-purchase funnel is Sites-native.
-  A 3-agent code audit (2026-07-29) found the plan doc badly stale — far more was already built than it said:
-  P1a–d **including P1b-2 flash client-side time-states**, and **order bumps via Stripe `optional_items`**
-  end-to-end (model → validation → both checkout handlers → sync-skip guard → builder inference; the old
-  `merge_resolved_offers`/`resolve_order_bumps` stopgap is retired — `merge_resolved_offers` is now dead code,
-  a cleanup candidate). The post-purchase funnel ENGINE + synthesis was also done but served ONLY on the
-  platform host via internal `{page_id}__upsell_N` artifact ids (custom-domain buyers bounced off their domain).
-- **P2b — reserved-slug custom-domain funnel (this session):** `route_table` now carries resolver-visible
-  entry fields (fixes a real bug: `price_context` was dropped, so `/sale`//`/flash-sale` broke on custom
-  domains via the index); `attach_funnel_slugs` (publishing.py) attaches `/upsell` (+ `/downsell` in carousel
-  mode) + `/thank-you` to the Site root with `funnel_role`+`strategy`; the resolver derives the synthetic
-  artifact from role+strategy+`funnel_step`; the post_checkout router emits custom-domain reserved-slug URLs;
-  the checkout entry gate is offer-aware (`_offer_has_upsell_funnel`). +10 tests.
-- **Re-publish on domain verification — SHIPPED dev (2026-07-30):** the Site `check_domain` (handlers/sites.py),
-  on the FIRST verified transition, re-puts every page attached to the Site → fires the publish stream → each
-  page re-publishes with the verified domain in effect, so the funnel + `/sale` slugs and canonical/robots
-  attach even for pages published BEFORE verification. Best-effort; no-op on re-checks of an already-verified
-  domain. SitesFunction gained PagesTable write. (Note: the legacy TenantConfig `custom_domains.py:179` minimal
-  index write is a separate, pre-Sites path; the Site flow syncs the full `domain_index_record`.)
-- **Still to do (funnel):**
-  - **Editable funnel Page docs (stripe-cart parity, plan §Auto-provisioning / P2).** Today the funnel steps are
-    ephemeral synthesized S3 artifacts, not tenant-customizable Page docs. Converges with the Upsell Phase 2
-    "scoped landing builder" idea. Deliberately deferred (user chose reserved-slug routing over editable pages).
-  - **P3 advanced tier** — the detached `Funnel` doc (`schemas/Funnel.schema.json`, `funnel_id`) for bespoke
-    multi-page/branching funnels; its resolver is stubbed (`funnels.py` raises "not yet supported").
-  - **Server-side flash-window guard** — a crafted request can still post an expired flash `price_id` (P1 client
-    guard only; plan flags this acceptable for P1).
-- Original plan (now partly historical): `plans/SALES_FUNNELS.md`.
-
-### ⭐ (historical) Sales funnels — original scoping note
-- **What:** close the loop for transaction (Stripe) landing pages with a coherent sales-funnel model under
-  the **Sites** paradigm — order bumps, sale + flash-sale pricing, one-click **upsells/downsells**, and the
-  **thank-you** page — driven by product/offer pricing **contexts**, with **reserved slugs**
-  (`upsell`, `downsell`, `thank-you`, `sale`, `flash-sale`) that tenants may never use for their own pages.
-- **Already exists (verified 2026-07-24):** offer/price `context` enum (standard/sale/flash_sale/upsell/
-  downsell/order_bump); order-bump folding into the initial Stripe checkout (`resolve_order_bumps`);
-  one-click post-purchase upsell charging via saved payment method (`handlers/upsell.py`); Site-aware
-  post-checkout routing (`handlers/post_checkout.py` + page `post_checkout.funnel_steps`/`thank_you_page`);
-  `SITE_PAGE_TYPES` already includes `thank_you` + `funnel_step`.
-- **Missing / to design:** reserved-slug reservation + the reserved-slug URL convention (`/upsell` etc.);
-  flash-sale runtime (countdown + flash pricing); `/sale` + `/flash-sale` page semantics; and a consolidated
-  design reconciling per-offer/product contexts with per-Site reserved slugs. Listicle offers deliberately
-  IGNORE upsell funnels (AI_AND_COMMERCE Part C — "focused funnel" vs "shop mode").
-- **Design LOCKED (author-clarified 2026-07-24) → `plans/SALES_FUNNELS.md` (unified plan).** A Site = one
-  funnel for one offer. Reserved slugs: `/` (Standard) · `/sale` + `/flash-sale` (context views of `/` — same
-  page, swapped price + Sale/🔥 badge + countdown from page-level dates, fall back to Standard) · single
-  `/upsell` + `/downsell` (post-purchase one-click, cycling the offer's `funnel` upsell/downsell product+price
-  refs; downsell only for declined upsells) · `/thank-you`. Upsells/downsells live in an **in-offer
-  `offer.funnel` block** (separate from `items[]` → keeps offer_type clean; one offer per funnel). Pricing
-  context IS the wiring. **Unifies the pre-Sites `Funnel` engine** (schemas/Funnel.schema.json +
-  domain/funnels.py): reuse its routing/charge plumbing; the generic per-page step-graph (numbered slugs)
-  becomes the future ADVANCED tier. Phasing: **P1 pre-purchase** (reserved slugs + sale/flash views, no
-  payment change) → **P2 post-purchase default funnel** → **P3 advanced tier + polish**.
+### Editable funnel Page docs — the only open item from SALES_FUNNELS.md
+- **What:** the funnel steps (`/upsell`, `/downsell`, `/thank-you`) render from ephemeral synthesized S3
+  artifacts, not tenant-customizable **Page** docs. Make them editable Page docs (stripe-cart parity, plan
+  §Auto-provisioning / P2); converges with the Upsell Phase 2 "scoped landing builder" idea.
+- **Why deferred:** deliberate — the author chose reserved-slug routing over editable funnel pages.
+- **Tackle alongside this task:** "Draggable upsell order" (below, Commerce) and the carousel "Default 'no image'
+  placeholder" (below, Landing Pages / SEO) — kept as their own entries, but slated to be done during this work.
+- **Everything else in `plans/SALES_FUNNELS.md` is DONE and live in PROD** (verified 2026-07-31 against the
+  deployed Lambda code): P1 pre-purchase (reserved slugs + `/sale`//`/flash-sale` price mechanism + flash
+  client-side time-states), P2 (order bumps via Stripe `optional_items`, post-purchase funnel engine,
+  reserved-slug custom-domain serving), the re-publish-on-domain-verification remediation, and the 3 landing
+  multi-product/cart bugs (all fixed + tested). **P3** (advanced branching `Funnel` doc, funnel builder UX,
+  per-step analytics, AI copy) is intentional FUTURE scope tracked in the plan — not part of closing this task.
 
 ### ⭐ Platform-hostname Site serving (`*.jbay.uk`) — navigable free/test stores + env parity
 - **What:** serve every Site on its free `{label}.jbay.uk` platform hostname in BOTH environments, so storefronts

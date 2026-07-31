@@ -10,6 +10,7 @@ from urllib.request import urlopen
 from handlers.checkout import build_checkout_payload, create_stripe_checkout_session
 from stripe_link.common import error_response, json_response, parse_json_body
 from stripe_link.domain.billing_status import BillingStatusError, assert_billing_in_good_standing
+from stripe_link.domain.bnpl import checkout_payment_method_types
 from stripe_link.domain.cart import CartError, resolved_items_for_checkout
 from stripe_link.domain.fees import build_fee_context
 from stripe_link.domain.opportunities import STAGE_CHECKOUT, stage_opportunities
@@ -125,10 +126,14 @@ def handler(
             tenant_id=tenant_id, offer=offer, products_by_id=products_by_id,
             resolved=resolved, tenant_repo=tenant_repo, billing_config_loader=billing_config_loader,
         )
+        bnpl_types = checkout_payment_method_types(
+            (stripe_keys.get("payment_methods") or {}).get("bnpl"), resolved.get("currency"),
+        ) if stripe_account else []
         payload = build_checkout_payload(
             tenant_id=tenant_id, offer=offer, products_by_id=products_by_id, resolved=resolved,
             success_url=success_url, cancel_url=cancel_url, page_id=page_id,
             fee_context=fee_context, apply_application_fee=bool(stripe_account),
+            bnpl_payment_method_types=bnpl_types,
         )
         payload["metadata[cart_id]"] = cart_id  # tie the resulting order back to the cart (attribution)
 
