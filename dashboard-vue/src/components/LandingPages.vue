@@ -1380,6 +1380,7 @@ import { formatMoney } from "../stores/products";
 import PurchaseFlowDiagram from "./PurchaseFlowDiagram.vue";
 import { useProfileStore } from "../stores/profile";
 import { useSitesStore } from "../stores/sites";
+import { useCollectionsStore } from "../stores/collections";
 import { useSubdomainCheck } from "../composables/useSubdomainCheck";
 import { resolvePageDeps, copyCatalogToEnv, pageForTarget } from "../composables/environmentCopy";
 import { idColorStyle } from "../utils/iconColor";
@@ -1393,6 +1394,7 @@ const pages = ref([]);
 const offers = ref([]);
 const profileStore = useProfileStore();
 const sitesStore = useSitesStore();
+const collectionsStore = useCollectionsStore();
 
 // Step 0 of the create wizard: which Site will this page live under (a page belongs to one Site). Skipped
 // when editing an existing offer-less page. `pendingSiteAttach` carries the chosen Site into the offer
@@ -2031,7 +2033,7 @@ function defaultWizardForm() {
     // Second composition axis: why the page exists / where its traffic comes from. Presets which capability
     // packs the page starts with (plans/LANDING_PAGE_GOAL_COMPOSITION.md).
     goal: "",
-    storefront: { headline: "", brand: "", nameMode: "", tagline: "", heading: "Shop all", logo_url: "", items: [], autoFill: true },
+    storefront: { headline: "", brand: "", nameMode: "", tagline: "", heading: "Shop all", logo_url: "", items: [], autoFill: true, collection_id: "" },
     categoryKey: "",
   };
 }
@@ -2520,24 +2522,37 @@ async function onStorefrontLogoPicked(event) {
   }
 }
 
-function buildStorefrontPageDocument() {
-  const byId = new Map((pages.value || []).map((p) => [p.page_id, p]));
-  // Link each picked product to its real Site slug (where it's attached in the route map) — not its own landing
-  // slug — so the card resolves on the store. The publisher re-resolves this against the Site at publish too.
-  const items = (form.storefront.items || [])
-    .map((pageId) => byId.get(pageId))
-    .filter((p) => p && p.offer_id)
-    .map((p) => ({ offer_id: p.offer_id, slug: siteSlugByPageId.value.get(p.page_id) || `/${slugify(p.route?.slug || p.name || p.page_id)}` }));
+// Build (or update) the Collection a storefront/category grid embeds, from the wizard's grid config
+// (plans/SITE_COLLECTIONS.md P1e). A storefront: rule 'all' (auto-fill) or 'manual' (the picked page ids); a
+// category page: rule 'category'. Pure data — no slug. Its id is reused when editing an existing collection.
+function buildOfferlessCollection(kind) {
+  const heading = form.storefront.heading || "";
+  const collection = {
+    document_type: "collection",
+    site_id: storefrontSite.value?.site_id || selectedSiteId.value || "",
+    name: heading || (kind === "category" ? categoryLabel(form.categoryKey) : (storefrontName.value || "Products")),
+  };
+  if (form.storefront.collection_id) collection.collection_id = form.storefront.collection_id;  // update in place
+  if (kind === "category") {
+    collection.rule = "category";
+    collection.category = form.categoryKey;
+  } else if (form.storefront.autoFill !== false) {
+    collection.rule = "all";  // fills from every offer page on the Site at publish
+  } else {
+    collection.rule = "manual";
+    collection.members = [...(form.storefront.items || [])];  // ordered page_id references
+  }
+  if (heading) collection.presentation = { heading };
+  return collection;
+}
+
+// The storefront page is a brand-hero + a catalog_grid that EMBEDS the collection (its items resolve from the
+// Collection at publish). The grid holds no inline items — the Collection is the source of truth.
+function buildStorefrontPageDocument(collectionId) {
   const headline = storefrontName.value || form.name || "Storefront";
-  // Auto-fill (default): the grid resolves to EVERY offer page on the Site at publish (scope="all"), so the
-  // homepage can be created brand-first with no offers and fills itself as offer pages are added. Manual mode
-  // keeps the curated items the tenant picked.
-  const auto = form.storefront.autoFill !== false;
-  const grid = { id: "catalog-grid", type: "catalog_grid", heading: form.storefront.heading || undefined, items: auto ? [] : items };
-  if (auto) grid.scope = "all";
   return finalizeOfferlessDoc([
     { id: "brand-hero", type: "brand_hero", headline, tagline: form.storefront.tagline || undefined, logo_url: form.storefront.logo_url || undefined },
-    grid,
+    { id: "catalog-grid", type: "catalog_grid", collection_id: collectionId, heading: form.storefront.heading || undefined },
   ], { name: form.name || "Storefront homepage", slug: form.slug || form.name || "home", title: headline });
 }
 
@@ -2632,14 +2647,17 @@ async function detachSite() {
 
 async function createStorefront() {
   wizardError.value = "";
-  const document = buildStorefrontPageDocument();
   // Auto-fill needs no upfront items (the grid fills itself from the Site at publish); only curated mode does.
-  if (form.storefront.autoFill === false && !document.sections[1].items.length) {
+  if (form.storefront.autoFill === false && !(form.storefront.items || []).length) {
     wizardError.value = "Pick at least one page for the product grid, or switch on “Show all my products.”";
     return;
   }
   creatingStorefront.value = true;
   try {
+    // Save the Collection first (it's the grid's source of truth), then the page that embeds it.
+    const collection = await collectionsStore.save(buildOfferlessCollection("storefront"));
+    form.storefront.collection_id = collection.collection_id;
+    const document = buildStorefrontPageDocument(collection.collection_id);
     const body = await apiRequest("/pages", { method: "POST", body: document });
     const saved = body.page || document;
     pages.value = [saved, ...pages.value.filter((p) => p.page_id !== saved.page_id)];
@@ -2655,12 +2673,12 @@ async function createStorefront() {
   }
 }
 
-function buildCategoryPageDocument() {
+function buildCategoryPageDocument(collectionId) {
   const label = categoryLabel(form.categoryKey);
   return finalizeOfferlessDoc([
     { id: "brand-hero", type: "brand_hero", headline: label },
-    // A category-driven grid: no items — the publisher fills them from the Site's pages in this category.
-    { id: "catalog-grid", type: "catalog_grid", heading: form.storefront.heading || label, category: form.categoryKey },
+    // A category-driven grid embeds a rule='category' Collection; the publisher fills it from the Site's pages.
+    { id: "catalog-grid", type: "catalog_grid", collection_id: collectionId, heading: form.storefront.heading || label },
   ], { name: form.name || `${label} (category)`, slug: form.slug || form.name || label || "category", title: label });
 }
 
@@ -2701,7 +2719,9 @@ async function createCategory() {
   }
   creatingStorefront.value = true;
   try {
-    const document = buildCategoryPageDocument();
+    const collection = await collectionsStore.save(buildOfferlessCollection("category"));
+    form.storefront.collection_id = collection.collection_id;
+    const document = buildCategoryPageDocument(collection.collection_id);
     const body = await apiRequest("/pages", { method: "POST", body: document });
     const saved = body.page || document;
     pages.value = [saved, ...pages.value.filter((p) => p.page_id !== saved.page_id)];
@@ -3610,15 +3630,21 @@ async function editOfferlessPage(page) {
   const brandHero = sections.find((s) => s && s.type === "brand_hero");
   const catalog = sections.find((s) => s && s.type === "catalog_grid");
   const profile = sections.find((s) => s && s.type === "seller_profile");
-  const kind = profile ? "profile" : catalog?.category ? "category" : "storefront";
+
+  // The grid embeds a Collection (its source of truth). Load it to determine kind (category vs storefront) and
+  // restore the grid config. A legacy INLINE grid (pre-migration) has no collection_id — read its inline config;
+  // saving then mints a Collection and migrates the page (plans/SITE_COLLECTIONS.md P1e).
+  const collection = catalog?.collection_id ? await collectionsStore.get(catalog.collection_id).catch(() => null) : null;
+  const kind = profile ? "profile"
+    : collection ? (collection.rule === "category" ? "category" : "storefront")
+    : (catalog?.category ? "category" : "storefront");
 
   resetWizard();
   form.pageKind = kind;
   form.page_id = page.page_id;
   form.name = page.name || "";
   form.slug = page.route?.slug || "";
-  // Restore the store-name mode: if the saved headline is one of the business's brands, edit it as a brand
-  // selection; otherwise it's a custom name.
+  // Restore the store-name mode: a saved headline matching a business brand edits as a brand selection.
   const savedHeadline = brandHero?.headline || "";
   if (savedHeadline && storeBrands.value.includes(savedHeadline)) {
     form.storefront.nameMode = "brand";
@@ -3629,8 +3655,18 @@ async function editOfferlessPage(page) {
   }
   form.storefront.tagline = brandHero?.tagline || "";
   form.storefront.logo_url = brandHero?.logo_url || "";
-  form.storefront.heading = catalog?.heading || profile?.heading || "";
-  form.categoryKey = catalog?.category || "";
+  form.storefront.collection_id = catalog?.collection_id || "";
+  if (collection) {
+    form.storefront.heading = collection.presentation?.heading || catalog?.heading || "";
+    if (kind === "category") form.categoryKey = collection.category || "";
+    else {
+      form.storefront.autoFill = collection.rule === "all";
+      form.storefront.items = collection.rule === "manual" ? [...(collection.members || [])] : [];
+    }
+  } else {
+    form.storefront.heading = catalog?.heading || profile?.heading || "";
+    form.categoryKey = catalog?.category || "";
+  }
   editingOfferlessOriginal.value = { ...page };
   wizardOpen.value = true;
   wizardStep.value = 2;
@@ -3640,10 +3676,9 @@ async function editOfferlessPage(page) {
   } catch (err) {
     wizardError.value = err.message || "Failed to load catalog.";
   }
-  if (kind === "storefront") {
-    // scope="all" is auto-fill; a stored curated grid keeps the manual picker with its items restored.
+  // Legacy inline storefront: map the stored {offer_id} items back to page_ids for the picker (needs pages loaded).
+  if (kind === "storefront" && !collection) {
     form.storefront.autoFill = catalog?.scope === "all";
-    // Map the curated grid's stored {offer_id} back to page_ids for the page-picker.
     const pageByOffer = new Map((pages.value || []).filter((p) => p.offer_id).map((p) => [p.offer_id, p.page_id]));
     form.storefront.items = (catalog?.items || []).map((it) => pageByOffer.get(it.offer_id)).filter(Boolean);
   }
