@@ -46,10 +46,22 @@ else
   PARAMETER_OVERRIDES+=("PlatformHostingDomain=jbay.be")
 fi
 
-# Master switch for serving Sites on the free platform host. Default OFF until the *.jbay.uk / *.jbay.be
-# Cloudflare Worker route is live (plans/PLATFORM_HOSTNAME_SERVING.md). Flip per env by exporting
-# PLATFORM_SERVING_ENABLED=true before the deploy, e.g. `PLATFORM_SERVING_ENABLED=true ./deploy/deploy.sh dev`.
-PARAMETER_OVERRIDES+=("PlatformServingEnabled=${PLATFORM_SERVING_ENABLED:-false}")
+# Master switch for serving Sites on the free platform host (plans/PLATFORM_HOSTNAME_SERVING.md). Flip it by
+# exporting PLATFORM_SERVING_ENABLED=true before the deploy. When the env var is NOT set, PRESERVE the value
+# already on the stack instead of resetting it — otherwise a plain `./deploy/deploy.sh <env>` would silently
+# turn platform serving off. A brand-new stack (no existing value) defaults to false.
+if [[ -n "${PLATFORM_SERVING_ENABLED:-}" ]]; then
+  PLATFORM_SERVING="${PLATFORM_SERVING_ENABLED}"
+else
+  PLATFORM_SERVING="$(aws cloudformation describe-stacks \
+    --region "${REGION}" --stack-name "${STACK_NAME}" \
+    --query "Stacks[0].Parameters[?ParameterKey=='PlatformServingEnabled'].ParameterValue | [0]" \
+    --output text 2>/dev/null)"
+  if [[ -z "${PLATFORM_SERVING}" || "${PLATFORM_SERVING}" == "None" ]]; then
+    PLATFORM_SERVING="false"
+  fi
+fi
+PARAMETER_OVERRIDES+=("PlatformServingEnabled=${PLATFORM_SERVING}")
 
 if [[ -n "${API_CUSTOM_DOMAIN_NAME}" ]]; then
   PARAMETER_OVERRIDES+=("ApiCustomDomainName=${API_CUSTOM_DOMAIN_NAME}")
