@@ -7,7 +7,7 @@ sets amounts. Returns the Stripe URL as JSON; the browser redirects to it.
 """
 from urllib.request import urlopen
 
-from handlers.checkout import build_checkout_payload, create_stripe_checkout_session
+from handlers.checkout import build_checkout_payload, create_checkout_session_with_bnpl_fallback
 from stripe_link.common import error_response, json_response, parse_json_body
 from stripe_link.domain.billing_status import BillingStatusError, assert_billing_in_good_standing
 from stripe_link.domain.bnpl import checkout_payment_method_types
@@ -137,8 +137,8 @@ def handler(
         )
         payload["metadata[cart_id]"] = cart_id  # tie the resulting order back to the cart (attribution)
 
-        stripe_response = create_stripe_checkout_session(
-            payload, api_key=api_key, stripe_account=stripe_account, opener=opener,
+        stripe_response = create_checkout_session_with_bnpl_fallback(
+            payload, api_key=api_key, stripe_account=stripe_account, opener=opener, had_bnpl=bool(bnpl_types),
         )
         checkout_url = stripe_response.get("url")
         if not checkout_url:

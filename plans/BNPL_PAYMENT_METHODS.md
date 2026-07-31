@@ -137,8 +137,13 @@ and triggers the capability request; a `GET` returns toggles + refreshed capabil
 - **Application fee** stays on the base subtotal; BNPL doesn't change our fee model (direct charge, unchanged).
 - **Fulfillment unaffected** — BNPL settles like a card to the connected account; the webhook order flow is
   unchanged (the payment method is just Klarna/etc. instead of card).
-- **Subscriptions:** BNPL (except Klarna in some cases) doesn't support recurring — gate BNPL to `mode=payment`
-  (one-time) checkouts; skip for `mode=subscription`.
+- **Subscriptions / recurring:** BNPL doesn't do recurring — gate BNPL to `mode=payment` AND exclude it if any
+  line carries a recurring price_data (belt-and-suspenders, per review 2026-07-31). ✓ implemented.
+- **Stale-status safety net (review 2026-07-31):** a method can go ineligible between our cached status and the
+  actual charge (merchant disables it in their own Stripe dashboard; a per-transaction rule). Explicit
+  `payment_method_types` then 400s. `create_checkout_session_with_bnpl_fallback` retries ONCE without
+  `payment_method_types` (card + account defaults) so checkout never crashes on an installment method. The GET
+  on Payments-screen load also refreshes the cached status (self-heals for the next checkout). ✓ implemented.
 - **Sezzle:** out — not a Stripe payment method.
 
 ## Phased plan

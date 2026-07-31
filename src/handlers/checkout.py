@@ -154,11 +154,12 @@ def handler(
             apply_application_fee=bool(stripe_account),
             bnpl_payment_method_types=bnpl_types,
         )
-        stripe_response = create_stripe_checkout_session(
+        stripe_response = create_checkout_session_with_bnpl_fallback(
             checkout_payload,
             api_key=api_key,
             stripe_account=stripe_account,
             opener=opener,
+            had_bnpl=bool(bnpl_types),
         )
         checkout_url = stripe_response.get("url")
         if not checkout_url:
@@ -343,13 +344,30 @@ def build_checkout_payload(
 
     # BNPL / installment methods the tenant enabled + that are capability-active + currency-eligible for this
     # session (plans/BNPL_PAYMENT_METHODS.md). Setting payment_method_types is explicit, so we must include card;
-    # only override when there's at least one BNPL method to add, and only for one-time payment mode (BNPL
-    # doesn't do recurring). Otherwise leave payment methods to the account's Stripe defaults, as before.
-    if bnpl_payment_method_types and payload.get("mode") == "payment":
+    # only override when there's at least one BNPL method to add, and only for one-time payment mode with NO
+    # recurring line (BNPL doesn't do recurring — guard on both the mode AND any recurring price_data line).
+    # Otherwise leave payment methods to the account's Stripe defaults, as before.
+    has_recurring = any("[recurring]" in key for key in payload)
+    if bnpl_payment_method_types and payload.get("mode") == "payment" and not has_recurring:
         types = ["card"] + [t for t in bnpl_payment_method_types if t and t != "card"]
         for index, pmt in enumerate(types):
             payload[f"payment_method_types[{index}]"] = pmt
     return payload
+
+
+def create_checkout_session_with_bnpl_fallback(payload, *, api_key, stripe_account="", opener=None, had_bnpl=False):
+    """Create the Checkout Session; if it fails when we added BNPL methods, retry ONCE with card + the account's
+    default payment methods. A BNPL method can become ineligible between our cached status and the actual charge
+    (e.g. the merchant turns it off in their own Stripe dashboard, or a per-transaction rule Stripe enforces at
+    creation), which makes an explicit `payment_method_types` list a hard 400. The fallback strips
+    payment_method_types so a checkout never crashes on an installment method (plans/BNPL_PAYMENT_METHODS.md)."""
+    try:
+        return create_stripe_checkout_session(payload, api_key=api_key, stripe_account=stripe_account, opener=opener)
+    except Exception:
+        if not had_bnpl:
+            raise
+        plain = {key: value for key, value in payload.items() if not key.startswith("payment_method_types[")}
+        return create_stripe_checkout_session(plain, api_key=api_key, stripe_account=stripe_account, opener=opener)
 
 
 def create_stripe_checkout_session(payload, *, api_key, stripe_account="", opener=None):

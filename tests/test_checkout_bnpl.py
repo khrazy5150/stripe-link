@@ -1,6 +1,6 @@
 import unittest
 
-from handlers.checkout import build_checkout_payload
+from handlers.checkout import build_checkout_payload, create_checkout_session_with_bnpl_fallback
 
 
 def _offer(mode="payment"):
@@ -43,6 +43,51 @@ class CheckoutBnplPayloadTests(unittest.TestCase):
         self.assertEqual(payload["payment_method_types[0]"], "card")
         self.assertEqual(payload["payment_method_types[1]"], "klarna")
         self.assertNotIn("payment_method_types[2]", payload)
+
+    def test_recurring_line_excludes_bnpl(self):
+        # A payment-mode session that still carries a recurring price_data line must not offer BNPL.
+        products = {"p1": {"product_id": "p1", "name": "Sub",
+                           "prices": [{"price_id": "pr1", "unit_amount": 2000, "currency": "usd",
+                                       "recurring": {"interval": "month"}}]}}
+        payload = build_checkout_payload(
+            tenant_id="t1", offer=_offer("payment"), products_by_id=products, resolved=_resolved(),
+            success_url="s", cancel_url="c", bnpl_payment_method_types=["klarna"])
+        self.assertIn("line_items[0][price_data][recurring][interval]", payload)  # recurring line present
+        self.assertNotIn("payment_method_types[0]", payload)                      # ...so no BNPL
+
+
+class _Ok:
+    def __enter__(self):
+        return self
+    def __exit__(self, *a):
+        return False
+    def read(self):
+        return b'{"url": "https://checkout.stripe.com/ok"}'
+
+
+class BnplCheckoutFallbackTests(unittest.TestCase):
+    def test_retries_without_bnpl_when_session_fails(self):
+        calls = []
+
+        def opener(request, timeout=None):
+            body = request.data.decode("utf-8")
+            calls.append(body)
+            if "payment_method_types" in body:   # first attempt (with BNPL) fails; retry without succeeds
+                raise RuntimeError("Stripe 400: klarna not available for this currency/account")
+            return _Ok()
+
+        payload = {"mode": "payment", "payment_method_types[0]": "card", "payment_method_types[1]": "klarna", "success_url": "s"}
+        result = create_checkout_session_with_bnpl_fallback(payload, api_key="sk", stripe_account="a", opener=opener, had_bnpl=True)
+        self.assertEqual(result["url"], "https://checkout.stripe.com/ok")
+        self.assertEqual(len(calls), 2)                          # failed once, retried once
+        self.assertNotIn("payment_method_types", calls[1])       # retry dropped BNPL
+
+    def test_no_retry_when_no_bnpl(self):
+        def opener(request, timeout=None):
+            raise RuntimeError("unrelated failure")
+        payload = {"mode": "payment", "success_url": "s"}
+        with self.assertRaises(RuntimeError):                    # had_bnpl False → surface, don't swallow/retry
+            create_checkout_session_with_bnpl_fallback(payload, api_key="sk", stripe_account="a", opener=opener, had_bnpl=False)
 
 
 if __name__ == "__main__":
