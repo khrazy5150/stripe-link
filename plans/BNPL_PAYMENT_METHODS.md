@@ -155,12 +155,16 @@ and triggers the capability request; a `GET` returns toggles + refreshed capabil
   them in their own Stripe dashboard → then they appear). Hardened with the stale-status checkout fallback +
   recurring guard.
 - **P3+ — future enhancements:**
-  - **On-page BNPL messaging (high-value, author-interested 2026-07-31).** Embed Stripe's **Payment Method
-    Messaging Element** (`paymentMethodMessaging`, Stripe.js) on the rendered landing page near the price/CTA —
-    the "As low as 4 payments of $X with Klarna" preview. It is an **Elements messaging widget**, NOT Elements
-    *checkout*, so it COEXISTS with our hosted Checkout (we keep Stripe Tax/wallets/3-DS). Needs the tenant's
-    publishable key + the offer amount/currency + enabled BNPL method types injected into html.py's price area.
-    This is the single biggest BNPL conversion lever (advertises the option before checkout).
+  - **On-page BNPL messaging — SHIPPED DEV 2026-07-31 (single/bundle offer pages).** Stripe's **Payment Method
+    Messaging Element** (`paymentMethodMessaging`, Stripe.js) renders below the price on `offer_price_selector`
+    pages: Stripe.js + a mount div + a fail-silent init with the offer amount/currency + the tenant's enabled
+    messaging methods (Klarna/Afterpay/Affirm) + account country, using the CONNECTED account's own publishable
+    key (scopes the plans to that account). Coexists with hosted Checkout (kept Stripe Tax). publish_page_document
+    loads stripe_keys for the offer's mode; renderer fills the amount from the resolved offer. Verified live on a
+    single-offer page (Klarna, $353.97). **Fast-follow (P3.5): listicle-carousel messaging** — a listicle renders
+    via `render_listicle_carousel` (a different price path), and the amount is per-product/current-slide, so it
+    needs per-card messaging + update-on-slide; deferred. Also deferred: update-on-tier-change for multi-tier
+    single offers (v1 uses the default/displayed amount).
   - **Per-account child `payment_method_configuration`** for server-side eligibility (drops the local
     currency/amount guards) if multi-currency tenants appear.
   - Connect `account.updated`/`capability.updated` webhook to push capability-status changes (drop polling).
