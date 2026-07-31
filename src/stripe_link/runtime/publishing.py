@@ -475,9 +475,11 @@ def cascade_publish_collection_drafts(page: dict[str, Any], collections_by_id: d
 
     EVERY draft member is published, regardless of whether it was live before: published pages can't be edited, so
     a tenant unpublishes → edits → previews → routinely forgets to re-publish; asking them to remember which pages
-    were once live isn't reasonable. Archived members are left alone. Best-effort per member; a bad member never
-    blocks the parent publish. Returns {"published": [page_id...], "site_changed": bool}. Terminates: an
-    already-published member produces no write, so the member's own publish stream can't re-cascade."""
+    were once live isn't reasonable. An already-published member is not re-written, but its Site route is still
+    healed (enabled + offer_id denormalized) so a card can't dead-end on a stale-disabled route. Archived members
+    are left alone. Best-effort per member; a bad member never blocks the parent publish. Returns
+    {"published": [page_id...], "site_changed": bool}. Terminates: only DRAFT members get a page write, so an
+    already-published member's own publish stream can't re-cascade (a route heal is a Site write, not a page write)."""
     published: list[str] = []
     site_changed = False
     if not pages_repository:
@@ -503,27 +505,31 @@ def cascade_publish_collection_drafts(page: dict[str, Any], collections_by_id: d
         except Exception:  # noqa: BLE001 — one unreadable member must not block the parent publish
             logger.warning("cascade: could not read collection member %s", pid, exc_info=True)
             member = None
-        # Publish any draft member (skip already-live members — that's also what terminates the cascade — and
-        # archived ones). A once-published, since-unpublished member IS republished: the tenant likely just forgot.
-        if not member or member.get("status") != "draft":
-            continue
-        member["status"] = "published"
-        member["published_at"] = now
-        member["updated_at"] = now
-        try:
-            pages_repository.put(member)
-        except Exception:  # noqa: BLE001
-            logger.warning("cascade: could not publish draft member %s", pid, exc_info=True)
-            continue
-        published.append(pid)
-        # Reflect the member on the in-memory Site map so THIS render's grid links it now, and so the edge
-        # resolver serves it (its own stream will denormalize too, idempotently):
-        #   - enable its route entry — a draft's route is disabled, so its card would 404 "store not active";
+        if not member or member.get("status") == "archived":
+            continue  # a gone/archived member has nothing to publish or route
+        # Publish a draft member. A once-published, since-unpublished member IS republished (the tenant likely
+        # just forgot). The member's own PagesTable write re-renders it; an ALREADY-published member is not
+        # re-written (no page write → its own stream can't re-cascade → the cascade terminates).
+        if member.get("status") == "draft":
+            member["status"] = "published"
+            member["published_at"] = now
+            member["updated_at"] = now
+            try:
+                pages_repository.put(member)
+            except Exception:  # noqa: BLE001
+                logger.warning("cascade: could not publish draft member %s", pid, exc_info=True)
+                continue
+            published.append(pid)
+        # For EVERY live member (just-published or already-published), make sure the Site map lets its card
+        # resolve — a Site write only, so it never re-triggers a page stream. Self-heals a stale-disabled route
+        # (e.g. a member published outside this cascade whose route the dashboard left disabled from draft time):
+        #   - enable its route entry — a disabled route 404s the card ("store not active");
         #   - denormalize its offer_id (needed for grid resolution) — already on the member doc, no extra load.
-        if site and _enable_site_route(site, pid):
-            site_changed = True
-        if site and member.get("offer_id") and _denormalize_page_catalog(site, pid, str(member.get("offer_id") or ""), ""):
-            site_changed = True
+        if member.get("status") == "published":
+            if site and _enable_site_route(site, pid):
+                site_changed = True
+            if site and member.get("offer_id") and _denormalize_page_catalog(site, pid, str(member.get("offer_id") or ""), ""):
+                site_changed = True
     return {"published": published, "site_changed": site_changed}
 
 

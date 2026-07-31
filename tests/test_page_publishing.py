@@ -1158,16 +1158,26 @@ class CascadePublishDraftMembersTests(unittest.TestCase):
         self.assertEqual(pages.get(self.tenant, "page_coffee")["status"], "published")  # republished
         self.assertIn('href="/coffee"', published)  # and back in the grid
 
-    def test_already_published_member_untouched_so_cascade_terminates(self):
-        # An already-live member produces no write — this is what stops the member's own publish stream from
-        # re-cascading forever.
+    def test_already_published_member_not_rewritten_but_route_healed(self):
+        # An already-live member is NOT re-written (no page write → the member's own stream can't re-cascade →
+        # termination) — but its stale-disabled Site route IS healed so its card still resolves.
         pages = FakeDocumentRepository("page_id")
         pages.put(self._member(status="published", published_at=1700000000))
         colls = {"coll_m": {"collection_id": "coll_m", "rule": "manual", "members": ["page_coffee"]}}
-        result = cascade_publish_collection_drafts(
-            self._storefront(), colls, self._site(), pages_repository=pages, now=123)
+        site = self._site()  # /coffee route is enabled=False (stale from draft time)
+        result = cascade_publish_collection_drafts(self._storefront(), colls, site, pages_repository=pages, now=123)
+        self.assertEqual(result["published"], [])          # no page re-write → cascade terminates
+        self.assertTrue(result["site_changed"])            # ...but the route was healed
+        self.assertIs(site["pages"]["/coffee"]["enabled"], True)
+
+    def test_archived_member_left_alone(self):
+        pages = FakeDocumentRepository("page_id")
+        pages.put(self._member(status="archived"))
+        colls = {"coll_m": {"collection_id": "coll_m", "rule": "manual", "members": ["page_coffee"]}}
+        site = self._site()
+        result = cascade_publish_collection_drafts(self._storefront(), colls, site, pages_repository=pages, now=123)
         self.assertEqual(result["published"], [])
-        self.assertFalse(result["site_changed"])
+        self.assertIs(site["pages"]["/coffee"]["enabled"], False)  # archived → route untouched
 
     def test_no_cascade_for_all_rule_collection(self):
         # An 'all' collection has no hand-selected members; nothing to auto-publish.
