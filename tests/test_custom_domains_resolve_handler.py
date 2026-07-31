@@ -41,6 +41,30 @@ class CustomDomainsResolveHandlerTests(unittest.TestCase):
         )
         self.assertEqual(json.loads(response["body"])["route"]["origin_url"], "https://pages.example.com/page_1/sale/index.html")
 
+    def test_redirect_route_target_returns_301(self):
+        # A per-path redirect RouteTarget (plans/SITE_COLLECTIONS.md P1c) -> the Worker 301s to the location.
+        self.index_repo.put({
+            "tenant_id": "tenant_demo", "domain": "shop.example.com", "target_page_id": "page_1", "status": "active",
+            "routes": {"/old": {"target": {"kind": "redirect", "location": "https://shop.example.com/new"}, "enabled": True}},
+        })
+        response = handler(
+            {"httpMethod": "GET", "queryStringParameters": {"host": "shop.example.com", "path": "/old"}},
+            None, index_repo=self.index_repo, pages_domain="pages.example.com",
+        )
+        self.assertEqual(json.loads(response["body"])["route"], {"type": "redirect", "location": "https://shop.example.com/new"})
+
+    def test_collection_route_target_is_not_served_yet(self):
+        # A routed collection has no rendered artifact yet (later slice) -> 404, not a broken origin_url.
+        self.index_repo.put({
+            "tenant_id": "tenant_demo", "domain": "shop.example.com", "target_page_id": "page_1", "status": "active",
+            "routes": {"/products": {"target": {"kind": "collection", "collection_id": "coll_1"}, "enabled": True}},
+        })
+        response = handler(
+            {"httpMethod": "GET", "queryStringParameters": {"host": "shop.example.com", "path": "/products"}},
+            None, index_repo=self.index_repo, pages_domain="pages.example.com",
+        )
+        self.assertEqual(response["statusCode"], 404)
+
     def test_funnel_slug_resolves_to_synthetic_artifact(self):
         # A reserved funnel slug carries funnel_role + strategy; the resolver derives the synthetic funnel
         # artifact so /upsell//downsell//thank-you serve on the custom domain (SALES_FUNNELS.md P2b).

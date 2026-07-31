@@ -10,6 +10,7 @@ from stripe_link.domain.custom_domains import (
     custom_hostname_dns_records,
     domain_index_record,
     platform_domain_index_record,
+    route_target,
     is_apex_domain,
     normalize_route_path,
     route_table,
@@ -259,9 +260,10 @@ class RouteTableTests(unittest.TestCase):
             "/broken": {"page_type": "landing"},  # no page_id -> skipped
         }}
         table = route_table(site)
-        self.assertEqual(table["/"], {"page_id": "page_home", "enabled": True})
-        self.assertEqual(table["/upsell-1"], {"page_id": "page_up", "enabled": True})
-        self.assertEqual(table["/retired"], {"page_id": "page_old", "enabled": False})
+        # Each row carries its RouteTarget (kind=page by default) plus page_id (back-compat) + enabled.
+        self.assertEqual(table["/"], {"target": {"kind": "page", "page_id": "page_home"}, "page_id": "page_home", "enabled": True})
+        self.assertEqual(table["/upsell-1"], {"target": {"kind": "page", "page_id": "page_up"}, "page_id": "page_up", "enabled": True})
+        self.assertEqual(table["/retired"], {"target": {"kind": "page", "page_id": "page_old"}, "page_id": "page_old", "enabled": False})
         self.assertNotIn("/broken", table)
 
     def test_route_table_carries_price_context_for_sale_slugs(self):
@@ -273,12 +275,29 @@ class RouteTableTests(unittest.TestCase):
             "/flash-sale": {"page_id": "page_home", "price_context": "flash_sale", "enabled": True},
         }}
         table = route_table(site)
-        self.assertEqual(table["/sale"], {"page_id": "page_home", "enabled": True, "price_context": "sale"})
+        self.assertEqual(table["/sale"], {"target": {"kind": "page", "page_id": "page_home"}, "page_id": "page_home", "enabled": True, "price_context": "sale"})
         self.assertEqual(table["/flash-sale"]["price_context"], "flash_sale")
         self.assertNotIn("price_context", table["/"])  # only carried when present
 
     def test_route_table_empty_when_no_pages(self):
         self.assertEqual(route_table({}), {})
+
+    def test_route_target_defaults_to_page_and_honors_explicit_kind(self):
+        self.assertEqual(route_target({"page_id": "p1"}), {"kind": "page", "page_id": "p1"})
+        self.assertEqual(route_target({"target": {"kind": "redirect", "location": "https://x/y"}}),
+                         {"kind": "redirect", "location": "https://x/y"})
+        self.assertIsNone(route_target({}))          # no target named
+        self.assertIsNone(route_target("not-a-dict"))
+
+    def test_route_table_carries_nonpage_targets(self):
+        site = {"pages": {
+            "/old": {"target": {"kind": "redirect", "location": "https://shop.example.com/new"}, "enabled": True},
+            "/products": {"target": {"kind": "collection", "collection_id": "coll_1"}, "enabled": True},
+        }}
+        table = route_table(site)
+        self.assertEqual(table["/old"]["target"], {"kind": "redirect", "location": "https://shop.example.com/new"})
+        self.assertNotIn("page_id", table["/old"])  # page_id kept only for page targets
+        self.assertEqual(table["/products"]["target"]["collection_id"], "coll_1")
 
     def test_domain_index_record_projects_site(self):
         site = {
@@ -293,7 +312,7 @@ class RouteTableTests(unittest.TestCase):
         self.assertEqual(record["domain"], "shop.example.com")
         self.assertEqual(record["status"], "active")
         self.assertEqual(record["target_page_id"], "page_home")
-        self.assertEqual(record["routes"]["/upsell-1"], {"page_id": "page_up", "enabled": True})
+        self.assertEqual(record["routes"]["/upsell-1"], {"target": {"kind": "page", "page_id": "page_up"}, "page_id": "page_up", "enabled": True})
 
     def test_platform_domain_index_record(self):
         # The free platform hostname gets its own always-active, noindex-tagged record with the same routes,
@@ -308,7 +327,7 @@ class RouteTableTests(unittest.TestCase):
         self.assertEqual(record["status"], "active")          # no verification — it's platform infra
         self.assertEqual(record["host_kind"], "platform")     # edge stamps noindex off this
         self.assertEqual(record["target_page_id"], "page_home")
-        self.assertEqual(record["routes"]["/whey"], {"page_id": "page_w", "enabled": True})
+        self.assertEqual(record["routes"]["/whey"], {"target": {"kind": "page", "page_id": "page_w"}, "page_id": "page_w", "enabled": True})
 
     def test_platform_domain_index_record_none_without_hostname(self):
         self.assertIsNone(platform_domain_index_record({"hosting": {}}))

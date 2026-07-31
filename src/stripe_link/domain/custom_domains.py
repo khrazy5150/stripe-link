@@ -56,21 +56,38 @@ def normalize_route_path(path: str) -> str:
 _RESOLVER_ENTRY_FIELDS = ("price_context", "funnel_role", "strategy")
 
 
+def route_target(entry: Any) -> dict[str, Any] | None:
+    """Normalize a route-map entry into a `RouteTarget` — the open abstraction the edge resolver hands off to
+    (plans/SITE_COLLECTIONS.md P1c). Kinds: `page` (default, derived from page_id — byte-compatible with today's
+    entries), `redirect`/`external` (a `location`), `collection` (a `collection_id`, routed rendering is a later
+    slice). An entry may instead declare an explicit `target: {kind, …}`. None when the entry names no target."""
+    if not isinstance(entry, dict):
+        return None
+    target = entry.get("target")
+    if isinstance(target, dict) and target.get("kind"):
+        return dict(target)
+    page_id = str(entry.get("page_id") or "")
+    if page_id:
+        return {"kind": "page", "page_id": page_id}
+    return None
+
+
 def route_table(site: dict[str, Any]) -> dict[str, dict[str, Any]]:
-    """Project a Site's slug→page map into the flat routing table denormalized onto the domain-index record
-    (plans/SITE_OBJECT.md §2.6). The edge resolver reads this, never the live Site document. Every attached
-    slug is included with its enabled flag so the resolver can 404 a disabled slug without a Site read, plus the
-    resolver-visible fields (`_RESOLVER_ENTRY_FIELDS`) it must act on — e.g. `price_context` for context views."""
+    """Project a Site's slug→target map into the flat routing table denormalized onto the domain-index record
+    (plans/SITE_OBJECT.md §2.6). The edge resolver reads this, never the live Site document. Every entry carries
+    its `RouteTarget` (`route_target`) + enabled flag so the resolver can 404 a disabled slug without a Site read,
+    plus the resolver-visible fields (`_RESOLVER_ENTRY_FIELDS`) it must act on — e.g. `price_context`. `page_id`
+    is kept alongside `target` for kind=page so an older resolver reading the field still works."""
     table: dict[str, dict[str, Any]] = {}
     for slug, entry in (site.get("pages") or {}).items():
-        if not isinstance(entry, dict):
+        target = route_target(entry)
+        if not target:
             continue
-        page_id = str(entry.get("page_id") or "")
-        if not page_id:
-            continue
-        row: dict[str, Any] = {"page_id": page_id, "enabled": entry.get("enabled", True) is not False}
+        row: dict[str, Any] = {"target": target, "enabled": entry.get("enabled", True) is not False}
+        if target.get("kind") == "page":
+            row["page_id"] = str(target.get("page_id") or "")  # back-compat with the legacy page_id read
         for field in _RESOLVER_ENTRY_FIELDS:
-            if entry.get(field):
+            if isinstance(entry, dict) and entry.get(field):
                 row[field] = str(entry[field])
         table[slug] = row
     return table

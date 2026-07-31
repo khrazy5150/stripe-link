@@ -2,7 +2,7 @@ import os
 import re
 
 from stripe_link.common import error_response, header_value, json_response, query_params
-from stripe_link.domain.custom_domains import normalize_domain, normalize_route_path
+from stripe_link.domain.custom_domains import normalize_domain, normalize_route_path, route_target
 from stripe_link.repositories.documents import RepositoryError, custom_domains_index_repository
 from stripe_link.runtime.artifacts import artifact_paths
 from stripe_link.runtime.publishing import public_url
@@ -39,17 +39,23 @@ def _resolve_slug(slug, routes, homepage_page_id, funnel_step=""):
     A reserved funnel slug (P2b) carries a `funnel_role`, so it serves a synthetic funnel artifact derived from
     the base page_id + the request's funnel_step (funnel artifacts are never context-varied). A legacy record
     without a route table serves the homepage for every path; the root always falls back."""
+    def _homepage():
+        return ({"kind": "page", "page_id": homepage_page_id} if homepage_page_id else None), ""
+
     if not isinstance(routes, dict):
-        return homepage_page_id, ""  # legacy record: homepage-only serving
+        return _homepage()  # legacy record: homepage-only serving
     entry = routes.get(slug)
     if isinstance(entry, dict) and entry.get("enabled", True) is not False:
-        base_page_id = str(entry.get("page_id") or "")
-        if entry.get("funnel_role"):
-            return _funnel_artifact_page_id(base_page_id, entry, funnel_step), ""
-        return base_page_id, str(entry.get("price_context") or "")
+        target = route_target(entry)
+        if target and target.get("kind") == "page":
+            base_page_id = str(target.get("page_id") or "")
+            if entry.get("funnel_role"):  # a reserved funnel slug serves a synthetic artifact (P2b)
+                return {"kind": "page", "page_id": _funnel_artifact_page_id(base_page_id, entry, funnel_step)}, ""
+            return {"kind": "page", "page_id": base_page_id}, str(entry.get("price_context") or "")
+        return target, ""  # redirect / external / collection RouteTarget
     if slug == "/":
-        return homepage_page_id, ""
-    return "", ""
+        return _homepage()
+    return None, ""
 
 
 def handler(event, context, *, index_repo=None, pages_domain=None):
@@ -101,7 +107,20 @@ def handler(event, context, *, index_repo=None, pages_domain=None):
         # funnel_step selects which sequential upsell a reserved /upsell slug serves (P2b); the Worker forwards
         # the buyer's query string, so it arrives here alongside path.
         funnel_step = str(qp.get("funnel_step") or "")
-        page_id, price_context = _resolve_slug(normalize_route_path(path), record.get("routes"), homepage_page_id, funnel_step)
+        target, price_context = _resolve_slug(normalize_route_path(path), record.get("routes"), homepage_page_id, funnel_step)
+        if not target:
+            return error_response("No page is published at this path.", status_code=404, code="no_route")
+        kind = str(target.get("kind") or "")
+        # A per-path redirect/external RouteTarget (plans/SITE_COLLECTIONS.md P1c) → 301, path-preserved by the
+        # Worker like the domain-level www→apex redirect above.
+        if kind in ("redirect", "external"):
+            location = str(target.get("location") or target.get("url") or "").strip()
+            if not location:
+                return error_response("No page is published at this path.", status_code=404, code="no_route")
+            return json_response({"route": {"type": "redirect", "location": location}})
+        # kind=page → serve its artifact (byte-identical to before). A routed collection (kind=collection) has no
+        # rendered artifact yet — that's a later slice; treat it as no route for now.
+        page_id = str(target.get("page_id") or "") if kind == "page" else ""
         if not page_id:
             return error_response("No page is published at this path.", status_code=404, code="no_route")
         artifact_key = artifact_paths(tenant_id, page_id, context=price_context)["published"]
