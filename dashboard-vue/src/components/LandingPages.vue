@@ -2488,6 +2488,19 @@ function setStorefrontNameMode(mode) {
   form.storefront.nameMode = mode;
 }
 
+// Auto-fill the internal page name from the store name so tenants don't have to name it twice. We only overwrite
+// while form.name is still empty or matches the previous auto-value — the moment the user types their own name we
+// stop touching it. Storefront/category only (offer pages name themselves from the offer).
+const lastAutoPageName = ref("");
+watch(storefrontName, (name) => {
+  if (form.pageKind !== "storefront") return;
+  const suggested = (name || "").trim() ? `${name.trim()} homepage` : "";
+  if (!form.name || form.name === lastAutoPageName.value) {
+    form.name = suggested;
+    lastAutoPageName.value = suggested;
+  }
+});
+
 // Soft, non-blocking notice when another of the tenant's storefronts already uses this store name. There's no
 // hard uniqueness on the display name (two Sites can legitimately differ by address, not name), so we only warn.
 const dupNameDismissed = ref("");
