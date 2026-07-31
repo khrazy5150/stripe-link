@@ -38,26 +38,31 @@ Four entities, each owning exactly one concern:
 | --- | --- | --- |
 | **Site** | hostname, **routing table**, navigation, theme, **chrome defaults**, publication | content |
 | **Page** | id, content, offer, SEO, layout, **per-page chrome** | its URL (no slug) |
-| **Collection** | id, name, presentation, **ordered page references**, `routable?` | its URL, the pages themselves |
+| **Collection** | id, name, presentation, **ordered page references** | its URL, *whether* it is routed, the pages themselves |
 | **Navigation** | ordered links, each → Page \| Collection \| External | — |
 
 ```
 Site
- ├── Routing table   path → Page | Collection | External
- ├── Navigation      ordered links → Page | Collection | External
+ ├── Routing table   path → RouteTarget
+ ├── Navigation      ordered links → RouteTarget
  ├── Theme
  ├── Chrome defaults
  ├── Pages           content/offer/SEO/layout (id only)
- └── Collections     ordered page references + presentation
+ └── Collections     ordered page references + presentation (URL-unaware)
+
+RouteTarget (open abstraction)  =  Page | Collection | Redirect | External | …(Blog, Search, API later)
 ```
 
 ### Rules (locked)
 
-1. **The Site owns the entire routing table.** A path maps to a Page, a Collection, or an external URL.
-   **Pages and Collections have no slug of their own** — the router does. One source of truth kills the
-   competing-slugs problem, and it unlocks (later) aliases, redirects, localized paths, and moving a page
-   without touching the page object. *Phasing:* v1 = exactly one canonical path per target; the superpowers are
-   allowed by the model but not built day one.
+1. **The Site owns the entire routing table.** A path maps to a **`RouteTarget`** — an open abstraction whose
+   kinds are `Page | Collection | Redirect | External` today, and `Blog | Search | API | …` later with zero
+   router changes. The router's whole job shrinks to "resolve path → RouteTarget, hand off." **Pages and
+   Collections have no slug of their own** — the router owns paths. One source of truth kills the competing-slugs
+   problem, and it unlocks (later) aliases, redirects, localized paths, and moving a page without touching the
+   page object. `Redirect` folds the existing `www→apex` 301 into the model instead of special-casing it in the
+   resolver. *Phasing:* v1 = exactly one canonical path per target; the superpowers are allowed by the model but
+   not built day one.
 
 2. **Published ⇒ has a Site.** A draft may be Site-less; a **published page with no Site is impossible** (a URL
    needs a hostname). This single invariant deletes the "published but No Site" state that caused the dead-link
@@ -74,13 +79,21 @@ Site
    collection curates landing pages. Implication for UX: "add a product to a collection" means "add its *landing
    page*," and every merchandised product has a page.
 
-6. **Embeddable always, routable optionally.** A collection is a reusable block you drop into any page as a
-   section; it becomes a real URL only when explicitly opted in. Rationale: collections do two jobs — **browse
-   pages** ("Supplements", "Sale" → routable, indexed, internal-linking hubs, subfolder authority) and **building
-   blocks** ("Homepage Featured", "New This Week", "You May Also Like" → embed-only). Force-routing every
-   collection mints thin, near-duplicate URLs (`/homepage-featured`) — exactly what the SEO stack (noindex floors,
-   thin-content gate) exists to avoid. Smart default: a collection created as a "category" defaults routable; one
-   created inline as a homepage section defaults embed-only.
+6. **Collections are pure data; routability is a routing concern, never a collection property.** A collection is
+   always just `{ id, name, presentation, members }` — it never knows whether it's reachable. Two independent
+   things can happen to it, and neither lives on the entity:
+   - **Embed** — a Page renders it via a `section: { type: collection, collection_id }`. Always available; a
+     collection is a reusable block droppable into any page (the homepage's Featured/New/Popular sections).
+   - **Route** — the Site's routing table *may* point a path at it (`/sale → Collection`). Whether it has a URL
+     is entirely "is there a route to me?", owned by the Site alongside every other URL fact. No `routable?` flag.
+
+   This keeps the ownership rules pure (a collection genuinely does not own its URL) and still gives the two real
+   jobs: **browse pages** ("Supplements", "Sale" → a route points at them: indexed hubs, subfolder authority) and
+   **building blocks** ("Homepage Featured", "You May Also Like" → embedded, no route). The thin-content
+   protection is simply *"we didn't add a route"* — force-routing every collection would mint near-duplicate
+   `/homepage-featured` junk the SEO stack (noindex floors, thin-content gate) exists to avoid. The **smart
+   default lives in the builder, not the model**: creating a "category" collection offers to also mint a route;
+   an inline homepage block just doesn't.
 
 7. **The homepage is just the page the route `/` points at.** Nothing special about it except its route. It
    **composes** sections — hero + several collection-embeds (Featured/New/Popular) + testimonials + footer. So a
@@ -127,9 +140,9 @@ offer_id}`; a "storefront" is a **page** with `brand_hero` + `catalog_grid` sect
 
 Incremental, back-compat at each step (the platform-hostname tests are the tripwire):
 
-1. **Routing table (rename/promote).** Treat `Site.pages` AS the routing table (`path → {target_type:"page",
-   page_id}`). Add `target_type` (default `"page"`) so entries can later point at a Collection/External. No
-   behavior change.
+1. **Routing table (rename/promote).** Treat `Site.pages` AS the routing table, each entry a
+   `path → RouteTarget`. Add the `RouteTarget` shape (`{kind:"page", page_id}` default) so entries can later
+   point at `kind:"collection"|"redirect"|"external"`. No behavior change.
 2. **Extract Collections.** For each existing `catalog_grid` (scope="all" / category / curated), mint a
    **Collection** entity (ordered page references + presentation) and replace the in-page grid with a
    **collection-embed** section referencing it. The storefront page becomes a normal composed page. Auto-fill and
@@ -145,7 +158,8 @@ Incremental, back-compat at each step (the platform-hostname tests are the tripw
 ## Builder UX shifts
 
 - **Collections screen** (new): create/name a collection, pick + order its member pages (playlist), set
-  presentation, toggle `routable?` (+ its path when on).
+  presentation. Optionally **give it a route** (adds a routing-table entry → this collection) — the collection
+  itself stays URL-unaware; this just writes a route on the Site.
 - **Page editor**: sets content/offer/SEO/layout + **its route** (path in the Site) + **chrome** (store/bare).
   No more "storefront" page kind; a "storefront homepage" is just a page composing collection-embeds.
 - **Homepage builder**: compose sections, including "embed a Collection" blocks (Featured/New/Popular).
@@ -155,9 +169,10 @@ Incremental, back-compat at each step (the platform-hostname tests are the tripw
 
 ## Phased build order (proposed)
 
-- **P1 — Routing table + Collection entity (additive).** `target_type` on route entries; a Collection document;
-  the collection-embed section reads references. Migrate existing grids to Collections behind the scenes. No
-  slug/chrome changes yet. This alone removes the two-relationships seam.
+- **P1 — Routing table + Collection entity (additive).** `RouteTarget` shape on route entries (default
+  `kind:"page"`); a Collection document (pure data, no slug/routable); the collection-embed section reads
+  references; the router resolves `path → RouteTarget`. Migrate existing grids to Collections behind the scenes.
+  No slug/chrome changes yet. This alone removes the two-relationships seam.
 - **P2 — Published ⇒ Site + auto-default Site.** Enforce the invariant; migrate No-Site published pages.
 - **P3 — Chrome per page.** Unified header + per-page store/bare; retire the top-left header.
 - **P4 — De-slug pages** + routing superpowers (aliases/redirects/localized) as demand appears.
@@ -174,5 +189,6 @@ Incremental, back-compat at each step (the platform-hostname tests are the tripw
 ## Ties
 
 `plans/SITE_OBJECT.md`, `plans/PAGE_COMPOSER.md`, `plans/CONVERSION_CONTEXT.md`, `plans/PLATFORM_HOSTNAME_SERVING.md`,
-`plans/SITE_MIGRATION.md`; `schemas/Site.schema.json` (route map → routing table), `schemas/Page.schema.json`
-(drop slug, add chrome), a new `schemas/Collection.schema.json`.
+`plans/SITE_MIGRATION.md`; `schemas/Site.schema.json` (route map → routing table of `path → RouteTarget`),
+`schemas/Page.schema.json` (drop slug, add chrome), a new `schemas/Collection.schema.json` (pure data — no slug,
+no routable).
