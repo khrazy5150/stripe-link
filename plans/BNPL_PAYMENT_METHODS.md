@@ -148,6 +148,25 @@ and triggers the capability request; a `GET` returns toggles + refreshed capabil
 
 ## Phased plan
 
+- **P1 + P2 — SHIPPED PROD 2026-07-31.** Built the backend generically over all four methods, so P2 (Afterpay/
+  Affirm/Zip) shipped WITH P1: the Payments screen renders all four with per-method country eligibility + live
+  capability status. Verified: Klarna shows on the hosted Checkout page (sandbox); Klarna + Afterpay are
+  `active` by default on an eligible US Standard account, Affirm/Zip come back `unrequested` (merchant enables
+  them in their own Stripe dashboard → then they appear). Hardened with the stale-status checkout fallback +
+  recurring guard.
+- **P3+ — future enhancements:**
+  - **On-page BNPL messaging (high-value, author-interested 2026-07-31).** Embed Stripe's **Payment Method
+    Messaging Element** (`paymentMethodMessaging`, Stripe.js) on the rendered landing page near the price/CTA —
+    the "As low as 4 payments of $X with Klarna" preview. It is an **Elements messaging widget**, NOT Elements
+    *checkout*, so it COEXISTS with our hosted Checkout (we keep Stripe Tax/wallets/3-DS). Needs the tenant's
+    publishable key + the offer amount/currency + enabled BNPL method types injected into html.py's price area.
+    This is the single biggest BNPL conversion lever (advertises the option before checkout).
+  - **Per-account child `payment_method_configuration`** for server-side eligibility (drops the local
+    currency/amount guards) if multi-currency tenants appear.
+  - Connect `account.updated`/`capability.updated` webhook to push capability-status changes (drop polling).
+
+## Original phased plan (historical — P1/P2 above collapsed it)
+
 - **P1 — Klarna, end to end (highest value):**
   - `tenant_config.payment_methods.bnpl` schema + `validate_tenant_config`.
   - Capability request/read helpers (`stripe_request` against `/v1/accounts/{acct}`), status mapping.
