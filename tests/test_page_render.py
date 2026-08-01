@@ -1099,9 +1099,14 @@ class BnplMessagingRenderTests(unittest.TestCase):
         self.assertIn('Stripe("pk_test_abc")', html)                     # tenant publishable key
         self.assertIn("paymentMethodMessaging", html)                    # the messaging element
         self.assertIn('paymentMethodTypes: ["klarna", "affirm"]', html)  # enabled+supported methods
-        self.assertIn('opts.countryCode = "US"', html)                   # account country
-        self.assertIn("amount: 6700", html)                              # resolved default subtotal ($67.00)
+        self.assertIn('base.countryCode = "US"', html)                   # account country
+        self.assertIn("render(6700)", html)                              # initial render at resolved default subtotal ($67.00)
         self.assertIn('currency: "USD"', html)
+        # follows the price selector: re-renders with the picked tier's amount
+        self.assertIn(".sl-price-options", html)
+        self.assertIn("data-sale-amount", html)
+        self.assertIn("conversion:itemChanged", html)   # hooks the selector's event bus (click sets .checked programmatically)
+        self.assertIn("window.slConversion", html)
 
     def test_no_messaging_without_config(self):
         html = render_page(self.page, self.offer, self.products_by_id)
