@@ -1100,8 +1100,10 @@ class BnplMessagingRenderTests(unittest.TestCase):
         self.assertIn("paymentMethodMessaging", html)                    # the messaging element
         self.assertIn('paymentMethodTypes: ["klarna", "affirm"]', html)  # enabled+supported methods
         self.assertIn('base.countryCode = "US"', html)                   # account country
-        self.assertIn("render(6700)", html)                              # initial render at resolved default subtotal ($67.00)
+        self.assertIn("currentAmount() || 6700", html)                   # initial render: DOM default, else resolved subtotal ($67.00)
         self.assertIn('currency: "USD"', html)
+        self.assertIn("appearance:", html)                               # legible in the page's theme (iframe can't inherit CSS)
+        self.assertIn("_appv.colorText", html)
         # follows the price selector: re-renders with the picked tier's amount
         self.assertIn(".sl-price-options", html)
         self.assertIn("data-sale-amount", html)
@@ -1118,3 +1120,35 @@ class BnplMessagingRenderTests(unittest.TestCase):
                            bnpl_messaging={"publishable_key": "pk_test", "payment_method_types": []})
         self.assertNotIn('id="sl-bnpl-message"', html)
         self.assertNotIn("js.stripe.com", html)
+
+    def test_messaging_on_listicle_carousel(self):
+        # A listicle (multi-product carousel) mounts the messaging below the tiers, before Add-to-cart, and the
+        # init follows the CAROUSEL product: conversion:itemChanged index -> the product's own tier block
+        # (.sl-listicle-tiers[data-index=i]), not a tier card in one options set as single/bundle does.
+        product_a = load_fixture("product-creatine-gummies.json")
+        product_b = copy.deepcopy(product_a)
+        product_b["product_id"] = "prod_second"
+        product_b["name"] = "Second Product"
+        product_b["default_price_id"] = "price_1bottle_b"
+        for price in product_b["prices"]:
+            price["price_id"] = price["price_id"] + "_b"
+        offer = load_fixture("offer-creatine-standard.json")
+        offer["offer_type"] = None                                    # two distinct products -> listicle
+        offer["items"] = [offer["items"][0],
+                          {"product_id": "prod_second", "price_id": "price_1bottle_b", "quantity": 1}]
+        page = load_fixture("page-creatine-standard.json")
+        products = {"prod_creatine_gummies": product_a, "prod_second": product_b}
+        html = render_page(page, offer, products, bnpl_messaging=self.msg, api_base_url="https://api.example.com")
+        self.assertIn("data-listicle", html)                          # rendered as the carousel
+        self.assertIn('id="sl-bnpl-message"', html)                   # mount div present
+        self.assertIn("https://js.stripe.com/v3/", html)
+        self.assertIn("var isListicle", html)                         # listicle-aware init
+        self.assertIn('sl-listicle-tiers[data-index="', html)         # carousel index -> product block
+        self.assertLess(html.find('id="sl-bnpl-message"'),
+                        html.find('<button class="sl-cta sl-listicle-add"'))   # div sits before Add-to-cart
+        # Finances the running cart total once items are added: reads the total live off the bus and re-prices
+        # on any mini-cart mutation (robust to the cartChanged event not reaching the messaging in time).
+        self.assertIn("liveCartTotal", html)
+        self.assertIn("window.slConversion.cartTotal", html)
+        self.assertIn("new MutationObserver", html)
+        self.assertIn("[data-minicart]", html)
