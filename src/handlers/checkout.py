@@ -30,6 +30,11 @@ from stripe_link.stripe_platform_secrets import checkout_credentials
 
 STRIPE_CHECKOUT_SESSIONS_URL = "https://api.stripe.com/v1/checkout/sessions"
 
+# Presentment currencies where we re-add Link to an explicit payment_method_types list (Link's established
+# markets). Outside these we omit it to avoid a guaranteed retry; the fallback ladder also drops Link if an
+# account lacks it. Link supports more over time — widen as needed.
+LINK_CURRENCIES = {"usd", "eur", "gbp", "cad", "aud", "nzd"}
+
 
 def handler(
     event,
@@ -349,25 +354,58 @@ def build_checkout_payload(
     # Otherwise leave payment methods to the account's Stripe defaults, as before.
     has_recurring = any("[recurring]" in key for key in payload)
     if bnpl_payment_method_types and payload.get("mode") == "payment" and not has_recurring:
-        types = ["card"] + [t for t in bnpl_payment_method_types if t and t != "card"]
+        # An explicit payment_method_types list SUPPRESSES Link (Stripe shows Link only when 'link' is listed);
+        # without a list Link rides in via the account defaults. Since we only set an explicit list to add BNPL,
+        # re-add 'link' here so enabling installments doesn't quietly drop Link (the fallback below removes it if
+        # the account has no Link). Card first, then Link, then the BNPL methods.
+        currency = str((resolved or {}).get("currency") or "").lower()
+        lead = ["card"] + (["link"] if currency in LINK_CURRENCIES else [])
+        types = lead + [t for t in bnpl_payment_method_types if t and t not in lead]
         for index, pmt in enumerate(types):
             payload[f"payment_method_types[{index}]"] = pmt
     return payload
 
 
 def create_checkout_session_with_bnpl_fallback(payload, *, api_key, stripe_account="", opener=None, had_bnpl=False):
-    """Create the Checkout Session; if it fails when we added BNPL methods, retry ONCE with card + the account's
-    default payment methods. A BNPL method can become ineligible between our cached status and the actual charge
-    (e.g. the merchant turns it off in their own Stripe dashboard, or a per-transaction rule Stripe enforces at
-    creation), which makes an explicit `payment_method_types` list a hard 400. The fallback strips
-    payment_method_types so a checkout never crashes on an installment method (plans/BNPL_PAYMENT_METHODS.md)."""
+    """Create the Checkout Session with a retry ladder for the explicit payment_method_types list (card + Link +
+    the tenant's BNPL). On failure we degrade in the order that keeps the most, so an edge account never crashes
+    checkout and rarely loses more than necessary (plans/BNPL_PAYMENT_METHODS.md):
+      1) drop 'link' — the account may not have Link enabled; keeps BNPL + platform control;
+      2) drop the whole explicit list → the account's default methods (a BNPL method went ineligible at charge
+         time, e.g. the merchant turned it off in their own dashboard, or a per-transaction Stripe rule)."""
     try:
         return create_stripe_checkout_session(payload, api_key=api_key, stripe_account=stripe_account, opener=opener)
-    except Exception:
-        if not had_bnpl:
+    except Exception as original:
+        ladder = []
+        without_link = _payload_without_payment_method_type(payload, "link")
+        if without_link is not None:
+            ladder.append(without_link)
+        if had_bnpl:
+            ladder.append({key: value for key, value in payload.items() if not key.startswith("payment_method_types[")})
+        if not ladder:
             raise
-        plain = {key: value for key, value in payload.items() if not key.startswith("payment_method_types[")}
-        return create_stripe_checkout_session(plain, api_key=api_key, stripe_account=stripe_account, opener=opener)
+        last_exc = original
+        for attempt in ladder:
+            try:
+                return create_stripe_checkout_session(attempt, api_key=api_key, stripe_account=stripe_account, opener=opener)
+            except Exception as exc:  # noqa: BLE001 - try the next rung; re-raise the last if all fail
+                last_exc = exc
+        raise last_exc
+
+
+def _payload_without_payment_method_type(payload, drop):
+    """A copy of `payload` with `drop` removed from the payment_method_types[i] list and the survivors re-indexed;
+    None if `drop` isn't present (so the caller can skip that retry rung)."""
+    def _index(key):
+        return int(key[len("payment_method_types["):-1])
+    keys = sorted((k for k in payload if k.startswith("payment_method_types[")), key=_index)
+    values = [payload[k] for k in keys]
+    if drop not in values:
+        return None
+    out = {k: v for k, v in payload.items() if not k.startswith("payment_method_types[")}
+    for index, value in enumerate(v for v in values if v != drop):
+        out[f"payment_method_types[{index}]"] = value
+    return out
 
 
 def create_stripe_checkout_session(payload, *, api_key, stripe_account="", opener=None):

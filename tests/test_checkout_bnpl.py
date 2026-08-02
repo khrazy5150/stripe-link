@@ -25,10 +25,19 @@ def _payload(bnpl, mode="payment"):
 
 
 class CheckoutBnplPayloadTests(unittest.TestCase):
-    def test_bnpl_adds_card_plus_methods_in_payment_mode(self):
+    def test_bnpl_adds_card_link_plus_methods_in_payment_mode(self):
         payload = _payload(["klarna"])
         self.assertEqual(payload["payment_method_types[0]"], "card")   # card must be included when explicit
-        self.assertEqual(payload["payment_method_types[1]"], "klarna")
+        self.assertEqual(payload["payment_method_types[1]"], "link")   # Link re-added (explicit list would suppress it)
+        self.assertEqual(payload["payment_method_types[2]"], "klarna")
+
+    def test_link_omitted_for_non_link_currency(self):
+        payload = build_checkout_payload(
+            tenant_id="t1", offer=_offer(), products_by_id=_products(), resolved=_resolved("jpy"),
+            success_url="s", cancel_url="c", bnpl_payment_method_types=["klarna"])
+        types = [v for k, v in payload.items() if k.startswith("payment_method_types[")]
+        self.assertEqual(types[0], "card")
+        self.assertNotIn("link", types)                               # JPY is outside Link's markets → omit
 
     def test_no_bnpl_leaves_payment_methods_to_stripe_defaults(self):
         payload = _payload([])
@@ -38,11 +47,12 @@ class CheckoutBnplPayloadTests(unittest.TestCase):
         payload = _payload(["klarna"], mode="subscription")
         self.assertNotIn("payment_method_types[0]", payload)           # BNPL is one-time only
 
-    def test_card_not_duplicated_if_passed(self):
-        payload = _payload(["card", "klarna"])
+    def test_card_and_link_not_duplicated_if_passed(self):
+        payload = _payload(["card", "link", "klarna"])
         self.assertEqual(payload["payment_method_types[0]"], "card")
-        self.assertEqual(payload["payment_method_types[1]"], "klarna")
-        self.assertNotIn("payment_method_types[2]", payload)
+        self.assertEqual(payload["payment_method_types[1]"], "link")
+        self.assertEqual(payload["payment_method_types[2]"], "klarna")
+        self.assertNotIn("payment_method_types[3]", payload)          # no dupes of the card/link lead
 
     def test_recurring_line_excludes_bnpl(self):
         # A payment-mode session that still carries a recurring price_data line must not offer BNPL.
@@ -88,6 +98,44 @@ class BnplCheckoutFallbackTests(unittest.TestCase):
         payload = {"mode": "payment", "success_url": "s"}
         with self.assertRaises(RuntimeError):                    # had_bnpl False → surface, don't swallow/retry
             create_checkout_session_with_bnpl_fallback(payload, api_key="sk", stripe_account="a", opener=opener, had_bnpl=False)
+
+    def test_ladder_drops_link_first_and_keeps_bnpl(self):
+        # An account without Link: the full list fails, but dropping just 'link' (keeping card + BNPL) succeeds,
+        # so the tenant keeps its installment offer + platform control.
+        calls = []
+
+        def opener(request, timeout=None):
+            body = request.data.decode("utf-8")
+            calls.append(body)
+            if "link" in body:
+                raise RuntimeError("Stripe 400: link is not available on this account")
+            return _Ok()
+
+        payload = {"mode": "payment", "payment_method_types[0]": "card", "payment_method_types[1]": "link",
+                   "payment_method_types[2]": "klarna", "success_url": "s"}
+        result = create_checkout_session_with_bnpl_fallback(payload, api_key="sk", stripe_account="a", opener=opener, had_bnpl=True)
+        self.assertEqual(result["url"], "https://checkout.stripe.com/ok")
+        self.assertEqual(len(calls), 2)
+        self.assertNotIn("link", calls[1])                      # link dropped
+        self.assertIn("klarna", calls[1])                       # BNPL preserved
+
+    def test_ladder_falls_through_to_account_defaults(self):
+        # Any explicit list fails → the last rung strips all payment_method_types → the account's defaults.
+        calls = []
+
+        def opener(request, timeout=None):
+            body = request.data.decode("utf-8")
+            calls.append(body)
+            if "payment_method_types" in body:
+                raise RuntimeError("Stripe 400")
+            return _Ok()
+
+        payload = {"mode": "payment", "payment_method_types[0]": "card", "payment_method_types[1]": "link",
+                   "payment_method_types[2]": "klarna", "success_url": "s"}
+        result = create_checkout_session_with_bnpl_fallback(payload, api_key="sk", stripe_account="a", opener=opener, had_bnpl=True)
+        self.assertEqual(result["url"], "https://checkout.stripe.com/ok")
+        self.assertEqual(len(calls), 3)                         # full → without-link → no-types
+        self.assertNotIn("payment_method_types", calls[2])
 
 
 if __name__ == "__main__":
