@@ -1,7 +1,13 @@
 # Decouple Stripe mode (test/live) from platform environment (dev/prod)
 
-Status: **PLANNED, not built.** Design 2026-08-02. Foundational re-architecture. Approved to plan in full while
+Status: **IN PROGRESS.** Design 2026-08-02. Foundational re-architecture. Approved to plan in full while
 **pre-launch** (all "tenants" are the operator's test emails → no real data to migrate; cheapest time to do it).
+Build workflow: **feature branch `stripe-mode-decoupling`** (main stays deployable), **dev-first cutover**.
+- **P0 DONE** (committed to `main`): `resolve_stripe_mode`/`normalize_stripe_mode` request helper + inert dashboard
+  `stripeMode`/`hostnameReleaseChannel` scaffolding. No behavior change (default mode = test/live per fail-safe).
+- **P0.5 DONE** (branch): stripe-keys → one per-deployment table keyed (tenant_id, mode); tenant-profiles dual-write
+  retired; StripeKeysTable gains `mode` SK; fixed `_DEV/_PROD` env pairs + IAM grants collapsed to per-env `!Ref`.
+- **P1 NEXT.**
 
 ## The problem — mode and infra are conflated
 
