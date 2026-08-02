@@ -197,6 +197,46 @@ class AccountHandlerTests(unittest.TestCase):
         self.assertEqual(body["session"]["tenant_id"], "client_demo")
         self.assertEqual(body["session"]["access_token"], "access-token")
 
+    def test_auth_login_rebuilds_wiped_profile(self):
+        # Self-heal after a clean-slate cutover / shared Cognito pool (plans/STRIPE_MODE_DECOUPLING.md P6): a
+        # confirmed Cognito user whose tenant + user profile were wiped gets them rebuilt on login.
+        class FakeCognito:
+            def initiate_auth(self, **kwargs):
+                return {"AuthenticationResult": {"AccessToken": "access-token", "TokenType": "Bearer"}}
+
+            def admin_get_user(self, **kwargs):
+                return {
+                    "Username": "keith@example.com",
+                    "UserAttributes": [
+                        {"Name": "sub", "Value": "user-sub-1"},
+                        {"Name": "email", "Value": "keith@example.com"},
+                        {"Name": "given_name", "Value": "Keith"},
+                        {"Name": "family_name", "Value": "De Costa"},
+                        {"Name": "custom:client_id", "Value": "client_demo"},
+                        {"Name": "email_verified", "Value": "true"},
+                    ],
+                }
+
+        tenants = FakeDocumentRepository("tenant_id")   # empty — data was wiped
+        users = FakeDocumentRepository("user_id")
+
+        with patch.dict(os.environ, {"COGNITO_USER_POOL_ID": "pool", "COGNITO_USER_POOL_CLIENT_ID": "client-app"}, clear=False):
+            response = auth_handler({
+                "httpMethod": "POST",
+                "path": "/auth/login",
+                "body": json.dumps({"email": "keith@example.com", "password": "password123"}),
+            }, None, cognito=FakeCognito(), tenant_repository=tenants, user_repository=users)
+
+        body = json.loads(response["body"])
+        self.assertEqual(response["statusCode"], 200)
+        # The response carries a rebuilt tenant, and both profiles are now persisted.
+        self.assertEqual(body["tenant"]["tenant_id"], "client_demo")
+        self.assertEqual(body["tenant"]["billing_status"], "trial")
+        self.assertEqual(tenants.get("client_demo", "client_demo")["owner"]["email"], "keith@example.com")
+        rebuilt_user = users.get("client_demo", "user-sub-1")
+        self.assertEqual(rebuilt_user["email"], "keith@example.com")
+        self.assertEqual(rebuilt_user["role"], "owner")
+
     def test_billing_connect_card_uses_tenant_tier_and_billing_config(self):
         class FakeStripeRepository:
             def get(self, tenant_id, mode="test"):
