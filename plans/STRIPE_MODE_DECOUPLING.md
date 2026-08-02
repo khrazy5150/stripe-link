@@ -33,8 +33,15 @@ Build workflow: **feature branch `stripe-mode-decoupling`** (main stays deployab
   by event_id). Threaded the mode into every reconcile path's repo writes/reads; `order_record_from_session` stamps
   `stripe_mode` so the raw order write matches the dashboard filter. **OPS at cutover**: point BOTH test + live
   Stripe webhook endpoints at the prod URL and configure both per-mode signing secrets on prod.
-- **P4 NEXT** — publishing (page_publish per-mode, from the page record's stripe_mode) + host-agnostic checkout URL
-  that bakes `?mode=` into published Buy links (closes the loop on P2's checkout mode-sourcing).
+- **P4 DONE** (branch): `checkout_base_url_for_page` host-agnostic (single `PUBLIC_CHECKOUT_BASE_URL`, no dev/prod
+  split); the offer's `stripe_mode` rides the Buy URL as `?mode=` (`build_checkout_url` + `checkout-mode` data attr
+  + JS `checkoutHref`), closing P2's checkout loop. Threaded mode through every on-page money path (listicle cart
+  add/remove/checkout/hydrate, post-purchase upsell session+charge for both islands, booking reserve+checkout, lead
+  capture). `page_publish` (stream) builds its mode-scoped repos PER RECORD from each page's `stripe_mode`.
+- **P5 NEXT** — CDN/serving mode-aware. Now also carries what moved out of P4 because write+read must change
+  together: **mode-partitioned S3 publish path** (avoid test/live page-id collisions in the one bucket),
+  `page_render` serving mode + the standalone `/book` page JS, and **explicit test-mode `noindex`**. Plus the
+  mode-aware custom-domain resolver + platform-hostname worker (the trickiest area).
 
 ## The problem — mode and infra are conflated
 
