@@ -163,16 +163,39 @@ Author confirmed the target after distinguishing two axes:
   `test` (low-stakes, all self-owned); retire dev's tenant-test role (dev = pure staging); rebuild the onboarding
   flow (live-first + opt-in Stripe-test sandbox, `plans/` onboarding streamline) on the clean model.
 
-## Migration — CLEAN-SLATE CUTOVER (chosen 2026-08-02)
+## Migration — CURATED SELECTIVE WIPE (revised 2026-08-02 — supersedes "truncate all tables")
 
-All current data is the operator's own disposable test data, so we **do NOT write migration/back-compat code**.
-Build every phase against the **target schema only** (per-env tables, `mode` as attribute); keep the current app
-running on current data throughout the build; then at **cutover**: tear down + recreate the tables via the SAM
-stack (or scan-delete), **clear the pages S3 buckets**, **re-seed config** (global billing config, tier policies),
-and **re-onboard** the handful of test tenants in the new model. **Cognito is untouched** (logins survive; profiles
-re-create via registration). Optionally clean Stripe test data. This removes the P0.5/P6 migration burden entirely
-— they become "define fresh tables + re-onboard," not "write and debug a data migration." One-time re-setup chore:
-re-run Stripe Connect OAuth per mode + re-add custom domains to the resolver.
+All per-tenant content is the operator's disposable test data, so we **do NOT write migration/back-compat code**;
+build every phase against the target schema only. BUT the cutover is **NOT a blanket truncate / stack teardown** —
+some tables hold platform reference data that must survive (operator flagged the categories table). Two facts make
+a surgical wipe both necessary and easy:
+- **Only `StripeKeysTable` has a key-schema change** (the P0.5 `mode` sort key), so a normal `sam deploy` replaces
+  just that one table (fine — Stripe keys re-onboard). **Every other table is schema-unchanged** — mode-in-key uses
+  the SK *value*, not a new key attribute — so a deploy preserves all their data. No teardown is needed to ship.
+- "Clean slate" = a **selective scan-delete of the WIPE list only**; PRESERVE tables are never touched.
+
+**PRESERVE (platform reference/config, NOT per-tenant test data — NEVER wipe):**
+- `product-categories` — shared cross-tenant taxonomy (grows per seller, feeds AI product creation). Irreplaceable.
+- `app-config` — deployment config (API base URLs, CDN/pages domains). Platform-global.
+- `tier-policies` — fee-tier reference. `themes` — theme/preset data (reserved).
+- (NOT a table: the global billing config lives in S3 `BILLING_CONFIG_BUCKET/global_billing_config.json` + a code
+  default `DEFAULT_GLOBAL_BILLING_CONFIG` — leave that S3 object in place.)
+
+**WIPE (per-tenant test content / accounts / transactions / funnel artifacts — re-created on re-onboard):**
+products, offers, coupons, pages, sites, collections, carts, checkout-sessions, invoices, services, experiments,
+orders, customers, lead-capture, reviews, notifications, refunds, routes, custom-domains, media, document-events,
+webhook-events, ledger, calendar-connections, stripe-keys, tenant-profiles, user-profiles, user-preferences,
+shipping-config, **platform-config** (misnamed — holds per-tenant TenantConfig).
+
+**REVIEW before wiping (per-tenant but may hold hand-authored content):** `legal-pages` (hand-written ToS/privacy?),
+the media S3 bucket (uploaded images).
+
+**Cutover steps:** (1) **Back up every table first** — full scan-dump to JSON in S3 (cheap insurance, nothing
+unrecoverable). (2) Selective scan-delete of the WIPE-list tables only. (3) Clear the **pages + preview** S3 buckets
+(published artifacts, disposable); leave the billing-config bucket + (per review) media bucket. (4) Re-onboard the
+handful of test tenants in the new model; **Cognito untouched** (logins survive; profiles re-create via
+registration). (5) Re-run Stripe Connect OAuth per mode; re-add custom domains to the resolver; point both Stripe
+webhook endpoints at prod with both per-mode signing secrets. (6) Optionally clean Stripe test data.
 
 ## Risks / tricky bits
 
