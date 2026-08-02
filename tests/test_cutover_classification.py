@@ -21,7 +21,7 @@ ALL_TABLES = [
     "custom-domains", "customers", "document-events", "experiments", "invoices", "lead-capture", "ledger",
     "legal-pages", "media", "notifications", "offers", "orders", "pages", "platform-config",
     "product-categories", "products", "refunds", "reviews", "routes", "services", "shipping-config", "sites",
-    "stripe-keys", "tenant-profiles", "themes", "tier-policies", "user-preferences", "user-profiles",
+    "stripe-keys-v2", "tenant-profiles", "themes", "tier-policies", "user-preferences", "user-profiles",
     "webhook-events",
 ]
 

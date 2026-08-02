@@ -42,7 +42,7 @@ WIPE = {
     "calendar-connections", "carts", "checkout-sessions", "collections", "coupons", "custom-domains",
     "customers", "document-events", "experiments", "invoices", "lead-capture", "ledger", "media",
     "notifications", "offers", "orders", "pages", "platform-config", "products", "refunds", "reviews",
-    "routes", "services", "shipping-config", "sites", "stripe-keys", "tenant-profiles",
+    "routes", "services", "shipping-config", "sites", "stripe-keys", "stripe-keys-v2", "tenant-profiles",
     "user-preferences", "user-profiles", "webhook-events",
 }
 

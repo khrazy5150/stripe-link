@@ -2824,7 +2824,10 @@ Resources:
   StripeKeysTable:
     Type: AWS::DynamoDB::Table
     Properties:
-      TableName: !Sub "${ProjectPrefix}-stripe-keys-${Environment}"
+      # Renamed -v2 so CloudFormation can add the composite `mode` sort key in one clean deploy: a key-schema
+      # change is a replacement, and CFN cannot replace a custom-named resource in place. The app references this
+      # only via !Ref, so the physical name is internal (plans/STRIPE_MODE_DECOUPLING.md P6).
+      TableName: !Sub "${ProjectPrefix}-stripe-keys-v2-${Environment}"
       BillingMode: PAY_PER_REQUEST
       SSESpecification:
         SSEEnabled: true
