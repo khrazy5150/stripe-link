@@ -85,6 +85,32 @@ def checkout_payment_method_types(bnpl_config: dict[str, Any] | None, currency: 
     return out
 
 
+def apply_capability_statuses(
+    bnpl_config: dict[str, Any] | None, capabilities: dict[str, Any] | None, now: int
+) -> tuple[dict[str, Any], bool]:
+    """Refresh each method's cached `capability_status` from a Stripe capabilities map — the same
+    `{capability: status}` shape that `GET /accounts/{id}` returns and that rides on the `account.updated`
+    webhook. Preserves the tenant's `enabled` intent; only touches methods whose capability appears in the map
+    (a partial event never clobbers a status we didn't hear about). Returns (bnpl_config, changed). Shared by the
+    Payments-screen poll and the webhook push so both refresh identically (plans/BNPL_PAYMENT_METHODS.md P3)."""
+    bnpl = dict(bnpl_config or {})
+    caps = capabilities or {}
+    changed = False
+    for method, spec in BNPL_METHODS.items():
+        capability = spec["capability"]
+        if capability not in caps:
+            continue
+        status = caps[capability]
+        entry = dict(bnpl.get(method) or {})
+        if entry.get("capability_status") != status:
+            entry["capability_status"] = status
+            entry["enabled"] = bool(entry.get("enabled"))
+            entry["updated_at"] = now
+            bnpl[method] = entry
+            changed = True
+    return bnpl, changed
+
+
 def messaging_method_types(bnpl_config: dict[str, Any] | None) -> list[str]:
     """Stripe `payment_method_type` strings for the on-page Payment Method Messaging Element — the tenant's
     ENABLED + capability-ACTIVE methods that the messaging element supports (Klarna/Afterpay/Affirm; not Zip).

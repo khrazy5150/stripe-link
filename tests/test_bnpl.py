@@ -2,6 +2,7 @@ import unittest
 
 from stripe_link.domain.bnpl import (
     BNPL_METHODS,
+    apply_capability_statuses,
     capability_name,
     checkout_payment_method_types,
     country_eligible,
@@ -50,6 +51,33 @@ class BnplDomainTests(unittest.TestCase):
         # klarna, afterpay, then... affirm(usd ok), zip(usd ok) — registry order, currency-filtered.
         self.assertEqual(types[0], "klarna")
         self.assertEqual(types[1], "afterpay_clearpay")
+
+
+class ApplyCapabilityStatusesTests(unittest.TestCase):
+    def test_refreshes_present_capabilities_and_preserves_enabled(self):
+        cfg = {"klarna": {"enabled": True, "capability_status": "pending"}}
+        out, changed = apply_capability_statuses(cfg, {"klarna_payments": "active"}, 100)
+        self.assertTrue(changed)
+        self.assertEqual(out["klarna"]["capability_status"], "active")
+        self.assertTrue(out["klarna"]["enabled"])          # intent preserved
+        self.assertEqual(out["klarna"]["updated_at"], 100)
+
+    def test_absent_capability_is_left_untouched(self):
+        # A partial event that omits every BNPL capability must not clobber any cached status.
+        cfg = {"affirm": {"enabled": True, "capability_status": "active"}}
+        out, changed = apply_capability_statuses(cfg, {"card_payments": "active"}, 100)
+        self.assertFalse(changed)
+        self.assertEqual(out["affirm"]["capability_status"], "active")
+
+    def test_no_change_when_status_matches(self):
+        cfg = {"klarna": {"enabled": True, "capability_status": "active"}}
+        out, changed = apply_capability_statuses(cfg, {"klarna_payments": "active"}, 100)
+        self.assertFalse(changed)
+
+    def test_seeds_a_method_not_yet_in_config(self):
+        out, changed = apply_capability_statuses({}, {"klarna_payments": "active"}, 100)
+        self.assertTrue(changed)
+        self.assertEqual(out["klarna"], {"capability_status": "active", "enabled": False, "updated_at": 100})
 
 
 if __name__ == "__main__":

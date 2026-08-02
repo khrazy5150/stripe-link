@@ -134,10 +134,11 @@ class ReconcileAccountUpdatedTests(unittest.TestCase):
         self.sites.put({"tenant_id": "t1", "site_id": "site_1", "document_type": "site",
                         "hosting": {"type": "platform"}, "indexing": {"eligibility": "blocked"}, "pages": {}})
 
-    def _run(self, acct):
+    def _run(self, acct, tenant_document=None):
         event = {"type": "account.updated", "account": "acct_1", "data": {"object": acct}}
         return reconcile_account_updated(
-            event, mode="test", tenant_document={"tenant_id": "t1", "connect_account_id": "acct_1"},
+            event, mode="test",
+            tenant_document=tenant_document or {"tenant_id": "t1", "connect_account_id": "acct_1"},
             stripe_keys_repo=self.keys, user_profiles_repo=self.profiles, sites_repo=self.sites,
             now_fn=lambda: 1790000000,
         )
@@ -167,6 +168,26 @@ class ReconcileAccountUpdatedTests(unittest.TestCase):
         self._run(account(charges_enabled=False, requirements={"disabled_reason": "rejected.fraud"}))
         self.assertEqual(self.keys.saved["connect_verification"], "restricted")
         self.assertEqual(self.sites.get("t1", "site_1")["indexing"]["eligibility"], "blocked")
+
+    def test_refreshes_bnpl_capability_status_from_event(self):
+        # A merchant activates Affirm in their own Stripe dashboard -> account.updated carries the new capability
+        # status; the cached status on the stripe_keys doc is refreshed via push (no polling needed), enabled kept.
+        doc = {"tenant_id": "t1", "connect_account_id": "acct_1",
+               "payment_methods": {"bnpl": {"affirm": {"enabled": True, "capability_status": "inactive"}}}}
+        result = self._run(account(capabilities={"affirm_payments": "active", "klarna_payments": "active"}), doc)
+        affirm = self.keys.saved["payment_methods"]["bnpl"]["affirm"]
+        self.assertEqual(affirm["capability_status"], "active")
+        self.assertTrue(affirm["enabled"])                      # tenant intent preserved
+        self.assertIn("affirm", result["bnpl_refreshed"])
+        self.assertEqual(self.keys.saved["payment_methods"]["account_country"], "US")   # country cached too
+
+    def test_no_bnpl_write_when_capabilities_unchanged(self):
+        doc = {"tenant_id": "t1", "connect_account_id": "acct_1",
+               "payment_methods": {"bnpl": {"klarna": {"enabled": True, "capability_status": "active"}},
+                                   "account_country": "US"}}
+        result = self._run(account(capabilities={"klarna_payments": "active"}), doc)
+        self.assertNotIn("bnpl_refreshed", result)             # nothing changed → no noisy report
+        self.assertEqual(self.keys.saved["payment_methods"]["bnpl"]["klarna"]["capability_status"], "active")
 
 
 if __name__ == "__main__":

@@ -13,7 +13,9 @@ capabilities[{cap}][requested]=…` with the platform secret key (no Stripe-Acco
 import time
 
 from stripe_link.common import error_response, json_response, parse_json_body, query_params, tenant_id_from_event
-from stripe_link.domain.bnpl import BNPL_METHODS, capability_name, country_eligible, is_valid_method
+from stripe_link.domain.bnpl import (
+    BNPL_METHODS, apply_capability_statuses, capability_name, country_eligible, is_valid_method,
+)
 from stripe_link.domain.documents import DocumentValidationError, validate_stripe_keys_document
 from stripe_link.repositories.documents import stripe_keys_repository
 from stripe_link.stripe_client import StripeApiError, stripe_request
@@ -68,25 +70,18 @@ def _read(tenant_id, mode, stripe_repo, stripe_caller, platform_key_loader):
     stored = dict((keys.get("payment_methods") or {}).get("bnpl") or {})
     account_country, capabilities = _fetch_account(stripe_caller, platform_key_loader, mode, acct) if acct else ("", {})
 
-    methods, changed = [], False
-    for key, spec in BNPL_METHODS.items():
-        entry = dict(stored.get(key) or {})
-        # Live status wins when we could reach Stripe; else fall back to the cached value.
-        status = capabilities.get(spec["capability"], entry.get("capability_status") or "unrequested") if acct \
-            else (entry.get("capability_status") or "unrequested")
-        if acct and capabilities and entry.get("capability_status") != status:
-            entry["capability_status"] = status                 # refresh the cache
-            stored[key] = entry
-            changed = True
-        methods.append({
-            "method": key,
-            "label": spec["label"],
-            "enabled": bool(entry.get("enabled")),
-            "capability_status": status,
-            # No account country yet → don't claim ineligible (show enabled; Stripe is the final gate).
-            "country_eligible": country_eligible(key, account_country) if account_country else True,
-            "countries": sorted(spec["countries"]),
-        })
+    # Refresh the cached capability statuses from the live poll (same primitive the account.updated webhook uses).
+    stored, changed = apply_capability_statuses(stored, capabilities, int(time.time())) if (acct and capabilities) \
+        else (stored, False)
+    methods = [{
+        "method": key,
+        "label": spec["label"],
+        "enabled": bool((stored.get(key) or {}).get("enabled")),
+        "capability_status": (stored.get(key) or {}).get("capability_status") or "unrequested",
+        # No account country yet → don't claim ineligible (show enabled; Stripe is the final gate).
+        "country_eligible": country_eligible(key, account_country) if account_country else True,
+        "countries": sorted(spec["countries"]),
+    } for key, spec in BNPL_METHODS.items()]
 
     # Cache the account country so publish-time on-page BNPL messaging can set the element's countryCode without
     # a live Stripe call (plans/BNPL_PAYMENT_METHODS.md P3).

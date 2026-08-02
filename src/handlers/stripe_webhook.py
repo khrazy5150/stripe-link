@@ -10,6 +10,7 @@ from urllib.request import Request, urlopen
 
 from stripe_link.common import error_response, header_value, json_response
 from stripe_link.domain.cart import mark_converted as mark_cart_converted
+from stripe_link.domain.bnpl import apply_capability_statuses
 from stripe_link.domain.booking import (
     appointment_line_from_purchase,
     appointment_price,
@@ -336,13 +337,28 @@ def reconcile_account_updated(
     tenant_id = str(tenant_document.get("tenant_id") or "").strip()
     now = int(now_fn())
 
-    # 1) Connect verification state onto the stripe_keys doc (the account→tenant record).
+    # 1) Connect verification state onto the stripe_keys doc (the account→tenant record). Fold in a BNPL
+    #    capability refresh from the SAME event so the Payments screen no longer relies on polling: the
+    #    account.updated payload carries account.capabilities + country (plans/BNPL_PAYMENT_METHODS.md P3).
     fields = connect_state_fields(account, now=now)
-    stripe_keys_repo.put({**tenant_document, **fields, "mode": mode, "updated_at": now})
+    updated_doc = {**tenant_document, **fields, "mode": mode, "updated_at": now}
+    payment_methods = dict(updated_doc.get("payment_methods") or {})
+    bnpl, bnpl_changed = apply_capability_statuses(payment_methods.get("bnpl"), account.get("capabilities"), now)
+    account_country = str(account.get("country") or "").strip()
+    country_changed = bool(account_country and payment_methods.get("account_country") != account_country)
+    if bnpl_changed:
+        payment_methods["bnpl"] = bnpl
+    if country_changed:
+        payment_methods["account_country"] = account_country
+    if bnpl_changed or country_changed:
+        updated_doc["payment_methods"] = payment_methods
+    stripe_keys_repo.put(updated_doc)
     state = fields.get("connect_verification")
     connect_verified = state == "verified"
     connect_restricted = state == "restricted"
     result: dict[str, Any] = {"tenant_id": tenant_id, "connect_verification": state}
+    if bnpl_changed:
+        result["bnpl_refreshed"] = sorted(k for k in bnpl if bnpl[k].get("updated_at") == now)
 
     # 2) NAP auto-seed from Stripe business_profile — fill empty fields only, stamped with provenance.
     profiles_repo = user_profiles_repo or (user_profiles_repository() if os.environ.get("USER_PROFILES_TABLE") else None)
