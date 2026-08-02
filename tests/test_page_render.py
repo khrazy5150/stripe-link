@@ -1102,8 +1102,9 @@ class BnplMessagingRenderTests(unittest.TestCase):
         self.assertIn('base.countryCode = "US"', html)                   # account country
         self.assertIn("currentAmount() || 6700", html)                   # initial render: DOM default, else resolved subtotal ($67.00)
         self.assertIn('currency: "USD"', html)
-        self.assertIn("appearance:", html)                               # legible in the page's theme (iframe can't inherit CSS)
-        self.assertIn("_appv.colorText", html)
+        self.assertIn("appearance:", html)                               # fixed light-card scheme (iframe + white modal)
+        self.assertIn("colorBackground: '#ffffff'", html)
+        self.assertIn(".sl-bnpl-message:not(:empty)", html)              # light card only once mounted
         # follows the price selector: re-renders with the picked tier's amount
         self.assertIn(".sl-price-options", html)
         self.assertIn("data-sale-amount", html)
