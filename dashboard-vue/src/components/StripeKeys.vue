@@ -138,7 +138,10 @@
               <button type="button" class="bnpl-info" :aria-label="`Where ${m.label} is available`" @click="toggleInfo(m.method)">ⓘ</button>
             </p>
             <p v-if="m.enabled && m.country_eligible && m.capability_status !== 'active'" class="bnpl-note">
-              <template v-if="m.onboarding_url">
+              <!-- Requesting/activating a capability is a live-only Stripe operation, so a not-yet-active method
+                   can't be turned on in test mode at all (Klarna/Afterpay are the exception — active by default). -->
+              <template v-if="pm.mode !== 'live'">{{ m.label }} can only be enabled in live mode.</template>
+              <template v-else-if="m.onboarding_url">
                 {{ m.label }} needs one more step to finish enabling.
                 <a :href="m.onboarding_url" target="_blank" rel="noopener" class="bnpl-finish">Finish setup in Stripe →</a>
               </template>
