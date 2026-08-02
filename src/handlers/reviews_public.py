@@ -8,7 +8,7 @@ import secrets
 import time
 from urllib.parse import parse_qs
 
-from stripe_link.common import error_response, header_value, json_response, query_params
+from stripe_link.common import error_response, header_value, json_response, query_params, resolve_stripe_mode
 from stripe_link.domain.documents import DocumentValidationError, validate_review
 from stripe_link.repositories.documents import RepositoryError, products_repository, review_invites_repository, reviews_repository, sites_repository
 
@@ -45,10 +45,11 @@ def handler(event, context, *, reviews_repo=None, products_repo=None, sites_repo
     method = (event or {}).get("httpMethod", "").upper()
     if method == "OPTIONS":
         return json_response({})
+    mode = resolve_stripe_mode(event)
     reviews_repo = reviews_repo or reviews_repository()
-    products_repo = products_repo or products_repository()
+    products_repo = products_repo or products_repository(mode=mode)
     if sites_repo is None and os.environ.get("SITES_TABLE"):
-        sites_repo = sites_repository()
+        sites_repo = sites_repository(mode=mode)
     if invites_repo is None and os.environ.get("REVIEWS_TABLE"):
         invites_repo = review_invites_repository()
     if method == "GET":

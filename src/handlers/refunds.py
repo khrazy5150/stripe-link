@@ -10,7 +10,7 @@ application fee is NOT reversed (legacy behavior). Idempotent on refund_request_
 
 import time
 
-from stripe_link.common import error_response, json_response, parse_json_body, path_params, tenant_id_from_event
+from stripe_link.common import error_response, json_response, parse_json_body, path_params, resolve_stripe_mode, tenant_id_from_event
 from stripe_link.domain.refund_ledger import build_refund_entry, set_refund_aggregates
 from stripe_link.kms_secrets import KmsSecretCipher
 from stripe_link.repositories.documents import (
@@ -75,7 +75,7 @@ def handler(
         return _execute(
             request, tenant_id, now,
             requests_repo=requests_repo,
-            orders_repo=orders_repo or orders_repository(),
+            orders_repo=orders_repo or orders_repository(mode=resolve_stripe_mode(event)),
             refunds_repo=refunds_repo or refunds_repository(),
             stripe_repo=stripe_repo or stripe_keys_repository(),
             secret_cipher=secret_cipher if secret_cipher is not None else KmsSecretCipher(),

@@ -18,6 +18,7 @@ from stripe_link.common import (
     parse_json_body,
     path_params,
     query_params,
+    resolve_stripe_mode,
     tenant_id_from_event,
 )
 from stripe_link.domain.documents import DocumentValidationError, validate_lead_submission
@@ -54,13 +55,15 @@ def handler(
     method = (event or {}).get("httpMethod", "").upper()
     if method == "OPTIONS":
         return json_response({})
+    # Leads are mode-agnostic CRM records; the offer/product context they capture is read in the request's mode.
+    mode = resolve_stripe_mode(event)
     leads_repo = leads_repo or leads_repository()
     if method == "POST":
         return ingest_lead(
             event,
             leads_repo=leads_repo,
-            offers_repo=offers_repo or offers_repository(),
-            products_repo=products_repo or products_repository(),
+            offers_repo=offers_repo or offers_repository(mode=mode),
+            products_repo=products_repo or products_repository(mode=mode),
             notifications_repo=notifications_repo,
             now=now_fn(),
         )

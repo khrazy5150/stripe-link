@@ -2,7 +2,7 @@ import os
 import re
 from urllib.parse import urlencode
 
-from stripe_link.common import error_response, json_response, path_params, query_params, tenant_id_from_event
+from stripe_link.common import error_response, json_response, path_params, query_params, resolve_stripe_mode, tenant_id_from_event
 from stripe_link.domain.connect_sync import site_domain_verified
 from stripe_link.domain.funnels import FunnelError, post_purchase_plan, resolve_funnel_transition
 from stripe_link.domain.opportunities import STAGE_POST_PURCHASE, stage_opportunities
@@ -108,10 +108,11 @@ def handler(event, context, *, repository=None, pages_domain=None, sites_repo=No
     if method != "GET":
         return error_response(f"Unsupported method '{method}'.", status_code=405, code="method_not_allowed")
 
-    repository = repository or pages_repository()
-    sites_repo = sites_repo or (sites_repository() if os.environ.get("SITES_TABLE") else None)
-    offers_repo = offers_repo or (offers_repository() if os.environ.get("OFFERS_TABLE") else None)
-    products_repo = products_repo or (products_repository() if os.environ.get("PRODUCTS_TABLE") else None)
+    mode = resolve_stripe_mode(event)
+    repository = repository or pages_repository(mode=mode)
+    sites_repo = sites_repo or (sites_repository(mode=mode) if os.environ.get("SITES_TABLE") else None)
+    offers_repo = offers_repo or (offers_repository(mode=mode) if os.environ.get("OFFERS_TABLE") else None)
+    products_repo = products_repo or (products_repository(mode=mode) if os.environ.get("PRODUCTS_TABLE") else None)
     pages_domain = pages_domain if pages_domain is not None else os.environ.get("PAGES_DISTRIBUTION_DOMAIN", "")
 
     page_id = path_params(event).get("page_id")

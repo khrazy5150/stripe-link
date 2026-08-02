@@ -21,10 +21,12 @@ logger = logging.getLogger(__name__)
 
 def handler(event, context, *, carts_repo=None, cart_tokens_repo=None, sites_repo=None,
             mailer_send=None, now_fn=None, token_factory=None):
-    carts_repo = carts_repo or carts_repository()
-    cart_tokens_repo = cart_tokens_repo or cart_tokens_repository()
+    # Abandoned-cart recovery is a live-only sweep: never email real recovery nudges for test-mode carts
+    # (plans/STRIPE_MODE_DECOUPLING.md). The mode-scoped scan returns only live carts.
+    carts_repo = carts_repo or carts_repository(mode="live")
+    cart_tokens_repo = cart_tokens_repo or cart_tokens_repository(mode="live")
     if sites_repo is None and os.environ.get("SITES_TABLE"):
-        sites_repo = sites_repository()
+        sites_repo = sites_repository(mode="live")
     mailer_send = mailer_send or send_email
     now = int((now_fn or time.time)())
     base_url = os.environ.get("PUBLIC_API_BASE_URL", "").rstrip("/")

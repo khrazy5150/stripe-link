@@ -40,7 +40,7 @@ def handler(
         if method == "GET" and not experiment_id:
             return list_experiments(event, repository)
         if method == "GET" and experiment_id:
-            return get_experiment(event, repository, experiment_id, orders)
+            return get_experiment(event, repository, experiment_id, orders, mode=mode)
         if method == "POST" and not experiment_id:
             return create_experiment(event, repository, routes, now_fn, id_fn, code_fn)
         if method == "PUT" and experiment_id and not action:
@@ -84,14 +84,14 @@ def list_experiments(event, repository):
     return json_response({"experiments": experiments, "count": len(experiments)})
 
 
-def get_experiment(event, repository, experiment_id, orders):
+def get_experiment(event, repository, experiment_id, orders, mode="test"):
     tenant_id = tenant_id_from_event(event)
     if not tenant_id:
         return error_response("tenant_id is required.", code="missing_tenant")
     experiment, missing = _load(repository, tenant_id, experiment_id)
     if missing:
         return missing
-    orders = orders or orders_repository()
+    orders = orders or orders_repository(mode=mode)
     tenant_orders = orders.list_for_tenant(tenant_id)
     results = compute_results(experiment, tenant_orders)
     return json_response({"experiment": with_short_url(experiment), "results": results})

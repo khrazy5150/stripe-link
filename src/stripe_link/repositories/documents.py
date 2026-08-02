@@ -492,6 +492,7 @@ class TenantRangeRepository:
         *,
         id_field: str,
         table: Any | None = None,
+        mode: str | None = None,
     ):
         if not table_name:
             raise RepositoryError("Table name is required.")
@@ -499,6 +500,9 @@ class TenantRangeRepository:
         self.table_name = table_name
         self.id_field = id_field
         self._table = table
+        # Orders/customers carry globally-unique ids (no cross-mode id reuse), so mode is a filtered ATTRIBUTE
+        # here rather than part of the key: stamp on write, filter list/get by mode (plans/STRIPE_MODE_DECOUPLING.md).
+        self.mode = normalize_stripe_mode(mode) if mode is not None else None
 
     @property
     def table(self):
@@ -515,17 +519,27 @@ class TenantRangeRepository:
             raise RepositoryError("Document tenant_id is required.")
         if not document_id:
             raise RepositoryError(f"Document {self.id_field} is required.")
+        if self.mode is not None:
+            document = {**document, "stripe_mode": self.mode}
         self.table.put_item(Item=document)
         return document
 
     def get(self, tenant_id: str, document_id: str) -> dict[str, Any] | None:
         response = self.table.get_item(Key={"tenant_id": tenant_id, self.id_field: document_id})
-        return response.get("Item")
+        item = response.get("Item")
+        if not item:
+            return None
+        if self.mode is not None and normalize_stripe_mode(item.get("stripe_mode")) != self.mode:
+            return None
+        return item
 
     def list_for_tenant(self, tenant_id: str) -> list[dict[str, Any]]:
-        from boto3.dynamodb.conditions import Key
+        from boto3.dynamodb.conditions import Attr, Key
 
-        return _query_all_pages(self.table, KeyConditionExpression=Key("tenant_id").eq(tenant_id))
+        kwargs: dict[str, Any] = {"KeyConditionExpression": Key("tenant_id").eq(tenant_id)}
+        if self.mode is not None:
+            kwargs["FilterExpression"] = Attr("stripe_mode").eq(self.mode)
+        return _query_all_pages(self.table, **kwargs)
 
     def find_by_payment_intent(self, payment_intent_id: str) -> dict[str, Any] | None:
         """Resolve an order from a Stripe PaymentIntent via the PaymentIntentIndex GSI."""
@@ -736,19 +750,21 @@ def shipping_config_repository(table: Any | None = None) -> SimpleKeyRepository:
     )
 
 
-def customers_repository(table: Any | None = None) -> TenantRangeRepository:
+def customers_repository(table: Any | None = None, *, mode: str | None = None) -> TenantRangeRepository:
     return TenantRangeRepository(
         os.environ.get("CUSTOMERS_TABLE", ""),
         id_field="customer_id",
         table=table,
+        mode=mode,
     )
 
 
-def orders_repository(table: Any | None = None) -> TenantRangeRepository:
+def orders_repository(table: Any | None = None, *, mode: str | None = None) -> TenantRangeRepository:
     return TenantRangeRepository(
         os.environ.get("ORDERS_TABLE", ""),
         id_field="order_id",
         table=table,
+        mode=mode,
     )
 
 

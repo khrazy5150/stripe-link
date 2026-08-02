@@ -1,7 +1,7 @@
 import time
 from urllib.request import urlopen
 
-from stripe_link.common import error_response, json_response, parse_json_body, query_params, tenant_id_from_event
+from stripe_link.common import error_response, json_response, parse_json_body, query_params, resolve_stripe_mode, tenant_id_from_event
 from stripe_link.domain.billing_status import BillingStatusError, assert_billing_in_good_standing
 from stripe_link.domain.fees import build_fee_context
 from stripe_link.domain.pricing import PricingError, load_offer_products, resolve_offer
@@ -46,18 +46,19 @@ def handler(
     stripe_repo = stripe_repo or stripe_keys_repository()
     secret_cipher = secret_cipher or KmsSecretCipher()
     opener = opener or urlopen
+    mode = resolve_stripe_mode(event)
 
     if method == "GET":
         return get_upsell_session(event, stripe_repo=stripe_repo, secret_cipher=secret_cipher, opener=opener)
 
     return process_upsell(
         event,
-        offers_repo=offers_repo or offers_repository(),
-        products_repo=products_repo or products_repository(),
+        offers_repo=offers_repo or offers_repository(mode=mode),
+        products_repo=products_repo or products_repository(mode=mode),
         stripe_repo=stripe_repo,
         tenant_repo=tenant_repo or tenant_profiles_repository(),
-        orders_repo=orders_repo or orders_repository(),
-        customers_repo=customers_repo or customers_repository(),
+        orders_repo=orders_repo or orders_repository(mode=mode),
+        customers_repo=customers_repo or customers_repository(mode=mode),
         secret_cipher=secret_cipher,
         opener=opener,
         billing_config_loader=billing_config_loader,

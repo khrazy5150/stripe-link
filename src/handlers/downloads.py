@@ -9,7 +9,7 @@ GET  /download              (public)  -> verify the session's order is paid and 
 import os
 import time
 
-from stripe_link.common import error_response, json_response, parse_json_body, query_params, tenant_id_from_event
+from stripe_link.common import error_response, json_response, parse_json_body, query_params, resolve_stripe_mode, tenant_id_from_event
 from stripe_link.domain.downloads import asset_bucket_key, sanitize_filename
 from stripe_link.ids import generate_id
 from stripe_link.repositories.documents import RepositoryError, orders_repository, products_repository
@@ -91,8 +91,9 @@ def serve_handler(event, context, *, products_repo=None, orders_repo=None, s3_cl
     if not (tenant_id and session_id and product_id):
         return error_response("tenant_id, session_id, and product_id are required.", code="missing_params")
 
-    orders_repo = orders_repo or orders_repository()
-    products_repo = products_repo or products_repository()
+    mode = resolve_stripe_mode(event)
+    orders_repo = orders_repo or orders_repository(mode=mode)
+    products_repo = products_repo or products_repository(mode=mode)
     downloadable_statuses = {"paid", "partially_refunded", "completed"}
     try:
         order = orders_repo.get(tenant_id, f"order_{session_id}")

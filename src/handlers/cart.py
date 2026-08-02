@@ -17,6 +17,7 @@ from stripe_link.common import (
     parse_json_body,
     path_params,
     query_params,
+    resolve_stripe_mode,
 )
 from stripe_link.domain.cart import (
     CartError,
@@ -59,9 +60,10 @@ def handler(
     method = (event or {}).get("httpMethod", "").upper()
     if method == "OPTIONS":
         return json_response({})
-    carts_repo = carts_repo or carts_repository()
+    mode = resolve_stripe_mode(event)
+    carts_repo = carts_repo or carts_repository(mode=mode)
     if cart_tokens_repo is None and os.environ.get("CARTS_TABLE"):
-        cart_tokens_repo = cart_tokens_repository()
+        cart_tokens_repo = cart_tokens_repository(mode=mode)
     resource = str((event or {}).get("resource") or (event or {}).get("path") or "")
     if resource.endswith("/unsubscribe"):
         return unsubscribe(event, carts_repo, cart_tokens_repo, now_fn())
@@ -69,9 +71,9 @@ def handler(
         return add_item(
             event,
             carts_repo=carts_repo,
-            offers_repo=offers_repo or offers_repository(),
-            products_repo=products_repo or products_repository(),
-            services_repo=services_repo or services_repository(),
+            offers_repo=offers_repo or offers_repository(mode=mode),
+            products_repo=products_repo or products_repository(mode=mode),
+            services_repo=services_repo or services_repository(mode=mode),
             cart_tokens_repo=cart_tokens_repo,
             now=now_fn(),
         )
