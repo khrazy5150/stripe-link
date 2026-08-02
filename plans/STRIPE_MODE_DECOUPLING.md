@@ -10,8 +10,20 @@ Build workflow: **feature branch `stripe-mode-decoupling`** (main stays deployab
 - **P1 DONE** (branch): backend base now hostname-derived (`getApiBase`); toggle → Stripe mode sent as `?mode=` +
   `X-Stripe-Mode` on every `apiRequest`; `getStripeMode` single source of truth; cross-mode copy targets the other
   mode on the same backend; all `getApiEnvironment` call-sites repointed. Dashboard builds clean.
-- **P2 NEXT** — backend stamp+filter `stripe_mode` across tenant entities (until then a deployment serves the same
-  data for both modes; harmless on the branch).
+- **P2 IN PROGRESS** — **DESIGN CHANGE (2026-08-02): mode goes in the KEY, not just an attribute.** The plan's
+  "attribute + filter" collides with the ID-preserving test→live copy: same `(tenant,id)` in one table = one item,
+  so promoting a test offer would overwrite it. Author chose *mode-in-key*: `DynamoDocumentRepository(mode=…)`
+  bakes mode into SK + GSI1PK (`{TYPE}#{mode}#{id}`) so test/live copies coexist; put stamps `stripe_mode`,
+  get/list/delete/find_by_id are mode-scoped; `mode=None` = legacy layout.
+  - **P2 part 1 DONE** (branch, commit 0cfef7c): dashboard CRUD — products/offers/coupons/pages/collections build
+    repos with `mode=resolve_stripe_mode(event)`. Repo + handler isolation tests. Self-coherent.
+  - **P2 part 2 TODO**: sites, invoices, checkout, cart_checkout, cart, upsell, post_checkout, leads, downloads,
+    page_publish/page_render, services/booking/appointments, experiments; sweeps (cart_recovery, reminders);
+    orders (TenantRangeRepository needs the same mode-in-key treatment). Every reader of a mode-scoped entity must
+    pass mode or dashboard-written (mode-keyed) records go invisible to it. Checkout/publish source mode from
+    `resolve_stripe_mode(event)` — depends on P4 baking `?mode=` into published Buy URLs.
+  - Open per-entity judgment: services (has per-mode Stripe ids → likely scope), leads/refund_requests/reviews
+    (no Stripe state → left mode-agnostic for now). Revisit in part 2.
 
 ## The problem — mode and infra are conflated
 
