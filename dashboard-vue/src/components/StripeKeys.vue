@@ -138,8 +138,12 @@
               <button type="button" class="bnpl-info" :aria-label="`Where ${m.label} is available`" @click="toggleInfo(m.method)">ⓘ</button>
             </p>
             <p v-if="m.enabled && m.country_eligible && m.capability_status !== 'active'" class="bnpl-note">
-              <template v-if="m.capability_status === 'pending'">Stripe is reviewing your account for {{ m.label }} — it appears at checkout once approved.</template>
-              <template v-else>{{ m.label }} isn't active on your Stripe account yet. Enable it in your Stripe dashboard and it will appear at checkout.</template>
+              <template v-if="m.onboarding_url">
+                {{ m.label }} needs one more step to finish enabling.
+                <a :href="m.onboarding_url" target="_blank" rel="noopener" class="bnpl-finish">Finish setup in Stripe →</a>
+              </template>
+              <template v-else-if="m.capability_status === 'pending'">Stripe is reviewing your account for {{ m.label }} — it appears at checkout once approved.</template>
+              <template v-else>{{ m.label }} isn't active on your account yet — it appears at checkout once Stripe approves it.</template>
             </p>
             <p v-if="openInfo === m.method" class="bnpl-countries">
               Available when your Stripe account is based in: {{ m.countries.join(", ") }}
@@ -448,6 +452,8 @@ onMounted(async () => {
 .bnpl-note { margin: 0.6rem 0 0; color: var(--muted); font-size: 1.3rem; }
 .bnpl-countries { margin: 0.5rem 0 0; color: var(--muted); font-size: 1.25rem; line-height: 1.5; }
 .bnpl-info { background: none; border: none; cursor: pointer; color: var(--muted); font-size: 1.3rem; padding: 0 0.2rem; }
+.bnpl-finish { font-weight: 700; color: var(--accent, #635bff); text-decoration: none; white-space: nowrap; }
+.bnpl-finish:hover { text-decoration: underline; }
 .bnpl-info:hover { color: var(--text); }
 
 /* Toggle switch */

@@ -21,18 +21,26 @@ class FakeStripeKeysRepo:
         return document
 
 
-def make_caller(*, capabilities=None, country="US", record=None):
-    """A fake stripe_request: POST /accounts/{id} echoes the requested capability; GET returns the account."""
+def make_caller(*, capabilities=None, country="US", record=None, requirements=None,
+                link_url="https://connect.stripe.com/setup/acct/xyz", fail_paths=()):
+    """A fake stripe_request: GET /accounts/{id} returns the account; POST /accounts/{id}/capabilities/{cap}
+    requests it (→ pending, with any configured `requirements`); POST /account_links mints a hosted link."""
     caps = dict(capabilities or {})
+    reqs = dict(requirements or {})               # {capability: {"currently_due": [...], "past_due": [...]}}
 
     def caller(method, path, *, api_key, stripe_account="", params=None, data=None, **kwargs):
         if record is not None:
             record.append({"method": method, "path": path, "api_key": api_key, "data": data})
-        if method == "POST" and path.startswith("/accounts/"):
-            requested = (data or {}).get("capabilities") or {}
-            for cap, cfg in requested.items():
-                caps[cap] = "pending" if cfg.get("requested") else "inactive"
-            return {"id": path.split("/")[-1], "country": country, "capabilities": dict(caps)}
+        if any(fp in path for fp in fail_paths):
+            raise StripeApiError(400, "forced failure")
+        if method == "POST" and "/capabilities/" in path:
+            cap = path.rsplit("/", 1)[-1]
+            if (data or {}).get("requested") and caps.get(cap) != "active":
+                caps[cap] = "pending"
+            return {"id": cap, "status": caps.get(cap, "pending"),
+                    "requirements": reqs.get(cap, {"currently_due": [], "past_due": []})}
+        if method == "POST" and path == "/account_links":
+            return {"url": link_url}
         if method == "GET" and path.startswith("/accounts/"):
             return {"id": path.split("/")[-1], "country": country, "capabilities": dict(caps)}
         raise AssertionError(f"unexpected call {method} {path}")
@@ -97,6 +105,60 @@ class PaymentMethodsHandlerTests(unittest.TestCase):
         body = json.loads(resp["body"])
         self.assertTrue(body["enabled"])
         self.assertEqual(body["capability_status"], "unrequested")
+
+    def test_enable_non_active_method_requests_the_capability(self):
+        # Affirm starts unrequested → enabling it REQUESTS the capability for the tenant (no dashboard trip).
+        repo = FakeStripeKeysRepo([CONNECTED])
+        record = []
+        caller = make_caller(capabilities={"affirm_payments": "unrequested"}, record=record)
+        resp = self._put({"tenant_id": "t1", "method": "affirm", "enabled": True}, repo, caller)
+        self.assertEqual(resp["statusCode"], 200)
+        self.assertEqual(json.loads(resp["body"])["capability_status"], "pending")   # request kicked it off
+        req = next(c for c in record if c["method"] == "POST" and "/capabilities/affirm_payments" in c["path"])
+        self.assertEqual(req["data"], {"requested": "true"})
+        self.assertEqual(req["api_key"], "sk_platform_test")                         # platform key, edits the account
+        self.assertEqual(repo.get("t1", "test")["payment_methods"]["bnpl"]["affirm"]["capability_status"], "pending")
+
+    def test_leftover_requirements_mint_an_account_link(self):
+        repo = FakeStripeKeysRepo([CONNECTED])
+        record = []
+        caller = make_caller(capabilities={"affirm_payments": "unrequested"}, record=record,
+                             requirements={"affirm_payments": {"currently_due": ["company.tax_id"], "past_due": []}})
+        resp = self._put({"tenant_id": "t1", "method": "affirm", "enabled": True,
+                          "return_url": "https://app.example.com/payments"}, repo, caller)
+        body = json.loads(resp["body"])
+        self.assertEqual(body["requirements_due"], ["company.tax_id"])
+        self.assertEqual(body["onboarding_url"], "https://connect.stripe.com/setup/acct/xyz")
+        self.assertTrue(any(c["path"] == "/account_links" for c in record))
+
+    def test_no_account_link_without_a_return_url(self):
+        repo = FakeStripeKeysRepo([CONNECTED])
+        record = []
+        caller = make_caller(capabilities={"affirm_payments": "unrequested"}, record=record,
+                             requirements={"affirm_payments": {"currently_due": ["company.tax_id"]}})
+        resp = self._put({"tenant_id": "t1", "method": "affirm", "enabled": True}, repo, caller)   # no return_url
+        body = json.loads(resp["body"])
+        self.assertEqual(body["requirements_due"], ["company.tax_id"])
+        self.assertNotIn("onboarding_url", body)
+        self.assertFalse(any(c["path"] == "/account_links" for c in record))
+
+    def test_capability_request_failure_degrades(self):
+        # Test mode ('only live keys') / any request error → keep the read status, no crash, toggle still saves intent.
+        repo = FakeStripeKeysRepo([CONNECTED])
+        caller = make_caller(capabilities={"affirm_payments": "unrequested"}, fail_paths=("/capabilities/",))
+        resp = self._put({"tenant_id": "t1", "method": "affirm", "enabled": True}, repo, caller)
+        self.assertEqual(resp["statusCode"], 200)
+        body = json.loads(resp["body"])
+        self.assertTrue(body["enabled"])
+        self.assertEqual(body["capability_status"], "unrequested")                   # degraded, still stored
+        self.assertNotIn("onboarding_url", body)
+
+    def test_active_method_is_not_re_requested(self):
+        repo = FakeStripeKeysRepo([CONNECTED])
+        record = []
+        caller = make_caller(capabilities={"afterpay_clearpay_payments": "active"}, record=record)
+        self._put({"tenant_id": "t1", "method": "afterpay_clearpay", "enabled": True}, repo, caller)
+        self.assertFalse(any("/capabilities/" in c["path"] for c in record))         # already active → no request
 
     def test_get_returns_status_and_country_eligibility_and_refreshes_cache(self):
         repo = FakeStripeKeysRepo([CONNECTED])

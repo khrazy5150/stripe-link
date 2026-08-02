@@ -34,13 +34,20 @@ export const usePaymentMethodsStore = defineStore("paymentMethods", {
       this.savingMethod = method;
       this.error = "";
       try {
-        const body = await apiRequest("/payment-methods", { method: "PUT", body: { mode: this.mode, method, enabled } });
+        // return_url lets the backend mint a Stripe Account Link back to this screen if the capability still
+        // needs the tenant to finish some requirement (so they never navigate their raw dashboard).
+        const body = await apiRequest("/payment-methods", {
+          method: "PUT",
+          body: { mode: this.mode, method, enabled, return_url: window.location.href },
+        });
         const index = this.methods.findIndex((m) => m.method === method);
         if (index >= 0) {
           this.methods.splice(index, 1, {
             ...this.methods[index],
             enabled: body.enabled,
             capability_status: body.capability_status,
+            requirements_due: body.requirements_due || [],
+            onboarding_url: body.onboarding_url || "",
           });
         }
       } catch (error) {

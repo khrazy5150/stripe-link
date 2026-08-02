@@ -46,7 +46,8 @@ def handler(event, context, *, stripe_repo=None, stripe_caller=None, platform_ke
         if not is_valid_method(method_key):
             return error_response("Unknown payment method.", code="invalid_method")
         return _toggle(tenant_id, _mode(body), method_key, bool(body.get("enabled")),
-                       stripe_repo, stripe_caller, platform_key_loader)
+                       stripe_repo, stripe_caller, platform_key_loader,
+                       return_url=str(body.get("return_url") or "").strip())
     return error_response(f"Unsupported method '{method}'.", status_code=405, code="method_not_allowed")
 
 
@@ -94,26 +95,76 @@ def _read(tenant_id, mode, stripe_repo, stripe_caller, platform_key_loader):
     return json_response({"mode": mode, "connected": bool(acct), "account_country": account_country, "methods": methods})
 
 
-def _toggle(tenant_id, mode, method_key, enabled, stripe_repo, stripe_caller, platform_key_loader):
+def _toggle(tenant_id, mode, method_key, enabled, stripe_repo, stripe_caller, platform_key_loader, return_url=""):
     keys = stripe_repo.get(tenant_id, mode=mode)
     acct = str((keys or {}).get("connect_account_id") or "").strip()
     if not keys or not acct:
         return error_response("Connect a Stripe account before enabling installment methods.",
                               code="stripe_not_connected")
-    # Connected accounts here are Standard accounts, which SELF-MANAGE their capabilities — eligible BNPL methods
-    # are active by default, and the platform can't reliably request them via the API (POST /accounts is
-    # live-only / restricted). So the toggle stores the tenant's DISPLAY intent and records the live capability
-    # status we read; checkout offers the method only when enabled AND capability-active AND currency-eligible.
-    # A method that isn't active on the account (rare — needs merchant activation in their Stripe dashboard) can
-    # still be toggled on, but won't appear at checkout until Stripe reports it active.
+    # Connected accounts here are OAuth Standard accounts. Eligible BNPL (Klarna/Afterpay) is active by default;
+    # Affirm/Zip start `unrequested`. When a tenant toggles a not-yet-active method ON we REQUEST the capability
+    # for them (platform key) so they never have to open their Stripe dashboard. Stripe won't force it active —
+    # it collects requirements first — but for a verified account it usually activates (the account.updated
+    # webhook then flips this cache to active with no polling). If requirements remain, we best-effort mint a
+    # hosted Account Link so they finish in one flow. In TEST mode the request is live-only and errors, so we
+    # degrade to storing intent + the live status (today's behavior). Toggle-OFF only stores intent (never revokes).
+    cap = capability_name(method_key)
     _country, capabilities = _fetch_account(stripe_caller, platform_key_loader, mode, acct)
-    status = capabilities.get(capability_name(method_key), "unrequested")
+    status = capabilities.get(cap, "unrequested")
+    requirements_due: list[str] = []
+    onboarding_url = ""
+
+    if enabled and status != "active":
+        capability = _request_capability(stripe_caller, platform_key_loader, mode, acct, cap)
+        if capability is not None:
+            status = str(capability.get("status") or status)
+            requirements_due = _requirements_due(capability)
+            if requirements_due and return_url:
+                onboarding_url = _account_onboarding_link(stripe_caller, platform_key_loader, mode, acct, return_url)
 
     bnpl = dict((keys.get("payment_methods") or {}).get("bnpl") or {})
     bnpl[method_key] = {"enabled": enabled, "capability_status": status, "updated_at": int(time.time())}
     keys.setdefault("payment_methods", {})["bnpl"] = bnpl
     _persist(keys, stripe_repo)
-    return json_response({"method": method_key, "enabled": enabled, "capability_status": status})
+
+    result = {"method": method_key, "enabled": enabled, "capability_status": status}
+    if requirements_due:
+        result["requirements_due"] = requirements_due
+    if onboarding_url:
+        result["onboarding_url"] = onboarding_url
+    return json_response(result)
+
+
+def _request_capability(stripe_caller, platform_key_loader, mode, acct, cap):
+    """Request `cap` on the connected account with the platform key; returns the Capability object (status +
+    requirements) or None if Stripe rejects it — test mode ('only live keys'), an un-requestable method, or any
+    error. None means the caller keeps the status it already read (graceful degrade, no crash)."""
+    if not cap:
+        return None
+    try:
+        return stripe_caller("POST", f"/accounts/{acct}/capabilities/{cap}",
+                             api_key=platform_key_loader(mode), data={"requested": "true"})
+    except StripeApiError:
+        return None
+
+
+def _requirements_due(capability):
+    """Requirement fields Stripe still needs before the capability activates (currently + past due), deduped."""
+    reqs = capability.get("requirements") or {}
+    return sorted(set((reqs.get("currently_due") or []) + (reqs.get("past_due") or [])))
+
+
+def _account_onboarding_link(stripe_caller, platform_key_loader, mode, acct, return_url):
+    """Best-effort hosted Account Link so the tenant finishes leftover requirements in one flow instead of
+    hunting through their Stripe dashboard. May not apply to OAuth Standard accounts → returns '' and the UI
+    falls back to a plain message."""
+    try:
+        link = stripe_caller("POST", "/account_links", api_key=platform_key_loader(mode), data={
+            "account": acct, "refresh_url": return_url, "return_url": return_url, "type": "account_onboarding",
+        })
+        return str(link.get("url") or "")
+    except StripeApiError:
+        return ""
 
 
 def _persist(keys, stripe_repo):
