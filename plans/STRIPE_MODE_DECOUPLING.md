@@ -208,6 +208,12 @@ handful of test tenants in the new model; **Cognito untouched** (logins survive;
 registration). (5) Re-run Stripe Connect OAuth per mode; re-add custom domains to the resolver; point both Stripe
 webhook endpoints at prod with both per-mode signing secrets. (6) Optionally clean Stripe test data.
 
+**Connect OAuth redirect-URI registration (per backend-host × mode).** Because both modes now run on each
+backend, each backend's callback (`https://{dev|prod}.juniorbay.com/stripe/connect/callback`) must be registered
+on BOTH Connect apps (TEST `ca_…IC0J4`, LIVE `ca_…Opkh4`). The old model only registered test→dev + live→prod, so
+add the missing two in the Stripe dashboard: **dev callback → LIVE app** (live-onboard on dev; was the dev
+re-onboard blocker) and **prod callback → TEST app** (test-onboard on prod). Purely Stripe app config, not code.
+
 ## Risks / tricky bits
 
 - **Webhook reconfiguration** (P3): both test + live Stripe events must reach the prod endpoint; verify the livemode
