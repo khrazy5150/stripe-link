@@ -82,13 +82,14 @@ class AccountHandlerTests(unittest.TestCase):
         self.assertEqual(tenants.get("client_demo", "client_demo")["billing_status"], "trial")
         self.assertEqual(users.get("client_demo", "user-sub-1")["role"], "owner")
 
-    def test_auth_register_writes_initial_tenant_profile_to_dev_and_prod(self):
+    def test_auth_register_writes_initial_tenant_profile_to_local_table(self):
+        # Registration writes only the local per-deployment table now — the cross-env dual-write is retired
+        # under data isolation (plans/STRIPE_MODE_DECOUPLING.md).
         class FakeCognito:
             def sign_up(self, **kwargs):
                 return {"UserSub": "user-sub-1"}
 
-        dev_tenants = FakeDocumentRepository("tenant_id")
-        prod_tenants = FakeDocumentRepository("tenant_id")
+        tenants = FakeDocumentRepository("tenant_id")
         users = FakeDocumentRepository("user_id")
 
         with patch.dict(os.environ, {"COGNITO_USER_POOL_CLIENT_ID": "client-app"}, clear=False):
@@ -104,16 +105,13 @@ class AccountHandlerTests(unittest.TestCase):
                 }),
             }, None,
                 cognito=FakeCognito(),
-                tenant_repository=dev_tenants,
-                tenant_registration_repositories=[dev_tenants, prod_tenants],
+                tenant_repository=tenants,
                 user_repository=users,
             )
 
         self.assertEqual(response["statusCode"], 201)
-        self.assertEqual(dev_tenants.get("client_demo", "client_demo")["tier_id"], "basic")
-        self.assertEqual(prod_tenants.get("client_demo", "client_demo")["tier_id"], "basic")
-        self.assertEqual(dev_tenants.get("client_demo", "client_demo")["billing_status"], "trial")
-        self.assertEqual(prod_tenants.get("client_demo", "client_demo")["billing_status"], "trial")
+        self.assertEqual(tenants.get("client_demo", "client_demo")["tier_id"], "basic")
+        self.assertEqual(tenants.get("client_demo", "client_demo")["billing_status"], "trial")
 
     def test_auth_register_defaults_client_id_to_cognito_sub(self):
         class FakeCognito:
@@ -303,13 +301,12 @@ class AccountHandlerTests(unittest.TestCase):
 
     def test_registration_create_and_get(self):
         repository = FakeDocumentRepository("tenant_id")
-        prod_repository = FakeDocumentRepository("tenant_id")
         tenant = load_fixture("tenant-profile-demo.json")
 
         created = registration_handler({
             "httpMethod": "POST",
             "body": json.dumps(tenant),
-        }, None, repository=repository, registration_repositories=[repository, prod_repository])
+        }, None, repository=repository)
         fetched = registration_handler({
             "httpMethod": "GET",
             "pathParameters": {"tenant_id": "tenant_demo"},
@@ -318,7 +315,7 @@ class AccountHandlerTests(unittest.TestCase):
         self.assertEqual(created["statusCode"], 201)
         self.assertEqual(fetched["statusCode"], 200)
         self.assertEqual(json.loads(fetched["body"])["tenant"]["business_name"], "Demo Supplements")
-        self.assertEqual(prod_repository.get("tenant_demo", "tenant_demo")["tier_id"], "basic")
+        self.assertEqual(repository.get("tenant_demo", "tenant_demo")["tier_id"], "basic")
 
     def test_stripe_keys_are_redacted_on_write_and_read(self):
         repository = FakeSimpleRepository("tenant_id")

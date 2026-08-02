@@ -71,7 +71,7 @@ def handler(event, context, *, offers_repo=None, products_repo=None, services_re
     services_repo = services_repo or (services_repository() if os.environ.get("SERVICES_TABLE") else None)
     sites_repo = sites_repo or (sites_repository() if os.environ.get("SITES_TABLE") else None)
     pages_repo = pages_repo or (pages_repository() if os.environ.get("PAGES_TABLE") else None)
-    stripe_keys_repo = stripe_keys_repo or (stripe_keys_repository() if os.environ.get("STRIPE_KEYS_TABLE_DEV") else None)
+    stripe_keys_repo = stripe_keys_repo or (stripe_keys_repository() if os.environ.get("STRIPE_KEYS_TABLE") else None)
     domains_index_repo = domains_index_repo or (custom_domains_index_repository() if os.environ.get("CUSTOM_DOMAINS_TABLE") else None)
     reviews_repo = reviews_repo or (reviews_repository() if os.environ.get("REVIEWS_TABLE") else None)
     collections_repo = collections_repo or (collections_repository() if os.environ.get("COLLECTIONS_TABLE") else None)

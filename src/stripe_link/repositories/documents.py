@@ -333,58 +333,52 @@ class SimpleKeyRepository:
 
 
 class StripeKeysRepository:
+    """A tenant's Stripe keys for BOTH modes, isolated in ONE per-deployment table (Stripe-mode decoupling,
+    plans/STRIPE_MODE_DECOUPLING.md). Mode is part of the composite key (PK=`tenant_id`, SK=`mode`) — NOT a
+    second physical table — so a deployment holds a tenant's test AND live keys side by side. `mode` is stamped
+    onto every write and required on every read; anything not explicitly "live" is treated as "test" (fail-safe)."""
+
     def __init__(
         self,
+        table_name: str,
         *,
-        dev_table_name: str,
-        prod_table_name: str,
         key_field: str = "tenant_id",
-        dev_table: Any | None = None,
-        prod_table: Any | None = None,
+        mode_field: str = "mode",
+        table: Any | None = None,
     ):
-        if not dev_table_name:
-            raise RepositoryError("Dev Stripe keys table name is required.")
-        if not prod_table_name:
-            raise RepositoryError("Prod Stripe keys table name is required.")
-        assert_jb_resource_name(dev_table_name)
-        assert_jb_resource_name(prod_table_name)
-        self.dev_table_name = dev_table_name
-        self.prod_table_name = prod_table_name
+        if not table_name:
+            raise RepositoryError("Stripe keys table name is required.")
+        assert_jb_resource_name(table_name)
+        self.table_name = table_name
         self.key_field = key_field
-        self._dev_table = dev_table
-        self._prod_table = prod_table
-
-    def table_for_mode(self, mode: str):
-        if mode == "live":
-            return self.prod_table
-        return self.dev_table
+        self.mode_field = mode_field
+        self._table = table
 
     @property
-    def dev_table(self):
-        if self._dev_table is None:
+    def table(self):
+        if self._table is None:
             import boto3
 
-            self._dev_table = boto3.resource("dynamodb").Table(self.dev_table_name)
-        return self._dev_table
+            self._table = boto3.resource("dynamodb").Table(self.table_name)
+        return self._table
 
-    @property
-    def prod_table(self):
-        if self._prod_table is None:
-            import boto3
+    @staticmethod
+    def _mode(value: Any) -> str:
+        return "live" if str(value or "").strip().lower() == "live" else "test"
 
-            self._prod_table = boto3.resource("dynamodb").Table(self.prod_table_name)
-        return self._prod_table
+    def _key(self, key_value: str, mode: str) -> dict[str, str]:
+        return {self.key_field: key_value, self.mode_field: self._mode(mode)}
 
     def put(self, document: dict[str, Any]) -> dict[str, Any]:
         key_value = str(document.get(self.key_field) or "").strip()
-        mode = "live" if document.get("mode") == "live" else "test"
         if not key_value:
             raise RepositoryError(f"Document {self.key_field} is required.")
-        self.table_for_mode(mode).put_item(Item=document)
+        document = {**document, self.mode_field: self._mode(document.get(self.mode_field))}
+        self.table.put_item(Item=document)
         return document
 
     def get(self, key_value: str, mode: str = "test") -> dict[str, Any] | None:
-        response = self.table_for_mode("live" if mode == "live" else "test").get_item(Key={self.key_field: key_value})
+        response = self.table.get_item(Key=self._key(key_value, mode))
         return response.get("Item")
 
     def find_by_connect_account_id(self, account_id: str, mode: str = "test") -> dict[str, Any] | None:
@@ -394,13 +388,12 @@ class StripeKeysRepository:
 
         from boto3.dynamodb.conditions import Attr
 
-        table = self.table_for_mode("live" if mode == "live" else "test")
         request: dict[str, Any] = {
-            "FilterExpression": Attr("connect_account_id").eq(account_id),
+            "FilterExpression": Attr("connect_account_id").eq(account_id) & Attr(self.mode_field).eq(self._mode(mode)),
         }
 
         while True:
-            response = table.scan(**request)
+            response = self.table.scan(**request)
             items = response.get("Items", [])
             if items:
                 return items[0]
@@ -688,13 +681,10 @@ def webhook_events_repository(table: Any | None = None) -> SimpleKeyRepository:
 
 
 def stripe_keys_repository(table: Any | None = None) -> StripeKeysRepository:
-    fallback_table = os.environ.get("STRIPE_KEYS_TABLE", "")
     return StripeKeysRepository(
-        dev_table_name=os.environ.get("STRIPE_KEYS_TABLE_DEV") or fallback_table,
-        prod_table_name=os.environ.get("STRIPE_KEYS_TABLE_PROD") or fallback_table,
+        os.environ.get("STRIPE_KEYS_TABLE", ""),
         key_field="tenant_id",
-        dev_table=table,
-        prod_table=table,
+        table=table,
     )
 
 
@@ -740,28 +730,11 @@ def tenant_profiles_repository(table: Any | None = None) -> DynamoDocumentReposi
 
 
 def tenant_profiles_registration_repositories(table: Any | None = None) -> list[DynamoDocumentRepository]:
-    table_names = [
-        os.environ.get("TENANT_PROFILES_TABLE_DEV", ""),
-        os.environ.get("TENANT_PROFILES_TABLE_PROD", ""),
-    ]
-    if not any(table_names):
-        table_names = [os.environ.get("TENANT_PROFILES_TABLE", "")]
-
-    repositories: list[DynamoDocumentRepository] = []
-    seen: set[str] = set()
-    for table_name in table_names:
-        if not table_name or table_name in seen:
-            continue
-        seen.add(table_name)
-        repositories.append(DynamoDocumentRepository(
-            table_name,
-            document_type="tenant",
-            id_field="tenant_id",
-            table=table,
-        ))
-    if not repositories:
-        raise RepositoryError("Tenant profile registration table names are required.")
-    return repositories
+    """Registration writes ONLY the local per-deployment tenant-profiles table. The legacy cross-env dual-write
+    (both `-DEV` and `-PROD`) is retired under data isolation (plans/STRIPE_MODE_DECOUPLING.md) — dev runs
+    unreleased code and must never write real prod profiles. Returns a single-element list so callers that iterate
+    the registration targets stay unchanged."""
+    return [tenant_profiles_repository(table)]
 
 
 def user_preferences_repository(table: Any | None = None) -> DynamoDocumentRepository:
