@@ -61,6 +61,37 @@ export function getOtherEnvironment(environment = getApiEnvironment()) {
   return normalizeEnvironment(environment) === "live" ? "test" : "live";
 }
 
+// --- P0 scaffolding: Stripe-mode / platform-env decoupling (plans/STRIPE_MODE_DECOUPLING.md).
+// Added but NOT yet wired into getApiBase/apiRequest — P1 flips the dashboard toggle to a Stripe-mode filter and
+// binds the backend to the hostname. Kept unused here so the contract exists and later phases can adopt it.
+
+const STRIPE_MODE_STORAGE_KEY = "stripeLinkVueStripeMode";
+
+export function normalizeStripeMode(mode) {
+  return mode === "live" ? "live" : "test";
+}
+
+// The per-tenant Stripe mode (test/live) — a DATA filter within a backend, independent of the release channel.
+// Product default is "live" (live-first onboarding); a tenant opts into a test sandbox explicitly.
+export function getStripeMode() {
+  return normalizeStripeMode(localStorage.getItem(STRIPE_MODE_STORAGE_KEY) || "live");
+}
+
+export function setStripeMode(mode) {
+  localStorage.setItem(STRIPE_MODE_STORAGE_KEY, normalizeStripeMode(mode));
+}
+
+// The platform RELEASE CHANNEL (which backend/code version), derived from the HOSTNAME:
+// app.* = prod (released), sandbox.*/localhost = dev (staging). This will replace the env-toggle→backend mapping
+// in P1; until then it falls back to today's runtime toggle so nothing changes.
+export function hostnameReleaseChannel() {
+  const host = window.location.hostname;
+  if (host === "localhost" || host === "127.0.0.1") return "dev";
+  if (host.startsWith("app.")) return "prod";
+  if (host.startsWith("sandbox.")) return "dev";
+  return configEnvironment(getApiEnvironment()); // fallback: preserve current behavior until P1
+}
+
 export function setApiBase(value) {
   localStorage.setItem(apiBaseStorageKey(getApiEnvironment()), value.replace(/\/$/, ""));
 }

@@ -74,6 +74,27 @@ def tenant_id_from_event(event: dict[str, Any], body: dict[str, Any] | None = No
     )
 
 
+def normalize_stripe_mode(value: Any) -> str:
+    """Coerce any mode-ish value to the canonical Stripe mode. Anything not explicitly "live" is "test" — the
+    fail-safe direction, so an unrecognized/absent value can never accidentally target live data."""
+    return "live" if str(value or "").strip().lower() == "live" else "test"
+
+
+def resolve_stripe_mode(event: dict[str, Any], body: dict[str, Any] | None = None, *, default: str = "test") -> str:
+    """The canonical per-request Stripe mode (test/live) for the decoupled model: read it from the REQUEST — body
+    `mode`, `?mode=`, or the `X-Stripe-Mode` header — instead of inferring it from the deployment environment
+    (plans/STRIPE_MODE_DECOUPLING.md). Fail-safe: an ABSENT mode falls back to `default` ("test"), so a caller that
+    forgets to send one can never mutate live data. P0 scaffolding — NOT yet wired into handlers; phases P1/P2 thread
+    it through the dashboard + entity read/write paths."""
+    body = body or {}
+    raw = (
+        str(body.get("mode") or "").strip()
+        or str(query_params(event).get("mode") or "").strip()
+        or str(header_value(event, "X-Stripe-Mode") or "").strip()
+    )
+    return normalize_stripe_mode(raw or default)
+
+
 def error_response(message: str, status_code: int = 400, *, code: str = "bad_request") -> dict[str, Any]:
     return json_response({
         "error": code,
