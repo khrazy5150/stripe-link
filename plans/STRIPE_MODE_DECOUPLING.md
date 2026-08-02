@@ -7,7 +7,11 @@ Build workflow: **feature branch `stripe-mode-decoupling`** (main stays deployab
   `stripeMode`/`hostnameReleaseChannel` scaffolding. No behavior change (default mode = test/live per fail-safe).
 - **P0.5 DONE** (branch): stripe-keys → one per-deployment table keyed (tenant_id, mode); tenant-profiles dual-write
   retired; StripeKeysTable gains `mode` SK; fixed `_DEV/_PROD` env pairs + IAM grants collapsed to per-env `!Ref`.
-- **P1 NEXT.**
+- **P1 DONE** (branch): backend base now hostname-derived (`getApiBase`); toggle → Stripe mode sent as `?mode=` +
+  `X-Stripe-Mode` on every `apiRequest`; `getStripeMode` single source of truth; cross-mode copy targets the other
+  mode on the same backend; all `getApiEnvironment` call-sites repointed. Dashboard builds clean.
+- **P2 NEXT** — backend stamp+filter `stripe_mode` across tenant entities (until then a deployment serves the same
+  data for both modes; harmless on the branch).
 
 ## The problem — mode and infra are conflated
 
