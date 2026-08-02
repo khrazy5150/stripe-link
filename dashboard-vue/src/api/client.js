@@ -1,171 +1,143 @@
+// Stripe-mode / release-channel decoupling (plans/STRIPE_MODE_DECOUPLING.md).
+//
+// TWO orthogonal concepts, previously one toggle:
+//   - RELEASE CHANNEL (dev/prod) = which backend/code version. Derived from the HOSTNAME, not chosen by the user.
+//   - STRIPE MODE (test/live)     = a per-tenant DATA filter WITHIN a backend. The dashboard toggle; sent as ?mode=.
+// The backend base follows the hostname; the toggle only changes which mode's data we read/write.
+
 const API_BASES = {
-  test: "https://dev.juniorbay.com",
-  live: "https://prod.juniorbay.com",
+  dev: "https://dev.juniorbay.com",
+  prod: "https://prod.juniorbay.com",
 };
-const LOCAL_DEV_API_BASES = {
-  test: "/api",
-  live: "/api-live",
-};
+// Localhost hits the dev backend through the Vite proxy; mode is a query param, so a single proxy suffices.
+const LOCAL_DEV_API_BASE = "/api";
 const API_BASE_STORAGE_KEY = "stripeLinkVueApiBase";
 const APP_CONFIG_STORAGE_KEY = "stripeLinkVueAppConfig";
-const API_ENVIRONMENT_STORAGE_KEY = "stripeLinkVueEnvironment";
+const STRIPE_MODE_STORAGE_KEY = "stripeLinkVueStripeMode";
+// Pre-decoupling toggle key — its value (test/live) was the Stripe mode, so carry it forward once.
+const LEGACY_ENV_STORAGE_KEY = "stripeLinkVueEnvironment";
 const TENANT_ID_STORAGE_KEY = "stripeLinkTenantId";
 const SESSION_STORAGE_KEY = "stripeLinkSession";
 const DEFAULT_TENANT_ID = "tenant_demo";
-
-function normalizeEnvironment(environment) {
-  return environment === "live" ? "live" : "test";
-}
-
-function configEnvironment(environment) {
-  return normalizeEnvironment(environment) === "live" ? "prod" : "dev";
-}
-
-function fallbackApiBase(environment) {
-  const normalized = normalizeEnvironment(environment);
-  if (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1") {
-    return LOCAL_DEV_API_BASES[normalized];
-  }
-  return API_BASES[normalized];
-}
-
-function apiBaseStorageKey(environment) {
-  return `${API_BASE_STORAGE_KEY}:${normalizeEnvironment(environment)}`;
-}
-
-function appConfigStorageKey(environment) {
-  return `${APP_CONFIG_STORAGE_KEY}:${normalizeEnvironment(environment)}`;
-}
-
-export function getApiEnvironment() {
-  return normalizeEnvironment(localStorage.getItem(API_ENVIRONMENT_STORAGE_KEY));
-}
-
-export function setApiEnvironment(environment) {
-  localStorage.setItem(API_ENVIRONMENT_STORAGE_KEY, normalizeEnvironment(environment));
-}
-
-export function getApiBase(environment = getApiEnvironment()) {
-  environment = normalizeEnvironment(environment);
-  const configured = localStorage.getItem(apiBaseStorageKey(environment));
-  if (configured) return configured;
-  return (
-    localStorage.getItem(environment === "live" ? "stripeLinkApiBaseLive" : "stripeLinkApiBaseTest") ||
-    localStorage.getItem("stripeLinkApiBase") ||
-    fallbackApiBase(environment)
-  );
-}
-
-// The environment "opposite" the one currently active — the target for a cross-env copy.
-export function getOtherEnvironment(environment = getApiEnvironment()) {
-  return normalizeEnvironment(environment) === "live" ? "test" : "live";
-}
-
-// --- P0 scaffolding: Stripe-mode / platform-env decoupling (plans/STRIPE_MODE_DECOUPLING.md).
-// Added but NOT yet wired into getApiBase/apiRequest — P1 flips the dashboard toggle to a Stripe-mode filter and
-// binds the backend to the hostname. Kept unused here so the contract exists and later phases can adopt it.
-
-const STRIPE_MODE_STORAGE_KEY = "stripeLinkVueStripeMode";
 
 export function normalizeStripeMode(mode) {
   return mode === "live" ? "live" : "test";
 }
 
+// The platform RELEASE CHANNEL ("dev" | "prod"), derived from the HOSTNAME: app.* = prod (released),
+// sandbox.*/localhost = dev (staging). Unknown hosts assume released prod (verify per deployment at cutover).
+export function hostnameReleaseChannel() {
+  const host = window.location.hostname;
+  if (host === "localhost" || host === "127.0.0.1") return "dev";
+  if (host.startsWith("app.")) return "prod";
+  if (host.startsWith("sandbox.")) return "dev";
+  return "prod";
+}
+
+function isLocalhost() {
+  return window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
+}
+
+function apiBaseStorageKey(channel = hostnameReleaseChannel()) {
+  return `${API_BASE_STORAGE_KEY}:${channel}`;
+}
+
+function appConfigStorageKey(channel = hostnameReleaseChannel()) {
+  return `${APP_CONFIG_STORAGE_KEY}:${channel}`;
+}
+
+// --- Stripe mode (the tenant-facing test/live toggle) -------------------------------------------------------
+
 // The per-tenant Stripe mode (test/live) — a DATA filter within a backend, independent of the release channel.
-// Product default is "live" (live-first onboarding); a tenant opts into a test sandbox explicitly.
+// Product default is "live" (live-first onboarding); a tenant opts into a test sandbox explicitly. Falls back to
+// the pre-decoupling toggle value so an existing dashboard keeps its current selection across the change.
 export function getStripeMode() {
-  return normalizeStripeMode(localStorage.getItem(STRIPE_MODE_STORAGE_KEY) || "live");
+  const stored = localStorage.getItem(STRIPE_MODE_STORAGE_KEY) || localStorage.getItem(LEGACY_ENV_STORAGE_KEY);
+  return normalizeStripeMode(stored || "live");
 }
 
 export function setStripeMode(mode) {
   localStorage.setItem(STRIPE_MODE_STORAGE_KEY, normalizeStripeMode(mode));
 }
 
-// The platform RELEASE CHANNEL (which backend/code version), derived from the HOSTNAME:
-// app.* = prod (released), sandbox.*/localhost = dev (staging). This will replace the env-toggle→backend mapping
-// in P1; until then it falls back to today's runtime toggle so nothing changes.
-export function hostnameReleaseChannel() {
-  const host = window.location.hostname;
-  if (host === "localhost" || host === "127.0.0.1") return "dev";
-  if (host.startsWith("app.")) return "prod";
-  if (host.startsWith("sandbox.")) return "dev";
-  return configEnvironment(getApiEnvironment()); // fallback: preserve current behavior until P1
+// The "other" Stripe mode — the target for a cross-mode copy (test <-> live), now on the SAME backend.
+export function getOtherEnvironment(mode = getStripeMode()) {
+  return normalizeStripeMode(mode) === "live" ? "test" : "live";
+}
+
+// --- Backend base (release channel) ------------------------------------------------------------------------
+
+export function getApiBase() {
+  const channel = hostnameReleaseChannel();
+  const configured = localStorage.getItem(apiBaseStorageKey(channel));
+  if (configured) return configured;
+  if (isLocalhost()) return LOCAL_DEV_API_BASE;
+  return API_BASES[channel];
 }
 
 export function setApiBase(value) {
-  localStorage.setItem(apiBaseStorageKey(getApiEnvironment()), value.replace(/\/$/, ""));
+  localStorage.setItem(apiBaseStorageKey(), value.replace(/\/$/, ""));
 }
 
-export function getEnvironmentConfig(environment = getApiEnvironment()) {
-  const normalized = normalizeEnvironment(environment);
-  const targetEnvironment = configEnvironment(normalized);
-  const raw = localStorage.getItem(appConfigStorageKey(normalized));
+export function getEnvironmentConfig(channel = hostnameReleaseChannel()) {
+  const raw = localStorage.getItem(appConfigStorageKey(channel));
   if (raw) {
     try {
-      return JSON.parse(raw)?.environments?.[targetEnvironment] || {};
+      return JSON.parse(raw)?.environments?.[channel] || {};
     } catch {
-      localStorage.removeItem(appConfigStorageKey(normalized));
+      localStorage.removeItem(appConfigStorageKey(channel));
     }
   }
   return {};
 }
 
-export function getPagesBaseUrl(environment = getApiEnvironment()) {
-  const configured = getEnvironmentConfig(environment).pages_base_url;
+export function getPagesBaseUrl(channel = hostnameReleaseChannel()) {
+  const configured = getEnvironmentConfig(channel).pages_base_url;
   if (configured) return configured.replace(/\/$/, "");
-  return normalizeEnvironment(environment) === "live"
+  return channel === "prod"
     ? "https://dlxn0y34f7dbz.cloudfront.net"
     : "https://drjfn283z66uz.cloudfront.net";
 }
 
-export function getPreviewPagesBaseUrl(environment = getApiEnvironment()) {
-  const configured = getEnvironmentConfig(environment).pages_preview_base_url;
+export function getPreviewPagesBaseUrl(channel = hostnameReleaseChannel()) {
+  const configured = getEnvironmentConfig(channel).pages_preview_base_url;
   if (configured) return configured.replace(/\/$/, "");
-  return normalizeEnvironment(environment) === "live"
-    ? "https://d1lcshydc31m77.cloudfront.net"
-    : "https://d1lcshydc31m77.cloudfront.net";
+  return "https://d1lcshydc31m77.cloudfront.net";
 }
 
-export async function loadAppConfigApiBase(environment = getApiEnvironment()) {
-  const normalized = normalizeEnvironment(environment);
-  const targetEnvironment = configEnvironment(normalized);
-  const candidateBases = [
-    fallbackApiBase(normalized),
-    normalized === "live" ? fallbackApiBase("test") : "",
-  ].filter(Boolean);
-
-  for (const base of [...new Set(candidateBases)]) {
-    try {
-      const url = new URL(`${base.replace(/\/$/, "")}/app-config/app_config`, window.location.origin);
-      url.searchParams.set("environment", "global");
-      const response = await fetch(url);
-      const body = await response.json().catch(() => ({}));
-      const configuredBase = body.app_config?.environments?.[targetEnvironment]?.api_base_url;
-      if (response.ok && configuredBase) {
-        localStorage.setItem(apiBaseStorageKey(normalized), configuredBase.replace(/\/$/, ""));
-        localStorage.setItem(appConfigStorageKey(normalized), JSON.stringify(body.app_config));
-        return {
-          source: base,
-          environment: targetEnvironment,
-          api_base_url: configuredBase.replace(/\/$/, ""),
-          app_config: body.app_config,
-        };
-      }
-    } catch {
-      // Keep bootstrapping from the next candidate; hard-coded fallback remains last resort.
+export async function loadAppConfigApiBase(channel = hostnameReleaseChannel()) {
+  const base = getApiBase();
+  try {
+    const url = new URL(`${base.replace(/\/$/, "")}/app-config/app_config`, window.location.origin);
+    url.searchParams.set("environment", "global");
+    const response = await fetch(url);
+    const body = await response.json().catch(() => ({}));
+    const configuredBase = body.app_config?.environments?.[channel]?.api_base_url;
+    if (response.ok && configuredBase) {
+      localStorage.setItem(apiBaseStorageKey(channel), configuredBase.replace(/\/$/, ""));
+      localStorage.setItem(appConfigStorageKey(channel), JSON.stringify(body.app_config));
+      return {
+        source: base,
+        environment: channel,
+        api_base_url: configuredBase.replace(/\/$/, ""),
+        app_config: body.app_config,
+      };
     }
+  } catch {
+    // Fall through to the built-in per-channel base.
   }
 
-  const fallback = fallbackApiBase(normalized);
-  localStorage.setItem(apiBaseStorageKey(normalized), fallback.replace(/\/$/, ""));
-  localStorage.removeItem(appConfigStorageKey(normalized));
+  const fallback = isLocalhost() ? LOCAL_DEV_API_BASE : API_BASES[channel];
+  localStorage.removeItem(appConfigStorageKey(channel));
   return {
     source: "fallback",
-    environment: targetEnvironment,
+    environment: channel,
     api_base_url: fallback.replace(/\/$/, ""),
     app_config: null,
   };
 }
+
+// --- Tenant / session --------------------------------------------------------------------------------------
 
 export function getTenantId() {
   return getAuthSession()?.tenant_id || getAuthSession()?.client_id || localStorage.getItem(TENANT_ID_STORAGE_KEY) || DEFAULT_TENANT_ID;
@@ -204,12 +176,13 @@ export function clearAuthSession() {
   localStorage.removeItem(TENANT_ID_STORAGE_KEY);
 }
 
-export async function apiRequest(path, { method = "GET", body, params = {}, environment } = {}) {
-  // `environment` targets the OTHER env's API base (cross-env copy) with the same shared token; omit for the
-  // active environment.
-  const base = environment ? getApiBase(environment) : getApiBase();
+export async function apiRequest(path, { method = "GET", body, params = {}, mode } = {}) {
+  // Backend base is hostname-derived (release channel). `mode` (test/live) is a DATA filter sent as ?mode=;
+  // pass an explicit `mode` to target the OTHER Stripe mode on the same backend (cross-mode copy).
+  const base = getApiBase();
   const url = new URL(`${base.replace(/\/$/, "")}${path}`, window.location.origin);
-  Object.entries({ tenant_id: getTenantId(), client_id: getClientId(), ...params }).forEach(([key, value]) => {
+  const stripeMode = normalizeStripeMode(mode || getStripeMode());
+  Object.entries({ tenant_id: getTenantId(), client_id: getClientId(), mode: stripeMode, ...params }).forEach(([key, value]) => {
     if (value !== undefined && value !== null && value !== "") url.searchParams.set(key, value);
   });
   const session = getAuthSession();
@@ -218,6 +191,7 @@ export async function apiRequest(path, { method = "GET", body, params = {}, envi
     method,
     headers: {
       "Content-Type": "application/json",
+      "X-Stripe-Mode": stripeMode,
       ...(session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {}),
     },
     body: body ? JSON.stringify(body) : undefined,

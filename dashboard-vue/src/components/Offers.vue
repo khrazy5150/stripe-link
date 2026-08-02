@@ -552,7 +552,7 @@
 
 <script setup>
 import { computed, onMounted, reactive, ref, watch } from "vue";
-import { apiRequest, getApiEnvironment, getTenantId } from "../api/client";
+import { apiRequest, getStripeMode, getTenantId } from "../api/client";
 import { formatCouponDiscount, useCouponsStore } from "../stores/coupons";
 import { defaultProductPrice, formatMoney, useProductsStore } from "../stores/products";
 import { useServicesStore } from "../stores/services";
@@ -1319,7 +1319,7 @@ function buildOfferDocument() {
     status: "active",
     product_intent: effectiveIntent,
     offer_type: inferOfferType(),
-    stripe_mode: getApiEnvironment(),
+    stripe_mode: getStripeMode(),
     items,
     purchase_opportunities: purchaseOpportunities,
     // Only meaningful with 2+ scheduled services; omit otherwise to keep the document clean.

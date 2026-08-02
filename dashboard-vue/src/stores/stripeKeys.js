@@ -1,5 +1,5 @@
 import { defineStore } from "pinia";
-import { apiRequest, getApiEnvironment, getTenantId, setTenantId } from "../api/client";
+import { apiRequest, getStripeMode, getTenantId, setTenantId } from "../api/client";
 import { stripeKeysSchema } from "../schema/stripeKeysSchema";
 
 function emptyMode(mode) {
@@ -35,9 +35,9 @@ function normalizeMode(mode, document) {
 export const useStripeKeysStore = defineStore("stripeKeys", {
   state: () => ({
     tenantId: getTenantId(),
-    // The Stripe mode the Payments screen views follows the active environment (test→dev backend / live→prod),
-    // so switching to the live environment uses the live-connected account + keys (not a stale hardcoded test).
-    verifyMode: getApiEnvironment(),
+    // The Stripe mode the Payments screen views follows the dashboard toggle, so switching to live uses the
+    // live-connected account + keys (not a stale hardcoded test). Now a pure data filter — same backend either way.
+    verifyMode: getStripeMode(),
     modes: {
       test: emptyMode("test"),
       live: emptyMode("live"),
@@ -59,7 +59,7 @@ export const useStripeKeysStore = defineStore("stripeKeys", {
   actions: {
     resetForCurrentTenant() {
       this.tenantId = getTenantId();
-      this.verifyMode = getApiEnvironment();
+      this.verifyMode = getStripeMode();
       this.modes = {
         test: emptyMode("test"),
         live: emptyMode("live"),

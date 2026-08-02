@@ -428,7 +428,7 @@
 
 <script setup>
 import { computed, onMounted, reactive, ref, watch } from "vue";
-import { apiRequest, getApiEnvironment, getOtherEnvironment } from "../api/client";
+import { apiRequest, getStripeMode, getOtherEnvironment } from "../api/client";
 import { useSitesStore, organizationFromBusiness, suggestSubdomain } from "../stores/sites";
 import { useProfileStore } from "../stores/profile";
 import { useSubdomainCheck } from "../composables/useSubdomainCheck";
@@ -481,18 +481,18 @@ async function copySiteToEnvironment(site) {
       deps.productDocs.forEach((p) => productById.set(p.product_id, p));
       hasServices = hasServices || deps.hasServices;
       // Per-page pre-flight so each page keeps the draft-vs-published rule on the target.
-      const existingTarget = await apiRequest(`/pages/${encodeURIComponent(page.page_id)}`, { environment: env })
+      const existingTarget = await apiRequest(`/pages/${encodeURIComponent(page.page_id)}`, { mode: env })
         .then((b) => b.page).catch(() => null);
       pages.push({ page, existingTarget });
     }
-    const existingSite = await apiRequest(`/sites/${encodeURIComponent(site.site_id)}`, { environment: env })
+    const existingSite = await apiRequest(`/sites/${encodeURIComponent(site.site_id)}`, { mode: env })
       .then((b) => b.site).catch(() => null);
     // If this Site is new to the target, its platform subdomain must be free there — otherwise the copy would
     // write the pages/catalog and then fail claiming the label (a different Site already owns it in that env).
     const label = String(site.hosting?.platform_hostname || "").split(".")[0];
     let subdomainConflict = false;
     if (!existingSite && label) {
-      const check = await apiRequest(`/sites/subdomain?name=${encodeURIComponent(label)}`, { environment: env }).catch(() => null);
+      const check = await apiRequest(`/sites/subdomain?name=${encodeURIComponent(label)}`, { mode: env }).catch(() => null);
       subdomainConflict = !!check && check.available === false;
     }
     copyPlan.value = {
@@ -520,9 +520,9 @@ async function executeSiteCopy() {
     // Bottom-up so references resolve in the target: products -> offers -> pages -> Site.
     await copyCatalogToEnv(plan.productDocs, plan.offerDocs, env);
     for (const { page, existingTarget } of plan.pages) {
-      await apiRequest("/pages", { method: "POST", body: pageForTarget(page, existingTarget, env), environment: env });
+      await apiRequest("/pages", { method: "POST", body: pageForTarget(page, existingTarget, env), mode: env });
     }
-    await apiRequest("/sites", { method: "POST", body: siteForTarget(plan.site, plan.existingSite, env), environment: env });
+    await apiRequest("/sites", { method: "POST", body: siteForTarget(plan.site, plan.existingSite, env), mode: env });
     store.message = `Copied “${plan.site.name}” (${plan.pages.length} page${plan.pages.length === 1 ? "" : "s"}) to ${targetEnvLabel.value}.`;
     copyPlan.value = null;
   } catch (err) {
@@ -658,7 +658,7 @@ const dnsProviders = [
   { id: "other", label: "Other / full name", fqdn: true },
 ];
 // Custom-domain serving is production/Live-only (single prod edge Worker) — hide it in Test to avoid a dead end.
-const customDomainsEnabled = computed(() => getApiEnvironment() === "live");
+const customDomainsEnabled = computed(() => getStripeMode() === "live");
 const dnsProvider = ref("route53");
 const openStep = ref(0);
 const copied = ref("");

@@ -1,5 +1,5 @@
 import { defineStore } from "pinia";
-import { apiRequest, getApiEnvironment, getTenantId } from "../api/client";
+import { apiRequest, getStripeMode, getTenantId } from "../api/client";
 import { buildPriceDocument, freeLeadPrice } from "./pricing";
 import { imageDimsForUrls } from "../utils/imageDims";
 
@@ -330,7 +330,7 @@ export async function buildProductDocument(form) {
     tenant_id: getTenantId(),
     product_id: productId,
     stripe_product_id: form.stripe_product_id || null,
-    stripe_mode: form.stripe_mode || getApiEnvironment(),
+    stripe_mode: form.stripe_mode || getStripeMode(),
     // Payment gateway (Stripe sync) is derived from intent, not a separate toggle: a payment product is
     // canonical, a lead-capture product is not. "Enable Payment Gateway" was jargon and is gone from the UI.
     canonical: !isLeadGen,

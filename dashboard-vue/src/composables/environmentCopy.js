@@ -1,10 +1,10 @@
-// Cross-environment copy (test <-> live). Shared by the page copy (LandingPages.vue) and the Site copy
+// Cross-mode copy (test <-> live). Shared by the page copy (LandingPages.vue) and the Site copy
 // (Sites.vue) so the transform + dependency-resolution rules live in exactly one place.
 //
-// The copy is client-orchestrated: cross-env writes go through the OTHER environment's API base
-// (apiRequest({ environment })), which a backend Lambda can't reach — so the browser resolves the dependency
-// graph in the source env and re-POSTs each document to the target env, bottom-up (products -> offers -> pages
-// -> Site) so references resolve as they land. IDs are preserved across environments.
+// The copy is client-orchestrated: writes to the OTHER Stripe mode go through apiRequest({ mode }) against the
+// SAME backend (post-decoupling both modes live in one deployment) — the browser resolves the dependency graph
+// in the source mode and re-POSTs each document to the target mode, bottom-up (products -> offers -> pages
+// -> Site) so references resolve as they land. IDs are preserved across modes.
 import { apiRequest } from "../api/client";
 
 // "live"/"test" — the Stripe mode + Site.environment value for the target.
@@ -121,9 +121,9 @@ export async function resolvePageDeps(page, { offerCache = [], productCache = []
 // Write a catalog (products then offers) to the target env — the shared bottom-up prefix of every copy.
 export async function copyCatalogToEnv(productDocs, offerDocs, env) {
   for (const product of productDocs) {
-    await apiRequest("/products", { method: "POST", body: productForTarget(product, env), environment: env });
+    await apiRequest("/products", { method: "POST", body: productForTarget(product, env), mode: env });
   }
   for (const offer of offerDocs) {
-    await apiRequest("/offers", { method: "POST", body: offerForTarget(offer, env), environment: env });
+    await apiRequest("/offers", { method: "POST", body: offerForTarget(offer, env), mode: env });
   }
 }

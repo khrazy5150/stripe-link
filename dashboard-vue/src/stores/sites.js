@@ -1,5 +1,5 @@
 import { defineStore } from "pinia";
-import { apiRequest, getApiEnvironment, getTenantId } from "../api/client";
+import { apiRequest, getStripeMode, getTenantId } from "../api/client";
 import { isE164, normalizeE164 } from "../utils/phone";
 
 const SITE_SCHEMA_VERSION = "2026-07-20";
@@ -61,7 +61,7 @@ export function buildDefaultSite(pages, business = {}, subdomain = "") {
     schema_version: SITE_SCHEMA_VERSION,
     document_type: "site",
     tenant_id: getTenantId(),
-    environment: getApiEnvironment(),
+    environment: getStripeMode(),
     name: business.name || "My Site",
     status: "active",
     hosting: { type: "platform", platform_subdomain: chosen },

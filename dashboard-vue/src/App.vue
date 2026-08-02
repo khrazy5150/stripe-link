@@ -199,7 +199,7 @@ import Sites from "./components/Sites.vue";
 import StripeKeys from "./components/StripeKeys.vue";
 import ToastHost from "./components/ToastHost.vue";
 import { iconPaths, menuGroupsForEnvironment } from "./config/menu";
-import { getApiEnvironment, loadAppConfigApiBase, setApiEnvironment } from "./api/client";
+import { getStripeMode, loadAppConfigApiBase, setStripeMode } from "./api/client";
 import { useAuthStore } from "./stores/auth";
 import { useCollectionsStore } from "./stores/collections";
 import { useCouponsStore } from "./stores/coupons";
@@ -230,7 +230,9 @@ let toastSeen = new Set();
 let toastBaselined = false;
 let notificationsPoll = null;
 const activeView = ref("dashboard");
-const activeEnvironment = ref(getApiEnvironment());
+// The active Stripe MODE (test/live) — the dashboard toggle. Drives view remounts + data reloads and the theme
+// class; the backend base is hostname-derived, not this value (plans/STRIPE_MODE_DECOUPLING.md).
+const activeEnvironment = ref(getStripeMode());
 const sidebarCollapsed = ref(false);
 const userMenuOpen = ref(false);
 
@@ -272,7 +274,7 @@ function toggleEnvironment() {
 
 function switchEnvironment(environment) {
   activeEnvironment.value = environment === "live" ? "live" : "test";
-  setApiEnvironment(activeEnvironment.value);
+  setStripeMode(activeEnvironment.value);
 }
 
 async function reloadActiveView() {
@@ -385,7 +387,7 @@ function handleKeydown(event) {
 onMounted(() => {
   document.addEventListener("mousedown", handleDocumentClick);
   document.addEventListener("keydown", handleKeydown);
-  loadAppConfigApiBase(activeEnvironment.value)
+  loadAppConfigApiBase()
     .then(reloadActiveView)
     .then(() => stripeKeys.load())
     .then(maybeNudgeStripeSetup)
@@ -424,7 +426,7 @@ watch(activeEnvironment, async () => {
   // data refresh (that was the bug: the toggle repainted the badge/theme but the awaited bootstrap gated the
   // reload, so the list kept the old environment's data). reloadActiveView falls back to the built-in per-env
   // base, so it's correct without waiting for the bootstrap.
-  loadAppConfigApiBase(activeEnvironment.value).catch(() => {});
+  loadAppConfigApiBase().catch(() => {});
   await reloadActiveView();
 });
 </script>
