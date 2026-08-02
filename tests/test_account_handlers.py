@@ -592,24 +592,23 @@ class AccountHandlerTests(unittest.TestCase):
         self.assertEqual(invoices_repo.documents[0]["amounts"]["platform_fee"], 371)
         self.assertEqual(invoices_repo.documents[0]["amounts"]["net_payout"], 3200)
 
-    def test_stripe_webhook_ignores_event_from_the_other_mode(self):
-        # A test-mode event (livemode=False) delivered to a prod (live) environment must be ignored,
-        # not persisted -- otherwise a single purchase delivered to both the dev and prod webhook
-        # endpoints is recorded and receipted once per environment (the dedup guard is per-table).
-        class FakeTable:
-            def __init__(self):
-                self.items = []
+    def test_stripe_webhook_routes_by_livemode_not_environment(self):
+        # Decoupled model (plans/STRIPE_MODE_DECOUPLING.md P3): the event's mode is its own `livemode`, NOT the
+        # deployment. A test-mode event (livemode=False) delivered to the prod endpoint is processed AS test and
+        # persisted in test mode -- one prod endpoint handles both modes; the old mode-mismatch reject is gone.
+        class FakeEvents:
+            def get(self, _event_id):
+                return None
 
-            def put_item(self, Item, **kwargs):
-                self.items.append(Item)
-                return {}
+            def put(self, _doc):
+                return _doc
 
-        orders_table = FakeTable()
+        # Unhandled event type + no `account`: isolates the mode-routing decision from the persistence machinery.
         payload = {
-            "id": "evt_wrong_mode",
-            "type": "checkout.session.completed",
+            "id": "evt_test_on_prod",
+            "type": "customer.updated",
             "livemode": False,
-            "data": {"object": {"id": "cs_test_123", "metadata": {"tenant_id": "tenant_demo"}}},
+            "data": {"object": {"metadata": {"tenant_id": "tenant_demo"}}},
         }
         body = json.dumps(payload, separators=(",", ":"))
         timestamp = 1781230000
@@ -624,14 +623,16 @@ class AccountHandlerTests(unittest.TestCase):
                 "headers": {"Stripe-Signature": f"t={timestamp},v1={signature}"},
                 "body": body,
             }, None,
-                orders_table=orders_table,
+                webhook_events_repo=FakeEvents(),
                 webhook_secret_loader=lambda kind, mode: "whsec_stable_test",
                 now_fn=lambda: timestamp,
             )
 
         self.assertEqual(response["statusCode"], 200)
-        self.assertEqual(json.loads(response["body"])["reason"], "mode_mismatch")
-        self.assertEqual(orders_table.items, [])  # nothing persisted
+        envelope = json.loads(response["body"])["webhook"]
+        self.assertEqual(envelope["mode"], "test")  # from livemode, despite ENVIRONMENT=prod
+        self.assertEqual(envelope["livemode"], False)
+        self.assertNotIn("reason", json.loads(response["body"]))  # not ignored
 
     def test_stripe_webhook_rejects_invalid_signature(self):
         body = json.dumps({"id": "evt_bad", "type": "invoice.paid"})
