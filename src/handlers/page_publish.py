@@ -66,15 +66,16 @@ def should_publish_record(record: dict[str, Any]) -> bool:
 
 
 def handler(event, context, *, offers_repo=None, products_repo=None, services_repo=None, sites_repo=None, pages_repo=None, domains_index_repo=None, reviews_repo=None, collections_repo=None, routes_repo=None, stripe_keys_repo=None, s3_client=None, cloudfront_client=None):
-    offers_repo = offers_repo or offers_repository()
-    products_repo = products_repo or products_repository()
-    services_repo = services_repo or (services_repository() if os.environ.get("SERVICES_TABLE") else None)
-    sites_repo = sites_repo or (sites_repository() if os.environ.get("SITES_TABLE") else None)
-    pages_repo = pages_repo or (pages_repository() if os.environ.get("PAGES_TABLE") else None)
+    # Mode-scoped repos (offers/products/services/sites/pages/collections) are built PER RECORD from each page's
+    # own stripe_mode below — a single stream batch can mix modes (plans/STRIPE_MODE_DECOUPLING.md P4). Capture any
+    # injected repos (tests) so the per-record build honours them. The rest are Stripe-mode-agnostic.
+    _injected = {
+        "offers": offers_repo, "products": products_repo, "services": services_repo,
+        "sites": sites_repo, "pages": pages_repo, "collections": collections_repo,
+    }
     stripe_keys_repo = stripe_keys_repo or (stripe_keys_repository() if os.environ.get("STRIPE_KEYS_TABLE") else None)
     domains_index_repo = domains_index_repo or (custom_domains_index_repository() if os.environ.get("CUSTOM_DOMAINS_TABLE") else None)
     reviews_repo = reviews_repo or (reviews_repository() if os.environ.get("REVIEWS_TABLE") else None)
-    collections_repo = collections_repo or (collections_repository() if os.environ.get("COLLECTIONS_TABLE") else None)
     routes_repo = routes_repo or (routes_repository() if os.environ.get("ROUTES_TABLE") else None)
     if s3_client is None or cloudfront_client is None:
         import boto3
@@ -96,6 +97,16 @@ def handler(event, context, *, offers_repo=None, products_repo=None, services_re
             page = deserialize_image(image)
             if page.get("document_type") != "page":
                 continue
+
+            # Bind this record's mode-scoped repos to the PAGE's own Stripe mode, so a test page publishes against
+            # test offers/products/collections and a live page against live (plans/STRIPE_MODE_DECOUPLING.md P4).
+            page_mode = "live" if str(page.get("stripe_mode") or "").strip().lower() == "live" else "test"
+            offers_repo = _injected["offers"] or offers_repository(mode=page_mode)
+            products_repo = _injected["products"] or products_repository(mode=page_mode)
+            services_repo = _injected["services"] or (services_repository(mode=page_mode) if os.environ.get("SERVICES_TABLE") else None)
+            sites_repo = _injected["sites"] or (sites_repository(mode=page_mode) if os.environ.get("SITES_TABLE") else None)
+            pages_repo = _injected["pages"] or (pages_repository(mode=page_mode) if os.environ.get("PAGES_TABLE") else None)
+            collections_repo = _injected["collections"] or (collections_repository(mode=page_mode) if os.environ.get("COLLECTIONS_TABLE") else None)
             if record.get("eventName") == "REMOVE" or page.get("status") == "archived":
                 result = delete_page_artifacts(
                     page,

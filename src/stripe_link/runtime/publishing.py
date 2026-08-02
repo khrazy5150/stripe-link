@@ -699,14 +699,10 @@ def checkout_base_url_for_page(page: dict[str, Any], offer: dict[str, Any], envi
     if configured:
         return configured
 
-    stripe_mode = str(offer.get("stripe_mode") or "").strip().lower()
-    if not stripe_mode:
-        stripe_mode = "live" if environment == "prod" else "test"
-    return (
-        "https://prod.juniorbay.com/checkout"
-        if stripe_mode == "live"
-        else "https://dev.juniorbay.com/checkout"
-    )
+    # Host-agnostic: both modes check out on the SAME endpoint; the mode travels as ?mode= on the Buy URL
+    # (baked by build_checkout_url from offer.stripe_mode), so we no longer pick a mode-specific host
+    # (plans/STRIPE_MODE_DECOUPLING.md P4). `environment` is retained for signature compatibility.
+    return str(os.environ.get("PUBLIC_CHECKOUT_BASE_URL") or "https://prod.juniorbay.com/checkout").strip()
 
 
 def strip_document_keys(document: dict[str, Any]) -> dict[str, Any]:

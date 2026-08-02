@@ -596,7 +596,9 @@ class PagePublishingTests(unittest.TestCase):
 
         self.assertIn(b"data-checkout-api-base-url=\"https://api.example.com/dev\"", self.s3.puts[0]["Body"])
 
-    def test_publish_page_document_uses_offer_mode_checkout_base(self):
+    def test_publish_page_document_uses_host_agnostic_checkout_with_mode(self):
+        # Decoupled model (plans/STRIPE_MODE_DECOUPLING.md P4): the checkout base is host-agnostic (no dev/prod
+        # split by mode) and the offer's Stripe mode travels as ?mode= on the Buy URL.
         result = publish_page_document(
             self.page,
             offers_repository=self.offers_repo,
@@ -609,10 +611,12 @@ class PagePublishingTests(unittest.TestCase):
 
         self.assertEqual([artifact["kind"] for artifact in result["artifacts"]], ["preview"])
         html = self.s3.puts[0]["Body"].decode("utf-8")
-        self.assertIn("https://dev.juniorbay.com/checkout?", html)
+        self.assertIn("https://prod.juniorbay.com/checkout?", html)
+        self.assertNotIn("dev.juniorbay.com/checkout", html)
         self.assertIn("clientID=tenant_demo", html)
         self.assertIn("offer=offer_simple_coffee", html)
         self.assertIn("page_id=page_simple_coffee", html)
+        self.assertIn("mode=", html)
 
     def test_publish_page_document_filters_landing_page_price_contexts_in_offer_order(self):
         product = copy.deepcopy(self.product)
