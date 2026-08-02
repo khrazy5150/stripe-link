@@ -1,5 +1,5 @@
 import { defineStore } from "pinia";
-import { apiRequest, getTenantId, setTenantId } from "../api/client";
+import { apiRequest, getApiEnvironment, getTenantId, setTenantId } from "../api/client";
 import { stripeKeysSchema } from "../schema/stripeKeysSchema";
 
 function emptyMode(mode) {
@@ -35,7 +35,9 @@ function normalizeMode(mode, document) {
 export const useStripeKeysStore = defineStore("stripeKeys", {
   state: () => ({
     tenantId: getTenantId(),
-    verifyMode: "test",
+    // The Stripe mode the Payments screen views follows the active environment (test→dev backend / live→prod),
+    // so switching to the live environment uses the live-connected account + keys (not a stale hardcoded test).
+    verifyMode: getApiEnvironment(),
     modes: {
       test: emptyMode("test"),
       live: emptyMode("live"),
@@ -57,7 +59,7 @@ export const useStripeKeysStore = defineStore("stripeKeys", {
   actions: {
     resetForCurrentTenant() {
       this.tenantId = getTenantId();
-      this.verifyMode = "test";
+      this.verifyMode = getApiEnvironment();
       this.modes = {
         test: emptyMode("test"),
         live: emptyMode("live"),

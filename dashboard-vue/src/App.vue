@@ -133,7 +133,7 @@
         :active-environment="activeEnvironment"
         @switch-environment="switchEnvironment"
       />
-      <StripeKeys v-else-if="activeView === 'stripeKeys'" />
+      <StripeKeys v-else-if="activeView === 'stripeKeys'" :key="`stripe-keys-${activeEnvironment}-${auth.session?.client_id || ''}`" />
       <Products v-else-if="activeView === 'products'" />
       <Coupons v-else-if="activeView === 'coupons'" />
       <Offers v-else-if="activeView === 'offers'" :key="`offers-${activeEnvironment}-${auth.session?.client_id || ''}`" />
