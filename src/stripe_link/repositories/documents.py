@@ -2,6 +2,8 @@ import os
 from decimal import Decimal
 from typing import Any
 
+from stripe_link.common import normalize_stripe_mode
+
 
 class RepositoryError(RuntimeError):
     pass
@@ -39,6 +41,7 @@ class DynamoDocumentRepository:
         document_type: str,
         id_field: str,
         table: Any | None = None,
+        mode: str | None = None,
     ):
         if not table_name:
             raise RepositoryError("Table name is required.")
@@ -47,6 +50,10 @@ class DynamoDocumentRepository:
         self.document_type = document_type
         self.id_field = id_field
         self._table = table
+        # When set, this repo is Stripe-mode-scoped: mode is baked into the SK + GSI1PK so a tenant's test and
+        # live documents (which may share an id after a test->live promote) are DISTINCT items that coexist in
+        # the one per-deployment table (plans/STRIPE_MODE_DECOUPLING.md). None = mode-agnostic (legacy layout).
+        self.mode = normalize_stripe_mode(mode) if mode is not None else None
 
     @property
     def table(self):
@@ -60,10 +67,25 @@ class DynamoDocumentRepository:
     def sort_prefix(self) -> str:
         return self.document_type.upper()
 
+    def _sk(self, document_id: str) -> str:
+        if self.mode is not None:
+            return f"{self.sort_prefix}#{self.mode}#{document_id}"
+        return f"{self.sort_prefix}#{document_id}"
+
+    def _list_prefix(self) -> str:
+        if self.mode is not None:
+            return f"{self.sort_prefix}#{self.mode}#"
+        return f"{self.sort_prefix}#"
+
+    def _gsi1pk(self, document_id: str) -> str:
+        if self.mode is not None:
+            return f"{self.sort_prefix}#{self.mode}#{document_id}"
+        return f"{self.sort_prefix}#{document_id}"
+
     def _key(self, tenant_id: str, document_id: str) -> dict[str, str]:
         return {
             "PK": f"TENANT#{tenant_id}",
-            "SK": f"{self.sort_prefix}#{document_id}",
+            "SK": self._sk(document_id),
         }
 
     def put(self, document: dict[str, Any]) -> dict[str, Any]:
@@ -74,10 +96,13 @@ class DynamoDocumentRepository:
         if not document_id:
             raise RepositoryError(f"Document {self.id_field} is required.")
 
+        if self.mode is not None:
+            document = {**document, "stripe_mode": self.mode}
+
         item = {
             **document,
             **self._key(tenant_id, document_id),
-            "GSI1PK": f"{self.sort_prefix}#{document_id}",
+            "GSI1PK": self._gsi1pk(document_id),
             "GSI1SK": f"TENANT#{tenant_id}",
         }
         self.table.put_item(Item=item)
@@ -105,17 +130,18 @@ class DynamoDocumentRepository:
 
         items = _query_all_pages(
             self.table,
-            KeyConditionExpression=Key("PK").eq(f"TENANT#{tenant_id}") & Key("SK").begins_with(f"{self.sort_prefix}#")
+            KeyConditionExpression=Key("PK").eq(f"TENANT#{tenant_id}") & Key("SK").begins_with(self._list_prefix())
         )
         return [self._strip_keys(item) for item in items]
 
     def scan_type(self) -> list[dict[str, Any]]:
         """Cross-tenant scan of every document of this repo's type. Intended for periodic
-        sweeps (e.g. due-reminder delivery), not the request path — it reads the whole table."""
+        sweeps (e.g. due-reminder delivery), not the request path — it reads the whole table.
+        Mode-scoped when the repo is bound to a mode; otherwise returns every mode."""
         from boto3.dynamodb.conditions import Attr
 
         items: list[dict[str, Any]] = []
-        request: dict[str, Any] = {"FilterExpression": Attr("SK").begins_with(f"{self.sort_prefix}#")}
+        request: dict[str, Any] = {"FilterExpression": Attr("SK").begins_with(self._list_prefix())}
         while True:
             response = self.table.scan(**request)
             items.extend(response.get("Items", []))
@@ -126,12 +152,13 @@ class DynamoDocumentRepository:
         return [self._strip_keys(item) for item in items]
 
     def find_by_id(self, document_id: str) -> dict[str, Any] | None:
-        """Look up a document by id alone (cross-tenant) via GSI1. Assumes document_id is unique."""
+        """Look up a document by id alone (cross-tenant) via GSI1. Assumes document_id is unique
+        within the repo's mode (the GSI1PK carries the mode when the repo is mode-scoped)."""
         from boto3.dynamodb.conditions import Key
 
         response = self.table.query(
             IndexName="GSI1",
-            KeyConditionExpression=Key("GSI1PK").eq(f"{self.sort_prefix}#{document_id}"),
+            KeyConditionExpression=Key("GSI1PK").eq(self._gsi1pk(document_id)),
             Limit=1,
         )
         items = response.get("Items", [])
@@ -161,48 +188,53 @@ class DynamoDocumentRepository:
         }
 
 
-def products_repository(table: Any | None = None) -> DynamoDocumentRepository:
+def products_repository(table: Any | None = None, *, mode: str | None = None) -> DynamoDocumentRepository:
     return DynamoDocumentRepository(
         os.environ.get("PRODUCTS_TABLE", ""),
         document_type="product",
         id_field="product_id",
         table=table,
+        mode=mode,
     )
 
 
-def offers_repository(table: Any | None = None) -> DynamoDocumentRepository:
+def offers_repository(table: Any | None = None, *, mode: str | None = None) -> DynamoDocumentRepository:
     return DynamoDocumentRepository(
         os.environ.get("OFFERS_TABLE", ""),
         document_type="offer",
         id_field="offer_id",
         table=table,
+        mode=mode,
     )
 
 
-def coupons_repository(table: Any | None = None) -> DynamoDocumentRepository:
+def coupons_repository(table: Any | None = None, *, mode: str | None = None) -> DynamoDocumentRepository:
     return DynamoDocumentRepository(
         os.environ.get("COUPONS_TABLE", ""),
         document_type="coupon",
         id_field="coupon_id",
         table=table,
+        mode=mode,
     )
 
 
-def pages_repository(table: Any | None = None) -> DynamoDocumentRepository:
+def pages_repository(table: Any | None = None, *, mode: str | None = None) -> DynamoDocumentRepository:
     return DynamoDocumentRepository(
         os.environ.get("PAGES_TABLE", ""),
         document_type="page",
         id_field="page_id",
         table=table,
+        mode=mode,
     )
 
 
-def sites_repository(table: Any | None = None) -> DynamoDocumentRepository:
+def sites_repository(table: Any | None = None, *, mode: str | None = None) -> DynamoDocumentRepository:
     return DynamoDocumentRepository(
         os.environ.get("SITES_TABLE", ""),
         document_type="site",
         id_field="site_id",
         table=table,
+        mode=mode,
     )
 
 
@@ -791,7 +823,7 @@ def reviews_repository(table: Any | None = None) -> DynamoDocumentRepository:
     )
 
 
-def collections_repository(table: Any | None = None) -> DynamoDocumentRepository:
+def collections_repository(table: Any | None = None, *, mode: str | None = None) -> DynamoDocumentRepository:
     """Collections — ordered, curated groups of a Site's pages (plans/SITE_COLLECTIONS.md). Tenant-scoped like
     every other document; a Collection carries its own site_id."""
     return DynamoDocumentRepository(
@@ -799,25 +831,28 @@ def collections_repository(table: Any | None = None) -> DynamoDocumentRepository
         document_type="collection",
         id_field="collection_id",
         table=table,
+        mode=mode,
     )
 
 
-def carts_repository(table: Any | None = None) -> DynamoDocumentRepository:
+def carts_repository(table: Any | None = None, *, mode: str | None = None) -> DynamoDocumentRepository:
     return DynamoDocumentRepository(
         os.environ.get("CARTS_TABLE", ""),
         document_type="cart",
         id_field="cart_id",
         table=table,
+        mode=mode,
     )
 
 
-def cart_tokens_repository(table: Any | None = None) -> DynamoDocumentRepository:
+def cart_tokens_repository(table: Any | None = None, *, mode: str | None = None) -> DynamoDocumentRepository:
     # Shares CARTS_TABLE via a distinct document_type (the reviews + review_invites precedent).
     return DynamoDocumentRepository(
         os.environ.get("CARTS_TABLE", ""),
         document_type="cart_token",
         id_field="token",
         table=table,
+        mode=mode,
     )
 
 
@@ -867,21 +902,23 @@ def availability_exceptions_repository(table: Any | None = None) -> DynamoDocume
     )
 
 
-def appointments_repository(table: Any | None = None) -> DynamoDocumentRepository:
+def appointments_repository(table: Any | None = None, *, mode: str | None = None) -> DynamoDocumentRepository:
     return DynamoDocumentRepository(
         os.environ.get("SERVICES_TABLE", ""),
         document_type="appointment",
         id_field="appointment_id",
         table=table,
+        mode=mode,
     )
 
 
-def invoices_repository(table: Any | None = None) -> DynamoDocumentRepository:
+def invoices_repository(table: Any | None = None, *, mode: str | None = None) -> DynamoDocumentRepository:
     return DynamoDocumentRepository(
         os.environ.get("INVOICES_TABLE", ""),
         document_type="invoice",
         id_field="invoice_id",
         table=table,
+        mode=mode,
     )
 
 
