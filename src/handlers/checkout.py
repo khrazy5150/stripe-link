@@ -1,7 +1,10 @@
 import json
+import logging
 from base64 import b64encode
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
+
+logger = logging.getLogger(__name__)
 
 from stripe_link.common import error_response, json_response, query_params, tenant_id_from_event
 from stripe_link.domain.billing_status import BillingStatusError, assert_billing_in_good_standing
@@ -333,7 +336,14 @@ def build_checkout_payload(
     # saves the PM; only payment mode needs these flags (plans/OFFER_MODEL_REDESIGN.md §6).
     if payload.get("mode") == "payment" and stage_opportunities(offer, STAGE_POST_PURCHASE):
         payload["customer_creation"] = "always"
-        payload["payment_intent_data[setup_future_usage]"] = "off_session"
+        # Save the PM for the one-click upsell, but SCOPE it to card/link. A top-level
+        # payment_intent_data[setup_future_usage] is REJECTED by BNPL methods (Klarna/Afterpay/Zip) —
+        # "setup_future_usage is unsupported for payment method afterpay_clearpay" — which 400s the whole
+        # Checkout Session whenever we also offer installments, silently dropping every method to the account
+        # defaults. Per-method options keep card/link reusable while letting BNPL coexist; BNPL buyers simply
+        # aren't eligible for the one-click upsell (they can't be charged off-session anyway).
+        payload["payment_method_options[card][setup_future_usage]"] = "off_session"
+        payload["payment_method_options[link][setup_future_usage]"] = "off_session"
 
     if fee_context:
         payload["metadata[product_type]"] = fee_context.get("product_type", "")
@@ -376,6 +386,9 @@ def create_checkout_session_with_bnpl_fallback(payload, *, api_key, stripe_accou
     try:
         return create_stripe_checkout_session(payload, api_key=api_key, stripe_account=stripe_account, opener=opener)
     except Exception as original:
+        # A retry here means an explicit method (a BNPL method that went ineligible, or Link) was rejected;
+        # log it so a silent drop-to-defaults is visible in the checkout logs.
+        logger.warning("checkout: retrying without some payment methods after error: %s", original)
         ladder = []
         without_link = _payload_without_payment_method_type(payload, "link")
         if without_link is not None:

@@ -54,6 +54,20 @@ class CheckoutBnplPayloadTests(unittest.TestCase):
         self.assertEqual(payload["payment_method_types[2]"], "klarna")
         self.assertNotIn("payment_method_types[3]", payload)          # no dupes of the card/link lead
 
+    def test_bnpl_with_upsell_scopes_setup_future_usage_off_bnpl(self):
+        # Regression: an offer with BOTH BNPL and a post-purchase upsell must NOT set the top-level
+        # payment_intent_data[setup_future_usage] (BNPL methods reject it -> the whole session 400s and every
+        # method silently drops to the account defaults). It's scoped to card/link instead.
+        offer = _offer()
+        offer["funnel"] = {"upsells": [{"product_id": "p1", "price_id": "pr1"}]}
+        payload = build_checkout_payload(
+            tenant_id="t1", offer=offer, products_by_id=_products(), resolved=_resolved(),
+            success_url="s", cancel_url="c", bnpl_payment_method_types=["klarna"])
+        types = [v for k, v in payload.items() if k.startswith("payment_method_types[")]
+        self.assertIn("klarna", types)                                          # BNPL still offered
+        self.assertEqual(payload.get("payment_method_options[card][setup_future_usage]"), "off_session")
+        self.assertNotIn("payment_intent_data[setup_future_usage]", payload)    # never top-level with BNPL
+
     def test_recurring_line_excludes_bnpl(self):
         # A payment-mode session that still carries a recurring price_data line must not offer BNPL.
         products = {"p1": {"product_id": "p1", "name": "Sub",

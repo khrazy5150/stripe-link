@@ -353,12 +353,17 @@ class CheckoutHandlerTests(unittest.TestCase):
         payload = parse_qs(self.requests[0].data.decode("utf-8"))
         self.assertEqual(payload["mode"], ["payment"])
         self.assertEqual(payload["customer_creation"], ["always"])
-        self.assertEqual(payload["payment_intent_data[setup_future_usage]"], ["off_session"])
+        # Scoped to card/link (NOT the top-level payment_intent_data flag, which BNPL methods reject and which
+        # would 400 the whole session when installments are offered).
+        self.assertEqual(payload["payment_method_options[card][setup_future_usage]"], ["off_session"])
+        self.assertEqual(payload["payment_method_options[link][setup_future_usage]"], ["off_session"])
+        self.assertNotIn("payment_intent_data[setup_future_usage]", payload)
 
     def test_checkout_without_upsell_does_not_save_payment_method(self):
         self._checkout_with_bump(dict(self.offer), self.product)
         payload = parse_qs(self.requests[0].data.decode("utf-8"))
         self.assertNotIn("customer_creation", payload)
+        self.assertNotIn("payment_method_options[card][setup_future_usage]", payload)
         self.assertNotIn("payment_intent_data[setup_future_usage]", payload)
 
     def test_checkout_emits_order_bump_as_optional_item(self):
