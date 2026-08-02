@@ -44,10 +44,15 @@ Build workflow: **feature branch `stripe-mode-decoupling`** (main stays deployab
   routes_resolve, test_page_serve, experiments_resolve, post_checkout) from each record/request. Domain index +
   route records carry `stripe_mode`. Test-mode pages forced `noindex`. page_render + dashboard preview/published URL
   builders mode-aware. The Cloudflare Worker is unaffected (it serves the resolver's origin_url). 1335 pass.
-- **P6 NEXT (cutover)** — operational, not code: wipe tables + clear S3 buckets, re-seed config (billing config,
-  tier policies), re-onboard the handful of test tenants on the clean model, dev-first then prod; re-run Stripe
-  Connect OAuth per mode; re-add custom domains; point both Stripe webhook endpoints at prod with both secrets.
-  Minor code follow-up: standalone `/book` page render mode; a full audit that no on-page fetch still defaults test.
+- **P5 follow-ups DONE** (branch): standalone `/book` page (booking_page.py) threads the service's mode into its
+  availability/reserve/checkout JS; audited every on-page `fetch()` (html.py + booking_page.py are the only two
+  sources) — the inline booking widget's availability GET was the last one defaulting to test, now fixed. No
+  mode-sensitive on-page fetch defaults to test anymore.
+- **Cutover SCRIPT DONE** (branch): `scripts/mode_decoupling_cutover.py` — jb--prefix guard + preserve allow-list +
+  backup-first + dry-run default + dev-first (`--allow-prod`). Invariants locked by tests/test_cutover_classification.py.
+- **P6 NEXT (cutover)** — operational, not code: run the cutover script (dry-run → --confirm, dev then prod), then
+  re-onboard tenants, re-run Stripe Connect OAuth per mode, re-add custom domains, and point both Stripe webhook
+  endpoints at prod with both per-mode signing secrets.
 
 ## The problem — mode and infra are conflated
 
