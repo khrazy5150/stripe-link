@@ -38,10 +38,16 @@ Build workflow: **feature branch `stripe-mode-decoupling`** (main stays deployab
   + JS `checkoutHref`), closing P2's checkout loop. Threaded mode through every on-page money path (listicle cart
   add/remove/checkout/hydrate, post-purchase upsell session+charge for both islands, booking reserve+checkout, lead
   capture). `page_publish` (stream) builds its mode-scoped repos PER RECORD from each page's `stripe_mode`.
-- **P5 NEXT** — CDN/serving mode-aware. Now also carries what moved out of P4 because write+read must change
-  together: **mode-partitioned S3 publish path** (avoid test/live page-id collisions in the one bucket),
-  `page_render` serving mode + the standalone `/book` page JS, and **explicit test-mode `noindex`**. Plus the
-  mode-aware custom-domain resolver + platform-hostname worker (the trickiest area).
+- **P5 DONE** (branch): `artifact_paths(mode=…)` — live keeps the root key (byte-identical), test goes under a
+  `test/` prefix (default "live" so un-updated callers fail-safe to a 404, never a cross-mode serve). Write side
+  (publish/delete/register_page_route) derives mode from the page; read side (custom_domains_resolve + platform,
+  routes_resolve, test_page_serve, experiments_resolve, post_checkout) from each record/request. Domain index +
+  route records carry `stripe_mode`. Test-mode pages forced `noindex`. page_render + dashboard preview/published URL
+  builders mode-aware. The Cloudflare Worker is unaffected (it serves the resolver's origin_url). 1335 pass.
+- **P6 NEXT (cutover)** — operational, not code: wipe tables + clear S3 buckets, re-seed config (billing config,
+  tier policies), re-onboard the handful of test tenants on the clean model, dev-first then prod; re-run Stripe
+  Connect OAuth per mode; re-add custom domains; point both Stripe webhook endpoints at prod with both secrets.
+  Minor code follow-up: standalone `/book` page render mode; a full audit that no on-page fetch still defaults test.
 
 ## The problem — mode and infra are conflated
 
