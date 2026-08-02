@@ -4647,7 +4647,7 @@ def render_page_interactions_script(page: dict[str, Any]) -> str:
         "        };",
         "        const loadSlots = () => {",
         "          const from = Math.floor(Date.now() / 1000); const to = from + 14 * 86400;",
-        "          fetch(`${apiBase}/services/${encodeURIComponent(serviceId)}/availability?from=${from}&to=${to}`)",
+        "          fetch(`${apiBase}/services/${encodeURIComponent(serviceId)}/availability?from=${from}&to=${to}&mode=${encodeURIComponent(bookingMode)}`)",
         "            .then((r) => r.json()).then((d) => renderSlots(d.slots || []))",
         "            .catch(() => { slotsHost.textContent = 'Could not load times.'; });",
         "        };",
