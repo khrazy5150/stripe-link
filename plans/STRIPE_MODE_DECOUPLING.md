@@ -25,8 +25,16 @@ Build workflow: **feature branch `stripe-mode-decoupling`** (main stays deployab
     **Left mode-agnostic**: leads, reviews/review_invites, refund_requests, fulfillers, availability, routes,
     custom_domains, legal_pages, notifications, tenant/user profiles (no per-mode Stripe state).
   - **P2 REMAINING**: page_publish + page_render — mode comes from the page record (stream) / serving host, not a
-    request → done in **P4** (per-mode publish path). Webhook entity readers → **P3** (mode from livemode). Until
-    those land, publishing/webhook can't see mode-keyed records (branch not deployed; tests inject → all pass).
+    request → done in **P4** (per-mode publish path). Until it lands, publishing can't see mode-keyed records
+    (branch not deployed; tests inject → all pass).
+- **P3 DONE** (branch): webhook derives mode from `event.livemode`, not the deployment. Parse body first (unverified)
+  to read livemode + pick the per-mode signing secret, then verify signature. Removed `_mode_for_environment` + the
+  mode-mismatch reject (the old dup-order guard — now moot: dev gets no Stripe traffic, dedup stays per-events-table
+  by event_id). Threaded the mode into every reconcile path's repo writes/reads; `order_record_from_session` stamps
+  `stripe_mode` so the raw order write matches the dashboard filter. **OPS at cutover**: point BOTH test + live
+  Stripe webhook endpoints at the prod URL and configure both per-mode signing secrets on prod.
+- **P4 NEXT** — publishing (page_publish per-mode, from the page record's stripe_mode) + host-agnostic checkout URL
+  that bakes `?mode=` into published Buy links (closes the loop on P2's checkout mode-sourcing).
 
 ## The problem — mode and infra are conflated
 
