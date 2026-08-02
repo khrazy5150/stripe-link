@@ -107,6 +107,9 @@ def domain_index_record(site: dict[str, Any]) -> dict[str, Any]:
         "routes": route_table(site),
         "status": str((site.get("domain_provisioning") or {}).get("status") or ""),
         "site_id": str(site.get("site_id") or ""),
+        # The Site's Stripe mode, so the edge resolver reads the mode-partitioned artifact key
+        # (plans/STRIPE_MODE_DECOUPLING.md P5). Custom domains are live-only, so this is "live" in practice.
+        "stripe_mode": "live" if str(site.get("environment") or "").strip().lower() == "live" else "test",
     }
 
 
@@ -130,6 +133,9 @@ def platform_domain_index_record(site: dict[str, Any]) -> dict[str, Any] | None:
         "status": "active",
         "site_id": str(site.get("site_id") or ""),
         "host_kind": "platform",
+        # Platform hostnames serve BOTH free/test and live Sites, so the resolver reads the mode-partitioned key
+        # off this (plans/STRIPE_MODE_DECOUPLING.md P5).
+        "stripe_mode": "live" if str(site.get("environment") or "").strip().lower() == "live" else "test",
     }
 
 

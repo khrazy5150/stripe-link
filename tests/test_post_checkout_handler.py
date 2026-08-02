@@ -45,7 +45,7 @@ class SequenceRoutingTests(unittest.TestCase):
             ]})
 
     def call(self, outcome=None, step_id=None, session_id=None):
-        params = {"tenant_id": "tenant_demo"}
+        params = {"tenant_id": "tenant_demo", "mode": "live"}
         if outcome is not None:
             params["outcome"] = outcome
         if step_id is not None:
@@ -122,7 +122,7 @@ class CarouselRoutingTests(unittest.TestCase):
         self._setup()
 
     def call(self, outcome=None, step_id=None, session_id=None):
-        params = {"tenant_id": "tenant_demo"}
+        params = {"tenant_id": "tenant_demo", "mode": "live"}
         if outcome is not None:
             params["outcome"] = outcome
         if step_id is not None:
@@ -165,7 +165,7 @@ class PostCheckoutHandlerTests(unittest.TestCase):
         self.repository.put({"tenant_id": "tenant_demo", "page_id": "page_thank_you", "status": "published"})
 
     def call(self, outcome=None, step_id=None, session_id=None, pages_domain="pages.example.com"):
-        params = {"tenant_id": "tenant_demo"}
+        params = {"tenant_id": "tenant_demo", "mode": "live"}
         if outcome is not None:
             params["outcome"] = outcome
         if step_id is not None:
@@ -237,7 +237,7 @@ class PostCheckoutHandlerTests(unittest.TestCase):
             {
                 "httpMethod": "GET",
                 "pathParameters": {"page_id": "page_missing"},
-                "queryStringParameters": {"tenant_id": "tenant_demo", "outcome": "accept"},
+                "queryStringParameters": {"tenant_id": "tenant_demo", "outcome": "accept", "mode": "live"},
             },
             None,
             repository=self.repository,
@@ -250,7 +250,7 @@ class PostCheckoutHandlerTests(unittest.TestCase):
             {
                 "httpMethod": "GET",
                 "pathParameters": {"page_id": "page_entry"},
-                "queryStringParameters": {"outcome": "accept"},
+                "queryStringParameters": {"outcome": "accept", "mode": "live"},
             },
             None,
             repository=self.repository,
@@ -306,7 +306,7 @@ class PostCheckoutCustomDomainTests(unittest.TestCase):
     def _call(self, outcome, verified):
         return handler(
             {"httpMethod": "GET", "pathParameters": {"page_id": "page_entry"},
-             "queryStringParameters": {"tenant_id": "tenant_demo", "outcome": outcome, "session_id": "cs_1"}},
+             "queryStringParameters": {"tenant_id": "tenant_demo", "outcome": outcome, "session_id": "cs_1", "mode": "live"}},
             None, repository=self.repository, pages_domain="pages.example.com",
             sites_repo=_FakeSitesRepo(self._site(verified=verified)),
         )
@@ -351,7 +351,7 @@ class PostCheckoutOfferDerivedReservedSlugTests(unittest.TestCase):
         }
 
     def _call(self, outcome, step_id=None, verified=True):
-        params = {"tenant_id": "tenant_demo", "outcome": outcome, "session_id": "cs_1"}
+        params = {"tenant_id": "tenant_demo", "outcome": outcome, "session_id": "cs_1", "mode": "live"}
         if step_id is not None:
             params["step_id"] = step_id
         return handler(
@@ -417,7 +417,7 @@ class PostCheckoutOriginAwareTests(unittest.TestCase):
         }
 
     def _call(self, *, origin=None, site=None, serving=True):
-        params = {"tenant_id": "tenant_demo", "outcome": "accept", "session_id": "cs_1"}
+        params = {"tenant_id": "tenant_demo", "outcome": "accept", "session_id": "cs_1", "mode": "live"}
         if origin is not None:
             params["origin"] = origin
         env = {"PLATFORM_SERVING_ENABLED": "true"} if serving else {"PLATFORM_SERVING_ENABLED": ""}

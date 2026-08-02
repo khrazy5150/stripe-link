@@ -4114,15 +4114,21 @@ function pagePathId(page) {
   return String(page.page_id || "").replace(/^\/+|\/+$/g, "");
 }
 
+// Test pages publish under a `test/` prefix so they never collide with the live promotion of the same page_id
+// (plans/STRIPE_MODE_DECOUPLING.md P5); live pages keep the root key.
+function modePrefix() {
+  return getStripeMode() === "live" ? "" : "test/";
+}
+
 function artifactPageUrl(page) {
   const pageId = pagePathId(page).split("/").map(encodeURIComponent).join("/");
-  return `${getPagesBaseUrl()}/${pageId}/index.html`;
+  return `${getPagesBaseUrl()}/${modePrefix()}${pageId}/index.html`;
 }
 
 function previewArtifactPageUrl(page) {
   const tenantId = encodeURIComponent(page.tenant_id || getTenantId());
   const pageId = pagePathId(page).split("/").map(encodeURIComponent).join("/");
-  return `${getPreviewPagesBaseUrl()}/preview/${tenantId}/${pageId}/index.html`;
+  return `${getPreviewPagesBaseUrl()}/preview/${modePrefix()}${tenantId}/${pageId}/index.html`;
 }
 
 // Per-card pricing-view selection (Standard / Sale / Flash Sale) for the test viewer, keyed by page_id. The

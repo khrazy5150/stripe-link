@@ -69,7 +69,7 @@ def handler(event, context, *, repository=None, s3_client=None, pages_bucket=Non
     if not page_id or not tenant_id:
         return _html_response(_NOT_FOUND_HTML, 404)
 
-    paths = artifact_paths(tenant_id, page_id, context=_VIEW_CONTEXT[view])
+    paths = artifact_paths(tenant_id, page_id, context=_VIEW_CONTEXT[view], mode=str(route.get("stripe_mode") or "live"))
     if is_preview:
         key = paths["preview"]
         bucket = preview_bucket if preview_bucket is not None else os.environ.get("PAGES_PREVIEW_BUCKET", "")

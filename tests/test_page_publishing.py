@@ -105,6 +105,7 @@ class FakeCloudFrontClient:
 class PagePublishingTests(unittest.TestCase):
     def setUp(self):
         self.page = load_fixture("page-simple-coffee.json")
+        self.page["stripe_mode"] = "live"  # publish tests assert the canonical live (root-key) serving path
         self.offer = load_fixture("offer-simple-coffee.json")
         self.product = load_fixture("product-simple-coffee.json")
         self.offers_repo = FakeRepository("offer_id", [self.offer])
@@ -617,6 +618,25 @@ class PagePublishingTests(unittest.TestCase):
         self.assertIn("offer=offer_simple_coffee", html)
         self.assertIn("page_id=page_simple_coffee", html)
         self.assertIn("mode=", html)
+
+    def test_test_mode_page_publishes_under_test_prefix(self):
+        # P5 (plans/STRIPE_MODE_DECOUPLING.md): a test-mode page's artifacts go under a `test/` prefix so they
+        # never collide with the live promotion of the same page_id; live pages keep the root key.
+        self.page["stripe_mode"] = "test"
+        self.page["status"] = "published"
+        result = publish_page_document(
+            self.page,
+            offers_repository=self.offers_repo,
+            products_repository=self.products_repo,
+            s3_client=self.s3,
+            pages_bucket="pages",
+            preview_bucket="preview",
+            environment="dev",
+        )
+        keys = [a["key"] for a in result["artifacts"]]
+        self.assertIn("test/page_simple_coffee/index.html", keys)
+        self.assertIn("preview/test/tenant_demo/page_simple_coffee/index.html", keys)
+        self.assertNotIn("page_simple_coffee/index.html", keys)  # no bare (live) key for a test page
 
     def test_publish_page_document_filters_landing_page_price_contexts_in_offer_order(self):
         product = copy.deepcopy(self.product)
@@ -1333,6 +1353,7 @@ class FunnelAttachTests(unittest.TestCase):
 class FunnelPublishIntegrationTests(unittest.TestCase):
     def setUp(self):
         self.page = load_fixture("page-simple-coffee.json")
+        self.page["stripe_mode"] = "live"  # publish tests assert the canonical live (root-key) serving path
         self.offer = load_fixture("offer-simple-coffee.json")
         self.product = load_fixture("product-simple-coffee.json")
         self.offers_repo = FakeRepository("offer_id", [self.offer])
@@ -1429,6 +1450,7 @@ class BnplPublishMessagingTests(unittest.TestCase):
         self.offer = load_fixture("offer-simple-coffee.json")
         self.product = load_fixture("product-simple-coffee.json")
         self.page = load_fixture("page-simple-coffee.json")
+        self.page["stripe_mode"] = "live"  # publish tests assert the canonical live (root-key) serving path
         self.page["status"] = "published"
         self.offers_repo = FakeRepository("offer_id", [self.offer])
         self.products_repo = FakeRepository("product_id", [self.product])

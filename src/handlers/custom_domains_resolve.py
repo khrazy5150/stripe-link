@@ -95,6 +95,10 @@ def handler(event, context, *, index_repo=None, pages_domain=None):
 
     tenant_id = str(record.get("tenant_id") or "")
     homepage_page_id = str(record.get("target_page_id") or "")
+    # Serve the artifact from the Site's mode partition (plans/STRIPE_MODE_DECOUPLING.md P5): live at the root
+    # key, test under `test/`. Records predating this default to live (root) via artifact_paths.
+    record_mode = "test" if str(record.get("stripe_mode") or "").strip().lower() == "test" else "live"
+    key_prefix = "test/" if record_mode == "test" else ""
 
     # A well-known crawl file (/robots.txt, /sitemap.xml, /{key}.txt) is served from the sibling artifact the
     # publisher wrote under the homepage page_id. Every other path routes through the Site's slug map: the
@@ -102,7 +106,7 @@ def handler(event, context, *, index_repo=None, pages_domain=None):
     qp = query_params(event)
     path = str(qp.get("path") or "")
     if path and _WELL_KNOWN_PATH.match(path):
-        artifact_key = f"{homepage_page_id}{path}"
+        artifact_key = f"{key_prefix}{homepage_page_id}{path}"
     else:
         # funnel_step selects which sequential upsell a reserved /upsell slug serves (P2b); the Worker forwards
         # the buyer's query string, so it arrives here alongside path.
@@ -123,7 +127,7 @@ def handler(event, context, *, index_repo=None, pages_domain=None):
         page_id = str(target.get("page_id") or "") if kind == "page" else ""
         if not page_id:
             return error_response("No page is published at this path.", status_code=404, code="no_route")
-        artifact_key = artifact_paths(tenant_id, page_id, context=price_context)["published"]
+        artifact_key = artifact_paths(tenant_id, page_id, context=price_context, mode=record_mode)["published"]
 
     origin_url = public_url(pages_domain, artifact_key)
     if not origin_url:

@@ -1,6 +1,6 @@
 import os
 
-from stripe_link.common import error_response, json_response, parse_json_body
+from stripe_link.common import error_response, json_response, parse_json_body, resolve_stripe_mode
 from stripe_link.domain.documents import (
     DocumentValidationError,
     is_offerless_page,
@@ -107,7 +107,8 @@ def handler(event, context, *, sites_repo=None, reviews_repo=None):
         # Resolve the page's Site so the live preview shows the same Organization entity graph the published
         # artifact will (the preview IS the published renderer). Optional/graceful — no Site, no change.
         if sites_repo is None and os.environ.get("SITES_TABLE"):
-            sites_repo = sites_repository()
+            # Resolve the Site in the previewed page's own mode so preview matches published (P5).
+            sites_repo = sites_repository(mode=resolve_stripe_mode(event, body))
         site = find_site_for_page(sites_repo, str(page.get("tenant_id") or ""), str(page.get("page_id") or ""))
         if reviews_repo is None and os.environ.get("REVIEWS_TABLE"):
             reviews_repo = reviews_repository()

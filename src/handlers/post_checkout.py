@@ -62,7 +62,7 @@ def _redirect_base(site, origin_host):
     return ""
 
 
-def _next_page_url(site, tenant_id, next_page_id, pages_domain, origin_host=None):
+def _next_page_url(site, tenant_id, next_page_id, pages_domain, origin_host=None, mode="live"):
     """The buyer-facing URL for the funnel's next page. Keep the buyer on the host they entered on (validated
     custom domain or platform host) so they never leave mid-funnel (plans/SITE_OBJECT.md §2.6): a synthetic
     funnel artifact serves at its reserved slug (/upsell //downsell //thank-you, P2b) when that slug is attached;
@@ -78,7 +78,7 @@ def _next_page_url(site, tenant_id, next_page_id, pages_domain, origin_host=None
         if slug:
             path = "" if slug == "/" else slug.lstrip("/")
             return f"{base}/{path}"
-    return public_url(pages_domain, artifact_paths(tenant_id, next_page_id)["published"])
+    return public_url(pages_domain, artifact_paths(tenant_id, next_page_id, mode=mode)["published"])
 
 
 def _load_post_purchase_plan(tenant_id, page, offers_repo, products_repo):
@@ -142,7 +142,7 @@ def handler(event, context, *, repository=None, pages_domain=None, sites_repo=No
         def _funnel_redirect(next_page_id, extra_query=None):
             """Redirect to a funnel artifact ({page_id}__…), carrying funnel_page/session so the next screen's
             island keeps the funnel context. Returns a 500 when the pages domain isn't configured."""
-            url = _next_page_url(site, tenant_id, next_page_id, pages_domain, origin_host)
+            url = _next_page_url(site, tenant_id, next_page_id, pages_domain, origin_host, mode=mode)
             if not url:
                 return error_response("Pages distribution domain is not configured.", status_code=500, code="pages_domain_not_configured")
             query = dict(extra_query or {})
@@ -199,13 +199,13 @@ def handler(event, context, *, repository=None, pages_domain=None, sites_repo=No
         except RepositoryError:
             thanks = None
         if not thanks or thanks.get("status") != "published":
-            entry_url = _next_page_url(site, tenant_id, page_id, pages_domain, origin_host)
+            entry_url = _next_page_url(site, tenant_id, page_id, pages_domain, origin_host, mode=mode)
             if not entry_url:
                 return error_response("Pages distribution domain is not configured.", status_code=500, code="pages_domain_not_configured")
             separator = "&" if "?" in entry_url else "?"
             return redirect_response(f"{entry_url}{separator}checkout=success")
 
-    url = _next_page_url(site, tenant_id, next_page_id, pages_domain, origin_host)
+    url = _next_page_url(site, tenant_id, next_page_id, pages_domain, origin_host, mode=mode)
     if not url:
         return error_response("Pages distribution domain is not configured.", status_code=500, code="pages_domain_not_configured")
 
