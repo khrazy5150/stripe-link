@@ -190,6 +190,12 @@ shipping-config, **platform-config** (misnamed — holds per-tenant TenantConfig
 **REVIEW before wiping (per-tenant but may hold hand-authored content):** `legal-pages` (hand-written ToS/privacy?),
 the media S3 bucket (uploaded images).
 
+**SCOPE GUARD — `jb-` prefix ONLY.** stripe-cart (legacy) and stripe-link coexist in the same AWS account with
+names that differ only by the prefix (stripe-cart `platform-config-{env}` = GLOBAL system themes/Connect config;
+stripe-link `jb-platform-config-{env}` = per-tenant tenant_config — DIFFERENT tables). The WIPE list above is the
+**`jb-`-prefixed** stripe-link tables; the cutover script MUST refuse any table name not starting with `jb-`
+(mirror `assert_jb_resource_name`) so it can never touch a stripe-cart table. All names below are `jb-<name>-<env>`.
+
 **Cutover steps:** (1) **Back up every table first** — full scan-dump to JSON in S3 (cheap insurance, nothing
 unrecoverable). (2) Selective scan-delete of the WIPE-list tables only. (3) Clear the **pages + preview** S3 buckets
 (published artifacts, disposable); leave the billing-config bucket + (per review) media bucket. (4) Re-onboard the
