@@ -2,7 +2,7 @@ import os
 import time
 import uuid
 
-from stripe_link.common import error_response, json_response, parse_json_body, path_params, query_params, tenant_id_from_event
+from stripe_link.common import error_response, json_response, parse_json_body, path_params, query_params, resolve_stripe_mode, tenant_id_from_event
 from stripe_link.domain.documents import DocumentValidationError, validate_invoice
 from stripe_link.domain.fees import cached_billing_config, calculate_price, normalize_tier_id
 from stripe_link.domain.invoicing import (
@@ -30,19 +30,20 @@ from stripe_link.stripe_platform_secrets import checkout_credentials
 
 
 def handler(event, context, repository=None, stripe_repo=None, tenant_repo=None, secret_cipher=None, opener=None, mailer_send=None, billing_config_loader=None, appointments_repo=None):
-    repository = repository or invoices_repository()
+    mode = resolve_stripe_mode(event)
+    repository = repository or invoices_repository(mode=mode)
     method = (event or {}).get("httpMethod", "").upper()
     path = (event or {}).get("path", "")
     if method == "OPTIONS":
         return json_response({})
     if method == "POST" and path.endswith("/from-appointment"):
-        return invoice_from_appointment_route(event, repository, appointments_repo=appointments_repo)
+        return invoice_from_appointment_route(event, repository, appointments_repo=appointments_repo, mode=mode)
     if method == "POST" and path.endswith("/from-order"):
-        return invoice_from_order_route(event, repository, appointments_repo=appointments_repo)
+        return invoice_from_order_route(event, repository, appointments_repo=appointments_repo, mode=mode)
     if method == "POST" and path.endswith("/send"):
         return send_invoice_route(event, repository, stripe_repo=stripe_repo, tenant_repo=tenant_repo,
                                   secret_cipher=secret_cipher, opener=opener, mailer_send=mailer_send,
-                                  billing_config_loader=billing_config_loader)
+                                  billing_config_loader=billing_config_loader, mode=mode)
     if method in {"POST", "PUT"}:
         return save_invoice(event, repository)
     if method == "GET":
@@ -53,7 +54,7 @@ def handler(event, context, repository=None, stripe_repo=None, tenant_repo=None,
     return error_response(f"Unsupported method '{method}'.", status_code=405, code="method_not_allowed")
 
 
-def send_invoice_route(event, repository, *, stripe_repo, tenant_repo, secret_cipher, opener, mailer_send, billing_config_loader):
+def send_invoice_route(event, repository, *, stripe_repo, tenant_repo, secret_cipher, opener, mailer_send, billing_config_loader, mode="test"):
     tenant_id = tenant_id_from_event(event)
     invoice_id = path_params(event).get("invoice_id")
     if not tenant_id:
@@ -73,7 +74,6 @@ def send_invoice_route(event, repository, *, stripe_repo, tenant_repo, secret_ci
     if not line_items:
         return error_response("Invoice has no line items.", code="empty_invoice")
 
-    mode = "live" if invoice.get("stripe_mode") == "live" else ("live" if os.environ.get("ENVIRONMENT") == "prod" else "test")
     stripe_repo = stripe_repo or stripe_keys_repository()
     tenant_repo = tenant_repo or tenant_profiles_repository()
     secret_cipher = secret_cipher or KmsSecretCipher()
@@ -151,7 +151,7 @@ def send_invoice_route(event, repository, *, stripe_repo, tenant_repo, secret_ci
     return json_response({"invoice": updated, "hosted_invoice_url": hosted_url, "delivered": sent})
 
 
-def invoice_from_appointment_route(event, repository, *, appointments_repo=None):
+def invoice_from_appointment_route(event, repository, *, appointments_repo=None, mode="test"):
     """Create a draft invoice from a book-then-pay appointment (STORY-6.4). Idempotent per
     appointment: returns the existing linked invoice if one was already created."""
     tenant_id = tenant_id_from_event(event)
@@ -165,7 +165,7 @@ def invoice_from_appointment_route(event, repository, *, appointments_repo=None)
     if not appointment_id:
         return error_response("appointment_id is required.", code="missing_appointment_id")
 
-    appointments_repo = appointments_repo or (appointments_repository() if os.environ.get("SERVICES_TABLE") else None)
+    appointments_repo = appointments_repo or (appointments_repository(mode=mode) if os.environ.get("SERVICES_TABLE") else None)
     if not appointments_repo:
         return error_response("Appointments are not available.", status_code=400, code="appointments_unavailable")
     appointment = appointments_repo.get(tenant_id, appointment_id)
@@ -186,7 +186,7 @@ def invoice_from_appointment_route(event, repository, *, appointments_repo=None)
     return json_response({"invoice": saved, "created": True}, status_code=201)
 
 
-def invoice_from_order_route(event, repository, *, appointments_repo=None):
+def invoice_from_order_route(event, repository, *, appointments_repo=None, mode="test"):
     """Create (idempotently) one invoice for a book-then-pay order, covering all its appointments
     (one line per service line). Returns the existing invoice if one was already created (STORY-3.3)."""
     tenant_id = tenant_id_from_event(event)
@@ -198,7 +198,7 @@ def invoice_from_order_route(event, repository, *, appointments_repo=None):
     if not order_id:
         return error_response("order_id is required.", code="missing_order_id")
 
-    appointments_repo = appointments_repo or (appointments_repository() if os.environ.get("SERVICES_TABLE") else None)
+    appointments_repo = appointments_repo or (appointments_repository(mode=mode) if os.environ.get("SERVICES_TABLE") else None)
     if not appointments_repo:
         return error_response("Appointments are not available.", status_code=503, code="appointments_unavailable")
     appointments = [a for a in appointments_repo.list_for_tenant(tenant_id) if str(a.get("order_id") or "") == order_id]

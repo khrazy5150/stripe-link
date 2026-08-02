@@ -866,12 +866,13 @@ def review_invites_repository(table: Any | None = None) -> DynamoDocumentReposit
     )
 
 
-def services_repository(table: Any | None = None) -> DynamoDocumentRepository:
+def services_repository(table: Any | None = None, *, mode: str | None = None) -> DynamoDocumentRepository:
     return DynamoDocumentRepository(
         os.environ.get("SERVICES_TABLE", ""),
         document_type="service",
         id_field="service_id",
         table=table,
+        mode=mode,
     )
 
 
@@ -932,13 +933,14 @@ def routes_repository(table: Any | None = None) -> DynamoDocumentRepository:
     )
 
 
-def experiments_repository(table: Any | None = None) -> DynamoDocumentRepository:
+def experiments_repository(table: Any | None = None, *, mode: str | None = None) -> DynamoDocumentRepository:
     """A/B experiments, keyed by tenant but resolvable by experiment_id via GSI1 (find_by_id)."""
     return DynamoDocumentRepository(
         os.environ.get("EXPERIMENTS_TABLE", ""),
         document_type="experiment",
         id_field="experiment_id",
         table=table,
+        mode=mode,
     )
 
 

@@ -5,7 +5,7 @@ import string
 import time
 
 from stripe_link.cloudflare_secrets import get_cloudflare_api_token
-from stripe_link.common import error_response, json_response, parse_json_body, path_params, query_params, tenant_id_from_event
+from stripe_link.common import error_response, json_response, parse_json_body, path_params, query_params, resolve_stripe_mode, tenant_id_from_event
 from stripe_link.domain.connect_sync import compute_site_eligibility, connect_state_fields, site_domain_verified, site_seo_enabled
 from stripe_link.domain.sitemap import generate_indexnow_key
 from stripe_link.stripe_client import stripe_request
@@ -134,7 +134,8 @@ def _ensure_platform_hostname(document: dict) -> None:
 
 
 def handler(event, context, repository=None, registry=None):
-    repository = repository or sites_repository()
+    mode = resolve_stripe_mode(event)
+    repository = repository or sites_repository(mode=mode)
     method = (event or {}).get("httpMethod", "").upper()
     if method == "OPTIONS":
         return json_response({})
@@ -143,11 +144,11 @@ def handler(event, context, repository=None, registry=None):
     if method == "GET" and resource.endswith("/subdomain"):
         return check_subdomain(event, registry or subdomain_registry())
     if method == "PATCH" and site_id and resource.endswith("/status"):
-        return update_site_status(event, repository, site_id)
+        return update_site_status(event, repository, site_id, mode=mode)
     if method == "POST" and site_id and resource.endswith("/homepage"):
         return set_homepage(event, repository, site_id)
     if method == "POST" and site_id and resource.endswith("/pages"):
-        return attach_page(event, repository, site_id)
+        return attach_page(event, repository, site_id, mode=mode)
     if method == "DELETE" and site_id and resource.endswith("/pages"):
         return detach_page(event, repository, site_id)
     if site_id and resource.endswith(("/domain", "/domain/check")):
@@ -159,13 +160,13 @@ def handler(event, context, repository=None, registry=None):
                 status_code=403, code="custom_domains_live_only",
             )
         if method == "POST" and resource.endswith("/domain/check"):
-            return check_domain(event, repository, site_id)
+            return check_domain(event, repository, site_id, mode=mode)
         if method == "POST" and resource.endswith("/domain"):
             return connect_domain(event, repository, site_id)
         if method == "DELETE" and resource.endswith("/domain"):
             return disconnect_domain(event, repository, site_id)
     if method == "POST":
-        return create_site(event, repository, registry)
+        return create_site(event, repository, registry, mode=mode)
     if method == "GET":
         if site_id:
             return get_site(event, repository, site_id)
@@ -260,7 +261,7 @@ def set_homepage(event, repository, site_id):
     return error or json_response({"site": saved})
 
 
-def attach_page(event, repository, site_id):
+def attach_page(event, repository, site_id, mode="test"):
     """Attach a page to the Site at a chosen slug with a page_type (+ optional category for a category page).
     The generalized route-map primitive (plans/SITE_OBJECT.md §2.5b Slice 2); the storefront/category builder
     uses it, and it seeds the full route-map editor later."""
@@ -292,19 +293,19 @@ def attach_page(event, repository, site_id):
         category=str(body.get("category") or "").strip() or None,
         label=str(body.get("label") or "").strip() or None,
     )
-    _record_offer_link_on_attach(pages, page_id, tenant_id)
+    _record_offer_link_on_attach(pages, page_id, tenant_id, mode=mode)
     site["pages"] = pages
     saved, error = _save_site_pages(repository, site)
     return error or json_response({"site": saved})
 
 
-def _record_offer_link_on_attach(pages: dict, page_id: str, tenant_id: str) -> None:
+def _record_offer_link_on_attach(pages: dict, page_id: str, tenant_id: str, mode: str = "test") -> None:
     """Record a just-attached PUBLISHED offer page's offer_id on its route-map entry immediately, so it's
     eligible for storefront grids without waiting for a re-publish. (Publishing denormalizes the same link via
     _denormalize_page_catalog; this makes attach-a-product-then-see-it-in-the-store work in one step. Only
     published pages qualify — a draft has no live artifact to link to.) Best-effort: never block the attach."""
     try:
-        page = pages_repository().get(tenant_id, page_id)
+        page = pages_repository(mode=mode).get(tenant_id, page_id)
     except Exception:  # noqa: BLE001 - a lookup failure just defers the link to the next publish
         return
     if not page or page.get("status") != "published":
@@ -367,7 +368,7 @@ def check_subdomain(event, registry):
     return json_response(result)
 
 
-def create_site(event, repository, registry=None):
+def create_site(event, repository, registry=None, mode="test"):
     registry = registry or subdomain_registry()
     try:
         document = parse_json_body(event)
@@ -390,7 +391,7 @@ def create_site(event, repository, registry=None):
         existing = repository.get(str(document.get("tenant_id") or ""), str(document.get("site_id") or ""))
         saved = repository.put(document)
         if existing is not None and site_seo_enabled(existing) != site_seo_enabled(saved):
-            _republish_site_pages(str(saved.get("tenant_id") or ""), saved)
+            _republish_site_pages(str(saved.get("tenant_id") or ""), saved, mode=mode)
         return json_response({"site": saved}, status_code=201)
     except (DocumentValidationError, ValueError, RepositoryError) as exc:
         return error_response(str(exc), code="invalid_site")
@@ -469,7 +470,7 @@ def _refresh_eligibility(repository, tenant_id, sites):
             continue
 
 
-def update_site_status(event, repository, site_id):
+def update_site_status(event, repository, site_id, mode="test"):
     try:
         body = parse_json_body(event)
     except ValueError as exc:
@@ -493,7 +494,7 @@ def update_site_status(event, repository, site_id):
     # Archiving/reactivating changes each page's robots directive (noindex when archived), so re-render the
     # Site's pages immediately — the dashboard tells the tenant it takes effect now.
     if status_changed:
-        _republish_site_pages(tenant_id, saved)
+        _republish_site_pages(tenant_id, saved, mode=mode)
     return json_response({"site": saved})
 
 
@@ -746,14 +747,14 @@ def connect_domain(event, repository, site_id):
     )
 
 
-def _republish_site_pages(tenant_id, site, pages_repo=None):
+def _republish_site_pages(tenant_id, site, pages_repo=None, mode="test"):
     """Re-publish every page attached to the Site by re-putting its page doc, firing the publish stream. Called
     when a custom domain FIRST verifies: the reserved /sale //flash-sale + post-purchase funnel slugs, and each
     page's canonical/robots/index-eligibility, are computed at publish time gated on the domain being verified
     (`on_custom_domain`), so without this a page published BEFORE verification never picks them up until the
     tenant manually re-saves (plans/SALES_FUNNELS.md P2b). Best-effort — a verify must never fail on this."""
     try:
-        pages_repo = pages_repo or pages_repository()
+        pages_repo = pages_repo or pages_repository(mode=mode)
         seen = set()
         now = int(time.time())
         for entry in (site.get("pages") or {}).values():
@@ -769,7 +770,7 @@ def _republish_site_pages(tenant_id, site, pages_repo=None):
         pass
 
 
-def check_domain(event, repository, site_id, pages_repo=None):
+def check_domain(event, repository, site_id, pages_repo=None, mode="test"):
     tenant_id = tenant_id_from_event(event)
     if not tenant_id:
         return error_response("tenant_id is required.", code="missing_tenant")
@@ -833,7 +834,7 @@ def check_domain(event, repository, site_id, pages_repo=None):
     # were published before the domain verified. The index above still reflects pre-verify pages.routes; the
     # re-publish updates pages.routes and re-syncs the index right after.
     if verified and not was_verified:
-        _republish_site_pages(tenant_id, saved, pages_repo)
+        _republish_site_pages(tenant_id, saved, pages_repo, mode=mode)
     # When not yet verified, tell the tenant exactly why: a record that isn't resolving (wrong name/value) vs.
     # records that look right but the certificate is still issuing.
     diagnostics, hint = [], ""

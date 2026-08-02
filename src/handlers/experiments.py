@@ -1,6 +1,6 @@
 import time
 
-from stripe_link.common import error_response, json_response, parse_json_body, path_params, tenant_id_from_event
+from stripe_link.common import error_response, json_response, parse_json_body, path_params, resolve_stripe_mode, tenant_id_from_event
 from handlers.routes import short_url_for_code
 from stripe_link.domain.documents import DocumentValidationError, validate_experiment, validate_route
 from stripe_link.ids import generate_id
@@ -28,7 +28,8 @@ def handler(
     id_fn=lambda: f"exp_{generate_id()}",
     code_fn=None,
 ):
-    repository = repository or experiments_repository()
+    mode = resolve_stripe_mode(event)
+    repository = repository or experiments_repository(mode=mode)
     method = (event or {}).get("httpMethod", "").upper()
     if method == "OPTIONS":
         return json_response({})
@@ -47,7 +48,7 @@ def handler(
         if method == "DELETE" and experiment_id and not action:
             return delete_experiment(event, repository, routes, experiment_id)
         if method == "POST" and experiment_id and action == "start":
-            return start_experiment(event, repository, pages, now_fn)
+            return start_experiment(event, repository, pages, now_fn, mode=mode)
         if method == "POST" and experiment_id and action == "pause":
             return set_status(event, repository, experiment_id, "paused", now_fn)
         if method == "POST" and experiment_id and action == "complete":
@@ -219,7 +220,7 @@ def update_experiment(event, repository, experiment_id, now_fn):
     return json_response({"experiment": with_short_url(saved)})
 
 
-def start_experiment(event, repository, pages, now_fn):
+def start_experiment(event, repository, pages, now_fn, mode="test"):
     tenant_id = tenant_id_from_event(event)
     if not tenant_id:
         return error_response("tenant_id is required.", code="missing_tenant")
@@ -232,7 +233,7 @@ def start_experiment(event, repository, pages, now_fn):
     if total_weight != 100:
         return error_response("Variant weights must total 100 before starting.", code="invalid_weights")
 
-    pages = pages or pages_repository()
+    pages = pages or pages_repository(mode=mode)
     for variant in variants:
         page = pages.get(tenant_id, variant.get("page_id"))
         if not page:
