@@ -43,6 +43,31 @@ Deferred, non-blocking follow-ups. Each item notes what, why it was deferred, an
 - **Why deferred:** manual reassignment is an edge case; the primary booking path is correct. Introduced
   in Phase B.5.
 
+## Platform architecture
+
+### ⭐⭐ Decouple Stripe mode (test/live) from platform environment (dev/prod)
+- **What:** today the dashboard test/live toggle swaps the WHOLE backend (test→dev.juniorbay.com,
+  live→prod.juniorbay.com), the webhook binds mode to `ENVIRONMENT`, and test pages render to the dev bucket — so a
+  tenant's Stripe-**test** sandbox structurally IS the dev backend. Decouple them: hostname→backend (app=prod,
+  sandbox=dev, dev becomes pure software staging) + a per-tenant **Stripe-mode toggle within prod** so a tenant's
+  test/"sandbox" mode runs on the production platform with test Stripe keys. Full plan +
+  contract + 6 phases in **`plans/STRIPE_MODE_DECOUPLING.md`**.
+- **Foundational + big** (dashboard/api-client, per-mode data across all entities, webhook mode-from-livemode,
+  publishing/checkout URL, CDN mode-partitioning). **Approved to plan** 2026-08-02 (do while pre-launch = no data to
+  migrate). **Prerequisite** for the clean onboarding streamline; **supersedes** the shipped mode-follows-environment
+  fix. Not built. Next step: greenlight the phasing + start P0.
+- **The `stripe_keys` fixed-name two-table design (documents.py:357) is the existing cross-mode precedent to
+  generalize.**
+
+### Streamline Connect onboarding — live-first + opt-in Stripe-test sandbox
+- **What:** default new tenants to LIVE; the wizard onboards their live Stripe only (with expanded `stripe_user[]`
+  prefill — email already prefilled at stripe_connect.py:165). A Settings button "Set up a sandbox for your funnels"
+  triggers the **Stripe-test** onboarding on demand, then reveals the top test/live toggle. Distinct TEST Connect
+  branding (a no-code Stripe-dashboard setting). Eliminates the confusing double-onboarding for tenants who never
+  need test, while preserving the sandbox for those who do.
+- **Depends on the Stripe-mode decoupling above** (the sandbox must be Stripe-test-on-prod, not the dev backend).
+  Author's chosen model (#4). Not built. Quick wins doable independently: prefill expansion; test brand color.
+
 ## Dashboard / UX
 
 ### Consolidate the side menu into collapsible groups
@@ -70,6 +95,41 @@ Deferred, non-blocking follow-ups. Each item notes what, why it was deferred, an
   `shipping` (needs shipping integration), `system`/support (needs a support system).
 
 ## Commerce
+
+### ⭐ SaaS billing paywall — port stripe-cart's platform→tenant subscription (TABLE-DRIVEN)
+- **What:** stripe-link has NO real platform→tenant billing (tier_id is only a transaction fee-rate; `billing_status`
+  is a placeholder stuck at "trial"; no Stripe subscription, no monthly charge). stripe-cart HAS the full SaaS
+  billing paywall (`stripe-cart/src/billing.py`, `platform_config.py`, `plans/SAAS_BILLING_PAYWALL_PLAN.md`) — it
+  was never migrated. Port it, but **DynamoDB-table-driven** (editable without deploys) per author. Full design in
+  **`plans/SAAS_BILLING_PAYWALL.md`**.
+- **Key requirements (author-confirmed 2026-08-02):** editable `PlatformPlansTable` (basic "Bay Pass" $9/14-day
+  trial active, pro "Bay Pass Pro" $19 inactive); **EXEMPT flag** so the author's test tenants (his own emails) are
+  in-good-standing with NO Stripe charge; price changes via new immutable Stripe Price → migrate existing subs at
+  cycle end (`proration_behavior='none'`); admin plan-CRUD screen is a LATER phase (MVP = hand-edit the table).
+- **Phases:** P1 rail (table + subscribe via Stripe Checkout(subscription)+Billing Portal + webhook status +
+  extend the good-standing guard to page-serving + exempt) → P2 dashboard billing screen → P3 admin screen → P4
+  price-migration tooling.
+- **Why it matters now:** foundational — it's the rail the identity-verification charging (below) needs, and the
+  actual mechanism that bills tenants their subscription. Awaiting greenlight on the plan-set + subscribe UX.
+
+### Age / identity verification gate (Stripe Identity)
+- **Blocked on the SaaS billing paywall above** — verification charging rides the tenant subscription (metered
+  SubscriptionItem or a "verified" tier), so build the paywall rail first.
+- **What:** let tenants mark products/offers age- or identity-restricted; the buyer must pass a **Stripe Identity**
+  check (gov-ID + selfie) before checkout; the platform bills the tenant per verification. Full design in
+  **`plans/IDENTITY_VERIFICATION.md`**.
+- **Key facts:** VerificationSession runs on the PLATFORM account (buyer verification, not Connect KYC); reading
+  `dob` for age gating needs a **restricted API key**; cost $1.50/verification (doc+selfie), no monthly minimum.
+- **Charging (primary open decision):** **no platform→tenant billing rail exists** (application_fee is a take-rate
+  on the buyer's payment). Recommended Phase-1 MVP = flat verification fee (~$2.50-3.00) added to the *converting*
+  order's application_fee (tenant nets it out; platform absorbs non-converting verifications via the markup;
+  per-tenant daily cap). Phase-2 (deferred) = a real metered platform→tenant billing rail (reusable for other
+  features).
+- **Why deferred:** planned 2026-08-02, no code. Current tenants sell supplements (not gated) — hold the design,
+  build when an age-restricted tenant onboards (or ship P1a free as a differentiator). Awaiting the charging-model
+  decision.
+
+
 
 ### Editable funnel Page docs — the only open item from SALES_FUNNELS.md
 - **What:** the funnel steps (`/upsell`, `/downsell`, `/thank-you`) render from ephemeral synthesized S3
@@ -169,6 +229,29 @@ Deferred, non-blocking follow-ups. Each item notes what, why it was deferred, an
   10DLC below); and testimonials/`social_proof` auto-wiring from approved reviews.
 - **Why deferred:** core review capture + Product star snippets are live and compliant; these are additive
   enhancements.
+
+## Stripe integrations (backlog — investigated 2026-08-02)
+
+### Capture more Connect-onboarding data via account.updated
+- **What:** we ALREADY capture the tenant's business identity (name/email/phone/address) from the `account.updated`
+  webhook via `business_profile_seed` (`src/stripe_link/domain/connect_sync.py:66`) → seeds the business profile
+  (fill-empty-only, `reconcile_account_updated` in `stripe_webhook.py`). Expand it to capture more `business_profile`
+  fields (website/url, product_description, MCC, support contacts) + store on the tenant/business profile.
+- **Caveats:** Stripe redacts sensitive KYC PII (tax_id/SSN/DOB/bank) on Standard accounts — business identity only,
+  not raw PII. The tax product-type selection is a Stripe Tax setting (see below), not Connect onboarding data.
+- **Small:** additive to the existing account.updated handler. Not built.
+
+### Stripe Tax threshold monitoring — toggle + on-demand panel in the dashboard
+- **What:** let a tenant enable Stripe's free sales-tax **threshold monitoring** ("when/where you need to collect")
+  from our dashboard, popped out on demand. Stripe ships it as a **Connect embedded component**
+  ([tax-threshold-monitoring](https://docs.stripe.com/connect/supported-embedded-components/tax-threshold-monitoring)):
+  create an Account Session (`components[tax_threshold_monitoring][enabled]=true`) + render via `@stripe/connect-js`.
+- **Notes:** monitoring is FREE; tax *calculation* on transactions costs (~0.5%/txn). Prereq: also render the Tax
+  **settings** + **registrations** components (the [Tax-for-platforms](https://docs.stripe.com/tax/tax-for-platforms)
+  setup). **VERIFY:** whether embedded components support our **Standard OAuth** connected accounts (platform-liable
+  model fits Express/Custom better); if not, fall back to a deep-link to the tenant's own Stripe Tax settings or use
+  the [Tax Settings API](https://docs.stripe.com/tax/settings-api) to read/enable status (BNPL-toggle pattern).
+- **Own plan when prioritized.** Not built.
 
 ## Production setup
 
