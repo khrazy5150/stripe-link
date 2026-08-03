@@ -38,8 +38,12 @@ def is_trial_expired(tenant_profile: dict[str, Any] | None, now: int | None = No
     profile = tenant_profile or {}
     if not _is_platform_trial(profile):
         return False
-    ends = profile.get("trial_ends_at")
-    if not isinstance(ends, int) or ends <= 0:
+    # trial_ends_at comes back from DynamoDB as a Decimal (not int), so coerce numerically rather than isinstance.
+    try:
+        ends = int(profile.get("trial_ends_at"))
+    except (TypeError, ValueError):
+        return False
+    if ends <= 0:
         return False
     current = now if now is not None else int(time.time())
     return current >= ends

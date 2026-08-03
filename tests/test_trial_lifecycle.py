@@ -52,6 +52,13 @@ class TrialExpiryTests(unittest.TestCase):
     def test_exempt_never_walled(self):
         self.assertTrue(is_billing_in_good_standing(self._trial(ends_at=1000, billing_exempt=True), now=2000))
 
+    def test_decimal_trial_ends_at_expires(self):
+        # DynamoDB returns numbers as Decimal, not int — the guard must still detect expiry (regression).
+        from decimal import Decimal
+        profile = {"billing_status": "trial", "trial_ends_at": Decimal("1000")}
+        self.assertTrue(is_trial_expired(profile, now=2000))
+        self.assertFalse(is_billing_in_good_standing(profile, now=2000))
+
 
 if __name__ == "__main__":
     unittest.main()
