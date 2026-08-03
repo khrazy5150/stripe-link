@@ -12,13 +12,16 @@ CAPABILITIES: dict[str, dict[str, str]] = {
     "landing_pages": {"label": "Landing Pages", "view": "landingPages"},
     "booking": {"label": "Booking & Appointments", "view": "services"},
     "sites": {"label": "Sites", "view": "sites"},
-    "custom_domains": {"label": "Custom Domains", "view": "configuration"},
     "collections": {"label": "Collections", "view": "collections"},
     "ab_testing": {"label": "A/B Testing", "view": "abTesting"},
     "reviews": {"label": "Reviews", "view": "reviews"},
     "lead_capture": {"label": "Lead Capture", "view": "leads"},
     "invoicing": {"label": "Invoicing", "view": "invoices"},
-    "bnpl": {"label": "Buy Now, Pay Later", "view": "stripeKeys"},
+    # These two are sub-features of shared core screens (custom domains lives inside Configuration; BNPL is a toggle
+    # on the Payments screen), so they have NO menu `view` — locking the whole screen over a sub-feature would strand
+    # a walled tenant away from Stripe-connect / settings. Still backend-gated at their own actions.
+    "custom_domains": {"label": "Custom Domains", "view": ""},
+    "bnpl": {"label": "Buy Now, Pay Later", "view": ""},
 }
 
 

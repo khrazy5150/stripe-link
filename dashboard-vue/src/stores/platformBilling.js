@@ -27,10 +27,11 @@ export const usePlatformBillingStore = defineStore("platformBilling", {
     // The capabilities the tenant currently has (server-computed: exempt=all, live trial=all, else plan's list).
     entitlementSet: (state) => new Set(state.current.entitlements || []),
 
-    // view key -> capability key (only for gated views; ungated views are absent = always allowed).
+    // view key -> capability key (only for gated views with a dedicated screen; capabilities with no `view` — e.g.
+    // bnpl, custom_domains — are sub-features of shared screens and never lock a menu item).
     viewCapability: (state) => {
       const map = {};
-      for (const cap of state.capabilities) map[cap.view] = cap.key;
+      for (const cap of state.capabilities) if (cap.view) map[cap.view] = cap.key;
       return map;
     },
 
