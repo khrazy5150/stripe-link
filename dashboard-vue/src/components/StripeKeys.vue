@@ -104,6 +104,32 @@
       </div>
     </section>
 
+    <section v-if="!store.hasTestSandbox" class="dashboard-card sandbox-card">
+      <header class="dashboard-card-header">
+        <div>
+          <h2>Set up a sandbox for your funnels</h2>
+          <p>Test your checkout, upsells, and funnels with Stripe test mode — no real charges, no real cards.</p>
+        </div>
+      </header>
+      <div class="connect-card-body">
+        <p class="connect-copy">
+          A sandbox connects your Stripe account in test mode so you can rehearse a full purchase safely. Once it's
+          set up, a <strong>Test / Live</strong> toggle appears at the top of the dashboard for switching between them.
+        </p>
+        <div class="connect-actions">
+          <button
+            type="button"
+            class="primary-action"
+            :disabled="store.connectStarting"
+            @click="setUpSandbox"
+          >
+            {{ store.connectStarting ? "Opening Stripe..." : "Set up a sandbox" }}
+          </button>
+        </div>
+        <div v-if="sandboxError" class="keys-status-banner error">{{ sandboxError }}</div>
+      </div>
+    </section>
+
     <section v-if="isConnected" class="dashboard-card bnpl-card">
       <header class="dashboard-card-header">
         <div>
@@ -281,10 +307,23 @@ import { computed, onMounted, ref, watch } from "vue";
 import StripeKeyPanel from "./StripeKeyPanel.vue";
 import { useStripeKeysStore } from "../stores/stripeKeys";
 import { usePaymentMethodsStore } from "../stores/paymentMethods";
+import { setStripeMode } from "../api/client";
 
 const store = useStripeKeysStore();
 const pm = usePaymentMethodsStore();
 const openInfo = ref("");
+const sandboxError = ref("");
+
+// Opt-in Stripe-test sandbox (live-first onboarding). Persist test mode BEFORE the OAuth round-trip so that when
+// Stripe redirects back and the dashboard reloads, App.vue initializes in test mode with the toggle revealed
+// (modes.test is now connected). If the tenant abandons OAuth, App.vue's coercion falls back to live — no strand.
+async function setUpSandbox() {
+  sandboxError.value = "";
+  setStripeMode("test");
+  store.verifyMode = "test";
+  await store.startConnect({ path: "existing" });
+  if (store.connectError) sandboxError.value = store.connectError;
+}
 
 function toggleInfo(method) {
   openInfo.value = openInfo.value === method ? "" : method;

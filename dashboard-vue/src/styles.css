@@ -6,6 +6,12 @@
   --text-muted: #9ca3af;
   --line: #e5e7eb;
   --line-strong: #d1d5db;
+  /* Surface/border aliases: several components (toast, variant rows, image previews, Collections controls) referenced
+     these as theme tokens, but they were never defined — so in light mode they fell back to transparent/white and in
+     live(dark) mode they rendered light-on-dark. Define them once here (mirrors --panel/--line) so every usage is
+     theme-correct. */
+  --surface: #fff;
+  --border: #e5e7eb;
   --accent: #4f46b5;
   --accent-soft: #eef2ff;
   --success-strong: #4f46b5;
@@ -58,6 +64,8 @@ select {
   --text-muted: #94a3b8;
   --line: #334155;
   --line-strong: #475569;
+  --surface: #111827;
+  --border: #334155;
   --accent-soft: #24235a;
   --shadow-sm: 0 0.1rem 0.3rem rgba(0, 0, 0, .28);
 }

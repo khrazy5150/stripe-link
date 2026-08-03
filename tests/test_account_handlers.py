@@ -1241,6 +1241,37 @@ class AccountHandlerTests(unittest.TestCase):
         self.assertEqual(response["statusCode"], 200)
         self.assertEqual(query["stripe_user[email]"], ["owner@example.com"])
 
+    def test_stripe_connect_start_prefills_business_and_owner_identity(self):
+        tenants = FakeDocumentRepository("tenant_id")
+        tenants.put({
+            "schema_version": "2026-05-29",
+            "document_type": "tenant_profile",
+            "tenant_id": "tenant_demo",
+            "business_name": "Acme Supplements",
+            "owner": {
+                "email": "owner@example.com",
+                "first_name": "Keith",
+                "last_name": "De Costa",
+                "phone_number": "+15551234567",
+            },
+        })
+
+        with patch.dict(os.environ, {
+            "STRIPE_CLIENT_ID_LIVE": "ca_live_demo",
+            "STRIPE_CONNECT_REDIRECT_URI": "https://api.example.com/connect/callback",
+        }):
+            response = start_handler({
+                "queryStringParameters": {"tenant_id": "tenant_demo", "mode": "live"}
+            }, None, tenant_repository=tenants)
+
+        query = parse_qs(urlparse(json.loads(response["body"])["connect_url"]).query)
+        self.assertEqual(response["statusCode"], 200)
+        self.assertEqual(query["stripe_user[email]"], ["owner@example.com"])
+        self.assertEqual(query["stripe_user[business_name]"], ["Acme Supplements"])
+        self.assertEqual(query["stripe_user[first_name]"], ["Keith"])
+        self.assertEqual(query["stripe_user[last_name]"], ["De Costa"])
+        self.assertEqual(query["stripe_user[phone_number]"], ["+15551234567"])
+
     def test_stripe_connect_callback_uses_oauth_mode_for_exchange_and_storage(self):
         class FakeStripeRepository:
             def __init__(self):

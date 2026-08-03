@@ -56,6 +56,18 @@ export const useStripeKeysStore = defineStore("stripeKeys", {
     output: null,
   }),
 
+  getters: {
+    // A tenant "has a test sandbox" once they've connected a test Stripe account or saved test keys. Live-first
+    // onboarding hides the top test/live toggle until this is true, so tenants who never need test never see it
+    // (plans/TODO.md — streamline Connect onboarding). Reads modes.test, which /stripe/keys loads for both modes.
+    // Kept as a direct state-reading getter (not a getter-returning-a-function) so Vue tracks modes.test reactively
+    // and the toggle appears the moment the sandbox connects.
+    hasTestSandbox: (state) => {
+      const m = state.modes?.test;
+      return Boolean(m && (m.saved_secret_key || m.connect_status === "connected" || m.connect_account_id));
+    },
+  },
+
   actions: {
     resetForCurrentTenant() {
       this.tenantId = getTenantId();

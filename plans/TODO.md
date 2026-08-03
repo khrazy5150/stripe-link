@@ -59,14 +59,26 @@ Deferred, non-blocking follow-ups. Each item notes what, why it was deferred, an
 - **The `stripe_keys` fixed-name two-table design (documents.py:357) is the existing cross-mode precedent to
   generalize.**
 
-### Streamline Connect onboarding — live-first + opt-in Stripe-test sandbox
+### Streamline Connect onboarding — live-first + opt-in Stripe-test sandbox — SHIPPED (code) 2026-08-02
 - **What:** default new tenants to LIVE; the wizard onboards their live Stripe only (with expanded `stripe_user[]`
-  prefill — email already prefilled at stripe_connect.py:165). A Settings button "Set up a sandbox for your funnels"
-  triggers the **Stripe-test** onboarding on demand, then reveals the top test/live toggle. Distinct TEST Connect
-  branding (a no-code Stripe-dashboard setting). Eliminates the confusing double-onboarding for tenants who never
-  need test, while preserving the sandbox for those who do.
-- **Depends on the Stripe-mode decoupling above** (the sandbox must be Stripe-test-on-prod, not the dev backend).
-  Author's chosen model (#4). Not built. Quick wins doable independently: prefill expansion; test brand color.
+  prefill). A Payments-screen button "Set up a sandbox for your funnels" triggers the **Stripe-test** onboarding on
+  demand, then reveals the top test/live toggle. Distinct TEST Connect branding (a no-code Stripe-dashboard setting).
+  Eliminates the confusing double-onboarding for tenants who never need test, while preserving the sandbox for those
+  who do. Author's chosen model (#4). Built on the Stripe-mode decoupling (sandbox = Stripe-test-on-prod).
+- **Built:**
+  - Default-to-live was already in place (`getStripeMode()` → `"live"`, api/client.js).
+  - **Toggle gating:** the top test/live pill+button (App.vue) is hidden until the tenant has a test sandbox
+    (`stripeKeys.hasTestSandbox` getter — test connected or test keys saved); a stale stored `"test"` mode is coerced
+    to live on load so nobody is stranded in a hidden mode; `modes` is repopulated on every mode switch so the toggle
+    can't vanish mid-use.
+  - **"Set up a sandbox for your funnels"** card on the Payments screen (`StripeKeys.vue`, shown only when no test
+    sandbox) — persists test mode then starts a test-mode Connect OAuth; on return the toggle is revealed in test mode.
+  - **Expanded `stripe_user[]` prefill** (`stripe_connect.py` `_stripe_user_prefill`): email + business_name +
+    first/last name + phone_number from the tenant profile.
+  - **TEST Connect branding** steps documented in `docs/CONNECT_TEST_BRANDING.md` (no-code; author action).
+- **Follow-ups (not built):** prefill business `url`/`country` once a canonical Business Profile exists (today the
+  `business` identity on user_profile is Stripe-seeded and often empty pre-connect); optional auto-switch-to-test UX
+  polish after sandbox setup.
 
 ## Dashboard / UX
 

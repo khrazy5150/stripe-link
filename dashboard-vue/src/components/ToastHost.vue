@@ -82,6 +82,9 @@ function select(toast) {
   gap: 0.6rem;
   padding: 0.9rem 1rem;
   border-radius: 12px;
+  /* --surface/--border are theme tokens (defined in styles.css for both test/live) so the toast follows the theme.
+     They were previously undefined, so in live(dark) mode the toast fell back to a white background under near-white
+     --text — light-on-light and unreadable. */
   background: var(--surface, #fff);
   color: var(--text, #111);
   border: 1px solid var(--border, #e3e3e3);
