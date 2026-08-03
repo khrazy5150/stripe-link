@@ -113,6 +113,32 @@ class CachedLoaderTests(unittest.TestCase):
         self.assertEqual(calls["n"], 1)  # second call served from cache
 
 
+class PromoTests(unittest.TestCase):
+    def setUp(self):
+        self.repo = PlatformPlansRepository("jb-platform-plans-test", table=FakeTable())
+
+    def test_put_get_promo_is_case_insensitive(self):
+        self.repo.put_promo("test", {"promo_code": "trial14", "trial_days": 14, "active": True})
+        loaded = self.repo.get_promo("test", "TRIAL14")
+        self.assertEqual(loaded["trial_days"], 14)
+        self.assertEqual(loaded["promo_code"], "TRIAL14")  # normalized upper
+        self.assertEqual(self.repo.get_promo("test", "Trial14")["trial_days"], 14)
+
+    def test_platform_promo_reads_fresh(self):
+        self.repo.put_promo("test", {"promo_code": "X", "trial_days": 30, "active": True})
+        self.assertEqual(platform_billing.platform_promo("test", "x", repository=self.repo)["trial_days"], 30)
+        self.assertIsNone(platform_billing.platform_promo("test", "nope", repository=self.repo))
+
+    def test_promo_is_valid(self):
+        self.assertTrue(platform_billing.promo_is_valid({"active": True}))
+        self.assertFalse(platform_billing.promo_is_valid({"active": False}))
+        self.assertFalse(platform_billing.promo_is_valid(None))
+        self.assertFalse(platform_billing.promo_is_valid({"active": True, "expires_at": 1000}, now=2000))
+        self.assertTrue(platform_billing.promo_is_valid({"active": True, "expires_at": 5000}, now=2000))
+        self.assertFalse(platform_billing.promo_is_valid({"active": True, "max_redemptions": 2, "redemptions": 2}))
+        self.assertTrue(platform_billing.promo_is_valid({"active": True, "max_redemptions": 2, "redemptions": 1}))
+
+
 class BillingStatusFromStripeTests(unittest.TestCase):
     def test_status_mapping(self):
         cases = {

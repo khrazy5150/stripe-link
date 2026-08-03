@@ -45,6 +45,11 @@ class PlatformPlansRepository:
     def _plan_sk(plan_key: str) -> str:
         return f"PLAN#{plan_key}"
 
+    @staticmethod
+    def _promo_sk(promo_code: str) -> str:
+        # Promo codes are case-insensitive: stored/looked up upper-cased so LAUNCH30 == launch30.
+        return f"PROMO#{str(promo_code).strip().upper()}"
+
     def list_plans(self, mode: str) -> list[dict[str, Any]]:
         from boto3.dynamodb.conditions import Key
 
@@ -71,6 +76,27 @@ class PlatformPlansRepository:
         }
         self.table.put_item(Item=item)
         return plan
+
+    def get_promo(self, mode: str, promo_code: str) -> dict[str, Any] | None:
+        if not str(promo_code or "").strip():
+            return None
+        response = self.table.get_item(Key={"PK": self._pk(mode), "SK": self._promo_sk(promo_code)})
+        item = response.get("Item")
+        return self._strip_keys(item) if item else None
+
+    def put_promo(self, mode: str, promo: dict[str, Any]) -> dict[str, Any]:
+        promo_code = str(promo.get("promo_code") or "").strip()
+        if not promo_code:
+            raise RepositoryError("Promo promo_code is required.")
+        item = {
+            **promo,
+            "promo_code": promo_code.upper(),
+            "PK": self._pk(mode),
+            "SK": self._promo_sk(promo_code),
+            "billing_mode": normalize_stripe_mode(mode),
+        }
+        self.table.put_item(Item=item)
+        return promo
 
     def get_config(self, mode: str) -> dict[str, Any] | None:
         response = self.table.get_item(Key={"PK": self._pk(mode), "SK": self._CONFIG_SK})

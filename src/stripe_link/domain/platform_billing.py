@@ -56,6 +56,30 @@ def default_platform_plan_key(mode: str, repository: Any | None = None) -> str |
     return cached_platform_billing(mode, repository)["config"].get("default_plan_key")
 
 
+def platform_promo(mode: str, promo_code: str, repository: Any | None = None) -> dict[str, Any] | None:
+    """A special-link promotion (a trial override and/or a Stripe discount). Read FRESH (not cached) so expiry and
+    redemption limits are current; subscribe is low-frequency. See plans/SAAS_BILLING_PAYWALL.md."""
+    if not promo_code:
+        return None
+    repo = repository or platform_plans_repository()
+    return repo.get_promo(mode, promo_code)
+
+
+def promo_is_valid(promo: dict[str, Any] | None, now: int | None = None) -> bool:
+    if not promo or not promo.get("active"):
+        return False
+    expires_at = promo.get("expires_at")
+    if isinstance(expires_at, int) and expires_at > 0:
+        current = now if now is not None else int(time.time())
+        if current >= expires_at:
+            return False
+    max_redemptions = promo.get("max_redemptions")
+    if isinstance(max_redemptions, int) and max_redemptions > 0:
+        if int(promo.get("redemptions") or 0) >= max_redemptions:
+            return False
+    return True
+
+
 def is_tenant_billing_exempt(
     mode: str, tenant_id: str = "", email: str = "", repository: Any | None = None
 ) -> bool:

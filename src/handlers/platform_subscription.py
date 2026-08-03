@@ -14,6 +14,8 @@ from stripe_link.domain.platform_billing import (
     is_tenant_billing_exempt,
     platform_billing_mode,
     platform_plan,
+    platform_promo,
+    promo_is_valid,
 )
 from stripe_link.repositories.documents import RepositoryError, tenant_profiles_repository
 from stripe_link.stripe_client import StripeApiError, stripe_request
@@ -133,7 +135,16 @@ def _subscribe(event, tenant_repository, plans_repository, mode, opener, secret_
         _safe_put(tenant_repository, {**tenant, "billing_exempt": True, "billing_status": "active"})
         return json_response({"platform_billing": {"exempt": True, "billing_status": "active"}})
 
-    plan_key = str(body.get("plan_key") or default_platform_plan_key(mode, plans_repository) or "").strip()
+    # Optional special-link promotion: a free-trial override and/or a Stripe discount, validated server-side so a
+    # link can't be forged. Trials are promo-only (base plan trial_days is 0), so no valid promo = no trial.
+    promo = None
+    promo_code = str(body.get("promo_code") or "").strip()
+    if promo_code:
+        promo = platform_promo(mode, promo_code, plans_repository)
+        if not promo_is_valid(promo):
+            return error_response("This promotion is not valid or has expired.", status_code=422, code="invalid_promo")
+
+    plan_key = str((promo or {}).get("plan_key") or body.get("plan_key") or default_platform_plan_key(mode, plans_repository) or "").strip()
     plan = platform_plan(mode, plan_key, plans_repository)
     if not plan or not plan.get("active"):
         return error_response("Unknown or inactive plan.", code="invalid_plan")
@@ -145,22 +156,35 @@ def _subscribe(event, tenant_repository, plans_repository, mode, opener, secret_
     if not key:
         return error_response("Platform Stripe secret is not configured.", status_code=503, code="platform_not_configured")
 
+    # A valid promo's trial_days override wins; otherwise the plan's own (normally 0). Card is collected up front —
+    # Stripe Checkout subscription mode's default payment_method_collection, so a trial auto-charges at its end.
+    if promo and promo.get("trial_days") is not None:
+        trial_days = int(promo.get("trial_days") or 0)
+    else:
+        trial_days = int(plan.get("trial_days") or 0)
+
     subscription_data: dict[str, Any] = {"metadata": {"tenant_id": tenant_id, "plan_key": plan_key}}
-    trial_days = int(plan.get("trial_days") or 0)
+    if promo:
+        subscription_data["metadata"]["promo_code"] = promo["promo_code"]
     if trial_days > 0:
         subscription_data["trial_period_days"] = trial_days
 
+    checkout_data: dict[str, Any] = {
+        "mode": "subscription",
+        "line_items": [{"price": price_id, "quantity": 1}],
+        "subscription_data": subscription_data,
+        "metadata": {"tenant_id": tenant_id, "plan_key": plan_key},
+        "success_url": str(body.get("success_url") or "").strip() or _default_return_url(),
+        "cancel_url": str(body.get("cancel_url") or "").strip() or _default_return_url(),
+    }
+    stripe_promotion_code = str((promo or {}).get("stripe_promotion_code") or "").strip()
+    if stripe_promotion_code:
+        checkout_data["discounts"] = [{"promotion_code": stripe_promotion_code}]
+
     try:
         customer_id = _ensure_customer(tenant, tenant_id, email, key, opener)
-        session = stripe_request("POST", "/checkout/sessions", api_key=key, opener=opener, data={
-            "mode": "subscription",
-            "customer": customer_id,
-            "line_items": [{"price": price_id, "quantity": 1}],
-            "subscription_data": subscription_data,
-            "metadata": {"tenant_id": tenant_id, "plan_key": plan_key},
-            "success_url": str(body.get("success_url") or "").strip() or _default_return_url(),
-            "cancel_url": str(body.get("cancel_url") or "").strip() or _default_return_url(),
-        })
+        checkout_data["customer"] = customer_id
+        session = stripe_request("POST", "/checkout/sessions", api_key=key, opener=opener, data=checkout_data)
     except StripeApiError as exc:
         return error_response(f"Stripe error: {exc}", status_code=502, code="stripe_error")
 

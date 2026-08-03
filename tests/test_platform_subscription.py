@@ -27,10 +27,12 @@ class FakeResponse:
 class FakeOpener:
     def __init__(self):
         self.calls = []
+        self.bodies = []
 
     def __call__(self, request, timeout=None):
         url = request.full_url
         self.calls.append((request.method, url))
+        self.bodies.append(request.data.decode("utf-8") if request.data else "")
         if "/customers" in url:
             return FakeResponse({"id": "cus_test_1"})
         if "/checkout/sessions" in url:
@@ -54,9 +56,10 @@ class FakeTenantRepo:
 
 
 class FakePlansRepo:
-    def __init__(self, plans, config):
+    def __init__(self, plans, config, promos=None):
         self._plans = plans
         self._config = config
+        self._promos = {str(p["promo_code"]).upper(): dict(p) for p in (promos or [])}
 
     def list_plans(self, mode):
         return [dict(p) for p in self._plans]
@@ -64,11 +67,16 @@ class FakePlansRepo:
     def get_config(self, mode):
         return dict(self._config)
 
+    def get_promo(self, mode, code):
+        promo = self._promos.get(str(code).strip().upper())
+        return dict(promo) if promo else None
 
-def _basic_plans_repo(exempt_emails=None):
+
+def _basic_plans_repo(exempt_emails=None, promos=None):
+    # trial_days 0 on the base plan: trials are promo-only (plans/SAAS_BILLING_PAYWALL.md).
     plan = {"plan_key": "basic", "label": "Bay Pass", "monthly_amount": 958,
-            "price_id": "price_basic", "trial_days": 14, "active": True, "sort_order": 1, "fee_tier": "basic"}
-    return FakePlansRepo([plan], {"default_plan_key": "basic", "exempt_emails": exempt_emails or []})
+            "price_id": "price_basic", "trial_days": 0, "active": True, "sort_order": 1, "fee_tier": "basic"}
+    return FakePlansRepo([plan], {"default_plan_key": "basic", "exempt_emails": exempt_emails or []}, promos=promos)
 
 
 def _tenant(**over):
@@ -149,6 +157,53 @@ class SubscribeHandlerTests(unittest.TestCase):
             opener=opener, secret_key="sk_test_x",
         )
         self.assertEqual(json.loads(resp["body"])["platform_billing"]["portal_url"], "https://billing.stripe.com/p/sess_1")
+
+    def test_no_promo_means_no_trial(self):
+        opener = FakeOpener()
+        platform_subscription.handler(
+            {"httpMethod": "POST", "path": "/platform-billing/subscribe", "body": json.dumps({"tenant_id": "t1"})},
+            None, tenant_repository=FakeTenantRepo([_tenant()]), plans_repository=_basic_plans_repo(),
+            opener=opener, secret_key="sk_test_x",
+        )
+        checkout_body = [b for b in opener.bodies if "line_items" in b][0]
+        self.assertNotIn("trial_period_days", checkout_body)
+
+    def test_promo_grants_free_trial(self):
+        opener = FakeOpener()
+        promos = [{"promo_code": "TRIAL14", "trial_days": 14, "active": True}]
+        resp = platform_subscription.handler(
+            {"httpMethod": "POST", "path": "/platform-billing/subscribe",
+             "body": json.dumps({"tenant_id": "t1", "promo_code": "trial14"})},  # case-insensitive
+            None, tenant_repository=FakeTenantRepo([_tenant()]), plans_repository=_basic_plans_repo(promos=promos),
+            opener=opener, secret_key="sk_test_x",
+        )
+        self.assertEqual(resp["statusCode"], 200)
+        checkout_body = [b for b in opener.bodies if "line_items" in b][0]
+        self.assertIn("subscription_data%5Btrial_period_days%5D=14", checkout_body)
+        self.assertIn("subscription_data%5Bmetadata%5D%5Bpromo_code%5D=TRIAL14", checkout_body)
+
+    def test_promo_applies_discount(self):
+        opener = FakeOpener()
+        promos = [{"promo_code": "HALFOFF", "stripe_promotion_code": "promo_abc", "active": True}]
+        platform_subscription.handler(
+            {"httpMethod": "POST", "path": "/platform-billing/subscribe",
+             "body": json.dumps({"tenant_id": "t1", "promo_code": "HALFOFF"})},
+            None, tenant_repository=FakeTenantRepo([_tenant()]), plans_repository=_basic_plans_repo(promos=promos),
+            opener=opener, secret_key="sk_test_x",
+        )
+        checkout_body = [b for b in opener.bodies if "line_items" in b][0]
+        self.assertIn("discounts%5B0%5D%5Bpromotion_code%5D=promo_abc", checkout_body)
+
+    def test_invalid_promo_is_rejected(self):
+        promos = [{"promo_code": "OLD", "trial_days": 14, "active": False}]  # inactive
+        resp = platform_subscription.handler(
+            {"httpMethod": "POST", "path": "/platform-billing/subscribe",
+             "body": json.dumps({"tenant_id": "t1", "promo_code": "OLD"})},
+            None, tenant_repository=FakeTenantRepo([_tenant()]), plans_repository=_basic_plans_repo(promos=promos),
+            opener=FakeOpener(), secret_key="sk_test_x",
+        )
+        self.assertEqual(resp["statusCode"], 422)
+        self.assertEqual(json.loads(resp["body"])["error"], "invalid_promo")
 
     def test_plans_lists_active_plans_and_current_status(self):
         resp = platform_subscription.handler(

@@ -50,7 +50,9 @@ def main():
     parser.add_argument("--label", default="Bay Pass")
     parser.add_argument("--amount", type=int, default=958, help="Monthly amount in cents (default 958 = $9.58).")
     parser.add_argument("--interval", default="month", choices=["month", "year"])
-    parser.add_argument("--trial-days", type=int, default=14)
+    # Trial is promo-only: the base plan has NO trial (subscribing charges immediately). Free trials are granted
+    # only by a valid promo link (scripts/seed_platform_promo.py). See plans/SAAS_BILLING_PAYWALL.md.
+    parser.add_argument("--trial-days", type=int, default=0)
     parser.add_argument("--fee-tier", default="basic")
     parser.add_argument("--exempt-email", action="append", default=[], help="Repeatable. Comped tenant emails.")
     parser.add_argument("--exempt-tenant-id", action="append", default=[], help="Repeatable. Comped tenant ids.")
