@@ -5,7 +5,7 @@ export const menuSchema = {
     { key: "main", label: "MAIN", items: ["dashboard", "stripeKeys"] },
     { key: "catalog", label: "CATALOG", items: ["products", "coupons", "offers", "landingPages", "sites", "collections", "services", "reviews", "abTesting"] },
     { key: "orders", label: "ORDERS", items: ["orders", "leads", "notifications", "invoices", "refunds", "shipping", "customers"] },
-    { key: "settings", label: "SETTINGS", items: ["stripeConnect", "registration", "configuration", "profile", "preferences"] },
+    { key: "settings", label: "SETTINGS", items: ["billing", "stripeConnect", "registration", "configuration", "profile", "preferences"] },
   ],
   items: {
     dashboard: {
@@ -152,6 +152,14 @@ export const menuSchema = {
       enabled: true,
       environments: ["test", "live"],
     },
+    billing: {
+      key: "billing",
+      label: "Billing",
+      icon: "sparkles",
+      view: "billing",
+      enabled: true,
+      environments: ["test", "live"],
+    },
     stripeConnect: {
       key: "stripeConnect",
       label: "Stripe Connect",
@@ -230,4 +238,5 @@ export const iconPaths = {
   settings: "M10.5 6h3m-5.25 4.5h7.5m-6 4.5h4.5m-2.25 5.25a8.25 8.25 0 1 0 0-16.5 8.25 8.25 0 0 0 0 16.5Z",
   user: "M15.75 7.5a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0ZM4.5 20.25a7.5 7.5 0 0 1 15 0",
   sliders: "M6 4.5v15m12-15v15M9 8.25H3m18 7.5h-6M9 15.75a3 3 0 1 0-6 0 3 3 0 0 0 6 0Zm12-7.5a3 3 0 1 0-6 0 3 3 0 0 0 6 0Z",
+  sparkles: "M9.813 15.904 9 18.75l-.813-2.846a4.5 4.5 0 0 0-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 0 0 3.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 0 0 3.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 0 0-3.09 3.09ZM18.259 8.715 18 9.75l-.259-1.035a3.375 3.375 0 0 0-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 0 0 2.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 0 0 2.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 0 0-2.456 2.456Z",
 };

@@ -3,8 +3,12 @@
     <section class="auth-card">
       <header class="auth-header">
         <img src="https://images.juniorbay.com/icon/favicon.png" alt="" />
-        <h1>Admin Login</h1>
-        <p>Enter your credentials to access the admin panel</p>
+        <h1>{{ store.activeTab === 'register' ? 'Start your free trial' : 'Admin Login' }}</h1>
+        <p>
+          {{ store.activeTab === 'register'
+            ? 'Full access for 14 days — no credit card required.'
+            : 'Enter your credentials to access the admin panel' }}
+        </p>
       </header>
 
       <div class="auth-body">
@@ -21,6 +25,7 @@
         </form>
 
         <div v-else-if="store.activeTab === 'register'" class="auth-form-stack">
+          <p class="auth-trial-note">✨ 14 days of full access, free. No card required — add one only when you're ready to keep going.</p>
           <form class="auth-form" @submit.prevent="store.register">
             <label>First Name<input v-model.trim="store.registerForm.first_name" placeholder="John" autocomplete="given-name" required /></label>
             <label>Last Name<input v-model.trim="store.registerForm.last_name" placeholder="Doe" autocomplete="family-name" required /></label>
@@ -28,7 +33,7 @@
             <label>Phone Number<input v-model.trim="store.registerForm.phone_number" type="tel" placeholder="+1234567890" autocomplete="tel" /></label>
             <span class="field-note">Format: +1234567890 (include country code)</span>
             <label>Password<input v-model="store.registerForm.password" type="password" placeholder="Create a password" autocomplete="new-password" required /></label>
-            <button class="primary-action stretch" type="submit" :disabled="store.loading">{{ store.loading ? "Creating..." : "Create Account" }}</button>
+            <button class="primary-action stretch" type="submit" :disabled="store.loading">{{ store.loading ? "Creating..." : "Start my free trial" }}</button>
           </form>
 
           <div class="info-toast">After sign-up, check your email for the verification code.</div>

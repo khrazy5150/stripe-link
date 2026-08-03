@@ -90,6 +90,7 @@ def _plans(event, tenant_repository, plans_repository, mode):
                 "billing_plan_key": tenant.get("billing_plan_key") or "",
                 "billing_exempt": bool(tenant.get("billing_exempt")),
                 "current_period_end": tenant.get("current_period_end"),
+                "trial_ends_at": tenant.get("trial_ends_at"),
                 "has_subscription": bool(tenant.get("stripe_subscription_id")),
                 "entitlements": sorted(tenant_entitlement_set(tenant)),
             },
