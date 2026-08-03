@@ -75,7 +75,8 @@ class FakePlansRepo:
 def _basic_plans_repo(exempt_emails=None, promos=None):
     # trial_days 0 on the base plan: trials are promo-only (plans/SAAS_BILLING_PAYWALL.md).
     plan = {"plan_key": "basic", "label": "Bay Pass", "monthly_amount": 958,
-            "price_id": "price_basic", "trial_days": 0, "active": True, "sort_order": 1, "fee_tier": "basic"}
+            "price_id": "price_basic", "trial_days": 0, "active": True, "sort_order": 1, "fee_tier": "basic",
+            "entitlements": {"landing_pages": True, "booking": False}}
     return FakePlansRepo([plan], {"default_plan_key": "basic", "exempt_emails": exempt_emails or []}, promos=promos)
 
 
@@ -106,6 +107,7 @@ class SubscribeHandlerTests(unittest.TestCase):
         self.assertTrue(any("/checkout/sessions" in u for _, u in opener.calls))
         self.assertEqual(tenants.docs["t1"]["stripe_customer_id"], "cus_test_1")
         self.assertEqual(tenants.docs["t1"]["billing_price_id"], "price_basic")
+        self.assertEqual(tenants.docs["t1"]["entitlements"], ["landing_pages"])  # denormalized from the plan
 
     def test_subscribe_exempt_tenant_skips_stripe(self):
         opener = FakeOpener()
@@ -218,6 +220,9 @@ class SubscribeHandlerTests(unittest.TestCase):
 
 
 class ReconcileWebhookTests(unittest.TestCase):
+    def setUp(self):
+        platform_billing.reset_cache()
+
     def _event(self, event_type, obj):
         return {"type": event_type, "data": {"object": obj}}
 
@@ -233,6 +238,22 @@ class ReconcileWebhookTests(unittest.TestCase):
         self.assertEqual(tenants.docs["t1"]["stripe_subscription_id"], "sub_1")
         self.assertEqual(tenants.docs["t1"]["current_period_end"], 1790000000)
         self.assertEqual(tenants.docs["t1"]["billing_price_id"], "price_basic")
+
+    def test_subscription_updated_denormalizes_entitlements(self):
+        tenants = FakeTenantRepo([_tenant(billing_plan_key="basic")])
+        event = self._event("customer.subscription.updated", {
+            "id": "sub_1", "status": "active", "metadata": {"tenant_id": "t1", "plan_key": "basic"},
+        })
+        reconcile_platform_subscription_event(
+            event, mode="test", tenant_repo=tenants, plans_repository=_basic_plans_repo())
+        self.assertEqual(tenants.docs["t1"]["entitlements"], ["landing_pages"])
+
+    def test_subscription_deleted_revokes_entitlements(self):
+        tenants = FakeTenantRepo([_tenant(billing_status="active", entitlements=["landing_pages"])])
+        reconcile_platform_subscription_event(
+            self._event("customer.subscription.deleted", {"id": "sub_1", "metadata": {"tenant_id": "t1"}, "status": "canceled"}),
+            mode="test", tenant_repo=tenants)
+        self.assertEqual(tenants.docs["t1"]["entitlements"], [])
 
     def test_subscription_deleted_cancels(self):
         tenants = FakeTenantRepo([_tenant(billing_status="active")])

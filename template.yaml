@@ -1865,6 +1865,9 @@ Resources:
             TableName: !Ref TenantProfilesTable
         - DynamoDBCrudPolicy:
             TableName: !Ref WebhookEventsTable
+        # Reads the plan's entitlements to denormalize them onto the tenant profile on subscription events.
+        - DynamoDBReadPolicy:
+            TableName: !Ref PlatformPlansTable
         - !If
           - HasStripePlatformSecret
           - Version: "2012-10-17"
@@ -2430,6 +2433,9 @@ Resources:
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref ServicesTable
+        # Reads the tenant's denormalized entitlements to gate creating a service on the `booking` plan capability.
+        - DynamoDBReadPolicy:
+            TableName: !Ref TenantProfilesTable
       Events:
         ServicesList:
           Type: Api

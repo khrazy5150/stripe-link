@@ -1,7 +1,8 @@
 import time
 from typing import Any, Callable
 
-from stripe_link.domain.platform_billing import billing_status_from_stripe
+from stripe_link.domain.entitlements import plan_entitlements
+from stripe_link.domain.platform_billing import billing_status_from_stripe, platform_plan
 
 
 def _tenant_id_from_object(obj: dict[str, Any]) -> str:
@@ -47,6 +48,7 @@ def reconcile_platform_subscription_event(
     *,
     mode: str,
     tenant_repo,
+    plans_repository=None,
     now_fn: Callable[[], int] = lambda: int(time.time()),
 ) -> dict[str, Any]:
     """Map a platform-account Stripe Billing event (the tenant's SaaS subscription) onto the tenant's
@@ -77,8 +79,14 @@ def reconcile_platform_subscription_event(
             updates["stripe_customer_id"] = customer_id
         if event_type == "customer.subscription.deleted":
             updates["billing_status"] = "canceled"
+            updates["entitlements"] = []  # access revoked on cancellation
         else:
             updates["billing_status"] = billing_status_from_stripe(obj.get("status"))
+            # Denormalize the plan's entitlements onto the tenant so the per-feature guards are a pure profile check.
+            plan_key = str((obj.get("metadata") or {}).get("plan_key") or tenant.get("billing_plan_key") or "").strip()
+            if plan_key:
+                updates["billing_plan_key"] = plan_key
+                updates["entitlements"] = plan_entitlements(platform_plan(mode, plan_key, plans_repository))
         current_period_end = obj.get("current_period_end")
         if isinstance(current_period_end, int):
             updates["current_period_end"] = current_period_end

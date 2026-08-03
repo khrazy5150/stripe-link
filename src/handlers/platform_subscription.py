@@ -8,6 +8,7 @@ from stripe_link.common import (
     parse_json_body,
     tenant_id_from_event,
 )
+from stripe_link.domain.entitlements import CAPABILITIES, plan_entitlements, tenant_entitlement_set
 from stripe_link.domain.platform_billing import (
     active_platform_plans,
     default_platform_plan_key,
@@ -90,7 +91,12 @@ def _plans(event, tenant_repository, plans_repository, mode):
                 "billing_exempt": bool(tenant.get("billing_exempt")),
                 "current_period_end": tenant.get("current_period_end"),
                 "has_subscription": bool(tenant.get("stripe_subscription_id")),
+                "entitlements": sorted(tenant_entitlement_set(tenant)),
             },
+            # The full gateable-feature catalog so the dashboard can DISABLE (not hide) the ones the tenant's
+            # entitlements don't include, with an upgrade hint (plans/SAAS_BILLING_PAYWALL.md).
+            "capabilities": [{"key": key, "label": meta["label"], "view": meta["view"]}
+                             for key, meta in CAPABILITIES.items()],
         }
     })
 
@@ -188,12 +194,13 @@ def _subscribe(event, tenant_repository, plans_repository, mode, opener, secret_
     except StripeApiError as exc:
         return error_response(f"Stripe error: {exc}", status_code=502, code="stripe_error")
 
-    # Optimistically record the plan choice + customer; the webhook confirms subscription id + status.
+    # Optimistically record the plan choice + customer + entitlements; the webhook confirms subscription id + status.
     _safe_put(tenant_repository, {
         **tenant,
         "stripe_customer_id": customer_id,
         "billing_plan_key": plan_key,
         "billing_price_id": price_id,
+        "entitlements": plan_entitlements(plan),
     })
     return json_response({"platform_billing": {"checkout_url": session.get("url"), "session_id": session.get("id")}})
 

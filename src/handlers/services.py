@@ -2,6 +2,7 @@ import time
 
 from stripe_link.common import error_response, json_response, parse_json_body, path_params, query_params, resolve_stripe_mode, tenant_id_from_event
 from stripe_link.domain.appointments import AppointmentTransitionError, transition_appointment
+from stripe_link.domain.entitlements import CAPABILITIES, is_entitled
 from stripe_link.domain.service_pricing import normalize_service_pricing
 from stripe_link.domain.documents import (
     DocumentValidationError,
@@ -18,7 +19,31 @@ from stripe_link.repositories.documents import (
     fulfillers_repository,
     services_repository,
     tenant_availability_repository,
+    tenant_profiles_repository,
 )
+
+
+def _require_capability(event, capability, tenant_repo):
+    """Gate a tenant-facing action on a plan capability (plans/SAAS_BILLING_PAYWALL.md). Reads the tenant's
+    denormalized entitlements. Fails OPEN when the profile is absent or the lookup errors (never break an
+    un-backfilled tenant); blocks only when a profile exists and lacks the capability."""
+    try:
+        body = parse_json_body(event) if (event or {}).get("body") else {}
+    except ValueError:
+        body = {}
+    tenant_id = tenant_id_from_event(event, body)
+    if not tenant_id:
+        return None
+    try:
+        tenant = (tenant_repo or tenant_profiles_repository()).get(tenant_id, tenant_id)
+    except RepositoryError:
+        return None
+    if tenant is None or is_entitled(tenant, capability):
+        return None
+    return error_response(
+        f"Your plan does not include {CAPABILITIES[capability]['label']}. Upgrade to enable it.",
+        status_code=403, code="plan_upgrade_required",
+    )
 
 
 def handler(
@@ -29,6 +54,7 @@ def handler(
     availability_repo=None,
     exceptions_repo=None,
     appointments_repo=None,
+    tenant_repo=None,
 ):
     # services + appointments carry per-mode Stripe state / are mode-specific transactions, so they are
     # mode-scoped; scheduling config (fulfillers/availability/exceptions) is mode-agnostic.
@@ -54,6 +80,11 @@ def handler(
         if action and method == "POST":
             return appointment_action_route(event, appointments_repo, action)
         return document_route(event, method, appointments_repo, "appointment", validate_appointment, "appointments", id_param="appointment_id")
+    # Creating/editing a service = using the booking feature; gate it on the tenant's plan.
+    if method in {"POST", "PUT"}:
+        gate = _require_capability(event, "booking", tenant_repo)
+        if gate is not None:
+            return gate
     return document_route(event, method, services_repo, "service", validate_service, "services", id_param="service_id", normalizer=normalize_service_pricing)
 
 
