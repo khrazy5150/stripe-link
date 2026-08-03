@@ -125,7 +125,7 @@ class CheckoutHandlerTests(unittest.TestCase):
         self.requests.append(request)
         return FakeResponse()
 
-    def test_checkout_blocks_tenant_with_past_due_billing_status(self):
+    def test_checkout_blocks_tenant_with_suspended_billing_status(self):
         response = handler(
             {
                 "httpMethod": "GET",
@@ -142,7 +142,7 @@ class CheckoutHandlerTests(unittest.TestCase):
             offers_repo=FakeRepository("offer_id", [self.offer]),
             products_repo=FakeRepository("product_id", [self.product]),
             stripe_repo=FakeStripeKeysRepository(),
-            tenant_repo=FakeRepository("tenant_id", [{"tenant_id": "tenant_demo", "billing_status": "past_due"}]),
+            tenant_repo=FakeRepository("tenant_id", [{"tenant_id": "tenant_demo", "billing_status": "suspended"}]),
             pages_repo=FakePublishedPagesRepository(),
             secret_cipher=FakeCipher(),
             opener=self.opener,

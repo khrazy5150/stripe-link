@@ -148,6 +148,7 @@ Globals:
         REVIEWS_TABLE: !Ref ReviewsTable
         COLLECTIONS_TABLE: !Ref CollectionsTable
         CARTS_TABLE: !Ref CartsTable
+        PLATFORM_PLANS_TABLE: !Ref PlatformPlansTable
         INVOICES_TABLE: !Ref InvoicesTable
         PRODUCTS_TABLE: !Ref ProductsTable
         OFFERS_TABLE: !Ref OffersTable
@@ -3144,6 +3145,27 @@ Resources:
               KeyType: RANGE
           Projection:
             ProjectionType: ALL
+
+  # Platform->tenant SaaS plan catalog (global, NOT tenant-scoped). PK=PLATFORM_BILLING#{billing_mode},
+  # SK=PLAN#{plan_key} | CONFIG. Hand-editable source of truth for the subscription plans + exempt list.
+  # See plans/SAAS_BILLING_PAYWALL.md. Simple PK/SK access (query plans by mode) — no GSI, no TTL (plans persist).
+  PlatformPlansTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "${ProjectPrefix}-platform-plans-${Environment}"
+      BillingMode: PAY_PER_REQUEST
+      SSESpecification:
+        SSEEnabled: true
+      AttributeDefinitions:
+        - AttributeName: PK
+          AttributeType: S
+        - AttributeName: SK
+          AttributeType: S
+      KeySchema:
+        - AttributeName: PK
+          KeyType: HASH
+        - AttributeName: SK
+          KeyType: RANGE
 
   ReviewsTable:
     Type: AWS::DynamoDB::Table

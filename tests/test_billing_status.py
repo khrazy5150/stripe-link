@@ -10,13 +10,20 @@ class AssertBillingInGoodStandingTests(unittest.TestCase):
         assert_billing_in_good_standing({})
         assert_billing_in_good_standing(None)
 
-    def test_blocks_past_due(self):
-        with self.assertRaises(BillingStatusError):
-            assert_billing_in_good_standing({"billing_status": "past_due"})
+    def test_allows_past_due_as_grace_window(self):
+        # past_due is the Stripe dunning/grace window — still allowed (plans/SAAS_BILLING_PAYWALL.md).
+        assert_billing_in_good_standing({"billing_status": "past_due"})
+
+    def test_allows_exempt_even_when_suspended(self):
+        assert_billing_in_good_standing({"billing_status": "suspended", "billing_exempt": True})
 
     def test_blocks_suspended(self):
         with self.assertRaises(BillingStatusError):
             assert_billing_in_good_standing({"billing_status": "suspended"})
+
+    def test_blocks_canceled(self):
+        with self.assertRaises(BillingStatusError):
+            assert_billing_in_good_standing({"billing_status": "canceled"})
 
     def test_error_carries_the_status(self):
         try:
