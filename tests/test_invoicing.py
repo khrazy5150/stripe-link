@@ -84,7 +84,7 @@ class SendInvoiceHandlerTests(unittest.TestCase):
         invoices.put(dict(invoice or INVOICE))
         stripe_repo = FakeStripeKeys({"secret_key_ref": "enc:sk"})
         tenant_repo = FakeDocumentRepository("tenant_id")
-        tenant_repo.put({"tenant_id": "t1", "business_name": "Acme", "support_email": "s@acme.com", "tier_id": "basic"})
+        tenant_repo.put({"tenant_id": "t1", "business_name": "Acme", "support_email": "s@acme.com", "tier_id": "basic", "billing_exempt": True})
         return invoices, stripe_repo, tenant_repo
 
     def _event(self, invoice_id="inv_1"):

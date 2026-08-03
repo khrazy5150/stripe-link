@@ -3,6 +3,7 @@ import time
 from stripe_link.common import error_response, json_response, parse_json_body, path_params, query_params, resolve_stripe_mode, tenant_id_from_event
 from stripe_link.domain.appointments import AppointmentTransitionError, transition_appointment
 from stripe_link.domain.service_pricing import normalize_service_pricing
+from stripe_link.entitlement_gate import require_capability
 from stripe_link.domain.documents import (
     DocumentValidationError,
     validate_appointment,
@@ -29,6 +30,7 @@ def handler(
     availability_repo=None,
     exceptions_repo=None,
     appointments_repo=None,
+    tenant_repo=None,
 ):
     # services + appointments carry per-mode Stripe state / are mode-specific transactions, so they are
     # mode-scoped; scheduling config (fulfillers/availability/exceptions) is mode-agnostic.
@@ -54,6 +56,11 @@ def handler(
         if action and method == "POST":
             return appointment_action_route(event, appointments_repo, action)
         return document_route(event, method, appointments_repo, "appointment", validate_appointment, "appointments", id_param="appointment_id")
+    # Creating/editing a service = using the booking feature; gate it on the tenant's plan.
+    if method in {"POST", "PUT"}:
+        gate = require_capability(event, "booking", tenant_repo)
+        if gate is not None:
+            return gate
     return document_route(event, method, services_repo, "service", validate_service, "services", id_param="service_id", normalizer=normalize_service_pricing)
 
 

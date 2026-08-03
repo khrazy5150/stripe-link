@@ -52,6 +52,15 @@ Parameters:
     Type: String
     Default: ""
     Description: Optional Secrets Manager ARN containing Junior Bay platform Stripe secret keys.
+  PlatformBillingMode:
+    Type: String
+    Default: live
+    AllowedValues: [test, live]
+    Description: The platform's OWN Stripe mode for billing tenants their SaaS subscription (distinct from a tenant's storefront mode). Set 'test' on dev to exercise billing against Stripe test plans/prices; 'live' in production.
+  TrialPeriodDays:
+    Type: Number
+    Default: 14
+    Description: Length of the free platform trial a new tenant gets before the subscribe wall. Use a short value (e.g. 1) on dev to test the wall quickly; 14 in production. Only affects NEW signups.
   ApiCustomDomainName:
     Type: String
     Default: ""
@@ -148,6 +157,9 @@ Globals:
         REVIEWS_TABLE: !Ref ReviewsTable
         COLLECTIONS_TABLE: !Ref CollectionsTable
         CARTS_TABLE: !Ref CartsTable
+        PLATFORM_PLANS_TABLE: !Ref PlatformPlansTable
+        PLATFORM_BILLING_MODE: !Ref PlatformBillingMode
+        TRIAL_PERIOD_DAYS: !Ref TrialPeriodDays
         INVOICES_TABLE: !Ref InvoicesTable
         PRODUCTS_TABLE: !Ref ProductsTable
         OFFERS_TABLE: !Ref OffersTable
@@ -412,6 +424,68 @@ Resources:
             Path: /billing/connect-card
             Method: OPTIONS
 
+  # Platform->tenant SaaS subscription: list plans, subscribe (Stripe Checkout subscription mode) and manage
+  # (Stripe Billing Portal) on the PLATFORM account. See plans/SAAS_BILLING_PAYWALL.md.
+  PlatformSubscriptionFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${ProjectPrefix}-platform-subscription-${Environment}"
+      CodeUri: src/
+      Handler: handlers.platform_subscription.handler
+      Description: Platform->tenant SaaS subscription — plans list, subscribe (Checkout), manage (Billing Portal).
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref TenantProfilesTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref PlatformPlansTable
+        - !If
+          - HasStripePlatformSecret
+          - Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                Resource:
+                  - !Ref StripePlatformSecretArn
+          - !Ref AWS::NoValue
+      Events:
+        PlatformBillingPlans:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /platform-billing/plans
+            Method: GET
+        PlatformBillingSubscribe:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /platform-billing/subscribe
+            Method: POST
+        PlatformBillingPortal:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /platform-billing/portal
+            Method: POST
+        PlatformBillingPlansOptions:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /platform-billing/plans
+            Method: OPTIONS
+        PlatformBillingSubscribeOptions:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /platform-billing/subscribe
+            Method: OPTIONS
+        PlatformBillingPortalOptions:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /platform-billing/portal
+            Method: OPTIONS
+
   ProductsFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -485,6 +559,9 @@ Resources:
       Handler: handlers.leads.handler
       Description: Lead capture — public ingest + tenant-scoped read/manage.
       Policies:
+        # Entitlement gate reads the tenant's denormalized entitlements to gate this feature on the plan.
+        - DynamoDBReadPolicy:
+            TableName: !Ref TenantProfilesTable
         - DynamoDBCrudPolicy:
             TableName: !Ref LeadsTable
         - DynamoDBCrudPolicy:
@@ -605,6 +682,9 @@ Resources:
       Handler: handlers.reviews.handler
       Description: First-party reviews — tenant-scoped CRUD + moderation.
       Policies:
+        # Entitlement gate reads the tenant's denormalized entitlements to gate this feature on the plan.
+        - DynamoDBReadPolicy:
+            TableName: !Ref TenantProfilesTable
         - DynamoDBCrudPolicy:
             TableName: !Ref ReviewsTable
       Events:
@@ -665,6 +745,9 @@ Resources:
       Handler: handlers.collections.handler
       Description: Collections — ordered, curated groups of a Site's pages (tenant-scoped CRUD).
       Policies:
+        # Entitlement gate reads the tenant's denormalized entitlements to gate this feature on the plan.
+        - DynamoDBReadPolicy:
+            TableName: !Ref TenantProfilesTable
         - DynamoDBCrudPolicy:
             TableName: !Ref CollectionsTable
       Events:
@@ -957,6 +1040,9 @@ Resources:
       Handler: handlers.sites.handler
       Description: JSON-first Sites API (the public aggregate root — plans/SITE_OBJECT.md).
       Policies:
+        # Entitlement gate reads the tenant's denormalized entitlements to gate this feature on the plan.
+        - DynamoDBReadPolicy:
+            TableName: !Ref TenantProfilesTable
         - DynamoDBCrudPolicy:
             TableName: !Ref SitesTable
         # Read pages for editor/nav resolution; write to re-put (re-publish) the Site's pages when a custom
@@ -1119,6 +1205,9 @@ Resources:
       Handler: handlers.pages.handler
       Description: JSON-first pages API.
       Policies:
+        # Entitlement gate reads the tenant's denormalized entitlements to gate this feature on the plan.
+        - DynamoDBReadPolicy:
+            TableName: !Ref TenantProfilesTable
         - DynamoDBCrudPolicy:
             TableName: !Ref PagesTable
       Events:
@@ -1333,6 +1422,9 @@ Resources:
       Handler: handlers.payment_methods.handler
       Description: Per-tenant BNPL/installment payment-method toggles (Klarna etc.) — requests the Stripe capability on the tenant's connected Standard account and caches the status on the stripe_keys doc (plans/BNPL_PAYMENT_METHODS.md).
       Policies:
+        # Entitlement gate reads the tenant's denormalized entitlements to gate this feature on the plan.
+        - DynamoDBReadPolicy:
+            TableName: !Ref TenantProfilesTable
         # Read + WRITE the stripe_keys doc (persist the toggle + cached capability status), per mode.
         - DynamoDBCrudPolicy:
             TableName: !Ref StripeKeysTable
@@ -1781,6 +1873,48 @@ Resources:
             Path: /webhook/stripe
             Method: POST
 
+  # Platform-account Stripe Billing webhook (the tenant's SaaS subscription). Separate endpoint from the Connect
+  # webhook: these are the PLATFORM account's OWN events ("Your account" scope), with their own signing secret.
+  # Maps customer.subscription.* / invoice.* -> tenant billing_status. See plans/SAAS_BILLING_PAYWALL.md.
+  PlatformBillingWebhookFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${ProjectPrefix}-platform-billing-webhook-${Environment}"
+      CodeUri: src/
+      Handler: handlers.platform_billing_webhook.handler
+      Description: Receives platform-account Stripe Billing events for tenant SaaS subscriptions.
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref TenantProfilesTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref WebhookEventsTable
+        # Reads the plan's entitlements to denormalize them onto the tenant profile on subscription events.
+        - DynamoDBReadPolicy:
+            TableName: !Ref PlatformPlansTable
+        - !If
+          - HasStripePlatformSecret
+          - Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                Resource:
+                  - !Ref StripePlatformSecretArn
+          - !Ref AWS::NoValue
+      Events:
+        PlatformBillingWebhook:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /webhook/platform-billing
+            Method: POST
+        PlatformBillingWebhookOptions:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /webhook/platform-billing
+            Method: OPTIONS
+
   ConfigFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -1813,6 +1947,9 @@ Resources:
       Handler: handlers.custom_domains.handler
       Description: Tenant custom domain CRUD -- creates/verifies/deletes Cloudflare for SaaS custom hostnames and stores domain records on TenantConfig.
       Policies:
+        # Entitlement gate reads the tenant's denormalized entitlements to gate this feature on the plan.
+        - DynamoDBReadPolicy:
+            TableName: !Ref TenantProfilesTable
         - DynamoDBCrudPolicy:
             TableName: !Ref PlatformConfigTable
         - DynamoDBCrudPolicy:
@@ -1974,6 +2111,9 @@ Resources:
       Policies:
         - DynamoDBReadPolicy:
             TableName: !Ref RoutesTable
+        # Billing-hold gate: a suspended/canceled tenant's published pages stop serving (SAAS_BILLING_PAYWALL.md).
+        - DynamoDBReadPolicy:
+            TableName: !Ref TenantProfilesTable
         - S3ReadPolicy:
             BucketName: !Ref PagesBucket
         - S3ReadPolicy:
@@ -2012,6 +2152,9 @@ Resources:
       Handler: handlers.experiments.handler
       Description: Tenant A/B testing CRUD and lifecycle -- create experiments, edit variants/weights, start/pause/complete, and read per-variant results. Also writes the experiment's short-URL route.
       Policies:
+        # Entitlement gate reads the tenant's denormalized entitlements to gate this feature on the plan.
+        - DynamoDBReadPolicy:
+            TableName: !Ref TenantProfilesTable
         - DynamoDBCrudPolicy:
             TableName: !Ref ExperimentsTable
         - DynamoDBCrudPolicy:
@@ -2319,6 +2462,9 @@ Resources:
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref ServicesTable
+        # Reads the tenant's denormalized entitlements to gate creating a service on the `booking` plan capability.
+        - DynamoDBReadPolicy:
+            TableName: !Ref TenantProfilesTable
       Events:
         ServicesList:
           Type: Api
@@ -3144,6 +3290,27 @@ Resources:
               KeyType: RANGE
           Projection:
             ProjectionType: ALL
+
+  # Platform->tenant SaaS plan catalog (global, NOT tenant-scoped). PK=PLATFORM_BILLING#{billing_mode},
+  # SK=PLAN#{plan_key} | CONFIG. Hand-editable source of truth for the subscription plans + exempt list.
+  # See plans/SAAS_BILLING_PAYWALL.md. Simple PK/SK access (query plans by mode) — no GSI, no TTL (plans persist).
+  PlatformPlansTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "${ProjectPrefix}-platform-plans-${Environment}"
+      BillingMode: PAY_PER_REQUEST
+      SSESpecification:
+        SSEEnabled: true
+      AttributeDefinitions:
+        - AttributeName: PK
+          AttributeType: S
+        - AttributeName: SK
+          AttributeType: S
+      KeySchema:
+        - AttributeName: PK
+          KeyType: HASH
+        - AttributeName: SK
+          KeyType: RANGE
 
   ReviewsTable:
     Type: AWS::DynamoDB::Table

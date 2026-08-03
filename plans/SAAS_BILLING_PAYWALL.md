@@ -1,6 +1,20 @@
 # SaaS Billing Paywall (platform → tenant subscriptions), table-driven
 
-Status: **PLANNED, not built.** Design 2026-08-02. Port + modernize stripe-cart's billing paywall
+Status: **P1 BACKEND BUILT 2026-08-02** (branch `saas-billing-paywall`, backend 1373 tests pass; NOT deployed, NOT
+merged). Decisions locked: basic "Bay Pass" **$9.58/mo** (958¢) 14-day trial active, pro seeded-inactive; hosted
+Checkout + Billing Portal; **page-serving parity**; grace = allow `past_due` (Stripe dunning) block
+`suspended`/`canceled`; fee_tier 1:1. **Built:** PlatformPlansTable + repo + cached loader
+(`domain/platform_billing.py`); TenantProfile billing fields + grace-model guard (`domain/billing_status.py`);
+subscribe/portal/plans (`handlers/platform_subscription.py`, routes `/platform-billing/*`); SEPARATE platform-billing
+webhook (`handlers/platform_billing_webhook.py` + `domain/platform_subscription_sync.py`, route
+`/webhook/platform-billing`, own signing secret kind=`platform_billing`); serve gate in `test_page_serve.py`; seed
+script `scripts/seed_platform_plans.py`. **Deferred:** custom-domain page takedown on suspension (a
+deactivate/unpublish sweep — `custom_domains_resolve` is pure routing by design, must not read billing state); the
+P2 dashboard billing screen; P3 admin plan-CRUD; P4 price-migration tooling. **Manual before end-to-end test:** run
+the seed script (creates Stripe Product + $9.58 Price + plan row + exempt list); configure the platform-billing
+Stripe webhook endpoint + store its signing secret as `whsec_platform_billing_{mode}` in the platform secret.
+
+Design 2026-08-02. Port + modernize stripe-cart's billing paywall
 (`stripe-cart/plans/SAAS_BILLING_PAYWALL_PLAN.md`, `stripe-cart/src/billing.py`, `platform_config.py`) into
 stripe-link, but **DynamoDB-table-driven** (editable without deploys) instead of code/app-config-embedded.
 Foundational: it's the rail the Identity-verification charging (`plans/IDENTITY_VERIFICATION.md`) and any future

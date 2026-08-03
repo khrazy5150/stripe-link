@@ -1302,6 +1302,18 @@ def validate_tenant_profile(document: dict[str, Any]) -> None:
     if not isinstance(owner, dict):
         raise DocumentValidationError("Tenant profile owner must be an object.")
     require_fields(owner, ["first_name", "last_name", "email"])
+    # Platform->tenant SaaS billing fields (plans/SAAS_BILLING_PAYWALL.md). All optional.
+    status = document.get("billing_status")
+    if status is not None and status not in {"trial", "active", "past_due", "canceled", "suspended", "trial_expired"}:
+        raise DocumentValidationError("Tenant profile billing_status is invalid.")
+    if "billing_exempt" in document and not isinstance(document.get("billing_exempt"), bool):
+        raise DocumentValidationError("Tenant profile billing_exempt must be a boolean.")
+    for field in ("billing_plan_key", "billing_price_id", "stripe_customer_id", "stripe_subscription_id"):
+        optional_string(document, field, f"Tenant profile {field}")
+    for field in ("current_period_end", "trial_ends_at"):
+        value = document.get(field)
+        if value is not None and (not isinstance(value, int) or isinstance(value, bool) or value < 0):
+            raise DocumentValidationError(f"Tenant profile {field} must be a non-negative integer.")
 
 
 def validate_stripe_keys_document(document: dict[str, Any]) -> None:

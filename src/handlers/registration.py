@@ -1,4 +1,7 @@
+import time
+
 from stripe_link.common import error_response, json_response, parse_json_body, path_params, tenant_id_from_event
+from stripe_link.domain.billing_status import TRIAL_PERIOD_SECONDS
 from stripe_link.domain.documents import DocumentValidationError, validate_tenant_profile
 from stripe_link.repositories.documents import (
     RepositoryError,
@@ -38,6 +41,9 @@ def register_tenant(event, repositories):
         document.pop("password", None)
         document["tier_id"] = str(document.get("tier_id") or "basic")
         document["billing_status"] = str(document.get("billing_status") or "trial")
+        # Start the free platform trial clock (trial-first onboarding, plans/SAAS_BILLING_PAYWALL.md).
+        if not document.get("trial_ends_at"):
+            document["trial_ends_at"] = int(time.time()) + TRIAL_PERIOD_SECONDS
         validate_tenant_profile(document)
         saved = None
         for repository in repositories:

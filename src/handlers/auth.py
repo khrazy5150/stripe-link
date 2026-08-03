@@ -4,6 +4,7 @@ import uuid
 from typing import Any
 
 from stripe_link.common import error_response, json_response, parse_json_body
+from stripe_link.domain.billing_status import TRIAL_PERIOD_SECONDS
 from stripe_link.domain.documents import (
     DocumentValidationError,
     validate_tenant_profile,
@@ -240,6 +241,10 @@ def tenant_profile_document(*, client_id, email, first_name, last_name, phone_nu
             "confirmed_at": now if status == "confirmed" else None,
         },
         "billing_status": "trial",
+        # Trial-first onboarding: the free platform trial starts at signup and gives full access until it expires
+        # (plans/SAAS_BILLING_PAYWALL.md). Set once here; the login/confirm self-heal only rebuilds a MISSING
+        # profile, so an existing tenant's clock is never reset.
+        "trial_ends_at": now + TRIAL_PERIOD_SECONDS,
         "tier_id": tier_id,
         "created_at": now,
         "updated_at": now,

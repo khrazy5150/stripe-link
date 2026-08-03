@@ -97,7 +97,9 @@ def get_platform_secret_key(mode: str, env_fallback: Optional[str] = None) -> Op
 
 def get_platform_webhook_secret(kind: str, mode: str, env_fallback: Optional[str] = None) -> Optional[str]:
     kind = (kind or "stable").lower()
-    if kind not in ("preview", "stable"):
+    # "platform_billing" is the platform-account Stripe Billing webhook (the tenant SaaS subscription); "preview"/
+    # "stable" are the Connect webhooks. An unknown kind falls back to "stable" (plans/SAAS_BILLING_PAYWALL.md).
+    if kind not in ("preview", "stable", "platform_billing"):
         kind = "stable"
 
     mode = (mode or "test").lower()

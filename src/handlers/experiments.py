@@ -3,6 +3,7 @@ import time
 from stripe_link.common import error_response, json_response, parse_json_body, path_params, resolve_stripe_mode, tenant_id_from_event
 from handlers.routes import short_url_for_code
 from stripe_link.domain.documents import DocumentValidationError, validate_experiment, validate_route
+from stripe_link.entitlement_gate import require_capability
 from stripe_link.ids import generate_id
 from stripe_link.repositories.documents import (
     RepositoryError,
@@ -27,6 +28,7 @@ def handler(
     now_fn=lambda: int(time.time()),
     id_fn=lambda: f"exp_{generate_id()}",
     code_fn=None,
+    tenant_repo=None,
 ):
     mode = resolve_stripe_mode(event)
     repository = repository or experiments_repository(mode=mode)
@@ -42,6 +44,9 @@ def handler(
         if method == "GET" and experiment_id:
             return get_experiment(event, repository, experiment_id, orders, mode=mode)
         if method == "POST" and not experiment_id:
+            gate = require_capability(event, "ab_testing", tenant_repo)
+            if gate is not None:
+                return gate
             return create_experiment(event, repository, routes, now_fn, id_fn, code_fn)
         if method == "PUT" and experiment_id and not action:
             return update_experiment(event, repository, experiment_id, now_fn)

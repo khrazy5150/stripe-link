@@ -6362,3 +6362,51 @@ button:disabled {
   line-height: 1.6;
   color: #92400e;
 }
+
+/* Plan billing: trial/wall banner + locked (unentitled) menu items (plans/SAAS_BILLING_PAYWALL.md). */
+.billing-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.7rem 1.5rem;
+  font-size: 1.35rem;
+}
+.billing-banner.info { background: rgba(59, 130, 246, 0.14); color: #2563eb; }
+.billing-banner.danger { background: rgba(239, 68, 68, 0.14); color: #b91c1c; }
+.theme-live .billing-banner.info { color: #93c5fd; }
+.theme-live .billing-banner.danger { color: #fca5a5; }
+.billing-banner-cta {
+  border: none;
+  padding: 0.4rem 1.1rem;
+  border-radius: 6px;
+  font: inherit;
+  font-weight: 700;
+  color: #fff;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.billing-banner.info .billing-banner-cta { background: #2563eb; }
+.billing-banner.danger .billing-banner-cta { background: #dc2626; }
+
+.nav-item.locked .nav-label,
+.nav-item.locked .nav-icon { opacity: 0.5; }
+.nav-lock {
+  width: 1.4rem;
+  height: 1.4rem;
+  margin-left: auto;
+  opacity: 0.55;
+  flex: none;
+}
+
+/* Trial-first sign-up note on the auth/register screen (plans/SAAS_BILLING_PAYWALL.md). */
+.auth-trial-note {
+  margin: 0 0 1rem;
+  padding: 0.7rem 1rem;
+  border-radius: 8px;
+  background: rgba(59, 130, 246, 0.12);
+  color: #1e40af;
+  font-size: 1.3rem;
+  line-height: 1.5;
+}
+.theme-live .auth-trial-note { color: #93c5fd; }

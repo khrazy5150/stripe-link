@@ -1,7 +1,8 @@
 import os
 
 from stripe_link.common import path_params
-from stripe_link.repositories.documents import RepositoryError, routes_repository
+from stripe_link.domain.billing_status import is_billing_in_good_standing
+from stripe_link.repositories.documents import RepositoryError, routes_repository, tenant_profiles_repository
 from stripe_link.runtime.artifacts import artifact_paths
 from stripe_link.runtime.error_pages import render_error_page
 
@@ -10,6 +11,20 @@ from stripe_link.runtime.error_pages import render_error_page
 _VIEW_CONTEXT = {"": "", "sale": "sale", "flash-sale": "flash_sale"}
 
 _NOT_FOUND_HTML = render_error_page(404, "This test link is no longer available.", title="Page not found", badge="Test Environment")
+_BILLING_HOLD_HTML = render_error_page(402, "This page is temporarily unavailable.", title="Temporarily unavailable", badge="Test Environment")
+
+
+def _serving_blocked(tenant_id, tenant_repo):
+    """A delinquent (suspended/canceled) tenant's PUBLISHED pages stop serving (plans/SAAS_BILLING_PAYWALL.md,
+    parity choice). Best-effort: a missing profile or lookup error serves normally (fail open), matching the
+    checkout guard — billing should never itself 500 a page for an un-backfilled tenant."""
+    if tenant_repo is None:
+        return False
+    try:
+        profile = tenant_repo.get(tenant_id, tenant_id)
+    except RepositoryError:
+        return False
+    return profile is not None and not is_billing_in_good_standing(profile)
 
 
 def _html_response(body, status_code=200):
@@ -31,7 +46,7 @@ def _html_response(body, status_code=200):
     }
 
 
-def handler(event, context, *, repository=None, s3_client=None, pages_bucket=None, preview_bucket=None):
+def handler(event, context, *, repository=None, s3_client=None, pages_bucket=None, preview_bucket=None, tenant_repo=None):
     """Public endpoint that serves a test page (and its /sale //flash-sale views) by its snowflake short_code,
     for the test.juniorbay.com host (plans/SALES_FUNNELS.md Phase B). Resolves the code to a page via the
     routes table, reads that page's artifact from S3, and returns the HTML verbatim so the visitor's URL stays
@@ -68,6 +83,12 @@ def handler(event, context, *, repository=None, s3_client=None, pages_bucket=Non
     tenant_id = str(route.get("tenant_id") or "")
     if not page_id or not tenant_id:
         return _html_response(_NOT_FOUND_HTML, 404)
+
+    # A billing hold takes the PUBLISHED page offline; the tenant can still preview their own drafts.
+    if not is_preview:
+        tenant_repo = tenant_repo or (tenant_profiles_repository() if os.environ.get("TENANT_PROFILES_TABLE") else None)
+        if _serving_blocked(tenant_id, tenant_repo):
+            return _html_response(_BILLING_HOLD_HTML, 402)
 
     paths = artifact_paths(tenant_id, page_id, context=_VIEW_CONTEXT[view], mode=str(route.get("stripe_mode") or "live"))
     if is_preview:

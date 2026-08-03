@@ -173,7 +173,7 @@ class CartCheckoutHandlerTests(unittest.TestCase):
             products_repo=FakeRepo("product_id", [_product("prod_a", "price_a", 1999)]),
             services_repo=FakeRepo("service_id", []),
             stripe_repo=FakeStripeKeysRepository(),
-            tenant_repo=FakeRepo("tenant_id", [{"tenant_id": "t1", "billing_status": "past_due"}]),
+            tenant_repo=FakeRepo("tenant_id", [{"tenant_id": "t1", "billing_status": "suspended"}]),
             secret_cipher=FakeCipher(), opener=self.opener,
         )
         self.assertEqual(resp["statusCode"], 402)

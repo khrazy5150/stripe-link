@@ -17,6 +17,7 @@ from stripe_link.domain.custom_domains import (
     validation_record_from_hostname,
 )
 from stripe_link.domain.documents import DocumentValidationError, validate_tenant_config
+from stripe_link.entitlement_gate import require_capability
 from stripe_link.repositories.documents import RepositoryError, custom_domains_index_repository, platform_config_repository
 
 
@@ -30,6 +31,7 @@ def handler(
     api_token=None,
     opener=None,
     now_fn=lambda: int(time.time()),
+    tenant_repo=None,
 ):
     method = (event or {}).get("httpMethod", "").upper()
     if method == "OPTIONS":
@@ -56,6 +58,9 @@ def handler(
         if method == "GET" and not domain:
             return list_domains(tenant_id, config_repo)
         if method == "POST" and not domain:
+            gate = require_capability(event, "custom_domains", tenant_repo)
+            if gate is not None:
+                return gate
             return create_domain(
                 event, tenant_id, config_repo, index_repo,
                 zone_id=zone_id, api_token=api_token, opener=opener, now_fn=now_fn,

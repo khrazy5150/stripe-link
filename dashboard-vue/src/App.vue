@@ -33,9 +33,10 @@
             v-show="sidebarCollapsed || !isGroupCollapsed(group.key)"
             :key="item.key"
             class="nav-item"
-            :class="{ active: activeView === item.view }"
+            :class="{ active: activeView === item.view, locked: item.locked }"
             type="button"
             :disabled="!item.enabled"
+            :title="item.locked ? 'Not included in your plan — click to upgrade' : undefined"
             @click="activateMenuItem(item)"
           >
             <span class="nav-icon" aria-hidden="true">
@@ -44,6 +45,9 @@
               </svg>
             </span>
             <span class="nav-label">{{ item.label }}</span>
+            <svg v-if="item.locked" class="nav-lock" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16.5 10.5V7.5a4.5 4.5 0 1 0-9 0v3m-1.5 0h12a1.5 1.5 0 0 1 1.5 1.5v6a1.5 1.5 0 0 1-1.5 1.5H6a1.5 1.5 0 0 1-1.5-1.5v-6A1.5 1.5 0 0 1 6 10.5Z" />
+            </svg>
           </button>
         </template>
       </nav>
@@ -128,6 +132,12 @@
         </div>
       </header>
 
+      <!-- Trial / billing wall banner (plans/SAAS_BILLING_PAYWALL.md). Hidden for comped + subscribed tenants. -->
+      <div v-if="billingBanner" class="billing-banner" :class="billingBanner.tone">
+        <span>{{ billingBanner.text }}</span>
+        <button type="button" class="billing-banner-cta" @click="activeView = 'billing'">{{ billingBanner.cta }}</button>
+      </div>
+
       <Dashboard
         v-if="activeView === 'dashboard'"
         :environment-label="environmentLabel"
@@ -167,6 +177,7 @@
       <Refunds v-else-if="activeView === 'refunds'" :key="`refunds-${activeEnvironment}-${auth.session?.client_id || ''}`" />
       <Notifications v-else-if="activeView === 'notifications'" :key="`notifications-${activeEnvironment}-${auth.session?.client_id || ''}`" />
       <Shipping v-else-if="activeView === 'shipping'" :key="`shipping-${activeEnvironment}-${auth.session?.client_id || ''}`" />
+      <Billing v-else-if="activeView === 'billing'" :key="`billing-${auth.session?.client_id || ''}`" />
       <Profile v-else-if="activeView === 'profile'" :key="`profile-${auth.session?.user_id || ''}`" />
       <Preferences v-else-if="activeView === 'preferences'" :key="`preferences-${auth.session?.user_id || ''}`" />
     </main>
@@ -178,6 +189,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import ABTesting from "./components/ABTesting.vue";
 import AuthPage from "./components/AuthPage.vue";
+import Billing from "./components/Billing.vue";
 import Configuration from "./components/Configuration.vue";
 import Collections from "./components/Collections.vue";
 import Coupons from "./components/Coupons.vue";
@@ -206,6 +218,7 @@ import { useCollectionsStore } from "./stores/collections";
 import { useCouponsStore } from "./stores/coupons";
 import { useDashboardStore } from "./stores/dashboard";
 import { useNotificationsStore } from "./stores/notifications";
+import { usePlatformBillingStore } from "./stores/platformBilling";
 import { useProductsStore } from "./stores/products";
 import { useSitesStore } from "./stores/sites";
 import { useStripeKeysStore } from "./stores/stripeKeys";
@@ -216,6 +229,7 @@ const collections = useCollectionsStore();
 const coupons = useCouponsStore();
 const dashboard = useDashboardStore();
 const notifications = useNotificationsStore();
+const platformBilling = usePlatformBillingStore();
 const products = useProductsStore();
 const sites = useSitesStore();
 const stripeKeys = useStripeKeysStore();
@@ -261,7 +275,18 @@ function toggleGroup(key) {
   }
 }
 const userMenuRef = ref(null);
-const menuGroups = computed(() => menuGroupsForEnvironment(activeEnvironment.value));
+// Overlay plan-entitlement gating: a config-enabled feature the tenant's plan doesn't include is shown LOCKED
+// (greyed, with a lock) rather than hidden — clicking it routes to Billing to upgrade. During a live trial the
+// tenant has all entitlements, so nothing is locked (plans/SAAS_BILLING_PAYWALL.md).
+const menuGroups = computed(() =>
+  menuGroupsForEnvironment(activeEnvironment.value).map((group) => ({
+    ...group,
+    items: group.items.map((item) => ({
+      ...item,
+      locked: item.enabled && platformBilling.loaded && !platformBilling.isViewAllowed(item.view),
+    })),
+  })),
+);
 const environmentLabel = computed(() => activeEnvironment.value === "live" ? "Live" : "Test");
 // Live-first onboarding: the test/live toggle only appears once the tenant opts into a test sandbox. Until then
 // the dashboard is live-only and never strands anyone in a hidden test mode (plans/TODO.md onboarding streamline).
@@ -274,8 +299,27 @@ function coerceModeIfNoSandbox() {
 
 function activateMenuItem(item) {
   if (!item.enabled) return;
-  activeView.value = item.view;
+  // A locked (unentitled) feature routes to Billing to upgrade instead of opening the gated screen.
+  activeView.value = item.locked ? "billing" : item.view;
 }
+
+const billingBanner = computed(() => {
+  if (!platformBilling.loaded) return null;
+  if (platformBilling.walled) {
+    return {
+      tone: "danger",
+      text: platformBilling.trialExpired
+        ? "Your free trial has ended. Subscribe to keep your pages live and take payments."
+        : "Your account is on hold. Subscribe to continue.",
+      cta: "Subscribe",
+    };
+  }
+  if (platformBilling.onTrial) {
+    const d = platformBilling.trialDaysLeft;
+    return { tone: "info", text: `${d} ${d === 1 ? "day" : "days"} left in your free trial — full access.`, cta: "Choose a plan" };
+  }
+  return null;
+});
 
 function toggleEnvironment() {
   switchEnvironment(activeEnvironment.value === "test" ? "live" : "test");
@@ -406,6 +450,7 @@ onMounted(() => {
     .then(coerceModeIfNoSandbox)
     .then(maybeNudgeStripeSetup)
     .catch(() => {});
+  platformBilling.load().catch(() => {});
   // Keep the bell badge fresh while the dashboard is open.
   notificationsPoll = window.setInterval(() => {
     if (auth.isAuthenticated) notifications.load({ silent: true });
@@ -432,6 +477,7 @@ watch(
     // emptied modes, so without this reload the test/live toggle would stay hidden until the Payments screen is
     // visited even for a tenant that has a sandbox.
     stripeKeys.load().then(coerceModeIfNoSandbox).catch(() => {});
+    platformBilling.load().catch(() => {});  // refresh trial/plan/entitlements for the new tenant
     activeView.value = "dashboard";
     userMenuOpen.value = false;
   },

@@ -5,6 +5,7 @@ import uuid
 from stripe_link.common import error_response, json_response, parse_json_body, path_params, query_params, resolve_stripe_mode, tenant_id_from_event
 from stripe_link.domain.documents import DocumentValidationError, validate_invoice
 from stripe_link.domain.fees import cached_billing_config, calculate_price, normalize_tier_id
+from stripe_link.entitlement_gate import require_capability
 from stripe_link.domain.invoicing import (
     DEFAULT_DAYS_UNTIL_DUE,
     invoice_currency,
@@ -36,6 +37,11 @@ def handler(event, context, repository=None, stripe_repo=None, tenant_repo=None,
     path = (event or {}).get("path", "")
     if method == "OPTIONS":
         return json_response({})
+    # Any invoice write (create / from-appointment / from-order / send) requires the `invoicing` plan capability.
+    if method in {"POST", "PUT"}:
+        gate = require_capability(event, "invoicing", tenant_repo)
+        if gate is not None:
+            return gate
     if method == "POST" and path.endswith("/from-appointment"):
         return invoice_from_appointment_route(event, repository, appointments_repo=appointments_repo, mode=mode)
     if method == "POST" and path.endswith("/from-order"):
