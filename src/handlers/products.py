@@ -2,7 +2,7 @@ import logging
 import os
 import time
 
-from stripe_link.common import error_response, json_response, parse_json_body, path_params, query_params, tenant_id_from_event
+from stripe_link.common import error_response, json_response, parse_json_body, path_params, query_params, resolve_stripe_mode, tenant_id_from_event
 from stripe_link.domain.categories import CURATED_CATEGORIES, category_label, normalize_category
 from stripe_link.domain.documents import (
     DocumentValidationError,
@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 
 def handler(event, context, repository=None, sync_invoker=None):
-    repository = repository or products_repository()
+    repository = repository or products_repository(mode=resolve_stripe_mode(event))
     method = (event or {}).get("httpMethod", "").upper()
     if method == "OPTIONS":
         return json_response({})

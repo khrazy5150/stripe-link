@@ -90,30 +90,11 @@ def register(event, cognito, tenant_repositories, user_repository):
     user_id = result.get("UserSub") or email
     client_id = client_id_for(body, user_id)
 
-    tenant = {
-        "schema_version": "2026-05-29",
-        "document_type": "tenant_profile",
-        "tenant_id": client_id,
-        "owner_email": email,
-        "owner": {
-            "first_name": first_name,
-            "last_name": last_name,
-            "email": email,
-            "phone_number": phone_number,
-            "email_verified": False,
-            "phone_verified": False,
-            "cognito_username": email,
-        },
-        "auth": {
-            "provider": "cognito",
-            "status": "pending_confirmation",
-            "confirmed_at": None,
-        },
-        "billing_status": "trial",
-        "tier_id": str(body.get("tier_id") or "basic"),
-        "created_at": now,
-        "updated_at": now,
-    }
+    tenant = tenant_profile_document(
+        client_id=client_id, email=email, first_name=first_name, last_name=last_name,
+        phone_number=phone_number, status="pending_confirmation", now=now,
+        tier_id=str(body.get("tier_id") or "basic"),
+    )
     validate_tenant_profile(tenant)
     for tenant_repository in tenant_repositories:
         tenant_repository.put(tenant)
@@ -149,23 +130,21 @@ def confirm(event, cognito, tenant_repository, tenant_repositories, user_reposit
     session = session_from_cognito_user(user)
     now = epoch()
 
-    tenant = tenant_repository.get(session["tenant_id"], session["tenant_id"])
-    if tenant:
-        tenant.setdefault("auth", {})
-        tenant["auth"]["provider"] = "cognito"
-        tenant["auth"]["status"] = "confirmed"
-        tenant["auth"]["confirmed_at"] = now
-        tenant["updated_at"] = now
-        for target_repository in tenant_repositories:
-            target_repository.put(tenant)
+    tenant = tenant_repository.get(session["tenant_id"], session["tenant_id"]) or _rebuilt_tenant_profile(session, now)
+    tenant.setdefault("auth", {})
+    tenant["auth"]["provider"] = "cognito"
+    tenant["auth"]["status"] = "confirmed"
+    tenant["auth"]["confirmed_at"] = now
+    tenant["updated_at"] = now
+    for target_repository in tenant_repositories:
+        target_repository.put(tenant)
 
-    profile = user_repository.get(session["tenant_id"], session["user_id"])
-    if profile:
-        profile["status"] = "active"
-        profile.setdefault("auth", {})
-        profile["auth"]["email_verified"] = True
-        profile["updated_at"] = now
-        user_repository.put(profile)
+    profile = user_repository.get(session["tenant_id"], session["user_id"]) or _rebuilt_user_profile(session, now)
+    profile["status"] = "active"
+    profile.setdefault("auth", {})
+    profile["auth"]["email_verified"] = True
+    profile["updated_at"] = now
+    user_repository.put(profile)
 
     return json_response({"message": "Email confirmed. You can sign in now.", "session": session})
 
@@ -187,15 +166,36 @@ def login(event, cognito, tenant_repository, user_repository):
     session = session_from_cognito_user(user, auth)
 
     now = epoch()
-    profile = user_repository.get(session["tenant_id"], session["user_id"])
-    if profile:
-        profile.setdefault("auth", {})
-        profile["auth"]["last_login_at"] = now
-        profile["updated_at"] = now
-        user_repository.put(profile)
+    # Self-heal: a confirmed Cognito user whose profile is missing (e.g. this deployment's data was wiped in a
+    # clean-slate cutover, or the Cognito pool is shared across deployments) gets a fresh profile rebuilt on login,
+    # keyed to their Cognito identity (plans/STRIPE_MODE_DECOUPLING.md P6).
+    profile = user_repository.get(session["tenant_id"], session["user_id"]) or _rebuilt_user_profile(session, now)
+    profile.setdefault("auth", {})
+    profile["auth"]["last_login_at"] = now
+    profile["updated_at"] = now
+    user_repository.put(profile)
 
     tenant = tenant_repository.get(session["tenant_id"], session["tenant_id"])
+    if not tenant:
+        tenant = _rebuilt_tenant_profile(session, now)
+        tenant_repository.put(tenant)
     return json_response({"session": session, "tenant": tenant})
+
+
+def _rebuilt_user_profile(session, now):
+    return user_profile_document(
+        client_id=session["tenant_id"], user_id=session["user_id"], email=session["email"],
+        first_name=session.get("first_name", ""), last_name=session.get("last_name", ""),
+        status="active", now=now,
+    )
+
+
+def _rebuilt_tenant_profile(session, now):
+    return tenant_profile_document(
+        client_id=session["tenant_id"], email=session["email"],
+        first_name=session.get("first_name", ""), last_name=session.get("last_name", ""),
+        status="confirmed", now=now, email_verified=bool(session.get("email_verified")),
+    )
 
 
 def forgot_password(event, cognito):
@@ -216,6 +216,34 @@ def reset_password(event, cognito):
         Password=required(body, "new_password"),
     )
     return json_response({"message": "Password updated. You can sign in now."})
+
+
+def tenant_profile_document(*, client_id, email, first_name, last_name, phone_number="", status, now, email_verified=False, tier_id="basic"):
+    """The tenant profile shape, shared by register and the login/confirm self-heal so they can't drift."""
+    return {
+        "schema_version": "2026-05-29",
+        "document_type": "tenant_profile",
+        "tenant_id": client_id,
+        "owner_email": email,
+        "owner": {
+            "first_name": first_name,
+            "last_name": last_name,
+            "email": email,
+            "phone_number": phone_number,
+            "email_verified": email_verified,
+            "phone_verified": False,
+            "cognito_username": email,
+        },
+        "auth": {
+            "provider": "cognito",
+            "status": status,
+            "confirmed_at": now if status == "confirmed" else None,
+        },
+        "billing_status": "trial",
+        "tier_id": tier_id,
+        "created_at": now,
+        "updated_at": now,
+    }
 
 
 def user_profile_document(*, client_id, user_id, email, first_name, last_name, status, now):

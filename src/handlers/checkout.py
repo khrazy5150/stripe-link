@@ -6,7 +6,7 @@ from urllib.request import Request, urlopen
 
 logger = logging.getLogger(__name__)
 
-from stripe_link.common import error_response, json_response, query_params, tenant_id_from_event
+from stripe_link.common import error_response, json_response, query_params, resolve_stripe_mode, tenant_id_from_event
 from stripe_link.domain.billing_status import BillingStatusError, assert_billing_in_good_standing
 from stripe_link.domain.bnpl import checkout_payment_method_types
 from stripe_link.domain.fees import build_fee_context
@@ -75,11 +75,14 @@ def handler(
     if not success_url or not cancel_url:
         return error_response("success_url and cancel_url are required.", code="missing_redirect_url")
 
-    offers_repo = offers_repo or offers_repository()
-    products_repo = products_repo or products_repository()
+    # The transaction runs in the request's Stripe mode; a published Buy URL carries ?mode= so live pages check
+    # out live and test pages test (plans/STRIPE_MODE_DECOUPLING.md P2/P4). Entities load in this mode.
+    mode = resolve_stripe_mode(event)
+    offers_repo = offers_repo or offers_repository(mode=mode)
+    products_repo = products_repo or products_repository(mode=mode)
     if services_repo is None:
         try:
-            services_repo = services_repository()
+            services_repo = services_repository(mode=mode)
         except Exception:  # noqa: BLE001 - services table optional; only needed for service offer items
             services_repo = None
     stripe_repo = stripe_repo or stripe_keys_repository()
@@ -94,7 +97,7 @@ def handler(
         # already shows a "DRAFT" screen instead of a working CTA, but this is the authoritative server-side
         # guard: a draft/unknown page_id cannot start a real transaction even if the API is called directly.
         if page_id:
-            pages_repo = pages_repo or pages_repository()
+            pages_repo = pages_repo or pages_repository(mode=mode)
             page = pages_repo.get(tenant_id, page_id)
             if not page or page.get("status") != "published":
                 # GET /checkout is the CTA's own href — a browser lands here directly — so serve the branded
@@ -131,7 +134,6 @@ def handler(
         selected_prices = {product_id: price_id} if product_id and price_id else {}
         resolved = resolve_offer(offer, products_by_id, selected_prices, services_by_id=services_by_id)
 
-        mode = "live" if offer.get("stripe_mode") == "live" else "test"
         stripe_keys = stripe_repo.get(tenant_id, mode=mode) or {}
         api_key, stripe_account = checkout_credentials(tenant_id, mode, stripe_keys, secret_cipher)
         if not api_key:

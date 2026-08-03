@@ -1,9 +1,9 @@
-from stripe_link.common import error_response, json_response, path_params, query_params, tenant_id_from_event
+from stripe_link.common import error_response, json_response, path_params, query_params, resolve_stripe_mode, tenant_id_from_event
 from stripe_link.repositories.documents import orders_repository
 
 
 def handler(event, context, repository=None):
-    repository = repository or orders_repository()
+    repository = repository or orders_repository(mode=resolve_stripe_mode(event))
     method = (event or {}).get("httpMethod", "").upper()
     if method == "OPTIONS":
         return json_response({})

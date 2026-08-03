@@ -49,7 +49,7 @@ def destination_url(route, *, pages_domain, api_base_url):
         tenant_id = str(route.get("tenant_id") or "")
         if not page_id or not tenant_id:
             return ""
-        return public_url(pages_domain, artifact_paths(tenant_id, page_id)["published"])
+        return public_url(pages_domain, artifact_paths(tenant_id, page_id, mode=str(route.get("stripe_mode") or "live"))["published"])
     if target_type == "experiment":
         # A/B experiment resolver (built in the A/B testing slice); the short code points at
         # the resolver, which does the weighted per-visit variant assignment.

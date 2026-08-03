@@ -2,6 +2,8 @@ import os
 from decimal import Decimal
 from typing import Any
 
+from stripe_link.common import normalize_stripe_mode
+
 
 class RepositoryError(RuntimeError):
     pass
@@ -39,6 +41,7 @@ class DynamoDocumentRepository:
         document_type: str,
         id_field: str,
         table: Any | None = None,
+        mode: str | None = None,
     ):
         if not table_name:
             raise RepositoryError("Table name is required.")
@@ -47,6 +50,10 @@ class DynamoDocumentRepository:
         self.document_type = document_type
         self.id_field = id_field
         self._table = table
+        # When set, this repo is Stripe-mode-scoped: mode is baked into the SK + GSI1PK so a tenant's test and
+        # live documents (which may share an id after a test->live promote) are DISTINCT items that coexist in
+        # the one per-deployment table (plans/STRIPE_MODE_DECOUPLING.md). None = mode-agnostic (legacy layout).
+        self.mode = normalize_stripe_mode(mode) if mode is not None else None
 
     @property
     def table(self):
@@ -60,10 +67,25 @@ class DynamoDocumentRepository:
     def sort_prefix(self) -> str:
         return self.document_type.upper()
 
+    def _sk(self, document_id: str) -> str:
+        if self.mode is not None:
+            return f"{self.sort_prefix}#{self.mode}#{document_id}"
+        return f"{self.sort_prefix}#{document_id}"
+
+    def _list_prefix(self) -> str:
+        if self.mode is not None:
+            return f"{self.sort_prefix}#{self.mode}#"
+        return f"{self.sort_prefix}#"
+
+    def _gsi1pk(self, document_id: str) -> str:
+        if self.mode is not None:
+            return f"{self.sort_prefix}#{self.mode}#{document_id}"
+        return f"{self.sort_prefix}#{document_id}"
+
     def _key(self, tenant_id: str, document_id: str) -> dict[str, str]:
         return {
             "PK": f"TENANT#{tenant_id}",
-            "SK": f"{self.sort_prefix}#{document_id}",
+            "SK": self._sk(document_id),
         }
 
     def put(self, document: dict[str, Any]) -> dict[str, Any]:
@@ -74,10 +96,13 @@ class DynamoDocumentRepository:
         if not document_id:
             raise RepositoryError(f"Document {self.id_field} is required.")
 
+        if self.mode is not None:
+            document = {**document, "stripe_mode": self.mode}
+
         item = {
             **document,
             **self._key(tenant_id, document_id),
-            "GSI1PK": f"{self.sort_prefix}#{document_id}",
+            "GSI1PK": self._gsi1pk(document_id),
             "GSI1SK": f"TENANT#{tenant_id}",
         }
         self.table.put_item(Item=item)
@@ -105,17 +130,18 @@ class DynamoDocumentRepository:
 
         items = _query_all_pages(
             self.table,
-            KeyConditionExpression=Key("PK").eq(f"TENANT#{tenant_id}") & Key("SK").begins_with(f"{self.sort_prefix}#")
+            KeyConditionExpression=Key("PK").eq(f"TENANT#{tenant_id}") & Key("SK").begins_with(self._list_prefix())
         )
         return [self._strip_keys(item) for item in items]
 
     def scan_type(self) -> list[dict[str, Any]]:
         """Cross-tenant scan of every document of this repo's type. Intended for periodic
-        sweeps (e.g. due-reminder delivery), not the request path — it reads the whole table."""
+        sweeps (e.g. due-reminder delivery), not the request path — it reads the whole table.
+        Mode-scoped when the repo is bound to a mode; otherwise returns every mode."""
         from boto3.dynamodb.conditions import Attr
 
         items: list[dict[str, Any]] = []
-        request: dict[str, Any] = {"FilterExpression": Attr("SK").begins_with(f"{self.sort_prefix}#")}
+        request: dict[str, Any] = {"FilterExpression": Attr("SK").begins_with(self._list_prefix())}
         while True:
             response = self.table.scan(**request)
             items.extend(response.get("Items", []))
@@ -126,12 +152,13 @@ class DynamoDocumentRepository:
         return [self._strip_keys(item) for item in items]
 
     def find_by_id(self, document_id: str) -> dict[str, Any] | None:
-        """Look up a document by id alone (cross-tenant) via GSI1. Assumes document_id is unique."""
+        """Look up a document by id alone (cross-tenant) via GSI1. Assumes document_id is unique
+        within the repo's mode (the GSI1PK carries the mode when the repo is mode-scoped)."""
         from boto3.dynamodb.conditions import Key
 
         response = self.table.query(
             IndexName="GSI1",
-            KeyConditionExpression=Key("GSI1PK").eq(f"{self.sort_prefix}#{document_id}"),
+            KeyConditionExpression=Key("GSI1PK").eq(self._gsi1pk(document_id)),
             Limit=1,
         )
         items = response.get("Items", [])
@@ -161,48 +188,53 @@ class DynamoDocumentRepository:
         }
 
 
-def products_repository(table: Any | None = None) -> DynamoDocumentRepository:
+def products_repository(table: Any | None = None, *, mode: str | None = None) -> DynamoDocumentRepository:
     return DynamoDocumentRepository(
         os.environ.get("PRODUCTS_TABLE", ""),
         document_type="product",
         id_field="product_id",
         table=table,
+        mode=mode,
     )
 
 
-def offers_repository(table: Any | None = None) -> DynamoDocumentRepository:
+def offers_repository(table: Any | None = None, *, mode: str | None = None) -> DynamoDocumentRepository:
     return DynamoDocumentRepository(
         os.environ.get("OFFERS_TABLE", ""),
         document_type="offer",
         id_field="offer_id",
         table=table,
+        mode=mode,
     )
 
 
-def coupons_repository(table: Any | None = None) -> DynamoDocumentRepository:
+def coupons_repository(table: Any | None = None, *, mode: str | None = None) -> DynamoDocumentRepository:
     return DynamoDocumentRepository(
         os.environ.get("COUPONS_TABLE", ""),
         document_type="coupon",
         id_field="coupon_id",
         table=table,
+        mode=mode,
     )
 
 
-def pages_repository(table: Any | None = None) -> DynamoDocumentRepository:
+def pages_repository(table: Any | None = None, *, mode: str | None = None) -> DynamoDocumentRepository:
     return DynamoDocumentRepository(
         os.environ.get("PAGES_TABLE", ""),
         document_type="page",
         id_field="page_id",
         table=table,
+        mode=mode,
     )
 
 
-def sites_repository(table: Any | None = None) -> DynamoDocumentRepository:
+def sites_repository(table: Any | None = None, *, mode: str | None = None) -> DynamoDocumentRepository:
     return DynamoDocumentRepository(
         os.environ.get("SITES_TABLE", ""),
         document_type="site",
         id_field="site_id",
         table=table,
+        mode=mode,
     )
 
 
@@ -333,58 +365,52 @@ class SimpleKeyRepository:
 
 
 class StripeKeysRepository:
+    """A tenant's Stripe keys for BOTH modes, isolated in ONE per-deployment table (Stripe-mode decoupling,
+    plans/STRIPE_MODE_DECOUPLING.md). Mode is part of the composite key (PK=`tenant_id`, SK=`mode`) — NOT a
+    second physical table — so a deployment holds a tenant's test AND live keys side by side. `mode` is stamped
+    onto every write and required on every read; anything not explicitly "live" is treated as "test" (fail-safe)."""
+
     def __init__(
         self,
+        table_name: str,
         *,
-        dev_table_name: str,
-        prod_table_name: str,
         key_field: str = "tenant_id",
-        dev_table: Any | None = None,
-        prod_table: Any | None = None,
+        mode_field: str = "mode",
+        table: Any | None = None,
     ):
-        if not dev_table_name:
-            raise RepositoryError("Dev Stripe keys table name is required.")
-        if not prod_table_name:
-            raise RepositoryError("Prod Stripe keys table name is required.")
-        assert_jb_resource_name(dev_table_name)
-        assert_jb_resource_name(prod_table_name)
-        self.dev_table_name = dev_table_name
-        self.prod_table_name = prod_table_name
+        if not table_name:
+            raise RepositoryError("Stripe keys table name is required.")
+        assert_jb_resource_name(table_name)
+        self.table_name = table_name
         self.key_field = key_field
-        self._dev_table = dev_table
-        self._prod_table = prod_table
-
-    def table_for_mode(self, mode: str):
-        if mode == "live":
-            return self.prod_table
-        return self.dev_table
+        self.mode_field = mode_field
+        self._table = table
 
     @property
-    def dev_table(self):
-        if self._dev_table is None:
+    def table(self):
+        if self._table is None:
             import boto3
 
-            self._dev_table = boto3.resource("dynamodb").Table(self.dev_table_name)
-        return self._dev_table
+            self._table = boto3.resource("dynamodb").Table(self.table_name)
+        return self._table
 
-    @property
-    def prod_table(self):
-        if self._prod_table is None:
-            import boto3
+    @staticmethod
+    def _mode(value: Any) -> str:
+        return "live" if str(value or "").strip().lower() == "live" else "test"
 
-            self._prod_table = boto3.resource("dynamodb").Table(self.prod_table_name)
-        return self._prod_table
+    def _key(self, key_value: str, mode: str) -> dict[str, str]:
+        return {self.key_field: key_value, self.mode_field: self._mode(mode)}
 
     def put(self, document: dict[str, Any]) -> dict[str, Any]:
         key_value = str(document.get(self.key_field) or "").strip()
-        mode = "live" if document.get("mode") == "live" else "test"
         if not key_value:
             raise RepositoryError(f"Document {self.key_field} is required.")
-        self.table_for_mode(mode).put_item(Item=document)
+        document = {**document, self.mode_field: self._mode(document.get(self.mode_field))}
+        self.table.put_item(Item=document)
         return document
 
     def get(self, key_value: str, mode: str = "test") -> dict[str, Any] | None:
-        response = self.table_for_mode("live" if mode == "live" else "test").get_item(Key={self.key_field: key_value})
+        response = self.table.get_item(Key=self._key(key_value, mode))
         return response.get("Item")
 
     def find_by_connect_account_id(self, account_id: str, mode: str = "test") -> dict[str, Any] | None:
@@ -394,13 +420,12 @@ class StripeKeysRepository:
 
         from boto3.dynamodb.conditions import Attr
 
-        table = self.table_for_mode("live" if mode == "live" else "test")
         request: dict[str, Any] = {
-            "FilterExpression": Attr("connect_account_id").eq(account_id),
+            "FilterExpression": Attr("connect_account_id").eq(account_id) & Attr(self.mode_field).eq(self._mode(mode)),
         }
 
         while True:
-            response = table.scan(**request)
+            response = self.table.scan(**request)
             items = response.get("Items", [])
             if items:
                 return items[0]
@@ -467,6 +492,7 @@ class TenantRangeRepository:
         *,
         id_field: str,
         table: Any | None = None,
+        mode: str | None = None,
     ):
         if not table_name:
             raise RepositoryError("Table name is required.")
@@ -474,6 +500,9 @@ class TenantRangeRepository:
         self.table_name = table_name
         self.id_field = id_field
         self._table = table
+        # Orders/customers carry globally-unique ids (no cross-mode id reuse), so mode is a filtered ATTRIBUTE
+        # here rather than part of the key: stamp on write, filter list/get by mode (plans/STRIPE_MODE_DECOUPLING.md).
+        self.mode = normalize_stripe_mode(mode) if mode is not None else None
 
     @property
     def table(self):
@@ -490,17 +519,27 @@ class TenantRangeRepository:
             raise RepositoryError("Document tenant_id is required.")
         if not document_id:
             raise RepositoryError(f"Document {self.id_field} is required.")
+        if self.mode is not None:
+            document = {**document, "stripe_mode": self.mode}
         self.table.put_item(Item=document)
         return document
 
     def get(self, tenant_id: str, document_id: str) -> dict[str, Any] | None:
         response = self.table.get_item(Key={"tenant_id": tenant_id, self.id_field: document_id})
-        return response.get("Item")
+        item = response.get("Item")
+        if not item:
+            return None
+        if self.mode is not None and normalize_stripe_mode(item.get("stripe_mode")) != self.mode:
+            return None
+        return item
 
     def list_for_tenant(self, tenant_id: str) -> list[dict[str, Any]]:
-        from boto3.dynamodb.conditions import Key
+        from boto3.dynamodb.conditions import Attr, Key
 
-        return _query_all_pages(self.table, KeyConditionExpression=Key("tenant_id").eq(tenant_id))
+        kwargs: dict[str, Any] = {"KeyConditionExpression": Key("tenant_id").eq(tenant_id)}
+        if self.mode is not None:
+            kwargs["FilterExpression"] = Attr("stripe_mode").eq(self.mode)
+        return _query_all_pages(self.table, **kwargs)
 
     def find_by_payment_intent(self, payment_intent_id: str) -> dict[str, Any] | None:
         """Resolve an order from a Stripe PaymentIntent via the PaymentIntentIndex GSI."""
@@ -688,13 +727,10 @@ def webhook_events_repository(table: Any | None = None) -> SimpleKeyRepository:
 
 
 def stripe_keys_repository(table: Any | None = None) -> StripeKeysRepository:
-    fallback_table = os.environ.get("STRIPE_KEYS_TABLE", "")
     return StripeKeysRepository(
-        dev_table_name=os.environ.get("STRIPE_KEYS_TABLE_DEV") or fallback_table,
-        prod_table_name=os.environ.get("STRIPE_KEYS_TABLE_PROD") or fallback_table,
+        os.environ.get("STRIPE_KEYS_TABLE", ""),
         key_field="tenant_id",
-        dev_table=table,
-        prod_table=table,
+        table=table,
     )
 
 
@@ -714,19 +750,21 @@ def shipping_config_repository(table: Any | None = None) -> SimpleKeyRepository:
     )
 
 
-def customers_repository(table: Any | None = None) -> TenantRangeRepository:
+def customers_repository(table: Any | None = None, *, mode: str | None = None) -> TenantRangeRepository:
     return TenantRangeRepository(
         os.environ.get("CUSTOMERS_TABLE", ""),
         id_field="customer_id",
         table=table,
+        mode=mode,
     )
 
 
-def orders_repository(table: Any | None = None) -> TenantRangeRepository:
+def orders_repository(table: Any | None = None, *, mode: str | None = None) -> TenantRangeRepository:
     return TenantRangeRepository(
         os.environ.get("ORDERS_TABLE", ""),
         id_field="order_id",
         table=table,
+        mode=mode,
     )
 
 
@@ -740,28 +778,11 @@ def tenant_profiles_repository(table: Any | None = None) -> DynamoDocumentReposi
 
 
 def tenant_profiles_registration_repositories(table: Any | None = None) -> list[DynamoDocumentRepository]:
-    table_names = [
-        os.environ.get("TENANT_PROFILES_TABLE_DEV", ""),
-        os.environ.get("TENANT_PROFILES_TABLE_PROD", ""),
-    ]
-    if not any(table_names):
-        table_names = [os.environ.get("TENANT_PROFILES_TABLE", "")]
-
-    repositories: list[DynamoDocumentRepository] = []
-    seen: set[str] = set()
-    for table_name in table_names:
-        if not table_name or table_name in seen:
-            continue
-        seen.add(table_name)
-        repositories.append(DynamoDocumentRepository(
-            table_name,
-            document_type="tenant",
-            id_field="tenant_id",
-            table=table,
-        ))
-    if not repositories:
-        raise RepositoryError("Tenant profile registration table names are required.")
-    return repositories
+    """Registration writes ONLY the local per-deployment tenant-profiles table. The legacy cross-env dual-write
+    (both `-DEV` and `-PROD`) is retired under data isolation (plans/STRIPE_MODE_DECOUPLING.md) — dev runs
+    unreleased code and must never write real prod profiles. Returns a single-element list so callers that iterate
+    the registration targets stay unchanged."""
+    return [tenant_profiles_repository(table)]
 
 
 def user_preferences_repository(table: Any | None = None) -> DynamoDocumentRepository:
@@ -818,7 +839,7 @@ def reviews_repository(table: Any | None = None) -> DynamoDocumentRepository:
     )
 
 
-def collections_repository(table: Any | None = None) -> DynamoDocumentRepository:
+def collections_repository(table: Any | None = None, *, mode: str | None = None) -> DynamoDocumentRepository:
     """Collections — ordered, curated groups of a Site's pages (plans/SITE_COLLECTIONS.md). Tenant-scoped like
     every other document; a Collection carries its own site_id."""
     return DynamoDocumentRepository(
@@ -826,25 +847,28 @@ def collections_repository(table: Any | None = None) -> DynamoDocumentRepository
         document_type="collection",
         id_field="collection_id",
         table=table,
+        mode=mode,
     )
 
 
-def carts_repository(table: Any | None = None) -> DynamoDocumentRepository:
+def carts_repository(table: Any | None = None, *, mode: str | None = None) -> DynamoDocumentRepository:
     return DynamoDocumentRepository(
         os.environ.get("CARTS_TABLE", ""),
         document_type="cart",
         id_field="cart_id",
         table=table,
+        mode=mode,
     )
 
 
-def cart_tokens_repository(table: Any | None = None) -> DynamoDocumentRepository:
+def cart_tokens_repository(table: Any | None = None, *, mode: str | None = None) -> DynamoDocumentRepository:
     # Shares CARTS_TABLE via a distinct document_type (the reviews + review_invites precedent).
     return DynamoDocumentRepository(
         os.environ.get("CARTS_TABLE", ""),
         document_type="cart_token",
         id_field="token",
         table=table,
+        mode=mode,
     )
 
 
@@ -858,12 +882,13 @@ def review_invites_repository(table: Any | None = None) -> DynamoDocumentReposit
     )
 
 
-def services_repository(table: Any | None = None) -> DynamoDocumentRepository:
+def services_repository(table: Any | None = None, *, mode: str | None = None) -> DynamoDocumentRepository:
     return DynamoDocumentRepository(
         os.environ.get("SERVICES_TABLE", ""),
         document_type="service",
         id_field="service_id",
         table=table,
+        mode=mode,
     )
 
 
@@ -894,21 +919,23 @@ def availability_exceptions_repository(table: Any | None = None) -> DynamoDocume
     )
 
 
-def appointments_repository(table: Any | None = None) -> DynamoDocumentRepository:
+def appointments_repository(table: Any | None = None, *, mode: str | None = None) -> DynamoDocumentRepository:
     return DynamoDocumentRepository(
         os.environ.get("SERVICES_TABLE", ""),
         document_type="appointment",
         id_field="appointment_id",
         table=table,
+        mode=mode,
     )
 
 
-def invoices_repository(table: Any | None = None) -> DynamoDocumentRepository:
+def invoices_repository(table: Any | None = None, *, mode: str | None = None) -> DynamoDocumentRepository:
     return DynamoDocumentRepository(
         os.environ.get("INVOICES_TABLE", ""),
         document_type="invoice",
         id_field="invoice_id",
         table=table,
+        mode=mode,
     )
 
 
@@ -922,13 +949,14 @@ def routes_repository(table: Any | None = None) -> DynamoDocumentRepository:
     )
 
 
-def experiments_repository(table: Any | None = None) -> DynamoDocumentRepository:
+def experiments_repository(table: Any | None = None, *, mode: str | None = None) -> DynamoDocumentRepository:
     """A/B experiments, keyed by tenant but resolvable by experiment_id via GSI1 (find_by_id)."""
     return DynamoDocumentRepository(
         os.environ.get("EXPERIMENTS_TABLE", ""),
         document_type="experiment",
         id_field="experiment_id",
         table=table,
+        mode=mode,
     )
 
 

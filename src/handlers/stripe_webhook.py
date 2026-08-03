@@ -81,8 +81,10 @@ def _webhook_kind(event: dict[str, Any]) -> str:
     return "preview" if path.rstrip("/").endswith("/stripe-preview") else "stable"
 
 
-def _mode_for_environment() -> str:
-    return "live" if os.environ.get("ENVIRONMENT") == "prod" else "test"
+def _mode_from_livemode(stripe_event: dict[str, Any]) -> str:
+    """A Stripe event's mode IS its `livemode` flag — the deployment no longer decides it
+    (plans/STRIPE_MODE_DECOUPLING.md P3). One prod endpoint handles both test and live events."""
+    return "live" if stripe_event.get("livemode") else "test"
 
 
 def _parse_signature_header(signature_header: str) -> tuple[int, list[str]]:
@@ -162,7 +164,21 @@ def handler(
         return error_response("Method not allowed.", 405, code="method_not_allowed")
 
     kind = _webhook_kind(event)
-    mode = _mode_for_environment()
+    body = _request_body(event)
+
+    # Derive the mode from the event's own `livemode` (route-by-livemode), so ONE prod endpoint handles both test
+    # and live events. Parse first (unverified) purely to read livemode + pick the matching per-mode signing
+    # secret; the signature is then verified against that secret, so a tampered body still fails below. This
+    # supersedes the deployment-derived mode + the mode-mismatch reject (the old dup-order guard): dev no longer
+    # receives Stripe traffic, and Stripe redelivery is still deduped per events-table by event_id.
+    try:
+        stripe_event = json.loads(body)
+    except json.JSONDecodeError as exc:
+        return error_response(f"Invalid JSON body: {exc}", 400, code="invalid_json")
+    if not isinstance(stripe_event, dict):
+        return error_response("Stripe webhook payload must be an object.", 400, code="invalid_json")
+
+    mode = _mode_from_livemode(stripe_event)
     secret = webhook_secret_loader(kind, mode)
     if not secret:
         return error_response(
@@ -171,24 +187,9 @@ def handler(
             code="webhook_secret_not_configured",
         )
 
-    body = _request_body(event)
     signature_header = header_value(event, "Stripe-Signature")
     if not _signature_is_valid(body=body, signature_header=signature_header, secret=secret, now_fn=now_fn):
         return error_response("Stripe webhook signature verification failed.", 400, code="invalid_signature")
-
-    try:
-        stripe_event = json.loads(body)
-    except json.JSONDecodeError as exc:
-        return error_response(f"Invalid JSON body: {exc}", 400, code="invalid_json")
-    if not isinstance(stripe_event, dict):
-        return error_response("Stripe webhook payload must be an object.", 400, code="invalid_json")
-
-    # A Stripe event belongs to exactly one mode. Each environment must process only its own mode:
-    # otherwise a test purchase delivered to both the dev and prod webhook endpoints is persisted and
-    # receipted twice -- once per environment -- because the dedup guard is per-environment (per-table).
-    # Ack with 200 so Stripe records the delivery and does not retry the (correctly) ignored event.
-    if bool(stripe_event.get("livemode")) != (mode == "live"):
-        return json_response({"status": "ignored", "reason": "mode_mismatch"})
 
     account_id = str(stripe_event.get("account") or "").strip()
     tenant_document = None
@@ -218,10 +219,10 @@ def handler(
     persistence = {}
     if event_type == "charge.refunded" and tenant_id:
         persistence = reconcile_charge_refunded(
-            stripe_event, tenant_id=tenant_id, orders_repo=orders_repo, refunds_repo=refunds_repo, now_fn=now_fn,
+            stripe_event, tenant_id=tenant_id, mode=mode, orders_repo=orders_repo, refunds_repo=refunds_repo, now_fn=now_fn,
         )
     elif event_type == "charge.dispute.created" and tenant_id:
-        persistence = reconcile_dispute(stripe_event, tenant_id=tenant_id, orders_repo=orders_repo, now_fn=now_fn)
+        persistence = reconcile_dispute(stripe_event, tenant_id=tenant_id, mode=mode, orders_repo=orders_repo, now_fn=now_fn)
     elif event_type == "checkout.session.completed" and tenant_id:
         session = _event_data_object(stripe_event)
         session_metadata = session.get("metadata") or {}
@@ -244,6 +245,7 @@ def handler(
             persistence = persist_checkout_session_completed(
                 stripe_event,
                 tenant_id=tenant_id,
+                mode=mode,
                 checkout_sessions_table=checkout_sessions_table,
                 orders_table=orders_table,
                 orders_repo=orders_repo,
@@ -372,7 +374,7 @@ def reconcile_account_updated(
                 result["nap_seeded"] = sorted(business.get("sources", {}).keys())
 
     # 3) Recompute indexing eligibility across the tenant's Sites (Connect state changed).
-    site_repo = sites_repo or (sites_repository() if os.environ.get("SITES_TABLE") else None)
+    site_repo = sites_repo or (sites_repository(mode=mode) if os.environ.get("SITES_TABLE") else None)
     if site_repo:
         recomputed = []
         for site in site_repo.list_for_tenant(tenant_id):
@@ -412,6 +414,7 @@ def persist_checkout_session_completed(
     stripe_event: dict[str, Any],
     *,
     tenant_id: str,
+    mode: str = "test",
     checkout_sessions_table=None,
     orders_table=None,
     orders_repo=None,
@@ -435,14 +438,14 @@ def persist_checkout_session_completed(
     now = int(now_fn())
     checkout_sessions_table = checkout_sessions_table or dynamodb_table(os.environ.get("CHECKOUT_SESSIONS_TABLE", ""))
     orders_table = orders_table or dynamodb_table(os.environ.get("ORDERS_TABLE", ""))
-    customers_repo = customers_repo or (customers_repository() if os.environ.get("CUSTOMERS_TABLE") else None)
-    invoices_repo = invoices_repo or (invoices_repository() if os.environ.get("INVOICES_TABLE") else None)
+    customers_repo = customers_repo or (customers_repository(mode=mode) if os.environ.get("CUSTOMERS_TABLE") else None)
+    invoices_repo = invoices_repo or (invoices_repository(mode=mode) if os.environ.get("INVOICES_TABLE") else None)
     notifications_repo = notifications_repo or (notifications_repository() if os.environ.get("NOTIFICATIONS_TABLE") else None)
-    products_repo = products_repo or (products_repository() if os.environ.get("PRODUCTS_TABLE") else None)
+    products_repo = products_repo or (products_repository(mode=mode) if os.environ.get("PRODUCTS_TABLE") else None)
     ledger_repo = ledger_repo or (ledger_repository() if os.environ.get("LEDGER_TABLE") else None)
     invites_repo = invites_repo or (review_invites_repository() if os.environ.get("REVIEWS_TABLE") else None)
-    carts_repo = carts_repo or (carts_repository() if os.environ.get("CARTS_TABLE") else None)
-    orders_repo = orders_repo or (orders_repository() if os.environ.get("ORDERS_TABLE") else None)
+    carts_repo = carts_repo or (carts_repository(mode=mode) if os.environ.get("CARTS_TABLE") else None)
+    orders_repo = orders_repo or (orders_repository(mode=mode) if os.environ.get("ORDERS_TABLE") else None)
 
     fees = fee_breakdown_from_session(session, billing_config_loader)
     session_record = checkout_session_record(stripe_event, session, tenant_id, now)
@@ -573,12 +576,12 @@ def _no_booking_comp_snapshot(tenant_id: str, line: dict[str, Any], services_rep
 
 
 def _record_service_purchase_on_invoice(
-    *, tenant_id, session_id, appointment_ids, no_booking_lines, currency, now,
+    *, tenant_id, mode="test", session_id, appointment_ids, no_booking_lines, currency, now,
     invoices_repo, services_repo, fulfillers_repo,
 ) -> None:
     """Stamp the appointment fan-out set + no_booking line items onto the purchase's invoice
     (source.appointment_ids may be empty for a no_booking-only purchase). Best-effort."""
-    invoices_repo = invoices_repo or (invoices_repository() if os.environ.get("INVOICES_TABLE") else None)
+    invoices_repo = invoices_repo or (invoices_repository(mode=mode) if os.environ.get("INVOICES_TABLE") else None)
     if not invoices_repo:
         return
     try:
@@ -638,7 +641,7 @@ def persist_service_purchase(
     purchased_lines = _service_lines_from_metadata(metadata)
     if not purchased_lines:
         return {"status": "skipped", "reason": "no_service_lines"}
-    appointments_repo = appointments_repo or (appointments_repository() if os.environ.get("SERVICES_TABLE") else None)
+    appointments_repo = appointments_repo or (appointments_repository(mode=mode) if os.environ.get("SERVICES_TABLE") else None)
     if not appointments_repo:
         return {"status": "skipped", "reason": "appointments_repo_unavailable"}
 
@@ -689,7 +692,7 @@ def persist_service_purchase(
 
     # Record the fan-out set + no_booking lines on the purchase's invoice (STORY-2.4 / STORY-2.5).
     _record_service_purchase_on_invoice(
-        tenant_id=tenant_id, session_id=session_id, appointment_ids=appointment_ids,
+        tenant_id=tenant_id, mode=mode, session_id=session_id, appointment_ids=appointment_ids,
         no_booking_lines=no_booking_lines, currency=currency, now=now,
         invoices_repo=invoices_repo, services_repo=services_repo, fulfillers_repo=fulfillers_repo,
     )
@@ -722,7 +725,7 @@ def persist_appointment_paid(
     hold, append a ledger sale entry, route the calendar event to the delegate's calendar, email
     the delegate, and emit the booked notification."""
     session = _event_data_object(stripe_event)
-    appointments_repo = appointments_repo or (appointments_repository() if os.environ.get("SERVICES_TABLE") else None)
+    appointments_repo = appointments_repo or (appointments_repository(mode=mode) if os.environ.get("SERVICES_TABLE") else None)
     if not appointments_repo:
         return {"status": "skipped", "reason": "appointments_repo_unavailable"}
     appointment = appointments_repo.get(tenant_id, appointment_id)
@@ -844,7 +847,7 @@ def persist_invoice_event(
     if not invoice_id:
         return {"status": "skipped", "reason": "not_a_tracked_invoice"}
 
-    invoices_repo = invoices_repo or (invoices_repository() if os.environ.get("INVOICES_TABLE") else None)
+    invoices_repo = invoices_repo or (invoices_repository(mode=mode) if os.environ.get("INVOICES_TABLE") else None)
     if not invoices_repo:
         return {"status": "skipped", "reason": "invoices_repo_unavailable"}
     invoice = invoices_repo.get(tenant_id, invoice_id)
@@ -890,7 +893,7 @@ def persist_invoice_event(
     # (STORY-2.5). source.appointment_ids[] may be empty (a no_booking-only purchase).
     source = invoice.get("source") or {}
     linked_ids = list(source.get("appointment_ids") or ([source["appointment_id"]] if source.get("appointment_id") else []))
-    appointments_repo = appointments_repo or (appointments_repository() if os.environ.get("SERVICES_TABLE") else None)
+    appointments_repo = appointments_repo or (appointments_repository(mode=mode) if os.environ.get("SERVICES_TABLE") else None)
     if new_status == "paid" and linked_ids and appointments_repo:
         for linked_appointment_id in linked_ids:
             try:
@@ -974,6 +977,7 @@ def reconcile_charge_refunded(
     stripe_event: dict[str, Any],
     *,
     tenant_id: str,
+    mode: str = "test",
     orders_repo=None,
     refunds_repo=None,
     ledger_repo=None,
@@ -989,7 +993,7 @@ def reconcile_charge_refunded(
     payment_intent = str(charge.get("payment_intent") or "").strip()
     charge_id = str(charge.get("id") or "").strip()
 
-    orders_repo = orders_repo or (orders_repository() if os.environ.get("ORDERS_TABLE") else None)
+    orders_repo = orders_repo or (orders_repository(mode=mode) if os.environ.get("ORDERS_TABLE") else None)
     if not orders_repo:
         return {"status": "skipped", "reason": "orders_repo_unavailable"}
     order = orders_repo.find_by_payment_intent(payment_intent) if payment_intent else None
@@ -1050,13 +1054,14 @@ def reconcile_dispute(
     stripe_event: dict[str, Any],
     *,
     tenant_id: str,
+    mode: str = "test",
     orders_repo=None,
     now_fn: Callable[[], int] = lambda: int(time.time()),
 ) -> dict[str, Any]:
     """Flag the order as disputed when a chargeback is opened."""
     dispute = _event_data_object(stripe_event)
     payment_intent = str(dispute.get("payment_intent") or "").strip()
-    orders_repo = orders_repo or (orders_repository() if os.environ.get("ORDERS_TABLE") else None)
+    orders_repo = orders_repo or (orders_repository(mode=mode) if os.environ.get("ORDERS_TABLE") else None)
     if not orders_repo or not payment_intent:
         return {"status": "skipped", "reason": "no_pi_or_repo"}
     order = orders_repo.find_by_payment_intent(payment_intent)
@@ -1288,7 +1293,10 @@ def order_record_from_session(session: dict[str, Any], tenant_id: str, now: int,
         "amount_total": int(session.get("amount_total") or 0),
         "currency": session.get("currency") or "usd",
         "payment_intent_id": session.get("payment_intent", ""),
+        # `mode` is the legacy order field (read by refunds/downloads); `stripe_mode` is the standardized field
+        # the orders repository filters on (orders are written raw, bypassing the repo's stamping) — keep both.
         "mode": "live" if session.get("livemode") else "test",
+        "stripe_mode": "live" if session.get("livemode") else "test",
         "customer": {
             "name": details.get("name", ""),
             "email": details.get("email", ""),

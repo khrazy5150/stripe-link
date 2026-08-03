@@ -1,7 +1,58 @@
 # Decouple Stripe mode (test/live) from platform environment (dev/prod)
 
-Status: **PLANNED, not built.** Design 2026-08-02. Foundational re-architecture. Approved to plan in full while
+Status: **IN PROGRESS.** Design 2026-08-02. Foundational re-architecture. Approved to plan in full while
 **pre-launch** (all "tenants" are the operator's test emails → no real data to migrate; cheapest time to do it).
+Build workflow: **feature branch `stripe-mode-decoupling`** (main stays deployable), **dev-first cutover**.
+- **P0 DONE** (committed to `main`): `resolve_stripe_mode`/`normalize_stripe_mode` request helper + inert dashboard
+  `stripeMode`/`hostnameReleaseChannel` scaffolding. No behavior change (default mode = test/live per fail-safe).
+- **P0.5 DONE** (branch): stripe-keys → one per-deployment table keyed (tenant_id, mode); tenant-profiles dual-write
+  retired; StripeKeysTable gains `mode` SK; fixed `_DEV/_PROD` env pairs + IAM grants collapsed to per-env `!Ref`.
+- **P1 DONE** (branch): backend base now hostname-derived (`getApiBase`); toggle → Stripe mode sent as `?mode=` +
+  `X-Stripe-Mode` on every `apiRequest`; `getStripeMode` single source of truth; cross-mode copy targets the other
+  mode on the same backend; all `getApiEnvironment` call-sites repointed. Dashboard builds clean.
+- **P2 IN PROGRESS** — **DESIGN CHANGE (2026-08-02): mode goes in the KEY, not just an attribute.** The plan's
+  "attribute + filter" collides with the ID-preserving test→live copy: same `(tenant,id)` in one table = one item,
+  so promoting a test offer would overwrite it. Author chose *mode-in-key*: `DynamoDocumentRepository(mode=…)`
+  bakes mode into SK + GSI1PK (`{TYPE}#{mode}#{id}`) so test/live copies coexist; put stamps `stripe_mode`,
+  get/list/delete/find_by_id are mode-scoped; `mode=None` = legacy layout.
+  - **P2 part 1 DONE** (0cfef7c): dashboard CRUD — products/offers/coupons/pages/collections. Repo + handler tests.
+  - **P2 part 2a DONE** (experiments, invoices, sites), **2b** (services + booking; services mode-scoped, booking
+    Stripe-key mode from request), **2c** (checkout, cart_checkout, cart, upsell, post_checkout, leads, downloads,
+    refunds, reviews_public, orders dashboard; orders/customers via TenantRangeRepository = mode as a filtered
+    ATTRIBUTE since ids are unique/no cross-mode reuse; sweeps cart_recovery + reminders = `mode="live"`).
+  - **Mode-scoped set**: products, offers, coupons, pages, sites, collections, carts, cart_tokens, invoices,
+    appointments, services, experiments (DynamoDoc, mode-in-key); orders, customers (TenantRange, mode-attribute).
+    **Left mode-agnostic**: leads, reviews/review_invites, refund_requests, fulfillers, availability, routes,
+    custom_domains, legal_pages, notifications, tenant/user profiles (no per-mode Stripe state).
+  - **P2 REMAINING**: page_publish + page_render — mode comes from the page record (stream) / serving host, not a
+    request → done in **P4** (per-mode publish path). Until it lands, publishing can't see mode-keyed records
+    (branch not deployed; tests inject → all pass).
+- **P3 DONE** (branch): webhook derives mode from `event.livemode`, not the deployment. Parse body first (unverified)
+  to read livemode + pick the per-mode signing secret, then verify signature. Removed `_mode_for_environment` + the
+  mode-mismatch reject (the old dup-order guard — now moot: dev gets no Stripe traffic, dedup stays per-events-table
+  by event_id). Threaded the mode into every reconcile path's repo writes/reads; `order_record_from_session` stamps
+  `stripe_mode` so the raw order write matches the dashboard filter. **OPS at cutover**: point BOTH test + live
+  Stripe webhook endpoints at the prod URL and configure both per-mode signing secrets on prod.
+- **P4 DONE** (branch): `checkout_base_url_for_page` host-agnostic (single `PUBLIC_CHECKOUT_BASE_URL`, no dev/prod
+  split); the offer's `stripe_mode` rides the Buy URL as `?mode=` (`build_checkout_url` + `checkout-mode` data attr
+  + JS `checkoutHref`), closing P2's checkout loop. Threaded mode through every on-page money path (listicle cart
+  add/remove/checkout/hydrate, post-purchase upsell session+charge for both islands, booking reserve+checkout, lead
+  capture). `page_publish` (stream) builds its mode-scoped repos PER RECORD from each page's `stripe_mode`.
+- **P5 DONE** (branch): `artifact_paths(mode=…)` — live keeps the root key (byte-identical), test goes under a
+  `test/` prefix (default "live" so un-updated callers fail-safe to a 404, never a cross-mode serve). Write side
+  (publish/delete/register_page_route) derives mode from the page; read side (custom_domains_resolve + platform,
+  routes_resolve, test_page_serve, experiments_resolve, post_checkout) from each record/request. Domain index +
+  route records carry `stripe_mode`. Test-mode pages forced `noindex`. page_render + dashboard preview/published URL
+  builders mode-aware. The Cloudflare Worker is unaffected (it serves the resolver's origin_url). 1335 pass.
+- **P5 follow-ups DONE** (branch): standalone `/book` page (booking_page.py) threads the service's mode into its
+  availability/reserve/checkout JS; audited every on-page `fetch()` (html.py + booking_page.py are the only two
+  sources) — the inline booking widget's availability GET was the last one defaulting to test, now fixed. No
+  mode-sensitive on-page fetch defaults to test anymore.
+- **Cutover SCRIPT DONE** (branch): `scripts/mode_decoupling_cutover.py` — jb--prefix guard + preserve allow-list +
+  backup-first + dry-run default + dev-first (`--allow-prod`). Invariants locked by tests/test_cutover_classification.py.
+- **P6 NEXT (cutover)** — operational, not code: run the cutover script (dry-run → --confirm, dev then prod), then
+  re-onboard tenants, re-run Stripe Connect OAuth per mode, re-add custom domains, and point both Stripe webhook
+  endpoints at prod with both per-mode signing secrets.
 
 ## The problem — mode and infra are conflated
 
@@ -117,16 +168,51 @@ Author confirmed the target after distinguishing two axes:
   `test` (low-stakes, all self-owned); retire dev's tenant-test role (dev = pure staging); rebuild the onboarding
   flow (live-first + opt-in Stripe-test sandbox, `plans/` onboarding streamline) on the clean model.
 
-## Migration — CLEAN-SLATE CUTOVER (chosen 2026-08-02)
+## Migration — CURATED SELECTIVE WIPE (revised 2026-08-02 — supersedes "truncate all tables")
 
-All current data is the operator's own disposable test data, so we **do NOT write migration/back-compat code**.
-Build every phase against the **target schema only** (per-env tables, `mode` as attribute); keep the current app
-running on current data throughout the build; then at **cutover**: tear down + recreate the tables via the SAM
-stack (or scan-delete), **clear the pages S3 buckets**, **re-seed config** (global billing config, tier policies),
-and **re-onboard** the handful of test tenants in the new model. **Cognito is untouched** (logins survive; profiles
-re-create via registration). Optionally clean Stripe test data. This removes the P0.5/P6 migration burden entirely
-— they become "define fresh tables + re-onboard," not "write and debug a data migration." One-time re-setup chore:
-re-run Stripe Connect OAuth per mode + re-add custom domains to the resolver.
+All per-tenant content is the operator's disposable test data, so we **do NOT write migration/back-compat code**;
+build every phase against the target schema only. BUT the cutover is **NOT a blanket truncate / stack teardown** —
+some tables hold platform reference data that must survive (operator flagged the categories table). Two facts make
+a surgical wipe both necessary and easy:
+- **Only `StripeKeysTable` has a key-schema change** (the P0.5 `mode` sort key), so a normal `sam deploy` replaces
+  just that one table (fine — Stripe keys re-onboard). **Every other table is schema-unchanged** — mode-in-key uses
+  the SK *value*, not a new key attribute — so a deploy preserves all their data. No teardown is needed to ship.
+- "Clean slate" = a **selective scan-delete of the WIPE list only**; PRESERVE tables are never touched.
+
+**PRESERVE (platform reference/config, NOT per-tenant test data — NEVER wipe):**
+- `product-categories` — shared cross-tenant taxonomy (grows per seller, feeds AI product creation). Irreplaceable.
+- `app-config` — deployment config (API base URLs, CDN/pages domains). Platform-global.
+- `tier-policies` — fee-tier reference. `themes` — theme/preset data (reserved).
+- (NOT a table: the global billing config lives in S3 `BILLING_CONFIG_BUCKET/global_billing_config.json` + a code
+  default `DEFAULT_GLOBAL_BILLING_CONFIG` — leave that S3 object in place.)
+
+**WIPE (per-tenant test content / accounts / transactions / funnel artifacts — re-created on re-onboard):**
+products, offers, coupons, pages, sites, collections, carts, checkout-sessions, invoices, services, experiments,
+orders, customers, lead-capture, reviews, notifications, refunds, routes, custom-domains, media, document-events,
+webhook-events, ledger, calendar-connections, stripe-keys, tenant-profiles, user-profiles, user-preferences,
+shipping-config, **platform-config** (misnamed — holds per-tenant TenantConfig).
+
+**REVIEW before wiping (per-tenant but may hold hand-authored content):** `legal-pages` (hand-written ToS/privacy?),
+the media S3 bucket (uploaded images).
+
+**SCOPE GUARD — `jb-` prefix ONLY.** stripe-cart (legacy) and stripe-link coexist in the same AWS account with
+names that differ only by the prefix (stripe-cart `platform-config-{env}` = GLOBAL system themes/Connect config;
+stripe-link `jb-platform-config-{env}` = per-tenant tenant_config — DIFFERENT tables). The WIPE list above is the
+**`jb-`-prefixed** stripe-link tables; the cutover script MUST refuse any table name not starting with `jb-`
+(mirror `assert_jb_resource_name`) so it can never touch a stripe-cart table. All names below are `jb-<name>-<env>`.
+
+**Cutover steps:** (1) **Back up every table first** — full scan-dump to JSON in S3 (cheap insurance, nothing
+unrecoverable). (2) Selective scan-delete of the WIPE-list tables only. (3) Clear the **pages + preview** S3 buckets
+(published artifacts, disposable); leave the billing-config bucket + (per review) media bucket. (4) Re-onboard the
+handful of test tenants in the new model; **Cognito untouched** (logins survive; profiles re-create via
+registration). (5) Re-run Stripe Connect OAuth per mode; re-add custom domains to the resolver; point both Stripe
+webhook endpoints at prod with both per-mode signing secrets. (6) Optionally clean Stripe test data.
+
+**Connect OAuth redirect-URI registration (per backend-host × mode).** Because both modes now run on each
+backend, each backend's callback (`https://{dev|prod}.juniorbay.com/stripe/connect/callback`) must be registered
+on BOTH Connect apps (TEST `ca_…IC0J4`, LIVE `ca_…Opkh4`). The old model only registered test→dev + live→prod, so
+add the missing two in the Stripe dashboard: **dev callback → LIVE app** (live-onboard on dev; was the dev
+re-onboard blocker) and **prod callback → TEST app** (test-onboard on prod). Purely Stripe app config, not code.
 
 ## Risks / tricky bits
 

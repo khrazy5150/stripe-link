@@ -32,6 +32,7 @@ def render_booking_page(service: dict[str, Any]) -> str:
     hero_html = f'<img class="hero" src="{escape(hero)}" alt="">' if hero else ""
     replacements = {
         "__SERVICE_ID__": escape(str(service.get("service_id") or ""), quote=True),
+        "__STRIPE_MODE__": "live" if str(service.get("stripe_mode") or "").strip().lower() == "live" else "test",
         "__SERVICE_NAME__": escape(str(service.get("name") or "Book a service")),
         "__SERVICE_DESC__": escape(str(service.get("description") or "")),
         "__PRICE_LABEL__": escape(_price_label(service.get("price") or {})),
@@ -105,6 +106,7 @@ _TEMPLATE = """<!doctype html>
 <script>
 (function () {
   var serviceId = "__SERVICE_ID__";
+  var stripeMode = "__STRIPE_MODE__";
   var apiBase = window.location.pathname.replace(/\\/book\\/[^/]+$/, "");
   var selected = null;
   var selectedFulfiller = null;
@@ -172,7 +174,7 @@ _TEMPLATE = """<!doctype html>
   function loadSlots() {
     var from = Math.floor(Date.now() / 1000);
     var to = from + 14 * 86400;
-    fetch(apiBase + "/services/" + serviceId + "/availability?from=" + from + "&to=" + to)
+    fetch(apiBase + "/services/" + serviceId + "/availability?from=" + from + "&to=" + to + "&mode=" + encodeURIComponent(stripeMode))
       .then(function (r) { return r.json(); })
       .then(function (d) { renderSlots(d.slots || []); })
       .catch(function () { document.getElementById("slots").textContent = "Could not load times."; });
@@ -184,7 +186,7 @@ _TEMPLATE = """<!doctype html>
     if (!selected) { return; }
     if (!email) { showError("Please enter your email."); return; }
     var customer = { name: document.getElementById("name").value.trim(), email: email, phone: document.getElementById("phone").value.trim() };
-    var body = { service_id: serviceId, slot_start: selected, customer: customer };
+    var body = { service_id: serviceId, mode: stripeMode, slot_start: selected, customer: customer };
     if (selectedFulfiller) { body.fulfiller_id = selectedFulfiller; }
     bookBtn.disabled = true; bookBtn.textContent = "Reserving\\u2026";
     fetch(apiBase + "/services/appointments/reserve", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })
@@ -194,7 +196,7 @@ _TEMPLATE = """<!doctype html>
         var base = window.location.href.split("?")[0];
         return fetch(apiBase + "/services/appointments/checkout", {
           method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ appointment_id: res.j.appointment.appointment_id, manage_token: res.j.manage_token, success_url: base + "?status=success", cancel_url: base + "?status=cancel" })
+          body: JSON.stringify({ appointment_id: res.j.appointment.appointment_id, manage_token: res.j.manage_token, mode: stripeMode, success_url: base + "?status=success", cancel_url: base + "?status=cancel" })
         }).then(function (r) { return r.json(); });
       })
       .then(function (checkout) {

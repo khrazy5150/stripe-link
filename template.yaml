@@ -137,13 +137,9 @@ Globals:
         PROJECT_PREFIX: !Ref ProjectPrefix
         APP_CONFIG_TABLE: !Ref AppConfigTable
         STRIPE_KEYS_TABLE: !Ref StripeKeysTable
-        STRIPE_KEYS_TABLE_DEV: !Sub "${ProjectPrefix}-stripe-keys-dev"
-        STRIPE_KEYS_TABLE_PROD: !Sub "${ProjectPrefix}-stripe-keys-prod"
         PLATFORM_CONFIG_TABLE: !Ref PlatformConfigTable
         SHIPPING_CONFIG_TABLE: !Ref ShippingConfigTable
         TENANT_PROFILES_TABLE: !Ref TenantProfilesTable
-        TENANT_PROFILES_TABLE_DEV: !Sub "${ProjectPrefix}-tenant-profiles-dev"
-        TENANT_PROFILES_TABLE_PROD: !Sub "${ProjectPrefix}-tenant-profiles-prod"
         USER_PREFERENCES_TABLE: !Ref UserPreferencesTable
         USER_PROFILES_TABLE: !Ref UserProfilesTable
         NOTIFICATIONS_TABLE: !Ref NotificationsTable
@@ -399,13 +395,7 @@ Resources:
         - DynamoDBCrudPolicy:
             TableName: !Ref TenantProfilesTable
         - DynamoDBCrudPolicy:
-            TableName: !Sub "${ProjectPrefix}-tenant-profiles-dev"
-        - DynamoDBCrudPolicy:
-            TableName: !Sub "${ProjectPrefix}-tenant-profiles-prod"
-        - DynamoDBCrudPolicy:
-            TableName: !Sub "${ProjectPrefix}-stripe-keys-dev"
-        - DynamoDBCrudPolicy:
-            TableName: !Sub "${ProjectPrefix}-stripe-keys-prod"
+            TableName: !Ref StripeKeysTable
         - S3ReadPolicy:
             BucketName: !Ref ConfigBucket
       Events:
@@ -760,9 +750,7 @@ Resources:
         - DynamoDBCrudPolicy:
             TableName: !Ref ProductsTable
         - DynamoDBReadPolicy:
-            TableName: !Sub "${ProjectPrefix}-stripe-keys-dev"
-        - DynamoDBReadPolicy:
-            TableName: !Sub "${ProjectPrefix}-stripe-keys-prod"
+            TableName: !Ref StripeKeysTable
         - Statement:
             - Effect: Allow
               Action:
@@ -855,9 +843,7 @@ Resources:
         - DynamoDBCrudPolicy:
             TableName: !Ref RefundsTable
         - DynamoDBReadPolicy:
-            TableName: !Sub "${ProjectPrefix}-stripe-keys-dev"
-        - DynamoDBReadPolicy:
-            TableName: !Sub "${ProjectPrefix}-stripe-keys-prod"
+            TableName: !Ref StripeKeysTable
         - Statement:
             - Effect: Allow
               Action:
@@ -983,9 +969,7 @@ Resources:
         - DynamoDBCrudPolicy:
             TableName: !Ref CustomDomainsTable
         - DynamoDBCrudPolicy:
-            TableName: !Sub "${ProjectPrefix}-stripe-keys-dev"
-        - DynamoDBCrudPolicy:
-            TableName: !Sub "${ProjectPrefix}-stripe-keys-prod"
+            TableName: !Ref StripeKeysTable
         - !If
           - HasCloudflareZone
           - Statement:
@@ -1258,9 +1242,7 @@ Resources:
         - DynamoDBReadPolicy:
             TableName: !Ref PagesTable
         - DynamoDBReadPolicy:
-            TableName: !Sub "${ProjectPrefix}-stripe-keys-dev"
-        - DynamoDBReadPolicy:
-            TableName: !Sub "${ProjectPrefix}-stripe-keys-prod"
+            TableName: !Ref StripeKeysTable
         - DynamoDBReadPolicy:
             TableName: !Ref TenantProfilesTable
         - S3ReadPolicy:
@@ -1307,9 +1289,7 @@ Resources:
         - DynamoDBReadPolicy:
             TableName: !Ref PagesTable
         - DynamoDBReadPolicy:
-            TableName: !Sub "${ProjectPrefix}-stripe-keys-dev"
-        - DynamoDBReadPolicy:
-            TableName: !Sub "${ProjectPrefix}-stripe-keys-prod"
+            TableName: !Ref StripeKeysTable
         - DynamoDBReadPolicy:
             TableName: !Ref TenantProfilesTable
         - S3ReadPolicy:
@@ -1355,9 +1335,7 @@ Resources:
       Policies:
         # Read + WRITE the stripe_keys doc (persist the toggle + cached capability status), per mode.
         - DynamoDBCrudPolicy:
-            TableName: !Sub "${ProjectPrefix}-stripe-keys-dev"
-        - DynamoDBCrudPolicy:
-            TableName: !Sub "${ProjectPrefix}-stripe-keys-prod"
+            TableName: !Ref StripeKeysTable
         # The platform secret key (Secrets Manager) — used to request capabilities on the connected account.
         - Statement:
             Effect: Allow
@@ -1397,9 +1375,7 @@ Resources:
         - DynamoDBReadPolicy:
             TableName: !Ref ProductsTable
         - DynamoDBReadPolicy:
-            TableName: !Sub "${ProjectPrefix}-stripe-keys-dev"
-        - DynamoDBReadPolicy:
-            TableName: !Sub "${ProjectPrefix}-stripe-keys-prod"
+            TableName: !Ref StripeKeysTable
         - DynamoDBReadPolicy:
             TableName: !Ref TenantProfilesTable
         - DynamoDBCrudPolicy:
@@ -1479,9 +1455,7 @@ Resources:
         # On-page BNPL messaging (plans/BNPL_PAYMENT_METHODS.md P3) reads the tenant's publishable key + enabled
         # installment methods from the stripe_keys doc at publish — read-only.
         - DynamoDBReadPolicy:
-            TableName: !Sub "${ProjectPrefix}-stripe-keys-dev"
-        - DynamoDBReadPolicy:
-            TableName: !Sub "${ProjectPrefix}-stripe-keys-prod"
+            TableName: !Ref StripeKeysTable
         # Publishing a page that embeds a manual collection auto-publishes its selected draft members
         # (plans/SITE_COLLECTIONS.md) — needs to READ the members and WRITE their published status back. The
         # handler otherwise gets pages only from the stream, so this is the only direct PagesTable access.
@@ -1517,10 +1491,6 @@ Resources:
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref TenantProfilesTable
-        - DynamoDBCrudPolicy:
-            TableName: !Sub "${ProjectPrefix}-tenant-profiles-dev"
-        - DynamoDBCrudPolicy:
-            TableName: !Sub "${ProjectPrefix}-tenant-profiles-prod"
       Events:
         RegisterTenant:
           Type: Api
@@ -1545,10 +1515,6 @@ Resources:
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref TenantProfilesTable
-        - DynamoDBCrudPolicy:
-            TableName: !Sub "${ProjectPrefix}-tenant-profiles-dev"
-        - DynamoDBCrudPolicy:
-            TableName: !Sub "${ProjectPrefix}-tenant-profiles-prod"
         - DynamoDBCrudPolicy:
             TableName: !Ref UserProfilesTable
         - Version: "2012-10-17"
@@ -1599,9 +1565,7 @@ Resources:
       Description: Tenant Stripe key metadata API.
       Policies:
         - DynamoDBCrudPolicy:
-            TableName: !Sub "${ProjectPrefix}-stripe-keys-dev"
-        - DynamoDBCrudPolicy:
-            TableName: !Sub "${ProjectPrefix}-stripe-keys-prod"
+            TableName: !Ref StripeKeysTable
         - Version: "2012-10-17"
           Statement:
             - Effect: Allow
@@ -1660,9 +1624,7 @@ Resources:
       Description: Handles Stripe Connect OAuth callbacks and stores encrypted tenant OAuth tokens.
       Policies:
         - DynamoDBCrudPolicy:
-            TableName: !Sub "${ProjectPrefix}-stripe-keys-dev"
-        - DynamoDBCrudPolicy:
-            TableName: !Sub "${ProjectPrefix}-stripe-keys-prod"
+            TableName: !Ref StripeKeysTable
         - Version: "2012-10-17"
           Statement:
             - Effect: Allow
@@ -1739,9 +1701,7 @@ Resources:
       Policies:
         # CRUD (not Read): account.updated persists Connect verification state onto the stripe_keys doc.
         - DynamoDBCrudPolicy:
-            TableName: !Sub "${ProjectPrefix}-stripe-keys-dev"
-        - DynamoDBCrudPolicy:
-            TableName: !Sub "${ProjectPrefix}-stripe-keys-prod"
+            TableName: !Ref StripeKeysTable
         # account.updated also auto-seeds the business NAP (user_profile) and recomputes Site eligibility.
         - DynamoDBCrudPolicy:
             TableName: !Ref UserProfilesTable
@@ -2440,9 +2400,7 @@ Resources:
         - DynamoDBReadPolicy:
             TableName: !Ref ServicesTable
         - DynamoDBReadPolicy:
-            TableName: !Sub "${ProjectPrefix}-stripe-keys-dev"
-        - DynamoDBReadPolicy:
-            TableName: !Sub "${ProjectPrefix}-stripe-keys-prod"
+            TableName: !Ref StripeKeysTable
         - DynamoDBReadPolicy:
             TableName: !Ref TenantProfilesTable
         - S3ReadPolicy:
@@ -2671,9 +2629,7 @@ Resources:
         - DynamoDBCrudPolicy:
             TableName: !Ref NotificationsTable
         - DynamoDBReadPolicy:
-            TableName: !Sub "${ProjectPrefix}-stripe-keys-dev"
-        - DynamoDBReadPolicy:
-            TableName: !Sub "${ProjectPrefix}-stripe-keys-prod"
+            TableName: !Ref StripeKeysTable
         - DynamoDBReadPolicy:
             TableName: !Ref TenantProfilesTable
         - S3ReadPolicy:
@@ -2868,16 +2824,25 @@ Resources:
   StripeKeysTable:
     Type: AWS::DynamoDB::Table
     Properties:
-      TableName: !Sub "${ProjectPrefix}-stripe-keys-${Environment}"
+      # Renamed -v2 so CloudFormation can add the composite `mode` sort key in one clean deploy: a key-schema
+      # change is a replacement, and CFN cannot replace a custom-named resource in place. The app references this
+      # only via !Ref, so the physical name is internal (plans/STRIPE_MODE_DECOUPLING.md P6).
+      TableName: !Sub "${ProjectPrefix}-stripe-keys-v2-${Environment}"
       BillingMode: PAY_PER_REQUEST
       SSESpecification:
         SSEEnabled: true
+      # Composite key holds BOTH Stripe modes for a tenant in this one per-deployment table
+      # (mode = SK), replacing the legacy two-shared-table design (plans/STRIPE_MODE_DECOUPLING.md).
       AttributeDefinitions:
         - AttributeName: tenant_id
+          AttributeType: S
+        - AttributeName: mode
           AttributeType: S
       KeySchema:
         - AttributeName: tenant_id
           KeyType: HASH
+        - AttributeName: mode
+          KeyType: RANGE
 
   PlatformConfigTable:
     Type: AWS::DynamoDB::Table

@@ -8,7 +8,7 @@ import secrets
 import time
 import uuid
 
-from stripe_link.common import error_response, json_response, parse_json_body, path_params, query_params
+from stripe_link.common import error_response, json_response, parse_json_body, path_params, query_params, resolve_stripe_mode
 from stripe_link.domain.appointments import AppointmentTransitionError, transition_appointment
 from stripe_link.domain.booking import (
     appointment_duration_minutes,
@@ -68,11 +68,12 @@ def handler(
     connections_repo=None,
     mailer_send=None,
 ):
-    services_repo = services_repo or services_repository()
+    mode = resolve_stripe_mode(event)
+    services_repo = services_repo or services_repository(mode=mode)
     availability_repo = availability_repo or tenant_availability_repository()
     fulfillers_repo = fulfillers_repo or fulfillers_repository()
     exceptions_repo = exceptions_repo or availability_exceptions_repository()
-    appointments_repo = appointments_repo or appointments_repository()
+    appointments_repo = appointments_repo or appointments_repository(mode=mode)
     if connections_repo is None:
         try:
             connections_repo = calendar_connections_repository()
@@ -239,7 +240,7 @@ def checkout_route(event, appointments_repo, *, stripe_repo, tenant_repo, notifi
     stripe_repo = stripe_repo or stripe_keys_repository()
     tenant_repo = tenant_repo or tenant_profiles_repository()
     secret_cipher = secret_cipher or KmsSecretCipher()
-    mode = "live" if os.environ.get("ENVIRONMENT") == "prod" else "test"
+    mode = resolve_stripe_mode(event)
 
     stripe_keys = stripe_repo.get(tenant_id, mode=mode) or {}
     api_key, stripe_account = checkout_credentials(tenant_id, mode, stripe_keys, secret_cipher)

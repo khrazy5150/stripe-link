@@ -1,11 +1,11 @@
-from stripe_link.common import error_response, json_response, parse_json_body, path_params, query_params, tenant_id_from_event
+from stripe_link.common import error_response, json_response, parse_json_body, path_params, query_params, resolve_stripe_mode, tenant_id_from_event
 from stripe_link.domain.documents import DocumentValidationError, validate_page_document
 from stripe_link.ids import generate_short_url_code
 from stripe_link.repositories.documents import RepositoryError, pages_repository
 
 
 def handler(event, context, repository=None):
-    repository = repository or pages_repository()
+    repository = repository or pages_repository(mode=resolve_stripe_mode(event))
     method = (event or {}).get("httpMethod", "").upper()
     if method == "OPTIONS":
         return json_response({})

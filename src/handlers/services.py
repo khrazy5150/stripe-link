@@ -1,6 +1,6 @@
 import time
 
-from stripe_link.common import error_response, json_response, parse_json_body, path_params, query_params, tenant_id_from_event
+from stripe_link.common import error_response, json_response, parse_json_body, path_params, query_params, resolve_stripe_mode, tenant_id_from_event
 from stripe_link.domain.appointments import AppointmentTransitionError, transition_appointment
 from stripe_link.domain.service_pricing import normalize_service_pricing
 from stripe_link.domain.documents import (
@@ -30,11 +30,14 @@ def handler(
     exceptions_repo=None,
     appointments_repo=None,
 ):
-    services_repo = services_repo or services_repository()
+    # services + appointments carry per-mode Stripe state / are mode-specific transactions, so they are
+    # mode-scoped; scheduling config (fulfillers/availability/exceptions) is mode-agnostic.
+    mode = resolve_stripe_mode(event)
+    services_repo = services_repo or services_repository(mode=mode)
     fulfillers_repo = fulfillers_repo or fulfillers_repository()
     availability_repo = availability_repo or tenant_availability_repository()
     exceptions_repo = exceptions_repo or availability_exceptions_repository()
-    appointments_repo = appointments_repo or appointments_repository()
+    appointments_repo = appointments_repo or appointments_repository(mode=mode)
     method = (event or {}).get("httpMethod", "").upper()
     path = (event or {}).get("path", "")
 

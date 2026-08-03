@@ -42,7 +42,7 @@ def handler(event, context, *, repository=None, pages_domain=None, choose_fn=Non
     if not page_id:
         return error_response("Experiment has no destination.", status_code=404, code="no_destination")
 
-    url = public_url(pages_domain, artifact_paths(str(experiment.get("tenant_id") or ""), page_id)["published"])
+    url = public_url(pages_domain, artifact_paths(str(experiment.get("tenant_id") or ""), page_id, mode=str(experiment.get("stripe_mode") or "live"))["published"])
     if not url:
         return error_response("Pages distribution domain is not configured.", status_code=500, code="pages_domain_not_configured")
 

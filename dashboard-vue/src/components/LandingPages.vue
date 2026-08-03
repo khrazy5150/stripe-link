@@ -1390,7 +1390,7 @@
 import { computed, onMounted, reactive, ref, watch } from "vue";
 import { offerViewTargets, offerViewTargetsFromExpanded } from "../composables/useConversionContext";
 import { isSectionVisible, defaultVisible, recommendedSectionKeys, optionalSectionKeys, governedKeys, elementLabel, elementChannel, addableElements, tokenGroups, previewVar, supportedGoals, goalLabel, packSeeds } from "../composables/pageComposer";
-import { apiRequest, getApiBase, getApiEnvironment, getOtherEnvironment, getPagesBaseUrl, getPreviewPagesBaseUrl, getTenantId } from "../api/client";
+import { apiRequest, getApiBase, getStripeMode, getOtherEnvironment, getPagesBaseUrl, getPreviewPagesBaseUrl, getTenantId } from "../api/client";
 import { formatMoney } from "../stores/products";
 import PurchaseFlowDiagram from "./PurchaseFlowDiagram.vue";
 import { useProfileStore } from "../stores/profile";
@@ -3814,7 +3814,7 @@ async function copyPageToEnvironment(page) {
     await ensureCatalogLoaded().catch(() => {});
     const { offerDocs, productDocs, hasServices } = await resolvePageDeps(page, { offerCache: offers.value, productCache: products.value });
     // Pre-flight the target PAGE (drives the draft-vs-keep-published rule + overwrite messaging).
-    const existingTarget = await apiRequest(`/pages/${encodeURIComponent(page.page_id)}`, { environment: targetEnv.value })
+    const existingTarget = await apiRequest(`/pages/${encodeURIComponent(page.page_id)}`, { mode: targetEnv.value })
       .then((b) => b.page).catch(() => null);
     copyPlan.value = { page, offerDocs, productDocs, existingTarget, hasServices };
   } catch (err) {
@@ -3833,7 +3833,7 @@ async function executeCopy() {
   try {
     // Bottom-up so references resolve in the target: products -> offer(s) -> page.
     await copyCatalogToEnv(plan.productDocs, plan.offerDocs, env);
-    await apiRequest("/pages", { method: "POST", body: pageForTarget(plan.page, plan.existingTarget, env), environment: env });
+    await apiRequest("/pages", { method: "POST", body: pageForTarget(plan.page, plan.existingTarget, env), mode: env });
     const n = plan.productDocs.length;
     message.value = `Copied “${plan.page.name}”${plan.offerDocs.length ? ` + its offer and ${n} product${n === 1 ? "" : "s"}` : ""} to ${targetEnvLabel.value}.`;
     copyPlan.value = null;
@@ -4114,15 +4114,21 @@ function pagePathId(page) {
   return String(page.page_id || "").replace(/^\/+|\/+$/g, "");
 }
 
+// Test pages publish under a `test/` prefix so they never collide with the live promotion of the same page_id
+// (plans/STRIPE_MODE_DECOUPLING.md P5); live pages keep the root key.
+function modePrefix() {
+  return getStripeMode() === "live" ? "" : "test/";
+}
+
 function artifactPageUrl(page) {
   const pageId = pagePathId(page).split("/").map(encodeURIComponent).join("/");
-  return `${getPagesBaseUrl()}/${pageId}/index.html`;
+  return `${getPagesBaseUrl()}/${modePrefix()}${pageId}/index.html`;
 }
 
 function previewArtifactPageUrl(page) {
   const tenantId = encodeURIComponent(page.tenant_id || getTenantId());
   const pageId = pagePathId(page).split("/").map(encodeURIComponent).join("/");
-  return `${getPreviewPagesBaseUrl()}/preview/${tenantId}/${pageId}/index.html`;
+  return `${getPreviewPagesBaseUrl()}/preview/${modePrefix()}${tenantId}/${pageId}/index.html`;
 }
 
 // Per-card pricing-view selection (Standard / Sale / Flash Sale) for the test viewer, keyed by page_id. The
@@ -4130,7 +4136,7 @@ function previewArtifactPageUrl(page) {
 const cardViews = reactive({});
 function cardViewOptions(page) {
   // Only the test viewer has /sale //flash-sale views, and only when the page enables that context.
-  if (getApiEnvironment() !== "test" || !page.short_code) return [];
+  if (getStripeMode() !== "test" || !page.short_code) return [];
   const opts = [{ value: "standard", label: "Standard" }];
   if (page.sale?.enabled) opts.push({ value: "sale", label: "Sale" });
   if (page.flash_sale?.enabled) opts.push({ value: "flash_sale", label: "Flash Sale" });
@@ -4156,7 +4162,7 @@ function pageUrl(page) {
     if (siteUrl) return siteUrl;
   }
   // Sale/Flash-Sale preview views + unattached/draft pages: the platform test viewer, keyed by short_code.
-  if (getApiEnvironment() === "test" && page.short_code) {
+  if (getStripeMode() === "test" && page.short_code) {
     const seg = page.status === "published" ? "published" : "preview";
     const viewSeg = view === "sale" ? "/sale" : view === "flash_sale" ? "/flash-sale" : "";
     return `https://${TEST_PAGES_HOST}/${seg}/${encodeURIComponent(page.short_code)}${viewSeg}`;

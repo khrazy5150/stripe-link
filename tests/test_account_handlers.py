@@ -20,7 +20,7 @@ from handlers.profile import handler as profile_handler
 from handlers.registration import handler as registration_handler
 from handlers.services import handler as services_handler
 from handlers.shipping import handler as shipping_handler
-from handlers.stripe_connect import callback_handler, start_handler, status_handler
+from handlers.stripe_connect import callback_handler, connected_account_summary, start_handler, status_handler
 from handlers.stripe_keys import handler as stripe_keys_handler
 from handlers.stripe_webhook import handler as stripe_webhook_handler
 from stripe_link.domain.fees import default_billing_config
@@ -82,13 +82,14 @@ class AccountHandlerTests(unittest.TestCase):
         self.assertEqual(tenants.get("client_demo", "client_demo")["billing_status"], "trial")
         self.assertEqual(users.get("client_demo", "user-sub-1")["role"], "owner")
 
-    def test_auth_register_writes_initial_tenant_profile_to_dev_and_prod(self):
+    def test_auth_register_writes_initial_tenant_profile_to_local_table(self):
+        # Registration writes only the local per-deployment table now — the cross-env dual-write is retired
+        # under data isolation (plans/STRIPE_MODE_DECOUPLING.md).
         class FakeCognito:
             def sign_up(self, **kwargs):
                 return {"UserSub": "user-sub-1"}
 
-        dev_tenants = FakeDocumentRepository("tenant_id")
-        prod_tenants = FakeDocumentRepository("tenant_id")
+        tenants = FakeDocumentRepository("tenant_id")
         users = FakeDocumentRepository("user_id")
 
         with patch.dict(os.environ, {"COGNITO_USER_POOL_CLIENT_ID": "client-app"}, clear=False):
@@ -104,16 +105,13 @@ class AccountHandlerTests(unittest.TestCase):
                 }),
             }, None,
                 cognito=FakeCognito(),
-                tenant_repository=dev_tenants,
-                tenant_registration_repositories=[dev_tenants, prod_tenants],
+                tenant_repository=tenants,
                 user_repository=users,
             )
 
         self.assertEqual(response["statusCode"], 201)
-        self.assertEqual(dev_tenants.get("client_demo", "client_demo")["tier_id"], "basic")
-        self.assertEqual(prod_tenants.get("client_demo", "client_demo")["tier_id"], "basic")
-        self.assertEqual(dev_tenants.get("client_demo", "client_demo")["billing_status"], "trial")
-        self.assertEqual(prod_tenants.get("client_demo", "client_demo")["billing_status"], "trial")
+        self.assertEqual(tenants.get("client_demo", "client_demo")["tier_id"], "basic")
+        self.assertEqual(tenants.get("client_demo", "client_demo")["billing_status"], "trial")
 
     def test_auth_register_defaults_client_id_to_cognito_sub(self):
         class FakeCognito:
@@ -198,6 +196,46 @@ class AccountHandlerTests(unittest.TestCase):
         self.assertEqual(body["session"]["client_id"], "client_demo")
         self.assertEqual(body["session"]["tenant_id"], "client_demo")
         self.assertEqual(body["session"]["access_token"], "access-token")
+
+    def test_auth_login_rebuilds_wiped_profile(self):
+        # Self-heal after a clean-slate cutover / shared Cognito pool (plans/STRIPE_MODE_DECOUPLING.md P6): a
+        # confirmed Cognito user whose tenant + user profile were wiped gets them rebuilt on login.
+        class FakeCognito:
+            def initiate_auth(self, **kwargs):
+                return {"AuthenticationResult": {"AccessToken": "access-token", "TokenType": "Bearer"}}
+
+            def admin_get_user(self, **kwargs):
+                return {
+                    "Username": "keith@example.com",
+                    "UserAttributes": [
+                        {"Name": "sub", "Value": "user-sub-1"},
+                        {"Name": "email", "Value": "keith@example.com"},
+                        {"Name": "given_name", "Value": "Keith"},
+                        {"Name": "family_name", "Value": "De Costa"},
+                        {"Name": "custom:client_id", "Value": "client_demo"},
+                        {"Name": "email_verified", "Value": "true"},
+                    ],
+                }
+
+        tenants = FakeDocumentRepository("tenant_id")   # empty — data was wiped
+        users = FakeDocumentRepository("user_id")
+
+        with patch.dict(os.environ, {"COGNITO_USER_POOL_ID": "pool", "COGNITO_USER_POOL_CLIENT_ID": "client-app"}, clear=False):
+            response = auth_handler({
+                "httpMethod": "POST",
+                "path": "/auth/login",
+                "body": json.dumps({"email": "keith@example.com", "password": "password123"}),
+            }, None, cognito=FakeCognito(), tenant_repository=tenants, user_repository=users)
+
+        body = json.loads(response["body"])
+        self.assertEqual(response["statusCode"], 200)
+        # The response carries a rebuilt tenant, and both profiles are now persisted.
+        self.assertEqual(body["tenant"]["tenant_id"], "client_demo")
+        self.assertEqual(body["tenant"]["billing_status"], "trial")
+        self.assertEqual(tenants.get("client_demo", "client_demo")["owner"]["email"], "keith@example.com")
+        rebuilt_user = users.get("client_demo", "user-sub-1")
+        self.assertEqual(rebuilt_user["email"], "keith@example.com")
+        self.assertEqual(rebuilt_user["role"], "owner")
 
     def test_billing_connect_card_uses_tenant_tier_and_billing_config(self):
         class FakeStripeRepository:
@@ -303,13 +341,12 @@ class AccountHandlerTests(unittest.TestCase):
 
     def test_registration_create_and_get(self):
         repository = FakeDocumentRepository("tenant_id")
-        prod_repository = FakeDocumentRepository("tenant_id")
         tenant = load_fixture("tenant-profile-demo.json")
 
         created = registration_handler({
             "httpMethod": "POST",
             "body": json.dumps(tenant),
-        }, None, repository=repository, registration_repositories=[repository, prod_repository])
+        }, None, repository=repository)
         fetched = registration_handler({
             "httpMethod": "GET",
             "pathParameters": {"tenant_id": "tenant_demo"},
@@ -318,7 +355,7 @@ class AccountHandlerTests(unittest.TestCase):
         self.assertEqual(created["statusCode"], 201)
         self.assertEqual(fetched["statusCode"], 200)
         self.assertEqual(json.loads(fetched["body"])["tenant"]["business_name"], "Demo Supplements")
-        self.assertEqual(prod_repository.get("tenant_demo", "tenant_demo")["tier_id"], "basic")
+        self.assertEqual(repository.get("tenant_demo", "tenant_demo")["tier_id"], "basic")
 
     def test_stripe_keys_are_redacted_on_write_and_read(self):
         repository = FakeSimpleRepository("tenant_id")
@@ -595,24 +632,23 @@ class AccountHandlerTests(unittest.TestCase):
         self.assertEqual(invoices_repo.documents[0]["amounts"]["platform_fee"], 371)
         self.assertEqual(invoices_repo.documents[0]["amounts"]["net_payout"], 3200)
 
-    def test_stripe_webhook_ignores_event_from_the_other_mode(self):
-        # A test-mode event (livemode=False) delivered to a prod (live) environment must be ignored,
-        # not persisted -- otherwise a single purchase delivered to both the dev and prod webhook
-        # endpoints is recorded and receipted once per environment (the dedup guard is per-table).
-        class FakeTable:
-            def __init__(self):
-                self.items = []
+    def test_stripe_webhook_routes_by_livemode_not_environment(self):
+        # Decoupled model (plans/STRIPE_MODE_DECOUPLING.md P3): the event's mode is its own `livemode`, NOT the
+        # deployment. A test-mode event (livemode=False) delivered to the prod endpoint is processed AS test and
+        # persisted in test mode -- one prod endpoint handles both modes; the old mode-mismatch reject is gone.
+        class FakeEvents:
+            def get(self, _event_id):
+                return None
 
-            def put_item(self, Item, **kwargs):
-                self.items.append(Item)
-                return {}
+            def put(self, _doc):
+                return _doc
 
-        orders_table = FakeTable()
+        # Unhandled event type + no `account`: isolates the mode-routing decision from the persistence machinery.
         payload = {
-            "id": "evt_wrong_mode",
-            "type": "checkout.session.completed",
+            "id": "evt_test_on_prod",
+            "type": "customer.updated",
             "livemode": False,
-            "data": {"object": {"id": "cs_test_123", "metadata": {"tenant_id": "tenant_demo"}}},
+            "data": {"object": {"metadata": {"tenant_id": "tenant_demo"}}},
         }
         body = json.dumps(payload, separators=(",", ":"))
         timestamp = 1781230000
@@ -627,14 +663,16 @@ class AccountHandlerTests(unittest.TestCase):
                 "headers": {"Stripe-Signature": f"t={timestamp},v1={signature}"},
                 "body": body,
             }, None,
-                orders_table=orders_table,
+                webhook_events_repo=FakeEvents(),
                 webhook_secret_loader=lambda kind, mode: "whsec_stable_test",
                 now_fn=lambda: timestamp,
             )
 
         self.assertEqual(response["statusCode"], 200)
-        self.assertEqual(json.loads(response["body"])["reason"], "mode_mismatch")
-        self.assertEqual(orders_table.items, [])  # nothing persisted
+        envelope = json.loads(response["body"])["webhook"]
+        self.assertEqual(envelope["mode"], "test")  # from livemode, despite ENVIRONMENT=prod
+        self.assertEqual(envelope["livemode"], False)
+        self.assertNotIn("reason", json.loads(response["body"]))  # not ignored
 
     def test_stripe_webhook_rejects_invalid_signature(self):
         body = json.dumps({"id": "evt_bad", "type": "invoice.paid"})
@@ -1243,6 +1281,56 @@ class AccountHandlerTests(unittest.TestCase):
         self.assertEqual(document["connect_oauth_mode"], "live")
         self.assertEqual(document["connect_account_id"], "acct_live_demo")
         self.assertIsNone(repository.get("tenant_demo", "test"))
+
+    def test_connected_account_summary_extracts_identity(self):
+        # #2: surface WHAT the tenant connected so they can catch a wrong reusable-account pick.
+        account = {
+            "business_profile": {"name": "Acme Co", "support_email": "biz@acme.com"},
+            "email": "owner@acme.com",
+            "country": "US",
+            "external_accounts": {"data": [{"last4": "3242"}]},
+        }
+        with patch("handlers.stripe_connect.get_platform_secret_key", return_value="sk_test_x"), \
+                patch("handlers.stripe_connect.stripe_request", return_value=account):
+            summary = connected_account_summary("acct_123", "test")
+        self.assertEqual(summary["connect_business_name"], "Acme Co")
+        self.assertEqual(summary["connect_email"], "owner@acme.com")
+        self.assertEqual(summary["connect_bank_last4"], "3242")
+        self.assertEqual(summary["connect_country"], "US")
+
+    def test_connected_account_summary_is_best_effort(self):
+        # No platform key, or a Stripe error, yields an empty summary — never blocks the connection.
+        with patch("handlers.stripe_connect.get_platform_secret_key", return_value=None):
+            self.assertEqual(connected_account_summary("acct_123", "test"), {})
+        with patch("handlers.stripe_connect.get_platform_secret_key", return_value="sk_test_x"), \
+                patch("handlers.stripe_connect.stripe_request", side_effect=Exception("boom")):
+            self.assertEqual(connected_account_summary("acct_123", "test"), {})
+
+    def test_stripe_connect_callback_stores_account_identity(self):
+        class FakeStripeRepository:
+            def __init__(self):
+                self.documents = {}
+
+            def get(self, tenant_id, mode="test"):
+                return self.documents.get((tenant_id, mode))
+
+            def put(self, document):
+                self.documents[(document["tenant_id"], document["mode"])] = dict(document)
+                return document
+
+        repository = FakeStripeRepository()
+        with patch("handlers.stripe_connect._exchange_oauth_code", return_value={
+            "stripe_user_id": "acct_test_demo", "scope": "read_write", "livemode": False,
+        }), patch("handlers.stripe_connect.connected_account_summary", return_value={
+            "connect_business_name": "Acme Co", "connect_email": "owner@acme.com", "connect_bank_last4": "3242",
+        }):
+            callback_handler({
+                "queryStringParameters": {"code": "ac_demo", "state": "tenant_demo:test:both:existing:test"},
+            }, None, repository=repository)
+
+        document = repository.get("tenant_demo", "test")
+        self.assertEqual(document["connect_business_name"], "Acme Co")
+        self.assertEqual(document["connect_bank_last4"], "3242")
 
     def test_stripe_connect_status_disconnects_connected_account(self):
         class FakeStripeRepository:

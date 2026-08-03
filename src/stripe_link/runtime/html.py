@@ -2225,8 +2225,9 @@ def render_listicle_carousel(
     # {api}/pages/{page_id}/post-checkout/next (like the single-product CTA), not back on the landing page.
     cart_page_id = escape(str(page.get("page_id") or ""))
     cart_has_post_checkout = "true" if page.get("post_checkout") else "false"
+    cart_mode = "live" if str(offer.get("stripe_mode") or "").strip().lower() == "live" else "test"
     return "\n".join(part for part in [
-        f"    <section class=\"sl-listicle\" data-section-type=\"offer_price_selector\" data-conversion-section=\"offer_selector\" data-listicle data-offer-id=\"{offer_id}\" data-tenant-id=\"{cart_tenant_id}\" data-cart-endpoint=\"{cart_endpoint}\" data-page-id=\"{cart_page_id}\" data-has-post-checkout=\"{cart_has_post_checkout}\">",
+        f"    <section class=\"sl-listicle\" data-section-type=\"offer_price_selector\" data-conversion-section=\"offer_selector\" data-listicle data-offer-id=\"{offer_id}\" data-tenant-id=\"{cart_tenant_id}\" data-cart-endpoint=\"{cart_endpoint}\" data-page-id=\"{cart_page_id}\" data-stripe-mode=\"{cart_mode}\" data-has-post-checkout=\"{cart_has_post_checkout}\">",
         *blocks,
         # BNPL messaging (P3.5): follows the shown product's selected tier via conversion:itemChanged (below).
         render_bnpl_messaging_div(),
@@ -4101,6 +4102,7 @@ def render_post_purchase_carousel(section: dict[str, Any], page: dict[str, Any],
             f"    <section class=\"sl-pp-carousel\" data-section-id=\"{escape(str(section.get('id', 'pp-carousel')))}\""
             f" data-section-type=\"post_purchase_carousel\" data-surface=\"{escape(str(section.get('surface', 'upsell')))}\""
             f" data-offer-id=\"{escape(str(section.get('offer_id', '')))}\" data-tenant-id=\"{escape(str(page.get('tenant_id', '')))}\""
+            f" data-stripe-mode=\"{'live' if str(page.get('stripe_mode') or '').strip().lower() == 'live' else 'test'}\""
             f" data-page-id=\"{escape(funnel_page_id)}\" data-api-base-url=\"{escape(str(api_base_url or ''))}\">"
         ),
         (f"      <h2 class=\"sl-pp-carousel-heading\">{render_headline_markup(heading)}</h2>" if heading else ""),
@@ -4134,8 +4136,8 @@ CTA_REGISTRY: dict[str, dict[str, Any]] = {
     "email": {"render": lambda c: render_email_cta(c.page, c.offer, c.cta, c.products_by_id, c.api_base_url), "version": 1},
     "download": {"render": lambda c: render_download_cta(c.cta), "version": 1},
     # An appointment IS a booking — reuse the inline calendar widget rather than duplicate it.
-    "booking": {"render": lambda c: render_booking_cta(c.cta, c.api_base_url), "version": 1},
-    "appointment": {"render": lambda c: render_booking_cta(c.cta, c.api_base_url), "version": 1},
+    "booking": {"render": lambda c: render_booking_cta(c.cta, c.api_base_url, c.offer), "version": 1},
+    "appointment": {"render": lambda c: render_booking_cta(c.cta, c.api_base_url, c.offer), "version": 1},
 }
 
 
@@ -4199,7 +4201,8 @@ def render_email_cta(
     return "\n".join([
         "    <section class=\"sl-checkout-cta sl-email-cta\" data-section-type=\"checkout_cta\" data-cta-type=\"email\">",
         f"      <form class=\"sl-lead-form\" data-lead-form data-endpoint=\"{endpoint}\" "
-        f"data-tenant-id=\"{tenant_id}\" data-offer-id=\"{offer_id}\" data-page-id=\"{page_id}\">",
+        f"data-tenant-id=\"{tenant_id}\" data-offer-id=\"{offer_id}\" data-page-id=\"{page_id}\" "
+        f"data-stripe-mode=\"{'live' if str(offer.get('stripe_mode') or '').strip().lower() == 'live' else 'test'}\">",
         (f"        <p class=\"sl-lead-title\">{title}</p>" if title else ""),
         (f"        <p class=\"sl-lead-description\">{description}</p>" if description else ""),
         *inputs,
@@ -4309,15 +4312,16 @@ def render_download_cta(cta: dict[str, str]) -> str:
     ])
 
 
-def render_booking_cta(cta: dict[str, str], api_base_url: str | None) -> str:
+def render_booking_cta(cta: dict[str, str], api_base_url: str | None, offer: dict[str, Any] | None = None) -> str:
     """Booking CTA: a button that reveals an inline booking calendar. The JS island (page interactions)
     drives the same public availability -> reserve -> checkout flow as the standalone /book page."""
     service_id = escape(cta["target"].strip())
     label = escape(cta["label"] or "Book Now")
     api_base = escape(str(api_base_url or "").rstrip("/"))
+    booking_mode = "live" if str((offer or {}).get("stripe_mode") or "").strip().lower() == "live" else "test"
     return "\n".join([
         "    <section class=\"sl-checkout-cta sl-booking-cta\" data-section-type=\"checkout_cta\" data-cta-type=\"booking\"",
-        f"      data-booking-widget data-service-id=\"{service_id}\" data-api-base=\"{api_base}\">",
+        f"      data-booking-widget data-service-id=\"{service_id}\" data-api-base=\"{api_base}\" data-stripe-mode=\"{booking_mode}\">",
         f"      <button class=\"sl-cta\" type=\"button\" data-booking-reveal>{label}</button>",
         "      <div class=\"sl-booking-panel\" data-booking-panel hidden>",
         "        <div class=\"sl-booking-banner\" data-booking-banner role=\"status\" aria-live=\"polite\"></div>",
@@ -4373,6 +4377,7 @@ def checkout_context(
         "href": fallback,
         "data": {
             "checkout-base-url": checkout_url,
+            "checkout-mode": "live" if str(offer.get("stripe_mode") or "").strip().lower() == "live" else "test",
             "checkout-tenant-id": page.get("tenant_id") or offer.get("tenant_id") or "",
             "checkout-offer-id": offer.get("offer_id") or "",
             "checkout-page-id": page.get("page_id") or "",
@@ -4416,6 +4421,9 @@ def build_checkout_url(
         "product_id": product_id,
         "price_id": price_id,
         "quantity": quantity or "1",
+        # The offer's Stripe mode travels on the Buy URL so a host-agnostic checkout resolves the mode from the
+        # request (plans/STRIPE_MODE_DECOUPLING.md P4) — a test page checks out test, a live page checks out live.
+        "mode": "live" if str(offer.get("stripe_mode") or "").strip().lower() == "live" else "test",
         # Real return URLs when we know the page's canonical location, so a crawler or a no-JS visitor sees a
         # resolved link instead of "{{success_url}}" literals. The interactions script still overrides these
         # from window.location on load (plans/ON_PAGE_SEO_REQUIREMENTS.md — clean out-of-the-box markup).
@@ -4581,6 +4589,7 @@ def render_page_interactions_script(page: dict[str, Any]) -> str:
         "          const hp = leadForm.querySelector('.sl-hp');",
         "          const payload = {",
         "            tenant_id: leadForm.dataset.tenantId, offer_id: leadForm.dataset.offerId,",
+        "            mode: leadForm.dataset.stripeMode || 'test',",
         "            page_id: leadForm.dataset.pageId, fields, consent, idempotency_key: idempotencyKey,",
         "            company_website: hp ? hp.value : '',",
         "          };",
@@ -4603,6 +4612,7 @@ def render_page_interactions_script(page: dict[str, Any]) -> str:
         "      const bookingWidget = document.querySelector('[data-booking-widget]');",
         "      if (bookingWidget) {",
         "        const serviceId = bookingWidget.dataset.serviceId;",
+        "        const bookingMode = bookingWidget.dataset.stripeMode || 'test';",
         "        const apiBase = (bookingWidget.dataset.apiBase || '').replace(/\\/$/, '');",
         "        const panel = bookingWidget.querySelector('[data-booking-panel]');",
         "        const revealBtn = bookingWidget.querySelector('[data-booking-reveal]');",
@@ -4637,7 +4647,7 @@ def render_page_interactions_script(page: dict[str, Any]) -> str:
         "        };",
         "        const loadSlots = () => {",
         "          const from = Math.floor(Date.now() / 1000); const to = from + 14 * 86400;",
-        "          fetch(`${apiBase}/services/${encodeURIComponent(serviceId)}/availability?from=${from}&to=${to}`)",
+        "          fetch(`${apiBase}/services/${encodeURIComponent(serviceId)}/availability?from=${from}&to=${to}&mode=${encodeURIComponent(bookingMode)}`)",
         "            .then((r) => r.json()).then((d) => renderSlots(d.slots || []))",
         "            .catch(() => { slotsHost.textContent = 'Could not load times.'; });",
         "        };",
@@ -4654,7 +4664,7 @@ def render_page_interactions_script(page: dict[str, Any]) -> str:
         "            name: (bookingWidget.querySelector('[data-booking-name]').value || '').trim(), email,",
         "            phone: (bookingWidget.querySelector('[data-booking-phone]').value || '').trim(),",
         "          };",
-        "          const body = { service_id: serviceId, slot_start: selectedSlot, customer };",
+        "          const body = { service_id: serviceId, mode: bookingMode, slot_start: selectedSlot, customer };",
         "          if (selectedFulfiller) body.fulfiller_id = selectedFulfiller;",
         "          confirmBtn.disabled = true; confirmBtn.textContent = 'Reserving...';",
         "          const base = window.location.href.split('?')[0];",
@@ -4663,7 +4673,7 @@ def render_page_interactions_script(page: dict[str, Any]) -> str:
         "            .then((res) => {",
         "              if (!res.ok) throw new Error(res.j.message || 'That time is no longer available.');",
         "              return fetch(`${apiBase}/services/appointments/checkout`, { method: 'POST', headers: { 'Content-Type': 'application/json' },",
-        "                body: JSON.stringify({ appointment_id: res.j.appointment.appointment_id, manage_token: res.j.manage_token, success_url: base + '?booking=success', cancel_url: base + '?booking=cancel' }) }).then((r) => r.json());",
+        "                body: JSON.stringify({ appointment_id: res.j.appointment.appointment_id, manage_token: res.j.manage_token, mode: bookingMode, success_url: base + '?booking=success', cancel_url: base + '?booking=cancel' }) }).then((r) => r.json());",
         "            })",
         "            .then((checkout) => {",
         "              if (checkout.checkout_url) { window.location = checkout.checkout_url; }",
@@ -4737,6 +4747,7 @@ def render_page_interactions_script(page: dict[str, Any]) -> str:
         "        if (listicle) {",
         "          const offerId = listicle.dataset.offerId || 'offer';",
         "          const tenantId = listicle.dataset.tenantId || '';",
+        "          const cartMode = listicle.dataset.stripeMode || 'test';",  # Stripe mode travels with every cart call
         "          const cartEndpoint = listicle.dataset.cartEndpoint || '';",
         "          const serverEnabled = !!(cartEndpoint && tenantId);",
         "          const ctToken = (new URLSearchParams(window.location.search)).get('ct') || '';",  # identified-link token
@@ -4783,12 +4794,12 @@ def render_page_interactions_script(page: dict[str, Any]) -> str:
         "          const removeFallback = (idx) => { const cart = readFallback(); if (idx >= 0 && idx < cart.length) { cart.splice(idx, 1); writeFallback(cart); } renderMinicart(); };",
         "          const removeLine = (lineId) => {",
         "            const id = getCartId(); if (!id || !serverEnabled) return;",
-        "            fetch(cartEndpoint + '/items/' + encodeURIComponent(lineId) + '?tenant_id=' + encodeURIComponent(tenantId) + '&cart_id=' + encodeURIComponent(id), { method: 'DELETE' })",
+        "            fetch(cartEndpoint + '/items/' + encodeURIComponent(lineId) + '?tenant_id=' + encodeURIComponent(tenantId) + '&cart_id=' + encodeURIComponent(id) + '&mode=' + encodeURIComponent(cartMode), { method: 'DELETE' })",
         "              .then((r) => r.ok ? r.json() : Promise.reject(r)).then(applyServerCart).catch(() => {});",
         "          };",
         "          const addToCart = (t) => {",
         "            if (!serverEnabled) { addFallback(t); return; }",
-        "            const body = { tenant_id: tenantId, offer_id: offerId, product_id: t.product_id || '', price_id: t.price_id || '', service_id: t.service_id || '', qty: 1, page_url: window.location.origin + window.location.pathname };",
+        "            const body = { tenant_id: tenantId, offer_id: offerId, mode: cartMode, product_id: t.product_id || '', price_id: t.price_id || '', service_id: t.service_id || '', qty: 1, page_url: window.location.origin + window.location.pathname };",
         "            const id = getCartId(); if (id) body.cart_id = id;",
         "            if (ctToken) body.ct = ctToken;",
 
@@ -4834,7 +4845,7 @@ def render_page_interactions_script(page: dict[str, Any]) -> str:
         "              const nextp = new URLSearchParams(); nextp.set('outcome', 'accept'); if (tenantId) nextp.set('tenant_id', tenantId); nextp.set('origin', window.location.origin);",
         "              cartSuccessUrl = `${cartApiBase}/pages/${cartPageId}/post-checkout/next?${nextp.toString()}&session_id={CHECKOUT_SESSION_ID}`;",
         "            }",
-        "            fetch(cartEndpoint + '/checkout', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ tenant_id: tenantId, cart_id: id, page_id: cartPageId, success_url: cartSuccessUrl, cancel_url: ret + '?checkout=cancel' }) })",
+        "            fetch(cartEndpoint + '/checkout', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ tenant_id: tenantId, cart_id: id, mode: cartMode, page_id: cartPageId, success_url: cartSuccessUrl, cancel_url: ret + '?checkout=cancel' }) })",
         # Clear the LOCAL cart ONLY once Stripe hands off (we have a redirect url) so returning to the page shows
         # an empty cart, not the just-purchased items. The .catch keeps it on failure (retry still works). The
         # SERVER cart persists — the webhook marks it converted on payment via metadata[cart_id], or it stays
@@ -4849,9 +4860,9 @@ def render_page_interactions_script(page: dict[str, Any]) -> str:
         "          const existingId = getCartId();",
         "          if (serverEnabled && ctToken) {",
         # Recovery/identified link: resolve the token to its cart so it rehydrates on ANY device.
-        "            hydrateFrom(cartEndpoint + '?tenant_id=' + encodeURIComponent(tenantId) + '&ct=' + encodeURIComponent(ctToken));",
+        "            hydrateFrom(cartEndpoint + '?tenant_id=' + encodeURIComponent(tenantId) + '&mode=' + encodeURIComponent(cartMode) + '&ct=' + encodeURIComponent(ctToken));",
         "          } else if (serverEnabled && existingId) {",
-        "            hydrateFrom(cartEndpoint + '?tenant_id=' + encodeURIComponent(tenantId) + '&cart_id=' + encodeURIComponent(existingId));",
+        "            hydrateFrom(cartEndpoint + '?tenant_id=' + encodeURIComponent(tenantId) + '&cart_id=' + encodeURIComponent(existingId) + '&mode=' + encodeURIComponent(cartMode));",
         "          } else { renderMinicart(); }",
         "        }",
         "        applyTarget(0);",
@@ -4956,6 +4967,7 @@ def render_page_interactions_script(page: dict[str, Any]) -> str:
         "        if (cta.dataset.checkoutTenantId) params.set('clientID', cta.dataset.checkoutTenantId);",
         "        if (cta.dataset.checkoutOfferId) params.set('offer', cta.dataset.checkoutOfferId);",
         "        if (cta.dataset.checkoutPageId) params.set('page_id', cta.dataset.checkoutPageId);",
+        "        params.set('mode', cta.dataset.checkoutMode || 'test');",
         "        if (productId) params.set('product_id', productId);",
         "        if (priceId) params.set('price_id', priceId);",
         "        if (quantity) params.set('quantity', quantity);",
@@ -5084,7 +5096,7 @@ def render_page_interactions_script(page: dict[str, Any]) -> str:
         "        cta.setAttribute('aria-disabled', 'true');",
         "        cta.dataset.ctaDefaultLabel = cta.textContent;",
         "        cta.textContent = 'Loading...';",
-        "        fetch(`${cta.dataset.checkoutApiBaseUrl}/upsell/session?session_id=${encodeURIComponent(funnelSessionId)}&clientID=${encodeURIComponent(cta.dataset.checkoutTenantId || '')}`)",
+        "        fetch(`${cta.dataset.checkoutApiBaseUrl}/upsell/session?session_id=${encodeURIComponent(funnelSessionId)}&clientID=${encodeURIComponent(cta.dataset.checkoutTenantId || '')}&mode=${encodeURIComponent(cta.dataset.checkoutMode || 'test')}`)",
         "          .then((response) => response.json())",
         "          .then((body) => {",
         "            const session = (body && body.session) || {};",
@@ -5110,6 +5122,7 @@ def render_page_interactions_script(page: dict[str, Any]) -> str:
         "            headers: { 'Content-Type': 'application/json' },",
         "            body: JSON.stringify({",
         "              tenant_id: cta.dataset.checkoutTenantId || '',",
+        "              mode: cta.dataset.checkoutMode || 'test',",
         "              session_id: funnelSessionId,",
         "              offer_id: cta.dataset.checkoutOfferId || '',",
         "              product_id: cta.dataset.checkoutProductId || '',",
@@ -5212,6 +5225,7 @@ def render_page_interactions_script(page: dict[str, Any]) -> str:
         "        const ppTenant = ppCarousel.dataset.tenantId || '';",
         "        const ppOffer = ppCarousel.dataset.offerId || '';",
         "        const ppSurface = ppCarousel.dataset.surface || 'upsell';",
+        "        const ppMode = ppCarousel.dataset.stripeMode || 'test';",
         "        const ppSession = funnelParams.get('session_id') || '';",
         "        const ppPage = funnelParams.get('funnel_page') || ppCarousel.dataset.pageId || '';",
         "        const ppDismissUrl = () => {",
@@ -5229,7 +5243,7 @@ def render_page_interactions_script(page: dict[str, Any]) -> str:
         "        let ppCustomerId = '';",
         "        let ppCustomerInfo = {};",
         "        ppAdds.forEach((b) => { b.setAttribute('aria-disabled', 'true'); });",
-        "        fetch(`${ppApi}/upsell/session?session_id=${encodeURIComponent(ppSession)}&clientID=${encodeURIComponent(ppTenant)}`)",
+        "        fetch(`${ppApi}/upsell/session?session_id=${encodeURIComponent(ppSession)}&clientID=${encodeURIComponent(ppTenant)}&mode=${encodeURIComponent(ppMode)}`)",
         "          .then((response) => response.json())",
         "          .then((body) => {",
         "            const session = (body && body.session) || {};",
@@ -5251,6 +5265,7 @@ def render_page_interactions_script(page: dict[str, Any]) -> str:
         "              headers: { 'Content-Type': 'application/json' },",
         "              body: JSON.stringify({",
         "                tenant_id: ppTenant,",
+        "                mode: ppMode,",
         "                session_id: ppSession,",
         "                offer_id: ppOffer,",
         "                product_id: (card && card.dataset.productId) || '',",

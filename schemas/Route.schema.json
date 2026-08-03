@@ -16,6 +16,7 @@
     "target_url": { "type": "string", "description": "Required when target_type is url." },
     "target_experiment_id": { "type": "string", "description": "Required when target_type is experiment." },
     "label": { "type": "string", "description": "Optional human-readable label for the dashboard." },
+    "stripe_mode": { "type": "string", "enum": ["test", "live"], "description": "The target page's Stripe mode, so the resolver reads the mode-partitioned artifact key (test pages under a test/ prefix)." },
     "created_at": { "type": "integer", "minimum": 0 },
     "updated_at": { "type": "integer", "minimum": 0 }
   },

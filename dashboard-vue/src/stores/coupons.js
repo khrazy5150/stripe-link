@@ -1,5 +1,5 @@
 import { defineStore } from "pinia";
-import { apiRequest, getApiEnvironment, getTenantId } from "../api/client";
+import { apiRequest, getStripeMode, getTenantId } from "../api/client";
 
 function localId(prefix = "coupon") {
   const alphabet = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
@@ -162,7 +162,7 @@ export function buildCouponDocument(form) {
     tenant_id: getTenantId(),
     coupon_id: couponId,
     canonical: true,
-    stripe_mode: getApiEnvironment(),
+    stripe_mode: getStripeMode(),
     stripe_coupon_id: form.stripe_coupon_id || couponId,
     stripe_promo_code_id: form.stripe_promo_code_id || `promo_${couponId.replace(/^coupon_/, "")}`,
     code: String(form.code || "").trim().toUpperCase(),

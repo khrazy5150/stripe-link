@@ -171,7 +171,7 @@
 
 <script setup>
 import { onMounted, reactive, ref } from "vue";
-import { apiRequest, getApiEnvironment, getTenantId } from "../api/client";
+import { apiRequest, getStripeMode, getTenantId } from "../api/client";
 import { formatMoney, useProductsStore } from "../stores/products";
 import { useServicesStore } from "../stores/services";
 import { formatEpochDate, statusLabel } from "../utils/format";
@@ -323,7 +323,7 @@ function buildInvoiceDocument(f) {
     invoice_id: localId("inv"),
     status: "draft",
     collection_method: "send_invoice",
-    stripe_mode: getApiEnvironment(),
+    stripe_mode: getStripeMode(),
     customer: { email: f.email, ...(f.name ? { name: f.name } : {}), ...(f.phone ? { phone: f.phone } : {}) },
     line_items: lineItems,
     amounts: { currency, subtotal: total, total, amount_paid: 0, amount_due: total },

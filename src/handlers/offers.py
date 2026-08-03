@@ -1,7 +1,7 @@
 import os
 import re
 
-from stripe_link.common import error_response, json_response, parse_json_body, path_params, query_params, tenant_id_from_event
+from stripe_link.common import error_response, json_response, parse_json_body, path_params, query_params, resolve_stripe_mode, tenant_id_from_event
 from stripe_link.domain.documents import DocumentValidationError, validate_offer_document
 from stripe_link.domain.opportunities import STAGE_LANDING, stage_opportunities
 from stripe_link.domain.pricing import PricingError, expand_offer, resolve_offer
@@ -42,16 +42,19 @@ def unique_offer_slug(desired: str, *, tenant_id: str, offer_id: str, repository
 
 
 def handler(event, context, repository=None, products_repo=None):
-    repository = repository or offers_repository()
+    # Stripe-mode scoping: offers + the products they reference are read/written in the request's mode so a
+    # test-mode dashboard only ever sees test records (plans/STRIPE_MODE_DECOUPLING.md P2).
+    mode = resolve_stripe_mode(event)
+    repository = repository or offers_repository(mode=mode)
     method = (event or {}).get("httpMethod", "").upper()
     if method == "OPTIONS":
         return json_response({})
     if method == "POST":
-        return create_offer(event, repository, products_repo)
+        return create_offer(event, repository, products_repo, mode=mode)
     if method == "GET":
         offer_id = path_params(event).get("offer_id")
         if offer_id:
-            return get_offer(event, repository, offer_id, products_repo=products_repo)
+            return get_offer(event, repository, offer_id, products_repo=products_repo, mode=mode)
         return list_offers(event, repository)
     if method == "PATCH":
         offer_id = path_params(event).get("offer_id")
@@ -79,10 +82,10 @@ def _landing_products(offer: dict, products_repo) -> dict:
     return out
 
 
-def create_offer(event, repository, products_repo=None):
+def create_offer(event, repository, products_repo=None, mode="test"):
     try:
         document = parse_json_body(event)
-        products_repo = products_repo or products_repository()
+        products_repo = products_repo or products_repository(mode=mode)
         # Server owns the offer's LABEL and SLUG — both from ONE OfferSemanticModel so they can't diverge
         # (plans/OFFER_SEMANTIC_ANALYZER.md; slug is the pilot consumer). Precedence for each: an explicit client
         # value wins (tenant override / legacy client); else an EXISTING offer keeps its value so published URLs +
@@ -111,7 +114,7 @@ def create_offer(event, repository, products_repo=None):
             desired = slug_from_model(_model())
         document["slug"] = unique_offer_slug(desired, tenant_id=tenant_id, offer_id=offer_id, repository=repository)
         validate_offer_document(document)
-        validate_offer_product_compatibility(document, products_repo or products_repository())
+        validate_offer_product_compatibility(document, products_repo or products_repository(mode=mode))
         saved = repository.put(document)
         return json_response({"offer": saved}, status_code=201)
     except (DocumentValidationError, ValueError, RepositoryError) as exc:
@@ -141,7 +144,7 @@ def validate_offer_product_compatibility(document: dict, products_repo) -> None:
             )
 
 
-def get_offer(event, repository, offer_id: str, products_repo=None, services_repo=None):
+def get_offer(event, repository, offer_id: str, products_repo=None, services_repo=None, mode="test"):
     tenant_id = tenant_id_from_event(event)
     if not tenant_id:
         return error_response("tenant_id is required.", code="missing_tenant")
@@ -151,12 +154,12 @@ def get_offer(event, repository, offer_id: str, products_repo=None, services_rep
     # ?expand=1 returns the ExpandedOffer (per-item product/service snapshots) the renderers consume
     # without lookups — storage stays normalized (plans/CONVERSION_CONTEXT.md).
     if str(query_params(event).get("expand") or "").strip() in {"1", "true"}:
-        return json_response({"offer": _expand(tenant_id, offer, products_repo, services_repo)})
+        return json_response({"offer": _expand(tenant_id, offer, products_repo, services_repo, mode=mode)})
     return json_response({"offer": offer})
 
 
-def _expand(tenant_id: str, offer: dict, products_repo=None, services_repo=None) -> dict:
-    products_repo = products_repo or products_repository()
+def _expand(tenant_id: str, offer: dict, products_repo=None, services_repo=None, mode="test") -> dict:
+    products_repo = products_repo or products_repository(mode=mode)
     products_by_id = {}
     services_by_id = {}
     for item in stage_opportunities(offer, STAGE_LANDING):

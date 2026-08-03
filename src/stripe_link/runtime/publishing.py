@@ -58,6 +58,11 @@ def page_slug(page: dict[str, Any]) -> str:
     return slug
 
 
+def _page_mode(page: dict[str, Any]) -> str:
+    """The Stripe mode a page's artifacts partition under (plans/STRIPE_MODE_DECOUPLING.md P5)."""
+    return "live" if str(page.get("stripe_mode") or "").strip().lower() == "live" else "test"
+
+
 def site_page_type(site: dict[str, Any] | None, page_id: str) -> str:
     """The page_type the Site records for this page (drives robots/sitemap eligibility). Defaults to 'landing'
     when the page has no Site entry (legacy pages)."""
@@ -621,7 +626,7 @@ def artifact_targets(
     slug = page_slug(page)
     if not tenant_id or not page_id:
         raise PublishError("Page tenant_id and page_id are required for publishing.")
-    paths = artifact_paths(tenant_id, page_id, slug)
+    paths = artifact_paths(tenant_id, page_id, slug, mode=_page_mode(page))
 
     targets = [
         {
@@ -675,6 +680,7 @@ def register_page_route(routes_repository: Any, page: dict[str, Any]) -> bool:
         "short_code": short_code,
         "target_type": "page",
         "target_page_id": page_id,
+        "stripe_mode": _page_mode(page),
         "created_at": int((existing or {}).get("created_at") or now),
         "updated_at": now,
     }
@@ -699,14 +705,10 @@ def checkout_base_url_for_page(page: dict[str, Any], offer: dict[str, Any], envi
     if configured:
         return configured
 
-    stripe_mode = str(offer.get("stripe_mode") or "").strip().lower()
-    if not stripe_mode:
-        stripe_mode = "live" if environment == "prod" else "test"
-    return (
-        "https://prod.juniorbay.com/checkout"
-        if stripe_mode == "live"
-        else "https://dev.juniorbay.com/checkout"
-    )
+    # Host-agnostic: both modes check out on the SAME endpoint; the mode travels as ?mode= on the Buy URL
+    # (baked by build_checkout_url from offer.stripe_mode), so we no longer pick a mode-specific host
+    # (plans/STRIPE_MODE_DECOUPLING.md P4). `environment` is retained for signature compatibility.
+    return str(os.environ.get("PUBLIC_CHECKOUT_BASE_URL") or "https://prod.juniorbay.com/checkout").strip()
 
 
 def strip_document_keys(document: dict[str, Any]) -> dict[str, Any]:
@@ -987,7 +989,8 @@ def publish_page_document(
             pass
     # Self-referencing canonical (plans/ON_PAGE_SEO_REQUIREMENTS.md SEO-01). Interim: the published artifact
     # URL where the page actually lives; clean root-domain paths arrive with the Site object.
-    published_paths = artifact_paths(tenant_id, page_id, page_slug(page))
+    page_mode = _page_mode(page)
+    published_paths = artifact_paths(tenant_id, page_id, page_slug(page), mode=page_mode)
     canonical_url = public_url(pages_domain, published_paths["published"])
     # Serve the whole inline funnel on the Site's clean host (verified custom domain OR the free platform host):
     # attach the funnel's pages at slugs so the edge resolver can route them, and refresh the denormalized route
@@ -1056,6 +1059,10 @@ def publish_page_document(
             page_type=page_type, on_custom_domain=on_custom_domain, site_archived=site_archived,
             seo_enabled=seo_enabled,
         )
+        # Test-mode pages are never indexable, whatever the Site's eligibility — test data must not reach search
+        # (plans/STRIPE_MODE_DECOUPLING.md P5). Live pages are unaffected.
+        if page_mode == "test":
+            robots = NOINDEX_ROBOTS
         html = _render(robots)
         # Thin-content gate (SEO-08): an otherwise-indexable page with too little unique body text is demoted
         # to noindex,follow so a doorway-thin page can't drag the whole Site's ranking down. Body text is
@@ -1093,14 +1100,14 @@ def publish_page_document(
             home_url=page_home_url, bnpl_messaging=bnpl_messaging,
         )
         if preview_bucket:
-            pv_key = artifact_paths(tenant_id, page_id, context=ctx)["preview"]
+            pv_key = artifact_paths(tenant_id, page_id, context=ctx, mode=page_mode)["preview"]
             s3_client.put_object(
                 Bucket=preview_bucket, Key=pv_key, Body=ctx_html.encode("utf-8"),
                 ContentType="text/html; charset=utf-8", CacheControl="no-cache, no-store, must-revalidate",
             )
             artifacts.append({"kind": f"preview:{ctx}", "bucket": preview_bucket, "key": pv_key, "url": public_url(preview_domain, pv_key)})
         if page.get("status") == "published" and pages_bucket:
-            ctx_key = artifact_paths(tenant_id, page_id, context=ctx)["published"]
+            ctx_key = artifact_paths(tenant_id, page_id, context=ctx, mode=page_mode)["published"]
             s3_client.put_object(
                 Bucket=pages_bucket, Key=ctx_key, Body=ctx_html.encode("utf-8"),
                 ContentType="text/html; charset=utf-8", CacheControl=PUBLISHED_PAGE_CACHE_CONTROL,
@@ -1114,14 +1121,14 @@ def publish_page_document(
     # offer without upsell-context prices, so this is a no-op for ordinary pages.
     def _write_funnel_artifact(fp_page_id: str, fp_html: str, kind: str) -> None:
         if preview_bucket:
-            pv_key = artifact_paths(tenant_id, fp_page_id)["preview"]
+            pv_key = artifact_paths(tenant_id, fp_page_id, mode=page_mode)["preview"]
             s3_client.put_object(
                 Bucket=preview_bucket, Key=pv_key, Body=fp_html.encode("utf-8"),
                 ContentType="text/html; charset=utf-8", CacheControl="no-cache, no-store, must-revalidate",
             )
             artifacts.append({"kind": f"preview:{kind}", "bucket": preview_bucket, "key": pv_key, "url": public_url(preview_domain, pv_key)})
         if page.get("status") == "published" and pages_bucket:
-            pub_key = artifact_paths(tenant_id, fp_page_id)["published"]
+            pub_key = artifact_paths(tenant_id, fp_page_id, mode=page_mode)["published"]
             s3_client.put_object(
                 Bucket=pages_bucket, Key=pub_key, Body=fp_html.encode("utf-8"),
                 ContentType="text/html; charset=utf-8", CacheControl=PUBLISHED_PAGE_CACHE_CONTROL,
@@ -1186,7 +1193,7 @@ def publish_page_document(
     for ctx in ("sale", "flash_sale"):
         if ctx in enabled_ctx:
             continue
-        stale = artifact_paths(tenant_id, page_id, context=ctx)
+        stale = artifact_paths(tenant_id, page_id, context=ctx, mode=page_mode)
         for bucket, key in ((preview_bucket, stale["preview"]), (pages_bucket, stale["published"])):
             if not bucket:
                 continue
@@ -1359,7 +1366,7 @@ def delete_page_artifacts(
     slug = page_slug(page)
     if not tenant_id or not page_id:
         raise PublishError("Page tenant_id and page_id are required for artifact deletion.")
-    paths = artifact_paths(tenant_id, page_id, slug)
+    paths = artifact_paths(tenant_id, page_id, slug, mode=_page_mode(page))
     targets = [
         {"kind": "preview", "bucket": preview_bucket, "key": paths["preview"]},
         {"kind": "page", "bucket": pages_bucket, "key": paths["published"]},

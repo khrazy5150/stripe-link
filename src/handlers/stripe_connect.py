@@ -10,6 +10,7 @@ from stripe_link.common import error_response, json_response, parse_json_body, t
 from stripe_link.kms_secrets import KmsSecretCipher
 from stripe_link.repositories.documents import RepositoryError, stripe_keys_repository, tenant_profiles_repository
 from stripe_link.security import redact_sensitive_fields
+from stripe_link.stripe_client import stripe_request
 from stripe_link.stripe_platform_secrets import get_platform_secret_key
 
 
@@ -87,6 +88,36 @@ def _exchange_oauth_code(code, mode):
         raise RuntimeError(f"Stripe OAuth token exchange failed: {body}") from exc
     except URLError as exc:
         raise RuntimeError(f"Stripe OAuth token exchange failed: {exc.reason}") from exc
+
+
+def connected_account_summary(account_id, mode, opener=None):
+    """Best-effort human identity of a just-connected account, so the confirm step can show a tenant WHAT they
+    connected (business name / email / bank last-4) and let them catch a wrong account before finalizing. Never
+    raises: display detail must not block a valid connection."""
+    account_id = str(account_id or "").strip()
+    if not account_id:
+        return {}
+    secret_key = get_platform_secret_key(mode)
+    if not secret_key:
+        return {}
+    try:
+        account = stripe_request("GET", f"/accounts/{account_id}", api_key=secret_key, opener=opener)
+    except Exception:  # noqa: BLE001 - best-effort; a fetch failure just omits the display detail.
+        return {}
+    business = account.get("business_profile") if isinstance(account.get("business_profile"), dict) else {}
+    dashboard = ((account.get("settings") or {}).get("dashboard") or {}) if isinstance(account.get("settings"), dict) else {}
+    bank_last4 = ""
+    for ext in ((account.get("external_accounts") or {}).get("data") or []):
+        if isinstance(ext, dict) and ext.get("last4"):
+            bank_last4 = str(ext.get("last4"))
+            break
+    summary = {
+        "connect_business_name": str(business.get("name") or dashboard.get("display_name") or "").strip(),
+        "connect_email": str(account.get("email") or business.get("support_email") or "").strip(),
+        "connect_country": str(account.get("country") or "").strip(),
+        "connect_bank_last4": bank_last4,
+    }
+    return {key: value for key, value in summary.items() if value}
 
 
 def _stripe_oauth_request(url, payload, mode, error_prefix):
@@ -236,6 +267,9 @@ def callback_handler(event, context, repository=None, secret_cipher=None):
                 mode=mode,
                 field="connect_refresh_token",
             )
+        # Store the connected account's human identity so the confirm step can show it (guards against a tenant
+        # accidentally selecting the wrong reusable account). Best-effort — never blocks the connection.
+        document.update(connected_account_summary(document["connect_account_id"], connected_mode))
         repository.put(document)
 
         return _dashboard_redirect({

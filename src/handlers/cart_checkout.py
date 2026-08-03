@@ -8,7 +8,7 @@ sets amounts. Returns the Stripe URL as JSON; the browser redirects to it.
 from urllib.request import urlopen
 
 from handlers.checkout import build_checkout_payload, create_checkout_session_with_bnpl_fallback
-from stripe_link.common import error_response, json_response, parse_json_body
+from stripe_link.common import error_response, json_response, parse_json_body, resolve_stripe_mode
 from stripe_link.domain.billing_status import BillingStatusError, assert_billing_in_good_standing
 from stripe_link.domain.bnpl import checkout_payment_method_types
 from stripe_link.domain.cart import CartError, resolved_items_for_checkout
@@ -64,12 +64,13 @@ def handler(
     if not success_url or not cancel_url:
         return error_response("success_url and cancel_url are required.", code="missing_redirect_url")
 
-    carts_repo = carts_repo or carts_repository()
-    offers_repo = offers_repo or offers_repository()
-    products_repo = products_repo or products_repository()
+    mode = resolve_stripe_mode(event)
+    carts_repo = carts_repo or carts_repository(mode=mode)
+    offers_repo = offers_repo or offers_repository(mode=mode)
+    products_repo = products_repo or products_repository(mode=mode)
     if services_repo is None:
         try:
-            services_repo = services_repository()
+            services_repo = services_repository(mode=mode)
         except Exception:  # noqa: BLE001 - services table optional
             services_repo = None
     stripe_repo = stripe_repo or stripe_keys_repository()
@@ -83,7 +84,7 @@ def handler(
         # Transactions are only allowed from a published page (same guard as the single-offer checkout): a draft
         # or unknown page_id cannot start a cart checkout even if the API is called directly.
         if page_id:
-            pages_repo = pages_repo or pages_repository()
+            pages_repo = pages_repo or pages_repository(mode=mode)
             page = pages_repo.get(tenant_id, page_id)
             if not page or page.get("status") != "published":
                 return error_response(
@@ -116,7 +117,6 @@ def handler(
             "currency": items[0]["currency"] if items else "usd",
         }
 
-        mode = "live" if offer.get("stripe_mode") == "live" else "test"
         stripe_keys = stripe_repo.get(tenant_id, mode=mode) or {}
         api_key, stripe_account = checkout_credentials(tenant_id, mode, stripe_keys, secret_cipher)
         if not api_key:

@@ -6,7 +6,7 @@ the Site route map so a card only ever links to a real, navigable Site page."""
 import secrets
 import time
 
-from stripe_link.common import error_response, json_response, parse_json_body, path_params, query_params, tenant_id_from_event
+from stripe_link.common import error_response, json_response, parse_json_body, path_params, query_params, resolve_stripe_mode, tenant_id_from_event
 from stripe_link.domain.documents import DocumentValidationError, validate_collection
 from stripe_link.repositories.documents import RepositoryError, collections_repository
 
@@ -19,7 +19,7 @@ def _new_collection_id() -> str:
 
 
 def handler(event, context, repository=None):
-    repository = repository or collections_repository()
+    repository = repository or collections_repository(mode=resolve_stripe_mode(event))
     method = (event or {}).get("httpMethod", "").upper()
     collection_id = path_params(event).get("collection_id")
     if method == "OPTIONS":

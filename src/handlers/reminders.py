@@ -29,7 +29,9 @@ def handler(event, context, *, appointments_repo=None, tenant_repo=None, sms_sen
     if not origination_configured:
         return {"scanned": 0, "sent": 0, "failed": 0, "skipped": "sms_not_configured"}
 
-    appointments_repo = appointments_repo or appointments_repository()
+    # Live-only sweep: never send real reminders for test-mode appointments (the mode-scoped scan returns
+    # only live appointments; plans/STRIPE_MODE_DECOUPLING.md).
+    appointments_repo = appointments_repo or appointments_repository(mode="live")
     tenant_repo = tenant_repo or tenant_profiles_repository()
     sms_send = sms_send or send_sms
     now = int((now_fn or time.time)())

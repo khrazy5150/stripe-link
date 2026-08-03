@@ -277,7 +277,7 @@
 
 <script setup>
 import { computed, onMounted, reactive, ref } from "vue";
-import { apiRequest, getApiBase, getApiEnvironment, getTenantId } from "../api/client";
+import { apiRequest, getApiBase, getStripeMode, getTenantId } from "../api/client";
 
 const loading = ref(false);
 const saving = ref(false);
@@ -297,9 +297,9 @@ const CONFIG_THANK_YOU_CARDS = [
 const form = reactive(defaultForm());
 
 const apiBase = computed(() => getApiBase());
-const environmentLabel = computed(() => (getApiEnvironment() === "live" ? "Production (live)" : "Test (dev)"));
+const environmentLabel = computed(() => (getStripeMode() === "live" ? "Live mode" : "Test mode"));
 // Danger Zone (Test-only) — delete all of this tenant's test data.
-const isTestEnv = computed(() => getApiEnvironment() !== "live");
+const isTestEnv = computed(() => getStripeMode() !== "live");
 const showDeleteModal = ref(false);
 const deleting = ref(false);
 const deleteError = ref("");
