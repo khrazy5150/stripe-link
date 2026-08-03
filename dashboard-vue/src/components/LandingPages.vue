@@ -253,7 +253,7 @@
                     autocapitalize="off"
                     autocorrect="off"
                     spellcheck="false"
-                    @input="siteCheck.check(newSiteSubdomain)"
+                    @input="onNewSiteSubdomainInput"
                   />
                   <span class="subdomain-suffix">.{{ sitesStore.hostingDomain || "jbay.uk" }}</span>
                 </div>
@@ -1423,6 +1423,18 @@ const newSiteName = ref("");
 const newSiteSubdomain = ref("");
 const siteCheck = useSubdomainCheck();
 const creatingSite = ref(false);
+// Auto-fill the store address from the Site name as the tenant types, until they edit the address themselves.
+const newSiteSubdomainEdited = ref(false);
+watch(newSiteName, (name) => {
+  if (newSiteSubdomainEdited.value) return;
+  const slug = slugify(name);
+  newSiteSubdomain.value = slug;
+  siteCheck.check(slug);
+});
+function onNewSiteSubdomainInput() {
+  newSiteSubdomainEdited.value = newSiteSubdomain.value.trim() !== "";
+  siteCheck.check(newSiteSubdomain.value);
+}
 
 const selectedSite = computed(() => sitesStore.sites.find((s) => s.site_id === selectedSiteId.value) || null);
 const selectedSiteHomepageLabel = computed(() => {
@@ -2166,6 +2178,7 @@ function resetWizard() {
   siteCreateOpen.value = false;
   newSiteName.value = "";
   newSiteSubdomain.value = "";
+  newSiteSubdomainEdited.value = false;
   siteCheck.clear();
 }
 

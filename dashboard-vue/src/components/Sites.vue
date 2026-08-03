@@ -39,7 +39,7 @@
               autocapitalize="off"
               autocorrect="off"
               spellcheck="false"
-              @input="createCheck.check(createSubdomain)"
+              @input="onCreateSubdomainInput"
             />
             <span class="subdomain-suffix">.{{ hostingDomainHint }}</span>
           </div>
@@ -450,6 +450,28 @@ const createSubdomain = ref("");
 const createPageIds = ref([]);
 const createCheck = useSubdomainCheck();
 const editCheck = useSubdomainCheck();
+// Once the tenant edits the store address themselves, stop auto-filling it from the Site name (they've taken over).
+const subdomainEdited = ref(false);
+
+// Client-side slug preview mirroring the backend normalize_subdomain (lowercase, non-alphanumeric -> single dash,
+// trimmed). The backend re-normalizes on check/save, so this only needs to be close enough to suggest.
+function slugify(value) {
+  return String(value || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/-{2,}/g, "-").replace(/^-+|-+$/g, "").slice(0, 63);
+}
+
+// As the tenant types the Site name, suggest a store address (until they edit it themselves) and check availability.
+watch(createName, (name) => {
+  if (subdomainEdited.value) return;
+  const slug = slugify(name);
+  createSubdomain.value = slug;
+  createCheck.check(slug);
+});
+
+function onCreateSubdomainInput() {
+  // Typing here takes control of the field; clearing it hands auto-fill back to the Site name.
+  subdomainEdited.value = createSubdomain.value.trim() !== "";
+  createCheck.check(createSubdomain.value);
+}
 
 const removeBusy = ref("");
 const removeError = ref("");
@@ -789,6 +811,7 @@ async function reload() {
 }
 
 function pickCreate(value) {
+  subdomainEdited.value = true;  // choosing a suggestion is a deliberate pick
   createSubdomain.value = value;
   createCheck.check(value);
 }
@@ -809,6 +832,7 @@ function startCreate() {
   formError.value = "";
   createName.value = "";
   createSubdomain.value = "";
+  subdomainEdited.value = false;
   createCheck.clear();
   createPageIds.value = defaultCreateSelection();
 }
