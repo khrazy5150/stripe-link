@@ -482,12 +482,16 @@ async function copySiteToEnvironment(site) {
     }
     const existingSite = await apiRequest(`/sites/${encodeURIComponent(site.site_id)}`, { mode: env })
       .then((b) => b.site).catch(() => null);
-    // If this Site is new to the target, its platform subdomain must be free there — otherwise the copy would
-    // write the pages/catalog and then fail claiming the label (a different Site already owns it in that env).
+    // If this Site is new to the target, its platform subdomain must not be owned by a DIFFERENT Site there.
+    // The copy preserves this Site's id, so pass site_id: the subdomain reservation is global and already owned by
+    // THIS site_id — without it the check reports the Site's own address as "taken" (a false conflict).
     const label = String(site.hosting?.platform_hostname || "").split(".")[0];
     let subdomainConflict = false;
     if (!existingSite && label) {
-      const check = await apiRequest(`/sites/subdomain?name=${encodeURIComponent(label)}`, { mode: env }).catch(() => null);
+      const check = await apiRequest(
+        `/sites/subdomain?name=${encodeURIComponent(label)}&site_id=${encodeURIComponent(site.site_id)}`,
+        { mode: env },
+      ).catch(() => null);
       subdomainConflict = !!check && check.available === false;
     }
     copyPlan.value = {
