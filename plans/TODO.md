@@ -108,24 +108,23 @@ Deferred, non-blocking follow-ups. Each item notes what, why it was deferred, an
 
 ## Commerce
 
-### ⭐ SaaS billing paywall — port stripe-cart's platform→tenant subscription (TABLE-DRIVEN)
-- **What:** stripe-link has NO real platform→tenant billing (tier_id is only a transaction fee-rate; `billing_status`
-  is a placeholder stuck at "trial"; no Stripe subscription, no monthly charge). stripe-cart HAS the full SaaS
-  billing paywall (`stripe-cart/src/billing.py`, `platform_config.py`, `plans/SAAS_BILLING_PAYWALL_PLAN.md`) — it
-  was never migrated. Port it, but **DynamoDB-table-driven** (editable without deploys) per author. Full design in
-  **`plans/SAAS_BILLING_PAYWALL.md`**.
-- **Key requirements (author-confirmed 2026-08-02):** editable `PlatformPlansTable` (basic "Bay Pass" $9/14-day
-  trial active, pro "Bay Pass Pro" $19 inactive); **EXEMPT flag** so the author's test tenants (his own emails) are
-  in-good-standing with NO Stripe charge; price changes via new immutable Stripe Price → migrate existing subs at
-  cycle end (`proration_behavior='none'`); admin plan-CRUD screen is a LATER phase (MVP = hand-edit the table).
-- **Phases:** P1 rail (table + subscribe via Stripe Checkout(subscription)+Billing Portal + webhook status +
-  extend the good-standing guard to page-serving + exempt) → P2 dashboard billing screen → P3 admin screen → P4
-  price-migration tooling.
-- **Why it matters now:** foundational — it's the rail the identity-verification charging (below) needs, and the
-  actual mechanism that bills tenants their subscription. Awaiting greenlight on the plan-set + subscribe UX.
+### ⭐ SaaS billing paywall + trial-first onboarding — SHIPPED PROD 2026-08-03
+- **Shipped:** table-driven `PlatformPlansTable` (Bay Pass $9.58/mo, editable) + repo/cached loader; subscribe via
+  Stripe Checkout(subscription) + Billing Portal; SEPARATE platform-billing webhook (`/webhook/platform-billing`,
+  own signing secret kind=`platform_billing`) driving `billing_status`; EXEMPT flag + config bypass list; special-link
+  promotions (trial override + Stripe discount); **plan entitlements** (per-feature on/off, denormalized onto the
+  tenant, backend-gated at all 10 feature chokepoints + disable-menu UI); **trial-first onboarding** (14-day
+  full-access platform trial stamped at registration, `TrialPeriodDays` env-configurable dev=1/prod=14, hard wall at
+  expiry via `trial_expired` + guard backstop); Billing screen + trial banner; auth "Start your free trial" reframe.
+  Full design in `plans/SAAS_BILLING_PAYWALL.md`. Deployed dev+prod, `main` consolidated, 1406 tests.
+- **Follow-ups (non-blocking):** reload Billing on Checkout success-return; per-use promo `max_redemptions` counting;
+  custom-domain takedown-on-suspension sweep; "trial ending/ended" emails (scheduled sweep); resync existing
+  subscribers on a plan-entitlements edit; admin plan-CRUD screen (P3, MVP = hand-edit the table); price-migration
+  batch tool (P4).
 
 ### Age / identity verification gate (Stripe Identity)
-- **Blocked on the SaaS billing paywall above** — verification charging rides the tenant subscription (metered
+- **UNBLOCKED 2026-08-03** — the SaaS billing subscription rail it needed now ships in prod. Verification charging can
+  ride the tenant subscription (metered
   SubscriptionItem or a "verified" tier), so build the paywall rail first.
 - **What:** let tenants mark products/offers age- or identity-restricted; the buyer must pass a **Stripe Identity**
   check (gov-ID + selfie) before checkout; the platform bills the tenant per verification. Full design in
