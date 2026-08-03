@@ -241,27 +241,18 @@
               <p v-if="!sitesStore.sites.length" class="field-note">You don't have a Site yet — create your first one to hold this page.</p>
               <label class="offer-field">
                 <span>Site name</span>
-                <input v-model.trim="newSiteName" type="text" placeholder="My Shop" />
+                <input :value="newSiteName" type="text" placeholder="My Shop"
+                       @input="applyTitleCaseInput((value) => { newSiteName = value; }, $event)" />
               </label>
-              <label class="offer-field">
-                <span>Store address</span>
-                <div class="subdomain-input">
-                  <input
-                    v-model.trim="newSiteSubdomain"
-                    type="text"
-                    placeholder="my-shop"
-                    autocapitalize="off"
-                    autocorrect="off"
-                    spellcheck="false"
-                    @input="onNewSiteSubdomainInput"
-                  />
-                  <span class="subdomain-suffix">.{{ sitesStore.hostingDomain || "jbay.uk" }}</span>
-                </div>
-                <small v-if="siteCheck.state.checking" class="field-note">Checking…</small>
-                <small v-else-if="siteCheck.state.checked" :class="siteCheck.state.available ? 'subdomain-ok' : 'subdomain-bad'">
-                  {{ siteCheck.state.available ? "Available" : (siteCheck.state.reason || "That address is taken.") }}
-                </small>
-              </label>
+              <StoreAddressField
+                v-model="newSiteSubdomain"
+                v-model:available="siteAvailable"
+                v-model:normalized="siteNormalized"
+                :name="newSiteName"
+                :hosting-domain="sitesStore.hostingDomain || 'jbay.uk'"
+                label="Store address"
+                placeholder="my-shop"
+              />
               <button type="button" class="secondary-action" :disabled="!canCreateInlineSite" @click="createInlineSite">
                 {{ creatingSite ? "Creating…" : "Create Site" }}
               </button>
@@ -1396,7 +1387,7 @@ import PurchaseFlowDiagram from "./PurchaseFlowDiagram.vue";
 import { useProfileStore } from "../stores/profile";
 import { useSitesStore } from "../stores/sites";
 import { useCollectionsStore } from "../stores/collections";
-import { useSubdomainCheck } from "../composables/useSubdomainCheck";
+import StoreAddressField from "./StoreAddressField.vue";
 import { resolvePageDeps, copyCatalogToEnv, pageForTarget } from "../composables/environmentCopy";
 import { idColorStyle } from "../utils/iconColor";
 import { uploadImage } from "../api/uploads";
@@ -1421,20 +1412,10 @@ const siteStepError = ref("");
 const siteCreateOpen = ref(false);
 const newSiteName = ref("");
 const newSiteSubdomain = ref("");
-const siteCheck = useSubdomainCheck();
 const creatingSite = ref(false);
-// Auto-fill the store address from the Site name as the tenant types, until they edit the address themselves.
-const newSiteSubdomainEdited = ref(false);
-watch(newSiteName, (name) => {
-  if (newSiteSubdomainEdited.value) return;
-  const slug = slugify(name);
-  newSiteSubdomain.value = slug;
-  siteCheck.check(slug);
-});
-function onNewSiteSubdomainInput() {
-  newSiteSubdomainEdited.value = newSiteSubdomain.value.trim() !== "";
-  siteCheck.check(newSiteSubdomain.value);
-}
+// Store-address availability + canonical value are owned by the StoreAddressField component and surfaced here.
+const siteAvailable = ref(false);
+const siteNormalized = ref("");
 
 const selectedSite = computed(() => sitesStore.sites.find((s) => s.site_id === selectedSiteId.value) || null);
 const selectedSiteHomepageLabel = computed(() => {
@@ -1442,7 +1423,7 @@ const selectedSiteHomepageLabel = computed(() => {
   return home ? home.label || home.page_id : "";
 });
 const canLeaveSiteStep = computed(() => !!selectedSiteId.value);
-const canCreateInlineSite = computed(() => !!newSiteSubdomain.value && siteCheck.state.available && !creatingSite.value);
+const canCreateInlineSite = computed(() => !!newSiteSubdomain.value && siteAvailable.value && !creatingSite.value);
 profileStore.ensureLoaded();
 const products = ref([]);
 const services = ref([]);
@@ -2178,8 +2159,8 @@ function resetWizard() {
   siteCreateOpen.value = false;
   newSiteName.value = "";
   newSiteSubdomain.value = "";
-  newSiteSubdomainEdited.value = false;
-  siteCheck.clear();
+  siteAvailable.value = false;
+  siteNormalized.value = "";
 }
 
 // Load on first search-box focus so filtering works without clicking Load Pages first (mirrors Products).
@@ -2281,12 +2262,8 @@ async function openWizard() {
 }
 
 function seedInlineSiteFields() {
-  const name = profileStore.business?.name || "";
-  if (!newSiteName.value) newSiteName.value = name;
-  if (!newSiteSubdomain.value && name) {
-    newSiteSubdomain.value = slugify(name);
-    if (newSiteSubdomain.value) siteCheck.check(newSiteSubdomain.value);
-  }
+  // Seed the Site name from the business profile; StoreAddressField derives + checks the address from it.
+  if (!newSiteName.value) newSiteName.value = profileStore.business?.name || "";
 }
 
 function selectExistingSite(siteId) {
@@ -2306,7 +2283,7 @@ async function createInlineSite() {
   creatingSite.value = true;
   try {
     const business = { ...(profileStore.business || {}), name: newSiteName.value || profileStore.business?.name };
-    const site = await sitesStore.createDefault([], business, siteCheck.state.normalized || newSiteSubdomain.value);
+    const site = await sitesStore.createDefault([], business, siteNormalized.value || newSiteSubdomain.value);
     selectedSiteId.value = site.site_id;
     siteCreateOpen.value = false;
   } catch (err) {

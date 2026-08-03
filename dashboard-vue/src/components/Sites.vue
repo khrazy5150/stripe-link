@@ -27,29 +27,19 @@
         </p>
         <label class="offer-field">
           <span>Site name</span>
-          <input v-model.trim="createName" type="text" placeholder="My Shop" autocapitalize="words" />
+          <input :value="createName" type="text" placeholder="My Shop" autocapitalize="words"
+                 @input="applyTitleCaseInput((value) => { createName = value; }, $event)" />
         </label>
-        <label class="offer-field">
-          <span>Choose your store address</span>
-          <div class="subdomain-input">
-            <input
-              v-model.trim="createSubdomain"
-              type="text"
-              placeholder="axel-mart"
-              autocapitalize="off"
-              autocorrect="off"
-              spellcheck="false"
-              @input="onCreateSubdomainInput"
-            />
-            <span class="subdomain-suffix">.{{ hostingDomainHint }}</span>
-          </div>
-          <small :class="availabilityClass(createCheck.state)">{{ availabilityText(createCheck.state) }}</small>
-          <div v-if="createCheck.state.suggestions.length" class="subdomain-suggestions">
-            <span class="field-note">Try:</span>
-            <button v-for="s in createCheck.state.suggestions" :key="s" type="button" class="subdomain-chip" @click="pickCreate(s)">{{ s }}</button>
-          </div>
-          <small class="field-note">This address is permanent and unique to you — pick it deliberately. You can add a custom domain later.</small>
-        </label>
+        <StoreAddressField
+          v-model="createSubdomain"
+          v-model:available="createAvailable"
+          v-model:normalized="createNormalized"
+          :name="createName"
+          :hosting-domain="hostingDomainHint"
+          label="Choose your store address"
+          placeholder="axel-mart"
+        />
+        <small class="field-note store-address-note">This address is permanent and unique to you — pick it deliberately. You can add a custom domain later.</small>
         <div class="offer-field">
           <span>Pages to include</span>
           <ul v-if="pages.length" class="site-page-list">
@@ -109,7 +99,8 @@
           <div v-if="formError" class="keys-status-banner error">{{ formError }}</div>
           <label class="offer-field">
             <span>Site Name</span>
-            <input v-model.trim="form.name" type="text" placeholder="My Store" />
+            <input :value="form.name" type="text" placeholder="My Store"
+                   @input="applyTitleCaseInput((value) => { form.name = value; }, $event)" />
           </label>
           <label class="offer-field">
             <span>Free address (subdomain)</span>
@@ -429,12 +420,14 @@
 <script setup>
 import { computed, onMounted, reactive, ref, watch } from "vue";
 import { apiRequest, getStripeMode, getOtherEnvironment } from "../api/client";
-import { useSitesStore, organizationFromBusiness, suggestSubdomain } from "../stores/sites";
+import { useSitesStore, organizationFromBusiness } from "../stores/sites";
 import { useProfileStore } from "../stores/profile";
 import { useSubdomainCheck } from "../composables/useSubdomainCheck";
 import { resolvePageDoc, resolvePageDeps, copyCatalogToEnv, pageForTarget, siteForTarget } from "../composables/environmentCopy";
 import { normalizeE164, phoneError } from "../utils/phone";
 import ConfirmDialog from "./shared/ConfirmDialog.vue";
+import StoreAddressField from "./StoreAddressField.vue";
+import { applyTitleCaseInput } from "../utils/titleCase.js";
 
 const store = useSitesStore();
 const profileStore = useProfileStore();
@@ -448,30 +441,10 @@ const creating = ref(false);
 const createName = ref("");
 const createSubdomain = ref("");
 const createPageIds = ref([]);
-const createCheck = useSubdomainCheck();
 const editCheck = useSubdomainCheck();
-// Once the tenant edits the store address themselves, stop auto-filling it from the Site name (they've taken over).
-const subdomainEdited = ref(false);
-
-// Client-side slug preview mirroring the backend normalize_subdomain (lowercase, non-alphanumeric -> single dash,
-// trimmed). The backend re-normalizes on check/save, so this only needs to be close enough to suggest.
-function slugify(value) {
-  return String(value || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/-{2,}/g, "-").replace(/^-+|-+$/g, "").slice(0, 63);
-}
-
-// As the tenant types the Site name, suggest a store address (until they edit it themselves) and check availability.
-watch(createName, (name) => {
-  if (subdomainEdited.value) return;
-  const slug = slugify(name);
-  createSubdomain.value = slug;
-  createCheck.check(slug);
-});
-
-function onCreateSubdomainInput() {
-  // Typing here takes control of the field; clearing it hands auto-fill back to the Site name.
-  subdomainEdited.value = createSubdomain.value.trim() !== "";
-  createCheck.check(createSubdomain.value);
-}
+// Store-address availability + canonical value are owned by the StoreAddressField component and surfaced here.
+const createAvailable = ref(false);
+const createNormalized = ref("");
 
 const removeBusy = ref("");
 const removeError = ref("");
@@ -794,7 +767,7 @@ async function disconnectDomain() {
 }
 
 const orgPhoneError = computed(() => phoneError(form.org.telephone));
-const canCreate = computed(() => !store.saving && createCheck.state.available);
+const canCreate = computed(() => !store.saving && createAvailable.value);
 const canSaveEdit = computed(() => !store.saving && editCheck.state.available && !orgPhoneError.value);
 
 async function loadPages() {
@@ -808,12 +781,6 @@ async function loadPages() {
 
 async function reload() {
   await Promise.all([store.load(), loadPages()]);
-}
-
-function pickCreate(value) {
-  subdomainEdited.value = true;  // choosing a suggestion is a deliberate pick
-  createSubdomain.value = value;
-  createCheck.check(value);
 }
 
 function pickEdit(value) {
@@ -832,8 +799,8 @@ function startCreate() {
   formError.value = "";
   createName.value = "";
   createSubdomain.value = "";
-  subdomainEdited.value = false;
-  createCheck.clear();
+  createAvailable.value = false;
+  createNormalized.value = "";
   createPageIds.value = defaultCreateSelection();
 }
 
@@ -848,7 +815,7 @@ async function createSite() {
   const selectedPages = pages.value.filter((p) => chosen.has(p.page_id) && !claimedBy(p.page_id));
   const business = { ...profileStore.business, name: createName.value || profileStore.business.name };
   try {
-    await store.createDefault(selectedPages, business, createCheck.state.normalized || createSubdomain.value);
+    await store.createDefault(selectedPages, business, createNormalized.value || createSubdomain.value);
     creating.value = false;
   } catch (error) {
     formError.value = error.message || "Failed to create site.";
@@ -1023,10 +990,8 @@ onMounted(async () => {
   await reload();
   if (store.loaded && !store.sites.length) {
     createPageIds.value = defaultCreateSelection();
-    if (!createSubdomain.value) {
-      createSubdomain.value = suggestSubdomain(profileStore.business);
-      if (createSubdomain.value) createCheck.check(createSubdomain.value);
-    }
+    // Seed the Site name from the business profile; StoreAddressField derives + checks the address from it.
+    if (!createName.value && profileStore.business?.name) createName.value = profileStore.business.name;
   }
 });
 </script>
