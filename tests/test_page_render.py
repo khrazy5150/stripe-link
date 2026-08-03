@@ -1153,3 +1153,48 @@ class BnplMessagingRenderTests(unittest.TestCase):
         self.assertIn("window.slConversion.cartTotal", html)
         self.assertIn("new MutationObserver", html)
         self.assertIn("[data-minicart]", html)
+
+
+class BrandHeaderCompositionTests(unittest.TestCase):
+    """One brand mark, not two (plans/SITE_COLLECTIONS.md 'Chrome / header composition'). When a page composes
+    its own centered ● Brand mark, that mark is the single brand + the crawlable store-root link, and the store
+    header drops its brand; a page with no such mark keeps the header brand (non-regressive)."""
+
+    def _with_state(self, **state):
+        from stripe_link.runtime.html import _RENDER_STATE, _RENDER_ORG
+        self._saved_state = dict(_RENDER_STATE)
+        self._saved_org = dict(_RENDER_ORG)
+        _RENDER_STATE.update(state)
+        _RENDER_ORG.clear()
+        _RENDER_ORG["name"] = "Poliaxis Nutrition"
+
+    def tearDown(self):
+        from stripe_link.runtime.html import _RENDER_STATE, _RENDER_ORG
+        if hasattr(self, "_saved_state"):
+            _RENDER_STATE.clear(); _RENDER_STATE.update(self._saved_state)
+            _RENDER_ORG.clear(); _RENDER_ORG.update(self._saved_org)
+
+    def test_served_brand_mark_carries_store_root_link_and_header_drops_its_brand(self):
+        from stripe_link.runtime.html import render_brand_label, render_site_header
+        self._with_state(home_url="https://poliaxis-nutrition.jbay.uk/", page_type="landing")
+        mark = render_brand_label({"enabled": True, "label": "Poliaxis Nutrition"}, {})
+        self.assertIn('<a class="sl-brand-label-link" href="/">', mark)   # the one crawlable store-root link
+        self.assertNotIn('class="sl-brand"', render_site_header(has_brand_mark=True))  # not repeated in the header
+
+    def test_header_keeps_brand_when_page_has_no_brand_mark(self):
+        from stripe_link.runtime.html import render_site_header
+        self._with_state(home_url="https://poliaxis-nutrition.jbay.uk/", page_type="landing")
+        self.assertIn('<a class="sl-brand" href="/">Poliaxis Nutrition</a>', render_site_header(has_brand_mark=False))
+
+    def test_brand_mark_is_plain_text_on_post_checkout_page(self):
+        from stripe_link.runtime.html import render_brand_label
+        self._with_state(home_url="https://poliaxis-nutrition.jbay.uk/", page_type="thank_you")
+        mark = render_brand_label({"enabled": True, "label": "Poliaxis Nutrition"}, {})
+        self.assertNotIn("sl-brand-label-link", mark)  # no store-root link that could leak the buyer back out
+        self.assertIn("Poliaxis Nutrition", mark)
+
+    def test_brand_mark_plain_text_without_a_home_host(self):
+        from stripe_link.runtime.html import render_brand_label
+        self._with_state(home_url="", page_type="landing")
+        mark = render_brand_label({"enabled": True, "label": "Poliaxis Nutrition"}, {})
+        self.assertNotIn("sl-brand-label-link", mark)  # nothing to link to off a served host

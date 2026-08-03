@@ -428,6 +428,8 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     "    .sl-brand-label{display:flex;align-items:center;justify-content:center;gap:0.8rem;color:var(--sl-brand-label-text);padding-top:1.6rem}",
     "    .sl-brand-label::before{content:'';width:1rem;height:1rem;border-radius:999px;background:var(--sl-brand-dot);box-shadow:0 0 0.8rem var(--sl-brand-dot)}",
     "    .sl-brand-label p{font-family:var(--sl-font-accent);font-size:1.3rem;font-weight:700;letter-spacing:0.08em;line-height:1.2;text-transform:uppercase;color:var(--sl-brand-label-text)}",
+    "    .sl-brand-label a{color:inherit;text-decoration:none}",
+    "    .sl-brand-label a:hover{text-decoration:underline;text-underline-offset:0.25em}",
     "    .sl-seo-title{text-align:center}",
     "    .sl-seo-title p{font-family:var(--sl-font-heading);font-size:clamp(2.4rem,5vw,3.2rem);line-height:1.2;color:var(--sl-headline)}",
     "    .sl-mark-text{color:var(--sl-highlight-text)}",
@@ -698,13 +700,15 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     "    .sl-breadcrumb a:hover{text-decoration:underline}",
     "    .sl-breadcrumb [aria-current=\"page\"]{color:var(--sl-content-text)}",
     "    .sl-siteheader{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:1rem;padding:0.8rem 0 0}",
+    "    .sl-siteheader:not(:has(.sl-brand)){justify-content:center}",
     "    .sl-brand{font-family:var(--sl-font-heading);font-weight:800;font-size:1.8rem;color:var(--sl-text);text-decoration:none}",
     "    .sl-nav ul{list-style:none;display:flex;flex-wrap:wrap;gap:1.4rem;padding:0;margin:0}",
     "    .sl-nav a{color:var(--sl-text);text-decoration:none;font-size:1.4rem}",
     "    .sl-nav a:hover{text-decoration:underline}",
-    # SEO turned off (Site-level opt-out): the storefront header drops its breadcrumb and its brand renders as the
-    # plain no-SEO brand cue — centered, uppercase, dotted (matching .sl-brand-label). The nav stays (it's
-    # navigation, not SEO). Purely visual; the noindex robots directive is applied server-side at publish.
+    # SEO turned off (Site-level opt-out): the storefront header drops its breadcrumb and its brand (when it still
+    # carries one — i.e. a page with no ● Brand mark of its own) renders as the plain no-SEO brand cue — centered,
+    # uppercase, dotted (matching .sl-brand-label). The nav stays (it's navigation, not SEO). Purely visual; the
+    # noindex robots directive is applied server-side at publish.
     "    body[data-seo=\"off\"] .sl-breadcrumb{display:none}",
     "    body[data-seo=\"off\"] .sl-siteheader{justify-content:center;padding-top:1.6rem}",
     "    body[data-seo=\"off\"] .sl-brand{display:inline-flex;align-items:center;gap:0.8rem;font-family:var(--sl-font-accent);font-size:1.3rem;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:var(--sl-brand-label-text)}",
@@ -1447,7 +1451,12 @@ def _render_page_body(
     # Storefront chrome from the Site's menus (SEO-13): a header (brand → store root + primary nav) and a
     # footer nav. Both empty off a verified custom domain / on post-checkout pages. A crawlable breadcrumb
     # trail (SEO-11) sits above the page content, matching the BreadcrumbList JSON-LD.
-    site_header = render_site_header()
+    # If the page composes its own ● Brand mark, the store header drops its brand so there's only one (SITE_COLLECTIONS.md
+    # "Chrome / header composition"). A disabled brand_label section still counts as absent.
+    has_brand_mark = any(
+        s.get("type") == "brand_label" and s.get("enabled") is not False for s in body_sections
+    )
+    site_header = render_site_header(has_brand_mark=has_brand_mark)
     footer_nav = render_footer_nav()
     breadcrumb = render_breadcrumb(breadcrumb_trail(offer, products_by_id))
     body = "\n".join(
@@ -1834,9 +1843,15 @@ def render_brand_label(section: dict[str, Any], page: dict[str, Any]) -> str:
         return ""
     label = render_headline_markup(section.get("label") or (page.get("seo") or {}).get("title") or page.get("name") or "")
     # heading_role: none in the element catalog — a brand label is not a heading (matches the preview's span).
+    # This centered ● Brand mark is the page's single brand header (the old top-left store-header brand is retired).
+    # On a served, browseable page it doubles as the crawlable store-root link (SEO-13); on a post-checkout page it
+    # stays plain text so it can't leak the buyer back out.
+    home = _RENDER_STATE.get("home_url") or ""
+    linkable = bool(home) and _RENDER_STATE.get("page_type") not in NONINDEXABLE_PAGE_TYPES
+    inner = f'<a class="sl-brand-label-link" href="/">{label}</a>' if linkable else label
     return "\n".join([
         f"    <section class=\"sl-brand-label\" data-section-id=\"{escape(str(section.get('id', 'brand-label')))}\" data-section-type=\"brand_label\">",
-        f"      <p>{label}</p>",
+        f"      <p>{inner}</p>",
         "    </section>",
     ])
 
@@ -2766,15 +2781,17 @@ def render_nav_list(items: list[dict[str, str]], *, css_class: str, aria_label: 
     return f'<nav class="{css_class}" aria-label="{escape(aria_label)}"><ul>{links}</ul></nav>'
 
 
-def render_site_header() -> str:
+def render_site_header(*, has_brand_mark: bool = False) -> str:
     """The storefront header: the Organization name linking to the store root (an internal link to the root on
-    every page, SEO-13) plus the primary menu. Rendered only when the Site's menus resolved (verified custom
-    domain). "" when there's no home host or nothing to show."""
+    every page, SEO-13) plus the primary menu. When the page renders its own centered ● Brand mark
+    (render_brand_label), the header drops the brand to avoid two competing brand marks and carries the menu
+    alone — the brand mark takes over the store-root link. Rendered only when there's a home host; "" on a
+    post-checkout page (a Home link would leak the buyer out) or when there's nothing to show."""
     home = _RENDER_STATE.get("home_url") or ""
     if not home or _RENDER_STATE.get("page_type") in NONINDEXABLE_PAGE_TYPES:
-        return ""  # no home host, or a post-checkout page where a Home link would leak the buyer out
+        return ""
     primary = render_nav_list(_RENDER_NAV.get("primary") or [], css_class="sl-nav", aria_label="Primary")
-    brand = str(_RENDER_ORG.get("name") or "").strip()
+    brand = "" if has_brand_mark else str(_RENDER_ORG.get("name") or "").strip()
     if not primary and not brand:
         return ""
     brand_html = f'<a class="sl-brand" href="/">{escape(brand)}</a>' if brand else ""

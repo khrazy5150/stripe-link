@@ -154,6 +154,11 @@ Incremental, back-compat at each step (the platform-hostname tests are the tripw
    tenant's default Site with a route derived from their old slug.
 5. **Chrome per page.** Add `page.chrome` (default from Site); render the unified centered-brand header +
    optional breadcrumb; retire the plain top-left header.
+   - **Partially shipped 2026-08-03 (double-header dedup):** when a page composes its own centered `● Brand` mark
+     (`brand_label`), that mark is now the single brand *and* carries the crawlable store-root link (SEO-13), and
+     the store header drops its brand (nav-only). A page with no brand mark still keeps the header brand
+     (non-regressive). Still to do here: `page.chrome` opt-down to bare, and ordering the breadcrumb *below* the
+     brand mark. See `render_brand_label` / `render_site_header` in `src/stripe_link/runtime/html.py`.
 
 ## Builder UX shifts
 

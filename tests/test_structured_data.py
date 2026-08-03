@@ -345,6 +345,7 @@ class SiteNavigationTests(unittest.TestCase):
         return m.group(0) if m else ""
 
     def test_header_has_brand_store_root_link_and_primary_menu(self):
+        # This page composes no ● Brand mark of its own, so the store header still carries the brand (SEO-13).
         header = self._region(self._render(), r'<header class="sl-siteheader">.*?</header>')
         self.assertIn('<a class="sl-brand" href="/">Bean Co</a>', header)  # host-relative store root (Slice 2)
         self.assertIn('<a href="/about">About Us</a>', header)
