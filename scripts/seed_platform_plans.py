@@ -22,6 +22,7 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
+from stripe_link.domain.entitlements import CAPABILITIES  # noqa: E402
 from stripe_link.repositories.platform_plans import PlatformPlansRepository  # noqa: E402
 from stripe_link.stripe_client import stripe_request  # noqa: E402
 
@@ -54,10 +55,18 @@ def main():
     # only by a valid promo link (scripts/seed_platform_promo.py). See plans/SAAS_BILLING_PAYWALL.md.
     parser.add_argument("--trial-days", type=int, default=0)
     parser.add_argument("--fee-tier", default="basic")
+    parser.add_argument("--entitlement", action="append", default=[], metavar="CAP",
+                        help=f"Repeatable. A gateable feature this plan includes. One of: {', '.join(CAPABILITIES)}.")
+    parser.add_argument("--all-entitlements", action="store_true", help="Include every gateable feature on this plan.")
     parser.add_argument("--exempt-email", action="append", default=[], help="Repeatable. Comped tenant emails.")
     parser.add_argument("--exempt-tenant-id", action="append", default=[], help="Repeatable. Comped tenant ids.")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
+
+    caps = list(CAPABILITIES) if args.all_entitlements else args.entitlement
+    unknown = [c for c in caps if c not in CAPABILITIES]
+    if unknown:
+        parser.error(f"Unknown entitlement(s): {unknown}. Valid: {', '.join(CAPABILITIES)}")
 
     price_id, product_id = args.price_id, args.product_id
     if not price_id:
@@ -83,6 +92,7 @@ def main():
         "sort_order": 1,
         "fee_tier": args.fee_tier,
         "features": [],
+        "entitlements": {cap: True for cap in caps},
     }
     config = {
         "default_plan_key": args.plan_key,
