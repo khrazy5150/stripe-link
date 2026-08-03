@@ -20,7 +20,7 @@ from handlers.profile import handler as profile_handler
 from handlers.registration import handler as registration_handler
 from handlers.services import handler as services_handler
 from handlers.shipping import handler as shipping_handler
-from handlers.stripe_connect import callback_handler, start_handler, status_handler
+from handlers.stripe_connect import callback_handler, connected_account_summary, start_handler, status_handler
 from handlers.stripe_keys import handler as stripe_keys_handler
 from handlers.stripe_webhook import handler as stripe_webhook_handler
 from stripe_link.domain.fees import default_billing_config
@@ -1281,6 +1281,56 @@ class AccountHandlerTests(unittest.TestCase):
         self.assertEqual(document["connect_oauth_mode"], "live")
         self.assertEqual(document["connect_account_id"], "acct_live_demo")
         self.assertIsNone(repository.get("tenant_demo", "test"))
+
+    def test_connected_account_summary_extracts_identity(self):
+        # #2: surface WHAT the tenant connected so they can catch a wrong reusable-account pick.
+        account = {
+            "business_profile": {"name": "Acme Co", "support_email": "biz@acme.com"},
+            "email": "owner@acme.com",
+            "country": "US",
+            "external_accounts": {"data": [{"last4": "3242"}]},
+        }
+        with patch("handlers.stripe_connect.get_platform_secret_key", return_value="sk_test_x"), \
+                patch("handlers.stripe_connect.stripe_request", return_value=account):
+            summary = connected_account_summary("acct_123", "test")
+        self.assertEqual(summary["connect_business_name"], "Acme Co")
+        self.assertEqual(summary["connect_email"], "owner@acme.com")
+        self.assertEqual(summary["connect_bank_last4"], "3242")
+        self.assertEqual(summary["connect_country"], "US")
+
+    def test_connected_account_summary_is_best_effort(self):
+        # No platform key, or a Stripe error, yields an empty summary — never blocks the connection.
+        with patch("handlers.stripe_connect.get_platform_secret_key", return_value=None):
+            self.assertEqual(connected_account_summary("acct_123", "test"), {})
+        with patch("handlers.stripe_connect.get_platform_secret_key", return_value="sk_test_x"), \
+                patch("handlers.stripe_connect.stripe_request", side_effect=Exception("boom")):
+            self.assertEqual(connected_account_summary("acct_123", "test"), {})
+
+    def test_stripe_connect_callback_stores_account_identity(self):
+        class FakeStripeRepository:
+            def __init__(self):
+                self.documents = {}
+
+            def get(self, tenant_id, mode="test"):
+                return self.documents.get((tenant_id, mode))
+
+            def put(self, document):
+                self.documents[(document["tenant_id"], document["mode"])] = dict(document)
+                return document
+
+        repository = FakeStripeRepository()
+        with patch("handlers.stripe_connect._exchange_oauth_code", return_value={
+            "stripe_user_id": "acct_test_demo", "scope": "read_write", "livemode": False,
+        }), patch("handlers.stripe_connect.connected_account_summary", return_value={
+            "connect_business_name": "Acme Co", "connect_email": "owner@acme.com", "connect_bank_last4": "3242",
+        }):
+            callback_handler({
+                "queryStringParameters": {"code": "ac_demo", "state": "tenant_demo:test:both:existing:test"},
+            }, None, repository=repository)
+
+        document = repository.get("tenant_demo", "test")
+        self.assertEqual(document["connect_business_name"], "Acme Co")
+        self.assertEqual(document["connect_bank_last4"], "3242")
 
     def test_stripe_connect_status_disconnects_connected_account(self):
         class FakeStripeRepository:

@@ -167,7 +167,16 @@
           <div v-else-if="wizardStep === 2" class="onboarding-step">
             <p>Junior Bay has refreshed the Stripe connection status for {{ environmentLabel.toLowerCase() }}.</p>
             <div v-if="isConnected" class="keys-status-banner success">
-              Stripe account connected{{ connectAccountId ? `: ${connectAccountId}` : "" }}.
+              <strong>Payouts will go to this account:</strong>
+              <div class="connect-account-summary">
+                <span v-if="connectBusinessName" class="connect-account-name">{{ connectBusinessName }}</span>
+                <span v-if="connectEmail">{{ connectEmail }}</span>
+                <span v-if="connectBankLast4">Bank ····{{ connectBankLast4 }}</span>
+                <span class="connect-account-id">{{ connectAccountId }}</span>
+              </div>
+              <button type="button" class="link-action" :disabled="stripeKeys.connectLoading" @click="disconnectAndRestart">
+                Not your account? Disconnect
+              </button>
             </div>
             <div v-else class="keys-status-banner warning">
               Waiting for Stripe authorization to complete.
@@ -234,6 +243,11 @@ const connectAccountId = computed(() => (
 ));
 const isConnected = computed(() => connectStatus.value === "connected" || Boolean(connectAccountId.value));
 const isRestricted = computed(() => connectStatus.value === "restricted");
+// Human identity of the connected account, so a tenant can confirm they picked the right one (and catch a
+// mistaken reuse of a different account) before finalizing.
+const connectBusinessName = computed(() => String(connectDocument.value.connect_business_name || "").trim());
+const connectEmail = computed(() => String(connectDocument.value.connect_email || "").trim());
+const connectBankLast4 = computed(() => String(connectDocument.value.connect_bank_last4 || "").trim());
 const otherEnvironment = computed(() => (props.activeEnvironment === "live" ? "test" : "live"));
 const otherEnvironmentLabel = computed(() => (otherEnvironment.value === "live" ? "Live" : "Test"));
 
@@ -274,6 +288,15 @@ function closeWizard() {
 async function refreshConnectStatus(mode = props.activeEnvironment) {
   stripeKeys.verifyMode = mode === "live" ? "live" : "test";
   await stripeKeys.loadConnectCard();
+}
+
+// Wrong account picked (e.g. an unintended reusable account)? Disconnect and return to step 1 to re-authorize.
+async function disconnectAndRestart() {
+  wizardError.value = "";
+  stripeKeys.verifyMode = props.activeEnvironment === "live" ? "live" : "test";
+  await stripeKeys.disconnectConnect();
+  if (stripeKeys.connectError) { wizardError.value = stripeKeys.connectError; return; }
+  wizardStep.value = 1;
 }
 
 async function beginStripeOAuth() {
@@ -333,3 +356,38 @@ watch(
   },
 );
 </script>
+
+<style scoped>
+.connect-account-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  margin: 0.4rem 0 0.5rem;
+  font-size: 0.9rem;
+}
+.connect-account-summary .connect-account-name {
+  font-weight: 600;
+}
+.connect-account-summary .connect-account-id {
+  font-size: 0.75rem;
+  opacity: 0.6;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.link-action {
+  background: none;
+  border: none;
+  padding: 0;
+  color: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+  font-size: 0.85rem;
+  opacity: 0.85;
+}
+.link-action:hover:not(:disabled) {
+  opacity: 1;
+}
+.link-action:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+</style>
