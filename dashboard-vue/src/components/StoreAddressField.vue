@@ -93,12 +93,15 @@ const availabilityText = computed(() => {
   if (!s.input) return "";
   if (s.checking) return "Checking availability…";
   if (!s.checked) return "";
-  return s.available ? `✓ ${s.hostname} is available` : `✗ ${s.reason}`;
+  if (s.available) return `✓ ${s.hostname} is available`;
+  if (s.ownedByYou) return `↪ ${s.reason}`;  // your own Site's address in the other mode — not a conflict
+  return `✗ ${s.reason}`;
 });
 const availabilityClass = computed(() => {
   const s = check.state;
   if (s.checking || !s.checked || !s.input) return "field-note";
-  return s.available ? "subdomain-ok" : "subdomain-bad";
+  if (s.available) return "subdomain-ok";
+  return s.ownedByYou ? "subdomain-hint" : "subdomain-bad";
 });
 </script>
 
@@ -110,4 +113,5 @@ const availabilityClass = computed(() => {
 .subdomain-chip { border: 1px solid var(--line-strong); background: var(--bg); color: var(--text); border-radius: 999px; padding: 0.15rem 0.7rem; font-family: ui-monospace, monospace; font-size: 0.85em; cursor: pointer; }
 .subdomain-ok { color: #22c55e; font-weight: 600; }
 .subdomain-bad { color: #f87171; font-weight: 600; }
+.subdomain-hint { color: #38bdf8; font-weight: 600; }
 </style>

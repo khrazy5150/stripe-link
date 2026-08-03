@@ -357,16 +357,24 @@ def check_subdomain(event, registry):
         "available": False,
         "reason": "",
         "suggestions": [],
+        "owned_by_you": False,
     }
     rule = subdomain_rule_error(label)
     if rule:
         result["reason"] = rule
         result["suggestions"] = suggest_subdomains(raw, registry) if label else []
         return json_response(result)
-    owner = registry.owner_of(label)
-    if owner and owner != site_id:
-        result["reason"] = "That name is already taken."
-        result["suggestions"] = suggest_subdomains(label, registry)
+    reservation = registry.reservation_of(label)
+    if reservation and reservation.get("site_id") != site_id:
+        tenant_id = tenant_id_from_event(event)
+        # If the reservation belongs to this tenant, the label isn't "taken" — it's their own Site's address
+        # in the other mode. Point them at Copy to Live instead of a dead-end + alternative names.
+        if tenant_id and reservation.get("tenant_id") == tenant_id:
+            result["owned_by_you"] = True
+            result["reason"] = "You already use this address on another Site of yours — use Copy to Live to bring it here."
+        else:
+            result["reason"] = "That name is already taken."
+            result["suggestions"] = suggest_subdomains(label, registry)
         return json_response(result)
     result["available"] = True
     return json_response(result)

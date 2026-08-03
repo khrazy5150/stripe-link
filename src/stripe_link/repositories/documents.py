@@ -275,6 +275,17 @@ class SubdomainRegistry:
         item = self.table.get_item(Key=self._key(label)).get("Item")
         return item.get("site_id") if item else None
 
+    def reservation_of(self, label: str) -> dict[str, str] | None:
+        """The full reservation (site_id + tenant_id) owning `label`, or None. Lets the availability check tell a
+        tenant's OWN address (in their other mode) apart from a genuinely foreign one."""
+        label = str(label or "").strip().lower()
+        if not label:
+            return None
+        item = self.table.get_item(Key=self._key(label)).get("Item")
+        if not item:
+            return None
+        return {"site_id": item.get("site_id") or "", "tenant_id": item.get("tenant_id") or ""}
+
     def reserve(self, label: str, *, site_id: str, tenant_id: str, now: int) -> bool:
         """Claim `label` for `site_id`. Return True on success, False if another Site already owns it.
         Idempotent: re-reserving a label this same Site already owns succeeds."""

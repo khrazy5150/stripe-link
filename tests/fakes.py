@@ -60,17 +60,22 @@ class FakeSubdomainRegistry:
     """In-memory stand-in for the global subdomain reservation (first-claim-wins, idempotent per site)."""
 
     def __init__(self):
-        self.reservations = {}  # label -> site_id
+        self.reservations = {}  # label -> {site_id, tenant_id}
 
     def owner_of(self, label):
-        return self.reservations.get(str(label or "").strip().lower())
+        item = self.reservations.get(str(label or "").strip().lower())
+        return item["site_id"] if item else None
+
+    def reservation_of(self, label):
+        item = self.reservations.get(str(label or "").strip().lower())
+        return dict(item) if item else None
 
     def reserve(self, label, *, site_id, tenant_id, now):
         label = str(label or "").strip().lower()
         owner = self.reservations.get(label)
-        if owner and owner != site_id:
+        if owner and owner["site_id"] != site_id:
             return False
-        self.reservations[label] = site_id
+        self.reservations[label] = {"site_id": site_id, "tenant_id": tenant_id}
         return True
 
 

@@ -10,6 +10,7 @@ export function useSubdomainCheck() {
     normalized: "",
     hostname: "",
     available: false,
+    ownedByYou: false,
     reason: "",
     suggestions: [],
     checking: false,
@@ -21,7 +22,7 @@ export function useSubdomainCheck() {
   function clear() {
     if (timer) clearTimeout(timer);
     state.input = state.normalized = state.hostname = state.reason = "";
-    state.available = state.checking = state.checked = false;
+    state.available = state.ownedByYou = state.checking = state.checked = false;
     state.suggestions = [];
   }
 
@@ -30,7 +31,7 @@ export function useSubdomainCheck() {
     if (timer) clearTimeout(timer);
     const trimmed = String(name || "").trim();
     if (!trimmed) {
-      state.checking = state.checked = state.available = false;
+      state.checking = state.checked = state.available = state.ownedByYou = false;
       state.reason = "";
       state.suggestions = [];
       state.normalized = state.hostname = "";
@@ -45,12 +46,13 @@ export function useSubdomainCheck() {
         state.normalized = res.normalized || "";
         state.hostname = res.hostname || "";
         state.available = !!res.available;
+        state.ownedByYou = !!res.owned_by_you;
         state.reason = res.reason || "";
         state.suggestions = Array.isArray(res.suggestions) ? res.suggestions : [];
         state.checked = true;
       } catch (error) {
         if (mine !== seq) return;
-        state.available = false;
+        state.available = state.ownedByYou = false;
         state.reason = error.message || "Could not check availability.";
         state.suggestions = [];
         state.checked = true;

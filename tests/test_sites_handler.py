@@ -31,10 +31,12 @@ class SitesHandlerTests(unittest.TestCase):
         return handler({"httpMethod": "POST", "body": json.dumps(site)}, None,
                        repository=self.repo, registry=self.registry)
 
-    def _check(self, name, site_id=None):
+    def _check(self, name, site_id=None, tenant_id=None):
         params = {"name": name}
         if site_id:
             params["site_id"] = site_id
+        if tenant_id:
+            params["tenant_id"] = tenant_id
         resp = handler({"httpMethod": "GET", "resource": "/sites/subdomain",
                         "queryStringParameters": params}, None, repository=self.repo, registry=self.registry)
         return json.loads(resp["body"])
@@ -149,6 +151,25 @@ class SitesHandlerTests(unittest.TestCase):
         self._post(base_site(site_id="site_AAAA1", hosting={"type": "platform", "platform_subdomain": "axel-mart"}))
         mine = self._check("axel-mart", site_id="site_AAAA1")
         self.assertTrue(mine["available"])
+
+    def test_check_subdomain_same_tenant_other_site_offers_copy_to_live(self):
+        # Tenant's Test Site owns the label; from a fresh Live create-form (no site_id) the SAME tenant should be
+        # told it's theirs + pointed at Copy to Live, not given a dead-end "taken" with alternative names.
+        self._post(base_site(site_id="site_AAAA1", tenant_id="tenant_demo",
+                             hosting={"type": "platform", "platform_subdomain": "axel-mart"}))
+        result = self._check("axel-mart", tenant_id="tenant_demo")
+        self.assertFalse(result["available"])
+        self.assertTrue(result["owned_by_you"])
+        self.assertIn("Copy to Live", result["reason"])
+        self.assertEqual(result["suggestions"], [])
+
+    def test_check_subdomain_other_tenant_still_taken(self):
+        self._post(base_site(site_id="site_AAAA1", tenant_id="tenant_a",
+                             hosting={"type": "platform", "platform_subdomain": "axel-mart"}))
+        result = self._check("axel-mart", tenant_id="tenant_b")
+        self.assertFalse(result["available"])
+        self.assertFalse(result["owned_by_you"])
+        self.assertTrue(result["suggestions"])
 
     def test_check_subdomain_too_short(self):
         result = self._check("ab")
