@@ -82,6 +82,25 @@ Deferred, non-blocking follow-ups. Each item notes what, why it was deferred, an
 
 ## Dashboard / UX
 
+### Auto-attach a page to its Site on Publish (publish → attach in one action)
+- **What:** the Publish button should run two steps in sequence — publish the page, then attach it to a Site —
+  so a tenant never has to publish and *then* separately remember to attach (a common source of "why isn't my
+  page live?" frustration). Behavior by Site count:
+  - **Exactly one Site:** auto-attach silently after publish. No prompt.
+  - **More than one Site:** publish first, then prompt "Which Site should serve this page?" (a small picker) and
+    attach to the chosen one. Publishing must NOT block on the choice — the page is already published; attachment
+    is the follow-up.
+  - **Zero Sites:** open question — either publish-only (current behavior, page has no public home yet) or offer to
+    create a Site inline. Recommend publish-only for v1 (the platform-hostname/free-Site flow already nudges Site
+    creation elsewhere); revisit if it confuses tenants.
+- **Where to build:** `dashboard-vue/src/components/LandingPages.vue` publish action (~line 1205, `publish-action`).
+  Reuse the existing pieces — no new backend: `sitesStore.sites` / `hasSites` for the count, and the existing
+  `sitesStore.attachPage(siteId, { pageId, slug, pageType, category, label })` (backend `attach_page`,
+  `src/handlers/sites.py:268`). A page belongs to at most one Site, so re-attaching an already-attached page is a
+  no-op/steal-guarded (`_assert_pages_unassigned`) — the flow should treat "already attached to a Site" as done and
+  skip the prompt.
+- **Why deferred:** enhancement, not a blocker — attach already works from the Sites screen. Requested 2026-08-03.
+
 ### Consolidate the side menu into collapsible groups
 - The side menu has grown cluttered and lost its original simplicity. Look into grouping items into collapsible
   sections. Deferred to AFTER BNPL ships (plans/BNPL_PAYMENT_METHODS.md) — the right grouping will be clearer then.
