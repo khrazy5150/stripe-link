@@ -554,6 +554,9 @@ Resources:
       Handler: handlers.leads.handler
       Description: Lead capture — public ingest + tenant-scoped read/manage.
       Policies:
+        # Entitlement gate reads the tenant's denormalized entitlements to gate this feature on the plan.
+        - DynamoDBReadPolicy:
+            TableName: !Ref TenantProfilesTable
         - DynamoDBCrudPolicy:
             TableName: !Ref LeadsTable
         - DynamoDBCrudPolicy:
@@ -674,6 +677,9 @@ Resources:
       Handler: handlers.reviews.handler
       Description: First-party reviews — tenant-scoped CRUD + moderation.
       Policies:
+        # Entitlement gate reads the tenant's denormalized entitlements to gate this feature on the plan.
+        - DynamoDBReadPolicy:
+            TableName: !Ref TenantProfilesTable
         - DynamoDBCrudPolicy:
             TableName: !Ref ReviewsTable
       Events:
@@ -734,6 +740,9 @@ Resources:
       Handler: handlers.collections.handler
       Description: Collections — ordered, curated groups of a Site's pages (tenant-scoped CRUD).
       Policies:
+        # Entitlement gate reads the tenant's denormalized entitlements to gate this feature on the plan.
+        - DynamoDBReadPolicy:
+            TableName: !Ref TenantProfilesTable
         - DynamoDBCrudPolicy:
             TableName: !Ref CollectionsTable
       Events:
@@ -1026,6 +1035,9 @@ Resources:
       Handler: handlers.sites.handler
       Description: JSON-first Sites API (the public aggregate root — plans/SITE_OBJECT.md).
       Policies:
+        # Entitlement gate reads the tenant's denormalized entitlements to gate this feature on the plan.
+        - DynamoDBReadPolicy:
+            TableName: !Ref TenantProfilesTable
         - DynamoDBCrudPolicy:
             TableName: !Ref SitesTable
         # Read pages for editor/nav resolution; write to re-put (re-publish) the Site's pages when a custom
@@ -1188,6 +1200,9 @@ Resources:
       Handler: handlers.pages.handler
       Description: JSON-first pages API.
       Policies:
+        # Entitlement gate reads the tenant's denormalized entitlements to gate this feature on the plan.
+        - DynamoDBReadPolicy:
+            TableName: !Ref TenantProfilesTable
         - DynamoDBCrudPolicy:
             TableName: !Ref PagesTable
       Events:
@@ -1402,6 +1417,9 @@ Resources:
       Handler: handlers.payment_methods.handler
       Description: Per-tenant BNPL/installment payment-method toggles (Klarna etc.) — requests the Stripe capability on the tenant's connected Standard account and caches the status on the stripe_keys doc (plans/BNPL_PAYMENT_METHODS.md).
       Policies:
+        # Entitlement gate reads the tenant's denormalized entitlements to gate this feature on the plan.
+        - DynamoDBReadPolicy:
+            TableName: !Ref TenantProfilesTable
         # Read + WRITE the stripe_keys doc (persist the toggle + cached capability status), per mode.
         - DynamoDBCrudPolicy:
             TableName: !Ref StripeKeysTable
@@ -1924,6 +1942,9 @@ Resources:
       Handler: handlers.custom_domains.handler
       Description: Tenant custom domain CRUD -- creates/verifies/deletes Cloudflare for SaaS custom hostnames and stores domain records on TenantConfig.
       Policies:
+        # Entitlement gate reads the tenant's denormalized entitlements to gate this feature on the plan.
+        - DynamoDBReadPolicy:
+            TableName: !Ref TenantProfilesTable
         - DynamoDBCrudPolicy:
             TableName: !Ref PlatformConfigTable
         - DynamoDBCrudPolicy:
@@ -2126,6 +2147,9 @@ Resources:
       Handler: handlers.experiments.handler
       Description: Tenant A/B testing CRUD and lifecycle -- create experiments, edit variants/weights, start/pause/complete, and read per-variant results. Also writes the experiment's short-URL route.
       Policies:
+        # Entitlement gate reads the tenant's denormalized entitlements to gate this feature on the plan.
+        - DynamoDBReadPolicy:
+            TableName: !Ref TenantProfilesTable
         - DynamoDBCrudPolicy:
             TableName: !Ref ExperimentsTable
         - DynamoDBCrudPolicy:

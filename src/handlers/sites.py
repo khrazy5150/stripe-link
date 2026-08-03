@@ -30,6 +30,7 @@ from stripe_link.domain.custom_domains import (
 )
 from stripe_link.domain.documents import DocumentValidationError, validate_site
 from stripe_link.domain.funnels import is_reserved_slug
+from stripe_link.entitlement_gate import require_capability
 from stripe_link.repositories.documents import (
     RepositoryError,
     custom_domains_index_repository,
@@ -133,7 +134,7 @@ def _ensure_platform_hostname(document: dict) -> None:
     hosting.pop("platform_subdomain", None)
 
 
-def handler(event, context, repository=None, registry=None):
+def handler(event, context, repository=None, registry=None, tenant_repo=None):
     mode = resolve_stripe_mode(event)
     repository = repository or sites_repository(mode=mode)
     method = (event or {}).get("httpMethod", "").upper()
@@ -166,6 +167,9 @@ def handler(event, context, repository=None, registry=None):
         if method == "DELETE" and resource.endswith("/domain"):
             return disconnect_domain(event, repository, site_id)
     if method == "POST":
+        gate = require_capability(event, "sites", tenant_repo)
+        if gate is not None:
+            return gate
         return create_site(event, repository, registry, mode=mode)
     if method == "GET":
         if site_id:

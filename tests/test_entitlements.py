@@ -12,7 +12,8 @@ from stripe_link.domain.entitlements import (
     plan_entitlements,
     tenant_entitlement_set,
 )
-from handlers import services
+from stripe_link.entitlement_gate import require_capability
+from handlers import pages, services
 
 
 class FakeTenantRepo:
@@ -65,15 +66,30 @@ class ServicesBookingGateTests(unittest.TestCase):
 
     def test_require_capability_fails_open_on_missing_profile(self):
         # No profile row -> fail open (do not block an un-backfilled tenant).
-        gate = services._require_capability(
+        gate = require_capability(
             {"body": json.dumps({"tenant_id": "t1"})}, "booking", FakeTenantRepo([]))
         self.assertIsNone(gate)
 
     def test_require_capability_allows_exempt(self):
-        gate = services._require_capability(
+        gate = require_capability(
             {"body": json.dumps({"tenant_id": "t1"})}, "booking",
             FakeTenantRepo([{"tenant_id": "t1", "billing_exempt": True}]))
         self.assertIsNone(gate)
+
+    def test_require_capability_blocks_unentitled(self):
+        gate = require_capability(
+            {"body": json.dumps({"tenant_id": "t1"})}, "booking",
+            FakeTenantRepo([{"tenant_id": "t1", "entitlements": ["landing_pages"]}]))
+        self.assertEqual(gate["statusCode"], 403)
+
+    def test_pages_create_gated_on_landing_pages(self):
+        # A second handler proves the wiring beyond services: no landing_pages entitlement -> 403 on page create.
+        resp = pages.handler(
+            {"httpMethod": "POST", "path": "/pages", "body": json.dumps({"tenant_id": "t1", "page": {}})},
+            None, repository=object(),
+            tenant_repo=FakeTenantRepo([{"tenant_id": "t1", "entitlements": ["booking"]}]))
+        self.assertEqual(resp["statusCode"], 403)
+        self.assertEqual(json.loads(resp["body"])["error"], "plan_upgrade_required")
 
 
 if __name__ == "__main__":

@@ -23,6 +23,7 @@ from stripe_link.common import (
 )
 from stripe_link.domain.documents import DocumentValidationError, validate_lead_submission
 from stripe_link.domain.opportunities import STAGE_LANDING, stage_opportunities
+from stripe_link.entitlement_gate import require_capability
 from stripe_link.domain.leads import (
     LeadValidationError,
     build_consent,
@@ -51,6 +52,7 @@ def handler(
     products_repo=None,
     notifications_repo=None,
     now_fn: Callable[[], int] = lambda: int(time.time()),
+    tenant_repo=None,
 ):
     method = (event or {}).get("httpMethod", "").upper()
     if method == "OPTIONS":
@@ -67,6 +69,12 @@ def handler(
             notifications_repo=notifications_repo,
             now=now_fn(),
         )
+    # Tenant-side lead access requires the `lead_capture` plan capability. The public POST ingest above stays open
+    # (buyers never see a plan gate); an unentitled tenant simply can't view/manage leads.
+    if method in {"GET", "PATCH"}:
+        gate = require_capability(event, "lead_capture", tenant_repo)
+        if gate is not None:
+            return gate
     if method == "GET":
         lead_id = path_params(event).get("lead_id")
         if lead_id:

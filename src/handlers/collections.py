@@ -8,6 +8,7 @@ import time
 
 from stripe_link.common import error_response, json_response, parse_json_body, path_params, query_params, resolve_stripe_mode, tenant_id_from_event
 from stripe_link.domain.documents import DocumentValidationError, validate_collection
+from stripe_link.entitlement_gate import require_capability
 from stripe_link.repositories.documents import RepositoryError, collections_repository
 
 _ID_ALPHABET = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
@@ -18,13 +19,16 @@ def _new_collection_id() -> str:
     return "coll_" + "".join(secrets.choice(_ID_ALPHABET) for _ in range(14))
 
 
-def handler(event, context, repository=None):
+def handler(event, context, repository=None, tenant_repo=None):
     repository = repository or collections_repository(mode=resolve_stripe_mode(event))
     method = (event or {}).get("httpMethod", "").upper()
     collection_id = path_params(event).get("collection_id")
     if method == "OPTIONS":
         return json_response({})
     if method == "POST":
+        gate = require_capability(event, "collections", tenant_repo)
+        if gate is not None:
+            return gate
         return upsert_collection(event, repository)
     if method == "GET":
         if collection_id:

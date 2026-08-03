@@ -6,6 +6,7 @@ import time
 
 from stripe_link.common import error_response, json_response, parse_json_body, path_params, query_params, tenant_id_from_event
 from stripe_link.domain.documents import DocumentValidationError, REVIEW_STATUSES, validate_review
+from stripe_link.entitlement_gate import require_capability
 from stripe_link.repositories.documents import RepositoryError, reviews_repository
 
 _ID_ALPHABET = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
@@ -16,7 +17,7 @@ def _new_review_id() -> str:
     return "review_" + "".join(secrets.choice(_ID_ALPHABET) for _ in range(14))
 
 
-def handler(event, context, repository=None):
+def handler(event, context, repository=None, tenant_repo=None):
     repository = repository or reviews_repository()
     method = (event or {}).get("httpMethod", "").upper()
     resource = (event or {}).get("resource") or ""
@@ -24,6 +25,9 @@ def handler(event, context, repository=None):
     if method == "OPTIONS":
         return json_response({})
     if method == "POST":
+        gate = require_capability(event, "reviews", tenant_repo)
+        if gate is not None:
+            return gate
         return create_review(event, repository)
     if method == "PATCH" and review_id and resource.endswith("/status"):
         return moderate_review(event, repository, review_id)

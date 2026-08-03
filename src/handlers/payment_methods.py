@@ -17,6 +17,7 @@ from stripe_link.domain.bnpl import (
     BNPL_METHODS, apply_capability_statuses, capability_name, country_eligible, is_valid_method,
 )
 from stripe_link.domain.documents import DocumentValidationError, validate_stripe_keys_document
+from stripe_link.entitlement_gate import require_capability
 from stripe_link.repositories.documents import stripe_keys_repository
 from stripe_link.stripe_client import StripeApiError, stripe_request
 from stripe_link.stripe_platform_secrets import get_platform_secret_key
@@ -24,7 +25,7 @@ from stripe_link.stripe_platform_secrets import get_platform_secret_key
 SCHEMA_VERSION = "2026-07-31"
 
 
-def handler(event, context, *, stripe_repo=None, stripe_caller=None, platform_key_loader=None):
+def handler(event, context, *, stripe_repo=None, stripe_caller=None, platform_key_loader=None, tenant_repo=None):
     method = (event or {}).get("httpMethod", "GET").upper()
     if method == "OPTIONS":
         return json_response({})
@@ -45,6 +46,9 @@ def handler(event, context, *, stripe_repo=None, stripe_caller=None, platform_ke
         method_key = str(body.get("method") or "").strip()
         if not is_valid_method(method_key):
             return error_response("Unknown payment method.", code="invalid_method")
+        gate = require_capability(event, "bnpl", tenant_repo)
+        if gate is not None:
+            return gate
         return _toggle(tenant_id, _mode(body), method_key, bool(body.get("enabled")),
                        stripe_repo, stripe_caller, platform_key_loader,
                        return_url=str(body.get("return_url") or "").strip())
