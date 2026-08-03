@@ -8,7 +8,7 @@ from stripe_link.common import (
     parse_json_body,
     tenant_id_from_event,
 )
-from stripe_link.domain.entitlements import CAPABILITIES, plan_entitlements, tenant_entitlement_set
+from stripe_link.domain.entitlements import CAPABILITIES, tenant_entitlement_set
 from stripe_link.domain.platform_billing import (
     active_platform_plans,
     default_platform_plan_key,
@@ -195,14 +195,12 @@ def _subscribe(event, tenant_repository, plans_repository, mode, opener, secret_
     except StripeApiError as exc:
         return error_response(f"Stripe error: {exc}", status_code=502, code="stripe_error")
 
-    # Optimistically record the plan choice + customer + entitlements; the webhook confirms subscription id + status.
-    _safe_put(tenant_repository, {
-        **tenant,
-        "stripe_customer_id": customer_id,
-        "billing_plan_key": plan_key,
-        "billing_price_id": price_id,
-        "entitlements": plan_entitlements(plan),
-    })
+    # Record ONLY the Stripe customer id, so a retry reuses it instead of creating duplicate customers. Do NOT mark
+    # the tenant as subscribed here: plan / price / entitlements / status are set by the platform-billing webhook
+    # when the subscription is actually CREATED (i.e. paid/trialing). This way an abandoned Checkout never leaves a
+    # tenant looking subscribed without paying.
+    if customer_id and customer_id != str(tenant.get("stripe_customer_id") or ""):
+        _safe_put(tenant_repository, {**tenant, "stripe_customer_id": customer_id})
     return json_response({"platform_billing": {"checkout_url": session.get("url"), "session_id": session.get("id")}})
 
 

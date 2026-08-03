@@ -102,12 +102,13 @@ class SubscribeHandlerTests(unittest.TestCase):
         self.assertEqual(resp["statusCode"], 200)
         body = json.loads(resp["body"])["platform_billing"]
         self.assertEqual(body["checkout_url"], "https://checkout.stripe.com/c/cs_1")
-        # Customer created + checkout session created; customer + plan recorded optimistically.
+        # Customer created + checkout session created; ONLY the customer id is recorded (not subscribed yet).
         self.assertTrue(any("/customers" in u for _, u in opener.calls))
         self.assertTrue(any("/checkout/sessions" in u for _, u in opener.calls))
         self.assertEqual(tenants.docs["t1"]["stripe_customer_id"], "cus_test_1")
-        self.assertEqual(tenants.docs["t1"]["billing_price_id"], "price_basic")
-        self.assertEqual(tenants.docs["t1"]["entitlements"], ["landing_pages"])  # denormalized from the plan
+        # Not marked as subscribed here — the webhook does that on subscription.created (abandoned Checkout stays trial).
+        self.assertNotIn("billing_plan_key", tenants.docs["t1"])
+        self.assertNotIn("entitlements", tenants.docs["t1"])
 
     def test_subscribe_exempt_tenant_skips_stripe(self):
         opener = FakeOpener()
