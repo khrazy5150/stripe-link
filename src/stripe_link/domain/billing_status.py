@@ -1,10 +1,16 @@
+import os
 import time
 from typing import Any
 
 # The free platform trial every signup gets (a self-managed clock, NOT a Stripe trial — no subscription exists
-# during it). Trial-first onboarding: full access until it expires, then a hard subscribe wall. See
-# plans/SAAS_BILLING_PAYWALL.md and [[project_saas_billing_paywall]].
-TRIAL_PERIOD_DAYS = 14
+# during it). Trial-first onboarding: full access until it expires, then a hard subscribe wall. Length is env-driven
+# (TRIAL_PERIOD_DAYS, default 14) so dev can use a short trial for testing while prod stays 14. Read at import;
+# changing it needs a redeploy and only affects NEW signups (existing trials keep their stamped trial_ends_at).
+# See plans/SAAS_BILLING_PAYWALL.md and [[project_saas_billing_paywall]].
+try:
+    TRIAL_PERIOD_DAYS = max(0, int(os.environ.get("TRIAL_PERIOD_DAYS", "14") or "14"))
+except ValueError:
+    TRIAL_PERIOD_DAYS = 14
 TRIAL_PERIOD_SECONDS = TRIAL_PERIOD_DAYS * 86400
 
 # Blocked: past_due is the Stripe DUNNING/grace window (still allowed). trial_expired is an unsubscribed platform

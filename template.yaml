@@ -57,6 +57,10 @@ Parameters:
     Default: live
     AllowedValues: [test, live]
     Description: The platform's OWN Stripe mode for billing tenants their SaaS subscription (distinct from a tenant's storefront mode). Set 'test' on dev to exercise billing against Stripe test plans/prices; 'live' in production.
+  TrialPeriodDays:
+    Type: Number
+    Default: 14
+    Description: Length of the free platform trial a new tenant gets before the subscribe wall. Use a short value (e.g. 1) on dev to test the wall quickly; 14 in production. Only affects NEW signups.
   ApiCustomDomainName:
     Type: String
     Default: ""
@@ -155,6 +159,7 @@ Globals:
         CARTS_TABLE: !Ref CartsTable
         PLATFORM_PLANS_TABLE: !Ref PlatformPlansTable
         PLATFORM_BILLING_MODE: !Ref PlatformBillingMode
+        TRIAL_PERIOD_DAYS: !Ref TrialPeriodDays
         INVOICES_TABLE: !Ref InvoicesTable
         PRODUCTS_TABLE: !Ref ProductsTable
         OFFERS_TABLE: !Ref OffersTable
