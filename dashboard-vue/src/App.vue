@@ -61,8 +61,9 @@
           <span></span><span></span><span></span>
         </button>
         <div class="topbar-actions">
-          <span class="environment-pill">{{ environmentLabel }}</span>
+          <span v-if="hasTestSandbox" class="environment-pill">{{ environmentLabel }}</span>
           <button
+            v-if="hasTestSandbox"
             class="topbar-icon-button environment-toggle-button"
             type="button"
             :aria-label="`Switch to ${activeEnvironment === 'test' ? 'live' : 'test'} environment`"
@@ -262,6 +263,14 @@ function toggleGroup(key) {
 const userMenuRef = ref(null);
 const menuGroups = computed(() => menuGroupsForEnvironment(activeEnvironment.value));
 const environmentLabel = computed(() => activeEnvironment.value === "live" ? "Live" : "Test");
+// Live-first onboarding: the test/live toggle only appears once the tenant opts into a test sandbox. Until then
+// the dashboard is live-only and never strands anyone in a hidden test mode (plans/TODO.md onboarding streamline).
+const hasTestSandbox = computed(() => stripeKeys.hasTestSandbox);
+function coerceModeIfNoSandbox() {
+  if (activeEnvironment.value === "test" && !hasTestSandbox.value) {
+    switchEnvironment("live");
+  }
+}
 
 function activateMenuItem(item) {
   if (!item.enabled) return;
@@ -289,6 +298,10 @@ async function reloadActiveView() {
   // previous environment's data). Views keyed on activeEnvironment reload themselves via remount.
   const safe = (p) => Promise.resolve(p).catch(() => {});
   safe(notifications.load({ silent: true }));
+  // resetForCurrentTenant() above wiped modes.test/live; repopulate them (background) so the toggle-gating flag
+  // (hasTestSandbox) stays accurate on any view — otherwise switching mode from a non-Payments view would drop
+  // modes to empty and make the toggle disappear mid-use. On the Payments view the awaited load below covers it.
+  if (activeView.value !== "stripeKeys") safe(stripeKeys.load());
   if (activeView.value === "dashboard") await safe(dashboard.load());
   else if (activeView.value === "products") await safe(products.load());
   else if (activeView.value === "coupons") await safe(coupons.load({ status: "all" }));
@@ -390,6 +403,7 @@ onMounted(() => {
   loadAppConfigApiBase()
     .then(reloadActiveView)
     .then(() => stripeKeys.load())
+    .then(coerceModeIfNoSandbox)
     .then(maybeNudgeStripeSetup)
     .catch(() => {});
   // Keep the bell badge fresh while the dashboard is open.
@@ -412,6 +426,12 @@ watch(
     coupons.reset();
     products.reset();
     stripeKeys.resetForCurrentTenant();
+    // Repopulate Stripe modes for the new tenant so the toggle-gating flag (hasTestSandbox) is correct on the very
+    // first (Dashboard) view, then coerce a stale test selection to live for a tenant with no sandbox. This watch
+    // fires on login and on async auth resolution — often AFTER onMounted's load — and resetForCurrentTenant() just
+    // emptied modes, so without this reload the test/live toggle would stay hidden until the Payments screen is
+    // visited even for a tenant that has a sandbox.
+    stripeKeys.load().then(coerceModeIfNoSandbox).catch(() => {});
     activeView.value = "dashboard";
     userMenuOpen.value = false;
   },

@@ -52,13 +52,28 @@ def _parse_state(state):
     }
 
 
-def _tenant_owner_email(tenant_id, repository=None):
+def _stripe_user_prefill(tenant_id, repository=None):
+    """Best-effort Stripe Connect OAuth prefill (stripe_user[...]) from the tenant profile so the tenant sees
+    their business name and contact already filled on Stripe's onboarding form — one fewer friction point in
+    live-first onboarding (plans/TODO.md). Every field is optional; a missing profile or field is just skipped."""
     if not tenant_id:
-        return ""
+        return {}
     repository = repository or tenant_profiles_repository()
     tenant = repository.get(tenant_id, tenant_id) or {}
     owner = tenant.get("owner") if isinstance(tenant.get("owner"), dict) else {}
-    return str(tenant.get("owner_email") or owner.get("email") or "").strip()
+    prefill = {}
+
+    def _set(key, value):
+        value = str(value or "").strip()
+        if value:
+            prefill[f"stripe_user[{key}]"] = value
+
+    _set("email", tenant.get("owner_email") or owner.get("email"))
+    _set("business_name", tenant.get("business_name"))
+    _set("first_name", owner.get("first_name"))
+    _set("last_name", owner.get("last_name"))
+    _set("phone_number", owner.get("phone_number"))
+    return prefill
 
 
 def _exchange_oauth_code(code, mode):
@@ -191,9 +206,7 @@ def start_handler(event, context, tenant_repository=None):
         "state": state,
     }
     try:
-        owner_email = _tenant_owner_email(tenant_id, tenant_repository)
-        if owner_email:
-            params["stripe_user[email]"] = owner_email
+        params.update(_stripe_user_prefill(tenant_id, tenant_repository))
     except RepositoryError:
         pass
     params = urlencode(params)
