@@ -6,12 +6,15 @@ import unittest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 from stripe_link.domain.entitlements import (
+    CAPABILITIES,
     EntitlementError,
     assert_entitled,
     is_entitled,
     plan_entitlements,
     tenant_entitlement_set,
 )
+
+CAPABILITIES_KEYS = set(CAPABILITIES)
 from stripe_link.entitlement_gate import require_capability
 from handlers import pages, services
 
@@ -32,19 +35,35 @@ class EntitlementModelTests(unittest.TestCase):
         self.assertEqual(plan_entitlements({}), [])
         self.assertEqual(plan_entitlements(None), [])
 
-    def test_tenant_entitlement_set(self):
-        self.assertEqual(tenant_entitlement_set({"entitlements": ["booking"]}), {"booking"})
-        self.assertEqual(tenant_entitlement_set({}), set())
-        # Exempt tenants get everything.
-        self.assertIn("booking", tenant_entitlement_set({"billing_exempt": True}))
-        self.assertIn("sites", tenant_entitlement_set({"billing_exempt": True}))
+    def test_subscribed_tenant_uses_its_entitlements_list(self):
+        sub = {"billing_status": "active", "stripe_subscription_id": "sub_1", "entitlements": ["booking"]}
+        self.assertEqual(tenant_entitlement_set(sub), {"booking"})
+
+    def test_platform_trial_gets_full_access(self):
+        # A fresh signup (trial, no subscription) sees ALL features until the trial expires.
+        self.assertEqual(tenant_entitlement_set({"billing_status": "trial"}), set(CAPABILITIES_KEYS))
+        self.assertEqual(tenant_entitlement_set({}), set(CAPABILITIES_KEYS))  # missing status defaults to trial
+
+    def test_expired_platform_trial_gets_nothing(self):
+        expired = {"billing_status": "trial", "trial_ends_at": 1000}
+        self.assertEqual(tenant_entitlement_set(expired, now=2000), set())
+        self.assertEqual(tenant_entitlement_set(expired, now=500), set(CAPABILITIES_KEYS))  # before expiry
+
+    def test_subscribed_trialing_uses_list_not_full_access(self):
+        # Stripe 'trialing' after subscribing: has a subscription id, so it's the plan's entitlements, not full.
+        trialing = {"billing_status": "trial", "stripe_subscription_id": "sub_1", "entitlements": ["landing_pages"]}
+        self.assertEqual(tenant_entitlement_set(trialing), {"landing_pages"})
+
+    def test_exempt_gets_everything(self):
+        self.assertEqual(tenant_entitlement_set({"billing_exempt": True}), set(CAPABILITIES_KEYS))
 
     def test_is_entitled_and_assert(self):
-        self.assertTrue(is_entitled({"entitlements": ["booking"]}, "booking"))
-        self.assertFalse(is_entitled({"entitlements": ["landing_pages"]}, "booking"))
-        self.assertTrue(is_entitled({}, "unknown_ungated"))  # ungated cap never blocks
+        sub = {"billing_status": "active", "stripe_subscription_id": "sub_1", "entitlements": ["landing_pages"]}
+        self.assertFalse(is_entitled(sub, "booking"))
+        self.assertTrue(is_entitled(sub, "landing_pages"))
+        self.assertTrue(is_entitled(sub, "unknown_ungated"))  # ungated cap never blocks
         with self.assertRaises(EntitlementError):
-            assert_entitled({"entitlements": []}, "booking")
+            assert_entitled(sub, "booking")
 
 
 class ServicesBookingGateTests(unittest.TestCase):
@@ -60,9 +79,17 @@ class ServicesBookingGateTests(unittest.TestCase):
         )
 
     def test_service_create_blocked_without_booking_capability(self):
-        resp = self._post_service(FakeTenantRepo([{"tenant_id": "t1", "billing_plan_key": "basic", "entitlements": ["landing_pages"]}]))
+        # A SUBSCRIBED tenant on a plan without booking (a live trial would have full access instead).
+        resp = self._post_service(FakeTenantRepo([{
+            "tenant_id": "t1", "billing_status": "active", "stripe_subscription_id": "sub_1",
+            "billing_plan_key": "basic", "entitlements": ["landing_pages"]}]))
         self.assertEqual(resp["statusCode"], 403)
         self.assertEqual(json.loads(resp["body"])["error"], "plan_upgrade_required")
+
+    def test_live_trial_tenant_can_create_service(self):
+        # Full access during the platform trial: booking is allowed even though basic wouldn't include it.
+        resp = self._post_service(FakeTenantRepo([{"tenant_id": "t1", "billing_status": "trial"}]))
+        self.assertNotEqual(resp["statusCode"], 403)
 
     def test_require_capability_fails_open_on_missing_profile(self):
         # No profile row -> fail open (do not block an un-backfilled tenant).
@@ -79,15 +106,17 @@ class ServicesBookingGateTests(unittest.TestCase):
     def test_require_capability_blocks_unentitled(self):
         gate = require_capability(
             {"body": json.dumps({"tenant_id": "t1"})}, "booking",
-            FakeTenantRepo([{"tenant_id": "t1", "entitlements": ["landing_pages"]}]))
+            FakeTenantRepo([{"tenant_id": "t1", "billing_status": "active",
+                             "stripe_subscription_id": "sub_1", "entitlements": ["landing_pages"]}]))
         self.assertEqual(gate["statusCode"], 403)
 
     def test_pages_create_gated_on_landing_pages(self):
-        # A second handler proves the wiring beyond services: no landing_pages entitlement -> 403 on page create.
+        # A second handler proves the wiring beyond services: a SUBSCRIBED tenant without landing_pages -> 403.
         resp = pages.handler(
             {"httpMethod": "POST", "path": "/pages", "body": json.dumps({"tenant_id": "t1", "page": {}})},
             None, repository=object(),
-            tenant_repo=FakeTenantRepo([{"tenant_id": "t1", "entitlements": ["booking"]}]))
+            tenant_repo=FakeTenantRepo([{"tenant_id": "t1", "billing_status": "active",
+                                         "stripe_subscription_id": "sub_1", "entitlements": ["booking"]}]))
         self.assertEqual(resp["statusCode"], 403)
         self.assertEqual(json.loads(resp["body"])["error"], "plan_upgrade_required")
 

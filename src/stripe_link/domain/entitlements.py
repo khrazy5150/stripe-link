@@ -1,5 +1,7 @@
 from typing import Any
 
+from stripe_link.domain.billing_status import is_trial_expired
+
 # Gateable PRODUCT features per plan. Core admin (dashboard, payments, products, offers, coupons, orders, refunds,
 # customers, notifications, profile, configuration) is always-on and NOT listed here. `view` is the dashboard menu
 # view key so the UI can DISABLE (not hide) an unentitled item with an upgrade hint. A plan enables a capability via
@@ -36,19 +38,26 @@ def plan_entitlements(plan: dict[str, Any] | None) -> list[str]:
     return sorted(cap for cap in CAPABILITIES if bool(entitlements.get(cap)))
 
 
-def tenant_entitlement_set(tenant: dict[str, Any] | None) -> set[str]:
-    """The capabilities a tenant currently has. Exempt (comped) tenants get everything; otherwise it's the
-    denormalized `entitlements` list on their profile (empty when unsubscribed / no plan)."""
+def tenant_entitlement_set(tenant: dict[str, Any] | None, now: int | None = None) -> set[str]:
+    """The capabilities a tenant currently has:
+      - exempt (comped) tenants get everything;
+      - a live PLATFORM trial (unsubscribed, not yet expired) gets FULL access (trial-first onboarding);
+      - an EXPIRED platform trial gets nothing (the hard wall);
+      - otherwise (subscribed / any other state) it's the denormalized `entitlements` list on the profile.
+    See plans/SAAS_BILLING_PAYWALL.md."""
     tenant = tenant or {}
     if tenant.get("billing_exempt"):
         return set(CAPABILITIES)
+    status = str(tenant.get("billing_status") or "trial")
+    if status == "trial" and not tenant.get("stripe_subscription_id"):
+        return set() if is_trial_expired(tenant, now) else set(CAPABILITIES)
     return {cap for cap in (tenant.get("entitlements") or []) if cap in CAPABILITIES}
 
 
-def is_entitled(tenant: dict[str, Any] | None, capability: str) -> bool:
+def is_entitled(tenant: dict[str, Any] | None, capability: str, now: int | None = None) -> bool:
     if capability not in CAPABILITIES:
         return True  # an unknown/ungated capability is never blocked
-    return capability in tenant_entitlement_set(tenant)
+    return capability in tenant_entitlement_set(tenant, now)
 
 
 def assert_entitled(tenant: dict[str, Any] | None, capability: str) -> None:

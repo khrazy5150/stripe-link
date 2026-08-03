@@ -44,7 +44,8 @@
         "primary_color": { "type": "string" }
       }
     },
-    "billing_status": { "type": "string", "enum": ["trial", "active", "past_due", "canceled", "suspended"], "default": "trial" },
+    "billing_status": { "type": "string", "enum": ["trial", "active", "past_due", "canceled", "suspended", "trial_expired"], "default": "trial" },
+    "trial_ends_at": { "type": "integer", "minimum": 0, "description": "Unix time the free platform trial ends (set at signup). While unsubscribed and before this, the tenant has full access; after, the hard subscribe wall." },
     "tier_id": { "type": "string", "default": "basic" },
     "billing_plan_key": { "type": "string", "description": "Which PlatformPlansTable plan the tenant is on (e.g. 'basic')." },
     "billing_price_id": { "type": "string", "description": "The Stripe Price currently on the tenant's subscription; stored per-tenant so a later catalog price change never silently re-prices them." },
