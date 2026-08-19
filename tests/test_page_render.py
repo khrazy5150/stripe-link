@@ -1198,3 +1198,48 @@ class BrandHeaderCompositionTests(unittest.TestCase):
         self._with_state(home_url="", page_type="landing")
         mark = render_brand_label({"enabled": True, "label": "Poliaxis Nutrition"}, {})
         self.assertNotIn("sl-brand-label-link", mark)  # nothing to link to off a served host
+
+
+class ListiclePlaceholderTests(unittest.TestCase):
+    """An image-less product still gets a hero slide (a "no image" placeholder) so the listicle carousel keeps one
+    slide PER product and the swipe->tier index sync can't skip it (plans/LANDING_CAROUSEL_FIXES.md). The
+    placeholder is a UI fallback only — never an SEO image signal."""
+
+    def _render_two_product_listicle(self, *, second_has_image):
+        product_a = load_fixture("product-creatine-gummies.json")
+        product_b = copy.deepcopy(product_a)
+        product_b["product_id"] = "prod_second"
+        product_b["name"] = "Second Product"
+        product_b["default_price_id"] = "price_1bottle_b"
+        product_b["images"] = product_a["images"] if second_has_image else []
+        for price in product_b["prices"]:
+            price["price_id"] = price["price_id"] + "_b"
+        offer = load_fixture("offer-creatine-standard.json")
+        offer["offer_type"] = None  # two distinct products -> listicle
+        offer["items"] = [offer["items"][0], {"product_id": "prod_second", "price_id": "price_1bottle_b", "quantity": 1}]
+        page = load_fixture("page-creatine-standard.json")
+        page["sections"] = [{"type": "hero_media"}, {"type": "offer_price_selector"}]  # ensure the hero carousel renders
+        return render_page(page, offer, {"prod_creatine_gummies": product_a, "prod_second": product_b},
+                           canonical_url="https://shop.example.com/p", robots="index,follow")
+
+    def test_image_less_product_still_gets_a_hero_slide(self):
+        html = self._render_two_product_listicle(second_has_image=False)
+        media = re.search(r'<section class="sl-hero-media[^"]*"[^>]*data-media-count="(\d+)"', html)
+        self.assertIsNotNone(media)
+        self.assertEqual(media.group(1), "2")  # one slide per product, incl. the image-less one (was 1 before the fix)
+        hero = re.search(r'<section class="sl-hero-media.*?</section>', html, re.S).group(0)
+        self.assertIn("data:image/svg+xml;base64", hero)  # the placeholder fills the otherwise-missing slide
+
+    def test_placeholder_is_never_an_seo_image(self):
+        html = self._render_two_product_listicle(second_has_image=False)
+        og = re.search(r'og:image" content="([^"]*)"', html)
+        self.assertTrue(og)
+        self.assertNotIn("data:image", og.group(1))  # og:image stays a real product photo
+        ld = re.findall(r'<script type="application/ld\+json">(.*?)</script>', html, re.S)
+        self.assertFalse(any("data:image" in block for block in ld))  # never in Product/Offer JSON-LD
+
+    def test_no_placeholder_when_every_product_has_an_image(self):
+        html = self._render_two_product_listicle(second_has_image=True)
+        media = re.search(r'data-media-count="(\d+)"', html)
+        self.assertEqual(media.group(1), "2")
+        self.assertNotIn("data:image/svg+xml;base64", html)  # nothing missing -> no placeholder anywhere

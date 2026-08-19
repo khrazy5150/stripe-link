@@ -383,21 +383,19 @@ third-party security assessment is required.
 
 ## Landing Pages / SEO
 
-### Default "no image" placeholder so image-less products stay swipeable in the carousel
-- **What:** the landing multi-product carousel syncs each product's tier block to the **hero image carousel** —
-  the buyer swipes the hero image to change the active product. A product with **no image** produces no hero
-  slide, so it can't be swiped to and its tier block never activates (the buyer can't reach it or add it). Give
-  every product a **default "no image" placeholder** so slide count == product count and swipe→tier sync always
-  holds.
-- **Where to fix:** hero slides come from `listicle_slides()` (`src/stripe_link/runtime/html.py`), rendered by
-  `render_hero_media`; the tier blocks are `render_listicle_carousel` (toggled on `conversion:itemChanged`).
-  Emit a fallback placeholder image when a product has none (a served default asset or an inline SVG data-URI),
-  and reuse it anywhere a product image is expected (tier cards, mini-cart rows). Keep the placeholder out of
-  Product JSON-LD / SEO image signals (it's a UI fallback, not a real product image).
-- **Alternative/complement:** add arrow/dot navigation on the carousel that drives the tier sync directly, so
-  swipeability doesn't depend on images at all. See `plans/LANDING_CAROUSEL_FIXES.md`.
-- **Why deferred:** works today for products *with* images (the common case); flagged during landing-carousel
-  live testing 2026-07-28.
+### Default "no image" placeholder so image-less products stay swipeable in the carousel — SHIPPED 2026-08-03
+- **What was broken:** the landing multi-product carousel syncs each product's tier block to the hero image
+  carousel by index, but `render_hero_media` FILTERED OUT slides with no image — so an image-less product got no
+  hero slide, the slide count no longer matched the product count, and the buyer couldn't swipe to it (its tier
+  block never activated).
+- **Fix (`src/stripe_link/runtime/html.py`):** a shared inline-SVG **`PLACEHOLDER_IMAGE`** data-URI (open box + "0"
+  badge, matching the author's illustration — swap the `_PLACEHOLDER_IMAGE_SVG` string to change the art). The
+  listicle hero now keeps **one slide per product** (`slide["image"] or PLACEHOLDER_IMAGE`), and price-option tier
+  cards fall back to it too (`price_image(...) or PLACEHOLDER_IMAGE`). Kept **out of SEO** — Product/Offer JSON-LD
+  and og:image read `product["images"]` directly, which is never mutated (regression test asserts this).
+- **Not applicable:** the mini-cart renders name/qty/amount only (no image), so there was nothing to place there.
+- **Still open (complement, not needed for the fix):** arrow/dot nav that drives the tier sync directly, so
+  swipeability doesn't depend on images at all (`plans/LANDING_CAROUSEL_FIXES.md`).
 
 ### Reorganize the Landing Page Builder and optimize its CSS
 - Reorganize the Landing Page Builder and optimize its CSS.

@@ -1,6 +1,7 @@
 from html import escape, unescape
 from dataclasses import dataclass
 from decimal import Decimal
+import base64
 import json
 import re
 from typing import Any
@@ -1922,6 +1923,32 @@ def render_hero_overlays(section: dict[str, Any], offer: dict[str, Any]) -> list
     return lines
 
 
+# Fallback "no image" illustration (an open box with a 0 badge) for a product/service that has none. Inlined as a
+# base64 SVG data-URI so it needs no hosted asset and stays crisp at any size. It's a UI fallback ONLY — never fed
+# into Product JSON-LD / og:image / SEO image signals (those read product["images"] directly, which we don't touch),
+# so a placeholder can never masquerade as a real product photo to a crawler. It exists mainly so a listicle
+# carousel keeps one hero slide PER product even when a product has no image, so the swipe→tier index sync holds
+# (plans/LANDING_CAROUSEL_FIXES.md). Drop a real .svg in and swap this string to change the artwork.
+_PLACEHOLDER_IMAGE_SVG = (
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400" role="img" aria-label="No image available">'
+    '<ellipse cx="200" cy="352" rx="132" ry="22" fill="#EEF3F6" stroke="#CBD9E6" stroke-width="3"/>'
+    '<g fill="none" stroke="#FDC42B" stroke-width="9" stroke-linecap="round">'
+    '<path d="M52 232 H104"/><path d="M40 268 a14 14 0 0 1 14 -14 H92"/>'
+    '<path d="M300 176 H344"/><path d="M312 214 a14 14 0 0 0 14 14 H352"/></g>'
+    '<polygon points="120,220 200,260 200,340 120,300" fill="#4FC07D"/>'
+    '<polygon points="200,260 280,220 280,300 200,340" fill="#2E8F79"/>'
+    '<polygon points="120,220 200,180 280,220 200,260" fill="#1C6F63"/>'
+    '<polygon points="120,220 200,180 168,120 88,160" fill="#5FCB8E"/>'
+    '<polygon points="200,180 280,220 300,150 214,110" fill="#17756A"/>'
+    '<polygon points="140,286 172,302 172,326 140,310" fill="#FFFFFF"/>'
+    '<circle cx="92" cy="178" r="38" fill="#EE6A2C"/>'
+    '<text x="92" y="194" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" '
+    'font-size="46" font-weight="700" fill="#FFFFFF">0</text>'
+    '</svg>'
+)
+PLACEHOLDER_IMAGE = "data:image/svg+xml;base64," + base64.b64encode(_PLACEHOLDER_IMAGE_SVG.encode("utf-8")).decode("ascii")
+
+
 def render_hero_media(
     section: dict[str, Any],
     offer: dict[str, Any],
@@ -1930,9 +1957,11 @@ def render_hero_media(
 ) -> str:
     product = first_offer_product(offer, products_by_id)
     if derived_offer_type(offer) == "listicle":
-        # A listicle's hero carousel IS the offer's items — one product image per slide, offer-driven so
-        # it can never fall out of sync with a manually-edited field (plans, ConversionContext direction).
-        images = [slide["image"] for slide in listicle_slides(offer, products_by_id, services_by_id or {}) if slide["image"]]
+        # A listicle's hero carousel IS the offer's items — one slide per item, offer-driven so it can never fall
+        # out of sync with a manually-edited field (plans, ConversionContext direction). Keep EVERY item's slide
+        # (a "no image" placeholder for image-less ones) so the slide count matches the product count and the
+        # swipe→tier index sync can't skip a product (plans/LANDING_CAROUSEL_FIXES.md).
+        images = [slide["image"] or PLACEHOLDER_IMAGE for slide in listicle_slides(offer, products_by_id, services_by_id or {})]
     else:
         images = hero_media_images(section, offer, product)
         if not images:
@@ -2287,7 +2316,7 @@ def _item_price_option_cards(
         currency = str(display_price.get("currency") or "usd")
         checkout_quantity = int(item.get("quantity") or 1)
         default_attr = "true" if price.get("price_id") == default_price_id else "false"
-        image_url = price_image(product, display_price, option)
+        image_url = price_image(product, display_price, option) or PLACEHOLDER_IMAGE  # "no image" fallback thumb
         description = escape(str(option.get("description") or price.get("description") or product.get("description") or ""))
         compare_at_unit_amount = context_compare if context_compare is not None else display_price.get("compare_at_unit_amount")
         savings_pct = option.get("display_discount_pct") or display_price.get("discount_pct")
