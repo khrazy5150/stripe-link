@@ -297,6 +297,27 @@ Deferred, non-blocking follow-ups. Each item notes what, why it was deferred, an
   `Compress: true`. Do **not** add a distribution-wide noindex ResponseHeadersPolicy — indexing stays per-page.
 - **Why deferred:** user's call to tune prod separately (2026-07-23). Dev is done.
 
+### Pretty preview host — `preview.juniorbay.com` for live-mode draft previews
+- **What:** a **live-mode draft** page's preview link is the raw preview-distribution domain
+  (`d1lcshydc31m77.cloudfront.net/preview/…`) instead of a tidy branded host. Give the preview distribution a
+  custom domain — **`preview.juniorbay.com`** (author's pick) — so live-mode draft previews look as clean as the
+  "Will publish to …" hint. (Test mode already routes previews through the nice `test.juniorbay.com` viewer;
+  this closes the live-mode gap.)
+- **Where:** infra + one config value, **no dashboard code change**:
+  1. Add `preview.juniorbay.com` as an **Alias** on `PreviewDistribution` (`template.yaml:3928`) with an
+     **ACM cert in us-east-1** (add `preview.juniorbay.com` to the existing `*.juniorbay.com`/juniorbay.com cert,
+     or issue one) — CloudFront requires the cert in us-east-1.
+  2. **DNS:** CNAME `preview.juniorbay.com` → the PreviewDistribution domain (same Cloudflare account that holds
+     the other juniorbay.com records).
+  3. Set **`pages_preview_base_url` = `https://preview.juniorbay.com`** in the **prod** app-config env block —
+     that's the value the dashboard's `getPreviewPagesBaseUrl()` returns (defaults to the raw CloudFront domain).
+     Optionally point `PREVIEW_DISTRIBUTION_DOMAIN` at it too so artifact URLs the backend emits match.
+- **Note:** the preview distribution serves per-tenant artifacts at `/preview/{mode}{tenant}/{page_id}/index.html`;
+  a custom domain only changes the host prefix, the path is unchanged. It's a **preview** host so it stays
+  `noindex` (a preview artifact, never a canonical page). Small, self-contained; requested 2026-08-03.
+- **Why deferred:** cosmetic — the preview link works today, it's just not branded in live mode. Author OK'd
+  leaving it for later.
+
 ### Create a separate prod Google OAuth client (calendar)
 - **What:** Before enabling calendar sync in **prod**, create a *separate* Google OAuth 2.0 client
   for production (option #2 — isolated credentials per environment), in the same Google Cloud project
