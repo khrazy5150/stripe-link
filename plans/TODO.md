@@ -82,24 +82,19 @@ Deferred, non-blocking follow-ups. Each item notes what, why it was deferred, an
 
 ## Dashboard / UX
 
-### Auto-attach a page to its Site on Publish (publish → attach in one action)
-- **What:** the Publish button should run two steps in sequence — publish the page, then attach it to a Site —
-  so a tenant never has to publish and *then* separately remember to attach (a common source of "why isn't my
-  page live?" frustration). Behavior by Site count:
-  - **Exactly one Site:** auto-attach silently after publish. No prompt.
-  - **More than one Site:** publish first, then prompt "Which Site should serve this page?" (a small picker) and
-    attach to the chosen one. Publishing must NOT block on the choice — the page is already published; attachment
-    is the follow-up.
-  - **Zero Sites:** open question — either publish-only (current behavior, page has no public home yet) or offer to
-    create a Site inline. Recommend publish-only for v1 (the platform-hostname/free-Site flow already nudges Site
-    creation elsewhere); revisit if it confuses tenants.
-- **Where to build:** `dashboard-vue/src/components/LandingPages.vue` publish action (~line 1205, `publish-action`).
-  Reuse the existing pieces — no new backend: `sitesStore.sites` / `hasSites` for the count, and the existing
-  `sitesStore.attachPage(siteId, { pageId, slug, pageType, category, label })` (backend `attach_page`,
-  `src/handlers/sites.py:268`). A page belongs to at most one Site, so re-attaching an already-attached page is a
-  no-op/steal-guarded (`_assert_pages_unassigned`) — the flow should treat "already attached to a Site" as done and
-  skip the prompt.
-- **Why deferred:** enhancement, not a blocker — attach already works from the Sites screen. Requested 2026-08-03.
+### Auto-attach a page to its Site on Publish (publish → attach in one action) — SHIPPED 2026-08-03
+- **What:** publishing a page now attaches it to a Site in the same action, so a page never lands published-but-
+  homeless (which stranded it on the bare artifact viewer URL instead of a real `{site}.jbay.uk/slug` store URL).
+  Behavior by Site count: **one Site** → attach silently; **several** → publish, then the existing "Attach to a
+  Site" modal opens to pick one (publish is not blocked); **zero** → publish only (nothing to attach to yet).
+  Already-attached pages are left as-is (no re-attach, no prompt).
+- **Where:** `dashboard-vue/src/components/LandingPages.vue` — `ensureSiteAttachmentOnPublish()`, called from both
+  publish paths (`publishPage` list menu + `saveBuilderPageWithStatus("published")` builder). Reuses the existing
+  `attachPageToSiteCore` / `pageAttachKind` / attach modal and `sitesStore.attachPage` (backend `attach_page`);
+  `attachPage._replace` refreshes the store so the list badge + nice URL update reactively. Frontend-only.
+- **Still open (draft URL display):** an *attached draft* still shows the preview-artifact URL, not the future
+  `{site}.jbay.uk/slug` (a draft isn't served there yet, so the nice URL would 404). Consider surfacing the
+  eventual store URL as a labelled "will publish to …" hint on attached drafts.
 
 ### Consolidate the side menu into collapsible groups
 - The side menu has grown cluttered and lost its original simplicity. Look into grouping items into collapsible

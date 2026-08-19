@@ -2660,6 +2660,34 @@ async function confirmAttachSite() {
   }
 }
 
+// After a page is published, make sure it has a home Site so it serves on a real store URL ({site}.jbay.uk/slug)
+// instead of the bare artifact viewer. One Site → attach silently; several → let the tenant pick (the existing
+// attach modal); none → leave it (nothing to attach to yet). Non-fatal: the page is already published, and attach
+// stays available from the menu. Returns the Site name it auto-attached to, else "" (attachPage._replace refreshes
+// the store, so the list badge + nice URL update reactively). See plans/TODO.md "Auto-attach a page … on Publish".
+async function ensureSiteAttachmentOnPublish(page) {
+  try {
+    if (!page || page.status !== "published") return "";
+    await sitesStore.ensureLoaded();
+    if (siteForPage(page)) return "";                 // already has a home
+    const sites = sitesStore.sites;
+    if (sites.length === 0) return "";                // no Site to attach to; serves via the artifact viewer for now
+    if (sites.length === 1) {
+      const kind = pageAttachKind(page);
+      const category = kind === "category"
+        ? (page.sections?.find((s) => s && s.type === "catalog_grid") || {}).category
+        : undefined;
+      await attachPageToSiteCore(page, sites[0].site_id, kind, category);
+      return sites[0].name || "your Site";
+    }
+    openAttachSite(page);                              // >1 Site: prompt which one (does not block the publish)
+    return "";
+  } catch (err) {
+    console.warn("Auto-attach on publish failed; attach it from the page menu instead.", err);
+    return "";
+  }
+}
+
 function requestDetachSite(page) {
   openMenuId.value = "";
   pendingDetachPage.value = page;
@@ -3274,6 +3302,10 @@ async function saveBuilderPageWithStatus(statusOverride = "") {
     builder.published_at = saved.published_at || builder.published_at;
     builder.short_code = saved.short_code || builder.short_code;  // populated the moment a page is published
     builderOriginalPage.value = { ...saved };
+    if (statusOverride === "published") {
+      const attachedTo = await ensureSiteAttachmentOnPublish(saved);
+      if (attachedTo) message.value = `${saved.name} was published and attached to ${attachedTo}.`;
+    }
   } catch (err) {
     error.value = err.message || "Failed to save landing page.";
   } finally {
@@ -3866,7 +3898,10 @@ async function publishPage(page) {
     const saved = body.page || publishedPage;
     pages.value = pages.value.map((item) => item.page_id === saved.page_id ? saved : item);
     await reflectCascadedMembers(saved);  // reflect the server-side draft-member cascade in the list badges
-    message.value = `${saved.name || "Landing page"} was published.`;
+    const attachedTo = await ensureSiteAttachmentOnPublish(saved);
+    message.value = attachedTo
+      ? `${saved.name || "Landing page"} was published and attached to ${attachedTo}.`
+      : `${saved.name || "Landing page"} was published.`;
   } catch (err) {
     error.value = err.message || "Failed to publish landing page.";
   } finally {
