@@ -92,9 +92,10 @@ Deferred, non-blocking follow-ups. Each item notes what, why it was deferred, an
   publish paths (`publishPage` list menu + `saveBuilderPageWithStatus("published")` builder). Reuses the existing
   `attachPageToSiteCore` / `pageAttachKind` / attach modal and `sitesStore.attachPage` (backend `attach_page`);
   `attachPage._replace` refreshes the store so the list badge + nice URL update reactively. Frontend-only.
-- **Still open (draft URL display):** an *attached draft* still shows the preview-artifact URL, not the future
-  `{site}.jbay.uk/slug` (a draft isn't served there yet, so the nice URL would 404). Consider surfacing the
-  eventual store URL as a labelled "will publish to …" hint on attached drafts.
+- **Draft URL hint — SHIPPED 2026-08-03:** an attached *draft* now shows a muted "Will publish to
+  {site}.jbay.uk/slug" line (`pendingSiteUrl()`), so the tenant sees its real store home. The URL row above keeps
+  the working preview link and Copy/Preview stay on the render (the store URL 404s until published), so the hint is
+  informational only — "" for published pages (live URL is already the main line) and for unattached drafts.
 
 ### Consolidate the side menu into collapsible groups
 - The side menu has grown cluttered and lost its original simplicity. Look into grouping items into collapsible

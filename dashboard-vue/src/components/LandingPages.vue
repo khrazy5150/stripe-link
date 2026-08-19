@@ -96,6 +96,13 @@
                 <button class="secondary-action compact" type="button" @click="previewPage(page)">Preview</button>
               </div>
 
+              <!-- An attached draft isn't served at its Site URL yet (that would 404), so the URL row above keeps the
+                   working preview link; this muted line shows where the page WILL live once published. -->
+              <p v-if="pendingSiteUrl(page)" class="landing-page-pending-url" :title="pendingSiteUrl(page)">
+                <span class="field-note">Will publish to</span>
+                <span>{{ pendingSiteUrl(page) }}</span>
+              </p>
+
               <div class="landing-page-meta">
                 <span>{{ itemCount(page) }} item(s)</span>
                 <span>{{ Number(page.analytics_summary?.views || 0) }} views</span>
@@ -2406,6 +2413,14 @@ function sitePublicUrl(page) {
     }
   }
   return "";
+}
+// The store URL a not-yet-published, Site-attached page WILL serve at once published — surfaced as a muted "will
+// publish to" hint so the tenant sees its real {site}.jbay.uk/slug home instead of only the preview-artifact URL.
+// "" for published pages (their live URL is already the main line) and for unattached drafts (no Site home yet).
+// Not made actionable (Copy/Preview stay on the working render) because this URL 404s until the page is published.
+function pendingSiteUrl(page) {
+  if (!page || page.status === "published") return "";
+  return sitePublicUrl(page);
 }
 // Slug shown on the metrics row, capped so a long slug can't blow out the card (full value on hover via title).
 function displaySlug(page) {
