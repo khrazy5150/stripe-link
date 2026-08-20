@@ -93,6 +93,10 @@ Parameters:
     Type: String
     Default: ""
     Description: Optional us-east-1 ACM certificate ARN covering PreviewCustomDomainName (the *.juniorbay.com wildcard cert covers preview.juniorbay.com).
+  PreviewCustomDomainHostedZoneName:
+    Type: String
+    Default: juniorbay.com.
+    Description: Route 53 hosted zone name used for the preview custom domain alias record.
   CognitoUserPoolId:
     Type: String
     Default: us-west-2_gBemPnEF8
@@ -4101,6 +4105,19 @@ Resources:
       Type: A
       AliasTarget:
         DNSName: !GetAtt DashboardDistribution.DomainName
+        HostedZoneId: Z2FDTNDATAQYW2
+
+  # Route 53 alias for the branded preview host (prod: preview.juniorbay.com -> the preview CloudFront dist).
+  # HostedZoneId Z2FDTNDATAQYW2 is CloudFront's fixed global zone id. Created only when the params are set (prod).
+  PreviewCustomDomainRecord:
+    Type: AWS::Route53::RecordSet
+    Condition: HasPreviewCustomDomain
+    Properties:
+      HostedZoneName: !Ref PreviewCustomDomainHostedZoneName
+      Name: !Ref PreviewCustomDomainName
+      Type: A
+      AliasTarget:
+        DNSName: !GetAtt PreviewDistribution.DomainName
         HostedZoneId: Z2FDTNDATAQYW2
 
 Outputs:
