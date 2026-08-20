@@ -97,6 +97,18 @@ Parameters:
     Type: String
     Default: juniorbay.com.
     Description: Route 53 hosted zone name used for the preview custom domain alias record.
+  TestServeDomainName:
+    Type: String
+    Default: ""
+    Description: Optional regional API Gateway custom domain for the test-mode page viewer (TestPageServeFunction), such as prod-test.juniorbay.com. Maps to this stack's RestApi. DNS in Route 53. (plans/SERVE_HOST_SCHEME.md)
+  TestServeCertificateArn:
+    Type: String
+    Default: ""
+    Description: Optional us-west-2 (REGIONAL) ACM cert ARN covering TestServeDomainName (the us-west-2 *.juniorbay.com wildcard).
+  TestServeHostedZoneName:
+    Type: String
+    Default: juniorbay.com.
+    Description: Route 53 hosted zone name used for the test-serve custom domain alias record.
   CognitoUserPoolId:
     Type: String
     Default: us-west-2_gBemPnEF8
@@ -141,6 +153,9 @@ Conditions:
   HasPreviewCustomDomain: !And
     - !Not [!Equals [!Ref PreviewCustomDomainName, ""]]
     - !Not [!Equals [!Ref PreviewCustomDomainCertificateArn, ""]]
+  HasTestServeDomain: !And
+    - !Not [!Equals [!Ref TestServeDomainName, ""]]
+    - !Not [!Equals [!Ref TestServeCertificateArn, ""]]
   HasStripePlatformSecret: !Not [!Equals [!Ref StripePlatformSecretArn, ""]]
   HasCloudflareZone: !Not [!Equals [!Ref CloudflareZoneId, ""]]
   # Non-prod (test/dev) published pages must never be indexed. NOT applied in prod: there, the pages
@@ -311,6 +326,39 @@ Resources:
       AliasTarget:
         DNSName: !GetAtt ApiCustomDomain.RegionalDomainName
         HostedZoneId: !GetAtt ApiCustomDomain.RegionalHostedZoneId
+
+  # Per-stage host for the test-mode page viewer (TestPageServeFunction) — prod: prod-test.juniorbay.com.
+  # Replaces the single, dev-only test.juniorbay.com so app(prod)+test-mode previews serve from prod, not dev
+  # (plans/SERVE_HOST_SCHEME.md step 1). Regional API Gateway domain → this stack's RestApi; created only when set.
+  TestServeCustomDomain:
+    Type: AWS::ApiGateway::DomainName
+    Condition: HasTestServeDomain
+    Properties:
+      DomainName: !Ref TestServeDomainName
+      EndpointConfiguration:
+        Types:
+          - REGIONAL
+      RegionalCertificateArn: !Ref TestServeCertificateArn
+      SecurityPolicy: TLS_1_2
+
+  TestServeCustomDomainBasePathMapping:
+    Type: AWS::ApiGateway::BasePathMapping
+    Condition: HasTestServeDomain
+    Properties:
+      DomainName: !Ref TestServeCustomDomain
+      RestApiId: !Ref RestApi
+      Stage: !Ref Environment
+
+  TestServeCustomDomainRecord:
+    Type: AWS::Route53::RecordSet
+    Condition: HasTestServeDomain
+    Properties:
+      HostedZoneName: !Ref TestServeHostedZoneName
+      Name: !Ref TestServeDomainName
+      Type: A
+      AliasTarget:
+        DNSName: !GetAtt TestServeCustomDomain.RegionalDomainName
+        HostedZoneId: !GetAtt TestServeCustomDomain.RegionalHostedZoneId
 
   HealthFunction:
     Type: AWS::Serverless::Function
