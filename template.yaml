@@ -85,22 +85,18 @@ Parameters:
     Type: String
     Default: juniorbay.com.
     Description: Route 53 hosted zone name used for the dashboard custom domain alias record.
-  PreviewCustomDomainName:
-    Type: String
-    Default: ""
-    Description: Optional LEGACY extra alias on the preview distribution (retired). The canonical live-preview host is PreviewLiveDomainName ({stage}-live.juniorbay.com). DNS in Route 53.
   PreviewCustomDomainCertificateArn:
     Type: String
     Default: ""
-    Description: us-east-1 ACM cert ARN for the preview distribution's aliases (the *.juniorbay.com wildcard covers the {stage}-live host). Required whenever any preview alias is set.
+    Description: us-east-1 ACM cert ARN for the preview distribution's {stage}-live alias (the *.juniorbay.com wildcard). Required when PreviewLiveDomainName is set.
   PreviewCustomDomainHostedZoneName:
     Type: String
     Default: juniorbay.com.
-    Description: Route 53 hosted zone name used for the preview custom domain alias record.
+    Description: Route 53 hosted zone name used for the preview live-host alias record.
   PreviewLiveDomainName:
     Type: String
     Default: ""
-    Description: The canonical {stage}-live preview host on this stack's preview CloudFront dist (dev-live / prod-live.juniorbay.com). Additional alias alongside the legacy PreviewCustomDomainName; uses the same us-east-1 wildcard cert (PreviewCustomDomainCertificateArn). (plans/SERVE_HOST_SCHEME.md)
+    Description: The canonical {stage}-live preview host on this stack's preview CloudFront dist (dev-live / prod-live.juniorbay.com); uses the us-east-1 wildcard cert (PreviewCustomDomainCertificateArn). (plans/SERVE_HOST_SCHEME.md)
   TestServeDomainName:
     Type: String
     Default: ""
@@ -154,18 +150,12 @@ Conditions:
   HasDashboardCustomDomain: !And
     - !Not [!Equals [!Ref DashboardCustomDomainName, ""]]
     - !Not [!Equals [!Ref DashboardCustomDomainCertificateArn, ""]]
-  HasPreviewCustomDomain: !And
-    - !Not [!Equals [!Ref PreviewCustomDomainName, ""]]
-    - !Not [!Equals [!Ref PreviewCustomDomainCertificateArn, ""]]
   HasTestServeDomain: !And
     - !Not [!Equals [!Ref TestServeDomainName, ""]]
     - !Not [!Equals [!Ref TestServeCertificateArn, ""]]
   HasPreviewLiveDomain: !And
     - !Not [!Equals [!Ref PreviewLiveDomainName, ""]]
     - !Not [!Equals [!Ref PreviewCustomDomainCertificateArn, ""]]
-  HasAnyPreviewAlias: !Or
-    - !Condition HasPreviewCustomDomain
-    - !Condition HasPreviewLiveDomain
   HasStripePlatformSecret: !Not [!Equals [!Ref StripePlatformSecretArn, ""]]
   HasCloudflareZone: !Not [!Equals [!Ref CloudflareZoneId, ""]]
   # Non-prod (test/dev) published pages must never be indexed. NOT applied in prod: there, the pages
@@ -4007,19 +3997,12 @@ Resources:
         DefaultRootObject: index.html
         HttpVersion: http2and3
         PriceClass: PriceClass_100
-        # Branded live-preview hosts so live-mode draft previews aren't the raw *.cloudfront.net name. The canonical
-        # host is {stage}-live (PreviewLiveDomainName); PreviewCustomDomainName is the legacy prod preview.juniorbay.com
-        # kept as an extra alias until it's retired. Both use the us-east-1 wildcard cert. Route 53 records below.
+        # Branded live-preview host ({stage}-live.juniorbay.com) so live-mode draft previews aren't the raw
+        # *.cloudfront.net name. Uses the us-east-1 wildcard cert. Empty param (none set) -> no alias, default cert.
         Aliases: !If
-          - HasPreviewCustomDomain
-          - !If
-            - HasPreviewLiveDomain
-            - [!Ref PreviewCustomDomainName, !Ref PreviewLiveDomainName]
-            - [!Ref PreviewCustomDomainName]
-          - !If
-            - HasPreviewLiveDomain
-            - [!Ref PreviewLiveDomainName]
-            - !Ref AWS::NoValue
+          - HasPreviewLiveDomain
+          - [!Ref PreviewLiveDomainName]
+          - !Ref AWS::NoValue
         Origins:
           - Id: PreviewS3Origin
             DomainName: !GetAtt PagesPreviewBucket.RegionalDomainName
@@ -4048,7 +4031,7 @@ Resources:
             ResponsePagePath: /404.html
             ErrorCachingMinTTL: 0
         ViewerCertificate: !If
-          - HasAnyPreviewAlias
+          - HasPreviewLiveDomain
           - AcmCertificateArn: !Ref PreviewCustomDomainCertificateArn
             SslSupportMethod: sni-only
             MinimumProtocolVersion: TLSv1.2_2021
@@ -4172,20 +4155,8 @@ Resources:
         DNSName: !GetAtt DashboardDistribution.DomainName
         HostedZoneId: Z2FDTNDATAQYW2
 
-  # Route 53 alias for the branded preview host (prod: preview.juniorbay.com -> the preview CloudFront dist).
-  # HostedZoneId Z2FDTNDATAQYW2 is CloudFront's fixed global zone id. Created only when the params are set (prod).
-  PreviewCustomDomainRecord:
-    Type: AWS::Route53::RecordSet
-    Condition: HasPreviewCustomDomain
-    Properties:
-      HostedZoneName: !Ref PreviewCustomDomainHostedZoneName
-      Name: !Ref PreviewCustomDomainName
-      Type: A
-      AliasTarget:
-        DNSName: !GetAtt PreviewDistribution.DomainName
-        HostedZoneId: Z2FDTNDATAQYW2
-
-  # The canonical {stage}-live host (dev-live / prod-live.juniorbay.com) -> this stack's preview dist.
+  # Route 53 alias for the canonical {stage}-live host (dev-live / prod-live.juniorbay.com) -> this stack's preview
+  # dist. HostedZoneId Z2FDTNDATAQYW2 is CloudFront's fixed global zone id. Created only when the param is set.
   PreviewLiveDomainRecord:
     Type: AWS::Route53::RecordSet
     Condition: HasPreviewLiveDomain
