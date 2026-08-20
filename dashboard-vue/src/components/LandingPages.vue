@@ -1388,7 +1388,7 @@
 import { computed, onMounted, reactive, ref, watch } from "vue";
 import { offerViewTargets, offerViewTargetsFromExpanded } from "../composables/useConversionContext";
 import { isSectionVisible, defaultVisible, recommendedSectionKeys, optionalSectionKeys, governedKeys, elementLabel, elementChannel, addableElements, tokenGroups, previewVar, supportedGoals, goalLabel, packSeeds } from "../composables/pageComposer";
-import { apiRequest, getApiBase, getStripeMode, getOtherEnvironment, getPagesBaseUrl, getPreviewPagesBaseUrl, getTenantId } from "../api/client";
+import { apiRequest, getApiBase, getStripeMode, getOtherEnvironment, getPagesBaseUrl, getPreviewPagesBaseUrl, getTestPagesHost, getTenantId } from "../api/client";
 import { formatMoney } from "../stores/products";
 import PurchaseFlowDiagram from "./PurchaseFlowDiagram.vue";
 import { useProfileStore } from "../stores/profile";
@@ -2004,7 +2004,6 @@ const isBuilderPublished = computed(() => builder.status === "published");
 // The shareable test link for the currently-previewed view. Only a published page has a short_code, so the
 // link (and copy affordance) appears only once published (plans/SALES_FUNNELS.md Phase B). The view segment
 // tracks the Standard/Sale/Flash-Sale toggle.
-const TEST_PAGES_HOST = "test.juniorbay.com";
 const testShareLink = computed(() => {
   if (!isBuilderPublished.value) return "";
   // Prefer the real, navigable store URL (Standard view) on the Site's platform host / custom domain — a page
@@ -2013,9 +2012,10 @@ const testShareLink = computed(() => {
     const siteUrl = sitePublicUrl({ page_id: builder.page_id });
     if (siteUrl) return siteUrl;
   }
-  if (!builder.short_code) return "";
+  const host = getTestPagesHost();  // {stage}-test.juniorbay.com from app_config
+  if (!builder.short_code || !host) return "";
   const seg = previewContext.value === "sale" ? "/sale" : previewContext.value === "flash_sale" ? "/flash-sale" : "";
-  return `https://${TEST_PAGES_HOST}/published/${builder.short_code}${seg}`;
+  return `https://${host}/published/${builder.short_code}${seg}`;
 });
 const testLinkCopied = ref(false);
 async function copyTestShareLink() {
@@ -4202,10 +4202,11 @@ function pageUrl(page) {
     if (siteUrl) return siteUrl;
   }
   // Sale/Flash-Sale preview views + unattached/draft pages: the platform test viewer, keyed by short_code.
-  if (getStripeMode() === "test" && page.short_code) {
+  const testHost = getTestPagesHost();  // {stage}-test.juniorbay.com from app_config
+  if (testHost && getStripeMode() === "test" && page.short_code) {
     const seg = page.status === "published" ? "published" : "preview";
     const viewSeg = view === "sale" ? "/sale" : view === "flash_sale" ? "/flash-sale" : "";
-    return `https://${TEST_PAGES_HOST}/${seg}/${encodeURIComponent(page.short_code)}${viewSeg}`;
+    return `https://${testHost}/${seg}/${encodeURIComponent(page.short_code)}${viewSeg}`;
   }
   if (page.status === "published") return sitePublicUrl(page) || artifactPageUrl(page);
   return previewArtifactPageUrl(page);

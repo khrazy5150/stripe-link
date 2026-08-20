@@ -100,9 +100,16 @@ export function getPagesBaseUrl(channel = hostnameReleaseChannel()) {
 }
 
 export function getPreviewPagesBaseUrl(channel = hostnameReleaseChannel()) {
+  // Config-driven per channel ({stage}-live.juniorbay.com, deploy-populated). No hardcoded fallback: a default here
+  // previously pointed prod at the DEV preview dist (the misroute). Empty until app_config loads (bootstrap).
   const configured = getEnvironmentConfig(channel).pages_preview_base_url;
-  if (configured) return configured.replace(/\/$/, "");
-  return "https://d1lcshydc31m77.cloudfront.net";
+  return configured ? configured.replace(/\/$/, "") : "";
+}
+
+// The per-channel test-mode page-viewer host ({stage}-test.juniorbay.com), deploy-populated into app_config.
+// Replaces the old hardcoded TEST_PAGES_HOST = "test.juniorbay.com" (which was dev-only → prod test previews 404'd).
+export function getTestPagesHost(channel = hostnameReleaseChannel()) {
+  return getEnvironmentConfig(channel).test_pages_host || "";
 }
 
 export async function loadAppConfigApiBase(channel = hostnameReleaseChannel()) {
