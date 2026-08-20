@@ -1,5 +1,11 @@
 # Serve-host scheme — implementation plan (early P5 slice)
 
+> **SHIPPED PROD + DEV 2026-08-19.** All four `{stage}-{mode}.juniorbay.com` hosts live and serving; dashboard
+> de-hardcoded + `app_config` deploy-populated; legacy `test.juniorbay.com` + `preview.juniorbay.com` deleted. The
+> app(prod)+test-mode preview misroute is fixed. **Lesson (step 4):** to unset a CloudFormation param you cannot just
+> drop it from samconfig (→ `UsePreviousValue`) — and SAM silently drops empty-string tokens too; the reliable fix
+> was to remove the legacy param + its resources from the template entirely.
+
 Concrete build plan for the `{stage}-{mode}.juniorbay.com` serve hosts + config-driven URLs decided in
 `plans/STRIPE_MODE_DECOUPLING.md` ("Serve-host naming + config-driven URLs"). This is the **early, additive** slice
 of P5: it fixes the app(prod)+test-mode preview misroute and de-hardcodes serve URLs **without** touching backend
