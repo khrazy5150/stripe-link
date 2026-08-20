@@ -97,6 +97,10 @@ Parameters:
     Type: String
     Default: juniorbay.com.
     Description: Route 53 hosted zone name used for the preview custom domain alias record.
+  PreviewLiveDomainName:
+    Type: String
+    Default: ""
+    Description: The canonical {stage}-live preview host on this stack's preview CloudFront dist (dev-live / prod-live.juniorbay.com). Additional alias alongside the legacy PreviewCustomDomainName; uses the same us-east-1 wildcard cert (PreviewCustomDomainCertificateArn). (plans/SERVE_HOST_SCHEME.md)
   TestServeDomainName:
     Type: String
     Default: ""
@@ -156,6 +160,12 @@ Conditions:
   HasTestServeDomain: !And
     - !Not [!Equals [!Ref TestServeDomainName, ""]]
     - !Not [!Equals [!Ref TestServeCertificateArn, ""]]
+  HasPreviewLiveDomain: !And
+    - !Not [!Equals [!Ref PreviewLiveDomainName, ""]]
+    - !Not [!Equals [!Ref PreviewCustomDomainCertificateArn, ""]]
+  HasAnyPreviewAlias: !Or
+    - !Condition HasPreviewCustomDomain
+    - !Condition HasPreviewLiveDomain
   HasStripePlatformSecret: !Not [!Equals [!Ref StripePlatformSecretArn, ""]]
   HasCloudflareZone: !Not [!Equals [!Ref CloudflareZoneId, ""]]
   # Non-prod (test/dev) published pages must never be indexed. NOT applied in prod: there, the pages
@@ -3997,12 +4007,19 @@ Resources:
         DefaultRootObject: index.html
         HttpVersion: http2and3
         PriceClass: PriceClass_100
-        # A branded preview host (prod: preview.juniorbay.com) so live-mode draft previews aren't the raw
-        # *.cloudfront.net name. Empty params (dev) -> no alias, default cert. DNS (CNAME) lives in Cloudflare.
+        # Branded live-preview hosts so live-mode draft previews aren't the raw *.cloudfront.net name. The canonical
+        # host is {stage}-live (PreviewLiveDomainName); PreviewCustomDomainName is the legacy prod preview.juniorbay.com
+        # kept as an extra alias until it's retired. Both use the us-east-1 wildcard cert. Route 53 records below.
         Aliases: !If
           - HasPreviewCustomDomain
-          - - !Ref PreviewCustomDomainName
-          - !Ref AWS::NoValue
+          - !If
+            - HasPreviewLiveDomain
+            - [!Ref PreviewCustomDomainName, !Ref PreviewLiveDomainName]
+            - [!Ref PreviewCustomDomainName]
+          - !If
+            - HasPreviewLiveDomain
+            - [!Ref PreviewLiveDomainName]
+            - !Ref AWS::NoValue
         Origins:
           - Id: PreviewS3Origin
             DomainName: !GetAtt PagesPreviewBucket.RegionalDomainName
@@ -4031,7 +4048,7 @@ Resources:
             ResponsePagePath: /404.html
             ErrorCachingMinTTL: 0
         ViewerCertificate: !If
-          - HasPreviewCustomDomain
+          - HasAnyPreviewAlias
           - AcmCertificateArn: !Ref PreviewCustomDomainCertificateArn
             SslSupportMethod: sni-only
             MinimumProtocolVersion: TLSv1.2_2021
@@ -4163,6 +4180,18 @@ Resources:
     Properties:
       HostedZoneName: !Ref PreviewCustomDomainHostedZoneName
       Name: !Ref PreviewCustomDomainName
+      Type: A
+      AliasTarget:
+        DNSName: !GetAtt PreviewDistribution.DomainName
+        HostedZoneId: Z2FDTNDATAQYW2
+
+  # The canonical {stage}-live host (dev-live / prod-live.juniorbay.com) -> this stack's preview dist.
+  PreviewLiveDomainRecord:
+    Type: AWS::Route53::RecordSet
+    Condition: HasPreviewLiveDomain
+    Properties:
+      HostedZoneName: !Ref PreviewCustomDomainHostedZoneName
+      Name: !Ref PreviewLiveDomainName
       Type: A
       AliasTarget:
         DNSName: !GetAtt PreviewDistribution.DomainName
