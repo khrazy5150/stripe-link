@@ -185,16 +185,20 @@ vs `/published/`) + id; **mode is in the host, NOT repeated in the path.**
 | `prod-live.juniorbay.com` | prod | live | app dashboard, live mode |
 | *(future)* `staging-test` / `staging-live` | staging | test/live | — |
 
-**Mechanics.**
-- Per stage there is **one** preview distribution/bucket serving *both* modes (separated by a `test/` path prefix
-  today). Both `{stage}-test` and `{stage}-live` alias to that one distribution; a small **CloudFront viewer-request
-  Function** maps `Host` → origin bucket-prefix (`prod-test…/preview/{id}` → origin `/preview/test/{id}`;
-  `prod-live…` → `/preview/{id}`). This is what lets mode live in the host while the bucket layout is unchanged.
-- All hosts are covered by the existing `*.juniorbay.com` wildcard cert (single-level). Each = one Route 53 alias +
-  one CloudFront alias, mirroring the already-shipped `PreviewCustomDomainRecord` pattern.
-- De-hardcode: replace `TEST_PAGES_HOST` in `LandingPages.vue` with an `app_config`-driven
-  `getTestPagesHost(channel)` (same shape as `getPreviewPagesBaseUrl`). Add `app_config.environments.{channel}`
-  keys for each serve host; deploy writes them from stack outputs.
+**Mechanics (see `plans/SERVE_HOST_SCHEME.md` for the concrete build plan).** The pragmatic slice **reuses the two
+serving front-ends that already exist**, one host per stage×mode — no unification, no CloudFront rewrite Function:
+- **`{stage}-live`** → that stage's **CloudFront preview distribution** (full-path artifact) — the mechanism
+  `preview.juniorbay.com` already uses.
+- **`{stage}-test`** → that stage's **`TestPageServeFunction`** (regional API Gateway custom domain, short_code →
+  artifact + `/sale`//`/flash-sale` variants) — the mechanism `test.juniorbay.com` already uses; the **prod** stack's
+  copy just needs a custom domain (that's the misroute fix).
+- Two cert stories by mechanism: CloudFront hosts use the **us-east-1** `*.juniorbay.com` wildcard; API Gateway
+  regional hosts use the **us-west-2** `*.juniorbay.com` wildcard (both already exist and in use).
+- De-hardcode: replace `TEST_PAGES_HOST` in `LandingPages.vue` with an `app_config`-driven `getTestPagesHost(channel)`
+  (same shape as `getPreviewPagesBaseUrl`); add per-channel serve-host keys to `app_config`, **deploy-populated from
+  stack outputs**.
+- A *later, optional* unification (all previews onto the dist, drop the short_code viewer) is what would need a
+  CloudFront host→prefix Function — deferred, not required.
 
 **Supersedes the interim `preview.juniorbay.com`.** The prod-live preview host shipped 2026-08-19 as
 `preview.juniorbay.com`; under this scheme it becomes **`prod-live.juniorbay.com`**. When implementing, either
