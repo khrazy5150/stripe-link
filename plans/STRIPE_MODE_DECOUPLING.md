@@ -150,6 +150,57 @@ Author confirmed the target after distinguishing two axes:
 6. **Env/config plumbing** — `_mode_for_environment` and any `ENVIRONMENT`-derived mode logic replaced by explicit
    mode; keep `ENVIRONMENT` for release-channel concerns only (which code/tables version).
 
+## Serve-host naming + config-driven URLs (decided 2026-08-19)
+
+**The bug that surfaced this.** `test.juniorbay.com` is hardwired to the **dev** backend (API `jm3ppyxos4`, stage
+`dev`) and the dashboard **hardcodes** `TEST_PAGES_HOST = "test.juniorbay.com"` for *all* test-mode preview/publish
+links in BOTH dashboards. So **app (prod) + test mode** points its preview links at the **dev** viewer, which reads
+the **dev** buckets — but the prod backend writes its test-mode artifacts to the **prod** buckets → prod test-mode
+previews are misrouted (a single-stage legacy from when test *was* the dev environment). Sandbox+test only works by
+coincidence (all-dev).
+
+**Principle: no hardcoded serve URLs — they come from `app_config` per channel.** This already holds for
+`api_base_url` / `pages_base_url` / `pages_preview_base_url`; `TEST_PAGES_HOST` is the straggler. Split config into
+two kinds:
+- **Operator-tunable** (flags, business knobs) → hand-editable DynamoDB.
+- **Infra identities** (CloudFront domains, API endpoints, serve hosts) → their canonical source is the **stack
+  outputs**, so the **deploy populates `app_config` from them** — never hand-typed. (Hand-editing infra values is
+  error-prone: proven 2026-08-19 when a hand-write of `pages_preview_base_url` landed under a bogus `config` key and
+  silently did nothing until caught.)
+- **Bootstrap exception:** the dev/prod **API base** stays hardcoded in `client.js` (the minimum needed to *fetch*
+  `app_config`); everything downstream is table-driven.
+- Terminology: **stage** = `dev`/`prod`/(future)`staging` (release channel / `Environment`); **mode** = `test`/`live`
+  (Stripe mode). Never call test/live "environment" — that name already means dev/prod.
+
+**Host scheme: `{stage}-{mode}.juniorbay.com`.** Stage token is `dev`/`prod` (NOT `app`/`sandbox` — those are the
+*dashboard* hosts; keeping serve hosts on `dev`/`prod` avoids collision AND matches the `app_config` keys + stack
+`Environment` so the deploy auto-populates with zero mapping). The **path** carries the artifact kind (`/preview/`
+vs `/published/`) + id; **mode is in the host, NOT repeated in the path.**
+
+| Host | Stage | Mode | Appears in |
+|---|---|---|---|
+| `dev-test.juniorbay.com`  | dev  | test | sandbox dashboard, test mode |
+| `dev-live.juniorbay.com`  | dev  | live | sandbox dashboard, live mode |
+| `prod-test.juniorbay.com` | prod | test | app dashboard, test mode |
+| `prod-live.juniorbay.com` | prod | live | app dashboard, live mode |
+| *(future)* `staging-test` / `staging-live` | staging | test/live | — |
+
+**Mechanics.**
+- Per stage there is **one** preview distribution/bucket serving *both* modes (separated by a `test/` path prefix
+  today). Both `{stage}-test` and `{stage}-live` alias to that one distribution; a small **CloudFront viewer-request
+  Function** maps `Host` → origin bucket-prefix (`prod-test…/preview/{id}` → origin `/preview/test/{id}`;
+  `prod-live…` → `/preview/{id}`). This is what lets mode live in the host while the bucket layout is unchanged.
+- All hosts are covered by the existing `*.juniorbay.com` wildcard cert (single-level). Each = one Route 53 alias +
+  one CloudFront alias, mirroring the already-shipped `PreviewCustomDomainRecord` pattern.
+- De-hardcode: replace `TEST_PAGES_HOST` in `LandingPages.vue` with an `app_config`-driven
+  `getTestPagesHost(channel)` (same shape as `getPreviewPagesBaseUrl`). Add `app_config.environments.{channel}`
+  keys for each serve host; deploy writes them from stack outputs.
+
+**Supersedes the interim `preview.juniorbay.com`.** The prod-live preview host shipped 2026-08-19 as
+`preview.juniorbay.com`; under this scheme it becomes **`prod-live.juniorbay.com`**. When implementing, either
+rename it or keep `preview.juniorbay.com` as a legacy alias to avoid breaking any copied links. Likewise
+`test.juniorbay.com` → `dev-test.juniorbay.com` (keep a redirect if any short links exist).
+
 ## Phasing
 
 - **P0 — Contract + scaffolding:** a `resolve_stripe_mode(event)` request helper (param/header) + a dashboard
@@ -164,6 +215,10 @@ Author confirmed the target after distinguishing two axes:
 - **P3 — Webhook mode-from-livemode:** one prod endpoint handles both; Stripe webhook reconfig; guard rework.
 - **P4 — Publishing + checkout URL:** host-agnostic checkout; per-mode publish path; test `noindex`.
 - **P5 — CDN / serving:** serve test pages on prod (mode-partitioned); mode-aware custom-domain + platform-hostname.
+  Implements the **serve-host naming + config-driven URLs** section above: the `{stage}-{mode}.juniorbay.com` hosts,
+  the CloudFront host→prefix Function, de-hardcoding `TEST_PAGES_HOST` into `app_config`, and deploy-time population
+  from stack outputs. Fixes the prod-test preview misroute noted there. A cheap early slice of P5 can land the four
+  hosts + config indirection *before* the full backend per-mode work, since it's additive.
 - **P6 — Migration + cleanup:** move the operator's existing test-mode data from dev tables → prod tables tagged
   `test` (low-stakes, all self-owned); retire dev's tenant-test role (dev = pure staging); rebuild the onboarding
   flow (live-first + opt-in Stripe-test sandbox, `plans/` onboarding streamline) on the clean model.

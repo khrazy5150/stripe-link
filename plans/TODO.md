@@ -58,6 +58,13 @@ Deferred, non-blocking follow-ups. Each item notes what, why it was deferred, an
   fix. Not built. Next step: greenlight the phasing + start P0.
 - **The `stripe_keys` fixed-name two-table design (documents.py:357) is the existing cross-mode precedent to
   generalize.**
+- **Serve-host naming decided 2026-08-19** (see the plan's "Serve-host naming + config-driven URLs" section): all
+  artifact-serving hosts move to `{stage}-{mode}.juniorbay.com` (`dev/prod` stage tokens, NOT the `app/sandbox`
+  dashboard hosts) — `dev-test`, `dev-live`, `prod-test`, `prod-live`. `TEST_PAGES_HOST` gets de-hardcoded into
+  `app_config` (deploy-populated from stack outputs); a CloudFront host→bucket-prefix Function keeps the bucket
+  layout unchanged. **Live bug it fixes:** `test.juniorbay.com` is dev-only, so app(prod)+test-mode previews are
+  misrouted to the dev viewer. The just-shipped `preview.juniorbay.com` becomes `prod-live.juniorbay.com` (keep as
+  alias). Landable as an early additive slice of P5.
 
 ### Streamline Connect onboarding — live-first + opt-in Stripe-test sandbox — SHIPPED (code) 2026-08-02
 - **What:** default new tenants to LIVE; the wizard onboards their live Stripe only (with expanded `stripe_user[]`
