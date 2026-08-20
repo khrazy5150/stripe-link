@@ -69,7 +69,7 @@
       "allowed_ctas": ["buy", "email_capture", "phone_call", "external"]
     },
     "listicle": {
-      "sections": ["hero_media", "hero", "offer_price_selector", "checkout_cta", "legal_footer"],
+      "sections": ["brand_label", "hero_media", "hero", "offer_price_selector", "checkout_cta", "legal_footer"],
       "allowed_ctas": ["buy", "cart"]
     }
   },

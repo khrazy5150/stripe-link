@@ -62,11 +62,18 @@ class CompositionTests(unittest.TestCase):
         types = [s["type"] for s in compose_page({"offer_type": "listicle"}, self._page())]
         self.assertNotIn("trust_badges", types)      # not in listicle allow-list
         self.assertNotIn("refund_policy", types)
-        self.assertNotIn("brand_label", types)
         # core listicle sections survive
         self.assertIn("hero", types)
         self.assertIn("offer_price_selector", types)
         self.assertIn("legal_footer", types)
+
+    def test_listicle_shows_brand_label_by_default(self):
+        # The ● Brand mark is a default on listicles too (parity with single/bundle) — tenants expect their brand
+        # on every page type, not just single-offer pages.
+        types = [s["type"] for s in compose_page({"offer_type": "listicle"}, self._page())]
+        self.assertIn("brand_label", types)
+        self.assertIn("brand_label", recommended_section_keys("listicle"))
+        self.assertNotIn("brand_label", optional_section_keys("listicle"))
 
     def test_ungoverned_element_always_visible(self):
         # A body element (testimonials) shows whenever present, even on a listicle (adding it IS the opt-in).
