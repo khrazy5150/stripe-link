@@ -660,7 +660,7 @@ def public_url(domain: str, key: str) -> str:
 
 
 def register_page_route(routes_repository: Any, page: dict[str, Any]) -> bool:
-    """Upsert the code->page route that lets test.juniorbay.com/published/{short_code} resolve to this page
+    """Upsert the code->page route that lets the {stage}-test.juniorbay.com/published/{short_code} viewer resolve to this page
     (plans/SALES_FUNNELS.md Phase B). No-op without a routes repo or a short_code; idempotent on re-publish."""
     if routes_repository is None:
         return False
@@ -1089,7 +1089,7 @@ def publish_page_document(
 
     # Sale / Flash-Sale context views (plans/SALES_FUNNELS.md P1c): render each enabled context once and write
     # it as a sibling artifact — always noindex (it is duplicate content of "/"). The PREVIEW context artifact
-    # is written on every save so test.juniorbay.com/preview/{code}/sale works for drafts too (Phase B); the
+    # is written on every save so {stage}-test.juniorbay.com/preview/{code}/sale works for drafts too (Phase B); the
     # PUBLISHED context artifact is written only when the page is published. On a verified custom domain root
     # page, attach the reserved /sale //flash-sale slugs so the resolver routes them.
     for ctx in context_view_contexts(page):

@@ -137,7 +137,7 @@ def handler(event, context, *, offers_repo=None, products_repo=None, services_re
                     pages_distribution_id=os.environ.get("PAGES_DISTRIBUTION_ID", ""),
                 )
                 # Keep the code->page route on unpublish: the page is now a draft, so its
-                # test.juniorbay.com/preview/{code} link stays live; /published/{code} 404s naturally once the
+                # {stage}-test.juniorbay.com/preview/{code} link stays live; /published/{code} 404s naturally once the
                 # published artifact above is deleted. The route is retired only on archive/delete.
                 logger.info("Deleted unpublished page artifacts: %s", result)
 
@@ -164,7 +164,7 @@ def handler(event, context, *, offers_repo=None, products_repo=None, services_re
                 pages_distribution_id=os.environ.get("PAGES_DISTRIBUTION_ID", ""),
             )
             # Register the code->page route for every saved (non-archived) page, draft or published, so both
-            # test.juniorbay.com/preview/{code} and /published/{code} resolve. Idempotent; no-op without a code.
+            # {stage}-test.juniorbay.com/preview/{code} and /published/{code} resolve. Idempotent; no-op without a code.
             register_page_route(routes_repo, page)
             logger.info("Published page artifacts: %s", result)
         except Exception as exc:

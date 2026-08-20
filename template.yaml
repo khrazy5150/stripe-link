@@ -88,11 +88,11 @@ Parameters:
   PreviewCustomDomainName:
     Type: String
     Default: ""
-    Description: Optional CloudFront custom domain for the draft-preview distribution, such as preview.juniorbay.com (prod only). DNS is managed in Cloudflare.
+    Description: Optional LEGACY extra alias on the preview distribution (retired). The canonical live-preview host is PreviewLiveDomainName ({stage}-live.juniorbay.com). DNS in Route 53.
   PreviewCustomDomainCertificateArn:
     Type: String
     Default: ""
-    Description: Optional us-east-1 ACM certificate ARN covering PreviewCustomDomainName (the *.juniorbay.com wildcard cert covers preview.juniorbay.com).
+    Description: us-east-1 ACM cert ARN for the preview distribution's aliases (the *.juniorbay.com wildcard covers the {stage}-live host). Required whenever any preview alias is set.
   PreviewCustomDomainHostedZoneName:
     Type: String
     Default: juniorbay.com.

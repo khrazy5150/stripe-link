@@ -48,9 +48,9 @@ def _html_response(body, status_code=200):
 
 def handler(event, context, *, repository=None, s3_client=None, pages_bucket=None, preview_bucket=None, tenant_repo=None):
     """Public endpoint that serves a test page (and its /sale //flash-sale views) by its snowflake short_code,
-    for the test.juniorbay.com host (plans/SALES_FUNNELS.md Phase B). Resolves the code to a page via the
+    for the per-stage test-mode viewer host ({stage}-test.juniorbay.com; app_config test_pages_host) (plans/SALES_FUNNELS.md Phase B). Resolves the code to a page via the
     routes table, reads that page's artifact from S3, and returns the HTML verbatim so the visitor's URL stays
-    test.juniorbay.com/{preview|published}/{short_code}. Read-only, unauthenticated; noindex.
+    {stage}-test.juniorbay.com/{preview|published}/{short_code}. Read-only, unauthenticated; noindex.
 
     Routes:
       GET /preview/{code}[/{view}]   -> the SAVED (draft or published) render, from the preview bucket

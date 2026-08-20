@@ -44,7 +44,7 @@ def create_page(event, repository):
 def assign_short_code(existing: dict | None, document: dict, code_fn=generate_short_url_code) -> None:
     """Give the page a stable snowflake short_code for its shareable test links, assigned the FIRST time it is
     SAVED (any status) and sticky across every later edit (plans/SALES_FUNNELS.md Phase B). The code keys both
-    test.juniorbay.com/preview/{code} (draft) and /published/{code} (published); the publish stream turns it
+    the {stage}-test.juniorbay.com viewer /preview/{code} (draft) and /published/{code} (published); the publish stream turns it
     into a code->page route. Assigning on save (not just publish) means a never-published draft already has a
     working preview link.
 
