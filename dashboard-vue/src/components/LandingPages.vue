@@ -1388,7 +1388,7 @@
 import { computed, onMounted, reactive, ref, watch } from "vue";
 import { offerViewTargets, offerViewTargetsFromExpanded } from "../composables/useConversionContext";
 import { isSectionVisible, defaultVisible, recommendedSectionKeys, optionalSectionKeys, governedKeys, elementLabel, elementChannel, addableElements, tokenGroups, previewVar, supportedGoals, goalLabel, packSeeds } from "../composables/pageComposer";
-import { apiRequest, getApiBase, getStripeMode, getOtherEnvironment, getPagesBaseUrl, getPreviewPagesBaseUrl, getTestPagesHost, getTenantId } from "../api/client";
+import { apiRequest, assetUrl, getApiBase, getStripeMode, getOtherEnvironment, getPagesBaseUrl, getPreviewPagesBaseUrl, getTestPagesHost, getTenantId } from "../api/client";
 import { formatMoney } from "../stores/products";
 import PurchaseFlowDiagram from "./PurchaseFlowDiagram.vue";
 import { useProfileStore } from "../stores/profile";
@@ -1480,7 +1480,7 @@ const THANK_YOU_DEFAULT_CARDS = [
   { icon: "🚀", title: "Start Your Journey", desc: "Begin your routine as soon as it arrives." },
 ];
 const builder = reactive(defaultBuilderForm());
-const defaultFaviconUrl = "https://images.juniorbay.com/icon/favicon.png";
+const defaultFaviconUrl = assetUrl("/icon/favicon.png");  // configured asset CDN (public_asset_base_url)
 // The saved document carries no legal URLs and no resolved year: render_legal_footer builds the platform
 // /legal/* links from the api_base_url we send with each render, and expands {{current_year}} itself.
 const defaultFooterCopyrightTemplate = "© {{current_year}} All rights reserved.";

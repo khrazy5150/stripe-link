@@ -111,6 +111,26 @@ export function getTestPagesHost(channel = hostnameReleaseChannel()) {
   return getEnvironmentConfig(channel).test_pages_host || "";
 }
 
+// The shared asset-delivery CDN base (public_asset_base_url, e.g. https://images.juniorbay.com). Config-driven so
+// a CDN migration is a single app_config change, not a code sweep. "" until app_config loads.
+export function getAssetBaseUrl(channel = hostnameReleaseChannel()) {
+  return (getEnvironmentConfig(channel).public_asset_base_url || "").replace(/\/$/, "");
+}
+
+// Build an asset URL from the configured CDN base: assetUrl("/icon/favicon.png") -> https://<cdn>/icon/favicon.png.
+export function assetUrl(path = "") {
+  const base = getAssetBaseUrl();
+  if (!base) return "";
+  return base + (path.startsWith("/") ? path : `/${path}`);
+}
+
+// Rewrite an upload-bucket URL (images.juniorbay.net host) onto the configured asset CDN host — replaces the
+// scattered `.replace("images.juniorbay.net", "images.juniorbay.com")` so the CDN host lives only in config.
+export function toAssetCdnUrl(url, uploadBucketHost = "images.juniorbay.net") {
+  const host = getAssetBaseUrl().replace(/^https?:\/\//, "");
+  return host ? String(url || "").replace(uploadBucketHost, host) : String(url || "");
+}
+
 export async function loadAppConfigApiBase(channel = hostnameReleaseChannel()) {
   const base = getApiBase();
   try {

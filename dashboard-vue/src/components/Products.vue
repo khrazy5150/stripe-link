@@ -483,7 +483,7 @@
 
 <script setup>
 import { computed, h, nextTick, ref, watch } from "vue";
-import { apiRequest } from "../api/client";
+import { apiRequest, toAssetCdnUrl } from "../api/client";
 import { defaultProductPrice, formatMoney, generateSku, isValidGtin, useProductsStore } from "../stores/products";
 import { humanizeCategory, normalizeCategory, searchCategories } from "../utils/categories";
 import { dimsFromStatus, recordImageDims } from "../utils/imageDims";
@@ -1112,7 +1112,7 @@ function productImageUrlCandidates(urls) {
 }
 
 function cdnImageUrl(url) {
-  return String(url || "").replace("images.juniorbay.net", "images.juniorbay.com");
+  return toAssetCdnUrl(url);  // upload bucket host -> configured asset CDN (public_asset_base_url)
 }
 
 function imageUrlLoads(url, timeoutMs = 4000) {

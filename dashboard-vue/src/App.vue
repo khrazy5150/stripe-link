@@ -8,7 +8,7 @@
   >
     <aside class="sidebar">
       <div class="brand">
-        <img src="https://images.juniorbay.com/icon/favicon.png" alt="" />
+        <img :src="assetUrl('/icon/favicon.png')" alt="" />
         <strong>Admin Panel</strong>
       </div>
       <nav>
@@ -212,7 +212,7 @@ import Sites from "./components/Sites.vue";
 import StripeKeys from "./components/StripeKeys.vue";
 import ToastHost from "./components/ToastHost.vue";
 import { iconPaths, menuGroupsForEnvironment } from "./config/menu";
-import { getStripeMode, loadAppConfigApiBase, setStripeMode } from "./api/client";
+import { assetUrl, getStripeMode, loadAppConfigApiBase, setStripeMode } from "./api/client";
 import { useAuthStore } from "./stores/auth";
 import { useCollectionsStore } from "./stores/collections";
 import { useCouponsStore } from "./stores/coupons";

@@ -2,7 +2,7 @@
   <main class="auth-page">
     <section class="auth-card">
       <header class="auth-header">
-        <img src="https://images.juniorbay.com/icon/favicon.png" alt="" />
+        <img :src="assetUrl('/icon/favicon.png')" alt="" />
         <h1>{{ store.activeTab === 'register' ? 'Start your free trial' : 'Admin Login' }}</h1>
         <p>
           {{ store.activeTab === 'register'
@@ -70,6 +70,7 @@
 </template>
 
 <script setup>
+import { assetUrl } from "../api/client";
 import { useAuthStore } from "../stores/auth";
 
 const store = useAuthStore();

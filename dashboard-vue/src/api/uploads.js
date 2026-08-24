@@ -1,4 +1,4 @@
-import { apiRequest } from "./client";
+import { apiRequest, toAssetCdnUrl } from "./client";
 import { dimsFromStatus } from "../utils/imageDims";
 
 // Shared tenant image-upload flow: presign a POST to the media bucket, upload the file,
@@ -54,7 +54,7 @@ function imageUrlCandidates(urls) {
 }
 
 function cdnImageUrl(url) {
-  return String(url || "").replace("images.juniorbay.net", "images.juniorbay.com");
+  return toAssetCdnUrl(url);  // upload bucket host -> configured asset CDN (public_asset_base_url)
 }
 
 function imageUrlLoads(url, timeoutMs = 4000) {

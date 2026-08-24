@@ -552,7 +552,7 @@
 
 <script setup>
 import { computed, onMounted, reactive, ref, watch } from "vue";
-import { apiRequest, getStripeMode, getTenantId } from "../api/client";
+import { apiRequest, getStripeMode, getTenantId, toAssetCdnUrl } from "../api/client";
 import { formatCouponDiscount, useCouponsStore } from "../stores/coupons";
 import { defaultProductPrice, formatMoney, useProductsStore } from "../stores/products";
 import { useServicesStore } from "../stores/services";
@@ -1586,7 +1586,7 @@ function imageUrlCandidates(urls) {
 }
 
 function cdnImageUrl(url) {
-  return String(url || "").replace("images.juniorbay.net", "images.juniorbay.com");
+  return toAssetCdnUrl(url);  // upload bucket host -> configured asset CDN (public_asset_base_url)
 }
 
 function imageUrlLoads(url, timeoutMs = 4000) {
