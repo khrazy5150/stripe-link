@@ -1,6 +1,7 @@
 from datetime import datetime, timezone
 
 from stripe_link.common import json_response, path_params
+from stripe_link.platform_config import legal_overrides
 from stripe_link.domain.legal import (
     LEGAL_CONFIG,
     merge_page_with_default,
@@ -30,7 +31,9 @@ def handler(event, context, *, repository=None, config=None, year_fn=None):
         return _html_response("<h1>Method not allowed</h1>", status_code=405)
 
     repository = repository or legal_pages_repository()
-    config = config or LEGAL_CONFIG
+    # Code defaults (LEGAL_CONFIG) overridden by app_config.legal, so the platform's legal identity (company,
+    # address, support email, website) is a config edit — no redeploy. Explicit `config` (tests) still wins.
+    config = config or {**LEGAL_CONFIG, **legal_overrides()}
     page_id = str(path_params(event).get("page_id") or "").strip()
 
     if not page_id:

@@ -3,6 +3,7 @@ import copy
 import re
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from handlers.page_render import handler
 from stripe_link.runtime.html import RenderError, format_money, render_page, responsive_img
@@ -88,7 +89,10 @@ class PageRenderTests(unittest.TestCase):
         self.products_by_id = {self.product["product_id"]: self.product}
 
     def test_render_page_outputs_semantic_sections_and_price_options(self):
-        html = render_page(self.page, self.offer, self.products_by_id)
+        # The default favicon now comes from the configured asset CDN (app_config.public_asset_base_url), resolved by
+        # the server-side reader — patch it to a known value to assert the tags carry it.
+        with patch("stripe_link.runtime.html.default_favicon_url", return_value="https://images.juniorbay.com/icon/favicon.png"):
+            html = render_page(self.page, self.offer, self.products_by_id)
 
         self.assertIn(">Creatine Gummies</h1>", html)   # the hero headline is the page's sole <h1>
         self.assertEqual(html.count("<h1"), 1)          # exactly one H1 — semantic outline invariant

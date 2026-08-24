@@ -7,6 +7,7 @@ import re
 from typing import Any
 from urllib.parse import urlencode, urlparse
 
+from stripe_link.platform_config import default_favicon_url
 from stripe_link.domain.business_types import BUSINESS_TYPES, resolve_entity_type
 from stripe_link.domain.composition import compose_page, element_channel
 from stripe_link.domain.connect_sync import site_seo_enabled
@@ -35,7 +36,6 @@ FONT_FALLBACK_STACKS = {
     "serif": "serif",
     "monospace": "monospace",
 }
-DEFAULT_FAVICON_URL = "https://images.juniorbay.com/icon/favicon.png"
 CURRENT_YEAR_TOKEN = "{{current_year}}"
 # The landing page shows ONLY the product's standard-context prices. `sale` / `flash_sale` are alternate
 # pricing MODES, not extra cards — a page shows them only when the builder explicitly switches into a Sale
@@ -1439,7 +1439,9 @@ def _render_page_body(
     # <h1>, and JSON-LD all read the same "MacBook" (SEO-18 case consistency).
     title = escape(document_title(page, offer, products_by_id))
     description = escape(document_description(page, offer, products_by_id))
-    favicon_tags = render_favicon_tags(page.get("seo") or {})
+    # Default favicon (when the tenant sets none) comes from the configured asset CDN (app_config.public_asset_base_url),
+    # resolved via the failsafe cached reader — no hardcoded URL. "" outside a configured backend (tests).
+    favicon_tags = render_favicon_tags(page.get("seo") or {}, default_favicon_url())
     styles = render_template_styles(page)
     # Page Composer decides which sections render (plans/PAGE_COMPOSER.md). The renderer only iterates the
     # composed list — it never decides visibility itself.
@@ -4584,8 +4586,11 @@ def render_analytics_adapters(analytics: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
-def render_favicon_tags(seo: dict[str, Any]) -> str:
-    favicon_url = escape(str(seo.get("favicon_url") or DEFAULT_FAVICON_URL))
+def render_favicon_tags(seo: dict[str, Any], default_url: str = "") -> str:
+    favicon_url = str(seo.get("favicon_url") or default_url).strip()
+    if not favicon_url:
+        return ""  # no tenant favicon and no configured default — emit nothing rather than a broken empty href
+    favicon_url = escape(favicon_url)
     return "\n".join([
         f"  <link rel=\"icon\" href=\"{favicon_url}\">",
         f"  <link rel=\"shortcut icon\" href=\"{favicon_url}\">",
