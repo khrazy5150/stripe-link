@@ -708,7 +708,9 @@ def checkout_base_url_for_page(page: dict[str, Any], offer: dict[str, Any], envi
     # Host-agnostic: both modes check out on the SAME endpoint; the mode travels as ?mode= on the Buy URL
     # (baked by build_checkout_url from offer.stripe_mode), so we no longer pick a mode-specific host
     # (plans/STRIPE_MODE_DECOUPLING.md P4). `environment` is retained for signature compatibility.
-    return str(os.environ.get("PUBLIC_CHECKOUT_BASE_URL") or "https://prod.juniorbay.com/checkout").strip()
+    # Deploy-set per stage (template Globals, derived from ApiCustomDomainName). No hardcoded URL fallback —
+    # empty if unset so a misconfiguration is loud, never a silent wrong-environment checkout host.
+    return str(os.environ.get("PUBLIC_CHECKOUT_BASE_URL") or "").strip()
 
 
 def strip_document_keys(document: dict[str, Any]) -> dict[str, Any]:

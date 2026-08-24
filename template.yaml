@@ -190,6 +190,10 @@ Globals:
         PLATFORM_PLANS_TABLE: !Ref PlatformPlansTable
         PLATFORM_BILLING_MODE: !Ref PlatformBillingMode
         TRIAL_PERIOD_DAYS: !Ref TrialPeriodDays
+        # Per-stage (derived from existing domain params) so checkout + billing-return never point at the wrong
+        # environment. Host-agnostic-by-mode (mode travels on the query); the release channel picks the host.
+        PUBLIC_CHECKOUT_BASE_URL: !Sub "https://${ApiCustomDomainName}/checkout"
+        PLATFORM_BILLING_RETURN_URL: !Sub "https://${DashboardCustomDomainName}"
         INVOICES_TABLE: !Ref InvoicesTable
         PRODUCTS_TABLE: !Ref ProductsTable
         OFFERS_TABLE: !Ref OffersTable

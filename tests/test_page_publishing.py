@@ -598,21 +598,23 @@ class PagePublishingTests(unittest.TestCase):
         self.assertIn(b"data-checkout-api-base-url=\"https://api.example.com/dev\"", self.s3.puts[0]["Body"])
 
     def test_publish_page_document_uses_host_agnostic_checkout_with_mode(self):
-        # Decoupled model (plans/STRIPE_MODE_DECOUPLING.md P4): the checkout base is host-agnostic (no dev/prod
-        # split by mode) and the offer's Stripe mode travels as ?mode= on the Buy URL.
-        result = publish_page_document(
-            self.page,
-            offers_repository=self.offers_repo,
-            products_repository=self.products_repo,
-            s3_client=self.s3,
-            pages_bucket="pages",
-            preview_bucket="preview",
-            environment="dev",
-        )
+        # Decoupled model (plans/STRIPE_MODE_DECOUPLING.md P4): the checkout base is the DEPLOY-CONFIGURED host
+        # (PUBLIC_CHECKOUT_BASE_URL, set per stage) — host-agnostic by mode (no dev/prod split by mode); the offer's
+        # Stripe mode travels as ?mode= on the Buy URL.
+        with patch.dict(os.environ, {"PUBLIC_CHECKOUT_BASE_URL": "https://prod.juniorbay.com/checkout"}, clear=False):
+            result = publish_page_document(
+                self.page,
+                offers_repository=self.offers_repo,
+                products_repository=self.products_repo,
+                s3_client=self.s3,
+                pages_bucket="pages",
+                preview_bucket="preview",
+                environment="dev",
+            )
 
         self.assertEqual([artifact["kind"] for artifact in result["artifacts"]], ["preview"])
         html = self.s3.puts[0]["Body"].decode("utf-8")
-        self.assertIn("https://prod.juniorbay.com/checkout?", html)
+        self.assertIn("https://prod.juniorbay.com/checkout?", html)  # the configured base, not an env-split host
         self.assertNotIn("dev.juniorbay.com/checkout", html)
         self.assertIn("clientID=tenant_demo", html)
         self.assertIn("offer=offer_simple_coffee", html)

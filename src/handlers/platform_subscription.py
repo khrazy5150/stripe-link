@@ -30,7 +30,8 @@ _PUBLIC_PLAN_FIELDS = (
 
 
 def _default_return_url() -> str:
-    return os.environ.get("PLATFORM_BILLING_RETURN_URL", "https://app.juniorbay.com").rstrip("/")
+    # Deploy-set per stage (template Globals, derived from DashboardCustomDomainName). No hardcoded URL fallback.
+    return os.environ.get("PLATFORM_BILLING_RETURN_URL", "").rstrip("/")
 
 
 def _public_plan(plan: dict[str, Any]) -> dict[str, Any]:

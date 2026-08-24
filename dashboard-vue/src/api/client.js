@@ -92,11 +92,10 @@ export function getEnvironmentConfig(channel = hostnameReleaseChannel()) {
 }
 
 export function getPagesBaseUrl(channel = hostnameReleaseChannel()) {
+  // Config-driven per channel (pages_base_url, deploy-populated from the stack's PagesDistributionDomainName).
+  // No hardcoded CDN fallback; empty only until app_config loads (bootstrap).
   const configured = getEnvironmentConfig(channel).pages_base_url;
-  if (configured) return configured.replace(/\/$/, "");
-  return channel === "prod"
-    ? "https://dlxn0y34f7dbz.cloudfront.net"
-    : "https://drjfn283z66uz.cloudfront.net";
+  return configured ? configured.replace(/\/$/, "") : "";
 }
 
 export function getPreviewPagesBaseUrl(channel = hostnameReleaseChannel()) {
