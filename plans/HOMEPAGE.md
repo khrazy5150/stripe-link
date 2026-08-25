@@ -50,6 +50,22 @@ dashboard reads the live `PlatformPlansTable`).
 - Footer links **Terms / Privacy / Refund** → the existing **`/legal/*`** pages (config-driven via `app_config.legal`).
 - Company name/address/email come from the same `app_config.legal` (one source — see `docs/APP_CONFIG.md`).
 
+### Brand / design system (provided 2026-08-24)
+- **Colors:** background **`#0b5294`** (deep blue) · accent **`#ff8309`** (orange) · text **`#fffff1`** (cream/off-white)
+  · **Free-trial button `#ffce47`** (gold) with **`#000000`** text on it.
+- **Fonts — via `fonts.juniorbay.com`** (a Google-Fonts-style CSS service; **repeated `family=` params**, `|` fails):
+  `<link rel="stylesheet" href="https://fonts.juniorbay.com/?family=Ubuntu%20Titling&family=Roboto&family=Montserrat">`.
+  - **Wordmark** ("Junior Bay") → `'Ubuntu Titling'` — **note: the family name has a SPACE** (`Ubuntu Titling`); the
+    hyphen form `Ubuntu-Titling` the service does NOT recognize. **Headlines** → `'Roboto'`. **Body** → `'Montserrat'`.
+  - **⚠️ Build dependency:** the service's `@font-face src` points at `https://juniorbay.com/fonts/…woff2` — the apex,
+    where the homepage lives. Ensure `/fonts/*.woff2` keeps resolving after cutover (bundle the fonts into the homepage
+    bucket, or a CloudFront behavior). Add `preconnect` to `fonts.juniorbay.com` **and** `juniorbay.com`.
+- **Wordmark treatment:** "**Junior**" in the text color (`#fffff1`) + "**Bay**" in the accent (`#ff8309`), set in
+  `Ubuntu Titling`.
+- **Logo / favicon:** `https://images.juniorbay.com/icon/favicon.png` (via `public_asset_base_url`).
+- **Hero image:** the provided photo — a creator live-selling her own product (baking kits) to an audience; frames the
+  positioning (turn your audience into a store). *Asset to place in `homepage/images/` at build.*
+
 ### SEO baseline
 Real static HTML with: unique `<title>` + meta description, Open Graph + Twitter tags, `Organization` JSON-LD,
 `sitemap.xml`, `robots.txt` (index,follow — this is the ONE juniorbay.com surface that SHOULD be indexed), a real
