@@ -1,11 +1,11 @@
 # Decouple Stripe mode (test/live) from platform environment (dev/prod)
 
-Status: **CODE COMPLETE — merged to `main`, deployed; the operational cutover (P6) is the only remaining step.**
-Design 2026-08-02. Foundational re-architecture, done **pre-launch** (all "tenants" are the operator's test emails →
-no real data to migrate; cheapest time to do it). Built on **feature branch `stripe-mode-decoupling`, now fully merged
-to `main`** — so the "(branch)" labels in the phase log below are **historical**: that code is on main and rides
-dev+prod via routine deploys, **backward-compatible** while `mode=None` = legacy layout. **P6 (cutover) is
-operational, not code** — see the P6 line.
+Status: **COMPLETE (P0–P6) — merged to `main`, deployed, and cut over in prod (2026-08-02).** Design 2026-08-02.
+Foundational re-architecture, done **pre-launch**. Built on feature branch `stripe-mode-decoupling` (now merged to
+`main` — the "(branch)" labels in the phase log below are **historical**). **The prod cutover was executed and
+verified 2026-08-02** (commit `774aaa3`): a Stripe-**test** purchase completed on the **prod** backend
+(`app.juniorbay.com`), and both Stripe webhook endpoints were repointed at prod with per-mode signing secrets.
+Test-mode data now lives on the prod tables (`OFFER#test#…`, `PAGE#test#…`). Nothing left to do here.
 - **P0 DONE** (committed to `main`): `resolve_stripe_mode`/`normalize_stripe_mode` request helper + inert dashboard
   `stripeMode`/`hostnameReleaseChannel` scaffolding. No behavior change (default mode = test/live per fail-safe).
 - **P0.5 DONE** (branch): stripe-keys → one per-deployment table keyed (tenant_id, mode); tenant-profiles dual-write
@@ -53,9 +53,10 @@ operational, not code** — see the P6 line.
   mode-sensitive on-page fetch defaults to test anymore.
 - **Cutover SCRIPT DONE** (branch): `scripts/mode_decoupling_cutover.py` — jb--prefix guard + preserve allow-list +
   backup-first + dry-run default + dev-first (`--allow-prod`). Invariants locked by tests/test_cutover_classification.py.
-- **P6 NEXT (cutover)** — operational, not code: run the cutover script (dry-run → --confirm, dev then prod), then
-  re-onboard tenants, re-run Stripe Connect OAuth per mode, re-add custom domains, and point both Stripe webhook
-  endpoints at prod with both per-mode signing secrets.
+- **P6 DONE (cutover, 2026-08-02, commit `774aaa3`)** — operational: ran the cutover script (dev then prod),
+  re-onboarded, re-ran Stripe Connect OAuth per mode, re-added custom domains, and pointed both Stripe webhook
+  endpoints at prod with per-mode signing secrets. **Verified:** a Stripe-test purchase completed on the prod backend
+  (`app.juniorbay.com`); test-mode data now lives on the prod tables.
 
 ## The problem — mode and infra are conflated
 
@@ -226,9 +227,9 @@ rename it or keep `preview.juniorbay.com` as a legacy alias to avoid breaking an
   the CloudFront host→prefix Function, de-hardcoding `TEST_PAGES_HOST` into `app_config`, and deploy-time population
   from stack outputs. Fixes the prod-test preview misroute noted there. A cheap early slice of P5 can land the four
   hosts + config indirection *before* the full backend per-mode work, since it's additive.
-- **P6 — Migration + cleanup:** move the operator's existing test-mode data from dev tables → prod tables tagged
-  `test` (low-stakes, all self-owned); retire dev's tenant-test role (dev = pure staging); rebuild the onboarding
-  flow (live-first + opt-in Stripe-test sandbox, `plans/` onboarding streamline) on the clean model.
+- **P6 — Migration + cleanup — DONE 2026-08-02:** moved the operator's test-mode data onto the prod tables tagged
+  `test`; retired dev's tenant-test role (dev = pure staging); the onboarding flow was rebuilt (live-first + opt-in
+  Stripe-test sandbox) on the clean model.
 
 ## Migration — CURATED SELECTIVE WIPE (revised 2026-08-02 — supersedes "truncate all tables")
 
