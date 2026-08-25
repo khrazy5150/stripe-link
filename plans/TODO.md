@@ -288,6 +288,21 @@ Deferred, non-blocking follow-ups. Each item notes what, why it was deferred, an
 
 ## Production setup
 
+### ⭐ Public marketing homepage — `juniorbay.com` (apex)
+- **What:** a public, SEO-facing **sales page** at `https://juniorbay.com` whose only job is **Start free trial** /
+  **Sign in** → `app.juniorbay.com`. **Plain static HTML/CSS/JS** (no framework, no build — SEO + speed), hosted in
+  **this repo** with an **isolated deploy** (own S3 bucket + CloudFront + apex Route 53 alias; reuses the existing
+  `*.juniorbay.com`/apex cert `1a72b7c6`). **No pricing shown** (trial-first; affordability hint *"It costs less than
+  your coffee habit"* — keep the money vague so it survives repricing); footer **Terms/Privacy/Refund → the `/legal/*`
+  pages**; identity from `app_config.legal`. Full plan: **`plans/HOMEPAGE.md`**.
+- **Bundled prereq — front-end cleanup:** `rm -rf dashboard` (legacy plain-JS front-end, untracked/unused) +
+  `git mv dashboard-vue dashboard` (drop the `-vue` suffix); new folder = `homepage/`. Low blast radius (only
+  `deploy/deploy-dashboard.sh` + doc mentions reference the name).
+- **Unblocks** the Google OAuth verification task below (which requires a public homepage + privacy policy on
+  `juniorbay.com`), and gives the `legal.website` link a real destination.
+- **Done:** the old `frontpage/dot-com` classifieds app was relocated to `frontpage/dot-net` (future `juniorbay.net`).
+  Architecture locked; homepage sections/copy/design still to discuss. Not built.
+
 ### Optimize prod CloudFront (pages) for indexing + aggressive caching
 - **What:** Optimize prod CloudFront (`dlxn0y34f7dbz`) for indexing, follow, archiving, aggressive
   caching, long TTLs, and optimized compression.
