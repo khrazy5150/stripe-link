@@ -95,7 +95,7 @@ Deferred, non-blocking follow-ups. Each item notes what, why it was deferred, an
   Behavior by Site count: **one Site** → attach silently; **several** → publish, then the existing "Attach to a
   Site" modal opens to pick one (publish is not blocked); **zero** → publish only (nothing to attach to yet).
   Already-attached pages are left as-is (no re-attach, no prompt).
-- **Where:** `dashboard-vue/src/components/LandingPages.vue` — `ensureSiteAttachmentOnPublish()`, called from both
+- **Where:** `dashboard/src/components/LandingPages.vue` — `ensureSiteAttachmentOnPublish()`, called from both
   publish paths (`publishPage` list menu + `saveBuilderPageWithStatus("published")` builder). Reuses the existing
   `attachPageToSiteCore` / `pageAttachKind` / attach modal and `sitesStore.attachPage` (backend `attach_page`);
   `attachPage._replace` refreshes the store so the list badge + nice URL update reactively. Frontend-only.
@@ -114,7 +114,7 @@ Deferred, non-blocking follow-ups. Each item notes what, why it was deferred, an
   progressively; explains propagation; auto-checks status so users rarely click "Check Status").
 - **Current behavior:** the backend is in place (`src/handlers/custom_domains.py` +
   `custom_domains_resolve.py`, Cloudflare Worker + resolve API); the dashboard only exposes the simple
-  TenantConfig-based form inside `dashboard-vue/src/components/Configuration.vue`.
+  TenantConfig-based form inside `dashboard/src/components/Configuration.vue`.
 - **Where to fix:** build the wizard as a dashboard component (its own multi-step flow) per the
   reference design; wire it to the existing custom-domains endpoints. No backend changes needed.
 - **Why deferred:** the functional path works via the Configuration form; the wizard is a UX upgrade.
@@ -239,7 +239,7 @@ Deferred, non-blocking follow-ups. Each item notes what, why it was deferred, an
     ledger (currently authored by overwrite, so they drift on missed/double webhooks) — the plan's core aim.
   - **Tax-liability-by-jurisdiction** reporting (group `tax` by `metadata.tax_jurisdiction`; feeds PRD Phase 8).
   - **Rollups**, **reversing-entry corrections**, **migration/backfill**, and a **dashboard reporting UI**
-    (no ledger view exists in `dashboard-vue`).
+    (no ledger view exists in `dashboard`).
 - **Why deferred:** the money-movement substrate works and orders report correctly today; this is the P&L /
   tax-reporting layer on top.
 
@@ -295,9 +295,10 @@ Deferred, non-blocking follow-ups. Each item notes what, why it was deferred, an
   `*.juniorbay.com`/apex cert `1a72b7c6`). **No pricing shown** (trial-first; affordability hint *"It costs less than
   your coffee habit"* — keep the money vague so it survives repricing); footer **Terms/Privacy/Refund → the `/legal/*`
   pages**; identity from `app_config.legal`. Full plan: **`plans/HOMEPAGE.md`**.
-- **Bundled prereq — front-end cleanup:** `rm -rf dashboard` (legacy plain-JS front-end, untracked/unused) +
-  `git mv dashboard-vue dashboard` (drop the `-vue` suffix); new folder = `homepage/`. Low blast radius (only
-  `deploy/deploy-dashboard.sh` + doc mentions reference the name).
+- **Front-end cleanup — DONE 2026-08-24:** retired the legacy plain-JS `dashboard/` folder and renamed
+  `dashboard-vue` → `dashboard` (drop the `-vue` suffix); the new homepage folder will be `homepage/`. Updated the one
+  functional reference (`deploy/deploy-dashboard.sh`), the npm package name, the `/dashboard/` `.gitignore` line, and
+  the doc mentions.
 - **Unblocks** the Google OAuth verification task below (which requires a public homepage + privacy policy on
   `juniorbay.com`), and gives the `legal.website` link a real destination.
 - **Done:** the old `frontpage/dot-com` classifieds app was relocated to `frontpage/dot-net` (future `juniorbay.net`).

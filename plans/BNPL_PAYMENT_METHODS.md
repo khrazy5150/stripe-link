@@ -204,7 +204,7 @@ and triggers the capability request; a `GET` returns toggles + refreshed capabil
 ## Ties
 `src/handlers/checkout.py` + `cart_checkout.py` (payload build), `src/handlers/stripe_connect.py` (connected
 account id), `src/stripe_link/stripe_client.py` (raw Stripe HTTP), `src/stripe_link/domain/documents.py`
-(`validate_tenant_config`), `dashboard-vue/src/components/StripeKeys.vue` (→ Payments screen). Stripe docs:
+(`validate_tenant_config`), `dashboard/src/components/StripeKeys.vue` (→ Payments screen). Stripe docs:
 [Account capabilities](https://docs.stripe.com/connect/account-capabilities),
 [Connect payment methods](https://docs.stripe.com/connect/payment-methods),
 [Payment method configurations](https://docs.stripe.com/connect/payment-method-configurations),

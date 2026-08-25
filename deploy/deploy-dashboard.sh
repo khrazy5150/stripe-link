@@ -5,7 +5,7 @@ ENVIRONMENT="${1:-dev}"
 STACK_NAME="${STACK_NAME:-jb-stripe-link-stack-${ENVIRONMENT}}"
 REGION="${AWS_REGION:-us-west-2}"
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-DASHBOARD_APP_DIR="${ROOT_DIR}/dashboard-vue"
+DASHBOARD_APP_DIR="${ROOT_DIR}/dashboard"
 DASHBOARD_DIR="${DASHBOARD_DIR:-${DASHBOARD_APP_DIR}/dist}"
 
 stack_output() {

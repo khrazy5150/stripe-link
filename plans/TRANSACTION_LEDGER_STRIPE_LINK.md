@@ -27,7 +27,7 @@ port it verbatim; it is single-merchant, raw-boto3, and scans full partitions).
 - **Tax-liability-by-jurisdiction** grouping (feeds PRD Phase 8) — `summarize` totals tax but doesn't group
   by `metadata.tax_jurisdiction`.
 - **Rollups** (fast-dashboard rollup records), **reversing-entry corrections** flow, **migration/backfill**,
-  and a **dashboard reporting UI** (no ledger view in `dashboard-vue`).
+  and a **dashboard reporting UI** (no ledger view in `dashboard`).
 
 ## Why
 

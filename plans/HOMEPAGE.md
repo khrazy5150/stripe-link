@@ -55,14 +55,11 @@ Real static HTML with: unique `<title>` + meta description, Open Graph + Twitter
 `sitemap.xml`, `robots.txt` (index,follow — this is the ONE juniorbay.com surface that SHOULD be indexed), a real
 `<h1>`, descriptive `alt`, and a fast, image-optimized hero. Favicon from the asset CDN (`public_asset_base_url`).
 
-## Prerequisite (front-end cleanup — agreed, not yet done)
-Do before/with scaffolding so the folder names are clean from the start:
-1. `rm -rf dashboard` — the legacy plain-JS front-end (untracked, unused, superseded by `dashboard-vue`).
-2. `git mv dashboard-vue dashboard` — drop the now-redundant `-vue` suffix. Update the one functional reference
-   (`deploy/deploy-dashboard.sh` `DASHBOARD_APP_DIR`) + prose mentions in `plans/*.md` / `docs/APP_CONFIG.md`; rebuild
-   to verify. Low blast radius (SAM/samconfig don't reference the source folder).
-
 ## Done already
+- **Front-end cleanup (2026-08-24):** retired the legacy plain-JS `dashboard/` folder and `git mv dashboard-vue →
+  dashboard` (dropping the `-vue` suffix; the new marketing folder will be `homepage/`). Updated the one functional
+  reference (`deploy/deploy-dashboard.sh`), the npm package name, the `/dashboard/` `.gitignore` line, and the doc
+  mentions. Build verified.
 - The old `frontpage/dot-com` classifieds app was relocated to `frontpage/dot-net` (for a future `juniorbay.net`);
   the retired travel test was discarded. The homepage is built here, not in the frontpage project.
 

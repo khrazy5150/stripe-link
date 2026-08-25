@@ -132,5 +132,5 @@ curl -s "https://prod.juniorbay.com/app-config/app_config?environment=global" | 
 - **Never hand-edit the deploy-populated fields** — the next deploy's populate step overwrites them.
 - **Backend cache:** changes apply on the next Lambda cold start (no TTL on the reader). If you need it immediately,
   force new containers (e.g. a trivial `sam deploy`), or call `platform_config.reset_cache()` in a one-off.
-- **The one thing NOT in config:** the dashboard bootstrap API base (`API_BASES` in `dashboard-vue/src/api/client.js`)
+- **The one thing NOT in config:** the dashboard bootstrap API base (`API_BASES` in `dashboard/src/api/client.js`)
   is intentionally hardcoded — it's how the app finds the config in the first place.

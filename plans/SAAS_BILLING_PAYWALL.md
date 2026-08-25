@@ -105,7 +105,7 @@ is deliberate.
 
 ## Dashboard
 
-- **Billing screen** (`dashboard-vue`): show plans from the catalog, current plan + status + trial/next-renewal
+- **Billing screen** (`dashboard`): show plans from the catalog, current plan + status + trial/next-renewal
   date, "Subscribe / Manage" → Stripe Checkout(subscription) / Billing Portal. Extends the read-only
   `BillingConnectCardFunction` (`billing.py`) into a real subscribe/manage flow.
 

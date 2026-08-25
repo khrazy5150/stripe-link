@@ -64,8 +64,8 @@ Two orthogonal concepts are currently ONE switch:
 
 Today they're the same toggle:
 - Dashboard test/live swaps the **whole backend base URL** — `test→dev.juniorbay.com`, `live→prod.juniorbay.com`
-  ([client.js:1-8](../dashboard-vue/src/api/client.js#L1)); no `mode` param, a different backend. No hostname
-  binding — it's purely `localStorage["stripeLinkVueEnvironment"]` ([client.js:40](../dashboard-vue/src/api/client.js#L40)).
+  ([client.js:1-8](../dashboard/src/api/client.js#L1)); no `mode` param, a different backend. No hostname
+  binding — it's purely `localStorage["stripeLinkVueEnvironment"]` ([client.js:40](../dashboard/src/api/client.js#L40)).
 - Webhook hard-binds mode to the deploy: `_mode_for_environment()` = `"live" if ENVIRONMENT=="prod" else "test"`
   ([stripe_webhook.py:84](../src/handlers/stripe_webhook.py#L84)); it even rejects mismatched `livemode` (`:190`).
 - Published pages bake mode→backend-host: a test page's Buy button points at `dev.juniorbay.com/checkout`
