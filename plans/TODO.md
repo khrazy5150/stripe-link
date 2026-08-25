@@ -52,19 +52,23 @@ Deferred, non-blocking follow-ups. Each item notes what, why it was deferred, an
   sandbox=dev, dev becomes pure software staging) + a per-tenant **Stripe-mode toggle within prod** so a tenant's
   test/"sandbox" mode runs on the production platform with test Stripe keys. Full plan +
   contract + 6 phases in **`plans/STRIPE_MODE_DECOUPLING.md`**.
-- **Foundational + big** (dashboard/api-client, per-mode data across all entities, webhook mode-from-livemode,
-  publishing/checkout URL, CDN mode-partitioning). **Approved to plan** 2026-08-02 (do while pre-launch = no data to
-  migrate). **Prerequisite** for the clean onboarding streamline; **supersedes** the shipped mode-follows-environment
-  fix. Not built. Next step: greenlight the phasing + start P0.
-- **The `stripe_keys` fixed-name two-table design (documents.py:357) is the existing cross-mode precedent to
-  generalize.**
-- **Serve-host naming decided 2026-08-19** (see the plan's "Serve-host naming + config-driven URLs" section): all
-  artifact-serving hosts move to `{stage}-{mode}.juniorbay.com` (`dev/prod` stage tokens, NOT the `app/sandbox`
-  dashboard hosts) — `dev-test`, `dev-live`, `prod-test`, `prod-live`. `TEST_PAGES_HOST` gets de-hardcoded into
-  `app_config` (deploy-populated from stack outputs); a CloudFront host→bucket-prefix Function keeps the bucket
-  layout unchanged. **Live bug it fixes:** `test.juniorbay.com` is dev-only, so app(prod)+test-mode previews are
-  misrouted to the dev viewer. The just-shipped `preview.juniorbay.com` becomes `prod-live.juniorbay.com` (keep as
-  alias). Landable as an early additive slice of P5.
+- **Status — code COMPLETE, merged to `main`, deployed; only the operational cutover (P6) remains.** The
+  `stripe-mode-decoupling` branch is fully merged (git: 0 branch-only commits) and rides on dev+prod via routine main
+  deploys — **backward-compatible** (`mode=None` = legacy layout, so behavior is unchanged until the cutover runs).
+  Full per-phase detail: **`plans/STRIPE_MODE_DECOUPLING.md`**.
+  - **Done (on main):** P0 request helper + dashboard scaffolding · P0.5 stripe-keys → one per-deployment table keyed
+    `(tenant, mode)` · P1 hostname→backend + Stripe mode as `?mode=`/`X-Stripe-Mode` · P2 **mode-in-key** data model
+    (`{TYPE}#{mode}#{id}`, so test/live copies coexist) across all tenant entities · P3 webhook mode-from-`livemode`
+    · P4 host-agnostic checkout + Buy-URL `?mode=` · P5 mode-partitioned artifact paths (`test/` prefix) + forced
+    `noindex` + mode-aware URL builders. **1335 tests.**
+- **P6 NEXT — the cutover (operational, not code):** run `scripts/mode_decoupling_cutover.py` (dry-run → `--confirm`,
+  **dev then prod**), re-onboard tenants, re-run Stripe **Connect OAuth per mode**, re-add custom domains, and point
+  **both** Stripe webhook endpoints at prod with the per-mode signing secrets. **Prerequisite** for the clean
+  onboarding streamline; **supersedes** the shipped mode-follows-environment fix.
+- **Serve-host slice already SHIPPED to prod on `main`** (2026-08-19, `plans/SERVE_HOST_SCHEME.md`): the
+  `{stage}-{mode}.juniorbay.com` hosts (`dev/prod`-`test`/`-live`); `TEST_PAGES_HOST` + preview base de-hardcoded into
+  `app_config` (deploy-populated); `preview.juniorbay.com`/`test.juniorbay.com` retired. Complements P5's artifact-path
+  partitioning.
 
 ### Streamline Connect onboarding — live-first + opt-in Stripe-test sandbox — SHIPPED (code) 2026-08-02
 - **What:** default new tenants to LIVE; the wizard onboards their live Stripe only (with expanded `stripe_user[]`

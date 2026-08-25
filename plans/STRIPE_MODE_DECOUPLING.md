@@ -1,8 +1,11 @@
 # Decouple Stripe mode (test/live) from platform environment (dev/prod)
 
-Status: **IN PROGRESS.** Design 2026-08-02. Foundational re-architecture. Approved to plan in full while
-**pre-launch** (all "tenants" are the operator's test emails → no real data to migrate; cheapest time to do it).
-Build workflow: **feature branch `stripe-mode-decoupling`** (main stays deployable), **dev-first cutover**.
+Status: **CODE COMPLETE — merged to `main`, deployed; the operational cutover (P6) is the only remaining step.**
+Design 2026-08-02. Foundational re-architecture, done **pre-launch** (all "tenants" are the operator's test emails →
+no real data to migrate; cheapest time to do it). Built on **feature branch `stripe-mode-decoupling`, now fully merged
+to `main`** — so the "(branch)" labels in the phase log below are **historical**: that code is on main and rides
+dev+prod via routine deploys, **backward-compatible** while `mode=None` = legacy layout. **P6 (cutover) is
+operational, not code** — see the P6 line.
 - **P0 DONE** (committed to `main`): `resolve_stripe_mode`/`normalize_stripe_mode` request helper + inert dashboard
   `stripeMode`/`hostnameReleaseChannel` scaffolding. No behavior change (default mode = test/live per fail-safe).
 - **P0.5 DONE** (branch): stripe-keys → one per-deployment table keyed (tenant_id, mode); tenant-profiles dual-write
