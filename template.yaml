@@ -109,6 +109,23 @@ Parameters:
     Type: String
     Default: juniorbay.com.
     Description: Route 53 hosted zone name used for the test-serve custom domain alias record.
+  HomepageEnabled:
+    Type: String
+    Default: "false"
+    AllowedValues: ["true", "false"]
+    Description: Set to true to create the public marketing homepage bucket + CloudFront distribution (prod only). Copy is deployed via deploy/deploy-homepage.sh (S3 sync), independent of this stack. See plans/HOMEPAGE.md
+  HomepageCustomDomainName:
+    Type: String
+    Default: ""
+    Description: Apex marketing host (juniorbay.com). Doubles as the cutover TOGGLE -- empty = Phase 1 (distribution serves on *.cloudfront.net only, no apex alias); set = Phase 2 (claims the apex + www alias and Route 53 records). Free the CNAME off the old apex distribution (E1VGTULTFA3BO3) before setting this.
+  HomepageCustomDomainCertificateArn:
+    Type: String
+    Default: ""
+    Description: us-east-1 ACM cert covering the apex homepage host + www (reuse the 1a72b7c6 cert, whose SANs include the bare juniorbay.com apex). Required for Phase 2.
+  HomepageCustomDomainHostedZoneName:
+    Type: String
+    Default: juniorbay.com.
+    Description: Route 53 hosted zone name used for the homepage apex + www alias records.
   CognitoUserPoolId:
     Type: String
     Default: us-west-2_gBemPnEF8
@@ -156,6 +173,13 @@ Conditions:
   HasPreviewLiveDomain: !And
     - !Not [!Equals [!Ref PreviewLiveDomainName, ""]]
     - !Not [!Equals [!Ref PreviewCustomDomainCertificateArn, ""]]
+  # Marketing homepage: HasHomepage builds the bucket+distribution (Phase 1, cloudfront.net only);
+  # HasHomepageApex additionally claims the apex+www alias and Route 53 records (Phase 2 cutover).
+  HasHomepage: !Equals [!Ref HomepageEnabled, "true"]
+  HasHomepageApex: !And
+    - !Equals [!Ref HomepageEnabled, "true"]
+    - !Not [!Equals [!Ref HomepageCustomDomainName, ""]]
+    - !Not [!Equals [!Ref HomepageCustomDomainCertificateArn, ""]]
   HasStripePlatformSecret: !Not [!Equals [!Ref StripePlatformSecretArn, ""]]
   HasCloudflareZone: !Not [!Equals [!Ref CloudflareZoneId, ""]]
   # Non-prod (test/dev) published pages must never be indexed. NOT applied in prod: there, the pages
@@ -4172,6 +4196,130 @@ Resources:
         DNSName: !GetAtt PreviewDistribution.DomainName
         HostedZoneId: Z2FDTNDATAQYW2
 
+  # ---- Public marketing homepage (juniorbay.com apex) — see plans/HOMEPAGE.md ----
+  # Isolated bucket + distribution; marketing copy is synced by deploy/deploy-homepage.sh (no stack deploy).
+  HomepageBucket:
+    Type: AWS::S3::Bucket
+    Condition: HasHomepage
+    Properties:
+      BucketName: !Sub "${ProjectPrefix}-homepage-${Environment}-${AWS::AccountId}"
+      PublicAccessBlockConfiguration: *PrivateBucketAccess
+      BucketEncryption: *BucketEncryption
+      VersioningConfiguration:
+        Status: Enabled
+
+  HomepageOriginAccessControl:
+    Type: AWS::CloudFront::OriginAccessControl
+    Condition: HasHomepage
+    Properties:
+      OriginAccessControlConfig:
+        Name: !Sub "${ProjectPrefix}-homepage-oac-${Environment}"
+        Description: !Sub "OAC for ${ProjectPrefix} marketing homepage ${Environment}"
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
+
+  HomepageDistribution:
+    Type: AWS::CloudFront::Distribution
+    Condition: HasHomepage
+    Properties:
+      DistributionConfig:
+        Enabled: true
+        Comment: !Sub "${ProjectPrefix} stripe-link marketing homepage ${Environment}"
+        DefaultRootObject: index.html
+        HttpVersion: http2and3
+        PriceClass: PriceClass_100
+        # Phase 2 (apex set): claim juniorbay.com + www. Phase 1 (apex empty): cloudfront.net only.
+        Aliases: !If
+          - HasHomepageApex
+          - - !Ref HomepageCustomDomainName
+            - !Sub "www.${HomepageCustomDomainName}"
+          - !Ref AWS::NoValue
+        Origins:
+          - Id: HomepageS3Origin
+            DomainName: !GetAtt HomepageBucket.RegionalDomainName
+            OriginAccessControlId: !Ref HomepageOriginAccessControl
+            S3OriginConfig:
+              OriginAccessIdentity: ""
+          # /legal/* is proxied to the API so Terms/Privacy live at the apex (one source of truth).
+          - Id: HomepageLegalApiOrigin
+            DomainName: !Ref ApiCustomDomainName
+            CustomOriginConfig:
+              OriginProtocolPolicy: https-only
+              OriginSSLProtocols: [TLSv1.2]
+        DefaultCacheBehavior:
+          TargetOriginId: HomepageS3Origin
+          ViewerProtocolPolicy: redirect-to-https
+          AllowedMethods: [GET, HEAD, OPTIONS]
+          CachedMethods: [GET, HEAD]
+          Compress: true
+          CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6  # Managed-CachingOptimized
+        CacheBehaviors:
+          # Forward /legal/* to the legal API. Managed-CachingDisabled forwards no Host header, so the
+          # origin receives Host=<ApiCustomDomainName> (required for the API Gateway custom-domain mapping).
+          - PathPattern: /legal/*
+            TargetOriginId: HomepageLegalApiOrigin
+            ViewerProtocolPolicy: redirect-to-https
+            AllowedMethods: [GET, HEAD, OPTIONS]
+            CachedMethods: [GET, HEAD]
+            Compress: true
+            CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad  # Managed-CachingDisabled
+        CustomErrorResponses:
+          - ErrorCode: 403
+            ResponseCode: 404
+            ResponsePagePath: /404.html
+            ErrorCachingMinTTL: 60
+          - ErrorCode: 404
+            ResponseCode: 404
+            ResponsePagePath: /404.html
+            ErrorCachingMinTTL: 60
+        ViewerCertificate: !If
+          - HasHomepageApex
+          - AcmCertificateArn: !Ref HomepageCustomDomainCertificateArn
+            SslSupportMethod: sni-only
+            MinimumProtocolVersion: TLSv1.2_2021
+          - CloudFrontDefaultCertificate: true
+
+  HomepageBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Condition: HasHomepage
+    Properties:
+      Bucket: !Ref HomepageBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: AllowCloudFrontRead
+            Effect: Allow
+            Principal:
+              Service: cloudfront.amazonaws.com
+            Action: s3:GetObject
+            Resource: !Sub "${HomepageBucket.Arn}/*"
+            Condition:
+              StringEquals:
+                AWS:SourceArn: !Sub "arn:aws:cloudfront::${AWS::AccountId}:distribution/${HomepageDistribution}"
+
+  HomepageApexRecord:
+    Type: AWS::Route53::RecordSet
+    Condition: HasHomepageApex
+    Properties:
+      HostedZoneName: !Ref HomepageCustomDomainHostedZoneName
+      Name: !Ref HomepageCustomDomainName
+      Type: A
+      AliasTarget:
+        DNSName: !GetAtt HomepageDistribution.DomainName
+        HostedZoneId: Z2FDTNDATAQYW2
+
+  HomepageWwwRecord:
+    Type: AWS::Route53::RecordSet
+    Condition: HasHomepageApex
+    Properties:
+      HostedZoneName: !Ref HomepageCustomDomainHostedZoneName
+      Name: !Sub "www.${HomepageCustomDomainName}"
+      Type: A
+      AliasTarget:
+        DNSName: !GetAtt HomepageDistribution.DomainName
+        HostedZoneId: Z2FDTNDATAQYW2
+
 Outputs:
   ApiUrl:
     Description: Base URL for the stripe-link API.
@@ -4285,6 +4433,25 @@ Outputs:
       - HasDashboardCustomDomain
       - !Sub "https://${DashboardCustomDomainName}"
       - !Sub "https://${DashboardDistribution.DomainName}"
+  HomepageBucketName:
+    Condition: HasHomepage
+    Description: S3 bucket for the marketing homepage (deploy/deploy-homepage.sh syncs here).
+    Value: !Ref HomepageBucket
+  HomepageDistributionId:
+    Condition: HasHomepage
+    Description: CloudFront distribution ID for the marketing homepage (invalidate on deploy).
+    Value: !Ref HomepageDistribution
+  HomepageDistributionDomainName:
+    Condition: HasHomepage
+    Description: CloudFront domain for the homepage (Phase 1 test URL before the apex cutover).
+    Value: !GetAtt HomepageDistribution.DomainName
+  HomepageUrl:
+    Condition: HasHomepage
+    Description: Public homepage URL.
+    Value: !If
+      - HasHomepageApex
+      - !Sub "https://${HomepageCustomDomainName}"
+      - !Sub "https://${HomepageDistribution.DomainName}"
   AppConfigTableName:
     Description: App configuration table.
     Value: !Ref AppConfigTable

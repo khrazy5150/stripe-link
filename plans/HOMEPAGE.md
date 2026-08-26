@@ -72,6 +72,34 @@ Real static HTML with: unique `<title>` + meta description, Open Graph + Twitter
 `<h1>`, descriptive `alt`, and a fast, image-optimized hero. Favicon from the asset CDN (`public_asset_base_url`).
 
 ## Done already
+- **Page built — Track A copy + Track B scaffold (2026-08-24):** `homepage/` static site created —
+  `index.html` (hero → 3 value props → **"A better link-in-bio" capability-orbit infographic** → 3-step
+  how-it-works → **"Everything you need to start selling" checklist + CSS storefront mockup** → trust strip →
+  final CTA → footer), `css/style.css` (brand kit applied), `robots.txt`, `sitemap.xml`, `images/` (README).
+  Header has logo mark + in-page nav (Features / How it works). Two CSS-only product mockups (phone-store in
+  the infographic, browser-store in the checklist) — no image assets, on-brand, re-themeable. Capability
+  bubbles are **only real JB features** (no Courses/Webinars/Affiliate — Stan has them, we don't). **Approved copy:**
+  hero H1 *"Turn your audience into a storefront."* + coffee-habit money hint; trust strip **replaces** a
+  testimonials/"proof" block (pre-launch — no real customers to quote; add later). Wordmark uses `Ubuntu Titling`
+  (space, weight 700), headlines `Roboto`, body `Montserrat`. **Still to do:** (1) bundle the hero photo at
+  `homepage/images/hero.jpg`; (2) Track B infra — `deploy/deploy-homepage.sh` + `template.yaml`
+  `HomepageBucket`/`Distribution`/apex Route 53; (3) wire `/legal/*` + `/fonts/*` to resolve on the apex.
+- **Track B — deploy infra BUILT (2026-08-24, NOT yet deployed):** `template.yaml` gained `HomepageEnabled`
+  + `HomepageCustomDomain{Name,CertificateArn,HostedZoneName}` params, `HasHomepage`/`HasHomepageApex`
+  conditions, and resources `HomepageBucket` / `HomepageOriginAccessControl` / `HomepageDistribution`
+  (S3 default origin + `/legal/*` → API custom origin) / `HomepageBucketPolicy` / `HomepageApexRecord` +
+  `HomepageWwwRecord`, plus outputs. `deploy/deploy-homepage.sh` (sync + invalidate, no build) and
+  `homepage/404.html` added. **Fonts bundled** into `homepage/fonts/{Ubuntu,Roboto,Montserrat}/…woff2` at the
+  exact `/fonts/*` paths the font-service `@font-face` points to (verified they live in the old apex S3 bucket
+  today). Cert **1a72b7c6 verified to include the bare apex SAN** (not just the wildcard). Template validates.
+  **Cutover choreography (apex is a toggle — `HomepageCustomDomainName`):**
+  1. *Phase 1* — deploy with `HomepageEnabled=true`, apex param empty → dist serves on `*.cloudfront.net`;
+     upload via `deploy-homepage.sh` and verify site + `/legal/*` + `/fonts/*`. Zero impact on live apex.
+  2. *Phase 2* — the old apex dist **E1VGTULTFA3BO3** (separate project; origin = `juniorbay.com` S3 bucket,
+     us-west-2) still holds `juniorbay.com` + `www`. CloudFront forbids the same CNAME on two dists, so
+     **free those aliases off E1VGTULTFA3BO3 first** (or `aws cloudfront associate-alias`), then set
+     `HomepageCustomDomainName=juniorbay.com` + cert `1a72b7c6` + zone and redeploy → claims apex+www alias
+     and Route 53 A-records. Old classifieds app moves to juniorbay.net separately.
 - **Front-end cleanup (2026-08-24):** retired the legacy plain-JS `dashboard/` folder and `git mv dashboard-vue →
   dashboard` (dropping the `-vue` suffix; the new marketing folder will be `homepage/`). Updated the one functional
   reference (`deploy/deploy-dashboard.sh`), the npm package name, the `/dashboard/` `.gitignore` line, and the doc
