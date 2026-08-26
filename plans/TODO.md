@@ -165,6 +165,25 @@ Deferred, non-blocking follow-ups. Each item notes what, why it was deferred, an
   `default_price_id` (self-serve in the UI today).
 - **Wiring:** premium subscription (`billing_status` / `PlatformPlansTable`) → `tier_id` → live fee + entitlements
   (the subscription rail already ships; reuse it). Prereq for the homepage "always free" reword (Production setup).
+- **(c) Feature packaging — FIXED vs METERED (deep-dive TBD):** the purpose of premium/value-add is to **mitigate
+  metered COGS**, so split features by *cost-to-us*, not one-by-one:
+  - *Free forever:* the core earning loop — landing pages, checkout, digital delivery, basic products, flat-rate
+    shipping (never gate a sale).
+  - *Premium (bundled, ~$19 + ~2% fee):* all **zero-marginal-cost** features — GMB, integrations (Zapier/HubSpot),
+    A/B, booking, carrier-calculated shipping/labels. Already gateable by flipping each plan's **entitlements map**
+    (`entitlements.py` / `PlatformPlansTable`) — minimal build. Resist Shopify-style à la carte add-ons for these
+    (decision fatigue for a creator audience; the transaction fee already captures success-based upside).
+  - *Metered (real per-use COGS — needs a usage-billing rail that is NOT built):* **AI generation, SMS, maybe email.**
+    Flat-rating these is a margin sink; if offered in-house, price as an included monthly allowance + overage, or a
+    metered add-on.
+  - **⭐ V1 likely decision:** **side-step in-house metered features** and offer **simple integrations** instead
+    (bring-your-own AI / email / SMS) so there is **no metered COGS to recover** and no usage rail to build
+    (reportedly how Stan works today). Revisit in-house metered offerings only when demand/margin justifies the rail.
+- **Code facts (verified 2026-08-26):** fee is config-driven (no hardcoded % at charge sites); plans + per-feature
+  entitlements are **table-driven** (edits take effect within a cache TTL, no deploy). **Caveats:** Stripe Prices are
+  **immutable** — editing a plan's dollar amount re-prices only NEW subscribers; existing ones need a new Price +
+  migration (deferred tool). The subscription is a **single line item** today (no multi-item/add-on billing), and
+  there is **no metered/usage rail** yet (same gap the Identity gate flagged).
 
 ### Age / identity verification gate (Stripe Identity)
 - **UNBLOCKED 2026-08-03** — the SaaS billing subscription rail it needed now ships in prod. Verification charging can
