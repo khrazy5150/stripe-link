@@ -84,6 +84,24 @@ Deferred, non-blocking follow-ups. Each item notes what, why it was deferred, an
   `business` identity on user_profile is Stripe-seeded and often empty pre-connect); optional auto-switch-to-test UX
   polish after sandbox setup.
 
+### Branded Connect onboarding intro (Standard-account UX polish) — decided 2026-08-26, NOT built
+- **Context:** onboarding redirects straight to Stripe's **OAuth** flow (Standard accounts), which feels intimidating
+  vs Stan's branded intro + hosted/embedded flow. **Staying on Standard** — Express was rejected **NOT for fees**
+  (`application_fee` works identically on Standard/Express/Custom) but because Standard keeps dispute / negative-balance
+  **liability with the merchant** and avoids a go-forward account migration. Standard **cannot embed** onboarding, so
+  the realistic win is a friendly wrapper around the OAuth redirect (Plan A).
+- **Plan A (what to build):**
+  - **Branded intro/interstitial page** in the dashboard before the redirect: "Set up payments — Junior Bay partners
+    with Stripe," what to have ready (gov-ID + bank details), a reassuring "you'll finish securely on Stripe and come
+    right back," home-country context, clear CTA. Removes most of the "leaving to a scary form" feeling.
+  - **Maximize `stripe_user[]` prefill** (extend `stripe_connect.py` `_stripe_user_prefill`): add business `url` /
+    `country` / address / MCC once a canonical Business Profile exists (already a follow-up on the streamline item
+    above) so the Stripe form arrives pre-filled and fast.
+  - **Platform Connect branding** (no-code Stripe setting): logo + brand color + platform name so the OAuth screens
+    show Junior Bay (mirror the TEST-branding steps in `docs/CONNECT_TEST_BRANDING.md`, for live).
+- **Not available on Standard:** embedded onboarding components (the never-leave-the-app screens Stan uses) require
+  Express/Custom — out of scope while we stay Standard.
+
 ## Dashboard / UX
 
 ### Auto-attach a page to its Site on Publish (publish → attach in one action) — SHIPPED 2026-08-03
