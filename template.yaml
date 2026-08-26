@@ -4298,27 +4298,10 @@ Resources:
               StringEquals:
                 AWS:SourceArn: !Sub "arn:aws:cloudfront::${AWS::AccountId}:distribution/${HomepageDistribution}"
 
-  HomepageApexRecord:
-    Type: AWS::Route53::RecordSet
-    Condition: HasHomepageApex
-    Properties:
-      HostedZoneName: !Ref HomepageCustomDomainHostedZoneName
-      Name: !Ref HomepageCustomDomainName
-      Type: A
-      AliasTarget:
-        DNSName: !GetAtt HomepageDistribution.DomainName
-        HostedZoneId: Z2FDTNDATAQYW2
-
-  HomepageWwwRecord:
-    Type: AWS::Route53::RecordSet
-    Condition: HasHomepageApex
-    Properties:
-      HostedZoneName: !Ref HomepageCustomDomainHostedZoneName
-      Name: !Sub "www.${HomepageCustomDomainName}"
-      Type: A
-      AliasTarget:
-        DNSName: !GetAtt HomepageDistribution.DomainName
-        HostedZoneId: Z2FDTNDATAQYW2
+  # NOTE: The apex + www DNS (A and AAAA alias records) are managed directly via Route 53 at cutover, not
+  # here — the pre-existing records were created outside this stack, and the apex needs both A and AAAA.
+  # HomepageDistribution claims the apex/www CNAME aliases (HasHomepageApex); the alias A/AAAA records point
+  # at it in the shared juniorbay.com zone.
 
 Outputs:
   ApiUrl:

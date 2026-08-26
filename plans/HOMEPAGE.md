@@ -84,7 +84,7 @@ Real static HTML with: unique `<title>` + meta description, Open Graph + Twitter
   (space, weight 700), headlines `Roboto`, body `Montserrat`. **Still to do:** (1) bundle the hero photo at
   `homepage/images/hero.jpg`; (2) Track B infra — `deploy/deploy-homepage.sh` + `template.yaml`
   `HomepageBucket`/`Distribution`/apex Route 53; (3) wire `/legal/*` + `/fonts/*` to resolve on the apex.
-- **Track B — deploy infra BUILT (2026-08-24, NOT yet deployed):** `template.yaml` gained `HomepageEnabled`
+- **Track B — SHIPPED + juniorbay.com CUT OVER LIVE (2026-08-24):** `template.yaml` gained `HomepageEnabled`
   + `HomepageCustomDomain{Name,CertificateArn,HostedZoneName}` params, `HasHomepage`/`HasHomepageApex`
   conditions, and resources `HomepageBucket` / `HomepageOriginAccessControl` / `HomepageDistribution`
   (S3 default origin + `/legal/*` → API custom origin) / `HomepageBucketPolicy` / `HomepageApexRecord` +
@@ -100,6 +100,16 @@ Real static HTML with: unique `<title>` + meta description, Open Graph + Twitter
      **free those aliases off E1VGTULTFA3BO3 first** (or `aws cloudfront associate-alias`), then set
      `HomepageCustomDomainName=juniorbay.com` + cert `1a72b7c6` + zone and redeploy → claims apex+www alias
      and Route 53 A-records. Old classifieds app moves to juniorbay.net separately.
+
+  **DONE (2026-08-24):** Phase 1 deployed (bucket `jb-homepage-prod-150544707159`, dist `E1RX3M3RT2BWUZ` =
+  `dxqbr8y3q07fh.cloudfront.net`), verified on cloudfront.net. Phase 2 cutover: freed both aliases off
+  `E1VGTULTFA3BO3` (CLI update-distribution; registry freed instantly), deployed apex+www aliases + cert
+  `1a72b7c6` onto the new dist, then upserted all **4** Route 53 records (apex + www, **A + AAAA**) → new dist.
+  Verified `https://juniorbay.com` + `www` serve the new site incl. `/legal/*` proxy + bundled `/fonts/*`.
+  DNS + old-dist alias removal were done via **CLI, not CFN** (apex needs A+AAAA and the records pre-existed
+  outside the stack) — so the two `Homepage*Record` CFN resources were removed; `HomepageDistribution` still
+  owns the apex/www CNAME aliases in-stack. **Old dist `E1VGTULTFA3BO3` + its `juniorbay.com` us-west-2 S3
+  bucket now serve nothing — safe to retire (→ juniorbay.net) whenever.**
 - **Front-end cleanup (2026-08-24):** retired the legacy plain-JS `dashboard/` folder and `git mv dashboard-vue →
   dashboard` (dropping the `-vue` suffix; the new marketing folder will be `homepage/`). Updated the one functional
   reference (`deploy/deploy-dashboard.sh`), the npm package name, the `/dashboard/` `.gitignore` line, and the doc
