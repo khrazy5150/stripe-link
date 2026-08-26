@@ -3,10 +3,12 @@
     <section class="auth-card">
       <header class="auth-header">
         <img :src="assetUrl('/icon/favicon.png')" alt="" />
-        <h1>{{ store.activeTab === 'register' ? 'Start your free trial' : 'User Login' }}</h1>
+        <h1>{{ store.activeTab === 'register' ? 'Start your free trial'
+          : store.activeTab === 'forgot' ? 'Forgot Password'
+          : 'User Login' }}</h1>
         <p>
-          {{ store.activeTab === 'register'
-            ? 'Full access for 14 days — no credit card required.'
+          {{ store.activeTab === 'register' ? 'Full access for 14 days — no credit card required.'
+            : store.activeTab === 'forgot' ? 'Reset your password and get back in.'
             : 'Enter your credentials to access the user dashboard' }}
         </p>
       </header>
