@@ -120,4 +120,17 @@ Real static HTML with: unique `<title>` + meta description, Open Graph + Twitter
 ## To discuss (the actual homepage — details)
 - Sections/layout (hero, value props, proof/social proof, how-it-works, FAQ, footer) and the copy.
 - Visual design / brand (colors, type, hero imagery).
-- Analytics (which tool), a contact/about page, and whether a lightweight build (minify/bundle) is worth it later.
+- A contact/about page, and whether a lightweight build (minify/bundle) is worth it later.
+
+## Analytics (decided 2026-08-26)
+- **Chosen: Cloudflare Web Analytics** (cookieless, no consent banner, free) over GA4 (avoids the EU
+  consent overhead; we don't need ad remarketing yet). `juniorbay.com` runs on **AWS** (CloudFront + Route 53),
+  NOT proxied through Cloudflare, so the zero-code zone toggle is unavailable — use the **manual beacon**
+  (`static.cloudflareinsights.com/beacon.min.js` with a site token) added to the homepage HTML.
+- **Scope of CF Web Analytics = pageviews + Web Vitals ONLY.** No click/event tracking, so it can NOT report
+  "Start free trial" clicks. Do **not** promise click metrics from it.
+- **Trial-conversion tracking = deferred to a platform-owner admin/analytics view** (NOT the tenant-facing
+  "page-view analytics" migration item, and not currently a discrete TODO). Cleanest signal: measure
+  **arrivals at `app.juniorbay.com` whose referrer is `juniorbay.com`** (first-party, no consent) = real
+  trial-starts, better than a raw click. Fold the unified "homepage visits + trial conversions" dashboard
+  into that platform-admin work when it happens.
