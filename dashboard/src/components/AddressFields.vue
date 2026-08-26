@@ -42,7 +42,7 @@
       </label>
       <label class="offer-field">
         <span>Phone</span>
-        <input v-model.trim="address.phone" type="tel" placeholder="Optional" />
+        <PhoneInput v-model="address.phone" />
       </label>
       <label class="offer-field">
         <span>Email</span>
@@ -57,6 +57,7 @@
 </template>
 
 <script setup>
+import PhoneInput from "./PhoneInput.vue";
 // `address` is a reactive object owned by the parent; fields mutate it in place.
 defineProps({
   address: { type: Object, required: true },

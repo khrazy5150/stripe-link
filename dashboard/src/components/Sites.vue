@@ -150,8 +150,7 @@
             <div class="offer-two-column">
               <label class="offer-field">
                 <span>Phone</span>
-                <input v-model.trim="form.org.telephone" type="tel" placeholder="+1 555 010 0100"
-                       @blur="form.org.telephone = normalizeE164(form.org.telephone)" />
+                <PhoneInput v-model="form.org.telephone" />
                 <small v-if="orgPhoneError" class="field-error">{{ orgPhoneError }}</small>
               </label>
               <label class="offer-field"><span>Email</span><input v-model.trim="form.org.email" type="email" /></label>
@@ -425,6 +424,7 @@ import { useProfileStore } from "../stores/profile";
 import { useSubdomainCheck } from "../composables/useSubdomainCheck";
 import { resolvePageDoc, resolvePageDeps, copyCatalogToEnv, pageForTarget, siteForTarget } from "../composables/environmentCopy";
 import { normalizeE164, phoneError } from "../utils/phone";
+import PhoneInput from "./PhoneInput.vue";
 import ConfirmDialog from "./shared/ConfirmDialog.vue";
 import StoreAddressField from "./StoreAddressField.vue";
 import { applyTitleCaseInput } from "../utils/titleCase.js";

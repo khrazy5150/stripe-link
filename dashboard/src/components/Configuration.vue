@@ -42,13 +42,13 @@
           </label>
           <label class="offer-field">
             <span>Support Phone</span>
-            <input v-model.trim="form.support.phone" type="tel" placeholder="+1 555 555 0123" />
+            <PhoneInput v-model="form.support.phone" />
           </label>
         </div>
         <div class="offer-two-column">
           <label class="offer-field">
             <span>SMS Notification Phone</span>
-            <input v-model.trim="form.support.sms_notification_phone" type="tel" placeholder="+15555550123" />
+            <PhoneInput v-model="form.support.sms_notification_phone" />
             <small>E.164 number for tenant SMS/admin notifications.</small>
           </label>
         </div>
@@ -278,6 +278,7 @@
 <script setup>
 import { computed, onMounted, reactive, ref } from "vue";
 import { apiRequest, getApiBase, getStripeMode, getTenantId } from "../api/client";
+import PhoneInput from "./PhoneInput.vue";
 
 const loading = ref(false);
 const saving = ref(false);

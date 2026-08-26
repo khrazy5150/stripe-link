@@ -20,7 +20,7 @@
         </div>
         <div class="offer-two-column">
           <label class="offer-field"><span>Email <strong>*</strong></span><input v-model.trim="form.email" type="email" placeholder="mary@example.com" required /></label>
-          <label class="offer-field"><span>Phone</span><input v-model.trim="form.phone" type="tel" placeholder="+15551234567" /></label>
+          <label class="offer-field"><span>Phone</span><PhoneInput v-model="form.phone" /></label>
         </div>
         <div class="offer-two-column">
           <label class="offer-field"><span>Display Name</span><input v-model.trim="form.display_name" type="text" placeholder="Mary Therapist" /></label>
@@ -108,6 +108,7 @@
 <script setup>
 import { onMounted, ref } from "vue";
 import WeeklyHours from "./WeeklyHours.vue";
+import PhoneInput from "../PhoneInput.vue";
 import ConfirmDialog from "../shared/ConfirmDialog.vue";
 import { defaultWeeklyHours } from "../../utils/weeklyHours";
 import { fulfillerDisplayName, formatCompensation, useFulfillersStore } from "../../stores/fulfillers";

@@ -90,7 +90,7 @@
               <label class="offer-field"><span>Customer Name</span><input v-model.trim="form.name" type="text" /></label>
               <label class="offer-field"><span>Customer Email <strong>*</strong></span><input v-model.trim="form.email" type="email" required /></label>
             </div>
-            <label class="offer-field"><span>Customer Phone (optional)</span><input v-model.trim="form.phone" type="tel" /></label>
+            <label class="offer-field"><span>Customer Phone (optional)</span><PhoneInput v-model="form.phone" /></label>
           </section>
 
           <section class="offer-form-section">
@@ -172,6 +172,7 @@
 <script setup>
 import { onMounted, reactive, ref } from "vue";
 import { apiRequest, getStripeMode, getTenantId } from "../api/client";
+import PhoneInput from "./PhoneInput.vue";
 import { formatMoney, useProductsStore } from "../stores/products";
 import { useServicesStore } from "../stores/services";
 import { formatEpochDate, statusLabel } from "../utils/format";
