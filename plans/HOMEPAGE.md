@@ -38,6 +38,10 @@ is what keeps the page fully static; live plan data lives in the Vue dashboard.)
 - **Sandbox / future staging are NOT linked from the homepage** — they're reached directly.
 
 ### Pricing — hint, don't show
+> **⚠️ Superseded (2026-08-26):** the "14-day trial / coffee habit" framing below is being replaced by an
+> **"always free"** message (pricing pivot to free-forever + transaction fee — see `plans/TODO.md`). Still show
+> **no fee specifics** on the front page; the tenant learns them only inside the app.
+
 No pricing table (prices/fees will change; and trial-first converts better with a no-card trial). But **do** signal
 affordability so "no price" doesn't read as "expensive." Approved copy:
 > **Start your free 14-day trial** — no credit card. *It costs less than your coffee habit.*

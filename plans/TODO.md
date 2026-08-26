@@ -141,6 +141,31 @@ Deferred, non-blocking follow-ups. Each item notes what, why it was deferred, an
   subscribers on a plan-entitlements edit; admin plan-CRUD screen (P3, MVP = hand-edit the table); price-migration
   batch tool (P4).
 
+### ⭐ Pricing pivot — free-forever + transaction-fee model (decided 2026-08-26, NOT built)
+- **Direction:** move from the shipped **hard-wall-at-trial-expiry** to a **free-forever** model. Basic is always free
+  and never shuts a store down or blocks a sale — the tenant just pays the basic transaction fee. The 14-day trial
+  grants **premium** features (booking, GMB, AI, shipping, A/B); at expiry those features gate off (existing
+  entitlement chokepoints) but **pages/checkout keep serving at the basic fee**. Premium (~$19/mo target) unlocks
+  those features **and** drops the transaction fee (~2%). Strategy = Beacons' free-forever acquisition + Shopify's
+  fee-graduation + a Stan-style trial that **downgrades gracefully** instead of locking out — you never lose the
+  tenant and keep earning the fee forever.
+- **(a) Paywall change:** replace the `trial_expired` **hard wall** (`plans/SAAS_BILLING_PAYWALL.md`) with a
+  **downgrade to free-forever** — keep pages/checkout/existing prices live, gate only the premium entitlements, and
+  flip the tenant's `tier_id`→basic so `build_fee_context` charges the basic fee automatically. Reword the trial
+  banner ("trial ended → now on Free, premium features paused") instead of a wall.
+- **(b) Fee-table retune (numbers TBD):** edit `fees.py` `DEFAULT_GLOBAL_BILLING_CONFIG` (or the S3
+  `global_billing_config.json`) — drop the unrealistic **15% digital**; set **free ≤10%**, **premium ~2%**; keep
+  **physical substantially lower** than digital (thin margins; 10%+Stripe makes physical uncompetitive). The per-tier
+  × per-product-type table already exists — this is config tuning, not new code.
+- **Already true in code (no work needed):** price is **baked at setup** (`prices.py` net-guaranteed gross-up →
+  `Product.unit_amount`) while the **fee is computed live at checkout** from the tenant's current `tier_id`
+  (`fees.py build_fee_context`). So upgrade/downgrade already "just work": buyer price stays stable; on **upgrade** the
+  tenant keeps the ~8% windfall (their price was grossed for the old high fee). **No re-price prompt — deliberately
+  not building it:** a tenant who wants a different price adds another `Product.prices[]` entry + flips
+  `default_price_id` (self-serve in the UI today).
+- **Wiring:** premium subscription (`billing_status` / `PlatformPlansTable`) → `tier_id` → live fee + entitlements
+  (the subscription rail already ships; reuse it). Prereq for the homepage "always free" reword (Production setup).
+
 ### Age / identity verification gate (Stripe Identity)
 - **UNBLOCKED 2026-08-03** — the SaaS billing subscription rail it needed now ships in prod. Verification charging can
   ride the tenant subscription (metered
@@ -285,7 +310,7 @@ Deferred, non-blocking follow-ups. Each item notes what, why it was deferred, an
 
 ## Production setup
 
-### ⭐ Public marketing homepage — `juniorbay.com` (apex)
+### ⭐ Public marketing homepage — `juniorbay.com` (apex) — SHIPPED PROD 2026-08-24 (open: "always free" reword)
 - **What:** a public, SEO-facing **sales page** at `https://juniorbay.com` whose only job is **Start free trial** /
   **Sign in** → `app.juniorbay.com`. **Plain static HTML/CSS/JS** (no framework, no build — SEO + speed), hosted in
   **this repo** with an **isolated deploy** (own S3 bucket + CloudFront + apex Route 53 alias; reuses the existing
@@ -298,8 +323,13 @@ Deferred, non-blocking follow-ups. Each item notes what, why it was deferred, an
   the doc mentions.
 - **Unblocks** the Google OAuth verification task below (which requires a public homepage + privacy policy on
   `juniorbay.com`), and gives the `legal.website` link a real destination.
-- **Done:** the old `frontpage/dot-com` classifieds app was relocated to `frontpage/dot-net` (future `juniorbay.net`).
-  Architecture locked; homepage sections/copy/design still to discuss. Not built.
+- **SHIPPED PROD 2026-08-24:** homepage built + deployed and the apex `juniorbay.com` (+ `www`) cut over from the old
+  classifieds distribution to the new homepage CloudFront (`HomepageEnabled`; bundled fonts; `/legal/*` proxied to the
+  API; sitemap submitted to Search Console; Cloudflare Web Analytics beacon on). Old classifieds app → `juniorbay.net`
+  (tenant to retire the old dist/bucket). Full record in `plans/HOMEPAGE.md`.
+- **OPEN — pricing reword (2026-08-26):** reword the hero/CTA to **"always free"** and drop the *"14-day trial"* +
+  *"costs less than your coffee habit"* framing (gated on the pricing pivot under Commerce). **Do NOT explain the fee
+  structure on the front page** — the tenant learns the specifics only INSIDE the app.
 
 ### Optimize prod CloudFront (pages) for indexing + aggressive caching
 - **What:** Optimize prod CloudFront (`dlxn0y34f7dbz`) for indexing, follow, archiving, aggressive
