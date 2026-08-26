@@ -61,8 +61,7 @@
           </label>
           <label class="offer-field">
             <span>Business Phone</span>
-            <input v-model.trim="form.business.phone" type="tel" placeholder="+1 555 010 0100"
-                   @blur="form.business.phone = normalizeE164(form.business.phone)" />
+            <PhoneInput v-model="form.business.phone" />
             <small v-if="businessPhoneError" class="field-error">{{ businessPhoneError }}</small>
             <small v-else>International format, e.g. +12065551234 — same standard as your account phone.</small>
           </label>
@@ -127,6 +126,7 @@ import { computed, reactive, ref } from "vue";
 import { apiRequest, getAuthSession, getTenantId } from "../api/client";
 import { formatEpochDate, statusLabel } from "../utils/format";
 import { normalizeE164, phoneError } from "../utils/phone";
+import PhoneInput from "./PhoneInput.vue";
 import { COUNTRIES, normalizeCountry } from "../utils/countries";
 
 const countries = COUNTRIES;

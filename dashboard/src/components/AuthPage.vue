@@ -32,8 +32,7 @@
             <label>First Name<input v-model.trim="store.registerForm.first_name" placeholder="John" autocomplete="given-name" required /></label>
             <label>Last Name<input v-model.trim="store.registerForm.last_name" placeholder="Doe" autocomplete="family-name" required /></label>
             <label>Email<input v-model.trim="store.registerForm.email" type="email" placeholder="john@example.com" autocomplete="email" required /></label>
-            <label>Phone Number<input v-model.trim="store.registerForm.phone_number" type="tel" placeholder="+1234567890" autocomplete="tel" /></label>
-            <span class="field-note">Format: +1234567890 (include country code)</span>
+            <label>Phone Number<PhoneInput v-model="store.registerForm.phone_number" /></label>
             <label>Password<input v-model="store.registerForm.password" type="password" placeholder="Create a password" autocomplete="new-password" required /></label>
             <button class="primary-action stretch" type="submit" :disabled="store.loading">{{ store.loading ? "Creating..." : "Start my free trial" }}</button>
           </form>
@@ -74,6 +73,7 @@
 <script setup>
 import { assetUrl } from "../api/client";
 import { useAuthStore } from "../stores/auth";
+import PhoneInput from "./PhoneInput.vue";
 
 const store = useAuthStore();
 </script>
