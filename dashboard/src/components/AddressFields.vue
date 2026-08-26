@@ -42,7 +42,7 @@
       </label>
       <label class="offer-field">
         <span>Phone</span>
-        <PhoneInput v-model="address.phone" />
+        <PhoneInput v-model="address.phone" :initial-country="address.country" />
       </label>
       <label class="offer-field">
         <span>Email</span>
