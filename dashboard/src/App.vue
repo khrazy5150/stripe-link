@@ -9,7 +9,7 @@
     <aside class="sidebar">
       <div class="brand">
         <img :src="assetUrl('/icon/favicon.png')" alt="" />
-        <strong>Admin Panel</strong>
+        <strong>Junior Bay</strong>
       </div>
       <nav>
         <template v-for="group in menuGroups" :key="group.key">

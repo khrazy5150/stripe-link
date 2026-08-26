@@ -3,11 +3,11 @@
     <section class="auth-card">
       <header class="auth-header">
         <img :src="assetUrl('/icon/favicon.png')" alt="" />
-        <h1>{{ store.activeTab === 'register' ? 'Start your free trial' : 'Admin Login' }}</h1>
+        <h1>{{ store.activeTab === 'register' ? 'Start your free trial' : 'User Login' }}</h1>
         <p>
           {{ store.activeTab === 'register'
             ? 'Full access for 14 days — no credit card required.'
-            : 'Enter your credentials to access the admin panel' }}
+            : 'Enter your credentials to access the user dashboard' }}
         </p>
       </header>
 
@@ -19,7 +19,7 @@
         </div>
 
         <form v-if="store.activeTab === 'login'" class="auth-form" @submit.prevent="store.login">
-          <label>Email<input v-model.trim="store.loginForm.email" type="email" placeholder="admin@example.com" autocomplete="username" required /></label>
+          <label>Email<input v-model.trim="store.loginForm.email" type="email" placeholder="you@example.com" autocomplete="username" required /></label>
           <label>Password<input v-model="store.loginForm.password" type="password" placeholder="Enter your password" autocomplete="current-password" required /></label>
           <button class="primary-action stretch" type="submit" :disabled="store.loading">{{ store.loading ? "Signing In..." : "Sign In" }}</button>
         </form>
