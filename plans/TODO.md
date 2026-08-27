@@ -183,8 +183,9 @@ Deferred, non-blocking follow-ups. Each item notes what, why it was deferred, an
   **downgrade to free-forever** — keep pages/checkout/existing prices live, gate only the premium entitlements, and
   flip the tenant's `tier_id`→basic so `build_fee_context` charges the basic fee automatically. Reword the trial
   banner ("trial ended → now on Free, premium features paused") instead of a wall.
-- **(b) Fee table — DECIDED 2026-08-26:** edit `fees.py` `DEFAULT_GLOBAL_BILLING_CONFIG` (+ S3
-  `global_billing_config.json`):
+- **(b) Fee table — SHIPPED DEV+PROD 2026-08-26** (`fees.py` defaults + both S3 `global_billing_config.json`
+  objects + dashboard preview rates; new `service` fee class live; verified via `/prices/calculate` on
+  dev.juniorbay.com AND prod.juniorbay.com — 5/6/7 free, 2% pro, 0% pro tips; 1420 tests green):
 
   | fee class | Free | Premium ($19/mo) |
   |---|---:|---:|
