@@ -28,12 +28,22 @@ export function platformFeeRate(productType, pricingModel) {
   return 0.07;
 }
 
+// fee_handling -> the merchant's share of the fees (mirror of backend MERCHANT_FEE_SHARES).
+export const MERCHANT_FEE_SHARES = { standard: 1, split: 0.5, net_guaranteed: 0 };
+
+// Buyer-facing amount for any fee_handling: gross up by the buyer's share of the fees
+// (standard = no gross-up, split = half, net_guaranteed = all). Preview/offline fallback only —
+// the authoritative calc is the server's /prices/calculate.
+export function grossedCustomerAmount(netAmount, platformRate, feeHandling) {
+  const merchantShare = MERCHANT_FEE_SHARES[feeHandling] ?? 1;
+  if (!netAmount || merchantShare >= 1) return netAmount || 0;
+  const buyerShare = 1 - merchantShare;
+  const variableRate = (0.029 + platformRate) * buyerShare;
+  return Math.ceil((netAmount + buyerShare * 30) / (1 - variableRate));
+}
+
 export function netGuaranteedCustomerAmount(netAmount, platformRate) {
-  if (!netAmount) return 0;
-  const stripePercentFee = 0.029;
-  const stripeFixedFeeCents = 30;
-  const variableRate = stripePercentFee + platformRate;
-  return Math.ceil((netAmount + stripeFixedFeeCents) / (1 - variableRate));
+  return grossedCustomerAmount(netAmount, platformRate, "net_guaranteed");
 }
 
 export function feeBreakdown({ tenantKeyedAmount, unitAmount, platformRate, feeHandling }) {
@@ -83,9 +93,7 @@ async function calculatePriceWithFallback({ tenantKeyedAmount, currency, product
   } catch {
     // Keep the authoring modal usable offline; persisted saves still pass server validation.
   }
-  const unitAmount = feeHandling === "net_guaranteed"
-    ? netGuaranteedCustomerAmount(tenantKeyedAmount, platformRate)
-    : tenantKeyedAmount;
+  const unitAmount = grossedCustomerAmount(tenantKeyedAmount, platformRate, feeHandling);
   return { unit_amount: unitAmount, breakdown: feeBreakdown({ tenantKeyedAmount, unitAmount, platformRate, feeHandling }) };
 }
 

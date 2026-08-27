@@ -106,6 +106,18 @@ def _round_cents(value: Decimal) -> int:
     return int(value.quantize(Decimal("1"), rounding=ROUND_HALF_UP))
 
 
+# fee_handling -> the merchant's share of the fees (2026-08-26 pricing pivot, plans/TODO.md b2).
+# standard: merchant absorbs everything (buyer pays the keyed price); net_guaranteed: buyer covers
+# everything (price grossed up so the merchant nets the keyed amount); split: shared 50/50 — the
+# buyer-facing markup is roughly halved vs net_guaranteed, the killer preset for thin-margin physical.
+# Stored as a share (not a bool) so future presets are data, not new code paths.
+MERCHANT_FEE_SHARES = {
+    "standard": Decimal("1"),
+    "split": Decimal("0.5"),
+    "net_guaranteed": Decimal("0"),
+}
+
+
 def fee_class_for(product_type: str, pricing_model: str = "one_time") -> str:
     if pricing_model == "customer_chooses" or product_type in {"tip-jar", "tip_jar"}:
         return "tip_jar"
@@ -252,8 +264,8 @@ def calculate_price(
     amount = _non_negative_int(tenant_keyed_amount, "tenant_keyed_amount")
     if not isinstance(currency, str) or len(currency) != 3:
         raise PriceCalculationError("currency must be a 3-letter currency code.")
-    if fee_handling not in {"standard", "net_guaranteed"}:
-        raise PriceCalculationError("fee_handling must be either standard or net_guaranteed.")
+    if fee_handling not in MERCHANT_FEE_SHARES:
+        raise PriceCalculationError("fee_handling must be standard, split, or net_guaranteed.")
     if amount == 0:
         return {
             "unit_amount": 0,
@@ -277,16 +289,24 @@ def calculate_price(
         pricing_model=pricing_model,
     )
 
-    if fee_handling == "net_guaranteed":
-        variable_rate = stripe_rate + platform_rate
+    merchant_share = MERCHANT_FEE_SHARES[fee_handling]
+    if merchant_share < 1:
+        # Gross up so the buyer covers their share of the fees: net_guaranteed (share 0) grosses up
+        # everything; split (share 0.5) half. The loop nudges the estimate up until the merchant nets
+        # at least the keyed amount minus their own fee share (rounding never favors the platform).
+        buyer_share = Decimal("1") - merchant_share
+        variable_rate = (stripe_rate + platform_rate) * buyer_share
         if variable_rate >= 1:
             raise PriceCalculationError("Combined fee rate must be less than 100%.")
-        unit_amount = _ceil_cents((Decimal(amount) + Decimal(fixed_cents)) / (Decimal("1") - variable_rate))
+        unit_amount = _ceil_cents(
+            (Decimal(amount) + buyer_share * Decimal(fixed_cents)) / (Decimal("1") - variable_rate)
+        )
         while True:
             stripe_fee = _stripe_fee(unit_amount, stripe_rate, fixed_cents)
             platform_fee = _platform_fee(unit_amount, platform_rate)
             net_payout = unit_amount - stripe_fee - platform_fee
-            if net_payout >= amount:
+            merchant_target = amount - _round_cents(merchant_share * Decimal(stripe_fee + platform_fee))
+            if net_payout >= merchant_target:
                 break
             unit_amount += 1
     else:

@@ -127,6 +127,41 @@ class FeeCalculationTests(unittest.TestCase):
         )
         self.assertEqual(result["breakdown"]["platform_fee"], 0)
 
+    def test_split_shares_fees_evenly_between_merchant_and_buyer(self):
+        """The 50/50 preset (2026-08-26 pivot): $100 keyed digital/free -> buyer $105.37, merchant $94.63."""
+        result = calculate_price(
+            tenant_keyed_amount=10000,
+            currency="usd",
+            product_type="digital",
+            fee_handling="split",
+            tenant_plan="basic",
+        )
+        self.assertEqual(result, {
+            "unit_amount": 10537,
+            "breakdown": {
+                "tenant_keyed_amount": 10000,
+                "stripe_fee": 336,
+                "platform_fee": 738,
+                "net_payout": 9463,
+            },
+        })
+        # Exact 50/50: buyer's markup equals the merchant's shortfall (537 cents each).
+        breakdown = result["breakdown"]
+        self.assertEqual(result["unit_amount"] - 10000, 10000 - breakdown["net_payout"])
+
+    def test_split_zero_amount_stays_zero(self):
+        result = calculate_price(
+            tenant_keyed_amount=0, currency="usd", product_type="digital",
+            fee_handling="split", tenant_plan="basic",
+        )
+        self.assertEqual(result["unit_amount"], 0)
+
+    def test_unknown_fee_handling_rejected(self):
+        from stripe_link.domain.fees import PriceCalculationError
+        with self.assertRaises(PriceCalculationError):
+            calculate_price(tenant_keyed_amount=1000, currency="usd",
+                            product_type="digital", fee_handling="half", tenant_plan="basic")
+
     def test_zero_amount_stays_zero_for_net_guaranteed(self):
         result = calculate_price(
             tenant_keyed_amount=0,

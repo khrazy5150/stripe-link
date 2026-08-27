@@ -107,7 +107,8 @@
     },
     "fee_handling": {
       "type": "string",
-      "enum": ["standard", "net_guaranteed"]
+      "enum": ["standard", "split", "net_guaranteed"],
+      "description": "Merchant's share of the fees: standard = merchant absorbs all, split = shared 50/50 (buyer price grossed up by half the fees), net_guaranteed = buyer covers all (merchant nets tenant_keyed_amount)."
     },
     "fee_breakdown": {
       "type": "object",

@@ -2170,8 +2170,8 @@ def validate_service(document: dict[str, Any]) -> None:
             context = entry.get("context")
             if context is not None and context not in {"standard", "sale", "flash_sale"}:
                 raise DocumentValidationError("Service price context must be standard, sale, or flash_sale.")
-            if entry.get("fee_handling") is not None and entry.get("fee_handling") not in {"standard", "net_guaranteed"}:
-                raise DocumentValidationError("Service price fee_handling must be standard or net_guaranteed.")
+            if entry.get("fee_handling") is not None and entry.get("fee_handling") not in {"standard", "split", "net_guaranteed"}:
+                raise DocumentValidationError("Service price fee_handling must be standard, split, or net_guaranteed.")
     if document.get("booking_flow") is not None and document.get("booking_flow") not in {"book_then_pay", "pay_then_book"}:
         raise DocumentValidationError("Service booking_flow must be book_then_pay or pay_then_book.")
     booking_rules = document.get("booking_rules") or {}

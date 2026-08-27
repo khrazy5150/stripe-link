@@ -1,7 +1,7 @@
 // Shared price-row FORM helpers for the authoring modals (products + services).
 // The form model is dollars-in-inputs; buildPriceDocument (stores/pricing.js) serializes to cents.
 import { formatMoney } from "../stores/products";
-import { netGuaranteedCustomerAmount, platformFeeRate } from "../stores/pricing";
+import { grossedCustomerAmount, platformFeeRate } from "../stores/pricing";
 
 export function priceFormId() {
   return `price-${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -55,18 +55,20 @@ export function pricePreviewFor(price, productType = "physical") {
   const tenantAmount = Math.max(0, Math.round(Number(keyedSource || 0) * 100)) * quantity;
   const compareAt = Math.max(0, Math.round(Number(price.regular_price || 0) * 100)) * quantity;
   const platformRate = platformFeeRate(productType, price.pricing_model);
-  const unitAmount = price.fee_handling === "net_guaranteed" && tenantAmount
-    ? netGuaranteedCustomerAmount(tenantAmount, platformRate)
-    : tenantAmount;
+  const unitAmount = grossedCustomerAmount(tenantAmount, platformRate, price.fee_handling);
   const discount = compareAt > unitAmount ? Math.max(1, Math.round((1 - unitAmount / compareAt) * 100)) : 0;
   const stripeFee = unitAmount > 0 ? Math.ceil(unitAmount * 0.029) + 30 : 0;
   const platformFee = Math.round(unitAmount * platformRate);
   const netPayout = Math.max(0, unitAmount - stripeFee - platformFee);
+  const note = !tenantAmount ? ""
+    : price.fee_handling === "net_guaranteed" ? `includes Stripe + ${Math.round(platformRate * 100)}% platform fee`
+    : price.fee_handling === "split" ? "includes half the fees — you cover the other half"
+    : "";
   return {
     amount: formatMoney(unitAmount, price.currency),
     compareAt: compareAt > unitAmount ? formatMoney(compareAt, price.currency) : "",
     discount,
-    note: price.fee_handling === "net_guaranteed" && tenantAmount ? `includes Stripe + ${Math.round(platformRate * 100)}% platform fee` : "",
+    note,
     youKeep: price.fee_handling !== "net_guaranteed" && tenantAmount ? formatMoney(netPayout, price.currency) : "",
   };
 }

@@ -54,6 +54,7 @@
         <fieldset>
           <legend>Fee handling</legend>
           <label><input v-model="price.fee_handling" type="radio" value="standard" /> Standard fees deducted</label>
+          <label><input v-model="price.fee_handling" type="radio" value="split" /> Split 50/50 — fees shared with your buyer</label>
           <label><input v-model="price.fee_handling" type="radio" value="net_guaranteed" /> Net-guaranteed fees added on top</label>
         </fieldset>
       </div>
