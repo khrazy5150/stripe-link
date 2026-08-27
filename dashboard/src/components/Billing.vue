@@ -27,6 +27,10 @@
           <p v-else-if="billing.onTrial" class="billing-status-note">
             <strong>{{ billing.trialDaysLeft }}</strong> {{ billing.trialDaysLeft === 1 ? "day" : "days" }} left in your free trial — full access, no card required yet.
           </p>
+          <p v-else-if="billing.current.has_subscription && billing.current.billing_status === 'past_due'" class="billing-status-note">
+            There's a payment issue with your subscription — premium stays active while Stripe retries.
+            Update your card via Manage subscription.
+          </p>
           <p v-else-if="billing.current.has_subscription" class="billing-status-note">
             You're subscribed{{ planLabel ? ` to ${planLabel}` : "" }}.
           </p>
@@ -109,6 +113,7 @@ const statusLabel = computed(() => {
 });
 
 const statusTone = computed(() => {
+  if (billing.current.billing_status === "past_due") return "danger";  // payment problem — never a green pill
   if (billing.current.billing_exempt || billing.current.has_subscription) return "ok";
   if (billing.walled) return "danger";
   return "info";

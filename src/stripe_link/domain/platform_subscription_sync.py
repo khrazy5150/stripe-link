@@ -70,6 +70,18 @@ def reconcile_platform_subscription_event(
     if tenant.get("billing_exempt"):
         return {"platform_billing": "exempt_ignored", "tenant_id": tenant_id}
 
+    # Stripe does NOT guarantee webhook delivery order, and this sync is last-write-wins — without a guard, the
+    # initial subscription.updated (status "incomplete", pre-payment -> past_due) can arrive AFTER invoice.paid
+    # and strand a validly-paid tenant on past_due (observed 2026-08-27). Skip events strictly older than the
+    # newest one already applied (equal timestamps still apply: same-second events can't be ordered).
+    event_created = stripe_event.get("created")
+    try:
+        last_applied = int(tenant.get("last_billing_event_at"))
+    except (TypeError, ValueError):
+        last_applied = None
+    if isinstance(event_created, int) and last_applied is not None and event_created < last_applied:
+        return {"platform_billing": "stale_event_skipped", "tenant_id": tenant_id, "event_type": event_type}
+
     updates: dict[str, Any] = {}
     if event_type.startswith("customer.subscription."):
         subscription_id = str(obj.get("id") or "").strip()
@@ -114,6 +126,8 @@ def reconcile_platform_subscription_event(
     else:
         return {"platform_billing": "ignored", "event_type": event_type, "tenant_id": tenant_id}
 
+    if isinstance(event_created, int):
+        updates["last_billing_event_at"] = event_created
     tenant_repo.put({**tenant, **updates})
     return {
         "platform_billing": "updated",

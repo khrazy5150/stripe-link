@@ -337,3 +337,28 @@ class ServeGateTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class WebhookOrderingGuardTests(unittest.TestCase):
+    """Stripe doesn't guarantee delivery order: an older event must not clobber a newer one (the
+    incomplete-after-paid past_due bug, observed 2026-08-27)."""
+
+    def _event(self, event_type, obj, created):
+        return {"type": event_type, "created": created, "data": {"object": obj}}
+
+    def test_stale_event_is_skipped(self):
+        tenants = FakeTenantRepo([_tenant(billing_status="active", last_billing_event_at=2000)])
+        result = reconcile_platform_subscription_event(
+            self._event("customer.subscription.updated",
+                        {"id": "sub_1", "status": "incomplete", "metadata": {"tenant_id": "t1"}}, created=1000),
+            mode="test", tenant_repo=tenants)
+        self.assertEqual(result["platform_billing"], "stale_event_skipped")
+        self.assertEqual(tenants.docs["t1"]["billing_status"], "active")  # not clobbered to past_due
+
+    def test_newer_event_applies_and_advances_the_clock(self):
+        tenants = FakeTenantRepo([_tenant(billing_status="past_due", last_billing_event_at=1000)])
+        result = reconcile_platform_subscription_event(
+            self._event("invoice.paid", {"metadata": {"tenant_id": "t1"}}, created=3000),
+            mode="test", tenant_repo=tenants)
+        self.assertEqual(result["billing_status"], "active")
+        self.assertEqual(tenants.docs["t1"]["last_billing_event_at"], 3000)
