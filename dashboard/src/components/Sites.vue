@@ -1001,8 +1001,8 @@ onMounted(async () => {
 </script>
 
 <style scoped>
-/* All colors come from the app's theme tokens (--panel/--bg/--text/--line/--accent), which flip under
-   .theme-live for the dark (Live) theme — never hardcode a surface color. */
+/* All colors come from the app's theme tokens (--panel/--bg/--text/--line/--accent) — never hardcode a
+   surface color. (The old .theme-live dark theme was retired 2026-08-27; the Live/Test pill is the env signal.) */
 .copy-replace-warning {
   color: var(--danger, #c0392b);
 }

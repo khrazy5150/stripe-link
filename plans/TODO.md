@@ -119,7 +119,7 @@ Deferred, non-blocking follow-ups. Each item notes what, why it was deferred, an
   the working preview link and Copy/Preview stay on the render (the store URL 404s until published), so the hint is
   informational only — "" for published pages (live URL is already the main line) and for unattached drafts.
 
-### Fix the Live-mode dark theme — forms are nearly invisible (noticed 2026-08-26)
+### Fix the Live-mode dark theme — RESOLVED 2026-08-27 (dark theme RETIRED, option #2)
 - **What:** the dashboard switches to a dark theme when the env toggle is on **Live** (`theme-live` class on the app
   shell; e.g. `.theme-live input { background:#1f2937 }` in `dashboard/src/styles.css`), but the dark styling is only
   partial: modals/cards/wizards (e.g. the 5-step Create Landing Page wizard) keep dark-on-dark fields with

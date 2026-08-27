@@ -3,7 +3,7 @@
   <div
     v-else
     class="app-shell"
-    :class="[`theme-${activeEnvironment}`, { 'sidebar-collapsed': sidebarCollapsed }]"
+    :class="{ 'sidebar-collapsed': sidebarCollapsed }"
     :key="auth.session?.client_id"
   >
     <aside class="sidebar">
