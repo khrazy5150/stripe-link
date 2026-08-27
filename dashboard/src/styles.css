@@ -6195,3 +6195,20 @@ button:disabled {
   font-size: 1.3rem;
   line-height: 1.5;
 }
+
+/* ---- Live-environment chrome (2026-08-27) ----
+   The ONLY visual difference between Test and Live: the brand block + topbar become a brand-blue band with
+   the homepage wordmark treatment (Junior white / Bay orange). Everything below the band stays the shared
+   light theme (the old full dark theme was retired). Scoped by .env-live on .app-shell (App.vue). */
+.env-live .brand,
+.env-live .topbar {
+  background: #0b5294;
+  border-color: rgba(255, 255, 255, 0.14);
+}
+.env-live .brand strong { color: #ffffff; }
+.env-live .brand .wm-junior { color: #ffffff; }
+.env-live .brand .wm-bay { color: #ff8309; }
+.env-live .menu-button span { background: #ffffff; }
+.env-live .topbar-icon-button { color: rgba(255, 255, 255, 0.88); }
+.env-live .topbar-icon-button:hover,
+.env-live .topbar-icon-button:focus-visible { background: rgba(255, 255, 255, 0.14); color: #ffffff; }

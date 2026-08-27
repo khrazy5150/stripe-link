@@ -3,13 +3,13 @@
   <div
     v-else
     class="app-shell"
-    :class="{ 'sidebar-collapsed': sidebarCollapsed }"
+    :class="{ 'sidebar-collapsed': sidebarCollapsed, 'env-live': activeEnvironment === 'live' }"
     :key="auth.session?.client_id"
   >
     <aside class="sidebar">
       <div class="brand">
         <img :src="assetUrl('/icon/favicon.png')" alt="" />
-        <strong>Junior Bay</strong>
+        <strong><span class="wm-junior">Junior</span> <span class="wm-bay">Bay</span></strong>
       </div>
       <nav>
         <template v-for="group in menuGroups" :key="group.key">
