@@ -201,7 +201,10 @@ Deferred, non-blocking follow-ups. Each item notes what, why it was deferred, an
   **Tier-key mapping:** Free=`basic`, Premium=`pro`; `standard` stays as a dormant legacy key (zero migration).
   **Code change (small):** `fee_class_for()` currently routes `service`→`digital` (deliberate, PRD STORY-4.1) —
   add a real `"service"` class + table entries + fallback for configs lacking the key.
-- **(b2) Fee-split preset — DECIDED 2026-08-26:** add a THIRD fee-handling option, **"Split 50/50"**, to the price
+- **(b2) Fee-split preset — SHIPPED DEV+PROD 2026-08-26** (generalized `calculate_price` around
+  `MERCHANT_FEE_SHARES`; schema + service validation; third radio in shared PricingCard + preview; verified live
+  both envs: digital $100→buyer $105.37/merchant $94.63, physical $100→$104.27/$95.73; 1423 tests): a THIRD
+  fee-handling option, **"Split 50/50"**, on the price
   form's Fee handling radio group (Products → Pricing, between "Standard fees deducted" and "Net-guaranteed fees
   added on top"). Merchant and buyer share the fees: generalized gross-up
   `unit = (keyed + (1−s)·fixed) / (1 − (1−s)·rate)` where `s` = merchant's absorption share (standard s=1,
