@@ -81,6 +81,10 @@ select {
 
 .brand strong {
   white-space: nowrap;
+  /* Junior Bay wordmark font (loaded in index.html from fonts.juniorbay.com; matches the homepage). */
+  font-family: 'Ubuntu Titling', Inter, ui-sans-serif, system-ui, sans-serif;
+  font-weight: 700;
+  letter-spacing: 0.02em;
 }
 
 nav {

@@ -99,7 +99,7 @@ function go() {
 </script>
 
 <style scoped>
-.connect-intro-card { max-width: 52rem; text-align: left; }
+.connect-intro-card { max-width: 56rem; text-align: left; padding: 3.2rem 3.6rem; box-sizing: border-box; }
 .ci-brandline { display: flex; align-items: center; gap: 1rem; margin-bottom: 1.2rem; }
 .ci-handshake { font-size: 2rem; }
 .ci-stripe { font-weight: 900; font-size: 2.2rem; color: #635bff; letter-spacing: -0.02em; }
