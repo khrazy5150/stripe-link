@@ -29,7 +29,7 @@
           </p>
           <p v-else-if="billing.current.has_subscription && billing.current.billing_status === 'past_due'" class="billing-status-note">
             There's a payment issue with your subscription — premium stays active while Stripe retries.
-            Update your card via Manage subscription.
+            Update your card with the button on the right.
           </p>
           <p v-else-if="billing.current.has_subscription && billing.current.cancel_at_period_end" class="billing-status-note">
             Your subscription is set to cancel — premium stays active until
@@ -42,7 +42,7 @@
         <div v-if="billing.current.has_subscription" class="billing-status-actions">
           <button
             v-if="billing.current.cancel_at_period_end"
-            type="button" class="secondary-action" :disabled="billing.working"
+            type="button" class="resume-action" :disabled="billing.working"
             @click="billing.setCancellation(false)"
           >
             {{ billing.working ? "Working…" : "Resume subscription" }}
@@ -57,16 +57,18 @@
           </template>
           <button
             v-else
-            type="button" class="secondary-action" :disabled="billing.working"
+            type="button" class="setup-action" :disabled="billing.working"
             @click="confirmingCancel = true"
           >
             Cancel subscription
           </button>
+          <!-- The Stripe portal is the only place to fix a failing card — surface it as a button ONLY then. -->
           <button
-            type="button" class="secondary-action" :disabled="billing.working"
+            v-if="billing.current.billing_status === 'past_due'"
+            type="button" class="setup-action" :disabled="billing.working"
             @click="billing.openPortal()"
           >
-            {{ billing.working ? "Opening…" : "Manage subscription" }}
+            {{ billing.working ? "Opening…" : "Update payment method" }}
           </button>
         </div>
       </section>
@@ -76,7 +78,7 @@
         <header class="dashboard-card-header">
           <div>
             <h2>{{ billing.current.has_subscription ? "Change plan" : "Choose a plan" }}</h2>
-            <p>Card required to subscribe. Cancel anytime from Manage subscription.</p>
+            <p>Card required to subscribe. Cancel anytime — right here.</p>
           </div>
         </header>
 
@@ -108,6 +110,12 @@
             <input v-model.trim="promoCode" type="text" placeholder="e.g. TRIAL14" autocomplete="off" />
           </label>
         </div>
+
+        <!-- Low-key portal access: the Stripe portal is the only place to change cards / download invoices. -->
+        <p v-if="billing.current.has_subscription" class="billing-portal-link">
+          Need to update your card or download invoices?
+          <a href="#" @click.prevent="billing.openPortal()">Open the secure Stripe portal</a>
+        </p>
 
         <div v-if="billing.error" class="keys-status-banner error">{{ billing.error }}</div>
       </section>
@@ -176,6 +184,21 @@ function subscribe(planKey) {
 .billing-status-card { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
 .billing-status-card.walled { border: 1px solid #dc2626; }
 .billing-status-actions { display: flex; align-items: center; gap: 0.8rem; flex-wrap: wrap; justify-content: flex-end; }
+/* Green mirror of the amber .setup-action — resuming is the happy path. */
+.resume-action {
+  min-height: 4rem;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: #16a34a;
+  color: #fff;
+  cursor: pointer;
+  font-weight: 900;
+  padding: 0.8rem 1.6rem;
+  white-space: nowrap;
+}
+.resume-action:disabled { opacity: 0.6; cursor: default; }
+.billing-portal-link { margin-top: 1rem; font-size: 1.2rem; color: var(--text-muted); }
+.billing-portal-link a { color: inherit; text-decoration: underline; }
 .billing-status-main { display: flex; flex-direction: column; gap: 0.4rem; }
 .billing-status-pill { align-self: flex-start; font-size: 1.1rem; font-weight: 700; padding: 0.2rem 0.7rem; border-radius: 999px; text-transform: uppercase; letter-spacing: 0.03em; }
 .billing-status-pill.ok { background: #dcfce7; color: #166534; }
