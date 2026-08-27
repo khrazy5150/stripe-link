@@ -4282,6 +4282,17 @@ Resources:
           Compress: true
           CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6  # Managed-CachingOptimized
         CacheBehaviors:
+          # /fonts/* are shared brand assets (the fonts.juniorbay.com CSS points every surface here). Fonts are
+          # CORS-gated by browsers, so cross-origin pages (the dashboard on app/sandbox.juniorbay.com) need
+          # Access-Control-Allow-Origin — Managed-SimpleCORS adds it.
+          - PathPattern: /fonts/*
+            TargetOriginId: HomepageS3Origin
+            ViewerProtocolPolicy: redirect-to-https
+            AllowedMethods: [GET, HEAD, OPTIONS]
+            CachedMethods: [GET, HEAD]
+            Compress: true
+            CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6  # Managed-CachingOptimized
+            ResponseHeadersPolicyId: 60669652-455b-4ae9-85a4-c4c02393f86c  # Managed-SimpleCORS
           # Forward /legal/* to the legal API. Managed-CachingDisabled forwards no Host header, so the
           # origin receives Host=<ApiCustomDomainName> (required for the API Gateway custom-domain mapping).
           - PathPattern: /legal/*
