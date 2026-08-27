@@ -211,12 +211,13 @@ class ProcessUpsellTests(unittest.TestCase):
         self.assertIsNotNone(order)
         self.assertEqual(order["line_item_type"], "upsell")
         self.assertEqual(order["amount_total"], 2700)
-        # physical/basic: stripe_fee = ceil(2700*2.9%)+30 = 109, platform_fee = round(2700*10%) = 270
+        # physical/basic: stripe_fee = ceil(2700*2.9%)+30 = 109, platform_fee = round(2700*5%) = 135
+        # (physical free-tier rate per the 2026-08-26 pricing pivot)
         self.assertEqual(order["fees"], {
             "tenant_keyed_amount": 2700,
             "stripe_fee": 109,
-            "platform_fee": 270,
-            "net_payout": 2321,
+            "platform_fee": 135,
+            "net_payout": 2456,
         })
 
         pi_request = opener.requests[-1]
@@ -308,7 +309,7 @@ class ProcessUpsellTests(unittest.TestCase):
 
         pi_request = opener.requests[-1]
         pi_payload = parse_qs(pi_request.data.decode("utf-8"))
-        self.assertEqual(pi_payload["application_fee_amount"], ["270"])
+        self.assertEqual(pi_payload["application_fee_amount"], ["135"])
         self.assertEqual(pi_request.headers.get("Stripe-account"), "acct_connected_123")
 
     def test_process_upsell_falls_back_to_first_attached_card(self):

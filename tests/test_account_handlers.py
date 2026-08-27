@@ -621,16 +621,17 @@ class AccountHandlerTests(unittest.TestCase):
         self.assertEqual(notifications_repo.documents[0]["title"], "New sale")
         self.assertEqual(notifications_repo.documents[0]["related"]["page_id"], "page_demo")
         # Standard fee handling, "basic" tier, "physical" product_type (both metadata defaults):
-        # stripe_fee = ceil(3709 * 2.9%) + 30 = 138, platform_fee = round(3709 * 10%) = 371.
+        # stripe_fee = ceil(3709 * 2.9%) + 30 = 138, platform_fee = round(3709 * 5%) = 185
+        # (physical free-tier rate per the 2026-08-26 pricing pivot).
         self.assertEqual(orders_table.items[0]["fees"], {
             "tenant_keyed_amount": 3709,
             "stripe_fee": 138,
-            "platform_fee": 371,
-            "net_payout": 3200,
+            "platform_fee": 185,
+            "net_payout": 3386,
         })
         self.assertEqual(invoices_repo.documents[0]["amounts"]["stripe_fee"], 138)
-        self.assertEqual(invoices_repo.documents[0]["amounts"]["platform_fee"], 371)
-        self.assertEqual(invoices_repo.documents[0]["amounts"]["net_payout"], 3200)
+        self.assertEqual(invoices_repo.documents[0]["amounts"]["platform_fee"], 185)
+        self.assertEqual(invoices_repo.documents[0]["amounts"]["net_payout"], 3386)
 
     def test_stripe_webhook_routes_by_livemode_not_environment(self):
         # Decoupled model (plans/STRIPE_MODE_DECOUPLING.md P3): the event's mode is its own `livemode`, NOT the

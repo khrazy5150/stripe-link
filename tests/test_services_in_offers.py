@@ -82,7 +82,7 @@ class ServicePricingAdapterTests(unittest.TestCase):
 
 class FeeClassTests(unittest.TestCase):
     def test_service_routes_to_digital(self):
-        self.assertEqual(fee_class_for("service"), "digital")
+        self.assertEqual(fee_class_for("service"), "service")
 
     def test_net_guaranteed_grosses_up_service(self):
         std = calculate_price(tenant_keyed_amount=15000, product_type="service", fee_handling="standard")

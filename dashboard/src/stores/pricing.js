@@ -17,10 +17,15 @@ export function cents(value) {
   return Math.max(0, Math.round(Number(value || 0) * 100));
 }
 
-// Services share the digital fee tier (see backend fee_class_for: service -> digital).
+// Free-tier rates from the 2026-08-26 pricing pivot (backend fee_class_for / DEFAULT_GLOBAL_BILLING_CONFIG:
+// physical 5% / service 6% / digital 7% / tip_jar 5%). Preview-only — the authoritative calc is server-side
+// (PriceCalculationFunction). Follow-up: serve the tenant's actual plan rates from the API so premium (2%)
+// previews correctly instead of assuming the free tier.
 export function platformFeeRate(productType, pricingModel) {
   if (pricingModel === "customer_chooses") return 0.05;
-  return productType === "digital" || productType === "service" ? 0.15 : 0.10;
+  if (productType === "physical") return 0.05;
+  if (productType === "service") return 0.06;
+  return 0.07;
 }
 
 export function netGuaranteedCustomerAmount(netAmount, platformRate) {

@@ -312,7 +312,7 @@ class CheckoutHandlerTests(unittest.TestCase):
 
         payload = parse_qs(self.requests[0].data.decode("utf-8"))
         # 1800 cents at the "basic" tier physical rate (10%) rounds to a 180 cent platform fee.
-        self.assertEqual(payload["payment_intent_data[application_fee_amount]"], ["180"])
+        self.assertEqual(payload["payment_intent_data[application_fee_amount]"], ["90"])
         self.assertEqual(payload["metadata[product_type]"], ["physical"])
         self.assertEqual(payload["metadata[tenant_plan]"], ["basic"])
 
@@ -395,7 +395,7 @@ class CheckoutHandlerTests(unittest.TestCase):
 
         payload = parse_qs(self.requests[0].data.decode("utf-8"))
         # 1800 base at basic-tier physical 10% = 180. The optional bump isn't in the base subtotal.
-        self.assertEqual(payload["payment_intent_data[application_fee_amount]"], ["180"])
+        self.assertEqual(payload["payment_intent_data[application_fee_amount]"], ["90"])
 
     def test_checkout_uses_selected_price_for_selectable_offer(self):
         offer = load_fixture("offer-creatine-standard.json")

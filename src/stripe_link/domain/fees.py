@@ -13,14 +13,32 @@ class PriceCalculationError(ValueError):
 DEFAULT_GLOBAL_BILLING_CONFIG = {
     "schema_version": "2026-06-04",
     "document_type": "global_billing_config",
-    "effective_date": "2026-06-04",
+    "effective_date": "2026-08-26",
     "canonical": True,
     "platform_fees": {
         "unit": "percent",
+        # Free-forever + transaction-fee model (plans/TODO.md "Pricing pivot", decided 2026-08-26):
+        # `basic` = the free tier; `pro` = premium ($19/mo). The ladder tracks margin (physical thinnest
+        # -> lowest fee). `standard` is a dormant legacy key kept for zero-migration — mirrors basic.
         "tiers": {
-            "basic": {"physical": Decimal("10.0"), "digital": Decimal("15.0"), "tip_jar": Decimal("5.0")},
-            "standard": {"physical": Decimal("8.0"), "digital": Decimal("13.0"), "tip_jar": Decimal("4.0")},
-            "pro": {"physical": Decimal("5.0"), "digital": Decimal("10.0"), "tip_jar": Decimal("2.0")},
+            "basic": {
+                "physical": Decimal("5.0"),
+                "service": Decimal("6.0"),
+                "digital": Decimal("7.0"),
+                "tip_jar": Decimal("5.0"),
+            },
+            "standard": {
+                "physical": Decimal("5.0"),
+                "service": Decimal("6.0"),
+                "digital": Decimal("7.0"),
+                "tip_jar": Decimal("5.0"),
+            },
+            "pro": {
+                "physical": Decimal("2.0"),
+                "service": Decimal("2.0"),
+                "digital": Decimal("2.0"),
+                "tip_jar": Decimal("0.0"),
+            },
         },
     },
     "payment_processing": {
@@ -93,10 +111,11 @@ def fee_class_for(product_type: str, pricing_model: str = "one_time") -> str:
         return "tip_jar"
     if product_type == "physical":
         return "physical"
-    # Services intentionally route to the "digital" fee class (no separate service tier today).
-    # This is an explicit decision, not an accidental fall-through — see PRD STORY-4.1.
+    # Services get their own fee class as of the 2026-08-26 pricing pivot (free 6% vs digital 7%) —
+    # supersedes the earlier deliberate service->digital routing (PRD STORY-4.1). Configs lacking a
+    # "service" entry fall back to the default table via platform_fee_rate's fallback.
     if product_type == "service":
-        return "digital"
+        return "service"
     return "digital"
 
 
