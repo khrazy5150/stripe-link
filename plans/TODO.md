@@ -119,6 +119,18 @@ Deferred, non-blocking follow-ups. Each item notes what, why it was deferred, an
   the working preview link and Copy/Preview stay on the render (the store URL 404s until published), so the hint is
   informational only — "" for published pages (live URL is already the main line) and for unattached drafts.
 
+### Fix the Live-mode dark theme — forms are nearly invisible (noticed 2026-08-26)
+- **What:** the dashboard switches to a dark theme when the env toggle is on **Live** (`theme-live` class on the app
+  shell; e.g. `.theme-live input { background:#1f2937 }` in `dashboard/src/styles.css`), but the dark styling is only
+  partial: modals/cards/wizards (e.g. the 5-step Create Landing Page wizard) keep dark-on-dark fields with
+  near-invisible borders, while **Test** stays light and looks correct. Screenshot evidence: same wizard, Live = murky
+  low-contrast panels; Test = clean white modal.
+- **Fix direction:** audit every surface under `.theme-live` (modals, cards, wizard steps, dropdowns, tables) and give
+  the dark theme a complete token set (backgrounds, borders, text, focus rings) — or, simpler, **reconsider whether
+  Live should be dark at all** (the mode pill + accent color may be enough env signal; a full theme swap doubles the
+  styling surface to maintain). Decide, then make whichever theme(s) remain fully consistent.
+- **Related:** the earlier env-toggle repaint issue in [dashboard env + caching] — same toggle, adjacent polish.
+
 ### Consolidate the side menu into collapsible groups
 - The side menu has grown cluttered and lost its original simplicity. Look into grouping items into collapsible
   sections. Deferred to AFTER BNPL ships (plans/BNPL_PAYMENT_METHODS.md) — the right grouping will be clearer then.
