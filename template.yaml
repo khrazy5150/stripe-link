@@ -473,6 +473,9 @@ Resources:
       Policies:
         - S3ReadPolicy:
             BucketName: !Ref ConfigBucket
+        # Read the tenant profile so the fee tier is server-authoritative (tier_id: premium=pro -> 2%).
+        - DynamoDBReadPolicy:
+            TableName: !Ref TenantProfilesTable
       Events:
         PriceCalculate:
           Type: Api
