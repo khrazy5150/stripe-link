@@ -135,6 +135,19 @@ Deferred, non-blocking follow-ups. Each item notes what, why it was deferred, an
   styling surface to maintain). Decide, then make whichever theme(s) remain fully consistent.
 - **Related:** the earlier env-toggle repaint issue in [dashboard env + caching] — same toggle, adjacent polish.
 
+### Show the connected Stripe account under the avatar (topbar user pill) — LOW priority, noted 2026-08-27
+- **What:** the topbar user pill's subtitle is the static word "user" (App.vue `.user-pill small`). Replace it with
+  the **connected Stripe account for the active mode** — the Connect email (`connect_email`, e.g.
+  keith@juniorbay.net) or business name (`connect_business_name`) from `stripeKeys.connectCard.stripe_connect`;
+  fall back to "Not connected" / "user" when there is none. **Truncate** (CSS `max-width` + `text-overflow:
+  ellipsis`, ~22ch, full value in `title=`) so a long email can't distort the pill.
+- **Why:** during onboarding verification the author mixed up which tenant owned which Stripe account (a Payments
+  screen showed a live acct on the yahoo test tenant while the Dashboard — a different login — said "not
+  connected"). Surfacing the connected account's identity at the top of every screen makes "which Stripe am I
+  wired to?" glanceable and prevents that confusion for tenants with multiple logins/accounts.
+- **Where:** App.vue user pill markup + `stripeKeys` store (already loads the connect card per mode; reuse, no new
+  API). Mode-aware: shows the test account in Test, the live account in Live.
+
 ### Consolidate the side menu into collapsible groups
 - The side menu has grown cluttered and lost its original simplicity. Look into grouping items into collapsible
   sections. Deferred to AFTER BNPL ships (plans/BNPL_PAYMENT_METHODS.md) — the right grouping will be clearer then.
