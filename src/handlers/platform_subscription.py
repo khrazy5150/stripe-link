@@ -71,6 +71,10 @@ def handler(
         return _subscribe(event, tenant_repository, plans_repository, mode, opener, secret_key)
     if method == "POST" and path.endswith("/portal"):
         return _portal(event, tenant_repository, mode, opener, secret_key)
+    if method == "POST" and path.endswith("/cancel"):
+        return _set_cancellation(event, tenant_repository, mode, opener, secret_key, cancel=True)
+    if method == "POST" and path.endswith("/resume"):
+        return _set_cancellation(event, tenant_repository, mode, opener, secret_key, cancel=False)
     return error_response(f"Unsupported route '{method} {path}'.", status_code=405, code="method_not_allowed")
 
 
@@ -98,6 +102,8 @@ def _plans(event, tenant_repository, plans_repository, mode):
                 # The tenant's live transaction-fee tier ("basic" free / "pro" premium) so the price-form
                 # preview shows the rates this tenant actually pays.
                 "tier_id": normalize_tier_id(tenant.get("tier_id")),
+                # Pending in-app cancellation: premium runs to current_period_end, then Free.
+                "cancel_at_period_end": bool(tenant.get("cancel_at_period_end")),
             },
             # The full gateable-feature catalog so the dashboard can DISABLE (not hide) the ones the tenant's
             # entitlements don't include, with an upgrade hint (plans/SAAS_BILLING_PAYWALL.md).
@@ -207,6 +213,46 @@ def _subscribe(event, tenant_repository, plans_repository, mode, opener, secret_
     if customer_id and customer_id != str(tenant.get("stripe_customer_id") or ""):
         _safe_put(tenant_repository, {**tenant, "stripe_customer_id": customer_id})
     return json_response({"platform_billing": {"checkout_url": session.get("url"), "session_id": session.get("id")}})
+
+
+def _set_cancellation(event, tenant_repository, mode, opener, secret_key, *, cancel: bool):
+    """In-app cancel (and resume) — no Stripe portal round-trip. Cancel sets cancel_at_period_end on the Stripe
+    subscription: premium (features + pro fee) runs to the paid-through date, then the subscription.deleted
+    webhook downgrades the tenant to the free tier (free-forever model, plans/TODO.md). Resume unsets it."""
+    body = parse_json_body(event) or {}
+    tenant_id = str(body.get("tenant_id") or tenant_id_from_event(event) or "").strip()
+    if not tenant_id:
+        return error_response("tenant_id is required.", code="missing_tenant")
+    try:
+        tenant = tenant_repository.get(tenant_id, tenant_id)
+    except RepositoryError as exc:
+        return error_response(str(exc), code="platform_billing_error")
+    if not tenant:
+        return error_response("Tenant not found.", status_code=404, code="not_found")
+    subscription_id = str(tenant.get("stripe_subscription_id") or "").strip()
+    if not subscription_id:
+        return error_response("No active subscription for this tenant.", status_code=409, code="no_subscription")
+
+    key = secret_key or get_platform_secret_key(mode)
+    if not key:
+        return error_response("Platform Stripe secret is not configured.", status_code=503, code="platform_not_configured")
+    try:
+        subscription = stripe_request(
+            "POST", f"/subscriptions/{subscription_id}", api_key=key, opener=opener,
+            data={"cancel_at_period_end": "true" if cancel else "false"},
+        )
+    except StripeApiError as exc:
+        return error_response(f"Stripe error: {exc}", status_code=502, code="stripe_error")
+
+    # Reflect immediately (the subscription.updated webhook will confirm) so the Billing screen updates on reload.
+    updates = {"cancel_at_period_end": bool(subscription.get("cancel_at_period_end"))}
+    if isinstance(subscription.get("current_period_end"), int):
+        updates["current_period_end"] = subscription["current_period_end"]
+    _safe_put(tenant_repository, {**tenant, **updates})
+    return json_response({"platform_billing": {
+        "cancel_at_period_end": updates["cancel_at_period_end"],
+        "current_period_end": updates.get("current_period_end") or tenant.get("current_period_end"),
+    }})
 
 
 def _portal(event, tenant_repository, mode, opener, secret_key):

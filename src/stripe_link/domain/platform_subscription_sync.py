@@ -98,7 +98,9 @@ def reconcile_platform_subscription_event(
             updates["billing_status"] = "canceled"
             updates["entitlements"] = []
             updates["tier_id"] = "basic"
+            updates["cancel_at_period_end"] = False  # the pending cancel has now happened
         else:
+            updates["cancel_at_period_end"] = bool(obj.get("cancel_at_period_end"))
             updates["billing_status"] = billing_status_from_stripe(obj.get("status"))
             # Denormalize the plan's entitlements onto the tenant so the per-feature guards are a pure profile check.
             plan_key = str((obj.get("metadata") or {}).get("plan_key") or tenant.get("billing_plan_key") or "").strip()

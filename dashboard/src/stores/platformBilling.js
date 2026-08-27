@@ -121,6 +121,24 @@ export const usePlatformBillingStore = defineStore("platformBilling", {
       }
     },
 
+    // In-app cancel/resume — no Stripe portal round-trip. Cancel keeps premium until the paid-through
+    // date (cancel_at_period_end), then the account moves to the Free plan.
+    async setCancellation(cancel) {
+      this.working = true;
+      this.error = "";
+      try {
+        await apiRequest(`/platform-billing/${cancel ? "cancel" : "resume"}`, {
+          method: "POST",
+          body: { tenant_id: getTenantId() },
+        });
+        await this.load();
+      } catch (error) {
+        this.error = error.message || "Could not update the subscription.";
+      } finally {
+        this.working = false;
+      }
+    },
+
     async openPortal() {
       this.working = true;
       this.error = "";

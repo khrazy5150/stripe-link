@@ -362,3 +362,50 @@ class WebhookOrderingGuardTests(unittest.TestCase):
             mode="test", tenant_repo=tenants)
         self.assertEqual(result["billing_status"], "active")
         self.assertEqual(tenants.docs["t1"]["last_billing_event_at"], 3000)
+
+
+class CancelResumeTests(unittest.TestCase):
+    """In-app cancel/resume — sets cancel_at_period_end on the Stripe subscription, no portal round-trip."""
+
+    class _SubOpener(FakeOpener):
+        def __init__(self, cancel_at_period_end):
+            super().__init__()
+            self._cape = cancel_at_period_end
+
+        def __call__(self, request, timeout=None):
+            url = request.full_url
+            self.calls.append((request.method, url))
+            self.bodies.append(request.data.decode("utf-8") if request.data else "")
+            if "/subscriptions/" in url:
+                return FakeResponse({"id": "sub_1", "cancel_at_period_end": self._cape,
+                                     "current_period_end": 1790000000})
+            return FakeResponse({})
+
+    def _post(self, path, tenants, opener):
+        return platform_subscription.handler(
+            {"httpMethod": "POST", "path": path, "body": json.dumps({"tenant_id": "t1"})},
+            None, tenant_repository=tenants, opener=opener, secret_key="sk_test_x")
+
+    def test_cancel_sets_cancel_at_period_end(self):
+        opener = self._SubOpener(True)
+        tenants = FakeTenantRepo([_tenant(stripe_subscription_id="sub_1", billing_status="active")])
+        resp = self._post("/platform-billing/cancel", tenants, opener)
+        self.assertEqual(resp["statusCode"], 200)
+        body = json.loads(resp["body"])["platform_billing"]
+        self.assertTrue(body["cancel_at_period_end"])
+        self.assertEqual(body["current_period_end"], 1790000000)
+        self.assertIn("cancel_at_period_end=true", opener.bodies[0])
+        self.assertTrue(tenants.docs["t1"]["cancel_at_period_end"])  # reflected immediately
+
+    def test_resume_unsets_cancel_at_period_end(self):
+        opener = self._SubOpener(False)
+        tenants = FakeTenantRepo([_tenant(stripe_subscription_id="sub_1", billing_status="active",
+                                          cancel_at_period_end=True)])
+        resp = self._post("/platform-billing/resume", tenants, opener)
+        self.assertEqual(resp["statusCode"], 200)
+        self.assertIn("cancel_at_period_end=false", opener.bodies[0])
+        self.assertFalse(tenants.docs["t1"]["cancel_at_period_end"])
+
+    def test_cancel_requires_subscription(self):
+        resp = self._post("/platform-billing/cancel", FakeTenantRepo([_tenant()]), FakeOpener())
+        self.assertEqual(resp["statusCode"], 409)

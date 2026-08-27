@@ -31,17 +31,44 @@
             There's a payment issue with your subscription — premium stays active while Stripe retries.
             Update your card via Manage subscription.
           </p>
+          <p v-else-if="billing.current.has_subscription && billing.current.cancel_at_period_end" class="billing-status-note">
+            Your subscription is set to cancel — premium stays active until
+            <strong>{{ periodEndLabel }}</strong>, then you'll move to the Free plan (your pages stay live).
+          </p>
           <p v-else-if="billing.current.has_subscription" class="billing-status-note">
             You're subscribed{{ planLabel ? ` to ${planLabel}` : "" }}.
           </p>
         </div>
-        <button
-          v-if="billing.current.has_subscription"
-          type="button" class="secondary-action" :disabled="billing.working"
-          @click="billing.openPortal()"
-        >
-          {{ billing.working ? "Opening…" : "Manage subscription" }}
-        </button>
+        <div v-if="billing.current.has_subscription" class="billing-status-actions">
+          <button
+            v-if="billing.current.cancel_at_period_end"
+            type="button" class="secondary-action" :disabled="billing.working"
+            @click="billing.setCancellation(false)"
+          >
+            {{ billing.working ? "Working…" : "Resume subscription" }}
+          </button>
+          <template v-else-if="confirmingCancel">
+            <button type="button" class="secondary-action" :disabled="billing.working" @click="confirmingCancel = false">
+              Keep premium
+            </button>
+            <button type="button" class="danger-action" :disabled="billing.working" @click="confirmCancel">
+              {{ billing.working ? "Canceling…" : "Yes, cancel at period end" }}
+            </button>
+          </template>
+          <button
+            v-else
+            type="button" class="secondary-action" :disabled="billing.working"
+            @click="confirmingCancel = true"
+          >
+            Cancel subscription
+          </button>
+          <button
+            type="button" class="secondary-action" :disabled="billing.working"
+            @click="billing.openPortal()"
+          >
+            {{ billing.working ? "Opening…" : "Manage subscription" }}
+          </button>
+        </div>
       </section>
 
       <!-- Plans -->
@@ -94,6 +121,17 @@ import { usePlatformBillingStore } from "../stores/platformBilling";
 
 const billing = usePlatformBillingStore();
 const promoCode = ref("");
+const confirmingCancel = ref(false);
+
+async function confirmCancel() {
+  await billing.setCancellation(true);
+  confirmingCancel.value = false;
+}
+
+const periodEndLabel = computed(() => {
+  const end = Number(billing.current.current_period_end || 0);
+  return end ? new Date(end * 1000).toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" }) : "the end of your billing period";
+});
 
 onMounted(() => {
   if (!billing.loaded) billing.load();
@@ -137,6 +175,7 @@ function subscribe(planKey) {
 .billing-muted { color: var(--muted); padding: 1rem 0; }
 .billing-status-card { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
 .billing-status-card.walled { border: 1px solid #dc2626; }
+.billing-status-actions { display: flex; align-items: center; gap: 0.8rem; flex-wrap: wrap; justify-content: flex-end; }
 .billing-status-main { display: flex; flex-direction: column; gap: 0.4rem; }
 .billing-status-pill { align-self: flex-start; font-size: 1.1rem; font-weight: 700; padding: 0.2rem 0.7rem; border-radius: 999px; text-transform: uppercase; letter-spacing: 0.03em; }
 .billing-status-pill.ok { background: #dcfce7; color: #166534; }

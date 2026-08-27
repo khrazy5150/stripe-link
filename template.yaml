@@ -579,6 +579,30 @@ Resources:
             RestApiId: !Ref RestApi
             Path: /platform-billing/portal
             Method: OPTIONS
+        PlatformBillingCancel:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /platform-billing/cancel
+            Method: POST
+        PlatformBillingCancelOptions:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /platform-billing/cancel
+            Method: OPTIONS
+        PlatformBillingResume:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /platform-billing/resume
+            Method: POST
+        PlatformBillingResumeOptions:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /platform-billing/resume
+            Method: OPTIONS
 
   ProductsFunction:
     Type: AWS::Serverless::Function
