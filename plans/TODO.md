@@ -179,10 +179,14 @@ Deferred, non-blocking follow-ups. Each item notes what, why it was deferred, an
   those features **and** drops the transaction fee (~2%). Strategy = Beacons' free-forever acquisition + Shopify's
   fee-graduation + a Stan-style trial that **downgrades gracefully** instead of locking out — you never lose the
   tenant and keep earning the fee forever.
-- **(a) Paywall change:** replace the `trial_expired` **hard wall** (`plans/SAAS_BILLING_PAYWALL.md`) with a
-  **downgrade to free-forever** — keep pages/checkout/existing prices live, gate only the premium entitlements, and
-  flip the tenant's `tier_id`→basic so `build_fee_context` charges the basic fee automatically. Reword the trial
-  banner ("trial ended → now on Free, premium features paused") instead of a wall.
+- **(a) Paywall change — SHIPPED DEV+PROD 2026-08-27:** hard wall replaced with the free-forever downgrade
+  (entitlements floor `landing_pages+sites+collections`; BLOCKED statuses = suspended only; free-plan banner).
+  Shipped alongside: **Premium $19 plan cutover** (docs/PLATFORM_PLANS.md), **tier_id sync** (subscribe→plan
+  fee_tier, deleted→basic), **server-authoritative fee tier** in /prices/calculate (+ TenantProfiles IAM grant,
+  tier-aware price-form preview), **webhook ordering guard** (last_billing_event_at; fixes incomplete-after-paid
+  past_due), honest past_due presentation, and **in-app Cancel/Resume subscription** (cancel_at_period_end; the
+  Stripe portal demoted to a muted card/invoices link + past_due-only button). Full upgrade→cancel→resume loop
+  verified on sandbox (tenant 08f12390); prod verified via routes/calc/bundle checks.
 - **(b) Fee table — SHIPPED DEV+PROD 2026-08-26** (`fees.py` defaults + both S3 `global_billing_config.json`
   objects + dashboard preview rates; new `service` fee class live; verified via `/prices/calculate` on
   dev.juniorbay.com AND prod.juniorbay.com — 5/6/7 free, 2% pro, 0% pro tips; 1420 tests green):
