@@ -28,6 +28,16 @@ html {
   font-size: 62.5%;
 }
 
+/* Junior Bay wordmark font — self-hosted (dashboard/public/fonts), same file the fonts.juniorbay.com
+   service serves. Same-origin so no CORS; matches the homepage wordmark. */
+@font-face {
+  font-family: 'Ubuntu Titling';
+  font-style: normal;
+  font-weight: 700;
+  src: url('/fonts/UbuntuTitling-Bold.woff2') format('woff2');
+  font-display: swap;
+}
+
 body {
   margin: 0;
   min-height: 100vh;
