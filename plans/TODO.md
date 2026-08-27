@@ -264,6 +264,35 @@ Deferred, non-blocking follow-ups. Each item notes what, why it was deferred, an
   migration (deferred tool). The subscription is a **single line item** today (no multi-item/add-on billing), and
   there is **no metered/usage rail** yet (same gap the Identity gate flagged).
 
+### "Sabbath mode" — optional weekly store closure (noted 2026-08-27, not built)
+- **What:** an opt-in toggle (OFF by default) letting a tenant close their store for the Sabbath. When enabled:
+  - The closure window runs from **Friday sundown − buffer** to **Saturday sundown + buffer**, sundown computed
+    for the tenant's **local location/timezone** (varies daily). ⚠️ *Interpretation to confirm with the author:*
+    the example given ("sundown 8:15 PM → shut at 7:15 PM, reopen 9:15 PM") illustrates the ±buffer around a
+    single sundown; the closure itself is assumed to span the full Sabbath (Fri sundown → Sat sundown), with the
+    buffer applied at both ends and the resume message showing the **Saturday** date/time.
+  - **Buffer** is tenant-configurable, **0–60 min**, default 60 (some want 30, 10, or 0). Symmetric for v1
+    (before-start = after-end); asymmetric before/after could come later (halachic customs differ: candle-lighting
+    ~18 min before sunset, end at nightfall ~42–72 min after).
+  - During the window, checkout is **replaced by a branded closure page**: *"Happy Sabbath! This store is
+    temporarily closed for business in observance of God's Holiday. We will resume business again on {date} at
+    {end-of-Sabbath-mode time}."* — same design family as the existing "This store is temporarily offline"
+    billing page (dark-blue card, JB wordmark, status chip, orange-accent headline, trust strip). Resume time
+    rendered in the tenant's local time with zone abbreviation.
+- **Design notes for the build:**
+  - **Sundown math:** needs the tenant's coordinates + IANA timezone. Source: Business Address (Profile) geocoded
+    once, or explicit lat/long + timezone fields on the setting. Compute with a solar algorithm (e.g. the `astral`
+    package or NOAA formula) — pure math, no external API, works offline in Lambda.
+  - **Where to enforce:** at the **checkout/cart/booking/upsell handlers** (dynamic API — reliable), returning the
+    closure page instead of a Stripe session; published landing pages are CloudFront-cached so don't rely on
+    page-render gating (optionally add a small "closed for Sabbath" notice via the JS island). This is a
+    TENANT-chosen gate, so it doesn't conflict with the free-forever "never block a sale" rule.
+  - **Scope of the setting:** the UI lives in **User Preferences**, but the closure is a **store (tenant)** property —
+    store it on the tenant profile/config, not per-user preferences, so every login sees the same state.
+  - Future: additional holy days (Yom Kippur etc.) as a date list; a "closed now / reopens at" preview in the
+    Preferences UI so the tenant can sanity-check their buffer.
+- **Why deferred:** feature idea captured for prioritization; no code.
+
 ### Age / identity verification gate (Stripe Identity)
 - **UNBLOCKED 2026-08-03** — the SaaS billing subscription rail it needed now ships in prod. Verification charging can
   ride the tenant subscription (metered
