@@ -183,10 +183,34 @@ Deferred, non-blocking follow-ups. Each item notes what, why it was deferred, an
   **downgrade to free-forever** — keep pages/checkout/existing prices live, gate only the premium entitlements, and
   flip the tenant's `tier_id`→basic so `build_fee_context` charges the basic fee automatically. Reword the trial
   banner ("trial ended → now on Free, premium features paused") instead of a wall.
-- **(b) Fee-table retune (numbers TBD):** edit `fees.py` `DEFAULT_GLOBAL_BILLING_CONFIG` (or the S3
-  `global_billing_config.json`) — drop the unrealistic **15% digital**; set **free ≤10%**, **premium ~2%**; keep
-  **physical substantially lower** than digital (thin margins; 10%+Stripe makes physical uncompetitive). The per-tier
-  × per-product-type table already exists — this is config tuning, not new code.
+- **(b) Fee table — DECIDED 2026-08-26:** edit `fees.py` `DEFAULT_GLOBAL_BILLING_CONFIG` (+ S3
+  `global_billing_config.json`):
+
+  | fee class | Free | Premium ($19/mo) |
+  |---|---:|---:|
+  | physical | **5%** | **2%** |
+  | service *(new class)* | **6%** | **2%** |
+  | digital | **7%** | **2%** |
+  | tip_jar | **5%** | **0%** ("keep 100% of tips") |
+
+  Ladder tracks margin (physical thinnest → lowest). Digital 7% **undercuts Beacons 9% / Gumroad 10%** — launch
+  positioning. Crossovers (GMV where premium wins): digital ~$380/mo, service ~$475, physical ~$630. **Ratchet
+  accepted:** fees can be *lowered* later (a gift) but never raised (scandal + baked net-guaranteed prices erode) —
+  7% digital is the forever-ceiling, chosen deliberately (merchant's-eye: 7%+Stripe ≈ a bearable ~10% all-in).
+  **Tier-key mapping:** Free=`basic`, Premium=`pro`; `standard` stays as a dormant legacy key (zero migration).
+  **Code change (small):** `fee_class_for()` currently routes `service`→`digital` (deliberate, PRD STORY-4.1) —
+  add a real `"service"` class + table entries + fallback for configs lacking the key.
+- **(b2) Fee-split preset — DECIDED 2026-08-26:** add a THIRD fee-handling option, **"Split 50/50"**, to the price
+  form's Fee handling radio group (Products → Pricing, between "Standard fees deducted" and "Net-guaranteed fees
+  added on top"). Merchant and buyer share the fees: generalized gross-up
+  `unit = (keyed + (1−s)·fixed) / (1 − (1−s)·rate)` where `s` = merchant's absorption share (standard s=1,
+  net_guaranteed s=0, split s=0.5) — the existing `calculate_price` loop generalizes with one parameter. Worked
+  example (digital free tier, $100 keyed): standard $100/$89.80, **split $105.36/$94.63**, net-guar $111.43/$100 —
+  split lands the buyer markup at ~5.4% (surcharge-tolerance territory) while halving the merchant's fee hit; the
+  **killer preset for thin-margin physical sellers**. **Presets only, NO slider** (store a numeric absorption share
+  internally — 100/50/0 — for future flexibility; UI exposes exactly three radio choices). Plain-language labels:
+  "I cover the fees / Split 50/50 / My buyers cover the fees," live buyer-price preview per option. Downgrade
+  behavior identical to net_guaranteed (baked buyer price holds; merchant's realized net dips until re-price).
 - **Already true in code (no work needed):** price is **baked at setup** (`prices.py` net-guaranteed gross-up →
   `Product.unit_amount`) while the **fee is computed live at checkout** from the tenant's current `tier_id`
   (`fees.py build_fee_context`). So upgrade/downgrade already "just work": buyer price stays stable; on **upgrade** the
