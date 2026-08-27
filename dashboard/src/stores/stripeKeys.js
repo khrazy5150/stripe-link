@@ -48,6 +48,7 @@ export const useStripeKeysStore = defineStore("stripeKeys", {
     connectLoading: false,
     connectLoaded: false,
     connectStarting: false,
+    connectIntro: null,  // {chain, path} while the branded intro modal is open; null = closed
     connectCard: null,
     connectError: "",
     message: "Set API Base URL, then save new Stripe keys.",
@@ -139,7 +140,19 @@ export const useStripeKeysStore = defineStore("stripeKeys", {
       return body.stripe_connect_card;
     },
 
-    async startConnect({ chain = "", path = "existing" } = {}) {
+    // Every "Connect Stripe" entry point lands here. Instead of redirecting straight to Stripe's OAuth
+    // (intimidating), open the branded intro modal first (ConnectIntroModal, mounted globally in App.vue);
+    // its Continue calls launchConnect. plans/TODO.md "Branded Connect onboarding intro".
+    startConnect({ chain = "", path = "existing" } = {}) {
+      this.connectError = "";
+      this.connectIntro = { chain, path };
+    },
+
+    dismissConnectIntro() {
+      this.connectIntro = null;
+    },
+
+    async launchConnect({ chain = "", path = "existing", country = "" } = {}) {
       this.connectStarting = true;
       this.connectError = "";
       setTenantId(this.tenantId);
@@ -149,6 +162,7 @@ export const useStripeKeysStore = defineStore("stripeKeys", {
         path,
       };
       if (chain) params.chain = chain;
+      if (country) params.country = country;
       try {
         const body = await apiRequest("/stripe/connect/start", {
           params,
@@ -158,7 +172,6 @@ export const useStripeKeysStore = defineStore("stripeKeys", {
         }
       } catch (error) {
         this.connectError = error.message;
-      } finally {
         this.connectStarting = false;
       }
     },

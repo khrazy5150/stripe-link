@@ -209,6 +209,10 @@ def start_handler(event, context, tenant_repository=None):
         params.update(_stripe_user_prefill(tenant_id, tenant_repository))
     except RepositoryError:
         pass
+    # The branded intro modal's Home Country picker — an explicit choice, so it wins over any profile prefill.
+    country = str(query.get("country") or "").strip().upper()
+    if len(country) == 2 and country.isalpha():
+        params["stripe_user[country]"] = country
     params = urlencode(params)
     connect_url = f"https://connect.stripe.com/oauth/authorize?{params}"
     if should_redirect:

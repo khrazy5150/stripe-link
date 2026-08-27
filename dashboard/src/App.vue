@@ -182,6 +182,8 @@
       <Preferences v-else-if="activeView === 'preferences'" :key="`preferences-${auth.session?.user_id || ''}`" />
     </main>
     <ToastHost @select="onToastSelect" />
+    <!-- Branded Stripe-Connect intro: opened by ANY startConnect() entry point (stripeKeys store). -->
+    <ConnectIntroModal />
   </div>
 </template>
 
@@ -191,6 +193,7 @@ import ABTesting from "./components/ABTesting.vue";
 import AuthPage from "./components/AuthPage.vue";
 import Billing from "./components/Billing.vue";
 import Configuration from "./components/Configuration.vue";
+import ConnectIntroModal from "./components/shared/ConnectIntroModal.vue";
 import Collections from "./components/Collections.vue";
 import Coupons from "./components/Coupons.vue";
 import Customers from "./components/Customers.vue";

@@ -1181,6 +1181,28 @@ class AccountHandlerTests(unittest.TestCase):
         self.assertEqual(body["state"], "tenant_demo:test:single:existing:test")
         self.assertEqual(body["oauth_mode"], "test")
 
+    def test_stripe_connect_start_prefills_country_from_intro_picker(self):
+        # The branded intro modal's Home Country picker rides the start URL as stripe_user[country].
+        with patch.dict(os.environ, {
+            "STRIPE_CLIENT_ID_TEST": "ca_test_demo",
+            "STRIPE_CONNECT_REDIRECT_URI": "https://api.example.com/connect/callback",
+        }):
+            response = start_handler({
+                "queryStringParameters": {"tenant_id": "tenant_demo", "mode": "test", "country": "ca"}
+            }, None)
+        body = json.loads(response["body"])
+        self.assertIn("stripe_user%5Bcountry%5D=CA", body["connect_url"])
+
+        # Junk country values are ignored, never breaking the URL.
+        with patch.dict(os.environ, {
+            "STRIPE_CLIENT_ID_TEST": "ca_test_demo",
+            "STRIPE_CONNECT_REDIRECT_URI": "https://api.example.com/connect/callback",
+        }):
+            response = start_handler({
+                "queryStringParameters": {"tenant_id": "tenant_demo", "mode": "test", "country": "US1"}
+            }, None)
+        self.assertNotIn("country", json.loads(response["body"])["connect_url"])
+
     def test_stripe_connect_start_requires_test_client_for_test_mode(self):
         with patch.dict(os.environ, {
             "STRIPE_CLIENT_ID": "ca_demo",
