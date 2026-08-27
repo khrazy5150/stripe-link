@@ -266,14 +266,21 @@ Deferred, non-blocking follow-ups. Each item notes what, why it was deferred, an
 
 ### "Sabbath mode" — optional weekly store closure (noted 2026-08-27, not built)
 - **What:** an opt-in toggle (OFF by default) letting a tenant close their store for the Sabbath. When enabled:
-  - The closure window runs from **Friday sundown − buffer** to **Saturday sundown + buffer**, sundown computed
-    for the tenant's **local location/timezone** (varies daily). ⚠️ *Interpretation to confirm with the author:*
-    the example given ("sundown 8:15 PM → shut at 7:15 PM, reopen 9:15 PM") illustrates the ±buffer around a
-    single sundown; the closure itself is assumed to span the full Sabbath (Fri sundown → Sat sundown), with the
-    buffer applied at both ends and the resume message showing the **Saturday** date/time.
-  - **Buffer** is tenant-configurable, **0–60 min**, default 60 (some want 30, 10, or 0). Symmetric for v1
+  - The closure window runs from **Friday sundown − buffer** to **Saturday sundown + buffer** (the full Sabbath
+    plus the buffer at each end), sundown computed for the tenant's **local location/timezone** (varies daily).
+    **CONFIRMED by the author 2026-08-27.** The resume message shows the **Saturday** date + end time.
+  - **Buffer** is tenant-configurable, **0–60 min**, default **60 before / 60 after**. **Zero buffer = the
+    checkout closes exactly at Friday sundown and reopens exactly at Saturday sundown.** Symmetric for v1
     (before-start = after-end); asymmetric before/after could come later (halachic customs differ: candle-lighting
-    ~18 min before sunset, end at nightfall ~42–72 min after).
+    ~18 min before sunset, end at nightfall ~42–72 min after). *(Note on arithmetic: the Sabbath itself is ~24h
+    sundown-to-sundown, so 60/60 spans ~26h; the author described the default as "a 25-hour window" — pin the
+    exact intent at build time.)*
+  - **Polar edge case (author, 2026-08-27):** in far-northern/southern locations (Alaska, northern Norway/Russia,
+    etc.) the sun may not set — or rise — for weeks. When the solar algorithm yields no sundown for the date, the
+    tenant supplies an **arbitrary manual window** instead: a start day/time + duration of **no less than 24 hours
+    and no more than 25 hours** (validated). Detect automatically (e.g. `astral` raises when there is no sunset)
+    and prompt for / fall back to the manual window; optionally let any tenant use the manual window as an
+    override.
   - During the window, checkout is **replaced by a branded closure page**: *"Happy Sabbath! This store is
     temporarily closed for business in observance of God's Holiday. We will resume business again on {date} at
     {end-of-Sabbath-mode time}."* — same design family as the existing "This store is temporarily offline"
