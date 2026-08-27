@@ -9,6 +9,7 @@ from stripe_link.common import (
     tenant_id_from_event,
 )
 from stripe_link.domain.entitlements import CAPABILITIES, tenant_entitlement_set
+from stripe_link.domain.fees import normalize_tier_id
 from stripe_link.domain.platform_billing import (
     active_platform_plans,
     default_platform_plan_key,
@@ -94,6 +95,9 @@ def _plans(event, tenant_repository, plans_repository, mode):
                 "trial_ends_at": tenant.get("trial_ends_at"),
                 "has_subscription": bool(tenant.get("stripe_subscription_id")),
                 "entitlements": sorted(tenant_entitlement_set(tenant)),
+                # The tenant's live transaction-fee tier ("basic" free / "pro" premium) so the price-form
+                # preview shows the rates this tenant actually pays.
+                "tier_id": normalize_tier_id(tenant.get("tier_id")),
             },
             # The full gateable-feature catalog so the dashboard can DISABLE (not hide) the ones the tenant's
             # entitlements don't include, with an upgrade hint (plans/SAAS_BILLING_PAYWALL.md).

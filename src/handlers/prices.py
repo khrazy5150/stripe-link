@@ -8,19 +8,34 @@ from stripe_link.domain.fees import (
     calculate_price,
     clear_config_cache,
     load_billing_config_from_s3,
+    normalize_tier_id,
 )
+from stripe_link.repositories.documents import tenant_profiles_repository
 
 
-def handler(event, context, billing_config_loader=None, now_fn: Callable[[], float] = time.time):
+def _tenant_plan_for(tenant_id: str, body: dict, tenant_repo=None) -> str:
+    """Server-authoritative fee tier: the tenant's live tier_id (premium subscribers = 'pro' = 2%) decides the
+    rate — the client-sent tenant_plan is only a fallback when the profile lookup fails (never break pricing)."""
+    fallback = normalize_tier_id(body.get("tenant_plan"))
+    try:
+        profile = (tenant_repo or tenant_profiles_repository()).get(tenant_id, tenant_id)
+    except Exception:
+        return fallback
+    if not profile:
+        return fallback
+    return normalize_tier_id(profile.get("tier_id"))
+
+
+def handler(event, context, billing_config_loader=None, now_fn: Callable[[], float] = time.time, tenant_repo=None):
     method = (event or {}).get("httpMethod", "").upper()
     if method == "OPTIONS":
         return json_response({})
     if method != "POST":
         return error_response(f"Unsupported method '{method}'.", status_code=405, code="method_not_allowed")
-    return calculate(event, billing_config_loader, now_fn)
+    return calculate(event, billing_config_loader, now_fn, tenant_repo)
 
 
-def calculate(event, billing_config_loader=None, now_fn: Callable[[], float] = time.time):
+def calculate(event, billing_config_loader=None, now_fn: Callable[[], float] = time.time, tenant_repo=None):
     try:
         body = parse_json_body(event)
         tenant_id = tenant_id_from_event(event, body)
@@ -34,7 +49,7 @@ def calculate(event, billing_config_loader=None, now_fn: Callable[[], float] = t
             product_type=body.get("product_type", "physical"),
             fee_handling=body.get("fee_handling", "standard"),
             pricing_model=body.get("pricing_model", "one_time"),
-            tenant_plan=body.get("tenant_plan", "basic"),
+            tenant_plan=_tenant_plan_for(tenant_id, body, tenant_repo),
             stripe_fee_type=body.get("stripe_fee_type", "domestic_card"),
             payment_schedule_key=body.get("payment_schedule_key", "US_USD"),
             billing_config=billing_config,

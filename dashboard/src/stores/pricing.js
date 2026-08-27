@@ -4,6 +4,7 @@
 // (matching the backend's fee_class_for), so pass productType "service".
 
 import { apiRequest } from "../api/client";
+import { usePlatformBillingStore } from "./platformBilling";
 
 export function priceLocalId(prefix = "price") {
   const alphabet = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
@@ -17,15 +18,28 @@ export function cents(value) {
   return Math.max(0, Math.round(Number(value || 0) * 100));
 }
 
-// Free-tier rates from the 2026-08-26 pricing pivot (backend fee_class_for / DEFAULT_GLOBAL_BILLING_CONFIG:
-// physical 5% / service 6% / digital 7% / tip_jar 5%). Preview-only — the authoritative calc is server-side
-// (PriceCalculationFunction). Follow-up: serve the tenant's actual plan rates from the API so premium (2%)
-// previews correctly instead of assuming the free tier.
+// Fee rates per tier (2026-08-26 pricing pivot — mirror of backend DEFAULT_GLOBAL_BILLING_CONFIG):
+// free (basic): physical 5% / service 6% / digital 7% / tip_jar 5%; premium (pro): 2% flat, tips 0%.
+// Preview-only — the authoritative calc is server-side (PriceCalculationFunction reads the tenant's live
+// tier_id itself). The tenant's tier comes from the billing summary via the platformBilling store.
+const TIER_RATES = {
+  basic: { physical: 0.05, service: 0.06, digital: 0.07, tip_jar: 0.05 },
+  pro: { physical: 0.02, service: 0.02, digital: 0.02, tip_jar: 0 },
+};
+
+function tenantTier() {
+  try {
+    const tier = usePlatformBillingStore().current.tier_id;
+    return TIER_RATES[tier] ? tier : "basic";
+  } catch {
+    return "basic"; // store not ready (e.g. unit context) — free-tier rates are the safe default
+  }
+}
+
 export function platformFeeRate(productType, pricingModel) {
-  if (pricingModel === "customer_chooses") return 0.05;
-  if (productType === "physical") return 0.05;
-  if (productType === "service") return 0.06;
-  return 0.07;
+  const rates = TIER_RATES[tenantTier()];
+  if (pricingModel === "customer_chooses") return rates.tip_jar;
+  return rates[productType] ?? rates.digital;
 }
 
 // fee_handling -> the merchant's share of the fees (mirror of backend MERCHANT_FEE_SHARES).
@@ -83,7 +97,7 @@ async function calculatePriceWithFallback({ tenantKeyedAmount, currency, product
         product_type: productType,
         pricing_model: pricingModel,
         fee_handling: feeHandling,
-        tenant_plan: "basic",
+        tenant_plan: tenantTier(),  // hint only — the server reads the tenant's live tier_id itself
         stripe_fee_type: "domestic_card",
       },
     });

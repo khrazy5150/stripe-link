@@ -95,3 +95,35 @@ class PriceCalculationHandlerTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TenantTierAuthorityTests(unittest.TestCase):
+    """The server reads the tenant's live tier_id — the client-sent tenant_plan is only a fallback."""
+
+    def setUp(self):
+        prices.clear_config_cache()
+
+    class _ProRepo:
+        def get(self, tenant_id, document_id):
+            return {"tenant_id": tenant_id, "tier_id": "pro"}
+
+    class _MissingRepo:
+        def get(self, tenant_id, document_id):
+            return None
+
+    def _event(self, tenant_plan="basic"):
+        return {"httpMethod": "POST", "body": json.dumps({
+            "tenant_id": "t1", "tenant_keyed_amount": 10000, "currency": "usd",
+            "product_type": "digital", "fee_handling": "standard", "tenant_plan": tenant_plan})}
+
+    def test_premium_tenant_gets_pro_rate_despite_client_claiming_basic(self):
+        resp = prices.handler(self._event("basic"), None,
+                              billing_config_loader=lambda: None, tenant_repo=self._ProRepo())
+        body = json.loads(resp["body"])
+        self.assertEqual(body["breakdown"]["platform_fee"], 200)  # 2% pro, not 7% basic
+
+    def test_unknown_tenant_falls_back_to_client_plan(self):
+        resp = prices.handler(self._event("basic"), None,
+                              billing_config_loader=lambda: None, tenant_repo=self._MissingRepo())
+        body = json.loads(resp["body"])
+        self.assertEqual(body["breakdown"]["platform_fee"], 700)  # free-tier digital 7%
