@@ -25,6 +25,14 @@ CAPABILITIES: dict[str, dict[str, str]] = {
 }
 
 
+# The free-forever floor (2026-08-26 pricing pivot, plans/TODO.md "Pricing pivot"): every non-suspended tenant
+# keeps the core earning loop — pages, the Sites they serve on, and Collections — no matter what happens to their
+# trial or subscription. Premium capabilities gate ADMIN management only; public serving/checkout never gates.
+# NOTE: this floor is code (not plan-table data) because the entitlement guard is a pure profile check with no
+# table read — changing the floor is a deploy, by design a rare event.
+FREE_TIER_CAPABILITIES: frozenset[str] = frozenset({"landing_pages", "sites", "collections"})
+
+
 class EntitlementError(RuntimeError):
     def __init__(self, capability: str):
         label = CAPABILITIES.get(capability, {}).get("label", capability)
@@ -42,19 +50,24 @@ def plan_entitlements(plan: dict[str, Any] | None) -> list[str]:
 
 
 def tenant_entitlement_set(tenant: dict[str, Any] | None, now: int | None = None) -> set[str]:
-    """The capabilities a tenant currently has:
+    """The capabilities a tenant currently has (free-forever model, 2026-08-26 pivot):
       - exempt (comped) tenants get everything;
       - a live PLATFORM trial (unsubscribed, not yet expired) gets FULL access (trial-first onboarding);
-      - an EXPIRED platform trial gets nothing (the hard wall);
-      - otherwise (subscribed / any other state) it's the denormalized `entitlements` list on the profile.
-    See plans/SAAS_BILLING_PAYWALL.md."""
+      - an EXPIRED platform trial downgrades to the FREE-TIER floor (no hard wall — the store keeps selling);
+      - suspended tenants get only their denormalized list (no floor — a deliberate hold);
+      - otherwise (subscribed / canceled / any other state) it's the denormalized `entitlements` list on the
+        profile, plus the free-tier floor (a canceled subscriber reverts to free, never to nothing).
+    See plans/SAAS_BILLING_PAYWALL.md and plans/TODO.md (Pricing pivot)."""
     tenant = tenant or {}
     if tenant.get("billing_exempt"):
         return set(CAPABILITIES)
     status = str(tenant.get("billing_status") or "trial")
+    denormalized = {cap for cap in (tenant.get("entitlements") or []) if cap in CAPABILITIES}
+    if status == "suspended":
+        return denormalized
     if status == "trial" and not tenant.get("stripe_subscription_id"):
-        return set() if is_trial_expired(tenant, now) else set(CAPABILITIES)
-    return {cap for cap in (tenant.get("entitlements") or []) if cap in CAPABILITIES}
+        return set(FREE_TIER_CAPABILITIES) if is_trial_expired(tenant, now) else set(CAPABILITIES)
+    return denormalized | FREE_TIER_CAPABILITIES
 
 
 def is_entitled(tenant: dict[str, Any] | None, capability: str, now: int | None = None) -> bool:

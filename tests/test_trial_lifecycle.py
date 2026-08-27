@@ -34,9 +34,11 @@ class TrialExpiryTests(unittest.TestCase):
         self.assertTrue(is_billing_in_good_standing(self._trial(ends_at=2000), now=1000))
         self.assertFalse(is_trial_expired(self._trial(ends_at=2000), now=1000))
 
-    def test_expired_trial_is_walled(self):
+    def test_expired_trial_downgrades_but_still_sells(self):
+        # Free-forever model: expiry flips the entitlement set to the free floor, but the tenant stays in good
+        # standing — pages serve and checkout charges at the free-tier fee.
         self.assertTrue(is_trial_expired(self._trial(ends_at=1000), now=2000))
-        self.assertFalse(is_billing_in_good_standing(self._trial(ends_at=1000), now=2000))
+        self.assertTrue(is_billing_in_good_standing(self._trial(ends_at=1000), now=2000))
 
     def test_trial_without_clock_is_grandfathered(self):
         # Tenants created before trial clocks (no trial_ends_at) never expire.
@@ -53,11 +55,12 @@ class TrialExpiryTests(unittest.TestCase):
         self.assertTrue(is_billing_in_good_standing(self._trial(ends_at=1000, billing_exempt=True), now=2000))
 
     def test_decimal_trial_ends_at_expires(self):
-        # DynamoDB returns numbers as Decimal, not int — the guard must still detect expiry (regression).
+        # DynamoDB returns numbers as Decimal, not int — expiry detection must still work (regression). Good
+        # standing is unaffected either way under the free-forever model.
         from decimal import Decimal
         profile = {"billing_status": "trial", "trial_ends_at": Decimal("1000")}
         self.assertTrue(is_trial_expired(profile, now=2000))
-        self.assertFalse(is_billing_in_good_standing(profile, now=2000))
+        self.assertTrue(is_billing_in_good_standing(profile, now=2000))
 
 
 if __name__ == "__main__":

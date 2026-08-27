@@ -7,6 +7,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 from stripe_link.domain.entitlements import (
     CAPABILITIES,
+    FREE_TIER_CAPABILITIES,
     EntitlementError,
     assert_entitled,
     is_entitled,
@@ -35,24 +36,31 @@ class EntitlementModelTests(unittest.TestCase):
         self.assertEqual(plan_entitlements({}), [])
         self.assertEqual(plan_entitlements(None), [])
 
-    def test_subscribed_tenant_uses_its_entitlements_list(self):
+    def test_subscribed_tenant_uses_its_entitlements_list_plus_free_floor(self):
         sub = {"billing_status": "active", "stripe_subscription_id": "sub_1", "entitlements": ["booking"]}
-        self.assertEqual(tenant_entitlement_set(sub), {"booking"})
+        self.assertEqual(tenant_entitlement_set(sub), {"booking"} | set(FREE_TIER_CAPABILITIES))
 
     def test_platform_trial_gets_full_access(self):
         # A fresh signup (trial, no subscription) sees ALL features until the trial expires.
         self.assertEqual(tenant_entitlement_set({"billing_status": "trial"}), set(CAPABILITIES_KEYS))
         self.assertEqual(tenant_entitlement_set({}), set(CAPABILITIES_KEYS))  # missing status defaults to trial
 
-    def test_expired_platform_trial_gets_nothing(self):
+    def test_expired_platform_trial_downgrades_to_free_tier(self):
+        # Free-forever model: expiry is a downgrade to the free floor, not a wall.
         expired = {"billing_status": "trial", "trial_ends_at": 1000}
-        self.assertEqual(tenant_entitlement_set(expired, now=2000), set())
+        self.assertEqual(tenant_entitlement_set(expired, now=2000), set(FREE_TIER_CAPABILITIES))
         self.assertEqual(tenant_entitlement_set(expired, now=500), set(CAPABILITIES_KEYS))  # before expiry
 
+    def test_suspended_gets_no_free_floor(self):
+        suspended = {"billing_status": "suspended", "entitlements": ["booking"]}
+        self.assertEqual(tenant_entitlement_set(suspended), {"booking"})
+
     def test_subscribed_trialing_uses_list_not_full_access(self):
-        # Stripe 'trialing' after subscribing: has a subscription id, so it's the plan's entitlements, not full.
+        # Stripe 'trialing' after subscribing: has a subscription id, so it's the plan's entitlements (+ the free
+        # floor), never the trial's full-access set.
         trialing = {"billing_status": "trial", "stripe_subscription_id": "sub_1", "entitlements": ["landing_pages"]}
-        self.assertEqual(tenant_entitlement_set(trialing), {"landing_pages"})
+        self.assertEqual(tenant_entitlement_set(trialing), set(FREE_TIER_CAPABILITIES))
+        self.assertNotIn("booking", tenant_entitlement_set(trialing))
 
     def test_exempt_gets_everything(self):
         self.assertEqual(tenant_entitlement_set({"billing_exempt": True}), set(CAPABILITIES_KEYS))
@@ -111,14 +119,23 @@ class ServicesBookingGateTests(unittest.TestCase):
         self.assertEqual(gate["statusCode"], 403)
 
     def test_pages_create_gated_on_landing_pages(self):
-        # A second handler proves the wiring beyond services: a SUBSCRIBED tenant without landing_pages -> 403.
+        # A second handler proves the wiring beyond services. landing_pages is in the free-forever floor, so the
+        # only tenant it can block is a SUSPENDED one (no floor) whose list lacks the capability -> 403.
         resp = pages.handler(
             {"httpMethod": "POST", "path": "/pages", "body": json.dumps({"tenant_id": "t1", "page": {}})},
             None, repository=object(),
-            tenant_repo=FakeTenantRepo([{"tenant_id": "t1", "billing_status": "active",
+            tenant_repo=FakeTenantRepo([{"tenant_id": "t1", "billing_status": "suspended",
                                          "stripe_subscription_id": "sub_1", "entitlements": ["booking"]}]))
         self.assertEqual(resp["statusCode"], 403)
         self.assertEqual(json.loads(resp["body"])["error"], "plan_upgrade_required")
+
+    def test_pages_create_passes_for_downgraded_free_tenant(self):
+        # A canceled/downgraded tenant keeps the floor: the gate passes (the 400 is ordinary validation).
+        resp = pages.handler(
+            {"httpMethod": "POST", "path": "/pages", "body": json.dumps({"tenant_id": "t1", "page": {}})},
+            None, repository=object(),
+            tenant_repo=FakeTenantRepo([{"tenant_id": "t1", "billing_status": "canceled", "entitlements": []}]))
+        self.assertNotEqual(resp["statusCode"], 403)
 
 
 if __name__ == "__main__":

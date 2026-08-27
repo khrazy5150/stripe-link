@@ -248,13 +248,31 @@ class ReconcileWebhookTests(unittest.TestCase):
         reconcile_platform_subscription_event(
             event, mode="test", tenant_repo=tenants, plans_repository=_basic_plans_repo())
         self.assertEqual(tenants.docs["t1"]["entitlements"], ["landing_pages"])
+        # Subscribing writes the PLAN's fee tier onto the tenant (this fixture plan carries fee_tier "basic").
+        self.assertEqual(tenants.docs["t1"]["tier_id"], "basic")
+
+    def test_subscription_updated_sets_pro_fee_tier_from_plan(self):
+        plan = {"plan_key": "premium", "label": "Premium", "monthly_amount": 1900, "price_id": "price_prem",
+                "trial_days": 0, "active": True, "sort_order": 1, "fee_tier": "pro",
+                "entitlements": {"booking": True}}
+        plans = FakePlansRepo([plan], {"default_plan_key": "premium", "exempt_emails": []})
+        tenants = FakeTenantRepo([_tenant()])
+        event = self._event("customer.subscription.updated", {
+            "id": "sub_1", "status": "active", "metadata": {"tenant_id": "t1", "plan_key": "premium"},
+        })
+        reconcile_platform_subscription_event(event, mode="test", tenant_repo=tenants, plans_repository=plans)
+        # The premium plan's fee_tier "pro" drives the 2% checkout fee via build_fee_context.
+        self.assertEqual(tenants.docs["t1"]["tier_id"], "pro")
+        self.assertEqual(tenants.docs["t1"]["entitlements"], ["booking"])
 
     def test_subscription_deleted_revokes_entitlements(self):
-        tenants = FakeTenantRepo([_tenant(billing_status="active", entitlements=["landing_pages"])])
+        tenants = FakeTenantRepo([_tenant(billing_status="active", entitlements=["landing_pages"], tier_id="pro")])
         reconcile_platform_subscription_event(
             self._event("customer.subscription.deleted", {"id": "sub_1", "metadata": {"tenant_id": "t1"}, "status": "canceled"}),
             mode="test", tenant_repo=tenants)
         self.assertEqual(tenants.docs["t1"]["entitlements"], [])
+        # Cancellation (fired at period end for cancel_at_period_end) reverts fees to the free tier.
+        self.assertEqual(tenants.docs["t1"]["tier_id"], "basic")
 
     def test_subscription_deleted_cancels(self):
         tenants = FakeTenantRepo([_tenant(billing_status="active")])

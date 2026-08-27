@@ -160,10 +160,11 @@ class GoodStandingGuardTests(unittest.TestCase):
         for status in ("trial", "active", "past_due"):
             assert_billing_in_good_standing({"billing_status": status})  # no raise
 
-    def test_suspended_and_canceled_blocked(self):
-        for status in ("suspended", "canceled"):
-            with self.assertRaises(BillingStatusError):
-                assert_billing_in_good_standing({"billing_status": status})
+    def test_only_suspended_blocked(self):
+        with self.assertRaises(BillingStatusError):
+            assert_billing_in_good_standing({"billing_status": "suspended"})
+        # Free-forever model: canceled downgrades to the free tier and keeps selling.
+        assert_billing_in_good_standing({"billing_status": "canceled"})
 
     def test_exempt_always_allowed_even_when_suspended(self):
         assert_billing_in_good_standing({"billing_status": "suspended", "billing_exempt": True})

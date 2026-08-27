@@ -13,9 +13,11 @@ except ValueError:
     TRIAL_PERIOD_DAYS = 14
 TRIAL_PERIOD_SECONDS = TRIAL_PERIOD_DAYS * 86400
 
-# Blocked: past_due is the Stripe DUNNING/grace window (still allowed). trial_expired is an unsubscribed platform
-# trial past its clock. trial/active are allowed. billing_exempt is always allowed.
-BLOCKED_BILLING_STATUSES = {"suspended", "canceled", "trial_expired"}
+# Free-forever model (2026-08-26 pricing pivot): ONLY a deliberate suspension blocks payments/serving. An expired
+# trial and a canceled subscription both downgrade to the free tier — pages keep serving and checkout keeps
+# charging (at the free-tier fee; that IS the revenue model). past_due is the Stripe dunning/grace window
+# (still allowed). billing_exempt is always allowed. See plans/TODO.md (Pricing pivot).
+BLOCKED_BILLING_STATUSES = {"suspended"}
 
 
 class BillingStatusError(RuntimeError):
@@ -50,13 +52,12 @@ def is_trial_expired(tenant_profile: dict[str, Any] | None, now: int | None = No
 
 
 def is_billing_in_good_standing(tenant_profile: dict[str, Any] | None, now: int | None = None) -> bool:
-    """True if the tenant may take new payments / serve pages. Exempt tenants always pass; an active platform trial
-    passes until it expires; past_due is the dunning grace window. A missing profile is treated as trial (allowed)."""
+    """True if the tenant may take new payments / serve pages. Free-forever model: everything passes except a
+    deliberate suspension — an expired trial or canceled subscription sells on at the free-tier fee. A missing
+    profile is treated as trial (allowed)."""
     profile = tenant_profile or {}
     if profile.get("billing_exempt"):
         return True
-    if is_trial_expired(profile, now):
-        return False
     status = str(profile.get("billing_status") or "trial")
     return status not in BLOCKED_BILLING_STATUSES
 

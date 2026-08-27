@@ -306,12 +306,13 @@ function activateMenuItem(item) {
 const billingBanner = computed(() => {
   if (!platformBilling.loaded) return null;
   if (platformBilling.walled) {
+    return { tone: "danger", text: "Your account is on hold. Contact support to continue.", cta: "Billing" };
+  }
+  if (platformBilling.onFreePlan) {
     return {
-      tone: "danger",
-      text: platformBilling.trialExpired
-        ? "Your free trial has ended. Subscribe to keep your pages live and take payments."
-        : "Your account is on hold. Subscribe to continue.",
-      cta: "Subscribe",
+      tone: "info",
+      text: "You're on the Free plan — your pages stay live and you keep selling. Upgrade for premium features and lower fees.",
+      cta: "Upgrade",
     };
   }
   if (platformBilling.onTrial) {

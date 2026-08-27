@@ -2,6 +2,7 @@ import time
 from typing import Any, Callable
 
 from stripe_link.domain.entitlements import plan_entitlements
+from stripe_link.domain.fees import normalize_tier_id
 from stripe_link.domain.platform_billing import billing_status_from_stripe, platform_plan
 
 
@@ -78,15 +79,25 @@ def reconcile_platform_subscription_event(
         if customer_id:
             updates["stripe_customer_id"] = customer_id
         if event_type == "customer.subscription.deleted":
+            # Free-forever model: cancellation reverts to the free tier, never to nothing. Stripe fires this at
+            # period end for cancel_at_period_end, so a mid-cycle cancel keeps premium (entitlements + pro fee)
+            # until the paid-through date. The empty list is topped up by the free-tier floor at read time
+            # (entitlements.tenant_entitlement_set), and tier_id=basic flips checkout to free-tier fees.
             updates["billing_status"] = "canceled"
-            updates["entitlements"] = []  # access revoked on cancellation
+            updates["entitlements"] = []
+            updates["tier_id"] = "basic"
         else:
             updates["billing_status"] = billing_status_from_stripe(obj.get("status"))
             # Denormalize the plan's entitlements onto the tenant so the per-feature guards are a pure profile check.
             plan_key = str((obj.get("metadata") or {}).get("plan_key") or tenant.get("billing_plan_key") or "").strip()
             if plan_key:
                 updates["billing_plan_key"] = plan_key
-                updates["entitlements"] = plan_entitlements(platform_plan(mode, plan_key, plans_repository))
+                plan = platform_plan(mode, plan_key, plans_repository)
+                updates["entitlements"] = plan_entitlements(plan)
+                # The plan's fee tier drives the live transaction fee (fees.build_fee_context reads tenant.tier_id):
+                # premium plans carry fee_tier "pro" (2%/0%); default to pro so a plan row without the field still
+                # grants the premium fee a subscriber is paying for.
+                updates["tier_id"] = normalize_tier_id((plan or {}).get("fee_tier") or "pro")
         current_period_end = obj.get("current_period_end")
         if isinstance(current_period_end, int):
             updates["current_period_end"] = current_period_end

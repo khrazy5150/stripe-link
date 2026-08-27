@@ -18,8 +18,11 @@
             Your account is comped — full access, no charge.
           </p>
           <p v-else-if="billing.walled" class="billing-status-note">
-            {{ billing.trialExpired ? "Your free trial has ended." : "Your account is on hold." }}
-            Subscribe to keep your pages live and take payments.
+            Your account is on hold. Contact support to continue.
+          </p>
+          <p v-else-if="billing.onFreePlan" class="billing-status-note">
+            You're on the <strong>Free plan</strong> — your pages stay live and you keep selling at the standard
+            fee. Upgrade to unlock premium features and lower transaction fees.
           </p>
           <p v-else-if="billing.onTrial" class="billing-status-note">
             <strong>{{ billing.trialDaysLeft }}</strong> {{ billing.trialDaysLeft === 1 ? "day" : "days" }} left in your free trial — full access, no card required yet.
@@ -99,10 +102,10 @@ const planLabel = computed(() => {
 
 const statusLabel = computed(() => {
   if (billing.current.billing_exempt) return "Comped";
-  if (billing.trialExpired) return "Trial ended";
+  if (billing.onFreePlan) return "Free plan";
   if (billing.onTrial) return "Free trial";
   const s = billing.current.billing_status;
-  return { active: "Active", past_due: "Payment due", suspended: "On hold", canceled: "Canceled" }[s] || "Trial";
+  return { active: "Active", past_due: "Payment due", suspended: "On hold", canceled: "Free plan" }[s] || "Trial";
 });
 
 const statusTone = computed(() => {

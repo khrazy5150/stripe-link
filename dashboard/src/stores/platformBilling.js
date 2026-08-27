@@ -55,11 +55,16 @@ export const usePlatformBillingStore = defineStore("platformBilling", {
       const s = this.trialSecondsLeft;
       return s !== null && s <= 0;
     },
-    // The hard wall: an expired trial with no subscription, or a suspended/canceled account.
+    // Free-forever model: only a deliberate suspension walls the account. An expired trial or canceled
+    // subscription downgrades to the Free plan (pages keep serving, selling continues at the free-tier fee).
     walled(state) {
       if (state.current.billing_exempt) return false;
-      if (this.trialExpired) return true;
-      return ["suspended", "canceled", "trial_expired"].includes(state.current.billing_status);
+      return state.current.billing_status === "suspended";
+    },
+    // Downgraded to Free: expired unsubscribed trial, or a canceled subscription.
+    onFreePlan(state) {
+      if (state.current.billing_exempt || state.current.has_subscription) return false;
+      return this.trialExpired || state.current.billing_status === "canceled";
     },
   },
 

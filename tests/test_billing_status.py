@@ -21,9 +21,9 @@ class AssertBillingInGoodStandingTests(unittest.TestCase):
         with self.assertRaises(BillingStatusError):
             assert_billing_in_good_standing({"billing_status": "suspended"})
 
-    def test_blocks_canceled(self):
-        with self.assertRaises(BillingStatusError):
-            assert_billing_in_good_standing({"billing_status": "canceled"})
+    def test_canceled_downgrades_but_still_sells(self):
+        # Free-forever model: a canceled subscription reverts to the free tier — checkout stays open.
+        assert_billing_in_good_standing({"billing_status": "canceled"})
 
     def test_error_carries_the_status(self):
         try:
