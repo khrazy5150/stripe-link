@@ -51,7 +51,7 @@
             <button type="button" class="secondary-action" :disabled="billing.working" @click="confirmingCancel = false">
               Keep premium
             </button>
-            <button type="button" class="danger-action" :disabled="billing.working" @click="confirmCancel">
+            <button type="button" class="confirm-cancel-action" :disabled="billing.working" @click="confirmCancel">
               {{ billing.working ? "Canceling…" : "Yes, cancel at period end" }}
             </button>
           </template>
@@ -197,6 +197,19 @@ function subscribe(planKey) {
   white-space: nowrap;
 }
 .resume-action:disabled { opacity: 0.6; cursor: default; }
+/* Red mirror of .setup-action/.resume-action so the confirm step matches its siblings. */
+.confirm-cancel-action {
+  min-height: 4rem;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: #dc2626;
+  color: #fff;
+  cursor: pointer;
+  font-weight: 900;
+  padding: 0.8rem 1.6rem;
+  white-space: nowrap;
+}
+.confirm-cancel-action:disabled { opacity: 0.6; cursor: default; }
 .billing-portal-link { margin-top: 1rem; font-size: 1.2rem; color: var(--text-muted); }
 .billing-portal-link a { color: inherit; text-decoration: underline; }
 .billing-status-main { display: flex; flex-direction: column; gap: 0.4rem; }
