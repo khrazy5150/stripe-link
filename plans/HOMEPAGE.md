@@ -38,9 +38,10 @@ is what keeps the page fully static; live plan data lives in the Vue dashboard.)
 - **Sandbox / future staging are NOT linked from the homepage** — they're reached directly.
 
 ### Pricing — hint, don't show
-> **⚠️ Superseded (2026-08-26):** the "14-day trial / coffee habit" framing below is being replaced by an
-> **"always free"** message (pricing pivot to free-forever + transaction fee — see `plans/TODO.md`). Still show
-> **no fee specifics** on the front page; the tenant learns them only inside the app.
+> **✅ Reworded (2026-08-27):** shipped the free-forever copy — CTA **"Full access for 14 days — free"** +
+> micro line **"No credit card · Always free checkout pages."** (hero + final CTA; footer now "Junior Bay
+> Corporation"). The coffee-habit hint below is retired. Still show **no fee specifics** on the front page;
+> the tenant learns them only inside the app.
 
 No pricing table (prices/fees will change; and trial-first converts better with a no-card trial). But **do** signal
 affordability so "no price" doesn't read as "expensive." Approved copy:

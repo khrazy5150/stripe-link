@@ -408,9 +408,10 @@ Deferred, non-blocking follow-ups. Each item notes what, why it was deferred, an
   classifieds distribution to the new homepage CloudFront (`HomepageEnabled`; bundled fonts; `/legal/*` proxied to the
   API; sitemap submitted to Search Console; Cloudflare Web Analytics beacon on). Old classifieds app → `juniorbay.net`
   (tenant to retire the old dist/bucket). Full record in `plans/HOMEPAGE.md`.
-- **OPEN — pricing reword (2026-08-26):** reword the hero/CTA to **"always free"** and drop the *"14-day trial"* +
-  *"costs less than your coffee habit"* framing (gated on the pricing pivot under Commerce). **Do NOT explain the fee
-  structure on the front page** — the tenant learns the specifics only INSIDE the app.
+- **Pricing reword — SHIPPED PROD 2026-08-27:** CTA now **"Full access for 14 days — free"** + micro line
+  **"No credit card · Always free checkout pages."** (hero + final CTA); coffee-habit hint retired; footer
+  "© Junior Bay Corporation". No fee specifics on the front page (specifics live inside the app). Shipped after
+  the paywall reversal made the promise true.
 
 ### Optimize prod CloudFront (pages) for indexing + aggressive caching
 - **What:** Optimize prod CloudFront (`dlxn0y34f7dbz`) for indexing, follow, archiving, aggressive
