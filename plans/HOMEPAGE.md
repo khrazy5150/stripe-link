@@ -125,7 +125,7 @@ Real static HTML with: unique `<title>` + meta description, Open Graph + Twitter
 ## To discuss (the actual homepage — details)
 - Sections/layout (hero, value props, proof/social proof, how-it-works, FAQ, footer) and the copy.
 - Visual design / brand (colors, type, hero imagery).
-- ~~A contact/about page~~ → **DONE 2026-08-28: `/support`** (static `homepage/support.html`; contact email, buyer-vs-seller
+- ~~A contact/about page~~ → **DONE 2026-08-28: `/support`** (static `homepage/support.html` with a **real contact form** (POST same-origin to `/support/contact` → `SupportContactFunction` → SES to support@, submitter as Reply-To; honeypot + caps; no `mailto:`); buyer-vs-seller
   router to cut disputes, seller contact, policy links; nav link opens in a new tab; in sitemap; also the Stripe
   platform profile's support URL). Whether a lightweight build (minify/bundle) is worth it later.
 
