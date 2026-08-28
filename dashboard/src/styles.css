@@ -431,6 +431,15 @@ main {
   display: block;
 }
 
+/* Connected-Stripe subtitle: hard-capped width + ellipsis so a long email never distorts the pill. */
+.user-pill-text { min-width: 0; }
+.user-pill-sub {
+  max-width: 22ch;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
 .user-pill small {
   color: var(--muted);
 }

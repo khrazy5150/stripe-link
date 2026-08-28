@@ -98,9 +98,9 @@
             @click="userMenuOpen = !userMenuOpen"
           >
             <span>{{ auth.initials }}</span>
-            <div>
+            <div class="user-pill-text">
               <strong>{{ auth.displayName }}</strong>
-              <small>user</small>
+              <small class="user-pill-sub" :title="connectedAccountTitle">{{ connectedAccountLabel }}</small>
             </div>
           </button>
           <div v-if="userMenuOpen" class="user-dropdown" role="menu">
@@ -294,6 +294,23 @@ const environmentLabel = computed(() => activeEnvironment.value === "live" ? "Li
 // Live-first onboarding: the test/live toggle only appears once the tenant opts into a test sandbox. Until then
 // the dashboard is live-only and never strands anyone in a hidden test mode (plans/TODO.md onboarding streamline).
 const hasTestSandbox = computed(() => stripeKeys.hasTestSandbox);
+
+// Subtitle under the avatar: the Stripe account connected for the ACTIVE mode (email, else business name), so
+// "which Stripe am I wired to?" is glanceable on every screen — a tenant with several logins/accounts can't
+// mistake one for another (plans/TODO.md). Truncated via CSS; the full value lives in the title tooltip.
+const connectedAccount = computed(() => stripeKeys.connectCard?.stripe_connect || {});
+const connectedAccountLabel = computed(() => {
+  const doc = connectedAccount.value;
+  const connected = doc.connect_status === "connected" || Boolean(doc.connect_account_id);
+  if (!connected) return stripeKeys.connectLoaded ? "No Stripe connected" : "user";
+  return String(doc.connect_email || doc.connect_business_name || doc.connect_account_id || "Stripe connected").trim();
+});
+const connectedAccountTitle = computed(() => {
+  const doc = connectedAccount.value;
+  if (!(doc.connect_status === "connected" || doc.connect_account_id)) return "No Stripe account connected for this mode";
+  const parts = [doc.connect_business_name, doc.connect_email, doc.connect_account_id].filter(Boolean);
+  return `Connected Stripe (${activeEnvironment.value}): ${parts.join(" · ")}`;
+});
 function coerceModeIfNoSandbox() {
   if (activeEnvironment.value === "test" && !hasTestSandbox.value) {
     switchEnvironment("live");
