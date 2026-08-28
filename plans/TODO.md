@@ -269,12 +269,12 @@ Deferred, non-blocking follow-ups. Each item notes what, why it was deferred, an
   - The closure window runs from **Friday sundown − buffer** to **Saturday sundown + buffer** (the full Sabbath
     plus the buffer at each end), sundown computed for the tenant's **local location/timezone** (varies daily).
     **CONFIRMED by the author 2026-08-27.** The resume message shows the **Saturday** date + end time.
-  - **Buffer** is tenant-configurable, **0–60 min**, default **60 before / 60 after**. **Zero buffer = the
-    checkout closes exactly at Friday sundown and reopens exactly at Saturday sundown.** Symmetric for v1
-    (before-start = after-end); asymmetric before/after could come later (halachic customs differ: candle-lighting
-    ~18 min before sunset, end at nightfall ~42–72 min after). *(Note on arithmetic: the Sabbath itself is ~24h
-    sundown-to-sundown, so 60/60 spans ~26h; the author described the default as "a 25-hour window" — pin the
-    exact intent at build time.)*
+  - **Two INDEPENDENT buffers (author, 2026-08-28):** *before Friday sundown* and *after Saturday sundown*, each
+    tenant-adjustable **0–60 min** — do NOT assume they match. Jewish practice commonly uses **~18 min before**
+    (candle-lighting) and **~40 min after** (nightfall; some customs go to ~50), so those are the natural
+    defaults — *pin the shipped defaults at build time* (18/40 common practice vs 60/60 maximum). **Zero on both =
+    the checkout closes exactly at Friday sundown and reopens exactly at Saturday sundown.** (The Sabbath itself
+    is ~24h sundown-to-sundown, so 60/60 spans ~26h — the earlier "25-hour" figure was a slip.)
   - **Polar edge case (author, 2026-08-27):** in far-northern/southern locations (Alaska, northern Norway/Russia,
     etc.) the sun may not set — or rise — for weeks. When the solar algorithm yields no sundown for the date, the
     tenant supplies an **arbitrary manual window** instead: a start day/time + duration of **no less than 24 hours
