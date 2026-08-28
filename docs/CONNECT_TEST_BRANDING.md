@@ -44,3 +44,24 @@ screen, live-mode settings on the live client's.
 
 No code changes accompany this; it is purely the platform account's mode-scoped Connect
 settings.
+
+## ⚠️ Rehearsing tenant onboarding as the platform owner (learned 2026-08-28)
+
+Stripe attaches a **newly created** connected account to whichever **Stripe login holds the browser session** —
+NOT to the Junior Bay login you're signed in as. So if you're signed into Stripe as the platform
+(`keith@juniorbay.net`) and rehearse onboarding for a test tenant, clicking **"Create a new account"** silently
+creates an account owned by the *platform* login. (That's exactly how the stray "Facebook" account appeared under
+a yahoo-email tenant; the duplicates cost an hour of cleanup.)
+
+**Rules for rehearsals:**
+1. Use a **separate browser profile or an incognito window** — never the window where the platform Stripe
+   dashboard is open.
+2. On Stripe's screen, **pick the existing account** from the chooser. Verified 2026-08-28: the chooser reuses
+   correctly and creates nothing. Only **"Create a new account"** mints a new one.
+3. Rehearse in **Test mode**. Live-mode rehearsals leave real, abandoned accounts behind, and a pile of those is
+   a risk signal Stripe associates with you as a person.
+4. After connecting, confirm the account on the **"Payouts will go to this account"** card (and the avatar pill)
+   before doing anything else — that's the cheap catch for a wrong-account connect.
+
+This is a **platform-owner edge case**: ordinary tenants either have their own Stripe session (chooser → their
+account) or none (create → correctly theirs).
