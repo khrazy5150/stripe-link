@@ -188,7 +188,7 @@ Deferred, non-blocking follow-ups. Each item notes what, why it was deferred, an
   subscribers on a plan-entitlements edit; admin plan-CRUD screen (P3, MVP = hand-edit the table); price-migration
   batch tool (P4).
 
-### ⭐ Pricing pivot — free-forever + transaction-fee model (decided 2026-08-26, NOT built)
+### ⭐ Pricing pivot — free-forever + transaction-fee model — FULLY SHIPPED PROD 2026-08-27
 - **Direction:** move from the shipped **hard-wall-at-trial-expiry** to a **free-forever** model. Basic is always free
   and never shuts a store down or blocks a sale — the tenant just pays the basic transaction fee. The 14-day trial
   grants **premium** features (booking, GMB, AI, shipping, A/B); at expiry those features gate off (existing
