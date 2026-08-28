@@ -155,6 +155,11 @@ Parameters:
     Default: go.jbay.uk
     Description: Public short-URL host served by the Cloudflare Worker on the jbay.uk zone (short links look like https://go.jbay.uk/{code}).
 
+  SupportInbox:
+    Type: String
+    Default: ""
+    Description: Where the public support form (juniorbay.com/support) delivers. Defaults to EmailFromAddress when empty — set it to a DIFFERENT mailbox so submissions aren't from-you-to-you (providers often spam-file or thread those).
+
   EmailFromAddress:
     Type: String
     Default: support@juniorbay.net
@@ -2356,6 +2361,9 @@ Resources:
       CodeUri: src/
       Handler: handlers.support_contact.handler
       Description: Public, unauthenticated platform support form (juniorbay.com/support) -- validates, honeypots, and emails support@ via SES with the submitter as Reply-To.
+      Environment:
+        Variables:
+          SUPPORT_INBOX: !Ref SupportInbox
       Policies:
         - Version: "2012-10-17"
           Statement:

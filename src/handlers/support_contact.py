@@ -96,11 +96,14 @@ def handler(event, context, *, send=None, now_fn=time.time):
         return error_response(str(exc), code="invalid_submission")
 
     subject, text, body_html = render_email(sub, _request_context(event), int(now_fn()))
+    inbox = _support_inbox()
     try:
-        (send or send_email)(
-            to=_support_inbox(), subject=subject, text=text, html=body_html,
+        result = (send or send_email)(
+            to=inbox, subject=subject, text=text, html=body_html,
             from_name="Junior Bay Support Form", reply_to=sub["email"],
-        )
+        ) or {}
+        # Log the SES MessageId so a "didn't arrive" report can be traced to an accepted send.
+        print(f"support_contact sent to={inbox} reply_to={sub['email']} ses_message_id={result.get('MessageId')}")
     except EmailError as exc:
         return error_response(f"We couldn't send your message right now: {exc}", status_code=502, code="send_failed")
     return json_response({"status": "sent"})
