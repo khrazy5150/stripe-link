@@ -17,10 +17,10 @@ from typing import Any
 LEGAL_CONFIG: dict[str, str] = {
     "company_name": "Junior Bay Corporation",
     "legal_address": "30 N Gould St, Ste R",
-    "legal_city": "Cheyenne",
+    "legal_city": "Sheridan",
     "legal_state": "WY",
     "legal_zip": "82801",
-    "legal_jurisdiction": "Laramie County, WY",
+    "legal_jurisdiction": "Sheridan County, WY",
     "legal_email": "support@juniorbay.net",
     "website": "https://juniorbay.com",
     "legal_effective_date": "March 24, 2026",

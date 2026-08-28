@@ -64,8 +64,8 @@ Notes:
 | Field | Example | Appears in |
 |---|---|---|
 | `company_name` | `Junior Bay Corporation` | Terms/Privacy/Refund body + footer, `GET /legal` list |
-| `legal_address`, `legal_city`, `legal_state`, `legal_zip` | `30 N Gould St, Ste R` / `Cheyenne` / `WY` / `82801` | the address block at the bottom of each legal page |
-| `legal_jurisdiction` | `Laramie County, WY` | Terms (governing law) |
+| `legal_address`, `legal_city`, `legal_state`, `legal_zip` | `30 N Gould St, Ste R` / `Sheridan` / `WY` / `82801` | the address block at the bottom of each legal page |
+| `legal_jurisdiction` | `Sheridan County, WY` | Terms (governing law) |
 | `legal_email` | `support@juniorbay.net` | every "contact us at …" link across the legal pages |
 | `website` | `https://juniorbay.com` | Terms/Privacy intro + legal-page footer link |
 | `legal_effective_date`, `legal_last_revised_date` | `March 24, 2026` | page headers |
