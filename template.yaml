@@ -2349,6 +2349,35 @@ Resources:
             Path: /experiments/{experiment_id}/{action}
             Method: OPTIONS
 
+  SupportContactFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${ProjectPrefix}-support-contact-${Environment}"
+      CodeUri: src/
+      Handler: handlers.support_contact.handler
+      Description: Public, unauthenticated platform support form (juniorbay.com/support) -- validates, honeypots, and emails support@ via SES with the submitter as Reply-To.
+      Policies:
+        - Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Action:
+                - ses:SendEmail
+                - sesv2:SendEmail
+              Resource: "*"
+      Events:
+        SupportContact:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /support/contact
+            Method: POST
+        SupportContactOptions:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /support/contact
+            Method: OPTIONS
+
   LegalFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -4293,6 +4322,16 @@ Resources:
             Compress: true
             CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6  # Managed-CachingOptimized
             ResponseHeadersPolicyId: 60669652-455b-4ae9-85a4-c4c02393f86c  # Managed-SimpleCORS
+          # The support form posts same-origin to /support/contact -> the API (no CORS). All methods + the
+          # AllViewerExceptHostHeader origin-request policy so the JSON body and Content-Type reach the origin.
+          - PathPattern: /support/contact
+            TargetOriginId: HomepageLegalApiOrigin
+            ViewerProtocolPolicy: redirect-to-https
+            AllowedMethods: [GET, HEAD, OPTIONS, PUT, PATCH, POST, DELETE]
+            CachedMethods: [GET, HEAD]
+            Compress: true
+            CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad  # Managed-CachingDisabled
+            OriginRequestPolicyId: b689b0a8-53d0-40ab-baf2-68738e2966ac  # Managed-AllViewerExceptHostHeader
           # Forward /legal/* to the legal API. Managed-CachingDisabled forwards no Host header, so the
           # origin receives Host=<ApiCustomDomainName> (required for the API Gateway custom-domain mapping).
           - PathPattern: /legal/*
