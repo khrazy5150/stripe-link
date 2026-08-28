@@ -129,8 +129,15 @@
           var res = await fetch('/support/contact', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
           var body = await res.json().catch(function () { return {}; });
           if (res.ok) { status.className = 'form-status ok'; status.textContent = "Thanks — we've got it. We'll reply within one business day."; form.reset(); }
-          else { status.className = 'form-status err'; status.textContent = body.message || "Couldn't send — please try again or email support@juniorbay.net."; btn.disabled = false; }
-        } catch (err) { status.className = 'form-status err'; status.textContent = "Couldn't send — please try again or email support@juniorbay.net."; btn.disabled = false; }
+          else { status.className = 'form-status err'; status.textContent = (body.message || 'Something went wrong') + ' (error ' + res.status + ')'; btn.disabled = false; }
+        } catch (err) {
+          // fetch() itself failed (offline, VPN/proxy drop, extension or content blocker). Say so plainly and
+          // offer a working fallback rather than a generic 'couldn't send'.
+          status.className = 'form-status err';
+          status.textContent = 'Your browser could not reach our server (' + (err && err.message ? err.message : 'network error') +
+            '). A VPN, ad blocker, or offline connection can cause this — please retry, or email support@juniorbay.net.';
+          btn.disabled = false;
+        }
       });
     })();
   </script>
