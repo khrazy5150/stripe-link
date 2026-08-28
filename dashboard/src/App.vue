@@ -303,7 +303,9 @@ const connectedAccountLabel = computed(() => {
   const doc = connectedAccount.value;
   const connected = doc.connect_status === "connected" || Boolean(doc.connect_account_id);
   if (!connected) return stripeKeys.connectLoaded ? "No Stripe connected" : "user";
-  return String(doc.connect_email || doc.connect_business_name || doc.connect_account_id || "Stripe connected").trim();
+  // Business name first: the Stripe login email can be shared across several connected accounts (one Stripe
+  // login owning many accounts), so it doesn't identify WHICH account is wired — the business name does.
+  return String(doc.connect_business_name || doc.connect_email || doc.connect_account_id || "Stripe connected").trim();
 });
 const connectedAccountTitle = computed(() => {
   const doc = connectedAccount.value;
