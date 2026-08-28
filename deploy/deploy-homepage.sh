@@ -64,6 +64,16 @@ aws s3 cp "s3://${BUCKET}/fonts/" "s3://${BUCKET}/fonts/" \
   --content-type "font/woff2" \
   --cache-control "public, max-age=31536000, immutable"
 
+# 4) Extensionless copies of content pages (support.html -> /support) so clean URLs resolve on S3+CloudFront.
+for page in "${SRC_DIR}"/*.html; do
+  name="$(basename "${page}" .html)"
+  [[ "${name}" == "index" || "${name}" == "404" ]] && continue
+  aws s3 cp "${page}" "s3://${BUCKET}/${name}" \
+    --region "${REGION}" \
+    --content-type "text/html; charset=utf-8" \
+    --cache-control "public, max-age=60, must-revalidate"
+done
+
 INVALIDATION_ID="$(aws cloudfront create-invalidation \
   --distribution-id "${DISTRIBUTION_ID}" \
   --paths "/*" \
