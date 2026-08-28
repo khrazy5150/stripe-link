@@ -504,6 +504,26 @@ Deferred, non-blocking follow-ups. Each item notes what, why it was deferred, an
   "© Junior Bay Corporation". No fee specifics on the front page (specifics live inside the app). Shipped after
   the paywall reversal made the promise true.
 
+### Email auth for `juniorbay.com` (SPF/DKIM/DMARC) — LOW priority, noted 2026-08-28, not built
+- **Today:** all platform mail sends from **`juniorbay.net`**, which is fully authenticated and has a **pristine
+  reputation** — SPF `v=spf1 include:amazonses.com ~all`, SES DKIM verified, DMARC `p=quarantine` with rua/ruf to
+  support@. Verified 2026-08-28; form submissions land in the inbox. **`juniorbay.com` has NO SPF and NO DMARC**,
+  and nothing sends from it.
+- **⚠️ History that must inform any change:** `juniorbay.com` was **lost and recently recovered**, and carries a
+  **poor historical spam reputation** from earlier misuse. `.net` is deliberately the sending domain *because* of
+  this. **Do NOT move platform sending to `.com`** on a whim — that would trade a pristine reputation for a
+  damaged one.
+- **What to do when it matters** (e.g. if tenant-facing mail should ever appear to come from the apex brand):
+  1. **Now / cheap:** publish a **null-sender SPF** (`v=spf1 -all`) + **DMARC `p=none`** with `rua` on
+     `juniorbay.com` — this doesn't enable sending; it tells receivers *nobody* sends from the domain, which
+     **blocks spoofing** of the buyer-facing brand and starts collecting reports. Two Route 53 TXT records,
+     addable as IaC in `template.yaml`.
+  2. **Only if/when sending from `.com`:** verify it in SES, enable DKIM, switch SPF to `include:amazonses.com`,
+     then **warm it slowly** (low volume first) and watch the DMARC reports — a recovered domain with past abuse
+     needs re-earned reputation, not a cold cutover.
+- **Why deferred:** nothing sends from `.com` today and `.net` works perfectly; this is protection + future
+  optionality, not a fix.
+
 ### Optimize prod CloudFront (pages) for indexing + aggressive caching
 - **What:** Optimize prod CloudFront (`dlxn0y34f7dbz`) for indexing, follow, archiving, aggressive
   caching, long TTLs, and optimized compression.
