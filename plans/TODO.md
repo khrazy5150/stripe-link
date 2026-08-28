@@ -117,6 +117,12 @@ Deferred, non-blocking follow-ups. Each item notes what, why it was deferred, an
     show Junior Bay (mirror the TEST-branding steps in `docs/CONNECT_TEST_BRANDING.md`, for live).
 - **Not available on Standard:** embedded onboarding components (the never-leave-the-app screens Stan uses) require
   Express/Custom — out of scope while we stay Standard.
+- **✅ Reuse VERIFIED 2026-08-28 (no code change needed):** controlled test — baseline 1 connected account per mode,
+  ran the full flow (intro modal → Stripe → **"Select the account you'd like to connect" → Connect**), result **still
+  1 per mode**, tenant wired to the existing `acct_1TA08M…`. So the account **chooser reuses correctly**; the
+  June duplicates came from taking **"Create a new account"** on that screen during rehearsals, NOT from our
+  `stripe_user[]` prefill. Prefill stays as-is. Guidance for tenants/rehearsals: on Stripe's screen pick the
+  existing account, never "Create a new account".
 - **SHIPPED 2026-08-27:** `ConnectIntroModal` (mounted once in App.vue; every `startConnect()` entry point opens
   it) — JB 🤝 Stripe brandline, "Start selling & get paid", what-to-have-ready checklist, Home Country picker
   (→ `?country=` → `stripe_user[country]`), reassurance line, mode-aware TEST copy. **Still manual (author):**
