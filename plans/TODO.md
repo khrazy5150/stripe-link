@@ -84,6 +84,22 @@ Deferred, non-blocking follow-ups. Each item notes what, why it was deferred, an
   `business` identity on user_profile is Stripe-seeded and often empty pre-connect); optional auto-switch-to-test UX
   polish after sandbox setup.
 
+### Multiple legal entities (tenants) under one dashboard login — DEFERRED (assessed 2026-08-28)
+- **Today:** one login (Cognito user) = one tenant = one Stripe Connect account per mode. A second legal entity
+  (LLC, corp) needs a second Junior Bay account. Tenant identity is resolved from the auth session across every
+  handler, so a switcher is a wide (not deep) change.
+- **Assessment — not worth building now:** the population needing it is small (multi-entity owners, agencies)
+  and the creator competitors don't offer it either (Stan = one store per account; Shopify only at the org tier).
+  The per-Site statement descriptor above covers the far more common "appear separate" need for sole props;
+  true risk isolation only comes from genuinely separate entities anyway, which means separate Stripe accounts
+  = separate tenants.
+- **If/when demanded, the shape is an "Organization/workspace" layer:** a `user ↔ tenant` membership table with
+  roles, a tenant switcher in the topbar, and tenant_id resolved from membership + selected workspace instead of
+  from the user — the same layer that would give **team/staff logins to one tenant** (the more common ask, and
+  adjacent to the existing fulfillers concept). Build both together, not piecemeal.
+- **Cheap interim:** separate logins per entity (browser profiles); optionally a "linked accounts" quick-switch
+  that just re-auths another Cognito identity (no data-model change).
+
 ### Branded Connect onboarding intro (Standard-account UX polish) — SHIPPED PROD 2026-08-27
 - **Context:** onboarding redirects straight to Stripe's **OAuth** flow (Standard accounts), which feels intimidating
   vs Stan's branded intro + hosted/embedded flow. **Staying on Standard** — Express was rejected **NOT for fees**
@@ -263,6 +279,28 @@ Deferred, non-blocking follow-ups. Each item notes what, why it was deferred, an
   **immutable** — editing a plan's dollar amount re-prices only NEW subscribers; existing ones need a new Price +
   migration (deferred tool). The subscription is a **single line item** today (no multi-item/add-on billing), and
   there is **no metered/usage rail** yet (same gap the Identity gate flagged).
+
+### ⭐ HIGH — Per-Site statement descriptor (dynamic descriptor suffix) — noted 2026-08-28, not built
+- **What:** let each **Site** carry an optional `statement_descriptor_suffix` so charges from different storefronts
+  on ONE Stripe account read differently on the buyer's card statement (e.g. `KEITH HARRIS* CODERBAY` vs
+  `KEITH HARRIS* JBSTORE`). Most tenants are sole proprietors with one Stripe account and (soon) several
+  brands/Sites — this is how those businesses *appear* separate without separate legal entities.
+- **How Stripe does it:** the account's descriptor is NOT fixed for life. Card charges support a **dynamic
+  suffix**: `payment_intent_data[statement_descriptor_suffix]` on Checkout Sessions / `statement_descriptor_suffix`
+  on PaymentIntents. Stripe renders `<account shortened descriptor prefix>* <suffix>`, **22 chars total**, so the
+  allowed suffix length = 22 − len(prefix) − 2. The prefix comes from the connected account's
+  `settings.payments.statement_descriptor_prefix` (readable by the platform) — **if the tenant hasn't set a
+  shortened descriptor in Stripe, the suffix is ignored**, so the UI must read the prefix, show the remaining
+  budget, and prompt the tenant to set a prefix in Stripe when missing. Allowed chars: letters/digits/spaces,
+  no `< > \ ' " *`; must contain a letter. Subscriptions (recurring Checkout) don't take the suffix on the
+  session — set it on the subscription's invoices (`subscription_data` / invoice settings) or accept the account
+  default for recurring.
+- **Where:** `Site.schema.json` (+ Sites screen field with live "reads as: PREFIX* SUFFIX" preview + length
+  budget); apply in every charge path — `checkout.py`, `cart_checkout.py`, `upsell.py` (PaymentIntent), `booking.py`,
+  `invoices.py` — resolved from the page's Site (fallback: none → account default). Validate server-side with the
+  live prefix length.
+- **Why high:** the single real seam in "one Stripe account, several brands" — the author (tenant #1) will run
+  a digital store + coderbay.net services on one account and needs buyers to recognize each charge.
 
 ### "Sabbath mode" — optional weekly store closure (noted 2026-08-27, not built)
 - **What:** an opt-in toggle (OFF by default) letting a tenant close their store for the Sabbath. When enabled:
