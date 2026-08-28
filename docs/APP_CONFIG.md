@@ -6,6 +6,11 @@ table, which field, and whether a redeploy is needed.
 
 ---
 
+> **Propagation:** hand-editable fields (`legal.*`, `public_asset_base_url`) are read by the backend through a
+> **5-minute container cache** (`APP_CONFIG_CACHE_TTL_SECONDS`, platform_config.py) — a table edit reaches every
+> warm Lambda within ~5 min, no deploy. (Before 2026-08-28 the cache had no TTL and a warm container could
+> serve a stale value until it recycled.)
+
 ## The tables
 
 | Table | Read by | Serves |

@@ -6,13 +6,18 @@ edit (no code change): the asset-delivery CDN base (public_asset_base_url) and t
 returns empties, so importing modules stay pure and tests stay fast. See plans/SERVE_HOST_SCHEME.md.
 """
 import os
+import time
 from typing import Any
 
+# Container cache with a TTL so a config edit (e.g. the legal address) reaches every warm Lambda within
+# minutes — a warm container previously held the first read for its whole lifetime. Mirrors
+# BILLING_CONFIG_CACHE_TTL_SECONDS in fees.py.
+APP_CONFIG_CACHE_TTL_SECONDS = int(os.environ.get("APP_CONFIG_CACHE_TTL_SECONDS", "300"))
 _CACHE: dict[str, Any] = {}
 
 
 def _app_config_doc() -> dict[str, Any]:
-    if "doc" in _CACHE:
+    if "doc" in _CACHE and _CACHE.get("expires_at", 0) > time.time():
         return _CACHE["doc"]
     doc: dict[str, Any] = {}
     if os.environ.get("APP_CONFIG_TABLE"):
@@ -23,6 +28,7 @@ def _app_config_doc() -> dict[str, Any]:
         except Exception:
             doc = {}
     _CACHE["doc"] = doc
+    _CACHE["expires_at"] = time.time() + APP_CONFIG_CACHE_TTL_SECONDS
     return doc
 
 
