@@ -504,7 +504,7 @@ Deferred, non-blocking follow-ups. Each item notes what, why it was deferred, an
   "© Junior Bay Corporation". No fee specifics on the front page (specifics live inside the app). Shipped after
   the paywall reversal made the promise true.
 
-### Email auth for `juniorbay.com` (SPF/DKIM/DMARC) — LOW priority, noted 2026-08-28, not built
+### Email auth for `juniorbay.com` — anti-spoofing SHIPPED PROD 2026-08-28 (sending-from-.com still deferred)
 - **Today:** all platform mail sends from **`juniorbay.net`**, which is fully authenticated and has a **pristine
   reputation** — SPF `v=spf1 include:amazonses.com ~all`, SES DKIM verified, DMARC `p=quarantine` with rua/ruf to
   support@. Verified 2026-08-28; form submissions land in the inbox. **`juniorbay.com` has NO SPF and NO DMARC**,
@@ -514,10 +514,11 @@ Deferred, non-blocking follow-ups. Each item notes what, why it was deferred, an
   this. **Do NOT move platform sending to `.com`** on a whim — that would trade a pristine reputation for a
   damaged one.
 - **What to do when it matters** (e.g. if tenant-facing mail should ever appear to come from the apex brand):
-  1. **Now / cheap:** publish a **null-sender SPF** (`v=spf1 -all`) + **DMARC `p=none`** with `rua` on
-     `juniorbay.com` — this doesn't enable sending; it tells receivers *nobody* sends from the domain, which
-     **blocks spoofing** of the buyer-facing brand and starts collecting reports. Two Route 53 TXT records,
-     addable as IaC in `template.yaml`.
+  1. ✅ **DONE 2026-08-28** — `HomepageApexSpfRecord` + `HomepageApexDmarcRecord` in `template.yaml` publish
+     **`v=spf1 -all`** and **`v=DMARC1; p=reject; rua=mailto:support@juniorbay.net; fo=1;`** on the apex. Chose
+     `p=reject` over `p=none` because the domain sends nothing, so nothing can break. The apex TXT record set
+     also carries the pre-existing **Google site-verification** string (a TXT set holds all its strings — an
+     SPF-only record would have deleted it). Verified live via public DNS.
   2. **Only if/when sending from `.com`:** verify it in SES, enable DKIM, switch SPF to `include:amazonses.com`,
      then **warm it slowly** (low volume first) and watch the DMARC reports — a recovered domain with past abuse
      needs re-earned reputation, not a cold cutover.

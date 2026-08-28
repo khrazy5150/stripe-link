@@ -4383,6 +4383,38 @@ Resources:
               StringEquals:
                 AWS:SourceArn: !Sub "arn:aws:cloudfront::${AWS::AccountId}:distribution/${HomepageDistribution}"
 
+  # ---- Email authentication for the APEX brand domain (juniorbay.com) ----
+  # NOTHING sends from juniorbay.com — all platform mail sends from juniorbay.net (fully authenticated, pristine
+  # reputation). juniorbay.com was lost and recovered and carries PAST SPAM REPUTATION, so it is deliberately NOT
+  # a sending domain (plans/TODO.md "Email auth for juniorbay.com"). These two records say exactly that to
+  # receivers, which blocks spoofing of the buyer-facing brand:
+  #   SPF "v=spf1 -all"  = no server is authorized to send as @juniorbay.com
+  #   DMARC p=reject     = reject anything claiming to be from it; rua sends aggregate reports to support@
+  # NOTE: the apex TXT record set must carry EVERY apex TXT string — the pre-existing Google site-verification
+  # value is included here so this record does not clobber it.
+  HomepageApexSpfRecord:
+    Type: AWS::Route53::RecordSet
+    Condition: HasHomepageApex
+    Properties:
+      HostedZoneName: !Ref HomepageCustomDomainHostedZoneName
+      Name: !Ref HomepageCustomDomainName
+      Type: TXT
+      TTL: 3600
+      ResourceRecords:
+        - '"v=spf1 -all"'
+        - '"google-site-verification=e8EtCsS8gz8pZrelYjcsG2pnPDFnEa8RHPn1BOas3Vs"'
+
+  HomepageApexDmarcRecord:
+    Type: AWS::Route53::RecordSet
+    Condition: HasHomepageApex
+    Properties:
+      HostedZoneName: !Ref HomepageCustomDomainHostedZoneName
+      Name: !Sub "_dmarc.${HomepageCustomDomainName}"
+      Type: TXT
+      TTL: 3600
+      ResourceRecords:
+        - '"v=DMARC1; p=reject; rua=mailto:support@juniorbay.net; fo=1;"'
+
   # NOTE: The apex + www DNS (A and AAAA alias records) are managed directly via Route 53 at cutover, not
   # here — the pre-existing records were created outside this stack, and the apex needs both A and AAAA.
   # HomepageDistribution claims the apex/www CNAME aliases (HasHomepageApex); the alias A/AAAA records point
