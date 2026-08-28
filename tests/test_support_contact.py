@@ -27,6 +27,7 @@ class SupportContactTests(unittest.TestCase):
         self.assertEqual(len(sent), 1)
         kw = sent[0]
         self.assertEqual(kw["reply_to"], "ada@example.com")
+        self.assertEqual(kw["from_name"], "Ada Lovelace (via Junior Bay Support)")
         self.assertIn("Buyer: Ada Lovelace", kw["subject"])
         self.assertIn("ref ord_123", kw["subject"])
         self.assertIn("My download link never arrived", kw["text"])
@@ -70,6 +71,24 @@ class SupportContactTests(unittest.TestCase):
     def test_options_and_wrong_method(self):
         self.assertEqual(support_contact.handler({"httpMethod": "OPTIONS"}, None)["statusCode"], 200)
         self.assertEqual(support_contact.handler({"httpMethod": "GET"}, None)["statusCode"], 405)
+
+
+class DisplayNameTests(unittest.TestCase):
+    def test_header_injection_is_stripped(self):
+        sent = []
+        support_contact.handler(
+            _post({**GOOD, "name": 'Evil"\r\nBcc: victim@example.com <x>'}), None,
+            send=lambda **kw: sent.append(kw))
+        fn = sent[0]["from_name"]
+        for bad in ('"', "\r", "\n", "<", ">"):
+            self.assertNotIn(bad, fn)
+        self.assertTrue(fn.endswith("(via Junior Bay Support)"))
+
+    def test_blank_name_falls_back(self):
+        # a name of only stripped characters still yields a usable display name
+        sent = []
+        support_contact.handler(_post({**GOOD, "name": '"<>"'}), None, send=lambda **kw: sent.append(kw))
+        self.assertEqual(sent[0]["from_name"], "Junior Bay Support Form")
 
 
 if __name__ == "__main__":

@@ -24,6 +24,12 @@ def _support_inbox() -> str:
     return str(os.environ.get("SUPPORT_INBOX") or os.environ.get("EMAIL_FROM_ADDRESS") or "support@juniorbay.net").strip()
 
 
+def _display_name(name: str) -> str:
+    """'Larry Miller (via Junior Bay Support)' — quotes/newlines stripped so the header can't be injected."""
+    clean = re.sub(r'[\r\n"<>]', "", str(name or "").strip())[:80].strip()
+    return f"{clean} (via Junior Bay Support)" if clean else "Junior Bay Support Form"
+
+
 def _clean(payload: dict[str, Any], key: str) -> str:
     return str(payload.get(key) or "").strip()[: MAX.get(key, 512)]
 
@@ -100,7 +106,10 @@ def handler(event, context, *, send=None, now_fn=time.time):
     try:
         result = (send or send_email)(
             to=inbox, subject=subject, text=text, html=body_html,
-            from_name="Junior Bay Support Form", reply_to=sub["email"],
+            # Display name = the submitter (address stays the VERIFIED identity — SES only sends from
+            # identities we own, and hotmail/gmail SPF+DKIM+DMARC would reject a spoofed From anyway).
+            # Inbox then reads "Larry Miller (via Junior Bay Support)" and Reply goes to them.
+            from_name=_display_name(sub["name"]), reply_to=sub["email"],
         ) or {}
         # Log the SES MessageId so a "didn't arrive" report can be traced to an accepted send.
         print(f"support_contact sent to={inbox} reply_to={sub['email']} ses_message_id={result.get('MessageId')}")
