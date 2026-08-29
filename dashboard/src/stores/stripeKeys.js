@@ -67,6 +67,13 @@ export const useStripeKeysStore = defineStore("stripeKeys", {
       const m = state.modes?.test;
       return Boolean(m && (m.saved_secret_key || m.connect_status === "connected" || m.connect_account_id));
     },
+
+    // Same test as hasTestSandbox but for EITHER mode — so the onboarding wizard can skip offering to configure
+    // an environment that is already set up (it used to ask unconditionally, a legacy test-first-then-live flow).
+    modeConfigured: (state) => (mode) => {
+      const m = state.modes?.[mode];
+      return Boolean(m && (m.saved_secret_key || m.connect_status === "connected" || m.connect_account_id));
+    },
   },
 
   actions: {

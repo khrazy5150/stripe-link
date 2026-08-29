@@ -190,17 +190,28 @@
           </div>
 
           <div v-else class="onboarding-step">
-            <p>
-              Do you want to configure the {{ otherEnvironmentLabel }} environment now?
-            </p>
-            <div class="onboarding-actions-row">
-              <button type="button" class="primary-action" @click="configureOtherEnvironment">
-                Configure {{ otherEnvironmentLabel }}
-              </button>
-              <button type="button" class="secondary-action" @click="closeWizard">
-                Not now
-              </button>
-            </div>
+            <template v-if="otherEnvironmentConfigured">
+              <p>
+                You're all set — <strong>{{ environmentLabel }}</strong> and
+                <strong>{{ otherEnvironmentLabel }}</strong> are both connected.
+              </p>
+              <div class="onboarding-actions-row">
+                <button type="button" class="primary-action" @click="closeWizard">Done</button>
+              </div>
+            </template>
+            <template v-else>
+              <p>
+                Do you want to configure the {{ otherEnvironmentLabel }} environment now?
+              </p>
+              <div class="onboarding-actions-row">
+                <button type="button" class="primary-action" @click="configureOtherEnvironment">
+                  Configure {{ otherEnvironmentLabel }}
+                </button>
+                <button type="button" class="secondary-action" @click="closeWizard">
+                  Not now
+                </button>
+              </div>
+            </template>
           </div>
 
           <div v-if="wizardError" class="keys-status-banner error">{{ wizardError }}</div>
@@ -249,6 +260,9 @@ const connectBusinessName = computed(() => String(connectDocument.value.connect_
 const connectEmail = computed(() => String(connectDocument.value.connect_email || "").trim());
 const connectBankLast4 = computed(() => String(connectDocument.value.connect_bank_last4 || "").trim());
 const otherEnvironment = computed(() => (props.activeEnvironment === "live" ? "test" : "live"));
+// Skip step 3's offer when the other environment is already connected (legacy flow asked unconditionally,
+// so a tenant who connected live first was still asked to "Configure Live").
+const otherEnvironmentConfigured = computed(() => stripeKeys.modeConfigured(otherEnvironment.value));
 const otherEnvironmentLabel = computed(() => (otherEnvironment.value === "live" ? "Live" : "Test"));
 
 const setupWarning = computed(() => {
@@ -271,7 +285,7 @@ const setupWarning = computed(() => {
 const wizardTitle = computed(() => {
   if (wizardStep.value === 1) return `Authorize ${props.environmentLabel} Stripe`;
   if (wizardStep.value === 2) return "Confirm your Stripe connection";
-  return `Configure ${otherEnvironmentLabel.value} environment`;
+  return otherEnvironmentConfigured.value ? "Setup complete" : `Configure ${otherEnvironmentLabel.value} environment`;
 });
 
 function openWizard() {
