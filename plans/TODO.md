@@ -516,6 +516,21 @@ Deferred, non-blocking follow-ups. Each item notes what, why it was deferred, an
   "© Junior Bay Corporation". No fee specifics on the front page (specifics live inside the app). Shipped after
   the paywall reversal made the promise true.
 
+### Brand logo in the email sender avatar (BIMI) — LOW priority / deferred on cost, noted 2026-08-28
+- **What:** show the Junior Bay logo instead of Gmail's generic letter avatar on mail from
+  `support@juniorbay.net` (the treatment PayPal/Apple have). The standard is **BIMI**.
+- **Prereqs ALREADY met on `juniorbay.net`** (verified 2026-08-28): SPF `include:amazonses.com`, SES **DKIM
+  verified**, and **DMARC at `p=quarantine`** — the enforcement policy most senders fail. Nothing to fix there.
+- **⚠️ Blocker is cost, not tech:** Gmail (and Apple Mail) render BIMI logos only with a **Verified Mark
+  Certificate (VMC)**, which requires a **registered trademark** for the logo and runs **~$1,000–1,500/yr**
+  (Entrust/DigiCert). **Deliberately deferred** — not worth it pre-revenue; revisit only if/when the trademark
+  exists and the revenue justifies it.
+- **Do instead (free, most of the benefit):** set a **profile photo on the `support@juniorbay.net` Google
+  Workspace account** — Gmail recipients then see the logo with no BIMI, no certificate, no cost.
+- **Cheap prep if wanted later:** produce the logo as **SVG Tiny PS** (square, solid background, no external
+  refs, no scripts) and publish a `default._bimi.juniorbay.net` TXT record (`v=BIMI1; l=<svg url>; a=<vmc url>`).
+  Some non-Gmail clients honor BIMI without a VMC; the record is harmless without one.
+
 ### Email auth for `juniorbay.com` — anti-spoofing SHIPPED PROD 2026-08-28 (sending-from-.com still deferred)
 - **Today:** all platform mail sends from **`juniorbay.net`**, which is fully authenticated and has a **pristine
   reputation** — SPF `v=spf1 include:amazonses.com ~all`, SES DKIM verified, DMARC `p=quarantine` with rua/ruf to
