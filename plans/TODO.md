@@ -292,6 +292,47 @@ Deferred, non-blocking follow-ups. Each item notes what, why it was deferred, an
   migration (deferred tool). The subscription is a **single line item** today (no multi-item/add-on billing), and
   there is **no metered/usage rail** yet (same gap the Identity gate flagged).
 
+### ⭐⭐ HIGH — Digital Marketplace (starter inventory + provisioning engine) — plan 2026-08-28, not built
+- **What:** a curated, **first-party** catalog of ready-to-sell digital assets. A tenant buys one and Junior Bay
+  provisions the whole business in one click — license + product + offer + draft landing page. Solves the
+  **empty-catalog cold start**; monetized not by the item margin but by the **GMV it creates** (the free-forever
+  transaction fee). Full design: **`plans/DIGITAL_MARKETPLACE.md`**.
+- **Keystone decision — FIRST-PARTY CONTENT ONLY in v1:** a `SourceContractSha256` proves a supplier's contract
+  wasn't altered, **not that they ever held the rights**. A "Verified by Junior Bay" badge over third-party
+  content makes *us* the target of any claim. Owning the content removes supplier warranties, indemnification,
+  DMCA cascades, and revocation-across-live-stores entirely. Third-party supply is deferred and needs its own design.
+- **Never say "PLR" customer-facing** — "starter inventory" / "done-for-you products". The rights schema stays.
+- **The durable primitive is the PROVISIONING ENGINE**, not the catalog (pluggable supply source).
+- **Architecture caveats:** source proposal assumed single-table DynamoDB + TypeScript; this repo is **Python 3.12,
+  table-per-entity**. Also **DynamoDB transactions don't span tables**, so provisioning is an **idempotent,
+  resumable state machine** (+ stuck-license sweep), NOT `TransactWriteItems`. Provisioned Product/Offer/Page must
+  be ordinary tenant entities (reuse existing repos/validators/screens).
+- **Money flow:** platform is the seller → rides the **existing platform-billing rail** (as Premium), not Connect.
+
+### ⭐⭐ HIGH — Attention Primitive (offer → campaign → attribution) — plan 2026-08-28, not built
+- **What:** derive a multi-platform social campaign **from the offer itself**, schedule it, publish it, and
+  attribute real GMV back to each post and pillar. Solves the second cold start — **"nobody visits my store"** —
+  and is the most differentiating item on the roadmap. Full design: **`plans/ATTENTION_PRIMITIVE.md`**.
+- **Architecturally it's the sibling of ConversionContext:** `AttentionContext` is a **consumer of
+  `OfferSemanticModel`** (`plans/OFFER_SEMANTIC_ANALYZER.md`, design-locked, **prerequisite**) — not a second
+  semantic extraction. The analyzer already names Meta/TikTok listings among its intended consumers.
+- **COGS is largely solved already:** `AI_AND_COMMERCE_ARCHITECTURE.md` §A.1 locks **BYO AI key ("cost is the
+  tenant's")** + §A.2's provider adapter — so text generation costs the platform **nothing** and this does NOT
+  reverse the "integrations, not in-house metered features" decision. **Only AI video** is a real platform cost →
+  ration it, meter it, show remaining credits.
+- **Trial:** keep the shipped homepage promise ("Full access for 14 days — free") by capping **usage**, not
+  features — e.g. a 7-day sample campaign, one video. Never feature-gate it out of the trial.
+- **Publishing:** vendor-agnostic adapter; aggregator first because **platform app review is the real blocker**
+  (weeks–months). Candidate **Outstand.so** (unverified: $19/mo base incl. 3,000 posts, unlimited profiles →
+  first ~50 tenants inside the base). **Managed Keys → BYOK forces tenant re-authorization** (OAuth tokens are
+  bound to the issuing app) → launch on Managed Keys, run app reviews in parallel, **migrate while the tenant
+  count is small**. Treat reconnection as a first-class state (queue posts, banner, auto-resume).
+- **Scheduling:** reuse the existing `rate(15 minutes)` sweep pattern (3 already exist), NOT per-post EventBridge.
+- **Ship attribution EARLY** (before autopilot generation) — it makes hand-posted content measurable, is cheap,
+  and produces the data that makes generation smart.
+- **Tier:** extra-premium ~$69/mo, modeled as a **higher plan tier** (billing is single-line-item today).
+- **Verify before building A5:** paid one-week vendor spike incl. deliberately revoking a token mid-queue.
+
 ### ⭐ HIGH — Per-Site statement descriptor (dynamic descriptor suffix) — noted 2026-08-28, not built
 - **What:** let each **Site** carry an optional `statement_descriptor_suffix` so charges from different storefronts
   on ONE Stripe account read differently on the buyer's card statement (e.g. `KEITH HARRIS* CODERBAY` vs
