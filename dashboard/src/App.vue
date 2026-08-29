@@ -298,7 +298,13 @@ const hasTestSandbox = computed(() => stripeKeys.hasTestSandbox);
 // Subtitle under the avatar: the Stripe account connected for the ACTIVE mode (email, else business name), so
 // "which Stripe am I wired to?" is glanceable on every screen — a tenant with several logins/accounts can't
 // mistake one for another (plans/TODO.md). Truncated via CSS; the full value lives in the title tooltip.
-const connectedAccount = computed(() => stripeKeys.connectCard?.stripe_connect || {});
+// Prefer the rich connect CARD (carries business name/email); fall back to the per-mode keys the store already
+// holds, so the pill names the account as soon as /stripe/keys returns instead of sitting on "user".
+const connectedAccount = computed(() => {
+  const card = stripeKeys.connectCard?.stripe_connect;
+  if (card && (card.connect_status === "connected" || card.connect_account_id)) return card;
+  return stripeKeys.modes?.[activeEnvironment.value] || {};
+});
 const connectedAccountLabel = computed(() => {
   const doc = connectedAccount.value;
   const connected = doc.connect_status === "connected" || Boolean(doc.connect_account_id);
