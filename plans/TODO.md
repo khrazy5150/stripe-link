@@ -157,7 +157,7 @@ Deferred, non-blocking follow-ups. Each item notes what, why it was deferred, an
   styling surface to maintain). Decide, then make whichever theme(s) remain fully consistent.
 - **Related:** the earlier env-toggle repaint issue in [dashboard env + caching] — same toggle, adjacent polish.
 
-### Show the connected Stripe account under the avatar (topbar user pill) — LOW priority, noted 2026-08-27
+### Show the connected Stripe account under the avatar (topbar user pill) — SHIPPED PROD 2026-08-28
 - **What:** the topbar user pill's subtitle is the static word "user" (App.vue `.user-pill small`). Replace it with
   the **connected Stripe account for the active mode** — the Connect email (`connect_email`, e.g.
   keith@juniorbay.net) or business name (`connect_business_name`) from `stripeKeys.connectCard.stripe_connect`;
@@ -169,6 +169,12 @@ Deferred, non-blocking follow-ups. Each item notes what, why it was deferred, an
   wired to?" glanceable and prevents that confusion for tenants with multiple logins/accounts.
 - **Where:** App.vue user pill markup + `stripeKeys` store (already loads the connect card per mode; reuse, no new
   API). Mode-aware: shows the test account in Test, the live account in Live.
+- **SHIPPED 2026-08-28:** pill shows business name → email → acct id (truncated 22ch + full value in the tooltip:
+  "Connected Stripe (live): Keith Harris · keithdecosta@gmail.com · acct_…"), "No Stripe connected" when none.
+  Falls back to `stripeKeys.modes[env]` so it names the account as soon as `/stripe/keys` returns.
+  **Also fixed (same pass):** the onboarding wizard's step 3 asked to "Configure {other} environment"
+  UNCONDITIONALLY — a legacy test-first-then-live leftover. It now checks `stripeKeys.modeConfigured(mode)` and
+  shows "You're all set — Test and Live are both connected" (title "Setup complete") when both are done.
 
 ### Consolidate the side menu into collapsible groups
 - The side menu has grown cluttered and lost its original simplicity. Look into grouping items into collapsible
