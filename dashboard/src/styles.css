@@ -27,7 +27,9 @@
   --text-page: 2.6rem;      /* page title (h1) */
   --text-card: 1.8rem;      /* card / modal / panel heading */
   --text-body: 1.4rem;      /* default body copy */
-  --text-label: 1.3rem;     /* field labels AND control text — deliberately the same step */
+  --text-label: 1.3rem;     /* field labels */
+  --text-control: 1.2rem;   /* input/select/textarea text — one step BELOW the label that names it */
+  --leading-control: 1.8rem;/* control line-height (matches stripe-cart's 12px/18px control rhythm) */
   --text-section: 1.15rem;  /* uppercase group headers (PAGE BASICS) */
   --text-hint: 1.1rem;      /* help text under a field — must sit clearly BELOW --text-label */
   --text-micro: 1rem;       /* badges, counters, tiny meta */
@@ -1788,7 +1790,8 @@ textarea {
   background: #fff;
   color: var(--text);
   padding: 0.55rem 1rem;
-  font-size: var(--text-label);
+  font-size: var(--text-control);
+  line-height: var(--leading-control);
   font-weight: var(--weight-normal);
   letter-spacing: 0;
 }
