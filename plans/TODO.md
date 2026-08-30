@@ -82,6 +82,37 @@ the UI actually needs rather than subtracting the ones it must not see. A denyli
 silently and invisibly every time the schema grows, which is exactly what happened here.
 Pairs naturally with hiding the raw JSON panels (below).
 
+### MEDIUM — stop storing credentials nothing reads (audit stripe_keys document, 2026-08-30)
+
+Fallout from the redaction fix: three credential fields on the stripe_keys document are
+written and never consumed. Each is blast radius with no upside.
+
+  connect_access_token_ref   written stripe_connect.py:274, read NOWHERE
+  connect_refresh_token_ref  written stripe_connect.py:281, read NOWHERE
+  webhook_secret_ref         written/redacted in stripe_keys.py only; signature
+                             verification uses get_platform_webhook_secret
+                             (stripe_webhook.py:66,152,182), never the tenant's
+
+Why they are unused: connected tenants call Stripe with the PLATFORM secret key plus a
+Stripe-Account header (checkout_credentials, stripe_platform_secrets.py:136-149), and
+Connect webhooks arrive at the platform endpoint signed with the platform secret. Note the
+Standard-account OAuth access_token is effectively a live secret key for the connected
+account, so this is real credential material, not a token of convenience.
+
+Still genuinely used, do NOT remove:
+  secret_key_ref    the BYO-keys fallback path for tenants who never connect via OAuth
+                    (checkout_credentials' second branch). Unused by CONNECTED tenants
+                    only. Retiring it is a product decision about whether BYO onboarding
+                    stays supported -- not a cleanup.
+  publishable_key   BNPL on-page messaging (publishing.py:897, html.py:1348/1433/2392);
+                    documents.py:1325 also requires it OR connect_account_id to validate.
+
+Decide per field: stop persisting it, or write down why it is retained (e.g. refresh
+tokens kept for a future token-refresh flow). Whatever is kept stays in SENSITIVE_FIELDS.
+
+Prereq/related: the allowlist rewrite in the HIGH item above -- doing both together means
+touching the response shape once.
+
 ### Hide the raw JSON panels behind a local Developer Mode — discussed 2026-08-30, not built
 
 13 `<pre>{{ JSON.stringify(...) }}</pre>` dumps across 10 components (Products, Offers x2,
