@@ -7,7 +7,7 @@ from stripe_link.common import error_response, json_response, parse_json_body, t
 from stripe_link.domain.documents import DocumentValidationError, validate_stripe_keys_document
 from stripe_link.kms_secrets import KmsSecretCipher
 from stripe_link.repositories.documents import RepositoryError, stripe_keys_repository
-from stripe_link.security import redact_sensitive_fields
+from stripe_link.security import REDACTED, redact_sensitive_fields, restore_redacted_fields
 
 
 def handler(event, context, repository=None, secret_cipher=None):
@@ -87,19 +87,18 @@ def stripe_key_mode_is_empty(document):
 
 def prepare_stripe_keys_document(incoming, existing, secret_cipher):
     document = dict(existing or {})
-    document.update(incoming)
+    # Merge the CLEANED payload, never the raw one: a sensitive field that came back blank-or-masked
+    # reverts to what is stored (or stays absent), so a redacted round-trip cannot erase a credential.
+    # Driven by SENSITIVE_FIELDS, so it covers the Connect token refs too -- not just these two.
+    document.update(restore_redacted_fields(incoming, existing))
     tenant_id = str(document.get("tenant_id") or "").strip()
     mode = document.get("mode") if document.get("mode") in {"test", "live"} else "test"
     document["tenant_id"] = tenant_id
     document["mode"] = mode
     for field in ("secret_key_ref", "webhook_secret_ref"):
         submitted = str(incoming.get(field) or "").strip()
-        if submitted in {"", "********"}:
-            if existing and existing.get(field):
-                document[field] = existing[field]
-            else:
-                document.pop(field, None)
-            continue
+        if submitted in {"", REDACTED}:
+            continue  # restore_redacted_fields already kept or dropped it
         document[field] = secret_cipher.encrypt(submitted, tenant_id=tenant_id, mode=mode, field=field)
     return document
 

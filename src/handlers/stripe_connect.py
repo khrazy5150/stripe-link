@@ -9,7 +9,7 @@ from urllib.request import Request, urlopen
 from stripe_link.common import error_response, json_response, parse_json_body, tenant_id_from_event
 from stripe_link.kms_secrets import KmsSecretCipher
 from stripe_link.repositories.documents import RepositoryError, stripe_keys_repository, tenant_profiles_repository
-from stripe_link.security import redact_sensitive_fields
+from stripe_link.security import redact_sensitive_fields, restore_redacted_fields
 from stripe_link.stripe_client import stripe_request
 from stripe_link.stripe_platform_secrets import get_platform_secret_key
 
@@ -318,6 +318,12 @@ def status_handler(event, context, repository=None):
             document = parse_json_body(event)
             if not document.get("tenant_id"):
                 return error_response("tenant_id is required.", code="missing_tenant")
+            # **document spreads the client body straight into the write, so a caller echoing back a
+            # redacted GET would persist the mask over the stored ciphertext. Keep what is on record.
+            document = restore_redacted_fields(
+                document,
+                repository.get(document["tenant_id"], _normalize_mode(document.get("mode", "test"))),
+            )
             saved = repository.put({
                 "schema_version": "2026-05-29",
                 "document_type": "stripe_keys",
