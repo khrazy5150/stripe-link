@@ -931,6 +931,30 @@ third-party security assessment is required.
 
 ## Offer Semantic Model
 
+### ⭐ HIGH — AI provider adapter (AI_AND_COMMERCE Phase 1) — SEQUENCED AFTER the other modules
+
+**Priority HIGH, but deliberately NOT next.** Author's sequencing 2026-08-30: pick this up
+once the remaining modules are complete — the pre-launch work first (see "Media field
+parity: video FILE upload + drag-reorder", tagged BEFORE LAUNCH).
+
+**Why it is on the critical path at all:** it is the gate on the Offer Semantic Analyzer's
+last phase. P1-P3 and P4.0 are SHIPPED; `smart_offer_slug` is already a thin wrapper over
+`slug_from_model(analyze_offer(...))`. The only thing left is **P4.1, the AI enrichment
+tier**, and per plans/OFFER_SEMANTIC_P4.md it deliberately does NOT build its own AI stack —
+it reuses the provider adapter from `AI_AND_COMMERCE_ARCHITECTURE.md` §A.2. So "continue the
+analyzer" actually means "build the provider adapter first". Recording that here so the real
+first task is not mistaken for a small next step.
+
+**Also unblocks:** P4.2a ad-copy generator (AI; a deterministic floor can ship without it),
+P4.2c AI content (needs AI_AND_COMMERCE Part A page-gen too). NOT a blocker for P4.2b
+Merchant feed, which is deterministic and gated on the Site object instead.
+
+**Cost note:** §A.1 locks BYO AI key ("cost is the tenant's"), so text generation costs the
+platform nothing — this is an engineering-time decision, not a COGS one.
+
+**Do not start with P4.1.** Start by scoping AI_AND_COMMERCE Phase 1 (the provider adapter);
+P4.1 is downstream of it.
+
 ### JSON-Schema ↔ model drift — RESOLVED 2026-07-28
 - **Done (option (a) from the original note):** the model schema now lives in code as the single source of truth
   (`OFFER_SEMANTIC_MODEL_SCHEMA` in `src/stripe_link/domain/semantic_schema.py`), enforced by a small in-repo,
@@ -947,3 +971,5 @@ third-party security assessment is required.
   invalidation-on-offer/product/brand-change. The deterministic model is cheap to recompute, so the cache only
   earns its keep once the **expensive AI enrichment** (P4.1) exists — build the write path then, alongside the
   enrichment flow, per the 2026-07-28 decision ("worry about cache when everything else is finalized").
+- **Gated on:** P4.1 cannot start until the AI provider adapter exists — see the ⭐ HIGH entry at the top of this
+  section, which the author sequenced AFTER the remaining modules (2026-08-30).
