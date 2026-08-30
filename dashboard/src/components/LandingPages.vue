@@ -2204,7 +2204,8 @@ async function loadPages() {
     pages.value = Array.isArray(body.pages) ? body.pages : [];
     pagesLoaded.value = true;
     const activeCount = pages.value.filter((page) => page.status !== "archived").length;
-    if (activeCount) message.value = `${activeCount} landing page${activeCount === 1 ? "" : "s"} loaded.`;
+    // No "N landing pages loaded." banner — the list itself is the feedback, and the blue box was pure
+    // chrome above the builder. Action confirmations (saved/attached/published) still set `message`.
     catalogPromise.catch(() => {});
   } catch (err) {
     error.value = err.message || "Failed to load landing pages.";
