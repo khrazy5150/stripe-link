@@ -182,6 +182,13 @@ business links render + feed sameAs; tenant overrides render nofollow but NEVER 
 sameAs, and are blocked at publish on platform hosts. Gate on `on_custom_domain`, NOT on a
 plan tier (landing pages are free-forever post-pivot).
 
+Vanity URL DECIDED 2026-08-30: `jbay.page/username` (path-on-apex, $10.20/yr). Top constraint
+is surviving Instagram/TikTok link filters -- `.cc` was the front-runner until testing found it
+blocked. `.page` is HSTS-preloaded at TLD level (Google Registry, like .app/.dev) so abuse never
+concentrated there. Two consequences are now REQUIRED, not optional: namespace the localStorage
+cart keys by tenant_id (all creator pages share one origin), and reserve a path wordlist before
+the first username is claimed.
+
 Also supersedes: retire `social_redirect`; decide whether `open_form` gets a renderer or is
 removed (see the form-builder plan, to be written).
 

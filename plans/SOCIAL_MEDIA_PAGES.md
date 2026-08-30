@@ -157,7 +157,49 @@ that gates behaviour with nothing producing it. See the audit item in `TODO.md`.
    hard-requires it, and that `primaryCtaContract()` (`Offers.vue:1205`) can return "no
    single primary CTA" — today it always returns something, derived from
    `landingProducts[0]`.
-4. **Vanity URL — OPEN, author researching a domain purchase (2026-08-30).**
+4. **Vanity URL — DECIDED 2026-08-30: `jbay.page`, path-on-apex (`jbay.page/username`).**
+
+   **The top constraint is surviving Instagram/TikTok link filtering.** A link-in-bio domain
+   that cannot be pasted into a bio is not a product. This outranks price, length and
+   semantics, and it is TESTABLE BEFORE PURCHASE: paste an existing URL on the candidate TLD
+   into an IG story link, a TikTok bio and a DM.
+
+   That test killed the earlier front-runner. `jbay.cc` ($8/yr) was chosen for brevity, then
+   found to be aggressively blocked by Instagram and TikTok for malware/spam reputation — the
+   byproduct of being cheap. `.win` ($4.18) was rejected for the same reason before testing.
+   Corroborating evidence nobody should ignore: NO competitor uses a cheap TLD —
+   linktr.ee (`.ee`), beacons.ai (`.ai`), stan.store (`.store`), juicy.bio (`.bio`). They all
+   depend on passing these filters and have already solved it.
+
+   **Why `.page` won** ($10.20/yr, the cheapest credible option):
+   - **HSTS-preloaded at the TLD level.** Google Registry runs `.page` alongside `.app` and
+     `.dev`; every domain is HTTPS-only, enforced by the browser. Plaintext throwaway
+     phishing is impossible there, so abuse never concentrated — the exact inverse of `.cc`.
+   - Confirmed to pass IG/TikTok filters; treated as a legitimate mainstream TLD.
+   - **Semantically neutral**, which matters because tenants are not only creators. The same
+     URL must look unremarkable for a massage therapist, a nutrition store and a creator.
+   - `jbay.page/mariawendt` — 9 characters before the slash.
+
+   Rejected: `.info` (cheap-TLD spam history — the `.cc` trap again), `.promo` (reads as
+   coupon spam on a page carrying a $599 buy button), `.luxe` / `.ink` (narrow; `.ink` reads
+   tattoo), `.pro` (odd for creators), `.social` (long, pricey, redundant), `.website`
+   (author dislikes). Fallback if ever needed: `.store` ($42.20), proven daily by stan.store.
+
+   **Consequences of path-on-apex — both are now REQUIRED, not optional:**
+   - Namespace the localStorage cart keys by `tenant_id` first (see #5). Every creator page
+     shares ONE browser origin under this scheme.
+   - Put `jbay.page` on the Public Suffix List (see #6), not `jbay.uk`, if creator pages are
+     where tenant content lives. Reserve a path wordlist (`/about`, `/login`, `/api`, …)
+     before the first username is claimed — usernames and platform routes now share a
+     namespace.
+
+   Commerce Sites stay on `{label}.jbay.uk`; this domain carries creator pages only, which is
+   the point — a blocklisting on the UGC domain must not touch marketing, dashboard, signup
+   or billing.
+
+   Superseded options (kept so the reasoning is not relitigated):
+
+5. **Superseded vanity-URL options (2026-08-30).**
 
    Every competitor uses path-on-apex (`linktr.ee/name`, `beacons.ai/name`,
    `stan.store/name`, `juicy.bio/yourname`), so `{domain}/username` is the category-standard
@@ -185,19 +227,19 @@ that gates behaviour with nothing producing it. See the audit item in `TODO.md`.
    **Do not let this gate the feature.** Ship v1 on `{label}.jbay.uk` subdomains; the page is
    identical and only the hostname changes when a vanity domain is chosen.
 
-5. **Shared-origin hazard if path-on-apex is ever chosen.** Published pages already store a
+6. **Shared-origin hazard — now LIVE, since path-on-apex was chosen.** Published pages already store a
    capability in localStorage (`html.py:4806-4807`): `sl_cart_id_{offerId}` (the SERVER cart
    id) and `sl_cart_{offerId}` — keyed by **offer, not tenant**. Distinct subdomains are
    distinct browser origins, so this is isolated today. On a shared apex it is not: any
    tenant's page script could read another tenant's cart ids for a visitor who used both.
    Namespace those keys by `tenant_id` before adopting any path-on-apex scheme.
 
-6. **Add the platform hosting domain to the Public Suffix List — do this regardless.**
+7. **Add the creator domain (`jbay.page`) to the Public Suffix List.**
    Subdomains isolate storage and DOM but NOT cookies: `a.jbay.uk` can set a cookie on
    `.jbay.uk` that `b.jbay.uk` reads. PSL registration is how `github.io` and `vercel.app`
    close this. Free, independent of the vanity-URL decision, and applies to whichever domain
    ends up serving tenant content.
-7. **Donation button.** Author raised it. Needs either a new CTA type or a priceless/
+8. **Donation button.** Author raised it. Needs either a new CTA type or a priceless/
    pay-what-you-want checkout. Out of scope for v1 unless decided otherwise.
 
 ## 10. Cleanup this supersedes
