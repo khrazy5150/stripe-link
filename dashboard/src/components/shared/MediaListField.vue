@@ -25,20 +25,36 @@
           <button type="button" class="media-remove" :aria-label="`Remove ${shortName(url)}`" @click="removeAt(index)"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg></button>
         </li>
       </ul>
+      <template v-else-if="derived.length">
+        <ul class="media-list is-derived">
+          <li v-for="(item, index) in derived" :key="`auto-${index}`" class="media-list-item is-derived">
+            <span class="media-drag is-placeholder" aria-hidden="true"></span>
+            <span class="media-thumb" :class="{ 'is-empty': !item.url }">
+              <img v-if="item.url" :src="item.url" alt="" loading="lazy" />
+              <span v-else class="media-empty-glyph" title="No image — the page renders a placeholder">▢</span>
+            </span>
+            <span class="media-meta">
+              <span class="media-kind is-auto">AUTO</span>
+              <span class="media-name" :title="item.label">{{ item.label }}{{ item.url ? "" : " — no image" }}</span>
+            </span>
+          </li>
+        </ul>
+        <p class="media-list-empty">{{ derivedNote }}</p>
+      </template>
       <p v-else class="media-list-empty">{{ emptyText }}</p>
 
       <div class="media-actions">
         <input ref="imageInput" type="file" accept="image/*" hidden @change="pickImage" />
-        <button type="button" class="secondary-action compact" :disabled="busy" @click="imageInput?.click()">
+        <button type="button" class="secondary-action compact" :disabled="Boolean(busy)" @click="imageInput?.click()">
           <svg class="mlf-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg><span>{{ busy === "image" ? "Uploading…" : "Upload Image" }}</span>
         </button>
 
         <input v-if="allowVideoUpload" ref="videoInput" type="file" accept="video/mp4,video/webm,video/quicktime" hidden @change="pickVideo" />
-        <button v-if="allowVideoUpload" type="button" class="secondary-action compact" :disabled="busy" @click="videoInput?.click()">
+        <button v-if="allowVideoUpload" type="button" class="secondary-action compact" :disabled="Boolean(busy)" @click="videoInput?.click()">
           <svg class="mlf-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg><span>{{ busy === "video" ? "Uploading…" : "Upload Video" }}</span>
         </button>
 
-        <button v-if="allowVideoUrl" type="button" class="secondary-action compact" :disabled="busy" @click="openUrlEntry">
+        <button v-if="allowVideoUrl" type="button" class="secondary-action compact" :disabled="Boolean(busy)" @click="openUrlEntry">
           <svg class="mlf-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg><span>Video URL</span>
         </button>
       </div>
@@ -93,6 +109,12 @@ const props = defineProps({
   emptyText: { type: String, default: "No media yet — upload an image or add a video." },
   // Quick-pick thumbnails (e.g. the offer's product images) the tenant can toggle in/out of the list.
   suggestions: { type: Array, default: () => [] },
+  // What the page will render when the list is EMPTY — the renderer falls back to the offer's own media
+  // (runtime/html.py hero_media_images). Shown read-only as AUTO rows so the field never claims "no media"
+  // while the carousel is actually showing slides. Shape: [{ url, label }]; a blank url renders as the
+  // page's own "no image" placeholder.
+  derived: { type: Array, default: () => [] },
+  derivedNote: { type: String, default: "Auto — from your offer. Upload or add media to override." },
   // async (file) => url. Required for the Upload Image action.
   upload: { type: Function, default: null },
   // async (file) => url. Video FILE upload needs a backend that stripe-link doesn't have yet
@@ -221,6 +243,11 @@ function commitUrl() {
 .media-remove { border: 0; background: transparent; color: var(--text-muted); cursor: pointer; padding: 0.4rem; }
 .media-remove:hover { color: #dc2626; }
 .media-list-empty { margin: 0; color: var(--text-muted); font-size: var(--text-hint); }
+.media-list-item.is-derived { cursor: default; border-style: dashed; background: transparent; }
+.media-drag.is-placeholder { width: 1.2rem; }
+.media-kind.is-auto { color: var(--text-muted); }
+.media-thumb.is-empty { background: #f3f4f6; color: var(--text-muted); }
+.media-empty-glyph { font-size: 1.6rem; }
 .media-actions { display: flex; flex-wrap: wrap; gap: 0.8rem; }
 .media-actions button { display: inline-flex; align-items: center; gap: 0.6rem; }
 .mlf-icon { flex: 0 0 auto; }

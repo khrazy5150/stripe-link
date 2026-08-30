@@ -773,6 +773,8 @@
                 hint="Add images and videos to your hero carousel"
                 empty-text="No media yet — upload an image or add a video URL."
                 :suggestions="builderProductImages"
+                :derived="builderDerivedHeroMedia"
+                derived-note="Auto — these come from your offer's products. Upload or add media to override."
                 :upload="uploadPageImage"
                 @update:model-value="setHeroMedia"
               />
@@ -1786,6 +1788,22 @@ const conversionTargets = computed(() => {
 // the server renderer owns all of that now, so it is gone along with the twin.
 const builderProductImages = computed(() => [...new Set(builderOfferProducts.value.flatMap((product) => product.images || []).filter(Boolean))]);
 const heroMediaList = computed(() => parseLines(builder.hero_media_text));
+// What the renderer falls back to when hero_media.images is empty — mirrors runtime/html.py
+// hero_media_images()/offer_uses_grouped_item_media(): a multi-item offer contributes ONE image per item
+// (so an image-less item still occupies a slide and renders the placeholder), a single-product offer
+// contributes all of that product's images. Surfaced read-only in the media field as AUTO rows.
+const builderDerivedHeroMedia = computed(() => {
+  const products = builderOfferProducts.value;
+  if (!products.length) return [];
+  if (products.length > 1) {
+    return products.map((product) => ({
+      url: (product.images || []).find(Boolean) || "",
+      label: product.name || "Product",
+    }));
+  }
+  const only = products[0];
+  return (only.images || []).filter(Boolean).map((url) => ({ url, label: only.name || "Product" }));
+});
 const previewHeroImage = computed(() => heroMediaList.value[0] || offerImage(builderOffer.value) || "");
 const visibleTrustBadges = computed(() => builder.trust_badges.badges.filter((badge) => badge.enabled !== false && badge.label));
 // ---------------------------------------------------------------------------------------------------
