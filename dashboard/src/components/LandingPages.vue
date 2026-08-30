@@ -104,9 +104,9 @@
               </p>
 
               <div class="landing-page-meta">
-                <span>{{ itemCount(page) }} item(s)</span>
-                <span>{{ Number(page.analytics_summary?.views || 0) }} views</span>
-                <span>{{ Number(page.analytics_summary?.conversions || 0) }} conversions</span>
+                <span><strong>{{ itemCount(page) }}</strong> item(s)</span>
+                <span><strong>{{ Number(page.analytics_summary?.views || 0) }}</strong> views</span>
+                <span><strong>{{ Number(page.analytics_summary?.conversions || 0) }}</strong> conversions</span>
                 <strong>{{ formatMoney(page.analytics_summary?.revenue_cents || 0) }}</strong>
                 <span>revenue</span>
                 <span v-if="page.route?.slug" class="landing-page-slug" :title="'/' + page.route.slug">Slug: {{ displaySlug(page) }}</span>

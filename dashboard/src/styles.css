@@ -25,7 +25,8 @@
      label/control text at 12.25px and hints at 10.5px — the hierarchy below matches that rhythm.
      RULE: never hard-code a font-size for these roles again; reach for the token. */
   --text-page: 2.6rem;      /* page title (h1) */
-  --text-card: 1.8rem;      /* card / modal / panel heading */
+  --text-card: 1.8rem;
+  --leading-card: 2.7rem;      /* card / modal / panel heading */
   --text-body: 1.4rem;      /* default body copy */
   --text-label: 1.2rem;     /* field labels */
   --leading-label: 1.8rem;  /* label line-height */
@@ -2350,7 +2351,9 @@ button:disabled {
   color: var(--text);
   cursor: pointer;
   font: inherit;
-  font-weight: 800;
+  font-size: 1.3rem;  /* a notch under --text-body: menu rows read as actions, not content */
+  line-height: normal;
+  font-weight: var(--weight-normal);
   padding: 0.9rem 1rem;
   text-align: left;
 }
@@ -3239,32 +3242,48 @@ button:disabled {
 }
 
 .landing-site-filter {
-  min-height: 4.4rem;
+  min-height: 3.2rem;
   border: 1px solid var(--line);
   border-radius: var(--radius-md);
   background: var(--panel);
   color: var(--text);
-  font: inherit;
-  font-weight: 700;
+  font-size: 1.3rem;
+  line-height: 2rem;
+  font-weight: var(--weight-normal);
   padding: 0 1rem;
 }
 
 .landing-search {
   width: 28rem;
   min-width: 20rem;
-  min-height: 4.4rem;
+  min-height: 3.2rem;
   border: 1px solid var(--line);
   border-radius: var(--radius-md);
   background: var(--panel);
   color: var(--text);
-  font: inherit;
-  font-weight: 700;
-  padding: 0 1.4rem;
+  font-size: 1.3rem;
+  line-height: 2rem;
+  font-weight: var(--weight-normal);
+  padding: 0 1.2rem;
 }
 
 .landing-pages-actions .primary-action,
 .landing-pages-actions .secondary-action {
   white-space: nowrap;
+}
+
+.landing-pages-actions .primary-action,
+.landing-pages-actions .secondary-action {
+  min-height: 3.2rem;
+  padding: 0.6rem 1.2rem;
+  font-size: 1.3rem;
+  line-height: 2rem;
+  font-weight: var(--weight-normal);
+}
+
+/* The one CTA in the row keeps a little more weight so it still leads. */
+.landing-pages-actions .primary-action {
+  font-weight: var(--weight-medium);
 }
 
 .landing-search.full {
@@ -3302,6 +3321,16 @@ button:disabled {
   background: var(--panel);
   padding: 1.6rem;
   box-shadow: var(--shadow-sm);
+  transition: border-color 0.16s ease, box-shadow 0.16s ease, transform 0.16s ease;
+}
+
+/* Same hover lift the offer/wizard cards use, so a row reads as a single clickable object.
+   Deliberately not stripe-cart's 0 4px 12px rgba(0,0,0,.2) -- that is tuned for its dark
+   (#0f1a2e) card and reads heavy over white. */
+.landing-page-card:hover {
+  border-color: var(--accent);
+  box-shadow: 0 0.8rem 2rem rgba(75, 73, 172, 0.14);
+  transform: translateY(-1px);
 }
 
 .landing-page-image,
@@ -3348,6 +3377,9 @@ button:disabled {
 .landing-page-title-row h3 {
   margin: 0;
   overflow-wrap: anywhere;
+  font-size: var(--text-card);
+  line-height: var(--leading-card);
+  font-weight: var(--weight-semibold);
 }
 
 .landing-page-title-row p {
@@ -3356,13 +3388,17 @@ button:disabled {
   gap: 1.2rem;
   margin: 0.4rem 0 0;
   color: var(--muted);
-  font-size: 1.4rem;
-  font-weight: 800;
+  font-size: var(--text-label);
+  line-height: var(--leading-label);
+  font-weight: var(--weight-normal);
 }
 
 .landing-page-title-row p span {
   color: var(--text-muted);
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-family: Monaco, "Courier New", monospace;
+  font-size: 1.1rem;
+  line-height: 1.7rem;
+  font-weight: var(--weight-normal);
   overflow-wrap: anywhere;
 }
 
@@ -3439,8 +3475,10 @@ button:disabled {
   max-width: min(100%, 32rem);
   overflow: hidden;
   color: var(--accent);
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-weight: 800;
+  font-family: Monaco, "Courier New", monospace;
+  font-size: 1.2rem;
+  line-height: 1.8rem;
+  font-weight: var(--weight-normal);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -3493,6 +3531,9 @@ button:disabled {
 
 .copy-icon-button {
   display: grid;
+  font-size: 1.2rem;
+  line-height: normal;
+  font-weight: var(--weight-normal);
   width: 3.6rem;
   height: 3.6rem;
   place-items: center;
@@ -3518,17 +3559,25 @@ button:disabled {
   padding: 0 1.2rem;
 }
 
+.landing-page-url-row .secondary-action {
+  font-size: 1.1rem;
+  line-height: normal;
+  font-weight: var(--weight-medium);
+}
+
 .landing-page-meta {
   display: flex;
   flex-wrap: wrap;
   gap: 1.4rem;
-  color: var(--muted);
-  font-size: 1.4rem;
-  font-weight: 800;
+  color: var(--text-muted);
+  font-size: 1.2rem;
+  line-height: 1.8rem;
+  font-weight: var(--weight-normal);
 }
 
 .landing-page-meta strong {
   color: var(--text);
+  font-weight: var(--weight-semibold);
 }
 
 /* Loud, unmissable warning when a cross-env copy will overwrite an existing target page. */
@@ -3541,6 +3590,10 @@ button:disabled {
 /* Slug lives on the metrics row (kept off the crowded title row so it can't push the Site badge out). */
 .landing-page-meta .landing-page-slug {
   color: var(--accent);
+  font-family: Monaco, "Courier New", monospace;
+  font-size: 1.2rem;
+  line-height: 1.8rem;
+  font-weight: var(--weight-normal);
   max-width: 32ch;
   overflow: hidden;
   text-overflow: ellipsis;
