@@ -517,6 +517,14 @@ main {
   margin: 0;
 }
 
+/* Card/panel headings carried no font-size, so they inherited the UA default h2 (1.5em = 2.1rem) and read
+   heavy beside stripe-cart's ~1.75rem card titles. Pinned to one explicit step so every card header matches. */
+.dashboard-card-header h2,
+.modal-card-header h2,
+.stripe-key-panel h3 {
+  font-size: 1.8rem;
+}
+
 .page-header h1 {
   font-size: 2.6rem;
 }
@@ -2457,6 +2465,11 @@ button:disabled {
 
 .offer-field {
   display: grid;
+  /* align-content:start is load-bearing — in an .offer-two-column row the columns stretch to the tallest
+     sibling, and without this the field's auto rows stretch too, inflating the input/select (observed as a
+     "fat" Preset dropdown next to a Page Goal that carries help text). Rows size to content; slack sits
+     at the bottom of the column. */
+  align-content: start;
   gap: 0.5rem;
   font-size: 1.3rem;
   color: var(--muted);
