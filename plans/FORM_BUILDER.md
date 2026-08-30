@@ -145,6 +145,40 @@ Worth building **later**, and consent-clean: an *abandoned-funnel* capture that 
 contact+consent step, so someone who gives their email and then drops on a later step still becomes a
 lead. That is the case with real value, and it reuses the abandoned-cart sweep pattern.
 
+### DECISION — resilience and "continue later": a CLIENT-SIDE draft
+
+Requirement (author, 2026-08-30): a dropped connection or a visitor who wants to finish later must not
+lose their answers. Agreed — but do it on the device, not the server.
+
+```
+localStorage  key: sl_form_{tenant_id}_{page_id}   TTL ~7 days   cleared on submit
+```
+
+This covers a dropped connection, a refresh, an accidental back-swipe and "I'll finish tonight" — the
+overwhelming majority of real cases. It needs no lawful basis: it is storage on the visitor's own device,
+strictly necessary for a service they actively requested, and it never reaches us, so it cannot become a
+breach or a subject-access request.
+
+**Why NOT server-side partials.** "Save it but don't use it" does not work under GDPR: storage IS
+processing (Art. 4(2)), so an incomplete submission needs a lawful basis whether or not anything reads
+it. Once it is server-side alongside a session id or IP it is pseudonymous personal data (online
+identifiers, recital 30), which drags retention and erasure obligations with it. Operationally it is also
+messy — partial rows would pollute the leads list, lead counts and the `lead_capture` entitlement gate.
+(Reasoning from the regulation; not legal advice.)
+
+**Cross-device resume needs no special case.** Resuming on a different device requires identifying the
+person, which means you already hold their email — which is precisely where consent lands. So the only
+scenario that genuinely needs server state is the abandoned-funnel capture above, which is already
+consent-clean.
+
+**DEPENDENCY — namespacing is REQUIRED, not optional.** The risk lives on the PUBLISHED page at runtime,
+not in authoring: a visitor loads `jbay.page/{username}` and the inline JS from `runtime/html.py` runs in
+their browser at the `jbay.page` origin — shared by every creator page (path-on-apex,
+`SOCIAL_MEDIA_PAGES.md` §9.4). A visitor who taps two creators' links from Instagram gives both pages'
+scripts access to the same `localStorage`. So form drafts MUST be namespaced by tenant, exactly like the
+`sl_cart_id_*` keys, and a half-typed email in an abandoned draft is more sensitive than a cart id.
+Publishing does not isolate this — it is what creates the shared origin.
+
 ### Consent placement
 
 The dual opt-in must render on the step that collects contact details — where it is today. Do not hoist

@@ -180,6 +180,13 @@ options, auto-advance, contact last. A flat form is just one step, and `fields[]
 into a flat renderer means rebuilding it. `form_id` is inert (written, never read): remove the prompt
 rather than auto-generating a value, since product_id already identifies the form.
 
+Resilience/"continue later" = a CLIENT-SIDE localStorage draft (TTL, cleared on submit), NOT server-side
+partials: "save but don't use" fails under GDPR because storage is processing (Art. 4(2)), and partial
+rows would pollute the leads list and entitlement gate. Cross-device resume needs an identifier, so it is
+only reachable post-contact -- i.e. the already-consent-clean abandoned-funnel capture. Drafts MUST be
+tenant-namespaced: every creator page shares the jbay.page origin in the VISITOR's browser, same hazard
+as the sl_cart_id_* keys.
+
 P3 (server-side validation) must ship with or before the builder UI is exposed -- the moment tenants can
 define forms, client-only guarantees are worthless. Retires `open_form` + `form_id`, which with
 `social_redirect` takes the action vocabulary from seven to five, both by removal.
