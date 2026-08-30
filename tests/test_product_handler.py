@@ -49,10 +49,13 @@ class ProductHandlerTests(unittest.TestCase):
         calls = []
         response = handler(
             {"httpMethod": "POST", "body": json.dumps(self.product)}, None,
-            repository=self.repository, sync_invoker=lambda tenant_id, product_id: calls.append((tenant_id, product_id)),
+            repository=self.repository,
+            sync_invoker=lambda tenant_id, product_id, mode: calls.append((tenant_id, product_id, mode)),
         )
         self.assertEqual(response["statusCode"], 201)
-        self.assertEqual(calls, [("tenant_demo", "prod_creatine_gummies")])
+        # The mode MUST travel with the invoke: it is part of the product's sort key, so the sync
+        # Lambda cannot find the document without it.
+        self.assertEqual(calls, [("tenant_demo", "prod_creatine_gummies", "test")])
 
     def test_get_product_requires_tenant(self):
         response = handler({

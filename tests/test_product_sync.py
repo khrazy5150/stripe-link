@@ -1,4 +1,5 @@
 import json
+import os
 import unittest
 
 from handlers.product_sync import check_product_drift, handler, run_product_sync
@@ -255,3 +256,98 @@ def fake_credentials(tenant_id, mode, stripe_keys, secret_cipher):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ProductSyncRepositoryWiringTests(unittest.TestCase):
+    """Pin the wiring the other tests cannot see.
+
+    Every other test in this file injects `repository=`, so the real products_repository() call is
+    never exercised — which is exactly why a completely broken "Sync to Stripe" sat behind a green
+    suite. The mode is part of the product's sort key (DynamoDocumentRepository._sk ->
+    "PRODUCT#{mode}#{id}"), so a sync handler that builds an UNSCOPED repository reads a key the
+    products handler never wrote, and 404s on every product in every mode.
+    """
+
+    def setUp(self):
+        self._prev = os.environ.get("PRODUCTS_TABLE")
+        os.environ["PRODUCTS_TABLE"] = "jb-products-dev"
+
+    def tearDown(self):
+        if self._prev is None:
+            os.environ.pop("PRODUCTS_TABLE", None)
+        else:
+            os.environ["PRODUCTS_TABLE"] = self._prev
+
+    def _sk_for(self, mode):
+        from stripe_link.repositories.documents import products_repository
+        return products_repository(mode=mode, table=object())._sk("prod_x")
+
+    def test_writer_and_syncer_agree_on_the_sort_key(self):
+        from stripe_link.common import resolve_stripe_mode
+
+        for mode in ("test", "live"):
+            with self.subTest(mode=mode):
+                event = {"httpMethod": "POST", "queryStringParameters": {"mode": mode}}
+                # products.py keys off resolve_stripe_mode(event); product_sync.py must match it.
+                self.assertEqual(self._sk_for(resolve_stripe_mode(event)), self._sk_for(mode))
+                self.assertIn(f"#{mode}#", self._sk_for(mode))
+
+    def test_an_unscoped_repository_would_miss(self):
+        # Guards the regression directly: unscoped is a DIFFERENT key, not a lenient one.
+        from stripe_link.repositories.documents import products_repository
+
+        self.assertNotEqual(products_repository(table=object())._sk("prod_x"), self._sk_for("test"))
+
+
+class ProductSyncModeWiringTests(unittest.TestCase):
+    """Directly pins the wiring that was broken: the sync handler MUST build its products repository
+    with the request's mode. Patching products_repository in the handler's namespace is the only way
+    to see this -- passing repository= (what every other test does) bypasses the call entirely."""
+
+    def test_handler_builds_a_mode_scoped_repository(self):
+        from unittest.mock import patch
+
+        import handlers.product_sync as mod
+
+        for mode in ("test", "live"):
+            with self.subTest(mode=mode):
+                seen = {}
+
+                def fake_products_repository(*args, **kwargs):
+                    seen["mode"] = kwargs.get("mode", "<unscoped>")
+                    class _Repo:
+                        def get(self, *_a, **_k):
+                            return None  # short-circuit: we only care how the repo was built
+                    return _Repo()
+
+                with patch.object(mod, "products_repository", fake_products_repository), \
+                     patch.object(mod, "stripe_keys_repository", lambda *a, **k: None), \
+                     patch.object(mod, "KmsSecretCipher", lambda *a, **k: None):
+                    mod.handler({
+                        "httpMethod": "POST",
+                        "pathParameters": {"product_id": "prod_x"},
+                        "queryStringParameters": {"tenant_id": "tenant_demo", "mode": mode},
+                    }, None)
+
+                self.assertEqual(seen.get("mode"), mode)
+
+    def test_internal_invoke_carries_the_mode(self):
+        from unittest.mock import patch
+
+        import handlers.product_sync as mod
+
+        seen = {}
+
+        def fake_products_repository(*args, **kwargs):
+            seen["mode"] = kwargs.get("mode", "<unscoped>")
+            class _Repo:
+                def get(self, *_a, **_k):
+                    return None
+            return _Repo()
+
+        with patch.object(mod, "products_repository", fake_products_repository), \
+             patch.object(mod, "stripe_keys_repository", lambda *a, **k: None), \
+             patch.object(mod, "KmsSecretCipher", lambda *a, **k: None):
+            mod.handler({"internal_sync": True, "tenant_id": "t", "product_id": "p", "mode": "live"}, None)
+
+        self.assertEqual(seen.get("mode"), "live")

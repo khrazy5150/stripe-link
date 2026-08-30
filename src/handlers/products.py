@@ -61,12 +61,16 @@ def create_product(event, repository, sync_invoker=None):
 def _trigger_async_sync(product, sync_invoker=None):
     invoke = sync_invoker or _default_sync_invoker
     try:
-        invoke(str(product.get("tenant_id") or ""), str(product.get("product_id") or ""))
+        invoke(
+            str(product.get("tenant_id") or ""),
+            str(product.get("product_id") or ""),
+            str(product.get("stripe_mode") or "test"),
+        )
     except Exception:  # noqa: BLE001 - a sync trigger failure must never fail the product save
         logger.warning("Failed to trigger async product sync for %s", product.get("product_id"), exc_info=True)
 
 
-def _default_sync_invoker(tenant_id, product_id):
+def _default_sync_invoker(tenant_id, product_id, mode="test"):
     """Fire-and-forget the product-sync Lambda (InvocationType=Event). No-ops without the function configured
     (unit tests) or missing ids; the sync itself skips gracefully when Stripe isn't connected."""
     function_name = os.environ.get("PRODUCT_SYNC_FUNCTION", "")
@@ -79,7 +83,12 @@ def _default_sync_invoker(tenant_id, product_id):
     boto3.client("lambda").invoke(
         FunctionName=function_name,
         InvocationType="Event",
-        Payload=json.dumps({"internal_sync": True, "tenant_id": tenant_id, "product_id": product_id}).encode("utf-8"),
+        Payload=json.dumps({
+            "internal_sync": True,
+            "tenant_id": tenant_id,
+            "product_id": product_id,
+            "mode": mode,  # the sync Lambda needs it: mode is part of the product's sort key
+        }).encode("utf-8"),
     )
 
 

@@ -9,7 +9,14 @@ new local prices (which get their own Stripe Price on the next sync).
 import copy
 import time
 
-from stripe_link.common import error_response, json_response, path_params, query_params, tenant_id_from_event
+from stripe_link.common import (
+    error_response,
+    json_response,
+    path_params,
+    query_params,
+    resolve_stripe_mode,
+    tenant_id_from_event,
+)
 from stripe_link.domain.stripe_products import build_price_params, build_product_params, price_differs
 from stripe_link.kms_secrets import KmsSecretCipher
 from stripe_link.repositories.documents import RepositoryError, products_repository, stripe_keys_repository
@@ -36,6 +43,9 @@ def handler(
     if internal:
         tenant_id = str(event.get("tenant_id") or "").strip()
         product_id = str(event.get("product_id") or "").strip()
+        # The invoker sends the product's stripe_mode. An in-flight payload from before that was added
+        # has no mode; "test" matches resolve_stripe_mode's fail-safe default so it can never touch live.
+        mode = str(event.get("mode") or "").strip() or "test"
     else:
         method = event.get("httpMethod", "").upper()
         if method == "OPTIONS":
@@ -44,12 +54,15 @@ def handler(
             return error_response(f"Unsupported method '{method}'.", status_code=405, code="method_not_allowed")
         tenant_id = tenant_id_from_event(event)
         product_id = str(path_params(event).get("product_id") or "").strip()
+        mode = resolve_stripe_mode(event)
     if not tenant_id:
         return {"skipped": "missing_tenant"} if internal else error_response("tenant_id is required.", code="missing_tenant")
     if not product_id:
         return {"skipped": "missing_product"} if internal else error_response("product_id is required.", code="missing_product")
 
-    repository = repository or products_repository()
+    # MUST be mode-scoped: the mode is part of the sort key (_sk -> "PRODUCT#{mode}#{id}"), so an
+    # unscoped repository reads a key products.py never wrote. That was a silent 404 on every sync.
+    repository = repository or products_repository(mode=mode)
     stripe_repo = stripe_repo or stripe_keys_repository()
     secret_cipher = secret_cipher or KmsSecretCipher()
 
@@ -58,7 +71,6 @@ def handler(
         if not product:
             return {"skipped": "not_found"} if internal else error_response("Product not found.", status_code=404, code="not_found")
 
-        mode = str(product.get("stripe_mode") or "test")
         stripe_keys = stripe_repo.get(tenant_id, mode=mode) or {}
         api_key, stripe_account = credentials_fn(tenant_id, mode, stripe_keys, secret_cipher)
         if not api_key:
