@@ -182,6 +182,28 @@ VERIFICATION, not repair. Exercise each shipped action against a published page,
 KNOWN DEFECT, do not re-report: fields render with placeholders derived from the field name and no
 <label>. Live in production, fixed by FORM_BUILDER P0/P1.
 
+### LOW — revisit image-processing: utility micro-service vs. a real media service (noted 2026-08-30)
+
+`../sam/image-processing` (see docs/EXTERNAL_SERVICES.md) is a thin utility: presign, copy, resize
+photos with sharp. Non-images are stored and served verbatim -- no transcode, no adaptive streaming.
+
+Fine for hero video. NOT fine for the online-course direction the author intends it to carry:
+
+  - no transcode -- every student streams the tenant's original file at full bitrate, no adaptive
+    quality, no bandwidth ladder
+  - `/upload/multiple` is presigned-POST only; the multipart branch exists in createUpload.js but is
+    not on the path stripe-link uses. S3 caps a single POST at 5GB, and reliability degrades long
+    before that on a phone
+  - no HLS/DASH packaging, no thumbnails/poster frames, no duration or dimension metadata for video
+  - no signed/expiring playback URLs, so course video would be as public as a hero clip
+
+Decide then whether to grow this service (MediaConvert + HLS + packaging) or adopt one (Mux,
+Cloudflare Stream, api.video). Buying is likely cheaper than building an encoding ladder, but it
+changes where tenant media lives -- an architectural call, not a feature.
+
+Not urgent: nothing about the current design blocks either path, and the size ceilings are now
+deploy-time parameters rather than code (b7a0f27 in that repo).
+
 ### Form Builder — plan plans/FORM_BUILDER.md, 2026-08-30, not built
 
 An EXTENSION of lead capture, not a new subsystem: `lead_capture.fields[]` is already declared,
