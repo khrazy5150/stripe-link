@@ -704,7 +704,7 @@ third-party security assessment is required.
 - **Still open (complement, not needed for the fix):** arrow/dot nav that drives the tier sync directly, so
   swipeability doesn't depend on images at all (`plans/LANDING_CAROUSEL_FIXES.md`).
 
-### Video FILE upload for the media field (backend) — noted 2026-08-30, not built
+### ⭐ HIGH — Media field parity: video FILE upload + drag-reorder (BEFORE LAUNCH) — 2026-08-30, not built
 - **What:** `MediaListField.vue` (the ported stripe-cart "HERO MEDIA" component) supports **Upload Image** and
   **Video URL** today. **Upload Video** is behind an `allowVideoUpload` prop that is OFF, because stripe-link has
   no video-upload path — `handlers/upload.py` proxies an **image** service (`/upload/multiple`).
@@ -714,8 +714,11 @@ third-party security assessment is required.
 - **To build:** presigned-POST endpoint + a video bucket/prefix, optional transcode (MediaConvert) + poll, then
   flip `allow-video-upload` on. Poster images would need a storage shape change (today media is a flat URL array,
   and kind is DERIVED from the extension by `runtime/html.py is_video_url()` — no schema change so far).
-- **Why deferred:** video URLs already render correctly; file upload is a separate backend capability with real
-  storage/transcode cost. Ship the UI first, add the transport when video demand is real.
+- **⭐ ALSO IN SCOPE — drag-reorder parity.** stripe-cart lets the tenant **drag page SECTIONS** to reorder them
+  (the ⠿ handles on HERO MEDIA / HEADLINE); stripe-link only drags the addable `builder.elements`, not the fixed
+  sections. `MediaListField` already drags media items WITHIN the list; section-level reordering is the gap.
+- **Why HIGH / pre-launch (author 2026-08-30):** the field currently advertises media management the backend
+  can't complete, and reordering is core builder UX. Both must work before launch.
 
 ### Reorganize the Landing Page Builder and optimize its CSS
 - Reorganize the Landing Page Builder and optimize its CSS.

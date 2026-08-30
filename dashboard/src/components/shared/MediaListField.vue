@@ -13,16 +13,16 @@
           @dragover.prevent
           @drop="dropOn(index)"
         >
-          <span class="media-drag" title="Drag to reorder" aria-hidden="true">⠿</span>
+          <span class="media-drag" title="Drag to reorder"><svg width="12" height="16" viewBox="0 0 12 16" fill="currentColor" aria-hidden="true"><circle cx="4" cy="3" r="1.4"></circle><circle cx="4" cy="8" r="1.4"></circle><circle cx="4" cy="13" r="1.4"></circle><circle cx="9" cy="3" r="1.4"></circle><circle cx="9" cy="8" r="1.4"></circle><circle cx="9" cy="13" r="1.4"></circle></svg></span>
           <span class="media-thumb" :class="{ 'is-video': isVideo(url) }">
             <img v-if="!isVideo(url)" :src="url" alt="" loading="lazy" />
-            <span v-else aria-hidden="true">▶</span>
+            <span v-else class="media-play"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg></span>
           </span>
           <span class="media-meta">
             <span class="media-kind">{{ isVideo(url) ? "VIDEO" : "IMAGE" }}</span>
             <span class="media-name" :title="url">{{ shortName(url) }}</span>
           </span>
-          <button type="button" class="media-remove" :aria-label="`Remove ${shortName(url)}`" @click="removeAt(index)">×</button>
+          <button type="button" class="media-remove" :aria-label="`Remove ${shortName(url)}`" @click="removeAt(index)"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg></button>
         </li>
       </ul>
       <p v-else class="media-list-empty">{{ emptyText }}</p>
@@ -30,16 +30,16 @@
       <div class="media-actions">
         <input ref="imageInput" type="file" accept="image/*" hidden @change="pickImage" />
         <button type="button" class="secondary-action compact" :disabled="busy" @click="imageInput?.click()">
-          {{ busy === "image" ? "Uploading…" : "⬆ Upload Image" }}
+          <svg class="mlf-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg><span>{{ busy === "image" ? "Uploading…" : "Upload Image" }}</span>
         </button>
 
         <input v-if="allowVideoUpload" ref="videoInput" type="file" accept="video/mp4,video/webm,video/quicktime" hidden @change="pickVideo" />
         <button v-if="allowVideoUpload" type="button" class="secondary-action compact" :disabled="busy" @click="videoInput?.click()">
-          {{ busy === "video" ? "Uploading…" : "⬆ Upload Video" }}
+          <svg class="mlf-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg><span>{{ busy === "video" ? "Uploading…" : "Upload Video" }}</span>
         </button>
 
         <button v-if="allowVideoUrl" type="button" class="secondary-action compact" :disabled="busy" @click="openUrlEntry">
-          ▶ Video URL
+          <svg class="mlf-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg><span>Video URL</span>
         </button>
       </div>
 
@@ -218,10 +218,15 @@ function commitUrl() {
 .media-meta { display: grid; min-width: 0; }
 .media-kind { font-size: var(--text-micro); font-weight: var(--weight-bold); letter-spacing: 0.06em; color: var(--accent); }
 .media-name { font-size: var(--text-hint); color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.media-remove { border: 0; background: transparent; color: var(--text-muted); font-size: 1.8rem; line-height: 1; cursor: pointer; padding: 0 0.4rem; }
+.media-remove { border: 0; background: transparent; color: var(--text-muted); cursor: pointer; padding: 0.4rem; }
 .media-remove:hover { color: #dc2626; }
 .media-list-empty { margin: 0; color: var(--text-muted); font-size: var(--text-hint); }
 .media-actions { display: flex; flex-wrap: wrap; gap: 0.8rem; }
+.media-actions button { display: inline-flex; align-items: center; gap: 0.6rem; }
+.mlf-icon { flex: 0 0 auto; }
+.media-drag { display: inline-flex; }
+.media-play { display: inline-flex; }
+.media-remove { display: inline-flex; align-items: center; }
 .media-url-entry { display: flex; gap: 0.8rem; align-items: center; }
 .media-url-entry input { flex: 1; min-width: 0; }
 .media-suggestions { display: flex; flex-wrap: wrap; gap: 0.8rem; margin-top: 1rem; }

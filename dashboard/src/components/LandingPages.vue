@@ -766,7 +766,7 @@
                 <textarea v-model.trim="builder.subheadline" rows="3"></textarea>
               </label>
             </template>
-            <label class="offer-field">
+            <div class="offer-field">
               <span>Hero Media</span>
               <MediaListField
                 :model-value="heroMediaList"
@@ -776,7 +776,7 @@
                 :upload="uploadPageImage"
                 @update:model-value="setHeroMedia"
               />
-            </label>
+            </div>
             <label class="builder-switch-row">
               <span class="builder-switch" @click.stop>
                 <input v-model="builder.autoplay" type="checkbox" aria-label="Autoplay hero videos muted" />
