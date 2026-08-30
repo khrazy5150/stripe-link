@@ -130,8 +130,12 @@ Do instead:
      backing theme/default_stripe_mode/dashboard_home/sidebar_collapsed, reached from the
      avatar dropdown), so developer_mode extends it -- NOT Configuration.vue, which
      governs the whole tenant, and not localStorage, which is per-device. Keep ?debug=1
-     as a non-persistent one-shot for support. Note UserPreferences.schema.json is
-     additionalProperties:false, so the field must be declared or the save is rejected.
+     as a non-persistent one-shot for support. Note UserPreferences.schema.json says
+     additionalProperties:false but is NEVER LOADED (runtime or tests) -- the hand-written
+     validate_user_preferences does not police unknown keys and the repository stores
+     **document as-is, so the field works WITHOUT the schema edit. Declare it anyway: the
+     schema is the only written spec of the shape, and letting it drift is how the
+     SENSITIVE_FIELDS denylist leaked the Connect token refs.
   2. A "Copy diagnostics" action emitting a purpose-built REDACTED bundle (entity id,
      schema_version, environment, app version, scrubbed document) — more useful to
      support than a raw dump and safe to paste into a ticket.

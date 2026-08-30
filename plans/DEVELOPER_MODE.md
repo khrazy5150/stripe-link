@@ -73,14 +73,49 @@ there rather than inventing a parallel mechanism.
 
 ### 1. Schema
 
-`schemas/UserPreferences.schema.json` is `"additionalProperties": false`, so the field must
-be declared or `validate_user_preferences` will reject the save:
+**Verified 2026-08-30 — the schema file is documentation, not enforcement.** It says
+`"additionalProperties": false`, but nothing reads it: `schemas/*.schema.json` is never
+loaded at runtime or in tests, `validate_user_preferences`
+(`domain/documents.py:1452`) is hand-written and only checks the four required fields plus
+the `landing_pages` / `authoring_defaults` sub-objects, and the repository's `put` spreads
+`**document` straight into DynamoDB without stripping unknown keys.
+
+So `developer_mode` would persist and load correctly **without touching the schema file at
+all**. That is the hazard, not the reassurance: the schema is the only written spec of this
+document's shape, and it is the thing future readers will trust. Shipping the field without
+declaring it leaves the spec quietly wrong — the same failure mode as the `SENSITIVE_FIELDS`
+denylist that drifted from the document and leaked the Connect token refs.
+
+Add it to `schemas/UserPreferences.schema.json`, grouped with the other booleans:
 
 ```json
-"developer_mode": { "type": "boolean", "default": false }
+    "sidebar_collapsed": { "type": "boolean", "default": false },
+    "developer_mode": { "type": "boolean", "default": false },
 ```
 
-No migration and no backfill: absent reads as `false` via the default.
+No migration and no backfill: absent reads as `false` via the default. No change to
+`validate_user_preferences` is needed — a plain boolean has nothing to validate beyond the
+type, and the validator does not police unknown keys.
+
+**Optional, larger, do not fold into this work:** the repo already has a pattern for
+preventing exactly this drift — `OfferSemanticModel` keeps validator and schema identical
+with a test (`domain/semantic_schema.py:5`, `documents.py:1764`: "the validator IS the
+schema"). `UserPreferences` has no such guard. Worth adopting, but it is its own task.
+
+### 1b. Touchpoints for the field
+
+Adding a preference is five small edits, not one:
+
+| File | Change |
+|---|---|
+| `schemas/UserPreferences.schema.json` | declare `developer_mode` (above) |
+| `Preferences.vue` → `defaultForm()` | `developer_mode: false` |
+| `Preferences.vue` → `applyPreferences()` | read it off the loaded document |
+| `Preferences.vue` → `save()` | include it in the PUT body |
+| `Preferences.vue` template | the checkbox (§4) |
+
+The `save()` path already does `const doc = { ...rawDoc.value }`, so it round-trips
+unknown fields — no risk of clobbering other preferences.
 
 ### 2. Composable
 
