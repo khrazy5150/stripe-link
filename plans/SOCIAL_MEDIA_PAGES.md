@@ -19,6 +19,12 @@ That framing decides everything below.
 
 ## 2. Key decision: a COMPOSITION, not a new page type
 
+**Cardinality: this is a ZERO-primary-offer page**, the storefront/collection shape — an identity
+header plus a `catalog_grid` whose cards each resolve their own offer and link out. It therefore needs
+NO exception to the "one primary offer per page" rule, which is exactly why the plumbing already
+exists. The rule is stated authoritatively in `PAGE_COMPOSER.md` § *Cardinality*; do not restate it
+here.
+
 **Do not build a separate page type or renderer.** Reasons:
 
 - The renderer already treats page role as metadata, never a branch — `documents.py:1857`:

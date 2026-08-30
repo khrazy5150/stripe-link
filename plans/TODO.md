@@ -166,7 +166,10 @@ The "Social page" lead-capture action was a placeholder for this and is currentl
 an identical CTA contract, so it is a duplicate of "Go to URL" with an unread `platform`
 field. The intent was a creator link-in-bio page (Stan / juicy.bio / linkcloud).
 
-Key finding: this is a COMPOSITION, not a new page type. `seller_profile` already renders
+Key finding: this is a COMPOSITION, not a new page type, and a ZERO-primary-offer (storefront-shaped)
+page -- so it needs no exception to "one primary offer per page". That rule is now stated precisely in
+PAGE_COMPOSER.md § Cardinality after the loose "one offer, one landing page" wording caused the same
+design conversation three times. `seller_profile` already renders
 identity + social links, `catalog_grid` is repeatable and already resolves each card's own
 offer, and the avatar tokens exist. The gap is that every offer_type composes to one
 `checkout_cta`; nothing pairs an identity header with a repeated per-destination grid.

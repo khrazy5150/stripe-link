@@ -35,6 +35,68 @@ Offer + Landing Page JSON
 Once both renderers consume the **same** composed model, "shows in preview but not on the live page" is
 structurally impossible.
 
+## Cardinality: one PRIMARY offer per page
+
+**A page has at most ONE primary offer — its conversion contract. Other offers may appear only as
+navigation: cards that link to their own page. They never render a competing CTA here.**
+
+This is the long-standing "one offer, one landing page" rule, stated precisely. The loose wording
+made legitimate composition look like a violation and cost three separate design conversations
+(latest 2026-08-30) before it was clear that nothing was actually in conflict.
+
+The renderer already implements exactly this — two page shapes, not a spectrum
+(`runtime/html.py:1423`):
+
+| Shape | Primary offer | Machinery that applies |
+|---|---|---|
+| **Landing page** | exactly ONE | `resolve_offer` → `resolved_offer`, `offer_price_selector`, a single `checkout_cta`, BNPL messaging, fee/tax calc |
+| **Storefront / collection** | **ZERO** (`offer == {}`) | none of the above. `catalog_grid` resolves each card's own offer from `offers_by_id` and links out |
+
+> *"A storefront/collection page has no primary offer (offer == {}); there's nothing to resolve or
+> price. Its catalog_grid resolves each card's own offer from offers_by_id instead."* — html.py:1424
+
+So a multi-offer page is **not** a landing page carrying several offers. It is a different page role
+carrying *none*, which is why none of the single-offer machinery has to cope with plurality. Nothing
+downstream — checkout, fees, orders, receipts, refunds, the ledger — ever sees a mixed page.
+
+### What this permits, and what it forbids
+
+PERMITTED — one primary offer plus cards that link away. This is what `related_products` has always
+been, and it does not create a second conversion:
+
+```
+[hero + price selector + ONE checkout_cta]   ← the conversion contract
+[catalog_grid: card → card → card]           ← navigation; each links to its own page
+```
+
+PERMITTED — zero primary offers, all cards. Storefronts, collections, and link-in-bio pages
+(`SOCIAL_MEDIA_PAGES.md`) are all this shape: an identity header plus a grid whose cards each resolve
+their own offer. **Link-in-bio needs no exception to this rule** — that is precisely why the plumbing
+already exists for it.
+
+FORBIDDEN — two things that would each convert on the same page: two `checkout_cta`s, a checkout CTA
+plus a lead-capture form as competing asks, or grid cards that check out inline rather than linking
+out. One page, one ask.
+
+### The guardrail this needs
+
+`catalog_grid` is a **repeatable element**, not a governed section, so nothing currently stops a
+tenant adding it to a page that already has a primary offer. That is usually fine (it is
+`related_products`). The rule that must hold is narrower:
+
+> **Grid cards link out. A grid card never renders its own checkout CTA.**
+
+Without that, the competing-conversion case re-enters through composition rather than through the
+offer model — the same outcome the cardinality rule exists to prevent, arriving by a different door.
+
+### Consequence for offers
+
+Because a landing page has exactly one conversion contract, an **offer carries exactly one
+`product_intent`** — mixing transactional and non-transactional items inside one offer would force
+multi-CTA and push plurality into checkout, fees, orders, receipts and refunds. Mixed *experiences*
+are composed at the page level from several single-intent offers, never inside one offer. See
+`LEAD_CAPTURE.md`.
+
 ## The model: mark, don't remove
 
 A composed section is annotated, not deleted:
