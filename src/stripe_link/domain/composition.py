@@ -164,6 +164,43 @@ def compose_page(offer: dict[str, Any], page: dict[str, Any]) -> list[dict[str, 
     ]
 
 
+# Placement governs ORDER + draggability; visibility is the separate `enabled` axis above. Both the
+# Python renderer and the Vue builder read these values from the one composition_rules.json, so there is
+# no second list to drift (see plans/TODO.md, "silent agreement failures").
+PLACEMENT_BANDS = ("lead", "pinned_top", "free", "pinned_bottom")
+
+
+def element_placement(key: str) -> str:
+    """Which band a section sits in. Unknown keys are treated as free — a new element is orderable
+    until someone decides otherwise, which is the safe default for rendering."""
+    return str((RULES.get("elements", {}).get(key) or {}).get("placement") or "free")
+
+
+def is_movable(key: str) -> bool:
+    """Only `free` sections may be dragged. The hero block is pinned on purpose."""
+    return element_placement(key) == "free"
+
+
+def order_section_keys(keys, tenant_order=()) -> list[str]:
+    """Sort section keys into lead -> pinned_top -> tenant-ordered free -> pinned_bottom.
+
+    `tenant_order` is the tenant's drag order; keys missing from it keep their catalog order, so a newly
+    added section appears in a sensible place instead of vanishing to one end.
+    """
+    keys = list(keys)
+    catalog = list(RULES.get("elements", {}))
+    rank = {key: index for index, key in enumerate(tenant_order)}
+    fallback = len(rank)
+
+    def sort_key(key):
+        band = element_placement(key)
+        band_index = PLACEMENT_BANDS.index(band) if band in PLACEMENT_BANDS else PLACEMENT_BANDS.index("free")
+        within = rank.get(key, fallback + (catalog.index(key) if key in catalog else 0))
+        return (band_index, within)
+
+    return [key for key in sorted(keys, key=sort_key) if element_placement(key) != "none"]
+
+
 def recommended_section_keys(offer_type: str, goal: str = "") -> list[str]:
     """Governed sections visible by default for this offer_type + goal (the builder's 'Recommended' group)."""
     return [key for key in RULES.get("governed_sections", []) if default_visible(offer_type, key, goal)]

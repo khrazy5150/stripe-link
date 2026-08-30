@@ -141,3 +141,34 @@ export function tokenGroups() {
 export function previewVar(token) {
   return `--preview-${String(token).replace(/_/g, "-")}`;
 }
+
+
+// Placement governs ORDER + draggability (visibility is the separate `enabled` axis). Read from the same
+// composition_rules.json the Python composer uses, so builder and renderer cannot disagree.
+export const PLACEMENT_BANDS = ["lead", "pinned_top", "free", "pinned_bottom"];
+
+export function elementPlacement(key) {
+  return (rules.elements?.[key] || {}).placement || "free";
+}
+
+// Only `free` sections get a drag handle. The hero block is pinned: hero_media is the LCP element, and
+// one-H1-first is an invariant the semantic outline depends on.
+export function isMovable(key) {
+  return elementPlacement(key) === "free";
+}
+
+// lead -> pinned_top -> tenant-ordered free -> pinned_bottom. Keys absent from tenantOrder keep their
+// catalog position, so a newly enabled section lands sensibly instead of jumping to an end.
+export function orderSectionKeys(keys, tenantOrder = []) {
+  const catalog = Object.keys(rules.elements || {});
+  const rank = new Map(tenantOrder.map((key, index) => [key, index]));
+  const fallback = rank.size;
+  const band = (key) => {
+    const index = PLACEMENT_BANDS.indexOf(elementPlacement(key));
+    return index === -1 ? PLACEMENT_BANDS.indexOf("free") : index;
+  };
+  const within = (key) => (rank.has(key) ? rank.get(key) : fallback + Math.max(0, catalog.indexOf(key)));
+  return [...keys]
+    .filter((key) => elementPlacement(key) !== "none")
+    .sort((a, b) => band(a) - band(b) || within(a) - within(b));
+}
