@@ -174,6 +174,12 @@ identity + social links, `catalog_grid` is repeatable and already resolves each 
 offer, and the avatar tokens exist. The gap is that every offer_type composes to one
 `checkout_cta`; nothing pairs an identity header with a repeated per-destination grid.
 
+GAP found while planning (plan 8a): `catalog_grid` cards are internal-only by design
+(`internal_href(slug)`, for crawlable subfolder authority), so a creator's external links cannot be
+cards. Resolved with a separate external-only `link_cards` element rather than adding a url field to
+`catalog_grid` -- keeps the SEO contract intact and gives the §7 trust policy one enforcement site
+instead of two that must agree.
+
 BLOCKERS found while planning:
   - `same_as` has NO dashboard UI — validated, never enterable. Nothing works until P0.
   - `same_as[].verified` is READ (html.py:3256, 4050) but SET NOWHERE, so no social link

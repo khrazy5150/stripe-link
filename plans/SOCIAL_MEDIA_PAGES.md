@@ -147,8 +147,70 @@ that gates behaviour with nothing producing it. See the audit item in `TODO.md`.
 - **`social_links`** — repeatable-adjacent ordered icon row (or a single element holding an
   ordered list). Reads §6's list, obeys §7.
 - **`profile_avatar`** — already specified in `SOCIALITE_PARITY.md`; build there, reuse here.
-- **`link_card`** *(decide)* — `catalog_grid` may already cover it, since each tile resolves
-  its own offer. Only add if a card must point somewhere that is not an offer.
+- **`link_cards`** — DECIDED, see §8a. `catalog_grid` does NOT cover the external case.
+
+## 8a. GAP: `catalog_grid` cards are internal-only, by design
+
+Earlier phrasing in this plan assumed `catalog_grid` would work as-is for link-in-bio. It will not.
+
+`render_catalog_grid` builds every href as `internal_href(slug)` — a link to that offer's landing-page
+slug on the Site. Its docstring states the reason: the cards exist to build *"the crawlable catalog
+hierarchy that makes subfolder domain authority work."* Cards without a `home` host or a slug render as
+plain unlinked tiles.
+
+So a creator's "my YouTube channel", "my Amazon storefront" or a raw affiliate link **cannot be a
+`catalog_grid` card**. That is not a bug; it is the element doing its job.
+
+### Options considered
+
+| | Verdict |
+|---|---|
+| **A — add a `url` field to `catalog_grid` items** | **No.** Silently undermines the SEO contract the element exists for, and forces the §7 trust policy to be enforced in a renderer that otherwise has nothing to do with it. |
+| **B — a separate `link_cards` element, external-only** | **CHOSEN.** |
+| **C — make every external destination an offer with an `external_url` CTA** | **No, as a general answer** — a whole offer, page and slug per "here's my TikTok" is absurd overhead, and it manufactures thin bridge pages, which is the cloaking risk §7 exists to avoid. Still CORRECT for the affiliate case (see below). |
+
+### Why B
+
+1. **The SEO contract stays intact.** `catalog_grid` is unchanged, so existing storefronts carry no
+   risk and the crawlable hierarchy keeps meaning what it says.
+2. **`rel` semantics are opposites.** Internal catalog links must be followable — that is the entire
+   point. External UGC links must carry `rel="nofollow ugc noopener"`. One element holding both is a
+   conditional that will eventually be inverted by someone who does not know why it is there.
+3. **The trust policy gets ONE home.** §7's rules (verified vs override, the `on_custom_domain` gate)
+   then apply to exactly one element and can be audited in one place. Allowing external links in
+   `catalog_grid` too would mean enforcing the same policy in two renderers that must agree with
+   nothing forcing them to — the failure shape that has bitten this codebase repeatedly (see the
+   silent-agreement audit item in `TODO.md`).
+4. **It matches existing practice.** `catalog_grid` already reuses `product_carousel`'s card shape and
+   shares a renderer with `related_products`. Sharing markup across elements is the established pattern
+   here, so this costs almost nothing.
+
+### `link_cards` specification
+
+- `items[]` of `{ url, label, image?, description? }` — **no `offer_id`**, no price, no `resolve_offer`.
+- Reuses the `product_carousel` card shape; no new CSS beyond the icon/compact variant.
+- Always `rel="nofollow ugc noopener"` and `target="_blank"`.
+- Repeatable, like `catalog_grid`.
+- **Never renders a checkout CTA** — per the cardinality guardrail in `PAGE_COMPOSER.md`, grid cards
+  link out. This element cannot convert.
+- Subject to §7: on a platform host, hosts are whitelisted; on a custom domain, any URL is allowed but
+  it NEVER enters `sameAs`.
+- Excluded from sitemap and structured data. It is visitor navigation, not catalog.
+
+### The three card kinds, kept distinct
+
+A real creator page uses more than one, which is exactly what the Stan reference shows:
+
+| Destination | Element |
+|---|---|
+| the tenant's own priced offers (internal, crawlable) | `catalog_grid` |
+| social profiles (icon row) | `social_links` |
+| arbitrary external links | `link_cards` |
+| an affiliate product the tenant genuinely *sells through* | an offer with an `external_url` CTA — option C, correct HERE because it earns a real page with its own content, analytics and disclosure |
+
+That last row is the affiliate bridge-page case from `LEAD_CAPTURE.md`. It gets a `catalog_grid` card
+like any other offer, because it has a page. The distinction is whether the destination deserves a page
+of its own — sold-through products do, "here is my TikTok" does not.
 
 ## 9. Decisions to make
 
