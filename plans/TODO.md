@@ -113,7 +113,7 @@ tokens kept for a future token-refresh flow). Whatever is kept stays in SENSITIV
 Prereq/related: the allowlist rewrite in the HIGH item above -- doing both together means
 touching the response shape once.
 
-### Hide the raw JSON panels behind a local Developer Mode — discussed 2026-08-30, not built
+### ⭐ HIGH — Developer Mode: hide the raw JSON panels (plan: plans/DEVELOPER_MODE.md, 2026-08-30, not built)
 
 13 `<pre>{{ JSON.stringify(...) }}</pre>` dumps across 10 components (Products, Offers x2,
 Orders, Customers, Invoices, Coupons, Services, Notifications, LandingPages x3, StripeKeys).
@@ -125,9 +125,13 @@ week (issuance, expiry, redemption, audit, support tooling) and would RAISE supp
 since support must mint a key before the tenant can gather what support asked for.
 
 Do instead:
-  1. One shared <JsonPanel> replacing all 13 sites, gated on a localStorage "Developer
-     Mode" flag (Settings toggle or ?debug=1). No server work. Solves the real concerns:
-     product polish, and incidental exposure via screenshots/screen-shares/tutorials.
+  1. One shared <JsonPanel> replacing all 13 sites, gated on a PER-USER preference. A
+     user preferences store already exists (/preferences keyed by tenant_id+user_id,
+     backing theme/default_stripe_mode/dashboard_home/sidebar_collapsed, reached from the
+     avatar dropdown), so developer_mode extends it -- NOT Configuration.vue, which
+     governs the whole tenant, and not localStorage, which is per-device. Keep ?debug=1
+     as a non-persistent one-shot for support. Note UserPreferences.schema.json is
+     additionalProperties:false, so the field must be declared or the save is rejected.
   2. A "Copy diagnostics" action emitting a purpose-built REDACTED bundle (entity id,
      schema_version, environment, app version, scrubbed document) — more useful to
      support than a raw dump and safe to paste into a ticket.
