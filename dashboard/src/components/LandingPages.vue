@@ -767,28 +767,16 @@
               </label>
             </template>
             <label class="offer-field">
-              <span>Hero Media URLs</span>
-              <div class="builder-upload-stack">
-                <input ref="heroFileInput" type="file" accept="image/*" hidden @change="handleHeroMediaPicked" />
-                <button class="secondary-action compact" type="button" :disabled="heroUploading" @click="heroFileInput?.click()">
-                  {{ heroUploading ? "Uploading..." : "Upload hero image" }}
-                </button>
-                <textarea v-model.trim="builder.hero_media_text" rows="4" placeholder="One image or video URL per line"></textarea>
-              </div>
-              <small v-if="heroUploadError" class="builder-upload-error">{{ heroUploadError }}</small>
+              <span>Hero Media</span>
+              <MediaListField
+                :model-value="heroMediaList"
+                hint="Add images and videos to your hero carousel"
+                empty-text="No media yet — upload an image or add a video URL."
+                :suggestions="builderProductImages"
+                :upload="uploadPageImage"
+                @update:model-value="setHeroMedia"
+              />
             </label>
-            <div class="builder-media-picker">
-              <button
-                v-for="image in builderProductImages"
-                :key="image"
-                type="button"
-                class="builder-media-thumb"
-                :class="{ selected: heroMediaList.includes(image) }"
-                @click="toggleHeroMedia(image)"
-              >
-                <img :src="image" alt="" />
-              </button>
-            </div>
             <label class="builder-switch-row">
               <span class="builder-switch" @click.stop>
                 <input v-model="builder.autoplay" type="checkbox" aria-label="Autoplay hero videos muted" />
@@ -1394,6 +1382,7 @@ import PurchaseFlowDiagram from "./PurchaseFlowDiagram.vue";
 import { useProfileStore } from "../stores/profile";
 import { useSitesStore } from "../stores/sites";
 import { useCollectionsStore } from "../stores/collections";
+import MediaListField from "./shared/MediaListField.vue";
 import StoreAddressField from "./StoreAddressField.vue";
 import { resolvePageDeps, copyCatalogToEnv, pageForTarget } from "../composables/environmentCopy";
 import { idColorStyle } from "../utils/iconColor";
@@ -3467,6 +3456,12 @@ function toggleHeroMedia(image) {
   else items.add(image);
   builder.hero_media_text = Array.from(items).join("\n");
   if (!builder.seo_image) builder.seo_image = image;
+}
+
+// The media field speaks arrays; the builder keeps storing newline text, so buildBuilderPageDocument()
+// and the product-image autofill below are unchanged (hero_media.images is still a plain URL array).
+function setHeroMedia(list) {
+  builder.hero_media_text = (Array.isArray(list) ? list : []).join("\n");
 }
 
 function appendHeroMedia(image) {
