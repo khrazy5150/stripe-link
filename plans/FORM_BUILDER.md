@@ -33,10 +33,11 @@ design a parallel forms subsystem.
    completion. This affects the email capture that is live today.
 4. **No dashboard UI.** `stores/products.js:469-473` hardcodes the field list per action
    (email → `[email]`, phone → `[phone]`, both → `[email, phone]`). A tenant cannot add a field.
-5. **Submissions are not validated against the declared fields.** `lead_submission.fields` only has to be
-   a non-empty dict. `required: true` is enforced client-side only, so it is trivially bypassable, and a
-   submission may contain fields the form never declared. VERIFY the exact behaviour in
-   `leads.ingest_lead` before building — this is a data-integrity gap, not just a nicety.
+5. ~~Submissions are not validated against the declared fields.~~ **WRONG — corrected 2026-08-30.**
+   `ingest_lead` calls `validate_and_extract_fields` (`domain/leads.py:48`), which already enforces
+   declared-only (unknown keys dropped), required-present, `email` contains `@`, `phone`/`tel` contains a
+   digit, and size caps (25 fields, 64-char names, 2000-char values). This rail is **built and sound**;
+   the extension work is §7.
 6. **`open_form` is inert.** It requires a `form_id` that nothing reads, and falls through to a generic
    `email` CTA.
 
@@ -207,18 +208,26 @@ In the product editor, replacing the hardcoded list in `stores/products.js`:
   renderer to keep in sync (`PAGE_COMPOSER.md`);
 - guard rails in the UI: warn past ~6 fields (completion falls off a cliff), and require a label.
 
-## 7. Server-side validation (P3) — do not skip this
+## 7. Server-side validation — EXTEND the existing validator (P3)
 
-Once tenants can declare arbitrary fields, `POST /leads` must validate the submission **against the
-declared fields of that offer's product**:
+**Already built and correct** (`domain/leads.py:48`, `validate_and_extract_fields`): declared-only
+(unknown keys dropped), required-present, `email` contains `@`, `phone`/`tel` contains a digit, and caps
+of 25 fields / 64-char names / 2000-char values. An earlier draft of this plan claimed this was missing
+and sequenced P3 as a prerequisite — that was wrong.
 
-- reject fields the form never declared (prevents junk and payload stuffing);
-- enforce `required` server-side — today it is a client-side attribute and nothing more;
-- enforce `max_length` and type coercion (`number`, `date`, `email` shape);
-- keep the honeypot's silent accept-and-drop behaviour unchanged.
+What the new field types (§4) need ADDED to the same function — extend it, do not write a second
+validator:
 
-This is a **prerequisite** for shipping the builder, not a follow-up: the moment a tenant can define a
-form, the client-only guarantees become worthless.
+- `select` / `radio`: the value must be one of the field's declared `options[]`. **This is the important
+  one** — an unconstrained choice field is a free-text field wearing a costume.
+- `checkbox`: coerce to a boolean rather than storing whatever string arrived.
+- `number` / `date` / `url`: shape checks, matching the light-touch style already there (a digit check,
+  not a full RFC parser).
+- per-field `max_length` where declared, tightening the global 2000-char cap.
+- `steps[]` (§4a): validate against the FLATTENED field list. Steps are a presentation concern; the
+  submission is one object, so the validator needs no notion of steps at all.
+
+Unchanged: the honeypot's silent accept-and-drop, and idempotency.
 
 ## 8. Retire `open_form` — and with it, `form_id`
 
@@ -261,7 +270,8 @@ seven to five, both by removal.
 3. **P1b** — multi-step rendering: step navigation, progress indicator, `display: "cards"`,
    `advance_on_select`. Same renderer, no fork.
 4. **P2** — builder UI in the product editor: fields, steps, reorder.
-5. **P3** — server-side submission validation. **Must ship with or before P2 is exposed to tenants.**
+5. **P3** — extend `validate_and_extract_fields` for the new types. `options[]` membership must ship
+   WITH the `select`/`radio` renderer, not after it.
 6. **P4** — retire `open_form` + `form_id`; drop the prompt, migrate any existing rows.
 
 P0/P1 fix the live accessibility defect on their own, before any builder UI exists.

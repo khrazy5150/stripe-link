@@ -159,6 +159,29 @@ tokens kept for a future token-refresh flow). Whatever is kept stays in SENSITIV
 Prereq/related: the allowlist rewrite in the HIGH item above -- doing both together means
 touching the response shape once.
 
+### MEDIUM — pre-launch QA: lead-capture end-to-end verification
+
+The lead rail is more complete than assumed (see FORM_BUILDER.md §2.5 correction), so this is
+VERIFICATION, not repair. Exercise each shipped action against a published page, not just the dashboard:
+
+  capture_email / capture_phone / capture_email_phone
+    - submit valid -> lead lands in LeadsTable and appears on the Leads screen
+    - omit a required field -> server rejects (client attrs bypassed; post directly)
+    - send an undeclared field -> silently dropped, not stored
+    - email without "@" and phone without a digit -> rejected
+    - oversize: >25 fields, >2000-char value -> rejected
+    - honeypot filled -> HTTP 202 accept-and-drop, nothing stored
+    - same idempotency_key twice -> one lead, second returns "duplicate"
+    - both GDPR opt-ins recorded correctly, independently
+  call_number / external_url
+    - CTA renders and navigates
+    - KNOWN: neither records a lead (tel:/redirect only), so nothing reaches the Leads screen.
+      Confirm that is intended -- call tracking is how lead-gen businesses in these verticals
+      actually measure, and its absence may be a product gap rather than a QA finding.
+
+KNOWN DEFECT, do not re-report: fields render with placeholders derived from the field name and no
+<label>. Live in production, fixed by FORM_BUILDER P0/P1.
+
 ### Form Builder — plan plans/FORM_BUILDER.md, 2026-08-30, not built
 
 An EXTENSION of lead capture, not a new subsystem: `lead_capture.fields[]` is already declared,
@@ -187,8 +210,10 @@ only reachable post-contact -- i.e. the already-consent-clean abandoned-funnel c
 tenant-namespaced: every creator page shares the jbay.page origin in the VISITOR's browser, same hazard
 as the sl_cart_id_* keys.
 
-P3 (server-side validation) must ship with or before the builder UI is exposed -- the moment tenants can
-define forms, client-only guarantees are worthless. Retires `open_form` + `form_id`, which with
+P3 EXTENDS the existing validator: `validate_and_extract_fields` (domain/leads.py:48) already enforces
+declared-only, required-present, email/phone shape and size caps. `options[]` membership for
+select/radio must ship WITH that renderer -- an unconstrained choice field is a free-text field in
+disguise. Retires `open_form` + `form_id`, which with
 `social_redirect` takes the action vocabulary from seven to five, both by removal.
 
 ### ⭐ HIGH — Social Media Pages (link-in-bio) — plan plans/SOCIAL_MEDIA_PAGES.md, 2026-08-30, not built
