@@ -787,6 +787,15 @@ main {
   background: var(--panel);
   box-shadow: var(--shadow-sm);
   padding: 2rem;
+  transition: border-color 0.16s ease, box-shadow 0.16s ease, transform 0.16s ease;
+}
+
+/* Same lift as .landing-page-card and the wizard cards. This is ListCard's root, so Offers,
+   Products and Services all pick it up from here rather than repeating it three times. */
+.product-card:hover {
+  border-color: var(--accent);
+  box-shadow: 0 0.8rem 2rem rgba(75, 73, 172, 0.14);
+  transform: translateY(-1px);
 }
 
 .product-card.archived {
@@ -852,18 +861,21 @@ main {
 
 .product-card-heading h3 {
   margin: 0;
-  font-size: 2rem;
+  font-size: var(--text-card);
+  line-height: var(--leading-card);
+  font-weight: var(--weight-semibold);
 }
 
 .product-card p {
   margin: 0;
   color: var(--muted);
-  line-height: 1.45;
+  font-size: var(--text-label);
+  line-height: var(--leading-label);
 }
 
 .product-status {
   border-radius: 999px;
-  font-size: 1.3rem;
+  font-size: var(--text-label);
   font-weight: 900;
   padding: 0.4rem 1rem;
 }
@@ -954,18 +966,29 @@ main {
 }
 
 .product-card-price strong {
-  font-size: 2.2rem;
+  font-size: 1.6rem;
+  line-height: 2.4rem;
+  font-weight: var(--weight-semibold);
 }
 
 .product-card-compare {
   color: var(--text-muted);
-  font-weight: 800;
+  font-size: var(--text-label);
+  line-height: var(--leading-label);
+  font-weight: var(--weight-normal);
 }
 
 .product-card-actions {
   display: flex;
   flex-wrap: wrap;
   gap: 1rem;
+}
+
+.product-card-actions .primary-action,
+.product-card-actions .secondary-action {
+  font-size: 1.1rem;
+  line-height: normal;
+  font-weight: var(--weight-medium);
 }
 
 .product-archived-label {
