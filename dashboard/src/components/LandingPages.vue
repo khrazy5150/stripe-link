@@ -776,6 +776,8 @@
                 :derived="builderDerivedHeroMedia"
                 derived-note="Auto — these come from your offer's products. Upload or add media to override."
                 :upload="uploadPageImage"
+                :upload-video="uploadPageVideo"
+                allow-video-upload
                 @update:model-value="setHeroMedia"
               />
             </div>
@@ -1388,7 +1390,7 @@ import MediaListField from "./shared/MediaListField.vue";
 import StoreAddressField from "./StoreAddressField.vue";
 import { resolvePageDeps, copyCatalogToEnv, pageForTarget } from "../composables/environmentCopy";
 import { idColorStyle } from "../utils/iconColor";
-import { uploadImage } from "../api/uploads";
+import { uploadImage, uploadVideo } from "../api/uploads";
 import { recordImageDims } from "../utils/imageDims";
 import { showIconPicker } from "../icon-picker.js";
 import { applyTitleCaseInput, formatHeadline } from "../utils/titleCase.js";
@@ -1873,6 +1875,14 @@ function schedulePreviewImageRefresh() {
 
 // Every builder upload goes through here so a freshly processed image always gets its heal repaint,
 // and so its intrinsic dimensions are captured once, centrally, for every page image field.
+// Hero video upload. Returns the CDN URL; MediaListField appends it to the list, and the renderer
+// derives "this is a video" from the extension (runtime/html.py is_video_url), so no schema change.
+async function uploadPageVideo(file) {
+  const url = await uploadVideo(file);
+  schedulePreviewImageRefresh();
+  return url;
+}
+
 async function uploadPageImage(file) {
   const { url, dims } = await uploadImage(file);
   recordImageDims(builder.image_dims, url, dims);

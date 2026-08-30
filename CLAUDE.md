@@ -15,6 +15,16 @@ architecture.
 
 ------------------------------------------------------------------------
 
+## External services
+
+`stripe-link` does **not** store or process media. Image *and video* upload are proxied to a separate
+sibling repo, `../sam/image-processing`, whose API base is hardcoded as `IMAGE_UPLOAD_API_BASE` in
+`template.yaml`. That dependency is nearly invisible from this codebase, so before building any media
+bucket, CDN or transcode pipeline here, read **`docs/EXTERNAL_SERVICES.md`** — the capability may
+already exist there. (Video already does.)
+
+------------------------------------------------------------------------
+
 ## Execution Workflow
 
 Before writing or modifying code:

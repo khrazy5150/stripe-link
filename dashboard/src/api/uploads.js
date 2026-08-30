@@ -77,3 +77,53 @@ function imageUrlLoads(url, timeoutMs = 4000) {
 function sleep(ms) {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
 }
+
+
+// Tenant video upload. Same presign-POST-then-poll flow as uploadImage, with mediaType "video" so the
+// processor routes it to the videos/ prefix and copies the original through untouched. There is NO
+// transcode (see docs/EXTERNAL_SERVICES.md), so the file we accept is the file visitors download —
+// hence mp4/webm only and a size cap well under the service's 100MB ceiling: a hero video is the
+// largest thing on a landing page, and page speed is the whole point of these pages.
+const VIDEO_UPLOAD_TYPES = ["video/mp4", "video/webm"];
+const MAX_VIDEO_BYTES = 50 * 1024 * 1024;
+
+export async function uploadVideo(file, { basePrefix = "offers", targetBucket = "images.juniorbay.net" } = {}) {
+  if (!VIDEO_UPLOAD_TYPES.includes(file.type)) {
+    throw new Error("Use an MP4 or WebM video. Other formats aren't converted, so they may not play for every visitor.");
+  }
+  if (file.size > MAX_VIDEO_BYTES) {
+    throw new Error("Use a video up to 50MB — larger hero videos slow the page down badly on mobile.");
+  }
+  const presigned = await apiRequest("/upload/multiple", {
+    method: "POST",
+    body: {
+      fileName: file.name,
+      contentType: file.type,
+      basePrefix,
+      targetBucket,
+      mediaType: "video",
+    },
+  });
+  const formData = new FormData();
+  Object.entries(presigned.upload?.fields || {}).forEach(([key, value]) => formData.append(key, value));
+  formData.append("file", file);
+  const uploadResponse = await fetch(presigned.upload.url, { method: "POST", body: formData });
+  if (!uploadResponse.ok) throw new Error("Failed to upload the video.");
+  return pollVideoUrl(presigned.id);
+}
+
+// Videos cannot be probed with an Image(), and there are no renditions to wait for — the processor
+// writes urls.original once the copy completes, so that is the ready signal.
+async function pollVideoUrl(uploadId) {
+  const deadline = Date.now() + 300000;  // a 50MB copy takes longer than an image resize
+  let delay = 1500;
+  while (Date.now() < deadline) {
+    await sleep(delay);
+    delay = Math.min(8000, Math.ceil(delay * 1.35));
+    const body = await apiRequest(`/upload/status/${encodeURIComponent(uploadId)}`).catch(() => ({}));
+    if (body.status === "failed" || body.status === "error") throw new Error("Video processing failed.");
+    const original = body.urls?.original;
+    if (original) return toAssetCdnUrl(original);
+  }
+  throw new Error("Timed out waiting for the uploaded video.");
+}
