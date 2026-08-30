@@ -159,6 +159,25 @@ tokens kept for a future token-refresh flow). Whatever is kept stays in SENSITIV
 Prereq/related: the allowlist rewrite in the HIGH item above -- doing both together means
 touching the response shape once.
 
+### Form Builder — plan plans/FORM_BUILDER.md, 2026-08-30, not built
+
+An EXTENSION of lead capture, not a new subsystem: `lead_capture.fields[]` is already declared,
+validated and rendered, and `lead_submission.fields` is already a free-form dict, so richer forms need
+NO storage change. Decision: NO `Form` entity -- the Product is already the reusable unit, and a field
+list is "what is collected", which the offer/product rule puts on the product.
+
+Found while planning:
+  - `field.type` is not an enum (any string validates; the renderer silently falls back to "text")
+  - every field renders as `<input>` -- no textarea/select/checkbox/radio
+  - labels are DERIVED FROM THE FIELD NAME and used as placeholders. That is a live accessibility
+    defect in shipped code, not just a missing feature -- it affects today's email capture
+  - no dashboard UI at all (stores/products.js hardcodes the field list per action)
+  - submissions are NOT validated against declared fields; `required` is client-side only
+
+P3 (server-side validation) must ship with or before the builder UI is exposed -- the moment tenants can
+define forms, client-only guarantees are worthless. Retires `open_form` + `form_id`, which with
+`social_redirect` takes the action vocabulary from seven to five, both by removal.
+
 ### ⭐ HIGH — Social Media Pages (link-in-bio) — plan plans/SOCIAL_MEDIA_PAGES.md, 2026-08-30, not built
 
 The "Social page" lead-capture action was a placeholder for this and is currently WRONG:
