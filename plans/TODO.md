@@ -45,7 +45,7 @@ Deferred, non-blocking follow-ups. Each item notes what, why it was deferred, an
 
 ## Security
 
-### ⭐⭐ HIGH — stop returning the Connect OAuth token ciphertext to the browser (found 2026-08-30, not fixed)
+### ⭐⭐ stop returning the Connect OAuth token ciphertext to the browser — SHIPPED dev+prod 2026-08-30 (175bce7)
 
 `SENSITIVE_FIELDS` (src/stripe_link/security.py) is a DENYLIST that never grew with the
 schema. It lists only the BYO-key era fields:
@@ -74,10 +74,16 @@ NOT a problem, for the record: `publishable_key` (pk_live_...) appears in these 
 and is meant to be public — it ships in every checkout page's client JS. Nothing to
 rotate there.
 
-Fix (small): add both fields to SENSITIVE_FIELDS. Verified the dashboard never reads
-either one (0 references), so nothing breaks.
+DONE (175bce7): both fields added to SENSITIVE_FIELDS. The naive two-line version would
+have introduced a WORSE bug -- stripe_connect.status_handler spreads the client body into
+its write (**document), so once a mask exists any caller echoing back a redacted GET would
+persist "********" over the stored ciphertext and destroy the connection. So the restore
+guard is now shared and driven by SENSITIVE_FIELDS itself (security.restore_redacted_fields),
+applied in both stripe_connect.py and stripe_keys.py. tests/test_secret_redaction.py pins
+the whole field set so the denylist cannot drift again. Confirmed on sandbox and prod:
+refs read "********", and saving keys leaves the account connected.
 
-Better fix (do this instead): invert to an ALLOWLIST — build responses from the fields
+STILL OPEN (the better fix): invert to an ALLOWLIST — build responses from the fields
 the UI actually needs rather than subtracting the ones it must not see. A denylist fails
 silently and invisibly every time the schema grows, which is exactly what happened here.
 Pairs naturally with hiding the raw JSON panels (below).
