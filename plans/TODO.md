@@ -159,6 +159,32 @@ tokens kept for a future token-refresh flow). Whatever is kept stays in SENSITIV
 Prereq/related: the allowlist rewrite in the HIGH item above -- doing both together means
 touching the response shape once.
 
+### ⭐ HIGH — Social Media Pages (link-in-bio) — plan plans/SOCIAL_MEDIA_PAGES.md, 2026-08-30, not built
+
+The "Social page" lead-capture action was a placeholder for this and is currently WRONG:
+`Offers.vue:1214` handles `social_redirect` in the SAME branch as `external_url` and emits
+an identical CTA contract, so it is a duplicate of "Go to URL" with an unread `platform`
+field. The intent was a creator link-in-bio page (Stan / juicy.bio / linkcloud).
+
+Key finding: this is a COMPOSITION, not a new page type. `seller_profile` already renders
+identity + social links, `catalog_grid` is repeatable and already resolves each card's own
+offer, and the avatar tokens exist. The gap is that every offer_type composes to one
+`checkout_cta`; nothing pairs an identity header with a repeated per-destination grid.
+
+BLOCKERS found while planning:
+  - `same_as` has NO dashboard UI — validated, never enterable. Nothing works until P0.
+  - `same_as[].verified` is READ (html.py:3256, 4050) but SET NOWHERE, so no social link
+    renders today and "verified" is self-assertable — the anti-impersonation guarantee does
+    not currently exist. Same silent-drift shape as the SENSITIVE_FIELDS denylist.
+
+Trust model reuses the existing "reputation-isolation floor" (html.py:1193): verified
+business links render + feed sameAs; tenant overrides render nofollow but NEVER enter
+sameAs, and are blocked at publish on platform hosts. Gate on `on_custom_domain`, NOT on a
+plan tier (landing pages are free-forever post-pivot).
+
+Also supersedes: retire `social_redirect`; decide whether `open_form` gets a renderer or is
+removed (see the form-builder plan, to be written).
+
 ### ⭐ HIGH — Developer Mode: hide the raw JSON panels (plan: plans/DEVELOPER_MODE.md, 2026-08-30, not built)
 
 13 `<pre>{{ JSON.stringify(...) }}</pre>` dumps across 10 components (Products, Offers x2,
