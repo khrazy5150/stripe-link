@@ -42,7 +42,12 @@
         </div>
 
         <div v-else class="landing-page-list">
-          <article v-for="page in filteredPages" :key="page.page_id" class="landing-page-card">
+          <article
+            v-for="page in filteredPages"
+            :key="page.page_id"
+            class="landing-page-card"
+            :class="{ 'is-menu-open': openMenuId === page.page_id }"
+          >
             <div class="landing-page-image">
               <!-- Storefront pages show a circular brand mark: the logo (contained, never distorted) or a
                    product-style deterministic colored tile with a house glyph when there's no logo. -->

@@ -796,6 +796,9 @@ main {
   border-color: var(--accent);
   box-shadow: 0 0.8rem 2rem rgba(75, 73, 172, 0.14);
   transform: translateY(-1px);
+  /* Nothing in ListCard overflows the card today, but the lift's transform creates a stacking context
+     that would trap the first popover/menu anyone adds — the exact bug this cost on the landing list. */
+  z-index: 1;
 }
 
 .product-card.archived {
@@ -3354,6 +3357,15 @@ button:disabled {
   border-color: var(--accent);
   box-shadow: 0 0.8rem 2rem rgba(75, 73, 172, 0.14);
   transform: translateY(-1px);
+  /* The lift's transform creates a STACKING CONTEXT, which traps the kebab menu's z-index inside this
+     card — later siblings then paint over the open menu. Raising the card itself lets it out again. */
+  z-index: 1;
+}
+
+/* An open menu must clear the following cards whether or not the pointer is still over this one:
+   moving the mouse onto the menu keeps :hover, but a keyboard user never had it. */
+.landing-page-card.is-menu-open {
+  z-index: 30;
 }
 
 .landing-page-image,
