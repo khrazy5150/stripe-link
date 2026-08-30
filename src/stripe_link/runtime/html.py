@@ -1877,9 +1877,14 @@ def is_video_url(url: str) -> bool:
 
 def render_media_slide(url: str, alt: str, *, autoplay: bool, eager: bool = False) -> str:
     """The MediaViewer's image/video modes (plans/CONVERSION_CONTEXT.md review 4). A video URL renders a
-    <video>; autoplay implies muted+loop (browser policy), otherwise it shows controls."""
+    <video>. Autoplay adds muted+loop because every browser refuses to autoplay with sound.
+
+    `controls` is ALWAYS present, autoplay included. Without it an autoplaying hero starts muted with no
+    way to unmute, pause or scrub — the tenant enabled autoplay, not silence, and a visitor who wants the
+    audio had no affordance at all. It is also a WCAG 2.2.2 (Pause, Stop, Hide) failure: content that
+    plays automatically for more than five seconds must offer a way to stop it."""
     if is_video_url(url):
-        attrs = "muted loop autoplay playsinline" if autoplay else "controls playsinline"
+        attrs = "controls playsinline" + (" muted loop autoplay" if autoplay else "")
         preload = "auto" if eager else "metadata"
         return (
             f"<video class=\"sl-hero-video\" src=\"{escape(str(url))}\" {attrs} preload=\"{preload}\" "
