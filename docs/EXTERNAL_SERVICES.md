@@ -34,6 +34,15 @@ Verified 2026-08-30 after nearly building a parallel video pipeline in this stac
    CDN-backed target bucket and writes `status: "complete"` with `urls.original`.
 4. `GET /upload/status/{id}` then reports complete with the public CDN URL.
 
+### Size limits live in that stack, not here
+
+`MaxUploadBytes` (photo, default 100MB) and `MaxVideoUploadBytes` (video, default 500MB) are CloudFormation
+**parameters** on `image-processing-stack`. The per-upload ceiling is baked into the presigned POST's
+`content-length-range`, so S3 enforces it, and it is returned as `maxBytes` in the presign response.
+
+**Never hardcode an upload limit in this repo.** `uploadVideo` reads `maxBytes` off the presign response,
+so raising the ceiling for course video is a stack parameter update — no dashboard build, no release.
+
 **No transcode.** The original is served as-is (`PRESERVE_SOURCE_FOR`). Practical consequence: prefer
 `video/mp4`; a large `.mov` from a phone will play inconsistently and is bad for page speed. If
 transcoding is ever wanted, it belongs in that repo, not this one.

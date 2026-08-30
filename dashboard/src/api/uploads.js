@@ -81,18 +81,18 @@ function sleep(ms) {
 
 // Tenant video upload. Same presign-POST-then-poll flow as uploadImage, with mediaType "video" so the
 // processor routes it to the videos/ prefix and copies the original through untouched. There is NO
-// transcode (see docs/EXTERNAL_SERVICES.md), so the file we accept is the file visitors download —
-// hence mp4/webm only and a size cap well under the service's 100MB ceiling: a hero video is the
-// largest thing on a landing page, and page speed is the whole point of these pages.
+// transcode (see docs/EXTERNAL_SERVICES.md), so the file we accept is the file visitors download.
+//
+// The SIZE LIMIT IS NOT DEFINED HERE. The service returns `maxBytes` for this upload and bakes the same
+// number into the presigned POST's content-length-range, so S3 enforces it. Raising the ceiling (course
+// video, say) is a stack parameter on image-processing — no code change here, no dashboard release.
+// We presign first and check second: presigning is one fast call, uploading the bytes is the slow part,
+// so this still fails fast without a client-side copy of the limit.
 const VIDEO_UPLOAD_TYPES = ["video/mp4", "video/webm"];
-const MAX_VIDEO_BYTES = 50 * 1024 * 1024;
 
 export async function uploadVideo(file, { basePrefix = "offers", targetBucket = "images.juniorbay.net" } = {}) {
   if (!VIDEO_UPLOAD_TYPES.includes(file.type)) {
     throw new Error("Use an MP4 or WebM video. Other formats aren't converted, so they may not play for every visitor.");
-  }
-  if (file.size > MAX_VIDEO_BYTES) {
-    throw new Error("Use a video up to 50MB — larger hero videos slow the page down badly on mobile.");
   }
   const presigned = await apiRequest("/upload/multiple", {
     method: "POST",
@@ -104,10 +104,15 @@ export async function uploadVideo(file, { basePrefix = "offers", targetBucket = 
       mediaType: "video",
     },
   });
+  const maxBytes = Number(presigned.maxBytes) || 0;
+  if (maxBytes && file.size > maxBytes) {
+    throw new Error(`This video is ${formatMb(file.size)}. The limit is ${formatMb(maxBytes)}.`);
+  }
   const formData = new FormData();
   Object.entries(presigned.upload?.fields || {}).forEach(([key, value]) => formData.append(key, value));
   formData.append("file", file);
   const uploadResponse = await fetch(presigned.upload.url, { method: "POST", body: formData });
+  // S3 rejects an oversize body itself via content-length-range, so this covers a stale presign too.
   if (!uploadResponse.ok) throw new Error("Failed to upload the video.");
   return pollVideoUrl(presigned.id);
 }
@@ -126,4 +131,8 @@ async function pollVideoUrl(uploadId) {
     if (original) return toAssetCdnUrl(original);
   }
   throw new Error("Timed out waiting for the uploaded video.");
+}
+
+function formatMb(bytes) {
+  return `${Math.round((Number(bytes) || 0) / (1024 * 1024))}MB`;
 }
