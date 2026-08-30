@@ -157,11 +157,47 @@ that gates behaviour with nothing producing it. See the audit item in `TODO.md`.
    hard-requires it, and that `primaryCtaContract()` (`Offers.vue:1205`) can return "no
    single primary CTA" — today it always returns something, derived from
    `landingProducts[0]`.
-4. **Vanity URL.** The author's `juniorbay.com/mariawendt` is path-on-apex, but the apex is
-   now the marketing homepage and platform serving is subdomain-based (`*.jbay.uk`). Decide:
-   `mariawendt.jbay.uk` (works with today's Worker) vs apex paths (needs routing work, and
-   `SITE_OBJECT.md` defers clean-slug routing to an edge slice).
-5. **Donation button.** Author raised it. Needs either a new CTA type or a priceless/
+4. **Vanity URL — OPEN, author researching a domain purchase (2026-08-30).**
+
+   Every competitor uses path-on-apex (`linktr.ee/name`, `beacons.ai/name`,
+   `stan.store/name`, `juicy.bio/yourname`), so `{domain}/username` is the category-standard
+   shape. The isolation benefit is NOT about brand perception — `linktr.ee` is obviously the
+   same brand as `linktree.com`. It is that blocklists, Safe Browsing and registrar abuse
+   desks act **per registered domain**: if the creator domain is flagged, marketing,
+   dashboard, signup and billing keep running.
+
+   | Option | Verdict |
+   |---|---|
+   | `mariawendt.jbay.uk` (subdomain) | **Works today.** Zero routing work, already origin-isolated. Customisable via CNAME to the tenant's own domain. Reads less well. |
+   | `jbay.uk/username` (path on the prod hosting apex) | **No.** Collapses every tenant onto ONE browser origin — see the localStorage note below — and concentrates reputation on the domain already serving all prod Sites. |
+   | `juniorbay.net/username` | **No, as things stand.** It carries `keith@juniorbay.net`, the Stripe platform account's owner email. Never co-locate tenant-overridable UGC with the email identity of the payment account: a blocklisting would hit deliverability during the very abuse incident that caused it. Viable only if that email moves first, and only after checking the `.net`'s history (the `.com` had prior spam reputation). |
+   | **a dedicated cheap domain, path-on-apex** | **Preferred.** Author researching Cloudflare Registrar (at-cost, requires Cloudflare DNS — already in use). |
+
+   Neither `jbay` domain is available: `jbay.uk` is the PROD free-tier hosting domain and
+   `jbay.be` the TEST one (`sites.py:52,453`), plus `go.jbay.uk` (short links) and
+   `domains.jbay.uk` (custom-domain CNAME target).
+
+   **When buying:** check the domain's history before purchase (Wayback, Safe Browsing,
+   blocklist lookups) — a recovered domain with spam history is worse than a new one, which
+   is exactly the `juniorbay.com` lesson. A brand-new domain's neutral reputation is a
+   feature here.
+
+   **Do not let this gate the feature.** Ship v1 on `{label}.jbay.uk` subdomains; the page is
+   identical and only the hostname changes when a vanity domain is chosen.
+
+5. **Shared-origin hazard if path-on-apex is ever chosen.** Published pages already store a
+   capability in localStorage (`html.py:4806-4807`): `sl_cart_id_{offerId}` (the SERVER cart
+   id) and `sl_cart_{offerId}` — keyed by **offer, not tenant**. Distinct subdomains are
+   distinct browser origins, so this is isolated today. On a shared apex it is not: any
+   tenant's page script could read another tenant's cart ids for a visitor who used both.
+   Namespace those keys by `tenant_id` before adopting any path-on-apex scheme.
+
+6. **Add the platform hosting domain to the Public Suffix List — do this regardless.**
+   Subdomains isolate storage and DOM but NOT cookies: `a.jbay.uk` can set a cookie on
+   `.jbay.uk` that `b.jbay.uk` reads. PSL registration is how `github.io` and `vercel.app`
+   close this. Free, independent of the vanity-URL decision, and applies to whichever domain
+   ends up serving tenant content.
+7. **Donation button.** Author raised it. Needs either a new CTA type or a priceless/
    pay-what-you-want checkout. Out of scope for v1 unless decided otherwise.
 
 ## 10. Cleanup this supersedes
