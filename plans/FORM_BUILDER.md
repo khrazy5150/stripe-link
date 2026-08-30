@@ -85,6 +85,73 @@ Enum: `text` · `textarea` · `email` · `tel` · `number` · `url` · `date` ·
 infrastructure it would share does not exist yet, see the media-parity item), payment fields (that is
 checkout), and conditional/branching logic (see §8).
 
+## 4a. Multi-step is FIRST-CLASS, not a later mode (author, 2026-08-30)
+
+The target shape is a **quiz funnel**: one question per screen, large tap targets, a visible progress
+indicator, contact details last. This is the dominant lead-gen pattern in education, insurance and
+home-services precisely because it out-converts a flat form, and it is mobile-first by nature — the same
+"effectively all traffic is a phone" constraint as `SOCIAL_MEDIA_PAGES.md`.
+
+An earlier draft of this plan deferred multi-step. That was wrong: building a flat renderer first and
+retrofitting steps means rebuilding it. Get the SHAPE right in P0 even if step rendering ships later —
+nesting is cheap now and expensive to retrofit.
+
+### Shape — a flat form is ONE STEP, not a separate mode
+
+```jsonc
+"lead_capture": {
+  "action": "capture_email",
+  "steps": [
+    { "title": "When would you like to start?",
+      "fields": [{ "name": "timeframe", "type": "radio", "display": "cards",
+                   "advance_on_select": true,
+                   "options": [{ "value": "now", "label": "Immediately" },
+                               { "value": "1_3", "label": "1-3 Months" }] }] },
+    { "title": "Where are you located?", "fields": [{ "name": "zip", "type": "text" }] },
+    { "fields": [{ "name": "email", "type": "email", "required": true }] }   // contact LAST
+  ]
+}
+```
+
+One shape, no mode flag. **`fields[]` stays valid** and normalizes to `steps: [{ fields }]` on read, so
+existing products need no migration and flat forms stay trivial to author.
+
+### Two additions to the field vocabulary (§4)
+
+- `display: "cards"` on `radio` — renders options as large tappable cards rather than radio dots. This
+  is a presentation hint, not a new type; the data is still a single-select.
+- `advance_on_select: true` — a single-select step advances on tap, with no Next button. Removing that
+  tap is a meaningful share of the conversion gain, and it only applies to single-select steps.
+
+### Rendering
+
+- One `<form>` for the whole funnel; only the final step submits. Steps are shown/hidden client-side,
+  so there is no navigation and no per-step round trip.
+- Progress indicator (the dots in the reference), plus a Back control.
+- Per-step client validation gates advancing. It is **UX only** — the server still validates the whole
+  submission against every declared field (§7), which is unchanged by steps.
+
+### DECISION — when is the lead recorded?
+
+**v1: once, at the end, after contact details and consent.** Answers are held client-side until then.
+
+The alternative — recording progressively per step — is tempting because it captures abandoners, but it
+means storing answers before the visitor has consented or identified themselves, which puts the dual
+GDPR opt-in in `LEAD_CAPTURE.md` §6 in the wrong place. Note the reference funnel asks *"when would you
+like to start?"* before it asks for an email, so most steps carry no PII at all — the value of
+progressive capture is lower than it looks.
+
+Worth building **later**, and consent-clean: an *abandoned-funnel* capture that fires only AFTER the
+contact+consent step, so someone who gives their email and then drops on a later step still becomes a
+lead. That is the case with real value, and it reuses the abandoned-cart sweep pattern.
+
+### Consent placement
+
+The dual opt-in must render on the step that collects contact details — where it is today. Do not hoist
+it to step 1: consent obtained before the visitor knows what they are giving is not meaningful consent,
+and in the regulated verticals this pattern targets (the reference page carries outcome disclaimers and
+a submission disclosure) that matters legally, not just ethically.
+
 ## 5. Rendering (P1)
 
 Extend `render_email_cta` — do not fork it. It already owns the honeypot, the dual consent checkboxes and
@@ -119,7 +186,18 @@ declared fields of that offer's product**:
 This is a **prerequisite** for shipping the builder, not a follow-up: the moment a tenant can define a
 form, the client-only guarantees become worthless.
 
-## 8. Retire `open_form`
+## 8. Retire `open_form` — and with it, `form_id`
+
+**`form_id` is inert.** `documents.py:626` requires it, `stores/products.js:482` writes it, and NOTHING
+reads it. The product editor currently prompts the tenant to type one, which is why it feels broken.
+
+Do NOT auto-generate a value for it. Auto-generating fills a field no code consumes, on an action this
+plan removes, and leaves a second identifier that must agree with `product_id` forever after. **Remove
+the prompt and the field.** If a form ever needs a stable identifier — for analytics, or to reference it
+externally — `product_id` already is one, and under the no-`Form`-entity decision (§3) the product *is*
+the form.
+
+
 
 `open_form` was "link to a quiz, application, or survey". After this plan it is covered twice over and
 should be removed along with `form_id`:
@@ -132,9 +210,9 @@ seven to five, both by removal.
 
 ## 9. Deferred, deliberately
 
-- **Multi-step / conditional logic.** Real demand exists for applications, but it changes the storage
-  shape (steps, visibility rules) and the renderer (client-side state). Ship flat forms first; revisit
-  with evidence.
+- **Conditional / branching logic** (show step 4 only if step 2 was "Immediately"). Multi-step itself is
+  now core (§4a); branching is the part still deferred — it needs a rules language and a way to preview
+  every path. Revisit once flat multi-step is in tenants' hands.
 - **A standalone `/forms/{id}` page.** Only if a form must exist without an offer. Today every form is
   reached through an offer's page, which the cardinality rule already covers.
 - **Per-form analytics** (views, starts, completion, drop-off field). High value — form completion is the
@@ -143,11 +221,15 @@ seven to five, both by removal.
 
 ## 10. Phasing
 
-1. **P0** — field enum + `label`/`options`/`help`/`max_length` on the schema, pinned by a test.
-2. **P1** — renderer: new control types, real labels, a11y attributes.
-3. **P2** — builder UI in the product editor.
-4. **P3** — server-side submission validation. **Must ship with or before P2 is exposed to tenants.**
-5. **P4** — retire `open_form` + `form_id`; migrate any existing rows.
+1. **P0** — field enum + `label`/`options`/`help`/`max_length`, **and the `steps[]` shape** (§4a), with
+   `fields[]` normalizing to one step. Pinned by a test. Get the nesting in now.
+2. **P1** — renderer: new control types, real labels, a11y attributes. Flat (single-step) first.
+3. **P1b** — multi-step rendering: step navigation, progress indicator, `display: "cards"`,
+   `advance_on_select`. Same renderer, no fork.
+4. **P2** — builder UI in the product editor: fields, steps, reorder.
+5. **P3** — server-side submission validation. **Must ship with or before P2 is exposed to tenants.**
+6. **P4** — retire `open_form` + `form_id`; drop the prompt, migrate any existing rows.
 
-P0/P1 are independently shippable and fix the live accessibility defect on their own, before any builder
-UI exists.
+P0/P1 fix the live accessibility defect on their own, before any builder UI exists.
+
+

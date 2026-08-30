@@ -174,6 +174,12 @@ Found while planning:
   - no dashboard UI at all (stores/products.js hardcodes the field list per action)
   - submissions are NOT validated against declared fields; `required` is client-side only
 
+Multi-step (quiz-funnel) forms are FIRST-CLASS, not deferred (plan 4a): one question per screen, card
+options, auto-advance, contact last. A flat form is just one step, and `fields[]` normalizes to
+`steps:[{fields}]` so there is no migration. Get the nesting into the schema at P0 -- retrofitting steps
+into a flat renderer means rebuilding it. `form_id` is inert (written, never read): remove the prompt
+rather than auto-generating a value, since product_id already identifies the form.
+
 P3 (server-side validation) must ship with or before the builder UI is exposed -- the moment tenants can
 define forms, client-only guarantees are worthless. Retires `open_form` + `form_id`, which with
 `social_redirect` takes the action vocabulary from seven to five, both by removal.
