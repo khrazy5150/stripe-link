@@ -172,3 +172,35 @@ export function orderSectionKeys(keys, tenantOrder = []) {
     .filter((key) => elementPlacement(key) !== "none")
     .sort((a, b) => band(a) - band(b) || within(a) - within(b));
 }
+
+
+// The key a section is ordered by. Repeatable types can have several instances, so those key by their
+// element id; everything else keys by type, which is the vocabulary the Page Sections panel already uses.
+export function sectionOrderKey(section) {
+  const type = section?.type || "";
+  const spec = rules.elements?.[type] || {};
+  return spec.repeatable && section?.id ? section.id : type;
+}
+
+// Apply placement bands + the tenant's order to real section objects. Ties fall back to the section's
+// current position, so anything the tenant has not explicitly moved stays where the builder put it.
+export function orderSections(sections, tenantOrder = []) {
+  const rank = new Map(tenantOrder.map((key, index) => [key, index]));
+  const bandOf = (type) => {
+    const index = PLACEMENT_BANDS.indexOf(elementPlacement(type));
+    return index === -1 ? PLACEMENT_BANDS.indexOf("free") : index;
+  };
+  return sections
+    .filter((section) => elementPlacement(section?.type || "") !== "none")
+    .map((section, index) => ({ section, index }))
+    .sort((a, b) => {
+      const band = bandOf(a.section.type) - bandOf(b.section.type);
+      if (band) return band;
+      const aKey = sectionOrderKey(a.section);
+      const bKey = sectionOrderKey(b.section);
+      const aRank = rank.has(aKey) ? rank.get(aKey) : rank.size + a.index;
+      const bRank = rank.has(bKey) ? rank.get(bKey) : rank.size + b.index;
+      return aRank - bRank;
+    })
+    .map((entry) => entry.section);
+}

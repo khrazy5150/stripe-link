@@ -866,6 +866,27 @@
                 </span>
               </label>
             </div>
+            <div class="composition-subhead">Section order</div>
+            <small>Drag to reorder. The hero stays at the top — it's the first thing visitors see and the
+              image the page is measured on — and the legal footer stays last.</small>
+            <div class="section-order-list">
+              <div
+                v-for="(section, index) in orderedSectionRows"
+                :key="section.key"
+                class="section-order-row"
+                :class="{ 'is-locked': !section.movable }"
+                :draggable="section.movable"
+                @dragstart="onSectionDragStart(index)"
+                @dragover.prevent
+                @drop="onSectionDrop(index)"
+              >
+                <span class="section-order-handle" :title="section.movable ? 'Drag to reorder' : 'Fixed position'">
+                  {{ section.movable ? "⠿" : "🔒" }}
+                </span>
+                <span class="section-order-name">{{ section.label }}</span>
+              </div>
+            </div>
+
             <div class="composition-subhead">Add content</div>
             <div class="element-add-row">
               <button v-for="entry in ELEMENT_TYPES" :key="entry.type" class="secondary-action compact" type="button" @click="addElement(entry.type)">
@@ -1379,7 +1400,7 @@
 <script setup>
 import { computed, onMounted, reactive, ref, watch } from "vue";
 import { offerViewTargets, offerViewTargetsFromExpanded } from "../composables/useConversionContext";
-import { isSectionVisible, defaultVisible, recommendedSectionKeys, optionalSectionKeys, governedKeys, elementLabel, elementChannel, addableElements, tokenGroups, previewVar, supportedGoals, goalLabel, packSeeds } from "../composables/pageComposer";
+import { isSectionVisible, defaultVisible, recommendedSectionKeys, optionalSectionKeys, governedKeys, elementLabel, elementChannel, addableElements, tokenGroups, previewVar, supportedGoals, goalLabel, packSeeds, orderSections, sectionOrderKey, isMovable, elementPlacement } from "../composables/pageComposer";
 import { apiRequest, assetUrl, getApiBase, getStripeMode, getOtherEnvironment, getPagesBaseUrl, getPreviewPagesBaseUrl, getTestPagesHost, getTenantId } from "../api/client";
 import { formatMoney } from "../stores/products";
 import PurchaseFlowDiagram from "./PurchaseFlowDiagram.vue";
@@ -2072,6 +2093,9 @@ function defaultWizardForm() {
 
 function defaultBuilderForm() {
   return {
+    // The tenant's drag order for the free band, as section keys (element instances key by id).
+    // Derived from page.sections on load; empty means "use the builder's natural order".
+    section_order: [],
     page_id: localId("page"),
     thank_you_page_id: localId("page"),
     offer_id: "",
@@ -2914,6 +2938,9 @@ function populateBuilderFromPage(page) {
   const refundPolicy = sections.find((section) => section.type === "refund_policy") || {};
   const cta = sections.find((section) => section.type === "checkout_cta") || {};
   Object.assign(builder, defaultBuilderForm(), {
+    // Section order is NOT a separate persisted field: page.sections is already stored in order
+    // (compose_page only filters, never reorders), so the tenant's arrangement is read back off it.
+    section_order: sections.map(sectionOrderKey),
     page_id: page.page_id || localId("page"),
     thank_you_page_id: page.post_checkout?.thank_you_page?.page_id || localId("page"),
     post_purchase: loadPostPurchase(page),
@@ -3160,6 +3187,12 @@ function buildBuilderPageDocument() {
 }
 
 function builderSections(intent) {
+  return orderSections(builderSectionCandidates(intent), builder.section_order || []);
+}
+
+// Assembles every section the page WILL contain. Emission order here is only a default -- placement
+// bands and the tenant's drag order are applied by builderSections() above.
+function builderSectionCandidates(intent) {
   const sections = [];
   if (builder.countdown.enabled) {
     sections.push({
@@ -3646,6 +3679,35 @@ async function handleSubImagePicked(target, field, key, event) {
 }
 
 // Map a composable element to its rendered page section, or null when empty.
+// What the page will actually contain, in final order — the same list builderSections() emits, so the
+// panel can never disagree with the page. Pinned rows are shown (a locked hero is information, not
+// clutter) but are not draggable.
+const orderedSectionRows = computed(() => builderSections(builderIntent.value).map((section) => ({
+  key: sectionOrderKey(section),
+  type: section.type,
+  label: elementLabel(section.type),
+  movable: isMovable(section.type),
+})));
+
+const sectionDragFrom = ref(-1);
+
+function onSectionDragStart(index) {
+  sectionDragFrom.value = index;
+}
+
+// Reorder within the FREE band only: a drop onto (or across) a pinned row is ignored rather than
+// silently doing nothing surprising, and orderSections re-applies the bands afterwards regardless.
+function onSectionDrop(index) {
+  const from = sectionDragFrom.value;
+  sectionDragFrom.value = -1;
+  const rows = orderedSectionRows.value;
+  if (from < 0 || from === index || !rows[from]?.movable || !rows[index]?.movable) return;
+  const keys = rows.map((row) => row.key);
+  const [moved] = keys.splice(from, 1);
+  keys.splice(index, 0, moved);
+  builder.section_order = keys;
+}
+
 function elementSection(element) {
   if (element.type === "content_block") {
     if (!element.title && !element.text && !element.image_url) return null;
