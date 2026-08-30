@@ -82,6 +82,46 @@ the UI actually needs rather than subtracting the ones it must not see. A denyli
 silently and invisibly every time the schema grows, which is exactly what happened here.
 Pairs naturally with hiding the raw JSON panels (below).
 
+### MEDIUM — audit for silent agreement failures (framing agreed 2026-08-30)
+
+Not a general bug hunt. Every defect found on 2026-08-30 shared one shape: TWO THINGS THAT
+MUST AGREE, WITH NOTHING FORCING THEM TO. All four were silent -- no error, no failing test,
+no broken build. Three shipped to prod.
+
+  1. styles.css had an unterminated `/*`. A CSS comment runs to the next `*/`, 65 lines
+     later, so nine rules were commented out. Valid CSS, so the build passed. (e65a4e6)
+  2. MediaListField bound :disabled="busy" with busy = ref(""). Vue's includeBooleanAttr
+     treats "" as TRUE for boolean attributes (HTML disabled="" means disabled), so every
+     button was permanently disabled. (d4b1d35)
+  3. SENSITIVE_FIELDS was a denylist that never grew with the schema. Connect OAuth token
+     refs added later were never listed, so they shipped to the browser in full ciphertext
+     on three endpoints. (175bce7)
+  4. schemas/UserPreferences.schema.json declares additionalProperties:false and other
+     constraints that NOTHING enforces -- the file is never loaded at runtime or in tests,
+     and the hand-written validator does not police unknown keys.
+
+The audit is therefore mechanically searchable rather than open-ended. Look for:
+
+  - hand-maintained lists that mirror a schema or document shape (denylists, allowlists,
+    field tuples, enum copies) with no test pinning them together
+  - schemas/*.schema.json files that nothing loads -- which ones are enforced, which are
+     merely aspirational documentation? Say so in each file.
+  - build/lint steps that accept malformed input silently. CSS is the known one; check
+    whether the Vue/Vite pipeline warns on anything comparable.
+  - client-side copies of server-side constants (see the Phase 2 warning in
+    plans/DEVELOPER_MODE.md -- the diagnostics bundle must reuse SENSITIVE_FIELDS, not
+    restate it)
+  - boolean-ish bindings where the falsy value is "" or 0 rather than false
+
+The cure already exists in the repo and generalises: OfferSemanticModel pins its validator
+to its schema with a test (domain/semantic_schema.py:5; documents.py:1764 -- "the validator
+IS the schema"). Adopt that wherever a second source of truth is found, or delete the
+second source.
+
+Caveat for whoever picks this up: the density found on 2026-08-30 partly reflects that one
+area was being read very closely that day. Do not assume it is uniform across the codebase
+-- sample broadly before concluding anything about overall quality.
+
 ### MEDIUM — stop storing credentials nothing reads (audit stripe_keys document, 2026-08-30)
 
 Fallout from the redaction fix: three credential fields on the stripe_keys document are
