@@ -27,9 +27,13 @@
   --text-page: 2.6rem;      /* page title (h1) */
   --text-card: 1.8rem;      /* card / modal / panel heading */
   --text-body: 1.4rem;      /* default body copy */
-  --text-label: 1.3rem;     /* field labels */
-  --text-control: 1.2rem;   /* input/select/textarea text — one step BELOW the label that names it */
-  --leading-control: 1.8rem;/* control line-height (matches stripe-cart's 12px/18px control rhythm) */
+  --text-label: 1.2rem;     /* field labels */
+  --leading-label: 1.8rem;  /* label line-height */
+  --text-control: 1.2rem;   /* input/select/textarea text */
+  --leading-control: 1.8rem;/* control line-height */
+  /* Labels and controls sit on the SAME step (stripe-cart runs both at 12px/18px) and are separated by
+     weight + color instead: label = medium + --muted, control = normal + --text. Kept as distinct tokens
+     because they are distinct roles that have already diverged once. */
   --text-section: 1.15rem;  /* uppercase group headers (PAGE BASICS) */
   --text-hint: 1.1rem;      /* help text under a field — must sit clearly BELOW --text-label */
   --text-micro: 1rem;       /* badges, counters, tiny meta */
@@ -2493,6 +2497,7 @@ button:disabled {
   align-content: start;
   gap: 0.5rem;
   font-size: var(--text-label);
+  line-height: var(--leading-label);
   color: var(--muted);
   font-weight: var(--weight-medium);
 }
