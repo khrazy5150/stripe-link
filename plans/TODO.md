@@ -43,6 +43,67 @@ Deferred, non-blocking follow-ups. Each item notes what, why it was deferred, an
 - **Why deferred:** manual reassignment is an edge case; the primary booking path is correct. Introduced
   in Phase B.5.
 
+## Security
+
+### ⭐⭐ HIGH — stop returning the Connect OAuth token ciphertext to the browser (found 2026-08-30, not fixed)
+
+`SENSITIVE_FIELDS` (src/stripe_link/security.py) is a DENYLIST that never grew with the
+schema. It lists only the BYO-key era fields:
+
+    secret_key, secret_key_ref, webhook_secret, webhook_secret_ref
+
+When Connect OAuth was added later, `connect_access_token_ref` and
+`connect_refresh_token_ref` were introduced (encrypted at stripe_connect.py:274,281) but
+nobody added them to the list. So `redact_sensitive_fields` runs on every response path,
+dutifully masks the four fields it knows about, and passes the two Connect refs through
+in full KMS ciphertext.
+
+Three endpoints ship them to the dashboard:
+
+  - stripe_keys.py:34,51        GET/PUT /stripe/keys
+  - stripe_connect.py:315,328,356  connect status
+  - billing.py:63              /billing/connect-card
+
+Severity: NOT directly exploitable — the values are `kms:v1:` envelope ciphertext and
+decrypting needs KMS permission the browser does not have. But these are the tenant's
+Stripe OAuth tokens, the highest-value credential in the system, and they have no reason
+to leave the backend. One over-broad key policy, one log sink, or one support screenshot
+away from mattering. Treat as defence-in-depth, not an active incident.
+
+NOT a problem, for the record: `publishable_key` (pk_live_...) appears in these payloads
+and is meant to be public — it ships in every checkout page's client JS. Nothing to
+rotate there.
+
+Fix (small): add both fields to SENSITIVE_FIELDS. Verified the dashboard never reads
+either one (0 references), so nothing breaks.
+
+Better fix (do this instead): invert to an ALLOWLIST — build responses from the fields
+the UI actually needs rather than subtracting the ones it must not see. A denylist fails
+silently and invisibly every time the schema grows, which is exactly what happened here.
+Pairs naturally with hiding the raw JSON panels (below).
+
+### Hide the raw JSON panels behind a local Developer Mode — discussed 2026-08-30, not built
+
+13 `<pre>{{ JSON.stringify(...) }}</pre>` dumps across 10 components (Products, Offers x2,
+Orders, Customers, Invoices, Coupons, Services, Notifications, LandingPages x3, StripeKeys).
+
+Considered and REJECTED: a support-issued 5-minute unlock key. It buys no confidentiality
+— every panel renders an object the browser already holds from the tenant's own
+authenticated API calls, so DevTools > Network shows the identical JSON. It would cost a
+week (issuance, expiry, redemption, audit, support tooling) and would RAISE support load,
+since support must mint a key before the tenant can gather what support asked for.
+
+Do instead:
+  1. One shared <JsonPanel> replacing all 13 sites, gated on a localStorage "Developer
+     Mode" flag (Settings toggle or ?debug=1). No server work. Solves the real concerns:
+     product polish, and incidental exposure via screenshots/screen-shares/tutorials.
+  2. A "Copy diagnostics" action emitting a purpose-built REDACTED bundle (entity id,
+     schema_version, environment, app version, scrubbed document) — more useful to
+     support than a raw dump and safe to paste into a ticket.
+
+Note the schema itself cannot be kept secret: shipping a JSON API to a browser SPA
+discloses it. These changes are about polish and accidental exposure, not secrecy.
+
 ## Platform architecture
 
 ### ⭐⭐ Decouple Stripe mode (test/live) from platform environment (dev/prod) — SHIPPED + CUT OVER PROD 2026-08-02
