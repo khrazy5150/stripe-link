@@ -3385,11 +3385,6 @@ button:disabled {
   width: 100%;
 }
 
-/* Live (dark) theme: --accent-soft is a dark navy {
-  background: rgba(129, 140, 248, 0.22);
-  color: #c7d2fe;
-}
-
 .landing-page-badges {
   grid-column: 3;
   grid-row: 1;
