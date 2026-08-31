@@ -1328,6 +1328,13 @@
              and show the returned HTML here. One JSON, one renderer, two consumers (this iframe and the
              published artifact) — there is no second implementation left to drift out of sync. -->
         <div v-if="previewError" class="preview-render-error">{{ previewError }}</div>
+        <!-- A Sale / Flash Sale view renders as Standard when no product carries that price context
+             (html.py _offer_has_price_context). Silently showing the standard page under a "Flash Sale"
+             tab reads as a missing banner, so say why. -->
+        <p v-if="previewContextUnavailable" class="preview-context-note">
+          No {{ previewContextUnavailable }} price on this offer, so the preview falls back to Standard —
+          and the banner won't show. Add one under Products → pricing context.
+        </p>
         <!-- Quality-baseline nudges on the rendered page (heading outline; a11y/CLS later). Never blocks
              publishing — the outline is correct by construction, so this usually stays hidden and only
              appears if something regresses. plans/SEMANTIC_HTML.md -->
@@ -1945,6 +1952,15 @@ const previewFrame = ref(null);
 // without a custom domain (the pretty slugs only exist via the published resolver). Only surfaced when the
 // page actually has that context enabled.
 const previewContext = ref("standard");
+
+// Which context the preview is showing but cannot honour. Returns its LABEL (truthy) or "" so the
+// template can both test and print it.
+const previewContextUnavailable = computed(() => {
+  const ctx = previewContext.value;
+  if (ctx !== "sale" && ctx !== "flash_sale") return "";
+  return offerHasPriceContext(ctx) ? "" : (ctx === "flash_sale" ? "Flash Sale" : "Sale");
+});
+
 const previewContextOptions = computed(() => {
   const opts = [{ value: "standard", label: "Standard" }];
   if (builder.sale?.enabled) opts.push({ value: "sale", label: "Sale" });

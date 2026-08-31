@@ -4407,6 +4407,17 @@ button:disabled {
   font-size: 1.4rem;
 }
 
+/* Not an error — the render is correct, the DATA is missing. Reads as guidance, not failure. */
+.preview-context-note {
+  margin: 0;
+  padding: 1rem 1.6rem;
+  background: #fffbeb;
+  border-bottom: 1px solid #fde68a;
+  color: #92400e;
+  font-size: var(--text-hint);
+  line-height: 1.5;
+}
+
 .preview-render-error {
   padding: 1.2rem 1.6rem;
   background: #fee2e2;
