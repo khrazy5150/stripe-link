@@ -253,7 +253,7 @@
                   <code v-if="builderCta.target">{{ builderCta.target }}</code>
                 </div>
               </template>
-              <template v-else-if="sectionEditor.row.editor === 'element' && row.element">
+              <template v-else-if="sectionEditor.row.editor === 'element' && sectionEditor.row.element">
                 <template v-for="element in [sectionEditor.row.element]" :key="element.id">
 
                     <template v-if="element.type === 'content_block'">
