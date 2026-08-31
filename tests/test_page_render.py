@@ -209,6 +209,10 @@ class PageRenderTests(unittest.TestCase):
         # The summary is display:flex, which kills the native disclosure triangle -- so the chevron is
         # the ONLY thing telling a visitor these open. It went missing once; keep it asserted.
         self.assertIn(".sl-faq summary::after{content:''", html)
+        # Sized to the diagonal, not the side: a 0.7rem square rotated 45deg reads ~10px wide, matching
+        # the refund policy's '+'. Coloured by the theme accent, so presets carry it.
+        self.assertIn("width:0.7rem;height:0.7rem", html)
+        self.assertIn("border-right:2px solid var(--sl-accent)", html)
         self.assertIn(".sl-faq details[open] summary::after{transform:", html)
         self.assertIn(".sl-faq summary::-webkit-details-marker{display:none}", html)
         self.assertIn("Get The Bundle - $69.42", html)

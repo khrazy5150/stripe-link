@@ -553,8 +553,8 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     # glyph so it inherits currentColor and stays sharp at any theme/preset colour.
     "    .sl-faq summary{list-style:none}",
     "    .sl-faq summary::-webkit-details-marker{display:none}",
-    "    .sl-faq summary::after{content:'';flex:none;width:0.9rem;height:0.9rem;margin-left:0.4rem;border-right:2px solid currentColor;border-bottom:2px solid currentColor;opacity:0.55;transform:translateY(-0.25rem) rotate(45deg);transition:transform .2s ease}",
-    "    .sl-faq details[open] summary::after{transform:translateY(0.15rem) rotate(-135deg)}",
+    "    .sl-faq summary::after{content:'';flex:none;width:0.7rem;height:0.7rem;margin-left:0.4rem;border-right:2px solid var(--sl-accent);border-bottom:2px solid var(--sl-accent);transform:translateY(-0.2rem) rotate(45deg);transition:transform .2s ease}",
+    "    .sl-faq details[open] summary::after{transform:translateY(0.1rem) rotate(-135deg)}",
     "    .sl-faq-heading{font-family:var(--sl-font-heading);font-size:1.8rem;line-height:1.25;margin-bottom:0.2rem;color:var(--sl-faq-summary)}",
     "    .sl-faq p{color:var(--sl-faq-text);font-size:1.4rem;line-height:1.6;padding:0 2rem 1.6rem}",
     "    .sl-checkout-cta{position:fixed;left:0;right:0;bottom:0;z-index:10;background:linear-gradient(transparent,var(--sl-cta-scrim) 20%);padding:1.6rem;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:0.8rem}",
