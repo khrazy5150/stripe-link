@@ -1,6 +1,6 @@
 <template>
   <div class="acc-item" :class="{ open }">
-    <button type="button" class="acc-head" :aria-expanded="open" @click="open = !open">
+    <button type="button" class="acc-head" :aria-expanded="open" @click="$emit('toggle')">
       <span class="acc-caret" aria-hidden="true">{{ open ? "▾" : "▸" }}</span>
       <strong class="acc-label">{{ label }}</strong>
       <span v-if="hint" class="acc-hint">{{ hint }}</span>
@@ -10,16 +10,15 @@
 </template>
 
 <script setup>
-import { ref } from "vue";
-
-// A disclosure row. Each one owns its open state — settings are independent, unlike the Post-Checkout
-// steps, where opening one switches what the preview is showing and so only one may be open at a time.
+// A disclosure row. Open state is OWNED BY THE PARENT so a group can enforce one-at-a-time: independent
+// state was defensible in principle, but several tall panels open at once makes the modal a wall to
+// scroll rather than a set of choices.
 defineProps({
   label: { type: String, required: true },
   hint: { type: String, default: "" },
+  open: { type: Boolean, default: false },
 });
-
-const open = ref(false);
+defineEmits(["toggle"]);
 </script>
 
 <style scoped>

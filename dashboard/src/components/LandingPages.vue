@@ -220,7 +220,7 @@
           <button type="button" class="modal-close" aria-label="Close" @click="pageSettingsOpen = false">✕</button>
         </header>
         <div class="section-editor-body">
-            <SettingsAccordion label="Page Basics" hint="What this page is">
+            <SettingsAccordion label="Page Basics" hint="What this page is" :open="openSetting === 'Page Basics'" @toggle="toggleSetting('Page Basics')">
                 <label class="offer-field">
                   <span>Page Name</span>
                   <input v-model.trim="builder.name" type="text" />
@@ -244,7 +244,7 @@
                   </label>
                 </div>
             </SettingsAccordion>
-            <SettingsAccordion label="Page Goal" hint="Who is arriving, and from where">
+            <SettingsAccordion label="Page Goal" hint="Who is arriving, and from where" :open="openSetting === 'Page Goal'" @toggle="toggleSetting('Page Goal')">
                 <!-- The goal is set in the create wizard, but it must stay editable: it drives composition, so
                      a page frozen on its original goal could never gain (or drop) what a goal governs. -->
                 <label class="offer-field">
@@ -258,7 +258,7 @@
                   <small>{{ builderGoalNote }}</small>
                 </label>
             </SettingsAccordion>
-            <SettingsAccordion label="Appearance" hint="Theme preset and colour overrides">
+            <SettingsAccordion label="Appearance" hint="Theme preset and colour overrides" :open="openSetting === 'Appearance'" @toggle="toggleSetting('Appearance')">
                   <label class="offer-field">
                     <span>Preset</span>
                     <select v-model="builder.preset">
@@ -296,7 +296,7 @@
                   </div>
                 </div>
             </SettingsAccordion>
-            <SettingsAccordion label="SEO" hint="Title and search snippet">
+            <SettingsAccordion label="SEO" hint="Title and search snippet" :open="openSetting === 'SEO'" @toggle="toggleSetting('SEO')">
                 <label class="offer-field">
                   <span>SEO Title</span>
                   <input :value="builder.seo_title" :placeholder="seoTitlePlaceholder" type="text" @input="applyTitleCaseInput((value) => { builder.seo_title = value; }, $event)" />
@@ -308,7 +308,7 @@
                   <small>The search-result snippet. Leave blank to auto-generate from the product description.</small>
                 </label>
             </SettingsAccordion>
-            <SettingsAccordion label="Discoverability" hint="Structured data and machine readers">
+            <SettingsAccordion label="Discoverability" hint="Structured data and machine readers" :open="openSetting === 'Discoverability'" @toggle="toggleSetting('Discoverability')">
                 <details v-if="discoverabilitySections.length" class="builder-section discoverability-drawer">
                   <summary>
                     <h3>Discoverability</h3>
@@ -348,7 +348,7 @@
                   </p>
                 </details>
             </SettingsAccordion>
-            <SettingsAccordion label="Analytics" hint="Google Tag and Meta Pixel">
+            <SettingsAccordion label="Analytics" hint="Google Tag and Meta Pixel" :open="openSetting === 'Analytics'" @toggle="toggleSetting('Analytics')">
                 <div class="offer-two-column">
                   <label class="offer-field">
                     <span>Google Tag ID</span>
@@ -360,7 +360,7 @@
                   </label>
                 </div>
             </SettingsAccordion>
-            <SettingsAccordion label="Favicon" hint="The browser-tab icon">
+            <SettingsAccordion label="Favicon" hint="The browser-tab icon" :open="openSetting === 'Favicon'" @toggle="toggleSetting('Favicon')">
                 <label class="offer-field">
                   <span>Favicon</span>
                   <div class="builder-inline-media">
@@ -4013,6 +4013,14 @@ const sequenceRows = computed(() => {
 
 // { row, isNew }. isNew means the row's element is a DRAFT that is not in builder.elements yet.
 const pageSettingsOpen = ref(false);
+
+// One settings accordion open at a time, keyed by label. Several tall panels open together turns the
+// modal into a wall; the Post-Checkout steps behave the same way, so the idiom is already familiar.
+const openSetting = ref("");
+
+function toggleSetting(key) {
+  openSetting.value = openSetting.value === key ? "" : key;
+}
 
 const sectionEditor = ref(null);
 
