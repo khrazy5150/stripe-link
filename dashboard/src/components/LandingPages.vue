@@ -872,6 +872,15 @@
               </template>
               <p v-else class="content-section-note">{{ rowNote(row) }}</p>
             </article>
+            <div class="composition-subhead">Add content</div>
+            <div class="element-add-row">
+            <button v-for="entry in ELEMENT_TYPES" :key="entry.type" class="secondary-action compact" type="button" @click="addElement(entry.type)">
+            + {{ entry.label }}
+            </button>
+            </div>
+            <p v-if="!builder.elements.length" class="element-empty">
+            Add testimonials, ratings, content, client logos, or FAQs — drag to reorder.
+            </p>
           </div>
 
 
@@ -1010,15 +1019,6 @@
               </label>
             </div>
 
-            <div class="composition-subhead">Add content</div>
-            <div class="element-add-row">
-              <button v-for="entry in ELEMENT_TYPES" :key="entry.type" class="secondary-action compact" type="button" @click="addElement(entry.type)">
-                + {{ entry.label }}
-              </button>
-            </div>
-            <p v-if="!builder.elements.length" class="element-empty">
-              Add testimonials, ratings, content, client logos, or FAQs — drag to reorder.
-            </p>
           </section>
 
           <!-- Discoverability: the sections that render to <head> / their own artifact rather than to the
@@ -3642,7 +3642,11 @@ function newElement(type) {
 
 function addElement(type) {
   if (builder.elements.length >= 20) return;
-  builder.elements.push(newElement(type));
+  const element = newElement(type);
+  builder.elements.push(element);
+  // Pin it to the END of the free band. Without this it sorts to wherever the element run sits by
+  // default — mid-sequence, off-screen from the button that created it, so the click looks like a no-op.
+  builder.section_order = [...sequenceRows.value.map((row) => row.key).filter((key) => key !== element.id), element.id];
 }
 
 function removeElement(id) {
@@ -3753,6 +3757,21 @@ const contentRows = computed(() => {
       editor: SECTION_EDITORS[type] || (isElementType(type) ? "element" : ""),
       element: isElementType(type) ? builder.elements.find((el) => el.id === section.id) : null,
       movable: isMovable(type),
+    });
+  }
+  // Same rule for elements, and it bites harder: elementSection() returns null for an EMPTY element, so
+  // a freshly added content block emits nothing and would never appear — the tenant clicks "+ Content
+  // block" and sees no result. Element rows therefore come from builder.elements, the tenant's actual
+  // list, not from what happens to render.
+  for (const element of builder.elements) {
+    if (rows.some((row) => row.key === element.id)) continue;
+    rows.push({
+      key: element.id,
+      type: element.type,
+      label: elementLabel(element.type),
+      editor: "element",
+      element,
+      movable: isMovable(element.type),
     });
   }
   // A section the tenant has EMPTIED stops being emitted — turn every trust badge off and the section
