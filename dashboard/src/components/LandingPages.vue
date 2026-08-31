@@ -216,7 +216,122 @@
           <button type="button" class="modal-close" aria-label="Close" @click="cancelSectionEditor">✕</button>
         </header>
         <div class="section-editor-body">
-            <template v-if="sectionEditor.row.editor === 'trust_badges'">
+            <template v-if="sectionEditor.row.editor === 'countdown'">
+                <p>Add urgency with a countdown timer at the top of the page.</p>
+                <label class="builder-toggle">
+                  <input v-model="builder.countdown.enabled" type="checkbox" />
+                  <span>Enable Countdown Timer</span>
+                </label>
+                <div v-if="builder.countdown.enabled" class="builder-countdown-options">
+                  <label class="offer-field">
+                    <span>Duration Minutes</span>
+                    <input v-model.number="builder.countdown.duration_minutes" type="number" min="1" />
+                  </label>
+                  <label class="builder-toggle">
+                    <input v-model="builder.countdown.persistent" type="checkbox" />
+                    <span>Persist Timer</span>
+                  </label>
+                  <label class="builder-toggle">
+                    <input v-model="builder.countdown.transparent" type="checkbox" />
+                    <span>Transparent Background</span>
+                  </label>
+                  <label class="builder-toggle">
+                    <input v-model="builder.countdown.sticky" type="checkbox" />
+                    <span>Sticky Banner</span>
+                  </label>
+                  <label class="builder-toggle">
+                    <input v-model="builder.countdown.marquee" type="checkbox" />
+                    <span>Marquee Scroll</span>
+                  </label>
+                  <div class="builder-countdown-row">
+                    <label class="builder-toggle">
+                      <input v-model="builder.countdown.start_enabled" type="checkbox" />
+                      <span>Banner Start</span>
+                    </label>
+                    <input v-model.trim="builder.countdown.start_icon" class="builder-icon-input" type="text" aria-label="Start icon" />
+                    <input v-model.trim="builder.countdown.start_text" type="text" aria-label="Start text" />
+                    <input v-model="builder.countdown.start_color" type="color" aria-label="Start color" />
+                  </div>
+                  <div class="builder-countdown-row">
+                    <label class="builder-toggle">
+                      <input v-model="builder.countdown.end_enabled" type="checkbox" />
+                      <span>Banner End</span>
+                    </label>
+                    <input v-model.trim="builder.countdown.end_icon" class="builder-icon-input" type="text" aria-label="End icon" />
+                    <input v-model.trim="builder.countdown.end_text" type="text" aria-label="End text" />
+                    <input v-model="builder.countdown.end_color" type="color" aria-label="End color" />
+                  </div>
+                </div>
+            </template>
+            <template v-else-if="sectionEditor.row.editor === 'hero'">
+                <template v-if="isListicleOffer">
+                  <small>This landing page shows several products in a carousel. The hero headline and subheadline follow the product you’re viewing — each product’s own name and description — so there’s nothing to set here.</small>
+                </template>
+                <template v-else>
+                  <label class="offer-field">
+                    <span>Hero Headline</span>
+                    <input :value="builder.headline" type="text" @input="applyTitleCaseInput((value) => { builder.headline = value; }, $event)" />
+                  </label>
+                  <label class="offer-field">
+                    <span>Hero Subheadline</span>
+                    <textarea v-model.trim="builder.subheadline" rows="3"></textarea>
+                  </label>
+                </template>
+                <div class="offer-field">
+                  <span>Hero Media</span>
+                  <MediaListField
+                    :model-value="heroMediaList"
+                    hint="Add images and videos to your hero carousel"
+                    empty-text="No media yet — upload an image or add a video URL."
+                    :suggestions="builderProductImages"
+                    :derived="builderDerivedHeroMedia"
+                    derived-note="Auto — these come from your offer's products. Upload or add media to override."
+                    :upload="uploadPageImage"
+                    :upload-video="uploadPageVideo"
+                    allow-video-upload
+                    @update:model-value="setHeroMedia"
+                  />
+                </div>
+                <label class="builder-switch-row">
+                  <span class="builder-switch" @click.stop>
+                    <input v-model="builder.autoplay" type="checkbox" aria-label="Autoplay hero videos muted" />
+                    <span aria-hidden="true"></span>
+                  </span>
+                  <span>Autoplay video (muted)</span>
+                </label>
+
+                <label class="offer-field">
+                  <span>Profile Avatar</span>
+                  <small>Put a face on the page — the person behind the service. Overlaps the hero image.</small>
+                  <div class="builder-avatar-row">
+                    <img v-if="builder.avatar_url" :src="builder.avatar_url" class="builder-avatar-preview" alt="" />
+                    <input ref="avatarFileInput" type="file" accept="image/*" hidden @change="handleAvatarPicked" />
+                    <button class="secondary-action compact" type="button" :disabled="avatarUploading" @click="avatarFileInput?.click()">
+                      {{ avatarUploading ? "Uploading..." : (builder.avatar_url ? "Replace avatar" : "Upload avatar") }}
+                    </button>
+                    <button v-if="builder.avatar_url" class="secondary-action compact" type="button" @click="builder.avatar_url = ''">Remove</button>
+                  </div>
+                  <small v-if="avatarUploadError" class="builder-upload-error">{{ avatarUploadError }}</small>
+                </label>
+
+                <label class="builder-switch-row">
+                  <span class="builder-switch" @click.stop>
+                    <input v-model="builder.brand_overlay" type="checkbox" aria-label="Show brand name on hero image" />
+                    <span aria-hidden="true"></span>
+                  </span>
+                  <span>Show brand on hero image</span>
+                </label>
+                <label v-if="builder.brand_overlay" class="offer-field">
+                  <span>Brand position</span>
+                  <select v-model="builder.brand_position">
+                    <option value="top-left">Top left</option>
+                    <option value="top-right">Top right</option>
+                    <option value="bottom-left">Bottom left</option>
+                    <option value="bottom-right">Bottom right</option>
+                  </select>
+                </label>
+            </template>
+            <template v-else-if="sectionEditor.row.editor === 'trust_badges'">
                 <div class="builder-repeat-list">
                   <div v-for="(badge, index) in builder.trust_badges.badges" :key="`badge-${index}`" class="builder-repeat-row builder-trust-badge-row">
                     <label class="builder-switch" @click.stop>
@@ -738,126 +853,9 @@
           </div>
 
 
-          <section class="builder-section">
-            <h3>Countdown Timer</h3>
-            <p>Add urgency with a countdown timer at the top of the page.</p>
-            <label class="builder-toggle">
-              <input v-model="builder.countdown.enabled" type="checkbox" />
-              <span>Enable Countdown Timer</span>
-            </label>
-            <div v-if="builder.countdown.enabled" class="builder-countdown-options">
-              <label class="offer-field">
-                <span>Duration Minutes</span>
-                <input v-model.number="builder.countdown.duration_minutes" type="number" min="1" />
-              </label>
-              <label class="builder-toggle">
-                <input v-model="builder.countdown.persistent" type="checkbox" />
-                <span>Persist Timer</span>
-              </label>
-              <label class="builder-toggle">
-                <input v-model="builder.countdown.transparent" type="checkbox" />
-                <span>Transparent Background</span>
-              </label>
-              <label class="builder-toggle">
-                <input v-model="builder.countdown.sticky" type="checkbox" />
-                <span>Sticky Banner</span>
-              </label>
-              <label class="builder-toggle">
-                <input v-model="builder.countdown.marquee" type="checkbox" />
-                <span>Marquee Scroll</span>
-              </label>
-              <div class="builder-countdown-row">
-                <label class="builder-toggle">
-                  <input v-model="builder.countdown.start_enabled" type="checkbox" />
-                  <span>Banner Start</span>
-                </label>
-                <input v-model.trim="builder.countdown.start_icon" class="builder-icon-input" type="text" aria-label="Start icon" />
-                <input v-model.trim="builder.countdown.start_text" type="text" aria-label="Start text" />
-                <input v-model="builder.countdown.start_color" type="color" aria-label="Start color" />
-              </div>
-              <div class="builder-countdown-row">
-                <label class="builder-toggle">
-                  <input v-model="builder.countdown.end_enabled" type="checkbox" />
-                  <span>Banner End</span>
-                </label>
-                <input v-model.trim="builder.countdown.end_icon" class="builder-icon-input" type="text" aria-label="End icon" />
-                <input v-model.trim="builder.countdown.end_text" type="text" aria-label="End text" />
-                <input v-model="builder.countdown.end_color" type="color" aria-label="End color" />
-              </div>
-            </div>
-          </section>
 
 
 
-          <section class="builder-section">
-            <h3>Hero</h3>
-            <template v-if="isListicleOffer">
-              <small>This landing page shows several products in a carousel. The hero headline and subheadline follow the product you’re viewing — each product’s own name and description — so there’s nothing to set here.</small>
-            </template>
-            <template v-else>
-              <label class="offer-field">
-                <span>Hero Headline</span>
-                <input :value="builder.headline" type="text" @input="applyTitleCaseInput((value) => { builder.headline = value; }, $event)" />
-              </label>
-              <label class="offer-field">
-                <span>Hero Subheadline</span>
-                <textarea v-model.trim="builder.subheadline" rows="3"></textarea>
-              </label>
-            </template>
-            <div class="offer-field">
-              <span>Hero Media</span>
-              <MediaListField
-                :model-value="heroMediaList"
-                hint="Add images and videos to your hero carousel"
-                empty-text="No media yet — upload an image or add a video URL."
-                :suggestions="builderProductImages"
-                :derived="builderDerivedHeroMedia"
-                derived-note="Auto — these come from your offer's products. Upload or add media to override."
-                :upload="uploadPageImage"
-                :upload-video="uploadPageVideo"
-                allow-video-upload
-                @update:model-value="setHeroMedia"
-              />
-            </div>
-            <label class="builder-switch-row">
-              <span class="builder-switch" @click.stop>
-                <input v-model="builder.autoplay" type="checkbox" aria-label="Autoplay hero videos muted" />
-                <span aria-hidden="true"></span>
-              </span>
-              <span>Autoplay video (muted)</span>
-            </label>
-
-            <label class="offer-field">
-              <span>Profile Avatar</span>
-              <small>Put a face on the page — the person behind the service. Overlaps the hero image.</small>
-              <div class="builder-avatar-row">
-                <img v-if="builder.avatar_url" :src="builder.avatar_url" class="builder-avatar-preview" alt="" />
-                <input ref="avatarFileInput" type="file" accept="image/*" hidden @change="handleAvatarPicked" />
-                <button class="secondary-action compact" type="button" :disabled="avatarUploading" @click="avatarFileInput?.click()">
-                  {{ avatarUploading ? "Uploading..." : (builder.avatar_url ? "Replace avatar" : "Upload avatar") }}
-                </button>
-                <button v-if="builder.avatar_url" class="secondary-action compact" type="button" @click="builder.avatar_url = ''">Remove</button>
-              </div>
-              <small v-if="avatarUploadError" class="builder-upload-error">{{ avatarUploadError }}</small>
-            </label>
-
-            <label class="builder-switch-row">
-              <span class="builder-switch" @click.stop>
-                <input v-model="builder.brand_overlay" type="checkbox" aria-label="Show brand name on hero image" />
-                <span aria-hidden="true"></span>
-              </span>
-              <span>Show brand on hero image</span>
-            </label>
-            <label v-if="builder.brand_overlay" class="offer-field">
-              <span>Brand position</span>
-              <select v-model="builder.brand_position">
-                <option value="top-left">Top left</option>
-                <option value="top-right">Top right</option>
-                <option value="bottom-left">Bottom left</option>
-                <option value="bottom-right">Bottom right</option>
-              </select>
-            </label>
-          </section>
 
           <!-- PAGE CONTENT — renders in page order, so the form reads exactly as the page does
                (plans/BUILDER_SECTION_ORDER.md). Fixed sections stay outside it: countdown and hero above,
@@ -871,15 +869,18 @@
               v-for="(row, rowIndex) in sequenceRows"
               :key="row.key"
               class="content-section"
+              :class="{ 'is-locked': !row.movable }"
               @dragover.prevent
               @drop="onRowDrop(rowIndex)"
             >
               <span
+                v-if="row.movable"
                 class="content-section-drag"
                 draggable="true"
                 title="Drag to reorder"
                 @dragstart="onRowDragStart(rowIndex)"
               >⠿</span>
+              <span v-else class="content-section-lock" title="Fixed position on the page">🔒</span>
               <span class="content-row-name">{{ row.label }}</span>
               <span class="content-row-summary">{{ rowSummary(row) }}</span>
               <button v-if="row.editor" class="secondary-action compact" type="button" @click="openSectionEditor(row)">Edit</button>
@@ -3856,7 +3857,7 @@ function isElementType(type) {
 // above, footer below), so the form still reads top-to-bottom as the page does without duplicating them
 // here. Element cards are excluded for now — their editors still live in the Page Sections panel.
 const sequenceRows = computed(() => {
-  const rows = contentRows.value.filter((row) => row.movable);
+  const rows = [...contentRows.value];
   // Sort by KEY, not type: repeatable elements share a type, so two content blocks would collapse to
   // the same sort index. Element ids are absent from the catalog and fall into the free band, which is
   // exactly right. Rows added for emptied sections skip builderSections(), so order is applied here too.
@@ -3947,7 +3948,12 @@ function onRowDrop(index) {
 // are one mechanism with two surfaces rather than two mechanisms that must agree.
 function moveSectionBefore(dragKey, dropKey) {
   if (!dragKey || !dropKey || dragKey === dropKey) return;
-  const keys = sequenceRows.value.map((row) => row.key);
+  const rows = sequenceRows.value;
+  // The sequence now includes PINNED rows, so this guard is load-bearing again — without it the hero
+  // could be dragged out of the top, which is the one thing placement exists to prevent.
+  const movable = (key) => rows.find((row) => row.key === key)?.movable;
+  if (!movable(dragKey) || !movable(dropKey)) return;
+  const keys = rows.map((row) => row.key);
   const from = keys.indexOf(dragKey);
   const to = keys.indexOf(dropKey);
   if (from < 0 || to < 0) return;

@@ -4214,6 +4214,18 @@ button:disabled {
   padding: 0.7rem 1rem;
 }
 
+.content-section.is-locked {
+  border-style: dashed;
+  background: transparent;
+}
+
+/* Shown, not hidden: a locked row explains WHERE a fixed section lands better than its absence would. */
+.content-section-lock {
+  font-size: 1.1rem;
+  line-height: 1;
+  opacity: 0.55;
+}
+
 .content-row-name {
   font-size: var(--text-label);
   line-height: var(--leading-label);
