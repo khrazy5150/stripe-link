@@ -209,6 +209,186 @@
     <!-- Section editor. One editing surface: rows are a scannable, draggable map and every editor lives
          here (plans/BUILDER_SECTION_ORDER.md Phase 2). ADD opens on a draft and commits; EDIT writes
          through live so the preview keeps updating as the tenant types. -->
+
+    <!-- Page Settings. Page-wide options with no position on the page — which is why this is NOT a row in
+         Page Content (plans/BUILDER_SECTION_ORDER.md §2: settings are a separate group). Accordions in
+         order of how often a tenant touches them, matching the Post-Checkout Flow pattern. -->
+    <div v-if="pageSettingsOpen" class="modal-backdrop" @click.self="pageSettingsOpen = false">
+      <section class="modal-card section-editor-modal" role="dialog" aria-modal="true" aria-labelledby="pageSettingsTitle">
+        <header class="modal-card-header">
+          <h2 id="pageSettingsTitle">Page Settings</h2>
+          <button type="button" class="modal-close" aria-label="Close" @click="pageSettingsOpen = false">✕</button>
+        </header>
+        <div class="section-editor-body">
+            <details class="settings-accordion">
+              <summary><strong>Page Basics</strong><span>What this page is</span></summary>
+                <label class="offer-field">
+                  <span>Page Name</span>
+                  <input v-model.trim="builder.name" type="text" />
+                  <small>Internal name for organizing your pages.</small>
+                </label>
+
+                <div class="offer-two-column">
+                  <label class="offer-field">
+                    <span>Product Source</span>
+                    <select disabled>
+                      <option>From Offer</option>
+                    </select>
+                  </label>
+                  <label class="offer-field">
+                    <span>Select Offer</span>
+                    <select v-model="builder.offer_id" @change="onBuilderOfferChange">
+                      <option v-for="offer in offers" :key="offer.offer_id" :value="offer.offer_id">
+                        {{ offer.name }} ({{ offerItemCount(offer) }} item{{ offerItemCount(offer) === 1 ? "" : "s" }})
+                      </option>
+                    </select>
+                  </label>
+                </div>
+            </details>
+            <details class="settings-accordion">
+              <summary><strong>Page Goal</strong><span>Who is arriving, and from where</span></summary>
+                <!-- The goal is set in the create wizard, but it must stay editable: it drives composition, so
+                     a page frozen on its original goal could never gain (or drop) what a goal governs. -->
+                <label class="offer-field">
+                  <span>Page Goal</span>
+                  <select v-model="builder.goal">
+                    <option value="">Not set</option>
+                    <option v-for="option in goalOptions" :key="option.value" :value="option.value">
+                      {{ option.label }}
+                    </option>
+                  </select>
+                  <small>{{ builderGoalNote }}</small>
+                </label>
+            </details>
+            <details class="settings-accordion">
+              <summary><strong>Appearance</strong><span>Theme preset and colour overrides</span></summary>
+                  <label class="offer-field">
+                    <span>Preset</span>
+                    <select v-model="builder.preset">
+                      <option v-for="option in universalBundlePresets" :key="option.value" :value="option.value">
+                        {{ option.label }}
+                      </option>
+                    </select>
+                  </label>
+
+                <label class="builder-switch-row">
+                  <span class="builder-switch" @click.stop>
+                    <input v-model="builder.advanced_colors" type="checkbox" aria-label="Advanced color settings" />
+                    <span aria-hidden="true"></span>
+                  </span>
+                  <span>Customize individual colors</span>
+                </label>
+                <div v-if="builder.advanced_colors" class="advanced-colors">
+                  <div class="advanced-colors-head">
+                    <small>The preset already looks good — only tweak here if you need to. Empty = use the preset.</small>
+                    <button class="secondary-action compact" type="button" @click="resetThemeTokens">Reset to preset</button>
+                  </div>
+                  <div v-for="group in tokenGroups()" :key="group.name" class="color-group">
+                    <div class="color-group-title">{{ group.name }}</div>
+                    <label v-for="t in group.tokens" :key="t.token" class="color-row">
+                      <input class="color-picker" type="color" :value="pickerColor(t.token)" :title="t.label" @input="setTokenColor(t.token, $event.target.value)" />
+                      <span class="color-label">{{ t.label }}</span>
+                      <input
+                        :value="builder.theme_tokens[t.token] || ''"
+                        type="text"
+                        spellcheck="false"
+                        :placeholder="effectiveColor(t.token) || 'preset'"
+                        @input="setTokenColor(t.token, $event.target.value)"
+                      />
+                    </label>
+                  </div>
+                </div>
+            </details>
+            <details class="settings-accordion">
+              <summary><strong>SEO</strong><span>Title and search snippet</span></summary>
+                <label class="offer-field">
+                  <span>SEO Title</span>
+                  <input :value="builder.seo_title" :placeholder="seoTitlePlaceholder" type="text" @input="applyTitleCaseInput((value) => { builder.seo_title = value; }, $event)" />
+                  <small>The browser tab / search-result title. Leave blank to use the smart default (shown above).</small>
+                </label>
+                <label class="offer-field">
+                  <span>SEO Description</span>
+                  <textarea v-model.trim="builder.seo_description" :placeholder="seoDescriptionPlaceholder" rows="3"></textarea>
+                  <small>The search-result snippet. Leave blank to auto-generate from the product description.</small>
+                </label>
+            </details>
+            <details class="settings-accordion">
+              <summary><strong>Discoverability</strong><span>Structured data and machine readers</span></summary>
+                <details v-if="discoverabilitySections.length" class="builder-section discoverability-drawer">
+                  <summary>
+                    <h3>Discoverability</h3>
+                    <span class="discoverability-hint">
+                      {{ isSectionEnabled("structured_data") ? "Structured data on" : "Nothing emitted" }}
+                    </span>
+                  </summary>
+                  <small>
+                    Not visible on the page — this is what search engines and AI crawlers read. It is generated from
+                    your offer and the sections you have already added, so there is nothing to write here.
+                  </small>
+                  <div class="composition-list">
+                    <label v-for="key in discoverabilitySections" :key="key" class="composition-row">
+                      <input type="checkbox" :checked="isSectionEnabled(key)" @change="toggleSection(key, $event.target.checked)" />
+                      <span class="composition-name">{{ sectionKeyLabel(key) }}</span>
+                      <span class="composition-tag" :class="defaultVisible(builderOfferType, key, builderGoal) ? 'is-recommended' : 'is-optional'">
+                        {{ defaultVisible(builderOfferType, key, builderGoal) ? "Recommended" : "Optional" }}
+                      </span>
+                    </label>
+                  </div>
+                  <div v-if="isSectionEnabled('structured_data')" class="discoverability-emits">
+                    <span>Will emit</span>
+                    <strong v-if="structuredDataTypes.length">{{ structuredDataTypes.join(", ") }}</strong>
+                    <strong v-else>Nothing yet — add an offer price or an FAQ</strong>
+                  </div>
+                  <!-- Thin markup isn't invalid, it's ignored — which is the failure a tenant can't see. Nudge,
+                       never block (plans/LANDING_PAGE_GOAL_COMPOSITION.md: warnings, not gates). -->
+                  <div v-if="isSectionEnabled('structured_data') && structuredDataWarnings.length" class="discoverability-warnings">
+                    <strong>To earn a rich result in search:</strong>
+                    <ul>
+                      <li v-for="(warning, i) in structuredDataWarnings" :key="i">{{ warning }}</li>
+                    </ul>
+                    <small>Your page still publishes normally — these only affect how search engines display it.</small>
+                  </div>
+                  <p v-if="!builderGoal" class="discoverability-note">
+                    Set a Page Goal of "Search / SEO" above to turn this on by default.
+                  </p>
+                </details>
+            </details>
+            <details class="settings-accordion">
+              <summary><strong>Analytics</strong><span>Google Tag and Meta Pixel</span></summary>
+                <div class="offer-two-column">
+                  <label class="offer-field">
+                    <span>Google Tag ID</span>
+                    <input v-model.trim="builder.google_tag_id" type="text" />
+                  </label>
+                  <label class="offer-field">
+                    <span>Meta Pixel ID</span>
+                    <input v-model.trim="builder.pixel_id" type="text" />
+                  </label>
+                </div>
+            </details>
+            <details class="settings-accordion">
+              <summary><strong>Favicon</strong><span>The browser-tab icon</span></summary>
+                <label class="offer-field">
+                  <span>Favicon</span>
+                  <div class="builder-inline-media">
+                    <img :src="builder.favicon_url || defaultFaviconUrl" alt="" />
+                    <div class="builder-upload-stack">
+                      <input ref="faviconFileInput" type="file" accept="image/*" hidden @change="handleFaviconPicked" />
+                      <button class="secondary-action compact" type="button" :disabled="faviconUploading" @click="faviconFileInput?.click()">
+                        {{ faviconUploading ? "Uploading..." : "Upload favicon" }}
+                      </button>
+                      <input v-model.trim="builder.favicon_url" type="url" placeholder="Leave blank to use Junior Bay favicon" />
+                    </div>
+                  </div>
+                  <small v-if="faviconUploadError" class="builder-upload-error">{{ faviconUploadError }}</small>
+                </label>
+            </details>
+        </div>
+        <footer class="section-editor-footer">
+          <button class="primary-action" type="button" @click="pageSettingsOpen = false">Done</button>
+        </footer>
+      </section>
+    </div>
     <div v-if="sectionEditor" class="modal-backdrop" @click.self="cancelSectionEditor">
       <section class="modal-card section-editor-modal" role="dialog" aria-modal="true" aria-labelledby="sectionEditorTitle">
         <header class="modal-card-header">
@@ -888,6 +1068,16 @@
 
 
 
+          <!-- Page Settings sits ABOVE Page Content, with a gear rather than a lock: it is not a section
+               of the page at all, and putting it in the sequence would teach that list to mean two
+               things. Same row/modal gesture, deliberately different placement and icon. -->
+          <div class="page-settings-row">
+            <span class="page-settings-icon" aria-hidden="true">⚙️</span>
+            <span class="content-row-name">Page Settings</span>
+            <span class="content-row-summary">Name, goal, appearance, SEO, analytics</span>
+            <button class="secondary-action compact" type="button" @click="pageSettingsOpen = true">Edit</button>
+          </div>
+
           <!-- PAGE CONTENT — renders in page order, so the form reads exactly as the page does
                (plans/BUILDER_SECTION_ORDER.md). Fixed sections stay outside it: countdown and hero above,
                footer below, because their position never changes. -->
@@ -944,69 +1134,6 @@
             <h3>Settings</h3>
             <small>Page-wide options. These do not appear as sections on the page.</small>
           </div>
-          <section class="builder-section">
-            <h3>Page Basics</h3>
-            <label class="offer-field">
-              <span>Page Name</span>
-              <input v-model.trim="builder.name" type="text" />
-              <small>Internal name for organizing your pages.</small>
-            </label>
-
-            <div class="offer-two-column">
-              <label class="offer-field">
-                <span>Preset</span>
-                <select v-model="builder.preset">
-                  <option v-for="option in universalBundlePresets" :key="option.value" :value="option.value">
-                    {{ option.label }}
-                  </option>
-                </select>
-              </label>
-              <!-- The goal is set in the create wizard, but it must stay editable: it drives composition, so
-                   a page frozen on its original goal could never gain (or drop) what a goal governs. -->
-              <label class="offer-field">
-                <span>Page Goal</span>
-                <select v-model="builder.goal">
-                  <option value="">Not set</option>
-                  <option v-for="option in goalOptions" :key="option.value" :value="option.value">
-                    {{ option.label }}
-                  </option>
-                </select>
-                <small>{{ builderGoalNote }}</small>
-              </label>
-            </div>
-
-            <div class="offer-two-column">
-              <label class="offer-field">
-                <span>Product Source</span>
-                <select disabled>
-                  <option>From Offer</option>
-                </select>
-              </label>
-              <label class="offer-field">
-                <span>Select Offer</span>
-                <select v-model="builder.offer_id" @change="onBuilderOfferChange">
-                  <option v-for="offer in offers" :key="offer.offer_id" :value="offer.offer_id">
-                    {{ offer.name }} ({{ offerItemCount(offer) }} item{{ offerItemCount(offer) === 1 ? "" : "s" }})
-                  </option>
-                </select>
-              </label>
-            </div>
-
-            <label class="offer-field">
-              <span>Favicon</span>
-              <div class="builder-inline-media">
-                <img :src="builder.favicon_url || defaultFaviconUrl" alt="" />
-                <div class="builder-upload-stack">
-                  <input ref="faviconFileInput" type="file" accept="image/*" hidden @change="handleFaviconPicked" />
-                  <button class="secondary-action compact" type="button" :disabled="faviconUploading" @click="faviconFileInput?.click()">
-                    {{ faviconUploading ? "Uploading..." : "Upload favicon" }}
-                  </button>
-                  <input v-model.trim="builder.favicon_url" type="url" placeholder="Leave blank to use Junior Bay favicon" />
-                </div>
-              </div>
-              <small v-if="faviconUploadError" class="builder-upload-error">{{ faviconUploadError }}</small>
-            </label>
-          </section>
           <section v-if="builderIntent === 'transaction'" class="builder-section">
             <h3>Sale &amp; Flash Sale</h3>
             <p>Publish <code>/sale</code> and <code>/flash-sale</code> views of this page that show your discounted pricing. Add the matching price to the product first (Products → pricing context).</p>
@@ -1042,19 +1169,6 @@
             </div>
           </section>
           <section class="builder-section">
-            <h3>SEO</h3>
-            <label class="offer-field">
-              <span>SEO Title</span>
-              <input :value="builder.seo_title" :placeholder="seoTitlePlaceholder" type="text" @input="applyTitleCaseInput((value) => { builder.seo_title = value; }, $event)" />
-              <small>The browser tab / search-result title. Leave blank to use the smart default (shown above).</small>
-            </label>
-            <label class="offer-field">
-              <span>SEO Description</span>
-              <textarea v-model.trim="builder.seo_description" :placeholder="seoDescriptionPlaceholder" rows="3"></textarea>
-              <small>The search-result snippet. Leave blank to auto-generate from the product description.</small>
-            </label>
-          </section>
-          <section class="builder-section">
             <header class="builder-section-title">
               <h3>Page Sections</h3>
             </header>
@@ -1075,90 +1189,9 @@
                page. Collapsed and out of the way because there is nothing to fill in — the output is DERIVED
                from the offer and the composed sections ("SEO" is a mode the goal flips on, not a form).
                plans/LANDING_PAGE_GOAL_COMPOSITION.md -->
-          <details v-if="discoverabilitySections.length" class="builder-section discoverability-drawer">
-            <summary>
-              <h3>Discoverability</h3>
-              <span class="discoverability-hint">
-                {{ isSectionEnabled("structured_data") ? "Structured data on" : "Nothing emitted" }}
-              </span>
-            </summary>
-            <small>
-              Not visible on the page — this is what search engines and AI crawlers read. It is generated from
-              your offer and the sections you have already added, so there is nothing to write here.
-            </small>
-            <div class="composition-list">
-              <label v-for="key in discoverabilitySections" :key="key" class="composition-row">
-                <input type="checkbox" :checked="isSectionEnabled(key)" @change="toggleSection(key, $event.target.checked)" />
-                <span class="composition-name">{{ sectionKeyLabel(key) }}</span>
-                <span class="composition-tag" :class="defaultVisible(builderOfferType, key, builderGoal) ? 'is-recommended' : 'is-optional'">
-                  {{ defaultVisible(builderOfferType, key, builderGoal) ? "Recommended" : "Optional" }}
-                </span>
-              </label>
-            </div>
-            <div v-if="isSectionEnabled('structured_data')" class="discoverability-emits">
-              <span>Will emit</span>
-              <strong v-if="structuredDataTypes.length">{{ structuredDataTypes.join(", ") }}</strong>
-              <strong v-else>Nothing yet — add an offer price or an FAQ</strong>
-            </div>
-            <!-- Thin markup isn't invalid, it's ignored — which is the failure a tenant can't see. Nudge,
-                 never block (plans/LANDING_PAGE_GOAL_COMPOSITION.md: warnings, not gates). -->
-            <div v-if="isSectionEnabled('structured_data') && structuredDataWarnings.length" class="discoverability-warnings">
-              <strong>To earn a rich result in search:</strong>
-              <ul>
-                <li v-for="(warning, i) in structuredDataWarnings" :key="i">{{ warning }}</li>
-              </ul>
-              <small>Your page still publishes normally — these only affect how search engines display it.</small>
-            </div>
-            <p v-if="!builderGoal" class="discoverability-note">
-              Set a Page Goal of "Search / SEO" above to turn this on by default.
-            </p>
-          </details>
 
 
-          <section class="builder-section">
-            <h3>Analytics</h3>
-            <div class="offer-two-column">
-              <label class="offer-field">
-                <span>Google Tag ID</span>
-                <input v-model.trim="builder.google_tag_id" type="text" />
-              </label>
-              <label class="offer-field">
-                <span>Meta Pixel ID</span>
-                <input v-model.trim="builder.pixel_id" type="text" />
-              </label>
-            </div>
-          </section>
 
-          <section class="builder-section">
-            <h3>Advanced Color Settings</h3>
-            <label class="builder-switch-row">
-              <span class="builder-switch" @click.stop>
-                <input v-model="builder.advanced_colors" type="checkbox" aria-label="Advanced color settings" />
-                <span aria-hidden="true"></span>
-              </span>
-              <span>Customize individual colors</span>
-            </label>
-            <div v-if="builder.advanced_colors" class="advanced-colors">
-              <div class="advanced-colors-head">
-                <small>The preset already looks good — only tweak here if you need to. Empty = use the preset.</small>
-                <button class="secondary-action compact" type="button" @click="resetThemeTokens">Reset to preset</button>
-              </div>
-              <div v-for="group in tokenGroups()" :key="group.name" class="color-group">
-                <div class="color-group-title">{{ group.name }}</div>
-                <label v-for="t in group.tokens" :key="t.token" class="color-row">
-                  <input class="color-picker" type="color" :value="pickerColor(t.token)" :title="t.label" @input="setTokenColor(t.token, $event.target.value)" />
-                  <span class="color-label">{{ t.label }}</span>
-                  <input
-                    :value="builder.theme_tokens[t.token] || ''"
-                    type="text"
-                    spellcheck="false"
-                    :placeholder="effectiveColor(t.token) || 'preset'"
-                    @input="setTokenColor(t.token, $event.target.value)"
-                  />
-                </label>
-              </div>
-            </div>
-          </section>
 
           <section v-if="builderIntent === 'transaction'" class="builder-section">
             <div class="builder-section-title">
@@ -3985,6 +4018,8 @@ const sequenceRows = computed(() => {
 });
 
 // { row, isNew }. isNew means the row's element is a DRAFT that is not in builder.elements yet.
+const pageSettingsOpen = ref(false);
+
 const sectionEditor = ref(null);
 
 function openSectionEditor(row) {
