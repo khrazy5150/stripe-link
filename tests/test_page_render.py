@@ -206,6 +206,11 @@ class PageRenderTests(unittest.TestCase):
         # FAQ joins the heading outline: an <h2> section heading with each question as an <h3> (plans/SEMANTIC_HTML.md).
         self.assertIn("<h2 class=\"sl-faq-heading\">", html)
         self.assertIn("<summary><h3>", html)
+        # The summary is display:flex, which kills the native disclosure triangle -- so the chevron is
+        # the ONLY thing telling a visitor these open. It went missing once; keep it asserted.
+        self.assertIn(".sl-faq summary::after{content:''", html)
+        self.assertIn(".sl-faq details[open] summary::after{transform:", html)
+        self.assertIn(".sl-faq summary::-webkit-details-marker{display:none}", html)
         self.assertIn("Get The Bundle - $69.42", html)
         self.assertIn("Terms of Service", html)
         self.assertIn("© 2026 All rights reserved.", html)

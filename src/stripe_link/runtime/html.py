@@ -548,6 +548,13 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     "    .sl-faq details{border:1px solid var(--sl-faq-border);background:var(--sl-faq-bg);border-radius:1.6rem;padding:0;overflow:hidden}",
     "    .sl-faq summary{cursor:pointer;font-family:var(--sl-font-heading);font-size:1.4rem;font-weight:600;line-height:1.35;color:var(--sl-faq-summary);display:flex;align-items:center;justify-content:space-between;gap:1.2rem;padding:1.6rem 2rem}",
     "    .sl-faq summary h3{margin:0;font:inherit;color:inherit;flex:1}",
+    # The summary is display:flex, which suppresses the native disclosure triangle — so without this
+    # the questions read as plain text and nobody knows they open. Drawn from two borders rather than a
+    # glyph so it inherits currentColor and stays sharp at any theme/preset colour.
+    "    .sl-faq summary{list-style:none}",
+    "    .sl-faq summary::-webkit-details-marker{display:none}",
+    "    .sl-faq summary::after{content:'';flex:none;width:0.9rem;height:0.9rem;margin-left:0.4rem;border-right:2px solid currentColor;border-bottom:2px solid currentColor;opacity:0.55;transform:translateY(-0.25rem) rotate(45deg);transition:transform .2s ease}",
+    "    .sl-faq details[open] summary::after{transform:translateY(0.15rem) rotate(-135deg)}",
     "    .sl-faq-heading{font-family:var(--sl-font-heading);font-size:1.8rem;line-height:1.25;margin-bottom:0.2rem;color:var(--sl-faq-summary)}",
     "    .sl-faq p{color:var(--sl-faq-text);font-size:1.4rem;line-height:1.6;padding:0 2rem 1.6rem}",
     "    .sl-checkout-cta{position:fixed;left:0;right:0;bottom:0;z-index:10;background:linear-gradient(transparent,var(--sl-cta-scrim) 20%);padding:1.6rem;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:0.8rem}",
@@ -601,7 +608,7 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     "    .sl-marquee-logo{display:inline-flex;align-items:center;justify-content:center;background:#ffffff;border-radius:0.8rem;padding:0.8rem 1.2rem;box-shadow:0 1px 3px rgba(0,0,0,.08)}",
     "    .sl-marquee-logo img{height:3.2rem;width:auto;object-fit:contain}",
     "    @keyframes sl-marquee{from{transform:translateX(0)}to{transform:translateX(-50%)}}",
-    "    @media (prefers-reduced-motion: reduce){.sl-marquee-track{animation:none;flex-wrap:wrap}}",
+    "    @media (prefers-reduced-motion: reduce){.sl-marquee-track{animation:none;flex-wrap:wrap}.sl-faq summary::after{transition:none}}",
     "    .sl-carousel-track{display:flex;gap:1.6rem;overflow-x:auto;scroll-snap-type:x mandatory;padding-bottom:1.2rem;-webkit-overflow-scrolling:touch}",
     "    .sl-carousel-slide{scroll-snap-align:start;flex:0 0 min(80%,28rem);display:flex;flex-direction:column;gap:0.8rem;background:var(--sl-price-card-bg);border:1px solid var(--sl-price-card-border);border-radius:1.2rem;padding:1.4rem}",
     "    .sl-carousel-slide img{width:100%;height:16rem;object-fit:cover;border-radius:0.8rem}",
