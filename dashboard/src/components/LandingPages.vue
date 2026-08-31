@@ -248,7 +248,12 @@
                       <input v-model="builder.countdown.start_enabled" type="checkbox" />
                       <span>Banner Start</span>
                     </label>
-                    <input v-model.trim="builder.countdown.start_icon" class="builder-icon-input" type="text" aria-label="Start icon" />
+                    <button
+                      type="button"
+                      class="badge-icon-picker-btn"
+                      aria-label="Start icon"
+                      @click.stop="showIconPicker(builder.countdown.start_icon, (emoji) => { builder.countdown.start_icon = emoji; }, 'Choose an Icon')"
+                    >{{ builder.countdown.start_icon || '—' }}</button>
                     <input v-model.trim="builder.countdown.start_text" type="text" aria-label="Start text" />
                     <input v-model="builder.countdown.start_color" type="color" aria-label="Start color" />
                   </div>
@@ -257,7 +262,12 @@
                       <input v-model="builder.countdown.end_enabled" type="checkbox" />
                       <span>Banner End</span>
                     </label>
-                    <input v-model.trim="builder.countdown.end_icon" class="builder-icon-input" type="text" aria-label="End icon" />
+                    <button
+                      type="button"
+                      class="badge-icon-picker-btn"
+                      aria-label="End icon"
+                      @click.stop="showIconPicker(builder.countdown.end_icon, (emoji) => { builder.countdown.end_icon = emoji; }, 'Choose an Icon')"
+                    >{{ builder.countdown.end_icon || '—' }}</button>
                     <input v-model.trim="builder.countdown.end_text" type="text" aria-label="End text" />
                     <input v-model="builder.countdown.end_color" type="color" aria-label="End color" />
                   </div>

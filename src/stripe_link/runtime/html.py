@@ -423,9 +423,12 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     "    .sl-countdown[data-sticky='true']{position:sticky;top:0;z-index:20}",
     "    .sl-countdown[data-transparent='true']{background:color-mix(in srgb,var(--sl-countdown-bg,var(--sl-card)) 82%,transparent)}",
     "    .sl-countdown[data-marquee='true']{overflow:hidden;white-space:nowrap}",
-    "    .sl-countdown[data-marquee='true'] .sl-countdown-content{display:inline-flex;align-items:center;gap:0.8rem;animation:sl-marquee 14s linear infinite}",
+    # Own keyframe name: `sl-marquee` is also defined by the client-logo strip further down, and the later
+    # definition wins — which gave the countdown the logo animation (0 -> -50%), so it restarted from the
+    # middle instead of wrapping off one edge and back in the other.
+    "    .sl-countdown[data-marquee='true'] .sl-countdown-content{display:inline-flex;align-items:center;gap:0.8rem;animation:sl-countdown-marquee 14s linear infinite}",
     "    .sl-countdown time{font-family:var(--sl-font-mono);background:color-mix(in srgb,var(--sl-countdown-text) 16%,transparent);border-radius:0.4rem;padding:0.3rem 0.7rem}",
-    "    @keyframes sl-marquee{from{transform:translateX(100%)}to{transform:translateX(-100%)}}",
+    "    @keyframes sl-countdown-marquee{from{transform:translateX(100%)}to{transform:translateX(-100%)}}",
     "    .sl-brand-label{display:flex;align-items:center;justify-content:center;gap:0.8rem;color:var(--sl-brand-label-text);padding-top:1.6rem}",
     "    .sl-brand-label::before{content:'';width:1rem;height:1rem;border-radius:999px;background:var(--sl-brand-dot);box-shadow:0 0 0.8rem var(--sl-brand-dot)}",
     "    .sl-brand-label p{font-family:var(--sl-font-accent);font-size:1.3rem;font-weight:700;letter-spacing:0.08em;line-height:1.2;text-transform:uppercase;color:var(--sl-brand-label-text)}",
@@ -1821,11 +1824,21 @@ def render_countdown_timer(section: dict[str, Any], page: dict[str, Any]) -> str
     raw_start_color, raw_end_color = countdown_timer_colors(page, section)
     start_color = escape(raw_start_color)
     end_color = escape(raw_end_color)
-    style = f"--sl-countdown-bg:{start_color};background:{start_color}"
+    # Transparent has to win here: an inline background always beats a stylesheet rule, so the option
+    # could never take effect while this was set unconditionally.
+    transparent = bool(section.get("transparent"))
+    style = f"--sl-countdown-bg:{start_color};background:" + ("transparent" if transparent else start_color)
+    # Each banner state can be switched off independently; the section hides itself while the active
+    # state is disabled. Both were emitted by the builder and ignored here.
+    start_enabled = section.get("start_enabled") is not False
+    end_enabled = section.get("end_enabled") is not False
+    start_icon = escape(str(section.get("start_icon") or ""))
+    end_icon = escape(str(section.get("end_icon") or ""))
     return "\n".join([
-        f"    <section class=\"sl-countdown\" data-section-id=\"{escape(str(section.get('id', 'countdown')))}\" data-section-type=\"countdown_timer\" data-duration-minutes=\"{duration}\" data-persistent=\"{str(bool(section.get('persistent'))).lower()}\" data-sticky=\"{str(bool(section.get('sticky'))).lower()}\" data-transparent=\"{str(bool(section.get('transparent'))).lower()}\" data-marquee=\"{str(bool(section.get('marquee'))).lower()}\" data-start-text=\"{label}\" data-end-text=\"{end_text}\" data-start-color=\"{start_color}\" data-end-color=\"{end_color}\" style=\"{style}\">",
+        f"    <section class=\"sl-countdown\" data-section-id=\"{escape(str(section.get('id', 'countdown')))}\" data-section-type=\"countdown_timer\" data-duration-minutes=\"{duration}\" data-persistent=\"{str(bool(section.get('persistent'))).lower()}\" data-sticky=\"{str(bool(section.get('sticky'))).lower()}\" data-transparent=\"{str(transparent).lower()}\" data-marquee=\"{str(bool(section.get('marquee'))).lower()}\" data-start-text=\"{label}\" data-end-text=\"{end_text}\" data-start-icon=\"{start_icon}\" data-end-icon=\"{end_icon}\" data-start-enabled=\"{str(start_enabled).lower()}\" data-end-enabled=\"{str(end_enabled).lower()}\" data-start-color=\"{start_color}\" data-end-color=\"{end_color}\" style=\"{style}\"{'' if start_enabled else ' hidden'}>",
         # aria-live=off: the timer mutates every second; announcing every tick would flood a screen reader.
         "      <span class=\"sl-countdown-content\" aria-live=\"off\">",
+        (f"        <span data-countdown-icon aria-hidden=\"true\">{start_icon}</span>" if start_icon else ""),
         f"        <span data-countdown-label>{label}</span>",
         f"        <time data-countdown-display>{duration}:00</time>" if duration else "",
         "      </span>",
@@ -5237,11 +5250,29 @@ def render_page_interactions_script(page: dict[str, Any]) -> str:
         "        const storageKey = `stripe-link:${pageId}${cdScope}:countdown:${section.dataset.sectionId || 'timer'}`;",
         "        let deadline = Date.now() + duration * 1000;",
         "        let interval = null;",
+        # The stored value carries the duration it was created for. Changing the timer from 15 to 5
+        # minutes previously kept counting down the OLD deadline, and the only way out was to switch
+        # Persist off and on again — which resumed the original value anyway.
+        "        const writeStored = (value) => {",
+        "          try { localStorage.setItem(storageKey, JSON.stringify({ v: value, d: duration })); } catch (e) {}",
+        "        };",
         "        if (persistent) {",
-        "          const stored = localStorage.getItem(storageKey);",
-        "          if (stored === 'expired') deadline = Date.now();",
-        "          else if (stored) deadline = Number(stored) || deadline;",
-        "          else localStorage.setItem(storageKey, String(deadline));",
+        "          let stored = null;",
+        "          try { stored = localStorage.getItem(storageKey); } catch (e) {}",
+        "          let parsed = null;",
+        "          if (stored) {",
+        "            try { parsed = JSON.parse(stored); } catch (e) { parsed = null; }",
+        # Values written before the duration was recorded are plain: a number, or the string 'expired'.
+        "            if (parsed === null || typeof parsed !== 'object') parsed = { v: stored, d: duration };",
+        "          }",
+        # A different duration means the tenant changed the timer: discard and start fresh.
+        "          if (parsed && Number(parsed.d) === duration) {",
+        "            if (parsed.v === 'expired') deadline = Date.now();",
+        "            else if (parsed.v) deadline = Number(parsed.v) || deadline;",
+        "            else writeStored(deadline);",
+        "          } else {",
+        "            writeStored(deadline);",
+        "          }",
         "        }",
         "        const render = () => {",
         "          const remaining = Math.max(0, Math.floor((deadline - Date.now()) / 1000));",
@@ -5249,10 +5280,16 @@ def render_page_interactions_script(page: dict[str, Any]) -> str:
         "          const seconds = String(remaining % 60).padStart(2, '0');",
         "          display.textContent = `${minutes}:${seconds}`;",
         "          if (remaining <= 0) {",
+        # The end banner can be switched off independently: hide rather than swap to the expired state.
+        "            if (section.dataset.endEnabled === 'false') { section.hidden = true; expireDiscounts(); return false; }",
+        "            section.hidden = false;",
         "            if (label) label.textContent = section.dataset.endText || 'Offer expired';",
+        "            const icon = section.querySelector('[data-countdown-icon]');",
+        "            if (icon && section.dataset.endIcon) icon.textContent = section.dataset.endIcon;",
         "            section.style.setProperty('--sl-countdown-bg', section.dataset.endColor || '#ef4444');",
-        "            section.style.background = section.dataset.endColor || '#ef4444';",
-        "            if (persistent) localStorage.setItem(storageKey, 'expired');",
+        # Re-applying a solid colour here would undo Transparent Background the moment the timer expired.
+        "            if (section.dataset.transparent !== 'true') section.style.background = section.dataset.endColor || '#ef4444';",
+        "            if (persistent) writeStored('expired');",
         "            expireDiscounts();",
         # On a funnel step, an expired upsell timer does what a decline does: swap to the downsell in place, or
         # advance to the next step / thank-you (§6, #4). No-op on ordinary pages.

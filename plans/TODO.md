@@ -204,6 +204,20 @@ changes where tenant media lives -- an architectural call, not a feature.
 Not urgent: nothing about the current design blocks either path, and the size ceilings are now
 deploy-time parameters rather than code (b7a0f27 in that repo).
 
+### MEDIUM — icon-picker is an imperative DOM helper, not a Vue component (noted 2026-08-31)
+
+`dashboard/src/icon-picker.js` exports `showIconPicker(current, onPick, title)` — a function that builds
+and tears down its own DOM, called imperatively from templates. Everything else in the dashboard is a
+Vue component. Consequences: no reactivity, no `v-model`, state lives outside Vue, it cannot be styled
+by the app's scoped rules, and each call site passes a callback instead of binding a value.
+
+Convert to a component (`shared/IconPicker.vue`) with `v-model` + a `title` prop, then update every
+call site. Callers today: trust badges, and the countdown start/end icons (wired to the existing helper
+2026-08-31 so the countdown at least matches trust-badge behaviour).
+
+Not urgent — the helper works. It is an architectural inconsistency, and the kind that quietly spreads
+as more icon fields appear.
+
 ### Form Builder — plan plans/FORM_BUILDER.md, 2026-08-30, not built
 
 An EXTENSION of lead capture, not a new subsystem: `lead_capture.fields[]` is already declared,

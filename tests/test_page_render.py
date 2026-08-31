@@ -209,7 +209,11 @@ class PageRenderTests(unittest.TestCase):
         self.assertIn("Get The Bundle - $69.42", html)
         self.assertIn("Terms of Service", html)
         self.assertIn("© 2026 All rights reserved.", html)
-        self.assertIn("localStorage.setItem(storageKey, 'expired')", html)
+        # Persistence now records the DURATION alongside the value, so changing the timer discards a
+        # stale deadline instead of counting down the old one (fixed 2026-08-31).
+        self.assertIn("writeStored('expired')", html)
+        self.assertIn("JSON.stringify({ v: value, d: duration })", html)
+        self.assertIn("Number(parsed.d) === duration", html)
         self.assertIn("expireDiscounts()", html)
         self.assertIn("selectCard(cards.find", html)
 
