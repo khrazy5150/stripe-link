@@ -213,6 +213,17 @@ modal editing is that same form factor with the duplication removed.
   to edit the same thing is the drift shape this codebase keeps hitting.
 - **Adding opens the same modal empty**, with an "Add Section" button. Cancel creates nothing.
 
+## Commit semantics — ADD commits, EDIT is live
+
+- **Adding** opens the modal on a DRAFT that does not exist in the document yet. "Add Section" commits
+  it; Cancel discards it and nothing was created.
+- **Editing** an existing section writes through live, exactly as the inline editors do today, so the
+  preview keeps updating as the tenant types. Closing is just closing.
+
+Deliberately not symmetrical. Live editing is what makes the preview useful, and a modal that batched
+changes until "Save" would make the preview stale for as long as it is open — the thing tenants rely on
+most while composing.
+
 ## Consequences worth stating
 
 - **No more empty cards.** A section exists only once the tenant confirms it, which supersedes the
@@ -228,9 +239,13 @@ modal editing is that same form factor with the duplication removed.
 
 ## Open
 
-- Do the pinned sections (Countdown, Hero) also move to modal editing? Consistency says yes; they are the
-  two the tenant edits most, so it may be worth leaving them expanded above the sequence. Decide when
-  building.
+- ~~Do the pinned sections also move to modal editing?~~ **DECIDED 2026-08-30: yes, Countdown and Hero
+  go modal too.** Not merely for consistency — they are the two with the MOST to configure. Countdown
+  already has several independent settings (duration, start/end copy, start/end icons, per-state
+  toggles), and Hero is due more: whether the H1 sits inside the hero image to save space, and where in
+  the image it sits (centre, lower-left, upper-right…), which is adjacent to the positionable brand
+  overlay in `SOCIALITE_PARITY.md`. Both are exactly the kind of multi-option editing a cramped inline
+  card handles badly and a modal handles well.
 - Automatic PLACEMENT by type ("an FAQ belongs near the bottom") only becomes meaningful once §4a's
   baseline order exists — that is what defines where a type belongs. Until then: new sections land at the
   end of the run, and the tenant drags.
