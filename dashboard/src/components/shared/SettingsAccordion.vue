@@ -33,7 +33,21 @@ defineEmits(["toggle"]);
 .acc-item {
   border: 1px solid var(--line);
   border-radius: var(--radius-md);
-  overflow: hidden;
+  /* NO overflow:hidden. On a grid item that sets the automatic minimum size to ZERO, so a short viewport
+     squeezes the open panel to a sliver instead of letting the modal body scroll — and because it also
+     clips, the content simply disappears. Corners are rounded on the children instead. */
+}
+
+.acc-head {
+  border-radius: calc(var(--radius-md) - 1px);
+}
+
+.acc-item.open .acc-head {
+  border-radius: calc(var(--radius-md) - 1px) calc(var(--radius-md) - 1px) 0 0;
+}
+
+.acc-body {
+  border-radius: 0 0 calc(var(--radius-md) - 1px) calc(var(--radius-md) - 1px);
 }
 
 /* Matches the Post-Checkout steps: the open one is outlined, so the eye finds it without hunting. */

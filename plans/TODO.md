@@ -252,6 +252,37 @@ select/radio must ship WITH that renderer -- an unconstrained choice field is a 
 disguise. Retires `open_form` + `form_id`, which with
 `social_redirect` takes the action vocabulary from seven to five, both by removal.
 
+### ⭐ HIGH — the dashboard is not usable on a phone (found 2026-08-31)
+
+Reported from a real device: from `sandbox.juniorbay.com` on a phone, the menus cannot be navigated to
+reach the landing-page builder at all. Not "awkward" — unreachable.
+
+Scale of the gap: `dashboard/src/styles.css` carries THREE responsive breakpoints (two `max-width:900px`,
+one `max-width:60rem`) and NOTHING below that. The sidebar has no collapsed/drawer state. The dashboard
+was built desktop-first and phone width was never designed for.
+
+Known work:
+  - **Sidebar → drawer.** It is a fixed column today, so on a phone it either eats the screen or the
+    content is unreachable behind it. This is the blocker.
+  - **The builder is inherently two-pane** (form + Live Preview side by side). On a phone that has to
+    become tabbed or stacked — a design decision, not just a media query. Note the preview already has a
+    Desktop/Mobile toggle whose Desktop mode hides the form; that pairing may be the seed of the answer.
+  - **Modals should go full-screen below a phone breakpoint.** Page Settings and the section editor are
+    centred cards sized for a laptop.
+  - **Tap targets and control heights.** The 2026-08-29 density pass tuned everything for a mouse:
+    3.2rem controls and 1.2rem text are fine on a desktop and small on a phone.
+  - **Tables/wide rows** (Orders, Customers, Leads) need a card layout or horizontal scroll containers.
+
+Related symptom already fixed (8994e6d, and the follow-up removing overflow:hidden from the settings
+accordion): at a merely SHORTER viewport the open accordion collapsed to one line and would not scroll,
+because `overflow:hidden` on a grid item sets its automatic minimum size to zero and therefore makes it
+compressible. Expect more of this class — the layout has not been exercised at small sizes, so bugs that
+only appear when space is tight have had nowhere to surface.
+
+Worth deciding early: is the target "a tenant can DO everything on a phone" or "a tenant can CHECK
+things on a phone and edit on a laptop"? Those are very different amounts of work, and the builder is
+the piece that makes the difference.
+
 ### ⭐ HIGH — Builder section order: make the form the page map (plan plans/BUILDER_SECTION_ORDER.md, 2026-08-30)
 
 Invariant to create: THE BUILDER FORM READS TOP-TO-BOTTOM IN THE SAME ORDER THE PAGE RENDERS. cart has
