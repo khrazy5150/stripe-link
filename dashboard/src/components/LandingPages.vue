@@ -1293,6 +1293,7 @@
         </header>
         <!-- Shareable test link for the previewed view. Appears once the page is published (it then has a
              snowflake short_code); the URL tracks the Standard/Sale/Flash-Sale toggle. -->
+        <div class="landing-builder-preview-body">
         <div v-if="testShareLink" class="preview-share-link">
           <span class="preview-share-label">Test link</span>
           <input type="text" readonly :value="testShareLink" @focus="$event.target.select()" />
@@ -1328,6 +1329,7 @@
         <!-- Hidden probe: Advanced Color Settings reads the active preset's effective --preview-* values
              off this element to seed its pickers. It carries the preset classes and nothing else. -->
         <div ref="previewEl" class="landing-live-preview preview-token-probe" :class="[builder.preset]" :style="previewTokenStyle" aria-hidden="true"></div>
+        </div>
       </article>
     </section>
 

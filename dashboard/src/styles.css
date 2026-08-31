@@ -4362,10 +4362,23 @@ button:disabled {
 }
 
 /* The Live Preview iframe holds the server's own render_page() output — the published page, verbatim. */
+/* One flexible column below the header. The card previously had SEVEN children against
+   grid-template-rows: auto minmax(0,1fr), so the iframe landed in an implicit auto row sized by its own
+   min-height — taller than the fixed-height card, whose overflow:hidden then clipped the bottom of the
+   frame and with it the sticky CTA. */
+.landing-builder-preview-body {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
 .landing-live-preview-frame {
   display: block;
   width: 100%;
-  min-height: 64rem;
+  /* Fill whatever the card has left instead of demanding a fixed 64rem. The iframe scrolls its own
+     content, so the page's sticky CTA pins to a bottom edge that is actually visible. */
+  flex: 1;
+  min-height: 0;
   border: 0;
   background: #ffffff;
 }
