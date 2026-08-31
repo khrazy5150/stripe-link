@@ -177,3 +177,60 @@ stored copy can.
   carry a lot of existing behaviour.
 - **Settings need a home that is not a dumping ground.** A collapsed group or a second tab; decide when
   building, with the content sequence as the default view.
+
+
+---
+
+# Phase 2 — compact rows + modal editing
+
+Status: PLANNED, not built. Agreed 2026-08-30, after Phase 1 shipped to sandbox.
+
+## Why Phase 1 is not the end state
+
+Phase 1 made the form read in page order, which was the goal. But the rows are EXPANDED editors, and that
+has two costs:
+
+1. **A long page is metres of form.** Ten sections is ten full editors — accurate, but not scannable. The
+   map property is weakened by the same thing that gave cart's builder its wall-of-form problem.
+2. **Tall cards cannot be dragged.** A testimonials section with 20 items is a ~2000px card. Dragging it
+   means scrolling mid-gesture, which in practice means the drag does not work at all. This is the
+   decisive argument: compact rows are not a tidiness preference, they are what makes reordering
+   physically possible.
+
+The Section order list retired in `b51078e` had the right FORM FACTOR — short rows — and the wrong
+architecture: it was a second surface beside inline editors, so the two could disagree. Compact rows with
+modal editing is that same form factor with the duplication removed.
+
+## The model
+
+    ⠿  Testimonials            3 quotes            Edit   Remove
+    ⠿  Price cards             from the offer
+    ⠿  FAQ                     2 questions         Edit   Remove
+    🔒 Footer                  generated
+
+- Each row: handle, name, a one-line summary of its contents, Edit, Remove.
+- **Editing happens in a modal, and ONLY in a modal.** One surface. No inline/modal split — two places
+  to edit the same thing is the drift shape this codebase keeps hitting.
+- **Adding opens the same modal empty**, with an "Add Section" button. Cancel creates nothing.
+
+## Consequences worth stating
+
+- **No more empty cards.** A section exists only once the tenant confirms it, which supersedes the
+  builder.elements-sourced rows added in `6ce24e1` — that fix existed to make empty elements visible, and
+  empty elements stop existing.
+- **Applies to the fixed-position sections too** — Trust Badges, Refund Policy, Call to Action edit
+  inline today. Leaving them inline while elements go modal would rebuild the mixed model this is meant
+  to remove.
+- **The summary line carries real weight.** "3 quotes" / "2 questions" / "from the offer" is what makes a
+  collapsed row worth scanning; without it the map is a list of type names.
+- **Cost: every edit is a click away.** Real, and accepted — at-a-glance editing is what makes the
+  sequence unscannable and undraggable.
+
+## Open
+
+- Do the pinned sections (Countdown, Hero) also move to modal editing? Consistency says yes; they are the
+  two the tenant edits most, so it may be worth leaving them expanded above the sequence. Decide when
+  building.
+- Automatic PLACEMENT by type ("an FAQ belongs near the bottom") only becomes meaningful once §4a's
+  baseline order exists — that is what defines where a type belongs. Until then: new sections land at the
+  end of the run, and the tenant drags.

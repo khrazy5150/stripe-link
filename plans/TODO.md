@@ -264,6 +264,13 @@ unset, never stored twice.
 
 Replaces both earlier attempts. Reshapes the most-used screen, so sandbox-soak before prod.
 
+PHASE 2 (agreed 2026-08-30, not built): compact rows + MODAL editing. Phase 1's rows are expanded
+editors, which leaves a long page as metres of form and -- decisively -- makes tall cards undraggable: a
+testimonials section with 20 items is a ~2000px card you cannot drag without scrolling mid-gesture. Rows
+become handle/name/summary/Edit/Remove; editing happens in a modal and ONLY there, so there is no
+inline-vs-modal split. Adding opens the same modal empty, so Cancel creates nothing and empty cards stop
+existing (superseding 6ce24e1).
+
 ### ⭐ HIGH — Social Media Pages (link-in-bio) — plan plans/SOCIAL_MEDIA_PAGES.md, 2026-08-30, not built
 
 The "Social page" lead-capture action was a placeholder for this and is currently WRONG:
