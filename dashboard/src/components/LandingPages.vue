@@ -1431,7 +1431,7 @@
 <script setup>
 import { computed, onMounted, reactive, ref, watch } from "vue";
 import { offerViewTargets, offerViewTargetsFromExpanded } from "../composables/useConversionContext";
-import { isSectionVisible, defaultVisible, recommendedSectionKeys, optionalSectionKeys, governedKeys, elementLabel, elementChannel, addableElements, tokenGroups, previewVar, supportedGoals, goalLabel, packSeeds, orderSections, sectionOrderKey, isMovable, elementPlacement } from "../composables/pageComposer";
+import { isSectionVisible, defaultVisible, recommendedSectionKeys, optionalSectionKeys, governedKeys, elementLabel, elementChannel, addableElements, tokenGroups, previewVar, supportedGoals, goalLabel, packSeeds, orderSections, sectionOrderKey, isMovable, elementPlacement, orderSectionKeys } from "../composables/pageComposer";
 import { apiRequest, assetUrl, getApiBase, getStripeMode, getOtherEnvironment, getPagesBaseUrl, getPreviewPagesBaseUrl, getTestPagesHost, getTenantId } from "../api/client";
 import { formatMoney } from "../stores/products";
 import PurchaseFlowDiagram from "./PurchaseFlowDiagram.vue";
@@ -3759,8 +3759,27 @@ const contentRows = computed(() => {
       movable: isMovable(type),
     });
   }
+  // A section the tenant has EMPTIED stops being emitted — turn every trust badge off and the section
+  // vanishes from the page. Its editor must survive that, or there is no way to switch them back on.
+  // The row's presence follows whether the section is ENABLED, never whether it currently renders.
+  for (const type of RESTORABLE_SECTIONS) {
+    if (!sectionVisible(type) || rows.some((row) => row.type === type)) continue;
+    rows.push({
+      key: type,
+      type,
+      label: elementLabel(type),
+      editor: SECTION_EDITORS[type],
+      element: null,
+      movable: isMovable(type),
+      empty: true,
+    });
+  }
   return rows;
 });
+
+// Sections whose content the tenant can empty AND restore. Not refund_policy: when the offer carries no
+// policy copy there is nothing a tenant can do from here, so an editor would be a dead control.
+const RESTORABLE_SECTIONS = ["trust_badges"];
 
 // An element row is one of the tenant-added cards, which already have their own editors.
 function isElementType(type) {
@@ -3770,10 +3789,16 @@ function isElementType(type) {
 // The draggable run only. Fixed sections are static markup in their correct places (countdown + hero
 // above, footer below), so the form still reads top-to-bottom as the page does without duplicating them
 // here. Element cards are excluded for now — their editors still live in the Page Sections panel.
-const sequenceRows = computed(() => contentRows.value.filter((row) => row.movable && row.editor !== "element"));
+const sequenceRows = computed(() => {
+  const rows = contentRows.value.filter((row) => row.movable && row.editor !== "element");
+  // Rows added for emptied sections skip builderSections(), so apply the ordering here too.
+  const order = orderSectionKeys(rows.map((row) => row.type), builder.section_order || []);
+  return [...rows].sort((a, b) => order.indexOf(a.type) - order.indexOf(b.type));
+});
 
 // Sections with no editor still earn a row: a tenant needs to see WHERE they land, even with nothing to set.
 function rowNote(row) {
+  if (row.empty) return "Nothing is showing on the page yet — switch one on below.";
   if (row.type === "offer_price_selector") return "Prices and options come from the offer.";
   if (row.type === "related_products") return "Chosen automatically from your catalog.";
   return "Nothing to configure — this section is generated.";
