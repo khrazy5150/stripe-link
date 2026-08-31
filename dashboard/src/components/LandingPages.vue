@@ -1030,7 +1030,7 @@
       </section>
     </div>
 
-    <section v-if="builderOpen" class="landing-builder-shell" :class="{ 'preview-only': builderFormHidden }">
+    <section v-if="builderOpen" class="landing-builder-shell" :class="[{ 'preview-only': builderFormHidden }, `preview-${previewDevice}`]">
       <article v-if="!builderFormHidden" class="dashboard-card landing-builder-form-card">
         <header class="dashboard-card-header landing-builder-header">
           <div>
@@ -1360,6 +1360,19 @@
               <button
                 type="button"
                 class="preview-device-btn"
+                :class="{ active: previewDevice === 'tablet' }"
+                aria-label="Tablet preview"
+                title="Tablet"
+                @click="setPreviewDevice('tablet')"
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <rect x="4" y="2.5" width="16" height="19" rx="2" />
+                  <path d="M10.5 18.5h3" />
+                </svg>
+              </button>
+              <button
+                type="button"
+                class="preview-device-btn"
                 :class="{ active: previewDevice === 'mobile' }"
                 aria-label="Mobile preview"
                 title="Mobile"
@@ -1407,7 +1420,6 @@
           ref="previewFrame"
           class="landing-live-preview-frame"
           :class="previewDevice"
-            :style="previewFrameStyle"
           :srcdoc="previewHtml"
           title="Live preview"
           sandbox="allow-scripts allow-same-origin"
@@ -1638,36 +1650,12 @@ const marqueeSpeedSlider = computed({
 
 const previewDevice = ref("mobile");
 
-// Mobile preview fills the pane WITHOUT becoming a desktop viewport. The frame keeps a real phone width
-// so the page's max-width:700px rules still apply, and zoom (not transform) scales it up — zoom
-// magnifies the rendering rather than stretching a bitmap, so text stays crisp and the layout stays
-// mobile. Sizing the frame to 100% instead would give it a ~750px viewport and render the DESKTOP
-// layout under a Mobile label.
-const MOBILE_PREVIEW_WIDTH = 390;
-const previewPane = ref(null);
-const mobileZoom = ref(1);
-
-function measureMobileZoom() {
-  const width = previewPane.value?.clientWidth || 0;
-  mobileZoom.value = width ? Math.max(1, width / MOBILE_PREVIEW_WIDTH) : 1;
-}
-
-const previewFrameStyle = computed(() => (previewDevice.value === "mobile"
-  ? { width: `${MOBILE_PREVIEW_WIDTH}px`, zoom: mobileZoom.value }
-  : {}));
-
-onMounted(() => {
-  measureMobileZoom();
-  if (typeof ResizeObserver !== "undefined" && previewPane.value) {
-    new ResizeObserver(measureMobileZoom).observe(previewPane.value);
-  } else {
-    window.addEventListener("resize", measureMobileZoom);
-  }
-});
 
 // Desktop preview and the form are mutually exclusive — one control, one honest state.
 function setPreviewDevice(device) {
   previewDevice.value = device;
+  // Only DESKTOP needs the form out of the way — a desktop layout cannot be shown honestly in a pane.
+  // Mobile and tablet panes are their real device width, so the form stays.
   builderFormHidden.value = device === "desktop";
 }
 
@@ -1676,7 +1664,9 @@ function setPreviewDevice(device) {
 // form means the preview panel is narrower than the page's 700px breakpoint, so desktop cannot be
 // shown honestly there.
 watch(builderFormHidden, (hidden) => {
-  if (!hidden) previewDevice.value = "mobile";
+  // Only DESKTOP is impossible with the form up; tablet and mobile panes are real device widths, so a
+  // tablet choice survives showing the form again.
+  if (!hidden && previewDevice.value === "desktop") previewDevice.value = "mobile";
 });
 
 // Bringing the form back returns the preview to mobile; a desktop preview in the narrow panel would be

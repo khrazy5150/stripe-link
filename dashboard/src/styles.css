@@ -3693,10 +3693,20 @@ button:disabled {
 
 .landing-builder-shell {
   --landing-builder-pane-height: calc(100vh - 22rem);
+  /* The preview pane is the WIDTH OF THE DEVICE, and the form takes whatever is left. A fixed 50/50
+     share left the phone floating in empty space, and any percentage split drifts with the window —
+     30% is phone-ish at 1440 and tablet-ish at 1920. Sizing the pane to the device instead means there
+     is nothing to waste, no zoom, and "Mobile" is honest at every window size. */
+  --preview-pane-width: 42rem;
   display: grid;
-  grid-template-columns: minmax(42rem, 1fr) minmax(38rem, 1.05fr);
+  grid-template-columns: minmax(42rem, 1fr) var(--preview-pane-width);
   gap: 2rem;
   align-items: start;
+}
+
+/* Tablet: a real 768px viewport, which is also roughly what the old fixed share happened to be. */
+.landing-builder-shell.preview-tablet {
+  --preview-pane-width: 78rem;
 }
 
 .landing-builder-shell.preview-only {
