@@ -238,6 +238,23 @@ select/radio must ship WITH that renderer -- an unconstrained choice field is a 
 disguise. Retires `open_form` + `form_id`, which with
 `social_redirect` takes the action vocabulary from seven to five, both by removal.
 
+### ⭐ HIGH — Builder section order: make the form the page map (plan plans/BUILDER_SECTION_ORDER.md, 2026-08-30)
+
+Invariant to create: THE BUILDER FORM READS TOP-TO-BOTTOM IN THE SAME ORDER THE PAGE RENDERS. cart has
+this; link does not, and two attempts to bolt ordering on without it both shipped and both are wrong --
+the Section order list (4f1fe07) is correct but invisible, and the form-block handles (e5428e3) are a
+ghost drag where the page reorders but the dragged block does not move.
+
+Three groups, not two: SETTINGS (favicon/theme/colours/SEO/analytics -- not sections at all, no
+position), FIXED SECTIONS (countdown, hero+H1, footer), DRAGGABLE (everything else incl. element cards,
+index 0 = first after hero). Maps onto the placement bands already shipped in 6f2676d. Settings are
+currently INTERLEAVED with sections, which is much of why order is unreadable.
+
+Also re-phrases the semantic rule: "the FIRST pinned_top section carries the H1 and is the LCP element",
+not "the hero does" -- a heroless quiz page (FORM_BUILDER §4a) must still have a defined H1 owner.
+
+Replaces both earlier attempts. Reshapes the most-used screen, so sandbox-soak before prod.
+
 ### ⭐ HIGH — Social Media Pages (link-in-bio) — plan plans/SOCIAL_MEDIA_PAGES.md, 2026-08-30, not built
 
 The "Social page" lead-capture action was a placeholder for this and is currently WRONG:
