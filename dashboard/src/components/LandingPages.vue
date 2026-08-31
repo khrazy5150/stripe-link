@@ -1468,7 +1468,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, reactive, ref, watch } from "vue";
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 import { offerViewTargets, offerViewTargetsFromExpanded } from "../composables/useConversionContext";
 import { isSectionVisible, defaultVisible, recommendedSectionKeys, optionalSectionKeys, governedKeys, elementLabel, elementChannel, addableElements, tokenGroups, previewVar, supportedGoals, goalLabel, packSeeds, orderSections, sectionOrderKey, isMovable, elementPlacement, orderSectionKeys, isRepeatableSection } from "../composables/pageComposer";
 import { apiRequest, assetUrl, getApiBase, getStripeMode, getOtherEnvironment, getPagesBaseUrl, getPreviewPagesBaseUrl, getTestPagesHost, getTenantId } from "../api/client";
@@ -1529,6 +1529,32 @@ const servicesLoading = ref(false);
 const saving = ref(false);
 const error = ref("");
 const message = ref("");
+
+// The save confirmation clears itself so it stops holding space once it has been read; the ✕ is still
+// there for anyone who wants it gone sooner. An ERROR never auto-clears — something went wrong, and the
+// tenant decides when they are done reading it.
+const MESSAGE_AUTO_DISMISS_MS = 15000;
+let messageDismissTimer = null;
+
+function clearMessageTimer() {
+  if (messageDismissTimer) {
+    window.clearTimeout(messageDismissTimer);
+    messageDismissTimer = null;
+  }
+}
+
+watch(message, (value) => {
+  // Restart on every new message, so a second save gets its own full 15s rather than inheriting the
+  // remainder of the first one's.
+  clearMessageTimer();
+  if (!value) return;
+  messageDismissTimer = window.setTimeout(() => {
+    messageDismissTimer = null;
+    message.value = "";
+  }, MESSAGE_AUTO_DISMISS_MS);
+});
+
+onBeforeUnmount(clearMessageTimer);
 const wizardError = ref("");
 const wizardOpen = ref(false);
 const wizardStep = ref(1);
