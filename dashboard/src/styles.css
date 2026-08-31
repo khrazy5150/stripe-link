@@ -4362,10 +4362,6 @@ button:disabled {
 }
 
 /* The Live Preview iframe holds the server's own render_page() output — the published page, verbatim. */
-.landing-live-preview-viewport {
-  overflow: hidden;   /* the zoomed frame is laid out at 1280px; clip anything the panel cannot show */
-}
-
 .landing-live-preview-frame {
   display: block;
   width: 100%;

@@ -581,7 +581,7 @@
             <h2>{{ builderExistingPageId ? "Edit Landing Page" : "Create Landing Page" }}</h2>
             <p>{{ builder.offerName || "Configure the page before saving." }}</p>
           </div>
-          <button class="secondary-action compact" type="button" @click="builderFormHidden = !builderFormHidden">
+          <button class="secondary-action compact" type="button" @click="toggleBuilderForm()">
             {{ builderFormHidden ? "Show Form" : "‹‹ Hide Form" }}
           </button>
         </header>
@@ -1273,7 +1273,7 @@
               <span>{{ activeFunnelStepLabel }}</span>
               <button type="button" title="Back to the landing page" @click="openFunnelStep = null">✕</button>
             </div>
-            <button v-if="builderFormHidden" class="secondary-action compact" type="button" @click="builderFormHidden = false">
+            <button v-if="builderFormHidden" class="secondary-action compact" type="button" @click="showBuilderForm()">
               Show Form
             </button>
             <div v-if="previewContextOptions.length > 1" class="preview-device-controls" aria-label="Preview pricing view">
@@ -1286,8 +1286,8 @@
               >{{ opt.label }}</button>
             </div>
             <div class="preview-device-controls" aria-label="Preview device">
-              <button type="button" :class="{ active: previewDevice === 'desktop' }" @click="previewDevice = 'desktop'">Desktop</button>
-              <button type="button" :class="{ active: previewDevice === 'mobile' }" @click="previewDevice = 'mobile'">Mobile</button>
+              <button type="button" :class="{ active: previewDevice === 'desktop' }" title="Shows the full-width desktop layout — hides the form to make room" @click="setPreviewDevice('desktop')">Desktop</button>
+              <button type="button" :class="{ active: previewDevice === 'mobile' }" @click="setPreviewDevice('mobile')">Mobile</button>
             </div>
           </div>
         </header>
@@ -1312,23 +1312,16 @@
             <li v-for="(warning, i) in pageHealthWarnings" :key="i">{{ warning }}</li>
           </ul>
         </div>
-        <!-- Desktop preview renders at a REAL desktop width and is zoomed down to fit. Sizing the frame
-             to the panel instead made it narrower than the page's 700px breakpoint, so "Desktop" was
-             quietly showing the mobile layout — content blocks stacked here but two-column when
-             published. Zoom (not transform) because it affects layout, so the frame's height still
-             reserves the right space. -->
-        <div v-show="previewHtml" ref="previewViewport" class="landing-live-preview-viewport">
-          <iframe
-            ref="previewFrame"
-            class="landing-live-preview-frame"
-            :class="previewDevice"
-            :style="previewFrameStyle"
-            :srcdoc="previewHtml"
-            title="Live preview"
-            sandbox="allow-scripts allow-same-origin"
-            @load="restorePreviewScroll"
-          ></iframe>
-        </div>
+        <iframe
+          v-show="previewHtml"
+          ref="previewFrame"
+          class="landing-live-preview-frame"
+          :class="previewDevice"
+          :srcdoc="previewHtml"
+          title="Live preview"
+          sandbox="allow-scripts allow-same-origin"
+          @load="restorePreviewScroll"
+        ></iframe>
         <p v-if="!previewHtml && !previewError" class="landing-live-preview-status">
           {{ builder.offer_id ? "Rendering preview..." : "Select an offer to see the preview." }}
         </p>
@@ -1506,32 +1499,37 @@ const builderOpen = ref(false);
 const builderFormHidden = ref(false);
 const builderExistingPageId = ref("");
 const builderOriginalPage = ref(null);
-const previewDevice = ref("desktop");
+// Mobile by default, because it is the only layout the side-by-side panel can show HONESTLY: the panel
+// is narrower than the published page's 700px breakpoint, so a "Desktop" preview beside the form would
+// be rendering the mobile layout under a desktop label. Choosing Desktop hides the form and gives the
+// preview the full width, which is a real desktop viewport (see setPreviewDevice).
+const previewDevice = ref("mobile");
 
-// The width a "Desktop" preview must lay out at. Anything under the published page's 700px breakpoint
-// renders the mobile layout, which is what made the preview disagree with the published page.
-const DESKTOP_PREVIEW_WIDTH = 1280;
-const previewViewport = ref(null);
-const previewZoom = ref(1);
-
-function measurePreviewZoom() {
-  const width = previewViewport.value?.clientWidth || 0;
-  previewZoom.value = width ? Math.min(1, width / DESKTOP_PREVIEW_WIDTH) : 1;
+// Desktop preview and the form are mutually exclusive — one control, one honest state.
+function setPreviewDevice(device) {
+  previewDevice.value = device;
+  builderFormHidden.value = device === "desktop";
 }
 
-// Mobile mode keeps its own narrow width and no zoom — it is already showing the layout it claims to.
-const previewFrameStyle = computed(() => (previewDevice.value === "mobile"
-  ? {}
-  : { width: `${DESKTOP_PREVIEW_WIDTH}px`, zoom: previewZoom.value }));
-
-onMounted(() => {
-  measurePreviewZoom();
-  if (typeof ResizeObserver !== "undefined" && previewViewport.value) {
-    new ResizeObserver(measurePreviewZoom).observe(previewViewport.value);
-  } else {
-    window.addEventListener("resize", measurePreviewZoom);
-  }
+// The pairing is an INVARIANT, enforced once rather than remembered at each of the four places that
+// reveal the form (Show Form, closing the builder, opening a page, the funnel-step exit). A visible
+// form means the preview panel is narrower than the page's 700px breakpoint, so desktop cannot be
+// shown honestly there.
+watch(builderFormHidden, (hidden) => {
+  if (!hidden) previewDevice.value = "mobile";
 });
+
+// Bringing the form back returns the preview to mobile; a desktop preview in the narrow panel would be
+// mislabelled again the moment the form reappears.
+function showBuilderForm() {
+  builderFormHidden.value = false;
+}
+
+// Hiding the form on its own leaves the device alone — someone may want a bigger MOBILE preview.
+function toggleBuilderForm() {
+  if (builderFormHidden.value) showBuilderForm();
+  else builderFormHidden.value = true;
+}
 const faviconFileInput = ref(null);
 const heroFileInput = ref(null);
 const avatarFileInput = ref(null);
