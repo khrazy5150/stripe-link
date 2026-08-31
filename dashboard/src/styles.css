@@ -4214,6 +4214,26 @@ button:disabled {
   padding: 0.7rem 1rem;
 }
 
+/* Slow-to-fast slider: the icons are the scale, so no numbers are shown. */
+.builder-speed-row {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.builder-speed-row input[type="range"] {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  padding: 0;
+  accent-color: var(--accent);
+}
+
+.builder-speed-row span {
+  font-size: 1.6rem;
+  line-height: 1;
+}
+
 .content-section.is-locked {
   border-style: dashed;
   background: transparent;

@@ -245,12 +245,18 @@
                   </label>
                   <label v-if="builder.countdown.marquee" class="offer-field">
                     <span>Scroll Speed</span>
-                    <select v-model.number="builder.countdown.marquee_seconds">
-                      <option :value="24">Slow</option>
-                      <option :value="14">Normal</option>
-                      <option :value="8">Fast</option>
-                      <option :value="5">Very fast</option>
-                    </select>
+                    <div class="builder-speed-row">
+                      <span aria-hidden="true" title="Slower">🐢</span>
+                      <input
+                        v-model.number="marqueeSpeedSlider"
+                        type="range"
+                        :min="MARQUEE_MIN_SECONDS"
+                        :max="MARQUEE_MAX_SECONDS"
+                        step="1"
+                        aria-label="Marquee scroll speed"
+                      />
+                      <span aria-hidden="true" title="Faster">🐇</span>
+                    </div>
                   </label>
                   <div class="builder-countdown-row">
                     <label class="builder-toggle">
@@ -1523,6 +1529,18 @@ const builderOriginalPage = ref(null);
 // is narrower than the published page's 700px breakpoint, so a "Desktop" preview beside the form would
 // be rendering the mobile layout under a desktop label. Choosing Desktop hides the form and gives the
 // preview the full width, which is a real desktop viewport (see setPreviewDevice).
+// Marquee speed. The renderer takes a DURATION (bigger = slower), but the slider reads left-to-right as
+// slow -> fast, so the bound value is the duration inverted about the range. Turtle at the low end,
+// hare at the high end, and the tenant never sees seconds.
+const MARQUEE_MIN_SECONDS = 5;
+const MARQUEE_MAX_SECONDS = 24;
+const marqueeSpeedSlider = computed({
+  get: () => MARQUEE_MIN_SECONDS + MARQUEE_MAX_SECONDS - (Number(builder.countdown.marquee_seconds) || 14),
+  set: (value) => {
+    builder.countdown.marquee_seconds = MARQUEE_MIN_SECONDS + MARQUEE_MAX_SECONDS - Number(value);
+  },
+});
+
 const previewDevice = ref("mobile");
 
 // Desktop preview and the form are mutually exclusive — one control, one honest state.

@@ -423,7 +423,7 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     # display:flex above beats the hidden attribute's UA display:none, which made Banner Start inert.
     "    .sl-countdown[hidden]{display:none}",
     "    .sl-countdown[data-sticky='true']{position:sticky;top:0;z-index:20}",
-    "    .sl-countdown[data-transparent='true']{background:color-mix(in srgb,var(--sl-countdown-bg,var(--sl-card)) 65%,transparent)}",
+    "    .sl-countdown[data-transparent='true']{background:color-mix(in srgb,var(--sl-countdown-bg,var(--sl-card)) 85%,transparent)}",
     "    .sl-countdown[data-marquee='true']{overflow:hidden;white-space:nowrap}",
     # Own keyframe name: `sl-marquee` is also defined by the client-logo strip further down, and the later
     # definition wins — which gave the countdown the logo animation (0 -> -50%), so it restarted from the
