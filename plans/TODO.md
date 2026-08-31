@@ -252,7 +252,7 @@ select/radio must ship WITH that renderer -- an unconstrained choice field is a 
 disguise. Retires `open_form` + `form_id`, which with
 `social_redirect` takes the action vocabulary from seven to five, both by removal.
 
-### ⭐ HIGH — the dashboard is not usable on a phone (found 2026-08-31)
+### ⭐ HIGH — the dashboard is not usable on a phone (found 2026-08-31, plan plans/MOBILE_EDITING.md)
 
 Reported from a real device: from `sandbox.juniorbay.com` on a phone, the menus cannot be navigated to
 reach the landing-page builder at all. Not "awkward" — unreachable.
