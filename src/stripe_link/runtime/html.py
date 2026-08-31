@@ -571,10 +571,17 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     "    .sl-booking-banner.is-error{color:#dc2626}",
     "    .sl-section-heading{font-family:var(--sl-font-heading);font-weight:800;font-size:2.4rem;text-align:center;color:var(--sl-content-heading);margin-bottom:1.6rem}",
     "    .sl-testimonials{display:grid;gap:1.4rem}",
-    "    .sl-testimonial{display:grid;gap:0.8rem;background:var(--sl-card);border:1px solid var(--sl-content-border);border-radius:1.2rem;padding:1.6rem;margin:0}",
-    "    .sl-testimonial img{width:5.6rem;height:5.6rem;border-radius:50%;object-fit:cover}",
-    "    .sl-testimonial blockquote{margin:0;font-size:1.6rem;line-height:1.5;color:var(--sl-content-text)}",
-    "    .sl-testimonial figcaption{font-size:1.4rem;color:var(--sl-muted)}",
+    # Quote-led card: an oversized accent quote mark, the quote as the largest thing in it, and the
+    # avatar to one side. Every colour is a theme token, so it re-skins with the preset instead of
+    # carrying a palette of its own.
+    "    .sl-testimonial{position:relative;display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:1.8rem;background:var(--sl-card);border:1px solid var(--sl-content-border);border-radius:1.6rem;padding:2rem 2rem 2rem 4.6rem;margin:0}",
+    "    .sl-testimonial::before{content:'\\201C';position:absolute;left:1.4rem;top:0.4rem;font-family:var(--sl-font-heading);font-size:5.2rem;line-height:1;color:var(--sl-accent);opacity:0.32;pointer-events:none}",
+    "    .sl-testimonial-body{display:grid;gap:1.2rem;min-width:0}",
+    "    .sl-testimonial img{width:7.2rem;height:7.2rem;border-radius:50%;object-fit:cover;box-shadow:0 0 0 0.3rem var(--sl-card),0 0 0 0.5rem var(--sl-accent)}",
+    "    .sl-testimonial blockquote{margin:0;font-size:1.8rem;line-height:1.55;color:var(--sl-content-text)}",
+    "    .sl-testimonial figcaption{display:flex;align-items:center;flex-wrap:wrap;gap:0.9rem;font-size:1.4rem;color:var(--sl-muted)}",
+    "    .sl-testimonial figcaption strong{color:var(--sl-text);font-weight:700}",
+    "    .sl-testimonial-sep{width:1px;height:1.4rem;background:var(--sl-content-border)}",
     "    .sl-rating{display:flex;flex-direction:column;align-items:center;gap:0.4rem}",
     "    .sl-rating-stars{color:#f59e0b;font-size:2.4rem;letter-spacing:0.2rem}",
     "    .sl-rating-meta{font-size:1.4rem;color:var(--sl-content-text)}",
@@ -718,7 +725,7 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     "    .sl-footernav ul{list-style:none;display:flex;flex-wrap:wrap;justify-content:center;gap:1.4rem;padding:0;margin:0}",
     "    .sl-footernav a{color:var(--sl-legal-link);text-decoration:none;font-size:1.3rem}",
     "    .sl-footernav a:hover{text-decoration:underline}",
-    "    @media (max-width: 700px){.sl-price-option{grid-template-columns:8.8rem minmax(0,1fr) 2.4rem;gap:1rem;padding:1.2rem}.sl-price-option img{width:8.8rem}.sl-content-block{grid-template-columns:1fr}.sl-headline h1{font-size:3rem}}",
+    "    @media (max-width: 700px){.sl-price-option{grid-template-columns:8.8rem minmax(0,1fr) 2.4rem;gap:1rem;padding:1.2rem}.sl-price-option img{width:8.8rem}.sl-content-block{grid-template-columns:1fr}.sl-headline h1{font-size:3rem}.sl-testimonial{grid-template-columns:1fr;padding:1.8rem 1.6rem 1.8rem 3.8rem}.sl-testimonial img{width:5.6rem;height:5.6rem;order:-1}.sl-testimonial blockquote{font-size:1.6rem}}",
 ]
 
 TEMPLATE_STYLES = {
@@ -3827,12 +3834,18 @@ def render_testimonials(section: dict[str, Any]) -> str:
         author = str(item.get("author") or "").strip()
         role = str(item.get("role") or "").strip()
         avatar_url = str(item.get("avatar_url") or "").strip()
-        byline = " · ".join(part for part in [f"<strong>{escape(author)}</strong>" if author else "", escape(role) if role else ""] if part)
+        byline = "<span class=\"sl-testimonial-sep\" aria-hidden=\"true\"></span>".join(
+            part for part in [f"<strong>{escape(author)}</strong>" if author else "", escape(role) if role else ""] if part
+        )
         cards.append("\n".join(line for line in [
             "      <figure class=\"sl-testimonial\">",
+            "        <div class=\"sl-testimonial-body\">",
+            f"          <blockquote>{escape(quote)}</blockquote>",
+            (f"          <figcaption>{byline}</figcaption>" if byline else ""),
+            "        </div>",
+            # Avatar LAST in source so it sits on the right on desktop; CSS reorders it above the quote
+            # on narrow screens, where a side-by-side split would squeeze the quote to a column of words.
             (f"        {responsive_img(avatar_url, author or 'Reviewer', sizes=CONTENT_BLOCK_SIZES)}" if avatar_url else ""),
-            f"        <blockquote>{escape(quote)}</blockquote>",
-            (f"        <figcaption>{byline}</figcaption>" if byline else ""),
             "      </figure>",
         ] if line))
     if not cards:
