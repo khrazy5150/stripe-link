@@ -2015,10 +2015,15 @@ async function renderPreview() {
     // before the identical-HTML early return below, or a no-op re-render would leave them stale.
     structuredDataWarnings.value = body?.warnings?.structured_data || [];
     pageHealthWarnings.value = body?.warnings?.page_health || [];
+    // Clear the error HERE, above the identical-HTML early return — same reason the warnings are
+    // captured here. A render that now SUCCEEDS but produces the same bytes would otherwise leave a
+    // stale failure on screen: enabling a flash sale fails, setting its end date fixes it, but the
+    // standard preview is unchanged (flash pricing only shows in the /flash-sale context), so the
+    // banner never went away.
+    previewError.value = "";
     if (html === previewHtml.value) return;  // nothing changed: don't reload and lose the scroll position
     capturePreviewScroll();
     previewHtml.value = html;
-    previewError.value = "";
   } catch (err) {
     if (seq !== previewRenderSeq) return;
     previewError.value = err.message || "Preview render failed.";
