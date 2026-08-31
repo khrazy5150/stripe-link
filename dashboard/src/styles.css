@@ -1967,12 +1967,34 @@ button:disabled {
 }
 
 .keys-status-banner {
+  display: flex;
+  align-items: center;
+  gap: 1.2rem;
   border: 1px solid #bfdbfe;
   border-radius: var(--radius-md);
   background: #eff6ff;
   color: #1d4ed8;
   padding: 1.4rem 1.6rem;
   font-weight: 800;
+}
+
+/* Dismiss. Inherits the banner's colour so it reads correctly in every severity rather than needing a
+   variant per state. */
+.status-banner-dismiss {
+  margin-left: auto;
+  flex: 0 0 auto;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  opacity: 0.65;
+  font-size: 1.3rem;
+  line-height: 1;
+  padding: 0.2rem 0.4rem;
+}
+
+.status-banner-dismiss:hover {
+  opacity: 1;
 }
 
 .keys-status-banner.success {

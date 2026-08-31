@@ -869,8 +869,14 @@
           </button>
         </header>
 
-        <div v-if="error" class="keys-status-banner error landing-builder-status">{{ error }}</div>
-        <div v-else-if="message" class="keys-status-banner landing-builder-status">{{ message }}</div>
+        <div v-if="error" class="keys-status-banner error landing-builder-status">
+          <span>{{ error }}</span>
+          <button type="button" class="status-banner-dismiss" aria-label="Dismiss" @click="error = ''">✕</button>
+        </div>
+        <div v-else-if="message" class="keys-status-banner landing-builder-status">
+          <span>{{ message }}</span>
+          <button type="button" class="status-banner-dismiss" aria-label="Dismiss" @click="message = ''">✕</button>
+        </div>
 
         <div v-if="!builderFormHidden" class="landing-builder-body">
           <div v-if="isBuilderPublished" class="keys-status-banner warning">
