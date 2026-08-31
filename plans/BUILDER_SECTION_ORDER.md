@@ -151,11 +151,20 @@ references: `product_intent` (lead_gen wants a wholly different sequence), price
 more proof before the ask), service vs product. A derived default costs nothing and cannot drift; a
 stored copy can.
 
-## 5. What this replaces
+## 5. What this replaces — DONE
 
-- **Remove** the drag handles on form blocks (`e5428e3`) — they are the ghost drag.
-- **Retire** the separate Section order list (`4f1fe07`) once the form itself is the map. Keep it until
-  then; it is currently the only complete view.
+- **Removed** the drag handles on form blocks (`e5428e3`) — the ghost drag. Superseded when the blocks
+  moved into the sequence (`04ad2e8`).
+- **Retired** the separate Section order list (`4f1fe07`). The form is the map now, and a second view of
+  the same thing only drifts.
+- **KEPT: the Page Sections checkboxes.** Not redundant with the sequence, for two reasons. They are the
+  only surface that shows sections which are currently OFF — the sequence renders only what is on, so
+  without the roster a disabled section would be unreachable, the same dead end as an emptied
+  trust-badges block. And a compact list of booleans is the right target for bulk and programmatic
+  edits: AI page-generation can flip a set of sections declaratively instead of walking a spatial drag
+  sequence item by item. Correct placement falls out of the three-group model — "which sections exist"
+  is configuration and sits below the Settings divider; "what order they are in" is content and sits
+  above it.
 - **Keep** `placement` in `composition_rules.json` and `order_section_keys` / `orderSections` — the
   ordering model is right, only its surface is wrong.
 - **Keep** deriving order from `page.sections` rather than storing a parallel array. No schema change.

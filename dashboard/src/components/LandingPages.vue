@@ -1009,26 +1009,6 @@
                 </span>
               </label>
             </div>
-            <div class="composition-subhead">Section order</div>
-            <small>Drag to reorder. The hero stays at the top — it's the first thing visitors see and the
-              image the page is measured on — and the legal footer stays last.</small>
-            <div class="section-order-list">
-              <div
-                v-for="(section, index) in orderedSectionRows"
-                :key="section.key"
-                class="section-order-row"
-                :class="{ 'is-locked': !section.movable }"
-                :draggable="section.movable"
-                @dragstart="onSectionDragStart(index)"
-                @dragover.prevent
-                @drop="onSectionDrop(index)"
-              >
-                <span class="section-order-handle" :title="section.movable ? 'Drag to reorder' : 'Fixed position'">
-                  {{ section.movable ? "⠿" : "🔒" }}
-                </span>
-                <span class="section-order-name">{{ section.label }}</span>
-              </div>
-            </div>
 
             <div class="composition-subhead">Add content</div>
             <div class="element-add-row">
@@ -3735,12 +3715,6 @@ async function handleSubImagePicked(target, field, key, event) {
 // What the page will actually contain, in final order — the same list builderSections() emits, so the
 // panel can never disagree with the page. Pinned rows are shown (a locked hero is information, not
 // clutter) but are not draggable.
-const orderedSectionRows = computed(() => builderSections(builderIntent.value).map((section) => ({
-  key: sectionOrderKey(section),
-  type: section.type,
-  label: elementLabel(section.type),
-  movable: isMovable(section.type),
-})));
 
 // --- Content sequence model (plans/BUILDER_SECTION_ORDER.md) -------------------------------------
 // The form renders THIS, in this order, so the builder reads top-to-bottom exactly as the page does.
@@ -3842,11 +3816,7 @@ function onRowDrop(index) {
   moveSectionBefore(rows[from].key, rows[index].key);
 }
 
-const sectionDragFrom = ref(-1);
 
-function onSectionDragStart(index) {
-  sectionDragFrom.value = index;
-}
 
 // Reorder within the FREE band only: a drop onto (or across) a pinned row is ignored rather than
 // silently doing nothing surprising, and orderSections re-applies the bands afterwards regardless.
@@ -3855,8 +3825,7 @@ function onSectionDragStart(index) {
 // are one mechanism with two surfaces rather than two mechanisms that must agree.
 function moveSectionBefore(dragKey, dropKey) {
   if (!dragKey || !dropKey || dragKey === dropKey) return;
-  if (!isMovable(sectionTypeForKey(dragKey)) || !isMovable(sectionTypeForKey(dropKey))) return;
-  const keys = orderedSectionRows.value.map((row) => row.key);
+  const keys = sequenceRows.value.map((row) => row.key);
   const from = keys.indexOf(dragKey);
   const to = keys.indexOf(dropKey);
   if (from < 0 || to < 0) return;
@@ -3865,38 +3834,11 @@ function moveSectionBefore(dragKey, dropKey) {
   builder.section_order = keys;
 }
 
-// Form-block keys are section types (the blocks are all singletons), so the key IS the type.
-function sectionTypeForKey(key) {
-  const row = orderedSectionRows.value.find((entry) => entry.key === key);
-  return row ? row.type : key;
-}
 
-const blockDragKey = ref("");
 
-function onBlockDragStart(key, event) {
-  blockDragKey.value = key;
-  if (event?.dataTransfer) event.dataTransfer.effectAllowed = "move";
-}
 
-function onBlockDrop(key) {
-  moveSectionBefore(blockDragKey.value, key);
-  blockDragKey.value = "";
-}
 
-function blockIsDraggable(key) {
-  return orderedSectionRows.value.some((row) => row.key === key && row.movable);
-}
 
-function onSectionDrop(index) {
-  const from = sectionDragFrom.value;
-  sectionDragFrom.value = -1;
-  const rows = orderedSectionRows.value;
-  if (from < 0 || from === index || !rows[from]?.movable || !rows[index]?.movable) return;
-  const keys = rows.map((row) => row.key);
-  const [moved] = keys.splice(from, 1);
-  keys.splice(index, 0, moved);
-  builder.section_order = keys;
-}
 
 function elementSection(element) {
   if (element.type === "content_block") {

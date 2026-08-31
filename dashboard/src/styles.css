@@ -4161,8 +4161,6 @@ button:disabled {
   font-size: 1.3rem;
 }
 
-/* Section order: the page's real running order. Pinned rows are shown but not draggable — a visible
-   locked hero explains the constraint better than omitting it would. */
 /* SETTINGS — the boundary between "what is on the page" and "how the page is configured". */
 .builder-settings-head {
   margin: 2.4rem 0 1.6rem;
@@ -4283,43 +4281,6 @@ button:disabled {
 
 .builder-section-drag:active {
   cursor: grabbing;
-}
-
-.section-order-list {
-  display: grid;
-  gap: 0.4rem;
-  margin: 0.8rem 0 1.6rem;
-}
-
-.section-order-row {
-  display: flex;
-  align-items: center;
-  gap: 0.8rem;
-  padding: 0.6rem 1rem;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-sm);
-  background: var(--panel);
-  font-size: var(--text-label);
-  line-height: var(--leading-label);
-  cursor: grab;
-}
-
-.section-order-row.is-locked {
-  cursor: default;
-  border-style: dashed;
-  background: transparent;
-  color: var(--muted);
-}
-
-.section-order-handle {
-  color: var(--text-muted);
-  font-size: 1.2rem;
-  line-height: 1;
-}
-
-.section-order-name {
-  min-width: 0;
-  overflow-wrap: anywhere;
 }
 
 .element-list {
