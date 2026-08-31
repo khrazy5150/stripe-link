@@ -4163,6 +4163,26 @@ button:disabled {
 
 /* Section order: the page's real running order. Pinned rows are shown but not draggable — a visible
    locked hero explains the constraint better than omitting it would. */
+/* Drag handle on a form block that maps to a real page section. ONLY the handle is draggable — making
+   the whole block draggable breaks text selection inside its inputs. */
+.builder-section-heading {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+}
+
+.builder-section-drag {
+  color: var(--text-muted);
+  cursor: grab;
+  font-size: 1.4rem;
+  line-height: 1;
+  user-select: none;
+}
+
+.builder-section-drag:active {
+  cursor: grabbing;
+}
+
 .section-order-list {
   display: grid;
   gap: 0.4rem;

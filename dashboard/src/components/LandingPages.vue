@@ -826,8 +826,14 @@
             </label>
           </section>
 
-          <section class="builder-section">
-            <h3>Trust Badges</h3>
+          <section class="builder-section" @dragover.prevent @drop="onBlockDrop('trust_badges')">
+            <h3 class="builder-section-heading"><span
+                v-if="blockIsDraggable('trust_badges')"
+                class="builder-section-drag"
+                draggable="true"
+                title="Drag to reorder this section on the page"
+                @dragstart="onBlockDragStart('trust_badges', $event)"
+              >⠿</span>Trust Badges</h3>
             <div class="builder-repeat-list">
               <div v-for="(badge, index) in builder.trust_badges.badges" :key="`badge-${index}`" class="builder-repeat-row builder-trust-badge-row">
                 <label class="builder-switch" @click.stop>
@@ -848,8 +854,14 @@
           </section>
 
           <!-- Same rule as the Page Sections toggle: no resolvable policy copy (e.g. service offers) = no control. -->
-          <section v-if="previewRefundPolicy" class="builder-section">
-            <h3>Refund Policy</h3>
+          <section v-if="previewRefundPolicy" class="builder-section" @dragover.prevent @drop="onBlockDrop('refund_policy')">
+            <h3 class="builder-section-heading"><span
+                v-if="blockIsDraggable('refund_policy')"
+                class="builder-section-drag"
+                draggable="true"
+                title="Drag to reorder this section on the page"
+                @dragstart="onBlockDragStart('refund_policy', $event)"
+              >⠿</span>Refund Policy</h3>
             <label class="builder-toggle">
               <input v-model="builder.refund_policy.enabled" type="checkbox" />
               <span>Show refund policy</span>
@@ -1046,8 +1058,14 @@
             </p>
           </details>
 
-          <section class="builder-section">
-            <h3>Call to Action</h3>
+          <section class="builder-section" @dragover.prevent @drop="onBlockDrop('checkout_cta')">
+            <h3 class="builder-section-heading"><span
+                v-if="blockIsDraggable('checkout_cta')"
+                class="builder-section-drag"
+                draggable="true"
+                title="Drag to reorder this section on the page"
+                @dragstart="onBlockDragStart('checkout_cta', $event)"
+              >⠿</span>Call to Action</h3>
             <label class="offer-field">
               <span>Button Label</span>
               <input v-model.trim="builder.cta_label" type="text" />
@@ -3702,6 +3720,43 @@ function onSectionDragStart(index) {
 
 // Reorder within the FREE band only: a drop onto (or across) a pinned row is ignored rather than
 // silently doing nothing surprising, and orderSections re-applies the bands afterwards regardless.
+// Reorder by section KEY — used by the drag handles on the form blocks themselves, where there is no
+// row index to work from. Same builder.section_order the Section order list writes, so the two controls
+// are one mechanism with two surfaces rather than two mechanisms that must agree.
+function moveSectionBefore(dragKey, dropKey) {
+  if (!dragKey || !dropKey || dragKey === dropKey) return;
+  if (!isMovable(sectionTypeForKey(dragKey)) || !isMovable(sectionTypeForKey(dropKey))) return;
+  const keys = orderedSectionRows.value.map((row) => row.key);
+  const from = keys.indexOf(dragKey);
+  const to = keys.indexOf(dropKey);
+  if (from < 0 || to < 0) return;
+  const [moved] = keys.splice(from, 1);
+  keys.splice(to, 0, moved);
+  builder.section_order = keys;
+}
+
+// Form-block keys are section types (the blocks are all singletons), so the key IS the type.
+function sectionTypeForKey(key) {
+  const row = orderedSectionRows.value.find((entry) => entry.key === key);
+  return row ? row.type : key;
+}
+
+const blockDragKey = ref("");
+
+function onBlockDragStart(key, event) {
+  blockDragKey.value = key;
+  if (event?.dataTransfer) event.dataTransfer.effectAllowed = "move";
+}
+
+function onBlockDrop(key) {
+  moveSectionBefore(blockDragKey.value, key);
+  blockDragKey.value = "";
+}
+
+function blockIsDraggable(key) {
+  return orderedSectionRows.value.some((row) => row.key === key && row.movable);
+}
+
 function onSectionDrop(index) {
   const from = sectionDragFrom.value;
   sectionDragFrom.value = -1;
