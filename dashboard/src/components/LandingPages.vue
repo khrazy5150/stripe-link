@@ -849,6 +849,12 @@
                   @dragstart="onRowDragStart(rowIndex)"
                 >⠿</span>
                 <h3>{{ row.label }}</h3>
+                <button
+                  v-if="row.editor === 'element'"
+                  class="danger-action compact"
+                  type="button"
+                  @click="removeElement(row.element.id)"
+                >Remove</button>
               </header>
             <template v-if="row.editor === 'trust_badges'">
                 <div class="builder-repeat-list">
@@ -886,6 +892,93 @@
                   <span>{{ ctaTypeDescription(builderCta.type) }} This comes from the offer and can't be changed here.</span>
                   <code v-if="builderCta.target">{{ builderCta.target }}</code>
                 </div>
+              </template>
+              <template v-else-if="row.editor === 'element' && row.element">
+                <template v-for="element in [row.element]" :key="element.id">
+
+                    <template v-if="element.type === 'content_block'">
+                      <input :value="element.title" type="text" placeholder="Title" @input="applyTitleCaseInput((value) => { element.title = value; }, $event)" />
+                      <textarea v-model.trim="element.text" rows="2" placeholder="Text"></textarea>
+                      <div class="selectable-price-image-controls" :class="{ 'has-image-preview': element.image_url }">
+                        <div v-if="element.image_url" class="selectable-price-image-preview">
+                          <img :src="element.image_url" alt="Content image preview" />
+                        </div>
+                        <input :ref="(el) => setElementImageInput(element.id, el)" type="file" accept="image/*" hidden @change="handleElementImagePicked(element, $event)" />
+                        <button class="secondary-action compact" type="button" :disabled="Boolean(blurbImageUploading[element.id])" @click.prevent="triggerElementImageUpload(element.id)">
+                          {{ blurbImageUploading[element.id] ? "Uploading..." : "Upload Image" }}
+                        </button>
+                        <input v-model.trim="element.image_url" type="url" placeholder="Optional image URL" />
+                      </div>
+                      <div v-if="blurbImageErrors[element.id]" class="price-image-error">{{ blurbImageErrors[element.id] }}</div>
+                      <label class="builder-toggle"><input v-model="element.centered" type="checkbox" /><span>Center this block</span></label>
+                    </template>
+
+                    <template v-else-if="element.type === 'testimonials'">
+                      <input v-model.trim="element.heading" type="text" placeholder="Section heading (optional)" />
+                      <div v-for="(item, i) in element.items" :key="i" class="element-subrow">
+                        <textarea v-model.trim="item.quote" rows="2" placeholder="Quote"></textarea>
+                        <input v-model.trim="item.author" type="text" placeholder="Author" />
+                        <input v-model.trim="item.role" type="text" placeholder="Role (optional)" />
+                        <div class="selectable-price-image-controls" :class="{ 'has-image-preview': item.avatar_url }">
+                          <div v-if="item.avatar_url" class="selectable-price-image-preview"><img :src="item.avatar_url" alt="Avatar preview" /></div>
+                          <input :ref="(el) => setSubImageInput(subImgKey(element, 'items', i), el)" type="file" accept="image/*" hidden @change="handleSubImagePicked(item, 'avatar_url', subImgKey(element, 'items', i), $event)" />
+                          <button class="secondary-action compact" type="button" :disabled="Boolean(subImageUploading[subImgKey(element, 'items', i)])" @click.prevent="triggerSubImageUpload(subImgKey(element, 'items', i))">
+                            {{ subImageUploading[subImgKey(element, 'items', i)] ? "Uploading..." : "Upload avatar" }}
+                          </button>
+                          <input v-model.trim="item.avatar_url" type="url" placeholder="or paste avatar URL" />
+                        </div>
+                        <div v-if="subImageErrors[subImgKey(element, 'items', i)]" class="price-image-error">{{ subImageErrors[subImgKey(element, 'items', i)] }}</div>
+                        <button class="danger-action compact" type="button" @click="removeSubItem(element, 'items', i)">Remove</button>
+                      </div>
+                      <button class="secondary-action compact" type="button" @click="addSubItem(element, 'items', { quote: '', author: '', role: '', avatar_url: '' })">+ Add testimonial</button>
+                    </template>
+
+                    <template v-else-if="element.type === 'rating'">
+                      <div class="offer-two-column">
+                        <label class="offer-field"><span>Stars (0–5)</span><input v-model.number="element.value" type="number" min="0" max="5" step="0.1" /></label>
+                        <label class="offer-field"><span>Review count</span><input v-model.number="element.count" type="number" min="0" /></label>
+                      </div>
+                      <label class="offer-field"><span>Label</span><input v-model.trim="element.label" type="text" placeholder="e.g. on Google" /></label>
+                    </template>
+
+                    <template v-else-if="element.type === 'client_marquee'">
+                      <input v-model.trim="element.heading" type="text" placeholder="Section heading (optional)" />
+                      <div v-for="(logo, i) in element.logos" :key="i" class="element-subrow">
+                        <input v-model.trim="logo.name" type="text" placeholder="Client name (only visible by search engines - recommended for SEO)" />
+                        <div class="selectable-price-image-controls" :class="{ 'has-image-preview': logo.image_url }">
+                          <div v-if="logo.image_url" class="selectable-price-image-preview"><img :src="logo.image_url" alt="Logo preview" /></div>
+                          <input :ref="(el) => setSubImageInput(subImgKey(element, 'logos', i), el)" type="file" accept="image/*" hidden @change="handleSubImagePicked(logo, 'image_url', subImgKey(element, 'logos', i), $event)" />
+                          <button class="secondary-action compact" type="button" :disabled="Boolean(subImageUploading[subImgKey(element, 'logos', i)])" @click.prevent="triggerSubImageUpload(subImgKey(element, 'logos', i))">
+                            {{ subImageUploading[subImgKey(element, 'logos', i)] ? "Uploading..." : "Upload logo" }}
+                          </button>
+                          <input v-model.trim="logo.image_url" type="url" placeholder="or paste image URL" />
+                        </div>
+                        <div v-if="subImageErrors[subImgKey(element, 'logos', i)]" class="price-image-error">{{ subImageErrors[subImgKey(element, 'logos', i)] }}</div>
+                        <button class="danger-action compact" type="button" @click="removeSubItem(element, 'logos', i)">Remove</button>
+                      </div>
+                      <button class="secondary-action compact" type="button" @click="addSubItem(element, 'logos', { image_url: '', name: '' })">+ Add logo</button>
+                    </template>
+
+                    <template v-else-if="element.type === 'faq'">
+                      <input :value="element.heading" type="text" placeholder="Section heading (optional)" @input="applyTitleCaseInput((value) => { element.heading = value; }, $event)" />
+                      <div v-for="(item, i) in element.items" :key="i" class="element-subrow">
+                        <input :value="item.question" type="text" placeholder="Question" @input="applyTitleCaseInput((value) => { item.question = value; }, $event)" />
+                        <textarea v-model.trim="item.answer" rows="2" placeholder="Answer"></textarea>
+                        <button class="danger-action compact" type="button" @click="removeSubItem(element, 'items', i)">Remove</button>
+                      </div>
+                      <button class="secondary-action compact" type="button" @click="addSubItem(element, 'items', { question: '', answer: '' })">+ Add question</button>
+                    </template>
+
+                    <template v-else-if="element.type === 'product_details'">
+                      <p class="element-empty">Shows the current product's gallery, badges, and description — pulled from the offer and synced to the carousel. No configuration needed.</p>
+                    </template>
+
+                    <template v-else-if="element.type === 'related_products'">
+                      <input v-model.trim="element.heading" type="text" placeholder="Section heading (optional)" />
+                      <p class="element-empty">Automatically shows other Site pages in the same category as this one — a same-category rail for internal linking. It fills itself; there's nothing to pick.</p>
+                    </template>
+
+                </template>
               </template>
               <p v-else class="content-section-note">{{ rowNote(row) }}</p>
             </article>
@@ -939,106 +1032,6 @@
             <p v-if="!builder.elements.length" class="element-empty">
               Add testimonials, ratings, content, client logos, or FAQs — drag to reorder.
             </p>
-            <div class="element-list">
-              <div
-                v-for="(element, index) in builder.elements"
-                :key="element.id"
-                class="element-card"
-                draggable="true"
-                @dragstart="onElementDragStart(index)"
-                @dragover.prevent
-                @drop="onElementDrop(index)"
-              >
-                <header class="element-card-header">
-                  <span class="element-drag" title="Drag to reorder">⠿</span>
-                  <strong>{{ elementLabel(element.type) }}</strong>
-                  <button class="danger-action compact" type="button" @click="removeElement(element.id)">Remove</button>
-                </header>
-
-                <template v-if="element.type === 'content_block'">
-                  <input :value="element.title" type="text" placeholder="Title" @input="applyTitleCaseInput((value) => { element.title = value; }, $event)" />
-                  <textarea v-model.trim="element.text" rows="2" placeholder="Text"></textarea>
-                  <div class="selectable-price-image-controls" :class="{ 'has-image-preview': element.image_url }">
-                    <div v-if="element.image_url" class="selectable-price-image-preview">
-                      <img :src="element.image_url" alt="Content image preview" />
-                    </div>
-                    <input :ref="(el) => setElementImageInput(element.id, el)" type="file" accept="image/*" hidden @change="handleElementImagePicked(element, $event)" />
-                    <button class="secondary-action compact" type="button" :disabled="Boolean(blurbImageUploading[element.id])" @click.prevent="triggerElementImageUpload(element.id)">
-                      {{ blurbImageUploading[element.id] ? "Uploading..." : "Upload Image" }}
-                    </button>
-                    <input v-model.trim="element.image_url" type="url" placeholder="Optional image URL" />
-                  </div>
-                  <div v-if="blurbImageErrors[element.id]" class="price-image-error">{{ blurbImageErrors[element.id] }}</div>
-                  <label class="builder-toggle"><input v-model="element.centered" type="checkbox" /><span>Center this block</span></label>
-                </template>
-
-                <template v-else-if="element.type === 'testimonials'">
-                  <input v-model.trim="element.heading" type="text" placeholder="Section heading (optional)" />
-                  <div v-for="(item, i) in element.items" :key="i" class="element-subrow">
-                    <textarea v-model.trim="item.quote" rows="2" placeholder="Quote"></textarea>
-                    <input v-model.trim="item.author" type="text" placeholder="Author" />
-                    <input v-model.trim="item.role" type="text" placeholder="Role (optional)" />
-                    <div class="selectable-price-image-controls" :class="{ 'has-image-preview': item.avatar_url }">
-                      <div v-if="item.avatar_url" class="selectable-price-image-preview"><img :src="item.avatar_url" alt="Avatar preview" /></div>
-                      <input :ref="(el) => setSubImageInput(subImgKey(element, 'items', i), el)" type="file" accept="image/*" hidden @change="handleSubImagePicked(item, 'avatar_url', subImgKey(element, 'items', i), $event)" />
-                      <button class="secondary-action compact" type="button" :disabled="Boolean(subImageUploading[subImgKey(element, 'items', i)])" @click.prevent="triggerSubImageUpload(subImgKey(element, 'items', i))">
-                        {{ subImageUploading[subImgKey(element, 'items', i)] ? "Uploading..." : "Upload avatar" }}
-                      </button>
-                      <input v-model.trim="item.avatar_url" type="url" placeholder="or paste avatar URL" />
-                    </div>
-                    <div v-if="subImageErrors[subImgKey(element, 'items', i)]" class="price-image-error">{{ subImageErrors[subImgKey(element, 'items', i)] }}</div>
-                    <button class="danger-action compact" type="button" @click="removeSubItem(element, 'items', i)">Remove</button>
-                  </div>
-                  <button class="secondary-action compact" type="button" @click="addSubItem(element, 'items', { quote: '', author: '', role: '', avatar_url: '' })">+ Add testimonial</button>
-                </template>
-
-                <template v-else-if="element.type === 'rating'">
-                  <div class="offer-two-column">
-                    <label class="offer-field"><span>Stars (0–5)</span><input v-model.number="element.value" type="number" min="0" max="5" step="0.1" /></label>
-                    <label class="offer-field"><span>Review count</span><input v-model.number="element.count" type="number" min="0" /></label>
-                  </div>
-                  <label class="offer-field"><span>Label</span><input v-model.trim="element.label" type="text" placeholder="e.g. on Google" /></label>
-                </template>
-
-                <template v-else-if="element.type === 'client_marquee'">
-                  <input v-model.trim="element.heading" type="text" placeholder="Section heading (optional)" />
-                  <div v-for="(logo, i) in element.logos" :key="i" class="element-subrow">
-                    <input v-model.trim="logo.name" type="text" placeholder="Client name (only visible by search engines - recommended for SEO)" />
-                    <div class="selectable-price-image-controls" :class="{ 'has-image-preview': logo.image_url }">
-                      <div v-if="logo.image_url" class="selectable-price-image-preview"><img :src="logo.image_url" alt="Logo preview" /></div>
-                      <input :ref="(el) => setSubImageInput(subImgKey(element, 'logos', i), el)" type="file" accept="image/*" hidden @change="handleSubImagePicked(logo, 'image_url', subImgKey(element, 'logos', i), $event)" />
-                      <button class="secondary-action compact" type="button" :disabled="Boolean(subImageUploading[subImgKey(element, 'logos', i)])" @click.prevent="triggerSubImageUpload(subImgKey(element, 'logos', i))">
-                        {{ subImageUploading[subImgKey(element, 'logos', i)] ? "Uploading..." : "Upload logo" }}
-                      </button>
-                      <input v-model.trim="logo.image_url" type="url" placeholder="or paste image URL" />
-                    </div>
-                    <div v-if="subImageErrors[subImgKey(element, 'logos', i)]" class="price-image-error">{{ subImageErrors[subImgKey(element, 'logos', i)] }}</div>
-                    <button class="danger-action compact" type="button" @click="removeSubItem(element, 'logos', i)">Remove</button>
-                  </div>
-                  <button class="secondary-action compact" type="button" @click="addSubItem(element, 'logos', { image_url: '', name: '' })">+ Add logo</button>
-                </template>
-
-                <template v-else-if="element.type === 'faq'">
-                  <input :value="element.heading" type="text" placeholder="Section heading (optional)" @input="applyTitleCaseInput((value) => { element.heading = value; }, $event)" />
-                  <div v-for="(item, i) in element.items" :key="i" class="element-subrow">
-                    <input :value="item.question" type="text" placeholder="Question" @input="applyTitleCaseInput((value) => { item.question = value; }, $event)" />
-                    <textarea v-model.trim="item.answer" rows="2" placeholder="Answer"></textarea>
-                    <button class="danger-action compact" type="button" @click="removeSubItem(element, 'items', i)">Remove</button>
-                  </div>
-                  <button class="secondary-action compact" type="button" @click="addSubItem(element, 'items', { question: '', answer: '' })">+ Add question</button>
-                </template>
-
-                <template v-else-if="element.type === 'product_details'">
-                  <p class="element-empty">Shows the current product's gallery, badges, and description — pulled from the offer and synced to the carousel. No configuration needed.</p>
-                </template>
-
-                <template v-else-if="element.type === 'related_products'">
-                  <input v-model.trim="element.heading" type="text" placeholder="Section heading (optional)" />
-                  <p class="element-empty">Automatically shows other Site pages in the same category as this one — a same-category rail for internal linking. It fills itself; there's nothing to pick.</p>
-                </template>
-
-              </div>
-            </div>
           </section>
 
           <!-- Discoverability: the sections that render to <head> / their own artifact rather than to the
@@ -3650,16 +3643,6 @@ function removeSubItem(element, key, index) {
 }
 
 const elementDragIndex = ref(-1);
-function onElementDragStart(index) {
-  elementDragIndex.value = index;
-}
-function onElementDrop(index) {
-  const from = elementDragIndex.value;
-  elementDragIndex.value = -1;
-  if (from < 0 || from === index) return;
-  const [moved] = builder.elements.splice(from, 1);
-  builder.elements.splice(index, 0, moved);
-}
 
 function setElementImageInput(id, el) {
   if (el) blurbImageInputs.value[id] = el;
@@ -3790,10 +3773,12 @@ function isElementType(type) {
 // above, footer below), so the form still reads top-to-bottom as the page does without duplicating them
 // here. Element cards are excluded for now — their editors still live in the Page Sections panel.
 const sequenceRows = computed(() => {
-  const rows = contentRows.value.filter((row) => row.movable && row.editor !== "element");
-  // Rows added for emptied sections skip builderSections(), so apply the ordering here too.
-  const order = orderSectionKeys(rows.map((row) => row.type), builder.section_order || []);
-  return [...rows].sort((a, b) => order.indexOf(a.type) - order.indexOf(b.type));
+  const rows = contentRows.value.filter((row) => row.movable);
+  // Sort by KEY, not type: repeatable elements share a type, so two content blocks would collapse to
+  // the same sort index. Element ids are absent from the catalog and fall into the free band, which is
+  // exactly right. Rows added for emptied sections skip builderSections(), so order is applied here too.
+  const order = orderSectionKeys(rows.map((row) => row.key), builder.section_order || []);
+  return [...rows].sort((a, b) => order.indexOf(a.key) - order.indexOf(b.key));
 });
 
 // Sections with no editor still earn a row: a tenant needs to see WHERE they land, even with nothing to set.

@@ -4212,6 +4212,11 @@ button:disabled {
   gap: 0.8rem;   /* no margin-bottom: the card's grid gap already separates header from body */
 }
 
+/* Remove sits at the far end of the row header, away from the title and the drag handle. */
+.content-section-header .danger-action {
+  margin-left: auto;
+}
+
 .content-section-header h3 {
   margin: 0;
   font-size: var(--text-label);
