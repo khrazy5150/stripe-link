@@ -1005,7 +1005,7 @@
             <h3>Sale &amp; Flash Sale</h3>
             <p>Publish <code>/sale</code> and <code>/flash-sale</code> views of this page that show your discounted pricing. Add the matching price to the product first (Products → pricing context).</p>
             <label class="builder-toggle">
-              <input v-model="builder.sale.enabled" type="checkbox" />
+              <input v-model="builder.sale.enabled" type="checkbox" @change="warnIfMissingPriceContext('sale')" />
               <span>Enable Sale (<code>/sale</code>)</span>
             </label>
             <div v-if="builder.sale.enabled" class="builder-sale-options">
@@ -1016,7 +1016,7 @@
               </label>
             </div>
             <label class="builder-toggle">
-              <input v-model="builder.flash_sale.enabled" type="checkbox" />
+              <input v-model="builder.flash_sale.enabled" type="checkbox" @change="warnIfMissingPriceContext('flash_sale')" />
               <span>Enable Flash Sale (<code>/flash-sale</code>)</span>
             </label>
             <div v-if="builder.flash_sale.enabled" class="builder-sale-options">
@@ -1466,6 +1466,7 @@ import { computed, onMounted, reactive, ref, watch } from "vue";
 import { offerViewTargets, offerViewTargetsFromExpanded } from "../composables/useConversionContext";
 import { isSectionVisible, defaultVisible, recommendedSectionKeys, optionalSectionKeys, governedKeys, elementLabel, elementChannel, addableElements, tokenGroups, previewVar, supportedGoals, goalLabel, packSeeds, orderSections, sectionOrderKey, isMovable, elementPlacement, orderSectionKeys, isRepeatableSection } from "../composables/pageComposer";
 import { apiRequest, assetUrl, getApiBase, getStripeMode, getOtherEnvironment, getPagesBaseUrl, getPreviewPagesBaseUrl, getTestPagesHost, getTenantId } from "../api/client";
+import { useToastsStore } from "../stores/toasts";
 import { formatMoney } from "../stores/products";
 import PurchaseFlowDiagram from "./PurchaseFlowDiagram.vue";
 import { useProfileStore } from "../stores/profile";
@@ -1486,6 +1487,7 @@ const offers = ref([]);
 const profileStore = useProfileStore();
 const sitesStore = useSitesStore();
 const collectionsStore = useCollectionsStore();
+const toasts = useToastsStore();
 
 // Step 0 of the create wizard: which Site will this page live under (a page belongs to one Site). Skipped
 // when editing an existing offer-less page. `pendingSiteAttach` carries the chosen Site into the offer
@@ -1756,6 +1758,22 @@ const seoDescriptionPlaceholder = computed(() => offerSeoDescriptionDefault(buil
 const builderCta = computed(() => builderOffer.value?.presentation?.cta || { type: builderIntent.value === "lead_gen" ? "email" : "buy" });
 
 // Sale / Flash-Sale (plans/SALES_FUNNELS.md P1d): does any product the offer sells carry a price in `context`?
+// Enabling a sale view only does something if a product actually carries a price in that context —
+// otherwise the page renders as Standard and the banner never appears, which is what caught the author
+// out. The field-level warning existed but sits far down in Settings; this nudges at the moment of the
+// action. Keyed so it cannot stack if the box is toggled repeatedly.
+function warnIfMissingPriceContext(context) {
+  const enabled = context === "sale" ? builder.sale.enabled : builder.flash_sale.enabled;
+  if (!enabled || offerHasPriceContext(context)) return;
+  const label = context === "sale" ? "Sale" : "Flash Sale";
+  toasts.push({
+    key: `missing-price-context:${context}`,
+    severity: "warning",
+    icon: "⚠️",
+    message: `This product does not have a "${label}" pricing context. Please create a "${label}" price for this product in the Products module.`,
+  });
+}
+
 function offerHasPriceContext(context) {
   return builderOfferProducts.value.some((product) => (product.prices || []).some((price) => (price.context || "standard") === context));
 }
