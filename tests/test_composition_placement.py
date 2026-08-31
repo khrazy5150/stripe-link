@@ -42,6 +42,21 @@ class PlacementCatalogTests(unittest.TestCase):
                 self.assertTrue(is_movable(key), f"{key} should be draggable")
 
 
+class RepeatableSectionTests(unittest.TestCase):
+    """`repeatable` means "this SECTION may appear more than once", NOT "it holds repeatable items"."""
+
+    def test_only_genuine_multi_instance_sections_are_repeatable(self):
+        repeatable = {k for k, v in RULES["elements"].items() if v.get("repeatable")}
+        self.assertEqual(repeatable, {"content_block", "catalog_grid"})
+
+    def test_container_sections_are_singletons(self):
+        # Testimonials and FAQ are ONE section holding many items, each with its own add control. A
+        # second "What Our Clients Say" heading further down the page is never what a tenant meant.
+        for key in ("testimonials", "faq", "client_marquee", "rating"):
+            with self.subTest(element=key):
+                self.assertFalse(RULES["elements"][key].get("repeatable"), key)
+
+
 class OrderSectionKeysTests(unittest.TestCase):
     def test_bands_are_honoured_regardless_of_input_order(self):
         ordered = order_section_keys(

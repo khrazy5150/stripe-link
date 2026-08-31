@@ -1431,7 +1431,7 @@
 <script setup>
 import { computed, onMounted, reactive, ref, watch } from "vue";
 import { offerViewTargets, offerViewTargetsFromExpanded } from "../composables/useConversionContext";
-import { isSectionVisible, defaultVisible, recommendedSectionKeys, optionalSectionKeys, governedKeys, elementLabel, elementChannel, addableElements, tokenGroups, previewVar, supportedGoals, goalLabel, packSeeds, orderSections, sectionOrderKey, isMovable, elementPlacement, orderSectionKeys } from "../composables/pageComposer";
+import { isSectionVisible, defaultVisible, recommendedSectionKeys, optionalSectionKeys, governedKeys, elementLabel, elementChannel, addableElements, tokenGroups, previewVar, supportedGoals, goalLabel, packSeeds, orderSections, sectionOrderKey, isMovable, elementPlacement, orderSectionKeys, isRepeatableSection } from "../composables/pageComposer";
 import { apiRequest, assetUrl, getApiBase, getStripeMode, getOtherEnvironment, getPagesBaseUrl, getPreviewPagesBaseUrl, getTestPagesHost, getTenantId } from "../api/client";
 import { formatMoney } from "../stores/products";
 import PurchaseFlowDiagram from "./PurchaseFlowDiagram.vue";
@@ -3660,13 +3660,44 @@ function newElement(type) {
 
 // Opens the editor on a DRAFT. Nothing reaches builder.elements until "Add Section" — so Cancel leaves
 // no trace, and an empty half-made section can never exist.
+//
+// EXCEPT for container sections. Testimonials and FAQ are one section holding many items, not many
+// sections: a second "Testimonials" heading further down the page is never what the tenant meant. For
+// those, adding opens the EXISTING section where it already sits — no new section, no move — with a
+// blank item ready to fill, which is what "add a testimonial" actually means.
 function addElement(type) {
+  if (!isRepeatableSection(type)) {
+    const existing = builder.elements.find((el) => el.type === type);
+    if (existing) {
+      appendBlankItem(existing);
+      sectionEditor.value = {
+        isNew: false,
+        row: { key: existing.id, type, label: elementLabel(type), editor: "element", element: existing, movable: true },
+      };
+      return;
+    }
+  }
   if (builder.elements.length >= 20) return;
   const element = newElement(type);
   sectionEditor.value = {
     isNew: true,
     row: { key: element.id, type, label: elementLabel(type), editor: "element", element, movable: true },
   };
+}
+
+// Give the tenant a row to type into, but never stack blanks: if an empty one is already waiting, that
+// is the row they wanted.
+function appendBlankItem(element) {
+  const blanks = {
+    testimonials: ["items", { quote: "", author: "", role: "", avatar_url: "" }, "quote"],
+    faq: ["items", { question: "", answer: "" }, "question"],
+    client_marquee: ["logos", { image_url: "", name: "" }, "image_url"],
+  }[element.type];
+  if (!blanks) return;
+  const [field, blank, probe] = blanks;
+  const list = element[field] || (element[field] = []);
+  if (list.some((item) => !String(item?.[probe] || "").trim())) return;
+  list.push({ ...blank });
 }
 
 function removeElement(id) {

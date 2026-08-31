@@ -204,3 +204,11 @@ export function orderSections(sections, tenantOrder = []) {
     })
     .map((entry) => entry.section);
 }
+
+
+// Whether this section may appear MORE THAN ONCE on a page. Content blocks can; testimonials and FAQ
+// cannot — they are one section holding many items, each with its own add control. Reads the same
+// catalog the Python composer does, so the two cannot disagree.
+export function isRepeatableSection(type) {
+  return Boolean((rules.elements?.[type] || {}).repeatable);
+}
