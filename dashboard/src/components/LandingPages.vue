@@ -594,69 +594,6 @@
             Published pages cannot be modified. Unpublish this page before editing.
           </div>
 
-          <section class="builder-section">
-            <h3>Page Basics</h3>
-            <label class="offer-field">
-              <span>Page Name</span>
-              <input v-model.trim="builder.name" type="text" />
-              <small>Internal name for organizing your pages.</small>
-            </label>
-
-            <div class="offer-two-column">
-              <label class="offer-field">
-                <span>Preset</span>
-                <select v-model="builder.preset">
-                  <option v-for="option in universalBundlePresets" :key="option.value" :value="option.value">
-                    {{ option.label }}
-                  </option>
-                </select>
-              </label>
-              <!-- The goal is set in the create wizard, but it must stay editable: it drives composition, so
-                   a page frozen on its original goal could never gain (or drop) what a goal governs. -->
-              <label class="offer-field">
-                <span>Page Goal</span>
-                <select v-model="builder.goal">
-                  <option value="">Not set</option>
-                  <option v-for="option in goalOptions" :key="option.value" :value="option.value">
-                    {{ option.label }}
-                  </option>
-                </select>
-                <small>{{ builderGoalNote }}</small>
-              </label>
-            </div>
-
-            <div class="offer-two-column">
-              <label class="offer-field">
-                <span>Product Source</span>
-                <select disabled>
-                  <option>From Offer</option>
-                </select>
-              </label>
-              <label class="offer-field">
-                <span>Select Offer</span>
-                <select v-model="builder.offer_id" @change="onBuilderOfferChange">
-                  <option v-for="offer in offers" :key="offer.offer_id" :value="offer.offer_id">
-                    {{ offer.name }} ({{ offerItemCount(offer) }} item{{ offerItemCount(offer) === 1 ? "" : "s" }})
-                  </option>
-                </select>
-              </label>
-            </div>
-
-            <label class="offer-field">
-              <span>Favicon</span>
-              <div class="builder-inline-media">
-                <img :src="builder.favicon_url || defaultFaviconUrl" alt="" />
-                <div class="builder-upload-stack">
-                  <input ref="faviconFileInput" type="file" accept="image/*" hidden @change="handleFaviconPicked" />
-                  <button class="secondary-action compact" type="button" :disabled="faviconUploading" @click="faviconFileInput?.click()">
-                    {{ faviconUploading ? "Uploading..." : "Upload favicon" }}
-                  </button>
-                  <input v-model.trim="builder.favicon_url" type="url" placeholder="Leave blank to use Junior Bay favicon" />
-                </div>
-              </div>
-              <small v-if="faviconUploadError" class="builder-upload-error">{{ faviconUploadError }}</small>
-            </label>
-          </section>
 
           <section class="builder-section">
             <h3>Countdown Timer</h3>
@@ -707,54 +644,7 @@
             </div>
           </section>
 
-          <section v-if="builderIntent === 'transaction'" class="builder-section">
-            <h3>Sale &amp; Flash Sale</h3>
-            <p>Publish <code>/sale</code> and <code>/flash-sale</code> views of this page that show your discounted pricing. Add the matching price to the product first (Products → pricing context).</p>
-            <label class="builder-toggle">
-              <input v-model="builder.sale.enabled" type="checkbox" />
-              <span>Enable Sale (<code>/sale</code>)</span>
-            </label>
-            <div v-if="builder.sale.enabled" class="builder-sale-options">
-              <p v-if="!offerHasPriceContext('sale')" class="field-error">This product doesn't have a Sale pricing context. Please go to the products page and set it there.</p>
-              <label class="offer-field">
-                <span>Expiration (optional — leave blank for a perpetual sale)</span>
-                <input v-model="saleEndsAtLocal" type="datetime-local" />
-              </label>
-            </div>
-            <label class="builder-toggle">
-              <input v-model="builder.flash_sale.enabled" type="checkbox" />
-              <span>Enable Flash Sale (<code>/flash-sale</code>)</span>
-            </label>
-            <div v-if="builder.flash_sale.enabled" class="builder-sale-options">
-              <p v-if="!offerHasPriceContext('flash_sale')" class="field-error">This product doesn't have a Flash Sale pricing context. Please go to the products page and set it there.</p>
-              <div class="offer-two-column">
-                <label class="offer-field">
-                  <span>Starts (optional)</span>
-                  <input v-model="flashStartsOnLocal" type="datetime-local" />
-                </label>
-                <label class="offer-field">
-                  <span>Ends (required)</span>
-                  <input v-model="flashEndsAtLocal" type="datetime-local" />
-                </label>
-              </div>
-              <p v-if="!builder.flash_sale.ends_at" class="field-error">You must set an expiration date in order to enable this feature.</p>
-              <p v-else-if="builder.flash_sale.starts_on && builder.flash_sale.starts_on >= builder.flash_sale.ends_at" class="field-error">The start date must be before the end date.</p>
-            </div>
-          </section>
 
-          <section class="builder-section">
-            <h3>SEO</h3>
-            <label class="offer-field">
-              <span>SEO Title</span>
-              <input :value="builder.seo_title" :placeholder="seoTitlePlaceholder" type="text" @input="applyTitleCaseInput((value) => { builder.seo_title = value; }, $event)" />
-              <small>The browser tab / search-result title. Leave blank to use the smart default (shown above).</small>
-            </label>
-            <label class="offer-field">
-              <span>SEO Description</span>
-              <textarea v-model.trim="builder.seo_description" :placeholder="seoDescriptionPlaceholder" rows="3"></textarea>
-              <small>The search-result snippet. Leave blank to auto-generate from the product description.</small>
-            </label>
-          </section>
 
           <section class="builder-section">
             <h3>Hero</h3>
@@ -988,6 +878,123 @@
 
           <!-- Same rule as the Page Sections toggle: no resolvable policy copy (e.g. service offers) = no control. -->
 
+
+          <!-- SETTINGS — page-wide configuration with no position on the page, so it lives BELOW the
+               content sequence instead of interleaved with it (plans/BUILDER_SECTION_ORDER.md §2). -->
+          <div class="builder-settings-head">
+            <h3>Settings</h3>
+            <small>Page-wide options. These do not appear as sections on the page.</small>
+          </div>
+          <section class="builder-section">
+            <h3>Page Basics</h3>
+            <label class="offer-field">
+              <span>Page Name</span>
+              <input v-model.trim="builder.name" type="text" />
+              <small>Internal name for organizing your pages.</small>
+            </label>
+
+            <div class="offer-two-column">
+              <label class="offer-field">
+                <span>Preset</span>
+                <select v-model="builder.preset">
+                  <option v-for="option in universalBundlePresets" :key="option.value" :value="option.value">
+                    {{ option.label }}
+                  </option>
+                </select>
+              </label>
+              <!-- The goal is set in the create wizard, but it must stay editable: it drives composition, so
+                   a page frozen on its original goal could never gain (or drop) what a goal governs. -->
+              <label class="offer-field">
+                <span>Page Goal</span>
+                <select v-model="builder.goal">
+                  <option value="">Not set</option>
+                  <option v-for="option in goalOptions" :key="option.value" :value="option.value">
+                    {{ option.label }}
+                  </option>
+                </select>
+                <small>{{ builderGoalNote }}</small>
+              </label>
+            </div>
+
+            <div class="offer-two-column">
+              <label class="offer-field">
+                <span>Product Source</span>
+                <select disabled>
+                  <option>From Offer</option>
+                </select>
+              </label>
+              <label class="offer-field">
+                <span>Select Offer</span>
+                <select v-model="builder.offer_id" @change="onBuilderOfferChange">
+                  <option v-for="offer in offers" :key="offer.offer_id" :value="offer.offer_id">
+                    {{ offer.name }} ({{ offerItemCount(offer) }} item{{ offerItemCount(offer) === 1 ? "" : "s" }})
+                  </option>
+                </select>
+              </label>
+            </div>
+
+            <label class="offer-field">
+              <span>Favicon</span>
+              <div class="builder-inline-media">
+                <img :src="builder.favicon_url || defaultFaviconUrl" alt="" />
+                <div class="builder-upload-stack">
+                  <input ref="faviconFileInput" type="file" accept="image/*" hidden @change="handleFaviconPicked" />
+                  <button class="secondary-action compact" type="button" :disabled="faviconUploading" @click="faviconFileInput?.click()">
+                    {{ faviconUploading ? "Uploading..." : "Upload favicon" }}
+                  </button>
+                  <input v-model.trim="builder.favicon_url" type="url" placeholder="Leave blank to use Junior Bay favicon" />
+                </div>
+              </div>
+              <small v-if="faviconUploadError" class="builder-upload-error">{{ faviconUploadError }}</small>
+            </label>
+          </section>
+          <section v-if="builderIntent === 'transaction'" class="builder-section">
+            <h3>Sale &amp; Flash Sale</h3>
+            <p>Publish <code>/sale</code> and <code>/flash-sale</code> views of this page that show your discounted pricing. Add the matching price to the product first (Products → pricing context).</p>
+            <label class="builder-toggle">
+              <input v-model="builder.sale.enabled" type="checkbox" />
+              <span>Enable Sale (<code>/sale</code>)</span>
+            </label>
+            <div v-if="builder.sale.enabled" class="builder-sale-options">
+              <p v-if="!offerHasPriceContext('sale')" class="field-error">This product doesn't have a Sale pricing context. Please go to the products page and set it there.</p>
+              <label class="offer-field">
+                <span>Expiration (optional — leave blank for a perpetual sale)</span>
+                <input v-model="saleEndsAtLocal" type="datetime-local" />
+              </label>
+            </div>
+            <label class="builder-toggle">
+              <input v-model="builder.flash_sale.enabled" type="checkbox" />
+              <span>Enable Flash Sale (<code>/flash-sale</code>)</span>
+            </label>
+            <div v-if="builder.flash_sale.enabled" class="builder-sale-options">
+              <p v-if="!offerHasPriceContext('flash_sale')" class="field-error">This product doesn't have a Flash Sale pricing context. Please go to the products page and set it there.</p>
+              <div class="offer-two-column">
+                <label class="offer-field">
+                  <span>Starts (optional)</span>
+                  <input v-model="flashStartsOnLocal" type="datetime-local" />
+                </label>
+                <label class="offer-field">
+                  <span>Ends (required)</span>
+                  <input v-model="flashEndsAtLocal" type="datetime-local" />
+                </label>
+              </div>
+              <p v-if="!builder.flash_sale.ends_at" class="field-error">You must set an expiration date in order to enable this feature.</p>
+              <p v-else-if="builder.flash_sale.starts_on && builder.flash_sale.starts_on >= builder.flash_sale.ends_at" class="field-error">The start date must be before the end date.</p>
+            </div>
+          </section>
+          <section class="builder-section">
+            <h3>SEO</h3>
+            <label class="offer-field">
+              <span>SEO Title</span>
+              <input :value="builder.seo_title" :placeholder="seoTitlePlaceholder" type="text" @input="applyTitleCaseInput((value) => { builder.seo_title = value; }, $event)" />
+              <small>The browser tab / search-result title. Leave blank to use the smart default (shown above).</small>
+            </label>
+            <label class="offer-field">
+              <span>SEO Description</span>
+              <textarea v-model.trim="builder.seo_description" :placeholder="seoDescriptionPlaceholder" rows="3"></textarea>
+              <small>The search-result snippet. Leave blank to auto-generate from the product description.</small>
+            </label>
+          </section>
           <section class="builder-section">
             <header class="builder-section-title">
               <h3>Page Sections</h3>
