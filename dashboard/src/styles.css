@@ -3697,6 +3697,9 @@ button:disabled {
      share left the phone floating in empty space, and any percentage split drifts with the window —
      30% is phone-ish at 1440 and tablet-ish at 1920. Sizing the pane to the device instead means there
      is nothing to waste, no zoom, and "Mobile" is honest at every window size. */
+  /* Phone width. A tablet pane (78rem) plus the form's 42rem minimum needs ~120rem, more than the
+     content area has beside the sidebar at 1440 — it overflowed to the right and squeezed the form, so
+     tablet was dropped rather than special-cased. */
   --preview-pane-width: 42rem;
   display: grid;
   grid-template-columns: minmax(42rem, 1fr) var(--preview-pane-width);
@@ -3704,10 +3707,6 @@ button:disabled {
   align-items: start;
 }
 
-/* Tablet: a real 768px viewport, which is also roughly what the old fixed share happened to be. */
-.landing-builder-shell.preview-tablet {
-  --preview-pane-width: 78rem;
-}
 
 .landing-builder-shell.preview-only {
   grid-template-columns: minmax(0, 1fr);

@@ -1360,19 +1360,6 @@
               <button
                 type="button"
                 class="preview-device-btn"
-                :class="{ active: previewDevice === 'tablet' }"
-                aria-label="Tablet preview"
-                title="Tablet"
-                @click="setPreviewDevice('tablet')"
-              >
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                  <rect x="4" y="2.5" width="16" height="19" rx="2" />
-                  <path d="M10.5 18.5h3" />
-                </svg>
-              </button>
-              <button
-                type="button"
-                class="preview-device-btn"
                 :class="{ active: previewDevice === 'mobile' }"
                 aria-label="Mobile preview"
                 title="Mobile"
@@ -1654,8 +1641,6 @@ const previewDevice = ref("mobile");
 // Desktop preview and the form are mutually exclusive — one control, one honest state.
 function setPreviewDevice(device) {
   previewDevice.value = device;
-  // Only DESKTOP needs the form out of the way — a desktop layout cannot be shown honestly in a pane.
-  // Mobile and tablet panes are their real device width, so the form stays.
   builderFormHidden.value = device === "desktop";
 }
 
@@ -1664,9 +1649,7 @@ function setPreviewDevice(device) {
 // form means the preview panel is narrower than the page's 700px breakpoint, so desktop cannot be
 // shown honestly there.
 watch(builderFormHidden, (hidden) => {
-  // Only DESKTOP is impossible with the form up; tablet and mobile panes are real device widths, so a
-  // tablet choice survives showing the form again.
-  if (!hidden && previewDevice.value === "desktop") previewDevice.value = "mobile";
+  if (!hidden) previewDevice.value = "mobile";
 });
 
 // Bringing the form back returns the preview to mobile; a desktop preview in the narrow panel would be
