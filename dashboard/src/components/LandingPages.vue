@@ -3831,11 +3831,12 @@ const contentRows = computed(() => {
       movable: isMovable(element.type),
     });
   }
-  // A section the tenant has EMPTIED stops being emitted — turn every trust badge off and the section
-  // vanishes from the page. Its editor must survive that, or there is no way to switch them back on.
-  // The row's presence follows whether the section is ENABLED, never whether it currently renders.
-  for (const type of RESTORABLE_SECTIONS) {
-    if (!sectionVisible(type) || rows.some((row) => row.type === type)) continue;
+  // A section that currently renders NOTHING still needs its row, or its editor — and with it the only
+  // switch that brings it back — becomes unreachable. Fourth instance of this in the restructure:
+  // emptied trust badges, blank elements, and the countdown, which is off by default and so never
+  // emitted at all. The row's presence follows AVAILABILITY, never whether it currently renders.
+  for (const { type, available } of ALWAYS_PRESENT_SECTIONS) {
+    if (!available() || rows.some((row) => row.type === type)) continue;
     rows.push({
       key: type,
       type,
@@ -3849,9 +3850,16 @@ const contentRows = computed(() => {
   return rows;
 });
 
-// Sections whose content the tenant can empty AND restore. Not refund_policy: when the offer carries no
-// policy copy there is nothing a tenant can do from here, so an editor would be a dead control.
-const RESTORABLE_SECTIONS = ["trust_badges"];
+// Sections whose ROW must exist even when they render nothing, each with its own availability test.
+// Not refund_policy: when the offer carries no policy copy there is nothing a tenant can do from here,
+// so an editor would be a dead control.
+const ALWAYS_PRESENT_SECTIONS = [
+  // Every badge switched off — the section stops rendering, but the toggles must stay reachable.
+  { type: "trust_badges", available: () => sectionVisible("trust_badges") },
+  // The countdown is NOT a governed section: its availability is builder.countdown.enabled, which is set
+  // inside its own editor. So its row is always present — otherwise the feature can never be turned on.
+  { type: "countdown_timer", available: () => true },
+];
 
 // An element row is one of the tenant-added cards, which already have their own editors.
 function isElementType(type) {
