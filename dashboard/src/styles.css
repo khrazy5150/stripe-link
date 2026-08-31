@@ -4220,48 +4220,6 @@ button:disabled {
   line-height: 1;
 }
 
-/* Accordions inside the settings modal — same idiom as the Post-Checkout Flow steps. */
-.settings-accordion {
-  border: 1px solid var(--line);
-  border-radius: var(--radius-md);
-  background: var(--panel);
-}
-
-.settings-accordion > summary {
-  display: flex;
-  align-items: baseline;
-  gap: 0.8rem;
-  padding: 1rem 1.2rem;
-  cursor: pointer;
-  list-style: none;
-  font-size: var(--text-label);
-  line-height: var(--leading-label);
-}
-
-.settings-accordion > summary::-webkit-details-marker { display: none; }
-
-.settings-accordion > summary::before {
-  content: "▸";
-  color: var(--text-muted);
-  font-size: 1.1rem;
-}
-
-.settings-accordion[open] > summary::before { content: "▾"; }
-
-.settings-accordion > summary span {
-  color: var(--text-muted);
-  font-size: var(--text-hint);
-  font-weight: var(--weight-normal);
-}
-
-.settings-accordion > *:not(summary) {
-  padding: 0 1.2rem;
-}
-
-.settings-accordion > *:last-child {
-  padding-bottom: 1.2rem;
-}
-
 /* PAGE CONTENT sequence — the form's running order, matching the page (plans/BUILDER_SECTION_ORDER.md).
    Each section is a bounded card so a long page scans as discrete units rather than continuous form,
    which is the shortcoming this improves on versus stripe-cart. */

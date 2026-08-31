@@ -220,8 +220,7 @@
           <button type="button" class="modal-close" aria-label="Close" @click="pageSettingsOpen = false">✕</button>
         </header>
         <div class="section-editor-body">
-            <details class="settings-accordion">
-              <summary><strong>Page Basics</strong><span>What this page is</span></summary>
+            <SettingsAccordion label="Page Basics" hint="What this page is">
                 <label class="offer-field">
                   <span>Page Name</span>
                   <input v-model.trim="builder.name" type="text" />
@@ -244,9 +243,8 @@
                     </select>
                   </label>
                 </div>
-            </details>
-            <details class="settings-accordion">
-              <summary><strong>Page Goal</strong><span>Who is arriving, and from where</span></summary>
+            </SettingsAccordion>
+            <SettingsAccordion label="Page Goal" hint="Who is arriving, and from where">
                 <!-- The goal is set in the create wizard, but it must stay editable: it drives composition, so
                      a page frozen on its original goal could never gain (or drop) what a goal governs. -->
                 <label class="offer-field">
@@ -259,9 +257,8 @@
                   </select>
                   <small>{{ builderGoalNote }}</small>
                 </label>
-            </details>
-            <details class="settings-accordion">
-              <summary><strong>Appearance</strong><span>Theme preset and colour overrides</span></summary>
+            </SettingsAccordion>
+            <SettingsAccordion label="Appearance" hint="Theme preset and colour overrides">
                   <label class="offer-field">
                     <span>Preset</span>
                     <select v-model="builder.preset">
@@ -298,9 +295,8 @@
                     </label>
                   </div>
                 </div>
-            </details>
-            <details class="settings-accordion">
-              <summary><strong>SEO</strong><span>Title and search snippet</span></summary>
+            </SettingsAccordion>
+            <SettingsAccordion label="SEO" hint="Title and search snippet">
                 <label class="offer-field">
                   <span>SEO Title</span>
                   <input :value="builder.seo_title" :placeholder="seoTitlePlaceholder" type="text" @input="applyTitleCaseInput((value) => { builder.seo_title = value; }, $event)" />
@@ -311,9 +307,8 @@
                   <textarea v-model.trim="builder.seo_description" :placeholder="seoDescriptionPlaceholder" rows="3"></textarea>
                   <small>The search-result snippet. Leave blank to auto-generate from the product description.</small>
                 </label>
-            </details>
-            <details class="settings-accordion">
-              <summary><strong>Discoverability</strong><span>Structured data and machine readers</span></summary>
+            </SettingsAccordion>
+            <SettingsAccordion label="Discoverability" hint="Structured data and machine readers">
                 <details v-if="discoverabilitySections.length" class="builder-section discoverability-drawer">
                   <summary>
                     <h3>Discoverability</h3>
@@ -352,9 +347,8 @@
                     Set a Page Goal of "Search / SEO" above to turn this on by default.
                   </p>
                 </details>
-            </details>
-            <details class="settings-accordion">
-              <summary><strong>Analytics</strong><span>Google Tag and Meta Pixel</span></summary>
+            </SettingsAccordion>
+            <SettingsAccordion label="Analytics" hint="Google Tag and Meta Pixel">
                 <div class="offer-two-column">
                   <label class="offer-field">
                     <span>Google Tag ID</span>
@@ -365,9 +359,8 @@
                     <input v-model.trim="builder.pixel_id" type="text" />
                   </label>
                 </div>
-            </details>
-            <details class="settings-accordion">
-              <summary><strong>Favicon</strong><span>The browser-tab icon</span></summary>
+            </SettingsAccordion>
+            <SettingsAccordion label="Favicon" hint="The browser-tab icon">
                 <label class="offer-field">
                   <span>Favicon</span>
                   <div class="builder-inline-media">
@@ -382,7 +375,7 @@
                   </div>
                   <small v-if="faviconUploadError" class="builder-upload-error">{{ faviconUploadError }}</small>
                 </label>
-            </details>
+            </SettingsAccordion>
         </div>
         <footer class="section-editor-footer">
           <button class="primary-action" type="button" @click="pageSettingsOpen = false">Done</button>
@@ -1511,6 +1504,7 @@ import PurchaseFlowDiagram from "./PurchaseFlowDiagram.vue";
 import { useProfileStore } from "../stores/profile";
 import { useSitesStore } from "../stores/sites";
 import { useCollectionsStore } from "../stores/collections";
+import SettingsAccordion from "./shared/SettingsAccordion.vue";
 import MediaListField from "./shared/MediaListField.vue";
 import StoreAddressField from "./StoreAddressField.vue";
 import { resolvePageDeps, copyCatalogToEnv, pageForTarget } from "../composables/environmentCopy";
