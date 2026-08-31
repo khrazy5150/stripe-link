@@ -4201,49 +4201,72 @@ button:disabled {
   font-size: var(--text-hint);
 }
 
+/* A COMPACT row, not an editor. Tall cards cannot be dragged — a testimonials section with 20 items is
+   a ~2000px card and the gesture needs scrolling mid-drag — so editing lives in a modal and the row
+   stays one line you can scan and grab. */
 .content-section {
-  /* grid + gap is what .builder-section used to stack its children — without it the lifted bodies flow
-     inline, running a <label> and its <small> together on one line. */
-  display: grid;
-  gap: 1rem;
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
   border: 1px solid var(--line);
   border-radius: var(--radius-md);
   background: var(--panel);
-  padding: 1.2rem 1.4rem 1.4rem;
+  padding: 0.7rem 1rem;
 }
 
-/* The lifted bodies were written as .builder-section children; carry the rules they relied on. */
-.content-section p {
+.content-row-name {
+  font-size: var(--text-label);
+  line-height: var(--leading-label);
+  font-weight: var(--weight-semibold);
+}
+
+/* What the section currently holds — "3 quotes", "none showing". Truncates rather than wrapping, so
+   every row stays exactly one line tall and the run keeps its rhythm. */
+.content-row-summary {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-muted);
+  font-size: var(--text-hint);
+}
+
+.section-editor-modal {
+  width: min(64rem, 100%);
+  max-height: min(84vh, 72rem);
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+}
+
+.section-editor-body {
+  display: grid;
+  gap: 1rem;
+  overflow: auto;
+  padding: 1.6rem 2rem;
+  min-height: 0;
+}
+
+.section-editor-body p {
   margin: 0;
 }
 
-.content-section small {
+.section-editor-body small {
   color: var(--muted);
   font-size: var(--text-hint);
   font-weight: var(--weight-normal);
 }
 
-.content-section-header {
+.section-editor-footer {
   display: flex;
-  align-items: center;
-  gap: 0.8rem;   /* no margin-bottom: the card's grid gap already separates header from body */
+  justify-content: flex-end;
+  gap: 1rem;
+  padding: 1.4rem 2rem;
+  border-top: 1px solid var(--line);
 }
 
+/* The lifted bodies were written as .builder-section children; carry the rules they relied on. */
 /* Remove sits at the far end of the row header, away from the title and the drag handle. */
-.content-section-header .danger-action {
-  margin-left: auto;
-}
-
-.content-section-header h3 {
-  margin: 0;
-  font-size: var(--text-label);
-  line-height: var(--leading-label);
-  font-weight: var(--weight-semibold);
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--muted);
-}
-
 .content-section-drag {
   color: var(--text-muted);
   cursor: grab;
@@ -4257,12 +4280,6 @@ button:disabled {
 }
 
 /* A section with nothing to configure still earns a row — the tenant needs to see where it lands. */
-.content-section-note {
-  margin: 0;
-  color: var(--text-muted);
-  font-size: var(--text-hint);
-}
-
 /* Drag handle on a form block that maps to a real page section. ONLY the handle is draggable — making
    the whole block draggable breaks text selection inside its inputs. */
 .builder-section-heading {

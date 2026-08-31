@@ -205,6 +205,149 @@
       </div>
     </section>
 
+
+    <!-- Section editor. One editing surface: rows are a scannable, draggable map and every editor lives
+         here (plans/BUILDER_SECTION_ORDER.md Phase 2). ADD opens on a draft and commits; EDIT writes
+         through live so the preview keeps updating as the tenant types. -->
+    <div v-if="sectionEditor" class="modal-backdrop" @click.self="cancelSectionEditor">
+      <section class="modal-card section-editor-modal" role="dialog" aria-modal="true" aria-labelledby="sectionEditorTitle">
+        <header class="modal-card-header">
+          <h2 id="sectionEditorTitle">{{ sectionEditor.isNew ? `Add ${sectionEditor.row.label}` : sectionEditor.row.label }}</h2>
+          <button type="button" class="modal-close" aria-label="Close" @click="cancelSectionEditor">✕</button>
+        </header>
+        <div class="section-editor-body">
+            <template v-if="sectionEditor.row.editor === 'trust_badges'">
+                <div class="builder-repeat-list">
+                  <div v-for="(badge, index) in builder.trust_badges.badges" :key="`badge-${index}`" class="builder-repeat-row builder-trust-badge-row">
+                    <label class="builder-switch" @click.stop>
+                      <input v-model="badge.enabled" type="checkbox" :aria-label="`Enable trust badge ${index + 1}`" />
+                      <span aria-hidden="true"></span>
+                    </label>
+                    <strong>Trust Badge {{ index + 1 }}</strong>
+                    <button
+                      type="button"
+                      class="badge-icon-picker-btn"
+                      :disabled="!badge.enabled"
+                      :aria-label="`Change icon for trust badge ${index + 1}`"
+                      @click.stop="showIconPicker(badge.emoji, (emoji) => { badge.emoji = emoji; }, 'Choose an Icon')"
+                    >{{ badge.emoji || '—' }}</button>
+                    <input v-model.trim="badge.label" type="text" :disabled="!badge.enabled" aria-label="Badge label" />
+                  </div>
+                </div>
+              </template>
+            <template v-else-if="sectionEditor.row.editor === 'refund_policy'">
+                <label class="builder-toggle">
+                  <input v-model="builder.refund_policy.enabled" type="checkbox" />
+                  <span>Show refund policy</span>
+                </label>
+                <small>Refund policy copy comes from the selected offer.</small>
+              </template>
+            <template v-else-if="sectionEditor.row.editor === 'checkout_cta'">
+                <label class="offer-field">
+                  <span>Button Label</span>
+                  <input v-model.trim="builder.cta_label" type="text" />
+                </label>
+                <div class="lead-action-summary">
+                  <strong>{{ ctaTypeLabel(builderCta.type) }}</strong>
+                  <span>{{ ctaTypeDescription(builderCta.type) }} This comes from the offer and can't be changed here.</span>
+                  <code v-if="builderCta.target">{{ builderCta.target }}</code>
+                </div>
+              </template>
+              <template v-else-if="sectionEditor.row.editor === 'element' && row.element">
+                <template v-for="element in [sectionEditor.row.element]" :key="element.id">
+
+                    <template v-if="element.type === 'content_block'">
+                      <input :value="element.title" type="text" placeholder="Title" @input="applyTitleCaseInput((value) => { element.title = value; }, $event)" />
+                      <textarea v-model.trim="element.text" rows="2" placeholder="Text"></textarea>
+                      <div class="selectable-price-image-controls" :class="{ 'has-image-preview': element.image_url }">
+                        <div v-if="element.image_url" class="selectable-price-image-preview">
+                          <img :src="element.image_url" alt="Content image preview" />
+                        </div>
+                        <input :ref="(el) => setElementImageInput(element.id, el)" type="file" accept="image/*" hidden @change="handleElementImagePicked(element, $event)" />
+                        <button class="secondary-action compact" type="button" :disabled="Boolean(blurbImageUploading[element.id])" @click.prevent="triggerElementImageUpload(element.id)">
+                          {{ blurbImageUploading[element.id] ? "Uploading..." : "Upload Image" }}
+                        </button>
+                        <input v-model.trim="element.image_url" type="url" placeholder="Optional image URL" />
+                      </div>
+                      <div v-if="blurbImageErrors[element.id]" class="price-image-error">{{ blurbImageErrors[element.id] }}</div>
+                      <label class="builder-toggle"><input v-model="element.centered" type="checkbox" /><span>Center this block</span></label>
+                    </template>
+
+                    <template v-else-if="element.type === 'testimonials'">
+                      <input v-model.trim="element.heading" type="text" placeholder="Section heading (optional)" />
+                      <div v-for="(item, i) in element.items" :key="i" class="element-subrow">
+                        <textarea v-model.trim="item.quote" rows="2" placeholder="Quote"></textarea>
+                        <input v-model.trim="item.author" type="text" placeholder="Author" />
+                        <input v-model.trim="item.role" type="text" placeholder="Role (optional)" />
+                        <div class="selectable-price-image-controls" :class="{ 'has-image-preview': item.avatar_url }">
+                          <div v-if="item.avatar_url" class="selectable-price-image-preview"><img :src="item.avatar_url" alt="Avatar preview" /></div>
+                          <input :ref="(el) => setSubImageInput(subImgKey(element, 'items', i), el)" type="file" accept="image/*" hidden @change="handleSubImagePicked(item, 'avatar_url', subImgKey(element, 'items', i), $event)" />
+                          <button class="secondary-action compact" type="button" :disabled="Boolean(subImageUploading[subImgKey(element, 'items', i)])" @click.prevent="triggerSubImageUpload(subImgKey(element, 'items', i))">
+                            {{ subImageUploading[subImgKey(element, 'items', i)] ? "Uploading..." : "Upload avatar" }}
+                          </button>
+                          <input v-model.trim="item.avatar_url" type="url" placeholder="or paste avatar URL" />
+                        </div>
+                        <div v-if="subImageErrors[subImgKey(element, 'items', i)]" class="price-image-error">{{ subImageErrors[subImgKey(element, 'items', i)] }}</div>
+                        <button class="danger-action compact" type="button" @click="removeSubItem(element, 'items', i)">Remove</button>
+                      </div>
+                      <button class="secondary-action compact" type="button" @click="addSubItem(element, 'items', { quote: '', author: '', role: '', avatar_url: '' })">+ Add testimonial</button>
+                    </template>
+
+                    <template v-else-if="element.type === 'rating'">
+                      <div class="offer-two-column">
+                        <label class="offer-field"><span>Stars (0–5)</span><input v-model.number="element.value" type="number" min="0" max="5" step="0.1" /></label>
+                        <label class="offer-field"><span>Review count</span><input v-model.number="element.count" type="number" min="0" /></label>
+                      </div>
+                      <label class="offer-field"><span>Label</span><input v-model.trim="element.label" type="text" placeholder="e.g. on Google" /></label>
+                    </template>
+
+                    <template v-else-if="element.type === 'client_marquee'">
+                      <input v-model.trim="element.heading" type="text" placeholder="Section heading (optional)" />
+                      <div v-for="(logo, i) in element.logos" :key="i" class="element-subrow">
+                        <input v-model.trim="logo.name" type="text" placeholder="Client name (only visible by search engines - recommended for SEO)" />
+                        <div class="selectable-price-image-controls" :class="{ 'has-image-preview': logo.image_url }">
+                          <div v-if="logo.image_url" class="selectable-price-image-preview"><img :src="logo.image_url" alt="Logo preview" /></div>
+                          <input :ref="(el) => setSubImageInput(subImgKey(element, 'logos', i), el)" type="file" accept="image/*" hidden @change="handleSubImagePicked(logo, 'image_url', subImgKey(element, 'logos', i), $event)" />
+                          <button class="secondary-action compact" type="button" :disabled="Boolean(subImageUploading[subImgKey(element, 'logos', i)])" @click.prevent="triggerSubImageUpload(subImgKey(element, 'logos', i))">
+                            {{ subImageUploading[subImgKey(element, 'logos', i)] ? "Uploading..." : "Upload logo" }}
+                          </button>
+                          <input v-model.trim="logo.image_url" type="url" placeholder="or paste image URL" />
+                        </div>
+                        <div v-if="subImageErrors[subImgKey(element, 'logos', i)]" class="price-image-error">{{ subImageErrors[subImgKey(element, 'logos', i)] }}</div>
+                        <button class="danger-action compact" type="button" @click="removeSubItem(element, 'logos', i)">Remove</button>
+                      </div>
+                      <button class="secondary-action compact" type="button" @click="addSubItem(element, 'logos', { image_url: '', name: '' })">+ Add logo</button>
+                    </template>
+
+                    <template v-else-if="element.type === 'faq'">
+                      <input :value="element.heading" type="text" placeholder="Section heading (optional)" @input="applyTitleCaseInput((value) => { element.heading = value; }, $event)" />
+                      <div v-for="(item, i) in element.items" :key="i" class="element-subrow">
+                        <input :value="item.question" type="text" placeholder="Question" @input="applyTitleCaseInput((value) => { item.question = value; }, $event)" />
+                        <textarea v-model.trim="item.answer" rows="2" placeholder="Answer"></textarea>
+                        <button class="danger-action compact" type="button" @click="removeSubItem(element, 'items', i)">Remove</button>
+                      </div>
+                      <button class="secondary-action compact" type="button" @click="addSubItem(element, 'items', { question: '', answer: '' })">+ Add question</button>
+                    </template>
+
+                    <template v-else-if="element.type === 'product_details'">
+                      <p class="element-empty">Shows the current product's gallery, badges, and description — pulled from the offer and synced to the carousel. No configuration needed.</p>
+                    </template>
+
+                    <template v-else-if="element.type === 'related_products'">
+                      <input v-model.trim="element.heading" type="text" placeholder="Section heading (optional)" />
+                      <p class="element-empty">Automatically shows other Site pages in the same category as this one — a same-category rail for internal linking. It fills itself; there's nothing to pick.</p>
+                    </template>
+
+                </template>
+              </template>
+        </div>
+        <footer class="section-editor-footer">
+          <button class="secondary-action" type="button" @click="cancelSectionEditor">Cancel</button>
+          <button v-if="sectionEditor.isNew" class="primary-action" type="button" @click="commitNewSection()">Add Section</button>
+          <button v-else class="primary-action" type="button" @click="closeSectionEditor()">Done</button>
+        </footer>
+      </section>
+    </div>
     <div v-if="wizardOpen" class="modal-backdrop" @click.self="closeWizard">
       <section class="modal-card landing-wizard-modal" role="dialog" aria-modal="true" aria-labelledby="landingWizardTitle">
         <header class="modal-card-header">
@@ -731,146 +874,21 @@
               @dragover.prevent
               @drop="onRowDrop(rowIndex)"
             >
-              <header class="content-section-header">
-                <span
-                  class="content-section-drag"
-                  draggable="true"
-                  title="Drag to reorder"
-                  @dragstart="onRowDragStart(rowIndex)"
-                >⠿</span>
-                <h3>{{ row.label }}</h3>
-                <button
-                  v-if="row.editor === 'element'"
-                  class="danger-action compact"
-                  type="button"
-                  @click="removeElement(row.element.id)"
-                >Remove</button>
-              </header>
-            <template v-if="row.editor === 'trust_badges'">
-                <div class="builder-repeat-list">
-                  <div v-for="(badge, index) in builder.trust_badges.badges" :key="`badge-${index}`" class="builder-repeat-row builder-trust-badge-row">
-                    <label class="builder-switch" @click.stop>
-                      <input v-model="badge.enabled" type="checkbox" :aria-label="`Enable trust badge ${index + 1}`" />
-                      <span aria-hidden="true"></span>
-                    </label>
-                    <strong>Trust Badge {{ index + 1 }}</strong>
-                    <button
-                      type="button"
-                      class="badge-icon-picker-btn"
-                      :disabled="!badge.enabled"
-                      :aria-label="`Change icon for trust badge ${index + 1}`"
-                      @click.stop="showIconPicker(badge.emoji, (emoji) => { badge.emoji = emoji; }, 'Choose an Icon')"
-                    >{{ badge.emoji || '—' }}</button>
-                    <input v-model.trim="badge.label" type="text" :disabled="!badge.enabled" aria-label="Badge label" />
-                  </div>
-                </div>
-              </template>
-            <template v-else-if="row.editor === 'refund_policy'">
-                <label class="builder-toggle">
-                  <input v-model="builder.refund_policy.enabled" type="checkbox" />
-                  <span>Show refund policy</span>
-                </label>
-                <small>Refund policy copy comes from the selected offer.</small>
-              </template>
-            <template v-else-if="row.editor === 'checkout_cta'">
-                <label class="offer-field">
-                  <span>Button Label</span>
-                  <input v-model.trim="builder.cta_label" type="text" />
-                </label>
-                <div class="lead-action-summary">
-                  <strong>{{ ctaTypeLabel(builderCta.type) }}</strong>
-                  <span>{{ ctaTypeDescription(builderCta.type) }} This comes from the offer and can't be changed here.</span>
-                  <code v-if="builderCta.target">{{ builderCta.target }}</code>
-                </div>
-              </template>
-              <template v-else-if="row.editor === 'element' && row.element">
-                <template v-for="element in [row.element]" :key="element.id">
-
-                    <template v-if="element.type === 'content_block'">
-                      <input :value="element.title" type="text" placeholder="Title" @input="applyTitleCaseInput((value) => { element.title = value; }, $event)" />
-                      <textarea v-model.trim="element.text" rows="2" placeholder="Text"></textarea>
-                      <div class="selectable-price-image-controls" :class="{ 'has-image-preview': element.image_url }">
-                        <div v-if="element.image_url" class="selectable-price-image-preview">
-                          <img :src="element.image_url" alt="Content image preview" />
-                        </div>
-                        <input :ref="(el) => setElementImageInput(element.id, el)" type="file" accept="image/*" hidden @change="handleElementImagePicked(element, $event)" />
-                        <button class="secondary-action compact" type="button" :disabled="Boolean(blurbImageUploading[element.id])" @click.prevent="triggerElementImageUpload(element.id)">
-                          {{ blurbImageUploading[element.id] ? "Uploading..." : "Upload Image" }}
-                        </button>
-                        <input v-model.trim="element.image_url" type="url" placeholder="Optional image URL" />
-                      </div>
-                      <div v-if="blurbImageErrors[element.id]" class="price-image-error">{{ blurbImageErrors[element.id] }}</div>
-                      <label class="builder-toggle"><input v-model="element.centered" type="checkbox" /><span>Center this block</span></label>
-                    </template>
-
-                    <template v-else-if="element.type === 'testimonials'">
-                      <input v-model.trim="element.heading" type="text" placeholder="Section heading (optional)" />
-                      <div v-for="(item, i) in element.items" :key="i" class="element-subrow">
-                        <textarea v-model.trim="item.quote" rows="2" placeholder="Quote"></textarea>
-                        <input v-model.trim="item.author" type="text" placeholder="Author" />
-                        <input v-model.trim="item.role" type="text" placeholder="Role (optional)" />
-                        <div class="selectable-price-image-controls" :class="{ 'has-image-preview': item.avatar_url }">
-                          <div v-if="item.avatar_url" class="selectable-price-image-preview"><img :src="item.avatar_url" alt="Avatar preview" /></div>
-                          <input :ref="(el) => setSubImageInput(subImgKey(element, 'items', i), el)" type="file" accept="image/*" hidden @change="handleSubImagePicked(item, 'avatar_url', subImgKey(element, 'items', i), $event)" />
-                          <button class="secondary-action compact" type="button" :disabled="Boolean(subImageUploading[subImgKey(element, 'items', i)])" @click.prevent="triggerSubImageUpload(subImgKey(element, 'items', i))">
-                            {{ subImageUploading[subImgKey(element, 'items', i)] ? "Uploading..." : "Upload avatar" }}
-                          </button>
-                          <input v-model.trim="item.avatar_url" type="url" placeholder="or paste avatar URL" />
-                        </div>
-                        <div v-if="subImageErrors[subImgKey(element, 'items', i)]" class="price-image-error">{{ subImageErrors[subImgKey(element, 'items', i)] }}</div>
-                        <button class="danger-action compact" type="button" @click="removeSubItem(element, 'items', i)">Remove</button>
-                      </div>
-                      <button class="secondary-action compact" type="button" @click="addSubItem(element, 'items', { quote: '', author: '', role: '', avatar_url: '' })">+ Add testimonial</button>
-                    </template>
-
-                    <template v-else-if="element.type === 'rating'">
-                      <div class="offer-two-column">
-                        <label class="offer-field"><span>Stars (0–5)</span><input v-model.number="element.value" type="number" min="0" max="5" step="0.1" /></label>
-                        <label class="offer-field"><span>Review count</span><input v-model.number="element.count" type="number" min="0" /></label>
-                      </div>
-                      <label class="offer-field"><span>Label</span><input v-model.trim="element.label" type="text" placeholder="e.g. on Google" /></label>
-                    </template>
-
-                    <template v-else-if="element.type === 'client_marquee'">
-                      <input v-model.trim="element.heading" type="text" placeholder="Section heading (optional)" />
-                      <div v-for="(logo, i) in element.logos" :key="i" class="element-subrow">
-                        <input v-model.trim="logo.name" type="text" placeholder="Client name (only visible by search engines - recommended for SEO)" />
-                        <div class="selectable-price-image-controls" :class="{ 'has-image-preview': logo.image_url }">
-                          <div v-if="logo.image_url" class="selectable-price-image-preview"><img :src="logo.image_url" alt="Logo preview" /></div>
-                          <input :ref="(el) => setSubImageInput(subImgKey(element, 'logos', i), el)" type="file" accept="image/*" hidden @change="handleSubImagePicked(logo, 'image_url', subImgKey(element, 'logos', i), $event)" />
-                          <button class="secondary-action compact" type="button" :disabled="Boolean(subImageUploading[subImgKey(element, 'logos', i)])" @click.prevent="triggerSubImageUpload(subImgKey(element, 'logos', i))">
-                            {{ subImageUploading[subImgKey(element, 'logos', i)] ? "Uploading..." : "Upload logo" }}
-                          </button>
-                          <input v-model.trim="logo.image_url" type="url" placeholder="or paste image URL" />
-                        </div>
-                        <div v-if="subImageErrors[subImgKey(element, 'logos', i)]" class="price-image-error">{{ subImageErrors[subImgKey(element, 'logos', i)] }}</div>
-                        <button class="danger-action compact" type="button" @click="removeSubItem(element, 'logos', i)">Remove</button>
-                      </div>
-                      <button class="secondary-action compact" type="button" @click="addSubItem(element, 'logos', { image_url: '', name: '' })">+ Add logo</button>
-                    </template>
-
-                    <template v-else-if="element.type === 'faq'">
-                      <input :value="element.heading" type="text" placeholder="Section heading (optional)" @input="applyTitleCaseInput((value) => { element.heading = value; }, $event)" />
-                      <div v-for="(item, i) in element.items" :key="i" class="element-subrow">
-                        <input :value="item.question" type="text" placeholder="Question" @input="applyTitleCaseInput((value) => { item.question = value; }, $event)" />
-                        <textarea v-model.trim="item.answer" rows="2" placeholder="Answer"></textarea>
-                        <button class="danger-action compact" type="button" @click="removeSubItem(element, 'items', i)">Remove</button>
-                      </div>
-                      <button class="secondary-action compact" type="button" @click="addSubItem(element, 'items', { question: '', answer: '' })">+ Add question</button>
-                    </template>
-
-                    <template v-else-if="element.type === 'product_details'">
-                      <p class="element-empty">Shows the current product's gallery, badges, and description — pulled from the offer and synced to the carousel. No configuration needed.</p>
-                    </template>
-
-                    <template v-else-if="element.type === 'related_products'">
-                      <input v-model.trim="element.heading" type="text" placeholder="Section heading (optional)" />
-                      <p class="element-empty">Automatically shows other Site pages in the same category as this one — a same-category rail for internal linking. It fills itself; there's nothing to pick.</p>
-                    </template>
-
-                </template>
-              </template>
-              <p v-else class="content-section-note">{{ rowNote(row) }}</p>
+              <span
+                class="content-section-drag"
+                draggable="true"
+                title="Drag to reorder"
+                @dragstart="onRowDragStart(rowIndex)"
+              >⠿</span>
+              <span class="content-row-name">{{ row.label }}</span>
+              <span class="content-row-summary">{{ rowSummary(row) }}</span>
+              <button v-if="row.editor" class="secondary-action compact" type="button" @click="openSectionEditor(row)">Edit</button>
+              <button
+                v-if="row.editor === 'element'"
+                class="danger-action compact"
+                type="button"
+                @click="removeElement(row.element.id)"
+              >Remove</button>
             </article>
             <div class="composition-subhead">Add content</div>
             <div class="element-add-row">
@@ -3640,13 +3658,15 @@ function newElement(type) {
   return base;
 }
 
+// Opens the editor on a DRAFT. Nothing reaches builder.elements until "Add Section" — so Cancel leaves
+// no trace, and an empty half-made section can never exist.
 function addElement(type) {
   if (builder.elements.length >= 20) return;
   const element = newElement(type);
-  builder.elements.push(element);
-  // Pin it to the END of the free band. Without this it sorts to wherever the element run sits by
-  // default — mid-sequence, off-screen from the button that created it, so the click looks like a no-op.
-  builder.section_order = [...sequenceRows.value.map((row) => row.key).filter((key) => key !== element.id), element.id];
+  sectionEditor.value = {
+    isNew: true,
+    row: { key: element.id, type, label: elementLabel(type), editor: "element", element, movable: true },
+  };
 }
 
 function removeElement(id) {
@@ -3812,6 +3832,58 @@ const sequenceRows = computed(() => {
   const order = orderSectionKeys(rows.map((row) => row.key), builder.section_order || []);
   return [...rows].sort((a, b) => order.indexOf(a.key) - order.indexOf(b.key));
 });
+
+// { row, isNew }. isNew means the row's element is a DRAFT that is not in builder.elements yet.
+const sectionEditor = ref(null);
+
+function openSectionEditor(row) {
+  sectionEditor.value = { row, isNew: false };
+}
+
+// Editing writes through live, so closing is just closing.
+function closeSectionEditor() {
+  sectionEditor.value = null;
+}
+
+// Cancel on an ADD throws the draft away — nothing was ever created, so there are no empty cards.
+function cancelSectionEditor() {
+  sectionEditor.value = null;
+}
+
+function commitNewSection() {
+  const element = sectionEditor.value?.row?.element;
+  sectionEditor.value = null;
+  if (!element || builder.elements.length >= 20) return;
+  builder.elements.push(element);
+  // Land at the END of the run, next to the buttons that created it.
+  builder.section_order = [...sequenceRows.value.map((r) => r.key).filter((k) => k !== element.id), element.id];
+}
+
+// The one line that makes a collapsed row worth scanning. Without it the map is a list of type names.
+function rowSummary(row) {
+  const e = row.element;
+  if (row.type === "trust_badges") {
+    const on = (builder.trust_badges.badges || []).filter((b) => b.enabled).length;
+    return on ? `${on} showing` : "none showing";
+  }
+  if (row.type === "refund_policy") return builder.refund_policy.enabled === false ? "hidden" : "shown";
+  if (row.type === "checkout_cta") return builder.cta_label || "Buy Now";
+  if (row.type === "offer_price_selector") return "from the offer";
+  if (row.type === "legal_footer") return "generated";
+  if (row.type === "countdown_timer") return builder.countdown.enabled ? `${builder.countdown.duration_minutes || 15} min` : "off";
+  if (!e) return "";
+  if (row.type === "testimonials") return countLabel((e.items || []).filter((i) => (i.quote || "").trim()).length, "quote");
+  if (row.type === "faq") return countLabel((e.items || []).filter((i) => (i.question || "").trim()).length, "question");
+  if (row.type === "client_marquee") return countLabel((e.logos || []).filter((l) => l.image_url).length, "logo");
+  if (row.type === "rating") return `${e.value || 5} stars`;
+  if (row.type === "content_block") return e.title?.trim() || (e.text?.trim() ? "text" : "empty");
+  return "";
+}
+
+function countLabel(n, noun) {
+  if (!n) return "empty";
+  return `${n} ${noun}${n === 1 ? "" : "s"}`;
+}
 
 // Sections with no editor still earn a row: a tenant needs to see WHERE they land, even with nothing to set.
 function rowNote(row) {
