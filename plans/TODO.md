@@ -253,6 +253,15 @@ currently INTERLEAVED with sections, which is much of why order is unreadable.
 Also re-phrases the semantic rule: "the FIRST pinned_top section carries the H1 and is the LCP element",
 not "the hero does" -- a heroless quiz page (FORM_BUILDER §4a) must still have a defined H1 owner.
 
+Also defines a RESEARCHED BASELINE order (plan 4a) so tenants need not reorder anything: trust badges
+move beside the price/CTA (seals work at the moment of commitment, not a screen away), and elements get
+a default sequence at all -- today it is insertion order, so adding FAQ before testimonials pins FAQ
+first forever. Deliberately does NOT move price/CTA above the fold: checkout_cta is non-repeatable, so
+the single ask belongs after the persuasion. The baseline lives as default_order per offer_type with
+per-goal overrides in composition_rules.json; page.goal already encodes traffic temperature. Goal stays
+on the PAGE (one offer can have a cold-ads page AND a bio page) and is DERIVED from the offer when
+unset, never stored twice.
+
 Replaces both earlier attempts. Reshapes the most-used screen, so sandbox-soak before prod.
 
 ### ⭐ HIGH — Social Media Pages (link-in-bio) — plan plans/SOCIAL_MEDIA_PAGES.md, 2026-08-30, not built

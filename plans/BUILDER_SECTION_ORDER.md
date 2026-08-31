@@ -96,6 +96,61 @@ cases. But one could imagine the form being `pinned_top` on a quiz page, since i
 appears, rather than building the generality first — an override map is easy to add later and impossible
 to remove once tenants depend on it.
 
+## 4a. The BASELINE order — a researched default, not cart's
+
+Tenants should not have to reorder anything to get a good page. Today the default is:
+
+    hero -> trust_badges -> [all elements, in INSERTION order] -> price -> CTA -> refund -> footer
+
+Two problems. **Trust badges sit a screen away from the CTA** — trust seals work by reducing friction at
+the moment of commitment (Baymard's checkout-seal research is the usual citation), so they belong beside
+the price/CTA cluster. And **there is no default order among elements at all**: a tenant who adds FAQ
+before testimonials gets FAQ first, permanently. That is the biggest gap, because elements are what
+tenants add most.
+
+Proposed baseline (transaction, neutral traffic):
+
+    countdown · brand_label · hero_media · hero
+    product_details -> rating -> testimonials -> content_block -> client_marquee -> faq
+    trust_badges -> offer_price_selector -> checkout_cta -> refund_policy
+    related_products · legal_footer
+
+The element run follows the visitor's actual questions: *what is it* -> *is it any good* -> *who says so*
+-> *tell me more* -> *who else uses it* -> *but what about...*
+
+**Deliberately NOT moving price/CTA above the fold.** Tempting, and right for warm traffic — but
+`checkout_cta` is non-repeatable, so there is exactly ONE ask. A single ask belongs after the persuasion.
+Moving it up without adding a second CTA at the bottom would be strictly worse. Revisit if a repeat CTA
+is ever added.
+
+### Calibration — what is actually established
+
+Well supported: value proposition above the fold; trust signals adjacent to the action; risk reversal at
+the moment of the ask; objections answered before the final ask. **Contested and A/B-dependent:** nearly
+everything else, especially price placement, which swings on traffic temperature and price point. Treat
+this baseline as a good default, not a law, which is exactly why every section stays draggable.
+
+### Where the baseline lives: goal, not a new field
+
+`page.goal` already exists with five values, and their own notes already encode traffic temperature:
+`paid_ads` ("converts fast or bounces"), `email_list` ("a warm audience... straight to the offer"),
+`social`, `search_seo`, `minimal`. Packs currently only ADD sections; they should also be able to ORDER
+them.
+
+Implementation: a `default_order` list per `offer_type`, with per-goal overrides, in
+`composition_rules.json` — the same file both renderers already read. No new document field, no new
+concept.
+
+**Goal stays on the PAGE. Do NOT add it to the Offer.** The same offer legitimately has a cold-ads page
+and a bio-link page, with different orders and identical product data. Storing goal on the offer makes
+those two pages unable to differ, and creates two fields meaning the same thing that must agree — the
+failure shape logged in `TODO.md` § silent agreement failures.
+
+**When goal is unset, DERIVE rather than store.** The inputs are already on the offer the page
+references: `product_intent` (lead_gen wants a wholly different sequence), price point (high-ticket earns
+more proof before the ask), service vs product. A derived default costs nothing and cannot drift; a
+stored copy can.
+
 ## 5. What this replaces
 
 - **Remove** the drag handles on form blocks (`e5428e3`) — they are the ghost drag.

@@ -3712,6 +3712,53 @@ const orderedSectionRows = computed(() => builderSections(builderIntent.value).m
   movable: isMovable(section.type),
 })));
 
+// --- Content sequence model (plans/BUILDER_SECTION_ORDER.md) -------------------------------------
+// The form renders THIS, in this order, so the builder reads top-to-bottom exactly as the page does.
+//
+// Two things the raw section list gets wrong for a builder view:
+//   1. One "Hero" form block covers four catalog elements (hero_media, hero, headline, subheadline).
+//      They share a placement and always move together, so the builder shows ONE row.
+//   2. Some sections have no editor at all — price cards are offer-driven and the footer is generated.
+//      They still belong on the map: a tenant needs to see WHERE they land, even with nothing to set.
+const HERO_FAMILY = ["hero_media", "hero", "headline", "subheadline"];
+
+// section type -> which editor block renders inside the row. Absent = a name-only row (no editor).
+const SECTION_EDITORS = {
+  countdown_timer: "countdown",
+  hero_media: "hero",
+  trust_badges: "trust_badges",
+  checkout_cta: "checkout_cta",
+  refund_policy: "refund_policy",
+};
+
+const contentRows = computed(() => {
+  const rows = [];
+  let heroEmitted = false;
+  for (const section of builderSections(builderIntent.value)) {
+    const type = section.type;
+    if (HERO_FAMILY.includes(type)) {
+      if (heroEmitted) continue;           // collapse the family into a single "Hero" row
+      heroEmitted = true;
+      rows.push({ key: "hero", type: "hero_media", label: "Hero", editor: "hero", movable: false });
+      continue;
+    }
+    rows.push({
+      key: sectionOrderKey(section),
+      type,
+      label: elementLabel(type),
+      editor: SECTION_EDITORS[type] || (isElementType(type) ? "element" : ""),
+      element: isElementType(type) ? builder.elements.find((el) => el.id === section.id) : null,
+      movable: isMovable(type),
+    });
+  }
+  return rows;
+});
+
+// An element row is one of the tenant-added cards, which already have their own editors.
+function isElementType(type) {
+  return ELEMENT_TYPES.value.some((entry) => entry.type === type);
+}
+
 const sectionDragFrom = ref(-1);
 
 function onSectionDragStart(index) {
