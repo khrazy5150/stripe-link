@@ -1251,3 +1251,40 @@ class ListiclePlaceholderTests(unittest.TestCase):
         media = re.search(r'data-media-count="(\d+)"', html)
         self.assertEqual(media.group(1), "2")
         self.assertNotIn("data:image/svg+xml;base64", html)  # nothing missing -> no placeholder anywhere
+
+
+class CountdownBannerTests(unittest.TestCase):
+    """Behaviours reported broken on 2026-08-31, each with a distinct cause."""
+
+    def _render(self, **section):
+        from stripe_link.runtime.html import render_countdown_timer
+        return render_countdown_timer({"id": "cd", "duration_minutes": 5, **section}, {})
+
+    def test_transparent_leaves_the_background_to_the_stylesheet(self):
+        # An inline background always beats the [data-transparent] rule, so emitting ANY inline colour
+        # here — solid or `transparent` — defeats the option. It must emit none.
+        html = self._render(transparent=True)
+        self.assertIn('data-transparent="true"', html)
+        self.assertNotIn("background:", html)
+
+    def test_opaque_still_sets_its_colour_inline(self):
+        self.assertIn("background:", self._render(transparent=False))
+
+    def test_start_disabled_hides_the_banner(self):
+        # .sl-countdown sets display:flex, which beat the hidden attribute until [hidden] was added.
+        self.assertIn("hidden>", self._render(start_enabled=False))
+        self.assertNotIn("hidden>", self._render(start_enabled=True))
+
+    def test_no_icon_is_an_explicit_choice(self):
+        # The picker's "no icon" sets "", which `|| "⏰"` used to turn back into the clock.
+        html = self._render(start_icon="")
+        self.assertIn('data-start-icon=""', html)
+        self.assertNotIn("data-countdown-icon", html)
+
+    def test_marquee_speed_is_emitted_and_clamped(self):
+        self.assertIn("--sl-countdown-marquee-duration:8s", self._render(marquee_seconds=8))
+        self.assertIn("--sl-countdown-marquee-duration:60s", self._render(marquee_seconds=9999))
+        self.assertIn("--sl-countdown-marquee-duration:3s", self._render(marquee_seconds=1))
+        # 0 is not a speed — it falls back to the default rather than clamping to the floor.
+        self.assertIn("--sl-countdown-marquee-duration:14s", self._render(marquee_seconds=0))
+        self.assertIn("--sl-countdown-marquee-duration:14s", self._render())

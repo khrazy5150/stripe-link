@@ -243,6 +243,15 @@
                     <input v-model="builder.countdown.marquee" type="checkbox" />
                     <span>Marquee Scroll</span>
                   </label>
+                  <label v-if="builder.countdown.marquee" class="offer-field">
+                    <span>Scroll Speed</span>
+                    <select v-model.number="builder.countdown.marquee_seconds">
+                      <option :value="24">Slow</option>
+                      <option :value="14">Normal</option>
+                      <option :value="8">Fast</option>
+                      <option :value="5">Very fast</option>
+                    </select>
+                  </label>
                   <div class="builder-countdown-row">
                     <label class="builder-toggle">
                       <input v-model="builder.countdown.start_enabled" type="checkbox" />
@@ -2201,6 +2210,7 @@ function defaultBuilderForm() {
       end_text: "Offer expired",
       start_enabled: true,
       end_enabled: true,
+      marquee_seconds: 14,   // lower = faster; the renderer clamps to 3..60
       start_icon: "⏰",
       end_icon: "⏰",
       start_color: "#f97316",
@@ -3068,8 +3078,9 @@ function populateBuilderFromPage(page) {
     end_text: countdown.end_text || "Offer expired",
     start_enabled: countdown.start_enabled !== false,
     end_enabled: countdown.end_enabled !== false,
-    start_icon: countdown.start_icon || "⏰",
-    end_icon: countdown.end_icon || "⏰",
+    marquee_seconds: Number(countdown.marquee_seconds) || 14,
+    start_icon: countdown.start_icon ?? "⏰",
+    end_icon: countdown.end_icon ?? "⏰",
     start_color: countdown.start_color || "#f97316",
     end_color: countdown.end_color || "#64748b",
     sticky: countdown.sticky !== false,
@@ -3281,8 +3292,9 @@ function builderSectionCandidates(intent) {
       end_text: builder.countdown.end_text || "Offer expired",
       start_enabled: builder.countdown.start_enabled !== false,
       end_enabled: builder.countdown.end_enabled !== false,
-      start_icon: builder.countdown.start_icon || "⏰",
-      end_icon: builder.countdown.end_icon || "⏰",
+      marquee_seconds: Number(builder.countdown.marquee_seconds) || 14,
+      start_icon: builder.countdown.start_icon ?? "⏰",
+      end_icon: builder.countdown.end_icon ?? "⏰",
       start_color: builder.countdown.start_color || "#f97316",
       end_color: builder.countdown.end_color || "#64748b",
       sticky: Boolean(builder.countdown.sticky),

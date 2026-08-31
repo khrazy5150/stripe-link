@@ -420,13 +420,17 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     "    main{width:100%;padding:0 0 12rem;display:grid;gap:1.6rem}",
     "    main > :not(.sl-countdown):not(.sl-checkout-cta){width:min(52rem,calc(100% - 3.2rem));margin-left:auto;margin-right:auto}",
     "    .sl-countdown{width:100%;display:flex;align-items:center;justify-content:center;gap:0.8rem;background:var(--sl-countdown-bg,var(--sl-card));color:var(--sl-countdown-text);border-radius:0;padding:1.2rem 1.6rem;font-weight:800}",
+    # display:flex above beats the hidden attribute's UA display:none, which made Banner Start inert.
+    "    .sl-countdown[hidden]{display:none}",
     "    .sl-countdown[data-sticky='true']{position:sticky;top:0;z-index:20}",
-    "    .sl-countdown[data-transparent='true']{background:color-mix(in srgb,var(--sl-countdown-bg,var(--sl-card)) 82%,transparent)}",
+    "    .sl-countdown[data-transparent='true']{background:color-mix(in srgb,var(--sl-countdown-bg,var(--sl-card)) 65%,transparent)}",
     "    .sl-countdown[data-marquee='true']{overflow:hidden;white-space:nowrap}",
     # Own keyframe name: `sl-marquee` is also defined by the client-logo strip further down, and the later
     # definition wins — which gave the countdown the logo animation (0 -> -50%), so it restarted from the
     # middle instead of wrapping off one edge and back in the other.
-    "    .sl-countdown[data-marquee='true'] .sl-countdown-content{display:inline-flex;align-items:center;gap:0.8rem;animation:sl-countdown-marquee 14s linear infinite}",
+    "    .sl-countdown[data-marquee='true'] .sl-countdown-content{display:inline-flex;align-items:center;gap:0.8rem;animation:sl-countdown-marquee var(--sl-countdown-marquee-duration,14s) linear infinite}",
+    # Scrolling past the deadline reads as a live offer that has already gone.
+    "    .sl-countdown[data-expired='true'] .sl-countdown-content{animation:none}",
     "    .sl-countdown time{font-family:var(--sl-font-mono);background:color-mix(in srgb,var(--sl-countdown-text) 16%,transparent);border-radius:0.4rem;padding:0.3rem 0.7rem}",
     "    @keyframes sl-countdown-marquee{from{transform:translateX(100%)}to{transform:translateX(-100%)}}",
     "    .sl-brand-label{display:flex;align-items:center;justify-content:center;gap:0.8rem;color:var(--sl-brand-label-text);padding-top:1.6rem}",
@@ -1827,7 +1831,8 @@ def render_countdown_timer(section: dict[str, Any], page: dict[str, Any]) -> str
     # Transparent has to win here: an inline background always beats a stylesheet rule, so the option
     # could never take effect while this was set unconditionally.
     transparent = bool(section.get("transparent"))
-    style = f"--sl-countdown-bg:{start_color};background:" + ("transparent" if transparent else start_color)
+    marquee_seconds = max(3, min(60, int(section.get("marquee_seconds") or 14)))
+    style = f"--sl-countdown-bg:{start_color};--sl-countdown-marquee-duration:{marquee_seconds}s" + ("" if transparent else f";background:{start_color}")
     # Each banner state can be switched off independently; the section hides itself while the active
     # state is disabled. Both were emitted by the builder and ignored here.
     start_enabled = section.get("start_enabled") is not False
@@ -5286,6 +5291,7 @@ def render_page_interactions_script(page: dict[str, Any]) -> str:
         "            if (label) label.textContent = section.dataset.endText || 'Offer expired';",
         "            const icon = section.querySelector('[data-countdown-icon]');",
         "            if (icon && section.dataset.endIcon) icon.textContent = section.dataset.endIcon;",
+        "            section.dataset.expired = 'true';",
         "            section.style.setProperty('--sl-countdown-bg', section.dataset.endColor || '#ef4444');",
         # Re-applying a solid colour here would undo Transparent Background the moment the timer expired.
         "            if (section.dataset.transparent !== 'true') section.style.background = section.dataset.endColor || '#ef4444';",
