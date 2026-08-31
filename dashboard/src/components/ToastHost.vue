@@ -110,7 +110,9 @@ function select(toast) {
 .toast-message {
   margin: 0.25rem 0 0;
   font-size: 0.85rem;
-  color: var(--muted, #555);
+  /* --muted is the palette's LIGHT grey (#6b7280); a toast is a nudge the tenant has a moment to read,
+     not incidental caption text, so it takes the body colour. */
+  color: var(--text, #1f2937);
   line-height: 1.35;
 }
 .toast-close {
