@@ -4314,6 +4314,10 @@ button:disabled {
 .section-editor-body {
   display: grid;
   gap: 1rem;
+  /* Rows size to their content and stack from the top. Without this the grid distributes the card's
+     spare height into the rows, which combined with the accordion's overflow:hidden clipped the bottom
+     of an open panel — the SEO description lost its helper text entirely. */
+  align-content: start;
   overflow: auto;
   padding: 1.6rem 2rem;
   min-height: 0;

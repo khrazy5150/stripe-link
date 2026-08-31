@@ -97,7 +97,10 @@ defineEmits(["toggle"]);
 .acc-body {
   display: grid;
   gap: 1rem;
-  padding: 1.2rem;
+  align-content: start;
+  /* A little more below than above: the last control's helper text sits tight against the border
+     otherwise, and a panel that ends flush reads as cut off even when it is not. */
+  padding: 1.2rem 1.2rem 1.6rem;
   border-top: 1px solid var(--line);
 }
 </style>
