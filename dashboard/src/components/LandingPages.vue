@@ -220,7 +220,7 @@
           <button type="button" class="modal-close" aria-label="Close" @click="pageSettingsOpen = false">✕</button>
         </header>
         <div class="section-editor-body">
-            <SettingsAccordion label="Page Basics" hint="What this page is" :open="openSetting === 'Page Basics'" @toggle="toggleSetting('Page Basics')">
+            <SettingsAccordion label="Page Basics" hint="What this page is" :icon="SETTINGS_ICONS['Page Basics']" :open="openSetting === 'Page Basics'" @toggle="toggleSetting('Page Basics')">
                 <label class="offer-field">
                   <span>Page Name</span>
                   <input v-model.trim="builder.name" type="text" />
@@ -244,7 +244,7 @@
                   </label>
                 </div>
             </SettingsAccordion>
-            <SettingsAccordion label="Page Goal" hint="Who is arriving, and from where" :open="openSetting === 'Page Goal'" @toggle="toggleSetting('Page Goal')">
+            <SettingsAccordion label="Page Goal" hint="Who is arriving, and from where" :icon="SETTINGS_ICONS['Page Goal']" :open="openSetting === 'Page Goal'" @toggle="toggleSetting('Page Goal')">
                 <!-- The goal is set in the create wizard, but it must stay editable: it drives composition, so
                      a page frozen on its original goal could never gain (or drop) what a goal governs. -->
                 <label class="offer-field">
@@ -258,7 +258,7 @@
                   <small>{{ builderGoalNote }}</small>
                 </label>
             </SettingsAccordion>
-            <SettingsAccordion label="Appearance" hint="Theme preset and colour overrides" :open="openSetting === 'Appearance'" @toggle="toggleSetting('Appearance')">
+            <SettingsAccordion label="Appearance" hint="Theme preset and colour overrides" :icon="SETTINGS_ICONS['Appearance']" :open="openSetting === 'Appearance'" @toggle="toggleSetting('Appearance')">
                   <label class="offer-field">
                     <span>Preset</span>
                     <select v-model="builder.preset">
@@ -296,7 +296,7 @@
                   </div>
                 </div>
             </SettingsAccordion>
-            <SettingsAccordion label="SEO" hint="Title and search snippet" :open="openSetting === 'SEO'" @toggle="toggleSetting('SEO')">
+            <SettingsAccordion label="SEO" hint="Title and search snippet" :icon="SETTINGS_ICONS['SEO']" :open="openSetting === 'SEO'" @toggle="toggleSetting('SEO')">
                 <label class="offer-field">
                   <span>SEO Title</span>
                   <input :value="builder.seo_title" :placeholder="seoTitlePlaceholder" type="text" @input="applyTitleCaseInput((value) => { builder.seo_title = value; }, $event)" />
@@ -308,7 +308,7 @@
                   <small>The search-result snippet. Leave blank to auto-generate from the product description.</small>
                 </label>
             </SettingsAccordion>
-            <SettingsAccordion label="Discoverability" hint="Structured data and machine readers" :open="openSetting === 'Discoverability'" @toggle="toggleSetting('Discoverability')">
+            <SettingsAccordion label="Discoverability" hint="Structured data and machine readers" :icon="SETTINGS_ICONS['Discoverability']" :open="openSetting === 'Discoverability'" @toggle="toggleSetting('Discoverability')">
                 <details v-if="discoverabilitySections.length" class="builder-section discoverability-drawer">
                   <summary>
                     <h3>Discoverability</h3>
@@ -348,7 +348,7 @@
                   </p>
                 </details>
             </SettingsAccordion>
-            <SettingsAccordion label="Analytics" hint="Google Tag and Meta Pixel" :open="openSetting === 'Analytics'" @toggle="toggleSetting('Analytics')">
+            <SettingsAccordion label="Analytics" hint="Google Tag and Meta Pixel" :icon="SETTINGS_ICONS['Analytics']" :open="openSetting === 'Analytics'" @toggle="toggleSetting('Analytics')">
                 <div class="offer-two-column">
                   <label class="offer-field">
                     <span>Google Tag ID</span>
@@ -360,7 +360,7 @@
                   </label>
                 </div>
             </SettingsAccordion>
-            <SettingsAccordion label="Favicon" hint="The browser-tab icon" :open="openSetting === 'Favicon'" @toggle="toggleSetting('Favicon')">
+            <SettingsAccordion label="Favicon" hint="The browser-tab icon" :icon="SETTINGS_ICONS['Favicon']" :open="openSetting === 'Favicon'" @toggle="toggleSetting('Favicon')">
                 <label class="offer-field">
                   <span>Favicon</span>
                   <div class="builder-inline-media">
@@ -4013,6 +4013,18 @@ const sequenceRows = computed(() => {
 
 // { row, isNew }. isNew means the row's element is a DRAFT that is not in builder.elements yet.
 const pageSettingsOpen = ref(false);
+
+// Settings-accordion glyphs: SVG path `d` strings in the same 24x24 stroke style as the sidebar, so the
+// modal does not introduce a second icon language. Keyed by the accordion's label.
+const SETTINGS_ICONS = {
+  "Page Basics": ["M9 3.75h6M5.25 6.75h13.5A1.5 1.5 0 0 1 20.25 8.25v10.5a1.5 1.5 0 0 1-1.5 1.5H5.25a1.5 1.5 0 0 1-1.5-1.5V8.25a1.5 1.5 0 0 1 1.5-1.5Z", "M8 11.5h8M8 15h5"],
+  "Page Goal": ["M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18Z", "M12 16.5a4.5 4.5 0 1 0 0-9 4.5 4.5 0 0 0 0 9Z", "M12 13.5a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3Z"],
+  "Appearance": ["M12 3a9 9 0 1 0 0 18c.83 0 1.5-.67 1.5-1.5 0-.39-.15-.74-.39-1a1.49 1.49 0 0 1 1.14-2.5H16a5 5 0 0 0 5-5c0-4.42-4.03-8-9-8Z", "M7.5 12a1 1 0 1 0 0-2 1 1 0 0 0 0 2ZM10.5 8.25a1 1 0 1 0 0-2 1 1 0 0 0 0 2ZM15 8.25a1 1 0 1 0 0-2 1 1 0 0 0 0 2Z"],
+  "SEO": ["M10.5 18a7.5 7.5 0 1 0 0-15 7.5 7.5 0 0 0 0 15Z", "M21 21l-5.2-5.2"],
+  "Discoverability": ["M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18Z", "M3.6 9h16.8M3.6 15h16.8", "M12 3a13.5 13.5 0 0 1 0 18a13.5 13.5 0 0 1 0-18Z"],
+  "Analytics": ["M4.5 19.5V13M9.75 19.5V8.25M15 19.5v-4.5M20.25 19.5V5.25"],
+  "Favicon": ["M12 3.75l2.5 5.2 5.75.83-4.16 4.02 1 5.7L12 16.83l-5.09 2.67 1-5.7L3.75 9.78l5.75-.83L12 3.75Z"],
+};
 
 // One settings accordion open at a time, keyed by label. Several tall panels open together turns the
 // modal into a wall; the Post-Checkout steps behave the same way, so the idiom is already familiar.
