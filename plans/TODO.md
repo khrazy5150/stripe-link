@@ -279,9 +279,27 @@ because `overflow:hidden` on a grid item sets its automatic minimum size to zero
 compressible. Expect more of this class — the layout has not been exercised at small sizes, so bugs that
 only appear when space is tight have had nowhere to surface.
 
-Worth deciding early: is the target "a tenant can DO everything on a phone" or "a tenant can CHECK
-things on a phone and edit on a laptop"? Those are very different amounts of work, and the builder is
-the piece that makes the difference.
+**DECIDED 2026-08-31: full parity — a tenant should be able to do EVERYTHING on a phone.** That is the
+larger of the two possible targets, and it makes the builder in-scope rather than view-only.
+
+### Consequence: drag-reorder does not work on touch AT ALL
+
+The section reorder shipped in this work uses the HTML5 drag-and-drop API (`draggable`, `dragstart`,
+`drop`). Mobile browsers do not fire those for touch — iOS Safari and Android Chrome both ignore them.
+So on a phone, section order is not awkward, it is IMPOSSIBLE. Same for the media list in
+MediaListField and the element cards.
+
+The identical gap exists on desktop for keyboard users: there is no way to tab to a handle and reorder.
+So one fix serves both, and the accessible answer is the simpler one:
+
+  - **Explicit move controls** (▲/▼ on each row, or a "Move to…" affordance) driving the same
+    `moveSectionBefore`. Works with touch, mouse, keyboard and screen readers, and needs no gesture
+    library.
+  - Keep the drag as a mouse-only enhancement on top; do NOT try to reimplement dragging with pointer
+    events, which is where this normally goes wrong.
+
+Worth doing regardless of the mobile timeline — the keyboard gap is a real accessibility defect today
+(WCAG 2.1.1 Keyboard), not just a phone problem.
 
 ### ⭐ HIGH — Builder section order: make the form the page map (plan plans/BUILDER_SECTION_ORDER.md, 2026-08-30)
 
