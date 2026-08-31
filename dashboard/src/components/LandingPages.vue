@@ -826,48 +826,74 @@
             </label>
           </section>
 
-          <section class="builder-section" @dragover.prevent @drop="onBlockDrop('trust_badges')">
-            <h3 class="builder-section-heading"><span
-                v-if="blockIsDraggable('trust_badges')"
-                class="builder-section-drag"
-                draggable="true"
-                title="Drag to reorder this section on the page"
-                @dragstart="onBlockDragStart('trust_badges', $event)"
-              >⠿</span>Trust Badges</h3>
-            <div class="builder-repeat-list">
-              <div v-for="(badge, index) in builder.trust_badges.badges" :key="`badge-${index}`" class="builder-repeat-row builder-trust-badge-row">
-                <label class="builder-switch" @click.stop>
-                  <input v-model="badge.enabled" type="checkbox" :aria-label="`Enable trust badge ${index + 1}`" />
-                  <span aria-hidden="true"></span>
-                </label>
-                <strong>Trust Badge {{ index + 1 }}</strong>
-                <button
-                  type="button"
-                  class="badge-icon-picker-btn"
-                  :disabled="!badge.enabled"
-                  :aria-label="`Change icon for trust badge ${index + 1}`"
-                  @click.stop="showIconPicker(badge.emoji, (emoji) => { badge.emoji = emoji; }, 'Choose an Icon')"
-                >{{ badge.emoji || '—' }}</button>
-                <input v-model.trim="badge.label" type="text" :disabled="!badge.enabled" aria-label="Badge label" />
-              </div>
+          <!-- PAGE CONTENT — renders in page order, so the form reads exactly as the page does
+               (plans/BUILDER_SECTION_ORDER.md). Fixed sections stay outside it: countdown and hero above,
+               footer below, because their position never changes. -->
+          <div class="content-sequence">
+            <div class="content-sequence-head">
+              <h3>Page Content</h3>
+              <small>In the order visitors see it. Drag a section to move it.</small>
             </div>
-          </section>
+            <article
+              v-for="(row, rowIndex) in sequenceRows"
+              :key="row.key"
+              class="content-section"
+              @dragover.prevent
+              @drop="onRowDrop(rowIndex)"
+            >
+              <header class="content-section-header">
+                <span
+                  class="content-section-drag"
+                  draggable="true"
+                  title="Drag to reorder"
+                  @dragstart="onRowDragStart(rowIndex)"
+                >⠿</span>
+                <h3>{{ row.label }}</h3>
+              </header>
+            <template v-if="row.editor === 'trust_badges'">
+                <div class="builder-repeat-list">
+                  <div v-for="(badge, index) in builder.trust_badges.badges" :key="`badge-${index}`" class="builder-repeat-row builder-trust-badge-row">
+                    <label class="builder-switch" @click.stop>
+                      <input v-model="badge.enabled" type="checkbox" :aria-label="`Enable trust badge ${index + 1}`" />
+                      <span aria-hidden="true"></span>
+                    </label>
+                    <strong>Trust Badge {{ index + 1 }}</strong>
+                    <button
+                      type="button"
+                      class="badge-icon-picker-btn"
+                      :disabled="!badge.enabled"
+                      :aria-label="`Change icon for trust badge ${index + 1}`"
+                      @click.stop="showIconPicker(badge.emoji, (emoji) => { badge.emoji = emoji; }, 'Choose an Icon')"
+                    >{{ badge.emoji || '—' }}</button>
+                    <input v-model.trim="badge.label" type="text" :disabled="!badge.enabled" aria-label="Badge label" />
+                  </div>
+                </div>
+              </template>
+            <template v-else-if="row.editor === 'refund_policy'">
+                <label class="builder-toggle">
+                  <input v-model="builder.refund_policy.enabled" type="checkbox" />
+                  <span>Show refund policy</span>
+                </label>
+                <small>Refund policy copy comes from the selected offer.</small>
+              </template>
+            <template v-else-if="row.editor === 'checkout_cta'">
+                <label class="offer-field">
+                  <span>Button Label</span>
+                  <input v-model.trim="builder.cta_label" type="text" />
+                </label>
+                <div class="lead-action-summary">
+                  <strong>{{ ctaTypeLabel(builderCta.type) }}</strong>
+                  <span>{{ ctaTypeDescription(builderCta.type) }} This comes from the offer and can't be changed here.</span>
+                  <code v-if="builderCta.target">{{ builderCta.target }}</code>
+                </div>
+              </template>
+              <p v-else class="content-section-note">{{ rowNote(row) }}</p>
+            </article>
+          </div>
+
+
 
           <!-- Same rule as the Page Sections toggle: no resolvable policy copy (e.g. service offers) = no control. -->
-          <section v-if="previewRefundPolicy" class="builder-section" @dragover.prevent @drop="onBlockDrop('refund_policy')">
-            <h3 class="builder-section-heading"><span
-                v-if="blockIsDraggable('refund_policy')"
-                class="builder-section-drag"
-                draggable="true"
-                title="Drag to reorder this section on the page"
-                @dragstart="onBlockDragStart('refund_policy', $event)"
-              >⠿</span>Refund Policy</h3>
-            <label class="builder-toggle">
-              <input v-model="builder.refund_policy.enabled" type="checkbox" />
-              <span>Show refund policy</span>
-            </label>
-            <small>Refund policy copy comes from the selected offer.</small>
-          </section>
 
           <section class="builder-section">
             <header class="builder-section-title">
@@ -1058,24 +1084,6 @@
             </p>
           </details>
 
-          <section class="builder-section" @dragover.prevent @drop="onBlockDrop('checkout_cta')">
-            <h3 class="builder-section-heading"><span
-                v-if="blockIsDraggable('checkout_cta')"
-                class="builder-section-drag"
-                draggable="true"
-                title="Drag to reorder this section on the page"
-                @dragstart="onBlockDragStart('checkout_cta', $event)"
-              >⠿</span>Call to Action</h3>
-            <label class="offer-field">
-              <span>Button Label</span>
-              <input v-model.trim="builder.cta_label" type="text" />
-            </label>
-            <div class="lead-action-summary">
-              <strong>{{ ctaTypeLabel(builderCta.type) }}</strong>
-              <span>{{ ctaTypeDescription(builderCta.type) }} This comes from the offer and can't be changed here.</span>
-              <code v-if="builderCta.target">{{ builderCta.target }}</code>
-            </div>
-          </section>
 
           <section class="builder-section">
             <h3>Analytics</h3>
@@ -3757,6 +3765,32 @@ const contentRows = computed(() => {
 // An element row is one of the tenant-added cards, which already have their own editors.
 function isElementType(type) {
   return ELEMENT_TYPES.value.some((entry) => entry.type === type);
+}
+
+// The draggable run only. Fixed sections are static markup in their correct places (countdown + hero
+// above, footer below), so the form still reads top-to-bottom as the page does without duplicating them
+// here. Element cards are excluded for now — their editors still live in the Page Sections panel.
+const sequenceRows = computed(() => contentRows.value.filter((row) => row.movable && row.editor !== "element"));
+
+// Sections with no editor still earn a row: a tenant needs to see WHERE they land, even with nothing to set.
+function rowNote(row) {
+  if (row.type === "offer_price_selector") return "Prices and options come from the offer.";
+  if (row.type === "related_products") return "Chosen automatically from your catalog.";
+  return "Nothing to configure — this section is generated.";
+}
+
+const rowDragFrom = ref(-1);
+
+function onRowDragStart(index) {
+  rowDragFrom.value = index;
+}
+
+function onRowDrop(index) {
+  const from = rowDragFrom.value;
+  rowDragFrom.value = -1;
+  const rows = sequenceRows.value;
+  if (from < 0 || from === index || !rows[from] || !rows[index]) return;
+  moveSectionBefore(rows[from].key, rows[index].key);
 }
 
 const sectionDragFrom = ref(-1);

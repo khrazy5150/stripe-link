@@ -4163,6 +4163,70 @@ button:disabled {
 
 /* Section order: the page's real running order. Pinned rows are shown but not draggable — a visible
    locked hero explains the constraint better than omitting it would. */
+/* PAGE CONTENT sequence — the form's running order, matching the page (plans/BUILDER_SECTION_ORDER.md).
+   Each section is a bounded card so a long page scans as discrete units rather than continuous form,
+   which is the shortcoming this improves on versus stripe-cart. */
+.content-sequence {
+  display: grid;
+  gap: 1.2rem;
+  margin: 1.6rem 0;
+}
+
+.content-sequence-head h3 {
+  margin: 0;
+  font-size: var(--text-card);
+  line-height: var(--leading-card);
+  font-weight: var(--weight-semibold);
+}
+
+.content-sequence-head small {
+  color: var(--muted);
+  font-size: var(--text-hint);
+}
+
+.content-section {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--panel);
+  padding: 1.2rem 1.4rem 1.4rem;
+}
+
+.content-section-header {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  margin-bottom: 1rem;
+}
+
+.content-section-header h3 {
+  margin: 0;
+  font-size: var(--text-label);
+  line-height: var(--leading-label);
+  font-weight: var(--weight-semibold);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.content-section-drag {
+  color: var(--text-muted);
+  cursor: grab;
+  font-size: 1.4rem;
+  line-height: 1;
+  user-select: none;
+}
+
+.content-section-drag:active {
+  cursor: grabbing;
+}
+
+/* A section with nothing to configure still earns a row — the tenant needs to see where it lands. */
+.content-section-note {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--text-hint);
+}
+
 /* Drag handle on a form block that maps to a real page section. ONLY the handle is draggable — making
    the whole block draggable breaks text selection inside its inputs. */
 .builder-section-heading {
