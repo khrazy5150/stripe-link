@@ -1312,16 +1312,23 @@
             <li v-for="(warning, i) in pageHealthWarnings" :key="i">{{ warning }}</li>
           </ul>
         </div>
-        <iframe
-          v-show="previewHtml"
-          ref="previewFrame"
-          class="landing-live-preview-frame"
-          :class="previewDevice"
-          :srcdoc="previewHtml"
-          title="Live preview"
-          sandbox="allow-scripts allow-same-origin"
-          @load="restorePreviewScroll"
-        ></iframe>
+        <!-- Desktop preview renders at a REAL desktop width and is zoomed down to fit. Sizing the frame
+             to the panel instead made it narrower than the page's 700px breakpoint, so "Desktop" was
+             quietly showing the mobile layout — content blocks stacked here but two-column when
+             published. Zoom (not transform) because it affects layout, so the frame's height still
+             reserves the right space. -->
+        <div v-show="previewHtml" ref="previewViewport" class="landing-live-preview-viewport">
+          <iframe
+            ref="previewFrame"
+            class="landing-live-preview-frame"
+            :class="previewDevice"
+            :style="previewFrameStyle"
+            :srcdoc="previewHtml"
+            title="Live preview"
+            sandbox="allow-scripts allow-same-origin"
+            @load="restorePreviewScroll"
+          ></iframe>
+        </div>
         <p v-if="!previewHtml && !previewError" class="landing-live-preview-status">
           {{ builder.offer_id ? "Rendering preview..." : "Select an offer to see the preview." }}
         </p>
@@ -1500,6 +1507,31 @@ const builderFormHidden = ref(false);
 const builderExistingPageId = ref("");
 const builderOriginalPage = ref(null);
 const previewDevice = ref("desktop");
+
+// The width a "Desktop" preview must lay out at. Anything under the published page's 700px breakpoint
+// renders the mobile layout, which is what made the preview disagree with the published page.
+const DESKTOP_PREVIEW_WIDTH = 1280;
+const previewViewport = ref(null);
+const previewZoom = ref(1);
+
+function measurePreviewZoom() {
+  const width = previewViewport.value?.clientWidth || 0;
+  previewZoom.value = width ? Math.min(1, width / DESKTOP_PREVIEW_WIDTH) : 1;
+}
+
+// Mobile mode keeps its own narrow width and no zoom — it is already showing the layout it claims to.
+const previewFrameStyle = computed(() => (previewDevice.value === "mobile"
+  ? {}
+  : { width: `${DESKTOP_PREVIEW_WIDTH}px`, zoom: previewZoom.value }));
+
+onMounted(() => {
+  measurePreviewZoom();
+  if (typeof ResizeObserver !== "undefined" && previewViewport.value) {
+    new ResizeObserver(measurePreviewZoom).observe(previewViewport.value);
+  } else {
+    window.addEventListener("resize", measurePreviewZoom);
+  }
+});
 const faviconFileInput = ref(null);
 const heroFileInput = ref(null);
 const avatarFileInput = ref(null);
