@@ -4204,6 +4204,21 @@ button:disabled {
 
 /* Page Settings trigger. Reads as a sibling of the content list, not a member of it: no drag rail, a
    gear rather than a lock, and separated by the rule below. */
+/* Icon-only device toggle. Square targets so the two read as a matched pair. */
+.preview-device-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 3.2rem;
+  height: 3.2rem;
+  padding: 0;
+}
+
+.preview-device-btn svg {
+  width: 1.7rem;
+  height: 1.7rem;
+}
+
 .page-settings-row {
   display: flex;
   align-items: center;
@@ -4437,11 +4452,10 @@ button:disabled {
   background: #ffffff;
 }
 
+/* Width and zoom come from previewFrameStyle: a real 390px viewport magnified to fill the pane, so the
+   page's mobile breakpoints still apply. No gutters and no side borders — it IS the pane now. */
 .landing-live-preview-frame.mobile {
-  width: min(100%, 39rem);
-  margin: 0 auto;
-  border-left: 1px solid var(--border, #e2e8f0);
-  border-right: 1px solid var(--border, #e2e8f0);
+  margin: 0;
 }
 
 .landing-live-preview-status {

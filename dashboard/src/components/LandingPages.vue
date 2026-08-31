@@ -1342,14 +1342,40 @@
               >{{ opt.label }}</button>
             </div>
             <div class="preview-device-controls" aria-label="Preview device">
-              <button type="button" :class="{ active: previewDevice === 'desktop' }" title="Shows the full-width desktop layout — hides the form to make room" @click="setPreviewDevice('desktop')">Desktop</button>
-              <button type="button" :class="{ active: previewDevice === 'mobile' }" @click="setPreviewDevice('mobile')">Mobile</button>
+              <!-- Icons, not words: the monitor/phone pair is universally understood, and the labels were the
+                   widest thing in this header. aria-label carries the meaning for screen readers. -->
+              <button
+                type="button"
+                class="preview-device-btn"
+                :class="{ active: previewDevice === 'desktop' }"
+                aria-label="Desktop preview"
+                title="Desktop — hides the form to give the preview a real desktop width"
+                @click="setPreviewDevice('desktop')"
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <rect x="2.5" y="4" width="19" height="12.5" rx="1.5" />
+                  <path d="M8.5 20h7M12 16.5V20" />
+                </svg>
+              </button>
+              <button
+                type="button"
+                class="preview-device-btn"
+                :class="{ active: previewDevice === 'mobile' }"
+                aria-label="Mobile preview"
+                title="Mobile"
+                @click="setPreviewDevice('mobile')"
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <rect x="6.5" y="2.5" width="11" height="19" rx="2" />
+                  <path d="M10.75 18.5h2.5" />
+                </svg>
+              </button>
             </div>
           </div>
         </header>
         <!-- Shareable test link for the previewed view. Appears once the page is published (it then has a
              snowflake short_code); the URL tracks the Standard/Sale/Flash-Sale toggle. -->
-        <div class="landing-builder-preview-body">
+        <div ref="previewPane" class="landing-builder-preview-body">
         <div v-if="testShareLink" class="preview-share-link">
           <span class="preview-share-label">Test link</span>
           <input type="text" readonly :value="testShareLink" @focus="$event.target.select()" />
@@ -1381,6 +1407,7 @@
           ref="previewFrame"
           class="landing-live-preview-frame"
           :class="previewDevice"
+            :style="previewFrameStyle"
           :srcdoc="previewHtml"
           title="Live preview"
           sandbox="allow-scripts allow-same-origin"
@@ -1610,6 +1637,33 @@ const marqueeSpeedSlider = computed({
 });
 
 const previewDevice = ref("mobile");
+
+// Mobile preview fills the pane WITHOUT becoming a desktop viewport. The frame keeps a real phone width
+// so the page's max-width:700px rules still apply, and zoom (not transform) scales it up — zoom
+// magnifies the rendering rather than stretching a bitmap, so text stays crisp and the layout stays
+// mobile. Sizing the frame to 100% instead would give it a ~750px viewport and render the DESKTOP
+// layout under a Mobile label.
+const MOBILE_PREVIEW_WIDTH = 390;
+const previewPane = ref(null);
+const mobileZoom = ref(1);
+
+function measureMobileZoom() {
+  const width = previewPane.value?.clientWidth || 0;
+  mobileZoom.value = width ? Math.max(1, width / MOBILE_PREVIEW_WIDTH) : 1;
+}
+
+const previewFrameStyle = computed(() => (previewDevice.value === "mobile"
+  ? { width: `${MOBILE_PREVIEW_WIDTH}px`, zoom: mobileZoom.value }
+  : {}));
+
+onMounted(() => {
+  measureMobileZoom();
+  if (typeof ResizeObserver !== "undefined" && previewPane.value) {
+    new ResizeObserver(measureMobileZoom).observe(previewPane.value);
+  } else {
+    window.addEventListener("resize", measureMobileZoom);
+  }
+});
 
 // Desktop preview and the form are mutually exclusive — one control, one honest state.
 function setPreviewDevice(device) {
