@@ -181,21 +181,33 @@ def is_movable(key: str) -> bool:
     return element_placement(key) == "free"
 
 
-def order_section_keys(keys, tenant_order=()) -> list[str]:
+def baseline_order(goal: str = "") -> list[str]:
+    """The default section sequence for a page nobody has reordered (plans/BUILDER_SECTION_ORDER.md 4a).
+
+    A goal may override it wholesale via goals.<goal>.default_order; none do today, deliberately.
+    """
+    override = ((RULES.get("goals", {}).get(goal) or {}).get("default_order")) if goal else None
+    return list(override or RULES.get("default_order", []))
+
+
+def order_section_keys(keys, tenant_order=(), goal: str = "") -> list[str]:
     """Sort section keys into lead -> pinned_top -> tenant-ordered free -> pinned_bottom.
 
-    `tenant_order` is the tenant's drag order; keys missing from it keep their catalog order, so a newly
-    added section appears in a sensible place instead of vanishing to one end.
+    `tenant_order` is the tenant's drag order. Keys missing from it fall back to the BASELINE order, so a
+    tenant who never drags anything still gets a researched sequence, and a newly added section lands in a
+    sensible place instead of vanishing to one end. A key in neither list sorts last rather than first --
+    an unplaced element should not silently jump to the top of the page.
     """
     keys = list(keys)
-    catalog = list(RULES.get("elements", {}))
+    baseline = {key: index for index, key in enumerate(baseline_order(goal))}
     rank = {key: index for index, key in enumerate(tenant_order)}
     fallback = len(rank)
+    tail = len(baseline)
 
     def sort_key(key):
         band = element_placement(key)
         band_index = PLACEMENT_BANDS.index(band) if band in PLACEMENT_BANDS else PLACEMENT_BANDS.index("free")
-        within = rank.get(key, fallback + (catalog.index(key) if key in catalog else 0))
+        within = rank.get(key, fallback + baseline.get(key, tail))
         return (band_index, within)
 
     return [key for key in sorted(keys, key=sort_key) if element_placement(key) != "none"]

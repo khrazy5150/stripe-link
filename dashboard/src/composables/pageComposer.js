@@ -157,17 +157,26 @@ export function isMovable(key) {
   return elementPlacement(key) === "free";
 }
 
-// lead -> pinned_top -> tenant-ordered free -> pinned_bottom. Keys absent from tenantOrder keep their
-// catalog position, so a newly enabled section lands sensibly instead of jumping to an end.
-export function orderSectionKeys(keys, tenantOrder = []) {
-  const catalog = Object.keys(rules.elements || {});
+// The default sequence for a page nobody has reordered. Mirrors composition.baseline_order() -- both read
+// the same composition_rules.json, so they cannot drift. See plans/BUILDER_SECTION_ORDER.md 4a.
+export function baselineOrder(goal = "") {
+  const override = goal ? rules.goals?.[goal]?.default_order : null;
+  return [...(override || rules.default_order || [])];
+}
+
+// lead -> pinned_top -> tenant-ordered free -> pinned_bottom. Keys absent from tenantOrder fall back to
+// the BASELINE order, so a tenant who never drags anything still gets a researched sequence. A key in
+// neither list sorts last, never first -- an unplaced element must not jump to the top of the page.
+export function orderSectionKeys(keys, tenantOrder = [], goal = "") {
+  const baseline = new Map(baselineOrder(goal).map((key, index) => [key, index]));
   const rank = new Map(tenantOrder.map((key, index) => [key, index]));
   const fallback = rank.size;
   const band = (key) => {
     const index = PLACEMENT_BANDS.indexOf(elementPlacement(key));
     return index === -1 ? PLACEMENT_BANDS.indexOf("free") : index;
   };
-  const within = (key) => (rank.has(key) ? rank.get(key) : fallback + Math.max(0, catalog.indexOf(key)));
+  const within = (key) =>
+    rank.has(key) ? rank.get(key) : fallback + (baseline.has(key) ? baseline.get(key) : baseline.size);
   return [...keys]
     .filter((key) => elementPlacement(key) !== "none")
     .sort((a, b) => band(a) - band(b) || within(a) - within(b));
@@ -182,9 +191,12 @@ export function sectionOrderKey(section) {
   return spec.repeatable && section?.id ? section.id : type;
 }
 
-// Apply placement bands + the tenant's order to real section objects. Ties fall back to the section's
-// current position, so anything the tenant has not explicitly moved stays where the builder put it.
-export function orderSections(sections, tenantOrder = []) {
+// Apply placement bands + the tenant's order to real section objects. Anything the tenant has not moved
+// falls back to the baseline position of its TYPE, tie-broken by current position -- so repeatable
+// sections (several content_blocks, keyed by id and therefore never in the baseline) keep their relative
+// order instead of collapsing together arbitrarily.
+export function orderSections(sections, tenantOrder = [], goal = "") {
+  const baseline = new Map(baselineOrder(goal).map((key, index) => [key, index]));
   const rank = new Map(tenantOrder.map((key, index) => [key, index]));
   const bandOf = (type) => {
     const index = PLACEMENT_BANDS.indexOf(elementPlacement(type));
@@ -198,9 +210,11 @@ export function orderSections(sections, tenantOrder = []) {
       if (band) return band;
       const aKey = sectionOrderKey(a.section);
       const bKey = sectionOrderKey(b.section);
-      const aRank = rank.has(aKey) ? rank.get(aKey) : rank.size + a.index;
-      const bRank = rank.has(bKey) ? rank.get(bKey) : rank.size + b.index;
-      return aRank - bRank;
+      const base = (key, type) =>
+        rank.has(key) ? rank.get(key) : rank.size + (baseline.has(type) ? baseline.get(type) : baseline.size);
+      const aRank = base(aKey, a.section.type);
+      const bRank = base(bKey, b.section.type);
+      return aRank - bRank || a.index - b.index;
     })
     .map((entry) => entry.section);
 }

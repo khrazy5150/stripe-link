@@ -1,5 +1,14 @@
 {
   "_comment": "Single source of truth for the landing-page ELEMENT CATALOG + composition (plans/PAGE_COMPOSER.md, Builder Reframe). Read by the Python publisher (domain/composition.py) AND imported by the Vue builder (composables/pageComposer.js). One vocabulary: the canonical key is the section `type` string (no aliases). Each element declares label + ui + kind + channel + heading_role + tokens; the composer uses governed_sections + offer_types (what the page sells) unioned with the packs enabled by goals (why its traffic comes \u2014 plans/LANDING_PAGE_GOAL_COMPOSITION.md).",
+  "_default_order_comment": "default_order is the BASELINE sequence a page gets when the tenant has not dragged anything — plans/BUILDER_SECTION_ORDER.md 4a. It only decides the FREE band; lead/pinned_top/pinned_bottom are fixed by placement regardless. The element run follows the visitor's questions: what is it -> is it any good -> who says so -> tell me more -> who else uses it -> but what about. Trust badges sit beside the price/CTA cluster because trust signals work at the moment of commitment, not a screen earlier. Price/CTA deliberately stay AFTER the persuasion: checkout_cta is non-repeatable, so there is exactly one ask. Per-goal overrides go in goals.<goal>.default_order; none are defined yet, because varying them without evidence would be guessing.",
+  "default_order": [
+    "countdown_timer", "brand_label", "seo_title", "hero_media", "hero", "headline", "subheadline",
+    "brand_hero", "seller_profile",
+    "product_details", "product_carousel", "catalog_grid",
+    "rating", "testimonials", "content_block", "client_marquee", "faq",
+    "trust_badges", "offer_price_selector", "checkout_cta", "refund_policy",
+    "related_products", "legal_footer"
+  ],
   "_placement_comment": "placement = where a section may sit, and whether the tenant may drag it. lead: bars that legitimately precede the hero (announcement/urgency). pinned_top: the hero block -- NOT movable, because hero_media is the LCP element the renderer emits preload/priority hints for, and one-H1-first is an invariant the semantic outline depends on. free: the tenant orders these. pinned_bottom: always last. none: not a visible section (channel: head). Deliberate divergence from stripe-cart, which let the hero move.",
   "elements": {
     "countdown_timer":      { "placement": "lead", "label": "Countdown timer", "ui": "toggle", "kind": "capability", "channel": "body", "heading_role": "none", "repeatable": false, "tokens": ["countdown_bg", "countdown_end_bg", "countdown_text"] },

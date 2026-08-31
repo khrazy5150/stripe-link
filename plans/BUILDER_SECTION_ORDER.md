@@ -98,6 +98,13 @@ to remove once tenants depend on it.
 
 ## 4a. The BASELINE order — a researched default, not cart's
 
+> **STATUS: SHIPPED.** `default_order` in `composition_rules.json`, read by `composition.baseline_order()`
+> and `pageComposer.baselineOrder()`. Existing pages are untouched — their order is derived from saved
+> `page.sections`, so a stored order always wins; the baseline only decides pages nobody has reordered.
+> Per-goal overrides (`goals.<goal>.default_order`) are supported but none are defined: varying the order
+> per goal without evidence would be guessing, and the calibration note below says so.
+
+
 Tenants should not have to reorder anything to get a good page. Today the default is:
 
     hero -> trust_badges -> [all elements, in INSERTION order] -> price -> CTA -> refund -> footer

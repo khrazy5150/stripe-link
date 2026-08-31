@@ -3413,7 +3413,7 @@ function buildBuilderPageDocument() {
 }
 
 function builderSections(intent) {
-  return orderSections(builderSectionCandidates(intent), builder.section_order || []);
+  return orderSections(builderSectionCandidates(intent), builder.section_order || [], builderGoal.value);
 }
 
 // Assembles every section the page WILL contain. Emission order here is only a default -- placement
@@ -4034,7 +4034,7 @@ const sequenceRows = computed(() => {
   // Sort by KEY, not type: repeatable elements share a type, so two content blocks would collapse to
   // the same sort index. Element ids are absent from the catalog and fall into the free band, which is
   // exactly right. Rows added for emptied sections skip builderSections(), so order is applied here too.
-  const order = orderSectionKeys(rows.map((row) => row.key), builder.section_order || []);
+  const order = orderSectionKeys(rows.map((row) => row.key), builder.section_order || [], builderGoal.value);
   return [...rows].sort((a, b) => order.indexOf(a.key) - order.indexOf(b.key));
 });
 
