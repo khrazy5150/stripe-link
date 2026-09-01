@@ -1053,6 +1053,22 @@ third-party security assessment is required.
 
 ## Landing Pages / SEO
 
+### Contrasting theme accents — the lever is the PRESET, not the element — LOW, worth considering later
+- **Where this came from:** the FAQ chevron uses `--sl-accent`; the refund policy's `+` falls back to `brand`.
+  On `tiktok-dark` that produced a striking two-tone (cyan chevron against a magenta `+`/CTA) the author liked
+  a lot. It was NOT designed — it is an accident of two different token defaults meeting.
+- **The finding:** measured across all 16 presets, `accent` is the same hue as `brand` (median gap **2 degrees**),
+  just a few points lighter. `tiktok-dark` is the ONLY preset where they differ in hue (**163 degrees**, near
+  complementary) — faithful, because that IS TikTok's brand identity.
+- **So:** *if you want that contrast on other themes, the lever is the preset's accent value, not the chevron.*
+  Give `coral-sunrise` a teal accent instead of a paler orange and you get the same effect there. Cheap to try,
+  one value per preset in `UNIVERSAL_BUNDLE_THEME_PRESETS`, entirely separate from any element's CSS.
+- **Still open (deliberately deferred):** the `+` and the chevron use different tokens for the same interaction.
+  Unifying both on one token (recommended: `accent`, the decorative token already used for the testimonial quote
+  mark, avatar ring and notice icon) would make the affordance consistent and keep TikTok's cyan. Not done —
+  the author paused the design thread.
+
+
 ### Default "no image" placeholder so image-less products stay swipeable in the carousel — SHIPPED 2026-08-03
 - **What was broken:** the landing multi-product carousel syncs each product's tier block to the hero image
   carousel by index, but `render_hero_media` FILTERED OUT slides with no image — so an image-less product got no

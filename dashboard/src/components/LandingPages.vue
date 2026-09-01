@@ -1068,6 +1068,7 @@
             <span class="page-settings-icon" aria-hidden="true">⚙️</span>
             <span class="content-row-name">Page Settings</span>
             <span class="content-row-summary">Name, goal, appearance, SEO, analytics</span>
+            <span v-if="builderPresetLabel" class="composition-tag is-preset">{{ builderPresetLabel }}</span>
             <button class="secondary-action compact" type="button" @click="pageSettingsOpen = true">Edit</button>
           </div>
 
@@ -2213,6 +2214,9 @@ const emptyStateText = computed(() => {
 const presetOptions = computed(() => universalBundlePresets);
 const selectedTemplateLabel = computed(() => "Universal Bundle");
 const selectedPresetLabel = computed(() => presetOptions.value.find((option) => option.value === form.preset)?.label || "None");
+// The EDIT builder's preset, surfaced on the Page Settings row. Reads the same list the picker renders
+// from, so a preset added there shows up here with no second place to update.
+const builderPresetLabel = computed(() => universalBundlePresets.find((option) => option.value === builder.preset)?.label || "");
 // Goal step. Options come from composition_rules.json, so adding a goal there surfaces it here — the
 // wizard never hardcodes the list (plans/LANDING_PAGE_GOAL_COMPOSITION.md).
 const goalOptions = computed(() => supportedGoals());

@@ -4187,6 +4187,16 @@ button:disabled {
   background: #f3f4f6;
 }
 
+/* Preset name on the Page Settings row. Same pill as Recommended/Optional, deliberately NOT green --
+   green reads as a recommendation, and this is just stating which preset is active. flex:none so the
+   flex:1 summary beside it cannot squeeze the name to an ellipsis. */
+.composition-tag.is-preset {
+  flex: none;
+  white-space: nowrap;
+  color: var(--accent);
+  background: #eef2ff;
+}
+
 .element-empty {
   color: var(--text-muted, #6b7280);
   font-size: 1.3rem;
