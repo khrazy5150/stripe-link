@@ -93,11 +93,12 @@ Pairs naturally with hiding the raw JSON panels (below).
   OfferSemanticModel "so they can't diverge" — but a tenant-typed name bypassed the model while the slug kept
   deriving from products ("Workout Bundle" -> `dietary-supplement-bundle`). Stated invariant, nothing enforcing
   it. Fixed + asserted.
-- **Related debt this created:** `Offers.vue` now carries THREE hand-written JS mirrors of Python slug logic
-  (`smartOfferSlug`/`smart_offer_slug`, `sanitizeSlug`/`sanitize_slug`, `uniqueSlugPreview`/`unique_offer_slug`),
-  each kept in parity only by comment. Verified identical on 10 cases at the time of writing, but nothing
-  FORCES it — the same shape the audit is about. Durable fix: extract them to a shared JS module the way
-  `pageComposer.js` mirrors `composition.py`, then parity-test it in CI.
+- **Related debt — RESOLVED 2026-09-01.** The slug rules now live in `domain/slugs.py` + its mirror
+  `composables/slugs.js`, and `tests/test_slug_parity.py` runs BOTH over `tests/fixtures/slug_cases.json`.
+  Note the technique: an algorithm can't be shared across runtimes the way `composition_rules.json` is, so
+  the FIXTURES are shared instead. Verified the guard actually bites by breaking the JS deliberately.
+  `smartOfferSlug`/`smart_offer_slug` (the semantic-model half) is NOT yet covered by fixtures — it needs a
+  product/service model as input, so its cases are a bigger fixture. Next candidate.
 
 Not a general bug hunt. Every defect found on 2026-08-30 shared one shape: TWO THINGS THAT
 MUST AGREE, WITH NOTHING FORCING THEM TO. All four were silent -- no error, no failing test,

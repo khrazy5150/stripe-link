@@ -6,42 +6,30 @@ from stripe_link.domain.documents import DocumentValidationError, validate_offer
 from stripe_link.domain.opportunities import STAGE_LANDING, stage_opportunities
 from stripe_link.domain.pricing import PricingError, expand_offer, resolve_offer
 from stripe_link.domain.semantic import analyze_offer, label_from_model, slug_from_model
+from stripe_link.domain.slugs import sanitize_slug, unique_slug
 from stripe_link.repositories.documents import RepositoryError, offers_repository, products_repository, services_repository
 
 
-def sanitize_slug(value: str) -> str:
-    """URL-safe slug: lowercase, non-alphanumerics collapsed to single hyphens, trimmed."""
-    slug = re.sub(r"[^a-z0-9]+", "-", str(value or "").strip().lower()).strip("-")
-    return slug or "offer"
-
-
-def smart_offer_slug(offer: dict, products_by_id: dict) -> str:
+def smart_offer_slug(offer: dict, products_by_id: dict, services_by_id: dict | None = None) -> str:
     """SEO slug BASE from the offer's semantic model (plans/OFFER_SEMANTIC_ANALYZER.md — the slug is the pilot
     consumer). Thin wrapper: the OfferSemanticModel is the single source of meaning (shared with the label so
     they can't diverge); NOT deduped — the caller runs unique_offer_slug for the `-N` net."""
-    return slug_from_model(analyze_offer(offer, products_by_id))
+    return slug_from_model(analyze_offer(offer, products_by_id, services_by_id))
 
 
 def unique_offer_slug(desired: str, *, tenant_id: str, offer_id: str, repository) -> str:
     """Sanitize the desired slug and make it unique within the tenant. Slugs address published pages,
     so two offers off the same item must not collide — append -2, -3, … when taken."""
-    base = sanitize_slug(desired)
     try:
         existing = repository.list_for_tenant(tenant_id)
     except Exception:  # noqa: BLE001 - if we can't check, fall back to the sanitized slug
-        return base
+        return sanitize_slug(desired)
+    # Exclude THIS offer's own slug, or re-saving would collide with itself and renumber its live URL.
     taken = {str(offer.get("slug") or "") for offer in existing if str(offer.get("offer_id") or "") != offer_id}
-    if base not in taken:
-        return base
-    candidate = base
-    suffix = 2
-    while candidate in taken:
-        candidate = f"{base}-{suffix}"
-        suffix += 1
-    return candidate
+    return unique_slug(desired, taken)
 
 
-def handler(event, context, repository=None, products_repo=None):
+def handler(event, context, repository=None, products_repo=None, services_repo=None):
     # Stripe-mode scoping: offers + the products they reference are read/written in the request's mode so a
     # test-mode dashboard only ever sees test records (plans/STRIPE_MODE_DECOUPLING.md P2).
     mode = resolve_stripe_mode(event)
@@ -50,7 +38,7 @@ def handler(event, context, repository=None, products_repo=None):
     if method == "OPTIONS":
         return json_response({})
     if method == "POST":
-        return create_offer(event, repository, products_repo, mode=mode)
+        return create_offer(event, repository, products_repo, mode=mode, services_repo=services_repo)
     if method == "GET":
         offer_id = path_params(event).get("offer_id")
         if offer_id:
@@ -82,7 +70,23 @@ def _landing_products(offer: dict, products_repo) -> dict:
     return out
 
 
-def create_offer(event, repository, products_repo=None, mode="test"):
+def _landing_services(offer: dict, services_repo) -> dict:
+    """Load the offer's landing services keyed by service_id — the naming half a service-only offer needs."""
+    tenant_id = str(offer.get("tenant_id") or "")
+    out = {}
+    for opp in stage_opportunities(offer, STAGE_LANDING):
+        service_id = str((opp or {}).get("service_id") or "")
+        if service_id and service_id not in out:
+            try:
+                service = services_repo.get(tenant_id, service_id)
+            except Exception:  # noqa: BLE001 - naming must never block a save
+                service = None
+            if service:
+                out[service_id] = service
+    return out
+
+
+def create_offer(event, repository, products_repo=None, mode="test", services_repo=None):
     try:
         document = parse_json_body(event)
         products_repo = products_repo or products_repository(mode=mode)
@@ -96,9 +100,21 @@ def create_offer(event, repository, products_repo=None, mode="test"):
         existing = repository.get(tenant_id, offer_id) if offer_id else None
         _cache: dict = {}
 
+        def _services_for_naming(doc):
+            """Services are needed ONLY to name a service-backed offer. Skip the lookup when there are none
+            (the common case), and never let it raise — a naming nicety must not fail a save."""
+            if not any(str((o or {}).get("service_id") or "") for o in stage_opportunities(doc, STAGE_LANDING)):
+                return {}
+            try:
+                return _landing_services(doc, services_repo or services_repository(mode=mode))
+            except Exception:  # noqa: BLE001
+                return {}
+
+
         def _model():
             if "m" not in _cache:
-                _cache["m"] = analyze_offer(document, _landing_products(document, products_repo))
+                _cache["m"] = analyze_offer(document, _landing_products(document, products_repo),
+                                            _services_for_naming(document))
             return _cache["m"]
 
         # Capture what the CLIENT actually sent before defaulting fills it in — a tenant-typed name has to

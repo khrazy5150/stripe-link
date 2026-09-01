@@ -69,6 +69,26 @@ class OfferCrudHandlerTests(unittest.TestCase):
         again = self._post({**self.offer, "offer_id": "offer_live", "name": "Totally New Name", "slug": ""})
         self.assertEqual(json.loads(again["body"])["offer"]["slug"], "original-url")
 
+    def test_a_service_only_offer_is_named_after_its_service(self):
+        # Regression: 95da715 required auto-label/slug to key off the unified item set (products AND
+        # services). That was dropped when naming moved to the semantic model, so every service-only offer
+        # became "Offer" / "offer" -> offer-2, offer-3. The model typed it as a service the whole time; it
+        # simply had no way to name it.
+        class _Services:
+            def get(self, tenant_id, service_id):
+                return {"service_id": service_id, "name": "Deep Tissue Massage"}
+
+        offer = {**self.offer, "offer_id": "offer_svc",
+                 "items": [{"service_id": "svc_1", "price_id": "p1", "quantity": 1}]}
+        offer.pop("name", None)
+        offer.pop("slug", None)   # the fixture ships a slug; a typed slug rightly wins, so clear it
+        resp = handler({"httpMethod": "POST", "body": json.dumps(offer)}, None,
+                       repository=self.repository, products_repo=self.products, services_repo=_Services())
+        self.assertEqual(resp["statusCode"], 201)
+        saved = json.loads(resp["body"])["offer"]
+        self.assertEqual(saved["name"], "Deep Tissue Massage")
+        self.assertEqual(saved["slug"], "deep-tissue-massage")
+
     def test_offer_slug_stable_on_re_save(self):
         first = self._post({**self.offer, "offer_id": "offer_a", "slug": "combo"})
         again = self._post({**self.offer, "offer_id": "offer_a", "slug": "combo"})

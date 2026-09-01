@@ -59,11 +59,24 @@ def _shared_category(products: list[dict]) -> str:
     return ""
 
 
-def analyze_offer(offer: dict, products_by_id: dict) -> dict:
-    """Return the deterministic OfferSemanticModel for an offer (+ its resolved products). Pure meaning."""
+def analyze_offer(offer: dict, products_by_id: dict, services_by_id: dict | None = None) -> dict:
+    """Return the deterministic OfferSemanticModel for an offer (+ its resolved products). Pure meaning.
+
+    `services_by_id` is optional but matters: a service-only offer has NO products, so without it the
+    primary entity fell back to the offer's own (usually empty) name and every such offer was labelled
+    "Offer" with the slug "offer" — then offer-2, offer-3. The model already typed it as a service; it
+    just had no way to name it. Restores the intent of 95da715 (auto-label/slug key off the unified item
+    set, products AND services), which was dropped when this moved to the semantic model.
+    """
     landing_opps = stage_opportunities(offer, STAGE_LANDING)
     products = [products_by_id.get(str((o or {}).get("product_id") or "")) for o in landing_opps]
     products = [p for p in products if p]
+    services_by_id = services_by_id or {}
+    service_names = [
+        str((services_by_id.get(str((o or {}).get("service_id") or "")) or {}).get("name") or "")
+        for o in landing_opps if str((o or {}).get("service_id") or "")
+    ]
+    service_names = [name for name in service_names if name]
     pres_kind = str(landing_presentation(offer).get("kind") or "")  # single | tiered | carousel | none
     commercial = str(offer.get("product_intent") or "transaction")
     brand = str(((offer.get("presentation") or {}).get("brand")) or "").strip()
@@ -84,12 +97,16 @@ def analyze_offer(offer: dict, products_by_id: dict) -> dict:
     # entities.primary.name — the product for a single; the shared-category theme for a homogeneous bundle;
     # else the headline product. secondary[] exposes the rest so a consumer can decide whether to use them.
     if len(products) <= 1:
-        primary_name = str((products[0].get("name") if products else offer.get("name")) or "Offer")
+        # Services are entities too. Order: the product, else the service, else the offer's own name.
+        fallback_name = service_names[0] if service_names else offer.get("name")
+        primary_name = str((products[0].get("name") if products else fallback_name) or "Offer")
     elif shared_cat:
         primary_name = _humanize(shared_cat)
     else:
         primary_name = str(products[0].get("name") or "Offer")
     secondary = [{"type": "product", "name": str(p.get("name") or "")} for p in products[1:] if p.get("name")]
+    if not products:  # a multi-service offer names its remaining services the way a bundle names products
+        secondary = [{"type": "service", "name": name} for name in service_names[1:]]
 
     # taxonomy.hierarchy — shallow + deterministic. Populated for a single product (its category) or a bundle
     # whose products SHARE a category; a mixed bundle has no single coherent category, so it stays empty (honest,

@@ -1,0 +1,31 @@
+{
+  "_comment": "Shared parity fixtures for the slug rules. BOTH suites read this file: tests/test_slug_parity.py runs the Python implementation (stripe_link/domain/slugs.py) and the JS mirror (dashboard/src/composables/slugs.js) over the same cases and asserts identical output. An algorithm cannot be shared across Python and JS the way composition_rules.json is shared, so the FIXTURES are shared instead. Add a case here when you change either implementation.",
+  "sanitize": [
+    {"in": "Workout Bundle",        "out": "workout-bundle"},
+    {"in": "  Tax Prep!! SVC ",     "out": "tax-prep-svc"},
+    {"in": "ALL CAPS NAME",         "out": "all-caps-name"},
+    {"in": "a b c d",               "out": "a-b-c-d"},
+    {"in": "---",                   "out": "offer"},
+    {"in": "",                      "out": "offer"},
+    {"in": "Ünïcode Ünicorn",       "out": "n-code-nicorn"},
+    {"in": "double  --  hyphens",   "out": "double-hyphens"},
+    {"in": "trailing-",             "out": "trailing"},
+    {"in": "-leading",              "out": "leading"},
+    {"in": "emoji 🎉 party",        "out": "emoji-party"},
+    {"in": "123 456",               "out": "123-456"}
+  ],
+  "unique": [
+    {"desired": "fresh",  "taken": ["combo", "solo"],            "out": "fresh"},
+    {"desired": "combo",  "taken": ["combo"],                    "out": "combo-2"},
+    {"desired": "combo",  "taken": ["combo", "combo-2"],         "out": "combo-3"},
+    {"desired": "combo",  "taken": ["combo", "combo-3"],         "out": "combo-2"},
+    {"desired": "Combo!", "taken": ["combo"],                    "out": "combo-2"},
+    {"desired": "",       "taken": ["offer"],                    "out": "offer-2"},
+    {"desired": "solo",   "taken": [],                           "out": "solo"}
+  ],
+  "tokens": [
+    {"in": "The Best of Your Whey Protein", "limit": 3, "out": ["best", "whey", "protein"]},
+    {"in": "A Guide to the Gym",            "limit": 0, "out": ["guide", "gym"]},
+    {"in": "and or the",                    "limit": 0, "out": []}
+  ]
+}
