@@ -1,0 +1,112 @@
+"""Behaviour of dashboard/src/composables/offerItems.js, exercised through node.
+
+This logic is JS-only (no Python counterpart), so there is nothing to hold in parity — but it encodes
+rules that were wrong in production and would be easy to regress:
+
+  * items[] is LANDING-ONLY, so "everything in this offer" must read purchase_opportunities
+  * a funnel product that duplicates a landing item must not be counted twice
+  * an order-bump product must be findable by search
+
+Skipped if node is unavailable.
+"""
+
+import json
+import pathlib
+import shutil
+import subprocess
+import unittest
+
+ROOT = pathlib.Path(__file__).resolve().parents[1]
+MODULE = ROOT / "dashboard" / "src" / "composables" / "offerItems.js"
+
+NAMES = {
+    "p1": "Creatine Gummies", "p2": "NAD Supplement", "p3": "Whey Protein",
+    "p4": "Protein Shaker Bottle", "p5": "Resistance Bands", "svc1": "60-Minute Mobile Massage",
+}
+
+WORKOUT_BUNDLE = {
+    "items": [{"product_id": "p1"}, {"product_id": "p2"}, {"product_id": "p3"}],
+    "purchase_opportunities": [
+        {"stage": "landing", "product_id": "p1", "placement": {"group": "main_offer"}},
+        {"stage": "landing", "product_id": "p2", "placement": {"group": "main_offer"}},
+        {"stage": "landing", "product_id": "p3", "placement": {"group": "main_offer"}},
+        {"stage": "checkout", "product_id": "p4", "placement": {"group": "order_bump"}},
+        {"stage": "post_purchase", "product_id": "p2", "placement": {"group": "upsell"}},
+    ],
+}
+
+# Saved before purchase_opportunities existed: items[] IS the landing set, so it must still work.
+LEGACY = {"items": [{"product_id": "p1"}, {"service_id": "svc1"}]}
+
+MANY = {"purchase_opportunities": (
+    [{"stage": "landing", "product_id": f"p{i}", "placement": {"group": "main_offer"}} for i in (1, 2, 3, 5)]
+    + [{"stage": "post_purchase", "product_id": "p4", "placement": {"group": "downsell"}}]
+)}
+
+
+def run_js(expr_map):
+    node = shutil.which("node")
+    if not node:
+        return None
+    script = f"""
+    import * as m from {json.dumps(str(MODULE))};
+    const NAMES = {json.dumps(NAMES)};
+    const r = (id) => NAMES[id] || "";
+    const offers = {json.dumps(expr_map)};
+    const out = {{}};
+    for (const [k, offer] of Object.entries(offers)) {{
+      out[k] = {{
+        summary: m.itemSummary(offer, r),
+        title: m.itemSummaryTitle(offer, r),
+        search: m.searchableItemText(offer, r),
+      }};
+    }}
+    console.log(JSON.stringify(out));
+    """
+    proc = subprocess.run([node, "--input-type=module", "-e", script],
+                          capture_output=True, text=True, cwd=str(ROOT), timeout=60)
+    if proc.returncode != 0:
+        raise AssertionError(proc.stderr)
+    return json.loads(proc.stdout)
+
+
+class OfferItemsTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.out = run_js({"bundle": WORKOUT_BUNDLE, "legacy": LEGACY, "many": MANY})
+        if cls.out is None:
+            raise unittest.SkipTest("node not available")
+
+    def test_landing_names_then_role_counts(self):
+        self.assertEqual(
+            self.out["bundle"]["summary"],
+            "Creatine Gummies, NAD Supplement, Whey Protein · 1 bump",
+        )
+
+    def test_a_funnel_product_that_repeats_a_landing_item_is_not_counted(self):
+        # p2 is BOTH a landing item and the upsell. Counting it would claim an extra product.
+        self.assertNotIn("2 ", self.out["bundle"]["summary"])
+        self.assertIn("1 bump", self.out["bundle"]["summary"])
+
+    def test_order_bump_product_is_searchable(self):
+        # The whole point: "where is that Protein Shaker I added?"
+        self.assertIn("Protein Shaker Bottle", self.out["bundle"]["search"])
+        self.assertIn("p4", self.out["bundle"]["search"])
+
+    def test_title_separates_landing_from_funnel(self):
+        title = self.out["bundle"]["title"]
+        self.assertIn("Landing: Creatine Gummies, NAD Supplement, Whey Protein", title)
+        self.assertIn("Funnel: Protein Shaker Bottle, NAD Supplement", title)
+
+    def test_legacy_offer_without_opportunities_still_reads(self):
+        self.assertEqual(self.out["legacy"]["summary"], "Creatine Gummies, 60-Minute Mobile Massage")
+
+    def test_more_than_three_landing_items_collapse_and_keep_role_counts(self):
+        self.assertEqual(
+            self.out["many"]["summary"],
+            "Creatine Gummies, NAD Supplement, Whey Protein +1 more · 1 downsell",
+        )
+
+
+if __name__ == "__main__":
+    unittest.main()

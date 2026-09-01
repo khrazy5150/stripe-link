@@ -1,6 +1,7 @@
 # Offer item visibility — cards and search
 
-**Status:** PLANNED, not built. HIGH priority.
+**Status:** phases 1-3 SHIPPED 2026-09-01. Phase 0 (list projection + pagination) still open —
+see the scaling note in section 4 and plans/TODO.md.
 
 ## 1. The problem, as a tenant hits it
 
@@ -71,11 +72,15 @@ day that matters, search moves server-side — that is a different plan, and not
 
 ## 5. Phases
 
-1. **Card role counts.** Read `purchase_opportunities`, append the deduped role-labelled count. Offers only.
-2. **Offer search through items.** `offerSearchText()` + placeholder.
-3. **Landing Pages parity.** Load the catalog on mount; add offer name + item names to the filter.
+1. **Card role counts** — SHIPPED. `Creatine Gummies, NAD Supplement, Whey Protein · 1 bump`.
+2. **Offer search through items** — SHIPPED. Names + ids, every stage; placeholder now `Name, slug, product...`.
+3. **Landing Pages parity** — SHIPPED. It already loaded the catalog via `ensureCatalogLoaded()`, so only the
+   filter needed extending: it now matches the offer's name/slug and every item in it.
 
-Each phase stands alone and ships independently.
+All three live in `dashboard/src/composables/offerItems.js` — ONE implementation with name resolution
+injected, because both screens need identical rules over different stores. Covered by
+`tests/test_offer_items_js.py` (run through node), which pins the two rules that were wrong in production:
+items[] is landing-only, and a funnel product duplicating a landing item must not be counted twice.
 
 ## 6. Deliberately out of scope
 

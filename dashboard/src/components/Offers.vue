@@ -29,7 +29,7 @@
             <input
               v-model.trim="offerSearchQuery"
               type="search"
-              placeholder="Name, slug, type..."
+              placeholder="Name, slug, product..."
               @focus="ensureOffersLoaded()"
             />
           </label>
@@ -559,6 +559,7 @@ import { defaultProductPrice, formatMoney, useProductsStore } from "../stores/pr
 import { useServicesStore } from "../stores/services";
 import { useProfileStore } from "../stores/profile";
 import { sanitizeSlug, slugTokens, uniqueSlug } from "../composables/slugs";
+import { itemSummary as offerItemSummary, itemSummaryTitle as offerItemSummaryTitle, searchableItemText } from "../composables/offerItems";
 import ConfirmDialog from "./shared/ConfirmDialog.vue";
 import ListCard from "./shared/ListCard.vue";
 import PurchaseFlowDiagram from "./PurchaseFlowDiagram.vue";
@@ -608,8 +609,11 @@ const pendingDeleteOffer = ref(null);
 const deletingOffer = ref(false);
 const offerStatusFilter = ref("active");
 const offerSearchQuery = ref("");
+// Search matches the offer's own fields AND everything in it -- names and ids, landing and funnel. Without
+// the item text a tenant cannot find "the offer with the Protein Shaker in it" by any route on this screen
+// (plans/OFFER_ITEM_VISIBILITY.md).
 function offerSearchText(offer) {
-  return [offer.name, offer.slug, offer.offer_type, offer.product_intent]
+  return [offer.name, offer.slug, offer.offer_type, offer.product_intent, searchableItemText(offer, resolveItemName)]
     .filter(Boolean).join(" ").toLowerCase();
 }
 const visibleOffers = computed(() => {
@@ -1795,53 +1799,16 @@ function offerImage(offer) {
   return offer?.presentation?.image_url || offer?.presentation?.hero_image_url || firstProduct?.images?.[0] || "";
 }
 
-// How many item names the card shows before collapsing the rest to a count, and a character backstop for
-// catalogues with very long names. Both exist to keep every card the same height -- an offer with 200 items
-// must not stretch its card past its neighbours.
-const ITEM_SUMMARY_MAX_NAMES = 3;
-const ITEM_SUMMARY_MAX_CHARS = 90;
-
-// One item's display name. Falls back to the id when the product/service is not loaded or no longer exists,
-// so the card degrades to the OLD behaviour rather than to a blank line.
-function itemName(item) {
-  const productId = String(item?.product_id || "");
-  if (productId) return productsById.value.get(productId)?.name || productId;
-  const serviceId = String(item?.service_id || "");
-  if (serviceId) return serviceObjFor(serviceId)?.name || serviceId;
-  return "";
+// Resolve a catalog id to its display name for THIS screen's stores. The composable owns the rules;
+// each screen owns its lookup.
+function resolveItemName(id) {
+  return productsById.value.get(id)?.name || serviceObjFor(id)?.name || "";
 }
-
-// Every item name, deduped -- a bundle can carry the same product at several prices, and repeating the name
-// reads as a mistake. Used for the card line and for its full-list tooltip.
-function itemNames(offer) {
-  const items = Array.isArray(offer?.items) ? offer.items : [];
-  const seen = new Set();
-  const names = [];
-  for (const item of items) {
-    const name = itemName(item);
-    if (name && !seen.has(name)) {
-      seen.add(name);
-      names.push(name);
-    }
-  }
-  return names;
-}
-
-// The card previously printed raw ids ("local_HVq2Sc8GdyW, local_SQ1VNEfgKv5"), which tell a tenant nothing
-// about their own offer. Names are the useful thing; the ids stay available as the fallback above.
 function itemSummary(offer) {
-  const names = itemNames(offer);
-  if (!names.length) return "";
-  const shown = names.slice(0, ITEM_SUMMARY_MAX_NAMES);
-  let text = shown.join(", ");
-  if (text.length > ITEM_SUMMARY_MAX_CHARS) text = `${text.slice(0, ITEM_SUMMARY_MAX_CHARS - 1).trimEnd()}…`;
-  const hidden = names.length - shown.length;
-  return hidden > 0 ? `${text} +${hidden} more` : text;
+  return offerItemSummary(offer, resolveItemName);
 }
-
-// Full list on hover, so collapsing to "+N more" hides nothing the tenant cannot get at.
 function itemSummaryTitle(offer) {
-  return itemNames(offer).join(", ");
+  return offerItemSummaryTitle(offer, resolveItemName);
 }
 
 function inferOfferType() {

@@ -21,7 +21,7 @@
             v-model.trim="search"
             class="landing-search"
             type="search"
-            placeholder="Search pages..."
+            placeholder="Name, slug, offer, product..."
             aria-label="Search landing pages"
             @focus="ensurePagesLoaded()"
           />
@@ -1530,6 +1530,7 @@ import { formatMoney } from "../stores/products";
 import PurchaseFlowDiagram from "./PurchaseFlowDiagram.vue";
 import { useProfileStore } from "../stores/profile";
 import { useSitesStore } from "../stores/sites";
+import { searchableItemText } from "../composables/offerItems";
 import { useCollectionsStore } from "../stores/collections";
 import SettingsAccordion from "./shared/SettingsAccordion.vue";
 import MediaListField from "./shared/MediaListField.vue";
@@ -2232,6 +2233,17 @@ const wizardSectionLabels = computed(() => {
   return [...governed, ...goalSeedLabels(form.goal)];
 });
 const siteFilter = ref("");  // "" = all, "__none__" = unattached, else a site_id
+// Resolve a catalog id for THIS screen's stores; the composable owns the rules (see Offers.vue, same shape).
+function resolveItemName(id) {
+  return productsById.value.get(id)?.name || servicesById.value.get(id)?.name || "";
+}
+// The offer a page renders, plus everything in that offer, as searchable text.
+function pageOfferSearchText(page) {
+  const offer = offers.value.find((entry) => entry.offer_id === page.offer_id);
+  if (!offer) return "";
+  return [offer.name, offer.slug, searchableItemText(offer, resolveItemName)].filter(Boolean).join(" ");
+}
+
 const filteredPages = computed(() => {
   const term = search.value.toLowerCase();
   let list = pages.value;
@@ -2249,6 +2261,9 @@ const filteredPages = computed(() => {
     page.route?.slug,
     templateLabel(page),
     page.status,
+    // A page is only findable by its own fields otherwise -- not by the OFFER it renders, nor by any
+    // product in that offer. Searching "Whey Protein" found nothing here (plans/OFFER_ITEM_VISIBILITY.md).
+    pageOfferSearchText(page),
   ].filter(Boolean).join(" ").toLowerCase().includes(term));
 });
 const wizardOffers = computed(() => {

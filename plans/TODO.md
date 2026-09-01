@@ -1074,7 +1074,7 @@ third-party security assessment is required.
 - Extract as a composable FROM the category field, which is the only server-backed typeahead in the
   dashboard today. Thin, not a generic search engine; let a second consumer reshape it.
 
-### Offer items invisible on cards and in search — HIGH (plans/OFFER_ITEM_VISIBILITY.md)
+### Offer items invisible on cards and in search — phases 1-3 SHIPPED 2026-09-01; phase 0 OPEN (plans/OFFER_ITEM_VISIBILITY.md)
 - A product added as an order bump appears NOWHERE on the Offers screen: not on the card (which reads the
   landing-only `items[]`) and not in search (which matches only name/slug/type/intent). The only way to
   find it is to open every offer and read its Purchase Flow. Landing items like "Whey Protein" are equally
@@ -1082,8 +1082,13 @@ third-party security assessment is required.
 - Same hole one screen over: Landing Pages searches `offer_id` but not the offer's NAME or any item name.
   The general pattern is that a list screen searches its OWN document's fields and never the entities it
   references. Fixing only the offer card would leave the sibling gap in place.
-- Card names + dedupe + tooltip already shipped 2026-09-01; role counts and both search fixes are the
-  remaining three phases.
+- SHIPPED: card role counts, offer search through item names/ids across every stage, and Landing Pages
+  searching through to its offer. Shared composable + node-run regression tests.
+- STILL OPEN — **phase 0, list projection + pagination.** `list_for_tenant` fetches all pages uncapped and
+  returns full documents (~2.9KB each): 500 offers = 1.4MB, 2000 = 5.8MB, which BREACHES the 6MB Lambda
+  proxy limit and the screen stops loading entirely. A cliff, not a slope. Do the API shape + pagination
+  pre-launch, while nothing else consumes these endpoints; keep filtering client-side over the projection.
+  Trigger for moving filtering server-side: any tenant past ~500 offers, or p95 list payload over 1MB.
 
 
 ### Flesh out the search_seo / discoverability pack in depth — MEDIUM
