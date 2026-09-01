@@ -123,9 +123,25 @@ class GoalCompositionTests(unittest.TestCase):
         self.assertEqual(goal_packs("search_seo"), ["discoverability"])
         self.assertEqual(pack_seeds("search_seo"), ["faq"])
         self.assertEqual(pack_seeds("social"), ["testimonials", "rating", "client_marquee"])
-        # Lean goals start with the offer only.
-        self.assertEqual(pack_seeds("paid_ads"), [])
+        # paid_ads answers the ad's promise and the obvious objections.
+        self.assertEqual(pack_seeds("paid_ads"), ["content_block", "faq"])
+        # email_list and minimal stay lean ON PURPOSE: both want LESS than the base, and packs are
+        # union-only, so there is nothing honest for them to add. Empty here is a decision, not a gap.
+        self.assertEqual(pack_seeds("email_list"), [])
         self.assertEqual(pack_seeds("minimal"), [])
+
+    def test_listicle_stays_lean_but_paid_ads_adds_checkout_trust(self):
+        # listicle "strips the fluff" by design (plans/LISTICLE_AND_CART.md) -- that base must not move.
+        base = recommended_section_keys("listicle")
+        self.assertNotIn("trust_badges", base)
+        self.assertNotIn("refund_policy", base)
+        # ...but ad platforms expect a refund policy on a paid landing page, so the GOAL adds them
+        # rather than the offer_type losing its lean default. Union-only: nothing is taken away.
+        with_ads = recommended_section_keys("listicle", "paid_ads")
+        self.assertIn("trust_badges", with_ads)
+        self.assertIn("refund_policy", with_ads)
+        for key in base:
+            self.assertIn(key, with_ads)
 
     def test_unknown_or_absent_goal_enables_nothing(self):
         # A page from before the goal axis must behave exactly as it did: base sections only.

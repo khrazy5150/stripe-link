@@ -1055,6 +1055,14 @@ third-party security assessment is required.
 
 ### Add additional content elements currently not found in the landing page builder — HIGH
 
+### Flesh out the search_seo / discoverability pack in depth — MEDIUM
+- FAQ + `structured_data` already ship (they are the `discoverability` pack today). What is NOT decided is
+  the rest of the modern discoverability surface: llms.txt, breadcrumb/Organization schema, IndexNow,
+  sitemap/robots. Several are already blocked on the Site object in the On-page SEO Phase 2 item — this is
+  the goal-axis half of that work, and the two should be planned together rather than twice.
+- Placeholder seeding + the FTC-accurate warning copy: see plans/GOAL_SEEDING_AND_PACKS.md.
+
+
 
 ### Contrasting theme accents — the lever is the PRESET, not the element — LOW, worth considering later
 - **Where this came from:** the FAQ chevron uses `--sl-accent`; the refund policy's `+` falls back to `brand`.

@@ -85,11 +85,12 @@
   },
   "_goal_comment": "Second composition axis: the tenant's GOAL / traffic source (plans/LANDING_PAGE_GOAL_COMPOSITION.md). A goal enables capability PACKS on top of the offer_type base \u2014 never a hand-maintained offer_type x goal matrix. Packs are union-only: they add, never remove, so a page with no goal composes exactly as it did before goals existed (no migration). A pack has two halves because the two kinds of section behave differently. `seeds` are content-bearing body elements (faq, testimonials, ...) that render nothing until a tenant fills them in \u2014 the create wizard seeds them as empty scaffolds into builder state and they are tenant-owned from then on, so changing goal never deletes copy. `sections` are governed sections the goal turns on; that suits DERIVED head/sidecar output (structured_data, llms_txt) needing no tenant input, and is empty until those exist (Phase 3) \u2014 the mechanism is here so they slot in without a renderer change. Editing guide: docs/CONFIGURING_GOALS.md. NEVER delete or rename a goal \u2014 pages that stored it would stop validating and could no longer be saved or re-rendered. Retire one with \"deprecated\": true, which hides it from the wizard while existing pages keep validating and composing.",
   "packs": {
+    "ad_landing":      { "label": "Ad landing",      "seeds": ["content_block", "faq"], "sections": ["trust_badges", "refund_policy"] },
     "discoverability": { "label": "Discoverability", "seeds": ["faq"], "sections": ["structured_data"] },
     "social_proof":    { "label": "Social proof",    "seeds": ["testimonials", "rating", "client_marquee"], "sections": [] }
   },
   "goals": {
-    "paid_ads":   { "label": "Paid ads",     "note": "Ad traffic converts fast or bounces. Adds no extra sections \u2014 just the offer.", "packs": [] },
+    "paid_ads":   { "label": "Paid ads",     "note": "Ad traffic converts fast or bounces. Adds a benefits block and an FAQ so the page answers the ad's promise and the obvious objections.", "packs": ["ad_landing"] },
     "search_seo": { "label": "Search-friendly", "note": "Adds search-friendly content: an FAQ, plus (later) structured data and llms.txt from the offer.", "packs": ["discoverability"] },
     "social":     { "label": "Social",       "note": "Built to convert a scrolling audience: adds social proof \u2014 testimonials, rating, client logos.", "packs": ["social_proof"] },
     "email_list": { "label": "Email list",   "note": "A warm audience that already knows you. Adds nothing extra \u2014 straight to the offer.", "packs": [] },
