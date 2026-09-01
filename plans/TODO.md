@@ -1053,6 +1053,9 @@ third-party security assessment is required.
 
 ## Landing Pages / SEO
 
+### Add additional content elements currently not found in the landing page builder — HIGH
+
+
 ### Contrasting theme accents — the lever is the PRESET, not the element — LOW, worth considering later
 - **Where this came from:** the FAQ chevron uses `--sl-accent`; the refund policy's `+` falls back to `brand`.
   On `tiktok-dark` that produced a striking two-tone (cyan chevron against a magenta `+`/CTA) the author liked
