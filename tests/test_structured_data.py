@@ -433,6 +433,15 @@ class ThinContentGateTests(unittest.TestCase):
         self.assertTrue(thin_content_warnings(self._doc("<p>only a few words here</p>")))
         self.assertEqual(thin_content_warnings(self._doc("<p>" + " ".join(["word"] * 200) + "</p>")), [])
 
+    def test_the_warning_does_not_claim_word_count_is_why_this_page_is_noindex(self):
+        # publishing.py only demotes an ALREADY indexable artifact (live mode, published, verified custom
+        # domain). A test-mode or platform-hosted page is noindex for other reasons entirely, so wording it
+        # as "so it publishes as noindex" told tenants that adding words would fix something it would not.
+        warning = thin_content_warnings(self._doc("<p>only a few words here</p>"))[0]
+        self.assertIn("On a verified custom domain", warning)
+        self.assertIn("would publish as noindex", warning)
+        self.assertNotIn("so it publishes as noindex", warning)
+
 
 class SiteOrganizationIdentityTests(unittest.TestCase):
     """The Site's Organization is the single source of the page's entity graph (plans/SITE_OBJECT.md §2.2):

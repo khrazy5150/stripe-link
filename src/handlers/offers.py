@@ -101,7 +101,10 @@ def create_offer(event, repository, products_repo=None, mode="test"):
                 _cache["m"] = analyze_offer(document, _landing_products(document, products_repo))
             return _cache["m"]
 
-        if not str(document.get("name") or "").strip():
+        # Capture what the CLIENT actually sent before defaulting fills it in — a tenant-typed name has to
+        # stay distinguishable from a derived one, because it steers the slug below.
+        sent_name = str(document.get("name") or "").strip()
+        if not sent_name:
             document["name"] = (str(existing["name"]) if existing and str(existing.get("name") or "").strip()
                                 else label_from_model(_model()))
 
@@ -110,6 +113,13 @@ def create_offer(event, repository, products_repo=None, mode="test"):
             desired = sent_slug
         elif existing and str(existing.get("slug") or "").strip():
             desired = str(existing["slug"])
+        elif sent_name:
+            # The tenant RENAMED the offer but left the slug alone. The label and slug are supposed to come
+            # from one model so they cannot diverge — but a typed name bypasses the model, and deriving the
+            # slug from products anyway produced "Workout Bundle" -> dietary-supplement-bundle. A deliberate
+            # rename is the stronger signal, so the slug follows it. Only reachable for a NEW offer: an
+            # existing one is caught by the branch above, so published URLs still never move on their own.
+            desired = sent_name
         else:
             desired = slug_from_model(_model())
         document["slug"] = unique_offer_slug(desired, tenant_id=tenant_id, offer_id=offer_id, repository=repository)

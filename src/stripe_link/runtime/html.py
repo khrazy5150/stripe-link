@@ -2763,15 +2763,21 @@ def indexable_word_count(html: str) -> int:
 
 
 def thin_content_warnings(html: str) -> list[str]:
-    """Builder page-health nudge (SEO-08): a page below the unique-content floor publishes as noindex, so tell
-    the tenant why and what to add. Warning, never a gate — publishing is never blocked."""
+    """Builder page-health nudge (SEO-08): a page below the unique-content floor is too thin to index, so tell
+    the tenant what to add. Warning, never a gate — publishing is never blocked.
+
+    Phrased CONDITIONALLY on purpose. The thin-content demotion in publishing.py only runs on an already
+    indexable artifact — live mode, published, verified custom domain, eligible page_type. A test-mode or
+    platform-hosted page is noindex for those reasons regardless of word count, so claiming the word count
+    causes it would be false, and adding 200 words would not change anything the tenant can observe."""
     count = indexable_word_count(html)
     if count >= THIN_CONTENT_MIN_WORDS:
         return []
     return [
-        f"This page has only about {count} words of unique content (under {THIN_CONTENT_MIN_WORDS}), so it "
-        "publishes as noindex — hidden from search — to protect your site's ranking. Add a product "
-        "description, a specifications table, an FAQ, or condition details to make it eligible."
+        f"This page has only about {count} words of unique content (under {THIN_CONTENT_MIN_WORDS}). On a "
+        "verified custom domain that is too thin to index, so it would publish as noindex — hidden from "
+        "search — to protect your site's ranking. Add a product description, a specifications table, an "
+        "FAQ, or condition details to make it eligible."
     ]
 
 

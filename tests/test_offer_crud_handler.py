@@ -48,6 +48,27 @@ class OfferCrudHandlerTests(unittest.TestCase):
         resp = self._post({**self.offer, "offer_id": "offer_b", "slug": "combo"})
         self.assertEqual(json.loads(resp["body"])["offer"]["slug"], "combo-2")
 
+    def test_a_renamed_offer_takes_its_slug_from_the_name(self):
+        # The bug: label "Workout Bundle" but slug "dietary-supplement-bundle". A tenant-typed name bypasses
+        # the semantic model while the slug still used it, so the two diverged with nothing forcing them
+        # to agree. A deliberate rename is the stronger signal.
+        resp = self._post({**self.offer, "offer_id": "offer_named", "name": "Workout Bundle", "slug": ""})
+        self.assertEqual(resp["statusCode"], 201)
+        body = json.loads(resp["body"])["offer"]
+        self.assertEqual(body["slug"], "workout-bundle")
+        self.assertEqual(body["name"], "Workout Bundle")
+
+    def test_a_typed_slug_still_beats_the_name(self):
+        resp = self._post({**self.offer, "offer_id": "offer_both", "name": "Workout Bundle", "slug": "my-url"})
+        self.assertEqual(json.loads(resp["body"])["offer"]["slug"], "my-url")
+
+    def test_renaming_an_EXISTING_offer_does_not_move_its_url(self):
+        # The whole reason the name is only consulted for a NEW offer: a live slug addresses published
+        # pages, ad campaigns and shared links. It must never change itself underneath the tenant.
+        self._post({**self.offer, "offer_id": "offer_live", "slug": "original-url"})
+        again = self._post({**self.offer, "offer_id": "offer_live", "name": "Totally New Name", "slug": ""})
+        self.assertEqual(json.loads(again["body"])["offer"]["slug"], "original-url")
+
     def test_offer_slug_stable_on_re_save(self):
         first = self._post({**self.offer, "offer_id": "offer_a", "slug": "combo"})
         again = self._post({**self.offer, "offer_id": "offer_a", "slug": "combo"})

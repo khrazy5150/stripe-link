@@ -162,7 +162,7 @@
             <div class="offer-two-column">
               <label class="offer-field">
                 <span>Offer Label <strong>*</strong></span>
-                <input v-model.trim="form.name" type="text" placeholder="Name this offer..." required @input="form.userEditedName = true" />
+                <input v-model.trim="form.name" type="text" placeholder="Name this offer..." required @input="onLabelInput" />
                 <small>Auto-generated label (you can modify it)</small>
               </label>
 
@@ -893,6 +893,19 @@ function smartOfferLabel() {
   const shared = cats.length && cats.every((c) => c) && new Set(cats).size === 1;
   if (shared) return humanizeCat(cats[0]) + " Bundle";
   return [products[0]?.name, products[1]?.name].filter(Boolean).join(" + ") + " Bundle";
+}
+
+// A typed label re-derives the slug (server mirror: handlers/offers.py sends the name as the slug source
+// when the tenant renamed but left the slug auto). Uses the field's own @input like the other edit flags --
+// a value-compare watcher races the programmatic auto-fills. Never touches a slug the tenant typed, and
+// loadOfferIntoForm marks an existing offer's slug edited, so published URLs stay put.
+function onLabelInput() {
+  form.userEditedName = true;
+  if (!form.userEditedSlug) form.slug = sanitizeSlug(form.name);
+}
+// JS mirror of the server's sanitize_slug (handlers/offers.py).
+function sanitizeSlug(value) {
+  return String(value || "").trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "offer";
 }
 
 watch(selectedItems, () => {
