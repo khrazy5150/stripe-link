@@ -47,6 +47,24 @@ warning is worse than none: the first tenant who knows it is exaggerated discoun
 product ever shows them. Specifically — **do not claim imprisonment.** FTC enforcement here is civil, and
 a false legal threat is both wrong and corrosive to trust.
 
+Draft copy (shown once, on first edit of a social-proof element):
+
+> **Testimonials must come from real customers.**
+>
+> Only publish a testimonial someone actually gave you. Inventing one — or editing a real quote into
+> something the customer did not say — violates the FTC's Rule on Consumer Reviews and Testimonials
+> (16 CFR Part 465).
+>
+> What that means in practice:
+> - Civil penalties of **tens of thousands of dollars per violation**.
+> - Your payment processor can terminate your account for deceptive practices. Chargebacks usually arrive first.
+> - We will suspend your account and hold your payouts.
+>
+> No testimonials yet? Remove this section. An honest page converts better than a hollow one.
+
+That last line matters: a warning that only forbids leaves the tenant stuck with a section they cannot
+fill. Give them the exit.
+
 What is true and worth saying:
 - Civil penalties **per violation**, in the tens of thousands of dollars (the FTC maximum is inflation-
   adjusted annually — look up the current figure at implementation time rather than hardcoding a stale one).
