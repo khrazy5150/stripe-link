@@ -1065,6 +1065,18 @@ third-party security assessment is required.
 
 ### Add additional content elements currently not found in the landing page builder — HIGH
 
+### Offer items invisible on cards and in search — HIGH (plans/OFFER_ITEM_VISIBILITY.md)
+- A product added as an order bump appears NOWHERE on the Offers screen: not on the card (which reads the
+  landing-only `items[]`) and not in search (which matches only name/slug/type/intent). The only way to
+  find it is to open every offer and read its Purchase Flow. Landing items like "Whey Protein" are equally
+  unsearchable, so this is not just a funnel problem.
+- Same hole one screen over: Landing Pages searches `offer_id` but not the offer's NAME or any item name.
+  The general pattern is that a list screen searches its OWN document's fields and never the entities it
+  references. Fixing only the offer card would leave the sibling gap in place.
+- Card names + dedupe + tooltip already shipped 2026-09-01; role counts and both search fixes are the
+  remaining three phases.
+
+
 ### Flesh out the search_seo / discoverability pack in depth — MEDIUM
 - FAQ + `structured_data` already ship (they are the `discoverability` pack today). What is NOT decided is
   the rest of the modern discoverability surface: llms.txt, breadcrumb/Organization schema, IndexNow,
