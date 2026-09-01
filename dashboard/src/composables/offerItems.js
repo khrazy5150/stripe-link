@@ -63,23 +63,25 @@ export function landingNames(offer, resolve) {
   return namesFor(landingEntries(offer), resolve);
 }
 
-// Role counts for funnel products NOT already named among the landing items. A product used as both a
-// landing item and an upsell (common — the upsell is often the same product at another price) must not be
-// counted again, or the card claims an extra product the offer does not have.
+// Counts every funnel PLACEMENT by role — deliberately NOT deduped against the landing items.
+//
+// These words name funnel STEPS, not products. An upsell selling a product the customer already saw on
+// the landing page (common: the same product at another price) is still a real step in the flow, and
+// suppressing it made a configured upsell invisible on the card. Counting placements answers "what does
+// this offer do", which is what the role words were always describing. The hover title names each one
+// with its role, so a count is never ambiguous.
 export function funnelRoleCounts(offer, resolve) {
-  const alreadyNamed = new Set(landingNames(offer, resolve));
-  const counted = new Set();
   const counts = new Map();
   for (const entry of funnelEntries(offer)) {
-    const id = itemId(entry);
-    if (!id) continue;
-    const name = resolve(id) || id;
-    if (alreadyNamed.has(name) || counted.has(name)) continue;
-    counted.add(name);
+    if (!itemId(entry)) continue;
     const label = FUNNEL_ROLE_LABELS[String(entry?.placement?.group || "")] || "extra";
     counts.set(label, (counts.get(label) || 0) + 1);
   }
-  return [...counts.entries()].map(([label, n]) => `${n} ${label}${n > 1 ? "s" : ""}`);
+  // Funnel order, not document order, so the line reads the way the customer experiences it.
+  const order = [...Object.values(FUNNEL_ROLE_LABELS), "extra"];
+  return [...counts.entries()]
+    .sort((a, b) => order.indexOf(a[0]) - order.indexOf(b[0]))
+    .map(([label, n]) => `${n} ${label}${n > 1 ? "s" : ""}`);
 }
 
 // The card line: landing names (capped), then role-labelled counts for the rest.
@@ -99,7 +101,13 @@ export function itemSummary(offer, resolve) {
 // Full breakdown for the hover title, so collapsing hides nothing.
 export function itemSummaryTitle(offer, resolve) {
   const parts = [`Landing: ${landingNames(offer, resolve).join(", ") || "none"}`];
-  const funnel = namesFor(funnelEntries(offer), resolve);
+  const funnel = funnelEntries(offer)
+    .filter((entry) => itemId(entry))
+    .map((entry) => {
+      const name = resolve(itemId(entry)) || itemId(entry);
+      const label = FUNNEL_ROLE_LABELS[String(entry?.placement?.group || "")] || "extra";
+      return `${name} (${label})`;
+    });
   if (funnel.length) parts.push(`Funnel: ${funnel.join(", ")}`);
   return parts.join("\n");
 }

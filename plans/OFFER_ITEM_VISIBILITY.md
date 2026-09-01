@@ -50,8 +50,10 @@ conditional on a purchase that has not happened yet.
 - Names for landing items (already shipped: names, 3-name cap, 90-char backstop, dedupe, title tooltip).
 - A role-labelled COUNT for non-landing stages, from `placement.group` (`order_bump` -> "bump",
   `upsell`/`downsell` -> "upsell"/"downsell").
-- Count only products **not already named**. The NAD upsell is a duplicate of a landing item, so the
-  Workout Bundle reads `1 bump`, never `2`.
+- Count **placements, not distinct products**. These words name funnel STEPS. An upsell reselling a
+  product already on the landing page is still a real step, so the Workout Bundle reads `1 bump, 1 upsell`.
+  (The first implementation deduped against the landing items and thereby hid a configured upsell
+  entirely — corrected same day.) Roles read in funnel order regardless of document order.
 - The hover title carries the full breakdown by role, so nothing is hidden, only collapsed.
 
 ## 4. Search
@@ -80,7 +82,7 @@ day that matters, search moves server-side — that is a different plan, and not
 All three live in `dashboard/src/composables/offerItems.js` — ONE implementation with name resolution
 injected, because both screens need identical rules over different stores. Covered by
 `tests/test_offer_items_js.py` (run through node), which pins the two rules that were wrong in production:
-items[] is landing-only, and a funnel product duplicating a landing item must not be counted twice.
+items[] is landing-only, and funnel counts are placements rather than distinct products.
 
 ## 6. Deliberately out of scope
 
