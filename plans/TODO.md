@@ -1065,6 +1065,15 @@ third-party security assessment is required.
 
 ### Add additional content elements currently not found in the landing page builder — HIGH
 
+### Cached suggestion field — fetch once per scope, filter locally — HIGH, do LAST (plans/CACHED_SUGGESTION_FIELD.md)
+- The product category autocomplete calls the API on every focus AND every 180ms typing pause, each one a
+  Lambda invoke plus a full DynamoDB scan. No cache in the util, the component, or apiRequest.
+- `plans/PRODUCT_CATEGORY_AUTOCOMPLETE.md` line 90 already asked for fetch-once-and-filter-locally. It said
+  "may", nothing enforced it, and it fell out — the SECOND dropped requirement found on 2026-09-01, after
+  service-only offer naming. Neither had a test.
+- Extract as a composable FROM the category field, which is the only server-backed typeahead in the
+  dashboard today. Thin, not a generic search engine; let a second consumer reshape it.
+
 ### Offer items invisible on cards and in search — HIGH (plans/OFFER_ITEM_VISIBILITY.md)
 - A product added as an order bump appears NOWHERE on the Offers screen: not on the card (which reads the
   landing-only `items[]`) and not in search (which matches only name/slug/type/intent). The only way to
