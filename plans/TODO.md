@@ -89,6 +89,15 @@ silently and invisibly every time the schema grows, which is exactly what happen
 Pairs naturally with hiding the raw JSON panels (below).
 
 ### MEDIUM — audit for silent agreement failures (framing agreed 2026-08-30)
+- **New instance, 2026-09-01:** `handlers/offers.py` documented that the offer label and slug come from ONE
+  OfferSemanticModel "so they can't diverge" — but a tenant-typed name bypassed the model while the slug kept
+  deriving from products ("Workout Bundle" -> `dietary-supplement-bundle`). Stated invariant, nothing enforcing
+  it. Fixed + asserted.
+- **Related debt this created:** `Offers.vue` now carries THREE hand-written JS mirrors of Python slug logic
+  (`smartOfferSlug`/`smart_offer_slug`, `sanitizeSlug`/`sanitize_slug`, `uniqueSlugPreview`/`unique_offer_slug`),
+  each kept in parity only by comment. Verified identical on 10 cases at the time of writing, but nothing
+  FORCES it — the same shape the audit is about. Durable fix: extract them to a shared JS module the way
+  `pageComposer.js` mirrors `composition.py`, then parity-test it in CI.
 
 Not a general bug hunt. Every defect found on 2026-08-30 shared one shape: TWO THINGS THAT
 MUST AGREE, WITH NOTHING FORCING THEM TO. All four were silent -- no error, no failing test,

@@ -169,7 +169,8 @@
               <label class="offer-field">
                 <span>Slug <strong>*</strong></span>
                 <input v-model.trim="form.slug" class="font-mono" type="text" placeholder="auto-generated-from-label" required @input="form.userEditedSlug = true" />
-                <small>URL-friendly identifier</small>
+                <small v-if="slugCollisionResolved && !form.userEditedSlug">URL-friendly identifier — another offer already uses that slug, so this one was numbered. Edit it if you'd rather choose.</small>
+                <small v-else>URL-friendly identifier</small>
               </label>
             </div>
 
@@ -901,25 +902,48 @@ function smartOfferLabel() {
 // loadOfferIntoForm marks an existing offer's slug edited, so published URLs stay put.
 function onLabelInput() {
   form.userEditedName = true;
-  if (!form.userEditedSlug) form.slug = sanitizeSlug(form.name);
+  if (!form.userEditedSlug) form.slug = uniqueSlugPreview(sanitizeSlug(form.name));
 }
 // JS mirror of the server's sanitize_slug (handlers/offers.py).
 function sanitizeSlug(value) {
   return String(value || "").trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "offer";
+}
+// JS mirror of the server's unique_offer_slug. Needs NO network call: offers.value already holds every
+// offer for this tenant in this Stripe mode, and offerCardModel keeps the whole document, slug included.
+// The server still decides on save -- it has to, since another tab could take the slug in between. This
+// only stops the modal from showing a slug the tenant will not actually get.
+const slugCollisionResolved = ref(false);
+function uniqueSlugPreview(base) {
+  const self = String(editingOfferId.value || "");
+  const taken = new Set(
+    (offers.value || [])
+      .filter((offer) => String(offer?.offer_id || "") !== self)
+      .map((offer) => String(offer?.slug || "")),
+  );
+  slugCollisionResolved.value = false;
+  if (!taken.has(base)) return base;
+  slugCollisionResolved.value = true;
+  let candidate = base;
+  let suffix = 2;
+  while (taken.has(candidate)) {
+    candidate = `${base}-${suffix}`;
+    suffix += 1;
+  }
+  return candidate;
 }
 
 watch(selectedItems, () => {
   syncItemConfigs(landingProducts.value);
   if (!selectedItems.value.length) return;
   if (!form.userEditedName) form.name = smartOfferLabel();
-  if (!form.userEditedSlug) form.slug = smartOfferSlug();  // product-driven SEO slug/label from the model
+  if (!form.userEditedSlug) form.slug = uniqueSlugPreview(smartOfferSlug());  // product-driven SEO slug/label from the model
 }, { immediate: true });
 
 // A tenant edit is flagged by the field's own @input (see the Label/Slug inputs), NOT a value-compare watcher:
 // the latter races with these programmatic auto-fills and can wrongly mark the slug "edited", freezing it empty
 // (observed on rapid multi-select). Brand changes still re-derive the slug while it's auto.
 watch(() => form.brand, () => {
-  if (!form.userEditedSlug) form.slug = smartOfferSlug();
+  if (!form.userEditedSlug) form.slug = uniqueSlugPreview(smartOfferSlug());
 });
 
 watch(productIntent, (intent) => {
