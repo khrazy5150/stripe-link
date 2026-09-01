@@ -69,7 +69,7 @@
             </template>
             <template #description>
               <p><strong>Type:</strong> {{ derivedOfferTypeLabel(offer) }}</p>
-              <p><strong>Items:</strong> {{ itemSummary(offer) }}</p>
+              <p :title="itemSummaryTitle(offer)"><strong>Items:</strong> {{ itemSummary(offer) }}</p>
             </template>
             <template #actions>
               <button type="button" class="secondary-action" @click="viewOffer(offer)">View</button>
@@ -629,7 +629,13 @@ function ensureOffersLoaded() {
 
 // Auto-load on mount so the list is fresh immediately, and reloads on an env switch (this view is keyed on
 // the environment → Vue remounts → this re-runs). The "Load Offers" button remains for a manual refresh.
-onMounted(ensureOffersLoaded);
+onMounted(() => {
+  ensureOffersLoaded();
+  // The list needs the catalog too: item NAMES on each card, and offerImage's product-image fallback,
+  // which already read productsById but never had it populated on this screen.
+  if (!productStore.loaded && !productStore.loading) productStore.load();
+  if (!servicesStore.loaded && !servicesStore.loading) servicesStore.load();
+});
 const form = reactive(defaultOfferForm());
 const itemConfigs = reactive({});
 const priceImageInputs = new Map();
@@ -1789,10 +1795,53 @@ function offerImage(offer) {
   return offer?.presentation?.image_url || offer?.presentation?.hero_image_url || firstProduct?.images?.[0] || "";
 }
 
-function itemSummary(offer) {
-  // Offer items are products or services; show whichever id each item carries.
+// How many item names the card shows before collapsing the rest to a count, and a character backstop for
+// catalogues with very long names. Both exist to keep every card the same height -- an offer with 200 items
+// must not stretch its card past its neighbours.
+const ITEM_SUMMARY_MAX_NAMES = 3;
+const ITEM_SUMMARY_MAX_CHARS = 90;
+
+// One item's display name. Falls back to the id when the product/service is not loaded or no longer exists,
+// so the card degrades to the OLD behaviour rather than to a blank line.
+function itemName(item) {
+  const productId = String(item?.product_id || "");
+  if (productId) return productsById.value.get(productId)?.name || productId;
+  const serviceId = String(item?.service_id || "");
+  if (serviceId) return serviceObjFor(serviceId)?.name || serviceId;
+  return "";
+}
+
+// Every item name, deduped -- a bundle can carry the same product at several prices, and repeating the name
+// reads as a mistake. Used for the card line and for its full-list tooltip.
+function itemNames(offer) {
   const items = Array.isArray(offer?.items) ? offer.items : [];
-  return items.map((item) => item.product_id || item.service_id).filter(Boolean).join(", ");
+  const seen = new Set();
+  const names = [];
+  for (const item of items) {
+    const name = itemName(item);
+    if (name && !seen.has(name)) {
+      seen.add(name);
+      names.push(name);
+    }
+  }
+  return names;
+}
+
+// The card previously printed raw ids ("local_HVq2Sc8GdyW, local_SQ1VNEfgKv5"), which tell a tenant nothing
+// about their own offer. Names are the useful thing; the ids stay available as the fallback above.
+function itemSummary(offer) {
+  const names = itemNames(offer);
+  if (!names.length) return "";
+  const shown = names.slice(0, ITEM_SUMMARY_MAX_NAMES);
+  let text = shown.join(", ");
+  if (text.length > ITEM_SUMMARY_MAX_CHARS) text = `${text.slice(0, ITEM_SUMMARY_MAX_CHARS - 1).trimEnd()}…`;
+  const hidden = names.length - shown.length;
+  return hidden > 0 ? `${text} +${hidden} more` : text;
+}
+
+// Full list on hover, so collapsing to "+N more" hides nothing the tenant cannot get at.
+function itemSummaryTitle(offer) {
+  return itemNames(offer).join(", ");
 }
 
 function inferOfferType() {
