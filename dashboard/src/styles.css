@@ -87,6 +87,11 @@ select {
   overflow: hidden;
   display: grid;
   grid-template-columns: 26rem minmax(0, 1fr);
+  /* REQUIRED, and the reason the first version clipped: with no explicit row the implicit one is `auto`
+     and sizes to its content, so main grew past 100dvh, nothing needed to scroll, and overflow:hidden
+     simply cut the list off. minmax(0, 1fr) rather than 1fr because 1fr carries an automatic minimum of
+     `auto` — the same automatic-minimum-size trap as min-height:0 on a flex item. */
+  grid-template-rows: minmax(0, 1fr);
   background: var(--bg);
   color: var(--text);
   transition: grid-template-columns 180ms ease;
@@ -97,6 +102,11 @@ select {
 }
 
 .sidebar {
+  /* Now that the shell is a fixed-height frame the sidebar is bounded too, and the nav is long enough to
+     overflow a short viewport — so it scrolls itself rather than clipping its last items. */
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
   border-right: 1px solid var(--line);
   background: var(--panel);
   min-width: 0;
