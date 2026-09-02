@@ -2989,6 +2989,21 @@ button:disabled {
   color: var(--muted);
 }
 
+/* Shown when the edit form's derived funnel differs from the SAVED offer. Not an error — an unsaved
+   change — but loud enough that a tenant cannot assume a funnel step is live when checkouts still use the
+   old one. */
+.funnel-stale-notice {
+  margin: 0 0 1.2rem;
+  padding: 0.9rem 1.2rem;
+  border: 1px solid rgba(245, 158, 11, 0.45);
+  border-left: 3px solid #b45309;
+  border-radius: var(--radius-md);
+  background: rgba(245, 158, 11, 0.1);
+  color: #92400e;
+  font-size: 1.2rem;
+  line-height: 1.5;
+}
+
 .funnel-extra-warning,
 .price-context-warning {
   color: #92400e;

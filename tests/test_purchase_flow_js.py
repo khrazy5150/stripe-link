@@ -61,6 +61,37 @@ MISSING = {"purchase_opportunities": [
 ]}
 
 
+def _node(expr):
+    node = shutil.which("node")
+    if not node:
+        return None
+    proc = subprocess.run([node, "--input-type=module", "-e", expr],
+                          capture_output=True, text=True, cwd=str(ROOT), timeout=60)
+    if proc.returncode != 0:
+        raise AssertionError(proc.stderr)
+    return json.loads(proc.stdout)
+
+
+def run_sig(cases):
+    return _node(f"""
+    import {{ funnelSignature }} from {json.dumps(str(MODULE))};
+    const cases = {json.dumps(cases)};
+    const out = {{}};
+    for (const [k, o] of Object.entries(cases)) out[k] = funnelSignature(o);
+    console.log(JSON.stringify(out));
+    """)
+
+
+def run_block(cases):
+    return _node(f"""
+    import {{ funnelSignatureFromBlock }} from {json.dumps(str(MODULE))};
+    const cases = {json.dumps(cases)};
+    const out = {{}};
+    for (const [k, b] of Object.entries(cases)) out[k] = funnelSignatureFromBlock(b);
+    console.log(JSON.stringify(out));
+    """)
+
+
 def run(cases):
     node = shutil.which("node")
     if not node:
@@ -116,6 +147,27 @@ class PurchaseFlowTests(unittest.TestCase):
 
     def test_unresolvable_tier_prices_fall_back_rather_than_show_half_a_range(self):
         self.assertEqual(self.out["unresolvable"][0]["items"][0]["chips"], ["$39.00"])
+
+    def test_funnel_signature_ignores_landing_and_sorts(self):
+        # Only funnel steps matter for the drift check; landing items change for unrelated reasons.
+        out = run_sig({
+            "saved": MODERN,
+            "reordered": {"purchase_opportunities": list(reversed(MODERN["purchase_opportunities"]))},
+        })
+        self.assertEqual(out["saved"], out["reordered"])
+        self.assertNotIn("main_offer", out["saved"])
+
+    def test_signature_detects_an_added_downsell(self):
+        # The trap this guards: a downsell price added to a PRODUCT shows in the edit diagram immediately,
+        # but the runtime reads the SAVED offer, so no buyer sees it until Update Offer is pressed.
+        out = run_sig({"saved": MODERN})
+        block_same = {"upsells": [{"product_id": "p2", "price_id": "pr2"}],
+                      "order_bumps": [{"product_id": "p4", "price_id": "pr4"}],
+                      "downsells": [{"product_id": "p2", "price_id": "pr2d"}]}
+        block_added = dict(block_same, downsells=block_same["downsells"] + [{"product_id": "p1", "price_id": "x"}])
+        sigs = run_block({"same": block_same, "added": block_added})
+        self.assertEqual(sigs["same"], out["saved"])
+        self.assertNotEqual(sigs["added"], out["saved"])
 
     def test_a_product_missing_from_the_store_still_renders(self):
         self.assertEqual(self.out["missing"][0]["items"][0]["product"]["name"], "gone_from_store")

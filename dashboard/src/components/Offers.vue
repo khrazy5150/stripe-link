@@ -399,6 +399,11 @@
               </div>
             </header>
 
+            <p v-if="funnelDivergedFromSaved" class="funnel-stale-notice">
+              This shows your products' <strong>current</strong> pricing. The saved offer still has the
+              previous funnel, and that is what live checkouts use — press
+              <strong>{{ editingOfferId ? "Update Offer" : "Create Offer" }}</strong> to apply it.
+            </p>
             <PurchaseFlowDiagram :offer-name="form.name" :stages="offerFunnelStages" />
           </section>
 
@@ -567,7 +572,7 @@ import { useServicesStore } from "../stores/services";
 import { useProfileStore } from "../stores/profile";
 import { sanitizeSlug, slugTokens, uniqueSlug } from "../composables/slugs";
 import { itemSummary as offerItemSummary, itemSummaryTitle as offerItemSummaryTitle, searchableItemText } from "../composables/offerItems";
-import { stagesFromSavedOffer } from "../composables/purchaseFlow";
+import { stagesFromSavedOffer, funnelSignature, funnelSignatureFromBlock } from "../composables/purchaseFlow";
 import ConfirmDialog from "./shared/ConfirmDialog.vue";
 import ListCard from "./shared/ListCard.vue";
 import PurchaseFlowDiagram from "./PurchaseFlowDiagram.vue";
@@ -753,6 +758,21 @@ const detailsFunnelStages = computed(() => {
     resolveProduct: (id) => productsById.value.get(id) || null,
     formatAmount: (amount, currency) => formatMoney(amount, currency),
   });
+});
+
+// The edit form derives its funnel from each product's CURRENT pricing contexts; the runtime reads the
+// SAVED offer (domain/funnels.funnel_context_items). Add a downsell price to a product and this diagram
+// shows it at once, but no buyer sees it until the offer is re-saved — so say so rather than let the
+// tenant believe a step is live when it is not.
+const savedOfferBeingEdited = computed(() =>
+  (offers.value || []).find((offer) => offer.offer_id === editingOfferId.value) || null);
+
+const funnelDivergedFromSaved = computed(() => {
+  const saved = savedOfferBeingEdited.value;
+  // Nothing to diverge FROM on a new offer, and an unloaded catalog would derive an empty funnel and
+  // report a false difference.
+  if (!saved || !productStore.loaded) return false;
+  return funnelSignatureFromBlock(buildFunnelBlock()) !== funnelSignature(saved);
 });
 
 function funnelEntriesFromProducts(context, requireUpsell = false) {

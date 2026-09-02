@@ -156,3 +156,32 @@ export function stagesFromSavedOffer(offer, { resolveProduct, formatAmount }) {
     items: stage.items.map(({ _product, _priceId, ...item }) => item),
   }));
 }
+
+/**
+ * A stable signature of an offer's FUNNEL entries (bump/upsell/downsell), as stored in the document.
+ *
+ * Exists because the Offers edit form derives its funnel live from each product's pricing contexts, while
+ * the runtime (domain/funnels.funnel_context_items) reads the SAVED document. Add a downsell price to a
+ * product and the edit diagram shows it immediately, but no buyer will ever see it until the offer is
+ * re-saved. Comparing this signature against the same signature built from the derived funnel is how the
+ * form can tell the tenant that.
+ */
+export function funnelSignature(offer) {
+  return normalizedEntries(offer)
+    .filter((entry) => entry.group !== "main_offer" && entry.stage !== "landing")
+    .map((entry) => `${entry.group}:${entry.id}|${entry.price_id}`)
+    .sort()
+    .join(";");
+}
+
+/** The same signature shape, from the {order_bumps, upsells, downsells} block the edit form builds. */
+export function funnelSignatureFromBlock(block) {
+  const groups = [["order_bumps", GROUP_ORDER_BUMP], ["upsells", GROUP_UPSELL], ["downsells", GROUP_DOWNSELL]];
+  const parts = [];
+  for (const [key, group] of groups) {
+    for (const entry of (block || {})[key] || []) {
+      parts.push(`${group}:${entryId(entry)}|${entry?.price_id || ""}`);
+    }
+  }
+  return parts.sort().join(";");
+}
