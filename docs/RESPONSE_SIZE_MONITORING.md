@@ -37,6 +37,51 @@ Note the last row: the Offers screen loads the full product catalog as well, and
 LARGER than offers (~3.1KB vs ~2.9KB). Most tenants have more products than offers, so **the product
 payload reaches the cliff first**. A product index is the higher-value twin of the offer one.
 
+## Where to find it in the CloudWatch console
+
+Region **us-west-2 (Oregon)**, account **leadgen (150544707159)** — the region selector must match or the
+metric will not appear.
+
+### The metric
+
+    CloudWatch -> Metrics -> All metrics -> Custom namespaces -> JuniorBay/Api
+      -> Environment, FunctionName   (pick a series, e.g. Environment=prod, FunctionName=jb-offers-api-prod)
+
+**It will not be listed until the first datapoint is published.** A custom namespace does not exist in the
+console until something writes to it, and nothing writes until a response crosses 64KB. With a handful of
+offers today, expect the namespace to be absent — that is the instrumentation working, not failing.
+Confirm from the CLI without hunting the UI:
+
+    aws cloudwatch list-metrics --region us-west-2 --namespace "JuniorBay/Api" --query 'length(Metrics)'
+
+`0` means no response has crossed the threshold yet.
+
+### The raw lines — works BEFORE any metric exists
+
+Every list endpoint has its own log group, named `/aws/lambda/jb-{entity}-api-{env}`:
+
+    /aws/lambda/jb-offers-api-prod        /aws/lambda/jb-offers-api-dev
+    /aws/lambda/jb-products-api-prod      /aws/lambda/jb-products-api-dev
+
+    CloudWatch -> Logs -> Log Insights -> select the log group -> run:
+
+    fields @timestamp, FunctionName, ResponseBytes, PercentOfLimit
+    | filter ispresent(ResponseBytes)
+    | sort ResponseBytes desc
+    | limit 20
+
+This is the useful view early on: it shows the largest responses actually served, and it works whether or
+not the metric namespace exists yet. Nothing returned means nothing has exceeded 64KB.
+
+### The alarm, once created
+
+    CloudWatch -> Alarms   (the left nav's Alarms counter, e.g. "4 / 12 / 0")
+
+### A note on AI Operations / Investigations
+
+The AI Operations panel investigates **alarms**, so it only becomes useful here after the alarm below
+exists and has fired. It is not where the metric itself is browsed — that is Metrics -> All metrics.
+
 ## Creating the alarm
 
 Not created here, because the notification target is a decision (email, SNS topic, Slack). When you want
