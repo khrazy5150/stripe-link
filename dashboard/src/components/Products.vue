@@ -52,7 +52,9 @@
         {{ store.loading ? "Loading products..." : store.loaded ? "No products match the current filters." : "Click Load Products to see products." }}
       </div>
 
-      <div v-else class="product-card-list">
+      <!-- tabindex makes the scroll region focusable so arrows / PageUp / PageDown / Space scroll it.
+           A container that only responds to a mouse wheel is unusable without one. -->
+      <div v-else class="product-card-list" tabindex="0" role="list" aria-label="Products">
         <ListCard
           v-for="product in store.filteredProducts"
           :key="product.product_id"

@@ -138,49 +138,54 @@
         <button type="button" class="billing-banner-cta" @click="activeView = 'billing'">{{ billingBanner.cta }}</button>
       </div>
 
-      <Dashboard
-        v-if="activeView === 'dashboard'"
-        :environment-label="environmentLabel"
-        :active-environment="activeEnvironment"
-        @switch-environment="switchEnvironment"
-      />
-      <StripeKeys v-else-if="activeView === 'stripeKeys'" :key="`stripe-keys-${activeEnvironment}-${auth.session?.client_id || ''}`" />
-      <Products v-else-if="activeView === 'products'" />
-      <Coupons v-else-if="activeView === 'coupons'" />
-      <Offers v-else-if="activeView === 'offers'" :key="`offers-${activeEnvironment}-${auth.session?.client_id || ''}`" />
-      <Services v-else-if="activeView === 'services'" :key="`services-${activeEnvironment}-${auth.session?.client_id || ''}`" />
-      <LandingPages
-        v-else-if="activeView === 'landingPages'"
-        :key="`landing-pages-${activeEnvironment}-${auth.session?.client_id || ''}`"
-      />
-      <Sites
-        v-else-if="activeView === 'sites'"
-        :key="`sites-${activeEnvironment}-${auth.session?.client_id || ''}`"
-      />
-      <Collections
-        v-else-if="activeView === 'collections'"
-        :key="`collections-${activeEnvironment}-${auth.session?.client_id || ''}`"
-      />
-      <ABTesting
-        v-else-if="activeView === 'abTesting'"
-        :key="`ab-testing-${activeEnvironment}-${auth.session?.client_id || ''}`"
-      />
-      <Configuration
-        v-else-if="activeView === 'configuration'"
-        :key="`configuration-${activeEnvironment}-${auth.session?.client_id || ''}`"
-      />
-      <Orders v-else-if="activeView === 'orders'" :key="`orders-${activeEnvironment}-${auth.session?.client_id || ''}`" />
-      <Leads v-else-if="activeView === 'leads'" :key="`leads-${activeEnvironment}-${auth.session?.client_id || ''}`" />
-      <Reviews v-else-if="activeView === 'reviews'" :key="`reviews-${activeEnvironment}-${auth.session?.client_id || ''}`" />
-      <Customers v-else-if="activeView === 'customers'" :key="`customers-${activeEnvironment}-${auth.session?.client_id || ''}`" />
-      <Invoices v-else-if="activeView === 'invoices'" :key="`invoices-${activeEnvironment}-${auth.session?.client_id || ''}`" />
-      <Refunds v-else-if="activeView === 'refunds'" :key="`refunds-${activeEnvironment}-${auth.session?.client_id || ''}`" />
-      <Notifications v-else-if="activeView === 'notifications'" :key="`notifications-${activeEnvironment}-${auth.session?.client_id || ''}`" />
-      <Shipping v-else-if="activeView === 'shipping'" :key="`shipping-${activeEnvironment}-${auth.session?.client_id || ''}`" />
-      <Billing v-else-if="activeView === 'billing'" :key="`billing-${auth.session?.client_id || ''}`" />
-      <Profile v-else-if="activeView === 'profile'" :key="`profile-${auth.session?.user_id || ''}`" />
-      <Preferences v-else-if="activeView === 'preferences'" :key="`preferences-${auth.session?.user_id || ''}`" />
-    </main>
+            <!-- The one scrolling region. The shell is a fixed-height frame and the topbar/banner are
+           pinned, so the page never has two scrollbars competing. A list screen can take this over
+           for itself (see .app-view.owns-scroll) when it wants to scroll its own list instead. -->
+      <div class="app-view" :class="{ 'owns-scroll': viewOwnsScroll }">
+  <Dashboard
+          v-if="activeView === 'dashboard'"
+          :environment-label="environmentLabel"
+          :active-environment="activeEnvironment"
+          @switch-environment="switchEnvironment"
+        />
+        <StripeKeys v-else-if="activeView === 'stripeKeys'" :key="`stripe-keys-${activeEnvironment}-${auth.session?.client_id || ''}`" />
+        <Products v-else-if="activeView === 'products'" />
+        <Coupons v-else-if="activeView === 'coupons'" />
+        <Offers v-else-if="activeView === 'offers'" :key="`offers-${activeEnvironment}-${auth.session?.client_id || ''}`" />
+        <Services v-else-if="activeView === 'services'" :key="`services-${activeEnvironment}-${auth.session?.client_id || ''}`" />
+        <LandingPages
+          v-else-if="activeView === 'landingPages'"
+          :key="`landing-pages-${activeEnvironment}-${auth.session?.client_id || ''}`"
+        />
+        <Sites
+          v-else-if="activeView === 'sites'"
+          :key="`sites-${activeEnvironment}-${auth.session?.client_id || ''}`"
+        />
+        <Collections
+          v-else-if="activeView === 'collections'"
+          :key="`collections-${activeEnvironment}-${auth.session?.client_id || ''}`"
+        />
+        <ABTesting
+          v-else-if="activeView === 'abTesting'"
+          :key="`ab-testing-${activeEnvironment}-${auth.session?.client_id || ''}`"
+        />
+        <Configuration
+          v-else-if="activeView === 'configuration'"
+          :key="`configuration-${activeEnvironment}-${auth.session?.client_id || ''}`"
+        />
+        <Orders v-else-if="activeView === 'orders'" :key="`orders-${activeEnvironment}-${auth.session?.client_id || ''}`" />
+        <Leads v-else-if="activeView === 'leads'" :key="`leads-${activeEnvironment}-${auth.session?.client_id || ''}`" />
+        <Reviews v-else-if="activeView === 'reviews'" :key="`reviews-${activeEnvironment}-${auth.session?.client_id || ''}`" />
+        <Customers v-else-if="activeView === 'customers'" :key="`customers-${activeEnvironment}-${auth.session?.client_id || ''}`" />
+        <Invoices v-else-if="activeView === 'invoices'" :key="`invoices-${activeEnvironment}-${auth.session?.client_id || ''}`" />
+        <Refunds v-else-if="activeView === 'refunds'" :key="`refunds-${activeEnvironment}-${auth.session?.client_id || ''}`" />
+        <Notifications v-else-if="activeView === 'notifications'" :key="`notifications-${activeEnvironment}-${auth.session?.client_id || ''}`" />
+        <Shipping v-else-if="activeView === 'shipping'" :key="`shipping-${activeEnvironment}-${auth.session?.client_id || ''}`" />
+        <Billing v-else-if="activeView === 'billing'" :key="`billing-${auth.session?.client_id || ''}`" />
+        <Profile v-else-if="activeView === 'profile'" :key="`profile-${auth.session?.user_id || ''}`" />
+        <Preferences v-else-if="activeView === 'preferences'" :key="`preferences-${auth.session?.user_id || ''}`" />
+      </div>
+</main>
     <ToastHost @select="onToastSelect" />
     <!-- Branded Stripe-Connect intro: opened by ANY startConnect() entry point (stripeKeys store). -->
     <ConnectIntroModal />
@@ -248,6 +253,14 @@ let toastSeen = new Set();
 let toastBaselined = false;
 let notificationsPoll = null;
 const activeView = ref("dashboard");
+
+// List screens scroll their OWN list so the filters above it stay pinned; every other screen lets
+// .app-view scroll normally. Opt-in, so a screen that has not been laid out for it is unaffected.
+// Only screens whose layout has actually been converted to a flex column with a scrolling list.
+// Adding a view here BEFORE converting it clips its content, because .owns-scroll stops the view
+// scrolling and the screen would have no scroll of its own.
+const SELF_SCROLLING_VIEWS = new Set(["products"]);
+const viewOwnsScroll = computed(() => SELF_SCROLLING_VIEWS.has(activeView.value));
 // The active Stripe MODE (test/live) — the dashboard toggle. Drives view remounts + data reloads and the theme
 // class; the backend base is hostname-derived, not this value (plans/STRIPE_MODE_DECOUPLING.md).
 const activeEnvironment = ref(getStripeMode());
