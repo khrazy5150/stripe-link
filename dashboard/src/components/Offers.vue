@@ -431,6 +431,13 @@
             <span>{{ derivedOfferTypeLabel(selectedOfferDetails) }}</span>
             <span>{{ itemSummary(selectedOfferDetails) || "No items" }}</span>
           </div>
+          <!-- The card line collapses the funnel to counts, and its full breakdown is a hover TITLE, which a
+               touch device cannot show. View is the mobile path to the same information, so the flow is
+               rendered here in full — same component the Edit form uses, fed from the saved document. -->
+          <section v-if="detailsFunnelStages.length" class="offer-details-funnel">
+            <h3>Purchase Flow</h3>
+            <PurchaseFlowDiagram :offer-name="selectedOfferDetails.name" :stages="detailsFunnelStages" />
+          </section>
           <pre>{{ JSON.stringify(selectedOfferDetails, null, 2) }}</pre>
         </div>
         <footer class="modal-footer">
@@ -732,6 +739,61 @@ const offerFunnelStages = computed(() => {
     hint: inferredUpsellStrategy.value === "carousel" ? `carousel · ${upsells.length} upsells` : "one at a time",
     items: upsells,
   });
+  return stages;
+});
+
+// Funnel stages for a SAVED offer, for the read-only View modal. offerFunnelStages above is computed from
+// the edit FORM's live selection and cannot describe an arbitrary offer; this reads the document's own
+// purchase_opportunities, which is the complete record of every stage. PurchaseFlowDiagram is presentational
+// by design — each parent supplies its own stages.
+const DETAILS_PRICE = (product, priceId) => {
+  const price = (product?.prices || []).find((entry) => entry.price_id === priceId);
+  return price ? `$${(Number(price.unit_amount || 0) / 100).toFixed(2)}` : "";
+};
+
+const detailsFunnelStages = computed(() => {
+  const offer = selectedOfferDetails.value;
+  const opps = Array.isArray(offer?.purchase_opportunities) ? offer.purchase_opportunities : [];
+  if (!opps.length) return [];
+
+  const card = (opp, intent) => {
+    const id = String(opp?.product_id || opp?.service_id || "");
+    const product = productsById.value.get(id);
+    return {
+      key: `${intent}:${id}`,
+      intent,
+      // A product not in the store (still loading, or archived) still renders by name/id rather than blank.
+      product: product || { name: resolveItemName(id) || id },
+      chips: [DETAILS_PRICE(product, opp?.price_id)].filter(Boolean),
+    };
+  };
+  const inGroup = (group) => opps.filter((o) => String(o?.placement?.group || "") === group);
+
+  const stages = [];
+  const landing = opps.filter((o) => String(o?.stage || "landing") === "landing");
+  if (landing.length) {
+    stages.push({ key: "landing", label: "Landing page", hint: "what the customer buys",
+                  items: landing.map((o) => card(o, "primary")) });
+  }
+  const bumps = inGroup("order_bump");
+  if (bumps.length) {
+    stages.push({ key: "checkout", label: "At checkout", hint: "Stripe order bump",
+                  items: bumps.map((o) => card(o, "cross_sell")) });
+  }
+  const upsells = inGroup("upsell");
+  const downsells = inGroup("downsell");
+  if (upsells.length) {
+    const items = upsells.map((opp) => {
+      const item = card(opp, "upgrade");
+      // A downsell is the SAME product's second-chance price, paired by product_id — the rule the edit-side
+      // diagram already uses.
+      const id = String(opp?.product_id || opp?.service_id || "");
+      const paired = downsells.find((d) => String(d?.product_id || d?.service_id || "") === id);
+      if (paired) item.downsell = { amount: DETAILS_PRICE(productsById.value.get(id), paired?.price_id) };
+      return item;
+    });
+    stages.push({ key: "post_purchase", label: "After purchase", hint: "one at a time", items });
+  }
   return stages;
 });
 

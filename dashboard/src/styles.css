@@ -2475,6 +2475,18 @@ button:disabled {
   font-weight: 800;
 }
 
+/* Funnel inside the View modal. The body is a grid, so the section needs min-width:0 or the diagram's
+   horizontally-scrolling cards would blow the modal out instead of scrolling inside it — the same
+   automatic-minimum-size trap as the settings accordion. */
+.offer-details-funnel {
+  min-width: 0;
+}
+
+.offer-details-funnel h3 {
+  margin: 0 0 1.2rem;
+  font-size: var(--text-section, 1.5rem);
+}
+
 .offer-details-body pre {
   max-height: 42rem;
   margin: 0;
