@@ -1065,6 +1065,21 @@ third-party security assessment is required.
 
 ### Add additional content elements currently not found in the landing page builder — HIGH
 
+### ⭐ HIGH — Adopt the slim index in the dashboard, and build the PRODUCT one (2026-09-02, not built)
+- Backend is ready: `GET /offers?view=index` (468B vs 4,482B, ~10%), `limit`/`cursor`, and response-size
+  telemetry all shipped prod. The dashboard still requests full documents, so today's UI keeps the cliff.
+- **The product payload is the bigger half and arrives first.** Product documents average ~3.1KB (larger
+  than offers) and tenants usually have more of them; the Offers screen loads the whole catalog on mount
+  for item names, funnel-role derivation and the image fallback. 2,000 products = 5.9MB = 99% of the limit.
+  A product index is the same shape of work as the offer one.
+- Then virtualize the list RENDERING — window the DOM. Not infinite scroll: the index loads whole, which is
+  what keeps client-side search complete. Paginating it would leave search covering only what was fetched.
+- Ordering gap, relevant to mobile infinite scroll: the sort key is `OFFER#{mode}#{offer_id}`, so pages
+  come back in id order and there is no chronological index. While the index loads whole you can sort
+  client-side on its `created_at`; past that you need a GSI. The GSI solves ORDER, never the cliff.
+- Watch `JuniorBay/Api` -> `ResponseBytes` (docs/RESPONSE_SIZE_MONITORING.md). Alarm at 3MB, half the
+  ceiling, so there is room to act. Trigger on BYTES, not record counts.
+
 ### Cached suggestion field — fetch once per scope, filter locally — HIGH, do LAST (plans/CACHED_SUGGESTION_FIELD.md)
 - The product category autocomplete calls the API on every focus AND every 180ms typing pause, each one a
   Lambda invoke plus a full DynamoDB scan. No cache in the util, the component, or apiRequest.
