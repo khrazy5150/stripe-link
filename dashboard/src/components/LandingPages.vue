@@ -1531,6 +1531,7 @@ import PurchaseFlowDiagram from "./PurchaseFlowDiagram.vue";
 import { useProfileStore } from "../stores/profile";
 import { useSitesStore } from "../stores/sites";
 import { searchableItemText } from "../composables/offerItems";
+import { stagesFromSavedOffer } from "../composables/purchaseFlow";
 import { useCollectionsStore } from "../stores/collections";
 import SettingsAccordion from "./shared/SettingsAccordion.vue";
 import MediaListField from "./shared/MediaListField.vue";
@@ -1733,44 +1734,17 @@ const hasPostPurchaseFunnel = computed(() => funnelUpsellCount.value + funnelDow
 // The offer's purchase flow, computed from the SAVED offer (items + funnel) for the read-only reference diagram
 // (shared PurchaseFlowDiagram, same as the Offer editor). plans/SALES_FUNNELS.md.
 const showPurchaseFlow = ref(false);
-function funnelPriceRef(product, priceId) {
-  const price = (product?.prices || []).find((p) => p.price_id === priceId);
-  return price ? formatMoney(Number(price.unit_amount || 0), price.currency) : "";
-}
+// Stages come from the SHARED builder (composables/purchaseFlow.js). This screen used to read the legacy
+// items[] + funnel.* fields directly, which are dual-written today but are dropped by
+// plans/OFFER_MODEL_REDESIGN.md P4 — at which point the flow would have silently lost its bumps and
+// upsells. The shared builder prefers purchase_opportunities and falls back, so it survives that.
 const funnelFlowStages = computed(() => {
   const offer = builderOffer.value;
   if (!offer) return [];
-  const stages = [];
-  const landing = (offer.items || []).map((item, i) => {
-    const product = productsById.value.get(item.product_id);
-    const tiers = (item.selectable_prices || []).length;
-    return { key: `${item.product_id}-${i}`, intent: "primary", product: product || { name: item.product_id },
-             chips: [tiers > 1 ? `${tiers} quantity tiers` : "standard"] };
-  }).filter((x) => x.product);
-  if (landing.length) stages.push({ key: "landing", label: "Landing page", hint: "what the customer buys", items: landing });
-
-  const funnel = offer.funnel || {};
-  const bumps = (funnel.order_bumps || []).map((b, i) => {
-    const product = productsById.value.get(b.product_id);
-    return { key: `${b.product_id}-${i}`, intent: "cross_sell", product: product || { name: b.product_id },
-             amount: funnelPriceRef(product, b.price_id) };
-  }).filter((x) => x.product);
-  if (bumps.length) stages.push({ key: "checkout", label: "At checkout", hint: "Stripe order bump", items: bumps });
-
-  const downsellByProduct = {};
-  (funnel.downsells || []).forEach((d) => { downsellByProduct[d.product_id] = d; });
-  const upsells = (funnel.upsells || []).map((u, i) => {
-    const product = productsById.value.get(u.product_id);
-    const ds = downsellByProduct[u.product_id];
-    return { key: `${u.product_id}-${i}`, intent: "upgrade", product: product || { name: u.product_id },
-             amount: funnelPriceRef(product, u.price_id),
-             downsell: ds ? { amount: funnelPriceRef(product, ds.price_id) } : null };
-  }).filter((x) => x.product);
-  if (upsells.length) stages.push({
-    key: "post_purchase", label: "After purchase",
-    hint: upsells.length > 3 ? `carousel · ${upsells.length} upsells` : "one at a time", items: upsells,
+  return stagesFromSavedOffer(offer, {
+    resolveProduct: (id) => productsById.value.get(id) || null,
+    formatAmount: (amount, currency) => formatMoney(amount, currency),
   });
-  return stages;
 });
 // The runtime default copy shown as editor placeholders (mirrors upsell_pages.py DEFAULT_UPSELL_SCAFFOLD /
 // DEFAULT_THANK_YOU). PRICE_TOKEN is interpolated as literal text (a bare {{ }} in the template would break
