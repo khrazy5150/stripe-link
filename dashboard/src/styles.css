@@ -2826,6 +2826,13 @@ button:disabled {
 }
 
 /* Read-only visual purchase funnel: Offer -> stages (landing/checkout/post-purchase) -> Thank-you. */
+/* Purchase-flow diagram — shared by the Offers edit form, the Offers View modal and the Landing Pages
+   builder, so every value here lands in three places.
+
+   NOTE ON SIZES: this app sets html{font-size:62.5%}, so 1rem = 10px. The original values (0.68rem badges,
+   0.72rem chips, 0.95rem names) were written against a 16px base and therefore rendered at 6.8px / 7.2px /
+   9.5px — illegible at any colour. Sizes below are on the dashboard's own scale: 1.4rem body, 1.2rem
+   secondary, 1.1rem uppercase micro-labels. */
 .funnel-diagram {
   display: flex;
   flex-direction: column;
@@ -2837,16 +2844,21 @@ button:disabled {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 0.15rem;
-  padding: 0.55rem 1.1rem;
-  border-radius: 0.6rem;
+  gap: 0.3rem;
+  padding: 1rem 1.8rem;
+  border-radius: var(--radius-md);
   text-align: center;
 }
 
+.funnel-node strong {
+  font-size: 1.5rem;
+}
+
 .funnel-node-kind {
-  font-size: 0.65rem;
+  font-size: 1rem;
+  font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 0.05em;
+  letter-spacing: 0.08em;
   color: var(--muted);
 }
 
@@ -2862,97 +2874,124 @@ button:disabled {
 
 .funnel-connector {
   width: 2px;
-  height: 1.4rem;
+  height: 2rem;
   background: var(--line);
 }
 
 .funnel-stage {
   width: 100%;
+  min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
-  padding: 0.8rem;
+  gap: 1rem;
+  padding: 1.4rem;
   border: 1px solid var(--line);
-  border-radius: 0.7rem;
+  border-radius: var(--radius-md);
   background: var(--surface, rgba(127, 127, 127, 0.03));
 }
 
 .funnel-stage-head {
   display: flex;
   align-items: baseline;
-  gap: 0.5rem;
+  gap: 0.8rem;
   flex-wrap: wrap;
 }
 
 .funnel-stage-label {
-  font-weight: 600;
-  font-size: 0.9rem;
+  font-weight: 700;
+  font-size: 1.4rem;
 }
 
 .funnel-stage-hint {
-  font-size: 0.75rem;
+  font-size: 1.2rem;
   color: var(--muted);
 }
 
 .funnel-cards {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.6rem;
+  gap: 1rem;
   justify-content: center;
 }
 
 .funnel-card {
-  flex: 1 1 14rem;
-  min-width: 12rem;
+  flex: 1 1 18rem;
+  min-width: 16rem;
   display: flex;
   flex-direction: column;
   align-items: center;
   text-align: center;
-  gap: 0.4rem;
-  padding: 0.7rem 0.8rem;
+  gap: 0.7rem;
+  padding: 1.2rem 1.4rem;
   border: 1px solid var(--line);
-  border-radius: 0.55rem;
+  border-radius: var(--radius-md);
   background: var(--card, rgba(127, 127, 127, 0.04));
 }
 
 .funnel-card-name {
-  font-size: 0.95rem;
+  font-size: 1.5rem;
+  line-height: 1.3;
 }
 
 .funnel-pricing {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.35rem;
+  gap: 0.5rem;
+  justify-content: center;
 }
 
+/* The price is data the tenant came here to read, not a footnote — so it gets real contrast and weight
+   rather than muted grey. */
 .price-chip {
-  font-size: 0.72rem;
-  padding: 0.1rem 0.5rem;
+  font-size: 1.2rem;
+  font-weight: 700;
+  padding: 0.3rem 0.9rem;
   border-radius: 999px;
-  background: rgba(127, 127, 127, 0.14);
-  color: var(--muted);
+  background: rgba(127, 127, 127, 0.12);
+  border: 1px solid var(--line);
+  color: var(--text);
+  white-space: nowrap;
 }
 
 .intent-badge {
   align-self: center;
-  font-size: 0.68rem;
-  font-weight: 600;
+  font-size: 1.1rem;
+  font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 0.03em;
-  padding: 0.12rem 0.5rem;
+  letter-spacing: 0.05em;
+  padding: 0.3rem 0.8rem;
   border-radius: 999px;
+  white-space: nowrap;
 }
 
-.intent-primary   { background: rgba(99, 102, 241, 0.16);  color: #4f46e5; }
-.intent-cross_sell { background: rgba(20, 184, 166, 0.16); color: #0f766e; }
-.intent-upgrade   { background: rgba(168, 85, 247, 0.16);  color: #7e22ce; }
-.intent-recovery  { background: rgba(245, 158, 11, 0.18);  color: #b45309; }
+/* Deeper text than the originals (indigo/teal/purple/amber 800 rather than 600-700) so the label clears
+   contrast against its own tint instead of floating on it. */
+.intent-primary    { background: rgba(99, 102, 241, 0.16);  color: #3730a3; }
+.intent-cross_sell { background: rgba(13, 148, 136, 0.18);  color: #115e59; }
+.intent-upgrade    { background: rgba(168, 85, 247, 0.18);  color: #6b21a8; }
+.intent-recovery   { background: rgba(245, 158, 11, 0.22);  color: #92400e; }
+
+/* The second-chance offer, visually subordinate to the upsell it hangs off. */
+.funnel-downsell {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 0.6rem;
+  width: 100%;
+  margin-top: 0.4rem;
+  padding-top: 0.9rem;
+  border-top: 1px dashed var(--line);
+  font-size: 1.2rem;
+  color: var(--muted);
+}
 
 .funnel-extra-warning,
 .price-context-warning {
-  color: #b45309;
-  font-size: 0.72rem;
-  max-width: 22rem;
+  color: #92400e;
+  font-size: 1.2rem;
+  line-height: 1.45;
+  max-width: 30rem;
 }
 
 .price-context-warning {

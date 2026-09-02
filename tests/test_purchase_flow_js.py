@@ -21,6 +21,10 @@ PRODUCTS = {
         {"price_id": "pr2", "unit_amount": 1445, "currency": "usd"},
         {"price_id": "pr2d", "unit_amount": 900, "currency": "usd"}]},
     "p4": {"name": "Protein Shaker Bottle", "prices": [{"price_id": "pr4", "unit_amount": 953, "currency": "eur"}]},
+    "p3": {"name": "Whey Protein", "prices": [
+        {"price_id": "t1", "unit_amount": 2422, "currency": "usd"},
+        {"price_id": "t2", "unit_amount": 4159, "currency": "usd"},
+        {"price_id": "t3", "unit_amount": 5571, "currency": "usd"}]},
 }
 
 MODERN = {"purchase_opportunities": [
@@ -39,9 +43,17 @@ LEGACY = {
     },
 }
 
+# Tier price_ids that RESOLVE against the product -> a low–high range.
 TIERED = {"purchase_opportunities": [
+    {"stage": "landing", "product_id": "p3", "price_id": "t1", "placement": {"group": "main_offer"},
+     "selectable_prices": [{"price_id": "t1"}, {"price_id": "t2"}, {"price_id": "t3"}]},
+]}
+
+# Tier price_ids that do NOT resolve (stale/removed prices) -> fall back to the single price, never a
+# half-built range.
+TIERS_UNRESOLVABLE = {"purchase_opportunities": [
     {"stage": "landing", "product_id": "p1", "price_id": "pr1", "placement": {"group": "main_offer"},
-     "selectable_prices": [{"price_id": "a"}, {"price_id": "b"}, {"price_id": "c"}]},
+     "selectable_prices": [{"price_id": "gone_a"}, {"price_id": "gone_b"}]},
 ]}
 
 MISSING = {"purchase_opportunities": [
@@ -75,7 +87,8 @@ def run(cases):
 class PurchaseFlowTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.out = run({"modern": MODERN, "legacy": LEGACY, "tiered": TIERED, "missing": MISSING})
+        cls.out = run({"modern": MODERN, "legacy": LEGACY, "tiered": TIERED,
+                       "unresolvable": TIERS_UNRESOLVABLE, "missing": MISSING})
         if cls.out is None:
             raise unittest.SkipTest("node not available")
 
@@ -96,8 +109,13 @@ class PurchaseFlowTests(unittest.TestCase):
         # The bump is priced in EUR; a hardcoded "$" would have mislabelled a real tenant's money.
         self.assertEqual(self.out["modern"][1]["items"][0]["chips"], ["EUR 9.53"])
 
-    def test_a_tiered_landing_item_names_the_choice_instead_of_one_price(self):
-        self.assertEqual(self.out["tiered"][0]["items"][0]["chips"], ["3 quantity tiers"])
+    def test_a_tiered_landing_item_shows_its_price_RANGE(self):
+        # A tiered item has no single price. The range says what the customer can actually pay, which beats
+        # naming the tier count ("3 quantity tiers", the first attempt).
+        self.assertEqual(self.out["tiered"][0]["items"][0]["chips"], ["$24.22 – $55.71"])
+
+    def test_unresolvable_tier_prices_fall_back_rather_than_show_half_a_range(self):
+        self.assertEqual(self.out["unresolvable"][0]["items"][0]["chips"], ["$39.00"])
 
     def test_a_product_missing_from_the_store_still_renders(self):
         self.assertEqual(self.out["missing"][0]["items"][0]["product"]["name"], "gone_from_store")

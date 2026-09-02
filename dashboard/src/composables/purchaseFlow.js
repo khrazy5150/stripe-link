@@ -65,6 +65,25 @@ export function stagesFromSavedOffer(offer, { resolveProduct, formatAmount }) {
     const price = (product?.prices || []).find((entry) => entry.price_id === priceId);
     return price ? formatAmount(Number(price.unit_amount || 0), price.currency) : "";
   };
+  // Low–high across a tiered item's selectable prices. Returns "" when there is nothing to span (no tiers,
+  // or none of their price_ids resolve), so the caller falls back to the single price.
+  const priceRange = (product, selectable) => {
+    const amounts = [];
+    let currency = "";
+    for (const tier of selectable || []) {
+      const price = (product?.prices || []).find((entry) => entry.price_id === tier?.price_id);
+      if (!price) continue;
+      amounts.push(Number(price.unit_amount || 0));
+      currency = currency || price.currency;
+    }
+    if (amounts.length < 2) return "";
+    const low = Math.min(...amounts);
+    const high = Math.max(...amounts);
+    return low === high
+      ? formatAmount(low, currency)
+      : `${formatAmount(low, currency)} – ${formatAmount(high, currency)}`;
+  };
+
   const card = (entry, intent) => {
     const product = resolveProduct(entry.id);
     return {
@@ -88,10 +107,11 @@ export function stagesFromSavedOffer(offer, { resolveProduct, formatAmount }) {
       hint: "what the customer buys",
       items: landing.map((entry) => {
         const item = card(entry, "primary");
-        const tiers = (entry.selectable_prices || []).length;
-        // A tiered item has no single price to show, so name the choice instead of picking one arbitrarily.
-        item.chips = tiers > 1
-          ? [`${tiers} quantity tiers`]
+        // A tiered item has no single price. Showing the RANGE beats naming the tier count: it tells the
+        // tenant what the customer can actually pay, which is the question the diagram is answering.
+        const range = priceRange(item._product, entry.selectable_prices);
+        item.chips = range
+          ? [range]
           : [priceLabel(item._product, entry.price_id) || "standard"];
         return item;
       }),
