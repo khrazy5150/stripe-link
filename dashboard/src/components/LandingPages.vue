@@ -2208,14 +2208,14 @@ const wizardSectionLabels = computed(() => {
 });
 const siteFilter = ref("");  // "" = all, "__none__" = unattached, else a site_id
 // Resolve a catalog id for THIS screen's stores; the composable owns the rules (see Offers.vue, same shape).
-function resolveItemName(id) {
-  return productsById.value.get(id)?.name || servicesById.value.get(id)?.name || "";
+function resolveItemProduct(id) {
+  return productsById.value.get(id) || servicesById.value.get(id) || null;
 }
 // The offer a page renders, plus everything in that offer, as searchable text.
 function pageOfferSearchText(page) {
   const offer = offers.value.find((entry) => entry.offer_id === page.offer_id);
   if (!offer) return "";
-  return [offer.name, offer.slug, searchableItemText(offer, resolveItemName)].filter(Boolean).join(" ");
+  return [offer.name, offer.slug, searchableItemText(offer, resolveItemProduct)].filter(Boolean).join(" ");
 }
 
 const filteredPages = computed(() => {

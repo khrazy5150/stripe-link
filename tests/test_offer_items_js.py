@@ -20,9 +20,19 @@ import unittest
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 MODULE = ROOT / "dashboard" / "src" / "composables" / "offerItems.js"
 
-NAMES = {
-    "p1": "Creatine Gummies", "p2": "NAD Supplement", "p3": "Whey Protein",
-    "p4": "Protein Shaker Bottle", "p5": "Resistance Bands", "svc1": "60-Minute Mobile Massage",
+# Roles are DERIVED from these pricing contexts, not from the offer's stored placement — so the fixtures
+# have to carry real prices now.
+def _p(name, *contexts):
+    return {"name": name, "prices": [{"price_id": f"pr_{c}", "context": c, "unit_amount": 1000}
+                                     for c in (contexts or ("standard",))]}
+
+PRODUCTS = {
+    "p1": _p("Creatine Gummies"), "p2": _p("NAD Supplement", "upsell"), "p3": _p("Whey Protein"),
+    "p4": _p("Protein Shaker Bottle", "order_bump"), "p5": _p("Resistance Bands"),
+    "svc1": _p("60-Minute Mobile Massage"),
+    # For the ordering case: one product per funnel role.
+    "b1": _p("Shaker", "order_bump"), "u1": _p("Upgrade A", "upsell"),
+    "u2": _p("Upgrade B", "upsell"), "d1": _p("Rescue", "downsell"),
 }
 
 WORKOUT_BUNDLE = {
@@ -39,14 +49,17 @@ WORKOUT_BUNDLE = {
 # Saved before purchase_opportunities existed: items[] IS the landing set, so it must still work.
 LEGACY = {"items": [{"product_id": "p1"}, {"service_id": "svc1"}]}
 
+# Document order deliberately scrambled: downsell first, bump last. The rendered line must still read in
+# FUNNEL order.
 ORDERING = {"purchase_opportunities": [
     {"stage": "landing", "product_id": "p1", "placement": {"group": "main_offer"}},
-    {"stage": "post_purchase", "product_id": "p2", "placement": {"group": "downsell"}},
-    {"stage": "post_purchase", "product_id": "p3", "placement": {"group": "upsell"}},
-    {"stage": "post_purchase", "product_id": "p4", "placement": {"group": "upsell"}},
-    {"stage": "checkout", "product_id": "p4", "placement": {"group": "order_bump"}},
+    {"stage": "post_purchase", "product_id": "d1", "placement": {"group": "downsell"}},
+    {"stage": "post_purchase", "product_id": "u1", "placement": {"group": "upsell"}},
+    {"stage": "post_purchase", "product_id": "u2", "placement": {"group": "upsell"}},
+    {"stage": "checkout", "product_id": "b1", "placement": {"group": "order_bump"}},
 ]}
 
+# p4 carries an order_bump price, so the derived role is "bump" regardless of what the document stored.
 MANY = {"purchase_opportunities": (
     [{"stage": "landing", "product_id": f"p{i}", "placement": {"group": "main_offer"}} for i in (1, 2, 3, 5)]
     + [{"stage": "post_purchase", "product_id": "p4", "placement": {"group": "downsell"}}]
@@ -59,8 +72,8 @@ def run_js(expr_map):
         return None
     script = f"""
     import * as m from {json.dumps(str(MODULE))};
-    const NAMES = {json.dumps(NAMES)};
-    const r = (id) => NAMES[id] || "";
+    const P = {json.dumps(PRODUCTS)};
+    const r = (id) => P[id] || null;
     const offers = {json.dumps(expr_map)};
     const out = {{}};
     for (const [k, offer] of Object.entries(offers)) {{
@@ -97,6 +110,17 @@ class OfferItemsTests(unittest.TestCase):
         # step is real and must show. Deduping it (the original rule) hid a configured upsell completely.
         self.assertIn("1 upsell", self.out["bundle"]["summary"])
 
+    def test_counts_come_from_product_pricing_not_the_stored_placement(self):
+        # The drift this closes: the card read placement.group while the diagram beside it derived from
+        # pricing, so adding a funnel price to a product made them disagree.
+        out = run_js({"stale": {"purchase_opportunities": [
+            {"stage": "landing", "product_id": "p1", "placement": {"group": "main_offer"}},
+            # document says upsell; p4's PRICE says order_bump. Pricing wins, because pricing charges.
+            {"stage": "post_purchase", "product_id": "p4", "placement": {"group": "upsell"}},
+        ]}})
+        self.assertIn("1 bump", out["stale"]["summary"])
+        self.assertNotIn("upsell", out["stale"]["summary"])
+
     def test_roles_read_in_funnel_order_not_document_order(self):
         self.assertEqual(
             self.out["ordering"]["summary"],
@@ -120,7 +144,7 @@ class OfferItemsTests(unittest.TestCase):
     def test_more_than_three_landing_items_collapse_and_keep_role_counts(self):
         self.assertEqual(
             self.out["many"]["summary"],
-            "Creatine Gummies, NAD Supplement, Whey Protein +1 more · 1 downsell",
+            "Creatine Gummies, NAD Supplement, Whey Protein +1 more · 1 bump, 1 upsell",
         )
 
 

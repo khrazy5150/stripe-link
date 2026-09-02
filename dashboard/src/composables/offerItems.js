@@ -5,8 +5,15 @@
 // `placement.group` naming the role. Reading items[] is what made an order-bump product invisible on the
 // Offers screen. See plans/OFFER_ITEM_VISIBILITY.md.
 //
-// Name resolution is injected: each screen owns its own product/service stores, and this stays pure so it
-// can be tested without Vue.
+// Product resolution is injected: each screen owns its own stores, and this stays pure so it can be
+// tested without Vue. `resolveProduct(id)` returns the product/service document, or null.
+//
+// Funnel ROLES are not read from the stored placement — they come from derivedFunnelEntries in
+// purchaseFlow.js, the same derivation the diagram and the runtime use. Reading placement.group here made
+// the card's counts disagree with the diagram beside them the moment a product gained a funnel price.
+
+// Explicit .js: Vite resolves extensionless, raw node (which runs the parity tests) does not.
+import { derivedFunnelEntries } from "./purchaseFlow.js";
 
 export const STAGE_LANDING = "landing";
 
@@ -42,15 +49,15 @@ export function funnelEntries(offer) {
   return opportunities(offer).filter((o) => String(o?.stage || STAGE_LANDING) !== STAGE_LANDING);
 }
 
-// Deduped display names for a set of entries. `resolve(id)` returns a name, or "" when unknown; an
-// unresolved id falls back to the id itself so the UI degrades to something rather than to nothing.
+// Deduped display names for a set of entries. An unresolved id falls back to the id itself, so the UI
+// degrades to something rather than to nothing.
 function namesFor(entries, resolve) {
   const seen = new Set();
   const names = [];
   for (const entry of entries) {
     const id = itemId(entry);
     if (!id) continue;
-    const name = resolve(id) || id;
+    const name = resolve(id)?.name || id;
     if (!seen.has(name)) {
       seen.add(name);
       names.push(name);
@@ -71,11 +78,11 @@ export function landingNames(offer, resolve) {
 // this offer do", which is what the role words were always describing. The hover title names each one
 // with its role, so a count is never ambiguous.
 export function funnelRoleCounts(offer, resolve) {
+  const derived = derivedFunnelEntries(offer, resolve);
   const counts = new Map();
-  for (const entry of funnelEntries(offer)) {
-    if (!itemId(entry)) continue;
-    const label = FUNNEL_ROLE_LABELS[String(entry?.placement?.group || "")] || "extra";
-    counts.set(label, (counts.get(label) || 0) + 1);
+  for (const [context, entries] of Object.entries(derived)) {
+    if (!entries.length) continue;
+    counts.set(FUNNEL_ROLE_LABELS[context] || "extra", entries.length);
   }
   // Funnel order, not document order, so the line reads the way the customer experiences it.
   const order = [...Object.values(FUNNEL_ROLE_LABELS), "extra"];
@@ -101,13 +108,9 @@ export function itemSummary(offer, resolve) {
 // Full breakdown for the hover title, so collapsing hides nothing.
 export function itemSummaryTitle(offer, resolve) {
   const parts = [`Landing: ${landingNames(offer, resolve).join(", ") || "none"}`];
-  const funnel = funnelEntries(offer)
-    .filter((entry) => itemId(entry))
-    .map((entry) => {
-      const name = resolve(itemId(entry)) || itemId(entry);
-      const label = FUNNEL_ROLE_LABELS[String(entry?.placement?.group || "")] || "extra";
-      return `${name} (${label})`;
-    });
+  const derived = derivedFunnelEntries(offer, resolve);
+  const funnel = Object.entries(derived).flatMap(([context, entries]) =>
+    entries.map((entry) => `${resolve(entry.id)?.name || entry.id} (${FUNNEL_ROLE_LABELS[context] || "extra"})`));
   if (funnel.length) parts.push(`Funnel: ${funnel.join(", ")}`);
   return parts.join("\n");
 }
@@ -115,6 +118,8 @@ export function itemSummaryTitle(offer, resolve) {
 // Every name AND id across every stage, for search. Ids stay searchable because pasting one is a
 // legitimate way to find an offer.
 export function searchableItemText(offer, resolve) {
+  // Search spans every stage as STORED — an id that is in the offer should be findable whether or not the
+  // product still carries a funnel price today.
   const entries = [...landingEntries(offer), ...funnelEntries(offer)];
   const ids = [...new Set(entries.map(itemId).filter(Boolean))];
   return [...namesFor(entries, resolve), ...ids].join(" ");

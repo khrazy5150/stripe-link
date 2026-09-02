@@ -621,7 +621,7 @@ const offerSearchQuery = ref("");
 // the item text a tenant cannot find "the offer with the Protein Shaker in it" by any route on this screen
 // (plans/OFFER_ITEM_VISIBILITY.md).
 function offerSearchText(offer) {
-  return [offer.name, offer.slug, offer.offer_type, offer.product_intent, searchableItemText(offer, resolveItemName)]
+  return [offer.name, offer.slug, offer.offer_type, offer.product_intent, searchableItemText(offer, resolveItemProduct)]
     .filter(Boolean).join(" ").toLowerCase();
 }
 const visibleOffers = computed(() => {
@@ -1821,14 +1821,14 @@ function offerImage(offer) {
 
 // Resolve a catalog id to its display name for THIS screen's stores. The composable owns the rules;
 // each screen owns its lookup.
-function resolveItemName(id) {
-  return productsById.value.get(id)?.name || serviceObjFor(id)?.name || "";
+function resolveItemProduct(id) {
+  return productsById.value.get(id) || serviceObjFor(id) || null;
 }
 function itemSummary(offer) {
-  return offerItemSummary(offer, resolveItemName);
+  return offerItemSummary(offer, resolveItemProduct);
 }
 function itemSummaryTitle(offer) {
-  return offerItemSummaryTitle(offer, resolveItemName);
+  return offerItemSummaryTitle(offer, resolveItemProduct);
 }
 
 function inferOfferType() {
