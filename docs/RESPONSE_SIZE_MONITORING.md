@@ -44,8 +44,15 @@ metric will not appear.
 
 ### The metric
 
-    CloudWatch -> Metrics -> All metrics -> Custom namespaces -> JuniorBay/Api
+    CloudWatch -> Metrics -> Classic metrics -> Browse tab -> JuniorBay/Api
       -> Environment, FunctionName   (pick a series, e.g. Environment=prod, FunctionName=jb-offers-api-prod)
+
+("Classic metrics" is what the console now calls the page previously labelled "All metrics". The left nav
+under Metrics reads Query Studio / Classic metrics / Explorer / Streams.)
+
+Custom namespaces appear in the same Browse grid as the AWS ones (DynamoDB, Lambda, S3 ...). Fastest route
+once it exists: type `JuniorBay` into the "Filter by any metric, dimension, resource id or account id" box
+rather than scanning the grid.
 
 **It will not be listed until the first datapoint is published.** A custom namespace does not exist in the
 console until something writes to it, and nothing writes until a response crosses 64KB. With a handful of
@@ -80,7 +87,7 @@ not the metric namespace exists yet. Nothing returned means nothing has exceeded
 ### A note on AI Operations / Investigations
 
 The AI Operations panel investigates **alarms**, so it only becomes useful here after the alarm below
-exists and has fired. It is not where the metric itself is browsed — that is Metrics -> All metrics.
+exists and has fired. It is not where the metric itself is browsed — that is Metrics -> Classic metrics.
 
 ## Creating the alarm
 
