@@ -13,6 +13,7 @@ import subprocess
 import unittest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
+import sys; sys.path.insert(0, str(ROOT / "src"))
 MODULE = ROOT / "dashboard" / "src" / "composables" / "purchaseFlow.js"
 
 PRODUCTS = {
@@ -176,6 +177,14 @@ class PurchaseFlowTests(unittest.TestCase):
         sigs = run_block({"same": block_same, "added": block_added})
         self.assertEqual(sigs["same"], out["saved"])
         self.assertNotEqual(sigs["added"], out["saved"])
+
+    def test_carousel_threshold_matches_the_python_constant(self):
+        from stripe_link.domain.funnels import MAX_SEQUENTIAL_UPSELLS
+        js = _node(f"""
+        import {{ MAX_SEQUENTIAL_UPSELLS }} from {json.dumps(str(MODULE))};
+        console.log(JSON.stringify(MAX_SEQUENTIAL_UPSELLS));
+        """)
+        self.assertEqual(js, MAX_SEQUENTIAL_UPSELLS)
 
     def test_a_product_missing_from_the_store_still_renders(self):
         self.assertEqual(self.out["missing"][0]["items"][0]["product"]["name"], "gone_from_store")

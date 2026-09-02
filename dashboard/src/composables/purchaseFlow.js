@@ -13,6 +13,11 @@
 // from the live product selection with sync/extra-price warnings. Different input, different job — sharing
 // it would mean one function pretending to be two.
 
+// Mirrors MAX_SEQUENTIAL_UPSELLS in domain/funnels.py: above this many upsells the runtime forces a
+// carousel instead of one-at-a-time. Named rather than a bare 3, because a literal in one of three places
+// is how these quietly stop agreeing.
+export const MAX_SEQUENTIAL_UPSELLS = 3;
+
 const GROUP_ORDER_BUMP = "order_bump";
 const GROUP_UPSELL = "upsell";
 const GROUP_DOWNSELL = "downsell";
@@ -162,7 +167,7 @@ export function stagesFromSavedOffer(offer, { resolveProduct, formatAmount }) {
     stages.push({
       key: "post_purchase",
       label: "After purchase",
-      hint: upsells.length > 3 ? `carousel · ${upsells.length} upsells` : "one at a time",
+      hint: upsells.length > MAX_SEQUENTIAL_UPSELLS ? `carousel · ${upsells.length} upsells` : "one at a time",
       items,
     });
   }

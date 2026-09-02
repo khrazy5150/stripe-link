@@ -567,7 +567,7 @@ import { useServicesStore } from "../stores/services";
 import { useProfileStore } from "../stores/profile";
 import { sanitizeSlug, slugTokens, uniqueSlug } from "../composables/slugs";
 import { itemSummary as offerItemSummary, itemSummaryTitle as offerItemSummaryTitle, searchableItemText } from "../composables/offerItems";
-import { stagesFromSavedOffer } from "../composables/purchaseFlow";
+import { stagesFromSavedOffer, MAX_SEQUENTIAL_UPSELLS } from "../composables/purchaseFlow";
 import ConfirmDialog from "./shared/ConfirmDialog.vue";
 import ListCard from "./shared/ListCard.vue";
 import PurchaseFlowDiagram from "./PurchaseFlowDiagram.vue";
@@ -690,7 +690,7 @@ const landingProducts = computed(() => selectedProducts.value.filter((product) =
 const inferredOrderBumps = computed(() => selectedProducts.value.filter((product) => contextPrice(product, "order_bump")));
 const inferredUpsells = computed(() => selectedProducts.value.filter((product) => contextPrice(product, "upsell")));
 // Sequence for ≤ MAX_SEQUENTIAL_UPSELLS upsell slots; a forced carousel of ALL upsells above it (§6).
-const MAX_SEQUENTIAL_UPSELLS = 3;
+// One definition, shared with the flow diagram (composables/purchaseFlow.js), mirroring domain/funnels.py.
 const inferredUpsellStrategy = computed(() => (inferredUpsells.value.length > MAX_SEQUENTIAL_UPSELLS ? "carousel" : "sequence"));
 
 // Intent = a friendly, DERIVED label over placement.surface (no new stored field) — it names WHY a product is
