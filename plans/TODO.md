@@ -1065,6 +1065,27 @@ third-party security assessment is required.
 
 ### Add additional content elements currently not found in the landing page builder — HIGH
 
+### ⭐ HIGH — Shared indexed-list machinery: migrate the remaining three screens — 2026-09-02
+- SHIPPED: `composables/indexedList.js` (loadIndex / fetchFullDocument / searchText / matchesSearch /
+  filterRows / shownMessage) + `domain/service_index.py` + `?view=index` on the shared `document_route`,
+  so registering an entity in `_INDEX_PROJECTIONS` gives it an index. **Services is the pilot consumer.**
+- REMAINING, in risk order: **Products** (closest shape), then **Offers** and **Landing Pages** (these join
+  `searchableItemText` in, which becomes the `extraText` config rather than bespoke code).
+- Why it matters more than the current field lists: virtualized rendering and any future server-side search
+  land ONCE in the composable instead of four times. The field lists differ legitimately and stay per-entity.
+
+### ⭐ HIGH — Clamp overflow in ListCard (after the shared search work) — 2026-09-02, not built
+- `shared/ListCard.vue` IS already shared by Offers, Products and Services (the card chrome is done). What
+  is missing is overflow protection: `min-width: 0` prevents a grid blowout but there is no line clamp and
+  no ellipsis, so a 500-word product description just makes a very tall card.
+- The Offers card only looks robust because the limiting lives in its CONTENT (`itemSummary`: 3 names,
+  `+N more`, 90-char cap, full text in the title). Products and Services pass raw text and get nothing.
+- Fix in the COMPONENT: `-webkit-line-clamp: 2` on the description, single-line ellipsis on the title, and
+  a `title` attribute carrying the full text. One change, three screens.
+- Leave content composition alone — "3 names then +N more" is offer semantics and belongs with the offer.
+- Landing Pages deliberately excluded: its cards carry a URL row, copy button, stats, preset and kebab
+  menu. Forcing them into one component means props only one caller uses.
+
 ### Slim indexes — BOTH SHIPPED 2026-09-02 (plans/OFFER_ITEM_VISIBILITY.md §7)
 - SHIPPED: `GET /offers?view=index` (10% of a document) and `GET /products?view=index` (34% — prices are
   irreducible, the Offers screen derives funnel roles from them). Both consumed by the dashboard; View and

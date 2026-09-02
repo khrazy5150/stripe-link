@@ -1,5 +1,6 @@
 import { defineStore } from "pinia";
 import { apiRequest, getTenantId } from "../api/client";
+import { fetchFullDocument, filterRows, loadIndex } from "../composables/indexedList.js";
 import { buildPriceDocument } from "./pricing";
 import { defaultPriceForm } from "../utils/priceForm";
 import { imageDimsForUrls } from "../utils/imageDims";
@@ -36,6 +37,14 @@ export function formatServiceDuration(service) {
 
 export const LOCATION_MODES = ["onsite", "mobile", "virtual", "hybrid"];
 
+// What a service is searchable by. The only service-specific part of the filtering.
+export const SERVICE_SEARCH_FIELDS = ["service_id", "name", "description", "location_mode"];
+
+/** The full document behind an index row, for the editor. Falls back to the row so the form still opens. */
+export async function fetchFullService(service) {
+  return (await fetchFullDocument("services", service?.service_id, { key: "service" })) || service;
+}
+
 export function serviceIsActive(service) {
   return service?.active !== false;
 }
@@ -56,17 +65,15 @@ export const useServicesStore = defineStore("services", {
 
   getters: {
     filteredServices(state) {
-      const search = state.filters.search.trim().toLowerCase();
-      return state.services.filter((service) => {
-        if (state.filters.status === "active" && !serviceIsActive(service)) return false;
-        if (state.filters.status === "inactive" && serviceIsActive(service)) return false;
-        if (!search) return true;
-        return [
-          service.service_id,
-          service.name,
-          service.description,
-          service.location_mode,
-        ].filter(Boolean).join(" ").toLowerCase().includes(search);
+      // Status + search through the shared machinery (composables/indexedList.js). Only the FIELD LIST is
+      // service-specific; the filtering itself is the same on every list screen, and this is where the
+      // next change (virtualized rendering, server-side search past the cliff) lands once instead of four
+      // times.
+      return filterRows(state.services, {
+        term: state.filters.search,
+        fields: SERVICE_SEARCH_FIELDS,
+        statusOf: (service) => (serviceIsActive(service) ? "active" : "inactive"),
+        status: state.filters.status,
       });
     },
 
@@ -98,8 +105,9 @@ export const useServicesStore = defineStore("services", {
       this.loading = true;
       this.error = "";
       try {
-        const body = await apiRequest("/services");
-        this.services = Array.isArray(body.services) ? body.services : [];
+        // The slim list projection. Services are loaded whole by THREE screens — their own, Offers (item
+        // names and the unified picker) and Invoices — so the full-document payload was paid three times.
+        this.services = await loadIndex("services");
         this.loaded = true;
         this.message = this.services.length
           ? `${this.filteredServices.length} of ${this.services.length} service${this.services.length === 1 ? "" : "s"} shown.`

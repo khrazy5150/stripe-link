@@ -1,6 +1,7 @@
 import time
 
 from stripe_link.common import error_response, json_response, parse_json_body, path_params, query_params, resolve_stripe_mode, tenant_id_from_event
+from stripe_link.domain.service_index import service_index_entry
 from stripe_link.domain.appointments import AppointmentTransitionError, transition_appointment
 from stripe_link.domain.service_pricing import normalize_service_pricing
 from stripe_link.entitlement_gate import require_capability
@@ -144,11 +145,20 @@ def get_document(event, repository, response_key, document_id):
     return json_response({response_key: document})
 
 
+# Slim list projections, by response key. `?view=index` returns these instead of full documents so a list
+# screen stops paying for what only an editor needs. Adding an entry here gives that entity an index —
+# document_route is shared machinery, so this is the one place it belongs.
+_INDEX_PROJECTIONS = {"services": service_index_entry}
+
+
 def list_documents(event, repository, response_key):
     tenant_id = tenant_id_from_event(event)
     if not tenant_id:
         return error_response("tenant_id is required.", code="missing_tenant")
     documents = repository.list_for_tenant(tenant_id)
+    project = _INDEX_PROJECTIONS.get(response_key)
+    if project and str(query_params(event).get("view") or "").strip().lower() == "index":
+        documents = [project(document) for document in documents]
     return json_response({response_key: documents, "count": len(documents)})
 
 

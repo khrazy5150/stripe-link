@@ -384,6 +384,7 @@ import {
   formatServicePrice,
   serviceIsActive,
   useServicesStore,
+  fetchFullService,
 } from "../stores/services";
 import { uploadImage } from "../api/uploads";
 import { recordImageDims } from "../utils/imageDims";
@@ -603,7 +604,10 @@ function openCreateModal() {
   showServiceModal.value = true;
 }
 
-function openEditModal(service) {
+async function openEditModal(row) {
+  // The list holds index ROWS; the editor needs the whole document (booking_rules, image_dims and the
+  // per-price fields the projection drops). One fetch, for the one service being opened.
+  const service = await fetchFullService(row);
   editingService.value = service;
   form.value = formFromService(service);
   formError.value = "";
