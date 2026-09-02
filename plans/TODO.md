@@ -1069,8 +1069,15 @@ third-party security assessment is required.
 - SHIPPED: `composables/indexedList.js` (loadIndex / fetchFullDocument / searchText / matchesSearch /
   filterRows / shownMessage) + `domain/service_index.py` + `?view=index` on the shared `document_route`,
   so registering an entity in `_INDEX_PROJECTIONS` gives it an index. **Services is the pilot consumer.**
-- REMAINING, in risk order: **Products** (closest shape), then **Offers** and **Landing Pages** (these join
-  `searchableItemText` in, which becomes the `extraText` config rather than bespoke code).
+- SHIPPED: **Products** migrated 2026-09-02 — `filteredProducts` is now `filterRows(...)` with
+  `PRODUCT_SEARCH_FIELDS`, its type filter passed as the new `where` predicate, and `load`/`fetchFull`
+  going through `loadIndex`/`fetchFullDocument`.
+- REMAINING: **Offers** and **Landing Pages** — these join `searchableItemText` in, which is the
+  `extraText` config rather than bespoke code. Landing Pages' Site filter is another `where`.
+- **Known gap:** store modules cannot be loaded under raw node (their import graph is extensionless, the
+  Vite convention), so the shared machinery is tested directly and the per-entity FIELD LISTS are not
+  covered by a test that reads them. Closing that means an extension pass across the store graph — worth
+  doing if these migrations keep going, not worth a detour now.
 - Why it matters more than the current field lists: virtualized rendering and any future server-side search
   land ONCE in the composable instead of four times. The field lists differ legitimately and stay per-entity.
 

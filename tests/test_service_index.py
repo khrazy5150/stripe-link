@@ -149,6 +149,44 @@ class SharedMachineryTests(unittest.TestCase):
         """)
         self.assertEqual(out, 1)
 
+    def test_the_field_shapes_the_remaining_screens_need_all_work(self):
+        """Products search a humanised category as well as the stored key; Landing Pages reach into
+        `page.route.slug`; Offers join in item names. All three are field-list configuration, not new code
+        — which is what makes migrating the remaining screens cheap."""
+        out = self._run("""
+        const rows = [
+          {product_id:'p1', name:'NAD', product_category:'dietary_supplement', tags:['nad']},
+          {product_id:'p2', name:'Guide', product_category:'ebook', tags:[]},
+        ];
+        const FIELDS = ['product_id','name','product_category',
+                        (p) => String(p?.product_category || '').replace(/_/g,' '), 'tags'];
+        console.log(JSON.stringify({
+          humanised: filterRows(rows, {term:'dietary supplement', fields:FIELDS}).map(r => r.product_id),
+          storedKey: filterRows(rows, {term:'dietary_supplement', fields:FIELDS}).map(r => r.product_id),
+          tag:       filterRows(rows, {term:'nad', fields:FIELDS}).map(r => r.product_id),
+        }));
+        """)
+        # The subtle one: a category stored as "dietary_supplement" must be findable by typing either form.
+        self.assertEqual(out["humanised"], ["p1"])
+        self.assertEqual(out["storedKey"], ["p1"])
+        self.assertEqual(out["tag"], ["p1"])
+
+    def test_an_extra_predicate_composes_with_search_and_status(self):
+        # Products filter by TYPE and Landing Pages by owning Site; both are the `where` callback.
+        out = self._run("""
+        const rows = [
+          {id:'a', name:'Ebook', type:'digital', status:'active'},
+          {id:'b', name:'Ebook Bundle', type:'physical', status:'active'},
+          {id:'c', name:'Ebook Old', type:'digital', status:'archived'},
+        ];
+        const fields = ['id','name'];
+        const statusOf = (r) => r.status;
+        console.log(JSON.stringify(filterRows(rows, {
+          term: 'ebook', fields, statusOf, status: 'active', where: (r) => r.type === 'digital',
+        }).map(r => r.id)));
+        """)
+        self.assertEqual(out, ["a"], "search + status + where must all compose")
+
     def test_shown_message(self):
         out = self._run("""
         console.log(JSON.stringify([shownMessage(3,12,'service'), shownMessage(1,1,'offer'), shownMessage(0,0,'product')]));

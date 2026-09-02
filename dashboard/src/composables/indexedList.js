@@ -68,10 +68,16 @@ export function matchesSearch(row, fields, term, extra = "") {
  * `statusOf(row)` returns the row's lifecycle value; `status` is what the filter is set to. An empty or
  * "all" status filters nothing, so a caller with no status concept simply omits both.
  */
-export function filterRows(rows, { term = "", fields = [], statusOf = null, status = "", extraText = null } = {}) {
+export function filterRows(
+  rows,
+  { term = "", fields = [], statusOf = null, status = "", extraText = null, where = null } = {},
+) {
   const wanted = String(status || "").trim();
   return (rows || []).filter((row) => {
     if (wanted && wanted !== "all" && statusOf && statusOf(row) !== wanted) return false;
+    // `where` is the screen's own extra predicate — a product TYPE, a Landing Page's owning Site. Those
+    // are genuinely per-entity, so they stay a callback rather than becoming more options here.
+    if (where && !where(row)) return false;
     return matchesSearch(row, fields, term, extraText ? extraText(row) : "");
   });
 }

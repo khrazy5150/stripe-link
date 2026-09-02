@@ -1,5 +1,6 @@
 import { defineStore } from "pinia";
 import { apiRequest, getStripeMode, getTenantId } from "../api/client";
+import { fetchFullDocument, filterRows, loadIndex, searchText } from "../composables/indexedList.js";
 import { buildPriceDocument, freeLeadPrice } from "./pricing";
 import { imageDimsForUrls } from "../utils/imageDims";
 
@@ -7,17 +8,22 @@ function productLifecycleStatus(product) {
   return product?.status === "archived" || product?.active === false ? "archived" : "active";
 }
 
+// What a product is searchable by — the only product-specific part of the filtering. The category appears
+// twice on purpose: once as the stored key ("dietary_supplement") and once humanised, so typing either
+// "dietary supplement" or the key finds it.
+export const PRODUCT_SEARCH_FIELDS = [
+  "product_id",
+  "stripe_product_id",
+  "name",
+  "description",
+  "product_category",
+  (product) => String(product?.product_category || "").replace(/_/g, " "),
+  "product_type",
+  "tags",
+];
+
 function productSearchText(product) {
-  return [
-    product.product_id,
-    product.stripe_product_id,
-    product.name,
-    product.description,
-    product.product_category,
-    String(product.product_category || "").replace(/_/g, " "),
-    product.product_type,
-    ...(Array.isArray(product.tags) ? product.tags : []),
-  ].filter(Boolean).join(" ").toLowerCase();
+  return searchText(product, PRODUCT_SEARCH_FIELDS);
 }
 
 function localId(prefix = "local") {
@@ -122,14 +128,16 @@ export const useProductsStore = defineStore("products", {
 
   getters: {
     filteredProducts(state) {
-      const search = state.filters.search.trim().toLowerCase();
-      return state.products.filter((product) => {
-        const status = productLifecycleStatus(product);
-        if (state.filters.status === "active" && status !== "active") return false;
-        if (state.filters.status === "archived" && status !== "archived") return false;
-        if (state.filters.productType && product.product_type !== state.filters.productType) return false;
-        if (search && !productSearchText(product).includes(search)) return false;
-        return true;
+      // Status + type + search through the shared machinery (composables/indexedList.js). Only the FIELD
+      // LIST and the type predicate are product-specific.
+      return filterRows(state.products, {
+        term: state.filters.search,
+        fields: PRODUCT_SEARCH_FIELDS,
+        statusOf: productLifecycleStatus,
+        status: state.filters.status,
+        where: state.filters.productType
+          ? (product) => product.product_type === state.filters.productType
+          : null,
       });
     },
 
@@ -168,12 +176,7 @@ export const useProductsStore = defineStore("products", {
     async fetchFull(product) {
       const productId = product?.product_id;
       if (!productId) return product;
-      try {
-        const body = await apiRequest(`/products/${encodeURIComponent(productId)}`);
-        return body.product || product;
-      } catch {
-        return product;
-      }
+      return (await fetchFullDocument("products", productId, { key: "product" })) || product;
     },
 
     async load() {
@@ -184,8 +187,7 @@ export const useProductsStore = defineStore("products", {
         // 6MB response ceiling FIRST — bigger documents than offers, and usually more of them — and BOTH
         // the Products screen and the Offers screen load the whole catalogue. Editing fetches the one
         // full document it needs (fetchFull below). plans/OFFER_ITEM_VISIBILITY.md §7.
-        const body = await apiRequest("/products", { params: { view: "index" } });
-        this.products = Array.isArray(body.products) ? body.products : [];
+        this.products = await loadIndex("products");
         this.loaded = true;
         this.message = this.products.length
           ? `${this.filteredProducts.length} of ${this.products.length} product${this.products.length === 1 ? "" : "s"} shown.`
