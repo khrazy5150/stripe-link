@@ -3,6 +3,7 @@ import re
 
 from stripe_link.common import error_response, json_response, parse_json_body, path_params, query_params, resolve_stripe_mode, tenant_id_from_event
 from stripe_link.domain.documents import DocumentValidationError, validate_offer_document
+from stripe_link.domain.offer_index import offer_index_entry
 from stripe_link.domain.opportunities import STAGE_LANDING, stage_opportunities
 from stripe_link.domain.pricing import PricingError, expand_offer, resolve_offer
 from stripe_link.domain.semantic import analyze_offer, label_from_model, slug_from_model
@@ -227,14 +228,28 @@ def _page_params(event) -> tuple[int | None, str]:
 
 
 def list_offers(event, repository):
+    """The offer list. Three shapes, all on one route:
+
+    * default — every full document, exactly as before, for clients that do not paginate.
+    * `?view=index` — the slim list projection (~10% of a full document), small enough to load WHOLE.
+      That is what keeps client-side search instant AND complete: a paginated full list would leave search
+      covering only the pages already fetched, which is worse than the payload problem it solves.
+    * `?limit=&cursor=` — a page of whichever shape was asked for.
+    """
     tenant_id = str(query_params(event).get("tenant_id") or "").strip() or tenant_id_from_event(event)
     if not tenant_id:
         return error_response("tenant_id is required.", code="missing_tenant")
+    as_index = str(query_params(event).get("view") or "").strip().lower() == "index"
     limit, cursor = _page_params(event)
+
     if limit is None and not cursor:
-        # Unchanged response for every client that does not paginate.
-        return json_response({"offers": repository.list_for_tenant(tenant_id)})
-    offers, next_cursor = repository.list_page_for_tenant(tenant_id, limit=limit, cursor=cursor)
+        offers = repository.list_for_tenant(tenant_id)
+        next_cursor = ""
+    else:
+        offers, next_cursor = repository.list_page_for_tenant(tenant_id, limit=limit, cursor=cursor)
+
+    if as_index:
+        offers = [offer_index_entry(offer) for offer in offers]
     body: dict = {"offers": offers}
     # Only present when there IS more, so "no next_cursor" is an unambiguous end-of-list.
     if next_cursor:

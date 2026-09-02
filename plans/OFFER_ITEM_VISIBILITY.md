@@ -118,6 +118,30 @@ table that always returns one row at a time.
   paginating without moving search would make "shaker" search only the loaded pages — a correctness bug
   worse than the performance one, and the same invisible-product failure this plan exists to fix.
 
+### The slim index — SHIPPED 2026-09-02
+
+`GET /offers?view=index` returns the list projection: `offer_id, name, slug, offer_type, product_intent,
+status, created_at, updated_at, item_ids, landing_ids` and `image_url` when set. Measured at **468 bytes
+against 4,482 for the full document — 10%**, which moves the response cliff from roughly 2,000 offers to
+roughly 13,000. Beyond that the same `limit`/`cursor` apply to the index too.
+
+It carries **no product data, only ids**. The list screen already loads the product and service stores (it
+needs them for item names and for deriving funnel roles from pricing contexts), so resolving a name
+client-side is free — while embedding names here would copy catalog data into a second place that can go
+stale, which is the failure mode this codebase keeps hitting. Ids reference; the catalog is the truth.
+
+`landing_ids` is stored because landing membership is genuine OFFER data (which products are on the page,
+in what order). Funnel roles are NOT stored, because they derive from each product's pricing contexts —
+see §6 and `domain/funnels.funnel_context_items`.
+
+`GET /offers/{offer_id}` already existed, so View and Edit fetch the one full document they need. That is
+what lets the list screen stop loading full documents entirely.
+
+**Still to do:** the dashboard does not consume the index yet. Adopting it is what actually removes the
+cliff for today's UI, and it is the prerequisite for mobile infinite scroll — which otherwise ships with
+rows in offer-id order (there is no chronological index; the sort key is `OFFER#{mode}#{offer_id}`) and a
+search covering only what has been scrolled.
+
 **When catalogs get big, the preferred shape is a split payload:** load a slim search index for EVERY offer
 (id, name, slug, item names — roughly 200 bytes each, so 1,000 offers is ~0.2MB) and paginate the rich
 cards. Substring matching stays in the browser where it is free and correct. Server-side `FilterExpression`
