@@ -1,7 +1,7 @@
 # Offer item visibility — cards and search
 
-**Status:** phases 1-3 SHIPPED 2026-09-01. Phase 0 (list projection + pagination) still open —
-see the scaling note in section 4 and plans/TODO.md.
+**Status:** phases 1-3 SHIPPED 2026-09-01. Phase 0 CONTRACT shipped 2026-09-02 (`GET /offers?limit=&cursor=`,
+opaque cursor, 500 cap, unchanged when unused). Projection + client adoption deferred — see below.
 
 ## 1. The problem, as a tenant hits it
 
@@ -90,3 +90,41 @@ items[] is landing-only, and funnel counts are placements rather than distinct p
 - Showing funnel items in the offer card's IMAGE logic — the landing product is the right hero.
 - Any change to `items[]` itself. It is a legitimate landing-only projection; the fix is to read
   `purchase_opportunities` when the question is "everything in this offer", not to redefine `items`.
+
+
+## 7. Phase 0 — what shipped, and what deliberately did not (2026-09-02)
+
+**Shipped: the contract.** `GET /offers?limit=&cursor=` returns `{offers, next_cursor}`, `next_cursor`
+present only when more remain. `limit` caps at 500 (~1.5MB of ~2.9KB documents). Omit both and the response
+is byte-identical to before, so no client changed. `list_page_for_tenant` is a NEW repository method;
+`list_for_tenant` is untouched because 49 internal callers (publishing, sweeps, funnel resolution)
+legitimately need the whole set.
+
+The reason to do this pre-launch is that the API SHAPE is the expensive thing to change once a tenant
+integration, the AI provider adapter, or a mobile client depends on the unbounded one. The implementation
+behind it can change freely.
+
+**Implementation note that matters:** DynamoDB applies `Limit` to items READ and stops at 1MB, so a query
+can return fewer items than asked while more remain. `_query_page` keeps reading until it fills the page
+or exhausts the partition. Treating a short page as end-of-list silently drops records — tested with a
+table that always returns one row at a time.
+
+**Deliberately NOT done:**
+
+- **A card projection.** Measured against the real documents: `purchase_opportunities` is 50.6% of an offer,
+  `items` 12.9%, `funnel` 8.8%. The card needs opportunities for item names and search needs the ids, so a
+  projection saves ~25%, not the 10x first assumed. Pagination is what moves the cliff; projection is a trim.
+- **Client adoption.** The dashboard still requests the full list, because filtering is client-side and
+  paginating without moving search would make "shaker" search only the loaded pages — a correctness bug
+  worse than the performance one, and the same invisible-product failure this plan exists to fix.
+
+**When catalogs get big, the preferred shape is a split payload:** load a slim search index for EVERY offer
+(id, name, slug, item names — roughly 200 bytes each, so 1,000 offers is ~0.2MB) and paginate the rich
+cards. Substring matching stays in the browser where it is free and correct. Server-side `FilterExpression`
+is the alternative, but it is applied AFTER the read, so it saves no read capacity — only payload — and it
+inherits the short-page trap above.
+
+**Cost footnote, so nobody optimises the wrong thing:** a full 1,000-offer read costs about $0.000125
+(PAY_PER_REQUEST, ~0.5 RCU per item). The reason to paginate is the 6MB response cliff, browser memory and
+Lambda duration — not the database bill. `ProjectionExpression` reduces wire bytes but NOT read capacity,
+which is charged on the full item size.

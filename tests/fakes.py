@@ -23,6 +23,23 @@ class FakeDocumentRepository:
             if doc_tenant_id == tenant_id
         ]
 
+    def list_page_for_tenant(self, tenant_id, *, limit=None, cursor=""):
+        """Mirrors DynamoDocumentRepository: one page plus an opaque cursor ("" when exhausted).
+        The fake's cursor is just the offset, base64'd, so tests exercise the same round trip."""
+        import base64
+
+        rows = self.list_for_tenant(tenant_id)
+        start = 0
+        if cursor:
+            try:
+                start = int(base64.urlsafe_b64decode(cursor.encode()).decode())
+            except Exception:  # noqa: BLE001 - a bad bookmark means "from the beginning", as in the real repo
+                start = 0
+        page = rows[start:] if limit is None else rows[start:start + limit]
+        end = start + len(page)
+        next_cursor = base64.urlsafe_b64encode(str(end).encode()).decode() if end < len(rows) else ""
+        return page, next_cursor
+
     def find_by_id(self, document_id):
         for document in self.documents.values():
             if document.get(self.id_field) == document_id:

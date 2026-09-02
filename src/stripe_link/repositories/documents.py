@@ -1,3 +1,5 @@
+import base64
+import json
 import os
 from decimal import Decimal
 from typing import Any
@@ -16,6 +18,61 @@ class ResourceIsolationError(RepositoryError):
 def assert_jb_resource_name(name: str) -> None:
     if not name.startswith("jb-"):
         raise ResourceIsolationError(f"Refusing to use non-jb resource '{name}'.")
+
+
+def encode_cursor(last_evaluated_key: dict[str, Any] | None) -> str:
+    """An opaque continuation token for a caller. Base64 of the DynamoDB LastEvaluatedKey.
+
+    Opaque on purpose: the shape of a table's key is an implementation detail, and a caller that learns to
+    construct one would break the day the key changes. Empty string when there is nothing more to read.
+    """
+    if not last_evaluated_key:
+        return ""
+    return base64.urlsafe_b64encode(json.dumps(last_evaluated_key, sort_keys=True).encode()).decode()
+
+
+def decode_cursor(cursor: str) -> dict[str, Any] | None:
+    """The LastEvaluatedKey a cursor carries, or None if it is absent or unusable.
+
+    A malformed cursor reads as "start from the beginning" rather than raising: a stale bookmark in a URL
+    should not 500. It cannot be used to read another tenant's rows — the KeyConditionExpression pins the
+    partition regardless of where the cursor points.
+    """
+    if not cursor:
+        return None
+    try:
+        decoded = json.loads(base64.urlsafe_b64decode(cursor.encode()).decode())
+    except Exception:  # noqa: BLE001 - any malformed token means "no bookmark"
+        return None
+    return decoded if isinstance(decoded, dict) and decoded else None
+
+
+def _query_page(table: Any, *, limit: int | None, cursor: str, **query: Any) -> tuple[list[dict[str, Any]], str]:
+    """One page of a query: up to `limit` items plus the cursor for the next page.
+
+    DynamoDB's own Limit counts items READ, and a page can come back short while more remain, so this keeps
+    reading until it has `limit` items or the partition is exhausted. Returns ([], "") for an empty table.
+    """
+    items: list[dict[str, Any]] = []
+    request = dict(query)
+    start_key = decode_cursor(cursor)
+    if start_key:
+        request["ExclusiveStartKey"] = start_key
+
+    while True:
+        if limit:
+            request["Limit"] = max(limit - len(items), 1)
+        response = table.query(**request)
+        items.extend(response.get("Items", []))
+        last_evaluated_key = response.get("LastEvaluatedKey")
+        if limit and len(items) >= limit:
+            # Trim an overshoot and hand back a cursor pointing at the first item we did NOT return.
+            if len(items) > limit:
+                items = items[:limit]
+            return items, encode_cursor(last_evaluated_key) if last_evaluated_key else ""
+        if not last_evaluated_key:
+            return items, ""
+        request["ExclusiveStartKey"] = last_evaluated_key
 
 
 def _query_all_pages(table: Any, **query: Any) -> list[dict[str, Any]]:
@@ -126,6 +183,9 @@ class DynamoDocumentRepository:
         return self._strip_keys(item)
 
     def list_for_tenant(self, tenant_id: str) -> list[dict[str, Any]]:
+        """Every document of this type for the tenant. Unbounded on purpose — internal callers (publishing,
+        sweeps, funnel resolution) genuinely need the whole set. API handlers that answer a browser should
+        prefer list_page_for_tenant, which cannot outgrow the Lambda response limit."""
         from boto3.dynamodb.conditions import Key
 
         items = _query_all_pages(
@@ -133,6 +193,26 @@ class DynamoDocumentRepository:
             KeyConditionExpression=Key("PK").eq(f"TENANT#{tenant_id}") & Key("SK").begins_with(self._list_prefix())
         )
         return [self._strip_keys(item) for item in items]
+
+    def list_page_for_tenant(
+        self, tenant_id: str, *, limit: int | None = None, cursor: str = "",
+    ) -> tuple[list[dict[str, Any]], str]:
+        """One page of the tenant's documents, plus the cursor for the next page ("" when exhausted).
+
+        `limit=None` returns everything, so an existing caller that does not paginate is unchanged. The
+        point of the page shape is that the API contract exists BEFORE anything depends on the unbounded
+        one: a full-document list of ~2.9KB items breaches the 6MB Lambda response limit somewhere around
+        2,000 records, and that failure is a cliff, not a slope.
+        """
+        from boto3.dynamodb.conditions import Key
+
+        items, next_cursor = _query_page(
+            self.table,
+            limit=limit,
+            cursor=cursor,
+            KeyConditionExpression=Key("PK").eq(f"TENANT#{tenant_id}") & Key("SK").begins_with(self._list_prefix()),
+        )
+        return [self._strip_keys(item) for item in items], next_cursor
 
     def scan_type(self) -> list[dict[str, Any]]:
         """Cross-tenant scan of every document of this repo's type. Intended for periodic

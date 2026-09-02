@@ -203,11 +203,43 @@ def _expand(tenant_id: str, offer: dict, products_repo=None, services_repo=None,
     return expand_offer(offer, products_by_id, services_by_id)
 
 
+# Ceiling on a single page, so a client cannot ask for a response that breaches the 6MB Lambda limit. Offer
+# documents run ~2.9KB, so 500 is roughly 1.5MB — comfortably inside it with room for growth.
+MAX_OFFERS_PAGE = 500
+
+
+def _page_params(event) -> tuple[int | None, str]:
+    """(limit, cursor) from the query string. No limit means "everything", which is what every client sends
+    today — the paged shape exists so the CONTRACT is in place before anything depends on the unbounded
+    one, not to change behaviour now."""
+    params = query_params(event)
+    raw_limit = str(params.get("limit") or "").strip()
+    cursor = str(params.get("cursor") or "").strip()
+    if not raw_limit:
+        return None, cursor
+    try:
+        limit = int(raw_limit)
+    except ValueError:
+        return None, cursor
+    if limit <= 0:
+        return None, cursor
+    return min(limit, MAX_OFFERS_PAGE), cursor
+
+
 def list_offers(event, repository):
     tenant_id = str(query_params(event).get("tenant_id") or "").strip() or tenant_id_from_event(event)
     if not tenant_id:
         return error_response("tenant_id is required.", code="missing_tenant")
-    return json_response({"offers": repository.list_for_tenant(tenant_id)})
+    limit, cursor = _page_params(event)
+    if limit is None and not cursor:
+        # Unchanged response for every client that does not paginate.
+        return json_response({"offers": repository.list_for_tenant(tenant_id)})
+    offers, next_cursor = repository.list_page_for_tenant(tenant_id, limit=limit, cursor=cursor)
+    body: dict = {"offers": offers}
+    # Only present when there IS more, so "no next_cursor" is an unambiguous end-of-list.
+    if next_cursor:
+        body["next_cursor"] = next_cursor
+    return json_response(body)
 
 
 def update_offer_status(event, repository, offer_id: str):

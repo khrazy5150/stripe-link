@@ -1084,7 +1084,11 @@ third-party security assessment is required.
   references. Fixing only the offer card would leave the sibling gap in place.
 - SHIPPED: card role counts, offer search through item names/ids across every stage, and Landing Pages
   searching through to its offer. Shared composable + node-run regression tests.
-- STILL OPEN — **phase 0, list projection + pagination.** `list_for_tenant` fetches all pages uncapped and
+- Phase 0 CONTRACT SHIPPED 2026-09-02: `GET /offers?limit=&cursor=`, opaque cursor, 500 cap, byte-identical
+  when unused; `list_page_for_tenant` added alongside the untouched `list_for_tenant`. Client adoption and
+  the card projection are deferred on purpose — see plans/OFFER_ITEM_VISIBILITY.md §7, which records why
+  paginating without moving search first would break search.
+- ORIGINAL NOTE — **phase 0, list projection + pagination.** `list_for_tenant` fetches all pages uncapped and
   returns full documents (~2.9KB each): 500 offers = 1.4MB, 2000 = 5.8MB, which BREACHES the 6MB Lambda
   proxy limit and the screen stops loading entirely. A cliff, not a slope. Do the API shape + pagination
   pre-launch, while nothing else consumes these endpoints; keep filtering client-side over the projection.
