@@ -102,15 +102,32 @@ select {
 }
 
 .sidebar {
-  /* Now that the shell is a fixed-height frame the sidebar is bounded too, and the nav is long enough to
-     overflow a short viewport — so it scrolls itself rather than clipping its last items. */
+  /* A column, mirroring main: the brand stays pinned exactly as the topbar does on the right, and only
+     the nav scrolls. Scrolling the whole aside took the logo with it, which read as a bug. */
+  display: flex;
+  flex-direction: column;
   min-height: 0;
-  overflow-y: auto;
-  overscroll-behavior: contain;
+  overflow: hidden;
   border-right: 1px solid var(--line);
   background: var(--panel);
   min-width: 0;
 }
+
+/* Pinned, like the topbar. */
+.sidebar > .brand {
+  flex: none;
+}
+
+/* The only part of the sidebar that scrolls, and only when the nav is taller than the viewport. */
+.sidebar > nav {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  /* Scrolling to the end of the nav must not then start scrolling the list behind it. */
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
 
 .brand {
   height: 7.2rem;

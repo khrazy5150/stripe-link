@@ -38,9 +38,17 @@ class ShellFrameTests(unittest.TestCase):
         self.assertIn("grid-template-rows", body)
         self.assertIn("minmax(0, 1fr)", body.split("grid-template-rows")[1])
 
-    def test_the_sidebar_scrolls_itself(self):
-        # Bounded by the frame now, and the nav is long enough to overflow a short viewport.
-        self.assertIn("overflow-y: auto", rule(".sidebar"))
+    def test_the_brand_stays_pinned_and_only_the_nav_scrolls(self):
+        """First version scrolled the whole aside, which carried the logo off the top — it read as a bug.
+        The sidebar mirrors main: a fixed header and one scrolling region beneath it."""
+        aside = rule(".sidebar")
+        self.assertIn("flex-direction: column", aside)
+        self.assertIn("overflow: hidden", aside, "the aside itself must not scroll")
+        self.assertIn("flex: none", rule(".sidebar > .brand"))
+        nav = rule(".sidebar > nav")
+        self.assertIn("overflow-y: auto", nav)
+        self.assertIn("min-height: 0", nav)
+        self.assertIn("overscroll-behavior: contain", nav)
 
     def test_main_can_actually_shrink(self):
         # Without min-height:0 a flex item's automatic minimum size is its content, so the scroll region
