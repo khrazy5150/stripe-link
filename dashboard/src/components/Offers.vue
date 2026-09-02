@@ -567,7 +567,7 @@ import { useServicesStore } from "../stores/services";
 import { useProfileStore } from "../stores/profile";
 import { sanitizeSlug, slugTokens, uniqueSlug } from "../composables/slugs";
 import { itemSummary as offerItemSummary, itemSummaryTitle as offerItemSummaryTitle, searchableItemText } from "../composables/offerItems";
-import { stagesFromSavedOffer, MAX_SEQUENTIAL_UPSELLS } from "../composables/purchaseFlow";
+import { stagesFromSavedOffer, isIndexRow, MAX_SEQUENTIAL_UPSELLS } from "../composables/purchaseFlow";
 import ConfirmDialog from "./shared/ConfirmDialog.vue";
 import ListCard from "./shared/ListCard.vue";
 import PurchaseFlowDiagram from "./PurchaseFlowDiagram.vue";
@@ -1105,7 +1105,10 @@ async function loadOffers() {
   offersError.value = "";
   offersMessage.value = "";
   try {
-    const body = await apiRequest("/offers");
+    // The slim list projection: ~10% of a full document, so the whole catalogue still loads at once —
+    // which is what keeps client-side search instant AND complete. View/Edit fetch the one full document
+    // they need. plans/OFFER_ITEM_VISIBILITY.md §7.
+    const body = await apiRequest("/offers", { params: { view: "index" } });
     offers.value = (Array.isArray(body.offers) ? body.offers : []).map(offerCardModel);
     offersLoaded.value = true;
     offersMessage.value = offers.value.length
@@ -1119,8 +1122,22 @@ async function loadOffers() {
   }
 }
 
-function viewOffer(offer) {
-  selectedOfferDetails.value = offer;
+// The list holds index ROWS, which carry ids but no sections, prices or funnel. View and Edit need the
+// real document, so they fetch the one they are opening. That single-document fetch is what lets the list
+// stop loading full documents at all.
+async function fullOffer(offer) {
+  if (!isIndexRow(offer)) return offer;
+  const body = await apiRequest(`/offers/${encodeURIComponent(offer.offer_id)}`);
+  return body.offer || body || offer;
+}
+
+async function viewOffer(offer) {
+  offersError.value = "";
+  try {
+    selectedOfferDetails.value = await fullOffer(offer);
+  } catch (error) {
+    offersError.value = error.message || "Failed to load this offer.";
+  }
 }
 
 function closeOfferDetails() {
@@ -1136,7 +1153,7 @@ async function editOffer(offer) {
     offersError.value = error.message || "Failed to load products for this offer.";
     return;
   }
-  openOfferModal(offer);
+  openOfferModal(await fullOffer(offer));
 }
 
 async function setOfferStatus(offer, status) {
@@ -1814,9 +1831,15 @@ function offerCardModel(offer) {
 }
 
 function offerImage(offer) {
-  const items = Array.isArray(offer?.items) ? offer.items : [];
-  const firstProduct = productsById.value.get(items[0]?.product_id);
-  return offer?.presentation?.image_url || offer?.presentation?.hero_image_url || firstProduct?.images?.[0] || "";
+  const firstLandingId = isIndexRow(offer)
+    ? (offer.landing_ids || [])[0]
+    : (Array.isArray(offer?.items) ? offer.items : [])[0]?.product_id;
+  const firstProduct = productsById.value.get(firstLandingId);
+  return offer?.image_url
+    || offer?.presentation?.image_url
+    || offer?.presentation?.hero_image_url
+    || firstProduct?.images?.[0]
+    || "";
 }
 
 // Resolve a catalog id to its display name for THIS screen's stores. The composable owns the rules;
@@ -1844,12 +1867,20 @@ function inferOfferType() {
   return "single";
 }
 
-function derivedOfferType(offer) {
-  const items = Array.isArray(offer?.items) ? offer.items : [];
-  if (items.length === 1 && Array.isArray(items[0]?.selectable_prices) && items[0].selectable_prices.length) {
-    return "single_product_selector";
+// How many landing items an offer has, and whether a lone one is tiered — read from either a full
+// document or an index row. The RULE below stays in one place; only the facts it needs are projected.
+function landingShape(offer) {
+  if (isIndexRow(offer)) {
+    return { count: (offer.landing_ids || []).length, tiers: Number(offer.landing_tier_count || 0) };
   }
-  return items.length > 1 ? "bundle" : "single_product";
+  const items = Array.isArray(offer?.items) ? offer.items : [];
+  return { count: items.length, tiers: (items[0]?.selectable_prices || []).length };
+}
+
+function derivedOfferType(offer) {
+  const { count, tiers } = landingShape(offer);
+  if (count === 1 && tiers) return "single_product_selector";
+  return count > 1 ? "bundle" : "single_product";
 }
 
 function derivedOfferTypeLabel(offer) {

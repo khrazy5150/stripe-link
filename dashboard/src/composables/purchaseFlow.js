@@ -28,7 +28,36 @@ function entryId(entry) {
 
 // purchase_opportunities if the document carries them, else the legacy items[] + funnel.* pair mapped to
 // the same shape. One vocabulary from here down.
+export function isIndexRow(offer) {
+  return Array.isArray(offer?.item_ids);
+}
+
+/**
+ * Every entry an offer references, normalized to {id, price_id, group, stage, selectable_prices} — from
+ * ANY of the three shapes: purchase_opportunities, the legacy items[]+funnel.*, or a slim index row.
+ *
+ * Exported so offerItems.js reads offers through the SAME reader. It had its own, which understood two of
+ * the three shapes, so an index row derived its funnel roles correctly and silently lost its landing
+ * NAMES. One reader, three shapes.
+ */
+export function offerEntries(offer) {
+  return normalizedEntries(offer);
+}
+
 function normalizedEntries(offer) {
+  // The slim list projection (GET /offers?view=index) carries ids only. Understanding it HERE means the
+  // card, its tooltip, search and the role derivation all work on an index row with no changes of their
+  // own — the list screen never needs full documents.
+  if (isIndexRow(offer)) {
+    const landing = new Set(offer.landing_ids || []);
+    return (offer.item_ids || []).map((id) => ({
+      id: String(id),
+      price_id: "",                       // the index does not carry prices; roles derive from the product
+      group: landing.has(id) ? "main_offer" : "",
+      stage: landing.has(id) ? "landing" : "checkout",
+      selectable_prices: [],
+    }));
+  }
   const opps = Array.isArray(offer?.purchase_opportunities) ? offer.purchase_opportunities : [];
   if (opps.length) {
     return opps.map((opp) => ({

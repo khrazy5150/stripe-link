@@ -39,6 +39,20 @@ def offer_index_entry(offer: dict[str, Any]) -> dict[str, Any]:
         if str(opportunity.get("stage") or STAGE_LANDING) == STAGE_LANDING and entity_id not in landing_ids:
             landing_ids.append(entity_id)
 
+    # The card labels an offer single / bundle / selector. That RULE lives in the client
+    # (derivedOfferType); what it needs is how many landing items there are and whether a lone one is
+    # tiered. Project the facts, keep the rule in one place — copying the rule here would be a second
+    # implementation to keep in step.
+    landing_tier_count = 0
+    if len(landing_ids) == 1:
+        for opportunity in opportunities_from_offer(offer):
+            if str(opportunity.get("product_id") or opportunity.get("service_id") or "") != landing_ids[0]:
+                continue
+            if str(opportunity.get("stage") or STAGE_LANDING) != STAGE_LANDING:
+                continue
+            landing_tier_count = len(opportunity.get("selectable_prices") or [])
+            break
+
     presentation = offer.get("presentation") or {}
     entry = {
         "offer_id": str(offer.get("offer_id") or ""),
@@ -51,6 +65,7 @@ def offer_index_entry(offer: dict[str, Any]) -> dict[str, Any]:
         "updated_at": str(offer.get("updated_at") or ""),
         "item_ids": item_ids,
         "landing_ids": landing_ids,
+        "landing_tier_count": landing_tier_count,
     }
     # Only when set: the card falls back to the first landing product's own image, which the client
     # already holds, so an absent key costs nothing and an empty string would just be noise.

@@ -13,7 +13,7 @@
 // the card's counts disagree with the diagram beside them the moment a product gained a funnel price.
 
 // Explicit .js: Vite resolves extensionless, raw node (which runs the parity tests) does not.
-import { derivedFunnelEntries } from "./purchaseFlow.js";
+import { derivedFunnelEntries, offerEntries } from "./purchaseFlow.js";
 
 export const STAGE_LANDING = "landing";
 
@@ -27,26 +27,20 @@ export const FUNNEL_ROLE_LABELS = {
 export const ITEM_SUMMARY_MAX_NAMES = 3;
 export const ITEM_SUMMARY_MAX_CHARS = 90;
 
-function opportunities(offer) {
-  return Array.isArray(offer?.purchase_opportunities) ? offer.purchase_opportunities : [];
-}
-
-// An opportunity/item's catalog id, whichever kind it is.
+// An entry's catalog id. Normalized entries expose `id`; a raw document entry has product_id/service_id.
 export function itemId(entry) {
-  return String(entry?.product_id || entry?.service_id || "");
+  return String(entry?.id || entry?.product_id || entry?.service_id || "");
 }
 
 // Landing entries: the offer's primary meaning. Falls back to items[] for a legacy document saved before
 // purchase_opportunities existed — items[] IS the landing set, so the fallback is exact, not approximate.
 export function landingEntries(offer) {
-  const opps = opportunities(offer);
-  if (opps.length) return opps.filter((o) => String(o?.stage || STAGE_LANDING) === STAGE_LANDING);
-  return Array.isArray(offer?.items) ? offer.items : [];
+  return offerEntries(offer).filter((entry) => String(entry.stage || STAGE_LANDING) === STAGE_LANDING);
 }
 
 // Everything that is NOT on the landing page: order bumps, upsells, downsells.
 export function funnelEntries(offer) {
-  return opportunities(offer).filter((o) => String(o?.stage || STAGE_LANDING) !== STAGE_LANDING);
+  return offerEntries(offer).filter((entry) => String(entry.stage || STAGE_LANDING) !== STAGE_LANDING);
 }
 
 // Deduped display names for a set of entries. An unresolved id falls back to the id itself, so the UI

@@ -35,7 +35,7 @@ class OfferIndexEntryTests(unittest.TestCase):
         self.assertEqual(
             set(entry),
             {"offer_id", "name", "slug", "offer_type", "product_intent", "status",
-             "created_at", "updated_at", "item_ids", "landing_ids", "image_url"},
+             "created_at", "updated_at", "item_ids", "landing_ids", "landing_tier_count", "image_url"},
         )
 
     def test_carries_NO_product_data_only_ids(self):
@@ -50,6 +50,15 @@ class OfferIndexEntryTests(unittest.TestCase):
         # p2 is both a landing item and the upsell; it appears once. p4 is bump-only and must be present,
         # or the offer containing it becomes unsearchable — the original bug.
         self.assertEqual(offer_index_entry(FULL_OFFER)["item_ids"], ["p1", "p2", "p4"])
+
+    def test_landing_tier_count_projects_a_fact_not_the_rule(self):
+        # The card's single/bundle/selector RULE lives in the client. Only the facts it needs are
+        # projected, so the rule is not implemented twice.
+        self.assertEqual(offer_index_entry(FULL_OFFER)["landing_tier_count"], 0)
+        tiered = {**FULL_OFFER, "purchase_opportunities": [
+            {"stage": "landing", "product_id": "p1", "placement": {"group": "main_offer"},
+             "selectable_prices": [{"price_id": "a"}, {"price_id": "b"}]}]}
+        self.assertEqual(offer_index_entry(tiered)["landing_tier_count"], 2)
 
     def test_landing_ids_are_the_page_subset(self):
         # Landing membership is genuine offer data; funnel ROLES are derived from pricing, so they are not

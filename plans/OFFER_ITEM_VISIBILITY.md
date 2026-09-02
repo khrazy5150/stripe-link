@@ -137,7 +137,29 @@ see §6 and `domain/funnels.funnel_context_items`.
 `GET /offers/{offer_id}` already existed, so View and Edit fetch the one full document they need. That is
 what lets the list screen stop loading full documents entirely.
 
-**Still to do:** the dashboard does not consume the index yet. Adopting it is what actually removes the
+### Dashboard adoption — SHIPPED 2026-09-02
+
+`loadOffers()` fetches `?view=index`. View and Edit call `fullOffer()`, which fetches
+`GET /offers/{offer_id}` for the one document they need — so the list never loads full documents at all.
+
+Every card-facing helper reads BOTH shapes, because `purchaseFlow.offerEntries` normalizes all three
+(purchase_opportunities, legacy items[]+funnel.*, index row) and `offerItems.js` now reads through it.
+It previously had its OWN reader that knew two of the three, which meant an index row derived its funnel
+roles correctly and silently lost its landing names — caught by the parity test, not by inspection.
+
+`landing_tier_count` is projected so the card's single/bundle/selector RULE stays in the client
+(`derivedOfferType`), reading the same facts from either shape via `landingShape()`. Projecting the fact
+rather than the verdict keeps one implementation of the rule.
+
+A saved offer stays in the list as a FULL document, deliberately: every consumer is shape-agnostic, so
+mixing costs nothing, and converting it would need a JS mirror of the projection — a second implementation
+to keep in step, which is the thing this design keeps avoiding.
+
+`tests/test_index_row_parity.py` feeds the REAL server projection to the REAL client helpers through node
+and requires identical card line, tooltip and roles — plus an absolute assertion on the text, since
+equality alone would pass if both sides were broken.
+
+**Still to do:** the PRODUCT index. Adopting it is what actually removes the
 cliff for today's UI, and it is the prerequisite for mobile infinite scroll — which otherwise ships with
 rows in offer-id order (there is no chronological index; the sort key is `OFFER#{mode}#{offer_id}`) and a
 search covering only what has been scrolled.
