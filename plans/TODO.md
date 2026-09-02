@@ -1072,8 +1072,13 @@ third-party security assessment is required.
 - SHIPPED: **Products** migrated 2026-09-02 — `filteredProducts` is now `filterRows(...)` with
   `PRODUCT_SEARCH_FIELDS`, its type filter passed as the new `where` predicate, and `load`/`fetchFull`
   going through `loadIndex`/`fetchFullDocument`.
-- REMAINING: **Offers** and **Landing Pages** — these join `searchableItemText` in, which is the
-  `extraText` config rather than bespoke code. Landing Pages' Site filter is another `where`.
+- SHIPPED: **Offers and Landing Pages** migrated 2026-09-02. All four screens now filter through
+  `filterRows`. The item join became `extraText`, the Site filter became `where`, and `route.slug` and the
+  template label became function fields — configuration, not code, exactly as the shapes were designed for.
+- **Landing Pages has no page index yet** and still loads full page documents (they carry sections):
+  measured at ~2.9KB avg, so 1,000 pages is 2.74MB, 46% of the ceiling. Less urgent than products or
+  offers were — tenants have fewer pages than products — but it is the last unindexed list. Registering
+  one is now a small job: a `domain/page_index.py` plus an entry in the projections map.
 - **Known gap:** store modules cannot be loaded under raw node (their import graph is extensionless, the
   Vite convention), so the shared machinery is tested directly and the per-entity FIELD LISTS are not
   covered by a test that reads them. Closing that means an extension pass across the store graph — worth

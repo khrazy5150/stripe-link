@@ -568,6 +568,7 @@ import { useProfileStore } from "../stores/profile";
 import { sanitizeSlug, slugTokens, uniqueSlug } from "../composables/slugs";
 import { itemSummary as offerItemSummary, itemSummaryTitle as offerItemSummaryTitle, searchableItemText } from "../composables/offerItems";
 import { stagesFromSavedOffer, isIndexRow, landingChips, MAX_SEQUENTIAL_UPSELLS } from "../composables/purchaseFlow";
+import { filterRows, loadIndex } from "../composables/indexedList";
 import ConfirmDialog from "./shared/ConfirmDialog.vue";
 import ListCard from "./shared/ListCard.vue";
 import PurchaseFlowDiagram from "./PurchaseFlowDiagram.vue";
@@ -617,22 +618,20 @@ const pendingDeleteOffer = ref(null);
 const deletingOffer = ref(false);
 const offerStatusFilter = ref("active");
 const offerSearchQuery = ref("");
-// Search matches the offer's own fields AND everything in it -- names and ids, landing and funnel. Without
-// the item text a tenant cannot find "the offer with the Protein Shaker in it" by any route on this screen
-// (plans/OFFER_ITEM_VISIBILITY.md).
-function offerSearchText(offer) {
-  return [offer.name, offer.slug, offer.offer_type, offer.product_intent, searchableItemText(offer, resolveItemProduct)]
-    .filter(Boolean).join(" ").toLowerCase();
-}
-const visibleOffers = computed(() => {
-  const isArchived = (o) => o.status === "archived";
-  let list = offers.value;
-  if (offerStatusFilter.value === "active") list = list.filter((o) => !isArchived(o));
-  else if (offerStatusFilter.value === "archived") list = list.filter(isArchived);
-  const search = offerSearchQuery.value.trim().toLowerCase();
-  if (search) list = list.filter((o) => offerSearchText(o).includes(search));
-  return list;
-});
+
+// What an offer is searchable by, beyond the items joined in below.
+const OFFER_SEARCH_FIELDS = ["name", "slug", "offer_type", "product_intent"];
+
+const visibleOffers = computed(() => filterRows(offers.value, {
+  term: offerSearchQuery.value,
+  fields: OFFER_SEARCH_FIELDS,
+  // Every item name and id, across every stage — the join that makes "shaker" find the offer containing
+  // it. Passing it as extraText keeps it configuration rather than a bespoke filter
+  // (plans/OFFER_ITEM_VISIBILITY.md).
+  extraText: (offer) => searchableItemText(offer, resolveItemProduct),
+  statusOf: (offer) => (offer.status === "archived" ? "archived" : "active"),
+  status: offerStatusFilter.value,
+}));
 
 // Load on first interaction so filtering "just works" without clicking Load Offers first (mirrors Products).
 function ensureOffersLoaded() {
@@ -1108,8 +1107,7 @@ async function loadOffers() {
     // The slim list projection: ~10% of a full document, so the whole catalogue still loads at once —
     // which is what keeps client-side search instant AND complete. View/Edit fetch the one full document
     // they need. plans/OFFER_ITEM_VISIBILITY.md §7.
-    const body = await apiRequest("/offers", { params: { view: "index" } });
-    offers.value = (Array.isArray(body.offers) ? body.offers : []).map(offerCardModel);
+    offers.value = (await loadIndex("offers")).map(offerCardModel);
     offersLoaded.value = true;
     offersMessage.value = offers.value.length
       ? `${offers.value.length} offer${offers.value.length === 1 ? "" : "s"} loaded.`

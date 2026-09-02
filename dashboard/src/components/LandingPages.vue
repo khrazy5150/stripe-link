@@ -1531,6 +1531,7 @@ import PurchaseFlowDiagram from "./PurchaseFlowDiagram.vue";
 import { useProfileStore } from "../stores/profile";
 import { useSitesStore } from "../stores/sites";
 import { searchableItemText } from "../composables/offerItems";
+import { filterRows } from "../composables/indexedList";
 import { stagesFromSavedOffer } from "../composables/purchaseFlow";
 import { useCollectionsStore } from "../stores/collections";
 import SettingsAccordion from "./shared/SettingsAccordion.vue";
@@ -2218,28 +2219,32 @@ function pageOfferSearchText(page) {
   return [offer.name, offer.slug, searchableItemText(offer, resolveItemProduct)].filter(Boolean).join(" ");
 }
 
-const filteredPages = computed(() => {
-  const term = search.value.toLowerCase();
-  let list = pages.value;
-  if (siteFilter.value) {
-    list = list.filter((page) => {
-      const site = siteForPage(page);
-      return siteFilter.value === "__none__" ? !site : site?.site_id === siteFilter.value;
-    });
-  }
-  if (!term) return list;
-  return list.filter((page) => [
-    page.name,
-    page.page_id,
-    page.offer_id,
-    page.route?.slug,
-    templateLabel(page),
-    page.status,
-    // A page is only findable by its own fields otherwise -- not by the OFFER it renders, nor by any
-    // product in that offer. Searching "Whey Protein" found nothing here (plans/OFFER_ITEM_VISIBILITY.md).
-    pageOfferSearchText(page),
-  ].filter(Boolean).join(" ").toLowerCase().includes(term));
-});
+// What a page is searchable by. `route.slug` and the template label are derived, so they are function
+// fields; the offer join comes in as extraText below.
+const PAGE_SEARCH_FIELDS = [
+  "name",
+  "page_id",
+  "offer_id",
+  (page) => page?.route?.slug,
+  (page) => templateLabel(page),
+  "status",
+];
+
+const filteredPages = computed(() => filterRows(pages.value, {
+  term: search.value,
+  fields: PAGE_SEARCH_FIELDS,
+  // A page is only findable by its own fields otherwise — not by the OFFER it renders, nor by any product
+  // in that offer. Searching "Whey Protein" found nothing here (plans/OFFER_ITEM_VISIBILITY.md).
+  extraText: pageOfferSearchText,
+  // The Site filter is this screen's own predicate: "__none__" means pages attached to no Site at all,
+  // which is a real state and not the same as "no filter".
+  where: siteFilter.value
+    ? (page) => {
+        const site = siteForPage(page);
+        return siteFilter.value === "__none__" ? !site : site?.site_id === siteFilter.value;
+      }
+    : null,
+}));
 const wizardOffers = computed(() => {
   const term = offerSearch.value.toLowerCase();
   const activeOffers = offers.value.filter((offer) => offer.status !== "archived");
