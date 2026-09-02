@@ -12,12 +12,15 @@
 
     <div class="product-card-body">
       <div class="product-card-heading">
-        <h3>{{ title || "Untitled" }}</h3>
+        <!-- title carries the full text: clamping hides characters, it must not hide information. -->
+        <h3 :title="title">{{ title || "Untitled" }}</h3>
         <slot name="badge">
           <span v-if="statusLabel" class="product-status" :class="statusTone">{{ statusLabel }}</span>
         </slot>
       </div>
-      <slot name="description"><p>{{ description || "No description provided." }}</p></slot>
+      <slot name="description">
+        <p :title="description">{{ description || "No description provided." }}</p>
+      </slot>
       <div v-if="$slots.subtitle || subtitle" class="product-card-price">
         <slot name="subtitle"><strong>{{ subtitle }}</strong></slot>
       </div>

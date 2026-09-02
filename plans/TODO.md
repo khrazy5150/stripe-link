@@ -1086,17 +1086,22 @@ third-party security assessment is required.
 - Why it matters more than the current field lists: virtualized rendering and any future server-side search
   land ONCE in the composable instead of four times. The field lists differ legitimately and stay per-entity.
 
-### ⭐ HIGH — Clamp overflow in ListCard (after the shared search work) — 2026-09-02, not built
+### Clamp overflow in ListCard — SHIPPED 2026-09-02
 - `shared/ListCard.vue` IS already shared by Offers, Products and Services (the card chrome is done). What
   is missing is overflow protection: `min-width: 0` prevents a grid blowout but there is no line clamp and
   no ellipsis, so a 500-word product description just makes a very tall card.
 - The Offers card only looks robust because the limiting lives in its CONTENT (`itemSummary`: 3 names,
   `+N more`, 90-char cap, full text in the title). Products and Services pass raw text and get nothing.
-- Fix in the COMPONENT: `-webkit-line-clamp: 2` on the description, single-line ellipsis on the title, and
-  a `title` attribute carrying the full text. One change, three screens.
-- Leave content composition alone — "3 names then +N more" is offer semantics and belongs with the offer.
-- Landing Pages deliberately excluded: its cards carry a URL row, copy button, stats, preset and kebab
-  menu. Forcing them into one component means props only one caller uses.
+- SHIPPED: `-webkit-line-clamp: 2` on the description, single-line ellipsis on the title, `min-width: 0`
+  so a long title truncates instead of pushing the status badge out, `overflow-wrap: anywhere` so an
+  unbreakable string (a pasted URL, an id) cannot widen the card, and the full text on each element's
+  `title` attribute — clamping may hide characters, it must not hide information.
+- Content composition left alone: "3 names then +N more" is offer semantics and belongs with the offer.
+- Landing Pages deliberately excluded: its cards carry a URL row, copy button, stats, preset and kebab menu.
+- **This unblocks virtualization.** Rows are now uniform height per list, so the remaining work is
+  fixed-height windowing (~50 lines) rather than measuring virtualization with an offset map.
+- Guarded by tests/test_list_card_clamp.py, which reads the stylesheet directly — CSS is not covered by the
+  renderer tests, and a clamp is easy to delete during an unrelated edit. Verified it fails without it.
 
 ### Slim indexes — BOTH SHIPPED 2026-09-02 (plans/OFFER_ITEM_VISIBILITY.md §7)
 - SHIPPED: `GET /offers?view=index` (10% of a document) and `GET /products?view=index` (34% — prices are
