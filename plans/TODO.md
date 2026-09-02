@@ -1080,7 +1080,7 @@ third-party security assessment is required.
 - Watch `JuniorBay/Api` -> `ResponseBytes` (docs/RESPONSE_SIZE_MONITORING.md). Alarm at 3MB, half the
   ceiling, so there is room to act. Trigger on BYTES, not record counts.
 
-### Cached suggestion field — fetch once per scope, filter locally — HIGH, do LAST (plans/CACHED_SUGGESTION_FIELD.md)
+### Cached suggestion field — SHIPPED 2026-09-02 (plans/CACHED_SUGGESTION_FIELD.md §7)
 - The product category autocomplete calls the API on every focus AND every 180ms typing pause, each one a
   Lambda invoke plus a full DynamoDB scan. No cache in the util, the component, or apiRequest.
 - `plans/PRODUCT_CATEGORY_AUTOCOMPLETE.md` line 90 already asked for fetch-once-and-filter-locally. It said

@@ -1,6 +1,7 @@
 # Cached suggestion field — fetch once per scope, filter locally
 
-**Status:** PLANNED, not built. HIGH priority, sequenced LAST among the search/list enhancements.
+**Status:** SHIPPED 2026-09-02. `composables/useCachedSuggestions.js`, consumed by the product category
+field; `/product-categories` gained `?limit=` so the whole scoped set can be fetched.
 
 ## 1. Why this exists
 
@@ -74,3 +75,28 @@ projection when the contributed table is measurably large.
 
 - `plans/PRODUCT_CATEGORY_AUTOCOMPLETE.md` — the origin of the requirement.
 - `plans/OFFER_ITEM_VISIBILITY.md` — same family: what filters where, and who holds the data.
+
+
+## 7. What shipped, and the thing the plan missed (2026-09-02)
+
+`useCachedSuggestions({ fetchAll, filter, scope })` — `open()` on focus, `search(q)` on input, local only.
+
+**The plan's gap:** it assumed the endpoint could return "the full set for a scope". It could not —
+`search_suggestions` caps at 20, a typeahead page, and there are 28 curated categories alone. Caching that
+response and filtering locally would have been fast and silently wrong, missing ten categories. So the
+endpoint learned `?limit=` (default 20 unchanged, capped at 500) and the client asks for the whole scope.
+**Filtering client-side is only correct over a complete set** — that precondition is the whole design, and
+it was not in the plan.
+
+**Stale-while-revalidate**, beyond the plan: the cached list renders immediately on open while the refresh
+is in flight, so the menu never blanks. A response for a scope the user has since left is discarded, and a
+scope change drops the previous list rather than showing it while loading — a digital product must not be
+offered a physical product's categories, even for a frame. Both are tested with a deliberately slow fetch.
+
+**Parity is enforced, not asserted in prose:** `filterCategories` mirrors `search_suggestions`' matching
+(normalized substring against key OR normalized label), and a test runs the JS filter and a real server
+query over the same terms — empty, whitespace, uppercase, multi-word — requiring identical keys.
+
+**Still true:** `ProductCategoriesRepository.list_all()` remains a full table scan per request. Caching
+reduces how OFTEN it runs, not its cost. Revisit with a query-by-prefix or cached projection when the
+contributed table is measurably large (2 rows in dev, 0 in prod today).

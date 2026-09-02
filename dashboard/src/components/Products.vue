@@ -485,7 +485,8 @@
 import { computed, h, nextTick, ref, watch } from "vue";
 import { apiRequest, toAssetCdnUrl } from "../api/client";
 import { defaultProductPrice, formatMoney, generateSku, isValidGtin, useProductsStore } from "../stores/products";
-import { humanizeCategory, normalizeCategory, searchCategories } from "../utils/categories";
+import { fetchCategoriesForScope, filterCategories, humanizeCategory, normalizeCategory } from "../utils/categories";
+import { useCachedSuggestions } from "../composables/useCachedSuggestions";
 import { dimsFromStatus, recordImageDims } from "../utils/imageDims";
 import { defaultPriceForm, priceFormFromDocument } from "../utils/priceForm";
 import { idColorStyle } from "../utils/iconColor";
@@ -543,9 +544,20 @@ const statusMessage = computed(() => {
 // --- Product Category autocomplete (plans/PRODUCT_CATEGORY_AUTOCOMPLETE.md) ---------------------------
 // form.product_category stores the normalized KEY; categoryQuery is the label the tenant sees/types.
 const categoryQuery = ref("");
-const categorySuggestions = ref([]);
+// Fetch once per product_type and filter locally, instead of calling the API on every focus AND every
+// 180ms typing pause — each of which was a Lambda invoke plus a full scan of contributed categories.
+// plans/CACHED_SUGGESTION_FIELD.md. The whole scoped set is fetched (the endpoint's default of 20 would
+// truncate 30 categories, making local filtering fast and wrong).
+const {
+  suggestions: categorySuggestions,
+  open: openCategorySuggestions,
+  search: filterCategorySuggestions,
+} = useCachedSuggestions({
+  fetchAll: (productType) => fetchCategoriesForScope(productType),
+  filter: filterCategories,
+  scope: () => form.value.product_type,
+});
 const showCategoryMenu = ref(false);
-let categorySearchTimer = null;
 
 function initCategoryQuery() {
   // Show the stored key's label. The proper server label arrives when the menu first opens; humanize is a
@@ -553,19 +565,18 @@ function initCategoryQuery() {
   categoryQuery.value = form.value.product_category ? humanizeCategory(form.value.product_category) : "";
 }
 
-async function fetchCategorySuggestions() {
-  categorySuggestions.value = await searchCategories(categoryQuery.value, form.value.product_type);
-}
-
 function onCategoryFocus() {
   showCategoryMenu.value = true;
-  fetchCategorySuggestions();
+  // Refreshes on OPEN: the only moment staleness is observable, since a category the tenant typed a
+  // moment ago must reappear. Cached results render immediately while that refresh is in flight.
+  openCategorySuggestions();
+  filterCategorySuggestions(categoryQuery.value);
 }
 
 function onCategoryInput() {
   showCategoryMenu.value = true;
-  clearTimeout(categorySearchTimer);
-  categorySearchTimer = setTimeout(fetchCategorySuggestions, 180);
+  // Local. No debounce needed, because there is no request to debounce.
+  filterCategorySuggestions(categoryQuery.value);
 }
 
 function pickCategory(suggestion) {
