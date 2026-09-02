@@ -72,22 +72,29 @@ class SelfScrollingScreensTests(unittest.TestCase):
         match = re.search(r"SELF_SCROLLING_VIEWS = new Set\(\[([^\]]*)\]\)", APP)
         self.assertIsNotNone(match)
         listed = {v.strip().strip('"\'') for v in match.group(1).split(",") if v.strip()}
-        self.assertEqual(listed, {"products", "services", "offers"})
+        self.assertEqual(listed, {"products"})
 
-        components = {"products": "Products.vue", "services": "Services.vue", "offers": "Offers.vue"}
+        components = {"products": "Products.vue"}
         for view, filename in components.items():
             source = (ROOT / "dashboard" / "src" / "components" / filename).read_text(encoding="utf-8")
             with self.subTest(view=view):
                 self.assertIn("scroll-column", source, f"{filename} must mark its column chain")
                 self.assertIn("scroll-region", source, f"{filename} must mark its scrolling list")
 
-    def test_landing_pages_is_deliberately_not_converted(self):
-        # Its list card is v-if="!builderOpen" and the builder is a different two-pane layout that needs
-        # the view to scroll normally. Recorded so it is not "fixed" by adding it to the set.
+    def test_multi_section_screens_stay_out(self):
+        """Only a screen that is ONE list filling the page fits this pattern. Tried and reverted:
+        Services (.page also holds FulfillersPanel and the availability panels, so pinning every child
+        clipped everything below the list), Offers (fits, but stretches into a tall empty box with few
+        rows), and Landing Pages (its card is v-if="!builderOpen"). All three scroll correctly through
+        .app-view — which is the right answer for a page that is not a single list."""
         match = re.search(r"SELF_SCROLLING_VIEWS = new Set\(\[([^\]]*)\]\)", APP)
-        self.assertNotIn("landingPages", match.group(1))
-        source = (ROOT / "dashboard" / "src" / "components" / "LandingPages.vue").read_text(encoding="utf-8")
-        self.assertNotIn("scroll-region", source)
+        for view in ("services", "offers", "landingPages"):
+            with self.subTest(view=view):
+                self.assertNotIn(view, match.group(1))
+        for filename in ("Services.vue", "Offers.vue", "LandingPages.vue"):
+            source = (ROOT / "dashboard" / "src" / "components" / filename).read_text(encoding="utf-8")
+            with self.subTest(component=filename):
+                self.assertNotIn("scroll-region", source)
 
     def test_the_marked_region_scrolls_not_the_page(self):
         self.assertIn("overflow: hidden", rule(".app-view.owns-scroll"))
@@ -104,7 +111,7 @@ class SelfScrollingScreensTests(unittest.TestCase):
 
     def test_every_scroll_region_is_keyboard_reachable(self):
         # A scroll container that only answers the mouse wheel is unusable without a pointer.
-        for filename in ("Products.vue", "Services.vue", "Offers.vue"):
+        for filename in ("Products.vue",):
             source = (ROOT / "dashboard" / "src" / "components" / filename).read_text(encoding="utf-8")
             with self.subTest(component=filename):
                 self.assertIn('scroll-region" tabindex="0"', source)

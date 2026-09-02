@@ -61,3 +61,24 @@ Do NOT build it blind. Scroll math is the kind of thing that looks right in code
 browser; it wants a real list of a few thousand rows to test against, which does not exist yet. When it
 does, `indexedList.js` is where it goes, gated on a row-count threshold so smaller lists render normally
 and the code path stays inert until it is needed.
+
+
+## Which screens the self-scrolling pattern actually fits (learned 2026-09-02)
+
+Converted Products, then tried Services, Offers and Landing Pages and reverted all three. The pattern
+assumes **one list filling the page**, and only Products is that:
+
+| Screen | Why it does or does not fit |
+|---|---|
+| Products | One list card under the header. Fits. Converted. |
+| Services | `.page` also holds `<FulfillersPanel />` and the availability/appointment panels. Pinning every child gave the remaining height to the list and CLIPPED everything below it. |
+| Offers | Structurally fits, but the scroll region stretches, so a couple of offers sit in a tall empty box with a focus ring around it. Worse than before. |
+| Landing Pages | Its card is `v-if="!builderOpen"`; the builder is a different two-pane layout that needs the view to scroll normally. |
+
+All three scroll correctly through `.app-view`, which is the right answer for a page that is not a single
+list. **The frame did its job** — one scrollbar, pinned topbar and brand — without every screen having to
+opt in.
+
+Consequence for virtualization: it applies where a scroll container exists, which today is Products alone.
+That is fine, because the trigger is a list of ~1,000 rows and only Products plausibly reaches it first.
+A screen that later becomes list-dominated can opt in then — but check it is one list before adding it.

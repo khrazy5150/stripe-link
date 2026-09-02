@@ -7,7 +7,7 @@
       </div>
     </header>
 
-    <section class="dashboard-card scroll-column">
+    <section class="dashboard-card">
       <header class="dashboard-card-header">
         <h2>Service Catalog</h2>
         <div class="button-row">
@@ -43,7 +43,7 @@
         {{ store.loading ? "Loading services..." : store.loaded ? "No services found. Create a service to get started." : "Click Load Services to see services." }}
       </div>
 
-      <div v-else class="product-card-list scroll-region" tabindex="0" role="list" aria-label="Services">
+      <div v-else class="product-card-list">
         <ListCard
           v-for="service in store.filteredServices"
           :key="service.service_id"

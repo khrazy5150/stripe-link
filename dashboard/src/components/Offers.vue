@@ -7,7 +7,7 @@
       </div>
     </header>
 
-    <section class="dashboard-card offer-management-card scroll-column">
+    <section class="dashboard-card offer-management-card">
       <header class="dashboard-card-header">
         <h2>Offer Configuration</h2>
         <div class="button-row">
@@ -19,7 +19,7 @@
         </div>
       </header>
 
-      <div class="offer-card-body scroll-column">
+      <div class="offer-card-body">
         <div v-if="offersError" class="keys-status-banner error">{{ offersError }}</div>
         <div v-else-if="offersMessage" class="keys-status-banner">{{ offersMessage }}</div>
 
@@ -50,7 +50,7 @@
           No {{ offerStatusFilter === 'all' ? '' : offerStatusFilter }} offers to show.
         </div>
 
-        <div v-else class="product-card-list scroll-region" tabindex="0" role="list" aria-label="Offers">
+        <div v-else class="product-card-list">
           <ListCard
             v-for="offer in visibleOffers"
             :key="offer.offer_id"
