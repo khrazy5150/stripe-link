@@ -1086,6 +1086,18 @@ third-party security assessment is required.
 - Why it matters more than the current field lists: virtualized rendering and any future server-side search
   land ONCE in the composable instead of four times. The field lists differ legitimately and stay per-entity.
 
+### List virtualization — BLOCKED on a UX decision, not effort (plans/LIST_VIRTUALIZATION.md)
+- Prerequisites are done: one shared filter path, uniform row heights, payload already solved by the
+  indexes. This is purely render cost.
+- **Blocker:** no list has its own scroll container — `.product-card-list` is a plain grid and the PAGE
+  scrolls. So it is either window-scroll virtualization (no UX change, more code, nastier failure modes)
+  or giving the list `overflow-y: auto` (simple code, introduces a nested scrollbar — a real UX change).
+- Recommendation: window-scroll, triggered when a real list passes ~1,000 rows. ~156px per row, so 1,000
+  rows is ~156,000px of DOM and ~4,000 elements. No hard failure, just degradation — unlike the payload
+  cliff.
+- Deliberately NOT built blind: scroll math looks right in code and is wrong in the browser, and there is
+  no list of that size to test against yet.
+
 ### Clamp overflow in ListCard — SHIPPED 2026-09-02
 - `shared/ListCard.vue` IS already shared by Offers, Products and Services (the card chrome is done). What
   is missing is overflow protection: `min-width: 0` prevents a grid blowout but there is no line clamp and
