@@ -1,3 +1,4 @@
+import copy
 import unittest
 
 from stripe_link.domain.funnels import (
@@ -127,6 +128,33 @@ class FunnelDerivationTests(unittest.TestCase):
             {"product_id": "prod_up", "price_id": "price_up"},    # valid
         ]}}
         self.assertEqual([i["price_id"] for i in funnel_context_items(offer, self.products, "upsell")], ["price_up"])
+
+    def test_adding_a_price_takes_effect_WITHOUT_re_saving_the_offer(self):
+        # The bug this closes. Roles used to be read from the offer's stored placement.surface, so adding a
+        # downsell price to a product changed nothing until every offer containing it was re-saved -- while
+        # DELETING a price took effect immediately. Derivation makes both directions behave the same.
+        offer = {"funnel": {"upsells": [{"product_id": "prod_up", "price_id": "price_up"}]}}
+        self.assertEqual(funnel_context_items(offer, self.products, "downsell"), [])
+
+        products = copy.deepcopy(self.products)
+        products["prod_up"]["prices"].append(
+            {"price_id": "price_dn", "context": "downsell", "unit_amount": 900, "currency": "usd"})
+        # Offer document untouched — only the product changed.
+        downs = funnel_context_items(offer, products, "downsell")
+        self.assertEqual([(i["product_id"], i["price_id"]) for i in downs], [("prod_up", "price_dn")])
+
+    def test_removing_a_price_still_takes_effect_immediately(self):
+        # The direction that already worked must keep working.
+        products = copy.deepcopy(self.products)
+        products["prod_up"]["prices"] = [p for p in products["prod_up"]["prices"] if p["context"] != "upsell"]
+        self.assertEqual(funnel_context_items(self.offer, products, "upsell"), [])
+
+    def test_a_role_is_not_configurable_per_offer(self):
+        # Deriving means the offer's own stored funnel list carries no authority. Documented consequence:
+        # a product's upsell price makes it an upsell in EVERY offer that includes it.
+        offer_claiming_none = {"items": [{"product_id": "prod_up"}], "funnel": {"upsells": []}}
+        ups = funnel_context_items(offer_claiming_none, self.products, "upsell")
+        self.assertEqual([i["product_id"] for i in ups], ["prod_up"])
 
     def test_reserved_slugs_in_flow_order(self):
         self.assertEqual(funnel_reserved_slugs(self.offer, self.products), ["/upsell", "/downsell", "/thank-you"])

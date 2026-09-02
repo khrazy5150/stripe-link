@@ -291,8 +291,17 @@ class PagePublishingTests(unittest.TestCase):
         self.assertEqual(updated["pages"]["/upsell"]["strategy"], "sequence")
         self.assertEqual(updated["pages"]["/thank-you"]["funnel_role"], "thank_you")
 
-        # Remove the funnel (no upsells) -> our reserved slugs retire; a tenant's own same-named page is untouched.
+        # Emptying offer.funnel.upsells does NOT retire the slug any more: the role is derived from the
+        # PRODUCT's pricing context, not from a list cached on the offer (plans/OFFER_MODEL_REDESIGN.md §6).
+        # While the product still carries an upsell price, the offer still has an upsell.
         offer["funnel"] = {"upsells": []}
+        _, still_there = attach_funnel_slugs(updated, {"page_id": page_id}, offer, {product["product_id"]: product})
+        self.assertFalse(still_there)
+        self.assertIn("/upsell", updated["pages"])
+
+        # Removing the upsell PRICE is what retires it — one place, and it applies to every offer using
+        # that product at once, with no per-offer re-save.
+        product["prices"] = [p for p in product["prices"] if p["price_id"] != "price_up"]
         updated["pages"]["/upsell-guide"] = {"page_id": "page_Guide"}  # not ours (no funnel_role)
         retired, changed2 = attach_funnel_slugs(updated, {"page_id": page_id}, offer, {product["product_id"]: product})
         self.assertTrue(changed2)

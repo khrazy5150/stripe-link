@@ -95,7 +95,23 @@ export function stagesFromSavedOffer(offer, { resolveProduct, formatAmount }) {
       _priceId: entry.price_id,
     };
   };
-  const inGroup = (group) => entries.filter((entry) => entry.group === group);
+  // Funnel roles are DERIVED from each product's pricing contexts, mirroring
+  // domain/funnels.funnel_context_items. Reading the offer's stored placement.group here would show a
+  // different funnel than the one that actually charges: the runtime derives, so this must too.
+  // Landing membership stays offer data — which products are on the page, at which prices/tiers.
+  const derived = { order_bump: [], upsell: [], downsell: [] };
+  const seenProduct = new Set();
+  for (const entry of entries) {
+    if (!entry.id || seenProduct.has(entry.id)) continue;
+    seenProduct.add(entry.id);
+    const product = resolveProduct(entry.id);
+    if (!product) continue;
+    for (const context of Object.keys(derived)) {
+      const price = (product.prices || []).find((p) => String(p.context || "standard") === context);
+      if (price) derived[context].push({ id: entry.id, price_id: price.price_id, selectable_prices: [] });
+    }
+  }
+  const inGroup = (group) => derived[group] || [];
 
   const stages = [];
 

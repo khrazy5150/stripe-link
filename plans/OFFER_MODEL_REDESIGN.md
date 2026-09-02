@@ -133,6 +133,23 @@ by product auto-sync (`plans/SALES_FUNNELS.md` P1.5). Unsynced bump → skipped 
 
 ## 6. Post-purchase: sequence OR carousel — DERIVED from count, capped (author-locked 2026-07-27)
 
+> **Funnel roles are now genuinely derived (2026-09-01).** `funnel_context_items` reads each product's
+> pricing contexts instead of the offer's stored `placement.surface`. Previously the model was derived in
+> ONE direction only: deleting an upsell price took effect immediately (the stored opportunity stopped
+> resolving), while adding one did nothing until every offer containing that product was re-saved. The
+> offer was caching the query "which of my products have an upsell price" and nothing invalidated it.
+>
+> Consequences, deliberately accepted:
+> - A product's funnel price applies to EVERY offer containing it. Roles are not configurable per offer —
+>   which was already true in the UI, since the builder only ever derived them.
+> - Emptying `offer.funnel.upsells` no longer retires anything; removing the PRICE does, in one place.
+> - `dashboard/src/composables/purchaseFlow.js` mirrors this, or the diagram would show a different funnel
+>   than the one that charges.
+> - A pricing change now alters live offers with no review step. That was already true for removals; the
+>   alternative was silent staleness that failed toward "the buyer never sees the upsell you configured".
+> - Landing membership stays OFFER data: which products are on the page, at which prices and tiers.
+
+
 Both reuse the same idempotent one-click charge (`process_upsell`, off-session PaymentIntent, keyed by
 `sequence`). Strategy is **not a free tenant toggle** — it's derived from the number of upsell slots, with a
 hard cap on serialized screens so a tenant can't march a customer through 7 "No thanks" clicks:

@@ -29,28 +29,55 @@ def funnel_step_slug(step_id: str) -> str:
     return f"/{segment}" if segment else ""
 
 
-def funnel_context_items(offer: dict[str, Any], products_by_id: dict[str, dict[str, Any]], context: str) -> list[dict[str, Any]]:
-    """The offer's purchase opportunities whose `placement.surface == context` (upsell/downsell/order_bump)
-    that resolve to a real product price in that context, in order (plans/OFFER_MODEL_REDESIGN.md). An
-    opportunity whose product is missing, or whose price_id isn't one of that product's prices in `context`,
-    is skipped — so a funnel only ever presents charges that actually exist. Returns
-    [{product_id, price_id, product, price}]."""
-    items: list[dict[str, Any]] = []
+def offer_product_ids(offer: dict[str, Any]) -> list[str]:
+    """Every product the offer references, in the offer's own order, deduped.
+
+    This is the part that genuinely belongs to the OFFER: which products participate. What each product
+    then DOES (landing item, order bump, upsell, downsell) belongs to the product's pricing contexts.
+    """
+    seen: set[str] = set()
+    ids: list[str] = []
     for opp in opportunities_from_offer(offer):
-        if str((opp.get("placement") or {}).get("surface") or "") != context:
-            continue
         product_id = str(opp.get("product_id") or "")
-        price_id = str(opp.get("price_id") or "")
+        if product_id and product_id not in seen:
+            seen.add(product_id)
+            ids.append(product_id)
+    return ids
+
+
+def funnel_context_items(offer: dict[str, Any], products_by_id: dict[str, dict[str, Any]], context: str) -> list[dict[str, Any]]:
+    """The offer's products that have a price in `context` (upsell/downsell/order_bump), in offer order.
+
+    DERIVED from product pricing, not read from the offer's stored `placement.surface`
+    (plans/OFFER_MODEL_REDESIGN.md §6: "every role is inferred from each product's pricing context").
+
+    This used to filter the stored opportunities by their recorded surface, which made the model
+    half-derived and asymmetric: DELETING an upsell price took effect immediately (the stored opportunity
+    stopped resolving), while ADDING one did nothing until the tenant re-saved every offer containing that
+    product. The offer was caching a query — "which of my products have an upsell price" — that nothing
+    invalidated. Deriving it removes the staleness class rather than managing it; nothing is lost, because
+    a role is a property of the product's pricing and is not configurable per offer.
+
+    Only the FIRST price in a context is used per product; extra ones are ignored (the builder warns).
+    A product with no price in `context` simply is not one, so a funnel only ever presents charges that
+    actually exist. Returns [{product_id, price_id, product, price}].
+    """
+    items: list[dict[str, Any]] = []
+    for product_id in offer_product_ids(offer):
         product = products_by_id.get(product_id)
         if not product:
             continue
         price = next(
-            (p for p in (product.get("prices") or [])
-             if str(p.get("price_id") or "") == price_id and str(p.get("context") or "standard") == context),
+            (p for p in (product.get("prices") or []) if str(p.get("context") or "standard") == context),
             None,
         )
         if price:
-            items.append({"product_id": product_id, "price_id": price_id, "product": product, "price": price})
+            items.append({
+                "product_id": product_id,
+                "price_id": str(price.get("price_id") or ""),
+                "product": product,
+                "price": price,
+            })
     return items
 
 

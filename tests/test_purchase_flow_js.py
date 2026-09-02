@@ -18,9 +18,10 @@ MODULE = ROOT / "dashboard" / "src" / "composables" / "purchaseFlow.js"
 PRODUCTS = {
     "p1": {"name": "Creatine Gummies", "prices": [{"price_id": "pr1", "unit_amount": 3900, "currency": "usd"}]},
     "p2": {"name": "NAD Supplement", "prices": [
-        {"price_id": "pr2", "unit_amount": 1445, "currency": "usd"},
-        {"price_id": "pr2d", "unit_amount": 900, "currency": "usd"}]},
-    "p4": {"name": "Protein Shaker Bottle", "prices": [{"price_id": "pr4", "unit_amount": 953, "currency": "eur"}]},
+        {"price_id": "pr2", "unit_amount": 1445, "currency": "usd", "context": "upsell"},
+        {"price_id": "pr2d", "unit_amount": 900, "currency": "usd", "context": "downsell"}]},
+    "p4": {"name": "Protein Shaker Bottle", "prices": [
+        {"price_id": "pr4", "unit_amount": 953, "currency": "eur", "context": "order_bump"}]},
     "p3": {"name": "Whey Protein", "prices": [
         {"price_id": "t1", "unit_amount": 2422, "currency": "usd"},
         {"price_id": "t2", "unit_amount": 4159, "currency": "usd"},
@@ -135,6 +136,13 @@ class PurchaseFlowTests(unittest.TestCase):
         upsell = self.out["modern"][2]["items"][0]
         self.assertEqual(upsell["intent"], "upgrade")
         self.assertEqual(upsell["downsell"]["amount"], "$9.00")
+
+    def test_roles_come_from_product_pricing_not_the_stored_placement(self):
+        # Mirrors domain/funnels.funnel_context_items. If this read the offer's stored group instead, the
+        # diagram would show a different funnel than the one that actually charges.
+        out = run({"claims_nothing": {"items": [{"product_id": "p4"}], "funnel": {}}})
+        stages = out["claims_nothing"]
+        self.assertIn("checkout", [s["key"] for s in stages])
 
     def test_amount_is_currency_aware_not_a_hardcoded_dollar_sign(self):
         # The bump is priced in EUR; a hardcoded "$" would have mislabelled a real tenant's money.
