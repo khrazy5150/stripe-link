@@ -783,7 +783,10 @@ function openCreateModal() {
   showCreateModal.value = true;
 }
 
-async function openEditModal(product) {
+async function openEditModal(row) {
+  // The list holds index ROWS; the editor needs the whole document (refund policy, variants, identifiers,
+  // per-price fee data the projection drops). One fetch, for the one product being opened.
+  const product = await productStore.fetchFull(row);
   editingProduct.value = product;
   hydratingForm.value = true;
   skuTouched.value = false;

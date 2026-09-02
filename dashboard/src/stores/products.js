@@ -162,11 +162,29 @@ export const useProductsStore = defineStore("products", {
       if (!this.loaded && !this.loading) this.load();
     },
 
+    /** The full document for one product. The list holds index rows, which omit what only an editor
+     *  needs (refund policy, variants, identifiers, per-price fee breakdowns). Falls back to the row on
+     *  failure so the modal still opens rather than blocking on a network error. */
+    async fetchFull(product) {
+      const productId = product?.product_id;
+      if (!productId) return product;
+      try {
+        const body = await apiRequest(`/products/${encodeURIComponent(productId)}`);
+        return body.product || product;
+      } catch {
+        return product;
+      }
+    },
+
     async load() {
       this.loading = true;
       this.error = "";
       try {
-        const body = await apiRequest("/products");
+        // The slim list projection: ~34% of a full document. Products are the payload that reaches the
+        // 6MB response ceiling FIRST — bigger documents than offers, and usually more of them — and BOTH
+        // the Products screen and the Offers screen load the whole catalogue. Editing fetches the one
+        // full document it needs (fetchFull below). plans/OFFER_ITEM_VISIBILITY.md §7.
+        const body = await apiRequest("/products", { params: { view: "index" } });
         this.products = Array.isArray(body.products) ? body.products : [];
         this.loaded = true;
         this.message = this.products.length

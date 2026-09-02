@@ -175,7 +175,31 @@ being composed from live form state (with sync and extra-price warnings) and can
 document. Its item builder is a validating function that returns `{error}` on incomplete input, so it
 cannot drive a live preview. What was worth sharing was the part that actually drifted.
 
-**Still to do:** the PRODUCT index. Adopting it is what actually removes the
+### The product index — SHIPPED 2026-09-02
+
+`GET /products?view=index`, measured at **842B against 2,486B — 34%**. Not the 10x the offer index
+achieved, because this projection CANNOT drop its dominant field: `prices` is ~57% of a product and the
+Offers screen derives funnel roles from every price's `context`. Dropping them would make an upsell
+indistinguishable from a landing item.
+
+What it drops is the part of each price nothing reads. Chosen by grepping every price-field access in
+`dashboard/src` rather than by judgement:
+
+- **kept**: `price_id, context, unit_amount, currency, pricing_model, quantity, stripe_price_id`
+  (the edit form's "not synced" warning), `compare_at_unit_amount` (discount %), `fee_handling`,
+  `suggested_amount`, `tenant_keyed_amount`, `label`
+- **dropped**: `fee_breakdown` (93B, the largest single field), `previous_price_id`, price timestamps
+- **dropped on the document**: `refund_policy` (~10%), `variants`, `image_dims`, `sync`, identifiers
+
+`productStore.fetchFull()` gets the whole document when a product is opened for editing, falling back to
+the row on a network error so the modal still opens. Same split as offers: the list never loads what only
+an editor needs.
+
+Effect at scale: 2,000 products goes from 4.74MB (79% of the ceiling) to 1.61MB (27%).
+
+**Both halves of the cliff are now addressed.** What remains is virtualized list RENDERING — windowing the
+DOM once a list holds thousands of rows — which is a render-cost problem, not a payload one, and is not
+infinite scroll: the indexes load whole, which is what keeps client-side search complete. Adopting it is what actually removes the
 cliff for today's UI, and it is the prerequisite for mobile infinite scroll — which otherwise ships with
 rows in offer-id order (there is no chronological index; the sort key is `OFFER#{mode}#{offer_id}`) and a
 search covering only what has been scrolled.

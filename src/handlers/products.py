@@ -3,6 +3,7 @@ import os
 import time
 
 from stripe_link.common import error_response, json_response, parse_json_body, path_params, query_params, resolve_stripe_mode, tenant_id_from_event
+from stripe_link.domain.product_index import product_index_entry
 from stripe_link.domain.categories import CURATED_CATEGORIES, category_label, normalize_category
 from stripe_link.domain.documents import (
     DocumentValidationError,
@@ -128,10 +129,19 @@ def get_product(event, repository, product_id: str):
 
 
 def list_products(event, repository):
+    """The product list. `?view=index` returns the slim projection (~34% of a document).
+
+    Products are the payload that reaches the 6MB response ceiling FIRST: documents average ~3.1KB, larger
+    than offers, and tenants usually have more of them. Both the Products screen and the Offers screen
+    load the whole catalogue. See plans/OFFER_ITEM_VISIBILITY.md §7.
+    """
     tenant_id = str(query_params(event).get("tenant_id") or "").strip() or tenant_id_from_event(event)
     if not tenant_id:
         return error_response("tenant_id is required.", code="missing_tenant")
-    return json_response({"products": [order_product_document(product) for product in repository.list_for_tenant(tenant_id)]})
+    products = repository.list_for_tenant(tenant_id)
+    if str(query_params(event).get("view") or "").strip().lower() == "index":
+        return json_response({"products": [product_index_entry(product) for product in products]})
+    return json_response({"products": [order_product_document(product) for product in products]})
 
 
 def update_product_status(event, repository, product_id: str):

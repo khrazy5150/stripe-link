@@ -1065,9 +1065,12 @@ third-party security assessment is required.
 
 ### Add additional content elements currently not found in the landing page builder — HIGH
 
-### ⭐ HIGH — Adopt the slim index in the dashboard, and build the PRODUCT one (2026-09-02, not built)
-- Backend is ready: `GET /offers?view=index` (468B vs 4,482B, ~10%), `limit`/`cursor`, and response-size
-  telemetry all shipped prod. The dashboard still requests full documents, so today's UI keeps the cliff.
+### Slim indexes — BOTH SHIPPED 2026-09-02 (plans/OFFER_ITEM_VISIBILITY.md §7)
+- SHIPPED: `GET /offers?view=index` (10% of a document) and `GET /products?view=index` (34% — prices are
+  irreducible, the Offers screen derives funnel roles from them). Both consumed by the dashboard; View and
+  Edit fetch the single full document they need. 2,000 products: 4.74MB -> 1.61MB.
+- REMAINING: virtualized list RENDERING (window the DOM). A render-cost problem, not payload. NOT infinite
+  scroll — the indexes load whole, which is what keeps client-side search complete.
 - **The product payload is the bigger half and arrives first.** Product documents average ~3.1KB (larger
   than offers) and tenants usually have more of them; the Offers screen loads the whole catalog on mount
   for item names, funnel-role derivation and the image fallback. 2,000 products = 5.9MB = 99% of the limit.
