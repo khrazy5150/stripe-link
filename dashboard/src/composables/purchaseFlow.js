@@ -86,6 +86,53 @@ function normalizedEntries(offer) {
   return legacy;
 }
 
+const FUNNEL_CONTEXTS = new Set([GROUP_ORDER_BUMP, GROUP_UPSELL, GROUP_DOWNSELL]);
+
+/**
+ * The chips under a LANDING product in the flow diagram: what the customer pays, then how it is priced.
+ *
+ * Shared because this is exactly what drifted. The edit form showed pricing SHAPE ("standard",
+ * "3 quantity tiers") while the saved views showed AMOUNTS ("$39.00", "$24.22 – $55.71") — the same
+ * component fed by two builders that had quietly diverged. Both facts are useful, so one function now
+ * produces both and both callers use it.
+ *
+ * `selectablePriceIds` comes from the edit form's live config or from a saved entry's selectable_prices;
+ * either way the tier RANGE is computed here rather than twice.
+ */
+export function landingChips({ product, selectablePriceIds = [], priceId = "", formatAmount }) {
+  const prices = (product?.prices || []).filter(
+    (price) => !FUNNEL_CONTEXTS.has(String(price?.context || "standard")),
+  );
+  const byId = (id) => prices.find((price) => String(price?.price_id || "") === String(id));
+  const money = (price) => formatAmount(Number(price?.unit_amount || 0), price?.currency);
+  const chips = [];
+
+  const tiers = (selectablePriceIds || []).filter((id) => byId(id));
+  if (tiers.length > 1) {
+    const amounts = tiers.map((id) => Number(byId(id).unit_amount || 0));
+    const low = Math.min(...amounts);
+    const high = Math.max(...amounts);
+    const currency = byId(tiers[0])?.currency;
+    chips.push(low === high
+      ? formatAmount(low, currency)
+      : `${formatAmount(low, currency)} – ${formatAmount(high, currency)}`);
+    chips.push(`${tiers.length} quantity tiers`);
+  } else {
+    const price = byId(priceId) || prices[0];
+    if (price) chips.push(money(price));
+  }
+
+  // How it is priced, beyond the amount. A subscription or an active sale changes what the tenant is
+  // looking at even when the headline number does not.
+  if (prices.some((price) => ["recurring", "subscription"].includes(String(price?.pricing_model || "")))) {
+    chips.push("subscription");
+  }
+  const contexts = new Set(prices.map((price) => String(price?.context || "standard")));
+  if (contexts.has("sale")) chips.push("sale");
+  if (contexts.has("flash_sale")) chips.push("flash sale");
+  return chips;
+}
+
 /**
  * The offer's funnel entries, DERIVED from each product's pricing contexts — mirroring
  * domain/funnels.funnel_context_items, which is what the runtime charges from.
@@ -169,12 +216,13 @@ export function stagesFromSavedOffer(offer, { resolveProduct, formatAmount }) {
       hint: "what the customer buys",
       items: landing.map((entry) => {
         const item = card(entry, "primary");
-        // A tiered item has no single price. Showing the RANGE beats naming the tier count: it tells the
-        // tenant what the customer can actually pay, which is the question the diagram is answering.
-        const range = priceRange(item._product, entry.selectable_prices);
-        item.chips = range
-          ? [range]
-          : [priceLabel(item._product, entry.price_id) || "standard"];
+        item.chips = landingChips({
+          product: item._product,
+          selectablePriceIds: (entry.selectable_prices || []).map((tier) => tier?.price_id),
+          priceId: entry.price_id,
+          formatAmount,
+        });
+        if (!item.chips.length) item.chips = ["standard"];
         return item;
       }),
     });

@@ -149,10 +149,11 @@ class PurchaseFlowTests(unittest.TestCase):
         # The bump is priced in EUR; a hardcoded "$" would have mislabelled a real tenant's money.
         self.assertEqual(self.out["modern"][1]["items"][0]["chips"], ["EUR 9.53"])
 
-    def test_a_tiered_landing_item_shows_its_price_RANGE(self):
-        # A tiered item has no single price. The range says what the customer can actually pay, which beats
-        # naming the tier count ("3 quantity tiers", the first attempt).
-        self.assertEqual(self.out["tiered"][0]["items"][0]["chips"], ["$24.22 – $55.71"])
+    def test_a_tiered_landing_item_shows_its_range_AND_its_tier_count(self):
+        # A tiered item has no single price, so the range says what the customer can actually pay. The tier
+        # count rides alongside because it is the fact the EDIT form used to show instead — sharing one chip
+        # builder meant neither view had to give its half up.
+        self.assertEqual(self.out["tiered"][0]["items"][0]["chips"], ["$24.22 – $55.71", "3 quantity tiers"])
 
     def test_unresolvable_tier_prices_fall_back_rather_than_show_half_a_range(self):
         self.assertEqual(self.out["unresolvable"][0]["items"][0]["chips"], ["$39.00"])
@@ -185,6 +186,42 @@ class PurchaseFlowTests(unittest.TestCase):
         console.log(JSON.stringify(MAX_SEQUENTIAL_UPSELLS));
         """)
         self.assertEqual(js, MAX_SEQUENTIAL_UPSELLS)
+
+    def test_landing_chips_are_identical_from_the_edit_form_and_a_saved_offer(self):
+        """The drift a reviewer spotted: the SAME PurchaseFlowDiagram showed "3 quantity tiers" in Edit
+        Offer and "$24.22 – $55.71" in View Offer, because two stage builders computed chips separately.
+        One shared landingChips now serves both, so they cannot describe a product differently."""
+        product = {"name": "NAD", "prices": [
+            {"price_id": "t1", "context": "standard", "unit_amount": 2422},
+            {"price_id": "t2", "context": "standard", "unit_amount": 4159},
+            {"price_id": "t3", "context": "standard", "unit_amount": 5571},
+            {"price_id": "u1", "context": "upsell", "unit_amount": 1445}]}
+        out = _node(f"""
+        import {{ landingChips }} from {json.dumps(str(MODULE))};
+        const p = {json.dumps(product)};
+        const money = (a, c) => (c && c !== "usd" ? c.toUpperCase() + " " : "$") + (a / 100).toFixed(2);
+        console.log(JSON.stringify({{
+          editForm: landingChips({{product: p, selectablePriceIds: ["t1","t2","t3"], formatAmount: money}}),
+          savedOffer: landingChips({{product: p, selectablePriceIds: ["t1","t2","t3"], priceId: "t1", formatAmount: money}}),
+        }}));
+        """)
+        self.assertEqual(out["editForm"], out["savedOffer"])
+        # Both facts, not one or the other: what the customer pays AND how it is priced.
+        self.assertEqual(out["editForm"], ["$24.22 – $55.71", "3 quantity tiers"])
+
+    def test_a_funnel_price_never_becomes_a_landing_chip(self):
+        # The upsell price above must not appear as something the customer pays on the landing page.
+        product = {"name": "NAD", "prices": [
+            {"price_id": "s1", "context": "standard", "unit_amount": 2422},
+            {"price_id": "u1", "context": "upsell", "unit_amount": 1445}]}
+        out = _node(f"""
+        import {{ landingChips }} from {json.dumps(str(MODULE))};
+        console.log(JSON.stringify(landingChips({{
+          product: {json.dumps(product)}, priceId: "s1",
+          formatAmount: (a) => "$" + (a / 100).toFixed(2),
+        }})));
+        """)
+        self.assertEqual(out, ["$24.22"])
 
     def test_a_product_missing_from_the_store_still_renders(self):
         self.assertEqual(self.out["missing"][0]["items"][0]["product"]["name"], "gone_from_store")

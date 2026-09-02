@@ -567,7 +567,7 @@ import { useServicesStore } from "../stores/services";
 import { useProfileStore } from "../stores/profile";
 import { sanitizeSlug, slugTokens, uniqueSlug } from "../composables/slugs";
 import { itemSummary as offerItemSummary, itemSummaryTitle as offerItemSummaryTitle, searchableItemText } from "../composables/offerItems";
-import { stagesFromSavedOffer, isIndexRow, MAX_SEQUENTIAL_UPSELLS } from "../composables/purchaseFlow";
+import { stagesFromSavedOffer, isIndexRow, landingChips, MAX_SEQUENTIAL_UPSELLS } from "../composables/purchaseFlow";
 import ConfirmDialog from "./shared/ConfirmDialog.vue";
 import ListCard from "./shared/ListCard.vue";
 import PurchaseFlowDiagram from "./PurchaseFlowDiagram.vue";
@@ -696,17 +696,17 @@ const inferredUpsellStrategy = computed(() => (inferredUpsells.value.length > MA
 // Intent = a friendly, DERIVED label over placement.surface (no new stored field) — it names WHY a product is
 // at its stage. primary=main buy · cross_sell=order bump · upgrade=upsell · recovery=downsell.
 // Pricing-option chips for a landing product (standard / N quantity tiers / subscription / sale / flash).
+// Delegates to the SHARED chip builder so the edit form and the saved views cannot describe the same
+// product differently — the drift that showed up as "3 quantity tiers" here and "$24.22 – $55.71" there.
 function landingPricingChips(product) {
   const config = itemConfig(product);
-  const prices = landingPrices(product);
-  const chips = [];
-  const tierCount = (config.selectable_price_ids || []).length;
-  chips.push(config.mode === "selectable" && tierCount > 1 ? `${tierCount} quantity tiers` : "standard");
-  if (prices.some((price) => ["recurring", "subscription"].includes(price.pricing_model))) chips.push("subscription");
-  const contexts = new Set(prices.map((price) => price.context || "standard"));
-  if (contexts.has("sale")) chips.push("sale");
-  if (contexts.has("flash_sale")) chips.push("flash sale");
-  return chips;
+  const chips = landingChips({
+    product,
+    selectablePriceIds: config.mode === "selectable" ? (config.selectable_price_ids || []) : [],
+    priceId: config.price_id,
+    formatAmount: (amount, currency) => formatMoney(amount, currency),
+  });
+  return chips.length ? chips : ["standard"];
 }
 
 // The offer's purchase flow as staged nodes — a visual funnel over the SAME inferred data (§6). Read-only.

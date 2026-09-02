@@ -159,6 +159,22 @@ to keep in step, which is the thing this design keeps avoiding.
 and requires identical card line, tooltip and roles — plus an absolute assertion on the text, since
 equality alone would pass if both sides were broken.
 
+### Chip drift between the edit and saved diagrams — CLOSED 2026-09-02
+
+A reviewer spotted the same `PurchaseFlowDiagram` showing `3 quantity tiers` in Edit Offer and
+`$24.22 – $55.71` in View Offer. Both facts were useful — Edit described pricing SHAPE, the saved views
+described AMOUNT — but two builders computing them separately is drift waiting to widen.
+
+`landingChips()` in `purchaseFlow.js` is now the one implementation and both callers use it, so a tiered
+item shows the range AND the tier count everywhere: neither view had to give up its half. Funnel-context
+prices are excluded from landing chips, so an upsell price can never read as something the customer pays
+on the page.
+
+The two STAGE builders stay separate, and that remains deliberate: `offerFunnelStages` describes an offer
+being composed from live form state (with sync and extra-price warnings) and cannot be fed from a saved
+document. Its item builder is a validating function that returns `{error}` on incomplete input, so it
+cannot drive a live preview. What was worth sharing was the part that actually drifted.
+
 **Still to do:** the PRODUCT index. Adopting it is what actually removes the
 cliff for today's UI, and it is the prerequisite for mobile infinite scroll — which otherwise ships with
 rows in offer-id order (there is no chronological index; the sort key is `OFFER#{mode}#{offer_id}`) and a
