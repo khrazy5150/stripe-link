@@ -259,7 +259,10 @@ const activeView = ref("dashboard");
 // Only screens whose layout has actually been converted to a flex column with a scrolling list.
 // Adding a view here BEFORE converting it clips its content, because .owns-scroll stops the view
 // scrolling and the screen would have no scroll of its own.
-const SELF_SCROLLING_VIEWS = new Set(["products"]);
+const SELF_SCROLLING_VIEWS = new Set(["products", "services", "offers"]);
+// landingPages is deliberately NOT here: its list card is v-if="!builderOpen", and the builder is a
+// different two-pane layout that needs the view to scroll normally. Its list already scrolls fine
+// through .app-view.
 const viewOwnsScroll = computed(() => SELF_SCROLLING_VIEWS.has(activeView.value));
 // The active Stripe MODE (test/live) — the dashboard toggle. Drives view remounts + data reloads and the theme
 // class; the backend base is hostname-derived, not this value (plans/STRIPE_MODE_DECOUPLING.md).
