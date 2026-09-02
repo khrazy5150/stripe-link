@@ -21,7 +21,50 @@ def project_prefix() -> str:
     return os.environ.get("PROJECT_PREFIX", "jb")
 
 
+# The Lambda proxy response ceiling. A response that reaches it does not degrade — the request fails
+# outright and the screen stops loading, so this is a cliff to stay away from, not a budget to spend.
+RESPONSE_LIMIT_BYTES = 6 * 1024 * 1024
+
+# Below this, a response cannot be anywhere near the ceiling, so measuring it would be log noise. Above it,
+# we are looking at a list endpoint that is growing and want the trend BEFORE it matters.
+RESPONSE_TRACK_BYTES = 64 * 1024
+
+
+def _emit_response_size(size: int) -> None:
+    """Publish response size as a CloudWatch metric via Embedded Metric Format.
+
+    EMF means a plain log line becomes a metric with no metric filter, no subscription and no extra
+    infrastructure. Dimensioned by Lambda function name, which identifies the endpoint without any handler
+    having to pass a route.
+
+    Measured in BYTES, deliberately not record counts: documents vary enough in size that a count-based
+    threshold misleads. Bytes are the thing the limit is actually expressed in.
+    """
+    import time
+
+    print(json.dumps({
+            "_aws": {
+                "Timestamp": int(time.time() * 1000),
+                "CloudWatchMetrics": [{
+                    "Namespace": "JuniorBay/Api",
+                    "Dimensions": [["FunctionName", "Environment"]],
+                    "Metrics": [{"Name": "ResponseBytes", "Unit": "Bytes"}],
+                }],
+            },
+            "FunctionName": os.environ.get("AWS_LAMBDA_FUNCTION_NAME", "local"),
+            "Environment": runtime_environment(),
+            "ResponseBytes": size,
+        "PercentOfLimit": round(100 * size / RESPONSE_LIMIT_BYTES, 1),
+    }))
+
+
 def json_response(body: dict[str, Any], status_code: int = 200) -> dict[str, Any]:
+    serialized = json.dumps(body, cls=JsonEncoder)
+    if len(serialized) >= RESPONSE_TRACK_BYTES:
+        try:
+            _emit_response_size(len(serialized))
+        except Exception:  # noqa: BLE001 - a metric is worth nothing if it can take the API down with it
+            pass
     return {
         "statusCode": status_code,
         "headers": {
@@ -30,7 +73,7 @@ def json_response(body: dict[str, Any], status_code: int = 200) -> dict[str, Any
             "Access-Control-Allow-Headers": "Content-Type,Authorization,X-Tenant-Id,X-Client-Id,X-Environment,X-Stripe-Mode",
             "Access-Control-Allow-Methods": "OPTIONS,GET,POST,PUT,PATCH,DELETE",
         },
-        "body": json.dumps(body, cls=JsonEncoder),
+        "body": serialized,
     }
 
 
