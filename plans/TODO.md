@@ -1097,7 +1097,11 @@ third-party security assessment is required.
      confirms building that mechanism generally rather than as per-element colour fields.
   5. **Quote** — new element; pull-quote with a vertical accent bar, plus the OPTIONAL attribution the
      legacy lacks. Not `testimonials`: that carries an endorsement, this carries an idea.
-  6. **Brand Marquee** — ENHANCEMENT of the existing `client_marquee`; see plans/BRAND_MARQUEE.md.
+  6. **Numbered List** (legacy "Benefit List") — heading + ordered authored lines on numbered cards, cap 12.
+     ONE element for benefits AND "how it works" steps — same component, the title is the only difference —
+     so it is named for the shape, not one use. Heading markup (`**coloured**`, `^^highlighted^^`) already
+     exists in `render_headline_markup`.
+  7. **Brand Marquee** — ENHANCEMENT of the existing `client_marquee`; see plans/BRAND_MARQUEE.md.
 - **Sequenced in plans/LANDING_ELEMENTS_UNIT.md, with a STEP 0:** four of the six break the page preset, so
   the section-scoped theme override is built first, once. Quote proves it must be a TOKEN MAP rather than a
   background field — it needs an accent (the bar) as well as a background.

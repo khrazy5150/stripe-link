@@ -11,7 +11,8 @@
 | 3 | Author Bio | establishes authority | no | AUTHOR_BIO.md |
 | 4 | Bragging Points | quantifies the claim | no | AUTHOR_BIO.md §4a |
 | 5 | Quote | lends a idea weight | no | §Quote below |
-| 6 | Brand Marquee | reassures | no | BRAND_MARQUEE.md (enhancement) |
+| 6 | Numbered List | enumerates (benefits OR steps) | no | §Numbered List below |
+| 7 | Brand Marquee | reassures | no | BRAND_MARQUEE.md (enhancement) |
 
 ## ⭐ Step 0 — the section-scoped theme override
 
@@ -62,6 +63,37 @@ A pull-quote with a vertical accent bar.
 quote is not mistaken for an endorsement nobody gave. That is a styling obligation, not a warning: the
 element already exists for endorsements.
 
+## Numbered List (legacy: "Benefit List")
+
+A section title plus an ordered list of authored lines, each on a card with a numbered badge.
+
+    **What's Inside** The Course
+
+    (1)  Learn All About Successful Social Media Marketing
+    (2)  Implement the Knowledge for Yourself or Your Business
+    (3)  Understand Secrets Behind Successful Influencers
+
+- **Fields:** `heading`, `items[]` (plain strings), cap 12 as the legacy has.
+- **Not repeatable** as an element; the list inside it is what repeats.
+- **`free` placement.**
+- The heading uses `render_headline_markup`, which **already** supports the legacy's two forms —
+  `**coloured**` and `^^highlighted^^` — so there is no new parser and it behaves like every other heading.
+
+### One element, not two — benefits AND steps
+
+"How it works" steps were on the wanted-elements list separately. They are this component: a numbered badge
+beside a line of authored text. The only difference is the title the tenant types — *What's Inside* versus
+*How It Works* — which is content, not structure.
+
+Building them separately means two visually identical elements and a tenant wondering which to pick. Same
+argument as Bragging Points and the stats band, which was accepted. **Name it for the shape
+(`numbered_list`), not for one of its uses**, so neither framing is privileged.
+
+### Not `faq`, not `product_details`
+
+`faq` is expandable Q&A — the visitor chooses what to open. This is a flat list they read. `product_details`
+renders a gallery and badges from PRODUCT data; this is authored page copy. Checked, not assumed.
+
 ## Build order
 
 0. **Section-scoped theme override** + derived foreground. Nothing visible ships; three elements depend on it.
@@ -70,8 +102,9 @@ element already exists for endorsements.
 2. **Author Bio** — first override consumer.
 3. **Bragging Points** — second consumer; near-free if step 0 is right, and the proof that it is.
 4. **Quote** — third consumer, and the one that needs `accent` as well as `bg`.
-5. **Brand Marquee** — the silent text-drop bug, three-state scroll, speed slider.
-6. **Page Ribbon** — largest, and the only one with CTA plumbing.
+5. **Numbered List** — no override, reuses the existing heading markup; the simplest of the six.
+6. **Brand Marquee** — the silent text-drop bug, three-state scroll, speed slider.
+7. **Page Ribbon** — largest, and the only one with CTA plumbing.
 
 Risky decisions first, biggest element last, and each override consumer validates step 0 before the next
 one depends on it.
