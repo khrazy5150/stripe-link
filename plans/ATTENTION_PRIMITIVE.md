@@ -68,6 +68,110 @@ what separates this from sludge.
 **Platform adaptation, not duplication** — one insight compiled into native formats: IG multi-slide carousel;
 TikTok 7–12s fast hook; YouTube Shorts 20–40s talking-head script.
 
+## 4a. ⭐ The OWNED channel — Attention Blocks on the tenant's own page
+
+Every channel in §2 is **rented**: IG, TikTok and YT Shorts each decide who sees a post. The tenant's own
+published page is the one surface they own outright, and today it carries no attention surface at all.
+
+```
+  AttentionContext
+        │
+   ┌────┴──────────────┬──────────┬──────────┐
+   ▼                   ▼          ▼          ▼
+ ATTENTION BLOCK      IG        TikTok    YT Shorts
+ (owned — this §)     └──────── rented ───────┘
+```
+
+**Attention Block** is the primitive; **Page Ribbon** is its first presentation. Naming it that way leaves
+room for Attention Card / Grid / Modal / Feed without forcing every future mechanism into a ribbon shape —
+and it matches how this codebase already works, where an element declares a presentation and the composition
+layer places it.
+
+### What it is
+
+A horizontal interruption placed mid-scroll, after the visitor has enough context to care:
+
+    [image]   EYEBROW
+              Headline
+              Supporting copy, with an optional inline link
+              [ CTA → ]
+
+Borrowed from YouTube's Premium banner, which is the same idea aimed at the same job.
+
+### Why it is not a `content_block`
+
+`content_block` is image + heading + text, repeatable. The Ribbon adds an **action**, and that changes its
+category: a content block informs, a ribbon asks. Same reason `checkout_cta` is its own element rather than
+a styled paragraph.
+
+### The twelve uses, sorted by what they actually require
+
+| Needs nothing new | Needs per-visitor state |
+|---|---|
+| promote an offer · upsell · cross-sell · limited-time sale · lead magnet · tenant content · video/channel · membership · affiliate · seasonal merchandising | free-shipping threshold ("you're $17 away") · live social-proof counts |
+
+**Ten of twelve are static.** That is the whole argument for shipping the static Ribbon first and treating
+the dynamic layer as separate work — it is not a compromise, it is most of the value.
+
+### ⚠️ The constraint that decides everything: pages are STATIC artifacts
+
+`runtime/publishing.py` renders a page ONCE at publish time and `put_object`s it to S3; CloudFront serves the
+bytes. There is no per-request render, so **nothing on a published page can vary by visitor server-side.**
+
+Every context-aware case — *has purchased Product A*, *cart is $75*, *returning visitor* — therefore needs
+**client-side hydration**: the Ribbon ships as markup plus a small script that reads cart/purchase state and
+swaps its content. That is a real project (a state source the page may read, a swap that does not shift
+layout, a no-JS fallback) and it belongs after the static Ribbon exists, not inside it.
+
+### The `purpose` field — only where it changes behaviour
+
+A ten-value enum that renders identically in every case is a taxonomy without behaviour: a field the tenant
+must think about for no return. `purpose` earns its place only where it CHANGES something — the default copy,
+which fields appear, what the CTA may target, or where the block is placed.
+
+Start with the three that genuinely differ:
+
+| purpose | what it changes |
+|---|---|
+| `promote_offer` | CTA targets one of the tenant's own offers/pages; copy seeded from that offer's semantic model |
+| `capture_lead` | CTA targets a form/email capture; no price shown |
+| `promote_content` | CTA targets a URL; supports a video thumbnail |
+
+`custom` covers everything else. Add a purpose when it does work, not when it names a use case.
+
+### The wallpaper rule
+
+Three ribbons stop being interruptions and become wallpaper — which destroys the only property that makes
+this element worth having. **Cap: two per page**, warn on the second. A constraint that protects the feature
+from its own users, in the same spirit as the single non-repeatable `checkout_cta`.
+
+### Presentations (P1)
+
+1. **image-left** — the YouTube formula, the default
+2. **centered** — no image, headline + copy + CTA
+3. **compact row** — image ┃ headline ┃ CTA on one line
+
+A video/animated variant is deferred; `hero_media` already handles video and its lessons should be reused
+rather than re-derived.
+
+### Measurement
+
+The chain the author described — impressions → ribbon views → clicks → offer views → checkout → purchase —
+is exactly §8's attribution model applied to an owned channel, and it is the easiest place to prove that
+model works: same-origin, no platform to ask, no redirect to lose. **Ship Ribbon attribution with the
+Ribbon**, as §8 already argues for shipping attribution early.
+
+### Phasing
+
+- **A-P1 (buildable now):** static Ribbon element — image/eyebrow/headline/copy/CTA, three presentations,
+  repeatable capped at two, `free` placement so the tenant drags it where it belongs, CTA reusing the
+  existing action vocabulary (`external_url`, `open_form`, `capture_email`, `call_number`, …) plus one
+  internal target for "another of my offers/pages".
+- **A-P2:** click attribution on the Ribbon, feeding §8.
+- **A-P3:** client-side hydration for the dynamic cases — cart threshold, purchase state, returning visitor.
+- **A-P4:** generation — the tenant says "promote my new product" and AttentionContext writes the Ribbon
+  alongside the social variants, which is the point of putting it in this document rather than a separate one.
+
 ## 5. Data model (table-per-entity — adapted)
 
 > Source proposal assumed single-table (`PK: TENANT# / SK: CAMPAIGN#…`) and TypeScript. This repo is

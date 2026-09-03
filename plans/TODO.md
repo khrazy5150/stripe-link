@@ -683,6 +683,16 @@ discloses it. These changes are about polish and accidental exposure, not secrec
 - **Money flow:** platform is the seller → rides the **existing platform-billing rail** (as Premium), not Connect.
 
 ### ⭐⭐ HIGH — Attention Primitive (offer → campaign → attribution) — plan 2026-08-28, not built
+- **NEW 2026-09-02 — §4a, the OWNED channel.** Every channel in the plan is RENTED (IG/TikTok/YT decide who
+  sees a post); the tenant's published page is the one surface they own, and it carries no attention surface
+  today. **Attention Block** is the primitive, **Page Ribbon** its first presentation (image · eyebrow ·
+  headline · copy · CTA, mid-scroll).
+- Ten of the twelve uses the author listed are STATIC; only the cart-threshold and live-count ones need
+  per-visitor state. Published pages are static S3 artifacts rendered once at publish time, so those need
+  client-side hydration — a separate phase, not part of the element.
+- A-P1 is buildable now and is a normal element build (~26 refs in html.py, ~11 in LandingPages.vue by the
+  FAQ yardstick). Capped at two per page: three ribbons become wallpaper, which destroys the only property
+  that makes it work.
 - **What:** derive a multi-platform social campaign **from the offer itself**, schedule it, publish it, and
   attribute real GMV back to each post and pillar. Solves the second cold start — **"nobody visits my store"** —
   and is the most differentiating item on the roadmap. Full design: **`plans/ATTENTION_PRIMITIVE.md`**.
