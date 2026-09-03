@@ -1085,7 +1085,13 @@ third-party security assessment is required.
      Tiered offers show the LOWEST price behind a locked "as low as" prefix — which makes it a claim about
      the range rather than about the visitor's selection, so it cannot contradict the price selector and
      needs no script. The strikethrough must pair with that same tier's compare-at, never a higher one.
-  3. **Brand Marquee** — ENHANCEMENT of the existing `client_marquee`; see plans/BRAND_MARQUEE.md.
+  3. **Author Bio** — new element; see plans/AUTHOR_BIO.md. Fixed structure (photo → name → credibility
+     headline → paragraph) and an OPTIONAL pattern break that overrides the page preset for that section.
+     Build the override as a general section-scoped `theme` map, not two fields on this element, or the next
+     pattern-breaking element duplicates it. The foreground must be DERIVED from the chosen background by
+     luminance — the legacy offers background and border pickers but no text colour, so a wrong pick makes
+     the paragraph invisible with no warning.
+  4. **Brand Marquee** — ENHANCEMENT of the existing `client_marquee`; see plans/BRAND_MARQUEE.md.
      Text-or-logo entries (text is silently dropped today — a bug), three-state scroll control, and the
      countdown's 🐢/🐇 speed slider reused rather than re-derived.
 - Still open from the earlier discussion, for pages that exist TODAY: how-it-works steps, comparison table,
