@@ -1091,7 +1091,12 @@ third-party security assessment is required.
      pattern-breaking element duplicates it. The foreground must be DERIVED from the chosen background by
      luminance — the legacy offers background and border pickers but no text colour, so a wrong pick makes
      the paragraph invisible with no warning.
-  4. **Brand Marquee** — ENHANCEMENT of the existing `client_marquee`; see plans/BRAND_MARQUEE.md.
+  4. **Bragging Points** — new element; see plans/AUTHOR_BIO.md §4a. Repeatable `{value, label}` cards that
+     reflow (1 wide / 2 columns / 2+1). Recommended STANDALONE rather than welded to Author Bio: the same
+     component is the "stats band" already wanted ("10,000 customers served"), and locking it inside a bio
+     means building that twice. It is also the SECOND consumer of the section-scoped theme override, which
+     confirms building that mechanism generally rather than as per-element colour fields.
+  5. **Brand Marquee** — ENHANCEMENT of the existing `client_marquee`; see plans/BRAND_MARQUEE.md.
      Text-or-logo entries (text is silently dropped today — a bug), three-state scroll control, and the
      countdown's 🐢/🐇 speed slider reused rather than re-derived.
 - Still open from the earlier discussion, for pages that exist TODAY: how-it-works steps, comparison table,
