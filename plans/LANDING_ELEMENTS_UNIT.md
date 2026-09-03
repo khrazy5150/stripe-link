@@ -14,6 +14,27 @@
 | 6 | Numbered List | enumerates (benefits OR steps) | no | §Numbered List below |
 | 7 | Brand Marquee | reassures | no | BRAND_MARQUEE.md (enhancement) |
 
+## ⭐ Step 0 — the section-scoped theme override — **BUILT 2026-09-02**
+
+`domain/section_theme.py` + `tests/test_section_theme.py`. Emits `--sl-section-bg` / `-accent` / `-border`
+plus a DERIVED `--sl-section-ink`, namespaced so a section override can never collide with a page token and
+an element must opt in explicitly (`var(--sl-section-bg, var(--sl-background))`). Unknown keys and
+unparseable colours are dropped rather than echoed into a style attribute.
+
+**Two things the measurements changed, neither visible in the code:**
+
+- The first version thresholded luminance at 0.42 to choose the ink. It picked the WORSE ink for orange,
+  mid-grey and green — three of ten test colours. Computing the contrast for both candidates and taking the
+  higher is exact and has no number to tune.
+- The ink pair was chosen for looks (`#111827` / `#f8fafc`) and the softened white dropped the worst case to
+  **4.49:1** on mid-grey, just under WCAG AA. Pure white holds **4.83:1** and clears AA on every background
+  tried, while the dark ink can stay near-black for free. Measured, not preferred.
+
+The whole promise of this feature is "pick one colour, get readable text", so a pair that fails AA anywhere
+would have quietly broken it.
+
+### Original design notes
+
 ## ⭐ Step 0 — the section-scoped theme override
 
 **FOUR of the six want to break the page preset**: Author Bio (background + image border), Bragging Points
