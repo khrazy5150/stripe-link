@@ -1079,7 +1079,12 @@ third-party security assessment is required.
      Image · eyebrow · headline · copy · CTA, capped at two per page, three presentations. A-P1 there is the
      static version; the context-aware layer is A-P3 and needs client-side hydration, because published
      pages are static S3 artifacts.
-  2. **Brand Marquee** — ENHANCEMENT of the existing `client_marquee`; see plans/BRAND_MARQUEE.md.
+  2. **Price Highlight** — new element (legacy "Price & Urgency"); see plans/PRICE_HIGHLIGHT.md. Standalone
+     bargain block: regular price struck through + sale price + two authored lines, no CTA. Numbers DERIVED
+     from the offer, tokens reused from `offer_price_selector` so every preset styles it already. Open
+     decision recorded: it must sync with the price selector on tiered offers, or the same page can show two
+     different prices.
+  3. **Brand Marquee** — ENHANCEMENT of the existing `client_marquee`; see plans/BRAND_MARQUEE.md.
      Text-or-logo entries (text is silently dropped today — a bug), three-state scroll control, and the
      countdown's 🐢/🐇 speed slider reused rather than re-derived.
 - Still open from the earlier discussion, for pages that exist TODAY: how-it-works steps, comparison table,
