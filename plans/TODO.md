@@ -1095,7 +1095,12 @@ third-party security assessment is required.
      reflow (1 wide / 2 columns / 2+1). STANDALONE (decided 2026-09-02) — it is the "stats band" already
      wanted ("10,000 customers served") and the author's brag, with one implementation. It is also the SECOND consumer of the section-scoped theme override, which
      confirms building that mechanism generally rather than as per-element colour fields.
-  5. **Brand Marquee** — ENHANCEMENT of the existing `client_marquee`; see plans/BRAND_MARQUEE.md.
+  5. **Quote** — new element; pull-quote with a vertical accent bar, plus the OPTIONAL attribution the
+     legacy lacks. Not `testimonials`: that carries an endorsement, this carries an idea.
+  6. **Brand Marquee** — ENHANCEMENT of the existing `client_marquee`; see plans/BRAND_MARQUEE.md.
+- **Sequenced in plans/LANDING_ELEMENTS_UNIT.md, with a STEP 0:** four of the six break the page preset, so
+  the section-scoped theme override is built first, once. Quote proves it must be a TOKEN MAP rather than a
+  background field — it needs an accent (the bar) as well as a background.
      Text-or-logo entries (text is silently dropped today — a bug), three-state scroll control, and the
      countdown's 🐢/🐇 speed slider reused rather than re-derived.
 - Still open from the earlier discussion, for pages that exist TODAY: how-it-works steps, comparison table,
