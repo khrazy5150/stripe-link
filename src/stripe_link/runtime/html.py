@@ -606,6 +606,16 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     # Price highlight (plans/PRICE_HIGHLIGHT.md). Every colour falls through to the PRICE element's tokens,
     # so a preset styles this on day one and it cannot drift from the price card beside it. --sl-section-*
     # is the optional per-section override; absent, these resolve to the page theme.
+    # Author bio (plans/AUTHOR_BIO.md). Colours fall through to the page theme unless the section
+    # overrides them; --sl-section-ink is derived from the chosen background so the copy stays readable.
+    "    .sl-author-bio{display:grid;gap:1.2rem;justify-items:center;text-align:center;padding:4rem 2rem;background:var(--sl-section-bg,transparent);color:var(--sl-section-ink,var(--sl-text))}",
+    # The ring reads as a portrait frame; it falls back to the theme accent when the tenant sets no border.
+    "    .sl-author-photo{width:14rem;height:14rem;border-radius:50%;overflow:hidden;box-shadow:0 0 0 0.5rem var(--sl-section-border,var(--sl-accent))}",
+    "    .sl-author-photo img{width:100%;height:100%;object-fit:cover;display:block}",
+    # A pill, so the name reads as an attribution rather than a second heading.
+    "    .sl-author-name{margin:0;display:inline-block;padding:0.4rem 1.4rem;border-radius:999px;background:var(--sl-section-border,var(--sl-accent));color:var(--sl-cta-text,#fff);font-size:1.3rem;font-weight:700;text-transform:uppercase;letter-spacing:0.06em}",
+    "    .sl-author-headline{margin:0;font-family:var(--sl-font-heading);font-size:clamp(2.4rem,5vw,3.6rem);line-height:1.2;color:var(--sl-section-ink,var(--sl-text))}",
+    "    .sl-author-body{margin:0;max-width:62rem;font-size:1.6rem;line-height:1.7;color:var(--sl-section-ink,var(--sl-muted))}",
     "    .sl-price-highlight{display:grid;gap:0.6rem;justify-items:center;text-align:center;padding:3.2rem 2rem;background:var(--sl-section-bg,transparent);color:var(--sl-section-ink,var(--sl-text))}",
     "    .sl-bargain-regular{margin:0;font-size:1.5rem;color:var(--sl-section-ink,var(--sl-price-regular));opacity:0.75}",
     "    .sl-bargain-amount{margin:0;font-family:var(--sl-font-heading);font-size:clamp(4rem,10vw,6.4rem);line-height:1;font-weight:800;color:var(--sl-section-ink,var(--sl-price-amount))}",
@@ -1756,6 +1766,7 @@ SECTION_REGISTRY: dict[str, dict[str, Any]] = {
     "rating": {"render": lambda c: render_rating(c.section), "version": 1},
     "client_marquee": {"render": lambda c: render_client_marquee(c.section), "version": 1},
     "price_highlight": {"render": lambda c: render_price_highlight(c.section, c.offer, c.products_by_id, c.services_by_id), "version": 1},
+    "author_bio": {"render": lambda c: render_author_bio(c.section), "version": 1},
     "product_details": {"render": lambda c: render_product_details(c.offer, c.products_by_id, c.services_by_id), "version": 1},
     "product_carousel": {"render": lambda c: render_product_carousel(c.section, c.page, c.offers_by_id, c.products_by_id, c.services_by_id, c.checkout_url, c.api_base_url), "version": 1},
     "post_purchase_carousel": {"render": lambda c: render_post_purchase_carousel(c.section, c.page, c.api_base_url), "version": 1},
@@ -3559,6 +3570,8 @@ def responsive_img(url: str, alt: str, *, sizes: str, eager: bool = False, dims:
 # ~52rem content column (full width on phones); price-option thumbnails are a fixed 9rem.
 HERO_MEDIA_SIZES = "(min-width: 52rem) 52rem, 100vw"
 CONTENT_BLOCK_SIZES = "(min-width: 52rem) 52rem, 100vw"
+# The author photo is a fixed circle, so one modest size covers every viewport.
+AUTHOR_PHOTO_SIZES = "220px"
 PRICE_OPTION_SIZES = "9rem"
 
 
@@ -3978,6 +3991,47 @@ def render_price_highlight(
     section_id = escape(str(section.get("id", "price-highlight")))
     return "\n".join([
         f'    <section class="sl-price-highlight{themed}" data-section-id="{section_id}" data-section-type="price_highlight"{style_attr}>',
+        *rows,
+        "    </section>",
+    ])
+
+
+def render_author_bio(section: dict[str, Any]) -> str:
+    """Credibility block: photo, name, a headline that earns attention, then the detail.
+
+    The ORDER is the element (plans/AUTHOR_BIO.md): person -> name -> why they are worth hearing -> proof.
+    It is not tenant-arrangeable, because rearranging it breaks the argument it encodes.
+
+    Optionally breaks the page preset via the shared section override — and when it does, the ink is
+    DERIVED from the chosen background, so a tenant cannot produce unreadable text by picking a colour.
+    """
+    name = str(section.get("name") or "").strip()
+    headline = str(section.get("headline") or "").strip()
+    body = str(section.get("body") or "").strip()
+    photo = str(section.get("photo_url") or "").strip()
+    if not (name or headline or body or photo):
+        return ""
+
+    rows: list[str] = []
+    if photo:
+        alt = escape(name or "Author")
+        rows.append(
+            f'      <div class="sl-author-photo">{responsive_img(photo, alt, sizes=AUTHOR_PHOTO_SIZES)}</div>'
+        )
+    if name:
+        rows.append(f'      <p class="sl-author-name">{escape(name)}</p>')
+    if headline:
+        # h2 so the block joins the page heading outline (plans/SEMANTIC_HTML.md) rather than floating.
+        rows.append(f'      <h2 class="sl-author-headline">{render_headline_markup(headline)}</h2>')
+    if body:
+        rows.append(f'      <p class="sl-author-body">{escape(body)}</p>')
+
+    style = section_theme_vars(section)
+    style_attr = f' style="{escape(style)}"' if style else ""
+    themed = " sl-section-themed" if style else ""
+    section_id = escape(str(section.get("id", "author-bio")))
+    return "\n".join([
+        f'    <section class="sl-author-bio{themed}" data-section-id="{section_id}" data-section-type="author_bio"{style_attr}>',
         *rows,
         "    </section>",
     ])

@@ -614,6 +614,40 @@
                       <label class="offer-field"><span>Label</span><input v-model.trim="element.label" type="text" placeholder="e.g. on Google" /></label>
                     </template>
 
+                    <template v-else-if="element.type === 'author_bio'">
+                      <div class="selectable-price-image-controls" :class="{ 'has-image-preview': element.photo_url }">
+                        <div v-if="element.photo_url" class="selectable-price-image-preview">
+                          <img :src="element.photo_url" alt="Author photo preview" />
+                        </div>
+                        <input :ref="(el) => setElementImageInput(element.id, el)" type="file" accept="image/*" hidden @change="handleElementImagePicked(element, $event, 'photo_url')" />
+                        <button class="secondary-action compact" type="button" :disabled="Boolean(blurbImageUploading[element.id])" @click.prevent="triggerElementImageUpload(element.id)">
+                          {{ blurbImageUploading[element.id] ? "Uploading..." : "Upload photo" }}
+                        </button>
+                      </div>
+                      <label class="offer-field"><span>Name</span><input v-model.trim="element.name" type="text" placeholder="e.g. Jordan Belfort" /></label>
+                      <label class="offer-field">
+                        <span>Credibility headline</span>
+                        <input v-model.trim="element.headline" type="text" placeholder="Learn From Someone Who's Done **$6M+** In Sales" />
+                        <small class="field-note">**text** colours a phrase, ^^text^^ highlights it.</small>
+                      </label>
+                      <label class="offer-field"><span>About</span><textarea v-model.trim="element.body" rows="4" placeholder="Why this person is worth listening to."></textarea></label>
+                      <label class="builder-toggle">
+                        <input type="checkbox" :checked="Boolean(element.theme && element.theme.bg)" @change="toggleSectionBreak(element, $event)" />
+                        <span>Break the page style for this section</span>
+                      </label>
+                      <div v-if="element.theme && element.theme.bg" class="offer-two-column">
+                        <label class="offer-field">
+                          <span>Background</span>
+                          <input v-model.trim="element.theme.bg" type="color" />
+                          <small class="field-note">Text colour is chosen automatically so it stays readable.</small>
+                        </label>
+                        <label class="offer-field">
+                          <span>Photo ring</span>
+                          <input v-model.trim="element.theme.border" type="color" />
+                        </label>
+                      </div>
+                    </template>
+
                     <template v-else-if="element.type === 'price_highlight'">
                       <p class="field-note">
                         The prices come from this offer's products — the sale price, and the regular price
@@ -3825,6 +3859,19 @@ async function handleAvatarPicked(event) {
 // The addable body elements come from the shared element catalog (Builder Reframe) — one source, one label.
 const ELEMENT_TYPES = computed(() => addableElements());
 
+// The pattern break is driven by the BACKGROUND: the ink derives from it, so clearing the background is
+// what returns the section to the page preset. A default is seeded on enable so the toggle does something
+// visible immediately.
+function toggleSectionBreak(element, event) {
+  if (!element.theme) element.theme = {};
+  if (event.target.checked) {
+    element.theme.bg = element.theme.bg || "#111827";
+    element.theme.border = element.theme.border || "#ffffff";
+  } else {
+    element.theme = {};
+  }
+}
+
 function newElement(type) {
   const base = { id: localId("el"), type };
   // Sensible default headings so the tenant isn't guessing — they can always reword them.
@@ -3836,6 +3883,7 @@ function newElement(type) {
   if (type === "related_products") return { ...base, heading: "Related products" };
   // The NUMBERS are derived from the offer; only these two lines are the tenant's.
   if (type === "price_highlight") return { ...base, main_text: "Today Only", subtext: "" };
+  if (type === "author_bio") return { ...base, photo_url: "", name: "", headline: "", body: "", theme: {} };
   // product_details is fully offer-driven (current target's gallery/badges/description) — no config.
   return base;
 }
@@ -3907,14 +3955,16 @@ function setElementImageInput(id, el) {
 function triggerElementImageUpload(id) {
   blurbImageInputs.value[id]?.click();
 }
-async function handleElementImagePicked(element, event) {
+// `field` lets an element name its own image property — author_bio stores a photo_url, content_block an
+// image_url. Defaulted, so every existing caller is unchanged.
+async function handleElementImagePicked(element, event, field = "image_url") {
   const file = event.target.files?.[0];
   event.target.value = "";
   if (!file) return;
   blurbImageErrors[element.id] = "";
   blurbImageUploading[element.id] = true;
   try {
-    element.image_url = await uploadPageImage(file);
+    element[field] = await uploadPageImage(file);
   } catch (err) {
     blurbImageErrors[element.id] = err.message || "Image upload failed.";
   } finally {
@@ -4212,6 +4262,13 @@ function elementSection(element) {
   if (element.type === "product_details") {
     return { id: element.id, type: "product_details" };   // content is the current target (offer-driven)
   }
+  if (element.type === "author_bio") {
+    if (!element.photo_url && !element.name && !element.headline && !element.body) return null;
+    const theme = element.theme && element.theme.bg ? element.theme : undefined;
+    return { id: element.id, type: "author_bio", photo_url: element.photo_url || undefined,
+      name: element.name || undefined, headline: formatHeadline(element.headline || "") || undefined,
+      body: element.body || undefined, theme };
+  }
   if (element.type === "price_highlight") {
     // Never null: the NUMBERS come from the offer, so this section is meaningful even with no copy at all.
     // The empty-check other elements use would wrongly drop it.
@@ -4235,6 +4292,10 @@ function elementsFromPage(sections) {
     } else if (section.type === "testimonials") {
       elements.push({ id: localId("el"), type: "testimonials", heading: section.heading || "",
         items: (section.items || []).map((item) => ({ quote: item.quote || "", author: item.author || "", role: item.role || "", avatar_url: item.avatar_url || "" })) });
+    } else if (section.type === "author_bio") {
+      elements.push({ id: localId("el"), type: "author_bio", photo_url: section.photo_url || "",
+        name: section.name || "", headline: section.headline || "", body: section.body || "",
+        theme: section.theme ? { ...section.theme } : {} });
     } else if (section.type === "price_highlight") {
       elements.push({ id: localId("el"), type: "price_highlight",
         main_text: section.main_text || "", subtext: section.subtext || "" });

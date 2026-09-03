@@ -5,7 +5,7 @@
     "countdown_timer", "brand_label", "seo_title", "hero_media", "hero", "headline", "subheadline",
     "brand_hero", "seller_profile",
     "product_details", "product_carousel", "catalog_grid",
-    "rating", "testimonials", "content_block", "client_marquee", "faq",
+    "rating", "testimonials", "author_bio", "content_block", "client_marquee", "faq",
     "trust_badges", "price_highlight", "offer_price_selector", "checkout_cta", "refund_policy",
     "related_products", "legal_footer"
   ],
@@ -24,6 +24,7 @@
     "content_block":        { "placement": "free", "label": "Content block",    "ui": "add",    "kind": "capability", "channel": "body", "heading_role": "h2",   "repeatable": true,  "tokens": ["content_heading", "content_text", "content_border"] },
     "testimonials":         { "placement": "free", "label": "Testimonials",     "ui": "add",    "kind": "capability", "channel": "body", "heading_role": "h2",   "repeatable": false,  "tokens": ["content_heading", "content_text", "content_border"] },
     "rating":               { "placement": "free", "label": "Rating",           "ui": "add",    "kind": "capability", "channel": "body", "heading_role": "none", "repeatable": false, "tokens": ["content_text"] },
+    "author_bio":           { "placement": "free", "label": "Author bio",      "ui": "add",    "kind": "capability", "channel": "body", "heading_role": "h2",   "repeatable": false, "tokens": ["content_heading", "content_text", "content_border"] },
     "price_highlight":      { "placement": "free", "label": "Price highlight", "ui": "add",    "kind": "capability", "channel": "body", "heading_role": "none", "repeatable": false, "tokens": ["price_amount", "price_regular", "price_title", "price_description"] },
     "client_marquee":       { "placement": "free", "label": "Client logos",     "ui": "add",    "kind": "capability", "channel": "body", "heading_role": "h2",   "repeatable": false, "tokens": ["content_heading", "content_border"] },
     "structured_data":      { "placement": "none", "label": "Structured data (SEO)", "ui": "toggle", "kind": "capability", "channel": "head", "heading_role": "none", "repeatable": false, "tokens": [] },

@@ -1,6 +1,7 @@
 # Author Bio — credibility block, with an optional pattern break
 
-**Status:** PLANNED, not built. A NEW element.
+**Status:** BUILT 2026-09-02. `render_author_bio` + registry entry `author_bio`, first consumer of
+the step-0 section override. Bragging Points (§4a) still to build.
 
 ## 1. What it is
 

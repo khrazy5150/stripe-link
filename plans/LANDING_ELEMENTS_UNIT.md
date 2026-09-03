@@ -120,7 +120,7 @@ renders a gallery and badges from PRODUCT data; this is authored page copy. Chec
 0. **Section-scoped theme override** + derived foreground. Nothing visible ships; three elements depend on it.
 1. **Price Highlight** — ✅ BUILT 2026-09-02. Derived numbers, no CTA, `as low as` for tiers, renders
    without a strikethrough when there is no discount rather than rendering nothing.
-2. **Author Bio** — first override consumer.
+2. **Author Bio** — ✅ BUILT 2026-09-02. First override consumer; the derived ink works end to end.
 3. **Bragging Points** — second consumer; near-free if step 0 is right, and the proof that it is.
 4. **Quote** — third consumer, and the one that needs `accent` as well as `bg`.
 5. **Numbered List** — no override, reuses the existing heading markup; the simplest of the six.
@@ -129,3 +129,22 @@ renders a gallery and badges from PRODUCT data; this is authored page copy. Chec
 
 Risky decisions first, biggest element last, and each override consumer validates step 0 before the next
 one depends on it.
+
+
+## Element descriptor refactor — DECLINED 2026-09-02
+
+Considered collapsing the five per-element registration points (catalog, renderer, SECTION_REGISTRY,
+`elementSection`, `elementsFromPage`) into one descriptor per element. **Not doing it.**
+
+The failure it would prevent — forgetting a registration — is already caught by
+`tests/test_element_registration.py`, which fails loudly on a miss and was verified against the real
+`price_highlight` bug. What remains is ergonomics, and the refactor would mean touching working serializers
+for eight live elements to buy it.
+
+These elements are also used in exactly ONE builder. A registry abstraction earns its keep when several
+consumers must agree; here there is one, and the builder is otherwise robust. Knowing where to register is
+sufficient, and the test enforces that knowledge.
+
+Generation was never the right target regardless: seven elements carry per-element emptiness policy, three
+filter incomplete sub-items, and `content_block` expands one section into several elements on restore.
+A schema expressing that would be a small programming language.
