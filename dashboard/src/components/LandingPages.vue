@@ -4046,10 +4046,15 @@ const contentRows = computed(() => {
   // a freshly added content block emits nothing and would never appear — the tenant clicks "+ Content
   // block" and sees no result. Element rows therefore come from builder.elements, the tenant's actual
   // list, not from what happens to render.
+  // Key the row the way the SECTION would be keyed, not by element id. Only repeatable types key by id;
+  // a non-repeatable element (author_bio, faq, price_highlight) keys by TYPE, so deduping on element.id
+  // matched nothing and every one of them got a second, phantom row — sorted somewhere else entirely,
+  // which is what "the section is out of order" looked like from the form.
   for (const element of builder.elements) {
-    if (rows.some((row) => row.key === element.id)) continue;
+    const key = sectionOrderKey(element);
+    if (rows.some((row) => row.key === key)) continue;
     rows.push({
-      key: element.id,
+      key,
       type: element.type,
       label: elementLabel(element.type),
       editor: "element",
@@ -4149,7 +4154,10 @@ function commitNewSection() {
   if (!element || builder.elements.length >= 20) return;
   builder.elements.push(element);
   // Land at the END of the run, next to the buttons that created it.
-  builder.section_order = [...sequenceRows.value.map((r) => r.key).filter((k) => k !== element.id), element.id];
+  // Same key the readers use — writing element.id here filed the tenant's "put it last" under a key
+  // nothing ever looks up, so a newly added non-repeatable element silently fell back to its baseline slot.
+  const key = sectionOrderKey(element);
+  builder.section_order = [...sequenceRows.value.map((r) => r.key).filter((k) => k !== key), key];
 }
 
 // The one line that makes a collapsed row worth scanning. Without it the map is a list of type names.

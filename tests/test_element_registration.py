@@ -67,3 +67,38 @@ class AddableElementRegistrationTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SectionOrderKeyTests(unittest.TestCase):
+    """A section's order key is its TYPE, unless the type is repeatable — then it is the element id.
+
+    The bug this exists to prevent, found 2026-09-02 from a builder screenshot: two sites keyed elements
+    by raw `element.id` while every reader keyed them by `sectionOrderKey`. For a NON-repeatable element
+    (author_bio, faq, price_highlight) those differ, so the row-dedupe matched nothing and each one grew a
+    second, phantom row that sorted somewhere the real section did not — the form and the live preview
+    disagreed about where the section was. Same shape as the class above: two places that must agree.
+    """
+
+    def _body(self, name):
+        start = BUILDER.index(f"{name}")
+        return BUILDER[start:start + 1200]
+
+    def test_element_rows_dedupe_by_order_key_not_id(self):
+        # contentRows() appends a row for any element the composed sections did not already emit. The
+        # identity test must be the ORDER KEY; element.id only equals it for repeatable types.
+        self.assertNotIn("row.key === element.id", BUILDER)
+
+    def test_section_order_is_written_with_order_keys(self):
+        # Every assignment to builder.section_order must carry keys, never raw element ids.
+        for match in re.finditer(r"builder\.section_order = (.+)", BUILDER):
+            self.assertNotRegex(
+                match.group(1), r"\belement\.id\b",
+                "section_order must be written with sectionOrderKey(element), not element.id",
+            )
+
+    def test_repeatable_types_are_the_only_id_keyed_ones(self):
+        # Guards the premise: if nothing were repeatable, keying by type would be trivially correct and
+        # the assertions above would be testing nothing.
+        repeatable = sorted(k for k, spec in RULES["elements"].items() if spec.get("repeatable"))
+        self.assertTrue(repeatable)
+        self.assertNotIn("author_bio", repeatable)
