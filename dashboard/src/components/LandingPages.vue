@@ -4212,6 +4212,12 @@ function elementSection(element) {
   if (element.type === "product_details") {
     return { id: element.id, type: "product_details" };   // content is the current target (offer-driven)
   }
+  if (element.type === "price_highlight") {
+    // Never null: the NUMBERS come from the offer, so this section is meaningful even with no copy at all.
+    // The empty-check other elements use would wrongly drop it.
+    return { id: element.id, type: "price_highlight",
+      main_text: element.main_text || undefined, subtext: element.subtext || undefined };
+  }
   if (element.type === "related_products") {
     return { id: element.id, type: "related_products", heading: element.heading || undefined };  // cards resolved at publish
   }
@@ -4229,6 +4235,9 @@ function elementsFromPage(sections) {
     } else if (section.type === "testimonials") {
       elements.push({ id: localId("el"), type: "testimonials", heading: section.heading || "",
         items: (section.items || []).map((item) => ({ quote: item.quote || "", author: item.author || "", role: item.role || "", avatar_url: item.avatar_url || "" })) });
+    } else if (section.type === "price_highlight") {
+      elements.push({ id: localId("el"), type: "price_highlight",
+        main_text: section.main_text || "", subtext: section.subtext || "" });
     } else if (section.type === "rating") {
       elements.push({ id: localId("el"), type: "rating", value: section.value ?? 5, count: section.count ?? 0, label: section.label || "" });
     } else if (section.type === "client_marquee") {
