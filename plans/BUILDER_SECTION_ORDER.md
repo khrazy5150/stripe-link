@@ -289,8 +289,19 @@ Two bugs this exposed, both the house pattern of *two things that must agree wit
   Those differ for every NON-repeatable element, so each grew a second phantom row that sorted somewhere
   the real section did not. Reported as "the Author Bio section is out of order".
 - `orderSections` **filtered** `placement: "none"`, which is the row-list rule, not the ordering rule. It
-  was silently stripping the `structured_data` section from every saved page — four of five dev pages had
-  lost their Product/FAQPage JSON-LD. Ordering orders; it never filters.
+  was silently stripping the `structured_data` section from every saved page. Ordering orders; it never
+  filters — filtering `none` belongs to `orderSectionKeys`, which builds the draggable row list.
+
+  Scope, corrected after checking rather than inferring: `structured_data` is goal-gated (granted by
+  `search_seo`, off for `paid_ads`), so only pages whose goal asked for it could lose anything. One dev
+  page was actually affected; no prod page was. "Section absent" is not "section lost" for a gated section.
+
+  The durable fix was to stop STORING it. A head-channel section carries no tenant fields —
+  `render_head_section` builds the JSON-LD from the offer and the page's own sections — so its truth is
+  entirely `is_section_visible`, i.e. the goal's pack plus the tenant's toggle. Keeping a copy in
+  `page.sections` was a second source for a fact the composer already had, retained only because
+  compose_page used to filter and never add. `derived_head_sections()` now generates it, so it cannot be
+  lost by any save path, and a page that already lost it heals on its next publish with no re-save.
 
 Guarded by `tests/test_section_order_parity.py` over `tests/fixtures/section_order_cases.json`: an
 algorithm can't be shared across Python and JS, so both runtimes execute the same fixtures and must agree

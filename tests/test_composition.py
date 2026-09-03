@@ -179,9 +179,34 @@ class GoalCompositionTests(unittest.TestCase):
         self.assertTrue(default_visible("single", "structured_data", "search_seo"))
 
     def test_compose_page_is_unchanged_without_a_goal(self):
-        with_goal = [s["type"] for s in compose_page({"offer_type": "single"}, self._page("search_seo"))]
+        # The union-only guarantee: a page that never picked a goal composes exactly as it did before the
+        # goal axis existed. Stated against the base composition rather than against the search_seo page —
+        # comparing the two only held while the discoverability grant had nothing to surface through, and
+        # asserting they stay equal would now assert the goal axis does nothing at all.
         without = [s["type"] for s in compose_page({"offer_type": "single"}, self._page())]
-        self.assertEqual(with_goal, without)
+        self.assertEqual(without, ["hero", "faq", "trust_badges"])
+        self.assertNotIn("structured_data", without)
+
+    def test_search_seo_adds_the_derived_head_section_and_nothing_else(self):
+        # The composer GENERATES structured_data: it carries no tenant fields, so storing it in the page was
+        # a duplicate of the goal's own grant — and losing that duplicate cost a page its rich results.
+        without = [s["type"] for s in compose_page({"offer_type": "single"}, self._page())]
+        with_goal = [s["type"] for s in compose_page({"offer_type": "single"}, self._page("search_seo"))]
+        self.assertEqual(with_goal, without + ["structured_data"])
+
+    def test_a_derived_head_section_is_never_duplicated(self):
+        # Pages saved by the old builder still carry a stored marker; it must not compose twice.
+        page = self._page("search_seo")
+        page["sections"] = list(page["sections"]) + [{"id": "structured-data", "type": "structured_data"}]
+        types = [s["type"] for s in compose_page({"offer_type": "single"}, page)]
+        self.assertEqual(types.count("structured_data"), 1)
+
+    def test_a_page_that_lost_its_marker_heals_without_a_re_save(self):
+        # The actual recovery path: the section is absent from the document, the goal still asks for it,
+        # and the next publish emits the JSON-LD anyway.
+        page = self._page("search_seo")
+        page["sections"] = [s for s in page["sections"] if s["type"] != "structured_data"]
+        self.assertIn("structured_data", [s["type"] for s in compose_page({"offer_type": "single"}, page)])
 
     def test_overrides_still_beat_the_goal_default(self):
         page = self._page("search_seo")

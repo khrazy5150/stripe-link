@@ -3580,13 +3580,10 @@ function builderSectionCandidates(intent) {
     type: "legal_footer",
     copyright: defaultFooterCopyrightTemplate,
   });
-  // Derived head section: carries no tenant fields — render_structured_data generates the JSON-LD from the
-  // offer and the sections the composer put on the page. It exists in sections[] only because compose_page
-  // filters rather than adds, so the section has to be present for the composer to keep it. The goal turns
-  // it on via the discoverability pack (plans/LANDING_PAGE_GOAL_COMPOSITION.md).
-  if (sectionVisible("structured_data")) {
-    sections.push({ id: "structured-data", type: "structured_data" });
-  }
+  // The structured_data head section is NOT stored: compose_page derives it from the goal's capability
+  // pack plus the tenant's toggle, which is where its truth already lived. It used to be pushed here only
+  // because the composer filtered and never added — and that duplicate is exactly what cost a page its
+  // Product/FAQPage markup when a save-path bug dropped the marker while the goal still said to emit it.
   return sections;
 }
 

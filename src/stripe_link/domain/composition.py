@@ -152,6 +152,29 @@ def page_goal(page: dict[str, Any]) -> str:
     return str((page or {}).get("goal") or "")
 
 
+def derived_head_sections(offer_type, overrides, goal, present) -> list[dict[str, Any]]:
+    """Head-channel sections the composer GENERATES rather than reads off the page.
+
+    A head section (structured_data today) carries no tenant fields at all — render_head_section builds the
+    JSON-LD from the offer and the sections already on the page. Its truth is entirely `is_section_visible`,
+    which is to say the goal's capability pack plus the tenant's toggle. Storing it in `page.sections` as
+    well was a second copy of a fact the composer already had, kept only because compose_page used to filter
+    and never add — a constraint that no longer holds.
+
+    That duplicate cost a page its rich results: a save-path bug dropped the stored marker, and with it the
+    page's entire Product/FAQPage markup, even though the goal still said it should be there. Derived, it
+    cannot be lost, and a page that lost it heals on the next publish with no re-save.
+    """
+    seen = {str(section.get("type") or "") for section in present}
+    return [
+        {"id": key.replace("_", "-"), "type": key}
+        for key, spec in RULES.get("elements", {}).items()
+        if spec.get("channel") == "head"
+        and key not in seen
+        and is_section_visible(offer_type, key, overrides, goal)
+    ]
+
+
 # Page kinds whose section sequence is AUTHORED in code rather than composed from a goal: the funnel steps
 # and thank-you pages built by runtime/upsell_pages.py. Composing their order would scramble it — celebration
 # sits in the `free` band while headline/subheadline are `pinned_top`, so a baseline pass drops the
@@ -178,6 +201,7 @@ def compose_page(
         section for section in (page.get("sections") or [])
         if is_section_visible(offer_type, str(section.get("type") or ""), overrides, goal)
     ]
+    visible += derived_head_sections(offer_type, overrides, goal, visible)
     if page_type in AUTHORED_PAGE_TYPES:
         return visible
     return order_sections(visible, page.get("section_order") or (), goal)
