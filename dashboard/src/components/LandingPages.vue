@@ -4114,7 +4114,13 @@ const sequenceRows = computed(() => {
   // Sort by KEY, not type: repeatable elements share a type, so two content blocks would collapse to
   // the same sort index. Element ids are absent from the catalog and fall into the free band, which is
   // exactly right. Rows added for emptied sections skip builderSections(), so order is applied here too.
-  const order = orderSectionKeys(rows.map((row) => row.key), builder.section_order || [], builderGoal.value);
+  // Pass the TYPE alongside the key. A repeatable element keys by id, and an id has no baseline position —
+  // without the type these rows fell to the very end of the list while the page rendered them at their
+  // type's slot, so the form and the preview disagreed about where the content blocks were.
+  const order = orderSectionKeys(
+    rows.map((row) => ({ key: row.key, type: row.type })),
+    builder.section_order || [], builderGoal.value,
+  );
   return [...rows].sort((a, b) => order.indexOf(a.key) - order.indexOf(b.key));
 });
 
@@ -4203,6 +4209,9 @@ function rowSummary(row) {
   if (row.type === "client_marquee") return countLabel((e.logos || []).filter((l) => l.image_url).length, "logo");
   if (row.type === "rating") return `${e.value || 5} stars`;
   if (row.type === "content_block") return e.title?.trim() || (e.text?.trim() ? "text" : "empty");
+  // The author IS the section — whose credibility it borrows is the one thing worth reading off a
+  // collapsed row, the way a content block shows its title.
+  if (row.type === "author_bio") return e.name?.trim() || e.headline?.trim() || "empty";
   return "";
 }
 

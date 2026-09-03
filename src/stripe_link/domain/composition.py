@@ -209,27 +209,49 @@ def baseline_order(goal: str = "") -> list[str]:
     return list(override or RULES.get("default_order", []))
 
 
-def order_section_keys(keys, tenant_order=(), goal: str = "") -> list[str]:
-    """Sort section keys into lead -> pinned_top -> tenant-ordered free -> pinned_bottom.
+def _order_entries(entries, tenant_order=(), goal: str = ""):
+    """THE ordering rule, in one place — the JS mirror is pageComposer.orderEntries().
 
-    `tenant_order` is the tenant's drag order. Keys missing from it fall back to the BASELINE order, so a
-    tenant who never drags anything still gets a researched sequence, and a newly added section lands in a
-    sensible place instead of vanishing to one end. A key in neither list sorts last rather than first --
-    an unplaced element should not silently jump to the top of the page.
+    Takes (key, type) pairs and returns the INDICES that sort them, so callers map back to whatever they
+    actually hold — keys in one case, section dicts in the other — without this function knowing either.
+
+    Every caller adapts its input to (key, type) pairs, because the rule needs both: the key is what the
+    tenant's drag order is recorded against, and the TYPE is what has a baseline position. Two versions of
+    this rule — one over keys, one over sections — is precisely what let the builder's row list and the
+    rendered page disagree, since a repeatable element keys by id and an id is never in the baseline.
+
+    lead -> pinned_top -> tenant-ordered free -> pinned_bottom. Entries missing from `tenant_order` fall back
+    to the baseline position of their type, so a tenant who never drags anything still gets a researched
+    sequence. An entry in neither list sorts last rather than first. Ties keep their incoming position.
     """
-    keys = list(keys)
+    entries = list(entries)
     baseline = {key: index for index, key in enumerate(baseline_order(goal))}
     rank = {key: index for index, key in enumerate(tenant_order)}
     fallback = len(rank)
     tail = len(baseline)
 
-    def sort_key(key):
-        band = element_placement(key)
+    def sort_key(pair):
+        index, (key, section_type) = pair
+        band = element_placement(section_type)
         band_index = PLACEMENT_BANDS.index(band) if band in PLACEMENT_BANDS else PLACEMENT_BANDS.index("free")
-        within = rank.get(key, fallback + baseline.get(key, tail))
-        return (band_index, within)
+        within = rank[key] if key in rank else fallback + baseline.get(section_type, tail)
+        return (band_index, within, index)
 
-    return [key for key in sorted(keys, key=sort_key) if element_placement(key) != "none"]
+    return [index for index, _ in sorted(enumerate(entries), key=sort_key)]
+
+
+def order_section_keys(keys, tenant_order=(), goal: str = "") -> list[str]:
+    """Order section KEYS. A bare string key is its own type; pass a (key, type) pair when they differ,
+    which is exactly the repeatable case.
+
+    Filters `placement: "none"` because this builds the DRAGGABLE ROW LIST, and a none-placed section
+    (structured_data) has no row. That filter belongs here and nowhere else.
+    """
+    entries = [(key, key) if isinstance(key, str) else (key[0], key[1]) for key in keys]
+    return [
+        entries[index][0] for index in _order_entries(entries, tenant_order, goal)
+        if element_placement(entries[index][1]) != "none"
+    ]
 
 
 def section_order_key(section: dict[str, Any]) -> str:
@@ -245,32 +267,15 @@ def section_order_key(section: dict[str, Any]) -> str:
 
 
 def order_sections(sections, tenant_order=(), goal: str = "") -> list[dict[str, Any]]:
-    """order_section_keys applied to real section objects — the JS mirror is pageComposer.orderSections().
+    """Order real section objects — the JS mirror is pageComposer.orderSections().
 
-    A section the tenant has not moved falls back to the baseline position of its TYPE, tie-broken by its
-    current position, so several content blocks (keyed by id, and therefore never in the baseline) keep
-    their relative order instead of collapsing together arbitrarily.
+    Orders; never filters. `placement: "none"` means "not a draggable row", which is order_section_keys'
+    business, not "not a section": structured_data is the head-channel JSON-LD, and dropping it here strips
+    a page's rich results. The JS twin had exactly that bug.
     """
     sections = list(sections)
-    baseline = {key: index for index, key in enumerate(baseline_order(goal))}
-    rank = {key: index for index, key in enumerate(tenant_order)}
-    fallback = len(rank)
-    tail = len(baseline)
-
-    def sort_key(pair):
-        index, section = pair
-        section_type = str(section.get("type") or "")
-        band = element_placement(section_type)
-        band_index = PLACEMENT_BANDS.index(band) if band in PLACEMENT_BANDS else PLACEMENT_BANDS.index("free")
-        key = section_order_key(section)
-        within = rank[key] if key in rank else fallback + baseline.get(section_type, tail)
-        return (band_index, within, index)
-
-    # Orders; never filters. `placement: "none"` means "not a draggable row" — that belongs to
-    # order_section_keys, which builds the builder's row list. A none-placed section is still a real
-    # section: structured_data is the head-channel JSON-LD, and dropping it here silently strips a page's
-    # rich results. See the JS mirror, which had exactly that bug.
-    return [section for _, section in sorted(enumerate(sections), key=sort_key)]
+    entries = [(section_order_key(section), str(section.get("type") or "")) for section in sections]
+    return [sections[index] for index in _order_entries(entries, tenant_order, goal)]
 
 
 def recommended_section_keys(offer_type: str, goal: str = "") -> list[str]:

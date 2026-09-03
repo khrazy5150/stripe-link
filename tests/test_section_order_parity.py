@@ -99,6 +99,35 @@ class ComposePageOwnsOrderTests(unittest.TestCase):
         self.assertIn("sd", [s["id"] for s in compose_page({"offer_type": "product"}, page)])
 
 
+class RowListMatchesPageTests(unittest.TestCase):
+    """The builder's row list and the rendered page must be the SAME SEQUENCE.
+
+    This is the invariant the user actually experiences, and it broke twice for the same reason: the rule
+    was implemented once over section objects and once over bare keys, and the two disagreed wherever a key
+    is not its own type — i.e. every repeatable element, which keys by id. Content blocks sank to the end of
+    the form while the page rendered them at their type's baseline slot.
+
+    Both entry points now run one rule over (key, type) pairs; this asserts they land in the same place.
+    """
+
+    def test_row_order_equals_section_order(self):
+        for case in FIXTURES["order_sections"]:
+            with self.subTest(why=case["why"]):
+                sections = sections_of(case)
+                page_order = [s["id"] for s in order_sections(sections, case["tenant_order"])]
+                rows = [(section_order_key(s), s["type"]) for s in sections]
+                by_key = {section_order_key(s): s["id"] for s in sections}
+                row_order = [by_key[k] for k in order_section_keys(rows, case["tenant_order"])]
+                # The row list omits none-placed sections (they have no row); order must otherwise match.
+                self.assertEqual(row_order, [i for i in page_order if i in set(row_order)])
+
+    def test_a_repeatable_element_is_placed_by_its_type(self):
+        # The specific regression: an id-keyed row has no baseline entry of its own, so without the type it
+        # sorts to the very end instead of to content_block's slot ahead of the FAQ.
+        rows = [("el_cb", "content_block"), ("faq", "faq"), ("author_bio", "author_bio")]
+        self.assertEqual(order_section_keys(rows, []), ["author_bio", "el_cb", "faq"])
+
+
 class JsMirrorMatchesPythonTests(unittest.TestCase):
     """Run the SAME fixtures through pageComposer.js and require identical output."""
 
@@ -126,6 +155,8 @@ class JsMirrorMatchesPythonTests(unittest.TestCase):
               order_sections: f.order_sections.map((c) =>
                 orderSections(c.sections.map(([type, id]) => ({{ type, id }})), c.tenant_order).map((s) => s.id)),
               order_section_keys: f.order_section_keys.map((c) => orderSectionKeys(c.keys, c.tenant_order)),
+              typed_entries: orderSectionKeys(
+                [{{key: "el_cb", type: "content_block"}}, {{key: "faq", type: "faq"}}, {{key: "author_bio", type: "author_bio"}}], []),
               keys: [sectionOrderKey({{type: "content_block", id: "cb1"}}), sectionOrderKey({{type: "author_bio", id: "ab"}})],
             }}));
             """
@@ -143,6 +174,8 @@ class JsMirrorMatchesPythonTests(unittest.TestCase):
         self.assertEqual(js["order_section_keys"],
                          [order_section_keys(c["keys"], c["tenant_order"]) for c in FIXTURES["order_section_keys"]])
         self.assertEqual(js["keys"], ["cb1", "author_bio"])
+        self.assertEqual(js["typed_entries"], ["author_bio", "el_cb", "faq"],
+                         "JS must place an id-keyed row by its TYPE, exactly as Python does")
         # ...and both match the fixtures' declared expectations, not merely each other.
         self.assertEqual(js["order_sections"], [c["out"] for c in FIXTURES["order_sections"]])
         self.assertEqual(js["order_section_keys"], [c["out"] for c in FIXTURES["order_section_keys"]])

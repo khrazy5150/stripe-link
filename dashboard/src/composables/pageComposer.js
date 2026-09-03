@@ -167,19 +167,46 @@ export function baselineOrder(goal = "") {
 // lead -> pinned_top -> tenant-ordered free -> pinned_bottom. Keys absent from tenantOrder fall back to
 // the BASELINE order, so a tenant who never drags anything still gets a researched sequence. A key in
 // neither list sorts last, never first -- an unplaced element must not jump to the top of the page.
-export function orderSectionKeys(keys, tenantOrder = [], goal = "") {
+// THE ordering rule, in one place. Everything else adapts its input to {key, type} and calls this, because
+// the rule needs BOTH: the key is what the tenant's drag order is recorded against, and the type is what has
+// a baseline position. Keeping two versions of this — one over keys, one over sections — is what let the
+// builder's row list and the rendered page disagree: a repeatable element keys by id, which is never in the
+// baseline, so the key-based version sank every content block to the end while the section-based one placed
+// it correctly at its type's slot.
+//
+// lead -> pinned_top -> tenant-ordered free -> pinned_bottom. Entries absent from tenantOrder fall back to
+// the BASELINE order of their TYPE, so a tenant who never drags anything still gets a researched sequence.
+// An entry in neither list sorts last, never first — an unplaced element must not jump to the top of a page.
+function orderEntries(entries, tenantOrder = [], goal = "") {
   const baseline = new Map(baselineOrder(goal).map((key, index) => [key, index]));
   const rank = new Map(tenantOrder.map((key, index) => [key, index]));
   const fallback = rank.size;
-  const band = (key) => {
-    const index = PLACEMENT_BANDS.indexOf(elementPlacement(key));
+  const tail = baseline.size;
+  const band = (type) => {
+    const index = PLACEMENT_BANDS.indexOf(elementPlacement(type));
     return index === -1 ? PLACEMENT_BANDS.indexOf("free") : index;
   };
-  const within = (key) =>
-    rank.has(key) ? rank.get(key) : fallback + (baseline.has(key) ? baseline.get(key) : baseline.size);
-  return [...keys]
-    .filter((key) => elementPlacement(key) !== "none")
-    .sort((a, b) => band(a) - band(b) || within(a) - within(b));
+  const within = (entry) =>
+    rank.has(entry.key) ? rank.get(entry.key) : fallback + (baseline.has(entry.type) ? baseline.get(entry.type) : tail);
+  // Ties keep their incoming position, so several content blocks (all at the same baseline slot) hold their
+  // relative order instead of collapsing together arbitrarily.
+  return entries
+    .map((entry, index) => ({ entry, index }))
+    .sort((a, b) =>
+      band(a.entry.type) - band(b.entry.type) ||
+      within(a.entry) - within(b.entry) ||
+      a.index - b.index)
+    .map(({ entry }) => entry);
+}
+
+// Order a list of section KEYS. A bare string key is its own type; pass {key, type} when they differ, which
+// is exactly the repeatable case. Filters `placement: "none"` because this builds the DRAGGABLE ROW LIST and
+// a none-placed section (structured_data) has no row — that filter belongs here and nowhere else.
+export function orderSectionKeys(keys, tenantOrder = [], goal = "") {
+  const entries = keys.map((key) => (typeof key === "string" ? { key, type: key } : key));
+  return orderEntries(entries, tenantOrder, goal)
+    .filter((entry) => elementPlacement(entry.type) !== "none")
+    .map((entry) => entry.key);
 }
 
 
@@ -191,34 +218,14 @@ export function sectionOrderKey(section) {
   return spec.repeatable && section?.id ? section.id : type;
 }
 
-// Apply placement bands + the tenant's order to real section objects. Anything the tenant has not moved
-// falls back to the baseline position of its TYPE, tie-broken by current position -- so repeatable
-// sections (several content_blocks, keyed by id and therefore never in the baseline) keep their relative
-// order instead of collapsing together arbitrarily.
+// Order real section objects. Orders; never filters — `placement: "none"` means "not a draggable row", which
+// is orderSectionKeys' business, not "not a section". This used to filter, which silently dropped the
+// structured_data section from every saved page and cost those pages their Product/FAQPage JSON-LD.
 export function orderSections(sections, tenantOrder = [], goal = "") {
-  const baseline = new Map(baselineOrder(goal).map((key, index) => [key, index]));
-  const rank = new Map(tenantOrder.map((key, index) => [key, index]));
-  const bandOf = (type) => {
-    const index = PLACEMENT_BANDS.indexOf(elementPlacement(type));
-    return index === -1 ? PLACEMENT_BANDS.indexOf("free") : index;
-  };
-  // Orders; never filters. `placement: "none"` means "not a draggable row", which is orderSectionKeys'
-  // business — not "not a section". This filter was silently dropping the structured_data section from
-  // every saved page, so published pages lost their Product/FAQPage JSON-LD entirely.
-  return sections
-    .map((section, index) => ({ section, index }))
-    .sort((a, b) => {
-      const band = bandOf(a.section.type) - bandOf(b.section.type);
-      if (band) return band;
-      const aKey = sectionOrderKey(a.section);
-      const bKey = sectionOrderKey(b.section);
-      const base = (key, type) =>
-        rank.has(key) ? rank.get(key) : rank.size + (baseline.has(type) ? baseline.get(type) : baseline.size);
-      const aRank = base(aKey, a.section.type);
-      const bRank = base(bKey, b.section.type);
-      return aRank - bRank || a.index - b.index;
-    })
-    .map((entry) => entry.section);
+  const entries = sections.map((section) => ({
+    key: sectionOrderKey(section), type: section?.type || "", section,
+  }));
+  return orderEntries(entries, tenantOrder, goal).map((entry) => entry.section);
 }
 
 
