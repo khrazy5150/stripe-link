@@ -6,7 +6,7 @@
     "brand_hero", "seller_profile",
     "product_details", "product_carousel", "catalog_grid",
     "rating", "testimonials", "content_block", "client_marquee", "faq",
-    "trust_badges", "offer_price_selector", "checkout_cta", "refund_policy",
+    "trust_badges", "price_highlight", "offer_price_selector", "checkout_cta", "refund_policy",
     "related_products", "legal_footer"
   ],
   "_placement_comment": "placement = where a section may sit, and whether the tenant may drag it. lead: bars that legitimately precede the hero (announcement/urgency). pinned_top: the hero block -- NOT movable, because hero_media is the LCP element the renderer emits preload/priority hints for, and one-H1-first is an invariant the semantic outline depends on. free: the tenant orders these. pinned_bottom: always last. none: not a visible section (channel: head). Deliberate divergence from stripe-cart, which let the hero move.",
@@ -24,6 +24,7 @@
     "content_block":        { "placement": "free", "label": "Content block",    "ui": "add",    "kind": "capability", "channel": "body", "heading_role": "h2",   "repeatable": true,  "tokens": ["content_heading", "content_text", "content_border"] },
     "testimonials":         { "placement": "free", "label": "Testimonials",     "ui": "add",    "kind": "capability", "channel": "body", "heading_role": "h2",   "repeatable": false,  "tokens": ["content_heading", "content_text", "content_border"] },
     "rating":               { "placement": "free", "label": "Rating",           "ui": "add",    "kind": "capability", "channel": "body", "heading_role": "none", "repeatable": false, "tokens": ["content_text"] },
+    "price_highlight":      { "placement": "free", "label": "Price highlight", "ui": "add",    "kind": "capability", "channel": "body", "heading_role": "none", "repeatable": false, "tokens": ["price_amount", "price_regular", "price_title", "price_description"] },
     "client_marquee":       { "placement": "free", "label": "Client logos",     "ui": "add",    "kind": "capability", "channel": "body", "heading_role": "h2",   "repeatable": false, "tokens": ["content_heading", "content_border"] },
     "structured_data":      { "placement": "none", "label": "Structured data (SEO)", "ui": "toggle", "kind": "capability", "channel": "head", "heading_role": "none", "repeatable": false, "tokens": [] },
     "faq":                  { "placement": "free", "label": "FAQ",              "ui": "add",    "kind": "capability", "channel": "body", "heading_role": "h2",   "repeatable": false,  "tokens": ["faq_bg", "faq_border", "faq_summary", "faq_text"] },

@@ -118,8 +118,8 @@ renders a gallery and badges from PRODUCT data; this is authored page copy. Chec
 ## Build order
 
 0. **Section-scoped theme override** + derived foreground. Nothing visible ships; three elements depend on it.
-1. **Price Highlight** — no override, no CTA. Smallest surface that exercises the derived-price path, so a
-   wrong reading of the pricing model surfaces cheaply.
+1. **Price Highlight** — ✅ BUILT 2026-09-02. Derived numbers, no CTA, `as low as` for tiers, renders
+   without a strikethrough when there is no discount rather than rendering nothing.
 2. **Author Bio** — first override consumer.
 3. **Bragging Points** — second consumer; near-free if step 0 is right, and the proof that it is.
 4. **Quote** — third consumer, and the one that needs `accent` as well as `bg`.

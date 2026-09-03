@@ -1,6 +1,7 @@
 # Price Highlight — a standalone bargain block
 
-**Status:** PLANNED, not built. A NEW element (legacy name: "Price & Urgency").
+**Status:** BUILT 2026-09-02. `domain/bargain.py` + `render_price_highlight` + registry entry
+`price_highlight`, slotted into the baseline order between `trust_badges` and the price cards.
 
 ## 1. What it is
 

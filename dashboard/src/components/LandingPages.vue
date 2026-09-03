@@ -614,6 +614,22 @@
                       <label class="offer-field"><span>Label</span><input v-model.trim="element.label" type="text" placeholder="e.g. on Google" /></label>
                     </template>
 
+                    <template v-else-if="element.type === 'price_highlight'">
+                      <p class="field-note">
+                        The prices come from this offer's products — the sale price, and the regular price
+                        struck through when one is set. A tiered product shows its lowest price as
+                        <strong>as low as&hellip;</strong>, so the figure stays true whichever tier a visitor picks.
+                      </p>
+                      <label class="offer-field">
+                        <span>Main text</span>
+                        <input v-model.trim="element.main_text" type="text" placeholder="e.g. Today Only" />
+                      </label>
+                      <label class="offer-field">
+                        <span>Subtext</span>
+                        <input v-model.trim="element.subtext" type="text" placeholder="e.g. Lifetime Access" />
+                      </label>
+                    </template>
+
                     <template v-else-if="element.type === 'client_marquee'">
                       <input v-model.trim="element.heading" type="text" placeholder="Section heading (optional)" />
                       <div v-for="(logo, i) in element.logos" :key="i" class="element-subrow">
@@ -3818,6 +3834,8 @@ function newElement(type) {
   if (type === "client_marquee") return { ...base, heading: "Our Clients", logos: [{ image_url: "", name: "" }] };
   if (type === "faq") return { ...base, heading: "Frequently Asked Questions", items: [{ question: "", answer: "" }] };
   if (type === "related_products") return { ...base, heading: "Related products" };
+  // The NUMBERS are derived from the offer; only these two lines are the tenant's.
+  if (type === "price_highlight") return { ...base, main_text: "Today Only", subtext: "" };
   // product_details is fully offer-driven (current target's gallery/badges/description) — no config.
   return base;
 }

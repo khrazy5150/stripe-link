@@ -8,6 +8,7 @@ from typing import Any
 from urllib.parse import urlencode, urlparse
 
 from stripe_link.platform_config import default_favicon_url
+from stripe_link.domain.bargain import FROM_PREFIX, derived_bargain
 from stripe_link.domain.business_types import BUSINESS_TYPES, resolve_entity_type
 from stripe_link.domain.composition import compose_page, element_channel
 from stripe_link.domain.connect_sync import site_seo_enabled
@@ -16,6 +17,7 @@ from stripe_link.domain.opportunities import STAGE_LANDING, STAGE_POST_PURCHASE,
 from stripe_link.domain.pricing import PricingError, expand_offer, find_price, resolve_offer, single_unit_price
 from stripe_link.domain.semantic import is_bundle, resolve_semantic_model, subject_from_model
 from stripe_link.domain.reviews import aggregate_reviews, markup_eligible
+from stripe_link.domain.section_theme import section_theme_vars
 from stripe_link.domain.service_pricing import resolve_service_price
 
 
@@ -601,6 +603,16 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     "    .sl-rating-meta{font-size:1.4rem;color:var(--sl-content-text)}",
     "    .sl-client-marquee{overflow:hidden}",
     "    .sl-marquee-track{display:flex;width:max-content;animation:sl-marquee 30s linear infinite}",
+    # Price highlight (plans/PRICE_HIGHLIGHT.md). Every colour falls through to the PRICE element's tokens,
+    # so a preset styles this on day one and it cannot drift from the price card beside it. --sl-section-*
+    # is the optional per-section override; absent, these resolve to the page theme.
+    "    .sl-price-highlight{display:grid;gap:0.6rem;justify-items:center;text-align:center;padding:3.2rem 2rem;background:var(--sl-section-bg,transparent);color:var(--sl-section-ink,var(--sl-text))}",
+    "    .sl-bargain-regular{margin:0;font-size:1.5rem;color:var(--sl-section-ink,var(--sl-price-regular));opacity:0.75}",
+    "    .sl-bargain-amount{margin:0;font-family:var(--sl-font-heading);font-size:clamp(4rem,10vw,6.4rem);line-height:1;font-weight:800;color:var(--sl-section-ink,var(--sl-price-amount))}",
+    # The prefix is small and quiet: it qualifies the number without competing with it.
+    "    .sl-bargain-prefix{display:block;font-size:1.6rem;font-weight:600;letter-spacing:0.02em;opacity:0.8}",
+    "    .sl-bargain-main{margin:0;font-family:var(--sl-font-heading);font-size:2.2rem;font-weight:700;color:var(--sl-section-ink,var(--sl-price-title))}",
+    "    .sl-bargain-sub{margin:0;font-size:1.5rem;color:var(--sl-section-ink,var(--sl-price-description));opacity:0.85}",
     "    .sl-marquee-row{display:flex;align-items:center;gap:1.6rem;padding-right:1.6rem}",
     # Few logos -> centered + static; many (>=5) -> the rolling track above.
     "    .sl-marquee-static{display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:1.6rem}",
@@ -1743,6 +1755,7 @@ SECTION_REGISTRY: dict[str, dict[str, Any]] = {
     "testimonials": {"render": lambda c: render_testimonials(c.section), "version": 1},
     "rating": {"render": lambda c: render_rating(c.section), "version": 1},
     "client_marquee": {"render": lambda c: render_client_marquee(c.section), "version": 1},
+    "price_highlight": {"render": lambda c: render_price_highlight(c.section, c.offer, c.products_by_id, c.services_by_id), "version": 1},
     "product_details": {"render": lambda c: render_product_details(c.offer, c.products_by_id, c.services_by_id), "version": 1},
     "product_carousel": {"render": lambda c: render_product_carousel(c.section, c.page, c.offers_by_id, c.products_by_id, c.services_by_id, c.checkout_url, c.api_base_url), "version": 1},
     "post_purchase_carousel": {"render": lambda c: render_post_purchase_carousel(c.section, c.page, c.api_base_url), "version": 1},
@@ -3916,6 +3929,58 @@ def render_rating(section: dict[str, Any]) -> str:
         (f"      <span class=\"sl-rating-meta\">{meta}</span>" if meta else ""),
         "    </section>",
     ] if line)
+
+
+def render_price_highlight(
+    section: dict[str, Any],
+    offer: dict[str, Any],
+    products_by_id: dict[str, dict[str, Any]],
+    services_by_id: dict[str, dict[str, Any]] | None = None,
+) -> str:
+    """The bargain block: regular price struck through, sale price large, two authored lines.
+
+    Carries NO action on purpose — checkout_cta is the ask, and this is a pause that reframes value on the
+    way there. Numbers are DERIVED (domain/bargain.py), never authored, so it cannot show a price that
+    checkout will not honour.
+
+    Reuses the price element's tokens rather than declaring its own, so every preset styles it on day one
+    and it cannot drift from the price card beside it.
+    """
+    bargain = derived_bargain(offer, products_by_id, services_by_id or {})
+    if not bargain["sale"]:
+        return ""
+
+    currency = bargain["currency"]
+    sale = format_money(bargain["sale"], currency)
+    # "as low as" makes a tiered figure a claim about the RANGE, so it cannot contradict the interactive
+    # price selector when a visitor picks another tier (plans/PRICE_HIGHLIGHT.md §4).
+    if bargain["tiered"]:
+        amount = f'<span class="sl-bargain-prefix">{escape(FROM_PREFIX)}</span> {escape(sale)}'
+    else:
+        amount = escape(sale)
+
+    rows: list[str] = []
+    if bargain["has_bargain"]:
+        regular = format_money(bargain["regular"], currency)
+        rows.append(f'      <p class="sl-bargain-regular">Regular Price: <s>{escape(regular)}</s></p>')
+    rows.append(f'      <p class="sl-bargain-amount">{amount}</p>')
+
+    main_text = str(section.get("main_text") or "").strip()
+    subtext = str(section.get("subtext") or "").strip()
+    if main_text:
+        rows.append(f'      <p class="sl-bargain-main">{render_headline_markup(main_text)}</p>')
+    if subtext:
+        rows.append(f'      <p class="sl-bargain-sub">{escape(subtext)}</p>')
+
+    style = section_theme_vars(section)
+    style_attr = f' style="{escape(style)}"' if style else ""
+    themed = " sl-section-themed" if style else ""
+    section_id = escape(str(section.get("id", "price-highlight")))
+    return "\n".join([
+        f'    <section class="sl-price-highlight{themed}" data-section-id="{section_id}" data-section-type="price_highlight"{style_attr}>',
+        *rows,
+        "    </section>",
+    ])
 
 
 def render_client_marquee(section: dict[str, Any]) -> str:
