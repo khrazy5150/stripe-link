@@ -64,65 +64,28 @@ class ShellFrameTests(unittest.TestCase):
         self.assertIn("flex: none", rule(".topbar"))
 
 
-class SelfScrollingScreensTests(unittest.TestCase):
-    def test_every_opted_in_view_has_marked_its_chain(self):
-        """A view listed here BEFORE its layout is marked gets clipped: .owns-scroll stops the view
-        scrolling, and an unmarked screen has no scroll of its own. So the opt-in list and the marked
-        components must agree — this asserts they do, rather than trusting that they will."""
-        match = re.search(r"SELF_SCROLLING_VIEWS = new Set\(\[([^\]]*)\]\)", APP)
-        self.assertIsNotNone(match)
-        listed = {v.strip().strip('"\'') for v in match.group(1).split(",") if v.strip()}
-        self.assertEqual(listed, {"products"})
+class NoScreenOptsOutTests(unittest.TestCase):
+    """The per-screen self-scrolling experiment was reverted; .app-view is the one scroll region.
 
-        components = {"products": "Products.vue"}
-        for view, filename in components.items():
-            source = (ROOT / "dashboard" / "src" / "components" / filename).read_text(encoding="utf-8")
-            with self.subTest(view=view):
-                self.assertIn("scroll-column", source, f"{filename} must mark its column chain")
-                self.assertIn("scroll-region", source, f"{filename} must mark its scrolling list")
+    Tried on Products, Services and Offers and reverted all three (2026-09-02). The pattern assumed a
+    screen was ONE list filling the page: Services also holds FulfillersPanel and the availability panels
+    so pinning every child clipped them; Offers stretched into a tall empty box; and on Products it simply
+    read worse than the plain page scroll it replaced. plans/LIST_VIRTUALIZATION.md carries the table.
+    """
 
-    def test_multi_section_screens_stay_out(self):
-        """Only a screen that is ONE list filling the page fits this pattern. Tried and reverted:
-        Services (.page also holds FulfillersPanel and the availability panels, so pinning every child
-        clipped everything below the list), Offers (fits, but stretches into a tall empty box with few
-        rows), and Landing Pages (its card is v-if="!builderOpen"). All three scroll correctly through
-        .app-view — which is the right answer for a page that is not a single list."""
-        match = re.search(r"SELF_SCROLLING_VIEWS = new Set\(\[([^\]]*)\]\)", APP)
-        for view in ("services", "offers", "landingPages"):
-            with self.subTest(view=view):
-                self.assertNotIn(view, match.group(1))
-        for filename in ("Services.vue", "Offers.vue", "LandingPages.vue"):
-            source = (ROOT / "dashboard" / "src" / "components" / filename).read_text(encoding="utf-8")
+    def test_the_opt_in_machinery_is_gone_not_left_dead(self):
+        for token in ("owns-scroll", "viewOwnsScroll", "SELF_SCROLLING_VIEWS"):
+            with self.subTest(token=token):
+                self.assertNotIn(token, APP)
+                self.assertNotIn(token, CSS)
+
+    def test_no_component_still_marks_a_scroll_chain(self):
+        components = ROOT / "dashboard" / "src" / "components"
+        for filename in ("Products.vue", "Services.vue", "Offers.vue", "LandingPages.vue"):
+            source = (components / filename).read_text(encoding="utf-8")
             with self.subTest(component=filename):
                 self.assertNotIn("scroll-region", source)
-
-    def test_the_marked_region_scrolls_not_the_page(self):
-        self.assertIn("overflow: hidden", rule(".app-view.owns-scroll"))
-        body = rule(".app-view.owns-scroll .scroll-region")
-        self.assertIn("overflow-y: auto", body)
-        self.assertIn("min-height: 0", body)
-        self.assertIn("scrollbar-gutter: stable", body)
-
-    def test_the_chain_is_marked_rather_than_assumed(self):
-        # The first version hard-coded ".page > .dashboard-card > .product-card-list", which collapsed
-        # Offers — its list sits one level deeper inside .offer-card-body.
-        self.assertIn(".scroll-column", CSS)
-        self.assertNotIn(".app-view.owns-scroll .page > .dashboard-card > :not(", CSS)
-
-    def test_every_scroll_region_is_keyboard_reachable(self):
-        # A scroll container that only answers the mouse wheel is unusable without a pointer.
-        for filename in ("Products.vue",):
-            source = (ROOT / "dashboard" / "src" / "components" / filename).read_text(encoding="utf-8")
-            with self.subTest(component=filename):
-                self.assertIn('scroll-region" tabindex="0"', source)
-
-    def test_unconverted_screens_are_untouched(self):
-        # Every self-scrolling rule is scoped under .owns-scroll, so the other 22 screens keep the plain
-        # .app-view scroll they had.
-        for selector in (".app-view.owns-scroll .scroll-region",):
-            with self.subTest(selector=selector):
-                self.assertTrue(rule(selector), f"{selector} missing")
-        self.assertNotIn("overflow-y: auto", rule(".page"))
+                self.assertNotIn("scroll-column", source)
 
 
 if __name__ == "__main__":

@@ -70,7 +70,7 @@ assumes **one list filling the page**, and only Products is that:
 
 | Screen | Why it does or does not fit |
 |---|---|
-| Products | One list card under the header. Fits. Converted. |
+| Products | Structurally the best fit, and still worse than the plain page scroll — reverted too. |
 | Services | `.page` also holds `<FulfillersPanel />` and the availability/appointment panels. Pinning every child gave the remaining height to the list and CLIPPED everything below it. |
 | Offers | Structurally fits, but the scroll region stretches, so a couple of offers sit in a tall empty box with a focus ring around it. Worse than before. |
 | Landing Pages | Its card is `v-if="!builderOpen"`; the builder is a different two-pane layout that needs the view to scroll normally. |
@@ -82,3 +82,26 @@ opt in.
 Consequence for virtualization: it applies where a scroll container exists, which today is Products alone.
 That is fine, because the trigger is a list of ~1,000 rows and only Products plausibly reaches it first.
 A screen that later becomes list-dominated can opt in then — but check it is one list before adding it.
+
+
+## Outcome: no screen self-scrolls (2026-09-02)
+
+Tried on Products, Services and Offers; all three reverted, and the `.owns-scroll` machinery removed
+rather than left dead. **`.app-view` is the single scroll region for every screen.**
+
+What survived and is worth keeping — the fixed-height shell:
+
+- `.app-shell` is `height: 100dvh; overflow: hidden` with `grid-template-rows: minmax(0, 1fr)`
+- the topbar and billing banner stay pinned, `.app-view` scrolls with `scrollbar-gutter: stable`
+- the sidebar mirrors it: the brand pinned, only the nav scrolls
+
+That gives the single-scrollbar frame the author wanted, without any screen having to be restructured.
+
+**Consequence for virtualization:** there is now no per-list scroll container anywhere, so the container
+route from §"Option B" is closed unless a screen is converted at that time. The window-scroll approach
+(Option A) is what remains — or convert one screen when a real list actually approaches ~1,000 rows.
+
+**The lesson worth keeping:** three rounds of "convert a screen, find it worse, revert" cost more than the
+feature was worth at this scale, and every failure was visible in a screenshot and invisible in the code.
+The payload problem — the one with a hard failure — was already solved by the slim indexes. This was
+render cost, which degrades rather than breaks, and there is no list large enough for it to matter.

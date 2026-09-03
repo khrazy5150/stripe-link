@@ -138,10 +138,9 @@
         <button type="button" class="billing-banner-cta" @click="activeView = 'billing'">{{ billingBanner.cta }}</button>
       </div>
 
-            <!-- The one scrolling region. The shell is a fixed-height frame and the topbar/banner are
-           pinned, so the page never has two scrollbars competing. A list screen can take this over
-           for itself (see .app-view.owns-scroll) when it wants to scroll its own list instead. -->
-      <div class="app-view" :class="{ 'owns-scroll': viewOwnsScroll }">
+            <!-- The one scrolling region. The shell is a fixed-height frame and the topbar/banner stay
+           pinned, so the page never has two scrollbars competing. -->
+      <div class="app-view">
   <Dashboard
           v-if="activeView === 'dashboard'"
           :environment-label="environmentLabel"
@@ -254,20 +253,6 @@ let toastBaselined = false;
 let notificationsPoll = null;
 const activeView = ref("dashboard");
 
-// List screens scroll their OWN list so the filters above it stay pinned; every other screen lets
-// .app-view scroll normally. Opt-in, so a screen that has not been laid out for it is unaffected.
-// Only screens whose layout has actually been converted to a flex column with a scrolling list.
-// Adding a view here BEFORE converting it clips its content, because .owns-scroll stops the view
-// scrolling and the screen would have no scroll of its own.
-const SELF_SCROLLING_VIEWS = new Set(["products"]);
-// Only screens that are ONE list filling the page. Tried and reverted 2026-09-02:
-//   * services  — .page also holds <FulfillersPanel /> and the availability/appointment panels, so
-//                 pinning every child clipped everything below the list.
-//   * offers    — fits the pattern, but with few offers the region stretches into a tall empty box.
-//   * landingPages — its card is v-if="!builderOpen" and the builder is a different two-pane layout.
-// All three scroll correctly through .app-view, which is the right answer for a page that is not a
-// single list. Do not add a view here without checking it is one.
-const viewOwnsScroll = computed(() => SELF_SCROLLING_VIEWS.has(activeView.value));
 // The active Stripe MODE (test/live) — the dashboard toggle. Drives view remounts + data reloads and the theme
 // class; the backend base is hostname-derived, not this value (plans/STRIPE_MODE_DECOUPLING.md).
 const activeEnvironment = ref(getStripeMode());

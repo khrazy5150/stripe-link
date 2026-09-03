@@ -277,56 +277,6 @@ main {
   scrollbar-gutter: stable;
 }
 
-/* A screen that scrolls its OWN list takes the scroll over: the view stops scrolling and hands its full
-   height to the screen, which pins its filters and scrolls only the list. */
-.app-view.owns-scroll {
-  overflow: hidden;
-}
-
-.app-view.owns-scroll > * {
-  height: 100%;
-  min-height: 0;
-}
-
-/* --- A self-scrolling list screen -------------------------------------------------------------
-   The page becomes a column: everything above the list is pinned and only the list scrolls.
-
-   Each screen MARKS its own chain rather than this guessing at structure — Products and Services put the
-   list directly in the card, Offers wraps it in .offer-card-body one level deeper, and a rule that assumed
-   the first shape collapsed the second. `.scroll-column` on every ancestor between the page and the list,
-   `.scroll-region` on the list itself.
-
-   All of it scoped to .owns-scroll, so an unconverted screen is completely unaffected. */
-.app-view.owns-scroll .page,
-.app-view.owns-scroll .scroll-column {
-  display: flex;
-  flex-direction: column;
-  /* Without this a flex item's automatic minimum size is its content, and the chain grows the frame
-     instead of scrolling inside it. */
-  min-height: 0;
-}
-
-/* Anything that is not part of the chain keeps its natural height and stays put. */
-.app-view.owns-scroll .page > *,
-.app-view.owns-scroll .scroll-column > * {
-  flex: none;
-}
-
-/* The chain itself takes the remaining height. */
-.app-view.owns-scroll .page > .scroll-column,
-.app-view.owns-scroll .scroll-column > .scroll-column,
-.app-view.owns-scroll .page > .scroll-region,
-.app-view.owns-scroll .scroll-column > .scroll-region {
-  flex: 1;
-}
-
-.app-view.owns-scroll .scroll-region {
-  min-height: 0;
-  overflow-y: auto;
-  /* Reserve the scrollbar so the cards do not shift sideways the moment the list overflows. */
-  scrollbar-gutter: stable;
-}
-
 .auth-page {
   min-height: 100vh;
   display: grid;

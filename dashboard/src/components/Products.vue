@@ -7,7 +7,7 @@
       </div>
     </header>
 
-    <section class="dashboard-card product-management-card scroll-column">
+    <section class="dashboard-card product-management-card">
       <header class="dashboard-card-header">
         <h2>Product Management</h2>
         <div class="button-row">
@@ -52,9 +52,7 @@
         {{ store.loading ? "Loading products..." : store.loaded ? "No products match the current filters." : "Click Load Products to see products." }}
       </div>
 
-      <!-- tabindex makes the scroll region focusable so arrows / PageUp / PageDown / Space scroll it.
-           A container that only responds to a mouse wheel is unusable without one. -->
-      <div v-else class="product-card-list scroll-region" tabindex="0" role="list" aria-label="Products">
+      <div v-else class="product-card-list">
         <ListCard
           v-for="product in store.filteredProducts"
           :key="product.product_id"
