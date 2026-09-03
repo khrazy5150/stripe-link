@@ -38,22 +38,44 @@ Prices are catalog data. The tenant authors only the two lines of copy.
 show, so the block renders the price and the copy **without** a strikethrough. It must never render
 nothing — silently dropping content when a field is absent is the exact bug the Brand Marquee has today.
 
-## 4. ⚠️ The open decision: tiered prices, and disagreeing with the selector
+## 4. Tiered prices — "as low as", and the pairing rule
 
-If the landing item is tiered, the price depends on which tier the visitor has selected — and this block is
-static HTML. So a page carrying BOTH this block and the price selector can show two different prices at
-once, which is worse than any styling problem.
+**Decided.** A tiered item shows its **lowest** price behind a fixed prefix:
 
-Two options:
+    Regular Price: $85          ← the SAME tier's compare-at
+      as low as $24.22
+        Today Only
 
-- **(a) Default tier, static.** Simple; the block can disagree with the selector the moment a visitor picks
-  another tier.
-- **(b) Sync with the selector.** The published page already carries `data-sale-amount` /
-  `data-regular-amount` on each `.sl-price-option` and a price-context script, so the hook exists. The block
-  subscribes and re-renders its two numbers on selection.
+This is better than syncing with the price selector, and not merely simpler. A bare number is a claim about
+*the visitor's current selection*, which is why a static block could contradict the selector. **"As low as"
+makes it a claim about the range**, which stays true whichever tier is selected. The contradiction is
+removed rather than synchronised away — no script, no fallback, nothing to drift.
 
-**Recommended: (b).** Two prices on one page is a correctness problem, not a polish one, and the machinery
-is already there. Fall back to the default tier when the selector is not on the page.
+### The prefix is not tenant-editable, and that is the point
+
+It is not decoration; it is what makes the sentence true. A tenant who edited it to "just" or deleted it
+would turn a range statement back into a selection claim and reintroduce the contradiction. Locking it
+protects a correctness property, not a style.
+
+It is also a **system string**, so it is the kind of text that gets localised centrally if this is ever
+translated — tenant copy is not.
+
+### ⚠️ The strikethrough must pair with the SAME tier
+
+Whatever price is displayed, the struck-through regular price must be **that price's own**
+`compare_at_amount` — never the highest tier's. Pairing a $24.22 sale price against an $85 regular from a
+different tier overstates the discount, and fabricated savings claims are exactly the territory the FTC
+warning copy in plans/GOAL_SEEDING_AND_PACKS.md exists for. Same rule as always: if that tier has no
+compare-at, no strikethrough.
+
+### Summary of what renders
+
+| Offer shape | Price line |
+|---|---|
+| single price | `$37` |
+| tiered item | `as low as $24.22` |
+| multi-item offer (no tiers) | `$37` — the resolved subtotal |
+| multi-item including a tiered item | `as low as …` — the subtotal at each tiered item's lowest |
 
 ## 5. Theming — reuse the price tokens, add none
 

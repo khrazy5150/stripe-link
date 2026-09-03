@@ -1082,8 +1082,9 @@ third-party security assessment is required.
   2. **Price Highlight** — new element (legacy "Price & Urgency"); see plans/PRICE_HIGHLIGHT.md. Standalone
      bargain block: regular price struck through + sale price + two authored lines, no CTA. Numbers DERIVED
      from the offer, tokens reused from `offer_price_selector` so every preset styles it already. Open
-     decision recorded: it must sync with the price selector on tiered offers, or the same page can show two
-     different prices.
+     Tiered offers show the LOWEST price behind a locked "as low as" prefix — which makes it a claim about
+     the range rather than about the visitor's selection, so it cannot contradict the price selector and
+     needs no script. The strikethrough must pair with that same tier's compare-at, never a higher one.
   3. **Brand Marquee** — ENHANCEMENT of the existing `client_marquee`; see plans/BRAND_MARQUEE.md.
      Text-or-logo entries (text is silently dropped today — a bug), three-state scroll control, and the
      countdown's 🐢/🐇 speed slider reused rather than re-derived.
