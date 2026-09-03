@@ -1074,6 +1074,16 @@ third-party security assessment is required.
 ## Landing Pages / SEO
 
 ### Add additional content elements currently not found in the landing page builder — HIGH
+- **Planned as a unit, to build in sequence (2026-09-02):**
+  1. **Page Ribbon** — new element. Attention Block's first presentation; see ATTENTION_PRIMITIVE.md §4a.
+     Image · eyebrow · headline · copy · CTA, capped at two per page, three presentations. A-P1 there is the
+     static version; the context-aware layer is A-P3 and needs client-side hydration, because published
+     pages are static S3 artifacts.
+  2. **Brand Marquee** — ENHANCEMENT of the existing `client_marquee`; see plans/BRAND_MARQUEE.md.
+     Text-or-logo entries (text is silently dropped today — a bug), three-state scroll control, and the
+     countdown's 🐢/🐇 speed slider reused rather than re-derived.
+- Still open from the earlier discussion, for pages that exist TODAY: how-it-works steps, comparison table,
+  stats band, standalone video, before/after. Social/lead-specific elements wait for those page types.
 
 ### Shared indexed-list machinery — ALL FOUR SCREENS MIGRATED, SHIPPED 2026-09-02
 - SHIPPED: `composables/indexedList.js` (loadIndex / fetchFullDocument / searchText / matchesSearch /
