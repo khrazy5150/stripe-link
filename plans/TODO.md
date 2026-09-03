@@ -1065,7 +1065,7 @@ third-party security assessment is required.
 
 ### Add additional content elements currently not found in the landing page builder — HIGH
 
-### ⭐ HIGH — Shared indexed-list machinery: migrate the remaining three screens — 2026-09-02
+### Shared indexed-list machinery — ALL FOUR SCREENS MIGRATED, SHIPPED 2026-09-02
 - SHIPPED: `composables/indexedList.js` (loadIndex / fetchFullDocument / searchText / matchesSearch /
   filterRows / shownMessage) + `domain/service_index.py` + `?view=index` on the shared `document_route`,
   so registering an entity in `_INDEX_PROJECTIONS` gives it an index. **Services is the pilot consumer.**
@@ -1202,7 +1202,14 @@ third-party security assessment is required.
 - **Still open (complement, not needed for the fix):** arrow/dot nav that drives the tier sync directly, so
   swipeability doesn't depend on images at all (`plans/LANDING_CAROUSEL_FIXES.md`).
 
-### ⭐ HIGH — Media field parity: video FILE upload + drag-reorder (BEFORE LAUNCH) — 2026-08-30, not built
+### Media field parity — SHIPPED (verified 2026-09-02)
+- `MediaListField` has Upload Image / Upload Video / Video URL and drag-reorder; `uploadVideo()` posts to the
+  image-processing service (`../sam/image-processing`, see docs/EXTERNAL_SERVICES.md), which gained video
+  support and raised caps. Confirmed working on a live hero carousel (image + video, reordered).
+- The notes below are the original stripe-cart reference, kept for the transcode/poster ideas that were NOT
+  ported (no MediaConvert step; the service returns the uploaded asset directly).
+
+### Original plan notes (reference only)
 - **What:** `MediaListField.vue` (the ported stripe-cart "HERO MEDIA" component) supports **Upload Image** and
   **Video URL** today. **Upload Video** is behind an `allowVideoUpload` prop that is OFF, because stripe-link has
   no video-upload path — `handlers/upload.py` proxies an **image** service (`/upload/multiple`).
