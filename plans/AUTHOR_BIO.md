@@ -66,13 +66,13 @@ The image border stays a separate optional pick; it is decoration and cannot hid
 - **Fields:** `photo`, `name`, `headline` (supports `**highlight**` markup like other headings), `body`,
   and optionally `section.theme.bg` + `section.theme.border`.
 
-## 4a. Bragging Points — recommend a SEPARATE element, not a field on this one
+## 4a. Bragging Points — a SEPARATE element (decided)
 
 Repeatable `{value, label}` pairs rendered as cards that reflow: one wide, two side by side, three as
 2 + 1. The value is large and accented, the label muted beneath it. The third example in the author's
 screenshots — `Q-Media / Founder and CEO` — is not a number, so the pair is free text, not a metric type.
 
-### Why separate, despite being described as an extension
+### Why separate, despite reading as an extension of the bio
 
 The author called it an extension of Author Bio, and semantically it usually is. But the same component is
 the **stats band** already on the wanted-elements list ("10,000 customers served") — a claim about the
@@ -82,8 +82,9 @@ Locked inside Author Bio, a tenant who wants company stats and no bio cannot hav
 gets built a second time. As its own element it serves both, and the common case — sitting directly under
 Author Bio — is just where the tenant drags it.
 
-**Recommendation: standalone, `repeatable: false` with a repeatable list of pairs inside it.** If the author
-prefers it welded to Author Bio, the cost is that the stats band later becomes a second implementation.
+**DECIDED 2026-09-02: standalone**, `repeatable: false` with a repeatable list of pairs inside it. It is the
+stats band and the author's brag with one implementation; adjacency to Author Bio is the tenant's choice,
+not a structural coupling.
 
 ### It is the SECOND consumer of the section-scoped theme override
 
