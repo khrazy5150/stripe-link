@@ -202,8 +202,10 @@ export function orderSections(sections, tenantOrder = [], goal = "") {
     const index = PLACEMENT_BANDS.indexOf(elementPlacement(type));
     return index === -1 ? PLACEMENT_BANDS.indexOf("free") : index;
   };
+  // Orders; never filters. `placement: "none"` means "not a draggable row", which is orderSectionKeys'
+  // business — not "not a section". This filter was silently dropping the structured_data section from
+  // every saved page, so published pages lost their Product/FAQPage JSON-LD entirely.
   return sections
-    .filter((section) => elementPlacement(section?.type || "") !== "none")
     .map((section, index) => ({ section, index }))
     .sort((a, b) => {
       const band = bandOf(a.section.type) - bandOf(b.section.type);

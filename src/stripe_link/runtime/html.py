@@ -1488,7 +1488,7 @@ def _render_page_body(
     styles = render_template_styles(page)
     # Page Composer decides which sections render (plans/PAGE_COMPOSER.md). The renderer only iterates the
     # composed list — it never decides visibility itself.
-    composed_sections = compose_page(offer, page)
+    composed_sections = compose_page(offer, page, str(_RENDER_STATE.get("page_type") or "landing"))
     # Each element declares a channel (plans/LANDING_PAGE_GOAL_COMPOSITION.md): "body" paints markup, "head"
     # emits meta/JSON-LD, "sidecar" writes its own artifact. Route by it rather than assuming everything is
     # body — a head section rendered into <main> would be visible junk, and vice versa.

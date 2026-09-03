@@ -253,6 +253,45 @@ most while composing.
   the image it sits (centre, lower-left, upper-right…), which is adjacent to the positionable brand
   overlay in `SOCIALITE_PARITY.md`. Both are exactly the kind of multi-option editing a cramped inline
   card handles badly and a modal handles well.
-- Automatic PLACEMENT by type ("an FAQ belongs near the bottom") only becomes meaningful once §4a's
-  baseline order exists — that is what defines where a type belongs. Until then: new sections land at the
-  end of the run, and the tenant drags.
+- ~~Automatic PLACEMENT by type ("an FAQ belongs near the bottom") only becomes meaningful once §4a's
+  baseline order exists.~~ **DONE 2026-09-02** — see §4c.
+
+## 4c. Order has an owner (2026-09-02)
+
+§4a defined the baseline. It did not say who *applies* it, and the honest answer was: nobody. Visibility
+had an owner — `compose_page` decides, the renderer obeys — but order was whatever the last writer left in
+the sections array. The builder then read that array straight back out as `section_order`, "the tenant's
+arrangement", which made every page a **fixed point**: whatever sequence a page happened to be saved with
+came back as a deliberate choice, and the baseline could never apply to anything. Pages saved before §4a
+kept a CTA in position 4 forever.
+
+The model, stated once so it stops being retrofitted:
+
+1. **A page starts at `baseline_order(goal)`.** That is the researched default, and it is the whole of the
+   answer for a page nobody has rearranged.
+2. **`page.section_order` records only the tenant's own arrangement.** It is a real persisted field, and it
+   is ABSENT until they actually drag something. Absent means "use the baseline" — so a baseline change
+   reaches every page that never opted out.
+3. **Adding or removing a section is not rearranging.** A new section lands at its baseline slot. Writing
+   an order on add would silently promote "I added a section" into "I have arranged this page myself".
+4. **`compose_page` applies it**, the same way it applies visibility. The renderer still only iterates.
+5. **Placement bands outrank everything**, tenant order included: `lead → pinned_top → free → pinned_bottom`.
+6. **Reset is giving up the field**, not restoring a copy — there is no stored "recommended sequence".
+
+Exemption: pages whose sequence is AUTHORED in code rather than composed from a goal — the funnel steps and
+thank-you pages in `runtime/upsell_pages.py` (`AUTHORED_PAGE_TYPES`). They have no goal and no tenant, and
+a baseline pass would actively break them: `celebration` is `free` while `headline` is `pinned_top`, so the
+celebration would sink below the headline.
+
+Two bugs this exposed, both the house pattern of *two things that must agree with nothing forcing them to*:
+
+- `contentRows` deduped element rows by `element.id` while the sections were keyed by `sectionOrderKey`.
+  Those differ for every NON-repeatable element, so each grew a second phantom row that sorted somewhere
+  the real section did not. Reported as "the Author Bio section is out of order".
+- `orderSections` **filtered** `placement: "none"`, which is the row-list rule, not the ordering rule. It
+  was silently stripping the `structured_data` section from every saved page — four of five dev pages had
+  lost their Product/FAQPage JSON-LD. Ordering orders; it never filters.
+
+Guarded by `tests/test_section_order_parity.py` over `tests/fixtures/section_order_cases.json`: an
+algorithm can't be shared across Python and JS, so both runtimes execute the same fixtures and must agree
+with each other *and* with expectations hand-written from `composition_rules.json`.

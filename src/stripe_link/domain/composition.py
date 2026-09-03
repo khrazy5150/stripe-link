@@ -152,16 +152,35 @@ def page_goal(page: dict[str, Any]) -> str:
     return str((page or {}).get("goal") or "")
 
 
-def compose_page(offer: dict[str, Any], page: dict[str, Any]) -> list[dict[str, Any]]:
-    """The Renderable Page Model: page.sections filtered to those the composer deems visible. The renderer
-    only iterates this — it never decides."""
+# Page kinds whose section sequence is AUTHORED in code rather than composed from a goal: the funnel steps
+# and thank-you pages built by runtime/upsell_pages.py. Composing their order would scramble it — celebration
+# sits in the `free` band while headline/subheadline are `pinned_top`, so a baseline pass drops the
+# celebration below the headline. They are not builder pages: no goal, no tenant deltas, nothing to compose.
+AUTHORED_PAGE_TYPES = ("funnel_step", "thank_you")
+
+
+def compose_page(
+    offer: dict[str, Any], page: dict[str, Any], page_type: str = "landing"
+) -> list[dict[str, Any]]:
+    """The Renderable Page Model: page.sections filtered to those the composer deems visible, then ORDERED.
+
+    Order is the composer's job for the same reason visibility is: it is a decision about what the page IS,
+    and leaving it to whoever last wrote the sections array is what let every page keep whatever sequence it
+    happened to be saved with. A page starts at baseline_order(goal); `page.section_order` records the
+    tenant's own arrangement on top of it, and is absent until they actually rearrange something.
+
+    The renderer only iterates the result — it never decides.
+    """
     offer_type = derived_offer_type(offer or {})
     overrides = page_overrides(page)
     goal = page_goal(page)
-    return [
+    visible = [
         section for section in (page.get("sections") or [])
         if is_section_visible(offer_type, str(section.get("type") or ""), overrides, goal)
     ]
+    if page_type in AUTHORED_PAGE_TYPES:
+        return visible
+    return order_sections(visible, page.get("section_order") or (), goal)
 
 
 # Placement governs ORDER + draggability; visibility is the separate `enabled` axis above. Both the
@@ -211,6 +230,47 @@ def order_section_keys(keys, tenant_order=(), goal: str = "") -> list[str]:
         return (band_index, within)
 
     return [key for key in sorted(keys, key=sort_key) if element_placement(key) != "none"]
+
+
+def section_order_key(section: dict[str, Any]) -> str:
+    """The key a section is ordered by — the JS mirror is pageComposer.sectionOrderKey().
+
+    Repeatable types can appear several times on one page, so those key by their element id; everything
+    else keys by TYPE, which is the vocabulary the builder's Page Sections panel already speaks.
+    """
+    section_type = str((section or {}).get("type") or "")
+    spec = RULES.get("elements", {}).get(section_type) or {}
+    section_id = str((section or {}).get("id") or "")
+    return section_id if (spec.get("repeatable") and section_id) else section_type
+
+
+def order_sections(sections, tenant_order=(), goal: str = "") -> list[dict[str, Any]]:
+    """order_section_keys applied to real section objects — the JS mirror is pageComposer.orderSections().
+
+    A section the tenant has not moved falls back to the baseline position of its TYPE, tie-broken by its
+    current position, so several content blocks (keyed by id, and therefore never in the baseline) keep
+    their relative order instead of collapsing together arbitrarily.
+    """
+    sections = list(sections)
+    baseline = {key: index for index, key in enumerate(baseline_order(goal))}
+    rank = {key: index for index, key in enumerate(tenant_order)}
+    fallback = len(rank)
+    tail = len(baseline)
+
+    def sort_key(pair):
+        index, section = pair
+        section_type = str(section.get("type") or "")
+        band = element_placement(section_type)
+        band_index = PLACEMENT_BANDS.index(band) if band in PLACEMENT_BANDS else PLACEMENT_BANDS.index("free")
+        key = section_order_key(section)
+        within = rank[key] if key in rank else fallback + baseline.get(section_type, tail)
+        return (band_index, within, index)
+
+    # Orders; never filters. `placement: "none"` means "not a draggable row" — that belongs to
+    # order_section_keys, which builds the builder's row list. A none-placed section is still a real
+    # section: structured_data is the head-channel JSON-LD, and dropping it here silently strips a page's
+    # rich results. See the JS mirror, which had exactly that bug.
+    return [section for _, section in sorted(enumerate(sections), key=sort_key)]
 
 
 def recommended_section_keys(offer_type: str, goal: str = "") -> list[str]:

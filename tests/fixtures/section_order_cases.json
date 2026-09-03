@@ -1,0 +1,61 @@
+{
+  "_": "Expectations are hand-written from composition_rules.json, not recorded from the code. Both the Python composer and its JS mirror run these.",
+  "order_sections": [
+    {
+      "why": "No tenant order: the page falls to the researched baseline. author_bio(14) before content_block(15), checkout_cta(21) last.",
+      "sections": [["checkout_cta", "cta"], ["author_bio", "ab"], ["hero", "hero"], ["testimonials", "tst"], ["content_block", "cb1"]],
+      "tenant_order": [],
+      "out": ["hero", "tst", "ab", "cb1", "cta"]
+    },
+    {
+      "why": "placement:none is NOT filtered here — structured_data is the head-channel JSON-LD and dropping it strips the page's rich results.",
+      "sections": [["checkout_cta", "cta"], ["structured_data", "sd"], ["hero", "hero"], ["author_bio", "ab"]],
+      "tenant_order": [],
+      "out": ["hero", "ab", "cta", "sd"]
+    },
+    {
+      "why": "The tenant's arrangement wins inside the free band; a section they never placed sorts after everything they did.",
+      "sections": [["testimonials", "tst"], ["checkout_cta", "cta"], ["author_bio", "ab"]],
+      "tenant_order": ["checkout_cta", "testimonials"],
+      "out": ["cta", "tst", "ab"]
+    },
+    {
+      "why": "Repeatable sections key by element id, so they are never in the baseline; they keep their relative order instead of collapsing.",
+      "sections": [["content_block", "cb2"], ["content_block", "cb1"], ["testimonials", "tst"]],
+      "tenant_order": [],
+      "out": ["tst", "cb2", "cb1"]
+    },
+    {
+      "why": "Bands outrank the tenant: legal_footer is pinned_bottom and cannot be dragged above free content.",
+      "sections": [["checkout_cta", "cta"], ["legal_footer", "foot"]],
+      "tenant_order": ["legal_footer", "checkout_cta"],
+      "out": ["cta", "foot"]
+    },
+    {
+      "why": "hero is pinned_top: it stays above free content no matter what the tenant order says.",
+      "sections": [["author_bio", "ab"], ["hero", "hero"]],
+      "tenant_order": ["author_bio", "hero"],
+      "out": ["hero", "ab"]
+    }
+  ],
+  "order_section_keys": [
+    {
+      "why": "The builder's ROW list does drop placement:none — structured_data is not a draggable row.",
+      "keys": ["checkout_cta", "structured_data", "hero", "author_bio"],
+      "tenant_order": [],
+      "out": ["hero", "author_bio", "checkout_cta"]
+    },
+    {
+      "why": "Baseline governs an unarranged page, same as the sections above.",
+      "keys": ["checkout_cta", "author_bio", "testimonials", "faq"],
+      "tenant_order": [],
+      "out": ["testimonials", "author_bio", "faq", "checkout_cta"]
+    },
+    {
+      "why": "A key in neither the tenant order nor the baseline sorts LAST, never first.",
+      "keys": ["author_bio", "el_unknown_id"],
+      "tenant_order": [],
+      "out": ["author_bio", "el_unknown_id"]
+    }
+  ]
+}

@@ -4377,7 +4377,26 @@ button:disabled {
   margin: 1.6rem 0;
 }
 
+/* The reset sits on the same line as the heading, right-aligned: it is an escape hatch from a state the
+   tenant opted into, not a primary control, and it only exists while there is a custom order to discard. */
+.content-sequence-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.35rem 0.6rem;
+}
+
+.content-sequence-head small {
+  flex: 1 1 auto;
+}
+
+.content-sequence-head .link-action {
+  flex: none;
+  font-size: var(--text-hint);
+}
+
 .content-sequence-head h3 {
+  flex: 0 0 100%;
   margin: 0;
   font-size: var(--text-card);
   line-height: var(--leading-card);

@@ -1128,7 +1128,11 @@
           <div class="content-sequence">
             <div class="content-sequence-head">
               <h3>Page Content</h3>
-              <small>In the order visitors see it. Drag a section to move it.</small>
+              <small v-if="hasCustomOrder">Your own order. Drag a section to move it.</small>
+              <small v-else>Recommended order for this goal. Drag a section to move it.</small>
+              <button v-if="hasCustomOrder" class="link-action" type="button" @click="resetSectionOrder()">
+                Reset to recommended order
+              </button>
             </div>
             <article
               v-for="(row, rowIndex) in sequenceRows"
@@ -3211,9 +3215,11 @@ function populateBuilderFromPage(page) {
   const refundPolicy = sections.find((section) => section.type === "refund_policy") || {};
   const cta = sections.find((section) => section.type === "checkout_cta") || {};
   Object.assign(builder, defaultBuilderForm(), {
-    // Section order is NOT a separate persisted field: page.sections is already stored in order
-    // (compose_page only filters, never reorders), so the tenant's arrangement is read back off it.
-    section_order: sections.map(sectionOrderKey),
+    // The tenant's OWN arrangement, and nothing else. Absent until they actually drag something, which
+    // is what lets baseline_order(goal) govern a page nobody has rearranged. This used to be derived
+    // from the saved sections array — which made every page a fixed point, since whatever order it
+    // happened to be saved with came back as "the tenant's order" and the baseline never got a look in.
+    section_order: Array.isArray(page.section_order) ? page.section_order.filter((k) => typeof k === "string") : [],
     page_id: page.page_id || localId("page"),
     thank_you_page_id: page.post_checkout?.thank_you_page?.page_id || localId("page"),
     post_purchase: loadPostPurchase(page),
@@ -3453,6 +3459,9 @@ function buildBuilderPageDocument() {
     composition: { overrides: { ...builder.composition.overrides } },
     // Intrinsic dimensions for uploaded page images so the renderer reserves layout space (no CLS).
     ...(Object.keys(builder.image_dims || {}).length ? { image_dims: { ...builder.image_dims } } : {}),
+    // Persisted only once the tenant has rearranged the page: an absent section_order means "use the
+    // baseline for this goal", which is the default a new page must keep getting.
+    ...(builder.section_order?.length ? { section_order: [...builder.section_order] } : {}),
     sections: builderSections(intent),
     revision: builder.revision || 1,
     created_at: createdAt,
@@ -4148,16 +4157,32 @@ function cancelSectionEditor() {
   sectionEditor.value = null;
 }
 
+// The page carries the tenant's own arrangement rather than the baseline for its goal. Drives the
+// sequence header's wording, and whether there is anything to reset.
+const hasCustomOrder = computed(() => Boolean(builder.section_order?.length));
+
+// Hand the page back to the baseline. Because an absent section_order MEANS "use the baseline", giving
+// it up is the whole operation — there is no stored copy of the recommended sequence to restore.
+function resetSectionOrder() {
+  builder.section_order = [];
+}
+
 function commitNewSection() {
   const element = sectionEditor.value?.row?.element;
   sectionEditor.value = null;
   if (!element || builder.elements.length >= 20) return;
   builder.elements.push(element);
-  // Land at the END of the run, next to the buttons that created it.
-  // Same key the readers use — writing element.id here filed the tenant's "put it last" under a key
-  // nothing ever looks up, so a newly added non-repeatable element silently fell back to its baseline slot.
-  const key = sectionOrderKey(element);
-  builder.section_order = [...sequenceRows.value.map((r) => r.key).filter((k) => k !== key), key];
+  // On a page the tenant has NOT arranged, this deliberately writes nothing: the new section lands at
+  // its baseline position, which is the researched sequence and the whole point of having a baseline.
+  // Recording an order here would quietly promote "I added a section" into "I have arranged this page
+  // myself" and freeze the page against every future baseline change.
+  if (builder.section_order?.length) {
+    // Once they HAVE arranged it, their order is authoritative — the new section joins the end of it
+    // rather than jumping to a baseline slot they never chose. Keyed the way readers key it: only
+    // repeatable types key by element id, everything else by type.
+    const key = sectionOrderKey(element);
+    builder.section_order = [...sequenceRows.value.map((r) => r.key).filter((k) => k !== key), key];
+  }
 }
 
 // The one line that makes a collapsed row worth scanning. Without it the map is a list of type names.
