@@ -613,7 +613,7 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     "    .sl-author-photo{width:14rem;height:14rem;border-radius:50%;overflow:hidden;box-shadow:0 0 0 0.5rem var(--sl-section-border,var(--sl-accent))}",
     "    .sl-author-photo img{width:100%;height:100%;object-fit:cover;display:block}",
     # A pill, so the name reads as an attribution rather than a second heading.
-    "    .sl-author-name{margin:0;display:inline-block;padding:0.4rem 1.4rem;border-radius:999px;background:var(--sl-section-border,var(--sl-accent));color:var(--sl-cta-text,#fff);font-size:1.3rem;font-weight:700;text-transform:uppercase;letter-spacing:0.06em}",
+    "    .sl-author-name{margin:0;display:inline-block;padding:0.4rem 1.4rem;border-radius:999px;background:var(--sl-section-border,var(--sl-accent));color:var(--sl-section-border-ink,var(--sl-cta-text,#fff));font-size:1.3rem;font-weight:700;text-transform:uppercase;letter-spacing:0.06em}",
     "    .sl-author-headline{margin:0;font-family:var(--sl-font-heading);font-size:clamp(2.4rem,5vw,3.6rem);line-height:1.2;color:var(--sl-section-ink,var(--sl-text))}",
     "    .sl-author-body{margin:0;max-width:62rem;font-size:1.6rem;line-height:1.7;color:var(--sl-section-ink,var(--sl-muted))}",
     "    .sl-price-highlight{display:grid;gap:0.6rem;justify-items:center;text-align:center;padding:3.2rem 2rem;background:var(--sl-section-bg,transparent);color:var(--sl-section-ink,var(--sl-text))}",

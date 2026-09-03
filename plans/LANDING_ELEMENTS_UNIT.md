@@ -33,6 +33,13 @@ unparseable colours are dropped rather than echoed into a style attribute.
 The whole promise of this feature is "pick one colour, get readable text", so a pair that fails AA anywhere
 would have quietly broken it.
 
+**A third correction, found in review of Author Bio:** deriving an ink for the section BACKGROUND was not
+enough. The name pill is painted with the BORDER colour and had its text hardcoded white, so a white photo
+ring made the name invisible — the very failure this mechanism exists to prevent, reintroduced one surface
+along. Every tenant-colourable surface now derives its own ink (`--sl-section-ink`, `-accent-ink`,
+`-border-ink`), so an element that paints with `accent` or `border` gets readable text for free rather than
+having to remember.
+
 ### Original design notes
 
 ## ⭐ Step 0 — the section-scoped theme override

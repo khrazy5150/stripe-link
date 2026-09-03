@@ -74,6 +74,13 @@ class PatternBreakTests(unittest.TestCase):
         html = render_author_bio({**FULL, "theme": {"bg": "#1e1033", "border": "#f97316"}})
         self.assertIn("--sl-section-border:#f97316", html)
 
+    def test_the_name_pill_stays_readable_on_a_white_ring(self):
+        """Found in review: the pill is painted with the BORDER colour and its text was hardcoded white,
+        so a white photo ring made the name vanish — the invisible-text failure, one surface along from
+        where it was guarded."""
+        html = render_author_bio({**FULL, "theme": {"bg": "#111827", "border": "#ffffff"}})
+        self.assertIn(f"--sl-section-border-ink:{DARK_INK}", html)
+
     def test_an_unparseable_colour_falls_back_to_the_preset(self):
         # Better a themeless section than a section with an unreadable or injected style.
         html = render_author_bio({**FULL, "theme": {"bg": "chartreuse; content:'x'"}})

@@ -81,11 +81,24 @@ class SectionThemeVarsTests(unittest.TestCase):
             with self.subTest(token=token):
                 self.assertIn(f"--sl-section-{token}:", css)
 
+    def test_every_tenant_coloured_surface_gets_its_own_readable_ink(self):
+        """The bug this closes, found in review: the author-bio NAME PILL is painted with the BORDER
+        colour while its text was hardcoded white — so a white photo ring made the name invisible. Deriving
+        an ink per surface means any element painting with accent or border gets readable text for free
+        instead of having to remember."""
+        css = section_theme_vars({"theme": {"bg": "#111827", "accent": "#facc15", "border": "#ffffff"}})
+        self.assertIn(f"--sl-section-ink:{LIGHT_INK}", css)          # dark background -> light text
+        self.assertIn(f"--sl-section-accent-ink:{DARK_INK}", css)    # yellow accent   -> dark text
+        self.assertIn(f"--sl-section-border-ink:{DARK_INK}", css)    # white ring      -> dark text
+
     def test_an_accent_alone_derives_no_ink(self):
         # Ink is derived from a BACKGROUND. Without one the section keeps the preset's text colour.
         css = section_theme_vars({"theme": {"accent": "#f97316"}})
-        self.assertIn("--sl-section-accent", css)
-        self.assertNotIn("--sl-section-ink", css)
+        self.assertIn("--sl-section-accent:", css)
+        # No BACKGROUND was chosen, so the section keeps the preset's body text colour...
+        self.assertNotIn("--sl-section-ink:", css)
+        # ...but anything painted with the accent still gets a readable ink.
+        self.assertIn("--sl-section-accent-ink:", css)
 
     def test_unknown_tokens_are_dropped(self):
         css = section_theme_vars({"theme": {"bg": "#1e1033", "font_size": "99px", "onclick": "x"}})

@@ -95,11 +95,18 @@ def section_theme_vars(section: dict[str, Any]) -> str:
         if value and relative_luminance(value) is not None:
             parts.append(f"--sl-section-{token}:{value}")
 
-    background = str(theme.get("bg") or "").strip()
-    if background:
-        ink = readable_ink(background)
+    # An ink for EVERY surface a tenant can colour, not just the section background. The author-bio name
+    # pill is painted with the border colour, and hardcoding its text to white made it invisible the moment
+    # a tenant chose a white photo ring — the exact failure this module exists to prevent, reintroduced one
+    # surface along. Any future element that paints something with `accent` or `border` gets a readable ink
+    # for free rather than having to remember.
+    for token, ink_name in (("bg", "ink"), ("accent", "accent-ink"), ("border", "border-ink")):
+        surface = str(theme.get(token) or "").strip()
+        if not surface:
+            continue
+        ink = readable_ink(surface)
         if ink:
-            parts.append(f"--sl-section-ink:{ink}")
+            parts.append(f"--sl-section-{ink_name}:{ink}")
     return ";".join(parts)
 
 
