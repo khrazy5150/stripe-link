@@ -262,6 +262,28 @@ select/radio must ship WITH that renderer -- an unconstrained choice field is a 
 disguise. Retires `open_form` + `form_id`, which with
 `social_redirect` takes the action vocabulary from seven to five, both by removal.
 
+### ⭐ HIGH — add the font service to published pages (found 2026-09-03, plan plans/FONT_SERVICE.md)
+
+Published landing pages load NO webfonts. `runtime/html.py` emits no `@font-face` and no link to
+`fonts.juniorbay.com`; its only preconnect is for the hero image host. `font_stack()` still produces
+`Montserrat,-apple-system,...`, so the named family applies only if the visitor happens to have it
+installed — in practice every page renders in whatever sans that device ships. **The same page looks
+different on macOS, Windows and Android.** The homepage wires the service up correctly; published pages
+never got the same treatment.
+
+Found while checking whether the service carries Inter for the Quote element (it does not — 404).
+
+Second finding, and the reason the fix is two-part: **nothing writes `theme.fonts`.** The renderer reads
+it, but no builder control and none of the 16 presets set it, so every page is `family: "system"` and
+loading the service alone would change nothing visible. Presets need typography before this is real.
+
+Preview and published both render through `render_page` (the preview POSTs to `/pages/render`), so ONE
+change covers both surfaces with nothing to keep in sync.
+
+Service capabilities, probed rather than assumed: `?family=X:400,700` gives both weights, a bare
+`?family=X` silently gives regular only (every 700 heading would be faux-bold), the Google `wght@` syntax
+404s, and families are Roboto / Montserrat / Poppins / Open Sans / Ubuntu Titling — no Inter.
+
 ### ⭐ HIGH — the dashboard is not usable on a phone (found 2026-08-31, plan plans/MOBILE_EDITING.md)
 
 Reported from a real device: from `sandbox.juniorbay.com` on a phone, the menus cannot be navigated to
