@@ -48,7 +48,10 @@ class RepeatableSectionTests(unittest.TestCase):
 
     def test_only_genuine_multi_instance_sections_are_repeatable(self):
         repeatable = {k for k, v in RULES["elements"].items() if v.get("repeatable")}
-        self.assertEqual(repeatable, {"content_block", "catalog_grid"})
+        # page_ribbon joined 2026-09-04: a page may legitimately carry a second interruption further down.
+        # It is the one repeatable element with an UPPER bound rather than none — the builder caps it at
+        # two, because a third stops being an interruption and becomes wallpaper.
+        self.assertEqual(repeatable, {"content_block", "catalog_grid", "page_ribbon"})
 
     def test_container_sections_are_singletons(self):
         # Testimonials and FAQ are ONE section holding many items, each with its own add control. A

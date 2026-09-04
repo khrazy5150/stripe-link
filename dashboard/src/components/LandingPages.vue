@@ -614,6 +614,62 @@
                       <label class="offer-field"><span>Label</span><input v-model.trim="element.label" type="text" placeholder="e.g. on Google" /></label>
                     </template>
 
+                    <template v-else-if="element.type === 'page_ribbon'">
+                      <p v-if="ribbonCount > 2" class="field-note is-warning">
+                        Three ribbons stop being interruptions and become wallpaper. Two is the most a page should carry.
+                      </p>
+                      <label class="offer-field">
+                        <span>Layout</span>
+                        <select v-model="element.presentation">
+                          <option value="image_left">Image left — image, then the copy and button</option>
+                          <option value="centered">Centered — no image</option>
+                          <option value="compact">Compact row — small image, one line of copy</option>
+                        </select>
+                      </label>
+                      <div v-if="element.presentation !== 'centered'" class="selectable-price-image-controls" :class="{ 'has-image-preview': element.image_url }">
+                        <div v-if="element.image_url" class="selectable-price-image-preview"><img :src="element.image_url" alt="Ribbon image preview" /></div>
+                        <input :ref="(el) => setElementImageInput(element.id, el)" type="file" accept="image/*" hidden @change="handleElementImagePicked(element, $event, 'image_url')" />
+                        <button class="secondary-action compact" type="button" :disabled="Boolean(blurbImageUploading[element.id])" @click.prevent="triggerElementImageUpload(element.id)">
+                          {{ blurbImageUploading[element.id] ? "Uploading..." : "Upload image" }}
+                        </button>
+                      </div>
+                      <label class="offer-field"><span>Eyebrow (optional)</span><input v-model.trim="element.eyebrow" type="text" placeholder="e.g. Limited time" /></label>
+                      <label class="offer-field">
+                        <span>Headline</span>
+                        <input v-model.trim="element.headline" type="text" placeholder="What you want them to do" />
+                        <small class="field-note">**text** colours a phrase, ^^text^^ highlights it.</small>
+                      </label>
+                      <label class="offer-field"><span>Supporting copy</span><textarea v-model.trim="element.body" rows="2" placeholder="One or two lines of why."></textarea></label>
+                      <div class="offer-two-column">
+                        <label class="offer-field"><span>Button label</span><input v-model.trim="element.cta.label" type="text" placeholder="e.g. Reactivate now" /></label>
+                        <label class="offer-field">
+                          <span>Button does</span>
+                          <select v-model="element.cta.action">
+                            <option value="redirect">Opens a link</option>
+                            <option value="call_phone">Starts a call</option>
+                            <option value="email">Opens an email</option>
+                          </select>
+                        </label>
+                      </div>
+                      <label class="offer-field">
+                        <span>{{ element.cta.action === "call_phone" ? "Phone number" : element.cta.action === "email" ? "Email address" : "Link" }}</span>
+                        <input v-model.trim="element.cta.target" type="text" :placeholder="element.cta.action === 'call_phone' ? '+1 555 010 1234' : element.cta.action === 'email' ? 'hello@example.com' : 'https://… or /another-page'" />
+                        <small class="field-note">Leave the label or this blank and the ribbon renders without a button.</small>
+                      </label>
+                      <label class="builder-toggle">
+                        <input type="checkbox" :checked="Boolean(element.theme && element.theme.bg)" @change="toggleSectionBreak(element, $event, 'accent')" />
+                        <span>Break the page style for this section</span>
+                      </label>
+                      <div v-if="element.theme && element.theme.bg" class="offer-two-column">
+                        <label class="offer-field">
+                          <span>Background</span>
+                          <input v-model.trim="element.theme.bg" type="color" />
+                          <small class="field-note">Text colour is chosen automatically so it stays readable.</small>
+                        </label>
+                        <label class="offer-field"><span>Button</span><input v-model.trim="element.theme.accent" type="color" /></label>
+                      </div>
+                    </template>
+
                     <template v-else-if="element.type === 'numbered_list'">
                       <label class="offer-field">
                         <span>Heading</span>
@@ -1291,7 +1347,14 @@
             </article>
             <div class="composition-subhead">Add content</div>
             <div class="element-add-row">
-            <button v-for="entry in ELEMENT_TYPES" :key="entry.type" class="secondary-action compact" type="button" @click="addElement(entry.type)">
+            <button
+              v-for="entry in ELEMENT_TYPES"
+              :key="entry.type"
+              class="secondary-action compact"
+              type="button"
+              :disabled="entry.type === 'page_ribbon' && ribbonCount >= RIBBON_MAX"
+              :title="entry.type === 'page_ribbon' && ribbonCount >= RIBBON_MAX ? 'Two ribbons is the most a page should carry' : undefined"
+              @click="addElement(entry.type)">
             + {{ entry.label }}
             </button>
             </div>
@@ -4029,6 +4092,9 @@ function newElement(type) {
   if (type === "bragging_points") return { ...base, heading: "", items: [{ value: "", label: "" }], theme: {} };
   if (type === "quote") return { ...base, text: "", attribution: "", title: "", image_url: "", style: "minimal", theme: {} };
   if (type === "numbered_list") return { ...base, heading: "", items: [""] };
+  if (type === "page_ribbon") return { ...base, purpose: "custom", presentation: "image_left",
+    image_url: "", eyebrow: "", headline: "", body: "",
+    cta: { label: "", action: "redirect", target: "" }, theme: {} };
   // The NUMBERS are derived from the offer; only these two lines are the tenant's.
   if (type === "price_highlight") return { ...base, main_text: "Today Only", subtext: "" };
   if (type === "author_bio") return { ...base, photo_url: "", name: "", headline: "", body: "", theme: {} };
@@ -4312,6 +4378,11 @@ function resetSectionOrder() {
   builder.section_order = [];
 }
 
+// Three ribbons stop being interruptions and become wallpaper, which destroys the only property that
+// makes the element worth having (plans/ATTENTION_PRIMITIVE.md §4a "the wallpaper rule"). Capped at two.
+const RIBBON_MAX = 2;
+const ribbonCount = computed(() => builder.elements.filter((el) => el.type === "page_ribbon").length);
+
 function commitNewSection() {
   const element = sectionEditor.value?.row?.element;
   sectionEditor.value = null;
@@ -4354,6 +4425,7 @@ function rowSummary(row) {
   if (row.type === "bragging_points") return countLabel((e.items || []).filter((i) => (i.value || "").trim()).length, "point");
   if (row.type === "quote") return e.attribution?.trim() || (e.text?.trim() ? "quote" : "empty");
   if (row.type === "numbered_list") return countLabel((e.items || []).filter((i) => (i || "").trim()).length, "item");
+  if (row.type === "page_ribbon") return e.headline?.trim() || e.eyebrow?.trim() || "empty";
   return "";
 }
 
@@ -4452,6 +4524,22 @@ function elementSection(element) {
   if (element.type === "product_details") {
     return { id: element.id, type: "product_details" };   // content is the current target (offer-driven)
   }
+  if (element.type === "page_ribbon") {
+    if (!(element.headline || "").trim() && !(element.body || "").trim()) return null;
+    const theme = element.theme && element.theme.bg ? element.theme : undefined;
+    const cta = element.cta || {};
+    return { id: element.id, type: "page_ribbon",
+      purpose: element.purpose || "custom",
+      presentation: element.presentation || "image_left",
+      // centered has no image slot, so the URL is not carried into a document that will ignore it
+      image_url: element.presentation === "centered" ? undefined : (element.image_url || undefined),
+      eyebrow: element.eyebrow || undefined,
+      headline: element.headline || undefined,
+      body: element.body || undefined,
+      ...((cta.label || "").trim() && (cta.target || "").trim()
+        ? { cta: { label: cta.label, action: cta.action || "redirect", target: cta.target } } : {}),
+      theme };
+  }
   if (element.type === "numbered_list") {
     // Plain strings, capped the way the renderer caps them so the document cannot carry more than shows.
     const items = (element.items || []).map((i) => (i || "").trim()).filter(Boolean).slice(0, 12);
@@ -4503,6 +4591,14 @@ function elementsFromPage(sections) {
     } else if (section.type === "testimonials") {
       elements.push({ id: localId("el"), type: "testimonials", heading: section.heading || "",
         items: (section.items || []).map((item) => ({ quote: item.quote || "", author: item.author || "", role: item.role || "", avatar_url: item.avatar_url || "" })) });
+    } else if (section.type === "page_ribbon") {
+      elements.push({ id: localId("el"), type: "page_ribbon",
+        purpose: section.purpose || "custom", presentation: section.presentation || "image_left",
+        image_url: section.image_url || "", eyebrow: section.eyebrow || "",
+        headline: section.headline || "", body: section.body || "",
+        cta: { label: section.cta?.label || "", action: section.cta?.action || "redirect",
+               target: section.cta?.target || "" },
+        theme: section.theme ? { ...section.theme } : {} });
     } else if (section.type === "numbered_list") {
       elements.push({ id: localId("el"), type: "numbered_list", heading: section.heading || "",
         items: (section.items || []).map((i) => String(i || "")) });

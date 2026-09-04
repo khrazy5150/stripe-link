@@ -163,7 +163,7 @@ Ribbon**, as §8 already argues for shipping attribution early.
 
 ### Phasing
 
-- **A-P1 (buildable now):** static Ribbon element — image/eyebrow/headline/copy/CTA, three presentations,
+- ~~**A-P1**~~ **SHIPPED 2026-09-04:** static Ribbon element — image/eyebrow/headline/copy/CTA, three presentations,
   repeatable capped at two, `free` placement so the tenant drags it where it belongs, CTA reusing the
   existing action vocabulary (`external_url`, `open_form`, `capture_email`, `call_number`, …) plus one
   internal target for "another of my offers/pages".

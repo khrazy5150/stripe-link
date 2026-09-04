@@ -151,7 +151,10 @@ renders a gallery and badges from PRODUCT data; this is authored page copy. Chec
 6. ~~**Brand Marquee**~~ — **SHIPPED 2026-09-04.** Text-drop bug fixed (a name is the entry, the logo
    is the optional upgrade), three-state scroll with `auto` preserving the >=5 rule so no page moves,
    speed slider on its own duration property, and a card/none logo backing.
-7. **Page Ribbon** — largest, and the only one with CTA plumbing.
+7. ~~**Page Ribbon**~~ — **SHIPPED 2026-09-04 (A-P1, static).** Three presentations, repeatable capped
+   at two (the wallpaper rule, enforced by disabling the add button rather than warning after the fact),
+   CTA named after the existing action vocabulary, and a `safe_href` guard because the link is typed by a
+   tenant. A-P2 attribution / A-P3 hydration remain, as planned.
 
 Risky decisions first, biggest element last, and each override consumer validates step 0 before the next
 one depends on it.

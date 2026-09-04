@@ -682,6 +682,23 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     "    .sl-numbered-item{counter-increment:sl-num;display:grid;grid-template-columns:auto minmax(0,1fr);align-items:center;gap:1.6rem;padding:1.6rem 2rem;border:1px solid var(--sl-content-border);border-radius:1rem;background:var(--sl-card)}",
     "    .sl-numbered-item::before{content:counter(sl-num);display:grid;place-items:center;width:3.6rem;height:3.6rem;border-radius:50%;background:var(--sl-accent);color:var(--sl-cta-text,#fff);font-family:var(--sl-font-heading);font-size:1.8rem;font-weight:700;line-height:1}",
     "    .sl-numbered-text{margin:0;font-size:1.6rem;line-height:1.55;color:var(--sl-content-text)}",
+    # PAGE RIBBON — an Attention Block. Uses the shared section override, so a tenant can make it break
+    # the page deliberately; that is the entire point of an interruption.
+    "    .sl-page-ribbon{display:grid;gap:2rem;align-items:center;margin:0 auto;padding:3.2rem;border-radius:1.4rem;background:var(--sl-section-bg,var(--sl-card));color:var(--sl-section-ink,var(--sl-text));max-width:74rem}",
+    "    .sl-page-ribbon.is-image_left{grid-template-columns:minmax(0,22rem) minmax(0,1fr)}",
+    "    .sl-page-ribbon.is-centered{grid-template-columns:minmax(0,1fr);text-align:center;justify-items:center}",
+    "    .sl-page-ribbon.is-compact{grid-template-columns:minmax(0,12rem) minmax(0,1fr);gap:1.6rem;padding:1.6rem 2rem}",
+    "    .sl-ribbon-media img{width:100%;height:auto;display:block;border-radius:1rem}",
+    "    .sl-ribbon-copy{display:grid;gap:0.8rem;min-width:0}",
+    "    .sl-page-ribbon.is-centered .sl-ribbon-copy{justify-items:center}",
+    "    .sl-ribbon-eyebrow{margin:0;font-size:1.3rem;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;opacity:0.75}",
+    "    .sl-ribbon-headline{margin:0;font-family:var(--sl-font-heading);font-size:clamp(2rem,4vw,2.8rem);line-height:1.2}",
+    "    .sl-ribbon-body{margin:0;font-size:1.6rem;line-height:1.55;opacity:0.85}",
+    # The CTA takes the section accent when the ribbon breaks the pattern, so its ink is the DERIVED
+    # accent-ink and a tenant cannot colour the button into invisibility.
+    "    .sl-ribbon-cta{justify-self:start;display:inline-flex;align-items:center;margin-top:0.8rem;padding:1.1rem 2.2rem;border-radius:999px;background:var(--sl-section-accent,var(--sl-accent));color:var(--sl-section-accent-ink,var(--sl-cta-text,#fff));font-size:1.5rem;font-weight:700;text-decoration:none}",
+    "    .sl-page-ribbon.is-centered .sl-ribbon-cta{justify-self:center}",
+    "    .sl-page-ribbon.is-compact .sl-ribbon-headline{font-size:clamp(1.7rem,3vw,2.1rem)}",
     "    .sl-price-highlight{display:grid;gap:0.6rem;justify-items:center;text-align:center;padding:3.2rem 2rem;background:var(--sl-section-bg,transparent);color:var(--sl-section-ink,var(--sl-text))}",
     "    .sl-bargain-regular{margin:0;font-size:1.5rem;color:var(--sl-section-ink,var(--sl-price-regular));opacity:0.75}",
     "    .sl-bargain-amount{margin:0;font-family:var(--sl-font-heading);font-size:clamp(4rem,10vw,6.4rem);line-height:1;font-weight:800;color:var(--sl-section-ink,var(--sl-price-amount))}",
@@ -1840,6 +1857,7 @@ SECTION_REGISTRY: dict[str, dict[str, Any]] = {
     "author_bio": {"render": lambda c: render_author_bio(c.section), "version": 1},
     "product_details": {"render": lambda c: render_product_details(c.offer, c.products_by_id, c.services_by_id), "version": 1},
     "product_carousel": {"render": lambda c: render_product_carousel(c.section, c.page, c.offers_by_id, c.products_by_id, c.services_by_id, c.checkout_url, c.api_base_url), "version": 1},
+    "page_ribbon": {"render": lambda c: render_page_ribbon(c.section), "version": 1},
     "numbered_list": {"render": lambda c: render_numbered_list(c.section), "version": 1},
     "quote": {"render": lambda c: render_quote(c.section), "version": 1},
     "bragging_points": {"render": lambda c: render_bragging_points(c.section), "version": 1},
@@ -4107,6 +4125,104 @@ def render_author_bio(section: dict[str, Any]) -> str:
     return "\n".join([
         f'    <section class="sl-author-bio{themed}" data-section-id="{section_id}" data-section-type="author_bio"{style_attr}>',
         *rows,
+        "    </section>",
+    ])
+
+
+RIBBON_PRESENTATIONS = ("image_left", "centered", "compact")
+RIBBON_PURPOSES = ("promote_offer", "capture_lead", "promote_content", "custom")
+# Named after the existing action vocabulary (CTA_TO_ACTION below) rather than a new set of words for the
+# same ideas. `none` is explicit: a ribbon with nothing to click is a content block, and should say so.
+RIBBON_ACTIONS = ("redirect", "call_phone", "email", "none")
+RIBBON_IMAGE_SIZES = "(max-width: 700px) 100vw, 320px"
+# A tenant types this URL, so the scheme is an injection surface: `javascript:` in an href executes on
+# click. Allow only schemes that navigate, plus same-origin paths.
+SAFE_HREF_SCHEMES = ("http://", "https://", "mailto:", "tel:")
+
+
+def safe_href(value: str) -> str:
+    """A tenant-supplied link, or "" when it is not something we will put in an href.
+
+    Same-origin paths (/thing) are allowed so a ribbon can point at another page on the tenant's own site,
+    which is the "promote one of my offers" case. Everything else must carry a scheme we recognise.
+    """
+    url = str(value or "").strip()
+    if not url:
+        return ""
+    lowered = url.lower()
+    if lowered.startswith("//"):          # protocol-relative: inherits the page scheme, but hides its host
+        return ""
+    if url.startswith("/"):
+        return url
+    return url if lowered.startswith(SAFE_HREF_SCHEMES) else ""
+
+
+def render_page_ribbon(section: dict[str, Any]) -> str:
+    """An Attention Block, presented as a ribbon: a mid-scroll interruption that ASKS for something.
+
+    Not a content_block (plans/ATTENTION_PRIMITIVE.md §4a): a content block informs, a ribbon acts. Same
+    reason checkout_cta is its own element rather than a styled paragraph.
+
+    Static only, deliberately. Ten of the twelve uses in the plan need no per-visitor state, and pages are
+    rendered ONCE at publish time and served from S3 — so anything that varies by visitor needs client-side
+    hydration, which is its own project (A-P3) rather than something to half-build here.
+    """
+    headline = str(section.get("headline") or "").strip()
+    body = str(section.get("body") or "").strip()
+    if not (headline or body):
+        return ""
+
+    presentation = str(section.get("presentation") or "image_left").strip().lower()
+    if presentation not in RIBBON_PRESENTATIONS:
+        presentation = "image_left"
+
+    eyebrow = str(section.get("eyebrow") or "").strip()
+    image = str(section.get("image_url") or "").strip()
+    # `centered` is the no-image presentation by definition, so an image left over from another choice is
+    # dropped rather than quietly changing the layout the tenant picked.
+    if presentation == "centered":
+        image = ""
+
+    cta = section.get("cta") or {}
+    action = str(cta.get("action") or "redirect").strip().lower()
+    if action not in RIBBON_ACTIONS:
+        action = "redirect"
+    target = str(cta.get("target") or "").strip()
+    if action == "call_phone":
+        href = safe_href(f"tel:{target}") if target else ""
+    elif action == "email":
+        href = safe_href(f"mailto:{target}") if target else ""
+    elif action == "redirect":
+        href = safe_href(target)
+    else:
+        href = ""
+    label = str(cta.get("label") or "").strip()
+
+    parts: list[str] = []
+    if image:
+        parts.append(f'      <div class="sl-ribbon-media">{responsive_img(image, headline or "", sizes=RIBBON_IMAGE_SIZES)}</div>')
+    copy: list[str] = ['      <div class="sl-ribbon-copy">']
+    if eyebrow:
+        copy.append(f'        <p class="sl-ribbon-eyebrow">{escape(eyebrow)}</p>')
+    if headline:
+        copy.append(f'        <h2 class="sl-ribbon-headline">{render_headline_markup(headline)}</h2>')
+    if body:
+        copy.append(f'        <p class="sl-ribbon-body">{escape(body)}</p>')
+    if href and label:
+        external = href.startswith(("http://", "https://"))
+        rel = ' rel="noopener"' + (' target="_blank"' if external else "")
+        copy.append(f'        <a class="sl-ribbon-cta" href="{escape(href)}"{rel}>{escape(label)}</a>')
+    copy.append("      </div>")
+    parts.extend(copy)
+
+    style = section_theme_vars(section)
+    style_attr = f' style="{escape(style)}"' if style else ""
+    themed = " sl-section-themed" if style else ""
+    section_id = escape(str(section.get("id", "page-ribbon")))
+    return "\n".join([
+        f'    <section class="sl-page-ribbon is-{presentation}{themed}" data-section-id="{section_id}"'
+        f' data-section-type="page_ribbon"{style_attr}>',
+        *parts,
         "    </section>",
     ])
 
