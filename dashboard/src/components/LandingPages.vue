@@ -665,9 +665,9 @@
                           </button>
                         </div>
                         <small v-if="ribbonTargetPage(element) && ribbonTargetPage(element).status !== 'published'" class="field-note is-warning">
-                          That page is not published yet, so the button would lead nowhere. Publish it before this one.
+                          That page is no longer published, so the button would lead nowhere. Publish it again, or choose another page.
                         </small>
-                        <small v-else class="field-note">The live URL is filled in for you, and refreshed each time you save.</small>
+                        <small v-else class="field-note">Only published pages can be chosen. The live URL is filled in for you, and refreshed each time you save.</small>
                       </div>
                       <label v-else class="offer-field">
                         <span>{{ element.cta.action === "call_phone" ? "Phone number" : element.cta.action === "email" ? "Email address" : "Link" }}</span>
@@ -923,26 +923,25 @@
         <div class="offer-product-selector-body">
           <input v-model.trim="ribbonPicker.search" class="offer-product-search" type="search" placeholder="Search pages..." />
           <div v-if="!ribbonPickerPages.length" class="selector-load-state">
-            No other pages yet. Create a second landing page and it will appear here.
+            There are no published pages to choose from. Publish another landing page and it will appear here.
           </div>
-          <div v-else class="offer-product-grid">
+          <div v-else class="ribbon-page-grid">
             <button
               v-for="page in ribbonPickerPages"
               :key="page.page_id"
               type="button"
-              class="offer-product-card"
+              class="ribbon-page-card"
               :class="{ selected: ribbonPicker.element?.cta?.page_id === page.page_id }"
               @click="chooseRibbonPage(page)"
             >
-              <div class="offer-product-image">
+              <span class="ribbon-page-thumb">
                 <img v-if="pageImage(page)" :src="pageImage(page)" :alt="page.name || 'Page image'" />
-                <span v-else>{{ (page.name || "P").trim().charAt(0).toUpperCase() }}</span>
-                <span class="offer-product-check" aria-hidden="true">✓</span>
-              </div>
-              <span class="offer-product-intent" :class="page.status === 'published' ? 'primary' : 'secondary'">
-                {{ page.status === "published" ? "Published" : "Draft" }}
+                <span v-else class="ribbon-page-initial">{{ (page.name || "P").trim().charAt(0).toUpperCase() }}</span>
               </span>
-              <span class="offer-product-name">{{ page.name || "Untitled page" }}</span>
+              <!-- The NAME is the identifier, not the image: two pages can promote the same product and
+                   look identical, which is exactly the case that made this necessary. -->
+              <span class="ribbon-page-title">{{ page.name || "Untitled page" }}</span>
+              <span class="ribbon-page-slug">{{ page.route?.slug ? "/" + String(page.route.slug).replace(/^\//, "") : "" }}</span>
             </button>
           </div>
         </div>
@@ -4445,7 +4444,9 @@ const ribbonPicker = reactive({ element: null, search: "" });
 const ribbonPickerPages = computed(() => {
   const term = ribbonPicker.search.trim().toLowerCase();
   return pages.value
-    .filter((p) => p.page_id !== builder.page_id && p.status !== "archived")
+    // PUBLISHED only. A draft has no live URL, so offering it and then warning about it was making the
+    // tenant undo a choice we should never have let them make.
+    .filter((p) => p.status === "published" && p.page_id !== builder.page_id)
     .filter((p) => !term || (p.name || "").toLowerCase().includes(term));
 });
 

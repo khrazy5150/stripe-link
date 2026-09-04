@@ -4102,6 +4102,72 @@ button:disabled {
   accent-color: var(--accent);
 }
 
+/* The ribbon's page picker has its own card rather than borrowing the Offers product card: that one is
+   built around a price row this has no use for, and its fixed 18rem image row pushed the page NAME out of
+   a card with overflow:hidden. The name is the identifier here — two pages can promote the same product
+   and look identical — so it is never the thing that gets clipped. */
+.ribbon-page-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(20rem, 100%), 1fr));
+  gap: 1.2rem;
+  max-height: 48rem;
+  overflow: auto;
+  padding: 0.4rem;
+}
+
+.ribbon-page-card {
+  display: grid;
+  grid-template-rows: 14rem auto auto;
+  gap: 0.6rem;
+  padding: 0.8rem;
+  text-align: left;
+  background: var(--surface);
+  border: 2px solid var(--line);
+  border-radius: 1rem;
+  cursor: pointer;
+}
+
+.ribbon-page-card:hover,
+.ribbon-page-card.selected {
+  border-color: var(--accent);
+}
+
+.ribbon-page-thumb {
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  border-radius: 0.6rem;
+  background: var(--subtle, #f1f5f9);
+}
+
+.ribbon-page-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.ribbon-page-initial {
+  font-size: 3.2rem;
+  font-weight: 700;
+  color: var(--muted);
+}
+
+.ribbon-page-title {
+  font-size: 1.4rem;
+  font-weight: 600;
+  line-height: 1.35;
+  color: var(--text);
+}
+
+.ribbon-page-slug {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: var(--text-hint);
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* The chosen page sits beside the picker button rather than in a dropdown: a tenant needs to see WHICH
    page and WHERE it points, since the URL is derived rather than typed. */
 .ribbon-page-choice {
