@@ -62,7 +62,7 @@ pointing at a 404 is worse than one with no button.
 Optional `collect email` / `collect phone`; neither ticked means the file downloads immediately. Ticked
 fields are required and recorded as a lead.
 
-## 3. Email a file — **the spec needs one correction**
+## 3. Email a file — **SHIPPED 2026-09-04, as a link**
 
 > Author: *"limit the file to a reasonable size… my gut tells me 50Mb"*
 
@@ -115,5 +115,7 @@ That is worth doing when tenants ask for attributable phone leads. It is not wor
 3. ~~**§2 download, with the lead gate**~~ — **SHIPPED.** POST /downloads/lead; the gate reads the
    PAGE, not the request; a spam-flagged request still gets the file but writes no lead; 50MB cap in the
    builder; dialog built with DOM calls so a field label can never be markup.
-4. **§3 email a link** — reuses §2 end to end once the correction above is accepted.
+4. ~~**§3 email a link**~~ — **SHIPPED.** One endpoint serves both deliveries; the SECTION decides.
+   email_file forces the email requirement whatever the checkboxes say. Emailed links live 24h, not the
+   download path's 5 minutes, because an inbox is read later.
 5. ~~**§5b true call tracking**~~ — **DEFERRED to v2, low priority (author, 2026-09-04).**

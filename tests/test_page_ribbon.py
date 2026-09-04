@@ -192,6 +192,30 @@ class DownloadActionTests(unittest.TestCase):
         self.assertNotIn("innerHTML", block)
 
 
+class EmailFileActionTests(unittest.TestCase):
+    def test_it_renders_the_same_button_as_a_download(self):
+        html = render_page_ribbon(
+            {**RIBBON, "cta": {"label": "Email it to me", "action": "email_file",
+                               "asset": {"bucket_key": "k", "filename": "g.pdf"}}},
+            {"tenant_id": "t1", "page_id": "p1"}, "https://api.example.com")
+        self.assertIn("data-sl-download", html)
+
+    def test_it_always_asks_for_an_email_even_with_no_checkbox(self):
+        html = render_page_ribbon(
+            {**RIBBON, "cta": {"label": "Email it", "action": "email_file",
+                               "asset": {"bucket_key": "k", "filename": "g.pdf"}}},
+            {"tenant_id": "t1", "page_id": "p1"}, "https://api.example.com")
+        self.assertIn('data-collect="email"', html)
+
+    def test_the_client_confirms_a_send_instead_of_navigating(self):
+        # An emailed response carries no url. Without this branch the dialog would just close and the
+        # visitor would have no idea whether anything happened.
+        from stripe_link.runtime.html import render_page_interactions_script
+        script = render_page_interactions_script(
+            {"sections": [{"type": "page_ribbon", "id": "rb", "cta": {"action": "download"}}]})
+        self.assertIn("Check your inbox", script)
+
+
 class DoubleClickTests(unittest.TestCase):
     """A download navigates to an attachment URL, which does NOT leave the page. So the button is still
     there afterwards, and a second click means a second signed URL, a second file, and a second lead."""

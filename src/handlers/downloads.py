@@ -15,9 +15,15 @@ from stripe_link.domain.downloads import asset_bucket_key, sanitize_filename
 from stripe_link.domain.lead_magnets import COLLECTABLE_FIELDS, download_offer, find_ribbon, missing_fields
 from stripe_link.domain.leads import build_lead_submission, is_spam, lead_id_for
 from stripe_link.ids import generate_id
+from stripe_link.mailer import send_email
+from html import escape
 from stripe_link.repositories.documents import RepositoryError, leads_repository, orders_repository, pages_repository, products_repository
 
 DOWNLOAD_URL_TTL_SECONDS = 300
+# An emailed link is read from an inbox, not clicked immediately. Five minutes would be expired by
+# the time most people open the mail; 24 hours is long enough to be useful and short enough that a
+# forwarded email stops working eventually.
+EMAILED_URL_TTL_SECONDS = 24 * 60 * 60
 
 
 def _s3_client():
@@ -143,6 +149,7 @@ def lead_download_handler(
     pages_repo=None,
     leads_repo=None,
     s3_client=None,
+    mailer_send=None,
     now_fn=lambda: int(time.time()),
 ):
     """Public: hand a visitor a Page Ribbon's file, capturing a lead first when the ribbon asks for one.
@@ -223,6 +230,7 @@ def lead_download_handler(
 
     asset = offer["asset"]
     filename = sanitize_filename(asset.get("filename") or "download")
+    emailing = offer["delivery"] == "email"
     url = (s3_client or _s3_client()).generate_presigned_url(
         "get_object",
         Params={
@@ -230,6 +238,29 @@ def lead_download_handler(
             "Key": str(asset.get("bucket_key")),
             "ResponseContentDisposition": f'attachment; filename="{filename}"',
         },
-        ExpiresIn=DOWNLOAD_URL_TTL_SECONDS,
+        ExpiresIn=EMAILED_URL_TTL_SECONDS if emailing else DOWNLOAD_URL_TTL_SECONDS,
     )
-    return json_response({"url": url, "filename": filename})
+    if not emailing:
+        return json_response({"url": url, "filename": filename})
+
+    # A LINK, not an attachment. SES caps a message at 40MB including base64 encoding — which inflates
+    # binary by about a third — so a 30MB file cannot be attached at all, and large attachments trip spam
+    # filters and mailbox quotas even when they fit. A link has no size limit, can expire, and reuses the
+    # exact signed URL the download path already produces.
+    try:
+        (mailer_send or send_email)(
+            to=submitted["email"],
+            subject=f"Your download: {filename}",
+            html=(
+                f"<p>Here is the file you asked for.</p>"
+                f'<p><a href="{escape(url)}">Download {escape(filename)}</a></p>'
+                f"<p>This link works for 24 hours.</p>"
+            ),
+            text=f"Here is the file you asked for:\n\n{url}\n\nThis link works for 24 hours.",
+        )
+    except Exception:
+        # The lead is already recorded, so the tenant keeps the contact either way. Tell the visitor,
+        # because unlike a download they have no way to notice nothing arrived.
+        return error_response("We could not send that email. Please try again.",
+                              status_code=502, code="send_failed")
+    return json_response({"status": "sent", "filename": filename})

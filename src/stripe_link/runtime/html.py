@@ -4148,7 +4148,7 @@ RIBBON_PURPOSES = ("promote_offer", "capture_lead", "promote_content", "custom")
 # same ideas. `none` is explicit: a ribbon with nothing to click is a content block, and should say so.
 # `promote_page` is a redirect whose target the BUILDER resolves from the tenant's own page list, so the
 # renderer treats it identically — the difference is where the URL comes from, not what happens on click.
-RIBBON_ACTIONS = ("redirect", "promote_page", "download", "call_phone", "email", "none")
+RIBBON_ACTIONS = ("redirect", "promote_page", "download", "email_file", "call_phone", "email", "none")
 RIBBON_IMAGE_SIZES = "(max-width: 700px) 100vw, 320px"
 # A tenant types this URL, so the scheme is an injection surface: `javascript:` in an href executes on
 # click. Allow only schemes that navigate, plus same-origin paths.
@@ -4225,9 +4225,14 @@ def render_page_ribbon(section: dict[str, Any], page: dict[str, Any] | None = No
         copy.append(f'        <h2 class="sl-ribbon-headline">{render_headline_markup(headline)}</h2>')
     if body:
         copy.append(f'        <p class="sl-ribbon-body">{escape(body)}</p>')
-    if action == "download" and label and (cta.get("asset") or {}).get("bucket_key"):
+    if action in ("download", "email_file") and label and (cta.get("asset") or {}).get("bucket_key"):
         page = page or {}
-        collect = ",".join(field for field in ("email", "phone") if cta.get(f"collect_{field}"))
+        collect = [field for field in ("email", "phone") if cta.get(f"collect_{field}")]
+        # Emailing needs an address whatever the checkboxes say — the server enforces this too, but asking
+        # for it up front saves the visitor a rejected submit.
+        if action == "email_file" and "email" not in collect:
+            collect.insert(0, "email")
+        collect = ",".join(collect)
         endpoint = f"{str(api_base_url or '').rstrip('/')}/downloads/lead"
         mode = "live" if str(page.get("stripe_mode") or "").strip().lower() == "live" else "test"
         copy.append(
@@ -5238,7 +5243,7 @@ def render_page_interactions_script(page: dict[str, Any]) -> str:
         "      document.querySelectorAll('[data-sl-download]').forEach((btn) => {",
         "        const wanted = (btn.dataset.collect || '').split(',').filter(Boolean);",
         "        const LABELS = { email: 'Email address', phone: 'Phone number' };",
-        "        const send = (fields, onError, onDone) => {",
+        "        const send = (fields, onError, onDone, onSent) => {",
         "          if (btn.disabled) return;",
         # Disabled IMMEDIATELY, and left that way on success. A download navigates to an attachment URL,
         # which does NOT leave the page — so without this the button is still live afterwards and a second
@@ -5253,7 +5258,12 @@ def render_page_interactions_script(page: dict[str, Any]) -> str:
         "              idempotency_key: btn.dataset.pageId + '-' + btn.dataset.sectionId + '-' + (fields.email || fields.phone || Date.now()),",
         "            }),",
         "          }).then((r) => (r.ok ? r.json() : Promise.reject(new Error('failed'))))",
-        "            .then((data) => { if (onDone) onDone(); if (data && data.url) window.location.href = data.url; })",
+        "            .then((data) => {",
+        "              if (data && data.url) { if (onDone) onDone(); window.location.href = data.url; return; }",
+        # Emailed: there is nothing to navigate to, so say so where the visitor is looking. Without this the
+        # dialog would just close and they would have no idea whether anything happened.
+        "              if (onSent) onSent(); else if (onDone) onDone();",
+        "            })",
         # Re-enabled ONLY on failure: nothing was delivered, so the visitor should be able to try again.
         "            .catch(() => { btn.disabled = false; if (onError) onError(); });",
         "        };",
@@ -5312,7 +5322,11 @@ def render_page_interactions_script(page: dict[str, Any]) -> str:
         "            submit.disabled = true;",
         "            send(fields,",
         "              () => { error.hidden = false; submit.disabled = false; },",
-        "              () => close());",
+        "              () => close(),",
+        "              () => {",
+        "                form.querySelectorAll('.sl-dl-field,.sl-dl-actions').forEach((el) => el.remove());",
+        "                title.textContent = 'Check your inbox — it is on its way.';",
+        "              });",
         "          });",
         "        });",
         "      });",

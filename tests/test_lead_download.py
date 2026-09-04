@@ -39,11 +39,22 @@ class FakeS3:
         return "https://signed/" + kw["Params"]["Key"]
 
 
-def call(body, *, doc, leads=None, s3=None):
+class FakeMailer:
+    def __init__(self, fail=False):
+        self.sent, self.fail = [], fail
+
+    def __call__(self, **kw):
+        if self.fail:
+            raise RuntimeError("ses down")
+        self.sent.append(kw)
+        return {"MessageId": "m1"}
+
+
+def call(body, *, doc, leads=None, s3=None, mailer=None):
     return lead_download_handler(
         {"httpMethod": "POST", "body": json.dumps(body)}, None,
         pages_repo=FakeRepo(doc), leads_repo=leads or FakeRepo(), s3_client=s3 or FakeS3(),
-        now_fn=lambda: 1700000000,
+        mailer_send=mailer or FakeMailer(), now_fn=lambda: 1700000000,
     )
 
 
@@ -123,6 +134,51 @@ class WiringTests(unittest.TestCase):
         src = inspect.getsource(downloads.lead_download_handler)
         self.assertIn("leads_repository()", src)
         self.assertIn("pages_repository(mode=mode)", src)
+
+
+class EmailDeliveryTests(unittest.TestCase):
+    """Same asset, same signed URL, same lead — the section decides whether a browser follows the link now
+    or an inbox does later. A LINK, never an attachment: SES caps a message at 40MB including base64, which
+    inflates binary by about a third, so a 30MB file cannot be attached at all."""
+
+    CTA = {"action": "email_file", "asset": ASSET}
+
+    def test_an_email_address_is_always_required_whatever_the_checkboxes_say(self):
+        # There is nowhere to send it otherwise. A property of the delivery, not a tenant preference.
+        self.assertEqual(download_offer({"cta": self.CTA})["required"], ["email"])
+        res = call({"tenant_id": "t1", "page_id": "p1", "section_id": "rb"}, doc=page(self.CTA))
+        self.assertEqual(res["statusCode"], 400)
+
+    def test_it_emails_a_link_and_returns_no_url(self):
+        mailer = FakeMailer()
+        res = call({"tenant_id": "t1", "page_id": "p1", "section_id": "rb", "fields": {"email": "a@b.co"}},
+                   doc=page(self.CTA), mailer=mailer)
+        self.assertEqual(res["statusCode"], 200)
+        self.assertIn("sent", res["body"])
+        self.assertNotIn("signed/", res["body"], "the browser must not be handed the file directly")
+        self.assertEqual(mailer.sent[0]["to"], "a@b.co")
+        self.assertIn("signed/", mailer.sent[0]["html"], "the link goes in the email")
+
+    def test_the_email_carries_no_attachment(self):
+        mailer = FakeMailer()
+        call({"tenant_id": "t1", "page_id": "p1", "section_id": "rb", "fields": {"email": "a@b.co"}},
+             doc=page(self.CTA), mailer=mailer)
+        self.assertNotIn("attachment", str(mailer.sent[0].keys()))
+        self.assertIn("24 hours", mailer.sent[0]["text"])
+
+    def test_the_lead_is_recorded_before_the_send(self):
+        leads, mailer = FakeRepo(), FakeMailer()
+        call({"tenant_id": "t1", "page_id": "p1", "section_id": "rb", "fields": {"email": "a@b.co"}},
+             doc=page(self.CTA), leads=leads, mailer=mailer)
+        self.assertEqual(leads.puts[0]["fields"]["email"], "a@b.co")
+
+    def test_a_failed_send_tells_the_visitor(self):
+        # Unlike a download, they have no way to notice nothing arrived — so this must not fail quietly.
+        leads = FakeRepo()
+        res = call({"tenant_id": "t1", "page_id": "p1", "section_id": "rb", "fields": {"email": "a@b.co"}},
+                   doc=page(self.CTA), leads=leads, mailer=FakeMailer(fail=True))
+        self.assertEqual(res["statusCode"], 502)
+        self.assertEqual(len(leads.puts), 1, "the tenant keeps the contact either way")
 
 
 class SpamTests(unittest.TestCase):

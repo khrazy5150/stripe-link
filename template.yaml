@@ -1014,7 +1014,7 @@ Resources:
       FunctionName: !Sub "${ProjectPrefix}-lead-download-${Environment}"
       CodeUri: src/
       Handler: handlers.downloads.lead_download_handler
-      Description: Public -- capture a lead when the ribbon asks for one, then return a short-lived presigned download URL.
+      Description: Public -- capture a lead when the ribbon asks for one, then hand the file over as a download or email the link.
       Policies:
         - DynamoDBReadPolicy:
             TableName: !Ref PagesTable
@@ -1022,6 +1022,14 @@ Resources:
             TableName: !Ref LeadsTable
         - S3ReadPolicy:
             BucketName: !Ref MediaBucket
+        # The email_file delivery mails a LINK, so this sends mail but never carries an attachment.
+        - Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Action:
+                - ses:SendEmail
+                - sesv2:SendEmail
+              Resource: "*"
       Events:
         LeadDownload:
           Type: Api

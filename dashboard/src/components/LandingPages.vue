@@ -647,13 +647,14 @@
                           <select v-model="element.cta.action">
                             <option value="promote_page">Promotes another of my pages</option>
                             <option value="download">Downloads a file</option>
+                            <option value="email_file">Sends an email with the file</option>
                             <option value="redirect">Opens a link</option>
                             <option value="call_phone">Starts a call</option>
                             <option value="email">Opens their email app</option>
                           </select>
                         </label>
                       </div>
-                      <div v-if="element.cta.action === 'download'" class="offer-field">
+                      <div v-if="element.cta.action === 'download' || element.cta.action === 'email_file'" class="offer-field">
                         <span>File to hand over</span>
                         <div class="ribbon-page-choice">
                           <span v-if="element.cta.asset" class="ribbon-page-chosen">
@@ -667,12 +668,17 @@
                           </button>
                         </div>
                         <small v-if="ribbonUploadError[element.id]" class="field-note is-warning">{{ ribbonUploadError[element.id] }}</small>
-                        <label class="builder-toggle"><input v-model="element.cta.collect_email" type="checkbox" /><span>Ask for their email first</span></label>
+                        <label class="builder-toggle">
+                          <input v-model="element.cta.collect_email" type="checkbox" :disabled="element.cta.action === 'email_file'" />
+                          <span>Ask for their email first</span>
+                        </label>
                         <label class="builder-toggle"><input v-model="element.cta.collect_phone" type="checkbox" /><span>Ask for their phone first</span></label>
                         <small class="field-note">
-                          {{ element.cta.collect_email || element.cta.collect_phone
-                             ? "They fill this in, it is saved to Leads, then the file downloads."
-                             : "Nothing is asked for — the file downloads straight away, and no lead is recorded." }}
+                          {{ element.cta.action === "email_file"
+                             ? "An email address is always required — there is nowhere to send it otherwise. It is saved to Leads, then the file is emailed as a link that works for 24 hours."
+                             : (element.cta.collect_email || element.cta.collect_phone
+                               ? "They fill this in, it is saved to Leads, then the file downloads."
+                               : "Nothing is asked for — the file downloads straight away, and no lead is recorded.") }}
                         </small>
                       </div>
                       <div v-else-if="element.cta.action === 'promote_page'" class="offer-field">
@@ -4696,7 +4702,7 @@ function ribbonCta(cta) {
   const action = cta.action || "redirect";
   const label = (cta.label || "").trim();
   if (!label) return {};
-  if (action === "download") {
+  if (action === "download" || action === "email_file") {
     // The asset IS the target here. Without a file there is nothing to hand over, so no button renders —
     // the same rule as a link with no URL.
     if (!cta.asset?.bucket_key) return {};
