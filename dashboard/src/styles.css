@@ -4102,6 +4102,44 @@ button:disabled {
   accent-color: var(--accent);
 }
 
+/* A small either/or where the options need describing — radios rather than a select, because the choice
+   changes what the section LOOKS like and both options deserve a sentence. */
+.builder-choice {
+  display: grid;
+  gap: 0.8rem;
+  margin: 0;
+  padding: 1.2rem 1.4rem;
+  border: 1px solid var(--line);
+  border-radius: 0.8rem;
+}
+
+.builder-choice legend {
+  padding: 0 0.4rem;
+  color: var(--muted);
+  font-size: var(--text-hint);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.builder-choice-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.8rem;
+  color: var(--text);
+  font-size: 1.4rem;
+  line-height: 1.45;
+  cursor: pointer;
+}
+
+.builder-choice-option input {
+  width: 1.6rem;
+  height: 1.6rem;
+  margin-top: 0.1rem;
+  flex: none;
+  accent-color: var(--accent);
+}
+
 .builder-countdown-options {
   display: grid;
   gap: 1.2rem;

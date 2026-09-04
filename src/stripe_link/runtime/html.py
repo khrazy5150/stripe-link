@@ -637,11 +637,28 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     # QUOTE. minmax(0,1fr) for the same reason as bragging points: justify-items:center leaves an auto
     # track, and an auto track sizes to max-content — long unbroken text would then widen the viewport.
     "    .sl-quote{display:grid;grid-template-columns:minmax(0,1fr);justify-items:center;padding:4rem 2rem;background:var(--sl-section-bg,transparent);color:var(--sl-section-ink,var(--sl-text))}",
-    # The BAR is the element's signature, and what keeps it from reading as a testimonial card.
-    "    .sl-quote-figure{margin:0;width:100%;max-width:62rem;text-align:left;border-left:0.5rem solid var(--sl-section-accent,var(--sl-accent));padding-left:2.4rem}",
+    "    .sl-quote-title{margin:0 0 1.6rem;width:100%;max-width:62rem;font-family:var(--sl-font-heading);font-size:clamp(1.8rem,3.4vw,2.4rem);line-height:1.3}",
     "    .sl-quote-text{margin:0;font-family:var(--sl-font-heading);font-size:clamp(2rem,4vw,2.8rem);line-height:1.45;font-style:italic}",
-    # Muted by opacity, so it stays legible against whatever ink the background derived.
+    # Muted by opacity, so it stays legible against whatever ink the surface derived.
     "    .sl-quote-attribution{margin:1.2rem 0 0;font-size:1.5rem;font-style:normal;opacity:0.75}",
+    # MINIMAL — the BAR is the signature, and what keeps it from reading as a testimonial card.
+    "    .sl-quote-minimal .sl-quote-figure{margin:0;width:100%;max-width:62rem;text-align:left;border-left:0.5rem solid var(--sl-section-accent,var(--sl-accent));padding-left:2.4rem}",
+    "    .sl-quote-minimal .sl-quote-photo{margin:0 0 1.6rem}",
+    "    .sl-quote-minimal .sl-quote-photo img{width:8rem;height:8rem;border-radius:1rem;object-fit:cover;display:block}",
+    # FANCY — a coloured card. `accent` paints the CARD here rather than a bar, so the text on it is the
+    # derived accent-ink: the reference design's white-on-pink comes out of the contrast maths, not a
+    # hardcoded colour, and holds for a pale card just as well.
+    "    .sl-quote-fancy .sl-quote-figure{margin:0;width:100%;max-width:74rem;display:flex;flex-wrap:wrap;align-items:center;gap:3.2rem;padding:3.2rem;border-radius:1rem;background:var(--sl-section-accent,var(--sl-accent));color:var(--sl-section-accent-ink,var(--sl-cta-text,#fff))}",
+    # flex-wrap rather than a breakpoint: the photo and the words each claim a basis and stack themselves
+    # when the card is too narrow, so the element needs no media query to survive a phone.
+    "    .sl-quote-fancy .sl-quote-photo{flex:1 1 18rem;max-width:22rem;margin-block:-2.4rem}",
+    "    .sl-quote-fancy .sl-quote-photo img{width:100%;border-radius:0.8rem;display:block;box-shadow:0 1.2rem 2.4rem rgba(0,0,0,0.4)}",
+    "    .sl-quote-fancy .sl-quote-body{flex:3 1 24rem;min-width:0;position:relative}",
+    "    .sl-quote-fancy .sl-quote-text{font-size:clamp(1.8rem,3.2vw,2.2rem);font-style:normal;font-weight:600;line-height:1.35}",
+    # The opening mark takes currentColor at low opacity, so it adapts to whatever ink the card derived
+    # instead of the reference's fixed blue. Inside the card's padding, so it never clips.
+    "    .sl-quote-fancy .sl-quote-body::before{content:'\\201C';position:absolute;top:-2.6rem;left:-1rem;font-family:var(--sl-font-heading);font-size:7rem;line-height:1;font-weight:600;opacity:0.3;pointer-events:none}",
+    "    .sl-quote-fancy .sl-quote-attribution{margin-top:2rem}",
     "    .sl-price-highlight{display:grid;gap:0.6rem;justify-items:center;text-align:center;padding:3.2rem 2rem;background:var(--sl-section-bg,transparent);color:var(--sl-section-ink,var(--sl-text))}",
     "    .sl-bargain-regular{margin:0;font-size:1.5rem;color:var(--sl-section-ink,var(--sl-price-regular));opacity:0.75}",
     "    .sl-bargain-amount{margin:0;font-family:var(--sl-font-heading);font-size:clamp(4rem,10vw,6.4rem);line-height:1;font-weight:800;color:var(--sl-section-ink,var(--sl-price-amount))}",
@@ -4066,35 +4083,74 @@ def render_author_bio(section: dict[str, Any]) -> str:
 
 
 ATTRIBUTION_DASHES = ("\u2014", "\u2013", "-")
+QUOTE_PHOTO_SIZES = "220px"
+QUOTE_STYLES = ("minimal", "fancy")
 
 
 def render_quote(section: dict[str, Any]) -> str:
-    """A pull-quote: an IDEA given weight, with an optional attribution.
+    """A pull-quote: an IDEA given weight, with an optional attribution, title and portrait.
 
     Deliberately unlike `testimonials` (plans/LANDING_ELEMENTS_UNIT.md §Quote). A testimonial is a customer
     vouching for the product; a pull-quote is a maxim or the tenant's own line. They must not look alike, or
-    a quote reads as an endorsement nobody gave — so this is a bar and italic type, not an avatar and a card.
+    a quote reads as an endorsement nobody actually gave.
 
-    figure/figcaption rather than a bare blockquote: the attribution is about the quote, not part of what was
-    said, and HTML has a shape for exactly that (plans/SEMANTIC_HTML.md).
+    Two presentations, because the same content wants different weight in different places:
+
+      * `minimal` (default) — a vertical accent bar and italic type. Quiet enough to sit inside body copy.
+      * `fancy` — a coloured card with a portrait and a large opening quotation mark.
+
+    The section override means the same thing in both, but paints a different surface: `accent` is the BAR
+    in minimal and the CARD in fancy. Either way the text on it is `--sl-section-accent-ink`, derived, so a
+    tenant cannot colour the quote into invisibility.
+
+    figure/figcaption rather than a bare blockquote: the attribution is about the quote, not part of what
+    was said, and HTML has a shape for exactly that (plans/SEMANTIC_HTML.md).
     """
     text = str(section.get("text") or "").strip()
     if not text:
         return ""
 
+    presentation = str(section.get("style") or "minimal")
+    if presentation not in QUOTE_STYLES:
+        presentation = "minimal"
+
+    title = str(section.get("title") or "").strip()
+    photo = str(section.get("image_url") or "").strip()
     attribution = str(section.get("attribution") or "").strip()
     # The dash belongs to the presentation, so a tenant who types one anyway does not get two.
     while attribution and attribution[0] in ATTRIBUTION_DASHES:
         attribution = attribution[1:].strip()
 
-    rows = [
-        '      <figure class="sl-quote-figure">',
-        f'        <blockquote class="sl-quote-text">{escape(text)}</blockquote>',
-    ]
-    if attribution:
-        rows.append(
-            f'        <figcaption class="sl-quote-attribution">\u2014 {escape(attribution)}</figcaption>'
-        )
+    quote_html = f'<blockquote class="sl-quote-text">{escape(text)}</blockquote>'
+    caption_html = (
+        f'<figcaption class="sl-quote-attribution">\u2014 {escape(attribution)}</figcaption>'
+        if attribution else ""
+    )
+    photo_html = (
+        f'<div class="sl-quote-photo">'
+        f"{responsive_img(photo, escape(attribution or title or 'Quote'), sizes=QUOTE_PHOTO_SIZES)}</div>"
+        if photo else ""
+    )
+
+    rows: list[str] = []
+    if title:
+        # h2 so the block joins the page heading outline rather than floating (plans/SEMANTIC_HTML.md).
+        rows.append(f'      <h2 class="sl-quote-title">{render_headline_markup(title)}</h2>')
+    rows.append('      <figure class="sl-quote-figure">')
+    if photo_html:
+        rows.append(f"        {photo_html}")
+    if presentation == "fancy":
+        # The card's text is wrapped so the big quotation mark can be positioned against it rather than
+        # against the card, which keeps the glyph beside the words at every width.
+        rows.append('        <div class="sl-quote-body">')
+        rows.append(f"          {quote_html}")
+        if caption_html:
+            rows.append(f"          {caption_html}")
+        rows.append("        </div>")
+    else:
+        rows.append(f"        {quote_html}")
+        if caption_html:
+            rows.append(f"        {caption_html}")
     rows.append("      </figure>")
 
     style = section_theme_vars(section)
@@ -4102,7 +4158,8 @@ def render_quote(section: dict[str, Any]) -> str:
     themed = " sl-section-themed" if style else ""
     section_id = escape(str(section.get("id", "quote")))
     return "\n".join([
-        f'    <section class="sl-quote{themed}" data-section-id="{section_id}" data-section-type="quote"{style_attr}>',
+        f'    <section class="sl-quote sl-quote-{presentation}{themed}"'
+        f' data-section-id="{section_id}" data-section-type="quote"{style_attr}>',
         *rows,
         "    </section>",
     ])

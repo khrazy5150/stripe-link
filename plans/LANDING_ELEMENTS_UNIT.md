@@ -79,8 +79,18 @@ A pull-quote with a vertical accent bar.
     ┃   but about the stories you tell."
     ┃                                        — Optional Attribution
 
-- **Fields:** `text`, `attribution` (optional — the author's addition; the legacy has none), plus the
-  optional `section.theme` overrides for background and bar.
+- **Fields:** `text`, `attribution` (optional — the author's addition; the legacy has none), `title` and
+  `image_url` (both optional, added 2026-09-03), plus the optional `section.theme` overrides.
+- **Two presentations** (added 2026-09-03), `style: minimal | fancy`:
+  - `minimal` (DEFAULT) — vertical bar, italic type. Quiet enough to sit inside body copy.
+  - `fancy` — a coloured card, the image beside the quote, and a large opening quotation mark.
+- **The override token means the same thing in both but paints a different surface**: `accent` is the BAR
+  in minimal and the CARD in fancy. That is why `--sl-section-accent-ink` matters more in fancy, where
+  text sits ON the accent: the reference design's white-on-pink falls out of the contrast maths, so a PALE
+  card gets dark text instead of the white the reference happened to hardcode. Same for the opening
+  quotation mark, which takes currentColor at low opacity rather than the reference's fixed blue.
+- **No media query.** The fancy card is flex-wrap with a basis on each part, so the photo and the words
+  stack themselves on a phone.
 - **Not repeatable.** A second pull-quote halves the weight of the first.
 - **`free` placement.**
 

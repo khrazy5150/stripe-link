@@ -616,6 +616,19 @@
 
                     <template v-else-if="element.type === 'quote'">
                       <label class="offer-field">
+                        <span>Title (optional)</span>
+                        <input v-model.trim="element.title" type="text" placeholder="e.g. What Our Founder Says" />
+                      </label>
+                      <div class="selectable-price-image-controls" :class="{ 'has-image-preview': element.image_url }">
+                        <div v-if="element.image_url" class="selectable-price-image-preview">
+                          <img :src="element.image_url" alt="Quote image preview" />
+                        </div>
+                        <input :ref="(el) => setElementImageInput(element.id, el)" type="file" accept="image/*" hidden @change="handleElementImagePicked(element, $event, 'image_url')" />
+                        <button class="secondary-action compact" type="button" :disabled="Boolean(blurbImageUploading[element.id])" @click.prevent="triggerElementImageUpload(element.id)">
+                          {{ blurbImageUploading[element.id] ? "Uploading..." : "Upload image (optional)" }}
+                        </button>
+                      </div>
+                      <label class="offer-field">
                         <span>Quote</span>
                         <textarea v-model.trim="element.text" rows="3" placeholder="A line worth pausing on — a principle, a maxim, your own words."></textarea>
                         <small class="field-note">For a customer vouching for the product, use Testimonials instead — a quote is styled so it does not read as an endorsement.</small>
@@ -636,10 +649,21 @@
                           <small class="field-note">Text colour is chosen automatically so it stays readable.</small>
                         </label>
                         <label class="offer-field">
-                          <span>Bar</span>
+                          <span>{{ element.style === "fancy" ? "Card" : "Bar" }}</span>
                           <input v-model.trim="element.theme.accent" type="color" />
                         </label>
                       </div>
+                      <fieldset class="builder-choice">
+                        <legend>Style</legend>
+                        <label class="builder-choice-option">
+                          <input v-model="element.style" type="radio" value="minimal" />
+                          <span><strong>Minimalist</strong> — a bar and italic type, quiet inside body copy.</span>
+                        </label>
+                        <label class="builder-choice-option">
+                          <input v-model="element.style" type="radio" value="fancy" />
+                          <span><strong>Fancy</strong> — a coloured card with the image beside the quote.</span>
+                        </label>
+                      </fieldset>
                     </template>
 
                     <template v-else-if="element.type === 'bragging_points'">
@@ -3949,7 +3973,7 @@ function newElement(type) {
   if (type === "faq") return { ...base, heading: "Frequently Asked Questions", items: [{ question: "", answer: "" }] };
   if (type === "related_products") return { ...base, heading: "Related products" };
   if (type === "bragging_points") return { ...base, heading: "", items: [{ value: "", label: "" }], theme: {} };
-  if (type === "quote") return { ...base, text: "", attribution: "", theme: {} };
+  if (type === "quote") return { ...base, text: "", attribution: "", title: "", image_url: "", style: "minimal", theme: {} };
   // The NUMBERS are derived from the offer; only these two lines are the tenant's.
   if (type === "price_highlight") return { ...base, main_text: "Today Only", subtext: "" };
   if (type === "author_bio") return { ...base, photo_url: "", name: "", headline: "", body: "", theme: {} };
@@ -4370,7 +4394,9 @@ function elementSection(element) {
     if (!(element.text || "").trim()) return null;
     const theme = element.theme && element.theme.bg ? element.theme : undefined;
     return { id: element.id, type: "quote", text: element.text,
-      attribution: element.attribution || undefined, theme };
+      title: element.title || undefined, image_url: element.image_url || undefined,
+      attribution: element.attribution || undefined,
+      ...(element.style === "fancy" ? { style: "fancy" } : {}), theme };
   }
   if (element.type === "bragging_points") {
     const items = (element.items || []).filter((i) => (i.value || "").trim() || (i.label || "").trim());
@@ -4411,7 +4437,9 @@ function elementsFromPage(sections) {
         items: (section.items || []).map((item) => ({ quote: item.quote || "", author: item.author || "", role: item.role || "", avatar_url: item.avatar_url || "" })) });
     } else if (section.type === "quote") {
       elements.push({ id: localId("el"), type: "quote", text: section.text || "",
-        attribution: section.attribution || "", theme: section.theme ? { ...section.theme } : {} });
+        title: section.title || "", image_url: section.image_url || "",
+        attribution: section.attribution || "", style: section.style === "fancy" ? "fancy" : "minimal",
+        theme: section.theme ? { ...section.theme } : {} });
     } else if (section.type === "bragging_points") {
       elements.push({ id: localId("el"), type: "bragging_points", heading: section.heading || "",
         items: (section.items || []).map((i) => ({ value: i.value || "", label: i.label || "" })),
