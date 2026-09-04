@@ -88,6 +88,25 @@ the UI actually needs rather than subtracting the ones it must not see. A denyli
 silently and invisibly every time the schema grows, which is exactly what happened here.
 Pairs naturally with hiding the raw JSON panels (below).
 
+### MEDIUM — look deeper into the visual picker (Offers + Page Ribbon, 2026-09-04)
+
+`SelectorCard.vue` was extracted when the ribbon's page picker, written by copying the Offers item
+selector's classes, diverged from it — images cropped where the original's did not, and the title was
+clipped out of a card whose rows were sized for a price line it never had. Both now render one component.
+
+What the extraction did NOT settle, and should be looked at properly:
+
+- **`contain` vs `cover`.** `contain` shows the whole product, which is the point of a visual selector, but
+  leaves neutral space around off-ratio images. Offers' grid changed appearance as a side effect. Either
+  tune the image row height, or decide per-screen — but a `fit` prop would let the two diverge again,
+  which is what the extraction removed.
+- **Whether the two selectors should share more than the card.** Both have a search box, an empty state, a
+  scroll region and a footer; only the card is shared today.
+- **Other pickers that predate this.** `coupon-selector-grid` and `wizard-offer-list` are the same idea
+  with their own markup, and were not touched.
+- **The overlay variant.** Currently a boolean prop. If a third caller wants something between the two
+  layouts, that flag becomes a mode and wants naming rather than extending.
+
 ### MEDIUM — audit for silent agreement failures (framing agreed 2026-08-30)
 - **New instance, 2026-09-01:** `handlers/offers.py` documented that the offer label and slug come from ONE
   OfferSemanticModel "so they can't diverge" — but a tenant-typed name bypassed the model while the slug kept

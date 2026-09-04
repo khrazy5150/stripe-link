@@ -1006,6 +1006,36 @@ Resources:
             Path: /downloads/upload-url
             Method: OPTIONS
 
+  # Public -- a Page Ribbon's lead magnet. Reads the PAGE to decide what the visitor must provide, so the
+  # gate cannot be skipped by omitting a field from the request.
+  LeadDownloadFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${ProjectPrefix}-lead-download-${Environment}"
+      CodeUri: src/
+      Handler: handlers.downloads.lead_download_handler
+      Description: Public -- capture a lead when the ribbon asks for one, then return a short-lived presigned download URL.
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref PagesTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref LeadsTable
+        - S3ReadPolicy:
+            BucketName: !Ref MediaBucket
+      Events:
+        LeadDownload:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /downloads/lead
+            Method: POST
+        LeadDownloadOptions:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /downloads/lead
+            Method: OPTIONS
+
   DownloadServeFunction:
     Type: AWS::Serverless::Function
     Properties:

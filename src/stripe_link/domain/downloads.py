@@ -18,8 +18,17 @@ def sanitize_filename(filename: str) -> str:
     return name[:200]
 
 
-def asset_bucket_key(tenant_id: str, product_id: str, asset_id: str, filename: str) -> str:
-    return f"downloads/{tenant_id}/{product_id}/{asset_id}/{sanitize_filename(filename)}"
+def asset_bucket_key(tenant_id: str, owner_id: str, asset_id: str, filename: str, *, scope: str = "") -> str:
+    """Where a downloadable file lives.
+
+    `scope` is optional and defaults to empty, so every existing product asset keeps the exact key it has
+    today — these are live objects and a changed key is a broken download. Page-owned files (a Page
+    Ribbon's lead magnet) pass scope="page", which keeps the two namespaces from colliding on ids.
+    """
+    prefix = f"downloads/{tenant_id}"
+    if scope:
+        prefix = f"{prefix}/{scope}"
+    return f"{prefix}/{owner_id}/{asset_id}/{sanitize_filename(filename)}"
 
 
 def build_download_url(api_base: str, *, tenant_id: str, session_id: str, product_id: str) -> str:
