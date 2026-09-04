@@ -148,7 +148,9 @@ renders a gallery and badges from PRODUCT data; this is authored page copy. Chec
 5. ~~**Numbered List**~~ — **SHIPPED 2026-09-04.** No override, reuses `render_headline_markup`. A real
    `<ol>` with the badge as a CSS counter, so the number is never selectable text and never doubles what
    assistive technology already announces from the list.
-6. **Brand Marquee** — the silent text-drop bug, three-state scroll, speed slider.
+6. ~~**Brand Marquee**~~ — **SHIPPED 2026-09-04.** Text-drop bug fixed (a name is the entry, the logo
+   is the optional upgrade), three-state scroll with `auto` preserving the >=5 rule so no page moves,
+   speed slider on its own duration property, and a card/none logo backing.
 7. **Page Ribbon** — largest, and the only one with CTA plumbing.
 
 Risky decisions first, biggest element last, and each override consumer validates step 0 before the next

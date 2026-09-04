@@ -762,7 +762,7 @@
                     <template v-else-if="element.type === 'client_marquee'">
                       <input v-model.trim="element.heading" type="text" placeholder="Section heading (optional)" />
                       <div v-for="(logo, i) in element.logos" :key="i" class="element-subrow">
-                        <input v-model.trim="logo.name" type="text" placeholder="Client name (only visible by search engines - recommended for SEO)" />
+                        <input v-model.trim="logo.name" type="text" placeholder="Client name — shown as text when there is no logo" />
                         <div class="selectable-price-image-controls" :class="{ 'has-image-preview': logo.image_url }">
                           <div v-if="logo.image_url" class="selectable-price-image-preview"><img :src="logo.image_url" alt="Logo preview" /></div>
                           <input :ref="(el) => setSubImageInput(subImgKey(element, 'logos', i), el)" type="file" accept="image/*" hidden @change="handleSubImagePicked(logo, 'image_url', subImgKey(element, 'logos', i), $event)" />
@@ -775,6 +775,40 @@
                         <button class="danger-action compact" type="button" @click="removeSubItem(element, 'logos', i)">Remove</button>
                       </div>
                       <button class="secondary-action compact" type="button" @click="addSubItem(element, 'logos', { image_url: '', name: '' })">+ Add logo</button>
+                      <small class="field-note">A name alone is enough — it renders as a wordmark. Add a logo to show that instead. Transparent PNGs sit best on any theme.</small>
+                      <div class="offer-two-column">
+                        <label class="offer-field">
+                          <span>Scrolling</span>
+                          <select v-model="element.scroll">
+                            <option value="auto">Auto — scrolls once there are 5 or more</option>
+                            <option value="always">Always scroll</option>
+                            <option value="never">Never scroll</option>
+                          </select>
+                        </label>
+                        <label class="offer-field">
+                          <span>Logo backing</span>
+                          <select v-model="element.logo_backing">
+                            <option value="card">Card — safe on any theme</option>
+                            <option value="none">None — logos sit on the page</option>
+                          </select>
+                        </label>
+                      </div>
+                      <label v-if="element.scroll !== 'never'" class="offer-field">
+                        <span>Scroll Speed</span>
+                        <div class="builder-speed-row">
+                          <span aria-hidden="true" title="Slower">&#128034;</span>
+                          <input
+                            :value="BRAND_MARQUEE_MIN + BRAND_MARQUEE_MAX - (Number(element.scroll_seconds) || 30)"
+                            type="range"
+                            :min="BRAND_MARQUEE_MIN"
+                            :max="BRAND_MARQUEE_MAX"
+                            step="1"
+                            aria-label="Marquee scroll speed"
+                            @input="element.scroll_seconds = BRAND_MARQUEE_MIN + BRAND_MARQUEE_MAX - Number($event.target.value)"
+                          />
+                          <span aria-hidden="true" title="Faster">&#128007;</span>
+                        </div>
+                      </label>
                     </template>
 
                     <template v-else-if="element.type === 'faq'">
@@ -1779,6 +1813,12 @@ const builderOriginalPage = ref(null);
 // Marquee speed. The renderer takes a DURATION (bigger = slower), but the slider reads left-to-right as
 // slow -> fast, so the bound value is the duration inverted about the range. Turtle at the low end,
 // hare at the high end, and the tenant never sees seconds.
+// Brand marquee speed. Same inversion as the countdown's below — dragging right must mean FASTER, so
+// the bound value is the duration reflected about the range. Its own constants because the two elements
+// have different sensible ranges: a logo row reads at a far more leisurely pace than a countdown banner.
+const BRAND_MARQUEE_MIN = 8;
+const BRAND_MARQUEE_MAX = 60;
+
 const MARQUEE_MIN_SECONDS = 5;
 const MARQUEE_MAX_SECONDS = 24;
 const marqueeSpeedSlider = computed({
@@ -3983,7 +4023,7 @@ function newElement(type) {
   if (type === "content_block") return { ...base, title: "", text: "", image_url: "", centered: false };
   if (type === "testimonials") return { ...base, heading: "What Our Clients Say", items: [{ quote: "", author: "", role: "", avatar_url: "" }] };
   if (type === "rating") return { ...base, value: 5, count: 0, label: "" };
-  if (type === "client_marquee") return { ...base, heading: "Our Clients", logos: [{ image_url: "", name: "" }] };
+  if (type === "client_marquee") return { ...base, heading: "Our Clients", logos: [{ image_url: "", name: "" }], scroll: "auto", scroll_seconds: 30, logo_backing: "card" };
   if (type === "faq") return { ...base, heading: "Frequently Asked Questions", items: [{ question: "", answer: "" }] };
   if (type === "related_products") return { ...base, heading: "Related products" };
   if (type === "bragging_points") return { ...base, heading: "", items: [{ value: "", label: "" }], theme: {} };
@@ -4388,10 +4428,16 @@ function elementSection(element) {
     return { id: element.id, type: "rating", value: Number(element.value || 0), count: Number(element.count || 0), label: element.label || undefined };
   }
   if (element.type === "client_marquee") {
-    const logos = (element.logos || []).filter((logo) => (logo.image_url || "").trim());
+    // An entry needs a name OR an image — the old filter required an image and silently dropped text.
+    const logos = (element.logos || []).filter((l) => (l.name || "").trim() || (l.image_url || "").trim());
     if (!logos.length) return null;
+    const scroll = element.scroll === "always" || element.scroll === "never" ? element.scroll : "auto";
+    const seconds = Math.max(3, Math.min(60, Number(element.scroll_seconds) || 30));
     return { id: element.id, type: "client_marquee", heading: element.heading || undefined,
-      logos: logos.map((logo) => ({ image_url: logo.image_url, name: logo.name || undefined })) };
+      logos: logos.map((l) => ({ name: l.name || "", image_url: l.image_url || undefined })),
+      ...(scroll !== "auto" ? { scroll } : {}),
+      ...(seconds !== 30 ? { scroll_seconds: seconds } : {}),
+      ...(element.logo_backing === "none" ? { logo_backing: "none" } : {}) };
   }
   if (element.type === "faq") {
     const items = (element.items || []).filter((item) => item.question && item.answer);
@@ -4480,7 +4526,10 @@ function elementsFromPage(sections) {
       elements.push({ id: localId("el"), type: "rating", value: section.value ?? 5, count: section.count ?? 0, label: section.label || "" });
     } else if (section.type === "client_marquee") {
       elements.push({ id: localId("el"), type: "client_marquee", heading: section.heading || "",
-        logos: (section.logos || []).map((logo) => ({ image_url: logo.image_url || "", name: logo.name || "" })) });
+        logos: (section.logos || []).map((l) => ({ name: l.name || "", image_url: l.image_url || "" })),
+        scroll: section.scroll === "always" || section.scroll === "never" ? section.scroll : "auto",
+        scroll_seconds: Number(section.scroll_seconds) || 30,
+        logo_backing: section.logo_backing === "none" ? "none" : "card" });
     } else if (section.type === "faq") {
       elements.push({ id: localId("el"), type: "faq", heading: section.heading || "Frequently Asked Questions", items: (section.items || []).map((item) => ({ question: item.question || "", answer: item.answer || "" })) });
     } else if (section.type === "product_details") {

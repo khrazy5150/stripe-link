@@ -1,6 +1,8 @@
 # Brand Marquee — text-or-logo social proof, with scroll and speed control
 
-**Status:** PLANNED, not built. An ENHANCEMENT of the existing `client_marquee` element, not a new one.
+**Status:** SHIPPED 2026-09-04. An ENHANCEMENT of the existing `client_marquee` element, not a new one.
+
+All of §2–§6 built. The `monochrome` treatment in §5 remains deferred, as planned.
 
 ## 1. What exists today
 

@@ -606,7 +606,7 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     "    .sl-rating-stars{color:#f59e0b;font-size:2.4rem;letter-spacing:0.2rem}",
     "    .sl-rating-meta{font-size:1.4rem;color:var(--sl-content-text)}",
     "    .sl-client-marquee{overflow:hidden}",
-    "    .sl-marquee-track{display:flex;width:max-content;animation:sl-marquee 30s linear infinite}",
+    "    .sl-marquee-track{display:flex;width:max-content;animation:sl-marquee var(--sl-brand-marquee-duration,30s) linear infinite}",
     # Price highlight (plans/PRICE_HIGHLIGHT.md). Every colour falls through to the PRICE element's tokens,
     # so a preset styles this on day one and it cannot drift from the price card beside it. --sl-section-*
     # is the optional per-section override; absent, these resolve to the page theme.
@@ -695,6 +695,11 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     # Logos sit on a light chip so they stay visible on any theme (dark logos on a dark page vanish otherwise).
     "    .sl-marquee-logo{display:inline-flex;align-items:center;justify-content:center;background:#ffffff;border-radius:0.8rem;padding:0.8rem 1.2rem;box-shadow:0 1px 3px rgba(0,0,0,.08)}",
     "    .sl-marquee-logo img{height:3.2rem;width:auto;object-fit:contain}",
+    # `none` backing drops the white card for tenants whose logos already suit their preset. The card
+    # stays the default because a dark logo on a dark preset is invisible without it.
+    "    .sl-marquee-logo.is-bare{background:none;box-shadow:none;padding:0}",
+    # A text entry is a WORDMARK in the page's own type, not text sitting in a logo-shaped white card.
+    "    .sl-marquee-word{display:inline-flex;align-items:center;height:3.2rem;font-family:var(--sl-font-heading);font-size:1.8rem;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;white-space:nowrap;color:var(--sl-muted)}",
     "    @keyframes sl-marquee{from{transform:translateX(0)}to{transform:translateX(-50%)}}",
     "    @media (prefers-reduced-motion: reduce){.sl-marquee-track{animation:none;flex-wrap:wrap}.sl-faq summary::after{transition:none}}",
     "    .sl-carousel-track{display:flex;gap:1.6rem;overflow-x:auto;scroll-snap-type:x mandatory;padding-bottom:1.2rem;-webkit-overflow-scrolling:touch}",
@@ -4272,29 +4277,81 @@ def render_bragging_points(section: dict[str, Any]) -> str:
     ])
 
 
+BRAND_MARQUEE_SCROLL_MODES = ("auto", "always", "never")
+BRAND_MARQUEE_MIN_SECONDS = 3
+BRAND_MARQUEE_MAX_SECONDS = 60
+BRAND_MARQUEE_DEFAULT_SECONDS = 30
+# Auto starts rolling once a row is long enough to be worth rolling. Keeping this exact number is what
+# makes `auto` a safe default: no page that exists today changes behaviour.
+BRAND_MARQUEE_AUTO_THRESHOLD = 5
+
+
 def render_client_marquee(section: dict[str, Any]) -> str:
-    logos = [logo for logo in (section.get("logos") or []) if str(logo.get("image_url") or "").strip()]
-    if not logos:
+    """Social proof as a row of client names or logos (plans/BRAND_MARQUEE.md).
+
+    The NAME is the entry and always renders; an image is the optional upgrade that renders instead of it.
+    That is the fix for a real bug: entries were filtered on `image_url`, so a tenant who typed "YouTube"
+    and uploaded nothing got silence — no logo, no text, no warning — while the builder labelled the field
+    as being for search engines only. The legacy marquee this replaced was text-only, so the element could
+    not reproduce what it succeeded.
+
+    Scrolling has three states because two would force a migration that breaks something either way:
+    default-scroll makes a two-logo page crawl, default-static stops an eight-logo one. `auto` keeps the
+    >= 5 rule exactly, so nothing that exists today moves.
+    """
+    entries = [
+        entry for entry in (section.get("logos") or [])
+        if str(entry.get("name") or "").strip() or str(entry.get("image_url") or "").strip()
+    ]
+    if not entries:
         return ""
-    # Duplicate the row so the CSS marquee scrolls seamlessly.
-    items = "".join(
-        f"<span class=\"sl-marquee-logo\">{responsive_img(str(logo.get('image_url')), str(logo.get('name') or 'Client'), sizes=CONTENT_BLOCK_SIZES)}</span>"
-        for logo in logos
-    )
+
+    bare = str(section.get("logo_backing") or "card").strip().lower() == "none"
+    logo_class = "sl-marquee-logo is-bare" if bare else "sl-marquee-logo"
+
+    def item(entry: dict[str, Any]) -> str:
+        name = str(entry.get("name") or "").strip()
+        image = str(entry.get("image_url") or "").strip()
+        if image:
+            return (f'<span class="{logo_class}">'
+                    f'{responsive_img(image, name or "Client", sizes=CONTENT_BLOCK_SIZES)}</span>')
+        # A themed wordmark, NOT a white card with text in it — that reads as a logo that failed to load.
+        return f'<span class="sl-marquee-word">{escape(name)}</span>'
+
+    items = "".join(item(entry) for entry in entries)
     heading = str(section.get("heading") or "Our Clients").strip()
-    heading_html = f"      <h2 class=\"sl-section-heading\">{render_headline_markup(heading)}</h2>" if heading else ""
-    # Roll only when there are enough logos to justify it (>= 5); otherwise show them centered and static.
-    if len(logos) >= 5:
+    heading_html = f'      <h2 class="sl-section-heading">{render_headline_markup(heading)}</h2>' if heading else ""
+
+    mode = str(section.get("scroll") or "auto").strip().lower()
+    if mode not in BRAND_MARQUEE_SCROLL_MODES:
+        mode = "auto"
+    scrolling = mode == "always" or (mode == "auto" and len(entries) >= BRAND_MARQUEE_AUTO_THRESHOLD)
+
+    if scrolling:
+        # The row is duplicated with aria-hidden on the copy, so the loop is seamless and the list is
+        # announced once rather than twice.
         body = [
-            "      <div class=\"sl-marquee-track\">",
-            f"        <div class=\"sl-marquee-row\">{items}</div>",
-            f"        <div class=\"sl-marquee-row\" aria-hidden=\"true\">{items}</div>",
+            '      <div class="sl-marquee-track">',
+            f'        <div class="sl-marquee-row">{items}</div>',
+            f'        <div class="sl-marquee-row" aria-hidden="true">{items}</div>',
             "      </div>",
         ]
     else:
-        body = [f"      <div class=\"sl-marquee-static\">{items}</div>"]
+        body = [f'      <div class="sl-marquee-static">{items}</div>']
+
+    seconds = section.get("scroll_seconds")
+    try:
+        seconds = int(seconds)
+    except (TypeError, ValueError):
+        seconds = BRAND_MARQUEE_DEFAULT_SECONDS
+    seconds = max(BRAND_MARQUEE_MIN_SECONDS, min(BRAND_MARQUEE_MAX_SECONDS, seconds))
+    # Its OWN duration property. The countdown banner has a separate marquee, and the two sharing a name
+    # is how one of them silently stopped animating once before.
+    style = f' style="--sl-brand-marquee-duration:{seconds}s"' if scrolling else ""
+
     return "\n".join(line for line in [
-        f"    <section class=\"sl-client-marquee\" data-section-id=\"{escape(str(section.get('id', 'client-marquee')))}\" data-section-type=\"client_marquee\">",
+        f'    <section class="sl-client-marquee" data-section-id="{escape(str(section.get("id", "client-marquee")))}"'
+        f' data-section-type="client_marquee"{style}>',
         heading_html,
         *body,
         "    </section>",

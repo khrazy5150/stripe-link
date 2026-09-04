@@ -37,14 +37,19 @@ class ElementRenderTests(unittest.TestCase):
     def test_marquee_few_logos_static_centered_with_default_heading(self):
         html = render_client_marquee({"id": "m", "logos": [
             {"image_url": "https://img/a.png", "name": "Acme"},
-            {"image_url": "", "name": "skip"},  # no image dropped
+            {"image_url": "", "name": "Wordmark"},   # a name with no logo now RENDERS, as text
+            {"image_url": "", "name": ""},           # neither half -> still dropped
         ]})
         self.assertIn('data-section-type="client_marquee"', html)
         self.assertIn("sl-marquee-static", html)                 # < 5 -> static, not rolling
         self.assertNotIn("sl-marquee-track", html)
         self.assertEqual(html.count("https://img/a.png"), 1)     # not duplicated
         self.assertIn("Our Clients", html)                        # default heading
-        self.assertNotIn("skip", html)
+        # This assertion used to be assertNotIn: the old renderer filtered entries on image_url, so a
+        # typed name with no upload vanished with no warning (plans/BRAND_MARQUEE.md §2). The test had
+        # codified the bug. A name is the entry now; the image is the optional upgrade.
+        self.assertIn("Wordmark", html)
+        self.assertEqual(html.count("sl-marquee-word"), 1)
 
     def test_marquee_five_or_more_logos_roll(self):
         logos = [{"image_url": f"https://img/{i}.png", "name": f"C{i}"} for i in range(5)]
