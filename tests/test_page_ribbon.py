@@ -125,5 +125,14 @@ class SectionOverrideTests(unittest.TestCase):
         self.assertIn("color:var(--sl-section-accent-ink,var(--sl-cta-text,#fff))", CSS)
 
 
+class MobileTests(unittest.TestCase):
+    def test_the_ribbon_stacks_on_a_phone(self):
+        # Shipped without this: the copy column collapsed to a few characters wide and the CTA squeezed
+        # into a circle. A two-column ribbon has to become one column somewhere.
+        mobile = CSS.split("@media (max-width: 700px){")[1]
+        self.assertIn(".sl-page-ribbon.is-image_left,.sl-page-ribbon.is-compact{grid-template-columns:minmax(0,1fr)}", mobile)
+        self.assertIn(".sl-ribbon-cta{justify-self:stretch", mobile)
+
+
 if __name__ == "__main__":
     unittest.main()
