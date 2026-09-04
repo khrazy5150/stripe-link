@@ -4435,8 +4435,25 @@ function openSectionEditor(row) {
 }
 
 // Editing writes through live, so closing is just closing.
-function closeSectionEditor() {
+// Done SAVES. Editing an element and then having to find the Save button is a step the tenant should not
+// have to remember, and forgetting it loses the edit. Cancel deliberately does not save — that is the
+// whole point of Cancel.
+async function closeSectionEditor() {
   sectionEditor.value = null;
+  await autoSavePage();
+}
+
+async function autoSavePage() {
+  if (!builderOpen.value) return;
+  wizardError.value = "";
+  await savePage();
+  // savePage() reports failures into wizardError, which is rendered by the WIZARD modal — NOT by the
+  // builder. Without this, an auto-save that fails says nothing at all, and the tenant carries on editing
+  // a page that is no longer being stored. Surface it where they actually are.
+  if (wizardError.value) {
+    error.value = wizardError.value;
+    wizardError.value = "";
+  }
 }
 
 // Cancel on an ADD throws the draft away — nothing was ever created, so there are no empty cards.
@@ -4560,7 +4577,7 @@ function chooseRibbonPage(page) {
 }
 const ribbonCount = computed(() => builder.elements.filter((el) => el.type === "page_ribbon").length);
 
-function commitNewSection() {
+async function commitNewSection() {
   const element = sectionEditor.value?.row?.element;
   sectionEditor.value = null;
   if (!element || builder.elements.length >= 20) return;
@@ -4576,6 +4593,7 @@ function commitNewSection() {
     const key = sectionOrderKey(element);
     builder.section_order = [...sequenceRows.value.map((r) => r.key).filter((k) => k !== key), key];
   }
+  await autoSavePage();
 }
 
 // The one line that makes a collapsed row worth scanning. Without it the map is a list of type names.

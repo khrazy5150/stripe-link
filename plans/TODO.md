@@ -88,6 +88,22 @@ the UI actually needs rather than subtracting the ones it must not see. A denyli
 silently and invisibly every time the schema grows, which is exactly what happened here.
 Pairs naturally with hiding the raw JSON panels (below).
 
+### MEDIUM — modify the Leads screen (raised 2026-09-04, details to come)
+
+Leads now arrive from two sources — the inline lead form and a Page Ribbon's gated download — and all three
+shapes (email only, phone only, both) were confirmed captured on 2026-09-04. The screen does its job but
+was built before the ribbon existed.
+
+Author will specify. Things visible from the current screen that are worth raising when they do:
+
+- **A lead does not say where it came from.** Ribbon downloads store `provenance.source = "page_ribbon"`
+  and the `section_id`, but the card shows neither, so a tenant cannot tell a form fill from a download.
+- **The card title is whichever field exists** — an email address for one lead, a bare phone number for the
+  next. Fine for three leads, hard to scan at three hundred.
+- **No search, and status filter only.** The other list screens moved to the shared indexed-list machinery
+  (paged projections + server-side search); this one did not.
+- **Which page or offer produced it** is shown as the offer name only.
+
 ### MEDIUM — look deeper into the visual picker (Offers + Page Ribbon, 2026-09-04)
 
 `SelectorCard.vue` was extracted when the ribbon's page picker, written by copying the Offers item
