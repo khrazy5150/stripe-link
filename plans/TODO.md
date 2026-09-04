@@ -281,8 +281,18 @@ Preview and published both render through `render_page` (the preview POSTs to `/
 change covers both surfaces with nothing to keep in sync.
 
 Service capabilities, probed rather than assumed: `?family=X:400,700` gives both weights, a bare
-`?family=X` silently gives regular only (every 700 heading would be faux-bold), the Google `wght@` syntax
-404s, and families are Roboto / Montserrat / Poppins / Open Sans / Ubuntu Titling — no Inter.
+`?family=X` silently gives regular only (every 700 heading would be faux-bold), and the Google `wght@`
+syntax 404s.
+
+**The service advertises 30 families and the bucket holds THREE** (Montserrat, Roboto, Ubuntu Titling).
+`?family=Poppins` returns valid CSS whose every `@font-face` 404s, so the text silently falls back with no
+visible error — the same failure mode this task exists to fix. The catalogue is 221 hardcoded entries in
+`../fonts-api/src/font_definitions.py`.
+
+Inter was uploaded 2026-09-03 but into the LEGACY `s3://juniorbay.com` bucket; the live origin is
+`jb-homepage-prod-150544707159` (distribution E1RX3M3RT2BWUZ), managed by this repo's template. Its
+18/24/28pt split is Inter's optical sizes and constrains nothing — the catalogue maps file name to family
+name already. The real cost is that the files are full-charset at ~116KB each, unsubsetted.
 
 ### ⭐ HIGH — the dashboard is not usable on a phone (found 2026-08-31, plan plans/MOBILE_EDITING.md)
 

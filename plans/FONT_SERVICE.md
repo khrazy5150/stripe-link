@@ -135,3 +135,90 @@ emits nothing for system-font pages.
 - **Inter still is not available.** The Quote element's opening mark keeps its system-sans stack until
   Inter is added to the service; that is a change in whichever repo owns `juniorbay.com/fonts/*`, not
   this one. See `QUOTE_MARK_FONT` in `runtime/html.py`.
+
+## 6. The service is a hardcoded catalogue — and it advertises families it cannot serve
+
+Traced 2026-09-03 after the Inter upload 404'd. `fonts-api` (`../fonts-api`) is a separate SAM app whose
+families live in `src/font_definitions.py` as 221 literal entries across 30 families, each:
+
+    "montserrat-thin": {
+        "format": "woff2", "weight_range": "100", "style": "normal",
+        "font_family_name": "Montserrat",      # what the CSS declares
+        "folder_name": "Montserrat",           # where the file lives
+        "file_name": "Montserrat-Thin.woff2",  # the object key
+    }
+
+`src/app.py` serves them from a single `URL = "https://juniorbay.com/fonts"`.
+
+**The catalogue and the bucket have drifted, and the failure is silent.** The API advertises 30 families;
+the serving bucket holds THREE:
+
+| Family | `?family=` | file at `/fonts/...` |
+|---|---|---|
+| Montserrat | 200 | **200** |
+| Roboto | 200 | **200** |
+| Ubuntu Titling | 200 | **200** |
+| Poppins | 200 | **404** |
+| Open Sans | 200 | **404** |
+| ...25 more | 200 | not present |
+
+So `?family=Poppins` returns perfectly valid CSS, the page loads it without error, every `@font-face`
+404s, and the text silently renders in the fallback. No console error a tenant would see, no failed
+request a publisher would notice. **Picking one of those 27 families would look exactly like the bug this
+whole plan exists to fix** — which makes an allow-list of *actually present* families a hard requirement
+of step 3c, not a nicety.
+
+### Where the Inter upload went
+
+Into `s3://juniorbay.com/fonts/Inter/` — a legacy bucket. The live origin for `juniorbay.com` is
+**`jb-homepage-prod-150544707159`** (distribution `E1RX3M3RT2BWUZ`), managed by THIS repo's
+`template.yaml` and deployed by `deploy/deploy-homepage.sh`. That is why the files exist in S3 and still
+404 at the CDN.
+
+Also: the console upload set `Content-Type: application/x-www-form-urlencoded`. `deploy-homepage.sh`
+already re-stamps `*.woff2` in the homepage bucket, so moving the files and running it fixes that too.
+
+## 7. Does Inter's 18/24/28pt split limit us? No.
+
+Those are Inter's **optical sizes** — the `opsz` axis flattened into three static families. 3 cuts x 9
+weights x 2 styles = 54 files, which is exactly what was uploaded. Each cut is a COMPLETE family
+(Thin -> Black, upright and italic).
+
+It does not constrain us, because **the CSS family name is whatever `@font-face` declares** and the
+catalogue already separates the three concerns. `Inter_28pt-SemiBold.woff2` can be published as
+`font-family: 'Inter'; font-weight: 600` with no renaming at all:
+
+    "inter-semibold": {
+        "font_family_name": "Inter", "folder_name": "Inter",
+        "file_name": "Inter_18pt-SemiBold.woff2", "weight_range": "600", "style": "normal",
+    }
+
+Optionally the split is an ASSET rather than an obstacle: register two families — `Inter` from the 18pt
+cut for body and UI, `Inter Display` from the 28pt cut for headlines and the Quote's opening mark. Larger
+optical sizes are drawn tighter for exactly that use. Worth doing only if the extra downloads are earned.
+
+### The real constraint is charset weight, not the split
+
+| File | Size |
+|---|---|
+| `Inter_18pt-Regular.woff2` | 116 KB |
+| `Montserrat-Regular.woff2` | 103 KB |
+| `Roboto-Regular.woff2` | 64 KB |
+| `UbuntuTitling-Bold.woff2` | 17 KB |
+
+These are full-charset (Latin + Greek + Cyrillic + Vietnamese) with no `unicode-range` subsetting — the
+service emits one `@font-face` per file and no subsets. Inter at 400+700 is ~235 KB on a landing page
+whose whole job is to convert. Google's own Latin subset of Inter is nearer 15 KB per weight.
+
+**So the work Inter actually needs is subsetting, not renaming.** `../font-converter` is a sibling repo
+that may already do this; check before building anything. Until then, keep the requested weight list
+minimal (400 + 700) and treat any third weight as a real cost.
+
+## 8. Revised build order
+
+1. **Subset Inter to Latin** (or confirm `font-converter` does), then upload the chosen cut(s) to
+   `jb-homepage-prod-150544707159/fonts/Inter/` and run `deploy/deploy-homepage.sh` to stamp content-types.
+2. **Register Inter in `fonts-api`** `font_definitions.py` — weights 400/600/700 to start.
+3. **Prune or flag the 27 phantom families** in the catalogue, or the allow-list in step 3c must exclude
+   them. A family that returns CSS pointing at 404s is worse than one that is absent.
+4. Then this repo's steps 3a/3b/3c as written above.
