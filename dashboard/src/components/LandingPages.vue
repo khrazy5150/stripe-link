@@ -938,10 +938,13 @@
                 <img v-if="pageImage(page)" :src="pageImage(page)" :alt="page.name || 'Page image'" />
                 <span v-else class="ribbon-page-initial">{{ (page.name || "P").trim().charAt(0).toUpperCase() }}</span>
               </span>
-              <!-- The NAME is the identifier, not the image: two pages can promote the same product and
-                   look identical, which is exactly the case that made this necessary. -->
-              <span class="ribbon-page-title">{{ page.name || "Untitled page" }}</span>
-              <span class="ribbon-page-slug">{{ page.route?.slug ? "/" + String(page.route.slug).replace(/^\//, "") : "" }}</span>
+              <!-- Name and slug sit ON the image, in the same scrim the published hero uses for its brand
+                   mark, so the picture and the identifier are both readable. The NAME is the identifier:
+                   two pages can promote the same product and look identical, which is what surfaced this. -->
+              <span class="ribbon-page-overlay">
+                <span class="ribbon-page-title">{{ page.name || "Untitled page" }}</span>
+                <span class="ribbon-page-slug">{{ page.route?.slug ? "/" + String(page.route.slug).replace(/^\//, "") : "" }}</span>
+              </span>
             </button>
           </div>
         </div>

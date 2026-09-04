@@ -4115,13 +4115,17 @@ button:disabled {
   padding: 0.4rem;
 }
 
+/* The card IS the image, with the name and slug over it — the same scrim the published hero uses for its
+   brand mark (.sl-hero-brand: translucent black + backdrop blur), so the picture and the identifier are
+   both legible instead of the text being clipped or the image being shrunk to make room. */
 .ribbon-page-card {
-  display: grid;
-  grid-template-rows: 14rem auto auto;
-  gap: 0.6rem;
-  padding: 0.8rem;
+  position: relative;
+  display: block;
+  height: 18rem;
+  padding: 0;
+  overflow: hidden;
   text-align: left;
-  background: var(--surface);
+  background: var(--subtle, #f1f5f9);
   border: 2px solid var(--line);
   border-radius: 1rem;
   cursor: pointer;
@@ -4135,9 +4139,8 @@ button:disabled {
 .ribbon-page-thumb {
   display: grid;
   place-items: center;
-  overflow: hidden;
-  border-radius: 0.6rem;
-  background: var(--subtle, #f1f5f9);
+  width: 100%;
+  height: 100%;
 }
 
 .ribbon-page-thumb img {
@@ -4147,22 +4150,35 @@ button:disabled {
 }
 
 .ribbon-page-initial {
-  font-size: 3.2rem;
+  font-size: 4rem;
   font-weight: 700;
   color: var(--muted);
 }
 
+.ribbon-page-overlay {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: grid;
+  gap: 0.2rem;
+  padding: 0.9rem 1.1rem;
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
 .ribbon-page-title {
-  font-size: 1.4rem;
-  font-weight: 600;
-  line-height: 1.35;
-  color: var(--text);
+  font-size: 1.35rem;
+  font-weight: 700;
+  line-height: 1.3;
+  color: rgba(255, 255, 255, 0.96);
 }
 
 .ribbon-page-slug {
   font-family: var(--font-mono, ui-monospace, monospace);
   font-size: var(--text-hint);
-  color: var(--muted);
+  color: rgba(255, 255, 255, 0.72);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
