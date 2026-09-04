@@ -128,7 +128,10 @@ renders a gallery and badges from PRODUCT data; this is authored page copy. Chec
 1. **Price Highlight** — ✅ BUILT 2026-09-02. Derived numbers, no CTA, `as low as` for tiers, renders
    without a strikethrough when there is no discount rather than rendering nothing.
 2. **Author Bio** — ✅ BUILT 2026-09-02. First override consumer; the derived ink works end to end.
-3. **Bragging Points** — second consumer; near-free if step 0 is right, and the proof that it is.
+3. ~~**Bragging Points**~~ — **SHIPPED 2026-09-03.** Second consumer, and step 0 held: it colours a
+   different surface (cards, not a photo ring) and inherited the derived-ink guarantee with no
+   element-specific contrast code. Reflow is pure CSS — the grid caps at two columns and a lone trailing
+   card spans the row, so 1 is one wide and 3 read 2 + 1 without the markup knowing the count.
 4. **Quote** — third consumer, and the one that needs `accent` as well as `bg`.
 5. **Numbered List** — no override, reuses the existing heading markup; the simplest of the six.
 6. **Brand Marquee** — the silent text-drop bug, three-state scroll, speed slider.

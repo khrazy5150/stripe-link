@@ -614,6 +614,35 @@
                       <label class="offer-field"><span>Label</span><input v-model.trim="element.label" type="text" placeholder="e.g. on Google" /></label>
                     </template>
 
+                    <template v-else-if="element.type === 'bragging_points'">
+                      <label class="offer-field">
+                        <span>Section heading (optional)</span>
+                        <input v-model.trim="element.heading" type="text" placeholder="e.g. By The Numbers" />
+                      </label>
+                      <div v-for="(item, i) in element.items" :key="i" class="element-subrow">
+                        <input v-model.trim="item.value" type="text" placeholder="Value — e.g. $6M+, 12 yrs, Q-Media" />
+                        <input v-model.trim="item.label" type="text" placeholder="What it counts — e.g. In sales" />
+                        <button class="danger-action compact" type="button" @click="removeSubItem(element, 'items', i)">Remove</button>
+                      </div>
+                      <button class="secondary-action compact" type="button" @click="addSubItem(element, 'items', { value: '', label: '' })">+ Add point</button>
+                      <small class="field-note">One card is full width, two sit side by side, three read 2 + 1.</small>
+                      <label class="builder-toggle">
+                        <input type="checkbox" :checked="Boolean(element.theme && element.theme.bg)" @change="toggleSectionBreak(element, $event, 'accent')" />
+                        <span>Break the page style for this section</span>
+                      </label>
+                      <div v-if="element.theme && element.theme.bg" class="offer-two-column">
+                        <label class="offer-field">
+                          <span>Background</span>
+                          <input v-model.trim="element.theme.bg" type="color" />
+                          <small class="field-note">Text colour is chosen automatically so it stays readable.</small>
+                        </label>
+                        <label class="offer-field">
+                          <span>Cards</span>
+                          <input v-model.trim="element.theme.accent" type="color" />
+                        </label>
+                      </div>
+                    </template>
+
                     <template v-else-if="element.type === 'author_bio'">
                       <div class="selectable-price-image-controls" :class="{ 'has-image-preview': element.photo_url }">
                         <div v-if="element.photo_url" class="selectable-price-image-preview">
@@ -3868,11 +3897,15 @@ const ELEMENT_TYPES = computed(() => addableElements());
 // The pattern break is driven by the BACKGROUND: the ink derives from it, so clearing the background is
 // what returns the section to the page preset. A default is seeded on enable so the toggle does something
 // visible immediately.
-function toggleSectionBreak(element, event) {
+// Each element names the SECOND surface it colours — the author bio rings a photo, bragging points fill
+// cards. The ink for both is derived server-side, so this only ever picks surfaces, never text colours.
+const SECTION_BREAK_DEFAULTS = { bg: "#111827", border: "#ffffff", accent: "#1f2937" };
+
+function toggleSectionBreak(element, event, surface = "border") {
   if (!element.theme) element.theme = {};
   if (event.target.checked) {
-    element.theme.bg = element.theme.bg || "#111827";
-    element.theme.border = element.theme.border || "#ffffff";
+    element.theme.bg = element.theme.bg || SECTION_BREAK_DEFAULTS.bg;
+    element.theme[surface] = element.theme[surface] || SECTION_BREAK_DEFAULTS[surface];
   } else {
     element.theme = {};
   }
@@ -3887,6 +3920,7 @@ function newElement(type) {
   if (type === "client_marquee") return { ...base, heading: "Our Clients", logos: [{ image_url: "", name: "" }] };
   if (type === "faq") return { ...base, heading: "Frequently Asked Questions", items: [{ question: "", answer: "" }] };
   if (type === "related_products") return { ...base, heading: "Related products" };
+  if (type === "bragging_points") return { ...base, heading: "", items: [{ value: "", label: "" }], theme: {} };
   // The NUMBERS are derived from the offer; only these two lines are the tenant's.
   if (type === "price_highlight") return { ...base, main_text: "Today Only", subtext: "" };
   if (type === "author_bio") return { ...base, photo_url: "", name: "", headline: "", body: "", theme: {} };
@@ -4209,6 +4243,7 @@ function rowSummary(row) {
   // The author IS the section — whose credibility it borrows is the one thing worth reading off a
   // collapsed row, the way a content block shows its title.
   if (row.type === "author_bio") return e.name?.trim() || e.headline?.trim() || "empty";
+  if (row.type === "bragging_points") return countLabel((e.items || []).filter((i) => (i.value || "").trim()).length, "point");
   return "";
 }
 
@@ -4301,6 +4336,13 @@ function elementSection(element) {
   if (element.type === "product_details") {
     return { id: element.id, type: "product_details" };   // content is the current target (offer-driven)
   }
+  if (element.type === "bragging_points") {
+    const items = (element.items || []).filter((i) => (i.value || "").trim() || (i.label || "").trim());
+    if (!items.length) return null;
+    const theme = element.theme && element.theme.bg ? element.theme : undefined;
+    return { id: element.id, type: "bragging_points", heading: element.heading || undefined,
+      items: items.map((i) => ({ value: i.value || "", label: i.label || "" })), theme };
+  }
   if (element.type === "author_bio") {
     if (!element.photo_url && !element.name && !element.headline && !element.body) return null;
     const theme = element.theme && element.theme.bg ? element.theme : undefined;
@@ -4331,6 +4373,10 @@ function elementsFromPage(sections) {
     } else if (section.type === "testimonials") {
       elements.push({ id: localId("el"), type: "testimonials", heading: section.heading || "",
         items: (section.items || []).map((item) => ({ quote: item.quote || "", author: item.author || "", role: item.role || "", avatar_url: item.avatar_url || "" })) });
+    } else if (section.type === "bragging_points") {
+      elements.push({ id: localId("el"), type: "bragging_points", heading: section.heading || "",
+        items: (section.items || []).map((i) => ({ value: i.value || "", label: i.label || "" })),
+        theme: section.theme ? { ...section.theme } : {} });
     } else if (section.type === "author_bio") {
       elements.push({ id: localId("el"), type: "author_bio", photo_url: section.photo_url || "",
         name: section.name || "", headline: section.headline || "", body: section.body || "",

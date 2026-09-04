@@ -616,6 +616,18 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     "    .sl-author-name{margin:0;display:inline-block;padding:0.4rem 1.4rem;border-radius:999px;background:var(--sl-section-border,var(--sl-accent));color:var(--sl-section-border-ink,var(--sl-cta-text,#fff));font-size:1.3rem;font-weight:700;text-transform:uppercase;letter-spacing:0.06em}",
     "    .sl-author-headline{margin:0;font-family:var(--sl-font-heading);font-size:clamp(2.4rem,5vw,3.6rem);line-height:1.2;color:var(--sl-section-ink,var(--sl-text))}",
     "    .sl-author-body{margin:0;max-width:62rem;font-size:1.6rem;line-height:1.7;color:var(--sl-section-ink,var(--sl-muted))}",
+    # BRAGGING POINTS. Same section-override contract as the author bio above.
+    "    .sl-bragging-points{display:grid;gap:1.6rem;justify-items:center;text-align:center;padding:4rem 2rem;background:var(--sl-section-bg,transparent);color:var(--sl-section-ink,var(--sl-text))}",
+    "    .sl-brag-heading{margin:0;font-family:var(--sl-font-heading);font-size:clamp(2rem,4vw,2.8rem);line-height:1.25;color:var(--sl-section-ink,var(--sl-text))}",
+    # Capped at TWO columns on purpose: three cards then read 2 + 1 rather than a thin triple, which is the
+    # reflow the element was specified with. auto-fit collapses to one column on narrow screens by itself.
+    "    .sl-brag-grid{list-style:none;margin:0;padding:0;width:100%;max-width:62rem;display:grid;gap:1.2rem;grid-template-columns:repeat(auto-fit,minmax(22rem,1fr))}",
+    # A lone trailing card spans the row, so 1 card is one wide and 3 cards are 2 + 1 — no count in the markup.
+    "    .sl-brag-grid > .sl-brag-card:last-child:nth-child(odd){grid-column:1/-1}",
+    "    .sl-brag-card{display:grid;gap:0.4rem;align-content:center;padding:2rem 1.6rem;border-radius:1rem;background:var(--sl-section-accent,rgba(127,127,127,0.12));color:var(--sl-section-accent-ink,var(--sl-section-ink,var(--sl-text)))}",
+    "    .sl-brag-value{margin:0;font-family:var(--sl-font-heading);font-size:clamp(2.4rem,5vw,3.4rem);line-height:1.1;font-weight:800}",
+    # Muted by OPACITY, not a second colour: it stays readable against whatever ink was derived.
+    "    .sl-brag-label{margin:0;font-size:1.4rem;line-height:1.5;opacity:0.75}",
     "    .sl-price-highlight{display:grid;gap:0.6rem;justify-items:center;text-align:center;padding:3.2rem 2rem;background:var(--sl-section-bg,transparent);color:var(--sl-section-ink,var(--sl-text))}",
     "    .sl-bargain-regular{margin:0;font-size:1.5rem;color:var(--sl-section-ink,var(--sl-price-regular));opacity:0.75}",
     "    .sl-bargain-amount{margin:0;font-family:var(--sl-font-heading);font-size:clamp(4rem,10vw,6.4rem);line-height:1;font-weight:800;color:var(--sl-section-ink,var(--sl-price-amount))}",
@@ -1769,6 +1781,7 @@ SECTION_REGISTRY: dict[str, dict[str, Any]] = {
     "author_bio": {"render": lambda c: render_author_bio(c.section), "version": 1},
     "product_details": {"render": lambda c: render_product_details(c.offer, c.products_by_id, c.services_by_id), "version": 1},
     "product_carousel": {"render": lambda c: render_product_carousel(c.section, c.page, c.offers_by_id, c.products_by_id, c.services_by_id, c.checkout_url, c.api_base_url), "version": 1},
+    "bragging_points": {"render": lambda c: render_bragging_points(c.section), "version": 1},
     "post_purchase_carousel": {"render": lambda c: render_post_purchase_carousel(c.section, c.page, c.api_base_url), "version": 1},
     "brand_hero": {"render": lambda c: render_brand_hero(c.section), "version": 1},
     "catalog_grid": {"render": lambda c: render_catalog_grid(c.section, c.offers_by_id, c.products_by_id, c.services_by_id), "version": 1},
@@ -4032,6 +4045,54 @@ def render_author_bio(section: dict[str, Any]) -> str:
     section_id = escape(str(section.get("id", "author-bio")))
     return "\n".join([
         f'    <section class="sl-author-bio{themed}" data-section-id="{section_id}" data-section-type="author_bio"{style_attr}>',
+        *rows,
+        "    </section>",
+    ])
+
+
+def render_bragging_points(section: dict[str, Any]) -> str:
+    """Quantified proof: {value, label} cards. The value is the claim, the label says what it counts.
+
+    Standalone rather than welded to Author Bio (plans/AUTHOR_BIO.md 4a) because the same component IS the
+    stats band — "10,000 customers served" has no author in it. Adjacency to the bio is the tenant's drag,
+    not a structural coupling.
+
+    Values are free text, never parsed as numbers: the author's own example is `Q-Media / Founder and CEO`.
+    """
+    items = [
+        item for item in (section.get("items") or [])
+        if str(item.get("value") or "").strip() or str(item.get("label") or "").strip()
+    ]
+    if not items:
+        return ""
+
+    heading = str(section.get("heading") or "").strip()
+    cards: list[str] = []
+    for item in items:
+        value = str(item.get("value") or "").strip()
+        label = str(item.get("label") or "").strip()
+        parts = []
+        if value:
+            parts.append(f'          <p class="sl-brag-value">{escape(value)}</p>')
+        if label:
+            parts.append(f'          <p class="sl-brag-label">{escape(label)}</p>')
+        cards.append("\n".join(['        <li class="sl-brag-card">', *parts, "        </li>"]))
+
+    rows: list[str] = []
+    if heading:
+        rows.append(f'      <h2 class="sl-brag-heading">{render_headline_markup(heading)}</h2>')
+    rows.append('      <ul class="sl-brag-grid">')
+    rows.extend(cards)
+    rows.append("      </ul>")
+
+    # Second consumer of the shared section override — the mechanism step 0 exists for. The card surface is
+    # `accent`, so its text is the DERIVED accent-ink and a tenant cannot colour the value into invisibility.
+    style = section_theme_vars(section)
+    style_attr = f' style="{escape(style)}"' if style else ""
+    themed = " sl-section-themed" if style else ""
+    section_id = escape(str(section.get("id", "bragging-points")))
+    return "\n".join([
+        f'    <section class="sl-bragging-points{themed}" data-section-id="{section_id}" data-section-type="bragging_points"{style_attr}>',
         *rows,
         "    </section>",
     ])
