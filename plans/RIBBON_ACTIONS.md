@@ -3,7 +3,25 @@
 **Status:** planned, not built. Author's spec 2026-09-04, five actions. Written after checking what already
 exists, because three of the five are mostly assembly and two are not.
 
-## 0. The one thing to build first: ONE click event
+## 0. Sequencing — DECIDED 2026-09-04
+
+**Part 1 (this document, build now): the actions themselves, with NO tracking.**
+**Part 2 (later): event capture + the analytics screen that displays it.**
+
+The click beacon was originally proposed as step 1, on the reasoning that all five actions need it. That
+was the wrong order, and checking the codebase is what showed it:
+
+- `document_events` is a **declared table with no writer** — the infrastructure exists on paper only.
+- There is **no analytics screen** (`dashboard/src/components/` has no analytics/insights/stats view), so
+  clicks would be written and never seen. A write-only feature.
+- But **`Leads.vue` exists**, so the leads produced by the download and email actions are visible the day
+  they ship.
+
+So the actions that produce LEADS pay off immediately, while the beacon needs a display surface built for
+it. The author's call: build the data for the analytics screen as the SECOND part of the enhancement, and
+the call button ships with no tracking at all for now — not even a click record, since nothing consumes it.
+
+## 0a. What "ONE click event" still means, when part 2 arrives
 
 The five actions differ in what happens *after* the click. They all need the same thing *at* the click: a
 record that this ribbon, on this page, was acted on. Building that five times is how this codebase produces
@@ -16,7 +34,7 @@ One beacon, fired on click, carrying `{page_id, section_id, action, purpose}`. T
 emits Google Tag / Meta Pixel tags (`render_analytics_tags`), so the same click can push a custom event
 there for tenants who use them, plus a first-party POST so the tenant sees it without a third party.
 
-## 1. Promote another of my pages — **buildable now**
+## 1. Promote another of my pages — **SHIPPED 2026-09-04**
 
 Visual single-select of the tenant's OTHER published landing pages; the control resolves the published URL
 and embeds it.
@@ -55,7 +73,7 @@ attachment path in the codebase today: `mailer.py` uses `sesv2` and the app only
 More to the point, **attachments are the wrong mechanism** at any size: they trip spam filters, bounce
 against mailbox quotas, cannot be revoked, and give the tenant no delivery signal.
 
-**Recommendation: email a LINK, not a file.** It removes the size limit entirely, reuses the exact presigned
+**DECIDED 2026-09-04 (author): email a LINK, not a file.** It removes the size limit entirely, reuses the exact presigned
 machinery from §2, lets the link expire, and is what every vendor in this space does. The tenant experience
 is unchanged — they upload a file, the prospect gets it by email — and the lead is recorded identically.
 
@@ -70,10 +88,12 @@ is what stops the opened tab reaching back into the opener.
 
 ## 5. Call a number — **two different features wearing one name**
 
-**(a) Click tracking — buildable now.** Fire the §0 beacon on tap. On mobile a `tel:` tap is a strong
+**(a) Click tracking — DEFERRED to part 2 (author, 2026-09-04).** Nothing consumes a click record
+until the analytics screen exists, so v1 ships a plain `tel:` button that dials and nothing more. On mobile a `tel:` tap is a strong
 intent signal, and it is the same mechanism every other action needs. This is most of the funnel value.
 
-**(b) True call tracking — a real telephony project, not a ribbon feature.** Knowing whether the call
+**(b) True call tracking — DEFERRED 2026-09-04 (author) as a v2 enhancement, low priority.**
+A real telephony project, not a ribbon feature. Knowing whether the call
 *connected*, and for how long, requires a **tracking number that forwards to the tenant's real number**, so
 the platform sits in the call path.
 
@@ -94,4 +114,4 @@ That is worth doing when tenants ask for attributable phone leads. It is not wor
 2. **§1 promote another page** — pure assembly of things that exist.
 3. **§2 download, with the lead gate** — the biggest new capability, and the modal is reusable by §3.
 4. **§3 email a link** — reuses §2 end to end once the correction above is accepted.
-5. **§5b true call tracking** — separate project, separate decision.
+5. ~~**§5b true call tracking**~~ — **DEFERRED to v2, low priority (author, 2026-09-04).**

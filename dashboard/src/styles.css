@@ -4102,6 +4102,37 @@ button:disabled {
   accent-color: var(--accent);
 }
 
+/* The chosen page sits beside the picker button rather than in a dropdown: a tenant needs to see WHICH
+   page and WHERE it points, since the URL is derived rather than typed. */
+.ribbon-page-choice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.8rem 1rem;
+  border: 1px solid var(--line);
+  border-radius: 0.8rem;
+}
+
+.ribbon-page-chosen {
+  display: grid;
+  gap: 0.2rem;
+  min-width: 0;
+}
+
+.ribbon-page-chosen small {
+  color: var(--muted);
+  font-size: var(--text-hint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ribbon-page-empty {
+  color: var(--muted);
+  font-size: 1.4rem;
+}
+
 /* A small either/or where the options need describing — radios rather than a select, because the choice
    changes what the section LOOKS like and both options deserve a sentence. */
 .builder-choice {

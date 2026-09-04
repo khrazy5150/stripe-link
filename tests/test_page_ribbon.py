@@ -125,6 +125,23 @@ class SectionOverrideTests(unittest.TestCase):
         self.assertIn("color:var(--sl-section-accent-ink,var(--sl-cta-text,#fff))", CSS)
 
 
+class PromotePageActionTests(unittest.TestCase):
+    """`promote_page` points at another of the tenant's own pages. The renderer treats it exactly like a
+    redirect — the difference is that the BUILDER derives the URL from the page list rather than the
+    tenant typing it, and re-derives it on every save so a later slug or domain change is picked up."""
+
+    def test_it_renders_as_a_link(self):
+        html = render_page_ribbon({**RIBBON, "cta": {
+            "label": "See the bundle", "action": "promote_page", "target": "https://shop.example.com/bundle"}})
+        self.assertIn('href="https://shop.example.com/bundle"', html)
+        self.assertIn('target="_blank"', html, "the page they are on must not be lost")
+
+    def test_it_is_guarded_by_the_same_href_rule(self):
+        html = render_page_ribbon({**RIBBON, "cta": {
+            "label": "Go", "action": "promote_page", "target": "javascript:x"}})
+        self.assertNotIn("sl-ribbon-cta", html)
+
+
 class MobileTests(unittest.TestCase):
     def test_the_ribbon_stacks_on_a_phone(self):
         # Shipped without this: the copy column collapsed to a few characters wide and the CTA squeezed

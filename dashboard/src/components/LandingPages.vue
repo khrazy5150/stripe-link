@@ -645,13 +645,31 @@
                         <label class="offer-field">
                           <span>Button does</span>
                           <select v-model="element.cta.action">
+                            <option value="promote_page">Promotes another of my pages</option>
                             <option value="redirect">Opens a link</option>
                             <option value="call_phone">Starts a call</option>
                             <option value="email">Opens an email</option>
                           </select>
                         </label>
                       </div>
-                      <label class="offer-field">
+                      <div v-if="element.cta.action === 'promote_page'" class="offer-field">
+                        <span>Page to promote</span>
+                        <div class="ribbon-page-choice">
+                          <span v-if="ribbonTargetPage(element)" class="ribbon-page-chosen">
+                            <strong>{{ ribbonTargetPage(element).name || "Untitled page" }}</strong>
+                            <small>{{ pageUrl(ribbonTargetPage(element)) }}</small>
+                          </span>
+                          <span v-else class="ribbon-page-empty">No page chosen yet.</span>
+                          <button class="secondary-action compact" type="button" @click="openRibbonPagePicker(element)">
+                            {{ ribbonTargetPage(element) ? "Change" : "Choose a page" }}
+                          </button>
+                        </div>
+                        <small v-if="ribbonTargetPage(element) && ribbonTargetPage(element).status !== 'published'" class="field-note is-warning">
+                          That page is not published yet, so the button would lead nowhere. Publish it before this one.
+                        </small>
+                        <small v-else class="field-note">The live URL is filled in for you, and refreshed each time you save.</small>
+                      </div>
+                      <label v-else class="offer-field">
                         <span>{{ element.cta.action === "call_phone" ? "Phone number" : element.cta.action === "email" ? "Email address" : "Link" }}</span>
                         <input v-model.trim="element.cta.target" type="text" :placeholder="element.cta.action === 'call_phone' ? '+1 555 010 1234' : element.cta.action === 'email' ? 'hello@example.com' : 'https://… or /another-page'" />
                         <small class="field-note">Leave the label or this blank and the ribbon renders without a button.</small>
@@ -893,6 +911,43 @@
           <button class="secondary-action" type="button" @click="cancelSectionEditor">Cancel</button>
           <button v-if="sectionEditor.isNew" class="primary-action" type="button" @click="commitNewSection()">Add Section</button>
           <button v-else class="primary-action" type="button" @click="closeSectionEditor()">Done</button>
+        </footer>
+      </section>
+    </div>
+    <div v-if="ribbonPicker.element" class="modal-backdrop offer-selector-backdrop" @click.self="closeRibbonPagePicker">
+      <section class="modal-card offer-product-selector-modal" role="dialog" aria-modal="true" aria-labelledby="ribbonPickerTitle">
+        <header class="modal-card-header">
+          <h2 id="ribbonPickerTitle">Choose a page to promote</h2>
+          <button type="button" class="modal-close" aria-label="Close page picker" @click="closeRibbonPagePicker">×</button>
+        </header>
+        <div class="offer-product-selector-body">
+          <input v-model.trim="ribbonPicker.search" class="offer-product-search" type="search" placeholder="Search pages..." />
+          <div v-if="!ribbonPickerPages.length" class="selector-load-state">
+            No other pages yet. Create a second landing page and it will appear here.
+          </div>
+          <div v-else class="offer-product-grid">
+            <button
+              v-for="page in ribbonPickerPages"
+              :key="page.page_id"
+              type="button"
+              class="offer-product-card"
+              :class="{ selected: ribbonPicker.element?.cta?.page_id === page.page_id }"
+              @click="chooseRibbonPage(page)"
+            >
+              <div class="offer-product-image">
+                <img v-if="pageThumbnail(page)" :src="pageThumbnail(page)" :alt="page.name || 'Page image'" />
+                <span v-else>{{ (page.name || "P").trim().charAt(0).toUpperCase() }}</span>
+                <span class="offer-product-check" aria-hidden="true">✓</span>
+              </div>
+              <span class="offer-product-intent" :class="page.status === 'published' ? 'primary' : 'secondary'">
+                {{ page.status === "published" ? "Published" : "Draft" }}
+              </span>
+              <span class="offer-product-name">{{ page.name || "Untitled page" }}</span>
+            </button>
+          </div>
+        </div>
+        <footer class="modal-footer">
+          <button class="secondary-action" type="button" @click="closeRibbonPagePicker">Cancel</button>
         </footer>
       </section>
     </div>
@@ -4094,7 +4149,7 @@ function newElement(type) {
   if (type === "numbered_list") return { ...base, heading: "", items: [""] };
   if (type === "page_ribbon") return { ...base, purpose: "custom", presentation: "image_left",
     image_url: "", eyebrow: "", headline: "", body: "",
-    cta: { label: "", action: "redirect", target: "" }, theme: {} };
+    cta: { label: "", action: "promote_page", page_id: "", target: "" }, theme: {} };
   // The NUMBERS are derived from the offer; only these two lines are the tenant's.
   if (type === "price_highlight") return { ...base, main_text: "Today Only", subtext: "" };
   if (type === "author_bio") return { ...base, photo_url: "", name: "", headline: "", body: "", theme: {} };
@@ -4381,6 +4436,47 @@ function resetSectionOrder() {
 // Three ribbons stop being interruptions and become wallpaper, which destroys the only property that
 // makes the element worth having (plans/ATTENTION_PRIMITIVE.md §4a "the wallpaper rule"). Capped at two.
 const RIBBON_MAX = 2;
+
+// Single-select, unlike the Offers product picker it mirrors: a ribbon promotes ONE page, so choosing
+// closes the modal rather than accumulating a selection.
+const ribbonPicker = reactive({ element: null, search: "" });
+
+// The current page can never be its own target — a ribbon linking to the page it sits on is a dead end.
+const ribbonPickerPages = computed(() => {
+  const term = ribbonPicker.search.trim().toLowerCase();
+  return pages.value
+    .filter((p) => p.page_id !== builder.page_id && p.status !== "archived")
+    .filter((p) => !term || (p.name || "").toLowerCase().includes(term));
+});
+
+function pageThumbnail(page) {
+  const sections = Array.isArray(page.sections) ? page.sections : [];
+  const media = sections.find((s) => s.type === "hero_media" && s.image_url);
+  return media?.image_url || "";
+}
+
+function ribbonTargetPage(element) {
+  const id = element?.cta?.page_id;
+  return id ? pages.value.find((p) => p.page_id === id) || null : null;
+}
+
+function openRibbonPagePicker(element) {
+  ribbonPicker.element = element;
+  ribbonPicker.search = "";
+}
+
+function closeRibbonPagePicker() {
+  ribbonPicker.element = null;
+}
+
+function chooseRibbonPage(page) {
+  const element = ribbonPicker.element;
+  if (!element) return;
+  element.cta.page_id = page.page_id;
+  // Resolve the live URL now AND again on save, so a later slug or domain change is picked up.
+  element.cta.target = pageUrl(page);
+  closeRibbonPagePicker();
+}
 const ribbonCount = computed(() => builder.elements.filter((el) => el.type === "page_ribbon").length);
 
 function commitNewSection() {
@@ -4485,6 +4581,25 @@ function moveSectionBefore(dragKey, dropKey) {
 
 
 
+// The ribbon's CTA, or nothing. A button needs BOTH a label and somewhere to go, so a half-filled CTA
+// renders no button rather than a dead one.
+//
+// For promote_page the URL is RE-RESOLVED here on every save, not just when the page was picked: the
+// target's slug, Site or custom domain can change afterwards, and a stale absolute URL is exactly the
+// kind of quietly-wrong link this codebase keeps producing.
+function ribbonCta(cta) {
+  const action = cta.action || "redirect";
+  const label = (cta.label || "").trim();
+  if (!label) return {};
+  if (action === "promote_page") {
+    const page = cta.page_id ? pages.value.find((p) => p.page_id === cta.page_id) : null;
+    if (!page) return {};
+    return { cta: { label, action, page_id: page.page_id, target: pageUrl(page) } };
+  }
+  const target = (cta.target || "").trim();
+  return target ? { cta: { label, action, target } } : {};
+}
+
 function elementSection(element) {
   if (element.type === "content_block") {
     if (!element.title && !element.text && !element.image_url) return null;
@@ -4536,8 +4651,7 @@ function elementSection(element) {
       eyebrow: element.eyebrow || undefined,
       headline: element.headline || undefined,
       body: element.body || undefined,
-      ...((cta.label || "").trim() && (cta.target || "").trim()
-        ? { cta: { label: cta.label, action: cta.action || "redirect", target: cta.target } } : {}),
+      ...ribbonCta(cta),
       theme };
   }
   if (element.type === "numbered_list") {
@@ -4597,7 +4711,7 @@ function elementsFromPage(sections) {
         image_url: section.image_url || "", eyebrow: section.eyebrow || "",
         headline: section.headline || "", body: section.body || "",
         cta: { label: section.cta?.label || "", action: section.cta?.action || "redirect",
-               target: section.cta?.target || "" },
+               page_id: section.cta?.page_id || "", target: section.cta?.target || "" },
         theme: section.theme ? { ...section.theme } : {} });
     } else if (section.type === "numbered_list") {
       elements.push({ id: localId("el"), type: "numbered_list", heading: section.heading || "",

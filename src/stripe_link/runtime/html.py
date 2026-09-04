@@ -4133,7 +4133,9 @@ RIBBON_PRESENTATIONS = ("image_left", "centered", "compact")
 RIBBON_PURPOSES = ("promote_offer", "capture_lead", "promote_content", "custom")
 # Named after the existing action vocabulary (CTA_TO_ACTION below) rather than a new set of words for the
 # same ideas. `none` is explicit: a ribbon with nothing to click is a content block, and should say so.
-RIBBON_ACTIONS = ("redirect", "call_phone", "email", "none")
+# `promote_page` is a redirect whose target the BUILDER resolves from the tenant's own page list, so the
+# renderer treats it identically — the difference is where the URL comes from, not what happens on click.
+RIBBON_ACTIONS = ("redirect", "promote_page", "call_phone", "email", "none")
 RIBBON_IMAGE_SIZES = "(max-width: 700px) 100vw, 320px"
 # A tenant types this URL, so the scheme is an injection surface: `javascript:` in an href executes on
 # click. Allow only schemes that navigate, plus same-origin paths.
@@ -4192,7 +4194,7 @@ def render_page_ribbon(section: dict[str, Any]) -> str:
         href = safe_href(f"tel:{target}") if target else ""
     elif action == "email":
         href = safe_href(f"mailto:{target}") if target else ""
-    elif action == "redirect":
+    elif action in ("redirect", "promote_page"):
         href = safe_href(target)
     else:
         href = ""
