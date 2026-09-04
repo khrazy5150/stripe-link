@@ -192,6 +192,30 @@ class DownloadActionTests(unittest.TestCase):
         self.assertNotIn("innerHTML", block)
 
 
+class DoubleClickTests(unittest.TestCase):
+    """A download navigates to an attachment URL, which does NOT leave the page. So the button is still
+    there afterwards, and a second click means a second signed URL, a second file, and a second lead."""
+
+    def _block(self):
+        from stripe_link.runtime.html import render_page_interactions_script
+        script = render_page_interactions_script(
+            {"sections": [{"type": "page_ribbon", "id": "rb", "cta": {"action": "download"}}]})
+        return script[script.index("data-sl-download"):script.index("sl-dl-actions")]
+
+    def test_the_button_is_disabled_before_the_request_not_after_it_returns(self):
+        block = self._block()
+        self.assertIn("btn.disabled = true;", block)
+        self.assertIn("if (btn.disabled) return;", block)
+
+    def test_success_leaves_it_disabled(self):
+        # A `finally` that re-enables would reopen the window this exists to close.
+        self.assertNotIn("finally", self._block())
+
+    def test_failure_re_enables_it(self):
+        # Nothing was delivered, so the visitor must be able to try again.
+        self.assertIn("catch(() => { btn.disabled = false;", self._block())
+
+
 class MobileTests(unittest.TestCase):
     def test_the_ribbon_stacks_on_a_phone(self):
         # Shipped without this: the copy column collapsed to a few characters wide and the CTA squeezed
