@@ -39,11 +39,23 @@ fi
 
 # 1) Static assets (css/images/fonts) — cache a day at the browser; edge TTL is longer (busted by invalidation).
 #    Excludes *.html (short cache, below) and *.md (the images/ README is not a served asset).
+# NOTE the fonts/* exclusion on --delete. The font library lives in the BUCKET, not in this repo — it is
+# built by the fonts-api catalogue workflow and is far too large to track here (Merriweather alone is
+# ~50MB). Without this exclusion, --delete removes every font that is not checked in, which is exactly
+# what happened on 2026-09-04: a homepage deploy took the bucket from 456 woff2 files down to the 3 that
+# happen to live under homepage/fonts/, and every published page silently lost its webfonts. Step 3 below
+# already assumes the fonts live in the bucket, so the delete was contradicting it.
 aws s3 sync "${SRC_DIR}/" "s3://${BUCKET}/" \
   --region "${REGION}" \
   --delete \
   --exclude "*.html" \
   --exclude "*.md" \
+  --exclude "fonts/*" \
+  --cache-control "public, max-age=86400"
+
+# Fonts checked into the repo still upload — they are just never DELETED from the bucket.
+aws s3 sync "${SRC_DIR}/fonts/" "s3://${BUCKET}/fonts/" \
+  --region "${REGION}" \
   --cache-control "public, max-age=86400"
 
 # 2) HTML — always revalidate so copy edits appear right after an invalidation.

@@ -673,6 +673,15 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     # rather than the reference's fixed blue, so it adapts to whatever ink the card derived.
     "    .sl-quote-fancy .sl-quote-body::before{content:'\\201C';position:absolute;top:0;left:-0.8rem;font-family:" + QUOTE_MARK_FONT + ";font-size:7.5rem;line-height:0.75;font-weight:600;opacity:0.3;pointer-events:none}",
     "    .sl-quote-fancy .sl-quote-attribution{margin-top:2rem}",
+    # NUMBERED LIST. Follows the page preset — no section override, this element has no pattern-break job.
+    "    .sl-numbered-list{display:grid;grid-template-columns:minmax(0,1fr);gap:1.6rem;padding:4rem 2rem}",
+    "    .sl-numbered-heading{margin:0 auto;width:100%;max-width:62rem;font-family:var(--sl-font-heading);font-size:clamp(2rem,4vw,2.8rem);line-height:1.25;color:var(--sl-content-heading,var(--sl-text))}",
+    # The badge number is a CSS counter, so it never becomes selectable or duplicated text — the <ol>
+    # already carries the ordering for anything that reads the page rather than looks at it.
+    "    .sl-numbered-items{list-style:none;counter-reset:sl-num;margin:0 auto;padding:0;width:100%;max-width:62rem;display:grid;gap:1.2rem}",
+    "    .sl-numbered-item{counter-increment:sl-num;display:grid;grid-template-columns:auto minmax(0,1fr);align-items:center;gap:1.6rem;padding:1.6rem 2rem;border:1px solid var(--sl-content-border);border-radius:1rem;background:var(--sl-card)}",
+    "    .sl-numbered-item::before{content:counter(sl-num);display:grid;place-items:center;width:3.6rem;height:3.6rem;border-radius:50%;background:var(--sl-accent);color:var(--sl-cta-text,#fff);font-family:var(--sl-font-heading);font-size:1.8rem;font-weight:700;line-height:1}",
+    "    .sl-numbered-text{margin:0;font-size:1.6rem;line-height:1.55;color:var(--sl-content-text)}",
     "    .sl-price-highlight{display:grid;gap:0.6rem;justify-items:center;text-align:center;padding:3.2rem 2rem;background:var(--sl-section-bg,transparent);color:var(--sl-section-ink,var(--sl-text))}",
     "    .sl-bargain-regular{margin:0;font-size:1.5rem;color:var(--sl-section-ink,var(--sl-price-regular));opacity:0.75}",
     "    .sl-bargain-amount{margin:0;font-family:var(--sl-font-heading);font-size:clamp(4rem,10vw,6.4rem);line-height:1;font-weight:800;color:var(--sl-section-ink,var(--sl-price-amount))}",
@@ -1826,6 +1835,7 @@ SECTION_REGISTRY: dict[str, dict[str, Any]] = {
     "author_bio": {"render": lambda c: render_author_bio(c.section), "version": 1},
     "product_details": {"render": lambda c: render_product_details(c.offer, c.products_by_id, c.services_by_id), "version": 1},
     "product_carousel": {"render": lambda c: render_product_carousel(c.section, c.page, c.offers_by_id, c.products_by_id, c.services_by_id, c.checkout_url, c.api_base_url), "version": 1},
+    "numbered_list": {"render": lambda c: render_numbered_list(c.section), "version": 1},
     "quote": {"render": lambda c: render_quote(c.section), "version": 1},
     "bragging_points": {"render": lambda c: render_bragging_points(c.section), "version": 1},
     "post_purchase_carousel": {"render": lambda c: render_post_purchase_carousel(c.section, c.page, c.api_base_url), "version": 1},
@@ -4091,6 +4101,41 @@ def render_author_bio(section: dict[str, Any]) -> str:
     section_id = escape(str(section.get("id", "author-bio")))
     return "\n".join([
         f'    <section class="sl-author-bio{themed}" data-section-id="{section_id}" data-section-type="author_bio"{style_attr}>',
+        *rows,
+        "    </section>",
+    ])
+
+
+NUMBERED_LIST_MAX = 12
+
+
+def render_numbered_list(section: dict[str, Any]) -> str:
+    """A heading plus an ordered list of authored lines, each on a card with a numbered badge.
+
+    ONE element for benefits AND how-it-works steps (plans/LANDING_ELEMENTS_UNIT.md §Numbered List). The
+    only thing separating them is the heading the tenant types — "What's Inside" versus "How It Works" —
+    which is content, not structure. Two visually identical elements would just make a tenant guess.
+
+    A real <ol>, so the sequence is in the markup rather than only in the styling: assistive technology
+    announces the position, and the visible badge is a CSS counter that carries no content of its own.
+    """
+    items = [str(item or "").strip() for item in (section.get("items") or [])]
+    items = [item for item in items if item][:NUMBERED_LIST_MAX]
+    if not items:
+        return ""
+
+    heading = str(section.get("heading") or "").strip()
+    rows: list[str] = []
+    if heading:
+        rows.append(f'      <h2 class="sl-numbered-heading">{render_headline_markup(heading)}</h2>')
+    rows.append('      <ol class="sl-numbered-items">')
+    for item in items:
+        rows.append(f'        <li class="sl-numbered-item"><p class="sl-numbered-text">{escape(item)}</p></li>')
+    rows.append("      </ol>")
+
+    section_id = escape(str(section.get("id", "numbered-list")))
+    return "\n".join([
+        f'    <section class="sl-numbered-list" data-section-id="{section_id}" data-section-type="numbered_list">',
         *rows,
         "    </section>",
     ])

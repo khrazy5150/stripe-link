@@ -20,6 +20,7 @@
     "bragging_points",
     "content_block",
     "quote",
+    "numbered_list",
     "client_marquee",
     "faq",
     "trust_badges",
@@ -193,6 +194,20 @@
       "heading_role": "none",
       "repeatable": false,
       "tokens": [
+        "content_text",
+        "content_border"
+      ]
+    },
+    "numbered_list": {
+      "placement": "free",
+      "label": "Numbered list",
+      "ui": "add",
+      "kind": "capability",
+      "channel": "body",
+      "heading_role": "h2",
+      "repeatable": false,
+      "tokens": [
+        "content_heading",
         "content_text",
         "content_border"
       ]

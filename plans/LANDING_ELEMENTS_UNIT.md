@@ -145,7 +145,9 @@ renders a gallery and badges from PRODUCT data; this is authored page copy. Chec
 4. ~~**Quote**~~ — **SHIPPED 2026-09-03.** Third consumer, and the first to use `accent` as a visible
    BAR rather than a background or a card fill. figure/figcaption so the attribution sits outside the
    blockquote; a typed dash is absorbed rather than doubled.
-5. **Numbered List** — no override, reuses the existing heading markup; the simplest of the six.
+5. ~~**Numbered List**~~ — **SHIPPED 2026-09-04.** No override, reuses `render_headline_markup`. A real
+   `<ol>` with the badge as a CSS counter, so the number is never selectable text and never doubles what
+   assistive technology already announces from the list.
 6. **Brand Marquee** — the silent text-drop bug, three-state scroll, speed slider.
 7. **Page Ribbon** — largest, and the only one with CTA plumbing.
 

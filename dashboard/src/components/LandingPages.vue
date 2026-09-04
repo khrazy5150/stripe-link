@@ -614,6 +614,20 @@
                       <label class="offer-field"><span>Label</span><input v-model.trim="element.label" type="text" placeholder="e.g. on Google" /></label>
                     </template>
 
+                    <template v-else-if="element.type === 'numbered_list'">
+                      <label class="offer-field">
+                        <span>Heading</span>
+                        <input v-model.trim="element.heading" type="text" placeholder="e.g. What's Inside The Course" />
+                        <small class="field-note">**text** colours a phrase, ^^text^^ highlights it. Works for benefits or how-it-works steps — the heading decides which.</small>
+                      </label>
+                      <div v-for="(item, i) in element.items" :key="i" class="element-subrow">
+                        <input v-model="element.items[i]" type="text" placeholder="One line — a benefit, or a step" />
+                        <button class="danger-action compact" type="button" @click="removeSubItem(element, 'items', i)">Remove</button>
+                      </div>
+                      <button v-if="(element.items || []).length < 12" class="secondary-action compact" type="button" @click="addSubItem(element, 'items', '')">+ Add line</button>
+                      <small v-else class="field-note">12 lines is the maximum.</small>
+                    </template>
+
                     <template v-else-if="element.type === 'quote'">
                       <label class="offer-field">
                         <span>Title (optional)</span>
@@ -3974,6 +3988,7 @@ function newElement(type) {
   if (type === "related_products") return { ...base, heading: "Related products" };
   if (type === "bragging_points") return { ...base, heading: "", items: [{ value: "", label: "" }], theme: {} };
   if (type === "quote") return { ...base, text: "", attribution: "", title: "", image_url: "", style: "minimal", theme: {} };
+  if (type === "numbered_list") return { ...base, heading: "", items: [""] };
   // The NUMBERS are derived from the offer; only these two lines are the tenant's.
   if (type === "price_highlight") return { ...base, main_text: "Today Only", subtext: "" };
   if (type === "author_bio") return { ...base, photo_url: "", name: "", headline: "", body: "", theme: {} };
@@ -4298,6 +4313,7 @@ function rowSummary(row) {
   if (row.type === "author_bio") return e.name?.trim() || e.headline?.trim() || "empty";
   if (row.type === "bragging_points") return countLabel((e.items || []).filter((i) => (i.value || "").trim()).length, "point");
   if (row.type === "quote") return e.attribution?.trim() || (e.text?.trim() ? "quote" : "empty");
+  if (row.type === "numbered_list") return countLabel((e.items || []).filter((i) => (i || "").trim()).length, "item");
   return "";
 }
 
@@ -4390,6 +4406,12 @@ function elementSection(element) {
   if (element.type === "product_details") {
     return { id: element.id, type: "product_details" };   // content is the current target (offer-driven)
   }
+  if (element.type === "numbered_list") {
+    // Plain strings, capped the way the renderer caps them so the document cannot carry more than shows.
+    const items = (element.items || []).map((i) => (i || "").trim()).filter(Boolean).slice(0, 12);
+    if (!items.length) return null;
+    return { id: element.id, type: "numbered_list", heading: element.heading || undefined, items };
+  }
   if (element.type === "quote") {
     if (!(element.text || "").trim()) return null;
     const theme = element.theme && element.theme.bg ? element.theme : undefined;
@@ -4435,6 +4457,9 @@ function elementsFromPage(sections) {
     } else if (section.type === "testimonials") {
       elements.push({ id: localId("el"), type: "testimonials", heading: section.heading || "",
         items: (section.items || []).map((item) => ({ quote: item.quote || "", author: item.author || "", role: item.role || "", avatar_url: item.avatar_url || "" })) });
+    } else if (section.type === "numbered_list") {
+      elements.push({ id: localId("el"), type: "numbered_list", heading: section.heading || "",
+        items: (section.items || []).map((i) => String(i || "")) });
     } else if (section.type === "quote") {
       elements.push({ id: localId("el"), type: "quote", text: section.text || "",
         title: section.title || "", image_url: section.image_url || "",
