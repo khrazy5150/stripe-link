@@ -479,27 +479,21 @@
             No items found.
           </div>
 
-          <div v-else-if="!productStore.error" class="offer-product-grid">
-            <button
+          <div v-else-if="!productStore.error" class="selector-grid">
+            <SelectorCard
               v-for="product in selectorItems"
               :key="productId(product)"
-              type="button"
-              class="offer-product-card"
-              :class="{ selected: draftSelectedProductIds.has(productId(product)), incompatible: isIncompatibleDraftProduct(product) }"
+              :image="product.images?.[0] || ''"
+              :title="product.name"
+              fallback-title="Untitled Product"
+              :badge="productIntentLabel(product)"
+              :badge-class="productIntentFor(product)"
+              :selected="draftSelectedProductIds.has(productId(product))"
               :disabled="isIncompatibleDraftProduct(product)"
-              @click="toggleDraftProduct(productId(product))"
+              @choose="toggleDraftProduct(productId(product))"
             >
-              <div class="offer-product-image">
-                <img v-if="product.images?.[0]" :src="product.images[0]" :alt="product.name || 'Product image'" />
-                <span v-else>{{ productInitial(product) }}</span>
-                <span class="offer-product-check" aria-hidden="true">✓</span>
-              </div>
-              <span class="offer-product-intent" :class="productIntentFor(product)">
-                {{ productIntentLabel(product) }}
-              </span>
-              <span class="offer-product-name">{{ product.name || "Untitled Product" }}</span>
               <strong>{{ priceText(product) }}</strong>
-            </button>
+            </SelectorCard>
           </div>
         </div>
 
@@ -560,6 +554,7 @@
 
 <script setup>
 import { computed, onMounted, reactive, ref, watch } from "vue";
+import SelectorCard from "./SelectorCard.vue";
 import { apiRequest, getStripeMode, getTenantId, toAssetCdnUrl } from "../api/client";
 import { formatCouponDiscount, useCouponsStore } from "../stores/coupons";
 import { defaultProductPrice, formatMoney, useProductsStore } from "../stores/products";

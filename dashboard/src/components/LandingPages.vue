@@ -925,27 +925,21 @@
           <div v-if="!ribbonPickerPages.length" class="selector-load-state">
             There are no published pages to choose from. Publish another landing page and it will appear here.
           </div>
-          <div v-else class="ribbon-page-grid">
-            <button
+          <div v-else class="selector-grid">
+            <!-- overlay: the picture is the point here and the NAME is the disambiguator, since two pages
+                 can promote the same product and look identical. -->
+            <SelectorCard
               v-for="page in ribbonPickerPages"
               :key="page.page_id"
-              type="button"
-              class="ribbon-page-card"
-              :class="{ selected: ribbonPicker.element?.cta?.page_id === page.page_id }"
-              @click="chooseRibbonPage(page)"
+              :image="pageImage(page)"
+              :title="page.name"
+              fallback-title="Untitled page"
+              :selected="ribbonPicker.element?.cta?.page_id === page.page_id"
+              overlay
+              @choose="chooseRibbonPage(page)"
             >
-              <span class="ribbon-page-thumb">
-                <img v-if="pageImage(page)" :src="pageImage(page)" :alt="page.name || 'Page image'" />
-                <span v-else class="ribbon-page-initial">{{ (page.name || "P").trim().charAt(0).toUpperCase() }}</span>
-              </span>
-              <!-- Name and slug sit ON the image, in the same scrim the published hero uses for its brand
-                   mark, so the picture and the identifier are both readable. The NAME is the identifier:
-                   two pages can promote the same product and look identical, which is what surfaced this. -->
-              <span class="ribbon-page-overlay">
-                <span class="ribbon-page-title">{{ page.name || "Untitled page" }}</span>
-                <span class="ribbon-page-slug">{{ page.route?.slug ? "/" + String(page.route.slug).replace(/^\//, "") : "" }}</span>
-              </span>
-            </button>
+              <span class="selector-card-sub">{{ page.route?.slug ? "/" + String(page.route.slug).replace(/^\//, "") : "" }}</span>
+            </SelectorCard>
           </div>
         </div>
         <footer class="modal-footer">
@@ -1825,6 +1819,7 @@
 
 <script setup>
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
+import SelectorCard from "./SelectorCard.vue";
 import { offerViewTargets, offerViewTargetsFromExpanded } from "../composables/useConversionContext";
 import { isSectionVisible, defaultVisible, recommendedSectionKeys, optionalSectionKeys, governedKeys, elementLabel, elementChannel, addableElements, tokenGroups, previewVar, supportedGoals, goalLabel, packSeeds, orderSections, sectionOrderKey, isMovable, elementPlacement, orderSectionKeys, isRepeatableSection } from "../composables/pageComposer";
 import { apiRequest, assetUrl, getApiBase, getStripeMode, getOtherEnvironment, getPagesBaseUrl, getPreviewPagesBaseUrl, getTestPagesHost, getTenantId } from "../api/client";
