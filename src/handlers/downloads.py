@@ -197,7 +197,9 @@ def lead_download_handler(
 
     now = int(now_fn())
     if offer["required"] and not is_spam(payload):
-        leads_repo = leads_repo or leads_repository(mode=mode)
+        # Leads are NOT mode-scoped — one table, unlike pages/orders. Passing mode= here threw a
+        # TypeError, and only for GATED downloads, since the ungated path never touches leads.
+        leads_repo = leads_repo or leads_repository()
         idempotency_key = str(payload.get("idempotency_key") or "").strip()
         offer_id = str((page or {}).get("offer_id") or "")
         lead_id = lead_id_for(tenant_id, offer_id, idempotency_key, now=now, token=secrets.token_hex(8))

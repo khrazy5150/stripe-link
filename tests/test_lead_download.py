@@ -105,6 +105,26 @@ class GateTests(unittest.TestCase):
                 self.assertEqual(res["statusCode"], 404)
 
 
+class WiringTests(unittest.TestCase):
+    """The tests above inject fake repositories, so they never call the real constructors — which is how
+    `leads_repository(mode=...)` reached production and failed with a TypeError on every gated download.
+    Injecting a dependency proves the logic and proves nothing about the wiring."""
+
+    def test_the_repository_constructors_accept_what_the_handler_passes(self):
+        import inspect
+        from stripe_link.repositories.documents import leads_repository, pages_repository
+        # pages IS mode-scoped; leads is NOT. The handler must not assume they are alike.
+        self.assertIn("mode", inspect.signature(pages_repository).parameters)
+        self.assertNotIn("mode", inspect.signature(leads_repository).parameters)
+
+    def test_the_handler_calls_them_the_way_they_are_declared(self):
+        import inspect
+        from handlers import downloads
+        src = inspect.getsource(downloads.lead_download_handler)
+        self.assertIn("leads_repository()", src)
+        self.assertIn("pages_repository(mode=mode)", src)
+
+
 class SpamTests(unittest.TestCase):
     """Deliberately unlike POST /leads, which accepts-and-drops. Dropping here would deny a real visitor
     their file on a false positive — and the file is a lead MAGNET, meant to be given away. The leads list

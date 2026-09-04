@@ -663,7 +663,7 @@
                           <span v-else class="ribbon-page-empty">No file uploaded yet.</span>
                           <input :ref="(el) => setRibbonFileInput(element.id, el)" type="file" hidden @change="handleRibbonFilePicked(element, $event)" />
                           <button class="secondary-action compact" type="button" :disabled="ribbonUploading[element.id]" @click.prevent="triggerRibbonFileUpload(element.id)">
-                            {{ ribbonUploading[element.id] ? "Uploading..." : (element.cta.asset ? "Replace" : "Upload file") }}
+                            {{ ribbonUploading[element.id] ? `Uploading ${ribbonUploadPct[element.id] || 0}%` : (element.cta.asset ? "Replace" : "Upload file") }}
                           </button>
                         </div>
                         <small v-if="ribbonUploadError[element.id]" class="field-note is-warning">{{ ribbonUploadError[element.id] }}</small>
@@ -4458,12 +4458,16 @@ function resetSectionOrder() {
 // makes the element worth having (plans/ATTENTION_PRIMITIVE.md §4a "the wallpaper rule"). Capped at two.
 const RIBBON_MAX = 2;
 
-// A ribbon's lead magnet. 50MB is a deliberate ceiling: it is generous for a guide or a short video, and
-// it keeps a single upload from becoming the thing that makes a page slow to hand over.
-const RIBBON_FILE_MAX_BYTES = 50 * 1024 * 1024;
+// A ribbon's lead magnet. There is no 50MB technical limit here — that number was invented, not measured.
+// The browser PUTs straight to a presigned S3 URL, so API Gateway's 10MB payload cap is not in the path;
+// the real boundary is S3's 5GB single-PUT maximum. Beyond that would need multipart, which is a different
+// feature. What large files DO need is feedback, so the upload reports progress rather than sitting on
+// "Uploading..." for minutes.
+const RIBBON_FILE_MAX_BYTES = 5 * 1024 * 1024 * 1024;
 const ribbonFileInputs = {};
 const ribbonUploading = reactive({});
 const ribbonUploadError = reactive({});
+const ribbonUploadPct = reactive({});
 
 function setRibbonFileInput(id, el) {
   if (el) ribbonFileInputs[id] = el;
@@ -4486,10 +4490,11 @@ async function handleRibbonFilePicked(element, event) {
   if (!file) return;
   ribbonUploadError[element.id] = "";
   if (file.size > RIBBON_FILE_MAX_BYTES) {
-    ribbonUploadError[element.id] = `That file is ${formatBytes(file.size)}. The limit is 50 MB.`;
+    ribbonUploadError[element.id] = `That file is ${formatBytes(file.size)}. A single upload can be up to 5 GB.`;
     return;
   }
   ribbonUploading[element.id] = true;
+  ribbonUploadPct[element.id] = 0;
   try {
     // Reuses the tenant upload endpoint, scoped to this PAGE rather than a product.
     const contentType = file.type || "application/octet-stream";
@@ -4497,10 +4502,18 @@ async function handleRibbonFilePicked(element, event) {
       method: "POST",
       body: { page_id: builder.page_id, filename: file.name, content_type: contentType, size_bytes: file.size },
     });
-    const put = await fetch(presign.upload_url, {
-      method: "PUT", headers: { "Content-Type": contentType }, body: file,
+    await new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open("PUT", presign.upload_url);
+      xhr.setRequestHeader("Content-Type", contentType);
+      xhr.upload.addEventListener("progress", (e) => {
+        if (e.lengthComputable) ribbonUploadPct[element.id] = Math.round((e.loaded / e.total) * 100);
+      });
+      xhr.addEventListener("load", () => (xhr.status >= 200 && xhr.status < 300
+        ? resolve() : reject(new Error(`Upload failed with ${xhr.status}`))));
+      xhr.addEventListener("error", () => reject(new Error("Upload failed. Check your connection.")));
+      xhr.send(file);
     });
-    if (!put.ok) throw new Error(`Upload failed with ${put.status}`);
     element.cta.asset = presign.digital_asset;
   } catch (err) {
     ribbonUploadError[element.id] = err.message || "Upload failed. Please try again.";
