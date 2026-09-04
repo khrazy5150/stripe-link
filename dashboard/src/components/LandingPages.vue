@@ -3455,11 +3455,7 @@ function seedGoalElements(goal) {
   }
 }
 
-// `silent` suppresses the routine success banner. Auto-save fires on every Done, and a banner on
-// every Done is noise the tenant did not ask for — the point of auto-save is to stop thinking about
-// saving. Failures are never silent: those still surface, because carrying on editing a page that
-// is no longer being stored is the one outcome worth interrupting for.
-async function savePage({ silent = false } = {}) {
+async function savePage() {
   wizardError.value = "";
   if (!draftPage.value) {
     wizardError.value = "Page could not be generated.";
@@ -3476,10 +3472,8 @@ async function savePage({ silent = false } = {}) {
       await attachCreatedPageToSite(saved, pendingSiteAttach.value, "offer");
       const siteName = sitesStore.sites.find((s) => s.site_id === pendingSiteAttach.value)?.name;
       pendingSiteAttach.value = "";
-      // Attaching to a Site is a one-time side effect the tenant did not ask for here, so it is reported
-      // even on a silent save.
       message.value = `${saved.name} was saved and attached to ${siteName || "your Site"}.`;
-    } else if (!silent) {
+    } else {
       message.value = `${saved.name} was saved.`;
     }
     wizardOpen.value = false;
@@ -3910,7 +3904,10 @@ async function unpublishBuilderPage() {
   }
 }
 
-async function saveBuilderPageWithStatus(statusOverride = "") {
+// `silent` suppresses the routine success banner. Auto-save fires on every Done, and a banner each time is
+// noise — the point is to stop thinking about saving. Failures are never silent: carrying on editing a page
+// that is no longer being stored is the one outcome worth interrupting for.
+async function saveBuilderPageWithStatus(statusOverride = "", { silent = false } = {}) {
   error.value = "";
   message.value = "";
   if (flashSaleInvalid.value) {
@@ -3928,7 +3925,9 @@ async function saveBuilderPageWithStatus(statusOverride = "") {
     const saved = body.page || document;
     pages.value = [saved, ...pages.value.filter((page) => page.page_id !== saved.page_id)];
     pagesLoaded.value = true;
-    message.value = statusOverride === "published" ? `${saved.name} was published.` : `${saved.name} was saved.`;
+    if (!silent) {
+      message.value = statusOverride === "published" ? `${saved.name} was published.` : `${saved.name} was saved.`;
+    }
     builderExistingPageId.value = saved.page_id;
     builder.status = saved.status || builder.status;
     builder.published_at = saved.published_at || builder.published_at;
@@ -4455,17 +4454,16 @@ async function closeSectionEditor() {
   await autoSavePage();
 }
 
+// Auto-save uses the BUILDER's save, not the wizard's. savePage() builds its document from `draftPage`,
+// which only exists inside the create-a-page wizard — calling it from the builder produced "Page could not
+// be generated." on every Done. saveBuilderPageWithStatus() with no override saves as a DRAFT and reports
+// into the builder's own error banner, which is what the tenant is looking at.
 async function autoSavePage() {
-  if (!builderOpen.value) return;
-  wizardError.value = "";
-  await savePage({ silent: true });
-  // savePage() reports failures into wizardError, which is rendered by the WIZARD modal — NOT by the
-  // builder. Without this, an auto-save that fails says nothing at all, and the tenant carries on editing
-  // a page that is no longer being stored. Surface it where they actually are.
-  if (wizardError.value) {
-    error.value = wizardError.value;
-    wizardError.value = "";
-  }
+  if (!builderOpen.value || saving.value) return;
+  // Matches the Save Page button's own rule: a published page is not saveable from the builder, so
+  // auto-save must not quietly try. Saving is not publishing, and it must never become publishing.
+  if (isBuilderPublished.value) return;
+  await saveBuilderPageWithStatus("", { silent: true });
 }
 
 // Cancel on an ADD throws the draft away — nothing was ever created, so there are no empty cards.
