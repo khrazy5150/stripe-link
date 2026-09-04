@@ -3449,7 +3449,11 @@ function seedGoalElements(goal) {
   }
 }
 
-async function savePage() {
+// `silent` suppresses the routine success banner. Auto-save fires on every Done, and a banner on
+// every Done is noise the tenant did not ask for — the point of auto-save is to stop thinking about
+// saving. Failures are never silent: those still surface, because carrying on editing a page that
+// is no longer being stored is the one outcome worth interrupting for.
+async function savePage({ silent = false } = {}) {
   wizardError.value = "";
   if (!draftPage.value) {
     wizardError.value = "Page could not be generated.";
@@ -3466,8 +3470,10 @@ async function savePage() {
       await attachCreatedPageToSite(saved, pendingSiteAttach.value, "offer");
       const siteName = sitesStore.sites.find((s) => s.site_id === pendingSiteAttach.value)?.name;
       pendingSiteAttach.value = "";
+      // Attaching to a Site is a one-time side effect the tenant did not ask for here, so it is reported
+      // even on a silent save.
       message.value = `${saved.name} was saved and attached to ${siteName || "your Site"}.`;
-    } else {
+    } else if (!silent) {
       message.value = `${saved.name} was saved.`;
     }
     wizardOpen.value = false;
@@ -4446,7 +4452,7 @@ async function closeSectionEditor() {
 async function autoSavePage() {
   if (!builderOpen.value) return;
   wizardError.value = "";
-  await savePage();
+  await savePage({ silent: true });
   // savePage() reports failures into wizardError, which is rendered by the WIZARD modal — NOT by the
   // builder. Without this, an auto-save that fails says nothing at all, and the tenant carries on editing
   // a page that is no longer being stored. Surface it where they actually are.
