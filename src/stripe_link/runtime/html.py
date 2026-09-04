@@ -656,8 +656,17 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     # The photo is sized by HEIGHT with a fixed box, exactly as the reference does. Sizing it by width
     # alone let a PORTRAIT source render ~500px tall, which forced the card to wrap even on a desktop and
     # buried the words under a column of photograph.
-    "    .sl-quote-fancy .sl-quote-photo{flex:0 0 auto;width:16rem;margin-block:-3.2rem}",
-    "    .sl-quote-fancy .sl-quote-photo img{display:block;width:100%;height:20rem;object-fit:cover;border-radius:0.8rem;box-shadow:0 1.2rem 2.4rem rgba(0,0,0,0.4)}",
+    # The photo OVERLAPS the card, as in the reference. The reference gets that from transform:scale(),
+    # which grows the image visually without growing its layout box — so it always spills past the card.
+    # A plain taller image cannot: the card's height is set by the WORDS, so the image never reaches the
+    # edges of a card with a few lines in it. Here the box stretches to the card's content height and the
+    # image is drawn taller than its box, which makes the bleed a CONSTANT 2.4rem whatever the text does:
+    #   card   = content + 6.4rem (its padding)
+    #   image  = content + 11.2rem
+    #   bleed  = (image - card) / 2 = 2.4rem, top and bottom
+    # min-height keeps the photo a sensible size when the quote is one short line.
+    "    .sl-quote-fancy .sl-quote-photo{flex:0 0 auto;width:16rem;align-self:stretch;min-height:14rem;position:relative}",
+    "    .sl-quote-fancy .sl-quote-photo img{position:absolute;top:50%;left:0;transform:translateY(-50%);display:block;width:100%;height:calc(100% + 11.2rem);object-fit:cover;border-radius:0.8rem;box-shadow:0 1.2rem 2.4rem rgba(0,0,0,0.4)}",
     "    .sl-quote-fancy .sl-quote-body{flex:1 1 18rem;min-width:0;position:relative;padding-top:2.8rem}",
     "    .sl-quote-fancy .sl-quote-text{font-size:clamp(1.8rem,3.2vw,2.2rem);font-style:normal;font-weight:600;line-height:1.35}",
     # The reference's fat opening mark: a heavy sans at 7.5rem, weight 600, 30% opacity. currentColor
@@ -809,7 +818,7 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     "    .sl-footernav ul{list-style:none;display:flex;flex-wrap:wrap;justify-content:center;gap:1.4rem;padding:0;margin:0}",
     "    .sl-footernav a{color:var(--sl-legal-link);text-decoration:none;font-size:1.3rem}",
     "    .sl-footernav a:hover{text-decoration:underline}",
-    "    @media (max-width: 700px){.sl-price-option{grid-template-columns:8.8rem minmax(0,1fr) 2.4rem;gap:1rem;padding:1.2rem}.sl-price-option img{width:8.8rem}.sl-content-block{grid-template-columns:1fr}.sl-headline h1{font-size:3rem}.sl-testimonial{grid-template-columns:1fr;padding:1.8rem 1.6rem 1.8rem 3.8rem}.sl-testimonial img{width:5.6rem;height:5.6rem;order:-1}.sl-testimonial blockquote{font-size:1.6rem}}",
+    "    @media (max-width: 700px){.sl-price-option{grid-template-columns:8.8rem minmax(0,1fr) 2.4rem;gap:1rem;padding:1.2rem}.sl-price-option img{width:8.8rem}.sl-content-block{grid-template-columns:1fr}.sl-headline h1{font-size:3rem}.sl-testimonial{grid-template-columns:1fr;padding:1.8rem 1.6rem 1.8rem 3.8rem}.sl-testimonial img{width:5.6rem;height:5.6rem;order:-1}.sl-testimonial blockquote{font-size:1.6rem}.sl-quote-fancy .sl-quote-photo{align-self:auto;min-height:0;height:20rem}.sl-quote-fancy .sl-quote-photo img{position:static;transform:none;height:100%}}",
 ]
 
 TEMPLATE_STYLES = {

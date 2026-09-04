@@ -163,11 +163,29 @@ class NarrowViewportTests(unittest.TestCase):
         self.assertIn(".sl-quote-fancy .sl-quote-photo{flex:0 0 auto;width:16rem", CSS)
         self.assertIn(".sl-quote-fancy .sl-quote-body{flex:1 1 18rem;min-width:0", CSS)
 
-    def test_the_photo_is_sized_by_height_not_by_width_alone(self):
+    def test_the_photo_never_takes_its_size_from_the_source_image(self):
         # The bug this exists to prevent: sized by width only, a PORTRAIT source rendered ~500px tall,
         # which forced the card to wrap even on a desktop and buried the words under a column of photo.
-        # A fixed box plus object-fit means the layout no longer depends on the source's aspect ratio.
-        self.assertIn("height:20rem;object-fit:cover", CSS)
+        # A definite box plus object-fit means layout no longer depends on the source's aspect ratio.
+        self.assertIn("object-fit:cover", CSS)
+        self.assertIn(".sl-quote-fancy .sl-quote-photo{flex:0 0 auto;width:16rem;align-self:stretch", CSS)
+
+    def test_the_photo_overlaps_the_card_by_a_constant_amount(self):
+        # The reference gets its overlap from transform:scale(), which grows the image visually without
+        # growing its layout box. A plain taller image cannot overlap, because the card's height is set by
+        # the WORDS — a card with a few lines in it is always taller than the photo. Stretching the box to
+        # the content height and drawing the image taller than its box makes the bleed constant:
+        #   card = content + 6.4rem, image = content + 11.2rem, so 2.4rem shows top and bottom, always.
+        self.assertIn("height:calc(100% + 11.2rem)", CSS)
+        self.assertIn("position:absolute;top:50%;left:0;transform:translateY(-50%)", CSS)
+        self.assertIn(".sl-quote-fancy .sl-quote-figure{margin:0 auto;width:100%;max-width:74rem;display:flex;flex-wrap:wrap;justify-content:center;align-items:center;gap:2.4rem;padding:3.2rem", CSS)
+
+    def test_the_overlap_is_switched_off_once_the_card_stacks(self):
+        # Bleeding into the words below would be a mess on a phone, and the author asked for the overlap
+        # "at least on desktop". Lives in the same max-width block as the rest of the page's mobile rules.
+        mobile = CSS.split("@media (max-width: 700px){")[1]
+        self.assertIn(".sl-quote-fancy .sl-quote-photo{align-self:auto;min-height:0;height:20rem}", mobile)
+        self.assertIn(".sl-quote-fancy .sl-quote-photo img{position:static;transform:none;height:100%}", mobile)
 
     def test_children_are_centred_by_auto_margins_not_justify_items(self):
         # justify-items:center sizes each child to fit-content, so `width:100%` on the card resolved
