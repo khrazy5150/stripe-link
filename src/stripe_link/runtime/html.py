@@ -32,6 +32,10 @@ CURRENCY_SYMBOLS = {
 }
 SYSTEM_FONT_STACK = "-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Oxygen,Ubuntu,sans-serif"
 SYSTEM_MONO_FONT_STACK = "ui-monospace,SFMono-Regular,Menlo,monospace"
+# The opening quotation mark wants a heavy geometric sans to read as FAT rather than as a stray tick.
+# Inter is named first as the author specified, but it is not self-hosted for published pages, so in
+# practice this resolves to the system sans unless the visitor happens to have Inter installed.
+QUOTE_MARK_FONT = "Inter,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif"
 FONT_FALLBACK_STACKS = {
     "system": SYSTEM_FONT_STACK,
     "sans-serif": "sans-serif",
@@ -636,28 +640,29 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     "    .sl-brag-label{margin:0;font-size:1.4rem;line-height:1.5;opacity:0.75}",
     # QUOTE. minmax(0,1fr) for the same reason as bragging points: justify-items:center leaves an auto
     # track, and an auto track sizes to max-content — long unbroken text would then widen the viewport.
-    "    .sl-quote{display:grid;grid-template-columns:minmax(0,1fr);justify-items:center;padding:4rem 2rem;background:var(--sl-section-bg,transparent);color:var(--sl-section-ink,var(--sl-text))}",
-    "    .sl-quote-title{margin:0 0 1.6rem;width:100%;max-width:62rem;font-family:var(--sl-font-heading);font-size:clamp(1.8rem,3.4vw,2.4rem);line-height:1.3}",
+    "    .sl-quote{display:grid;grid-template-columns:minmax(0,1fr);padding:4rem 2rem;background:var(--sl-section-bg,transparent);color:var(--sl-section-ink,var(--sl-text))}",
+    "    .sl-quote-title{margin:0 auto 1.6rem;width:100%;max-width:62rem;font-family:var(--sl-font-heading);font-size:clamp(1.8rem,3.4vw,2.4rem);line-height:1.3}",
     "    .sl-quote-text{margin:0;font-family:var(--sl-font-heading);font-size:clamp(2rem,4vw,2.8rem);line-height:1.45;font-style:italic}",
     # Muted by opacity, so it stays legible against whatever ink the surface derived.
     "    .sl-quote-attribution{margin:1.2rem 0 0;font-size:1.5rem;font-style:normal;opacity:0.75}",
     # MINIMAL — the BAR is the signature, and what keeps it from reading as a testimonial card.
-    "    .sl-quote-minimal .sl-quote-figure{margin:0;width:100%;max-width:62rem;text-align:left;border-left:0.5rem solid var(--sl-section-accent,var(--sl-accent));padding-left:2.4rem}",
+    "    .sl-quote-minimal .sl-quote-figure{margin:0 auto;width:100%;max-width:62rem;text-align:left;border-left:0.5rem solid var(--sl-section-accent,var(--sl-accent));padding-left:2.4rem}",
     "    .sl-quote-minimal .sl-quote-photo{margin:0 0 1.6rem}",
-    "    .sl-quote-minimal .sl-quote-photo img{width:8rem;height:8rem;border-radius:1rem;object-fit:cover;display:block}",
+    "    .sl-quote-minimal .sl-quote-photo img{width:8rem;height:8rem;border-radius:50%;object-fit:cover;display:block}",
     # FANCY — a coloured card. `accent` paints the CARD here rather than a bar, so the text on it is the
     # derived accent-ink: the reference design's white-on-pink comes out of the contrast maths, not a
     # hardcoded colour, and holds for a pale card just as well.
-    "    .sl-quote-fancy .sl-quote-figure{margin:0;width:100%;max-width:74rem;display:flex;flex-wrap:wrap;align-items:center;gap:3.2rem;padding:3.2rem;border-radius:1rem;background:var(--sl-section-accent,var(--sl-accent));color:var(--sl-section-accent-ink,var(--sl-cta-text,#fff))}",
-    # flex-wrap rather than a breakpoint: the photo and the words each claim a basis and stack themselves
-    # when the card is too narrow, so the element needs no media query to survive a phone.
-    "    .sl-quote-fancy .sl-quote-photo{flex:1 1 18rem;max-width:22rem;margin-block:-2.4rem}",
-    "    .sl-quote-fancy .sl-quote-photo img{width:100%;border-radius:0.8rem;display:block;box-shadow:0 1.2rem 2.4rem rgba(0,0,0,0.4)}",
-    "    .sl-quote-fancy .sl-quote-body{flex:3 1 24rem;min-width:0;position:relative}",
+    "    .sl-quote-fancy .sl-quote-figure{margin:0 auto;width:100%;max-width:74rem;display:flex;flex-wrap:wrap;justify-content:center;align-items:center;gap:2.4rem;padding:3.2rem;border-radius:1rem;background:var(--sl-section-accent,var(--sl-accent));color:var(--sl-section-accent-ink,var(--sl-cta-text,#fff))}",
+    # The photo is sized by HEIGHT with a fixed box, exactly as the reference does. Sizing it by width
+    # alone let a PORTRAIT source render ~500px tall, which forced the card to wrap even on a desktop and
+    # buried the words under a column of photograph.
+    "    .sl-quote-fancy .sl-quote-photo{flex:0 0 auto;width:16rem;margin-block:-3.2rem}",
+    "    .sl-quote-fancy .sl-quote-photo img{display:block;width:100%;height:20rem;object-fit:cover;border-radius:0.8rem;box-shadow:0 1.2rem 2.4rem rgba(0,0,0,0.4)}",
+    "    .sl-quote-fancy .sl-quote-body{flex:1 1 18rem;min-width:0;position:relative;padding-top:2.8rem}",
     "    .sl-quote-fancy .sl-quote-text{font-size:clamp(1.8rem,3.2vw,2.2rem);font-style:normal;font-weight:600;line-height:1.35}",
-    # The opening mark takes currentColor at low opacity, so it adapts to whatever ink the card derived
-    # instead of the reference's fixed blue. Inside the card's padding, so it never clips.
-    "    .sl-quote-fancy .sl-quote-body::before{content:'\\201C';position:absolute;top:-2.6rem;left:-1rem;font-family:var(--sl-font-heading);font-size:7rem;line-height:1;font-weight:600;opacity:0.3;pointer-events:none}",
+    # The reference's fat opening mark: a heavy sans at 7.5rem, weight 600, 30% opacity. currentColor
+    # rather than the reference's fixed blue, so it adapts to whatever ink the card derived.
+    "    .sl-quote-fancy .sl-quote-body::before{content:'\\201C';position:absolute;top:0;left:-0.8rem;font-family:" + QUOTE_MARK_FONT + ";font-size:7.5rem;line-height:0.75;font-weight:600;opacity:0.3;pointer-events:none}",
     "    .sl-quote-fancy .sl-quote-attribution{margin-top:2rem}",
     "    .sl-price-highlight{display:grid;gap:0.6rem;justify-items:center;text-align:center;padding:3.2rem 2rem;background:var(--sl-section-bg,transparent);color:var(--sl-section-ink,var(--sl-text))}",
     "    .sl-bargain-regular{margin:0;font-size:1.5rem;color:var(--sl-section-ink,var(--sl-price-regular));opacity:0.75}",

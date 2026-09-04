@@ -87,6 +87,16 @@ class StyleTests(unittest.TestCase):
         self.assertIn("sl-quote-body", render_quote({**QUOTE, "style": "fancy"}))
         self.assertNotIn("sl-quote-body", render_quote(QUOTE))
 
+    def test_the_opening_mark_is_heavy_and_large(self):
+        # The reference's mark is fat because of size and weight together, not the glyph alone: a heavy
+        # sans at 7.5rem/600. Named Inter first as specified — see the note on the constant, it is not
+        # self-hosted, so published pages fall back to the system sans.
+        self.assertIn("font-size:7.5rem;line-height:0.75;font-weight:600;opacity:0.3", CSS)
+        self.assertIn("font-family:Inter,", CSS)
+
+    def test_the_minimal_portrait_is_a_circle(self):
+        self.assertIn(".sl-quote-minimal .sl-quote-photo img{width:8rem;height:8rem;border-radius:50%", CSS)
+
     def test_the_opening_mark_adapts_to_the_card(self):
         # currentColor at low opacity, NOT the reference design's fixed blue — the card colour is the
         # tenant's, so a hardcoded glyph colour would eventually land on a background it cannot be seen on.
@@ -147,11 +157,23 @@ class SectionOverrideTests(unittest.TestCase):
 
 class NarrowViewportTests(unittest.TestCase):
     def test_the_fancy_card_stacks_without_a_breakpoint(self):
-        # flex-wrap with a basis on each part: the photo and the words stack themselves when the card is
+        # flex-wrap with a basis on the words: the photo and the text stack themselves when the card is
         # too narrow, so the element survives a phone with no media query of its own.
         self.assertIn("flex-wrap:wrap", CSS)
-        self.assertIn(".sl-quote-fancy .sl-quote-photo{flex:1 1 18rem", CSS)
-        self.assertIn(".sl-quote-fancy .sl-quote-body{flex:3 1 24rem;min-width:0", CSS)
+        self.assertIn(".sl-quote-fancy .sl-quote-photo{flex:0 0 auto;width:16rem", CSS)
+        self.assertIn(".sl-quote-fancy .sl-quote-body{flex:1 1 18rem;min-width:0", CSS)
+
+    def test_the_photo_is_sized_by_height_not_by_width_alone(self):
+        # The bug this exists to prevent: sized by width only, a PORTRAIT source rendered ~500px tall,
+        # which forced the card to wrap even on a desktop and buried the words under a column of photo.
+        # A fixed box plus object-fit means the layout no longer depends on the source's aspect ratio.
+        self.assertIn("height:20rem;object-fit:cover", CSS)
+
+    def test_children_are_centred_by_auto_margins_not_justify_items(self):
+        # justify-items:center sizes each child to fit-content, so `width:100%` on the card resolved
+        # against a shrunk area and it never reached its 74rem — it wrapped in a pane wide enough for it.
+        self.assertNotIn(".sl-quote{display:grid;grid-template-columns:minmax(0,1fr);justify-items:center", CSS)
+        self.assertIn(".sl-quote-fancy .sl-quote-figure{margin:0 auto;width:100%;max-width:74rem", CSS)
 
     def test_the_section_track_is_bounded(self):
         # Same trap as bragging points: justify-items:center leaves an auto track, an auto track sizes to
