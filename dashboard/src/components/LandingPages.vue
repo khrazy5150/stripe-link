@@ -614,6 +614,34 @@
                       <label class="offer-field"><span>Label</span><input v-model.trim="element.label" type="text" placeholder="e.g. on Google" /></label>
                     </template>
 
+                    <template v-else-if="element.type === 'quote'">
+                      <label class="offer-field">
+                        <span>Quote</span>
+                        <textarea v-model.trim="element.text" rows="3" placeholder="A line worth pausing on — a principle, a maxim, your own words."></textarea>
+                        <small class="field-note">For a customer vouching for the product, use Testimonials instead — a quote is styled so it does not read as an endorsement.</small>
+                      </label>
+                      <label class="offer-field">
+                        <span>Attribution (optional)</span>
+                        <input v-model.trim="element.attribution" type="text" placeholder="e.g. Seth Godin" />
+                        <small class="field-note">The dash is added for you.</small>
+                      </label>
+                      <label class="builder-toggle">
+                        <input type="checkbox" :checked="Boolean(element.theme && element.theme.bg)" @change="toggleSectionBreak(element, $event, 'accent')" />
+                        <span>Break the page style for this section</span>
+                      </label>
+                      <div v-if="element.theme && element.theme.bg" class="offer-two-column">
+                        <label class="offer-field">
+                          <span>Background</span>
+                          <input v-model.trim="element.theme.bg" type="color" />
+                          <small class="field-note">Text colour is chosen automatically so it stays readable.</small>
+                        </label>
+                        <label class="offer-field">
+                          <span>Bar</span>
+                          <input v-model.trim="element.theme.accent" type="color" />
+                        </label>
+                      </div>
+                    </template>
+
                     <template v-else-if="element.type === 'bragging_points'">
                       <label class="offer-field">
                         <span>Section heading (optional)</span>
@@ -3921,6 +3949,7 @@ function newElement(type) {
   if (type === "faq") return { ...base, heading: "Frequently Asked Questions", items: [{ question: "", answer: "" }] };
   if (type === "related_products") return { ...base, heading: "Related products" };
   if (type === "bragging_points") return { ...base, heading: "", items: [{ value: "", label: "" }], theme: {} };
+  if (type === "quote") return { ...base, text: "", attribution: "", theme: {} };
   // The NUMBERS are derived from the offer; only these two lines are the tenant's.
   if (type === "price_highlight") return { ...base, main_text: "Today Only", subtext: "" };
   if (type === "author_bio") return { ...base, photo_url: "", name: "", headline: "", body: "", theme: {} };
@@ -4244,6 +4273,7 @@ function rowSummary(row) {
   // collapsed row, the way a content block shows its title.
   if (row.type === "author_bio") return e.name?.trim() || e.headline?.trim() || "empty";
   if (row.type === "bragging_points") return countLabel((e.items || []).filter((i) => (i.value || "").trim()).length, "point");
+  if (row.type === "quote") return e.attribution?.trim() || (e.text?.trim() ? "quote" : "empty");
   return "";
 }
 
@@ -4336,6 +4366,12 @@ function elementSection(element) {
   if (element.type === "product_details") {
     return { id: element.id, type: "product_details" };   // content is the current target (offer-driven)
   }
+  if (element.type === "quote") {
+    if (!(element.text || "").trim()) return null;
+    const theme = element.theme && element.theme.bg ? element.theme : undefined;
+    return { id: element.id, type: "quote", text: element.text,
+      attribution: element.attribution || undefined, theme };
+  }
   if (element.type === "bragging_points") {
     const items = (element.items || []).filter((i) => (i.value || "").trim() || (i.label || "").trim());
     if (!items.length) return null;
@@ -4373,6 +4409,9 @@ function elementsFromPage(sections) {
     } else if (section.type === "testimonials") {
       elements.push({ id: localId("el"), type: "testimonials", heading: section.heading || "",
         items: (section.items || []).map((item) => ({ quote: item.quote || "", author: item.author || "", role: item.role || "", avatar_url: item.avatar_url || "" })) });
+    } else if (section.type === "quote") {
+      elements.push({ id: localId("el"), type: "quote", text: section.text || "",
+        attribution: section.attribution || "", theme: section.theme ? { ...section.theme } : {} });
     } else if (section.type === "bragging_points") {
       elements.push({ id: localId("el"), type: "bragging_points", heading: section.heading || "",
         items: (section.items || []).map((i) => ({ value: i.value || "", label: i.label || "" })),

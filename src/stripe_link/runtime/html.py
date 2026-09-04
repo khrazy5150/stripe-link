@@ -634,6 +634,14 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     "    .sl-brag-value{margin:0;font-family:var(--sl-font-heading);font-size:clamp(2.4rem,5vw,3.4rem);line-height:1.1;font-weight:800}",
     # Muted by OPACITY, not a second colour: it stays readable against whatever ink was derived.
     "    .sl-brag-label{margin:0;font-size:1.4rem;line-height:1.5;opacity:0.75}",
+    # QUOTE. minmax(0,1fr) for the same reason as bragging points: justify-items:center leaves an auto
+    # track, and an auto track sizes to max-content — long unbroken text would then widen the viewport.
+    "    .sl-quote{display:grid;grid-template-columns:minmax(0,1fr);justify-items:center;padding:4rem 2rem;background:var(--sl-section-bg,transparent);color:var(--sl-section-ink,var(--sl-text))}",
+    # The BAR is the element's signature, and what keeps it from reading as a testimonial card.
+    "    .sl-quote-figure{margin:0;width:100%;max-width:62rem;text-align:left;border-left:0.5rem solid var(--sl-section-accent,var(--sl-accent));padding-left:2.4rem}",
+    "    .sl-quote-text{margin:0;font-family:var(--sl-font-heading);font-size:clamp(2rem,4vw,2.8rem);line-height:1.45;font-style:italic}",
+    # Muted by opacity, so it stays legible against whatever ink the background derived.
+    "    .sl-quote-attribution{margin:1.2rem 0 0;font-size:1.5rem;font-style:normal;opacity:0.75}",
     "    .sl-price-highlight{display:grid;gap:0.6rem;justify-items:center;text-align:center;padding:3.2rem 2rem;background:var(--sl-section-bg,transparent);color:var(--sl-section-ink,var(--sl-text))}",
     "    .sl-bargain-regular{margin:0;font-size:1.5rem;color:var(--sl-section-ink,var(--sl-price-regular));opacity:0.75}",
     "    .sl-bargain-amount{margin:0;font-family:var(--sl-font-heading);font-size:clamp(4rem,10vw,6.4rem);line-height:1;font-weight:800;color:var(--sl-section-ink,var(--sl-price-amount))}",
@@ -1787,6 +1795,7 @@ SECTION_REGISTRY: dict[str, dict[str, Any]] = {
     "author_bio": {"render": lambda c: render_author_bio(c.section), "version": 1},
     "product_details": {"render": lambda c: render_product_details(c.offer, c.products_by_id, c.services_by_id), "version": 1},
     "product_carousel": {"render": lambda c: render_product_carousel(c.section, c.page, c.offers_by_id, c.products_by_id, c.services_by_id, c.checkout_url, c.api_base_url), "version": 1},
+    "quote": {"render": lambda c: render_quote(c.section), "version": 1},
     "bragging_points": {"render": lambda c: render_bragging_points(c.section), "version": 1},
     "post_purchase_carousel": {"render": lambda c: render_post_purchase_carousel(c.section, c.page, c.api_base_url), "version": 1},
     "brand_hero": {"render": lambda c: render_brand_hero(c.section), "version": 1},
@@ -4051,6 +4060,49 @@ def render_author_bio(section: dict[str, Any]) -> str:
     section_id = escape(str(section.get("id", "author-bio")))
     return "\n".join([
         f'    <section class="sl-author-bio{themed}" data-section-id="{section_id}" data-section-type="author_bio"{style_attr}>',
+        *rows,
+        "    </section>",
+    ])
+
+
+ATTRIBUTION_DASHES = ("\u2014", "\u2013", "-")
+
+
+def render_quote(section: dict[str, Any]) -> str:
+    """A pull-quote: an IDEA given weight, with an optional attribution.
+
+    Deliberately unlike `testimonials` (plans/LANDING_ELEMENTS_UNIT.md §Quote). A testimonial is a customer
+    vouching for the product; a pull-quote is a maxim or the tenant's own line. They must not look alike, or
+    a quote reads as an endorsement nobody gave — so this is a bar and italic type, not an avatar and a card.
+
+    figure/figcaption rather than a bare blockquote: the attribution is about the quote, not part of what was
+    said, and HTML has a shape for exactly that (plans/SEMANTIC_HTML.md).
+    """
+    text = str(section.get("text") or "").strip()
+    if not text:
+        return ""
+
+    attribution = str(section.get("attribution") or "").strip()
+    # The dash belongs to the presentation, so a tenant who types one anyway does not get two.
+    while attribution and attribution[0] in ATTRIBUTION_DASHES:
+        attribution = attribution[1:].strip()
+
+    rows = [
+        '      <figure class="sl-quote-figure">',
+        f'        <blockquote class="sl-quote-text">{escape(text)}</blockquote>',
+    ]
+    if attribution:
+        rows.append(
+            f'        <figcaption class="sl-quote-attribution">\u2014 {escape(attribution)}</figcaption>'
+        )
+    rows.append("      </figure>")
+
+    style = section_theme_vars(section)
+    style_attr = f' style="{escape(style)}"' if style else ""
+    themed = " sl-section-themed" if style else ""
+    section_id = escape(str(section.get("id", "quote")))
+    return "\n".join([
+        f'    <section class="sl-quote{themed}" data-section-id="{section_id}" data-section-type="quote"{style_attr}>',
         *rows,
         "    </section>",
     ])

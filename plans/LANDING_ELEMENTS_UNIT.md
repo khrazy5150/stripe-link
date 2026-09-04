@@ -132,7 +132,9 @@ renders a gallery and badges from PRODUCT data; this is authored page copy. Chec
    different surface (cards, not a photo ring) and inherited the derived-ink guarantee with no
    element-specific contrast code. Reflow is pure CSS — the grid caps at two columns and a lone trailing
    card spans the row, so 1 is one wide and 3 read 2 + 1 without the markup knowing the count.
-4. **Quote** — third consumer, and the one that needs `accent` as well as `bg`.
+4. ~~**Quote**~~ — **SHIPPED 2026-09-03.** Third consumer, and the first to use `accent` as a visible
+   BAR rather than a background or a card fill. figure/figcaption so the attribution sits outside the
+   blockquote; a typed dash is absorbed rather than doubled.
 5. **Numbered List** — no override, reuses the existing heading markup; the simplest of the six.
 6. **Brand Marquee** — the silent text-drop bug, three-state scroll, speed slider.
 7. **Page Ribbon** — largest, and the only one with CTA plumbing.
