@@ -617,11 +617,17 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     "    .sl-author-headline{margin:0;font-family:var(--sl-font-heading);font-size:clamp(2.4rem,5vw,3.6rem);line-height:1.2;color:var(--sl-section-ink,var(--sl-text))}",
     "    .sl-author-body{margin:0;max-width:62rem;font-size:1.6rem;line-height:1.7;color:var(--sl-section-ink,var(--sl-muted))}",
     # BRAGGING POINTS. Same section-override contract as the author bio above.
-    "    .sl-bragging-points{display:grid;gap:1.6rem;justify-items:center;text-align:center;padding:4rem 2rem;background:var(--sl-section-bg,transparent);color:var(--sl-section-ink,var(--sl-text))}",
+    # minmax(0,1fr) on the outer track, NOT the default `auto`: with justify-items:center an auto track
+    # sizes to its child's MAX-CONTENT, which for the card grid below is every column at full width. The
+    # section then grew past the viewport and shoved the whole page right on a phone. `width:100%` on the
+    # child cannot fix that — it resolves against the very track it is inflating.
+    "    .sl-bragging-points{display:grid;grid-template-columns:minmax(0,1fr);gap:1.6rem;justify-items:center;text-align:center;padding:4rem 2rem;background:var(--sl-section-bg,transparent);color:var(--sl-section-ink,var(--sl-text))}",
     "    .sl-brag-heading{margin:0;font-family:var(--sl-font-heading);font-size:clamp(2rem,4vw,2.8rem);line-height:1.25;color:var(--sl-section-ink,var(--sl-text))}",
     # Capped at TWO columns on purpose: three cards then read 2 + 1 rather than a thin triple, which is the
     # reflow the element was specified with. auto-fit collapses to one column on narrow screens by itself.
-    "    .sl-brag-grid{list-style:none;margin:0;padding:0;width:100%;max-width:62rem;display:grid;gap:1.2rem;grid-template-columns:repeat(auto-fit,minmax(22rem,1fr))}",
+    # min(22rem,100%) is the load-bearing half: a bare minmax(22rem,1fr) makes every track demand 22rem
+    # even when the container is narrower, so auto-fit overflows instead of collapsing to one column.
+    "    .sl-brag-grid{list-style:none;margin:0;padding:0;width:100%;max-width:62rem;display:grid;gap:1.2rem;grid-template-columns:repeat(auto-fit,minmax(min(22rem,100%),1fr))}",
     # A lone trailing card spans the row, so 1 card is one wide and 3 cards are 2 + 1 — no count in the markup.
     "    .sl-brag-grid > .sl-brag-card:last-child:nth-child(odd){grid-column:1/-1}",
     "    .sl-brag-card{display:grid;gap:0.4rem;align-content:center;padding:2rem 1.6rem;border-radius:1rem;background:var(--sl-section-accent,rgba(127,127,127,0.12));color:var(--sl-section-accent-ink,var(--sl-section-ink,var(--sl-text)))}",

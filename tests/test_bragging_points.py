@@ -100,5 +100,32 @@ class SectionOverrideTests(unittest.TestCase):
         self.assertNotIn("--sl-section-text", html)
 
 
+class NarrowViewportTests(unittest.TestCase):
+    """The card grid must never be wider than the phone it is on.
+
+    Found on a 42rem preview pane: `justify-items:center` gives the section an AUTO track, an auto track
+    sizes to its child's max-content, and the card grid's max-content is every column at full width. The
+    section grew past the viewport and pushed the whole page right — hero and content block included, so it
+    read as a page-wide layout fault rather than one element's CSS. `width:100%` on the child cannot fix it,
+    because that width resolves against the very track it is inflating.
+
+    Both halves are load-bearing, which is why they are asserted rather than left to review.
+    """
+
+    def _css(self):
+        from stripe_link.runtime.html import UNIVERSAL_BUNDLE_TEMPLATE_STYLES
+        return "\n".join(UNIVERSAL_BUNDLE_TEMPLATE_STYLES)
+
+    def test_the_section_track_is_bounded(self):
+        css = self._css()
+        self.assertIn(".sl-bragging-points{display:grid;grid-template-columns:minmax(0,1fr)", css,
+                      "an auto track would size to the card grid's max-content and overflow the viewport")
+
+    def test_auto_fit_columns_never_demand_more_than_the_container(self):
+        css = self._css()
+        self.assertIn("repeat(auto-fit,minmax(min(22rem,100%),1fr))", css,
+                      "a bare minmax(22rem,1fr) overflows instead of collapsing to one column")
+
+
 if __name__ == "__main__":
     unittest.main()

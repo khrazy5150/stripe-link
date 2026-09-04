@@ -4604,8 +4604,9 @@ button:disabled {
   background: #ffffff;
 }
 
-/* Width and zoom come from previewFrameStyle: a real 390px viewport magnified to fill the pane, so the
-   page's mobile breakpoints still apply. No gutters and no side borders — it IS the pane now. */
+/* No zoom and no fixed viewport: the PANE is the device width (--preview-pane-width, 42rem), so the iframe
+   at 100% is a real phone-width viewport and the page's own breakpoints apply directly. Nothing to set here
+   but the gutters. (This comment used to describe a previewFrameStyle binding that no longer exists.) */
 .landing-live-preview-frame.mobile {
   margin: 0;
 }
