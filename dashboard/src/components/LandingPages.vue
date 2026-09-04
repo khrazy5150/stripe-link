@@ -1408,20 +1408,30 @@
               @drop="onRowDrop(rowIndex)"
             >
               <span
-                v-if="row.movable"
+                v-if="row.movable && !isBuilderPublished"
                 class="content-section-drag"
                 draggable="true"
                 title="Drag to reorder"
                 @dragstart="onRowDragStart(rowIndex)"
               >⠿</span>
+              <span v-else-if="row.movable" class="content-section-lock" title="Unpublish this page to reorder">🔒</span>
               <span v-else class="content-section-lock" title="Fixed position on the page">🔒</span>
               <span class="content-row-name">{{ row.label }}</span>
               <span class="content-row-summary">{{ rowSummary(row) }}</span>
-              <button v-if="row.editor" class="secondary-action compact" type="button" @click="openSectionEditor(row)">Edit</button>
+              <button
+                v-if="row.editor"
+                class="secondary-action compact"
+                type="button"
+                :disabled="isBuilderPublished"
+                :title="isBuilderPublished ? 'Unpublish this page to edit it' : undefined"
+                @click="openSectionEditor(row)"
+              >Edit</button>
               <button
                 v-if="row.editor === 'element'"
                 class="danger-action compact"
                 type="button"
+                :disabled="isBuilderPublished"
+                :title="isBuilderPublished ? 'Unpublish this page to edit it' : undefined"
                 @click="removeElement(row.element.id)"
               >Remove</button>
             </article>
@@ -1432,8 +1442,8 @@
               :key="entry.type"
               class="secondary-action compact"
               type="button"
-              :disabled="entry.type === 'page_ribbon' && ribbonCount >= RIBBON_MAX"
-              :title="entry.type === 'page_ribbon' && ribbonCount >= RIBBON_MAX ? 'Two ribbons is the most a page should carry' : undefined"
+              :disabled="isBuilderPublished || (entry.type === 'page_ribbon' && ribbonCount >= RIBBON_MAX)"
+              :title="isBuilderPublished ? 'Unpublish this page to edit it' : (entry.type === 'page_ribbon' && ribbonCount >= RIBBON_MAX ? 'Two ribbons is the most a page should carry' : undefined)"
               @click="addElement(entry.type)">
             + {{ entry.label }}
             </button>
