@@ -648,7 +648,7 @@
                             <option value="promote_page">Promotes another of my pages</option>
                             <option value="redirect">Opens a link</option>
                             <option value="call_phone">Starts a call</option>
-                            <option value="email">Opens an email</option>
+                            <option value="email">Opens their email app</option>
                           </select>
                         </label>
                       </div>
@@ -935,7 +935,7 @@
               @click="chooseRibbonPage(page)"
             >
               <div class="offer-product-image">
-                <img v-if="pageThumbnail(page)" :src="pageThumbnail(page)" :alt="page.name || 'Page image'" />
+                <img v-if="pageImage(page)" :src="pageImage(page)" :alt="page.name || 'Page image'" />
                 <span v-else>{{ (page.name || "P").trim().charAt(0).toUpperCase() }}</span>
                 <span class="offer-product-check" aria-hidden="true">✓</span>
               </div>
@@ -4448,12 +4448,6 @@ const ribbonPickerPages = computed(() => {
     .filter((p) => p.page_id !== builder.page_id && p.status !== "archived")
     .filter((p) => !term || (p.name || "").toLowerCase().includes(term));
 });
-
-function pageThumbnail(page) {
-  const sections = Array.isArray(page.sections) ? page.sections : [];
-  const media = sections.find((s) => s.type === "hero_media" && s.image_url);
-  return media?.image_url || "";
-}
 
 function ribbonTargetPage(element) {
   const id = element?.cta?.page_id;
