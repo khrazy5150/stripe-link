@@ -142,6 +142,56 @@ class PromotePageActionTests(unittest.TestCase):
         self.assertNotIn("sl-ribbon-cta", html)
 
 
+class DownloadActionTests(unittest.TestCase):
+    """The download CTA is a BUTTON, not a link: the URL is minted per click (short-lived, presigned), and
+    when the ribbon collects details there is a form to satisfy first."""
+
+    ASSET = {"bucket_key": "downloads/t1/page/p1/a1/guide.pdf", "filename": "guide.pdf"}
+    PAGE = {"tenant_id": "t1", "page_id": "p1", "stripe_mode": "test"}
+
+    def _ribbon(self, **cta):
+        return render_page_ribbon(
+            {**RIBBON, "cta": {"label": "Get the guide", "action": "download", "asset": self.ASSET, **cta}},
+            self.PAGE, "https://api.example.com")
+
+    def test_it_renders_a_button_carrying_what_the_client_needs(self):
+        html = self._ribbon()
+        self.assertIn("<button", html)
+        self.assertIn("data-sl-download", html)
+        self.assertIn('data-endpoint="https://api.example.com/downloads/lead"', html)
+        self.assertIn('data-tenant-id="t1"', html)
+        self.assertIn('data-section-id="rb"', html)
+
+    def test_the_collect_list_reflects_the_ribbon_not_the_visitor(self):
+        self.assertIn('data-collect=""', self._ribbon())
+        self.assertIn('data-collect="email"', self._ribbon(collect_email=True))
+        self.assertIn('data-collect="email,phone"', self._ribbon(collect_email=True, collect_phone=True))
+
+    def test_no_file_means_no_button(self):
+        html = render_page_ribbon(
+            {**RIBBON, "cta": {"label": "Get it", "action": "download"}}, self.PAGE, "https://api.example.com")
+        self.assertNotIn("sl-ribbon-cta", html)
+
+    def test_the_script_ships_only_when_a_download_ribbon_exists(self):
+        from stripe_link.runtime.html import render_page_interactions_script
+        with_ribbon = render_page_interactions_script(
+            {"sections": [{"type": "page_ribbon", "id": "rb", "cta": {"action": "download"}}]})
+        self.assertIn("data-sl-download", with_ribbon)
+        other = render_page_interactions_script(
+            {"sections": [{"type": "page_ribbon", "id": "rb", "cta": {"action": "redirect"}}]})
+        self.assertNotIn("data-sl-download", other)
+
+    def test_the_dialog_is_built_with_dom_calls_not_markup_strings(self):
+        # A field label concatenated into innerHTML is a markup injection waiting for a new label. Scoped
+        # to the download block: other features on the page legitimately use innerHTML for fixed markup.
+        from stripe_link.runtime.html import render_page_interactions_script
+        script = render_page_interactions_script(
+            {"sections": [{"type": "page_ribbon", "id": "rb", "cta": {"action": "download"}}]})
+        block = script[script.index("data-sl-download"):script.index("sl-dl-actions")]
+        self.assertIn("document.createElement", block)
+        self.assertNotIn("innerHTML", block)
+
+
 class MobileTests(unittest.TestCase):
     def test_the_ribbon_stacks_on_a_phone(self):
         # Shipped without this: the copy column collapsed to a few characters wide and the CTA squeezed

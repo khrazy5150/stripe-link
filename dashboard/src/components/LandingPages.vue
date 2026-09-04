@@ -646,13 +646,36 @@
                           <span>Button does</span>
                           <select v-model="element.cta.action">
                             <option value="promote_page">Promotes another of my pages</option>
+                            <option value="download">Downloads a file</option>
                             <option value="redirect">Opens a link</option>
                             <option value="call_phone">Starts a call</option>
                             <option value="email">Opens their email app</option>
                           </select>
                         </label>
                       </div>
-                      <div v-if="element.cta.action === 'promote_page'" class="offer-field">
+                      <div v-if="element.cta.action === 'download'" class="offer-field">
+                        <span>File to hand over</span>
+                        <div class="ribbon-page-choice">
+                          <span v-if="element.cta.asset" class="ribbon-page-chosen">
+                            <strong>{{ element.cta.asset.filename }}</strong>
+                            <small>{{ formatBytes(element.cta.asset.size_bytes) }}</small>
+                          </span>
+                          <span v-else class="ribbon-page-empty">No file uploaded yet.</span>
+                          <input :ref="(el) => setRibbonFileInput(element.id, el)" type="file" hidden @change="handleRibbonFilePicked(element, $event)" />
+                          <button class="secondary-action compact" type="button" :disabled="ribbonUploading[element.id]" @click.prevent="triggerRibbonFileUpload(element.id)">
+                            {{ ribbonUploading[element.id] ? "Uploading..." : (element.cta.asset ? "Replace" : "Upload file") }}
+                          </button>
+                        </div>
+                        <small v-if="ribbonUploadError[element.id]" class="field-note is-warning">{{ ribbonUploadError[element.id] }}</small>
+                        <label class="builder-toggle"><input v-model="element.cta.collect_email" type="checkbox" /><span>Ask for their email first</span></label>
+                        <label class="builder-toggle"><input v-model="element.cta.collect_phone" type="checkbox" /><span>Ask for their phone first</span></label>
+                        <small class="field-note">
+                          {{ element.cta.collect_email || element.cta.collect_phone
+                             ? "They fill this in, it is saved to Leads, then the file downloads."
+                             : "Nothing is asked for — the file downloads straight away, and no lead is recorded." }}
+                        </small>
+                      </div>
+                      <div v-else-if="element.cta.action === 'promote_page'" class="offer-field">
                         <span>Page to promote</span>
                         <div class="ribbon-page-choice">
                           <span v-if="ribbonTargetPage(element)" class="ribbon-page-chosen">
@@ -4146,7 +4169,8 @@ function newElement(type) {
   if (type === "numbered_list") return { ...base, heading: "", items: [""] };
   if (type === "page_ribbon") return { ...base, purpose: "custom", presentation: "image_left",
     image_url: "", eyebrow: "", headline: "", body: "",
-    cta: { label: "", action: "promote_page", page_id: "", target: "" }, theme: {} };
+    cta: { label: "", action: "promote_page", page_id: "", target: "",
+           asset: null, collect_email: false, collect_phone: false }, theme: {} };
   // The NUMBERS are derived from the offer; only these two lines are the tenant's.
   if (type === "price_highlight") return { ...base, main_text: "Today Only", subtext: "" };
   if (type === "author_bio") return { ...base, photo_url: "", name: "", headline: "", body: "", theme: {} };
@@ -4434,6 +4458,57 @@ function resetSectionOrder() {
 // makes the element worth having (plans/ATTENTION_PRIMITIVE.md §4a "the wallpaper rule"). Capped at two.
 const RIBBON_MAX = 2;
 
+// A ribbon's lead magnet. 50MB is a deliberate ceiling: it is generous for a guide or a short video, and
+// it keeps a single upload from becoming the thing that makes a page slow to hand over.
+const RIBBON_FILE_MAX_BYTES = 50 * 1024 * 1024;
+const ribbonFileInputs = {};
+const ribbonUploading = reactive({});
+const ribbonUploadError = reactive({});
+
+function setRibbonFileInput(id, el) {
+  if (el) ribbonFileInputs[id] = el;
+}
+
+function triggerRibbonFileUpload(id) {
+  ribbonFileInputs[id]?.click();
+}
+
+function formatBytes(bytes) {
+  const n = Number(bytes) || 0;
+  if (!n) return "";
+  if (n < 1024 * 1024) return `${Math.max(1, Math.round(n / 1024))} KB`;
+  return `${(n / 1024 / 1024).toFixed(1)} MB`;
+}
+
+async function handleRibbonFilePicked(element, event) {
+  const file = event.target?.files?.[0];
+  if (event.target) event.target.value = "";   // so re-picking the same file still fires
+  if (!file) return;
+  ribbonUploadError[element.id] = "";
+  if (file.size > RIBBON_FILE_MAX_BYTES) {
+    ribbonUploadError[element.id] = `That file is ${formatBytes(file.size)}. The limit is 50 MB.`;
+    return;
+  }
+  ribbonUploading[element.id] = true;
+  try {
+    // Reuses the tenant upload endpoint, scoped to this PAGE rather than a product.
+    const contentType = file.type || "application/octet-stream";
+    const presign = await apiRequest("/downloads/upload-url", {
+      method: "POST",
+      body: { page_id: builder.page_id, filename: file.name, content_type: contentType, size_bytes: file.size },
+    });
+    const put = await fetch(presign.upload_url, {
+      method: "PUT", headers: { "Content-Type": contentType }, body: file,
+    });
+    if (!put.ok) throw new Error(`Upload failed with ${put.status}`);
+    element.cta.asset = presign.digital_asset;
+  } catch (err) {
+    ribbonUploadError[element.id] = err.message || "Upload failed. Please try again.";
+  } finally {
+    ribbonUploading[element.id] = false;
+  }
+}
+
 // Single-select, unlike the Offers product picker it mirrors: a ribbon promotes ONE page, so choosing
 // closes the modal rather than accumulating a selection.
 const ribbonPicker = reactive({ element: null, search: "" });
@@ -4584,6 +4659,14 @@ function ribbonCta(cta) {
   const action = cta.action || "redirect";
   const label = (cta.label || "").trim();
   if (!label) return {};
+  if (action === "download") {
+    // The asset IS the target here. Without a file there is nothing to hand over, so no button renders —
+    // the same rule as a link with no URL.
+    if (!cta.asset?.bucket_key) return {};
+    return { cta: { label, action, asset: cta.asset,
+      ...(cta.collect_email ? { collect_email: true } : {}),
+      ...(cta.collect_phone ? { collect_phone: true } : {}) } };
+  }
   if (action === "promote_page") {
     const page = cta.page_id ? pages.value.find((p) => p.page_id === cta.page_id) : null;
     if (!page) return {};
@@ -4704,7 +4787,10 @@ function elementsFromPage(sections) {
         image_url: section.image_url || "", eyebrow: section.eyebrow || "",
         headline: section.headline || "", body: section.body || "",
         cta: { label: section.cta?.label || "", action: section.cta?.action || "redirect",
-               page_id: section.cta?.page_id || "", target: section.cta?.target || "" },
+               page_id: section.cta?.page_id || "", target: section.cta?.target || "",
+               asset: section.cta?.asset || null,
+               collect_email: Boolean(section.cta?.collect_email),
+               collect_phone: Boolean(section.cta?.collect_phone) },
         theme: section.theme ? { ...section.theme } : {} });
     } else if (section.type === "numbered_list") {
       elements.push({ id: localId("el"), type: "numbered_list", heading: section.heading || "",

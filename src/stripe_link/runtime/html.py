@@ -699,6 +699,18 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     "    .sl-ribbon-cta{justify-self:start;display:inline-flex;align-items:center;margin-top:0.8rem;padding:1.1rem 2.2rem;border-radius:999px;background:var(--sl-section-accent,var(--sl-accent));color:var(--sl-section-accent-ink,var(--sl-cta-text,#fff));font-size:1.5rem;font-weight:700;text-decoration:none}",
     "    .sl-page-ribbon.is-centered .sl-ribbon-cta{justify-self:center}",
     "    .sl-page-ribbon.is-compact .sl-ribbon-headline{font-size:clamp(1.7rem,3vw,2.1rem)}",
+    # The download dialog. Built by script, so its styles ship with the page whether or not it is used --
+    # a few hundred bytes against a round trip to fetch them at the moment a visitor is deciding.
+    "    .sl-dl-backdrop{position:fixed;inset:0;z-index:60;display:grid;place-items:center;padding:2rem;background:rgba(0,0,0,.55)}",
+    "    .sl-dl-card{width:100%;max-width:38rem;display:grid;gap:1.2rem;padding:2.4rem;border-radius:1.2rem;background:var(--sl-card,#fff);color:var(--sl-text)}",
+    "    .sl-dl-title{margin:0;font-family:var(--sl-font-heading);font-size:2rem;line-height:1.25}",
+    "    .sl-dl-field{display:grid;gap:0.4rem;font-size:1.4rem}",
+    "    .sl-dl-field input{padding:1rem 1.2rem;border:1px solid var(--sl-content-border);border-radius:0.8rem;font-size:1.6rem;font-family:inherit}",
+    "    .sl-dl-error{margin:0;color:#b91c1c;font-size:1.4rem}",
+    "    .sl-dl-actions{display:flex;gap:1rem;justify-content:flex-end}",
+    "    .sl-dl-actions button{padding:1rem 1.8rem;border-radius:999px;font-size:1.5rem;font-weight:700;cursor:pointer;font-family:inherit}",
+    "    .sl-dl-cancel{background:none;border:1px solid var(--sl-content-border);color:inherit}",
+    "    .sl-dl-submit{border:0;background:var(--sl-accent);color:var(--sl-cta-text,#fff)}",
     "    .sl-price-highlight{display:grid;gap:0.6rem;justify-items:center;text-align:center;padding:3.2rem 2rem;background:var(--sl-section-bg,transparent);color:var(--sl-section-ink,var(--sl-text))}",
     "    .sl-bargain-regular{margin:0;font-size:1.5rem;color:var(--sl-section-ink,var(--sl-price-regular));opacity:0.75}",
     "    .sl-bargain-amount{margin:0;font-family:var(--sl-font-heading);font-size:clamp(4rem,10vw,6.4rem);line-height:1;font-weight:800;color:var(--sl-section-ink,var(--sl-price-amount))}",
@@ -1857,7 +1869,7 @@ SECTION_REGISTRY: dict[str, dict[str, Any]] = {
     "author_bio": {"render": lambda c: render_author_bio(c.section), "version": 1},
     "product_details": {"render": lambda c: render_product_details(c.offer, c.products_by_id, c.services_by_id), "version": 1},
     "product_carousel": {"render": lambda c: render_product_carousel(c.section, c.page, c.offers_by_id, c.products_by_id, c.services_by_id, c.checkout_url, c.api_base_url), "version": 1},
-    "page_ribbon": {"render": lambda c: render_page_ribbon(c.section), "version": 1},
+    "page_ribbon": {"render": lambda c: render_page_ribbon(c.section, c.page, c.api_base_url), "version": 1},
     "numbered_list": {"render": lambda c: render_numbered_list(c.section), "version": 1},
     "quote": {"render": lambda c: render_quote(c.section), "version": 1},
     "bragging_points": {"render": lambda c: render_bragging_points(c.section), "version": 1},
@@ -4135,7 +4147,7 @@ RIBBON_PURPOSES = ("promote_offer", "capture_lead", "promote_content", "custom")
 # same ideas. `none` is explicit: a ribbon with nothing to click is a content block, and should say so.
 # `promote_page` is a redirect whose target the BUILDER resolves from the tenant's own page list, so the
 # renderer treats it identically — the difference is where the URL comes from, not what happens on click.
-RIBBON_ACTIONS = ("redirect", "promote_page", "call_phone", "email", "none")
+RIBBON_ACTIONS = ("redirect", "promote_page", "download", "call_phone", "email", "none")
 RIBBON_IMAGE_SIZES = "(max-width: 700px) 100vw, 320px"
 # A tenant types this URL, so the scheme is an injection surface: `javascript:` in an href executes on
 # click. Allow only schemes that navigate, plus same-origin paths.
@@ -4159,7 +4171,8 @@ def safe_href(value: str) -> str:
     return url if lowered.startswith(SAFE_HREF_SCHEMES) else ""
 
 
-def render_page_ribbon(section: dict[str, Any]) -> str:
+def render_page_ribbon(section: dict[str, Any], page: dict[str, Any] | None = None,
+                       api_base_url: str | None = None) -> str:
     """An Attention Block, presented as a ribbon: a mid-scroll interruption that ASKS for something.
 
     Not a content_block (plans/ATTENTION_PRIMITIVE.md §4a): a content block informs, a ribbon acts. Same
@@ -4185,6 +4198,7 @@ def render_page_ribbon(section: dict[str, Any]) -> str:
     if presentation == "centered":
         image = ""
 
+    section_id = escape(str(section.get("id", "page-ribbon")))
     cta = section.get("cta") or {}
     action = str(cta.get("action") or "redirect").strip().lower()
     if action not in RIBBON_ACTIONS:
@@ -4210,7 +4224,21 @@ def render_page_ribbon(section: dict[str, Any]) -> str:
         copy.append(f'        <h2 class="sl-ribbon-headline">{render_headline_markup(headline)}</h2>')
     if body:
         copy.append(f'        <p class="sl-ribbon-body">{escape(body)}</p>')
-    if href and label:
+    if action == "download" and label and (cta.get("asset") or {}).get("bucket_key"):
+        page = page or {}
+        collect = ",".join(field for field in ("email", "phone") if cta.get(f"collect_{field}"))
+        endpoint = f"{str(api_base_url or '').rstrip('/')}/downloads/lead"
+        mode = "live" if str(page.get("stripe_mode") or "").strip().lower() == "live" else "test"
+        copy.append(
+            '        <button type="button" class="sl-ribbon-cta" data-sl-download'
+            f' data-endpoint="{escape(endpoint)}"'
+            f' data-tenant-id="{escape(str(page.get("tenant_id") or ""))}"'
+            f' data-page-id="{escape(str(page.get("page_id") or ""))}"'
+            f' data-section-id="{section_id}"'
+            f' data-stripe-mode="{mode}"'
+            f' data-collect="{escape(collect)}">{escape(label)}</button>'
+        )
+    elif href and label:
         external = href.startswith(("http://", "https://"))
         rel = ' rel="noopener"' + (' target="_blank"' if external else "")
         copy.append(f'        <a class="sl-ribbon-cta" href="{escape(href)}"{rel}>{escape(label)}</a>')
@@ -4220,7 +4248,6 @@ def render_page_ribbon(section: dict[str, Any]) -> str:
     style = section_theme_vars(section)
     style_attr = f' style="{escape(style)}"' if style else ""
     themed = " sl-section-themed" if style else ""
-    section_id = escape(str(section.get("id", "page-ribbon")))
     return "\n".join([
         f'    <section class="sl-page-ribbon is-{presentation}{themed}" data-section-id="{section_id}"'
         f' data-section-type="page_ribbon"{style_attr}>',
@@ -5189,7 +5216,12 @@ def render_page_interactions_script(page: dict[str, Any]) -> str:
         for section in page.get("sections", [])
     )
     has_pp_carousel = any(section.get("type") == "post_purchase_carousel" for section in page.get("sections", []))
-    if not any([has_countdown, has_price_selector, has_current_year, has_checkout_cta, has_hero_carousel, has_pp_carousel]):
+    has_ribbon_download = any(
+        section.get("type") == "page_ribbon"
+        and str(((section.get("cta") or {}).get("action")) or "") == "download"
+        for section in page.get("sections", [])
+    )
+    if not any([has_countdown, has_price_selector, has_current_year, has_checkout_cta, has_hero_carousel, has_pp_carousel, has_ribbon_download]):
         return ""
     page_id = escape(str(page.get("page_id") or "page"))
     return "\n".join([
@@ -5197,6 +5229,85 @@ def render_page_interactions_script(page: dict[str, Any]) -> str:
         "    document.addEventListener('DOMContentLoaded', () => {",
         "      document.querySelectorAll('[data-sl-current-year]').forEach((node) => {",
         "        node.textContent = String(new Date().getFullYear());",
+        "      });",
+        # PAGE RIBBON DOWNLOAD. The URL is minted per click -- short-lived and presigned -- so this is a
+        # button rather than a link. When the ribbon collects details a small dialog gates the request;
+        # the SERVER still decides what is required, this only saves a pointless round trip. Built with DOM
+        # calls rather than innerHTML so no field label can ever be markup.
+        "      document.querySelectorAll('[data-sl-download]').forEach((btn) => {",
+        "        const wanted = (btn.dataset.collect || '').split(',').filter(Boolean);",
+        "        const LABELS = { email: 'Email address', phone: 'Phone number' };",
+        "        const send = (fields, onError) => {",
+        "          if (btn.dataset.busy === 'true') return;",
+        "          btn.dataset.busy = 'true';",
+        "          fetch(btn.dataset.endpoint, {",
+        "            method: 'POST', headers: { 'Content-Type': 'application/json' },",
+        "            body: JSON.stringify({",
+        "              tenant_id: btn.dataset.tenantId, page_id: btn.dataset.pageId,",
+        "              section_id: btn.dataset.sectionId, mode: btn.dataset.stripeMode || 'test',",
+        "              fields: fields, company_website: fields.company_website || '',",
+        "              idempotency_key: btn.dataset.pageId + '-' + btn.dataset.sectionId + '-' + (fields.email || fields.phone || Date.now()),",
+        "            }),",
+        "          }).then((r) => (r.ok ? r.json() : Promise.reject(new Error('failed'))))",
+        "            .then((data) => { if (data && data.url) window.location.href = data.url; })",
+        "            .catch(() => { if (onError) onError(); })",
+        "            .finally(() => { btn.dataset.busy = 'false'; });",
+        "        };",
+        "        btn.addEventListener('click', () => {",
+        "          if (!wanted.length) { send({}); return; }",
+        "          const backdrop = document.createElement('div');",
+        "          backdrop.className = 'sl-dl-backdrop';",
+        "          const form = document.createElement('form');",
+        "          form.className = 'sl-dl-card';",
+        "          const title = document.createElement('p');",
+        "          title.className = 'sl-dl-title';",
+        "          title.textContent = 'Where should we send it?';",
+        "          form.appendChild(title);",
+        "          wanted.forEach((name) => {",
+        "            const label = document.createElement('label');",
+        "            label.className = 'sl-dl-field';",
+        "            const span = document.createElement('span');",
+        "            span.textContent = LABELS[name] || name;",
+        "            const input = document.createElement('input');",
+        "            input.name = name;",
+        "            input.type = name === 'email' ? 'email' : 'tel';",
+        "            input.required = true;",
+        "            input.autocomplete = name === 'email' ? 'email' : 'tel';",
+        "            label.appendChild(span); label.appendChild(input); form.appendChild(label);",
+        "          });",
+        "          const hp = document.createElement('input');",
+        "          hp.className = 'sl-hp'; hp.name = 'company_website'; hp.tabIndex = -1;",
+        "          hp.autocomplete = 'off'; hp.setAttribute('aria-hidden', 'true');",
+        "          form.appendChild(hp);",
+        "          const error = document.createElement('p');",
+        "          error.className = 'sl-dl-error'; error.hidden = true;",
+        "          error.textContent = 'Something went wrong. Please try again.';",
+        "          form.appendChild(error);",
+        "          const actions = document.createElement('div');",
+        "          actions.className = 'sl-dl-actions';",
+        "          const cancel = document.createElement('button');",
+        "          cancel.type = 'button'; cancel.className = 'sl-dl-cancel'; cancel.textContent = 'Cancel';",
+        "          const submit = document.createElement('button');",
+        "          submit.type = 'submit'; submit.className = 'sl-dl-submit'; submit.textContent = 'Get it';",
+        "          actions.appendChild(cancel); actions.appendChild(submit); form.appendChild(actions);",
+        "          backdrop.appendChild(form);",
+        "          document.body.appendChild(backdrop);",
+        "          const close = () => backdrop.remove();",
+        "          cancel.addEventListener('click', close);",
+        "          backdrop.addEventListener('click', (e) => { if (e.target === backdrop) close(); });",
+        "          document.addEventListener('keydown', function esc(e) {",
+        "            if (e.key === 'Escape') { close(); document.removeEventListener('keydown', esc); }",
+        "          });",
+        "          const first = form.querySelector('input:not(.sl-hp)');",
+        "          if (first) first.focus();",
+        "          form.addEventListener('submit', (e) => {",
+        "            e.preventDefault();",
+        "            const fields = {};",
+        "            form.querySelectorAll('input').forEach((i) => { if (i.value.trim()) fields[i.name] = i.value.trim(); });",
+        "            error.hidden = true;",
+        "            send(fields, () => { error.hidden = false; });",
+        "          });",
+        "        });",
         "      });",
         # Inline lead-capture form: POST to /leads, honeypot on the server, show a thank-you on success.
         "      const leadForm = document.querySelector('[data-lead-form]');",

@@ -48,7 +48,7 @@ and embeds it.
 Note it must exclude the CURRENT page, and must handle "selected page later unpublished" — a ribbon
 pointing at a 404 is worse than one with no button.
 
-## 2. Download a file — **buildable now, most parts exist**
+## 2. Download a file — **SHIPPED 2026-09-04**
 
 | Needs | Exists? |
 |---|---|
@@ -112,6 +112,8 @@ That is worth doing when tenants ask for attributable phone leads. It is not wor
 
 1. **§0 the click beacon** — unblocks call tracking (5a) and gives every action attribution.
 2. **§1 promote another page** — pure assembly of things that exist.
-3. **§2 download, with the lead gate** — the biggest new capability, and the modal is reusable by §3.
+3. ~~**§2 download, with the lead gate**~~ — **SHIPPED.** POST /downloads/lead; the gate reads the
+   PAGE, not the request; a spam-flagged request still gets the file but writes no lead; 50MB cap in the
+   builder; dialog built with DOM calls so a field label can never be markup.
 4. **§3 email a link** — reuses §2 end to end once the correction above is accepted.
 5. ~~**§5b true call tracking**~~ — **DEFERRED to v2, low priority (author, 2026-09-04).**
