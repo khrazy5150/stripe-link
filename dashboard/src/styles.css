@@ -3990,6 +3990,44 @@ button:disabled {
    built around a price row this has no use for, and its fixed 18rem image row pushed the page NAME out of
    a card with overflow:hidden. The name is the identifier here — two pages can promote the same product
    and look identical — so it is never the thing that gets clipped. */
+/* Business email verification. The badge sits with the field rather than in a banner: the state belongs
+   to this one value, and a page-level notice would still be true after the tenant edits the address. */
+.business-email-row {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+}
+
+.business-email-row input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.business-email-badge.verified {
+  flex: none;
+  padding: 0.3rem 0.9rem;
+  border-radius: 999px;
+  background: #dcfce7;
+  color: #166534;
+  font-size: var(--text-hint);
+  font-weight: 700;
+}
+
+.business-email-code {
+  display: grid;
+  gap: 0.8rem;
+  margin-top: 1rem;
+  padding: 1.2rem;
+  border: 1px solid var(--line);
+  border-radius: 0.8rem;
+}
+
+.business-email-actions {
+  display: flex;
+  gap: 0.8rem;
+  justify-content: flex-end;
+}
+
 /* SELECTOR GRID + CARD — shared by the Offers item selector and the Page Ribbon's page picker.
    `contain`, not `cover`: these are product shots on flat backgrounds, and cropping one to fill a card is
    how the ribbon picker ended up showing the middle third of a jar. Letterboxing on a neutral ground shows

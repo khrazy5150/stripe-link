@@ -654,6 +654,12 @@
                           </select>
                         </label>
                       </div>
+                      <!-- Blocking, not a warning after the fact: the tenant should learn they cannot send
+                           BEFORE uploading a file and writing copy for a button that will refuse to work. -->
+                      <p v-if="element.cta.action === 'email_file' && !businessEmailVerified" class="field-note is-warning">
+                        You must first enter a valid business email address before using this feature!
+                        Go to your Profile page to enter a business email.
+                      </p>
                       <div v-if="element.cta.action === 'download' || element.cta.action === 'email_file'" class="offer-field">
                         <span>File to hand over</span>
                         <div class="ribbon-page-choice">
@@ -1861,7 +1867,7 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue"
 import SelectorCard from "./SelectorCard.vue";
 import { offerViewTargets, offerViewTargetsFromExpanded } from "../composables/useConversionContext";
 import { isSectionVisible, defaultVisible, recommendedSectionKeys, optionalSectionKeys, governedKeys, elementLabel, elementChannel, addableElements, tokenGroups, previewVar, supportedGoals, goalLabel, packSeeds, orderSections, sectionOrderKey, isMovable, elementPlacement, orderSectionKeys, isRepeatableSection } from "../composables/pageComposer";
-import { apiRequest, assetUrl, getApiBase, getStripeMode, getOtherEnvironment, getPagesBaseUrl, getPreviewPagesBaseUrl, getTestPagesHost, getTenantId } from "../api/client";
+import { apiRequest, assetUrl, getApiBase, getAuthSession, getStripeMode, getOtherEnvironment, getPagesBaseUrl, getPreviewPagesBaseUrl, getTestPagesHost, getTenantId } from "../api/client";
 import { useToastsStore } from "../stores/toasts";
 import { formatMoney } from "../stores/products";
 import PurchaseFlowDiagram from "./PurchaseFlowDiagram.vue";
@@ -2780,6 +2786,7 @@ function resetWizard() {
 // Load on first search-box focus so filtering works without clicking Load Pages first (mirrors Products).
 function ensurePagesLoaded() {
   if (!pagesLoaded.value && !loading.value) loadPages();
+  loadBusinessEmailState();
 }
 
 // Auto-load the pages list on mount so it's fresh immediately — and, since this view is keyed on the
@@ -4493,6 +4500,22 @@ function resetSectionOrder() {
 
 // Three ribbons stop being interruptions and become wallpaper, which destroys the only property that
 // makes the element worth having (plans/ATTENTION_PRIMITIVE.md §4a "the wallpaper rule"). Capped at two.
+// Whether this tenant may send email at all. The SEND is the real gate (handlers/downloads.py) — this only
+// tells the tenant before they invest effort in a button that would refuse to work.
+const businessEmailVerified = ref(false);
+
+async function loadBusinessEmailState() {
+  try {
+    const session = getAuthSession() || {};
+    const body = await apiRequest("/profile", { params: { user_id: session.user_id || "" } });
+    businessEmailVerified.value = Boolean(body.profile?.business?.email_verified);
+  } catch {
+    // Unknown is not "unverified": a failed profile load must not accuse a verified tenant of not being
+    // set up. The send-time gate is what actually decides.
+    businessEmailVerified.value = true;
+  }
+}
+
 const RIBBON_MAX = 2;
 
 // A ribbon's lead magnet. There is no 50MB technical limit here — that number was invented, not measured.

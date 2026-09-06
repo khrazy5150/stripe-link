@@ -66,11 +66,43 @@
             <small v-else>International format, e.g. +12065551234 — same standard as your account phone.</small>
           </label>
         </div>
-        <label class="offer-field">
+        <div class="offer-field">
           <span>Business Email</span>
-          <input v-model.trim="form.business.email" type="email" placeholder="hello@yourbusiness.com" />
-          <small>Public contact email shown in your business's structured data.</small>
-        </label>
+          <div class="business-email-row">
+            <input v-model.trim="form.business.email" type="email" placeholder="hello@yourbusiness.com" :disabled="emailVerify.step === 'code'" />
+            <span v-if="businessEmailVerified" class="business-email-badge verified">Verified</span>
+            <button
+              v-else-if="emailVerify.step !== 'code'"
+              class="secondary-action compact"
+              type="button"
+              :disabled="!form.business.email || emailVerify.busy"
+              @click="startEmailVerification"
+            >{{ emailVerify.busy ? "Checking..." : "Verify" }}</button>
+          </div>
+
+          <!-- The code step replaces the field rather than sitting beside it: there is one thing to do here
+               and splitting attention between an address box and a code box is how people paste the wrong one. -->
+          <div v-if="emailVerify.step === 'code'" class="business-email-code">
+            <label class="offer-field">
+              <span>Enter the 6-digit code we emailed to {{ emailVerify.pending }}</span>
+              <input v-model.trim="emailVerify.code" type="text" inputmode="numeric" maxlength="6" placeholder="123456" />
+            </label>
+            <div class="business-email-actions">
+              <button class="secondary-action compact" type="button" @click="cancelEmailVerification">Cancel</button>
+              <button class="primary-action compact" type="button" :disabled="emailVerify.code.length !== 6 || emailVerify.busy" @click="confirmEmailVerification">
+                {{ emailVerify.busy ? "Checking..." : "Confirm" }}
+              </button>
+            </div>
+            <small class="field-note">The code expires in 5 minutes.</small>
+          </div>
+
+          <small v-if="emailVerify.error" class="field-note is-warning">{{ emailVerify.error }}</small>
+          <small v-else-if="emailVerify.catchAll" class="field-note">
+            That domain accepts mail to any address, so we could not confirm this specific mailbox — the code will.
+          </small>
+          <small v-else-if="businessEmailVerified">Replies to emails you send go here. Verified {{ formatDate(form.business.email_verified_at) }}.</small>
+          <small v-else>Verify this address to send emails from your landing pages. It is also the public contact in your structured data.</small>
+        </div>
         <p v-if="hasStripeSourcedFields" class="field-note">
           Some details were filled automatically from your Stripe account. Edit any field to override it.
         </p>
@@ -143,6 +175,63 @@ const form = reactive({
   first_name: session.first_name || "", last_name: session.last_name || "", display_name: "",
   business: emptyBusiness(),
 });
+
+// Verification state. Deliberately NOT part of `form`: it is a transient workflow, not a profile field,
+// and mixing it in would send it to the save endpoint.
+const emailVerify = reactive({ step: "idle", code: "", pending: "", busy: false, error: "", catchAll: false });
+
+// Verified means verified for the address CURRENTLY typed. Editing the field to something else must drop
+// the badge immediately, or a tenant sees "Verified" next to an address that is nothing of the sort.
+const businessEmailVerified = computed(() =>
+  Boolean(rawDoc.value.business?.email_verified)
+  && (form.business.email || "").trim().toLowerCase() === (rawDoc.value.business?.email || "").toLowerCase(),
+);
+
+async function startEmailVerification() {
+  emailVerify.busy = true;
+  emailVerify.error = "";
+  emailVerify.catchAll = false;
+  try {
+    const body = await apiRequest("/profile/business-email/start", {
+      method: "POST",
+      body: { tenant_id: getTenantId(), user_id: userId, email: form.business.email },
+    });
+    emailVerify.pending = form.business.email;
+    emailVerify.catchAll = Boolean(body.catch_all);
+    emailVerify.step = "code";
+    emailVerify.code = "";
+  } catch (err) {
+    emailVerify.error = err.message || "We could not send the code. Please try again.";
+  } finally {
+    emailVerify.busy = false;
+  }
+}
+
+async function confirmEmailVerification() {
+  emailVerify.busy = true;
+  emailVerify.error = "";
+  try {
+    const body = await apiRequest("/profile/business-email/confirm", {
+      method: "POST",
+      body: { tenant_id: getTenantId(), user_id: userId, code: emailVerify.code },
+    });
+    // The server is the source of truth for what is verified, so take its answer rather than assuming.
+    rawDoc.value = { ...rawDoc.value, business: { ...(rawDoc.value.business || {}), email: body.email, email_verified: true } };
+    form.business.email = body.email;
+    emailVerify.step = "idle";
+    emailVerify.code = "";
+  } catch (err) {
+    emailVerify.error = err.message || "That code is not right.";
+  } finally {
+    emailVerify.busy = false;
+  }
+}
+
+function cancelEmailVerification() {
+  emailVerify.step = "idle";
+  emailVerify.code = "";
+  emailVerify.error = "";
+}
 
 const hasStripeSourcedFields = computed(() =>
   Object.values((rawDoc.value.business || {}).sources || {}).includes("stripe"),
