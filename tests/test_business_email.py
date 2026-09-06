@@ -60,6 +60,19 @@ class ValidationTests(unittest.TestCase):
         self.assertTrue(is_disposable("x@mailinator.com"))
         self.assertFalse(is_disposable("x@poliaxis.co"))
 
+    def test_subdomains_of_a_listed_domain_are_caught(self):
+        # Found in testing: MailSlurp hands out {uuid}@sandbox.zazamail.link, and Debounce rates that
+        # domain "Safe to Send" while flagging mailslurp.com as Disposable. Listing the bare domain is no
+        # use if the service only ever issues subdomains.
+        self.assertTrue(is_disposable("8b73cb60@sandbox.zazamail.link"))
+        self.assertTrue(is_disposable("x@sub.mailinator.com"))
+
+    def test_a_real_domain_is_not_caught_by_the_subdomain_rule(self):
+        # The suffix walk must not match on a shared TLD, or every .com address would be disposable.
+        for good in ("owner@poliaxis.co", "keith@juniorbay.net", "hi@notmailinator.com"):
+            with self.subTest(good=good):
+                self.assertFalse(is_disposable(good))
+
     def test_debounce_fails_open_on_every_failure_mode(self):
         # A validator that blocks signup during its own outage is worse than no validator.
         def boom(_url, timeout=None):

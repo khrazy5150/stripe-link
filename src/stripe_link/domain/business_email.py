@@ -20,11 +20,37 @@ _EMAIL = re.compile(r"^[^@\s]+@[^@\s.]+\.[^@\s]+$")
 
 # Blocking these is uncontroversial: they exist to be thrown away, so an address at one cannot be the place
 # a business receives replies. Catch-all domains are deliberately NOT here — see plans/TENANT_SENDER_IDENTITY.md.
+#
+# This list is a SUPPLEMENT to Debounce, not a substitute, and it is knowingly incomplete. Testing services
+# rotate domains precisely to stay ahead of blocklists: verified 2026-09-06, Debounce flags mailslurp.com as
+# Disposable but rates its sandbox domain zazamail.link "Safe to Send". No list wins that race.
+#
+# That is acceptable because this is NOT the security boundary. The confirmation code proves the tenant can
+# receive at the address, which is the property the Reply-To actually needs; the list only turns away the
+# careless. Anyone determined to use a throwaway inbox will succeed, and the answer to abuse is rate limits
+# and monitoring, not a longer list.
 DISPOSABLE_DOMAINS = frozenset({
     "mailinator.com", "guerrillamail.com", "10minutemail.com", "tempmail.com", "throwawaymail.com",
     "yopmail.com", "trashmail.com", "sharklasers.com", "getnada.com", "temp-mail.org", "dispostable.com",
     "maildrop.cc", "fakeinbox.com", "mintemail.com", "spamgourmet.com",
+    # Testing-inbox services and their known sandbox domains.
+    "mailslurp.com", "mailslurp.net", "mailslurp.biz", "zazamail.link", "mailsac.com", "inbox.testmail.app",
+    "ethereal.email", "trashmail.de", "mytemp.email", "emailondeck.com",
 })
+
+
+def disposable_domain_of(value: str) -> str:
+    """The matched domain, or "". Matches SUBDOMAINS too: a service that hands out
+    `{uuid}@sandbox.zazamail.link` is not defeated by listing the bare domain."""
+    _, _, domain = str(value or "").strip().lower().partition("@")
+    if not domain:
+        return ""
+    parts = domain.split(".")
+    for index in range(len(parts) - 1):
+        candidate = ".".join(parts[index:])
+        if candidate in DISPOSABLE_DOMAINS:
+            return candidate
+    return ""
 
 
 def looks_like_email(value: str) -> bool:
@@ -32,8 +58,7 @@ def looks_like_email(value: str) -> bool:
 
 
 def is_disposable(value: str) -> bool:
-    _, _, domain = str(value or "").strip().lower().partition("@")
-    return domain in DISPOSABLE_DOMAINS
+    return bool(disposable_domain_of(value))
 
 
 def hash_code(code: str, *, tenant_id: str) -> str:

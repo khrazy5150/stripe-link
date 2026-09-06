@@ -114,3 +114,30 @@ picker, where offering a choice and then rejecting it was worse than not offerin
 2. The send-time gate + the builder's blocking message.
 3. From/Reply-To/Subject shape on the ribbon's send (no mailer change needed).
 4. Validation vendor, once chosen — and only ever fail open.
+
+
+## 8. What disposable-address blocking can and cannot do (verified 2026-09-06)
+
+Testing revealed the ceiling on this, and it is worth stating plainly so nobody later mistakes the list for
+a guarantee.
+
+A MailSlurp inbox at `{uuid}@sandbox.zazamail.link` passed verification end to end — Debounce rated it
+**"Safe to Send / Deliverable"**, while flagging `mailslurp.com` itself as **Disposable**. Testing services
+rotate domains precisely to stay ahead of blocklists, so no list wins that race, and Debounce's is no
+exception.
+
+**This is acceptable, because the list is not the security boundary.** The properties that actually matter:
+
+| Property | What provides it |
+|---|---|
+| The address can receive mail | the confirmation code — inarguable, and a throwaway inbox passing it is not a lie |
+| Replies reach the tenant | the same code |
+| Abuse is attributable | the tenant account, not the address |
+| Our SES reputation is protected | rate limits and monitoring, neither of which a list provides |
+
+The list turns away the careless; it will never stop the determined, and building as though it might is the
+mistake. If throwaway addresses become a real abuse vector, the answer is send-rate limits and bounce
+monitoring — not a longer list.
+
+Local matching now walks subdomains, since a service that only issues `{uuid}@sandbox.example.com` is
+untouched by listing the bare domain.
