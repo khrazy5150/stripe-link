@@ -88,6 +88,41 @@ the UI actually needs rather than subtracting the ones it must not see. A denyli
 silently and invisibly every time the schema grows, which is exactly what happened here.
 Pairs naturally with hiding the raw JSON panels (below).
 
+### MEDIUM — Junior Bay Partner Program (design locked 2026-09-06)
+
+Turn the tenant base into a distribution network: any merchant can refer businesses to Junior Bay and earn
+a share of the platform fees those businesses generate. **Junior Bay pays only when Junior Bay is paid** —
+commission is a percentage of collected platform fees, never a per-signup bounty, which makes fraud
+self-defeating (a fake tenant that never sells generates nothing to pay on).
+
+Full design in **`plans/PARTNER_REFERRAL_PLAN.md`**. Locked: 20% for 12 months then a 5% lifetime tail;
+first-touch attribution stamped write-once at registration; the commission clock starts at the referred
+tenant's **first qualifying sale**, not signup; v1 pays account credit only, with the balance modelled as
+cash-capable from day one.
+
+The foundation already exists and is why this is worth doing here: the append-only ledger is per-tenant and
+idempotent and already records `platform_fee` on every sale, the fee rate is server-authoritative, and the
+email footer shipped 2026-09-06 is already on every free tenant's outbound mail.
+
+Three things to settle before building:
+
+- **Does `?ref=` survive the signup round-trip?** Captured client-side on a static homepage, it has to
+  reach `register_tenant` through the auth redirect. If that flow round-trips a hosted auth UI, query
+  params can be dropped. A broken chain here is invisible — it looks exactly like nobody referring anyone —
+  so verify it against the real flow FIRST.
+- **The redemption gap.** `application_fee` is collected atomically at charge time, so credit cannot
+  retroactively offset a fee already taken. Credit can cleanly pay a Premium invoice; a free tenant who
+  never upgrades has nowhere to spend it. Either accept that (it drives upgrades) or bring the cash rail
+  forward.
+- **The footer must revert to quiet wording.** What shipped is promotional ("Want to start your own online
+  store?"), which is too much on a customer's receipt once it also earns the merchant money. It becomes
+  "Powered by Junior Bay" with the code invisible in the link, and the destination page does the selling.
+  Counsel should review the final copy — an earning link is a material connection under FTC guidance.
+
+Also note: a commission accrues to the *partner's* ledger from the *referred tenant's* sale — the one
+deliberate cross-tenant write in the system. It needs to be an explicit reviewed exception, not a side
+effect of passing a different `tenant_id`.
+
 ### MEDIUM — modify the Leads screen (raised 2026-09-04, details to come)
 
 Leads now arrive from two sources — the inline lead form and a Page Ribbon's gated download — and all three
