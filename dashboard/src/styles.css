@@ -2640,6 +2640,28 @@ button:disabled {
   font-weight: var(--weight-normal);
 }
 
+/* `.offer-field small` above sets a muted colour, and it beats .field-error on BOTH counts: two selectors
+   to one, and later in the file. So an error message inside a field rendered as ordinary grey body text —
+   which is exactly what it looked like. Restate the intent at matching specificity rather than reaching for
+   !important, which would only move the problem to whoever writes the next rule. */
+.offer-field small.field-error,
+.offer-field p.field-error,
+.offer-field small.field-warning,
+.offer-field p.field-warning {
+  font-size: 1.3rem;
+  font-weight: 700;
+}
+
+.offer-field small.field-error,
+.offer-field p.field-error {
+  color: #b91c1c;
+}
+
+.offer-field small.field-warning,
+.offer-field p.field-warning {
+  color: #b45309;
+}
+
 .selected-products-list {
   display: flex;
   flex-wrap: wrap;
