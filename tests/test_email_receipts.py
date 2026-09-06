@@ -31,6 +31,22 @@ class MailerTests(unittest.TestCase):
             self.assertEqual(from_email_address("Acme Co"), "Acme Co <support@juniorbay.net>")
             self.assertEqual(from_email_address(""), "support@juniorbay.net")
 
+    def test_a_business_name_with_a_comma_is_quoted(self):
+        """"Acme, Inc." is the ordinary case, not an edge one. Unquoted, the comma is an address separator
+        and SES rejects the message -- which a visitor sees as a download that silently never arrives."""
+        with patch.dict(os.environ, {"EMAIL_FROM_ADDRESS": "support@juniorbay.net"}, clear=False):
+            self.assertEqual(from_email_address("Acme, Inc."), '"Acme, Inc." <support@juniorbay.net>')
+
+    def test_every_from_header_parses_back_to_one_address(self):
+        from email.utils import getaddresses
+        names = ["Acme, Inc.", 'Bob "The Builder" Ltd', "Smith & Sons; Co", "Caf\u00e9 Ubuntu", "Plain Name"]
+        with patch.dict(os.environ, {"EMAIL_FROM_ADDRESS": "support@juniorbay.net"}, clear=False):
+            for name in names:
+                with self.subTest(name=name):
+                    parsed = getaddresses([from_email_address(name)])
+                    self.assertEqual(len(parsed), 1, "the display name split the header into two addresses")
+                    self.assertEqual(parsed[0][1], "support@juniorbay.net")
+
     def test_send_email_builds_ses_request(self):
         ses = FakeSes()
         with patch.dict(os.environ, {"EMAIL_FROM_ADDRESS": "support@juniorbay.net"}, clear=False):

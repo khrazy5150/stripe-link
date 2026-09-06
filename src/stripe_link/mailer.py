@@ -7,6 +7,7 @@ per-tenant domain verification.
 """
 
 import os
+from email.utils import formataddr
 from typing import Any
 
 
@@ -25,9 +26,16 @@ def _ses_client():
 
 
 def from_email_address(display_name: str = "") -> str:
+    """`Business Name <support@juniorbay.net>`, correctly quoted.
+
+    The display name is a TENANT-typed business name, so it routinely contains the characters RFC 5322
+    calls specials -- "Acme, Inc." being the ordinary case. Pasted in raw, the comma reads as an address
+    separator and SES rejects the whole message, which surfaces to a visitor as a failed download with no
+    explanation. formataddr quotes when it must and RFC 2047-encodes a non-ASCII name.
+    """
     address = os.environ.get("EMAIL_FROM_ADDRESS", DEFAULT_FROM_ADDRESS)
     name = str(display_name or "").strip()
-    return f"{name} <{address}>" if name else address
+    return formataddr((name, address)) if name else address
 
 
 def send_email(
