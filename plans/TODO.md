@@ -1175,8 +1175,13 @@ third-party security assessment is required.
 
 ## Landing Pages / SEO
 
-### Add additional content elements currently not found in the landing page builder — HIGH
-- **Planned as a unit, to build in sequence (2026-09-02):**
+### ✅ Additional content elements for the landing page builder — COMPLETE, shipped prod 2026-09-06
+
+Step 0 (the section-scoped theme override) plus all seven elements are built, deployed and verified
+in prod. Sequence and per-element notes in **`plans/LANDING_ELEMENTS_UNIT.md`**; the Page Ribbon's
+five CTA actions in **`plans/RIBBON_ACTIONS.md`**.
+
+- **Built as a unit (2026-09-02 → 2026-09-06):**
   1. **Page Ribbon** — new element. Attention Block's first presentation; see ATTENTION_PRIMITIVE.md §4a.
      Image · eyebrow · headline · copy · CTA, capped at two per page, three presentations. A-P1 there is the
      static version; the context-aware layer is A-P3 and needs client-side hydration, because published
@@ -1209,8 +1214,25 @@ third-party security assessment is required.
   background field — it needs an accent (the bar) as well as a background.
      Text-or-logo entries (text is silently dropped today — a bug), three-state scroll control, and the
      countdown's 🐢/🐇 speed slider reused rather than re-derived.
-- Still open from the earlier discussion, for pages that exist TODAY: how-it-works steps, comparison table,
-  stats band, standalone video, before/after. Social/lead-specific elements wait for those page types.
+- **Absorbed by design, not skipped:** *how-it-works steps* became Numbered List (one element; the
+  heading is the only difference between the two uses) and *stats band* became Bragging Points, which was
+  made standalone precisely so it could serve both it and the author's brag.
+- **Deferred by decision, tracked in their own plans:** the ribbon's part-2 event capture + analytics
+  screen (`RIBBON_ACTIONS.md` §0 — a click record with nothing to consume it is write-only), true call
+  tracking (§5b, v2, low priority), and the ribbon's A-P2 attribution / A-P3 hydration layers
+  (`ATTENTION_PRIMITIVE.md`).
+
+### MEDIUM — three landing elements still unbuilt (remainder of the unit above, 2026-09-06)
+
+Named in the original discussion, never built, and not absorbed by anything that shipped:
+
+- **Comparison table** — the only one needing real design work. It is a claim about competitors, so it
+  carries a truthfulness surface the other elements do not.
+- **Standalone video** — `hero_media` already handles video in the hero, so this is the same capability
+  somewhere else on the page: mostly placement, not new machinery.
+- **Before / after** — two images and a divider. Simplest of the three.
+
+Social and lead-specific elements still wait for those page types to exist.
 
 ### Shared indexed-list machinery — ALL FOUR SCREENS MIGRATED, SHIPPED 2026-09-02
 - SHIPPED: `composables/indexedList.js` (loadIndex / fetchFullDocument / searchText / matchesSearch /

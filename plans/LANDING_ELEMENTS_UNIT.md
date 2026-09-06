@@ -1,6 +1,12 @@
 # Landing elements unit — the build sequence and its shared step 0
 
-**Status:** PLANNED, not built. Six elements to build as one unit.
+**Status:** ✅ **COMPLETE — shipped prod 2026-09-06.** Step 0 plus all seven elements built and
+deployed. (The unit was scoped as six and became seven when Bragging Points was split out as
+standalone rather than folded into Author Bio.)
+
+Deliberately still open, tracked elsewhere and NOT part of this unit: the Page Ribbon's A-P2
+attribution and A-P3 hydration layers (`ATTENTION_PRIMITIVE.md`), and the ribbon's part-2 event
+capture + analytics screen (`RIBBON_ACTIONS.md` §0).
 
 ## The unit
 

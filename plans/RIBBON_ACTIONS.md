@@ -1,7 +1,12 @@
 # Page Ribbon — what the button does (A-P1.5)
 
-**Status:** planned, not built. Author's spec 2026-09-04, five actions. Written after checking what already
-exists, because three of the five are mostly assembly and two are not.
+**Status:** ✅ **Part 1 COMPLETE — shipped prod 2026-09-06.** All five actions built. Author's spec
+2026-09-04. Written after checking what already exists, because three of the five were mostly assembly
+and two were not.
+
+**Part 2 remains, deferred by decision (not oversight):** click-event capture and the analytics screen
+that would display it (§0). Nothing consumes a click record today, so the record would be write-only —
+the screen has to exist first. True call tracking (§5b) is a separate v2, low priority.
 
 ## 0. Sequencing — DECIDED 2026-09-04
 
