@@ -9,7 +9,7 @@ Every email the platform sends *on a tenant's behalf* must carry:
 
 | Header | Value |
 |---|---|
-| From | `"{Business name}" <support@juniorbay.com>` |
+| From | `"{Business name}" <support@juniorbay.net>` |
 | Reply-To | the tenant's **verified** business email |
 | Subject | the **offer name**, so it matches what the customer clicked |
 
@@ -29,10 +29,18 @@ Better than expected. Three of the four pieces are in place:
 
 What does **not** exist: any verification flow for `business.email`, and any email-validation vendor.
 
-⚠️ **Check before building:** the mailer's default is `support@juniorbay.net`, and the requirement says
-`support@juniorbay.com`. The deployed value comes from the `EmailFromAddress` parameter, so confirm which
-domain is actually verified in SES before changing anything — a From address on an unverified domain fails
-every send.
+**Sender domain — SETTLED 2026-09-05.** `support@juniorbay.net`, which is what is already deployed. The
+spec first said `.com`; checking SES showed `juniorbay.com` is not an identity at all, so that From address
+would have failed every send. Verified state, checked rather than assumed:
+
+| Identity | Verified for sending |
+|---|---|
+| `juniorbay.net` | yes |
+| `support@juniorbay.net` | yes |
+| `juniorbay.com` / `support@juniorbay.com` | **not an SES identity** |
+
+The account has production access (50k/day, sending enabled), so recipients are unrestricted — which is
+precisely why the platform has to be what refuses an unverified tenant, since SES will not.
 
 ## 3. Verification flow (new)
 
