@@ -71,7 +71,15 @@ that step regardless. The code IS the proof of existence; the validator is only 
 **DECIDED 2026-09-06:** hard-reject disposable and syntactically/DNS invalid. Catch-all is a soft warning
 that still allows submission, with the confirmation code doing the real work.
 
-**Vendor DECIDED 2026-09-06: Debounce** (`api.debounce.io`). It must fail **open** — if the validator is
+**Vendor DECIDED 2026-09-06: Debounce** (`api.debounce.io`). **Needs your own account and key** —
+`debounce.io`, pay-as-you-go credits. The key lives in Secrets Manager as `jb/debounce/{env}` holding
+`{"api_key": "..."}`, set with `deploy/debounce-secret.sh <env> <key>`; never an environment variable,
+because a key in the template is a key in git and in every deploy log. Separate keys per environment so
+sandbox testing cannot burn production credits.
+
+**Volume is tiny, which matters for cost.** Validation runs when a tenant SETS or CHANGES their business
+email — roughly once per tenant, ever — not per send and not per lead. A thousand tenants is on the order of
+a thousand checks. Whatever the plan, this is not the line item to worry about. It must fail **open** — if the validator is
 unreachable or errors, let the address through; the confirmation code still gates. A dependency that can
 block signup when it has an outage is worse than no validator at all.
 

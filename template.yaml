@@ -254,6 +254,9 @@ Globals:
         CALENDAR_CONNECTIONS_TABLE: !Ref CalendarConnectionsTable
         SMS_ORIGINATION_SECRET_NAME: !Sub "jb/sms-origination/${Environment}"
         GOOGLE_OAUTH_SECRET_NAME: !Sub "jb/google-oauth/${Environment}"
+        # Debounce email validation. The secret holds {"api_key": "..."}; with no secret, or no key in it,
+        # validation simply stays off — it fails OPEN by design (plans/TENANT_SENDER_IDENTITY.md).
+        DEBOUNCE_SECRET_NAME: !Sub "jb/debounce/${Environment}"
         PAGES_BUCKET: !Ref PagesBucket
         PAGES_PREVIEW_BUCKET: !Ref PagesPreviewBucket
         MEDIA_BUCKET: !Ref MediaBucket
