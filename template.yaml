@@ -1023,6 +1023,10 @@ Resources:
             TableName: !Ref PagesTable
         - DynamoDBCrudPolicy:
             TableName: !Ref LeadsTable
+        # The email_file delivery refuses to send until the page's owner has a VERIFIED business email
+        # (plans/TENANT_SENDER_IDENTITY.md), which means reading their profile.
+        - DynamoDBReadPolicy:
+            TableName: !Ref UserProfilesTable
         - S3ReadPolicy:
             BucketName: !Ref MediaBucket
         # The email_file delivery mails a LINK, so this sends mail but never carries an attachment.

@@ -7,6 +7,7 @@ omitting the field it asks for.
 
 import json
 import os
+import pathlib
 import unittest
 
 os.environ.setdefault("MEDIA_BUCKET", "test-media-bucket")
@@ -167,6 +168,40 @@ class WiringTests(unittest.TestCase):
             )
         self.assertEqual(captured.get("mode"), "live")
         self.assertEqual(res["statusCode"], 200)
+
+    def test_every_table_the_handler_reads_is_granted_in_the_template(self):
+        """Signatures agreeing is not the same as IAM agreeing.
+
+        The sender-identity gate added a read of the user-profiles table. The code was right, the tests
+        passed, and prod still threw AccessDeniedException on the first request that got far enough to
+        reach it -- because the function's Policies were never widened. Every test above injects a fake
+        profiles repo, so none of them could have noticed.
+
+        Derived from the handler's own source, so adding a repository to it fails here until the template
+        grants the table.
+        """
+        import inspect
+        import re
+        from handlers import downloads
+
+        # A repository constructor and the template resource holding its table.
+        TABLE_FOR = {
+            "pages_repository": "PagesTable",
+            "leads_repository": "LeadsTable",
+            "user_profiles_repository": "UserProfilesTable",
+        }
+        used = {name for name in TABLE_FOR if name + "(" in inspect.getsource(downloads.lead_download_handler)}
+        self.assertIn("user_profiles_repository", used, "the sender gate must read the owner's profile")
+
+        template = (pathlib.Path(__file__).resolve().parents[1] / "template.yaml").read_text()
+        block = re.search(r"^  LeadDownloadFunction:\n(.*?)(?=^  \w+:\n)", template, re.S | re.M)
+        self.assertIsNotNone(block, "LeadDownloadFunction not found in template.yaml")
+        granted = set(re.findall(r"TableName: !Ref (\w+)", block.group(1)))
+
+        for name in sorted(used):
+            with self.subTest(repository=name):
+                self.assertIn(TABLE_FOR[name], granted,
+                              f"{name}() is called but {TABLE_FOR[name]} is not granted to the function")
 
 
 class EmailDeliveryTests(unittest.TestCase):
