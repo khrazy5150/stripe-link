@@ -2547,6 +2547,18 @@ Resources:
             RestApiId: !Ref RestApi
             Path: /profile
             Method: PUT
+        StartBusinessEmail:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /profile/business-email/start
+            Method: POST
+        ConfirmBusinessEmail:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /profile/business-email/confirm
+            Method: POST
 
   NotificationsFunction:
     Type: AWS::Serverless::Function
