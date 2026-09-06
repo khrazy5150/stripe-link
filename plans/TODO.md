@@ -1222,6 +1222,36 @@ five CTA actions in **`plans/RIBBON_ACTIONS.md`**.
   tracking (§5b, v2, low priority), and the ribbon's A-P2 attribution / A-P3 hydration layers
   (`ATTENTION_PRIMITIVE.md`).
 
+### MEDIUM — image cropper: crop/zoom/reposition behind every image button (plan 2026-09-06)
+
+A shared `ImageCropper.vue` used by every image uploader in the dashboard, so a tenant controls what part
+of a photo survives instead of accepting whatever `object-fit` picks. Full design in
+**`plans/IMAGE_CROPPER.md`**.
+
+**It is one stack extended, not a new service.** `OnDemandResizeFunction` in `image-processing-stack`
+already has sharp, source-bucket read, target-bucket write, the metadata table and immutable cache headers.
+Cropping is `sharp.extract()` plus query params — roughly 40–60 lines. The bulk of the work is the Vue
+component, so this is mostly a front-end project.
+
+Key decisions already made: the **consuming element declares the aspect ratio** and the cropper enforces it
+(which is what makes one component serve avatars, heroes and a Before/After pair alike); the crop rect is
+stored as **normalized fractions**, not pixels, so it survives every rendition the processor makes; and it
+is applied via `object-position` first, with derivative baking as a later delivery optimisation.
+
+Three traps recorded in the plan, all of which survive naive testing:
+
+- **The `/resize` cache key omits the transform** (`custom_{w}x{h}.{fmt}`), so two crops at the same output
+  size overwrite each other — behind `max-age=31536000, immutable`. Must be fixed BEFORE any crop param.
+- **`.extract()` must come after `.rotate()`**, or portrait phone photos crop the wrong region while every
+  landscape desktop test image passes.
+- **`ALLOWED_ORIGINS` on that function excludes `app.juniorbay.com` and `sandbox.juniorbay.com`**, so a
+  direct browser call is blocked by CORS. Proxy through `upload.py` if baking is ever wanted.
+
+Also fixes a live latent bug: builder file-input refs are keyed by `element.id` alone, so any element with
+two images collides (second ref wins, shared spinner, shared error). Nothing hits it today because no
+element has two images — Before/After would be the first. Fixed structurally by the shared component
+owning its own input.
+
 ### MEDIUM — three landing elements still unbuilt (remainder of the unit above, 2026-09-06)
 
 Named in the original discussion, never built, and not absorbed by anything that shipped:
