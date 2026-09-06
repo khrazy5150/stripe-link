@@ -186,6 +186,29 @@ class EmailDeliveryTests(unittest.TestCase):
         self.assertEqual(len(leads.puts), 1, "the tenant keeps the contact either way")
 
 
+class LeadQualityTests(unittest.TestCase):
+    """The bargain is a real address in exchange for the file. A throwaway defeats the point of the gate,
+    so the lead's own address is checked too — not just the tenant's."""
+
+    def test_a_throwaway_cannot_claim_the_freebie(self):
+        for addr in ("x@mailinator.com", "uuid@sandbox.zazamail.link"):
+            with self.subTest(addr=addr):
+                res = call({"tenant_id": "t1", "page_id": "p1", "section_id": "rb", "fields": {"email": addr}},
+                           doc=page({"action": "download", "collect_email": True, "asset": ASSET}))
+                self.assertEqual(res["statusCode"], 400)
+                self.assertIn("disposable_email", res["body"])
+
+    def test_alias_services_are_real_people_and_pass(self):
+        # Apple Hide My Email is offered by default to every iPhone user at sign-up. Refusing it would turn
+        # away a large slice of ordinary visitors whose address works perfectly well.
+        leads = FakeRepo()
+        res = call({"tenant_id": "t1", "page_id": "p1", "section_id": "rb",
+                    "fields": {"email": "abc123@privaterelay.appleid.com"}},
+                   doc=page({"action": "download", "collect_email": True, "asset": ASSET}), leads=leads)
+        self.assertEqual(res["statusCode"], 200)
+        self.assertEqual(len(leads.puts), 1)
+
+
 class SenderIdentityTests(unittest.TestCase):
     """Junior Bay's SES account has production access and will mail anyone on a tenant's behalf. That is
     exactly why the PLATFORM must refuse an unverified tenant — SES will not."""

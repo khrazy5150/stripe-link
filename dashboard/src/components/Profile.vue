@@ -96,7 +96,7 @@
             <small class="field-note">The code expires in 5 minutes.</small>
           </div>
 
-          <small v-if="emailVerify.error" class="field-note is-warning">{{ emailVerify.error }}</small>
+          <small v-if="emailVerify.error" class="field-error">{{ emailVerify.error }}</small>
           <small v-else-if="emailVerify.catchAll" class="field-note">
             That domain accepts mail to any address, so we could not confirm this specific mailbox — the code will.
           </small>

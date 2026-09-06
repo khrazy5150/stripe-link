@@ -12,7 +12,7 @@ import time
 
 from stripe_link.common import error_response, json_response, parse_json_body, query_params, resolve_stripe_mode, tenant_id_from_event
 from stripe_link.domain.downloads import asset_bucket_key, sanitize_filename
-from stripe_link.domain.business_email import verified_email
+from stripe_link.domain.business_email import is_disposable, verified_email
 from stripe_link.domain.lead_magnets import COLLECTABLE_FIELDS, download_offer, find_ribbon, missing_fields
 from stripe_link.domain.leads import build_lead_submission, is_spam, lead_id_for
 from stripe_link.ids import generate_id
@@ -198,6 +198,12 @@ def lead_download_handler(
         return error_response("No download is available here.", status_code=404, code="not_found")
 
     submitted = {field: str((payload.get("fields") or {}).get(field) or "").strip() for field in COLLECTABLE_FIELDS}
+    # The whole bargain is a real address in exchange for the file, so a throwaway defeats the point of the
+    # gate. Checked against the LOCAL list only — Debounce per lead would scale its cost with the tenant's
+    # success, which is the wrong direction. Campaign lists get bulk-cleaned before a send instead.
+    if submitted.get("email") and is_disposable(submitted["email"]):
+        return error_response("Please use an email address you can receive mail at.",
+                              code="disposable_email", status_code=400)
     missing = missing_fields(offer["required"], submitted)
     if missing:
         return error_response(

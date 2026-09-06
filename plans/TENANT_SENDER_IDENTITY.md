@@ -141,3 +141,28 @@ monitoring — not a longer list.
 
 Local matching now walks subdomains, since a service that only issues `{uuid}@sandbox.example.com` is
 untouched by listing the bare domain.
+
+
+## 9. Lead addresses, and campaign cleaning (author, 2026-09-06)
+
+Two different addresses, two different rules — worth separating, because conflating them is how the wrong
+thing gets blocked.
+
+**The LEAD's address** (a visitor claiming a freebie). The bargain is a real address in exchange for the
+file, so a throwaway defeats the gate's purpose. Now checked at capture against the LOCAL list only.
+
+Deliberately NOT a Debounce call per lead: that scales cost with the tenant's success, which is exactly the
+wrong direction — a lead magnet's whole purpose is volume, so the better it works the more it costs.
+
+**Alias services are not disposable, and must never be added to the list.** Apple Hide My Email
+(`privaterelay.appleid.com`), DuckDuckGo, Firefox Relay and SimpleLogin all forward to a real person's
+inbox. Hide My Email is offered by default to every iPhone user at the point of sign-up, so blocking it
+would refuse a large slice of ordinary visitors whose address works perfectly. `ALIAS_DOMAINS` short-circuits
+the suffix walk so a future extension of the disposable list cannot accidentally catch them.
+
+**Campaign sends get bulk-cleaned first** (author's proposal, and the right one). Debounce's bulk API exists
+for this, cost is per campaign rather than per capture, and it catches the address that worked for the
+freebie and was abandoned afterwards. That protects Junior Bay's SES reputation, which is the asset actually
+at risk — a bounce rate above ~5% threatens the sending account for every tenant at once.
+
+Not built: campaign sending does not exist yet. Recorded here so it is designed in from the start.

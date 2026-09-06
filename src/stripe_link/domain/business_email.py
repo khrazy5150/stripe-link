@@ -39,6 +39,18 @@ DISPOSABLE_DOMAINS = frozenset({
 })
 
 
+# NOT disposable, and never to be added above: alias and forwarding services. Apple Hide My Email
+# (privaterelay.appleid.com), DuckDuckGo, Firefox Relay and SimpleLogin all forward to a REAL person's
+# inbox — they are privacy tools, not throwaways, and Hide My Email in particular is offered by default to
+# every iPhone user at the point of sign-up. Blocking them would refuse a large slice of ordinary people
+# whose address works perfectly well. Listed here so the distinction survives the next person extending
+# DISPOSABLE_DOMAINS.
+ALIAS_DOMAINS = frozenset({
+    "privaterelay.appleid.com", "icloud.com", "duck.com", "mozmail.com", "simplelogin.io",
+    "anonaddy.com", "addy.io", "relay.firefox.com",
+})
+
+
 def disposable_domain_of(value: str) -> str:
     """The matched domain, or "". Matches SUBDOMAINS too: a service that hands out
     `{uuid}@sandbox.zazamail.link` is not defeated by listing the bare domain."""
@@ -48,6 +60,8 @@ def disposable_domain_of(value: str) -> str:
     parts = domain.split(".")
     for index in range(len(parts) - 1):
         candidate = ".".join(parts[index:])
+        if candidate in ALIAS_DOMAINS:
+            return ""          # an alias forwards to a real person; stop before any disposable match
         if candidate in DISPOSABLE_DOMAINS:
             return candidate
     return ""

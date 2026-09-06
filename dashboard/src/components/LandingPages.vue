@@ -615,7 +615,7 @@
                     </template>
 
                     <template v-else-if="element.type === 'page_ribbon'">
-                      <p v-if="ribbonCount > 2" class="field-note is-warning">
+                      <p v-if="ribbonCount > 2" class="field-warning">
                         Three ribbons stop being interruptions and become wallpaper. Two is the most a page should carry.
                       </p>
                       <label class="offer-field">
@@ -656,7 +656,7 @@
                       </div>
                       <!-- Blocking, not a warning after the fact: the tenant should learn they cannot send
                            BEFORE uploading a file and writing copy for a button that will refuse to work. -->
-                      <p v-if="element.cta.action === 'email_file' && !businessEmailVerified" class="field-note is-warning">
+                      <p v-if="element.cta.action === 'email_file' && !businessEmailVerified" class="field-error">
                         You must first enter a valid business email address before using this feature!
                         Go to your Profile page to enter a business email.
                       </p>
@@ -673,7 +673,7 @@
                             {{ ribbonUploading[element.id] ? `Uploading ${ribbonUploadPct[element.id] || 0}%` : (element.cta.asset ? "Replace" : "Upload file") }}
                           </button>
                         </div>
-                        <small v-if="ribbonUploadError[element.id]" class="field-note is-warning">{{ ribbonUploadError[element.id] }}</small>
+                        <small v-if="ribbonUploadError[element.id]" class="field-error">{{ ribbonUploadError[element.id] }}</small>
                         <label class="builder-toggle">
                           <input v-model="element.cta.collect_email" type="checkbox" :disabled="element.cta.action === 'email_file'" />
                           <span>Ask for their email first</span>
@@ -699,7 +699,7 @@
                             {{ ribbonTargetPage(element) ? "Change" : "Choose a page" }}
                           </button>
                         </div>
-                        <small v-if="ribbonTargetPage(element) && ribbonTargetPage(element).status !== 'published'" class="field-note is-warning">
+                        <small v-if="ribbonTargetPage(element) && ribbonTargetPage(element).status !== 'published'" class="field-warning">
                           That page is no longer published, so the button would lead nowhere. Publish it again, or choose another page.
                         </small>
                         <small v-else class="field-note">Only published pages can be chosen. The live URL is filled in for you, and refreshed each time you save.</small>
