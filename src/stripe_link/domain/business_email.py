@@ -114,3 +114,27 @@ def verified_email(business: Any) -> str:
     business = business if isinstance(business, dict) else {}
     email = str(business.get("email") or "").strip()
     return email if email and business.get("email_verified") else ""
+
+
+def sender_display_name(profile: Any) -> str:
+    """The name a tenant-authored email appears to come FROM, or "" to fall back to the bare address.
+
+    The point of the whole sender identity is that the mail reads as the tenant's, not the platform's — a
+    recipient who sees "support@juniorbay.net" with no name has been handed Junior Bay's mail, not the
+    merchant's. So an empty business name falls through to the person instead of giving up: a sole trader
+    who never filled in a business name still has a name, and it is a better sender than no name at all.
+
+    Reply-To is the verified BUSINESS address; this is only the display name beside the platform's From.
+    """
+    profile = profile if isinstance(profile, dict) else {}
+    business = profile.get("business") if isinstance(profile.get("business"), dict) else {}
+    candidates = (
+        business.get("name"),
+        profile.get("display_name"),
+        " ".join(part for part in (profile.get("first_name"), profile.get("last_name")) if part),
+    )
+    for candidate in candidates:
+        name = str(candidate or "").strip()
+        if name:
+            return name
+    return ""

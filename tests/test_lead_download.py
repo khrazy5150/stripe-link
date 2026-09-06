@@ -295,15 +295,39 @@ class SenderIdentityTests(unittest.TestCase):
                    profile={"business": {"email": "owner@poliaxis.co", "email_verification": {"pending_email": "x"}}})
         self.assertEqual(res["statusCode"], 409)
 
-    def test_the_headers_carry_the_tenant_not_the_platform(self):
+    def _send(self, *, doc, profile=VERIFIED_PROFILE):
         mailer = FakeMailer()
-        call({"tenant_id": "t1", "page_id": "p1", "section_id": "rb", "fields": {"email": "a@b.co"}},
-             doc={**page(self.CTA), "name": "NAD Supplement Landing Page"}, mailer=mailer)
-        sent = mailer.sent[0]
+        res = call({"tenant_id": "t1", "page_id": "p1", "section_id": "rb", "fields": {"email": "a@b.co"}},
+                   doc=doc, mailer=mailer, profile=profile)
+        self.assertEqual(res["statusCode"], 200)
+        return mailer.sent[0]
+
+    def test_the_headers_carry_the_tenant_not_the_platform(self):
+        doc = {**page(self.CTA), "name": "NAD Supplement Landing Page"}
+        doc["sections"][0]["headline"] = "25 superfoods every athlete should eat"
+        sent = self._send(doc=doc)
         self.assertEqual(sent["from_name"], "Poliaxis Nutrition")
         self.assertEqual(sent["reply_to"], "owner@poliaxis.co")
-        self.assertEqual(sent["subject"], "NAD Supplement Landing Page",
-                         "the subject is the offer name, so it matches what the customer clicked")
+        self.assertEqual(sent["subject"], "25 superfoods every athlete should eat",
+                         "the subject is the ribbon headline -- the promise the visitor actually clicked")
+
+    def test_a_tenant_with_no_business_name_still_sends_under_their_own(self):
+        # A bare support@juniorbay.net hands the recipient the PLATFORM's mail, which is the failure this
+        # whole feature exists to prevent. A sole trader who skipped the business name still has a name.
+        profile = {"business": {"email": "k@x.co", "email_verified": True}, "display_name": "Keith De Costa"}
+        self.assertEqual(self._send(doc=page(self.CTA), profile=profile)["from_name"], "Keith De Costa")
+
+    def test_first_and_last_name_are_the_last_resort_before_giving_up(self):
+        profile = {"business": {"email": "k@x.co", "email_verified": True},
+                   "first_name": "Keith", "last_name": "De Costa"}
+        self.assertEqual(self._send(doc=page(self.CTA), profile=profile)["from_name"], "Keith De Costa")
+
+    def test_a_ribbon_with_no_headline_falls_back_to_the_page_name(self):
+        doc = {**page(self.CTA), "name": "NAD Supplement Landing Page"}
+        self.assertEqual(self._send(doc=doc)["subject"], "NAD Supplement Landing Page")
+
+    def test_a_subject_is_never_empty(self):
+        self.assertEqual(self._send(doc=page(self.CTA))["subject"], "guide.pdf")
 
     def test_a_download_does_not_need_a_verified_sender(self):
         # Nothing is being sent, so there is no sending identity to verify. Gating it would block a

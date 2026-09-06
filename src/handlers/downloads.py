@@ -12,7 +12,7 @@ import time
 
 from stripe_link.common import error_response, json_response, parse_json_body, query_params, resolve_stripe_mode, tenant_id_from_event
 from stripe_link.domain.downloads import asset_bucket_key, sanitize_filename
-from stripe_link.domain.business_email import is_disposable, verified_email
+from stripe_link.domain.business_email import is_disposable, sender_display_name, verified_email
 from stripe_link.domain.lead_magnets import COLLECTABLE_FIELDS, download_offer, find_ribbon, missing_fields
 from stripe_link.domain.leads import build_lead_submission, is_spam, lead_id_for
 from stripe_link.ids import generate_id
@@ -267,9 +267,12 @@ def lead_download_handler(
             "This page cannot send email yet. Its owner needs to verify a business email address.",
             status_code=409, code="sender_unverified",
         )
-    business_name = str(business.get("name") or "").strip()
-    # The subject is the OFFER's name, so it matches whatever the customer just clicked on.
-    offer_name = str(page.get("name") or "").strip() or filename
+    # An empty business name must not fall back to the platform's bare address — that hands the recipient
+    # Junior Bay's mail instead of the merchant's, which is the one thing this feature exists to avoid.
+    business_name = sender_display_name(profile or {})
+    # The subject is the RIBBON's headline: it is the promise the visitor just clicked, so it is what they
+    # will recognise in a crowded inbox. The page's name is an internal label the tenant picked for a list.
+    subject = str((section or {}).get("headline") or "").strip() or str(page.get("name") or "").strip() or filename
 
     # A LINK, not an attachment. SES caps a message at 40MB including base64 encoding — which inflates
     # binary by about a third — so a 30MB file cannot be attached at all, and large attachments trip spam
@@ -280,13 +283,14 @@ def lead_download_handler(
             to=submitted["email"],
             from_name=business_name,
             reply_to=reply_to,
-            subject=offer_name,
+            subject=subject,
             html=(
                 f"<p>Here is the file you asked for.</p>"
                 f'<p><a href="{escape(url)}">Download {escape(filename)}</a></p>'
                 f"<p>This link works for 24 hours.</p>"
             ),
             text=f"Here is the file you asked for:\n\n{url}\n\nThis link works for 24 hours.",
+            tenant_id=tenant_id,
         )
     except Exception:
         # The lead is already recorded, so the tenant keeps the contact either way. Tell the visitor,
