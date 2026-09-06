@@ -647,7 +647,9 @@
                           <select v-model="element.cta.action">
                             <option value="promote_page">Promotes another of my pages</option>
                             <option value="download">Downloads a file</option>
-                            <option value="email_file">Sends an email with the file</option>
+                            <option value="email_file" :disabled="!businessEmailVerified">
+                              Sends an email with the file{{ businessEmailVerified ? "" : " — needs a verified business email" }}
+                            </option>
                             <option value="redirect">Opens a link</option>
                             <option value="call_phone">Starts a call</option>
                             <option value="email">Opens their email app</option>
@@ -4733,6 +4735,7 @@ function ribbonCta(cta) {
   const action = cta.action || "redirect";
   const label = (cta.label || "").trim();
   if (!label) return {};
+  if (action === "email_file" && !businessEmailVerified.value) return {};
   if (action === "download" || action === "email_file") {
     // The asset IS the target here. Without a file there is nothing to hand over, so no button renders —
     // the same rule as a link with no URL.

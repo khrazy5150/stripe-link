@@ -237,7 +237,7 @@ class DoubleClickTests(unittest.TestCase):
 
     def test_failure_re_enables_it(self):
         # Nothing was delivered, so the visitor must be able to try again.
-        self.assertIn("catch(() => { btn.disabled = false;", self._block())
+        self.assertIn("catch((err) => { btn.disabled = false;", self._block())
 
 
 class MobileTests(unittest.TestCase):
