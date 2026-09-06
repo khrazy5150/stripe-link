@@ -50,11 +50,16 @@ class FakeMailer:
         return {"MessageId": "m1"}
 
 
-def call(body, *, doc, leads=None, s3=None, mailer=None):
+VERIFIED_PROFILE = {"business": {"name": "Poliaxis Nutrition", "email": "owner@poliaxis.co",
+                                 "email_verified": True}}
+
+
+def call(body, *, doc, leads=None, s3=None, mailer=None, profile=VERIFIED_PROFILE):
     return lead_download_handler(
         {"httpMethod": "POST", "body": json.dumps(body)}, None,
         pages_repo=FakeRepo(doc), leads_repo=leads or FakeRepo(), s3_client=s3 or FakeS3(),
-        mailer_send=mailer or FakeMailer(), now_fn=lambda: 1700000000,
+        mailer_send=mailer or FakeMailer(), profiles_repo=FakeRepo(profile),
+        now_fn=lambda: 1700000000,
     )
 
 
@@ -179,6 +184,47 @@ class EmailDeliveryTests(unittest.TestCase):
                    doc=page(self.CTA), leads=leads, mailer=FakeMailer(fail=True))
         self.assertEqual(res["statusCode"], 502)
         self.assertEqual(len(leads.puts), 1, "the tenant keeps the contact either way")
+
+
+class SenderIdentityTests(unittest.TestCase):
+    """Junior Bay's SES account has production access and will mail anyone on a tenant's behalf. That is
+    exactly why the PLATFORM must refuse an unverified tenant — SES will not."""
+
+    CTA = {"action": "email_file", "asset": ASSET}
+
+    def test_an_unverified_business_email_cannot_send(self):
+        for business in ({}, {"email": "owner@poliaxis.co"}, {"email": "", "email_verified": True}):
+            with self.subTest(business=business):
+                res = call({"tenant_id": "t1", "page_id": "p1", "section_id": "rb",
+                            "fields": {"email": "a@b.co"}},
+                           doc=page(self.CTA), profile={"business": business})
+                self.assertEqual(res["statusCode"], 409)
+                self.assertIn("sender_unverified", res["body"])
+
+    def test_pending_is_not_verified(self):
+        # A tenant who types an address and never confirms it must not be able to send, or the whole
+        # verification step is decorative.
+        res = call({"tenant_id": "t1", "page_id": "p1", "section_id": "rb", "fields": {"email": "a@b.co"}},
+                   doc=page(self.CTA),
+                   profile={"business": {"email": "owner@poliaxis.co", "email_verification": {"pending_email": "x"}}})
+        self.assertEqual(res["statusCode"], 409)
+
+    def test_the_headers_carry_the_tenant_not_the_platform(self):
+        mailer = FakeMailer()
+        call({"tenant_id": "t1", "page_id": "p1", "section_id": "rb", "fields": {"email": "a@b.co"}},
+             doc={**page(self.CTA), "name": "NAD Supplement Landing Page"}, mailer=mailer)
+        sent = mailer.sent[0]
+        self.assertEqual(sent["from_name"], "Poliaxis Nutrition")
+        self.assertEqual(sent["reply_to"], "owner@poliaxis.co")
+        self.assertEqual(sent["subject"], "NAD Supplement Landing Page",
+                         "the subject is the offer name, so it matches what the customer clicked")
+
+    def test_a_download_does_not_need_a_verified_sender(self):
+        # Nothing is being sent, so there is no sending identity to verify. Gating it would block a
+        # working feature for an unrelated reason.
+        res = call({"tenant_id": "t1", "page_id": "p1", "section_id": "rb"},
+                   doc=page({"action": "download", "asset": ASSET}), profile={"business": {}})
+        self.assertEqual(res["statusCode"], 200)
 
 
 class SpamTests(unittest.TestCase):

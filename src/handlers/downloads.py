@@ -12,12 +12,13 @@ import time
 
 from stripe_link.common import error_response, json_response, parse_json_body, query_params, resolve_stripe_mode, tenant_id_from_event
 from stripe_link.domain.downloads import asset_bucket_key, sanitize_filename
+from stripe_link.domain.business_email import verified_email
 from stripe_link.domain.lead_magnets import COLLECTABLE_FIELDS, download_offer, find_ribbon, missing_fields
 from stripe_link.domain.leads import build_lead_submission, is_spam, lead_id_for
 from stripe_link.ids import generate_id
 from stripe_link.mailer import send_email
 from html import escape
-from stripe_link.repositories.documents import RepositoryError, leads_repository, orders_repository, pages_repository, products_repository
+from stripe_link.repositories.documents import RepositoryError, leads_repository, orders_repository, pages_repository, products_repository, user_profiles_repository
 
 DOWNLOAD_URL_TTL_SECONDS = 300
 # An emailed link is read from an inbox, not clicked immediately. Five minutes would be expired by
@@ -150,6 +151,7 @@ def lead_download_handler(
     leads_repo=None,
     s3_client=None,
     mailer_send=None,
+    profiles_repo=None,
     now_fn=lambda: int(time.time()),
 ):
     """Public: hand a visitor a Page Ribbon's file, capturing a lead first when the ribbon asks for one.
@@ -243,6 +245,26 @@ def lead_download_handler(
     if not emailing:
         return json_response({"url": url, "filename": filename})
 
+    # The tenant's sending identity. Junior Bay's SES account has production access and will mail anyone,
+    # so the PLATFORM is what refuses an unverified tenant — SES will not do it for us
+    # (plans/TENANT_SENDER_IDENTITY.md). Gate is here, at the send, not in the builder's UI: the next
+    # feature that sends mail would forget the UI check.
+    profile = None
+    try:
+        profile = (profiles_repo or user_profiles_repository()).get(tenant_id, str(page.get("user_id") or tenant_id))
+    except RepositoryError:
+        profile = None
+    business = (profile or {}).get("business") or {}
+    reply_to = verified_email(business)
+    if not reply_to:
+        return error_response(
+            "This page cannot send email yet. Its owner needs to verify a business email address.",
+            status_code=409, code="sender_unverified",
+        )
+    business_name = str(business.get("name") or "").strip()
+    # The subject is the OFFER's name, so it matches whatever the customer just clicked on.
+    offer_name = str(page.get("name") or "").strip() or filename
+
     # A LINK, not an attachment. SES caps a message at 40MB including base64 encoding — which inflates
     # binary by about a third — so a 30MB file cannot be attached at all, and large attachments trip spam
     # filters and mailbox quotas even when they fit. A link has no size limit, can expire, and reuses the
@@ -250,7 +272,9 @@ def lead_download_handler(
     try:
         (mailer_send or send_email)(
             to=submitted["email"],
-            subject=f"Your download: {filename}",
+            from_name=business_name,
+            reply_to=reply_to,
+            subject=offer_name,
             html=(
                 f"<p>Here is the file you asked for.</p>"
                 f'<p><a href="{escape(url)}">Download {escape(filename)}</a></p>'

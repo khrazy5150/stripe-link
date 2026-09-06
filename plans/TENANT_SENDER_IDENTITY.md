@@ -68,12 +68,12 @@ real customers with real addresses, and the failure is invisible to us — they 
 Since this address must survive a confirmation code anyway, a catch-all address that is fake will fail at
 that step regardless. The code IS the proof of existence; the validator is only there to catch the obvious.
 
-**Recommendation:** hard-reject disposable and syntactically/DNS invalid. Treat catch-all as a soft warning
-that still allows submission, with the code doing the real work.
+**DECIDED 2026-09-06:** hard-reject disposable and syntactically/DNS invalid. Catch-all is a soft warning
+that still allows submission, with the confirmation code doing the real work.
 
-**Vendor is an open decision** — ZeroBounce, NeverBounce, Kickbox, AbstractAPI are the usual candidates.
-Each is a new external dependency, a secret to manage, a per-check cost, and a request in the signup path
-that must fail *open* (if the validator is down, do not block a legitimate tenant; the code still gates).
+**Vendor DECIDED 2026-09-06: Debounce** (`api.debounce.io`). It must fail **open** — if the validator is
+unreachable or errors, let the address through; the confirmation code still gates. A dependency that can
+block signup when it has an outage is worse than no validator at all.
 
 ## 5. Enforcement — "universally" needs a defined edge
 
@@ -86,9 +86,9 @@ Affected today:
 
 ⚠️ **Decide explicitly:** do transactional emails the tenant did not compose — order receipts, refund
 notices — also require a verified business email? Gating those would mean an unverified tenant's *customers*
-stop getting receipts, which punishes the wrong person. My recommendation is to gate **tenant-authored
-sends** (lead magnets, campaigns) and let platform-authored transactional mail continue from the platform
-identity with no tenant reply-to.
+stop getting receipts, which punishes the wrong person. **DECIDED 2026-09-06:** gate **tenant-authored sends** (lead magnets, campaigns). Platform-authored
+transactional mail — receipts, refund notices, invoices — keeps sending from the platform identity with no
+tenant reply-to, so an unverified tenant's CUSTOMERS are never punished for the tenant's inaction.
 
 ## 6. Builder-side message
 
