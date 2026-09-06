@@ -71,14 +71,35 @@ class ValidationTests(unittest.TestCase):
                 self.assertTrue(result["allowed"])
                 self.assertFalse(result["checked"], "an unanswered check must not look like a pass")
 
-    def test_catch_all_is_reported_not_blocked(self):
+    def _debounce(self, body):
         class R:
-            def read(self):
-                return b'{"debounce":{"code":"4"}}'
+            def read(self_inner):
+                return body
+        return check_email("a@b.co", api_key="k", opener=lambda *_a, **_k: R())
 
-        result = check_email("a@b.co", api_key="k", opener=lambda *_a, **_k: R())
-        self.assertTrue(result["allowed"], "catch-all domains belong to real businesses")
-        self.assertTrue(result["catch_all"])
+    def test_it_keys_on_the_result_string_not_the_numeric_code(self):
+        # Verified against the live API 2026-09-06: code 5 returns "Safe to Send" for keith@juniorbay.net
+        # and "Risky" for support@juniorbay.net. The SAME code, different results — so the code alone
+        # cannot decide, and an earlier version of this keyed on codes and let mailinator straight through.
+        safe = self._debounce(b'{"debounce":{"code":"5","result":"Safe to Send","reason":"Deliverable"}}')
+        risky = self._debounce(b'{"debounce":{"code":"5","result":"Risky","reason":"Role"}}')
+        self.assertTrue(safe["allowed"])
+        self.assertTrue(risky["allowed"])
+
+    def test_role_addresses_are_allowed(self):
+        # support@, info@, hello@ are role addresses, which Debounce marks Risky — and a role address at
+        # the company domain is exactly what a business email usually IS. Blocking Risky would refuse the
+        # archetypal correct answer, including Google's and Stripe's own contact addresses.
+        result = self._debounce(b'{"debounce":{"code":"4","result":"Risky","reason":"Accept All, Role"}}')
+        self.assertTrue(result["allowed"])
+        self.assertTrue(result["catch_all"], "reported, never blocking")
+
+    def test_invalid_and_disposable_are_refused(self):
+        disposable = self._debounce(b'{"debounce":{"code":"3","result":"Invalid","reason":"Disposable"}}')
+        syntax = self._debounce(b'{"debounce":{"code":"1","result":"Invalid","reason":"Syntax"}}')
+        self.assertFalse(disposable["allowed"])
+        self.assertIn("disposable", disposable["reason"].lower())
+        self.assertFalse(syntax["allowed"])
 
 
 if __name__ == "__main__":

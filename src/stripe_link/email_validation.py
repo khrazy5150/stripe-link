@@ -20,9 +20,21 @@ _KEY_CACHE: dict[str, str] = {}
 DEBOUNCE_URL = "https://api.debounce.io/v1/"
 TIMEOUT_SECONDS = 4          # in a signup path: better to let it through than to make someone wait
 
-# Debounce result codes. 5 = deliverable, 4 = risky/accept-all, 8 = disposable, 6 = invalid/undeliverable.
-BLOCKING_CODES = {"6", "8"}
-CATCH_ALL_CODES = {"4"}
+# Debounce's `result` STRING is authoritative, not its numeric code. Verified against the live API
+# 2026-09-06, and the codes do not mean what a reasonable person would guess:
+#
+#   not-an-email          code 1  Invalid        (Syntax)
+#   test@mailinator.com   code 3  Invalid        (disposable — NOT a distinct "disposable" code)
+#   nonexistent@…         code 6  Invalid
+#   keith@juniorbay.net   code 5  Safe to Send   (Deliverable)
+#   support@juniorbay.net code 5  Risky          (Role) — SAME code, different result
+#   info@google.com       code 4  Risky          (Accept All, Role)
+#
+# The last two are the point. `support@`, `info@`, `hello@` are ROLE addresses, which Debounce marks Risky
+# — and a role address at the company domain is exactly what a business email usually IS. Blocking Risky
+# would refuse the archetypal correct answer, and refuse Google's and Stripe's own contact addresses.
+BLOCKING_RESULTS = {"invalid"}
+RISKY_RESULT = "risky"
 
 
 def _region() -> str:
@@ -71,9 +83,14 @@ def check_email(email: str, *, api_key: str | None = None, opener=None, secrets_
         return {"allowed": True, "reason": "", "catch_all": False, "checked": False}
 
     debounce = payload.get("debounce") or {}
-    code = str(debounce.get("code") or "")
-    if code in BLOCKING_CODES:
+    result = str(debounce.get("result") or "").strip().lower()
+    detail = str(debounce.get("reason") or "").lower()
+    if result in BLOCKING_RESULTS:
         reason = ("That looks like a disposable address. Please use your business email."
-                  if code == "8" else "That address does not appear to exist.")
+                  if "disposable" in detail else
+                  "That address does not look valid. Please check it and try again.")
         return {"allowed": False, "reason": reason, "catch_all": False, "checked": True}
-    return {"allowed": True, "reason": "", "catch_all": code in CATCH_ALL_CODES, "checked": True}
+    # Risky covers accept-all AND role addresses. Both are allowed: the confirmation code is what proves
+    # the mailbox exists, and this flag is only for reporting.
+    return {"allowed": True, "reason": "", "catch_all": result == RISKY_RESULT and "accept all" in detail,
+            "checked": True}
