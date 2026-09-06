@@ -11,7 +11,22 @@ Every email the platform sends *on a tenant's behalf* must carry:
 |---|---|
 | From | `"{Business name}" <support@juniorbay.net>` |
 | Reply-To | the tenant's **verified** business email |
-| Subject | the **offer name**, so it matches what the customer clicked |
+| Subject | the **ribbon's headline** — the promise the visitor actually clicked |
+
+**Corrections made once this was live and tested (2026-09-06).**
+
+*From:* the display name is `formataddr`-quoted, not concatenated. A tenant-typed business name routinely
+contains RFC 5322 specials — "Acme, Inc." being the ordinary case — and unquoted, the comma reads as an
+address separator and SES rejects the message.
+
+An empty business name no longer collapses to the bare platform address: it falls through to
+`display_name`, then first + last. A sole trader who never filled in a business name still has a name, and
+a recipient who sees `support@juniorbay.net` with nothing beside it has been handed Junior Bay's mail
+rather than the merchant's — the one failure this whole feature exists to prevent.
+
+*Subject:* first shipped as the page's name, which is an internal label the tenant picked for a list
+screen; it arrived in the inbox as "Creatine Gummies Landing Page". It is now the ribbon headline, falling
+back to the page name, then the filename, so it is never empty.
 
 And the hard gate: **no tenant may send through Junior Bay's SES account without a verified reply-to.**
 Junior Bay is out of the SES sandbox and can mail anyone — which is exactly why the platform, not SES, has
@@ -166,3 +181,27 @@ freebie and was abandoned afterwards. That protects Junior Bay's SES reputation,
 at risk — a bounce rate above ~5% threatens the sending account for every tenant at once.
 
 Not built: campaign sending does not exist yet. Recorded here so it is designed in from the start.
+
+
+## The Junior Bay sign-off
+
+Free tenants' outbound mail carries a footer: the mark, a rule, and *"Want to start your own online store?
+Try it for free"*, linking to the homepage with a `utm_campaign=signature` tag. Premium (tier `pro`) does
+not carry it — removing the platform's branding is part of what the upgrade buys.
+
+The decision lives in `send_email` itself, not in the callers. Eight places send mail today; a sign-off
+that each of them has to remember is one the ninth feature ships without, and "on everything" is the whole
+point. Callers opt in by passing `tenant_id`; `profile.py` opts out explicitly with `signature=False`,
+because a verification code is not the place to invite someone to start the store they already run.
+
+Two deliberate fail-safes: an unreadable tier shows the signature (a lookup failure must not hand a free
+tenant the premium perk), and a lookup failure never blocks the send (a footer must not be the reason a
+customer misses their receipt).
+
+The tier vocabulary is imported from `domain/fees.py` rather than restated, so a future tier cannot mean
+one thing to billing and another to this footer.
+
+**The trap worth remembering:** the tier lookup happens inside the mailer, so it is invisible in any
+sender's own source — no test that reads a handler can see it. Three functions could mail but not read a
+tier, which in production is an AccessDeniedException, not a missing footer. `GrantTests` checks
+`template.yaml` directly instead.
