@@ -1,3 +1,4 @@
+import json
 import unittest
 
 from stripe_link.common import normalize_stripe_mode, resolve_stripe_mode
@@ -42,3 +43,41 @@ class ResolveStripeModeTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ResolveModeFromUnparsedBodyTests(unittest.TestCase):
+    """A published page sends `mode` in the POST body and nothing else — no query string, no header.
+
+    The handlers call resolve_stripe_mode(event) with no body, so until the function parsed the body itself
+    every such POST resolved to "test" and read the wrong mode's documents. A live page's Page Ribbon looked
+    up its own section under PAGE#test#... and 404'd. These lock the real client payload, not a synthetic one.
+    """
+
+    @staticmethod
+    def _post(payload):
+        return {"httpMethod": "POST", "body": json.dumps(payload)}
+
+    def test_live_mode_in_json_body_is_read_without_being_passed(self):
+        self.assertEqual(resolve_stripe_mode(self._post({"mode": "live", "page_id": "p1"})), "live")
+
+    def test_body_mode_outranks_query_and_header(self):
+        event = self._post({"mode": "live"})
+        event["queryStringParameters"] = {"mode": "test"}
+        event["headers"] = {"X-Stripe-Mode": "test"}
+        self.assertEqual(resolve_stripe_mode(event), "live")
+
+    def test_header_still_wins_when_body_has_no_mode(self):
+        event = self._post({"page_id": "p1"})
+        event["headers"] = {"X-Stripe-Mode": "live"}
+        self.assertEqual(resolve_stripe_mode(event), "live")
+
+    def test_unparseable_body_falls_back_instead_of_raising(self):
+        event = {"httpMethod": "POST", "body": "not json", "headers": {"X-Stripe-Mode": "live"}}
+        self.assertEqual(resolve_stripe_mode(event), "live")
+
+    def test_non_object_body_falls_back(self):
+        self.assertEqual(resolve_stripe_mode({"body": "[1,2,3]"}), "test")
+
+    def test_explicitly_passed_body_is_not_second_guessed(self):
+        # page_render.py passes its parsed body; an empty one must NOT re-read the raw event.
+        self.assertEqual(resolve_stripe_mode(self._post({"mode": "live"}), {}), "test")

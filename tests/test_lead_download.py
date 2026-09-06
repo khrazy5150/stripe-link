@@ -140,6 +140,34 @@ class WiringTests(unittest.TestCase):
         self.assertIn("leads_repository()", src)
         self.assertIn("pages_repository(mode=mode)", src)
 
+    def test_a_live_page_is_looked_up_in_live_mode(self):
+        """The pages repo is mode-scoped: the SK is PAGE#{mode}#{page_id}, so resolving the wrong mode does
+        not return a stale page — it returns a DIFFERENT page, or none. A published live page whose visitor
+        was answered out of the test-mode copy 404'd on a ribbon that plainly existed.
+
+        The published page sends `mode` in the POST body and nothing else — no query string, no header — so
+        this asserts against that exact payload rather than a convenient one.
+        """
+        from unittest import mock
+        from handlers import downloads
+
+        captured = {}
+
+        def fake_pages_repository(**kwargs):
+            captured.update(kwargs)
+            return FakeRepo(page({"action": "download", "asset": ASSET}))
+
+        with mock.patch.object(downloads, "pages_repository", fake_pages_repository), \
+             mock.patch.object(downloads, "leads_repository", lambda: FakeRepo()), \
+             mock.patch.object(downloads, "user_profiles_repository", lambda: FakeRepo(VERIFIED_PROFILE)):
+            res = downloads.lead_download_handler(
+                {"httpMethod": "POST", "body": json.dumps({
+                    "tenant_id": "t1", "page_id": "p1", "section_id": "rb", "mode": "live"})},
+                None, s3_client=FakeS3(), mailer_send=FakeMailer(), now_fn=lambda: 1700000000,
+            )
+        self.assertEqual(captured.get("mode"), "live")
+        self.assertEqual(res["statusCode"], 200)
+
 
 class EmailDeliveryTests(unittest.TestCase):
     """Same asset, same signed URL, same lead — the section decides whether a browser follows the link now

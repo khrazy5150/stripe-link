@@ -127,9 +127,17 @@ def resolve_stripe_mode(event: dict[str, Any], body: dict[str, Any] | None = Non
     """The canonical per-request Stripe mode (test/live) for the decoupled model: read it from the REQUEST — body
     `mode`, `?mode=`, or the `X-Stripe-Mode` header — instead of inferring it from the deployment environment
     (plans/STRIPE_MODE_DECOUPLING.md). Fail-safe: an ABSENT mode falls back to `default` ("test"), so a caller that
-    forgets to send one can never mutate live data. P0 scaffolding — NOT yet wired into handlers; phases P1/P2 thread
-    it through the dashboard + entity read/write paths."""
-    body = body or {}
+    forgets to send one can never mutate live data. Precedence is body, then `?mode=`, then header: the dashboard
+    sends the header on every request, while published pages put `mode` in the POST body and a URL param on GETs."""
+    if body is None:
+        # The docstring promises the BODY is a source, but a caller has to hand it over — and almost none did,
+        # so every POST from a published page (which sends `mode` in its JSON body and has no query string or
+        # header) silently resolved to the default and read the wrong mode's documents. Read it here instead
+        # of trusting 20-odd call sites to remember: one implementation, no agreement to maintain.
+        try:
+            body = parse_json_body(event)
+        except ValueError:
+            body = {}
     raw = (
         str(body.get("mode") or "").strip()
         or str(query_params(event).get("mode") or "").strip()
