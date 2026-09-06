@@ -106,6 +106,7 @@ def start_business_email_verification(event, repository, *, mailer_send=None, no
             subject="Your Junior Bay verification code",
             text=f"Your verification code is {code}. It expires in 5 minutes.",
             html=f"<p>Your verification code is <strong>{code}</strong>.</p><p>It expires in 5 minutes.</p>",
+            signature=False,  # platform -> tenant: they already have the store the sign-off advertises
         )
     except Exception:  # noqa: BLE001 - tell the tenant; a code they never receive is a dead end
         return error_response("We could not send the code. Please check the address and try again.",

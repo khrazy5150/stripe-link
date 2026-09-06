@@ -10,6 +10,12 @@ import os
 from email.utils import formataddr
 from typing import Any
 
+from stripe_link.domain.platform_signature import (
+    shows_platform_signature,
+    signature_html,
+    signature_text,
+)
+
 
 class EmailError(RuntimeError):
     pass
@@ -38,6 +44,18 @@ def from_email_address(display_name: str = "") -> str:
     return formataddr((name, address)) if name else address
 
 
+def _tenant_shows_signature(tenant_id: str, profiles_repo: Any | None = None) -> bool:
+    """Read the tenant's tier. Unreadable means free: a lookup failure must not hand out the premium perk."""
+    try:
+        if profiles_repo is None:
+            from stripe_link.repositories.documents import tenant_profiles_repository
+
+            profiles_repo = tenant_profiles_repository()
+        return shows_platform_signature(profiles_repo.get(tenant_id, tenant_id))
+    except Exception:  # noqa: BLE001 - a footer must never be the reason a message fails to send
+        return True
+
+
 def send_email(
     *,
     to: str,
@@ -46,13 +64,34 @@ def send_email(
     text: str = "",
     from_name: str = "",
     reply_to: str = "",
+    tenant_id: str = "",
+    signature: bool | None = None,
+    profiles_repo: Any | None = None,
     client: Any | None = None,
 ) -> dict[str, Any]:
+    """Send one message as the tenant, appending the platform sign-off unless they have paid it away.
+
+    The signature decision lives HERE, at the single choke point every send already passes through, rather
+    than in each of the eight callers -- the next feature that mails something would forget, and the whole
+    point of a sign-off is that it is on everything.
+
+    `tenant_id` opts a message in and resolves the tier. `signature=False` opts out explicitly, which is
+    what platform-to-tenant mail does: a verification code is not the place to invite someone to start the
+    store they already run.
+    """
     recipient = str(to or "").strip()
     if not recipient:
         raise EmailError("Recipient email is required.")
     if not html and not text:
         raise EmailError("Email must include an html or text body.")
+
+    if signature is None:
+        signature = bool(str(tenant_id or "").strip()) and _tenant_shows_signature(tenant_id, profiles_repo)
+    if signature:
+        if html:
+            html += signature_html()
+        if text:
+            text += signature_text()
 
     body: dict[str, Any] = {}
     if html:

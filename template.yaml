@@ -1027,6 +1027,10 @@ Resources:
         # (plans/TENANT_SENDER_IDENTITY.md), which means reading their profile.
         - DynamoDBReadPolicy:
             TableName: !Ref UserProfilesTable
+        # Sending mail reads the tenant's tier: free tenants carry the Junior Bay sign-off,
+        # premium has paid it away (domain/platform_signature.py).
+        - DynamoDBReadPolicy:
+            TableName: !Ref TenantProfilesTable
         - S3ReadPolicy:
             BucketName: !Ref MediaBucket
         # The email_file delivery mails a LINK, so this sends mail but never carries an attachment.
@@ -3107,6 +3111,10 @@ Resources:
       Description: Scheduled sweep that emails abandoned-cart recovery nudges.
       Timeout: 120
       Policies:
+        # Sending mail reads the tenant's tier: free tenants carry the Junior Bay sign-off,
+        # premium has paid it away (domain/platform_signature.py).
+        - DynamoDBReadPolicy:
+            TableName: !Ref TenantProfilesTable
         - DynamoDBCrudPolicy:
             TableName: !Ref CartsTable
         - DynamoDBReadPolicy:
@@ -3133,6 +3141,10 @@ Resources:
       Description: Scheduled sweep that sends due post-purchase review invitation emails.
       Timeout: 120
       Policies:
+        # Sending mail reads the tenant's tier: free tenants carry the Junior Bay sign-off,
+        # premium has paid it away (domain/platform_signature.py).
+        - DynamoDBReadPolicy:
+            TableName: !Ref TenantProfilesTable
         - DynamoDBCrudPolicy:
             TableName: !Ref ReviewsTable
         - DynamoDBReadPolicy:

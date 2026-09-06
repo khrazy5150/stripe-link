@@ -122,7 +122,8 @@ def send_invoice_route(event, repository, *, stripe_repo, tenant_repo, secret_ci
     send = mailer_send or send_email
     sent = False
     try:
-        send(to=customer["email"], subject=content["subject"], html=content["html"], text=content["text"], from_name=business_name, reply_to=support_email)
+        send(to=customer["email"], subject=content["subject"], html=content["html"], text=content["text"],
+             from_name=business_name, reply_to=support_email, tenant_id=tenant_id)
         sent = True
     except Exception:  # noqa: BLE001 - a delivery failure must not lose the finalized invoice
         pass

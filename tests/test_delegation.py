@@ -149,7 +149,7 @@ class ApplyDelegationTests(unittest.TestCase):
         appt, appointments, services, fulfillers, tenants, conns = self._env()
         sent = {}
 
-        def fake_mail(*, to, subject, html, text, from_name, reply_to):
+        def fake_mail(*, to, subject, html, text, from_name, reply_to, **_kw):
             sent.update({"to": to, "subject": subject})
 
         apply_delegation(appt, action="upsert", change="booked", appointments_repo=appointments,
@@ -167,7 +167,7 @@ class ApplyDelegationTests(unittest.TestCase):
             fulfiller_cal="cal_missing", connections=[conn("cal_default", default=True)])
         sent = {}
 
-        def fake_mail(*, to, subject, html, text, from_name, reply_to):
+        def fake_mail(*, to, subject, html, text, from_name, reply_to, **_kw):
             sent.update({"to": to})
 
         apply_delegation(appt, action="upsert", change="booked", appointments_repo=appointments,

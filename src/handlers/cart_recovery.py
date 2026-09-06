@@ -56,6 +56,7 @@ def handler(event, context, *, carts_repo=None, cart_tokens_repo=None, sites_rep
             mailer_send(
                 to=str(cart.get("email") or ""), subject=content["subject"],
                 html=content["html"], text=content["text"], from_name=str(org.get("name") or ""),
+                tenant_id=tenant_id,
             )
             carts_repo.put(mark_recovery_sent(cart, now))
             sent += 1

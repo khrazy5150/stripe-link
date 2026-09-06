@@ -100,7 +100,7 @@ class SendInvoiceHandlerTests(unittest.TestCase):
             {"id": "in_1", "hosted_invoice_url": "https://pay.stripe.com/x", "invoice_pdf": "https://pdf"},  # finalize
         )
         sent = {}
-        def fake_send(*, to, subject, html, text, from_name, reply_to):
+        def fake_send(*, to, subject, html, text, from_name, reply_to, **_kw):
             sent.update({"to": to, "subject": subject})
             return {"MessageId": "m1"}
 

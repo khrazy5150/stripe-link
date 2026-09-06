@@ -1130,6 +1130,7 @@ def send_order_receipt(
             text=content["text"],
             from_name=context.get("business_name", ""),
             reply_to=context.get("support_email", ""),
+            tenant_id=tenant_id,
         )
         return {"status": "sent", "to": email}
     except Exception as exc:  # noqa: BLE001 - receipt failure must not fail the webhook

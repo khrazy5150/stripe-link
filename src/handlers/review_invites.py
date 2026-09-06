@@ -44,7 +44,7 @@ def handler(event, context, *, invites_repo=None, sites_repo=None, mailer_send=N
                 mailer_send(
                     to=(current.get("customer") or {}).get("email", ""),
                     subject=content["subject"], html=content["html"], text=content["text"],
-                    from_name=str(org.get("name") or ""),
+                    from_name=str(org.get("name") or ""), tenant_id=tenant_id,
                 )
                 current = mark_step_sent(current, step["day"], now)
                 sent += 1

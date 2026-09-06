@@ -29,7 +29,7 @@ def route_and_sync(appointment, *, service, fulfiller, connections, action, conn
     return events, status
 
 
-def notify_delegate(appointment, service, fulfiller, *, change, business_name="", support_email="", manage_url="", mailer_send=None):
+def notify_delegate(appointment, service, fulfiller, *, change, business_name="", support_email="", manage_url="", tenant_id="", mailer_send=None):
     """Email the assigned staff person their booking. Returns True if an email was sent. No-op
     when there is no assigned fulfiller or they have no email."""
     email = str((fulfiller or {}).get("email") or "").strip()
@@ -43,7 +43,8 @@ def notify_delegate(appointment, service, fulfiller, *, change, business_name=""
     )
     send = mailer_send or send_email
     try:
-        send(to=email, subject=content["subject"], html=content["html"], text=content["text"], from_name=business_name, reply_to=support_email)
+        send(to=email, subject=content["subject"], html=content["html"], text=content["text"],
+             from_name=business_name, reply_to=support_email, tenant_id=tenant_id)
         return True
     except Exception:  # noqa: BLE001 - a delivery failure must not break the booking
         return False
@@ -88,7 +89,7 @@ def apply_delegation(appointment: dict[str, Any], *, action, change, services_re
             notify_delegate(
                 appointment, service, fulfiller, change=change,
                 business_name=str(profile.get("business_name") or ""), support_email=str(profile.get("support_email") or ""),
-                mailer_send=mailer_send,
+                tenant_id=tenant_id, mailer_send=mailer_send,
             )
     except Exception:  # noqa: BLE001 - delegation must never break a booking
         pass
