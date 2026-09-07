@@ -857,6 +857,15 @@ discloses it. These changes are about polish and accidental exposure, not secrec
     and no more than 25 hours** (validated). Detect automatically (e.g. `astral` raises when there is no sunset)
     and prompt for / fall back to the manual window; optionally let any tenant use the manual window as an
     override.
+  - **Artwork already exists (found 2026-09-07).** `s3://www.juniorbay.net/images/frontpage/sabbath/` holds
+    **16 curated Sabbath photos** (`1.jpg`…`16.jpg`), from a 2020 attempt at this same idea — the old
+    homepage was to show them during Sabbath hours, and it died when the external sunset API it depended on
+    went away. The Lambda and its stack are deleted; the images are deliberately kept. The closure page
+    needs exactly one, so pick from there rather than sourcing new art.
+  - **Do not reach for an external sunset service.** That dependency is precisely what killed the 2020
+    version. Sundown is pure math from lat/long and date, which is why this plan already specifies a local
+    solar algorithm (`astral`) — no availability risk, and the polar no-sundown case surfaces as an
+    exception rather than a failed HTTP call.
   - During the window, checkout is **replaced by a branded closure page**: *"Happy Sabbath! This store is
     temporarily closed for business in observance of God's Holiday. We will resume business again on {date} at
     {end-of-Sabbath-mode time}."* — same design family as the existing "This store is temporarily offline"
