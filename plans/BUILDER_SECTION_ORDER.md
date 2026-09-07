@@ -1,6 +1,6 @@
 # Builder section order — the form IS the page map
 
-Status: PLANNED, not built. Designed 2026-08-30 with the author.
+Status: ✅ **SHIPPED** (verified 2026-09-07). Designed 2026-08-30 with the author.
 Related: `PAGE_COMPOSER.md` (§ Cardinality, composition), `LANDING_PAGE_GOAL_COMPOSITION.md`,
 `SEMANTIC_HTML.md`, `FORM_BUILDER.md`, `SOCIAL_MEDIA_PAGES.md`.
 
@@ -190,7 +190,7 @@ stored copy can.
 
 # Phase 2 — compact rows + modal editing
 
-Status: PLANNED, not built. Agreed 2026-08-30, after Phase 1 shipped to sandbox.
+Status: ✅ **SHIPPED.** Agreed 2026-08-30, after Phase 1 shipped to sandbox; compact rows and modal editing are live.
 
 ## Why Phase 1 is not the end state
 

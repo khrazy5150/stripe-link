@@ -471,7 +471,14 @@ So one fix serves both, and the accessible answer is the simpler one:
 Worth doing regardless of the mobile timeline — the keyboard gap is a real accessibility defect today
 (WCAG 2.1.1 Keyboard), not just a phone problem.
 
-### ⭐ HIGH — Builder section order: make the form the page map (plan plans/BUILDER_SECTION_ORDER.md, 2026-08-30)
+### ✅ Builder section order: the form IS the page map — SHIPPED (verified 2026-09-07)
+
+**Verified shipped 2026-09-07.** The invariant holds: Page Settings is a separate group above Page
+Content (the builder cites `BUILDER_SECTION_ORDER.md §2` at the code site), rows are compact with modal
+editing, `default_order` lives in `composition_rules.json` and is read by `composition.baseline_order()`,
+and the standalone Section-order list was retired (`b51078e`, `023ab04`, `ae013c0`, `5dd7659`).
+
+Original framing, kept for the reasoning:
 
 Invariant to create: THE BUILDER FORM READS TOP-TO-BOTTOM IN THE SAME ORDER THE PAGE RENDERS. cart has
 this; link does not, and two attempts to bolt ordering on without it both shipped and both are wrong --
@@ -1319,9 +1326,10 @@ two images collides (second ref wins, shared spinner, shared error). Nothing hit
 element has two images — Before/After would be the first. Fixed structurally by the shared component
 owning its own input.
 
-### MEDIUM — three landing elements still unbuilt (remainder of the unit above, 2026-09-06)
+### ✅ Three remaining landing elements — ALL RESOLVED 2026-09-07
 
-Named in the original discussion, never built, and not absorbed by anything that shipped:
+Named in the original discussion. Two shipped, one dropped on the author's call — recorded so the
+dropped one reads as a decision rather than an omission:
 
 - ~~**Comparison table**~~ — **DROPPED 2026-09-07 (author).** Narrowest use, hardest mobile problem
   (a three-column table has to become card-per-column below ~600px), and the only element carrying
