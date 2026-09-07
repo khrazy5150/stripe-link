@@ -1,0 +1,147 @@
+"""Which typeface a page uses, and who decided it.
+
+Published pages carried NO webfont until 2026-09-07 — every one fell back to whatever the visitor's device
+happened to have, so a tenant's chosen typography never reached their customers. Presets now carry
+pairings, and four levels resolve which family wins.
+"""
+
+import json
+import pathlib
+import unittest
+
+from stripe_link.domain.fonts import (
+    DEFAULT_PRESET,
+    PAIRINGS,
+    PRESET_PAIRINGS,
+    SERVABLE_FAMILIES,
+    families_to_load,
+    pairing_for_preset,
+    resolve_families,
+)
+from stripe_link.runtime.html import UNIVERSAL_BUNDLE_THEME_PRESETS, font_vars, render_head_seo_tags
+
+PRESET_PAGE = {"theme": {"preset": "midnight-luxe"}}
+
+
+class PrecedenceTests(unittest.TestCase):
+    """system fallback ← preset ← tenant default (behind the toggle) ← page override."""
+
+    def test_a_preset_proposes_its_pairing(self):
+        self.assertEqual(resolve_families(PRESET_PAGE), {"heading": "Raleway", "body": "Lato"})
+
+    def test_a_tenant_default_does_nothing_without_the_toggle(self):
+        """The toggle is the load-bearing half. Without it, idly picking a font in preferences would
+        silently re-typeset every page the tenant has ever published."""
+        prefs = {"fonts": {"heading": "Oswald"}}
+        self.assertEqual(resolve_families(PRESET_PAGE, prefs)["heading"], "Raleway")
+
+    def test_a_tenant_default_applies_when_the_toggle_is_on(self):
+        prefs = {"fonts": {"override_presets": True, "heading": "Oswald"}}
+        self.assertEqual(resolve_families(PRESET_PAGE, prefs)["heading"], "Oswald")
+
+    def test_a_page_override_beats_the_tenant_default(self):
+        # A house style should not have to be switched off to make one page different.
+        page = {"theme": {"preset": "midnight-luxe", "fonts": {"heading": {"family": "Montserrat"}}}}
+        prefs = {"fonts": {"override_presets": True, "heading": "Oswald"}}
+        self.assertEqual(resolve_families(page, prefs)["heading"], "Montserrat")
+
+    def test_an_explicit_system_choice_beats_the_preset(self):
+        page = {"theme": {"preset": "fire-sale", "fonts": {"body": {"family": "system"}}}}
+        self.assertEqual(resolve_families(page)["body"], "system")
+        self.assertNotIn("system", families_to_load(page), "system must never be requested from the CDN")
+
+
+class ServabilityTests(unittest.TestCase):
+    def test_only_verified_families_are_requested(self):
+        """A family the service cannot serve produces CSS pointing at a 404 — worse than no webfont."""
+        page = {"theme": {"preset": "clean-slate", "fonts": {"heading": {"family": "Inter Tight"}}}}
+        self.assertNotIn("Inter Tight", families_to_load(page))
+
+    def test_but_an_unservable_choice_still_reaches_the_css(self):
+        """Dropping it from the STACK would silently replace the tenant's explicit choice with the
+        preset's. The visitor may have the font locally; if not, the fallback applies."""
+        page = {"theme": {"preset": "clean-slate", "fonts": {"heading": {"family": "Inter Tight"}}}}
+        self.assertEqual(resolve_families(page)["heading"], "Inter Tight")
+
+    def test_every_pairing_uses_only_servable_families(self):
+        for name, pairing in PAIRINGS.items():
+            for role, family in pairing.items():
+                with self.subTest(pairing=name, role=role):
+                    self.assertIn(family, SERVABLE_FAMILIES)
+
+    def test_every_colour_preset_has_a_pairing(self):
+        # A preset without one would fall back silently and look unstyled next to its siblings.
+        for preset in UNIVERSAL_BUNDLE_THEME_PRESETS:
+            with self.subTest(preset=preset):
+                self.assertIn(preset, PRESET_PAIRINGS)
+
+    def test_every_named_pairing_exists(self):
+        for preset, pairing in PRESET_PAIRINGS.items():
+            with self.subTest(preset=preset):
+                self.assertIn(pairing, PAIRINGS)
+
+    def test_no_pairing_asks_for_three_families(self):
+        # Every family is a download on a page tuned for LCP.
+        for name, pairing in PAIRINGS.items():
+            with self.subTest(pairing=name):
+                self.assertLessEqual(len(set(pairing.values())), 2)
+
+
+class DefaultTests(unittest.TestCase):
+    def test_the_font_default_matches_the_colour_default(self):
+        """A page showing techno-green colours and modern type would mean the preset does not actually
+        carry the visual identity, which is the entire claim presets make."""
+        self.assertIn(DEFAULT_PRESET, UNIVERSAL_BUNDLE_THEME_PRESETS)
+        self.assertEqual(pairing_for_preset(None), pairing_for_preset(DEFAULT_PRESET))
+
+    def test_an_unknown_preset_falls_back_rather_than_failing(self):
+        self.assertEqual(pairing_for_preset("no-such-preset"), pairing_for_preset(DEFAULT_PRESET))
+
+
+class RenderTests(unittest.TestCase):
+    def _head(self, page, preferences=None):
+        return "\n".join(render_head_seo_tags(page, {"name": "X"}, {}, {}, "T", "D", preferences))
+
+    def test_the_stylesheet_is_linked_with_a_preconnect(self):
+        # Stylesheet then font file is two round trips to a third origin; the handshake is most of the
+        # first one.
+        head = self._head(PRESET_PAGE)
+        self.assertIn('rel="preconnect" href="https://fonts.juniorbay.com"', head)
+        self.assertIn("fonts.juniorbay.com/?family=", head)
+
+    def test_only_the_families_the_page_needs(self):
+        head = self._head(PRESET_PAGE)
+        self.assertIn("family=Lato", head)
+        self.assertIn("family=Raleway", head)
+        self.assertNotIn("family=Oswald", head)
+
+    def test_the_family_list_is_sorted_so_the_url_is_a_stable_cache_key(self):
+        # Two orderings of one page would be two URLs and two downloads of the same fonts.
+        self.assertEqual(families_to_load(PRESET_PAGE), sorted(families_to_load(PRESET_PAGE)))
+
+    def test_a_system_fonts_page_links_nothing(self):
+        page = {"theme": {"preset": "fire-sale", "fonts": {
+            "heading": {"family": "system"}, "body": {"family": "system"}}}}
+        self.assertNotIn("fonts.juniorbay.com", self._head(page))
+
+    def test_the_resolved_family_reaches_the_css_variables(self):
+        """Loading the stylesheet is half the job: without the family in the token the font downloads and
+        nothing on the page ever asks for it."""
+        css = font_vars(PRESET_PAGE)
+        self.assertIn("--sl-font-heading:Raleway,", css)
+        self.assertIn("--sl-font-body:Lato,", css)
+
+    def test_a_fallback_always_follows_the_family(self):
+        # A font that fails to arrive must degrade to something readable, not the browser's default serif.
+        for token in font_vars(PRESET_PAGE).split(";"):
+            with self.subTest(token=token.split(":")[0]):
+                self.assertIn(",", token, "every font token needs a fallback behind it")
+
+    def test_accent_follows_the_heading_unless_named(self):
+        self.assertIn("--sl-font-accent:Raleway,", font_vars(PRESET_PAGE))
+        page = {"theme": {"preset": "midnight-luxe", "fonts": {"accent": {"family": "Oswald"}}}}
+        self.assertIn("--sl-font-accent:Oswald,", font_vars(page))
+
+
+if __name__ == "__main__":
+    unittest.main()

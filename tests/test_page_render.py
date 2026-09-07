@@ -100,7 +100,10 @@ class PageRenderTests(unittest.TestCase):
         self.assertIn("<link rel=\"icon\" href=\"https://images.juniorbay.com/icon/favicon.png\">", html)
         self.assertIn("<link rel=\"shortcut icon\" href=\"https://images.juniorbay.com/icon/favicon.png\">", html)
         self.assertIn("<link rel=\"apple-touch-icon\" href=\"https://images.juniorbay.com/icon/favicon.png\">", html)
-        self.assertIn("--sl-font-body:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Oxygen,Ubuntu,sans-serif", html)
+        # Presets now carry typography, so a page renders its preset's body font ahead of the system
+        # fallback. Before this, published pages loaded NO webfont at all and a tenant's chosen type
+        # never reached their customers (plans/FONT_SERVICE.md).
+        self.assertIn("--sl-font-body:Lato,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Oxygen,Ubuntu,sans-serif", html)
         self.assertIn("font-family:var(--sl-font-body)", html)
         self.assertIn("data-section-type=\"offer_price_selector\"", html)
         self.assertIn("data-price-id=\"price_1bottle\"", html)
@@ -156,7 +159,11 @@ class PageRenderTests(unittest.TestCase):
         self.assertIn("data-start-color=\"#dc2626\"", html)
         self.assertIn("data-end-color=\"#f97316\"", html)
         self.assertIn("data-countdown-display", html)
+        # This fixture explicitly chooses family "system" for every role, so it must load NO webfont --
+        # an explicit choice beats the preset, or picking system fonts would silently hand the tenant a
+        # download they declined.
         self.assertIn("--sl-font-body:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Oxygen,Ubuntu,sans-serif", html)
+        self.assertNotIn("fonts.juniorbay.com", html)
         self.assertIn("--sl-font-heading:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Oxygen,Ubuntu,sans-serif", html)
         self.assertIn("--sl-font-accent:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Oxygen,Ubuntu,sans-serif", html)
         self.assertIn("font-family:var(--sl-font-body)", html)

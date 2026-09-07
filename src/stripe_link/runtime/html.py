@@ -5,7 +5,7 @@ import base64
 import json
 import re
 from typing import Any
-from urllib.parse import urlencode, urlparse
+from urllib.parse import quote, urlencode, urlparse
 
 from stripe_link.platform_config import default_favicon_url
 from stripe_link.domain.bargain import FROM_PREFIX, derived_bargain
@@ -18,6 +18,7 @@ from stripe_link.domain.pricing import PricingError, expand_offer, find_price, r
 from stripe_link.domain.semantic import is_bundle, resolve_semantic_model, subject_from_model
 from stripe_link.domain.reviews import aggregate_reviews, markup_eligible
 from stripe_link.domain.image_crop import crop_style_vars
+from stripe_link.domain.fonts import families_to_load, is_system, resolve_families
 from stripe_link.domain.video_embeds import parse_video_embed
 from stripe_link.domain.section_theme import section_theme_vars
 from stripe_link.domain.service_pricing import resolve_service_price
@@ -988,6 +989,9 @@ def css_var_name(token_name: str) -> str:
     return token_name.replace("_", "-")
 
 
+FONT_SERVICE_ORIGIN = "https://fonts.juniorbay.com"
+
+
 def font_stack(page: dict[str, Any], role: str) -> str:
     fonts = ((page.get("theme") or {}).get("fonts") or {})
     font = fonts.get(role) if isinstance(fonts.get(role), dict) else {}
@@ -1002,13 +1006,40 @@ def font_stack(page: dict[str, Any], role: str) -> str:
     return f"{css_family},{fallback_stack}"
 
 
-def font_vars(page: dict[str, Any]) -> str:
+def font_vars(page: dict[str, Any], preferences: dict[str, Any] | None = None) -> str:
+    """The font tokens, with the resolved family in front of a fallback stack.
+
+    Loading the stylesheet is only half the job: without the family reaching these variables the webfont
+    downloads and nothing on the page ever asks for it. The fallback stays behind every family so a font
+    that fails to arrive degrades to something readable rather than to the browser's default serif.
+
+    `accent` follows the heading unless set, and `mono` is always the system stack -- neither justifies a
+    third download on a page tuned for LCP.
+    """
+    resolved = resolve_families(page, preferences)
+    heading = _family_with_fallback(page, "heading", resolved["heading"])
+    # accent follows the heading unless the tenant named one -- no preset proposes a third family, but
+    # taking the choice away is not the same as declining to make it for them.
+    accent = _family_with_fallback(page, "accent", resolved["accent"]) if "accent" in resolved else heading
     return (
-        f"--sl-font-body:{font_stack(page, 'body')};"
-        f"--sl-font-heading:{font_stack(page, 'heading')};"
-        f"--sl-font-accent:{font_stack(page, 'accent')};"
+        f"--sl-font-body:{_family_with_fallback(page, 'body', resolved['body'])};"
+        f"--sl-font-heading:{heading};"
+        f"--sl-font-accent:{accent};"
         f"--sl-font-mono:{SYSTEM_MONO_FONT_STACK}"
     )
+
+
+def _family_with_fallback(page: dict[str, Any], role: str, family: str) -> str:
+    """`'Family',<fallback stack>`, or the bare stack when the tenant chose system fonts."""
+    fonts = ((page.get("theme") or {}).get("fonts") or {})
+    entry = fonts.get(role) if isinstance(fonts.get(role), dict) else {}
+    fallback_name = str(entry.get("fallback") or "system")
+    fallback = FONT_FALLBACK_STACKS.get(fallback_name, SYSTEM_FONT_STACK)
+    if is_system(family):
+        # An explicit "system" is a decision to load nothing; adding a family here would undo it.
+        return SYSTEM_MONO_FONT_STACK if fallback_name == "monospace" else fallback
+    quoted = f"'{family}'" if any(char.isspace() for char in family) else family
+    return f"{quoted},{fallback}"
 
 
 def render_template_styles(page: dict[str, Any]) -> list[str]:
@@ -1243,8 +1274,11 @@ def render_head_seo_tags(
     services_by_id: dict[str, dict[str, Any]],
     title: str,
     description: str,
+    # The tenant's own font default, applied only behind their explicit override toggle. Absent for every
+    # caller that has no preferences to hand, which resolves to preset fonts -- the correct default.
+    preferences: dict[str, Any] | None = None,
 ) -> list[str]:
-    """Canonical, robots, Open Graph / Twitter Card, and LCP resource hints for the <head>
+    """Canonical, robots, Open Graph / Twitter Card, LCP resource hints and webfonts for the <head>
     (plans/ON_PAGE_SEO_REQUIREMENTS.md SEO-01/02/09/10). Interim: canonical/og:url come from the page's
     published URL; clean root-domain paths and funnel/env noindex land with the Site work."""
     lines: list[str] = []
@@ -1319,6 +1353,16 @@ def render_head_seo_tags(
             )
         else:
             lines.append(f'  <link rel="preload" as="image" href="{escape(image)}" fetchpriority="high">')
+
+    # WEBFONTS. Published pages carried none until now, so a tenant's chosen typography never reached
+    # their customers -- every page fell back to whatever the visitor's device happened to have
+    # (plans/FONT_SERVICE.md). preconnect first: the stylesheet and the font file are two round trips to
+    # a third origin, and the handshake is most of the first one.
+    families = families_to_load(page, preferences)
+    if families:
+        lines.append(f'  <link rel="preconnect" href="{FONT_SERVICE_ORIGIN}" crossorigin>')
+        query = "&".join(f"family={quote(family)}" for family in families)
+        lines.append(f'  <link rel="stylesheet" href="{escape(f"{FONT_SERVICE_ORIGIN}/?{query}")}">')
     return lines
 
 
