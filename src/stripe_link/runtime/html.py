@@ -1883,7 +1883,7 @@ SECTION_REGISTRY: dict[str, dict[str, Any]] = {
     "countdown_timer": {"render": lambda c: render_countdown_timer(c.section, c.page), "version": 1},
     "seo_title": {"render": lambda c: render_seo_title(c.section, c.page, c.products_by_id), "version": 1},
     "brand_label": {"render": lambda c: render_brand_label(c.section, c.page), "version": 1},
-    "hero_media": {"render": lambda c: render_hero_media(c.section, c.offer, c.products_by_id, c.services_by_id), "version": 1},
+    "hero_media": {"render": lambda c: render_hero_media(c.section, c.offer, c.products_by_id, c.services_by_id, (c.page or {}).get("video_posters")), "version": 1},
     "headline": {"render": lambda c: render_headline(c.section), "version": 1},
     "subheadline": {"render": lambda c: render_subheadline(c.section), "version": 1},
     "trust_badges": {"render": lambda c: render_trust_badges(c.section), "version": 1},
@@ -2104,7 +2104,7 @@ def render_video_embed(embed: dict[str, str], alt: str) -> str:
     )
 
 
-def render_media_slide(url: str, alt: str, *, autoplay: bool, eager: bool = False) -> str:
+def render_media_slide(url: str, alt: str, *, autoplay: bool, eager: bool = False, poster: str = "") -> str:
     """The MediaViewer's image/video modes (plans/CONVERSION_CONTEXT.md review 4). A video URL renders a
     <video>. Autoplay adds muted+loop because every browser refuses to autoplay with sound.
 
@@ -2114,7 +2114,9 @@ def render_media_slide(url: str, alt: str, *, autoplay: bool, eager: bool = Fals
     plays automatically for more than five seconds must offer a way to stop it."""
     embed = parse_video_embed(url)
     if embed:
-        return render_video_embed(embed, alt)
+        # A tenant poster wins: YouTube's auto-frame is often a blurred mid-sentence, and Vimeo has no
+        # deterministic thumbnail at all, so this is the only poster it can have.
+        return render_video_embed({**embed, "thumbnail_url": poster or embed["thumbnail_url"]}, alt)
     if is_video_url(url):
         attrs = "controls playsinline" + (" muted loop autoplay" if autoplay else "")
         preload = "auto" if eager else "metadata"
@@ -2193,7 +2195,11 @@ def render_hero_media(
     offer: dict[str, Any],
     products_by_id: dict[str, dict[str, Any]],
     services_by_id: dict[str, dict[str, Any]] | None = None,
+    # embed url -> tenant-supplied poster. Kept on the PAGE rather than in the media list because that
+    # list is plain URL strings, and a poster is about the entry rather than a new kind of entry.
+    posters: dict[str, str] | None = None,
 ) -> str:
+    posters = posters or {}
     product = first_offer_product(offer, products_by_id)
     if derived_offer_type(offer) == "listicle":
         # A listicle's hero carousel IS the offer's items — one slide per item, offer-driven so it can never fall
@@ -2215,7 +2221,8 @@ def render_hero_media(
     overlays = render_hero_overlays(section, offer)
     media_class = "sl-hero-media" + (" has-avatar" if section.get("avatar_url") else "")
     slides = [
-        f"        <div class=\"sl-hero-slide\">{render_media_slide(url, alt, autoplay=autoplay, eager=(index == 0))}</div>"
+        f"        <div class=\"sl-hero-slide\">"
+        f"{render_media_slide(url, alt, autoplay=autoplay, eager=(index == 0), poster=posters.get(url, ''))}</div>"
         for index, url in enumerate(images)
     ]
     # A <figcaption> carrying NAP on local-business heroes (SEO: crawlers weight text around an image).
@@ -5427,7 +5434,7 @@ def render_page_interactions_script(page: dict[str, Any]) -> str:
         "          frame.allow = 'accelerometer; autoplay; encrypted-media; picture-in-picture; web-share';",
         "          frame.referrerPolicy = 'strict-origin-when-cross-origin';",
         "          frame.allowFullscreen = true;",
-        "          box.replaceChildren(frame);",
+        "          box.appendChild(frame);",
         "        });",
         "      });",
         "      document.querySelectorAll('[data-sl-before-after]').forEach((frame) => {",
@@ -5854,6 +5861,13 @@ def render_page_interactions_script(page: dict[str, Any]) -> str:
         "        let heroIndex = 0;",
         "        const heroSync = (index) => {",
         "          heroIndex = index;",
+        # Leaving a slide must silence it. Otherwise a YouTube and a Vimeo embed play over each other and
+        # the visitor cannot see which one is making the noise -- the iframe is off-screen by then.
+        "          heroCarousel.querySelectorAll('.sl-hero-slide').forEach((slide, i) => {",
+        "            if (i === index) return;",
+        "            slide.querySelectorAll('video').forEach((v) => { if (!v.paused) v.pause(); });",
+        "            slide.querySelectorAll('[data-sl-embed] iframe').forEach((f) => f.remove());",
+        "          });",
         "          heroDots.forEach((dot, i) => dot.classList.toggle('is-active', i === index));",
         "          if (heroCounter) heroCounter.textContent = (index + 1) + ' / ' + heroCount;",
         "        };",

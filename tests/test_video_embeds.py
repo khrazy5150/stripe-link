@@ -126,6 +126,77 @@ class ScriptTests(unittest.TestCase):
         self.assertEqual(render_page_interactions_script(page), "")
 
 
+class PosterTests(unittest.TestCase):
+    """A tenant-supplied poster, because the provider's is not always available or good.
+
+    Vimeo has no deterministic thumbnail without an oEmbed lookup, so without this it has no poster at all.
+    YouTube's exists but is an auto-picked frame, often a blurred mid-sentence.
+    """
+
+    SECTION = {"id": "h", "type": "hero_media", "images": ["https://vimeo.com/123456789"]}
+
+    def test_vimeo_without_a_poster_falls_back_to_the_neutral_one(self):
+        from stripe_link.runtime.html import render_hero_media
+        self.assertIn("is-blank", render_hero_media(self.SECTION, {"name": "X"}, {}, {}))
+
+    def test_a_supplied_poster_is_used(self):
+        from stripe_link.runtime.html import render_hero_media
+        html = render_hero_media(self.SECTION, {"name": "X"}, {}, {},
+                                 {"https://vimeo.com/123456789": "https://cdn/poster.webp"})
+        self.assertIn("cdn/poster.webp", html)
+        self.assertNotIn("is-blank", html)
+
+    def test_a_poster_overrides_youtubes_own(self):
+        from stripe_link.runtime.html import render_hero_media
+        section = {**self.SECTION, "images": ["https://youtu.be/dQw4w9WgXcQ"]}
+        html = render_hero_media(section, {"name": "X"}, {}, {},
+                                 {"https://youtu.be/dQw4w9WgXcQ": "https://cdn/better.webp"})
+        self.assertIn("cdn/better.webp", html)
+        self.assertNotIn("hqdefault", html)
+
+    def test_posters_for_other_urls_do_not_leak(self):
+        from stripe_link.runtime.html import render_hero_media
+        html = render_hero_media(self.SECTION, {"name": "X"}, {}, {},
+                                 {"https://youtu.be/somethingelse": "https://cdn/wrong.webp"})
+        self.assertNotIn("cdn/wrong.webp", html)
+
+    def test_the_builder_persists_them(self):
+        # The save payload is an ALLOW-LIST: a field the builder holds but does not list is dropped without
+        # complaint, and the poster would vanish on the first save.
+        import pathlib
+        builder = (pathlib.Path(__file__).resolve().parents[1]
+                   / "dashboard/src/components/LandingPages.vue").read_text()
+        self.assertIn("video_posters: { ...builder.video_posters }", builder)
+        self.assertIn("builder.video_posters = { ...(page.video_posters || {}) }", builder)
+
+
+class CarouselTests(unittest.TestCase):
+    """Leaving a slide has to silence it.
+
+    Two embeds could otherwise play over each other, and the visitor cannot find the one making noise --
+    by then its iframe has scrolled off screen.
+    """
+
+    def _script(self):
+        page = {"page_id": "p", "sections": [{"type": "hero_media",
+                                              "images": ["https://youtu.be/dQw4w9WgXcQ",
+                                                         "https://vimeo.com/123456789"]}]}
+        return render_page_interactions_script(page)
+
+    def test_changing_slide_removes_other_slides_iframes(self):
+        self.assertIn("slide.querySelectorAll('[data-sl-embed] iframe').forEach((f) => f.remove())",
+                      self._script())
+
+    def test_changing_slide_pauses_file_video(self):
+        self.assertIn("v.pause()", self._script())
+
+    def test_the_facade_survives_playing_so_it_can_be_returned_to(self):
+        # replaceChildren destroyed the poster and button, leaving nothing to restore after stopping.
+        script = self._script()
+        self.assertIn("box.appendChild(frame)", script)
+        self.assertNotIn("box.replaceChildren(frame)", script)
+
+
 class BuilderContractTests(unittest.TestCase):
     """The builder refuses what the renderer cannot draw, and vice versa."""
 

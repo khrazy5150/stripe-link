@@ -14,8 +14,8 @@
           @drop="dropOn(index)"
         >
           <span class="media-drag" title="Drag to reorder"><svg width="12" height="16" viewBox="0 0 12 16" fill="currentColor" aria-hidden="true"><circle cx="4" cy="3" r="1.4"></circle><circle cx="4" cy="8" r="1.4"></circle><circle cx="4" cy="13" r="1.4"></circle><circle cx="9" cy="3" r="1.4"></circle><circle cx="9" cy="8" r="1.4"></circle><circle cx="9" cy="13" r="1.4"></circle></svg></span>
-          <span class="media-thumb" :class="{ 'is-video': isVideo(url) }">
-            <img v-if="!isVideo(url)" :src="url" alt="" loading="lazy" />
+          <span class="media-thumb" :class="{ 'is-video': isVideo(url) || isEmbed(url) }">
+            <img v-if="thumbFor(url)" :src="thumbFor(url)" alt="" loading="lazy" />
             <span v-else class="media-play"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg></span>
           </span>
           <span class="media-meta">
@@ -23,7 +23,15 @@
             <span class="media-name" :title="url">{{ shortName(url) }}</span>
           </span>
           <button
-            v-if="!isVideo(url) && assets[url]"
+            v-if="isEmbed(url) && upload"
+            type="button"
+            class="media-crop"
+            :disabled="Boolean(busy) || posterBusy"
+            :aria-label="`Set poster for ${shortName(url)}`"
+            @click="pickPoster(url)"
+          >{{ posters[url] ? "Poster" : "Add poster" }}</button>
+          <button
+            v-if="!isVideo(url) && !isEmbed(url) && assets[url]"
             type="button"
             class="media-crop"
             :disabled="cropBusy"
@@ -88,6 +96,7 @@
         <button type="button" class="secondary-action compact" @click="closeUrlEntry">Cancel</button>
       </div>
 
+      <input ref="posterInput" type="file" accept="image/*" hidden @change="posterPicked" />
       <small v-if="error" class="builder-upload-error">{{ error }}</small>
     </div>
 
@@ -142,6 +151,9 @@ const props = defineProps({
   cropRatios: { type: [Number, Array, String], default: null },
   // url -> asset id, for images this field uploaded. Without an id there is no original to crop from.
   assets: { type: Object, default: () => ({}) },
+  // embed url -> poster image url. YouTube has a deterministic thumbnail; Vimeo has none without an
+  // oEmbed lookup, so a tenant can supply one. An uploaded poster wins for either.
+  posters: { type: Object, default: () => ({}) },
   // async (file) => url. Required for the Upload Image action.
   upload: { type: Function, default: null },
   // async (file) => url. Video file upload works (image-processing handles it, verified 2026-08-30).
@@ -149,7 +161,7 @@ const props = defineProps({
   allowVideoUrl: { type: Boolean, default: true },
   allowVideoUpload: { type: Boolean, default: false },
 });
-const emit = defineEmits(["update:modelValue", "crop-applied"]);
+const emit = defineEmits(["update:modelValue", "crop-applied", "poster-set"]);
 
 const imageInput = ref(null);
 const videoInput = ref(null);
@@ -268,6 +280,56 @@ const VIDEO_LINK = /^(?:https?:\/\/)?(?:www\.|m\.)?(?:youtube\.com\/(?:watch\?.*
 
 // The row label should say what the entry IS, so a tenant can tell a hosted file from a linked one at a
 // glance -- they behave differently (one is served by us, the other by the provider on click).
+const posterBusy = ref(false);
+const posterInput = ref(null);
+let posterFor = "";
+
+function isEmbed(url) {
+  return VIDEO_LINK.test(String(url || ""));
+}
+
+// YouTube's thumbnail is deterministic, so it needs no upload and no API call. Vimeo's is not, which is
+// exactly the gap the manual poster fills. Mirrors domain/video_embeds.py -- the id character class is
+// kept identical so the two cannot disagree about what a valid id looks like.
+function youtubeId(url) {
+  const text = String(url || "");
+  const match = text.match(/(?:youtu\.be\/|[?&]v=|\/embed\/|\/shorts\/|\/live\/|\/v\/)([A-Za-z0-9_-]{6,20})/);
+  return match ? match[1] : "";
+}
+
+function thumbFor(url) {
+  if (props.posters[url]) return props.posters[url];
+  if (isEmbed(url)) {
+    const id = youtubeId(url);
+    return id ? `https://i.ytimg.com/vi/${id}/hqdefault.jpg` : "";
+  }
+  return isVideo(url) ? "" : url;
+}
+
+async function pickPoster(url) {
+  posterFor = url;
+  await nextTick();
+  posterInput.value?.click();
+}
+
+async function posterPicked(event) {
+  const file = event.target.files?.[0];
+  event.target.value = "";
+  if (!file || !posterFor) return;
+  error.value = "";
+  posterBusy.value = true;
+  try {
+    const result = await props.upload(file);
+    const posterUrl = typeof result === "string" ? result : result?.url;
+    emit("poster-set", { url: posterFor, poster: posterUrl });
+  } catch (err) {
+    error.value = err?.message || "Poster upload failed.";
+  } finally {
+    posterBusy.value = false;
+    posterFor = "";
+  }
+}
+
 function mediaKind(url) {
   if (VIDEO_LINK.test(String(url || ""))) return /vimeo/i.test(url) ? "VIMEO" : "YOUTUBE";
   return isVideo(url) ? "VIDEO" : "IMAGE";
