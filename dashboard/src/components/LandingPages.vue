@@ -575,7 +575,7 @@
                       <ImageUploadField
                         v-model="element.image_url"
                         :crop="element.image_crop"
-                        :ratios="imageRatios.ratios.content_block"
+                        :ratios="imageRatios.placement.content_block"
                         :uploader="uploadPageImage"
                         label="Upload Image"
                         alt="Content image preview"
@@ -631,7 +631,7 @@
                         v-if="element.presentation !== 'centered'"
                         v-model="element.image_url"
                         :crop="element.image_crop"
-                        :ratios="imageRatios.ratios.page_ribbon"
+                        :ratios="imageRatios.placement.page_ribbon"
                         :uploader="uploadPageImage"
                         alt="Ribbon image preview"
                         @update:crop="(rect) => (element.image_crop = rect)"
@@ -827,7 +827,7 @@
                       <ImageUploadField
                         v-model="element.photo_url"
                         :crop="element.image_crop"
-                        :ratios="imageRatios.ratios.author_bio"
+                        :ratios="imageRatios.placement.author_bio"
                         :uploader="uploadPageImage"
                         label="Upload photo"
                         alt="Author photo preview"

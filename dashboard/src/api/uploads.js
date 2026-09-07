@@ -35,7 +35,7 @@ async function pollImageUrl(imageId) {
     if (body.status === "failed") throw new Error("Image processing failed.");
     for (const url of imageUrlCandidates(body.urls || {})) {
       const probe = await imageUrlLoads(url);
-      if (probe.ok) return { url, dims: dimsFromStatus(body, probe) };
+      if (probe.ok) return { url, dims: dimsFromStatus(body, probe), imageId };
     }
   }
   throw new Error("Timed out waiting for processed image.");
@@ -135,4 +135,31 @@ async function pollVideoUrl(uploadId) {
 
 function formatMb(bytes) {
   return `${Math.round((Number(bytes) || 0) / (1024 * 1024))}MB`;
+}
+
+
+/**
+ * Bake a crop into a new derivative and return its URL.
+ *
+ * For ASSET images -- product, service, landing hero -- the crop cannot live in CSS: the same photo also
+ * feeds `og:image` and Product JSON-LD, which are URLs in meta tags that no stylesheet can reach. A
+ * CSS-cropped product would still send the uncropped image to Facebook and Google.
+ *
+ * Always cropped from the ORIGINAL (the service reads the source by id), so re-cropping never compounds
+ * a previous crop.
+ */
+export async function cropImage(imageId, crop, { width = 1600, height = 1600 } = {}) {
+  if (!imageId) throw new Error("This image was added before cropping existed, so it cannot be cropped.");
+  const body = await apiRequest("/upload/crop", {
+    method: "POST",
+    body: {
+      image_id: imageId,
+      width: Math.round(width),
+      height: Math.round(height),
+      crop: { x: crop.x, y: crop.y, w: crop.w, h: crop.h },
+    },
+  });
+  const url = imageUrlCandidates(body.urls || {})[0];
+  if (!url) throw new Error("The cropped image could not be generated.");
+  return url;
 }

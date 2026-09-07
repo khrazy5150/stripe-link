@@ -1159,6 +1159,20 @@ Resources:
             RestApiId: !Ref RestApi
             Path: /upload/status/{image_id}
             Method: OPTIONS
+        # Bake a crop into a derivative. Proxied because the resize function's ALLOWED_ORIGINS does not
+        # include the dashboard, and widening CORS on a public endpoint to save a proxy is the wrong trade.
+        UploadCrop:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /upload/crop
+            Method: POST
+        UploadCropOptions:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /upload/crop
+            Method: OPTIONS
 
   OffersFunction:
     Type: AWS::Serverless::Function

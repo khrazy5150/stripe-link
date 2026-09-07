@@ -105,8 +105,9 @@ class SharedRatioTests(unittest.TestCase):
         """A number locks, a list offers choices, null accepts any shape. Nothing else is meaningful."""
         from stripe_link.domain.image_crop import FREEFORM
 
-        data = json.loads((pathlib.Path(__file__).resolve().parents[1]
-                           / "src/stripe_link/image_ratios.json").read_text())["ratios"]
+        table = json.loads((pathlib.Path(__file__).resolve().parents[1]
+                            / "src/stripe_link/image_ratios.json").read_text())
+        data = {**table["placement"], **table["asset"]}
         self.assertTrue(data, "an empty table makes every surface square by accident")
         for surface, value in data.items():
             with self.subTest(surface=surface):
@@ -227,8 +228,9 @@ class CssIsolationTests(unittest.TestCase):
         rule = re.search(r"\.sl-cropped\{[^}]*\}", self._css()).group(0)
         self.assertNotIn("border-radius", rule)
 
-    def test_every_wired_surface_actually_renders_its_crop(self):
-        """The ratio table lists only wired surfaces, so each must crop end to end.
+    def test_every_placement_surface_actually_renders_its_crop(self):
+        """Every PLACEMENT surface must crop end to end. Asset surfaces deliberately render nothing --
+        their stored URL is already the cropped derivative, so applying a rect again would double-crop.
 
         A surface listed but not wired is a lie the cropper cannot detect: the tenant is offered a shape
         picker, frames a photo, and the page ignores it.
@@ -236,7 +238,7 @@ class CssIsolationTests(unittest.TestCase):
         from stripe_link.runtime.html import render_author_bio, render_content_blocks
 
         root = pathlib.Path(__file__).resolve().parents[1]
-        declared = set(json.loads((root / "src/stripe_link/image_ratios.json").read_text())["ratios"])
+        declared = set(json.loads((root / "src/stripe_link/image_ratios.json").read_text())["placement"])
         crop = {"x": 0.1, "y": 0.1, "w": 0.5, "h": 0.5, "ar": 1}
         rendered = {
             "page_ribbon": render_page_ribbon({**RendererTests.SECTION, "image_crop": dict(crop)}),
@@ -253,6 +255,60 @@ class CssIsolationTests(unittest.TestCase):
         for surface, html in rendered.items():
             with self.subTest(surface=surface):
                 self.assertIn("sl-cropped", html, f"{surface} is declared croppable but ignores its crop")
+
+
+class MechanismTests(unittest.TestCase):
+    """A surface is cropped one way or the other, never both and never neither.
+
+    PLACEMENT crops are clipped in CSS at render time, so the stored URL is the original. ASSET crops are
+    baked into a derivative, so the stored URL is ALREADY cropped. Wire a surface the wrong way and you get
+    one of two silent failures: an asset image clipped again on top of a baked crop, or a placement image
+    whose crop is stored and never applied.
+    """
+
+    def _table(self):
+        return json.loads((pathlib.Path(__file__).resolve().parents[1]
+                           / "src/stripe_link/image_ratios.json").read_text())
+
+    def test_no_surface_is_declared_under_both_mechanisms(self):
+        table = self._table()
+        overlap = set(table["placement"]) & set(table["asset"])
+        self.assertEqual(overlap, set(), "a surface cropped twice is cropped wrong")
+
+    def test_asset_surfaces_bake_and_placement_surfaces_do_not(self):
+        root = pathlib.Path(__file__).resolve().parents[1]
+        table = self._table()
+        sources = {
+            "dashboard/src/components/Services.vue": set(table["asset"]),
+            "dashboard/src/components/LandingPages.vue": set(table["placement"]),
+        }
+        for path, surfaces in sources.items():
+            text = (root / path).read_text()
+            for surface in surfaces:
+                with self.subTest(surface=surface):
+                    self.assertIn(surface, text, f"{surface} is declared but nothing in {path} uses it")
+        # Matches the `bake` PROP on a component, not the word "baked" in prose.
+        bake_prop = re.compile(r"^\s+:?bake(=|\s*$)", re.M)
+        builder = (root / "dashboard/src/components/LandingPages.vue").read_text()
+        self.assertIsNone(bake_prop.search(builder),
+                          "a placement surface that bakes would store a cropped URL and clip it again")
+        services = (root / "dashboard/src/components/Services.vue").read_text()
+        self.assertIsNotNone(bake_prop.search(services),
+                             "an asset surface must bake or its crop never reaches og:image")
+
+    def test_the_renderer_only_knows_about_placement_surfaces(self):
+        from stripe_link.domain.image_crop import ASSET_SURFACES, PLACEMENT_SURFACES
+
+        renderer = (pathlib.Path(__file__).resolve().parents[1]
+                    / "src/stripe_link/runtime/html.py").read_text()
+        for surface in PLACEMENT_SURFACES:
+            with self.subTest(placement=surface):
+                self.assertIn(f'"{surface}"', renderer, "a placement crop is applied by the renderer")
+        for surface in ASSET_SURFACES:
+            with self.subTest(asset=surface):
+                self.assertNotIn(f'cropped_media(\n', "")  # readability no-op
+                self.assertNotIn(f'"{surface}", "sl-', renderer,
+                                 "an asset crop is already in the file; clipping it again double-crops")
 
 
 class PersistenceTests(unittest.TestCase):

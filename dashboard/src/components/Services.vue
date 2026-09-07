@@ -305,19 +305,22 @@
             <label class="offer-field">
               <span>Hero Image</span>
               <div class="builder-upload-stack">
-                <input ref="heroFileInput" type="file" accept="image/*" hidden @change="handleHeroPicked" />
+                <ImageUploadField
+                  v-model="form.hero_image_url"
+                  :crop="form.hero_image_crop"
+                  :ratios="imageRatios.asset.service_hero"
+                  :uploader="uploadServiceHero"
+                  bake
+                  label="Upload hero image"
+                  alt="Hero image preview"
+                  @update:crop="(rect) => (form.hero_image_crop = rect)"
+                />
                 <button
-                  class="secondary-action compact"
+                  v-if="form.hero_image_url"
                   type="button"
-                  :disabled="heroUploading"
-                  @click="heroFileInput?.click()"
-                >
-                  {{ heroUploading ? "Uploading..." : form.hero_image_url ? "Replace image" : "Upload hero image" }}
-                </button>
-                <div v-if="form.hero_image_url" class="service-hero-preview">
-                  <img :src="form.hero_image_url" alt="Hero image preview" />
-                  <button type="button" class="secondary-action compact" @click="form.hero_image_url = ''">Remove</button>
-                </div>
+                  class="secondary-action compact"
+                  @click="form.hero_image_url = ''; form.hero_image_crop = null"
+                >Remove</button>
               </div>
               <small v-if="heroUploadError" class="builder-upload-error">{{ heroUploadError }}</small>
             </label>
@@ -388,6 +391,8 @@ import {
 } from "../stores/services";
 import { uploadImage } from "../api/uploads";
 import { recordImageDims } from "../utils/imageDims";
+import ImageUploadField from "./shared/ImageUploadField.vue";
+import imageRatios from "../../../src/stripe_link/image_ratios.json";
 import { fulfillerDisplayName, useFulfillersStore } from "../stores/fulfillers";
 import { formatMoney } from "../stores/products";
 import { useCalendarStore } from "../stores/calendar";
@@ -565,6 +570,14 @@ async function handleHeroPicked(event) {
   } finally {
     heroUploading.value = false;
   }
+}
+
+// Returns the whole upload result, not just the URL: baking a crop needs the asset id so a re-crop reads
+// the ORIGINAL rather than compounding the previous crop.
+async function uploadServiceHero(file) {
+  const result = await uploadImage(file, { basePrefix: "services" });
+  recordImageDims(form.value.image_dims, result.url, result.dims);
+  return result;
 }
 
 function defaultServiceForm() {

@@ -22,7 +22,15 @@ CROP_KEYS = ("x", "y", "w", "h")
 # Ratios are DATA, shared with the builder, not a constant restated per language. The cropper must frame
 # exactly what the renderer crops to; a comment saying "must match" is not a mechanism.
 _RATIOS_PATH = Path(__file__).resolve().parent.parent / "image_ratios.json"
-_RATIOS: dict[str, Any] = json.loads(_RATIOS_PATH.read_text())["ratios"]
+_RATIOS_FILE: dict[str, Any] = json.loads(_RATIOS_PATH.read_text())
+
+# Two mechanisms, one table. PLACEMENT crops are clipped in CSS at render time; ASSET crops are baked into
+# a derivative, so the stored URL is already cropped and the renderer must apply nothing. Keeping them in
+# one file with the mechanism in the structure means a surface cannot be wired one way and rendered the
+# other -- which would either double-crop the image or ignore the crop entirely.
+PLACEMENT_SURFACES: dict[str, Any] = _RATIOS_FILE.get("placement") or {}
+ASSET_SURFACES: dict[str, Any] = _RATIOS_FILE.get("asset") or {}
+_RATIOS: dict[str, Any] = {**PLACEMENT_SURFACES, **ASSET_SURFACES}
 
 # A surface that accepts any shape. "original" means the source image's own ratio -- a reframe that zooms
 # and pans without changing the shape, which is what a shape-agnostic surface usually wants.

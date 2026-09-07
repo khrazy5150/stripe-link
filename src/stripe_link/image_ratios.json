@@ -1,18 +1,13 @@
 {
-  "_comment": "What shape each image surface crops to. Read by BOTH the renderer (domain/image_crop.py) and the builder's cropper, because a cropper locked to a different ratio than the renderer crops to is worse than no cropper -- the tenant frames a shot and the page silently discards it. Three forms: a NUMBER locks the ratio (the layout demands one -- a circular avatar is not negotiable); a LIST offers the tenant those choices; null means the surface accepts any shape and the crop defines it. \"original\" in a list means the source's own ratio. THIS TABLE LISTS ONLY SURFACES THAT ARE ACTUALLY WIRED: adding an entry does not make a surface croppable on its own, and a surface listed here but not wired would be a lie the cropper cannot detect. Deliberate exclusions are recorded in plans/IMAGE_CROPPER.md. See that plan for the full design.",
-  "ratios": {
-    "page_ribbon": [
-      "original",
-      1,
-      1.3333333333,
-      1.7777777778
-    ],
+  "_comment": "What shape each image surface crops to, grouped by the MECHANISM that applies the crop. Read by both the renderer (domain/image_crop.py) and the builder's cropper, because a cropper framing a different shape than the page renders is worse than no cropper -- the tenant frames a shot and the page silently discards it. Ratio forms: a NUMBER locks the shape (the layout demands one -- a circular avatar is not negotiable); a LIST offers the tenant those choices; null accepts any shape. \"original\" means the source image's own ratio. Only WIRED surfaces are listed: an entry with no wiring is a lie the cropper cannot detect. See plans/IMAGE_CROPPER.md.",
+  "_placement": "Decorative images owned by one spot on one page. The crop is applied in CSS at render time by clipping, so the stored URL is untouched and the crop stays re-editable for free.",
+  "placement": {
+    "page_ribbon": ["original", 1, 1.3333333333, 1.7777777778],
     "author_bio": 1,
-    "content_block": [
-      "original",
-      1,
-      1.3333333333,
-      1.7777777778
-    ]
+    "content_block": ["original", 1, 1.3333333333, 1.7777777778]
+  },
+  "_asset": "Images that appear on MANY surfaces and also feed og:image and Product JSON-LD. Meta tags are URLs and no stylesheet can reach them, so a CSS crop would still send the uncropped photo to Facebook and Google. These are BAKED into a derivative: the stored URL is the cropped one, and the renderer applies nothing.",
+  "asset": {
+    "service_hero": ["original", 1.7777777778, 1.3333333333, 1]
   }
 }

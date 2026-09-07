@@ -12,6 +12,7 @@
  */
 import { computed, ref } from "vue";
 import ImageCropper from "./ImageCropper.vue";
+import { cropImage } from "../../api/uploads";
 
 const props = defineProps({
   modelValue: { type: String, default: "" },
@@ -25,6 +26,17 @@ const props = defineProps({
   // Some surfaces let a tenant paste a URL instead of uploading. Kept because removing it would be a
   // silent regression for anyone hosting their images elsewhere.
   allowUrl: { type: Boolean, default: false },
+  /**
+   * ASSET mode. The crop is baked into a new derivative and the stored URL becomes the cropped one.
+   *
+   * Required wherever the image also feeds `og:image` or Product JSON-LD -- meta tags are URLs, and no
+   * stylesheet can reach them, so a CSS crop would leave the uncropped photo going to Facebook and
+   * Google. It also means one crop serves every surface the asset appears on, instead of the tenant
+   * cropping the same product photo once per placement.
+   */
+  bake: { type: Boolean, default: false },
+  // The baked output box. Generous, so no surface has to upscale what it is given.
+  bakeWidth: { type: Number, default: 1600 },
   urlPlaceholder: { type: String, default: "or paste an image URL" },
 });
 const emit = defineEmits(["update:modelValue", "update:crop"]);
@@ -46,6 +58,14 @@ function choose() {
   input.value?.click();
 }
 
+// In bake mode the crop travels with the ASSET, not the placement: keep the id so a re-crop reads the
+// original rather than compounding the last crop, and the original URL so the cropper shows the whole
+// photo rather than the part that survived.
+const asset = ref({ id: "", originalUrl: "" });
+
+// Reopen against the original when there is one; otherwise the stored image is all we have.
+const cropSource = computed(() => asset.value.originalUrl || props.crop?.original_url || props.modelValue);
+
 async function picked(event) {
   const file = event.target.files?.[0];
   event.target.value = "";
@@ -53,7 +73,11 @@ async function picked(event) {
   error.value = "";
   uploading.value = true;
   try {
-    const url = await props.uploader(file);
+    const result = await props.uploader(file);
+    const url = typeof result === "string" ? result : result?.url;
+    if (typeof result === "object" && result?.imageId) {
+      asset.value = { id: result.imageId, originalUrl: url };
+    }
     emit("update:modelValue", url);
     // A fresh image invalidates any previous framing.
     emit("update:crop", null);
@@ -73,14 +97,34 @@ function onUrlTyped(event) {
   emit("update:crop", null);
 }
 
-function applyCrop(rect) {
-  emit("update:crop", rect);
-  cropping.value = false;
+async function applyCrop(rect) {
+  if (!props.bake) {
+    emit("update:crop", rect);
+    cropping.value = false;
+    return;
+  }
+  const id = asset.value.id || props.crop?.image_id;
+  const original = asset.value.originalUrl || props.crop?.original_url || props.modelValue;
+  error.value = "";
+  uploading.value = true;
+  try {
+    const height = Math.round(props.bakeWidth / (rect.ar || 1));
+    const url = await cropImage(id, rect, { width: props.bakeWidth, height });
+    emit("update:modelValue", url);
+    // The rect is kept so the crop stays re-editable, alongside what it needs to crop the ORIGINAL again.
+    emit("update:crop", { ...rect, image_id: id, original_url: original });
+    cropping.value = false;
+  } catch (err) {
+    error.value = err?.message || "The crop could not be applied.";
+  } finally {
+    uploading.value = false;
+  }
 }
 
 // The stored rect describes which part of the source survives. Reproduce it in the preview by scaling the
 // image so the crop fills the box and offsetting it -- object-position alone cannot express a zoom.
 function previewStyle() {
+  if (props.bake) return { width: "100%", height: "100%", objectFit: "cover" };
   const c = props.crop;
   if (!c || !(c.w > 0) || !(c.h > 0)) return { width: "100%", height: "100%", objectFit: "cover" };
   return {
@@ -129,7 +173,7 @@ function previewStyle() {
 
     <ImageCropper
       v-if="cropping && modelValue"
-      :src="modelValue"
+      :src="cropSource"
       :ratios="ratios"
       :crop="crop"
       @apply="applyCrop"
