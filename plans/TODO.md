@@ -313,6 +313,20 @@ Livestreams are one of only TWO things the Indexing API officially supports (the
 this is well-supported rather than a trick. The URL survives the broadcast and becomes the replay, which
 is the SEO flywheel and the clearest instance of the Attention primitive yet.
 
+**Phase 8 is IndexNow / Bing**, and it is SMALLER than Phase 7 despite looking bigger from outside: SEO-15
+already scopes an IndexNow submitter, so this adds the live transitions as extra triggers rather than a
+new integration. Microsoft explicitly names "Live Stream Announcements" as an IndexNow use case, and one
+submission reaches multiple participating engines -- so there is no separate Yahoo integration to write.
+
+It is also EASIER to automate than the Google path, for a concrete reason: Google's Indexing API needs a
+service account owning a Search Console property (an account-level relationship per tenant domain), while
+IndexNow needs a key FILE at the domain root -- a publishing operation this platform already performs. It
+may therefore ship before Phase 7. Be more cautious about the payoff though: Bing documents no LIVE-badge
+equivalent, only rapid discovery and video indexing.
+
+The philosophy to hold: build ONE live-discovery system and broadcast through the appropriate protocols,
+not "Google SEO + Bing SEO + Yahoo SEO".
+
 Its architectural consequence lands in Phase 5, not 7: published pages are STATIC S3 artifacts that change
 only when a human saves them, and a live page must change state three times at event-driven moments with
 the markup in the SERVED html. So the publish pipeline has to become triggerable by the stream lifecycle.

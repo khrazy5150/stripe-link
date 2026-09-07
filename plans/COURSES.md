@@ -388,6 +388,7 @@ roadmap are simply Phases 1–4, already written:
 | **5** | **Live events** — schedule, Go Live, MediaLive/IVS, paid audience | Needs an audience and a checkout to be worth anything |
 | **6** | **Live → VOD** — the replay as a product | Nearly free once 1 and 5 exist |
 | **7** | **Livestream SEO** — BroadcastEvent, Indexing API, replay conversion | Needs 5 and 6; the republish trigger it depends on must be designed in 5 |
+| **8** | **IndexNow / Bing** — the same transitions, a second channel | Smaller than 7; SEO-15 already scopes the submitter. Easier to automate, so arguably ships first |
 
 The proposition at the end of it:
 
@@ -525,6 +526,104 @@ Create event → SEO page → social + email → GOES LIVE → Google LIVE disco
 Video stops being a content primitive and becomes an **attention → content → commerce** primitive. That is
 the difference between competing with a video host and doing something neither YouTube nor a course
 platform does: the discovery, the audience, the replay and the sale all live at one URL the tenant owns.
+
+## Phase 8 — Bing and the rest, via IndexNow
+
+**The engineering philosophy first, because it decides the shape:**
+
+> Build **one** excellent live-discovery system, then broadcast the signals through the appropriate
+> protocols. Not "Google SEO + Bing SEO + Yahoo SEO".
+
+There is no separate Bing product to build. There is one live-event lifecycle (Phase 7) with a second
+notification channel attached to the same transitions.
+
+### Most of this is already scoped
+
+**SEO-15 — "IndexNow submission on publish"** is already a P1 requirement in
+[ON_PAGE_SEO_REQUIREMENTS.md](ON_PAGE_SEO_REQUIREMENTS.md), with an `indexnow_key` field designed for it.
+This phase does not introduce IndexNow; it adds the **live transitions as additional triggers** to a
+mechanism the platform is already committed to building:
+
+```
+scheduled → IndexNow          }
+LIVE      → IndexNow          }  the same submitter SEO-15 builds,
+ended     → IndexNow          }  called at three more moments
+```
+
+That makes Phase 8 substantially smaller than Phase 7 — which is the opposite of how it looks from
+outside.
+
+### Microsoft explicitly recommends this for livestreams
+
+Bing names **"Live Stream Announcements"** as an appropriate IndexNow use case, and its guidance for
+video-sharing sites recommends notifying IndexNow for upcoming live streams. So unlike the Google side —
+where the mechanism exists and eligibility is the honest claim — here the platform is doing precisely what
+the vendor asks for.
+
+And one submission reaches **multiple participating engines**, not Bing alone.
+
+### Be more cautious about the payoff than with Google
+
+| | Google | Bing |
+|---|---|---|
+| Live-specific search treatment | Yes (LIVE badge) | Less explicitly documented |
+| `BroadcastEvent` | Yes, documented | Schema.org markup can be supplied |
+| Rapid indexing | Indexing API | IndexNow |
+| Video feeds | Video sitemap | mRSS / video XML |
+| Live-stream notification guidance | Yes | **Explicitly yes** |
+| Guaranteed ranking boost | **No** | **No** |
+| Special LIVE badge guarantee | **No** | **No equivalent found** |
+
+"No equivalent found" is a statement about *documentation*, not a claim that Bing ignores live content.
+What Bing clearly offers is rapid discovery, structured-data interpretation, video indexing and a push
+channel — and it says plainly that markup does not guarantee a rich result.
+
+### Why Bing is genuinely easier to automate here
+
+The verification model is the reason, and it is a real difference rather than a preference:
+
+| | Google Indexing API | IndexNow |
+|---|---|---|
+| Proof of ownership | Service account must be an **owner of the Search Console property** | A **key file** served at the domain root |
+| Per custom domain | An account-level relationship to establish | A file to publish |
+| Automatable at platform scale | Awkward — needs a Search Console property per tenant domain | **Yes** — publishing a file is something the platform already does |
+
+Publishing a static file to a domain the platform already serves is a *publishing operation*, which is
+exactly what this system is built to do. That is why the Bing path can be switched on for every tenant
+with far less ceremony than the Google one, and it is worth building **first** for that reason.
+
+### Yahoo: do not build for it
+
+Yahoo is listed among IndexNow adopters, and the protocol notifies participating engines from a single
+submission. There is no "Yahoo SEO" integration to write. Building one would be work with no mechanism
+behind it.
+
+### Submission discipline
+
+Microsoft's video guidance suggests continuing to notify as engagement changes. For a small platform I
+would **submit on state transitions only** — scheduled, live, ended — and treat engagement-driven
+submission as a later, measured decision. Pinging on viewer-count changes is indistinguishable from spam
+from the receiving end, and IndexNow's value depends on the platform's submissions staying credible.
+
+### The video feed is a new artifact
+
+mRSS / video XML carries title, play-page URL, publication date, description, thumbnail and player URL —
+another generated artifact alongside the sitemap of SEO-14, produced by the same publishing machinery. It
+belongs with that work rather than with the live pipeline.
+
+### What this is really for
+
+A YouTube livestream is a **YouTube asset**. The same event on Junior Bay becomes a **tenant-owned web
+asset**:
+
+```
+LIVE EVENT ──┬── live search ──┬── EVENT ── REPLAY ── EVERGREEN PAGE ── COURSE/PRODUCT ── SALE
+             └── live traffic ─┘
+```
+
+The platform is not just hosting the content. It is orchestrating the mechanisms that get it discovered
+**while it is timely**, then preserving the asset afterwards at a URL the tenant owns. That is the
+Attention primitive doing something neither a video host nor a course platform does.
 
 ## Related
 
