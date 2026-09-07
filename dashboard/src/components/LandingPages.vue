@@ -486,8 +486,11 @@
                     derived-note="Auto — these come from your offer's products. Upload or add media to override."
                     :upload="uploadPageImage"
                     :upload-video="uploadPageVideo"
+                    :crop-ratios="imageRatios.asset.hero_media"
+                    :assets="builder.image_assets || {}"
                     allow-video-upload
                     @update:model-value="setHeroMedia"
+                    @crop-applied="onHeroCropApplied"
                   />
                 </div>
                 <label class="builder-switch-row">
@@ -2457,10 +2460,22 @@ async function uploadPageVideo(file) {
 }
 
 async function uploadPageImage(file) {
-  const { url, dims } = await uploadImage(file);
+  const { url, dims, imageId } = await uploadImage(file);
   recordImageDims(builder.image_dims, url, dims);
+  // Keep the asset id against the URL: baking a crop reads the ORIGINAL by id, so a re-crop never
+  // compounds the last one. Only images uploaded here have one -- a pasted URL cannot be cropped.
+  if (imageId) builder.image_assets = { ...(builder.image_assets || {}), [url]: imageId };
   schedulePreviewImageRefresh();
   return url;
+}
+
+// A baked hero crop replaces the URL, so the asset id follows it to the new one.
+function onHeroCropApplied({ oldUrl, url, imageId }) {
+  const assets = { ...(builder.image_assets || {}) };
+  delete assets[oldUrl];
+  assets[url] = imageId;
+  builder.image_assets = assets;
+  schedulePreviewImageRefresh();
 }
 
 // A service offer's items carry service_id (not product_id); render_page resolves those separately.
@@ -2687,6 +2702,9 @@ function defaultBuilderForm() {
     favicon_url: "",
     // Intrinsic dimensions of uploaded page images (rendition-base -> [w, h]) for CLS-free rendering.
     image_dims: {},
+    // url -> asset id for images uploaded here, so a baked crop can be re-cropped from the ORIGINAL
+    // rather than compounding the previous crop. A pasted URL has none and cannot be cropped.
+    image_assets: {},
     seo_title: "",
     seo_description: "",
     seo_image: "",
@@ -3558,6 +3576,7 @@ function populateBuilderFromPage(page) {
   });
   // Restore captured image dimensions so re-saving an untouched page keeps them.
   builder.image_dims = { ...(page.image_dims || {}) };
+  builder.image_assets = { ...(page.image_assets || {}) };
   // Restore the Page Composer overrides so section toggles reflect the tenant's prior choices.
   builder.composition.overrides = { ...(page.composition?.overrides || {}) };
   // Restore Advanced Color Settings overrides; auto-open the panel if any were set.
@@ -3762,6 +3781,9 @@ function buildBuilderPageDocument() {
     composition: { overrides: { ...builder.composition.overrides } },
     // Intrinsic dimensions for uploaded page images so the renderer reserves layout space (no CLS).
     ...(Object.keys(builder.image_dims || {}).length ? { image_dims: { ...builder.image_dims } } : {}),
+    // Without this the ids never persist and a saved crop stops being re-editable -- the payload is
+    // an allow-list, so a field the builder holds but does not list here is silently dropped.
+    ...(Object.keys(builder.image_assets || {}).length ? { image_assets: { ...builder.image_assets } } : {}),
     // Persisted only once the tenant has rearranged the page: an absent section_order means "use the
     // baseline for this goal", which is the default a new page must keep getting.
     ...(builder.section_order?.length ? { section_order: [...builder.section_order] } : {}),

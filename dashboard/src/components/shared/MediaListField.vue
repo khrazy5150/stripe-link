@@ -22,9 +22,25 @@
             <span class="media-kind">{{ isVideo(url) ? "VIDEO" : "IMAGE" }}</span>
             <span class="media-name" :title="url">{{ shortName(url) }}</span>
           </span>
+          <button
+            v-if="!isVideo(url) && assets[url]"
+            type="button"
+            class="media-crop"
+            :disabled="cropBusy"
+            :aria-label="`Crop ${shortName(url)}`"
+            @click="croppingUrl = url"
+          >Crop</button>
           <button type="button" class="media-remove" :aria-label="`Remove ${shortName(url)}`" @click="removeAt(index)"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg></button>
         </li>
       </ul>
+      <ImageCropper
+        v-if="croppingUrl"
+        :src="croppingUrl"
+        :ratios="cropRatios"
+        title="Crop this hero image"
+        @apply="applyCrop"
+        @cancel="croppingUrl = ''"
+      />
       <template v-else-if="derived.length">
         <ul class="media-list is-derived">
           <li v-for="(item, index) in derived" :key="`auto-${index}`" class="media-list-item is-derived">
@@ -100,6 +116,8 @@
 // Media KIND is derived from the URL extension, never stored — mirroring the server's is_video_url()
 // in runtime/html.py. Keep VIDEO_EXTENSIONS below in sync with that list.
 import { computed, nextTick, ref } from "vue";
+import ImageCropper from "./ImageCropper.vue";
+import { cropImage } from "../../api/uploads";
 
 const VIDEO_EXTENSIONS = [".mp4", ".webm", ".mov", ".m4v", ".ogv"];
 
@@ -115,6 +133,15 @@ const props = defineProps({
   // page's own "no image" placeholder.
   derived: { type: Array, default: () => [] },
   derivedNote: { type: String, default: "Auto — from your offer. Upload or add media to override." },
+  /**
+   * Per-image crop, for the ones this field UPLOADED. A hero image is an ASSET -- it also feeds og:image
+   * and Product JSON-LD, which are URLs no stylesheet can reach -- so the crop is baked and the listed URL
+   * becomes the cropped one. AUTO rows are not croppable here: they belong to the product, and cropping
+   * them there means every surface inherits it (plans/IMAGE_CROPPER.md).
+   */
+  cropRatios: { type: [Number, Array, String], default: null },
+  // url -> asset id, for images this field uploaded. Without an id there is no original to crop from.
+  assets: { type: Object, default: () => ({}) },
   // async (file) => url. Required for the Upload Image action.
   upload: { type: Function, default: null },
   // async (file) => url. Video FILE upload needs a backend that stripe-link doesn't have yet
@@ -124,7 +151,7 @@ const props = defineProps({
   allowVideoUrl: { type: Boolean, default: true },
   allowVideoUpload: { type: Boolean, default: false },
 });
-const emit = defineEmits(["update:modelValue"]);
+const emit = defineEmits(["update:modelValue", "crop-applied"]);
 
 const imageInput = ref(null);
 const videoInput = ref(null);
@@ -156,6 +183,30 @@ function append(url) {
   const value = String(url || "").trim();
   if (!value || items.value.includes(value)) return;
   commit([...items.value, value]);
+}
+
+const croppingUrl = ref("");
+const cropBusy = ref(false);
+
+// Baked, not clipped: this URL travels into og:image and JSON-LD, which CSS cannot reach. The service
+// always crops the ORIGINAL it holds by id, so re-cropping never compounds the previous crop.
+async function applyCrop(rect) {
+  const oldUrl = croppingUrl.value;
+  const id = props.assets[oldUrl];
+  cropBusy.value = true;
+  try {
+    const height = Math.round(1600 / (rect.ar || 1));
+    const url = await cropImage(id, rect, { width: 1600, height });
+    emit("update:modelValue", items.value.map((item) => (item === oldUrl ? url : item)));
+    emit("crop-applied", { oldUrl, url, imageId: id, rect });
+    croppingUrl.value = "";
+  } catch (err) {
+    // The ref is `error`; naming the catch parameter the same would shadow it and the message would be
+    // assigned to the exception instead of the component's state.
+    error.value = err?.message || "The crop could not be applied.";
+  } finally {
+    cropBusy.value = false;
+  }
 }
 
 function removeAt(index) {

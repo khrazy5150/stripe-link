@@ -214,7 +214,28 @@ entry with no wiring is a lie the cropper cannot detect: the tenant gets a shape
 and the page ignores it. Author bio, ribbon, hero, products, marquee. Each declares its ratio. Do
 them one at a time; each is a small diff once P3 exists.
 
-**P5 — bake derivatives** where LCP justifies it, proxied through `upload.py`.
+**P5 — bake derivatives. ✅ SHIPPED** — but for correctness, not LCP. Asset images (product, service,
+landing hero) also feed `og:image` and Product JSON-LD, which are URLs in meta tags no stylesheet can
+reach, so a CSS crop would keep sending the uncropped photo to Facebook and Google. `POST /upload/crop`
+proxies the resize endpoint; the crop always reads the ORIGINAL by asset id, so a re-crop never compounds
+the last one.
+
+**The two mechanisms are not interchangeable**, and the ratio table is grouped by mechanism so a surface
+cannot be wired one way and rendered the other:
+
+| | Placement | Asset |
+|---|---|---|
+| Examples | ribbon, author bio, content block | product, service hero, landing hero |
+| Crop applied | CSS clip at render time | baked into a derivative |
+| Stored URL | the original | already cropped |
+| Renderer | emits `.sl-cropped` | emits nothing |
+| Reaches `og:image` | **no** | yes |
+
+Wiring one as the other fails silently in both directions: an asset image clipped again on top of a baked
+crop, or a placement crop stored and never applied.
+
+Landing-page hero AUTO slides need nothing — they come from the offer's products, so cropping a product
+once means every surface inherits it.
 
 P1 and P2 are in `image-processing`; P3 onward are here. Service first, always — it stays backward
 compatible, so there is no window where the two must land together.

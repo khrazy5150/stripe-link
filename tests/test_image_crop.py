@@ -278,23 +278,38 @@ class MechanismTests(unittest.TestCase):
     def test_asset_surfaces_bake_and_placement_surfaces_do_not(self):
         root = pathlib.Path(__file__).resolve().parents[1]
         table = self._table()
-        sources = {
-            "dashboard/src/components/Services.vue": set(table["asset"]),
-            "dashboard/src/components/LandingPages.vue": set(table["placement"]),
+        # Named explicitly. Matching a surface against whichever file happens to contain the word passes
+        # by coincidence -- "product" appears in every screen.
+        OWNER = {
+            "page_ribbon": "dashboard/src/components/LandingPages.vue",
+            "author_bio": "dashboard/src/components/LandingPages.vue",
+            "content_block": "dashboard/src/components/LandingPages.vue",
+            "service_hero": "dashboard/src/components/Services.vue",
+            "product": "dashboard/src/components/Products.vue",
+            "hero_media": "dashboard/src/components/LandingPages.vue",
         }
-        for path, surfaces in sources.items():
-            text = (root / path).read_text()
-            for surface in surfaces:
-                with self.subTest(surface=surface):
-                    self.assertIn(surface, text, f"{surface} is declared but nothing in {path} uses it")
+        declared = set(table["placement"]) | set(table["asset"])
+        self.assertEqual(declared, set(OWNER), "every declared surface needs a named owner here")
+        for surface, path in OWNER.items():
+            group = "placement" if surface in table["placement"] else "asset"
+            with self.subTest(surface=surface):
+                self.assertIn(f"imageRatios.{group}.{surface}", (root / path).read_text(),
+                              f"{surface} must read its ratios from the {group} group in {path}")
         # Matches the `bake` PROP on a component, not the word "baked" in prose.
         bake_prop = re.compile(r"^\s+:?bake(=|\s*$)", re.M)
         builder = (root / "dashboard/src/components/LandingPages.vue").read_text()
         self.assertIsNone(bake_prop.search(builder),
                           "a placement surface that bakes would store a cropped URL and clip it again")
-        services = (root / "dashboard/src/components/Services.vue").read_text()
-        self.assertIsNotNone(bake_prop.search(services),
-                             "an asset surface must bake or its crop never reaches og:image")
+        # Products drives the cropper directly rather than through the field, so it bakes via cropImage().
+        # Services goes through ImageUploadField's `bake` prop; Products and the hero list drive the
+        # cropper directly, so they bake by calling cropImage() themselves.
+        for path, marker in (("dashboard/src/components/Services.vue", None),
+                             ("dashboard/src/components/Products.vue", "cropImage("),
+                             ("dashboard/src/components/shared/MediaListField.vue", "cropImage(")):
+            text = (root / path).read_text()
+            with self.subTest(owner=path):
+                baked = bake_prop.search(text) is not None or (marker is not None and marker in text)
+                self.assertTrue(baked, "an asset surface must bake or its crop never reaches og:image")
 
     def test_the_renderer_only_knows_about_placement_surfaces(self):
         from stripe_link.domain.image_crop import ASSET_SURFACES, PLACEMENT_SURFACES
@@ -309,6 +324,41 @@ class MechanismTests(unittest.TestCase):
                 self.assertNotIn(f'cropped_media(\n', "")  # readability no-op
                 self.assertNotIn(f'"{surface}", "sl-', renderer,
                                  "an asset crop is already in the file; clipping it again double-crops")
+
+
+class AssetIdPersistenceTests(unittest.TestCase):
+    """The asset id must survive a save, or a baked crop stops being re-editable.
+
+    Baking replaces the stored URL with the cropped derivative. Re-cropping has to read the ORIGINAL --
+    cropping the derivative again would compound the two crops -- and the only handle on the original is
+    the asset id. The builder's save payload is an ALLOW-LIST, so a field it holds but does not list is
+    dropped without complaint: the crop works, the tenant saves, and the Crop button quietly disappears.
+    """
+
+    def _builder(self):
+        return (pathlib.Path(__file__).resolve().parents[1]
+                / "dashboard/src/components/LandingPages.vue").read_text()
+
+    def test_the_builder_sends_the_asset_ids_it_collects(self):
+        source = self._builder()
+        self.assertIn("image_assets: { ...builder.image_assets }", source,
+                      "collected ids that are never sent are lost on the first save")
+
+    def test_the_builder_reads_them_back(self):
+        self.assertIn("builder.image_assets = { ...(page.image_assets || {}) }", self._builder(),
+                      "ids that are saved but never loaded leave a reopened page uncroppable")
+
+    def test_a_page_document_carrying_asset_ids_validates(self):
+        from stripe_link.domain.documents import validate_page_document
+
+        page = {
+            "page_id": "p1", "tenant_id": "t1", "offer_id": "o1", "name": "N", "status": "draft",
+            "schema_version": "1", "document_type": "page", "route": {"slug": "x"},
+            "sections": [{"id": "h", "type": "hero", "headline": "Hi"}],
+            "image_assets": {"https://cdn/x/large.webp": "img_1"},
+        }
+        validate_page_document(page)
+        self.assertEqual(page["image_assets"], {"https://cdn/x/large.webp": "img_1"})
 
 
 class PersistenceTests(unittest.TestCase):

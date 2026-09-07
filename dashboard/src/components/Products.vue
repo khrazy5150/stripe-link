@@ -381,8 +381,24 @@
               <figure v-for="url in form.uploaded_images" :key="url" class="product-image-preview">
                 <img :src="url" alt="Uploaded product image" />
                 <figcaption>{{ shortImageName(url) }}</figcaption>
+                <button
+                  v-if="canCrop(url)"
+                  type="button"
+                  class="secondary-action compact"
+                  :disabled="cropBusy"
+                  @click.prevent="croppingUrl = url"
+                >Crop</button>
               </figure>
             </div>
+            <ImageCropper
+              v-if="croppingUrl"
+              :src="cropSourceUrl(croppingUrl)"
+              :ratios="imageRatios.asset.product"
+              :crop="existingCrop(croppingUrl)"
+              title="Crop this product photo"
+              @apply="applyProductCrop"
+              @cancel="croppingUrl = ''"
+            />
             <div v-if="uploadStatus" class="upload-status" :class="uploadStatusKind">{{ uploadStatus }}</div>
             <label>Paste image URLs, one per line
               <textarea v-model.trim="form.images" rows="3" placeholder="https://example.com/image1.jpg"></textarea>
@@ -488,6 +504,9 @@ import { defaultProductPrice, formatMoney, generateSku, isValidGtin, useProducts
 import { fetchCategoriesForScope, filterCategories, humanizeCategory, normalizeCategory } from "../utils/categories";
 import { useCachedSuggestions } from "../composables/useCachedSuggestions";
 import { dimsFromStatus, recordImageDims } from "../utils/imageDims";
+import { cropImage } from "../api/uploads";
+import ImageCropper from "./shared/ImageCropper.vue";
+import imageRatios from "../../../src/stripe_link/image_ratios.json";
 import { defaultPriceForm, priceFormFromDocument } from "../utils/priceForm";
 import { idColorStyle } from "../utils/iconColor";
 import PricingCard from "./shared/PricingCard.vue";
@@ -700,6 +719,8 @@ function defaultProductForm() {
     refund_full_policy: "Refunds are available within 30 days of delivery in unused condition.",
     images: "",
     uploaded_images: [],
+    image_assets: {},
+    image_crops: {},
     image_dims: {},
     digital_asset: null,
     size_enabled: false,
@@ -1065,8 +1086,8 @@ async function handleImageFiles(files) {
   let completed = 0;
   for (const file of uploadFiles) {
     try {
-      const { url, dims } = await uploadProductImage(file);
-      addUploadedImage(url, dims);
+      const { url, dims, imageId } = await uploadProductImage(file);
+      addUploadedImage(url, dims, imageId);
       completed += 1;
       uploadStatus.value = `Uploaded ${completed}/${uploadFiles.length} image${uploadFiles.length === 1 ? "" : "s"}...`;
     } catch (error) {
@@ -1107,7 +1128,7 @@ async function pollProductImageUrl(imageId) {
     if (body.status === "failed") throw new Error("Image processing failed");
     for (const url of productImageUrlCandidates(body.urls || {})) {
       const probe = await imageUrlLoads(url);
-      if (probe.ok) return { url, dims: dimsFromStatus(body, probe) };
+      if (probe.ok) return { url, dims: dimsFromStatus(body, probe), imageId };
     }
   }
   throw new Error("Timed out waiting for processed image");
@@ -1149,11 +1170,69 @@ function imageUrlLoads(url, timeoutMs = 4000) {
   });
 }
 
-function addUploadedImage(url, dims) {
+function addUploadedImage(url, dims, imageId) {
   if (!url) return;
+  // Keep the asset id against the URL so this image stays croppable after the modal closes.
+  if (imageId) form.value.image_assets = { ...(form.value.image_assets || {}), [url]: imageId };
   form.value.uploaded_images = [...new Set([...form.value.uploaded_images, url])].slice(0, 8);
   form.value.images = [...new Set([...String(form.value.images || "").split(/\n+/).map((line) => line.trim()).filter(Boolean), url])].slice(0, 8).join("\n");
   recordImageDims(form.value.image_dims, url, dims);
+}
+
+// A product photo is an ASSET: it appears on the hero carousel, price cards, listicle slides AND in
+// og:image and Product JSON-LD. Meta tags are URLs no stylesheet can reach, so the crop is baked into a
+// derivative and the stored URL becomes the cropped one (plans/IMAGE_CROPPER.md).
+const croppingUrl = ref("");
+const cropBusy = ref(false);
+
+function cropAssetId(url) {
+  return (form.value.image_assets || {})[url] || (form.value.image_crops || {})[url]?.image_id || "";
+}
+function cropSourceUrl(url) {
+  return (form.value.image_crops || {})[url]?.original_url || url;
+}
+function existingCrop(url) {
+  return (form.value.image_crops || {})[url] || null;
+}
+function canCrop(url) {
+  // Pasted URLs and images uploaded before cropping existed have no asset id, so there is nothing to
+  // crop from -- the service crops the original it holds, not whatever a URL happens to point at.
+  return Boolean(cropAssetId(url));
+}
+
+function replaceImageUrl(oldUrl, newUrl) {
+  form.value.uploaded_images = form.value.uploaded_images.map((u) => (u === oldUrl ? newUrl : u));
+  form.value.images = String(form.value.images || "")
+    .split(/\n+/).map((line) => (line.trim() === oldUrl ? newUrl : line.trim())).filter(Boolean).join("\n");
+}
+
+async function applyProductCrop(rect) {
+  const oldUrl = croppingUrl.value;
+  const id = cropAssetId(oldUrl);
+  const original = cropSourceUrl(oldUrl);
+  cropBusy.value = true;
+  uploadStatusKind.value = "";
+  uploadStatus.value = "Applying crop...";
+  try {
+    const height = Math.round(1600 / (rect.ar || 1));
+    const url = await cropImage(id, rect, { width: 1600, height });
+    replaceImageUrl(oldUrl, url);
+    const assets = { ...(form.value.image_assets || {}) };
+    delete assets[oldUrl];
+    assets[url] = id;
+    form.value.image_assets = assets;
+    const crops = { ...(form.value.image_crops || {}) };
+    delete crops[oldUrl];
+    crops[url] = { ...rect, image_id: id, original_url: original };
+    form.value.image_crops = crops;
+    uploadStatus.value = "Crop applied.";
+    croppingUrl.value = "";
+  } catch (error) {
+    uploadStatusKind.value = "error";
+    uploadStatus.value = error.message || "The crop could not be applied.";
+  } finally {
+    cropBusy.value = false;
+  }
 }
 
 function imageUrlList() {
