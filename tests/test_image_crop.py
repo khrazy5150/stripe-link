@@ -198,7 +198,7 @@ class CssIsolationTests(unittest.TestCase):
     later in the file. Correct by source order is not correct.
     """
 
-    CROPPABLE_CONTAINERS = [".sl-ribbon-media", ".sl-author-photo", ".sl-content-media"]
+    CROPPABLE_CONTAINERS = [".sl-ribbon-media", ".sl-author-photo", ".sl-content-media", ".sl-ba-img"]
 
     def _css(self):
         from stripe_link.runtime.html import render_template_styles
@@ -235,7 +235,7 @@ class CssIsolationTests(unittest.TestCase):
         A surface listed but not wired is a lie the cropper cannot detect: the tenant is offered a shape
         picker, frames a photo, and the page ignores it.
         """
-        from stripe_link.runtime.html import render_author_bio, render_content_blocks
+        from stripe_link.runtime.html import render_author_bio, render_before_after, render_content_blocks
 
         root = pathlib.Path(__file__).resolve().parents[1]
         declared = set(json.loads((root / "src/stripe_link/image_ratios.json").read_text())["placement"])
@@ -249,6 +249,10 @@ class CssIsolationTests(unittest.TestCase):
                 "id": "cb", "type": "content_block",
                 "blocks": [{"title": "T", "body": "B", "image_url": "https://i/x/large.webp",
                             "image_crop": dict(crop)}]}),
+            "before_after": render_before_after({
+                "id": "ba", "type": "before_after",
+                "before_url": "https://i/b/large.webp", "after_url": "https://i/a/large.webp",
+                "before_crop": dict(crop), "after_crop": dict(crop)}),
         }
         self.assertEqual(declared, set(rendered),
                          "a declared surface with no coverage here is one nobody has proven crops")
@@ -287,10 +291,15 @@ class MechanismTests(unittest.TestCase):
             "service_hero": "dashboard/src/components/Services.vue",
             "product": "dashboard/src/components/Products.vue",
             "hero_media": "dashboard/src/components/LandingPages.vue",
+            # Both sides take the ELEMENT's shape, so the editor binds element.ratio rather than the table
+            # directly -- the shape is asked once, which is what keeps the two halves aligned.
+            "before_after": None,
         }
         declared = set(table["placement"]) | set(table["asset"])
         self.assertEqual(declared, set(OWNER), "every declared surface needs a named owner here")
         for surface, path in OWNER.items():
+            if path is None:
+                continue
             group = "placement" if surface in table["placement"] else "asset"
             with self.subTest(surface=surface):
                 self.assertIn(f"imageRatios.{group}.{surface}", (root / path).read_text(),

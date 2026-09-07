@@ -14,6 +14,13 @@
       1,
       1.3333333333,
       1.7777777778
+    ],
+    "before_after": [
+      "original",
+      1.3333333333,
+      1.7777777778,
+      1,
+      0.8
     ]
   },
   "_asset": "Images that appear on MANY surfaces and also feed og:image and Product JSON-LD. Meta tags are URLs and no stylesheet can reach them, so a CSS crop would still send the uncropped photo to Facebook and Google. These are BAKED into a derivative: the stored URL is the cropped one, and the renderer applies nothing.",

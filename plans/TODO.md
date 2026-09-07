@@ -1269,7 +1269,12 @@ Named in the original discussion, never built, and not absorbed by anything that
   carries a truthfulness surface the other elements do not.
 - **Standalone video** — `hero_media` already handles video in the hero, so this is the same capability
   somewhere else on the page: mostly placement, not new machinery.
-- **Before / after** — two images and a divider. Simplest of the three.
+- ~~**Before / after**~~ — **SHIPPED 2026-09-07.** The divider is a real `<input type="range">`, so
+  keyboard, touch, click-to-jump and assistive technology come from the browser and the script is one
+  assignment; without JS it rests at the authored position, which is a legible side-by-side rather than a
+  broken control. Both layers are the SAME box with the top one **clipped**, not resized — sizing it to
+  the divider would make its image narrower than the one beneath and the seam would visibly jump. The
+  element owns ONE shape that both photos crop to, which is what removed the alignment problem entirely.
 
 Social and lead-specific elements still wait for those page types to exist.
 

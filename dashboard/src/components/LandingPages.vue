@@ -731,6 +731,55 @@
                       </div>
                     </template>
 
+                    <template v-else-if="element.type === 'before_after'">
+                      <label class="offer-field">
+                        <span>Heading (optional)</span>
+                        <input v-model.trim="element.heading" type="text" placeholder="e.g. The difference one visit makes" />
+                      </label>
+                      <label class="offer-field">
+                        <span>Shape</span>
+                        <select v-model.number="element.ratio" @change="resetBeforeAfterCrops(element)">
+                          <option v-for="r in beforeAfterShapes" :key="r.value" :value="r.value">{{ r.label }}</option>
+                        </select>
+                        <small class="field-note">Both photos are cropped to this shape — that is what makes the slider line up.</small>
+                      </label>
+                      <div class="offer-two-column">
+                        <div class="offer-field">
+                          <span>Before</span>
+                          <ImageUploadField
+                            v-model="element.before_url"
+                            :crop="element.before_crop"
+                            :ratios="element.ratio"
+                            :uploader="uploadPageImage"
+                            label="Upload before"
+                            alt="Before image preview"
+                            @update:crop="(rect) => (element.before_crop = rect)"
+                          />
+                          <input v-model.trim="element.before_label" type="text" placeholder="Before" />
+                        </div>
+                        <div class="offer-field">
+                          <span>After</span>
+                          <ImageUploadField
+                            v-model="element.after_url"
+                            :crop="element.after_crop"
+                            :ratios="element.ratio"
+                            :uploader="uploadPageImage"
+                            label="Upload after"
+                            alt="After image preview"
+                            @update:crop="(rect) => (element.after_crop = rect)"
+                          />
+                          <input v-model.trim="element.after_label" type="text" placeholder="After" />
+                        </div>
+                      </div>
+                      <label class="offer-field">
+                        <span>Slider starts at {{ element.start }}%</span>
+                        <input v-model.number="element.start" type="range" min="0" max="100" step="5" />
+                        <small class="field-note">Where the divider sits before anyone touches it — and where it stays if scripts are blocked.</small>
+                      </label>
+                      <p v-if="!element.before_url || !element.after_url" class="field-warning">
+                        Both photos are needed — one image is not a comparison, so this element will not render yet.
+                      </p>
+                    </template>
                     <template v-else-if="element.type === 'numbered_list'">
                       <label class="offer-field">
                         <span>Heading</span>
@@ -4212,6 +4261,21 @@ function toggleSectionBreak(element, event, surface = "border") {
   }
 }
 
+// Offered shapes for a Before/After pair. Both sides take the element's choice, so this is asked once.
+const beforeAfterShapes = [
+  { value: 1.3333333333, label: "4:3 — landscape" },
+  { value: 1.7777777778, label: "16:9 — wide" },
+  { value: 1, label: "1:1 — square" },
+  { value: 0.8, label: "4:5 — portrait" },
+];
+
+// A crop is framed against a specific shape, so changing the shape invalidates both. Keeping them would
+// silently render the pair at the wrong aspect and the seam would stop lining up.
+function resetBeforeAfterCrops(element) {
+  element.before_crop = null;
+  element.after_crop = null;
+}
+
 function newElement(type) {
   const base = { id: localId("el"), type };
   // Sensible default headings so the tenant isn't guessing — they can always reword them.
@@ -4221,6 +4285,11 @@ function newElement(type) {
   if (type === "client_marquee") return { ...base, heading: "Our Clients", logos: [{ image_url: "", name: "" }], scroll: "auto", scroll_seconds: 30, logo_backing: "card" };
   if (type === "faq") return { ...base, heading: "Frequently Asked Questions", items: [{ question: "", answer: "" }] };
   if (type === "related_products") return { ...base, heading: "Related products" };
+  // ONE ratio for the element, not one per image: locking both sides to the same shape is what makes the
+  // wipe align. 4:3 is the common phone-photo shape, so most pairs need no change.
+  if (type === "before_after") return { ...base, heading: "", before_url: "", after_url: "",
+    before_crop: null, after_crop: null, before_label: "Before", after_label: "After",
+    ratio: 1.3333333333, start: 50 };
   if (type === "bragging_points") return { ...base, heading: "", items: [{ value: "", label: "" }], theme: {} };
   if (type === "quote") return { ...base, text: "", attribution: "", title: "", image_url: "", style: "minimal", theme: {} };
   if (type === "numbered_list") return { ...base, heading: "", items: [""] };
@@ -4691,6 +4760,10 @@ function rowSummary(row) {
   if (row.type === "author_bio") return e.name?.trim() || e.headline?.trim() || "empty";
   if (row.type === "bragging_points") return countLabel((e.items || []).filter((i) => (i.value || "").trim()).length, "point");
   if (row.type === "quote") return e.attribution?.trim() || (e.text?.trim() ? "quote" : "empty");
+  if (row.type === "before_after") {
+    const have = [e.before_url, e.after_url].filter((u) => (u || "").trim()).length;
+    return have === 2 ? "pair ready" : `${have} of 2 images`;
+  }
   if (row.type === "numbered_list") return countLabel((e.items || []).filter((i) => (i || "").trim()).length, "item");
   if (row.type === "page_ribbon") return e.headline?.trim() || e.eyebrow?.trim() || "empty";
   return "";
@@ -4834,6 +4907,17 @@ function elementSection(element) {
       ...ribbonCta(cta),
       theme };
   }
+  if (element.type === "before_after") {
+    // One image is not a comparison, so an incomplete pair is dropped rather than half-rendered.
+    if (!(element.before_url || "").trim() || !(element.after_url || "").trim()) return null;
+    return { id: element.id, type: "before_after",
+      heading: (element.heading || "").trim() || undefined,
+      before_url: element.before_url, after_url: element.after_url,
+      before_crop: element.before_crop || undefined, after_crop: element.after_crop || undefined,
+      before_label: (element.before_label || "").trim() || undefined,
+      after_label: (element.after_label || "").trim() || undefined,
+      ratio: Number(element.ratio) || undefined, start: Number(element.start) };
+  }
   if (element.type === "numbered_list") {
     // Plain strings, capped the way the renderer caps them so the document cannot carry more than shows.
     const items = (element.items || []).map((i) => (i || "").trim()).filter(Boolean).slice(0, 12);
@@ -4896,6 +4980,13 @@ function elementsFromPage(sections) {
                collect_email: Boolean(section.cta?.collect_email),
                collect_phone: Boolean(section.cta?.collect_phone) },
         theme: section.theme ? { ...section.theme } : {} });
+    } else if (section.type === "before_after") {
+      elements.push({ id: localId("el"), type: "before_after", heading: section.heading || "",
+        before_url: section.before_url || "", after_url: section.after_url || "",
+        before_crop: section.before_crop || null, after_crop: section.after_crop || null,
+        before_label: section.before_label || "Before", after_label: section.after_label || "After",
+        ratio: Number(section.ratio) || 1.3333333333,
+        start: Number.isFinite(Number(section.start)) ? Number(section.start) : 50 });
     } else if (section.type === "numbered_list") {
       elements.push({ id: localId("el"), type: "numbered_list", heading: section.heading || "",
         items: (section.items || []).map((i) => String(i || "")) });

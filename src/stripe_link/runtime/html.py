@@ -694,6 +694,25 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     "    .sl-ribbon-media:not(.sl-cropped) img{width:100%;height:auto;display:block}",
     # A cropped image is scaled up inside a clipped box and offset, so the chosen region exactly fills it.
     "    .sl-cropped{position:relative;overflow:hidden;aspect-ratio:var(--sl-crop-ar,1)}",
+    "    .sl-before-after{max-width:74rem;margin:0 auto}",
+    "    .sl-ba-heading{font-family:var(--sl-font-heading);font-size:2rem;line-height:1.25;margin-bottom:1.2rem;color:var(--sl-content-heading);text-align:center}",
+    "    .sl-ba-frame{position:relative;aspect-ratio:var(--sl-ba-ar,4/3);overflow:hidden;border-radius:1rem;background:var(--sl-card);touch-action:none;user-select:none}",
+    "    .sl-ba-frame:focus-within{outline:2px solid var(--sl-accent);outline-offset:3px}",
+    # Both layers are the SAME box; the top one is clipped rather than resized, so the two halves cannot
+    # drift out of register at the seam whatever the images are.
+    "    .sl-before-after .sl-ba-img{position:absolute;inset:0;overflow:hidden}",
+    "    .sl-before-after .sl-ba-img:not(.sl-cropped) img{width:100%;height:100%;object-fit:cover;display:block}",
+    "    .sl-ba-img.is-before{clip-path:inset(0 calc(100% - var(--sl-ba-pos,50%)) 0 0)}",
+    "    .sl-ba-handle{position:absolute;top:0;bottom:0;left:var(--sl-ba-pos,50%);width:0.2rem;margin-left:-0.1rem;background:#fff;box-shadow:0 0 0 1px rgba(0,0,0,0.25);pointer-events:none}",
+    "    .sl-ba-handle::after{content:\"\";position:absolute;top:50%;left:50%;width:3.2rem;height:3.2rem;transform:translate(-50%,-50%);border-radius:50%;background:#fff;box-shadow:0 0.2rem 0.8rem rgba(0,0,0,0.35)}",
+    # The range fills the frame so a drag or a click anywhere moves the divider, and it stays a real
+    # control underneath: keyboard, touch and assistive technology all work without a line of script.
+    "    .sl-ba-range{position:absolute;inset:0;width:100%;height:100%;margin:0;opacity:0;cursor:ew-resize;-webkit-appearance:none;appearance:none;background:transparent}",
+    "    .sl-ba-range::-webkit-slider-thumb{-webkit-appearance:none;width:3.2rem;height:100%}",
+    "    .sl-ba-range::-moz-range-thumb{width:3.2rem;height:100%;border:0;opacity:0}",
+    "    .sl-ba-tag{position:absolute;bottom:1.2rem;padding:0.4rem 1rem;border-radius:999px;font-size:1.2rem;font-weight:600;background:rgba(0,0,0,0.6);color:#fff;pointer-events:none}",
+    "    .sl-ba-tag.is-before{left:1.2rem}",
+    "    .sl-ba-tag.is-after{right:1.2rem}",
     "    .sl-cropped>img{position:absolute;top:var(--sl-crop-y,0);left:var(--sl-crop-x,0);width:var(--sl-crop-w,100%);height:var(--sl-crop-h,100%);max-width:none;border-radius:inherit}",
     "    .sl-ribbon-copy{display:grid;gap:0.8rem;min-width:0}",
     "    .sl-page-ribbon.is-centered .sl-ribbon-copy{justify-items:center}",
@@ -1879,6 +1898,7 @@ SECTION_REGISTRY: dict[str, dict[str, Any]] = {
     "product_details": {"render": lambda c: render_product_details(c.offer, c.products_by_id, c.services_by_id), "version": 1},
     "product_carousel": {"render": lambda c: render_product_carousel(c.section, c.page, c.offers_by_id, c.products_by_id, c.services_by_id, c.checkout_url, c.api_base_url), "version": 1},
     "page_ribbon": {"render": lambda c: render_page_ribbon(c.section, c.page, c.api_base_url), "version": 1},
+    "before_after": {"render": lambda c: render_before_after(c.section), "version": 1},
     "numbered_list": {"render": lambda c: render_numbered_list(c.section), "version": 1},
     "quote": {"render": lambda c: render_quote(c.section), "version": 1},
     "bragging_points": {"render": lambda c: render_bragging_points(c.section), "version": 1},
@@ -4297,6 +4317,73 @@ def render_page_ribbon(section: dict[str, Any], page: dict[str, Any] | None = No
 NUMBERED_LIST_MAX = 12
 
 
+BEFORE_AFTER_SIZES = "(min-width: 60rem) 60rem, 100vw"
+BEFORE_AFTER_DEFAULT_RATIO = 4 / 3
+
+
+def render_before_after(section: dict[str, Any]) -> str:
+    """Two photographs of the same thing, with a divider the visitor drags to wipe between them.
+
+    The divider is a real `<input type="range">`, not hand-rolled pointer handling. That is what makes it
+    work with a keyboard and with assistive technology, and it collapses the script to syncing one value
+    into a CSS custom property -- drag, touch, capture and bounds all come from the browser.
+
+    Without JavaScript the wipe sits at its authored position, which is a legible side-by-side split rather
+    than a broken control. Published pages are static artifacts, so the no-JS state has to be a real state.
+
+    Both images are locked to ONE ratio (the element's own), which is what makes the two halves align.
+    Letting each side choose would reveal misaligned content at the seam and look broken.
+    """
+    before = str(section.get("before_url") or "").strip()
+    after = str(section.get("after_url") or "").strip()
+    if not (before and after):
+        return ""  # a single image is not a comparison, and half a wipe is worse than none
+
+    try:
+        ratio = float(section.get("ratio") or BEFORE_AFTER_DEFAULT_RATIO)
+    except (TypeError, ValueError):
+        ratio = BEFORE_AFTER_DEFAULT_RATIO
+    if ratio <= 0:
+        ratio = BEFORE_AFTER_DEFAULT_RATIO
+
+    try:
+        start = float(section.get("start", 50))
+    except (TypeError, ValueError):
+        start = 50.0
+    start = min(max(start, 0.0), 100.0)
+
+    before_label = str(section.get("before_label") or "Before").strip() or "Before"
+    after_label = str(section.get("after_label") or "After").strip() or "After"
+    heading = str(section.get("heading") or "").strip()
+    section_id = escape(str(section.get("id", "before-after")))
+
+    def layer(url: str, crop: Any, alt: str, side: str, eager: bool) -> str:
+        img = responsive_img(url, alt, sizes=BEFORE_AFTER_SIZES, eager=eager)
+        return cropped_media(img, crop, "before_after", f"sl-ba-img is-{side}")
+
+    rows: list[str] = []
+    if heading:
+        rows.append(f'      <h2 class="sl-ba-heading">{render_headline_markup(heading)}</h2>')
+    rows.extend([
+        f'      <div class="sl-ba-frame" data-sl-before-after style="--sl-ba-ar:{ratio:g};--sl-ba-pos:{start:g}%">',
+        # AFTER sits underneath and BEFORE is clipped over it, so dragging left reveals the outcome --
+        # the direction people expect, and the outcome is what the tenant is selling.
+        "        " + layer(after, section.get("after_crop"), after_label, "after", eager=False),
+        "        " + layer(before, section.get("before_crop"), before_label, "before", eager=True),
+        f'        <span class="sl-ba-tag is-before">{escape(before_label)}</span>',
+        f'        <span class="sl-ba-tag is-after">{escape(after_label)}</span>',
+        '        <span class="sl-ba-handle" aria-hidden="true"></span>',
+        '        <input class="sl-ba-range" type="range" min="0" max="100"',
+        f'               value="{start:g}" aria-label="{escape(before_label)} and {escape(after_label)} comparison slider">',
+        "      </div>",
+    ])
+    return "\n".join([
+        f'    <section class="sl-before-after" data-section-id="{section_id}" data-section-type="before_after">',
+        *rows,
+        "    </section>",
+    ])
+
+
 def render_numbered_list(section: dict[str, Any]) -> str:
     """A heading plus an ordered list of authored lines, each on a card with a numbered badge.
 
@@ -5254,12 +5341,18 @@ def render_page_interactions_script(page: dict[str, Any]) -> str:
         for section in page.get("sections", [])
     )
     has_pp_carousel = any(section.get("type") == "post_purchase_carousel" for section in page.get("sections", []))
+    has_before_after = any(
+        section.get("type") == "before_after"
+        and str(section.get("before_url") or "").strip()
+        and str(section.get("after_url") or "").strip()
+        for section in page.get("sections", [])
+    )
     has_ribbon_download = any(
         section.get("type") == "page_ribbon"
         and str(((section.get("cta") or {}).get("action")) or "") == "download"
         for section in page.get("sections", [])
     )
-    if not any([has_countdown, has_price_selector, has_current_year, has_checkout_cta, has_hero_carousel, has_pp_carousel, has_ribbon_download]):
+    if not any([has_countdown, has_price_selector, has_current_year, has_checkout_cta, has_hero_carousel, has_pp_carousel, has_ribbon_download, has_before_after]):
         return ""
     page_id = escape(str(page.get("page_id") or "page"))
     return "\n".join([
@@ -5267,6 +5360,17 @@ def render_page_interactions_script(page: dict[str, Any]) -> str:
         "    document.addEventListener('DOMContentLoaded', () => {",
         "      document.querySelectorAll('[data-sl-current-year]').forEach((node) => {",
         "        node.textContent = String(new Date().getFullYear());",
+        "      });",
+        # BEFORE / AFTER. The range input already handles drag, touch, click-to-jump, keyboard and
+        # assistive technology; all that is left is moving its value into the custom property the clip-path
+        # and the handle read. Without this the divider simply stays where the tenant authored it, which is
+        # a legible side-by-side rather than a broken control.
+        "      document.querySelectorAll('[data-sl-before-after]').forEach((frame) => {",
+        "        const range = frame.querySelector('.sl-ba-range');",
+        "        if (!range) return;",
+        "        const sync = () => frame.style.setProperty('--sl-ba-pos', range.value + '%');",
+        "        range.addEventListener('input', sync);",
+        "        sync();",
         "      });",
         # PAGE RIBBON DOWNLOAD. The URL is minted per click -- short-lived and presigned -- so this is a
         # button rather than a link. When the ribbon collects details a small dialog gates the request;
