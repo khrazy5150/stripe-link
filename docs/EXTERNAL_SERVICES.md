@@ -47,6 +47,29 @@ so raising the ceiling for course video is a stack parameter update — no dashb
 `video/mp4`; a large `.mov` from a phone will play inconsistently and is bad for page speed. If
 transcoding is ever wanted, it belongs in that repo, not this one.
 
+### NEVER plain `sam build` that stack from a Mac
+
+Learned the hard way on 2026-09-06, by taking the whole image service down.
+
+`sharp` resolves a platform-specific binary at install time. `sam build` on macOS packages
+`@img/sharp-darwin-x64`, which cannot load on Lambda — **every** function in that stack shares `CodeUri:
+src/`, so all ten start throwing `Could not load the "sharp" module using the linux-x64 runtime` on their
+next invocation. Uploads, processing and resizing all stop.
+
+Nothing in the normal loop catches it. `sam build` exits 0. The unit tests pass — they deliberately never
+load sharp, because a platform-specific binary will not load on a dev machine at all. The only evidence
+lives inside the package.
+
+```bash
+cd ../image-processing
+sam build --use-container --parallel   # resolve deps in the RUNTIME image, not the laptop
+npm run verify:build                   # fails if any package lacks sharp-linux-x64
+sam deploy --no-confirm-changeset
+```
+
+`npm run verify:build` exits non-zero and names the offending functions, so it can gate a deploy. Run it
+between build and deploy every time — the failure is invisible until production traffic hits it.
+
 ### Rule of thumb
 
 Media storage/processing lives in `image-processing`. This repo proxies and stores URLs. Before adding a
