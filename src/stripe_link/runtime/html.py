@@ -689,7 +689,7 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     "    .sl-page-ribbon.is-image_left{grid-template-columns:minmax(0,22rem) minmax(0,1fr)}",
     "    .sl-page-ribbon.is-centered{grid-template-columns:minmax(0,1fr);text-align:center;justify-items:center}",
     "    .sl-page-ribbon.is-compact{grid-template-columns:minmax(0,12rem) minmax(0,1fr);gap:1.6rem;padding:1.6rem 2rem}",
-    "    .sl-ribbon-media img{width:100%;height:auto;display:block;border-radius:1rem}",
+    "    .sl-ribbon-media:not(.sl-cropped) img{width:100%;height:auto;display:block;border-radius:1rem}",
     # A cropped image is scaled up inside a clipped box and offset, so the chosen region exactly fills it.
     "    .sl-cropped{position:relative;overflow:hidden;border-radius:1rem;aspect-ratio:var(--sl-crop-ar,1)}",
     "    .sl-cropped>img{position:absolute;top:var(--sl-crop-y,0);left:var(--sl-crop-x,0);width:var(--sl-crop-w,100%);height:var(--sl-crop-h,100%);max-width:none;border-radius:0}",
@@ -868,7 +868,7 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     "    .sl-footernav ul{list-style:none;display:flex;flex-wrap:wrap;justify-content:center;gap:1.4rem;padding:0;margin:0}",
     "    .sl-footernav a{color:var(--sl-legal-link);text-decoration:none;font-size:1.3rem}",
     "    .sl-footernav a:hover{text-decoration:underline}",
-    "    @media (max-width: 700px){.sl-price-option{grid-template-columns:8.8rem minmax(0,1fr) 2.4rem;gap:1rem;padding:1.2rem}.sl-price-option img{width:8.8rem}.sl-content-block{grid-template-columns:1fr}.sl-headline h1{font-size:3rem}.sl-testimonial{grid-template-columns:1fr;padding:1.8rem 1.6rem 1.8rem 3.8rem}.sl-testimonial img{width:5.6rem;height:5.6rem;order:-1}.sl-testimonial blockquote{font-size:1.6rem}.sl-quote-fancy .sl-quote-photo{align-self:auto;min-height:0;height:20rem}.sl-quote-fancy .sl-quote-photo img{position:static;transform:none;height:100%}.sl-page-ribbon{padding:2rem;gap:1.4rem}.sl-page-ribbon.is-image_left,.sl-page-ribbon.is-compact{grid-template-columns:minmax(0,1fr)}.sl-page-ribbon .sl-ribbon-media img{max-height:22rem;object-fit:cover}.sl-ribbon-cta{justify-self:stretch;text-align:center;justify-content:center}}",
+    "    @media (max-width: 700px){.sl-price-option{grid-template-columns:8.8rem minmax(0,1fr) 2.4rem;gap:1rem;padding:1.2rem}.sl-price-option img{width:8.8rem}.sl-content-block{grid-template-columns:1fr}.sl-headline h1{font-size:3rem}.sl-testimonial{grid-template-columns:1fr;padding:1.8rem 1.6rem 1.8rem 3.8rem}.sl-testimonial img{width:5.6rem;height:5.6rem;order:-1}.sl-testimonial blockquote{font-size:1.6rem}.sl-quote-fancy .sl-quote-photo{align-self:auto;min-height:0;height:20rem}.sl-quote-fancy .sl-quote-photo img{position:static;transform:none;height:100%}.sl-page-ribbon{padding:2rem;gap:1.4rem}.sl-page-ribbon.is-image_left,.sl-page-ribbon.is-compact{grid-template-columns:minmax(0,1fr)}.sl-page-ribbon .sl-ribbon-media:not(.sl-cropped) img{max-height:22rem;object-fit:cover}.sl-ribbon-cta{justify-self:stretch;text-align:center;justify-content:center}}",
 ]
 
 TEMPLATE_STYLES = {

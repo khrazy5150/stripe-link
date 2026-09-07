@@ -120,6 +120,44 @@ class SharedRatioTests(unittest.TestCase):
         self.assertIn(f"--sl-crop-ar:{ratio_of('page_ribbon'):g}", div)
 
 
+class CssIsolationTests(unittest.TestCase):
+    """Nothing outside the crop rule may size a cropped image.
+
+    A cropped box positions its image absolutely and sizes it from the custom properties, so a stray
+    width / height / object-fit / max-height corrupts that geometry. The ribbon's mobile rule
+    (`.sl-page-ribbon .sl-ribbon-media img`, specificity 0,2,1) beat the crop rule (0,1,1), so the crop
+    was wrong on phones -- while desktop worked only because the two tie and mine happened to come later
+    in the file. Correct by source order is not correct.
+
+    Only containers that can actually hold a `.sl-cropped` wrapper are checked. Add each surface here as
+    P4 makes it croppable; a surface that never crops needs no exclusion.
+    """
+
+    CROPPABLE_CONTAINERS = [".sl-ribbon-media"]
+
+    def _css(self):
+        from stripe_link.runtime.html import render_template_styles
+        return "\n".join(render_template_styles({}))
+
+    def test_no_rule_on_a_croppable_container_can_size_the_image(self):
+        css = self._css()
+        for container in self.CROPPABLE_CONTAINERS:
+            for rule in re.findall(r"[^{}\n]*" + re.escape(container) + r"[^{}\n]*\bimg\s*\{[^}]*\}", css):
+                selector, body = rule.split("{", 1)
+                if not any(p in body for p in ("max-height:", "object-fit:", "height:", "width:")):
+                    continue
+                with self.subTest(selector=selector.strip()[:80]):
+                    self.assertIn(":not(.sl-cropped)", selector,
+                                  "this rule outranks or ties the crop rule and corrupts the geometry")
+
+    def test_the_ribbon_actually_has_such_rules_to_guard(self):
+        # If the selectors are ever renamed the loop above silently matches nothing and passes forever.
+        css = self._css()
+        self.assertIn(".sl-ribbon-media:not(.sl-cropped) img", css)
+        self.assertGreaterEqual(css.count(".sl-ribbon-media:not(.sl-cropped) img"), 2,
+                                "both the desktop and the mobile rule must exclude cropped media")
+
+
 class PersistenceTests(unittest.TestCase):
     def test_a_crop_survives_document_validation(self):
         """Sections pass unknown fields through today, so this works with no validator change.
