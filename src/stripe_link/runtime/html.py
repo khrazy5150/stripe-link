@@ -18,6 +18,7 @@ from stripe_link.domain.pricing import PricingError, expand_offer, find_price, r
 from stripe_link.domain.semantic import is_bundle, resolve_semantic_model, subject_from_model
 from stripe_link.domain.reviews import aggregate_reviews, markup_eligible
 from stripe_link.domain.image_crop import crop_style_vars
+from stripe_link.domain.video_embeds import parse_video_embed
 from stripe_link.domain.section_theme import section_theme_vars
 from stripe_link.domain.service_pricing import resolve_service_price
 
@@ -694,6 +695,14 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     "    .sl-ribbon-media:not(.sl-cropped) img{width:100%;height:auto;display:block}",
     # A cropped image is scaled up inside a clipped box and offset, so the chosen region exactly fills it.
     "    .sl-cropped{position:relative;overflow:hidden;aspect-ratio:var(--sl-crop-ar,1)}",
+    "    .sl-embed{position:relative;width:100%;aspect-ratio:16/9;overflow:hidden;border-radius:1rem;background:#000}",
+    "    .sl-embed .sl-embed-poster{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:block;border:0}",
+    "    .sl-embed .sl-embed-poster.is-blank{background:linear-gradient(135deg,#1f2937,#0f172a)}",
+    "    .sl-embed iframe{position:absolute;inset:0;width:100%;height:100%;border:0}",
+    "    .sl-embed-play{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);border:0;background:none;padding:0;cursor:pointer;line-height:0}",
+    "    .sl-embed-play .sl-embed-play-bg{fill:#212121;fill-opacity:0.8;transition:fill-opacity 0.15s}",
+    "    .sl-embed-play:hover .sl-embed-play-bg,.sl-embed-play:focus-visible .sl-embed-play-bg{fill:#f00;fill-opacity:1}",
+    "    .sl-embed-play:focus-visible{outline:2px solid #fff;outline-offset:4px;border-radius:0.6rem}",
     "    .sl-before-after{max-width:74rem;margin:0 auto}",
     "    .sl-ba-heading{font-family:var(--sl-font-heading);font-size:2rem;line-height:1.25;margin-bottom:1.2rem;color:var(--sl-content-heading);text-align:center}",
     "    .sl-ba-frame{position:relative;aspect-ratio:var(--sl-ba-ar,4/3);overflow:hidden;border-radius:1rem;background:var(--sl-card);touch-action:none;user-select:none}",
@@ -2064,6 +2073,37 @@ def is_video_url(url: str) -> bool:
     return urlparse(str(url or "")).path.lower().endswith(VIDEO_EXTENSIONS)
 
 
+def render_video_embed(embed: dict[str, str], alt: str) -> str:
+    """A click-to-load facade: poster and a play button, with the iframe inserted only on click.
+
+    A YouTube iframe pulls roughly a megabyte of script and sets third-party cookies on the tenant's
+    customers whether or not anyone watches. The facade costs one image, keeps the page fast, and means
+    nothing is shared with the provider until a visitor deliberately asks to play -- which is also the
+    honest default for someone else's customers.
+
+    A real <button>, so it is reachable by keyboard and announced as a control. The provider URL is built
+    from a strictly-validated id (domain/video_embeds.py), never from tenant text.
+    """
+    label = escape(alt or "Play video")
+    poster = embed.get("thumbnail_url") or ""
+    art = (
+        f'<img class="sl-embed-poster" src="{escape(poster)}" alt="" loading="lazy" decoding="async">'
+        if poster else '<span class="sl-embed-poster is-blank" aria-hidden="true"></span>'
+    )
+    return (
+        f'<div class="sl-embed" data-sl-embed="{escape(embed["embed_url"])}"'
+        f' data-embed-title="{label}">'
+        f"{art}"
+        f'<button type="button" class="sl-embed-play" aria-label="Play {label}">'
+        '<svg viewBox="0 0 68 48" width="68" height="48" aria-hidden="true">'
+        '<path class="sl-embed-play-bg" d="M66.5 7.7a8 8 0 0 0-5.6-5.7C56 .7 34 .7 34 .7s-22 0-26.9 1.3'
+        'A8 8 0 0 0 1.5 7.7 83 83 0 0 0 0 24a83 83 0 0 0 1.5 16.3 8 8 0 0 0 5.6 5.7C12 47.3 34 47.3 34 47.3'
+        's22 0 26.9-1.3a8 8 0 0 0 5.6-5.7A83 83 0 0 0 68 24a83 83 0 0 0-1.5-16.3z"></path>'
+        '<path d="M45 24 27 14v20z" fill="#fff"></path>'
+        "</svg></button></div>"
+    )
+
+
 def render_media_slide(url: str, alt: str, *, autoplay: bool, eager: bool = False) -> str:
     """The MediaViewer's image/video modes (plans/CONVERSION_CONTEXT.md review 4). A video URL renders a
     <video>. Autoplay adds muted+loop because every browser refuses to autoplay with sound.
@@ -2072,6 +2112,9 @@ def render_media_slide(url: str, alt: str, *, autoplay: bool, eager: bool = Fals
     way to unmute, pause or scrub — the tenant enabled autoplay, not silence, and a visitor who wants the
     audio had no affordance at all. It is also a WCAG 2.2.2 (Pause, Stop, Hide) failure: content that
     plays automatically for more than five seconds must offer a way to stop it."""
+    embed = parse_video_embed(url)
+    if embed:
+        return render_video_embed(embed, alt)
     if is_video_url(url):
         attrs = "controls playsinline" + (" muted loop autoplay" if autoplay else "")
         preload = "auto" if eager else "metadata"
@@ -5341,6 +5384,11 @@ def render_page_interactions_script(page: dict[str, Any]) -> str:
         for section in page.get("sections", [])
     )
     has_pp_carousel = any(section.get("type") == "post_purchase_carousel" for section in page.get("sections", []))
+    has_video_embed = any(
+        parse_video_embed(url)
+        for section in page.get("sections", [])
+        for url in (section.get("images") or [])
+    )
     has_before_after = any(
         section.get("type") == "before_after"
         and str(section.get("before_url") or "").strip()
@@ -5352,7 +5400,7 @@ def render_page_interactions_script(page: dict[str, Any]) -> str:
         and str(((section.get("cta") or {}).get("action")) or "") == "download"
         for section in page.get("sections", [])
     )
-    if not any([has_countdown, has_price_selector, has_current_year, has_checkout_cta, has_hero_carousel, has_pp_carousel, has_ribbon_download, has_before_after]):
+    if not any([has_countdown, has_price_selector, has_current_year, has_checkout_cta, has_hero_carousel, has_pp_carousel, has_ribbon_download, has_before_after, has_video_embed]):
         return ""
     page_id = escape(str(page.get("page_id") or "page"))
     return "\n".join([
@@ -5365,6 +5413,23 @@ def render_page_interactions_script(page: dict[str, Any]) -> str:
         # assistive technology; all that is left is moving its value into the custom property the clip-path
         # and the handle read. Without this the divider simply stays where the tenant authored it, which is
         # a legible side-by-side rather than a broken control.
+        # VIDEO EMBED. The provider's iframe -- a megabyte of script and third-party cookies -- is not
+        # loaded until a visitor asks for it. Replacing the facade rather than layering over it means the
+        # poster stops competing for the frame, and autoplay is honoured because the click IS the gesture
+        # the browser requires.
+        "      document.querySelectorAll('[data-sl-embed]').forEach((box) => {",
+        "        const play = box.querySelector('.sl-embed-play');",
+        "        if (!play) return;",
+        "        play.addEventListener('click', () => {",
+        "          const frame = document.createElement('iframe');",
+        "          frame.src = box.dataset.slEmbed;",
+        "          frame.title = box.dataset.embedTitle || 'Video';",
+        "          frame.allow = 'accelerometer; autoplay; encrypted-media; picture-in-picture; web-share';",
+        "          frame.referrerPolicy = 'strict-origin-when-cross-origin';",
+        "          frame.allowFullscreen = true;",
+        "          box.replaceChildren(frame);",
+        "        });",
+        "      });",
         "      document.querySelectorAll('[data-sl-before-after]').forEach((frame) => {",
         "        const range = frame.querySelector('.sl-ba-range');",
         "        if (!range) return;",

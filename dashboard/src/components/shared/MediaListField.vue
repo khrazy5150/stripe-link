@@ -19,7 +19,7 @@
             <span v-else class="media-play"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg></span>
           </span>
           <span class="media-meta">
-            <span class="media-kind">{{ isVideo(url) ? "VIDEO" : "IMAGE" }}</span>
+            <span class="media-kind">{{ mediaKind(url) }}</span>
             <span class="media-name" :title="url">{{ shortName(url) }}</span>
           </span>
           <button
@@ -71,7 +71,7 @@
         </button>
 
         <button v-if="allowVideoUrl" type="button" class="secondary-action compact" :disabled="Boolean(busy)" @click="openUrlEntry">
-          <svg class="mlf-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg><span>Video URL</span>
+          <svg class="mlf-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg><span>YouTube / Vimeo</span>
         </button>
       </div>
 
@@ -80,7 +80,7 @@
           ref="urlInput"
           v-model.trim="urlDraft"
           type="url"
-          placeholder="https://…/clip.mp4"
+          placeholder="https://youtube.com/watch?v=… or vimeo.com/…"
           @keyup.enter="commitUrl"
           @keyup.esc="closeUrlEntry"
         />
@@ -144,9 +144,7 @@ const props = defineProps({
   assets: { type: Object, default: () => ({}) },
   // async (file) => url. Required for the Upload Image action.
   upload: { type: Function, default: null },
-  // async (file) => url. Video FILE upload needs a backend that stripe-link doesn't have yet
-  // (stripe-cart used a presigned S3 POST + transcode); off until it does, so the UI never
-  // offers a capability that would fail. Video URLs work today — the renderer handles them.
+  // async (file) => url. Video file upload works (image-processing handles it, verified 2026-08-30).
   uploadVideo: { type: Function, default: null },
   allowVideoUrl: { type: Boolean, default: true },
   allowVideoUpload: { type: Boolean, default: false },
@@ -263,8 +261,27 @@ function closeUrlEntry() {
   urlDraft.value = "";
 }
 
+// Only a recognised YouTube or Vimeo link. The field used to accept anything, so pasting the obvious
+// thing -- a YouTube link -- was stored and then rendered as a BROKEN IMAGE on the published page. Refusing
+// it here is the difference between a message the tenant can act on and a page they discover is broken.
+const VIDEO_LINK = /^(?:https?:\/\/)?(?:www\.|m\.)?(?:youtube\.com\/(?:watch\?.*v=|embed\/|shorts\/|live\/|v\/)|youtu\.be\/|(?:www\.)?vimeo\.com\/|player\.vimeo\.com\/video\/)/i;
+
+// The row label should say what the entry IS, so a tenant can tell a hosted file from a linked one at a
+// glance -- they behave differently (one is served by us, the other by the provider on click).
+function mediaKind(url) {
+  if (VIDEO_LINK.test(String(url || ""))) return /vimeo/i.test(url) ? "VIMEO" : "YOUTUBE";
+  return isVideo(url) ? "VIDEO" : "IMAGE";
+}
+
 function commitUrl() {
-  if (urlDraft.value) append(urlDraft.value);
+  const value = (urlDraft.value || "").trim();
+  if (!value) return closeUrlEntry();
+  if (!VIDEO_LINK.test(value)) {
+    error.value = "Paste a YouTube or Vimeo link. To use your own video file, choose Upload Video.";
+    return;
+  }
+  error.value = "";
+  append(value);
   closeUrlEntry();
 }
 </script>
