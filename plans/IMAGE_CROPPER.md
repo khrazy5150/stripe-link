@@ -1,6 +1,7 @@
 # Image cropper
 
-**Status:** planned, not built. Raised 2026-09-06.
+**Status:** P1–P3 **SHIPPED** 2026-09-06 (not yet deployed). P4 in progress — Page Ribbon done, other
+surfaces pending. P5 not started.
 
 ## What this is
 
@@ -42,23 +43,18 @@ SOURCE, so 0.5 x 0.5 is any shape until you know the source's dimensions — **t
 it framed at** as `ar` on the crop. Depending on the `image_dims` sidecar instead would make the page wrong
 whenever it happened to be missing.
 
-## The core idea: the element declares the ratio, the cropper enforces it
+## The core idea: the surface declares what it allows, the cropper obeys
 
-This is what makes one component serve every caller. A crop UI that lets the tenant pick any rectangle
-solves nothing on its own — the hero still gets a square photo from someone who cropped square.
+This is what makes one component serve every caller. A crop UI where the tenant picks any rectangle solves
+nothing on its own — the hero still gets a square photo from someone who cropped square. A cropper that
+picks its own ratio is worse still: the tenant frames a shot and the page silently discards it.
 
-Instead each call site declares what it needs:
-
-| Surface | Ratio |
+| Surface | Allowance |
 |---|---|
-| Author bio photo, marquee logo | `1:1` |
-| Hero media, page ribbon | `16:9` |
-| Product / offer images | `1:1` |
-| **Before / After pair** | one ratio, **both sides locked to it** |
-
-The cropper locks the crop box to that ratio and the tenant moves and zooms within it. The output is then
-correct by construction rather than by hope, and the before/after alignment problem stops being a problem
-anyone can create.
+| Author bio photo, marquee logo, product | `1` — locked, the layout demands a square |
+| Hero media | `1.7778` — locked |
+| **Page ribbon** | `["original", 1, 1.3333, 1.7778]` — renders `height:auto`, so the tenant chooses |
+| **Before / After pair** | one ratio, **both sides locked to it** — that is what makes them align |
 
 ## The rect is data, not a baked file
 
@@ -68,9 +64,18 @@ If the rect is persisted, crops are non-destructive: a tenant reopens the modal 
 they expect from every tool that has ever offered a crop. If only the derivative is kept, every adjustment
 is a re-upload and the framing decision is unrecoverable.
 
-It also buys a genuinely useful intermediate step: with the rect in hand, **CSS can apply the crop with no
-backend change at all** — `object-fit` plus `object-position` against the declared `aspect-ratio`. Baking a
-derivative through `/resize` then becomes a delivery optimisation for LCP, not a correctness requirement.
+It also buys a genuinely useful intermediate step: with the rect in hand, **CSS applies the crop with no
+backend change at all**. Not `object-position` — that can only pan, so it cannot express a zoom. The image
+is scaled by `1/w` and `1/h` inside a clipped box and offset by `-x/w`, `-y/h`, which puts exactly the
+chosen region in view and leaves `responsive_img`'s srcset, lazy loading and intrinsic dimensions intact.
+Baking a derivative through `/resize` is then a delivery optimisation for LCP, not a correctness
+requirement.
+
+**Any rule that sizes an image inside a cropped box corrupts that geometry.** The ribbon's own mobile rule
+(`.sl-page-ribbon .sl-ribbon-media img`, specificity 0,2,1) outranked the crop rule (0,1,1) and clamped the
+scaled image, so the crop was wrong on phones while desktop was right only because the two desktop rules
+tie and the crop rule happened to sit later in the file. Every croppable container's image rules carry
+`:not(.sl-cropped)`.
 
 ### Coordinates must be normalized
 
@@ -133,9 +138,10 @@ deploy independently and ahead of the dashboard, with nothing to coordinate.
 
 ### The shared component
 
-One `ImageCropper.vue`, used by every image button. Props: the source URL, the required `ratio`, and an
-existing `crop` to reopen with. Emits the normalized rect. Interaction is drag to move, slider or wheel to
-zoom — the shape of the reference UI.
+One `ImageCropper.vue`, used by every image button. Props: the source URL, the surface's `ratios`
+allowance (number, list, or null), and an existing `crop` to reopen with. Emits the normalized rect plus
+the `ar` it was framed at. Drag to move, slider to zoom; the shape picker appears only when there is a
+choice to make, since a one-option picker invites the tenant to look for a choice that does not exist.
 
 Its job is the rect. It does not upload, does not know about elements, and does not decide where the value
 is stored.
@@ -183,16 +189,16 @@ and stores URLs") — rather than widening CORS on a public endpoint.
 
 ## Phases
 
-**P1 — cache key.** Hash the full transform into `destKey`. Ships alone, fixes a latent bug, unblocks
+**P1 — cache key. ✅ SHIPPED.** Hash the full transform into `destKey`. Ships alone, fixes a latent bug, unblocks
 everything else.
 
-**P2 — crop on `/resize`.** `crop` parameter, normalized→pixel conversion, `extract()` after `rotate()`,
+**P2 — crop on `/resize`. ✅ SHIPPED.** `crop` parameter, normalized→pixel conversion, `extract()` after `rotate()`,
 clamping. Backward compatible, deploys independently.
 
-**P3 — `ImageCropper.vue` + rect storage.** The bulk of the work. Ratio-locked, non-destructive, owns its
+**P3 — `ImageCropper.vue` + rect storage. ✅ SHIPPED.** The bulk of the work. Ratio-locked, non-destructive, owns its
 own file input. Applied via `object-position`; no derivative baked yet.
 
-**P4 — roll out per surface.** Author bio, ribbon, hero, products, marquee. Each declares its ratio. Do
+**P4 — roll out per surface. IN PROGRESS** — Page Ribbon done. Author bio, ribbon, hero, products, marquee. Each declares its ratio. Do
 them one at a time; each is a small diff once P3 exists.
 
 **P5 — bake derivatives** where LCP justifies it, proxied through `upload.py`.
@@ -210,8 +216,11 @@ compatible, so there is no window where the two must land together.
 3. **Does the cropper replace or supplement upload?** Crop-on-upload (forced, like the reference UI) versus
    crop-later (optional, via an edit affordance). Forced is simpler to reason about and gets every image
    framed; optional is less friction. I lean forced-on-upload with re-edit available afterwards.
-4. **Zoom beyond 100%.** Allowing upscale produces soft images. Cap zoom at native resolution unless there
-   is a reason not to.
+4. ~~**Zoom beyond 100%.**~~ **Decided:** capped at native resolution. A small upload therefore has little
+   crop range, and the cropper says so rather than offering a slider that does nothing.
+5. **Does an unlocked surface want true drag-handle freeform?** Shipped as presets plus "original", which
+   covers the ribbon without building resize handles. Revisit only if a surface appears that genuinely
+   needs an arbitrary rectangle.
 
 ## Related
 
