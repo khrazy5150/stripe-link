@@ -763,6 +763,15 @@
                         <small class="field-note">Vimeo has no automatic thumbnail, and YouTube picks its own frame — set one to control what people see before they press play.</small>
                       </div>
                       <label class="offer-field">
+                        <span>Shape</span>
+                        <select v-model.number="element.aspect">
+                          <option v-for="o in videoShapes" :key="o.value" :value="o.value">{{ o.label }}</option>
+                        </select>
+                        <small class="field-note">{{ isEmbedLink(element.url)
+                          ? "A linked video's shape cannot be detected — pick the one it was filmed in."
+                          : "Set automatically when you upload a file; change it if you want a different frame." }}</small>
+                      </label>
+                      <label class="offer-field">
                         <span>Caption (optional)</span>
                         <input v-model.trim="element.caption" type="text" placeholder="e.g. A two-minute walkthrough" />
                       </label>
@@ -4340,6 +4349,16 @@ function videoKindLabel(url) {
   return /vimeo/i.test(url) ? "Vimeo — loads only when a visitor presses play" : "YouTube — loads only when a visitor presses play";
 }
 
+// Vertical first: Shorts, Reels and TikTok-style video are the common case now, so the list should not
+// read as if landscape were the only real option.
+const videoShapes = [
+  { value: 1.7777777778, label: "16:9 — landscape" },
+  { value: 0.5625, label: "9:16 — vertical" },
+  { value: 1, label: "1:1 — square" },
+  { value: 0.8, label: "4:5 — portrait" },
+  { value: 1.3333333333, label: "4:3 — classic" },
+];
+
 const elementVideoInputs = ref({});
 const elementVideoUploading = reactive({});
 const elementVideoErrors = reactive({});
@@ -4351,6 +4370,21 @@ function setElementVideoInput(id, el) {
 function triggerElementVideoUpload(id) {
   elementVideoInputs.value[id]?.click();
 }
+// The browser knows the real shape of a file, so read it instead of asking. Vertical video is common now
+// and a wrong default either letterboxes it into a stripe or crops the subject out.
+function videoAspectOf(file) {
+  return new Promise((resolve) => {
+    const probe = document.createElement("video");
+    probe.preload = "metadata";
+    const src = URL.createObjectURL(file);
+    const done = (value) => { URL.revokeObjectURL(src); resolve(value); };
+    probe.onloadedmetadata = () => done(probe.videoWidth && probe.videoHeight
+      ? probe.videoWidth / probe.videoHeight : 0);
+    probe.onerror = () => done(0);
+    probe.src = src;
+  });
+}
+
 async function handleElementVideoPicked(element, event) {
   const file = event.target.files?.[0];
   event.target.value = "";
@@ -4358,7 +4392,9 @@ async function handleElementVideoPicked(element, event) {
   elementVideoErrors[element.id] = "";
   elementVideoUploading[element.id] = true;
   try {
+    const measured = await videoAspectOf(file);
     element.url = await uploadPageVideo(file);
+    if (measured) element.aspect = Math.round(measured * 1e4) / 1e4;
     // A file plays inline; a poster belongs to an embed, so anything left over would never be used.
     element.poster = "";
   } catch (err) {
@@ -4379,7 +4415,7 @@ function newElement(type) {
   if (type === "related_products") return { ...base, heading: "Related products" };
   // ONE ratio for the element, not one per image: locking both sides to the same shape is what makes the
   // wipe align. 4:3 is the common phone-photo shape, so most pairs need no change.
-  if (type === "video") return { ...base, heading: "", url: "", poster: "", caption: "" };
+  if (type === "video") return { ...base, heading: "", url: "", poster: "", caption: "", aspect: 1.7777777778 };
   if (type === "before_after") return { ...base, heading: "", before_url: "", after_url: "",
     before_crop: null, after_crop: null, before_label: "Before", after_label: "After",
     ratio: 1.3333333333, start: 50 };
@@ -5006,7 +5042,8 @@ function elementSection(element) {
     return { id: element.id, type: "video", url: element.url.trim(),
       heading: (element.heading || "").trim() || undefined,
       caption: (element.caption || "").trim() || undefined,
-      poster: (element.poster || "").trim() || undefined };
+      poster: (element.poster || "").trim() || undefined,
+      aspect: Number(element.aspect) || undefined };
   }
   if (element.type === "before_after") {
     // One image is not a comparison, so an incomplete pair is dropped rather than half-rendered.
@@ -5083,7 +5120,8 @@ function elementsFromPage(sections) {
         theme: section.theme ? { ...section.theme } : {} });
     } else if (section.type === "video") {
       elements.push({ id: localId("el"), type: "video", url: section.url || "",
-        heading: section.heading || "", caption: section.caption || "", poster: section.poster || "" });
+        heading: section.heading || "", caption: section.caption || "", poster: section.poster || "",
+        aspect: Number(section.aspect) || 1.7777777778 });
     } else if (section.type === "before_after") {
       elements.push({ id: localId("el"), type: "before_after", heading: section.heading || "",
         before_url: section.before_url || "", after_url: section.after_url || "",

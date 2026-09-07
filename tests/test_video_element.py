@@ -67,12 +67,61 @@ class StyleTests(unittest.TestCase):
             with self.subTest(cls=cls):
                 self.assertIn(cls, css)
 
-    def test_an_uploaded_file_is_given_a_shape(self):
-        # An embed brings its own aspect-ratio box; a bare <video> would otherwise size to its intrinsic
-        # dimensions and jump the layout once metadata loads.
+    def test_the_frame_carries_the_shape_so_the_layout_does_not_jump(self):
+        # A bare <video> sizes to its intrinsic dimensions and jumps the layout once metadata loads, so the
+        # FRAME holds the shape and the player fills it.
         css = "\n".join(render_template_styles({}))
-        self.assertIn(".sl-video-frame>video", css)
-        self.assertIn("aspect-ratio:16/9", css)
+        self.assertIn(".sl-video-frame{aspect-ratio:var(--sl-video-ar,16/9)}", css)
+
+
+class ShapeTests(unittest.TestCase):
+    """The frame follows the VIDEO, not the page.
+
+    Vertical video is the common case now. Forcing 16/9 on it either letterboxes it into a stripe or, with
+    object-fit: cover, crops the subject straight out of frame -- which is what this element did at first.
+    """
+
+    def test_the_default_is_landscape(self):
+        self.assertIn("--sl-video-ar:1.77778", render_video(FILE))
+
+    def test_a_vertical_video_gets_a_vertical_frame(self):
+        html = render_video({**FILE, "aspect": 9 / 16})
+        self.assertIn("--sl-video-ar:0.5625", html)
+
+    def test_the_shape_reaches_an_embed_too(self):
+        # The embed box has its own aspect-ratio, so the element has to override it or a linked vertical
+        # video sits letterboxed inside a landscape box.
+        html = render_video({**EMBED, "aspect": 9 / 16})
+        self.assertIn("--sl-embed-ar:0.5625", html)
+
+    def test_a_tall_video_is_bounded(self):
+        # Unbounded, a 9:16 frame at full page width runs several screens tall on a desktop.
+        self.assertIn("is-tall", render_video({**FILE, "aspect": 9 / 16}))
+        self.assertNotIn("is-tall", render_video({**FILE, "aspect": 16 / 9}))
+
+    def test_a_nonsense_shape_falls_back(self):
+        for aspect in ("wide", 0, -3, 50, 0.01, None):
+            with self.subTest(aspect=aspect):
+                self.assertIn("--sl-video-ar:1.77778", render_video({**FILE, "aspect": aspect}))
+
+    def test_a_mismatched_shape_letterboxes_rather_than_crops(self):
+        """contain, not cover. If the chosen shape does not match the source, black bars are honest --
+        cropping silently removes whatever the tenant was pointing at."""
+        css = "\n".join(render_template_styles({}))
+        self.assertIn(".sl-video-frame>video{display:block;width:100%;height:100%;object-fit:contain", css)
+
+    def test_the_embed_default_is_unchanged_for_everyone_else(self):
+        # The hero and every page published before today must keep their 16/9 box.
+        css = "\n".join(render_template_styles({}))
+        self.assertIn("aspect-ratio:var(--sl-embed-ar,16/9)", css)
+
+    def test_the_builder_measures_a_file_rather_than_asking(self):
+        import pathlib
+        builder = (pathlib.Path(__file__).resolve().parents[1]
+                   / "dashboard/src/components/LandingPages.vue").read_text()
+        self.assertIn("videoAspectOf", builder)
+        self.assertIn("probe.videoWidth", builder,
+                      "the browser knows the real shape; asking the tenant for it is a worse default")
 
 
 class RegistrationTests(unittest.TestCase):

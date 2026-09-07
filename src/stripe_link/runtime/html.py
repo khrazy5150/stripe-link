@@ -695,12 +695,16 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     "    .sl-ribbon-media:not(.sl-cropped) img{width:100%;height:auto;display:block}",
     # A cropped image is scaled up inside a clipped box and offset, so the chosen region exactly fills it.
     "    .sl-cropped{position:relative;overflow:hidden;aspect-ratio:var(--sl-crop-ar,1)}",
-    "    .sl-embed{position:relative;width:100%;aspect-ratio:16/9;overflow:hidden;border-radius:1rem;background:#000}",
+    "    .sl-embed{position:relative;width:100%;aspect-ratio:var(--sl-embed-ar,16/9);overflow:hidden;border-radius:1rem;background:#000}",
     "    .sl-video-block{max-width:74rem;margin:0 auto}",
     "    .sl-video-heading{font-family:var(--sl-font-heading);font-size:2rem;line-height:1.25;margin-bottom:1.2rem;color:var(--sl-content-heading);text-align:center}",
     "    .sl-video-frame{position:relative;width:100%;overflow:hidden;border-radius:1rem;background:#000}",
     # An uploaded file is sized here; an embed brings its own aspect-ratio box with it.
-    "    .sl-video-frame>video{display:block;width:100%;height:auto;aspect-ratio:16/9;object-fit:cover;background:#000}",
+    "    .sl-video-frame>video{display:block;width:100%;height:100%;object-fit:contain;background:#000}",
+    "    .sl-video-frame{aspect-ratio:var(--sl-video-ar,16/9)}",
+    # A vertical video on a wide screen must not become a full-height column; the frame stays centred and
+    # bounded by the viewport instead.
+    "    .sl-video-block.is-tall .sl-video-frame{max-width:min(100%,45vh);margin:0 auto}",
     "    .sl-video-caption{margin-top:0.8rem;text-align:center;font-size:1.4rem;color:var(--sl-content-text)}",
     "    .sl-embed .sl-embed-poster{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:block;border:0}",
     "    .sl-embed .sl-embed-poster.is-blank{background:linear-gradient(135deg,#1f2937,#0f172a)}",
@@ -4441,7 +4445,7 @@ def render_before_after(section: dict[str, Any]) -> str:
     ])
 
 
-VIDEO_BLOCK_ASPECT = "16/9"
+VIDEO_BLOCK_DEFAULT_ASPECT = 16 / 9
 
 
 def render_video(section: dict[str, Any]) -> str:
@@ -4464,6 +4468,19 @@ def render_video(section: dict[str, Any]) -> str:
     poster = str(section.get("poster") or "").strip()
     section_id = escape(str(section.get("id", "video")))
 
+    # The shape follows the VIDEO, not the page. Vertical video is the common case now, and forcing 16/9
+    # on it either letterboxes it into a stripe or crops the subject out of frame. An uploaded file's
+    # natural ratio is measured at upload; an embed cannot be measured without an API call, so the tenant
+    # says which it is.
+    try:
+        aspect = float(section.get("aspect") or VIDEO_BLOCK_DEFAULT_ASPECT)
+    except (TypeError, ValueError):
+        aspect = VIDEO_BLOCK_DEFAULT_ASPECT
+    if not 0.2 <= aspect <= 5:
+        aspect = VIDEO_BLOCK_DEFAULT_ASPECT
+    # Taller than square: bound it so it cannot run the height of a desktop screen.
+    tall = " is-tall" if aspect < 1 else ""
+
     rows: list[str] = []
     if heading:
         rows.append(f'      <h2 class="sl-video-heading">{render_headline_markup(heading)}</h2>')
@@ -4477,8 +4494,10 @@ def render_video(section: dict[str, Any]) -> str:
         # video is not an illustration of surrounding prose.
         rows.append(f'      <p class="sl-video-caption">{escape(caption)}</p>')
 
+    style = f'--sl-video-ar:{aspect:g};--sl-embed-ar:{aspect:g}'
     return "\n".join([
-        f'    <section class="sl-video-block" data-section-id="{section_id}" data-section-type="video">',
+        f'    <section class="sl-video-block{tall}" data-section-id="{section_id}"'
+        f' data-section-type="video" style="{style}">',
         *rows,
         "    </section>",
     ])
