@@ -696,6 +696,12 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     # A cropped image is scaled up inside a clipped box and offset, so the chosen region exactly fills it.
     "    .sl-cropped{position:relative;overflow:hidden;aspect-ratio:var(--sl-crop-ar,1)}",
     "    .sl-embed{position:relative;width:100%;aspect-ratio:16/9;overflow:hidden;border-radius:1rem;background:#000}",
+    "    .sl-video-block{max-width:74rem;margin:0 auto}",
+    "    .sl-video-heading{font-family:var(--sl-font-heading);font-size:2rem;line-height:1.25;margin-bottom:1.2rem;color:var(--sl-content-heading);text-align:center}",
+    "    .sl-video-frame{position:relative;width:100%;overflow:hidden;border-radius:1rem;background:#000}",
+    # An uploaded file is sized here; an embed brings its own aspect-ratio box with it.
+    "    .sl-video-frame>video{display:block;width:100%;height:auto;aspect-ratio:16/9;object-fit:cover;background:#000}",
+    "    .sl-video-caption{margin-top:0.8rem;text-align:center;font-size:1.4rem;color:var(--sl-content-text)}",
     "    .sl-embed .sl-embed-poster{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:block;border:0}",
     "    .sl-embed .sl-embed-poster.is-blank{background:linear-gradient(135deg,#1f2937,#0f172a)}",
     "    .sl-embed iframe{position:absolute;inset:0;width:100%;height:100%;border:0}",
@@ -1908,6 +1914,7 @@ SECTION_REGISTRY: dict[str, dict[str, Any]] = {
     "product_carousel": {"render": lambda c: render_product_carousel(c.section, c.page, c.offers_by_id, c.products_by_id, c.services_by_id, c.checkout_url, c.api_base_url), "version": 1},
     "page_ribbon": {"render": lambda c: render_page_ribbon(c.section, c.page, c.api_base_url), "version": 1},
     "before_after": {"render": lambda c: render_before_after(c.section), "version": 1},
+    "video": {"render": lambda c: render_video(c.section), "version": 1},
     "numbered_list": {"render": lambda c: render_numbered_list(c.section), "version": 1},
     "quote": {"render": lambda c: render_quote(c.section), "version": 1},
     "bragging_points": {"render": lambda c: render_bragging_points(c.section), "version": 1},
@@ -4429,6 +4436,49 @@ def render_before_after(section: dict[str, Any]) -> str:
     ])
     return "\n".join([
         f'    <section class="sl-before-after" data-section-id="{section_id}" data-section-type="before_after">',
+        *rows,
+        "    </section>",
+    ])
+
+
+VIDEO_BLOCK_ASPECT = "16/9"
+
+
+def render_video(section: dict[str, Any]) -> str:
+    """One video anywhere on the page: an uploaded file, or a YouTube/Vimeo link.
+
+    Deliberately NOT autoplaying. The hero offers autoplay because a visitor has just arrived and the media
+    is the first impression; a video that starts itself halfway down a page is noise the reader did not ask
+    for, and content that plays for more than five seconds without a way to stop it fails WCAG 2.2.2.
+
+    Everything about picking between a file and an embed already lives in render_media_slide, so this
+    element is placement and a caption -- it inherits the click-to-load facade, the poster handling and the
+    provider parsing without restating any of it.
+    """
+    url = str(section.get("url") or "").strip()
+    if not url:
+        return ""
+
+    heading = str(section.get("heading") or "").strip()
+    caption = str(section.get("caption") or "").strip()
+    poster = str(section.get("poster") or "").strip()
+    section_id = escape(str(section.get("id", "video")))
+
+    rows: list[str] = []
+    if heading:
+        rows.append(f'      <h2 class="sl-video-heading">{render_headline_markup(heading)}</h2>')
+    rows.append(
+        '      <div class="sl-video-frame">'
+        + render_media_slide(url, heading or caption or "Video", autoplay=False, poster=poster)
+        + "</div>"
+    )
+    if caption:
+        # A <figcaption> would need the whole thing to be a <figure>; this is a plain caption, and the
+        # video is not an illustration of surrounding prose.
+        rows.append(f'      <p class="sl-video-caption">{escape(caption)}</p>')
+
+    return "\n".join([
+        f'    <section class="sl-video-block" data-section-id="{section_id}" data-section-type="video">',
         *rows,
         "    </section>",
     ])

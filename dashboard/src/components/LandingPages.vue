@@ -733,6 +733,43 @@
                       </div>
                     </template>
 
+                    <template v-else-if="element.type === 'video'">
+                      <label class="offer-field">
+                        <span>Heading (optional)</span>
+                        <input v-model.trim="element.heading" type="text" placeholder="e.g. See how it works" />
+                      </label>
+                      <label class="offer-field">
+                        <span>Video</span>
+                        <input v-model.trim="element.url" type="url" placeholder="YouTube or Vimeo link, or upload below" />
+                        <small v-if="element.url" class="field-note">{{ videoKindLabel(element.url) }}</small>
+                        <small v-else class="field-note">Paste a YouTube or Vimeo link, or upload your own file.</small>
+                      </label>
+                      <div class="image-upload-actions">
+                        <input :ref="(el) => setElementVideoInput(element.id, el)" type="file" accept="video/*" hidden @change="handleElementVideoPicked(element, $event)" />
+                        <button class="secondary-action compact" type="button" :disabled="Boolean(elementVideoUploading[element.id])" @click.prevent="triggerElementVideoUpload(element.id)">
+                          {{ elementVideoUploading[element.id] ? "Uploading..." : "Upload video file" }}
+                        </button>
+                      </div>
+                      <p v-if="elementVideoErrors[element.id]" class="field-error">{{ elementVideoErrors[element.id] }}</p>
+                      <div v-if="isEmbedLink(element.url)" class="offer-field">
+                        <span>Poster (optional)</span>
+                        <ImageUploadField
+                          v-model="element.poster"
+                          :ratios="1.7777777778"
+                          :uploader="uploadPageImage"
+                          label="Upload poster"
+                          alt="Video poster preview"
+                        />
+                        <small class="field-note">Vimeo has no automatic thumbnail, and YouTube picks its own frame — set one to control what people see before they press play.</small>
+                      </div>
+                      <label class="offer-field">
+                        <span>Caption (optional)</span>
+                        <input v-model.trim="element.caption" type="text" placeholder="e.g. A two-minute walkthrough" />
+                      </label>
+                      <p v-if="!element.url" class="field-warning">
+                        Add a video — this element will not render until it has one.
+                      </p>
+                    </template>
                     <template v-else-if="element.type === 'before_after'">
                       <label class="offer-field">
                         <span>Heading (optional)</span>
@@ -4290,6 +4327,47 @@ function resetBeforeAfterCrops(element) {
   element.after_crop = null;
 }
 
+// Mirrors domain/video_embeds.py: the builder must agree with the renderer about what counts as a link,
+// or it will promise a poster for something that renders as a file, or refuse one that needs it.
+const EMBED_LINK = /^(?:https?:\/\/)?(?:www\.|m\.)?(?:youtube\.com\/(?:watch\?.*v=|embed\/|shorts\/|live\/|v\/)|youtu\.be\/|(?:www\.)?vimeo\.com\/|player\.vimeo\.com\/video\/)/i;
+
+function isEmbedLink(url) {
+  return EMBED_LINK.test(String(url || ""));
+}
+
+function videoKindLabel(url) {
+  if (!isEmbedLink(url)) return "Hosted video file";
+  return /vimeo/i.test(url) ? "Vimeo — loads only when a visitor presses play" : "YouTube — loads only when a visitor presses play";
+}
+
+const elementVideoInputs = ref({});
+const elementVideoUploading = reactive({});
+const elementVideoErrors = reactive({});
+
+function setElementVideoInput(id, el) {
+  if (el) elementVideoInputs.value[id] = el;
+  else delete elementVideoInputs.value[id];
+}
+function triggerElementVideoUpload(id) {
+  elementVideoInputs.value[id]?.click();
+}
+async function handleElementVideoPicked(element, event) {
+  const file = event.target.files?.[0];
+  event.target.value = "";
+  if (!file) return;
+  elementVideoErrors[element.id] = "";
+  elementVideoUploading[element.id] = true;
+  try {
+    element.url = await uploadPageVideo(file);
+    // A file plays inline; a poster belongs to an embed, so anything left over would never be used.
+    element.poster = "";
+  } catch (err) {
+    elementVideoErrors[element.id] = err?.message || "Video upload failed.";
+  } finally {
+    elementVideoUploading[element.id] = false;
+  }
+}
+
 function newElement(type) {
   const base = { id: localId("el"), type };
   // Sensible default headings so the tenant isn't guessing — they can always reword them.
@@ -4301,6 +4379,7 @@ function newElement(type) {
   if (type === "related_products") return { ...base, heading: "Related products" };
   // ONE ratio for the element, not one per image: locking both sides to the same shape is what makes the
   // wipe align. 4:3 is the common phone-photo shape, so most pairs need no change.
+  if (type === "video") return { ...base, heading: "", url: "", poster: "", caption: "" };
   if (type === "before_after") return { ...base, heading: "", before_url: "", after_url: "",
     before_crop: null, after_crop: null, before_label: "Before", after_label: "After",
     ratio: 1.3333333333, start: 50 };
@@ -4774,6 +4853,7 @@ function rowSummary(row) {
   if (row.type === "author_bio") return e.name?.trim() || e.headline?.trim() || "empty";
   if (row.type === "bragging_points") return countLabel((e.items || []).filter((i) => (i.value || "").trim()).length, "point");
   if (row.type === "quote") return e.attribution?.trim() || (e.text?.trim() ? "quote" : "empty");
+  if (row.type === "video") return (e.url || "").trim() ? videoKindLabel(e.url) : "no video yet";
   if (row.type === "before_after") {
     const have = [e.before_url, e.after_url].filter((u) => (u || "").trim()).length;
     return have === 2 ? "pair ready" : `${have} of 2 images`;
@@ -4921,6 +5001,13 @@ function elementSection(element) {
       ...ribbonCta(cta),
       theme };
   }
+  if (element.type === "video") {
+    if (!(element.url || "").trim()) return null;  // nothing to show
+    return { id: element.id, type: "video", url: element.url.trim(),
+      heading: (element.heading || "").trim() || undefined,
+      caption: (element.caption || "").trim() || undefined,
+      poster: (element.poster || "").trim() || undefined };
+  }
   if (element.type === "before_after") {
     // One image is not a comparison, so an incomplete pair is dropped rather than half-rendered.
     if (!(element.before_url || "").trim() || !(element.after_url || "").trim()) return null;
@@ -4994,6 +5081,9 @@ function elementsFromPage(sections) {
                collect_email: Boolean(section.cta?.collect_email),
                collect_phone: Boolean(section.cta?.collect_phone) },
         theme: section.theme ? { ...section.theme } : {} });
+    } else if (section.type === "video") {
+      elements.push({ id: localId("el"), type: "video", url: section.url || "",
+        heading: section.heading || "", caption: section.caption || "", poster: section.poster || "" });
     } else if (section.type === "before_after") {
       elements.push({ id: localId("el"), type: "before_after", heading: section.heading || "",
         before_url: section.before_url || "", after_url: section.after_url || "",

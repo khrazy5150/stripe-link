@@ -23,6 +23,7 @@
     "numbered_list",
     "page_ribbon",
     "client_marquee",
+    "video",
     "before_after",
     "faq",
     "trust_badges",
@@ -461,6 +462,19 @@
         "content_heading",
         "content_text",
         "content_border"
+      ]
+    },
+    "video": {
+      "placement": "free",
+      "label": "Video",
+      "ui": "add",
+      "kind": "capability",
+      "channel": "body",
+      "heading_role": "h2",
+      "repeatable": false,
+      "tokens": [
+        "content_heading",
+        "content_text"
       ]
     }
   },

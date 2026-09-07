@@ -1265,10 +1265,16 @@ owning its own input.
 
 Named in the original discussion, never built, and not absorbed by anything that shipped:
 
-- **Comparison table** — the only one needing real design work. It is a claim about competitors, so it
-  carries a truthfulness surface the other elements do not.
-- **Standalone video** — `hero_media` already handles video in the hero, so this is the same capability
-  somewhere else on the page: mostly placement, not new machinery.
+- ~~**Comparison table**~~ — **DROPPED 2026-09-07 (author).** Narrowest use, hardest mobile problem
+  (a three-column table has to become card-per-column below ~600px), and the only element carrying
+  third-party legal exposure, since it makes claims about competitors rather than about the tenant. If a
+  need resurfaces, the safe shape is a single-column "What's included" checklist with no competitor column
+  at all.
+- ~~**Standalone video**~~ — **SHIPPED 2026-09-07.** Takes an uploaded file OR a YouTube/Vimeo link,
+  inheriting the click-to-load facade, poster handling and provider parsing from `render_media_slide`
+  rather than restating any of it. Deliberately never autoplays: the hero can, because the visitor has
+  just arrived and the media is the first impression, but a video that starts itself halfway down a page
+  is noise, and content playing past five seconds with no stop fails WCAG 2.2.2.
 - ~~**Before / after**~~ — **SHIPPED 2026-09-07.** The divider is a real `<input type="range">`, so
   keyboard, touch, click-to-jump and assistive technology come from the browser and the script is one
   assignment; without JS it rests at the authored position, which is a legible side-by-side rather than a
