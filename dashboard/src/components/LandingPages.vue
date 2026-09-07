@@ -630,7 +630,7 @@
                         v-if="element.presentation !== 'centered'"
                         v-model="element.image_url"
                         :crop="element.image_crop"
-                        :ratio="imageRatios.ratios.page_ribbon"
+                        :ratios="imageRatios.ratios.page_ribbon"
                         :uploader="uploadPageImage"
                         alt="Ribbon image preview"
                         @update:crop="(rect) => (element.image_crop = rect)"

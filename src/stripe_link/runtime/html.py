@@ -17,7 +17,7 @@ from stripe_link.domain.opportunities import STAGE_LANDING, STAGE_POST_PURCHASE,
 from stripe_link.domain.pricing import PricingError, expand_offer, find_price, resolve_offer, single_unit_price
 from stripe_link.domain.semantic import is_bundle, resolve_semantic_model, subject_from_model
 from stripe_link.domain.reviews import aggregate_reviews, markup_eligible
-from stripe_link.domain.image_crop import crop_style_vars, surface_ratio
+from stripe_link.domain.image_crop import crop_style_vars
 from stripe_link.domain.section_theme import section_theme_vars
 from stripe_link.domain.service_pricing import resolve_service_price
 
@@ -4225,7 +4225,7 @@ def render_page_ribbon(section: dict[str, Any], page: dict[str, Any] | None = No
     if image:
         # A stored crop is applied by clipping, not by object-position, which cannot express a zoom. The
         # srcset/lazy/dims work stays in responsive_img; the wrapper only frames what it renders.
-        crop_vars = crop_style_vars(section.get("image_crop"), surface_ratio("page_ribbon"))
+        crop_vars = crop_style_vars(section.get("image_crop"), "page_ribbon")
         media_class = "sl-ribbon-media sl-cropped" if crop_vars else "sl-ribbon-media"
         crop_attr = f' style="{escape(crop_vars)}"' if crop_vars else ""
         parts.append(

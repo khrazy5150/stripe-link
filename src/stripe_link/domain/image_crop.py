@@ -22,14 +22,50 @@ CROP_KEYS = ("x", "y", "w", "h")
 # Ratios are DATA, shared with the builder, not a constant restated per language. The cropper must frame
 # exactly what the renderer crops to; a comment saying "must match" is not a mechanism.
 _RATIOS_PATH = Path(__file__).resolve().parent.parent / "image_ratios.json"
-_RATIOS: dict[str, float] = {
-    key: float(value) for key, value in json.loads(_RATIOS_PATH.read_text())["ratios"].items()
-}
+_RATIOS: dict[str, Any] = json.loads(_RATIOS_PATH.read_text())["ratios"]
+
+# A surface that accepts any shape. "original" means the source image's own ratio -- a reframe that zooms
+# and pans without changing the shape, which is what a shape-agnostic surface usually wants.
+FREEFORM = "original"
+
+
+def surface_ratios(surface: str) -> list[Any]:
+    """Every ratio a surface offers, in order. One entry means locked; empty means anything goes."""
+    value = _RATIOS.get(str(surface or ""), None)
+    if value is None:
+        return [FREEFORM]
+    if isinstance(value, list):
+        return [v for v in value if v == FREEFORM or (isinstance(v, (int, float)) and v > 0)]
+    return [value] if isinstance(value, (int, float)) and value > 0 else [FREEFORM]
 
 
 def surface_ratio(surface: str, default: float = 1.0) -> float:
-    """The width/height a surface renders at. Unknown surfaces are square rather than an error."""
-    return _RATIOS.get(str(surface or ""), default)
+    """The single ratio a LOCKED surface renders at.
+
+    Only meaningful where the layout demands one shape. A surface offering choices has no single answer,
+    so the crop itself carries the shape it was made at -- see crop_aspect.
+    """
+    options = surface_ratios(surface)
+    if len(options) == 1 and options[0] != FREEFORM:
+        return float(options[0])
+    return default
+
+
+def crop_aspect(crop: Any, surface: str = "", default: float = 1.0) -> float:
+    """The shape a crop actually renders at.
+
+    The rect is fractions of the SOURCE, so its own numbers cannot reveal the output shape without the
+    source dimensions. Rather than depend on the image_dims sidecar being present, the cropper records the
+    ratio it framed at; a locked surface can still answer from the table for crops made before it did.
+    """
+    if isinstance(crop, dict):
+        try:
+            stored = float(crop.get("ar"))
+            if stored > 0:
+                return stored
+        except (TypeError, ValueError):
+            pass
+    return surface_ratio(surface, default)
 
 
 def normalized_crop(value: Any) -> dict[str, float] | None:
@@ -68,20 +104,16 @@ def _pct(value: float) -> str:
     return f"{text}%"
 
 
-def crop_style_vars(crop: Any, ratio: Any = None) -> str:
+def crop_style_vars(crop: Any, surface: str = "") -> str:
     """The inline custom properties the `.sl-cropped` rule reads, or "" when there is nothing to apply."""
     rect = normalized_crop(crop)
     if not rect:
         return ""
-    parts = [
+    aspect = crop_aspect(crop, surface)
+    return ";".join([
+        f"--sl-crop-ar:{aspect:g}",
         f"--sl-crop-w:{_pct(100.0 / rect['w'])}",
         f"--sl-crop-h:{_pct(100.0 / rect['h'])}",
         f"--sl-crop-x:{_pct(-rect['x'] / rect['w'] * 100.0)}",
         f"--sl-crop-y:{_pct(-rect['y'] / rect['h'] * 100.0)}",
-    ]
-    try:
-        if ratio and float(ratio) > 0:
-            parts.insert(0, f"--sl-crop-ar:{float(ratio):g}")
-    except (TypeError, ValueError):
-        pass
-    return ";".join(parts)
+    ])

@@ -10,20 +10,28 @@
  * Uploading is DELEGATED to the caller. The parent records image dimensions and refreshes the preview as
  * side effects of a successful upload, and those belong with the document, not in a presentation component.
  */
-import { ref } from "vue";
+import { computed, ref } from "vue";
 import ImageCropper from "./ImageCropper.vue";
 
 const props = defineProps({
   modelValue: { type: String, default: "" },
   crop: { type: Object, default: null },
-  // width / height the consuming surface needs. The cropper locks to it, so the output is the right shape
-  // by construction rather than by asking the tenant to eyeball it.
-  ratio: { type: Number, default: 1 },
+  // What shape this surface allows: a number locks it, an array offers choices, null accepts any shape.
+  // Passed straight through from image_ratios.json -- see ImageCropper for the three modes.
+  ratios: { type: [Number, Array, String], default: null },
   label: { type: String, default: "Upload image" },
   alt: { type: String, default: "Image preview" },
   uploader: { type: Function, required: true },
 });
 const emit = defineEmits(["update:modelValue", "update:crop"]);
+
+// The thumbnail shows the shape the crop was actually made at; before any crop, the surface's first
+// allowed shape is the honest preview.
+const previewRatio = computed(() => {
+  if (props.crop?.ar > 0) return props.crop.ar;
+  const first = Array.isArray(props.ratios) ? props.ratios[0] : props.ratios;
+  return typeof first === "number" && first > 0 ? first : 1;
+});
 
 const input = ref(null);
 const uploading = ref(false);
@@ -76,7 +84,7 @@ function previewStyle() {
 
 <template>
   <div class="image-upload-field">
-    <div v-if="modelValue" class="image-upload-preview" :style="{ aspectRatio: String(ratio) }">
+    <div v-if="modelValue" class="image-upload-preview" :style="{ aspectRatio: String(previewRatio) }">
       <img :src="modelValue" :alt="alt" :style="previewStyle()" />
     </div>
 
@@ -102,7 +110,7 @@ function previewStyle() {
     <ImageCropper
       v-if="cropping && modelValue"
       :src="modelValue"
-      :ratio="ratio"
+      :ratios="ratios"
       :crop="crop"
       @apply="applyCrop"
       @cancel="cropping = false"

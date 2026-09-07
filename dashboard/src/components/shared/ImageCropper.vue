@@ -1,11 +1,11 @@
 <script setup>
 /**
- * Crop / zoom / reposition, locked to the aspect ratio the CALLER declares.
+ * Crop / zoom / reposition, in whatever shape the CONSUMING SURFACE allows.
  *
- * The ratio lock is the whole point. A free-form crop box solves nothing: the hero still receives a square
- * photo from a tenant who cropped square. Because the frame is fixed and the image moves behind it, the
- * output is the requested shape by construction -- which is also what makes a Before/After pair align,
- * since both sides are cropped to one ratio rather than to two well-meant guesses.
+ * Some surfaces demand one ratio -- a circular avatar is not negotiable, and a Before/After pair only
+ * aligns because both sides crop to one shape. Others (the page ribbon renders height:auto) never had a
+ * shape at all, and forcing one silently discards the framing the tenant chose. So the surface declares
+ * what it allows and this adapts: locked, a choice of presets, or the source's own ratio.
  *
  * The value is a NORMALIZED rect ({x, y, w, h} as fractions of the source, 0..1), never pixels. The image
  * service emits thumb/small/medium/large/full and mints more on demand, so a pixel rect is correct against
@@ -16,16 +16,22 @@ import { computed, ref, watch } from "vue";
 
 const props = defineProps({
   src: { type: String, required: true },
-  // width / height. 1 = square, 16/9 = wide.
-  ratio: { type: Number, default: 1 },
+  /**
+   * What shape this crop may be, from image_ratios.json. Three forms, and the UI adapts to each:
+   *   a NUMBER          -- locked; the layout demands one shape (a circular avatar is not negotiable)
+   *   an ARRAY          -- the tenant picks; "original" means the source image's own ratio
+   *   null / undefined  -- the surface accepts any shape, so the source's own ratio is offered
+   * A surface that renders height:auto never had one shape, and forcing one silently discards framing
+   * the tenant chose. See plans/IMAGE_CROPPER.md.
+   */
+  ratios: { type: [Number, Array, String], default: null },
   // Reopen with the crop already applied, so a crop is an editable decision rather than a one-shot.
   crop: { type: Object, default: null },
   title: { type: String, default: "Crop, zoom, or move" },
 });
 const emit = defineEmits(["apply", "cancel"]);
 
-const FRAME_WIDTH = 420;
-const frameHeight = computed(() => Math.round(FRAME_WIDTH / (props.ratio || 1)));
+const FREEFORM = "original";
 
 const natural = ref({ width: 0, height: 0 });
 const scale = ref(1);
@@ -34,10 +40,43 @@ const dragging = ref(false);
 const loadFailed = ref(false);
 let dragStart = null;
 
+
+// Fits a phone as well as a desktop; a fixed 420 overflowed narrow viewports.
+const frameWidth = ref(Math.min(420, (typeof window !== "undefined" ? window.innerWidth : 420) - 96));
+
+const options = computed(() => {
+  const raw = props.ratios;
+  if (raw === null || raw === undefined || raw === "") return [FREEFORM];
+  const list = Array.isArray(raw) ? raw : [raw];
+  const usable = list.filter((r) => r === FREEFORM || (typeof r === "number" && r > 0));
+  return usable.length ? usable : [FREEFORM];
+});
+const locked = computed(() => options.value.length === 1);
+const chosen = ref(null);
+
+// "original" resolves only once the image has loaded and its own shape is known.
+const activeRatio = computed(() => {
+  const pick = chosen.value ?? options.value[0];
+  if (pick === FREEFORM) {
+    return natural.value.width && natural.value.height
+      ? natural.value.width / natural.value.height
+      : 1;
+  }
+  return pick;
+});
+const frameHeight = computed(() => Math.round(frameWidth.value / (activeRatio.value || 1)));
+
+function ratioLabel(option) {
+  if (option === FREEFORM) return "Original";
+  const named = { 1: "1:1", 1.3333333333: "4:3", 1.7777777778: "16:9", 0.8: "4:5", 0.5625: "9:16" };
+  const hit = Object.keys(named).find((k) => Math.abs(Number(k) - option) < 0.001);
+  return hit ? named[hit] : `${Math.round(option * 100) / 100}`;
+}
+
 // Below this the image cannot cover the frame and gaps appear at the edges, so it is the floor for zoom.
 const minScale = computed(() => {
   if (!natural.value.width || !natural.value.height) return 1;
-  return Math.max(FRAME_WIDTH / natural.value.width, frameHeight.value / natural.value.height);
+  return Math.max(frameWidth.value / natural.value.width, frameHeight.value / natural.value.height);
 });
 // Never enlarge past native resolution: upscaling produces a soft image the tenant cannot diagnose. An
 // image smaller than the frame is the exception -- it has to be enlarged to cover at all.
@@ -49,14 +88,14 @@ function clampOffset(next, atScale) {
   const w = natural.value.width * atScale;
   const h = natural.value.height * atScale;
   return {
-    x: Math.min(0, Math.max(FRAME_WIDTH - w, next.x)),
+    x: Math.min(0, Math.max(frameWidth.value - w, next.x)),
     y: Math.min(0, Math.max(frameHeight.value - h, next.y)),
   };
 }
 
 function centreOn(atScale) {
   offset.value = clampOffset({
-    x: (FRAME_WIDTH - natural.value.width * atScale) / 2,
+    x: (frameWidth.value - natural.value.width * atScale) / 2,
     y: (frameHeight.value - natural.value.height * atScale) / 2,
   }, atScale);
 }
@@ -64,9 +103,15 @@ function centreOn(atScale) {
 function onImageLoad(event) {
   loadFailed.value = false;
   natural.value = { width: event.target.naturalWidth, height: event.target.naturalHeight };
+  if (props.crop?.ar > 0) {
+    const match = options.value.find(
+      (o) => o !== FREEFORM && Math.abs(o - props.crop.ar) < 0.001,
+    );
+    chosen.value = match ?? (options.value.includes(FREEFORM) ? FREEFORM : options.value[0]);
+  }
   if (props.crop && props.crop.w > 0 && props.crop.h > 0) {
     // Reopening: recover the transform the stored rect describes.
-    const restored = Math.max(minScale.value, FRAME_WIDTH / (props.crop.w * natural.value.width));
+    const restored = Math.max(minScale.value, frameWidth.value / (props.crop.w * natural.value.width));
     scale.value = Math.min(maxScale.value, restored);
     offset.value = clampOffset({
       x: -props.crop.x * natural.value.width * scale.value,
@@ -81,9 +126,16 @@ function onImageLoad(event) {
 watch(scale, (next, previous) => {
   if (!natural.value.width || next === previous) return;
   // Zoom about the frame's centre, so the subject the tenant framed stays framed.
-  const cx = (FRAME_WIDTH / 2 - offset.value.x) / previous;
+  const cx = (frameWidth.value / 2 - offset.value.x) / previous;
   const cy = (frameHeight.value / 2 - offset.value.y) / previous;
-  offset.value = clampOffset({ x: FRAME_WIDTH / 2 - cx * next, y: frameHeight.value / 2 - cy * next }, next);
+  offset.value = clampOffset({ x: frameWidth.value / 2 - cx * next, y: frameHeight.value / 2 - cy * next }, next);
+});
+
+watch(activeRatio, () => {
+  if (!natural.value.width) return;
+  // A new frame shape can leave the old scale too small to cover it, which would show bare background.
+  scale.value = Math.max(minScale.value, Math.min(maxScale.value, scale.value));
+  centreOn(scale.value);
 });
 
 function startDrag(event) {
@@ -121,13 +173,16 @@ function apply() {
   const rect = {
     x: Math.min(Math.max(-offset.value.x / w, 0), 1),
     y: Math.min(Math.max(-offset.value.y / h, 0), 1),
-    w: Math.min(FRAME_WIDTH / w, 1),
+    w: Math.min(frameWidth.value / w, 1),
     h: Math.min(frameHeight.value / h, 1),
   };
   // Round to the fifth decimal: enough precision for any real image, and it keeps the stored document and
   // the generated cache key stable instead of churning on floating-point noise.
   const round = (n) => Math.round(n * 1e5) / 1e5;
-  emit("apply", { x: round(rect.x), y: round(rect.y), w: round(rect.w), h: round(rect.h) });
+  emit("apply", {
+    x: round(rect.x), y: round(rect.y), w: round(rect.w), h: round(rect.h),
+    ar: Math.round(activeRatio.value * 1e5) / 1e5,
+  });
 }
 </script>
 
@@ -138,9 +193,23 @@ function apply() {
 
       <p v-if="loadFailed" class="field-error">That image could not be loaded.</p>
 
+      <!-- Only when there is a decision to make. A locked surface showing a one-option picker invites the
+           tenant to look for a choice that does not exist. -->
+      <div v-if="!locked" class="cropper-ratios" role="group" aria-label="Shape">
+        <button
+          v-for="option in options"
+          :key="String(option)"
+          type="button"
+          class="cropper-ratio"
+          :class="{ 'is-active': (chosen ?? options[0]) === option }"
+          :aria-pressed="(chosen ?? options[0]) === option"
+          @click="chosen = option"
+        >{{ ratioLabel(option) }}</button>
+      </div>
+
       <div
         class="cropper-frame"
-        :style="{ width: `${FRAME_WIDTH}px`, height: `${frameHeight}px` }"
+        :style="{ width: `${frameWidth}px`, height: `${frameHeight}px` }"
         tabindex="0"
         role="application"
         aria-label="Drag to reposition. Arrow keys nudge."
@@ -202,6 +271,12 @@ function apply() {
 .cropper-frame:active { cursor: grabbing; }
 .cropper-frame:focus-visible { outline: 2px solid #4f46e5; outline-offset: 2px; }
 .cropper-image { position: absolute; top: 0; left: 0; max-width: none; transform-origin: 0 0; }
+.cropper-ratios { display: flex; justify-content: center; gap: 0.4rem; flex-wrap: wrap; margin-bottom: 0.9rem; }
+.cropper-ratio {
+  border: 1px solid #e2e8f0; background: #fff; border-radius: 999px;
+  padding: 0.25rem 0.7rem; font-size: 0.8rem; cursor: pointer; color: #475569;
+}
+.cropper-ratio.is-active { border-color: #4f46e5; color: #4f46e5; font-weight: 600; }
 .cropper-zoom { display: flex; align-items: center; gap: 0.75rem; margin: 1rem auto 0; max-width: 420px; }
 .cropper-zoom input[type="range"] { flex: 1; }
 .cropper-zoom-step {

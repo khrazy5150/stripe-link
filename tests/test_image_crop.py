@@ -10,7 +10,7 @@ import pathlib
 import re
 import unittest
 
-from stripe_link.domain.image_crop import crop_style_vars, normalized_crop, surface_ratio
+from stripe_link.domain.image_crop import CROP_KEYS, crop_aspect, crop_style_vars, normalized_crop, surface_ratio, surface_ratios
 from stripe_link.runtime.html import render_page_ribbon
 
 CASES = json.loads((pathlib.Path(__file__).parent / "fixtures" / "image_crop_cases.json").read_text())["cases"]
@@ -101,61 +101,90 @@ class SharedRatioTests(unittest.TestCase):
         self.assertNotIn("RIBBON_IMAGE_RATIO", builder, "a restated constant can drift from the renderer")
         self.assertNotIn("RIBBON_IMAGE_RATIO", (root / "src/stripe_link/runtime/html.py").read_text())
 
-    def test_every_ratio_is_a_usable_positive_number(self):
+    def test_every_entry_is_one_of_the_three_legal_shapes(self):
+        """A number locks, a list offers choices, null accepts any shape. Nothing else is meaningful."""
+        from stripe_link.domain.image_crop import FREEFORM
+
         data = json.loads((pathlib.Path(__file__).resolve().parents[1]
                            / "src/stripe_link/image_ratios.json").read_text())["ratios"]
-        self.assertTrue(data, "an empty ratio table makes every surface square by accident")
+        self.assertTrue(data, "an empty table makes every surface square by accident")
         for surface, value in data.items():
             with self.subTest(surface=surface):
-                self.assertIsInstance(value, (int, float))
-                self.assertGreater(value, 0)
+                if value is None:
+                    continue
+                entries = value if isinstance(value, list) else [value]
+                self.assertTrue(entries, "an empty list offers the tenant nothing")
+                for entry in entries:
+                    if entry == FREEFORM:
+                        continue
+                    self.assertIsInstance(entry, (int, float))
+                    self.assertGreater(entry, 0)
 
-    def test_an_unknown_surface_is_square_rather_than_an_error(self):
-        self.assertEqual(surface_ratio("no-such-surface"), 1.0)
+    def test_a_locked_surface_reports_its_one_ratio(self):
+        self.assertEqual(surface_ratio("author_bio"), 1.0)
+        self.assertAlmostEqual(surface_ratio("hero_media"), 16 / 9, places=6)
 
-    def test_the_ribbon_renders_at_the_ratio_the_table_declares(self):
-        from stripe_link.domain.image_crop import surface_ratio as ratio_of
-        section = {**RendererTests.SECTION, "image_crop": {"x": 0.1, "y": 0.1, "w": 0.5, "h": 0.5}}
-        div = re.search(r'<div class="sl-ribbon-media[^>]*>', render_page_ribbon(section)).group(0)
-        self.assertIn(f"--sl-crop-ar:{ratio_of('page_ribbon'):g}", div)
+    def test_a_surface_offering_choices_has_no_single_ratio(self):
+        # page_ribbon renders height:auto, so it never had one shape. The crop carries what it was made at.
+        from stripe_link.domain.image_crop import FREEFORM
+        options = surface_ratios("page_ribbon")
+        self.assertGreater(len(options), 1)
+        self.assertIn(FREEFORM, options, "a shape-agnostic surface must offer the source's own ratio")
+
+    def test_an_unknown_surface_is_freeform_rather_than_an_error(self):
+        from stripe_link.domain.image_crop import FREEFORM
+        self.assertEqual(surface_ratios("no-such-surface"), [FREEFORM])
+
+    def test_the_crop_carries_the_shape_it_was_made_at(self):
+        """A preset or freeform crop's shape cannot be recovered from the rect alone.
+
+        The rect is fractions of the SOURCE, so without the source's dimensions 0.5x0.5 could be any shape.
+        Depending on the image_dims sidecar would make the page wrong whenever it is missing, so the cropper
+        records the ratio it framed at.
+        """
+        wide = {"x": 0.1, "y": 0.1, "w": 0.5, "h": 0.5, "ar": 16 / 9}
+        self.assertIn("--sl-crop-ar:1.77778", crop_style_vars(wide, "page_ribbon"))
+        self.assertAlmostEqual(crop_aspect(wide, "page_ribbon"), 16 / 9, places=5)
+
+    def test_a_locked_surface_still_answers_for_crops_made_before_it_recorded_one(self):
+        # Backward compatibility for any crop stored without `ar`.
+        self.assertEqual(crop_aspect({"x": 0, "y": 0, "w": 0.5, "h": 0.5}, "author_bio"), 1.0)
 
 
-class CssIsolationTests(unittest.TestCase):
-    """Nothing outside the crop rule may size a cropped image.
+class CropperContractTests(unittest.TestCase):
+    """What the Vue cropper writes is what the Python renderer reads. Nothing in either language forces it.
 
-    A cropped box positions its image absolutely and sizes it from the custom properties, so a stray
-    width / height / object-fit / max-height corrupts that geometry. The ribbon's mobile rule
-    (`.sl-page-ribbon .sl-ribbon-media img`, specificity 0,2,1) beat the crop rule (0,1,1), so the crop
-    was wrong on phones -- while desktop worked only because the two tie and mine happened to come later
-    in the file. Correct by source order is not correct.
-
-    Only containers that can actually hold a `.sl-cropped` wrapper are checked. Add each surface here as
-    P4 makes it croppable; a surface that never crops needs no exclusion.
+    The rect alone cannot reveal the output shape -- it is fractions of the SOURCE, so 0.5 x 0.5 is any
+    shape until you know the source's dimensions. For a locked surface the table answers, but for a preset
+    or "original" crop only the cropper knows, so it records `ar`. Drop that and every ribbon crop silently
+    renders square.
     """
 
-    CROPPABLE_CONTAINERS = [".sl-ribbon-media"]
+    def _cropper(self):
+        root = pathlib.Path(__file__).resolve().parents[1]
+        return (root / "dashboard/src/components/shared/ImageCropper.vue").read_text()
 
-    def _css(self):
-        from stripe_link.runtime.html import render_template_styles
-        return "\n".join(render_template_styles({}))
+    def test_the_cropper_records_the_shape_it_framed_at(self):
+        source = self._cropper()
+        start = source.find('emit("apply"')
+        self.assertGreater(start, -1, "the cropper must emit an applied crop")
+        payload = source[start:source.find("\n}", start)]
+        self.assertIn("ar:", payload,
+                      "the applied crop must carry `ar` or the renderer cannot know its shape")
 
-    def test_no_rule_on_a_croppable_container_can_size_the_image(self):
-        css = self._css()
-        for container in self.CROPPABLE_CONTAINERS:
-            for rule in re.findall(r"[^{}\n]*" + re.escape(container) + r"[^{}\n]*\bimg\s*\{[^}]*\}", css):
-                selector, body = rule.split("{", 1)
-                if not any(p in body for p in ("max-height:", "object-fit:", "height:", "width:")):
-                    continue
-                with self.subTest(selector=selector.strip()[:80]):
-                    self.assertIn(":not(.sl-cropped)", selector,
-                                  "this rule outranks or ties the crop rule and corrupts the geometry")
+    def test_the_cropper_emits_every_key_the_renderer_reads(self):
+        source = self._cropper()
+        for key in CROP_KEYS:
+            with self.subTest(key=key):
+                self.assertRegex(source, rf"\b{key}:\s*round\(",
+                                 f"the renderer requires {key}; a crop missing it is discarded entirely")
 
-    def test_the_ribbon_actually_has_such_rules_to_guard(self):
-        # If the selectors are ever renamed the loop above silently matches nothing and passes forever.
-        css = self._css()
-        self.assertIn(".sl-ribbon-media:not(.sl-cropped) img", css)
-        self.assertGreaterEqual(css.count(".sl-ribbon-media:not(.sl-cropped) img"), 2,
-                                "both the desktop and the mobile rule must exclude cropped media")
+    def test_the_surface_declares_the_shape_and_the_cropper_obeys(self):
+        # A cropper that picked its own ratio would silently discard the tenant's framing on save.
+        self.assertIn("ratios", self._cropper())
+        field = (pathlib.Path(__file__).resolve().parents[1]
+                 / "dashboard/src/components/shared/ImageUploadField.vue").read_text()
+        self.assertIn(':ratios="ratios"', field, "the field must pass the surface's allowance straight through")
 
 
 class PersistenceTests(unittest.TestCase):

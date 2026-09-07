@@ -1,10 +1,11 @@
 {
-  "_comment": "The aspect ratio each image surface renders at, as width/height. Read by BOTH the renderer (domain/image_crop.py) and the builder's cropper (ImageUploadField), because the cropper must frame exactly what the page will show -- a cropper locked to a different ratio than the renderer crops to is worse than no cropper, since the tenant's framing is silently discarded. Adding a surface here is what makes it croppable. See plans/IMAGE_CROPPER.md.",
+  "_comment": "What shape each image surface crops to. Read by BOTH the renderer (domain/image_crop.py) and the builder's cropper, because a cropper locked to a different ratio than the renderer crops to is worse than no cropper -- the tenant frames a shot and the page silently discards it. Three forms: a NUMBER locks the ratio (the layout demands one -- a circular avatar is not negotiable); a LIST offers the tenant those choices; null means the surface accepts any shape and the crop defines it. \"original\" in a list means the source's own ratio. Adding a surface here is what makes it croppable. See plans/IMAGE_CROPPER.md.",
   "ratios": {
-    "page_ribbon": 1.3333333333,
+    "page_ribbon": ["original", 1, 1.3333333333, 1.7777777778],
     "author_bio": 1,
     "hero_media": 1.7777777778,
     "client_marquee": 1,
-    "product": 1
+    "product": 1,
+    "content_block": null
   }
 }

@@ -23,6 +23,25 @@ No new bucket, table, distribution, IAM role, or stack. `OnDemandResizeFunction`
 the source bucket, **write** on the target bucket, the metadata table, the CDN base and immutable cache
 headers, at 2048 MB / 30 s. Cropping adds query parameters and one call in a chain that already runs.
 
+## Three modes, because surfaces differ (revised 2026-09-06)
+
+The first cut locked every surface to one ratio. That was wrong for half of them: the page ribbon renders
+`height: auto` and has never had a fixed shape, so locking it to 4/3 imposed a constraint the design never
+had and silently discarded framing the tenant chose. `image_ratios.json` now takes three forms:
+
+| Entry | Meaning | Example |
+|---|---|---|
+| a **number** | Locked. The layout demands one shape | `author_bio: 1` — a circular avatar is not negotiable |
+| a **list** | The tenant picks | `page_ribbon: ["original", 1, 1.3333, 1.7778]` |
+| **null** | The surface accepts any shape | `content_block: null` |
+
+`"original"` means the source image's own ratio: a reframe that zooms and pans without changing shape.
+
+Because a preset or freeform crop's shape cannot be recovered from the rect alone — it is fractions of the
+SOURCE, so 0.5 x 0.5 is any shape until you know the source's dimensions — **the cropper records the ratio
+it framed at** as `ar` on the crop. Depending on the `image_dims` sidecar instead would make the page wrong
+whenever it happened to be missing.
+
 ## The core idea: the element declares the ratio, the cropper enforces it
 
 This is what makes one component serve every caller. A crop UI that lets the tenant pick any rectangle
