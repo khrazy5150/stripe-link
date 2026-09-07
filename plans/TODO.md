@@ -392,6 +392,22 @@ disguise. Retires `open_form` + `form_id`, which with
 
 ### ⭐ HIGH — add the font service to published pages (found 2026-09-03, plan plans/FONT_SERVICE.md)
 
+**Scope extended 2026-09-07 (§9-§11 of the plan).** Presets will carry font PAIRINGS, not just colour —
+"presets already carry the page's whole visual identity except its type" — but they PROPOSE rather than
+own, so a tenant's explicit choice survives a preset change. Four-level resolution, most specific winning:
+system fallback ← preset ← tenant preference (behind an explicit "Override font presets with these"
+toggle) ← page override. Same shape as the colour-token override in ADVANCED_COLOR_SETTINGS, deliberately,
+so type and colour need one mental model rather than two.
+
+Also adds tenant font IMPORT, which is mostly wiring: `../sam/font-converter` already exists (Node 20,
+ttf2woff2, upload endpoint). Two things recorded there because they are easy to get wrong: **a static TTF
+cannot become a variable WOFF2** -- WOFF2 compresses, it does not add axes, which is exactly what bit us
+on 2026-09-03 when a full Google TTF set converted to statics -- and the converter's current variable
+detection is a substring search over file bytes plus a filename guess, where it needs to read the fvar
+table. Licensing needs an upload-time affirmation of web-embedding rights: desktop licences frequently do
+not cover serving a font publicly from the platform's CDN.
+
+
 Published landing pages load NO webfonts. `runtime/html.py` emits no `@font-face` and no link to
 `fonts.juniorbay.com`; its only preconnect is for the hero image host. `font_stack()` still produces
 `Montserrat,-apple-system,...`, so the named family applies only if the visitor happens to have it

@@ -222,3 +222,104 @@ minimal (400 + 700) and treat any third weight as a real cost.
 3. **Prune or flag the 27 phantom families** in the catalogue, or the allow-list in step 3c must exclude
    them. A family that returns CSS pointing at 404s is worse than one that is absent.
 4. Then this repo's steps 3a/3b/3c as written above.
+
+---
+
+## 9. Tenant-wide font preference (added 2026-09-07)
+
+A tenant with a strong typographic identity should not re-pick fonts on every page. Add a **font pairing
+preference** to user preferences plus an explicit toggle:
+
+> ☐ **Override font presets with these**
+
+### The toggle is the important half
+
+Without it, saving a preference would silently re-typeset every existing page the moment a tenant idly
+picked a font they liked. The toggle makes it a decision rather than a side effect, and it is the same
+reason presets *propose* fonts rather than owning them (§3).
+
+### Resolution order
+
+Four levels, most specific winning — the same shape already chosen for colour tokens in
+`ADVANCED_COLOR_SETTINGS.md`, deliberately, so type and colour do not need two different mental models:
+
+```
+system fallback            always present, never fails
+  ← preset fonts           the design the tenant picked
+  ← tenant preference      only when the toggle is on
+  ← page override          an explicit choice on THIS page
+```
+
+A page override still beats the tenant default. That matters: a tenant with a house style will still want
+one landing page to look different, and they should not have to turn their own preference off to get it.
+
+Storage is `user_preferences` (the table and repository already exist). It holds the pairing and the
+toggle; it does not hold anything the renderer reads directly — resolution stays in one place.
+
+## 10. Importing a tenant's own fonts (added 2026-09-07)
+
+### `font-converter` already exists
+
+A sibling service (`../sam/font-converter`, Node 20) already converts uploads with `ttf2woff2` and exposes
+an upload endpoint. So this is largely **wiring an existing service in**, not building one — the same
+situation as video upload, which turned out to be supported all along.
+
+### ⚠️ The honest constraint: variable in, variable out
+
+**A static TTF cannot be converted into a variable WOFF2.** WOFF2 is a compression container; it does not
+add axes that were never in the outlines. `ttf2woff2` makes the file ~30–50% smaller and changes nothing
+else.
+
+This is not theoretical — it is exactly what bit us on 2026-09-03. A full Google Fonts TTF set was
+converted and every result was static, because **Google ships almost all families as statics**. The
+catalogue had been carrying `woff2-variations` entries for months on the assumption that conversion would
+produce them; verifying with `fontTools` showed none were variable.
+
+So the tenant-facing behaviour must be:
+
+| Uploaded file | Result | What the tenant is told |
+|---|---|---|
+| Variable TTF (has `fvar` axes) | One variable WOFF2, full weight range | "One file covers every weight" |
+| Static TTF | One static WOFF2 per weight | "Upload each weight you want to use" |
+
+Saying nothing here is the cruelty: a tenant uploads Regular, sees it work, and cannot understand why bold
+text is synthetically smeared instead of actually bold.
+
+### Detection must be real, not a string sniff
+
+`font-converter` currently decides with:
+
+```js
+fileString.includes('fvar') || fileString.includes('STAT') || filename.includes('variable')
+```
+
+That is a substring search over the file's bytes and a filename guess. It can false-positive on arbitrary
+byte sequences, it cannot report which axes exist, and a correctly-named static passes it. Proper
+detection reads the font's table directory for an `fvar` table and enumerates its axes — which is also
+what tells the tenant *which* weight range they actually got.
+
+### Licensing is a real question, not a footnote
+
+A tenant uploading a font they own for **desktop** use does not necessarily hold **webfont** rights, and
+the platform would be serving it publicly from its own CDN. Most commercial licences separate the two
+explicitly.
+
+At minimum this needs an upload-time affirmation that the tenant holds web-embedding rights, in the same
+spirit as the comparison-table reasoning in `TODO.md`: the platform should not host a third-party legal
+exposure it never asked about. Worth a lawyer's five minutes before the feature is public.
+
+### Subsetting still applies
+
+An imported font should get the same treatment as a catalogue one: subset to the needed unicode range,
+`font-display: swap`, and a metrically-similar fallback stack. A tenant's own font is not exempt from
+being the thing that shifts their layout.
+
+## 11. Revised build order (supersedes §8's tail)
+
+1. §8 steps 1–3 — Inter subset, register, prune the phantom families
+2. §3a/3b/3c — link the service, then preset fonts
+3. **§9 tenant preference + toggle** — small once the resolution order exists
+4. **§10 font import** — wire `font-converter` in, with real `fvar` detection and the licence affirmation
+
+Import comes last deliberately: it is the only step with a legal surface, and it is worth nothing until
+the pipeline it feeds is proven.
