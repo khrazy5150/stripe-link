@@ -143,6 +143,9 @@ codecs, and today a video that cannot be processed has nowhere to report that.
 Also settle **master retention**: keep the source for re-encoding (a future ladder change) or delete it
 after success. Keeping is right, but it should be an explicit lifecycle rule rather than an accident.
 
+Note the renderer already emits `Product`, `FAQPage`, `BreadcrumbList`, `LocalBusiness` and others, but
+**no `VideoObject`** — that is new work, and Phase 7 depends on it.
+
 ### Phase 2 — Video as a content component
 
 A page section or lesson can hold:
@@ -384,6 +387,7 @@ roadmap are simply Phases 1–4, already written:
 | 3–4 | Courses and learning state | The product the infrastructure was for |
 | **5** | **Live events** — schedule, Go Live, MediaLive/IVS, paid audience | Needs an audience and a checkout to be worth anything |
 | **6** | **Live → VOD** — the replay as a product | Nearly free once 1 and 5 exist |
+| **7** | **Livestream SEO** — BroadcastEvent, Indexing API, replay conversion | Needs 5 and 6; the republish trigger it depends on must be designed in 5 |
 
 The proposition at the end of it:
 
@@ -391,6 +395,136 @@ The proposition at the end of it:
 > storefront.**
 
 Which is a materially larger claim than "we host video".
+
+## Phase 7 — Livestream SEO
+
+**The honest claim first.** There is no generic "SEO boost because a page is live". What exists is
+narrower and still worth having:
+
+1. A livestream marked up with `BroadcastEvent` is **eligible** for Google's LIVE badge in Search.
+2. Google's **Indexing API** explicitly supports livestream pages, so Google can be told to crawl at the
+   moment a stream starts and again when it ends.
+
+Google states plainly that structured-data features are not guaranteed to appear. So this is *eligibility
+and timing*, not ranking. The value is that a live event is worthless to discover an hour late, and this
+is the only mechanism that makes the timing controllable.
+
+### Why this is one of only two legitimate uses of the Indexing API
+
+Worth knowing precisely, because it is easy to over-claim: Google's Indexing API is documented for
+**`JobPosting`** and **`BroadcastEvent`** — not as a general "index my page faster" endpoint. Using it for
+ordinary landing pages is outside its stated scope. Livestreams happen to be one of the two things it is
+actually for, which makes this unusually well-supported rather than a trick.
+
+For everything else the platform publishes, the existing route stands: **SEO-14** (sitemap/robots),
+**SEO-15** (IndexNow — Bing/Yandex, a different mechanism) and **SEO-16** (verification) in
+[ON_PAGE_SEO_REQUIREMENTS.md](ON_PAGE_SEO_REQUIREMENTS.md).
+
+### The lifecycle
+
+```
+CREATED           scheduled      VideoObject + BroadcastEvent
+                                 isLiveBroadcast: false
+                                 startDate / endDate (planned)
+                                        │
+  tenant clicks GO LIVE ────────────────┤
+                                        ▼
+LIVE                             isLiveBroadcast: true
+                                 startDate = ACTUAL start
+                                 → Indexing API: URL_UPDATED
+                                        │
+  stream ends ──────────────────────────┤
+                                        ▼
+ENDED / REPLAY                   isLiveBroadcast: false
+                                 endDate = ACTUAL end
+                                 → Indexing API: URL_UPDATED
+                                 CTA: "Watch Live" → "Watch Replay"
+                                 URL unchanged
+```
+
+**The URL never changes.** That is the whole point: the live event becomes an evergreen asset at the same
+address, keeping whatever it earned. Phase 6 supplies the replay; Phase 7 makes the page survive the
+transition instead of dying with the broadcast.
+
+### ⚠️ This is the first page that changes without a tenant editing it
+
+Published pages are **static S3 artifacts**, rendered once at publish time. Every page today changes only
+when a human saves it.
+
+A livestream page must change state at least **three times at event-driven moments** — and the markup has
+to be in the *served HTML*, because that is what Google reads. Rendering the live state client-side would
+leave the structured data saying "not live" to the only reader that matters.
+
+So the publish pipeline has to become **triggerable by the stream lifecycle**: re-render and re-upload on
+Go Live, and again on End, with a CloudFront invalidation each time. That is a genuine change to how
+publishing works and should be designed in Phase 5, not discovered in Phase 7.
+
+**The markup must match reality, always.** A LIVE badge on a page whose stream ended is a structured-data
+violation, not an untidy detail. The end transition is compliance, and it must fire even when a stream
+ends badly — which ties directly to the dropped-stream policy in the live addendum.
+
+### The page is a landing page that contains a stream, not a player
+
+A bare embedded player gives Google almost nothing to work with. The page should carry real semantic
+content around the video:
+
+```
+🔴 LIVE
+How to Start a Shopify Store in 2026
+[            VIDEO PLAYER            ]
+1,247 watching
+
+About This Live Event      ← prose Google can read
+What You'll Learn          ← list markup
+Upcoming                   ← next session, internal linking
+[Get the course]           ← the commerce CTA
+```
+
+Most of this already exists as elements — headline, numbered list, content block, CTA. The live page is
+largely **composition over existing parts**, which is what the page composer is for.
+
+The **viewer count is client-side only** and deliberately not part of the SEO payload: it changes by the
+second and has no place in a static artifact.
+
+### What Junior Bay automates
+
+The tenant-facing promise is one toggle:
+
+> 🚀 **Live SEO** — we'll optimise your livestream for Google Search.
+
+Behind it: title, description, canonical, `VideoObject` + `BroadcastEvent`, thumbnail, scheduled times and
+sitemap inclusion before the event; the live transition and Indexing API call at start; the actual
+`endDate`, replay conversion and CTA swap at the end.
+
+### The practical blocker: property verification
+
+The Indexing API authenticates as a service account that must be an **owner of the Search Console
+property**. That is easy or awkward depending on where the page lives:
+
+| Page served from | Verification |
+|---|---|
+| `*.jbay.uk` / `*.jbay.be` | **One property, owned by Junior Bay.** Verify once, works for every tenant |
+| A tenant's **custom domain** | That domain needs its own Search Console property, with the service account added as an owner |
+
+The custom-domain case is not a blocker — the platform already performs DNS-based verification for custom
+domains, so the mechanism exists — but it is an **onboarding step**, not something that can happen
+silently. Worth designing as part of the Live SEO toggle rather than failing quietly at the first
+Indexing API call.
+
+### Why this belongs to Attention, not to SEO
+
+This is the clearest instance yet of the Attention primitive
+([ATTENTION_PRIMITIVE.md](ATTENTION_PRIMITIVE.md)). The platform is not offering somewhere to put a video;
+it is turning an event into attention and then into commerce:
+
+```
+Create event → SEO page → social + email → GOES LIVE → Google LIVE discovery
+    → live viewers → event ends → replay remains → evergreen asset → course CTA
+```
+
+Video stops being a content primitive and becomes an **attention → content → commerce** primitive. That is
+the difference between competing with a video host and doing something neither YouTube nor a course
+platform does: the discovery, the audience, the replay and the sale all live at one URL the tenant owns.
 
 ## Related
 

@@ -306,6 +306,18 @@ live differ only in the backend -- MediaConvert processes a file, MediaLive cont
 subscriber-only broadcasts are the existing offer -> payment -> entitlement chain with a different
 resource on the end. Live -> VOD then sells the replay with no new infrastructure.
 
+**Phase 7 is Livestream SEO** (2026-09-07): `BroadcastEvent` markup makes a stream ELIGIBLE for Google's
+LIVE badge, and Google's Indexing API can be told to crawl at start and at end. Eligibility and timing,
+not a ranking boost -- but a live event is worthless to discover an hour late, so timing is the value.
+Livestreams are one of only TWO things the Indexing API officially supports (the other is JobPosting), so
+this is well-supported rather than a trick. The URL survives the broadcast and becomes the replay, which
+is the SEO flywheel and the clearest instance of the Attention primitive yet.
+
+Its architectural consequence lands in Phase 5, not 7: published pages are STATIC S3 artifacts that change
+only when a human saves them, and a live page must change state three times at event-driven moments with
+the markup in the SERVED html. So the publish pipeline has to become triggerable by the stream lifecycle.
+Design that in Phase 5.
+
 Two hazards recorded there because they are not obvious from the architecture: a MediaLive channel bills
 for every hour it RUNS, so a tenant who forgets to end a stream burns money all night (needs idle-stop and
 a hard maximum, not a reminder); and the real barrier is that MediaLive ingests RTMP, so the tenant needs
