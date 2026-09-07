@@ -1,0 +1,10 @@
+{
+  "_comment": "The aspect ratio each image surface renders at, as width/height. Read by BOTH the renderer (domain/image_crop.py) and the builder's cropper (ImageUploadField), because the cropper must frame exactly what the page will show -- a cropper locked to a different ratio than the renderer crops to is worse than no cropper, since the tenant's framing is silently discarded. Adding a surface here is what makes it croppable. See plans/IMAGE_CROPPER.md.",
+  "ratios": {
+    "page_ribbon": 1.3333333333,
+    "author_bio": 1,
+    "hero_media": 1.7777777778,
+    "client_marquee": 1,
+    "product": 1
+  }
+}

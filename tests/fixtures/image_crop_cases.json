@@ -1,0 +1,50 @@
+{
+  "_comment": "Shared crop cases. The published page (domain/image_crop.py) and the builder thumbnail (ImageUploadField.vue previewStyle) apply the same rect with the same formulas; the fixture is what forces them to agree instead of drifting until the preview lies about the page. Percentages are strings exactly as emitted.",
+  "cases": [
+    {
+      "name": "full frame is not a crop",
+      "crop": { "x": 0, "y": 0, "w": 1, "h": 1 },
+      "vars": ""
+    },
+    {
+      "name": "centre quarter",
+      "crop": { "x": 0.25, "y": 0.25, "w": 0.5, "h": 0.5 },
+      "vars": "--sl-crop-w:200%;--sl-crop-h:200%;--sl-crop-x:-50%;--sl-crop-y:-50%"
+    },
+    {
+      "name": "top-left quarter has no offset",
+      "crop": { "x": 0, "y": 0, "w": 0.5, "h": 0.5 },
+      "vars": "--sl-crop-w:200%;--sl-crop-h:200%;--sl-crop-x:0%;--sl-crop-y:0%"
+    },
+    {
+      "name": "bottom-right quarter",
+      "crop": { "x": 0.5, "y": 0.5, "w": 0.5, "h": 0.5 },
+      "vars": "--sl-crop-w:200%;--sl-crop-h:200%;--sl-crop-x:-100%;--sl-crop-y:-100%"
+    },
+    {
+      "name": "letterbox: full width, middle third",
+      "crop": { "x": 0, "y": 0.3333, "w": 1, "h": 0.3333 },
+      "vars": "--sl-crop-w:100%;--sl-crop-h:300.03%;--sl-crop-x:0%;--sl-crop-y:-100%"
+    },
+    {
+      "name": "a zero-width rect is not a crop",
+      "crop": { "x": 0, "y": 0, "w": 0, "h": 1 },
+      "vars": ""
+    },
+    {
+      "name": "negative values are refused",
+      "crop": { "x": -0.1, "y": 0, "w": 0.5, "h": 0.5 },
+      "vars": ""
+    },
+    {
+      "name": "missing keys are refused",
+      "crop": { "x": 0, "y": 0, "w": 0.5 },
+      "vars": ""
+    },
+    {
+      "name": "a rect running past the edge is pulled back inside",
+      "crop": { "x": 0.8, "y": 0, "w": 0.5, "h": 0.5 },
+      "vars": "--sl-crop-w:200%;--sl-crop-h:200%;--sl-crop-x:-100%;--sl-crop-y:0%"
+    }
+  ]
+}

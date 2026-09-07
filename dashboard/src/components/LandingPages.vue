@@ -626,13 +626,15 @@
                           <option value="compact">Compact row — small image, one line of copy</option>
                         </select>
                       </label>
-                      <div v-if="element.presentation !== 'centered'" class="selectable-price-image-controls" :class="{ 'has-image-preview': element.image_url }">
-                        <div v-if="element.image_url" class="selectable-price-image-preview"><img :src="element.image_url" alt="Ribbon image preview" /></div>
-                        <input :ref="(el) => setElementImageInput(element.id, el)" type="file" accept="image/*" hidden @change="handleElementImagePicked(element, $event, 'image_url')" />
-                        <button class="secondary-action compact" type="button" :disabled="Boolean(blurbImageUploading[element.id])" @click.prevent="triggerElementImageUpload(element.id)">
-                          {{ blurbImageUploading[element.id] ? "Uploading..." : "Upload image" }}
-                        </button>
-                      </div>
+                      <ImageUploadField
+                        v-if="element.presentation !== 'centered'"
+                        v-model="element.image_url"
+                        :crop="element.image_crop"
+                        :ratio="imageRatios.ratios.page_ribbon"
+                        :uploader="uploadPageImage"
+                        alt="Ribbon image preview"
+                        @update:crop="(rect) => (element.image_crop = rect)"
+                      />
                       <label class="offer-field"><span>Eyebrow (optional)</span><input v-model.trim="element.eyebrow" type="text" placeholder="e.g. Limited time" /></label>
                       <label class="offer-field">
                         <span>Headline</span>
@@ -1867,6 +1869,8 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 import SelectorCard from "./SelectorCard.vue";
+import ImageUploadField from "./shared/ImageUploadField.vue";
+import imageRatios from "../../../src/stripe_link/image_ratios.json";
 import { offerViewTargets, offerViewTargetsFromExpanded } from "../composables/useConversionContext";
 import { isSectionVisible, defaultVisible, recommendedSectionKeys, optionalSectionKeys, governedKeys, elementLabel, elementChannel, addableElements, tokenGroups, previewVar, supportedGoals, goalLabel, packSeeds, orderSections, sectionOrderKey, isMovable, elementPlacement, orderSectionKeys, isRepeatableSection } from "../composables/pageComposer";
 import { apiRequest, assetUrl, getApiBase, getAuthSession, getStripeMode, getOtherEnvironment, getPagesBaseUrl, getPreviewPagesBaseUrl, getTestPagesHost, getTenantId } from "../api/client";

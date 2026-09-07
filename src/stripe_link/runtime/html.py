@@ -17,6 +17,7 @@ from stripe_link.domain.opportunities import STAGE_LANDING, STAGE_POST_PURCHASE,
 from stripe_link.domain.pricing import PricingError, expand_offer, find_price, resolve_offer, single_unit_price
 from stripe_link.domain.semantic import is_bundle, resolve_semantic_model, subject_from_model
 from stripe_link.domain.reviews import aggregate_reviews, markup_eligible
+from stripe_link.domain.image_crop import crop_style_vars, surface_ratio
 from stripe_link.domain.section_theme import section_theme_vars
 from stripe_link.domain.service_pricing import resolve_service_price
 
@@ -689,6 +690,9 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     "    .sl-page-ribbon.is-centered{grid-template-columns:minmax(0,1fr);text-align:center;justify-items:center}",
     "    .sl-page-ribbon.is-compact{grid-template-columns:minmax(0,12rem) minmax(0,1fr);gap:1.6rem;padding:1.6rem 2rem}",
     "    .sl-ribbon-media img{width:100%;height:auto;display:block;border-radius:1rem}",
+    # A cropped image is scaled up inside a clipped box and offset, so the chosen region exactly fills it.
+    "    .sl-cropped{position:relative;overflow:hidden;border-radius:1rem;aspect-ratio:var(--sl-crop-ar,1)}",
+    "    .sl-cropped>img{position:absolute;top:var(--sl-crop-y,0);left:var(--sl-crop-x,0);width:var(--sl-crop-w,100%);height:var(--sl-crop-h,100%);max-width:none;border-radius:0}",
     "    .sl-ribbon-copy{display:grid;gap:0.8rem;min-width:0}",
     "    .sl-page-ribbon.is-centered .sl-ribbon-copy{justify-items:center}",
     "    .sl-ribbon-eyebrow{margin:0;font-size:1.3rem;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;opacity:0.75}",
@@ -4219,7 +4223,15 @@ def render_page_ribbon(section: dict[str, Any], page: dict[str, Any] | None = No
 
     parts: list[str] = []
     if image:
-        parts.append(f'      <div class="sl-ribbon-media">{responsive_img(image, headline or "", sizes=RIBBON_IMAGE_SIZES)}</div>')
+        # A stored crop is applied by clipping, not by object-position, which cannot express a zoom. The
+        # srcset/lazy/dims work stays in responsive_img; the wrapper only frames what it renders.
+        crop_vars = crop_style_vars(section.get("image_crop"), surface_ratio("page_ribbon"))
+        media_class = "sl-ribbon-media sl-cropped" if crop_vars else "sl-ribbon-media"
+        crop_attr = f' style="{escape(crop_vars)}"' if crop_vars else ""
+        parts.append(
+            f'      <div class="{media_class}"{crop_attr}>'
+            f'{responsive_img(image, headline or "", sizes=RIBBON_IMAGE_SIZES)}</div>'
+        )
     copy: list[str] = ['      <div class="sl-ribbon-copy">']
     if eyebrow:
         copy.append(f'        <p class="sl-ribbon-eyebrow">{escape(eyebrow)}</p>')
