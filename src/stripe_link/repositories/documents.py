@@ -90,6 +90,34 @@ def _query_all_pages(table: Any, **query: Any) -> list[dict[str, Any]]:
         request["ExclusiveStartKey"] = last_evaluated_key
 
 
+def dynamo_safe(value: Any) -> Any:
+    """Convert floats to Decimal, recursively, on the way into DynamoDB.
+
+    DynamoDB has no float type and boto3 refuses one outright: "Float types are not supported. Use Decimal
+    types instead." The exception escapes the handler, so API Gateway answers with a gateway 5xx that
+    carries no CORS headers -- which a browser reports as "Failed to fetch", naming neither the field nor
+    the document. A crop rect is four floats and an aspect ratio is a fifth, so the whole class of
+    geometry-carrying documents would fail this way.
+
+    Converted via `str` deliberately: Decimal(0.1) is 0.1000000000000000055511151231257827, while
+    Decimal(str(0.1)) is 0.1. The stored document should read the way the author wrote it.
+
+    NaN and infinities have no DynamoDB representation at all, so they are dropped rather than raised on --
+    a nonsensical coordinate must not be the reason a tenant cannot save their page.
+    """
+    if isinstance(value, bool):  # bool is an int subclass; it stores natively and must not be touched
+        return value
+    if isinstance(value, float):
+        if value != value or value in (float("inf"), float("-inf")):
+            return None
+        return Decimal(str(value))
+    if isinstance(value, dict):
+        return {key: dynamo_safe(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [dynamo_safe(item) for item in value]
+    return value
+
+
 class DynamoDocumentRepository:
     def __init__(
         self,
@@ -162,7 +190,7 @@ class DynamoDocumentRepository:
             "GSI1PK": self._gsi1pk(document_id),
             "GSI1SK": f"TENANT#{tenant_id}",
         }
-        self.table.put_item(Item=item)
+        self.table.put_item(Item=dynamo_safe(item))
         return document
 
     def get(self, tenant_id: str, document_id: str) -> dict[str, Any] | None:
