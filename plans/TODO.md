@@ -300,6 +300,18 @@ Three things the earlier note did not have:
 Sequencing also inverted: build the video primitive BEFORE the course product. It is independently
 useful, and designing curriculum against a delivery layer that does not exist yet is backwards.
 
+**Live streaming is Phases 5-6 of the same plan, not a separate feature** (addendum, 2026-09-07). VOD and
+live differ only in the backend -- MediaConvert processes a file, MediaLive continuously processes a feed
+-- and both emit HLS, so one player and one commerce layer serve both. Live events, paid workshops and
+subscriber-only broadcasts are the existing offer -> payment -> entitlement chain with a different
+resource on the end. Live -> VOD then sells the replay with no new infrastructure.
+
+Two hazards recorded there because they are not obvious from the architecture: a MediaLive channel bills
+for every hour it RUNS, so a tenant who forgets to end a stream burns money all night (needs idle-stop and
+a hard maximum, not a reminder); and the real barrier is that MediaLive ingests RTMP, so the tenant needs
+OBS -- which most small tenants do not have. **AWS IVS is likely the better fit** for "small tenants go
+live occasionally" and should be evaluated before committing to MediaLive.
+
 Still open, and only for Phase 1: grow this service (MediaConvert + HLS) or adopt one (Mux, Cloudflare
 Stream, api.video). Phases 2-4 are the same work either way. Nothing in the current design blocks either
 path, and the size ceilings are deploy-time parameters rather than code (b7a0f27 in that repo).
