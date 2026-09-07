@@ -747,7 +747,7 @@
                       <div class="image-upload-actions">
                         <input :ref="(el) => setElementVideoInput(element.id, el)" type="file" accept="video/*" hidden @change="handleElementVideoPicked(element, $event)" />
                         <button class="secondary-action compact" type="button" :disabled="Boolean(elementVideoUploading[element.id])" @click.prevent="triggerElementVideoUpload(element.id)">
-                          {{ elementVideoUploading[element.id] ? "Uploading..." : "Upload video file" }}
+                          {{ elementVideoUploading[element.id] ? (elementVideoStatus[element.id] || "Uploading...") : "Upload video file" }}
                         </button>
                       </div>
                       <p v-if="elementVideoErrors[element.id]" class="field-error">{{ elementVideoErrors[element.id] }}</p>
@@ -2550,8 +2550,8 @@ function schedulePreviewImageRefresh() {
 // and so its intrinsic dimensions are captured once, centrally, for every page image field.
 // Hero video upload. Returns the CDN URL; MediaListField appends it to the list, and the renderer
 // derives "this is a video" from the extension (runtime/html.py is_video_url), so no schema change.
-async function uploadPageVideo(file) {
-  const url = await uploadVideo(file);
+async function uploadPageVideo(file, onProgress = null) {
+  const url = await uploadVideo(file, { onProgress });
   schedulePreviewImageRefresh();
   return url;
 }
@@ -4360,6 +4360,9 @@ const videoShapes = [
 ];
 
 const elementVideoInputs = ref({});
+// A percentage while the bytes move, then an honest "Processing" while the server works -- the two
+// phases have very different lengths and only one of them can report progress.
+const elementVideoStatus = reactive({});
 const elementVideoUploading = reactive({});
 const elementVideoErrors = reactive({});
 
@@ -4391,9 +4394,12 @@ async function handleElementVideoPicked(element, event) {
   if (!file) return;
   elementVideoErrors[element.id] = "";
   elementVideoUploading[element.id] = true;
+  elementVideoStatus[element.id] = "Uploading 0%";
   try {
     const measured = await videoAspectOf(file);
-    element.url = await uploadPageVideo(file);
+    element.url = await uploadPageVideo(file, ({ phase, percent }) => {
+      elementVideoStatus[element.id] = phase === "processing" ? "Processing..." : `Uploading ${percent}%`;
+    });
     if (measured) element.aspect = Math.round(measured * 1e4) / 1e4;
     // A file plays inline; a poster belongs to an embed, so anything left over would never be used.
     element.poster = "";
@@ -4401,6 +4407,7 @@ async function handleElementVideoPicked(element, event) {
     elementVideoErrors[element.id] = err?.message || "Video upload failed.";
   } finally {
     elementVideoUploading[element.id] = false;
+    elementVideoStatus[element.id] = "";
   }
 }
 

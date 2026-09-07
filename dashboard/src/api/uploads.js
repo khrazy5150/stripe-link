@@ -27,10 +27,12 @@ export async function uploadImage(file, { basePrefix = "offers", targetBucket = 
 
 async function pollImageUrl(imageId) {
   const deadline = Date.now() + 180000;
-  let delay = 1200;
+  // Same reasoning as pollVideoUrl: an image resize is FASTER than a video copy, so an opening delay of
+  // 1200ms was overshooting even further past the moment the work was done.
+  let delay = 400;
   while (Date.now() < deadline) {
     await sleep(delay);
-    delay = Math.min(8000, Math.ceil(delay * 1.35));
+    delay = Math.min(3000, Math.ceil(delay * 1.3));
     const body = await apiRequest(`/upload/status/${encodeURIComponent(imageId)}`).catch(() => ({}));
     if (body.status === "failed") throw new Error("Image processing failed.");
     for (const url of imageUrlCandidates(body.urls || {})) {
@@ -90,7 +92,7 @@ function sleep(ms) {
 // so this still fails fast without a client-side copy of the limit.
 const VIDEO_UPLOAD_TYPES = ["video/mp4", "video/webm"];
 
-export async function uploadVideo(file, { basePrefix = "offers", targetBucket = "images.juniorbay.net" } = {}) {
+export async function uploadVideo(file, { basePrefix = "offers", targetBucket = "images.juniorbay.net", onProgress = null } = {}) {
   if (!VIDEO_UPLOAD_TYPES.includes(file.type)) {
     throw new Error("Use an MP4 or WebM video. Other formats aren't converted, so they may not play for every visitor.");
   }
@@ -111,20 +113,52 @@ export async function uploadVideo(file, { basePrefix = "offers", targetBucket = 
   const formData = new FormData();
   Object.entries(presigned.upload?.fields || {}).forEach(([key, value]) => formData.append(key, value));
   formData.append("file", file);
-  const uploadResponse = await fetch(presigned.upload.url, { method: "POST", body: formData });
-  // S3 rejects an oversize body itself via content-length-range, so this covers a stale presign too.
-  if (!uploadResponse.ok) throw new Error("Failed to upload the video.");
+  // S3 rejects an oversize body itself via content-length-range, so a failure here covers a stale presign.
+  await postWithProgress(presigned.upload.url, formData, onProgress);
+  // The bytes have landed; what remains is the processor, which cannot report a percentage. Saying so is
+  // more honest than leaving "Uploading" on screen while nothing is uploading.
+  if (onProgress) onProgress({ phase: "processing", percent: 100 });
   return pollVideoUrl(presigned.id);
 }
 
 // Videos cannot be probed with an Image(), and there are no renditions to wait for — the processor
 // writes urls.original once the copy completes, so that is the ready signal.
+/**
+ * POST to S3 with real progress.
+ *
+ * fetch() cannot report upload progress, so the whole transfer was opaque -- the button read "Uploading..."
+ * from the first byte until processing finished, covering two phases of very different length with one
+ * word. A 500MB ceiling makes that potentially minutes of silence, which is what makes an upload feel
+ * broken rather than slow.
+ */
+function postWithProgress(url, formData, onProgress) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", url);
+    xhr.upload.addEventListener("progress", (event) => {
+      if (event.lengthComputable && onProgress) {
+        onProgress({ phase: "uploading", percent: Math.round((event.loaded / event.total) * 100) });
+      }
+    });
+    xhr.onload = () => (xhr.status >= 200 && xhr.status < 300
+      ? resolve()
+      : reject(new Error("Failed to upload the video.")));
+    xhr.onerror = () => reject(new Error("Failed to upload the video."));
+    xhr.send(formData);
+  });
+}
+
 async function pollVideoUrl(uploadId) {
   const deadline = Date.now() + 300000;  // a 50MB copy takes longer than an image resize
-  let delay = 1500;
+  // Measured 2026-09-07: the processor finishes a video in ~2s using 119MB of its 1024MB, and the queue
+  // adds no delay -- so the wait a tenant felt was almost entirely THIS schedule. Starting at 1500ms with
+  // a 1.35x backoff put the checks at 1.5s, 3.5s, 6.3s, 9.9s: a job done at 2s was not noticed until 3.5s,
+  // and one done at 7s waited until 9.9s. Polling opens tighter and backs off gently instead. Each check
+  // costs ~0.45s round trip, so this is a handful of extra cheap requests, not a busy loop.
+  let delay = 500;
   while (Date.now() < deadline) {
     await sleep(delay);
-    delay = Math.min(8000, Math.ceil(delay * 1.35));
+    delay = Math.min(3000, Math.ceil(delay * 1.3));
     const body = await apiRequest(`/upload/status/${encodeURIComponent(uploadId)}`).catch(() => ({}));
     if (body.status === "failed" || body.status === "error") throw new Error("Video processing failed.");
     const original = body.urls?.original;
