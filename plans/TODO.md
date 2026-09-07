@@ -262,7 +262,7 @@ VERIFICATION, not repair. Exercise each shipped action against a published page,
 KNOWN DEFECT, do not re-report: fields render with placeholders derived from the field name and no
 <label>. Live in production, fixed by FORM_BUILDER P0/P1.
 
-### LOW — revisit image-processing: utility micro-service vs. a real media service (noted 2026-08-30)
+### MEDIUM — Junior Bay Courses: sell knowledge from the same storefront (raised 2026-09-07)
 
 `../sam/image-processing` (see docs/EXTERNAL_SERVICES.md) is a thin utility: presign, copy, resize
 photos with sharp. Non-images are stored and served verbatim -- no transcode, no adaptive streaming.
@@ -277,12 +277,32 @@ Fine for hero video. NOT fine for the online-course direction the author intends
   - no HLS/DASH packaging, no thumbnails/poster frames, no duration or dimension metadata for video
   - no signed/expiring playback URLs, so course video would be as public as a hero clip
 
-Decide then whether to grow this service (MediaConvert + HLS + packaging) or adopt one (Mux,
-Cloudflare Stream, api.video). Buying is likely cheaper than building an encoding ladder, but it
-changes where tenant media lives -- an architectural call, not a feature.
+**Reframed and raised to MEDIUM 2026-09-07 — full design in `plans/COURSES.md`.**
 
-Not urgent: nothing about the current design blocks either path, and the size ceilings are now
-deploy-time parameters rather than code (b7a0f27 in that repo).
+The framing changed, and it changes what gets built. This is not a video delivery service; it is
+**knowledge as another thing a tenant can sell**, through the storefront, checkout, customers and
+analytics they already have. The pitch is *"you already have a store, now sell a course from it"* —
+which is a different and much stronger position than competing with Teachable or Kajabi.
+
+Three things the earlier note did not have:
+
+- **Entitlement is NOT the delivery mechanism.** Commercial rules (purchased, subscription, enrolled,
+  drip, free preview) live above a video system that knows only *"user X may access resource Y"*. Half of
+  that is already built — `downloads.serve_handler` does exactly this for paid downloads.
+- **⚠️ CloudFront signed cookies will not reliably work here.** A published page can be served from a
+  tenant's custom domain, `*.jbay.uk`/`*.jbay.be`, or the platform host, so a cookie set for a media
+  distribution is a THIRD-PARTY cookie — blocked by Safari, being removed by Chrome. The textbook AWS
+  answer assumes player and media share an origin; here they usually will not. Signed-manifest is the
+  recommended alternative. **This blocks Phase 1 and must be settled first.**
+- **Video costs DELIVERY, not storage** — a different business from images. Instrument GB delivered from
+  day one, and do not bury it inside an unlimited $19/month plan before that ratio is known.
+
+Sequencing also inverted: build the video primitive BEFORE the course product. It is independently
+useful, and designing curriculum against a delivery layer that does not exist yet is backwards.
+
+Still open, and only for Phase 1: grow this service (MediaConvert + HLS) or adopt one (Mux, Cloudflare
+Stream, api.video). Phases 2-4 are the same work either way. Nothing in the current design blocks either
+path, and the size ceilings are deploy-time parameters rather than code (b7a0f27 in that repo).
 
 ### MEDIUM — icon-picker is an imperative DOM helper, not a Vue component (noted 2026-08-31)
 
