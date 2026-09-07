@@ -198,7 +198,20 @@ clamping. Backward compatible, deploys independently.
 **P3 — `ImageCropper.vue` + rect storage. ✅ SHIPPED.** The bulk of the work. Ratio-locked, non-destructive, owns its
 own file input. Applied via `object-position`; no derivative baked yet.
 
-**P4 — roll out per surface. IN PROGRESS** — Page Ribbon done. Author bio, ribbon, hero, products, marquee. Each declares its ratio. Do
+**P4 — roll out per surface. ✅ DONE for every surface that should crop.** Page Ribbon, Author Bio and
+Content Block are wired. The remaining image surfaces were examined and deliberately excluded — "roll out
+to everything" turned out to be wrong:
+
+| Surface | Why not |
+|---|---|
+| **Client marquee logo** | `object-fit: contain` is deliberate — a logo must show in full. Forcing it into a crop box fights the one thing that rule exists to guarantee |
+| **Quote photo** | Two presentations. The *fancy* one positions the photo absolutely at `height: calc(100% + 11.2rem)` to overlap the card; a crop box would break that overlap |
+| **Testimonial avatar** | Emitted as a bare `<img>` carrying `order: -1` in the mobile rule. Wrapping it changes flex ordering — a layout change that needs visual checking, not a mechanical edit |
+| **Hero media** | Stored as newline-joined URL **strings**, so there is no object to hang a crop on. Wants a URL-keyed sidecar mirroring `image_dims` (`renditionBase()` keying, already proven) — a data-model step, not a wiring one |
+
+The ratio table lists ONLY wired surfaces, and a test renders each one to prove it actually crops. An
+entry with no wiring is a lie the cropper cannot detect: the tenant gets a shape picker, frames a photo,
+and the page ignores it. Author bio, ribbon, hero, products, marquee. Each declares its ratio. Do
 them one at a time; each is a small diff once P3 exists.
 
 **P5 — bake derivatives** where LCP justifies it, proxied through `upload.py`.

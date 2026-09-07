@@ -121,8 +121,8 @@ class SharedRatioTests(unittest.TestCase):
                     self.assertGreater(entry, 0)
 
     def test_a_locked_surface_reports_its_one_ratio(self):
+        # author_bio renders in a 14rem circle, so its shape is not the tenant's to choose.
         self.assertEqual(surface_ratio("author_bio"), 1.0)
-        self.assertAlmostEqual(surface_ratio("hero_media"), 16 / 9, places=6)
 
     def test_a_surface_offering_choices_has_no_single_ratio(self):
         # page_ribbon renders height:auto, so it never had one shape. The crop carries what it was made at.
@@ -185,6 +185,74 @@ class CropperContractTests(unittest.TestCase):
         field = (pathlib.Path(__file__).resolve().parents[1]
                  / "dashboard/src/components/shared/ImageUploadField.vue").read_text()
         self.assertIn(':ratios="ratios"', field, "the field must pass the surface's allowance straight through")
+
+
+class CssIsolationTests(unittest.TestCase):
+    """Nothing outside the crop rule may size a cropped image.
+
+    A cropped box positions its image absolutely and sizes it from the custom properties, so a stray
+    width / height / object-fit / max-height corrupts that geometry. The ribbon's mobile rule
+    (`.sl-page-ribbon .sl-ribbon-media img`, specificity 0,2,1) beat the crop rule (0,1,1), so the crop was
+    wrong on phones -- while desktop was right only because the two tie and the crop rule happened to sit
+    later in the file. Correct by source order is not correct.
+    """
+
+    CROPPABLE_CONTAINERS = [".sl-ribbon-media", ".sl-author-photo", ".sl-content-media"]
+
+    def _css(self):
+        from stripe_link.runtime.html import render_template_styles
+        return "\n".join(render_template_styles({}))
+
+    def test_no_rule_on_a_croppable_container_can_size_the_image(self):
+        css = self._css()
+        for container in self.CROPPABLE_CONTAINERS:
+            for rule in re.findall(r"[^{}\n]*" + re.escape(container) + r"[^{}\n]*\bimg\s*\{[^}]*\}", css):
+                selector, body = rule.split("{", 1)
+                if not any(prop in body for prop in ("max-height:", "object-fit:", "height:", "width:")):
+                    continue
+                with self.subTest(selector=selector.strip()[:80]):
+                    self.assertIn(":not(.sl-cropped)", selector,
+                                  "this rule outranks or ties the crop rule and corrupts the geometry")
+
+    def test_each_croppable_container_actually_has_such_a_rule(self):
+        # If a selector is renamed the loop above silently matches nothing and passes forever.
+        css = self._css()
+        for container in self.CROPPABLE_CONTAINERS:
+            with self.subTest(container=container):
+                self.assertIn(f"{container}:not(.sl-cropped) img", css)
+
+    def test_the_shared_rule_imposes_no_appearance_of_its_own(self):
+        # It briefly set border-radius:1rem -- the ribbon's -- which would have squared off the author
+        # photo's circle. The crop box clips; the surface keeps its own look.
+        rule = re.search(r"\.sl-cropped\{[^}]*\}", self._css()).group(0)
+        self.assertNotIn("border-radius", rule)
+
+    def test_every_wired_surface_actually_renders_its_crop(self):
+        """The ratio table lists only wired surfaces, so each must crop end to end.
+
+        A surface listed but not wired is a lie the cropper cannot detect: the tenant is offered a shape
+        picker, frames a photo, and the page ignores it.
+        """
+        from stripe_link.runtime.html import render_author_bio, render_content_blocks
+
+        root = pathlib.Path(__file__).resolve().parents[1]
+        declared = set(json.loads((root / "src/stripe_link/image_ratios.json").read_text())["ratios"])
+        crop = {"x": 0.1, "y": 0.1, "w": 0.5, "h": 0.5, "ar": 1}
+        rendered = {
+            "page_ribbon": render_page_ribbon({**RendererTests.SECTION, "image_crop": dict(crop)}),
+            "author_bio": render_author_bio({
+                "id": "ab", "type": "author_bio", "name": "Jo",
+                "photo_url": "https://i/x/large.webp", "image_crop": dict(crop)}),
+            "content_block": render_content_blocks({
+                "id": "cb", "type": "content_block",
+                "blocks": [{"title": "T", "body": "B", "image_url": "https://i/x/large.webp",
+                            "image_crop": dict(crop)}]}),
+        }
+        self.assertEqual(declared, set(rendered),
+                         "a declared surface with no coverage here is one nobody has proven crops")
+        for surface, html in rendered.items():
+            with self.subTest(surface=surface):
+                self.assertIn("sl-cropped", html, f"{surface} is declared croppable but ignores its crop")
 
 
 class PersistenceTests(unittest.TestCase):

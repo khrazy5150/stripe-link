@@ -528,7 +528,8 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     "    .sl-content-block{display:grid;grid-template-columns:minmax(0,1fr) minmax(12rem,18rem);gap:1.2rem;align-items:center;border-top:1px solid var(--sl-content-border);padding-top:1.6rem}",
     "    .sl-content-block h2{font-family:var(--sl-font-heading);font-size:2rem;line-height:1.25;margin-bottom:0.8rem;color:var(--sl-content-heading)}",
     "    .sl-content-block p{color:var(--sl-content-text);font-size:1.5rem;line-height:1.6}",
-    "    .sl-content-block img{width:100%;height:auto;aspect-ratio:4/3;object-fit:cover;border-radius:0.8rem}",
+    "    .sl-content-media{border-radius:0.8rem;overflow:hidden}",
+    "    .sl-content-media:not(.sl-cropped) img{width:100%;height:auto;aspect-ratio:4/3;object-fit:cover}",
     # Centered variant (SALES_FUNNELS.md P3.5): a single centered column — used for the upsell product blurb and
     # any content block a tenant opts to center.
     "    .sl-content-blocks--centered .sl-content-block{grid-template-columns:minmax(0,1fr);text-align:center;justify-items:center}",
@@ -616,7 +617,7 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     "    .sl-author-bio{display:grid;gap:1.2rem;justify-items:center;text-align:center;padding:4rem 2rem;background:var(--sl-section-bg,transparent);color:var(--sl-section-ink,var(--sl-text))}",
     # The ring reads as a portrait frame; it falls back to the theme accent when the tenant sets no border.
     "    .sl-author-photo{width:14rem;height:14rem;border-radius:50%;overflow:hidden;box-shadow:0 0 0 0.5rem var(--sl-section-border,var(--sl-accent))}",
-    "    .sl-author-photo img{width:100%;height:100%;object-fit:cover;display:block}",
+    "    .sl-author-photo:not(.sl-cropped) img{width:100%;height:100%;object-fit:cover;display:block}",
     # A pill, so the name reads as an attribution rather than a second heading.
     "    .sl-author-name{margin:0;display:inline-block;padding:0.4rem 1.4rem;border-radius:999px;background:var(--sl-section-border,var(--sl-accent));color:var(--sl-section-border-ink,var(--sl-cta-text,#fff));font-size:1.3rem;font-weight:700;text-transform:uppercase;letter-spacing:0.06em}",
     "    .sl-author-headline{margin:0;font-family:var(--sl-font-heading);font-size:clamp(2.4rem,5vw,3.6rem);line-height:1.2;color:var(--sl-section-ink,var(--sl-text))}",
@@ -689,10 +690,11 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     "    .sl-page-ribbon.is-image_left{grid-template-columns:minmax(0,22rem) minmax(0,1fr)}",
     "    .sl-page-ribbon.is-centered{grid-template-columns:minmax(0,1fr);text-align:center;justify-items:center}",
     "    .sl-page-ribbon.is-compact{grid-template-columns:minmax(0,12rem) minmax(0,1fr);gap:1.6rem;padding:1.6rem 2rem}",
-    "    .sl-ribbon-media:not(.sl-cropped) img{width:100%;height:auto;display:block;border-radius:1rem}",
+    "    .sl-ribbon-media{border-radius:1rem;overflow:hidden}",
+    "    .sl-ribbon-media:not(.sl-cropped) img{width:100%;height:auto;display:block}",
     # A cropped image is scaled up inside a clipped box and offset, so the chosen region exactly fills it.
-    "    .sl-cropped{position:relative;overflow:hidden;border-radius:1rem;aspect-ratio:var(--sl-crop-ar,1)}",
-    "    .sl-cropped>img{position:absolute;top:var(--sl-crop-y,0);left:var(--sl-crop-x,0);width:var(--sl-crop-w,100%);height:var(--sl-crop-h,100%);max-width:none;border-radius:0}",
+    "    .sl-cropped{position:relative;overflow:hidden;aspect-ratio:var(--sl-crop-ar,1)}",
+    "    .sl-cropped>img{position:absolute;top:var(--sl-crop-y,0);left:var(--sl-crop-x,0);width:var(--sl-crop-w,100%);height:var(--sl-crop-h,100%);max-width:none;border-radius:inherit}",
     "    .sl-ribbon-copy{display:grid;gap:0.8rem;min-width:0}",
     "    .sl-page-ribbon.is-centered .sl-ribbon-copy{justify-items:center}",
     "    .sl-ribbon-eyebrow{margin:0;font-size:1.3rem;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;opacity:0.75}",
@@ -3800,7 +3802,10 @@ def render_content_blocks(section: dict[str, Any]) -> str:
             f"          <h2>{render_headline_markup(block.get('title') or '')}</h2>",
             f"          <p>{escape(str(block.get('text') or ''))}</p>",
             "        </div>",
-            "        " + responsive_img(image_url, str(block.get("title") or "Content image"), sizes=CONTENT_BLOCK_SIZES) if image_url else "",
+            "        " + cropped_media(
+                responsive_img(image_url, str(block.get("title") or "Content image"), sizes=CONTENT_BLOCK_SIZES),
+                block.get("image_crop"), "content_block", "sl-content-media",
+            ) if image_url else "",
             "      </article>",
         ]))
     if not rendered:
@@ -4127,7 +4132,10 @@ def render_author_bio(section: dict[str, Any]) -> str:
     if photo:
         alt = escape(name or "Author")
         rows.append(
-            f'      <div class="sl-author-photo">{responsive_img(photo, alt, sizes=AUTHOR_PHOTO_SIZES)}</div>'
+            "      " + cropped_media(
+                responsive_img(photo, alt, sizes=AUTHOR_PHOTO_SIZES),
+                section.get("image_crop"), "author_bio", "sl-author-photo",
+            )
         )
     if name:
         rows.append(f'      <p class="sl-author-name">{escape(name)}</p>')
@@ -4178,6 +4186,21 @@ def safe_href(value: str) -> str:
     return url if lowered.startswith(SAFE_HREF_SCHEMES) else ""
 
 
+def cropped_media(inner: str, crop: Any, surface: str, base_class: str) -> str:
+    """Wrap rendered image markup in a crop box, or return it unwrapped when there is no crop.
+
+    Every croppable surface goes through here so the class, the custom properties and the "no crop means
+    no extra markup" rule are decided once. A surface that hand-rolls this is a surface that will forget
+    one of the three (plans/IMAGE_CROPPER.md).
+
+    The wrapper only frames: srcset, lazy loading and intrinsic dimensions stay with responsive_img.
+    """
+    style = crop_style_vars(crop, surface)
+    if not style:
+        return f'<div class="{base_class}">{inner}</div>'
+    return f'<div class="{base_class} sl-cropped" style="{escape(style)}">{inner}</div>'
+
+
 def render_page_ribbon(section: dict[str, Any], page: dict[str, Any] | None = None,
                        api_base_url: str | None = None) -> str:
     """An Attention Block, presented as a ribbon: a mid-scroll interruption that ASKS for something.
@@ -4223,15 +4246,10 @@ def render_page_ribbon(section: dict[str, Any], page: dict[str, Any] | None = No
 
     parts: list[str] = []
     if image:
-        # A stored crop is applied by clipping, not by object-position, which cannot express a zoom. The
-        # srcset/lazy/dims work stays in responsive_img; the wrapper only frames what it renders.
-        crop_vars = crop_style_vars(section.get("image_crop"), "page_ribbon")
-        media_class = "sl-ribbon-media sl-cropped" if crop_vars else "sl-ribbon-media"
-        crop_attr = f' style="{escape(crop_vars)}"' if crop_vars else ""
-        parts.append(
-            f'      <div class="{media_class}"{crop_attr}>'
-            f'{responsive_img(image, headline or "", sizes=RIBBON_IMAGE_SIZES)}</div>'
-        )
+        parts.append("      " + cropped_media(
+            responsive_img(image, headline or "", sizes=RIBBON_IMAGE_SIZES),
+            section.get("image_crop"), "page_ribbon", "sl-ribbon-media",
+        ))
     copy: list[str] = ['      <div class="sl-ribbon-copy">']
     if eyebrow:
         copy.append(f'        <p class="sl-ribbon-eyebrow">{escape(eyebrow)}</p>')

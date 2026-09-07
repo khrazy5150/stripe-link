@@ -22,6 +22,10 @@ const props = defineProps({
   label: { type: String, default: "Upload image" },
   alt: { type: String, default: "Image preview" },
   uploader: { type: Function, required: true },
+  // Some surfaces let a tenant paste a URL instead of uploading. Kept because removing it would be a
+  // silent regression for anyone hosting their images elsewhere.
+  allowUrl: { type: Boolean, default: false },
+  urlPlaceholder: { type: String, default: "or paste an image URL" },
 });
 const emit = defineEmits(["update:modelValue", "update:crop"]);
 
@@ -59,6 +63,14 @@ async function picked(event) {
   } finally {
     uploading.value = false;
   }
+}
+
+// A pasted URL is a different image, so any crop framed against the old one no longer means anything.
+function onUrlTyped(event) {
+  const next = event.target.value.trim();
+  if (next === props.modelValue) return;
+  emit("update:modelValue", next);
+  emit("update:crop", null);
 }
 
 function applyCrop(rect) {
@@ -104,6 +116,14 @@ function previewStyle() {
         Crop
       </button>
     </div>
+
+    <input
+      v-if="allowUrl"
+      :value="modelValue"
+      type="url"
+      :placeholder="urlPlaceholder"
+      @input="onUrlTyped"
+    />
 
     <p v-if="error" class="field-error">{{ error }}</p>
 

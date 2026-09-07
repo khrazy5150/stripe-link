@@ -1,11 +1,18 @@
 {
-  "_comment": "What shape each image surface crops to. Read by BOTH the renderer (domain/image_crop.py) and the builder's cropper, because a cropper locked to a different ratio than the renderer crops to is worse than no cropper -- the tenant frames a shot and the page silently discards it. Three forms: a NUMBER locks the ratio (the layout demands one -- a circular avatar is not negotiable); a LIST offers the tenant those choices; null means the surface accepts any shape and the crop defines it. \"original\" in a list means the source's own ratio. Adding a surface here is what makes it croppable. See plans/IMAGE_CROPPER.md.",
+  "_comment": "What shape each image surface crops to. Read by BOTH the renderer (domain/image_crop.py) and the builder's cropper, because a cropper locked to a different ratio than the renderer crops to is worse than no cropper -- the tenant frames a shot and the page silently discards it. Three forms: a NUMBER locks the ratio (the layout demands one -- a circular avatar is not negotiable); a LIST offers the tenant those choices; null means the surface accepts any shape and the crop defines it. \"original\" in a list means the source's own ratio. THIS TABLE LISTS ONLY SURFACES THAT ARE ACTUALLY WIRED: adding an entry does not make a surface croppable on its own, and a surface listed here but not wired would be a lie the cropper cannot detect. Deliberate exclusions are recorded in plans/IMAGE_CROPPER.md. See that plan for the full design.",
   "ratios": {
-    "page_ribbon": ["original", 1, 1.3333333333, 1.7777777778],
+    "page_ribbon": [
+      "original",
+      1,
+      1.3333333333,
+      1.7777777778
+    ],
     "author_bio": 1,
-    "hero_media": 1.7777777778,
-    "client_marquee": 1,
-    "product": 1,
-    "content_block": null
+    "content_block": [
+      "original",
+      1,
+      1.3333333333,
+      1.7777777778
+    ]
   }
 }

@@ -572,16 +572,17 @@
                     <template v-if="element.type === 'content_block'">
                       <input :value="element.title" type="text" placeholder="Title" @input="applyTitleCaseInput((value) => { element.title = value; }, $event)" />
                       <textarea v-model.trim="element.text" rows="2" placeholder="Text"></textarea>
-                      <div class="selectable-price-image-controls" :class="{ 'has-image-preview': element.image_url }">
-                        <div v-if="element.image_url" class="selectable-price-image-preview">
-                          <img :src="element.image_url" alt="Content image preview" />
-                        </div>
-                        <input :ref="(el) => setElementImageInput(element.id, el)" type="file" accept="image/*" hidden @change="handleElementImagePicked(element, $event)" />
-                        <button class="secondary-action compact" type="button" :disabled="Boolean(blurbImageUploading[element.id])" @click.prevent="triggerElementImageUpload(element.id)">
-                          {{ blurbImageUploading[element.id] ? "Uploading..." : "Upload Image" }}
-                        </button>
-                        <input v-model.trim="element.image_url" type="url" placeholder="Optional image URL" />
-                      </div>
+                      <ImageUploadField
+                        v-model="element.image_url"
+                        :crop="element.image_crop"
+                        :ratios="imageRatios.ratios.content_block"
+                        :uploader="uploadPageImage"
+                        label="Upload Image"
+                        alt="Content image preview"
+                        allow-url
+                        url-placeholder="Optional image URL"
+                        @update:crop="(rect) => (element.image_crop = rect)"
+                      />
                       <div v-if="blurbImageErrors[element.id]" class="price-image-error">{{ blurbImageErrors[element.id] }}</div>
                       <label class="builder-toggle"><input v-model="element.centered" type="checkbox" /><span>Center this block</span></label>
                     </template>
@@ -823,15 +824,15 @@
                     </template>
 
                     <template v-else-if="element.type === 'author_bio'">
-                      <div class="selectable-price-image-controls" :class="{ 'has-image-preview': element.photo_url }">
-                        <div v-if="element.photo_url" class="selectable-price-image-preview">
-                          <img :src="element.photo_url" alt="Author photo preview" />
-                        </div>
-                        <input :ref="(el) => setElementImageInput(element.id, el)" type="file" accept="image/*" hidden @change="handleElementImagePicked(element, $event, 'photo_url')" />
-                        <button class="secondary-action compact" type="button" :disabled="Boolean(blurbImageUploading[element.id])" @click.prevent="triggerElementImageUpload(element.id)">
-                          {{ blurbImageUploading[element.id] ? "Uploading..." : "Upload photo" }}
-                        </button>
-                      </div>
+                      <ImageUploadField
+                        v-model="element.photo_url"
+                        :crop="element.image_crop"
+                        :ratios="imageRatios.ratios.author_bio"
+                        :uploader="uploadPageImage"
+                        label="Upload photo"
+                        alt="Author photo preview"
+                        @update:crop="(rect) => (element.image_crop = rect)"
+                      />
                       <label class="offer-field"><span>Name</span><input v-model.trim="element.name" type="text" placeholder="e.g. Jordan Belfort" /></label>
                       <label class="offer-field">
                         <span>Credibility headline</span>
