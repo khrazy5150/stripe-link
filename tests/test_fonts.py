@@ -11,6 +11,7 @@ import unittest
 
 from stripe_link.domain.fonts import (
     DEFAULT_PRESET,
+    REQUEST_WEIGHTS,
     PAIRINGS,
     PRESET_PAIRINGS,
     SERVABLE_FAMILIES,
@@ -85,6 +86,40 @@ class ServabilityTests(unittest.TestCase):
         for name, pairing in PAIRINGS.items():
             with self.subTest(pairing=name):
                 self.assertLessEqual(len(set(pairing.values())), 2)
+
+
+class WeightTests(unittest.TestCase):
+    """A static family serves ONE weight unless the request names more.
+
+    This is what broke the first time it shipped: the link asked for `family=Source Code Pro` and got
+    weight 400 alone, so every heading — the template renders them at 600/700/800/900 — had no matching
+    face and the browser synthesised or dropped the font. A variable family hid the bug, because it
+    returns its whole range in a single file whatever is asked for.
+    """
+
+    def _head(self, page):
+        return "\n".join(render_head_seo_tags(page, {"name": "X"}, {}, {}, "T", "D"))
+
+    def test_the_request_names_weights(self):
+        self.assertIn(f"Pro:{','.join(REQUEST_WEIGHTS)}", self._head({"theme": {"preset": "techno-green"}}))
+
+    def test_every_family_in_the_url_carries_them(self):
+        head = self._head({"theme": {"preset": "techno-green"}})
+        import re
+        families = re.findall(r"family=([^&\"]+)", head)
+        self.assertTrue(families)
+        for family in families:
+            with self.subTest(family=family):
+                self.assertIn(":", family, "a family without weights serves 400 only")
+
+    def test_body_and_bold_are_both_covered(self):
+        # Body text is 400; the template's 600-900 headings all resolve to the 700 face.
+        self.assertIn("400", REQUEST_WEIGHTS)
+        self.assertIn("700", REQUEST_WEIGHTS)
+
+    def test_it_stays_lean(self):
+        # Each extra weight is another file for every static family on the page.
+        self.assertLessEqual(len(REQUEST_WEIGHTS), 2)
 
 
 class DefaultTests(unittest.TestCase):

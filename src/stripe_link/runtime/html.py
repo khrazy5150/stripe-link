@@ -18,7 +18,7 @@ from stripe_link.domain.pricing import PricingError, expand_offer, find_price, r
 from stripe_link.domain.semantic import is_bundle, resolve_semantic_model, subject_from_model
 from stripe_link.domain.reviews import aggregate_reviews, markup_eligible
 from stripe_link.domain.image_crop import crop_style_vars
-from stripe_link.domain.fonts import families_to_load, is_system, resolve_families
+from stripe_link.domain.fonts import REQUEST_WEIGHTS, families_to_load, is_system, resolve_families
 from stripe_link.domain.video_embeds import parse_video_embed
 from stripe_link.domain.section_theme import section_theme_vars
 from stripe_link.domain.service_pricing import resolve_service_price
@@ -1361,7 +1361,10 @@ def render_head_seo_tags(
     families = families_to_load(page, preferences)
     if families:
         lines.append(f'  <link rel="preconnect" href="{FONT_SERVICE_ORIGIN}" crossorigin>')
-        query = "&".join(f"family={quote(family)}" for family in families)
+        # `Name:400,700` -- the service's own syntax, not Google's `:wght@`. Without it a static family
+        # serves weight 400 alone and every bold heading falls back.
+        weights = ",".join(REQUEST_WEIGHTS)
+        query = "&".join(f"family={quote(family)}:{weights}" for family in families)
         lines.append(f'  <link rel="stylesheet" href="{escape(f"{FONT_SERVICE_ORIGIN}/?{query}")}">')
     return lines
 

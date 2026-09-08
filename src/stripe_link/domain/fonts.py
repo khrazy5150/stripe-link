@@ -75,6 +75,15 @@ DEFAULT_PRESET = "techno-green"
 # should not have a preset quietly hand them a download.
 SYSTEM = "system"
 
+# Weights to request. A VARIABLE family ignores this and returns its whole range in one file; a STATIC
+# family returns one file per weight, and without a list the service sends 400 only -- so every heading
+# rendered at 600-900 had no matching face and the browser faked or dropped the font. That is exactly what
+# went wrong the first time this shipped.
+#
+# 400 and 700 are enough: body text is 400, and the template's 600/700/800/900 headings all resolve to the
+# 700 face. Adding 600 would double a static family's download to buy a weight nobody can see.
+REQUEST_WEIGHTS = ("400", "700")
+
 ROLES = ("heading", "body")
 # `accent` is never PROPOSED by a preset -- a third family is a third download on a page tuned for LCP --
 # but a tenant who explicitly sets one keeps it. Proposing and permitting are different questions.
