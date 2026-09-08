@@ -23,6 +23,10 @@ from typing import Any
 # a wish list, and nothing joins it without being checked.
 SERVABLE_FAMILIES = {
     "Inter", "Montserrat", "Poppins", "Lato", "Merriweather", "Oswald", "Roboto", "Raleway", "Nunito",
+    # Added 2026-09-07: converted from the TTFs already in the bucket and registered in fonts-api. Both
+    # are STATIC -- one file per weight -- because the source TTFs are, which is the constraint recorded
+    # in FONT_SERVICE.md section 10.
+    "Source Code Pro", "Source Sans Pro",
 }
 
 # Six pairings across sixteen colour presets. Not one each: several presets are colour mimicry of a
@@ -35,7 +39,10 @@ PAIRINGS: dict[str, dict[str, str]] = {
     "editorial": {"heading": "Merriweather", "body": "Inter"},
     "geometric": {"heading": "Montserrat", "body": "Lato"},
     "friendly": {"heading": "Nunito", "body": "Nunito"},
-    "impact": {"heading": "Oswald", "body": "Roboto"},
+    "impact": {"heading": "Poppins", "body": "Lato"},
+    # techno-green gets its own: a monospace headline reads as technical in a way no sans does, which is
+    # the whole point of that preset.
+    "terminal": {"heading": "Source Code Pro", "body": "Source Sans Pro"},
     "elegant": {"heading": "Raleway", "body": "Lato"},
 }
 
@@ -55,7 +62,7 @@ PRESET_PAIRINGS: dict[str, str] = {
     "royal-velvet": "elegant",
     "rose-minimalist": "elegant",
     "fire-sale": "impact",
-    "techno-green": "geometric",
+    "techno-green": "terminal",
     "cyber-pulse": "geometric",
 }
 

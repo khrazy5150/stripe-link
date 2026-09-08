@@ -103,7 +103,9 @@ class PageRenderTests(unittest.TestCase):
         # Presets now carry typography, so a page renders its preset's body font ahead of the system
         # fallback. Before this, published pages loaded NO webfont at all and a tenant's chosen type
         # never reached their customers (plans/FONT_SERVICE.md).
-        self.assertIn("--sl-font-body:Lato,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Oxygen,Ubuntu,sans-serif", html)
+        # No preset on this page, so it falls back to the default one (techno-green) and gets ITS fonts --
+        # the same fallback colours already use. See DEFAULT_PRESET in domain/fonts.py.
+        self.assertIn("--sl-font-body:'Source Sans Pro',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Oxygen,Ubuntu,sans-serif", html)
         self.assertIn("font-family:var(--sl-font-body)", html)
         self.assertIn("data-section-type=\"offer_price_selector\"", html)
         self.assertIn("data-price-id=\"price_1bottle\"", html)
