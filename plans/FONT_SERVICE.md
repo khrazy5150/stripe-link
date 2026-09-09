@@ -1,8 +1,13 @@
 # Font service on published pages
 
-**Status:** planned, not built. Raised 2026-09-03 while checking whether `fonts.juniorbay.com` carries
-Inter for the Quote element's opening quotation mark. It does not — but the check turned up something
-larger, which is what this plan is actually about.
+**Status:** SHIPPED to dev + prod 2026-09-07/08 — §3a/3b/3c, §9's resolution order, the catalogue audit,
+variable upgrades and Latin subsetting. **Still open:** §9's tenant-preference UI, §10 font import, and the
+unexplained CORS failure recorded in §12. Raised 2026-09-03 while checking whether `fonts.juniorbay.com`
+carries Inter for the Quote element's opening quotation mark. It does not — but the check turned up
+something larger, which is what this plan is actually about.
+
+Sections 1–11 are the ORIGINAL plan, kept as written. **§12 is what actually happened**, including four
+findings that cost most of the build time and are worth reading before touching any of this again.
 
 ## 1. The finding
 
@@ -323,3 +328,101 @@ being the thing that shifts their layout.
 
 Import comes last deliberately: it is the only step with a legal surface, and it is worth nothing until
 the pipeline it feeds is proven.
+
+---
+
+## 12. What shipped, and what it cost (2026-09-07/08)
+
+### 12a. Shipped
+
+| | |
+|---|---|
+| §3a/3b | Pages emit the stylesheet link; weights requested as `Name:400,700` (the service's syntax, **not** Google's `:wght@`) |
+| §3c | Per-page picker in Page Settings → Appearance, writing `page.theme.fonts.{role}` |
+| §9 (half) | The four-level resolution order is live in `domain/fonts.py`. The tenant-preference **UI** is not built |
+| Catalogue | Audited: 34 families, every catalogued file present, **zero** broken entries — §6's "advertises what it cannot serve" is resolved |
+| Picker | 11 → **31** families offered |
+| Variable | Source Code Pro and Source Sans 3 replaced their static pairs |
+| Subsetting | Every pairing cut to Latin: **4,228 KB → 1,344 KB** weighted by preset usage |
+
+Excluded from the picker deliberately, each recorded in `SERVABLE_FAMILIES`: **Themify** (an icon font — 0 of
+62 Latin letters map, verified via its cmap; body text would render as glyph soup), **Futura** (a commercial
+typeface — a licensing exposure, not a technical one), **Ubuntu Titling** (the Junior Bay wordmark; handing
+the platform's own brand type to tenants is a branding decision).
+
+### 12b. The trap that cost the most: `immutable` plus a late CORS fix
+
+Chromium and Firefox refused every font with *"No 'Access-Control-Allow-Origin' header is present"* while
+`curl` — **from the same machine, on the same network** — was served the header correctly every time, over
+IPv4 and IPv6, coalesced or not, cold cache or warm.
+
+Ruled out, all measured rather than reasoned about: browser cache, CloudFront cache-key/`Vary` poisoning, the
+S3 bucket CORS config (there is none — the header comes from a `Managed-SimpleCORS` response-headers policy),
+DNS across four resolvers, the TLS certificate, `content-type`, `content-encoding`, HTTP/2 connection
+coalescing, HTTP/3, IPv4 vs IPv6, and the WOFF2 files themselves (structurally valid; Safari renders them,
+and Safari is the only one of the three that does **not** enforce CORS on fonts).
+
+**The lesson that generalises:** the font files are served `cache-control: public, max-age=31536000,
+immutable`. The CORS policy was attached *after* those files had been cached. `immutable` tells a browser
+never to revalidate — so a copy stored before the fix stays wrong **for a year**, and no amount of
+server-side fixing reaches it. Only a **different URL** does. That is why the service now appends
+`?v=FONT_URL_VERSION` to every file URL, and why subset fonts were uploaded under **new filenames** rather
+than replacing the originals in place.
+
+**Still unexplained**, and deliberately routed around rather than solved: see §12e.
+
+### 12c. `fs=true` — embedding, and why it is a workaround
+
+`?fs=true` returns the font bytes inside the stylesheet as `data:` URIs. One request, one host, no
+cross-origin font fetch for anything to block. It is what made fonts work at all, and it is behind
+`FONT_EMBED` in `runtime/html.py` so the referencing form is one edit away.
+
+The cost is real: a `data:` URI cannot be skipped the way `unicode-range` lets a browser skip a file it does
+not need, so the charset must be chosen up front. Subsetting is what makes that affordable — before it,
+`natural-calm` shipped an **848 KB render-blocking stylesheet**.
+
+### 12d. Measurements worth not repeating
+
+- **Subsetting beats variability, by a lot.** Going variable saved ~1.3× (two files become one); subsetting
+  to Latin saved a further ~4.6×. Most of the win is charset, not weight axes.
+- **Only 2 of 15 static families have a variable version upstream** (Source Code Pro; Source Sans Pro only
+  via its successor **Source Sans 3**, a rename). The other thirteen have no variable cut at all — but they
+  subset just as well, so nothing is stuck.
+- **Naive subsetting leaves half the win on the table.** Keeping every OpenType feature and all hinting gave
+  Merriweather 433 → 200 KB; pruning to the features our CSS invokes (`kern liga clig calt ccmp locl mark
+  mkmk rlig`) and dropping hinting gave **433 → 92.9 KB**, matching Google's own Latin cut.
+- **Always re-check `fvar` after subsetting.** A careless subset silently flattens a variable font to static,
+  which shows up only as faux-bold headings on a published page.
+- **Raising webp/woff `effort` is not worth it** — measured at ~2% for 4× the encode time.
+- **Inter is genuinely variable** (`fvar`, `wght 100–900` plus `opsz 14–32`). Its PostScript name reads
+  `Inter-Regular`, which is the default instance and a red herring; the catalogue's `100 900` is honest.
+
+### 12e. OPEN — the CORS failure is still unexplained
+
+Every server-side layer measures correct from the user's own machine, and their browsers still do not see the
+header. `fs=true` removes the request rather than explaining it. Anyone picking this up should start from
+§12b's ruled-out list rather than re-walking it, and should treat the fact that **`fonts.juniorbay.com` is an
+edge-optimized API Gateway custom domain** as the most suspicious remaining detail: it is an AWS-owned
+distribution that cannot take an S3 origin or a `/fonts/*` cache behaviour, which is why the files live on
+`juniorbay.com` and the two-host split exists in the first place.
+
+Related and separately measured: that stylesheet is **never cached at the edge** (`x-cache: Miss` on every
+request, `cacheClusterEnabled: false`), so every first page load invokes a Lambda for a render-blocking
+resource, with TTFB swinging 0.11–0.38s. There are only seven pairings — pre-generating seven static CSS
+files behind a real CloudFront distribution would remove the Lambda, fix the caching, and let the service
+serve its own font files under relative URLs, closing the two-host split that started all of this.
+
+### 12f. Recurring shape: two homes, no link
+
+Four bugs this build, all the same shape — a value with two homes and nothing forcing them to agree:
+
+1. `APP_CONFIG_TABLE` in template `Globals` vs the IAM grant on one function → config reads failed silently,
+   and the platform favicon vanished from every published page.
+2. `SERVABLE_FAMILIES` in Python vs the picker list in `LandingPages.vue`.
+3. `resolve_families` accepting a bare family string vs `validate_font_settings` requiring `{family}` — the
+   lenient half was exercised, the strict half runs first.
+4. The rendition ladder in `imageProcessorApp.js` vs `template.yaml`'s `SizesJson` vs `IMAGE_RENDITION_WIDTHS`.
+
+Each is now pinned by a test that **derives** one side rather than restating it — `test_app_config_grants.py`
+walks the import graph, `test_font_picker_options.py` reads the `.vue`, `test_rendition_ladder.py` reads the
+sibling repo's template. Prefer that over a second hand-maintained list.

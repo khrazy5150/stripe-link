@@ -390,6 +390,25 @@ select/radio must ship WITH that renderer -- an unconstrained choice field is a 
 disguise. Retires `open_form` + `form_id`, which with
 `social_redirect` takes the action vocabulary from seven to five, both by removal.
 
+### ⭐ HIGH — add the font service to published pages — SHIPPED dev+prod 2026-09-08 (plan plans/FONT_SERVICE.md §12)
+
+**DONE:** pages emit the stylesheet; presets carry pairings; per-page picker in Page Settings → Appearance;
+catalogue audited (34 families, zero broken entries) and the picker widened 11 → 31; Source Code Pro and
+Source Sans 3 moved to variable; every pairing subset to Latin — **4,228 KB → 1,344 KB** weighted by preset
+usage, which moved a real page +18 PageSpeed points.
+
+**STILL OPEN, tracked in the plan, not here:**
+- §9's tenant-wide preference **UI** (the four-level resolution order it feeds is already live)
+- §10 font import (TTF→WOFF2) — the only step with a legal surface, deliberately last
+- **The CORS failure is unexplained** (§12e). `fs=true` embeds the bytes and removes the request rather than
+  explaining it; every server-side layer measures correct from the user's own machine while their browsers
+  still refuse the header. Read §12b's ruled-out list before re-investigating.
+- The font stylesheet is **never edge-cached** — every first load invokes a Lambda for a render-blocking
+  resource. Seven pairings could be pre-generated as static CSS behind a real CloudFront distribution, which
+  would also let the service serve its own font files and close the two-host split (§12e).
+
+The original entry follows.
+
 ### ⭐ HIGH — add the font service to published pages (found 2026-09-03, plan plans/FONT_SERVICE.md)
 
 **Scope extended 2026-09-07 (§9-§11 of the plan).** Presets will carry font PAIRINGS, not just colour —
@@ -600,6 +619,25 @@ Note the schema itself cannot be kept secret: shipping a JSON API to a browser S
 discloses it. These changes are about polish and accidental exposure, not secrecy.
 
 ## Platform architecture
+
+### MEDIUM — migrate `fonts-api` off python3.9 (raised 2026-09-08)
+
+- **What:** `fonts-api/template.yaml` declares `Runtime: python3.9`, which AWS has deprecated. It is the only
+  stack still on it that we actively develop; `stripe-link` is on `python3.12` (141 deployed functions) and
+  `image-processing` on `nodejs20.x`, both current.
+- **Target `python3.12`, not the newest.** `python3.13` is the latest Lambda offers (confirmed against the
+  runtime enum 2026-09-08), but matching `stripe-link` is worth more than being newest: one Python version
+  across the platform removes "which version does this service use" as a question anyone has to ask.
+- **Low risk.** `fonts-api` is pure Python — no requirements.txt, boto3 comes from the runtime — so there is
+  no native wheel to rebuild. It is a one-line template change plus a redeploy.
+- **Raised while asking whether the Node image processor was at risk.** It is not: AWS deprecates runtime
+  VERSIONS, not languages, and Python gets the same treatment. Worth recording so the question is not
+  re-litigated — and `sharp` is Node-only anyway (libvips binding; Python's equivalent is `pyvips`), so a
+  port would swap one platform-specific binary trap for an identical one while putting the working crop
+  geometry and rendition ladder back on the table for no functional gain.
+- **Also visible in the account, unrelated to this stack:** 29 functions on `nodejs12.x`, 17 on `nodejs8.10`,
+  23 on `python3.9`. Most are almost certainly the legacy stacks already being retired — worth a sweep to
+  confirm nothing live is hiding among them.
 
 ### ⭐⭐ Decouple Stripe mode (test/live) from platform environment (dev/prod) — SHIPPED + CUT OVER PROD 2026-08-02
 - **What it did:** the dashboard test/live toggle used to swap the WHOLE backend (test→dev, live→prod), so a tenant's
