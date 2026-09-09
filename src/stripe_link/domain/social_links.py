@@ -24,6 +24,28 @@ SAME_AS_HOSTS = frozenset({
     "wikidata.org", "wikipedia.org", "yelp.com", "trustpilot.com",
 })
 
+# Display names for every allowlisted host. Complete by construction -- a host without a label used to
+# fall back to its bare domain, so a Better Business Bureau link rendered as "bbb.org". The parity test
+# asserts every host has one, on both sides.
+NETWORK_LABELS = {
+    "bbb.org": "Better Business Bureau",
+    "crunchbase.com": "Crunchbase",
+    "facebook.com": "Facebook",
+    "github.com": "GitHub",
+    "instagram.com": "Instagram",
+    "linkedin.com": "LinkedIn",
+    "pinterest.com": "Pinterest",
+    "threads.net": "Threads",
+    "tiktok.com": "TikTok",
+    "trustpilot.com": "Trustpilot",
+    "twitter.com": "Twitter",
+    "wikidata.org": "Wikidata",
+    "wikipedia.org": "Wikipedia",
+    "x.com": "X",
+    "yelp.com": "Yelp",
+    "youtube.com": "YouTube",
+}
+
 # The cap is on the IDENTITY claim, not on what a page may display. A link-in-bio page shows more links
 # than this; only these six can enter sameAs.
 SAME_AS_MAX = 6
@@ -100,6 +122,15 @@ def url_key(url: Any) -> str:
         text = text[4:]
     host, _, rest = text.partition("/")
     return f"{host.lower()}/{rest}".rstrip("/")
+
+
+def network_label(url: Any) -> str:
+    """The human name of the network a profile URL belongs to."""
+    host = same_as_host(url)
+    for domain, label in NETWORK_LABELS.items():
+        if host == domain or host.endswith("." + domain):
+            return label
+    return host or "Profile"
 
 
 def is_verified(entry: Any) -> bool:

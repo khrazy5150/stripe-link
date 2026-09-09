@@ -239,9 +239,15 @@
               <p v-if="socialCheckNote" class="field-note">{{ socialCheckNote }}</p>
               <small class="field-note">
                 Up to {{ SAME_AS_MAX }} profiles. These tell search engines which accounts are yours, so we confirm
-                each one before making that claim — add a link back to this site on the profile and we will check it.
-                Instagram and TikTok can be listed and will be shown to visitors, but they cannot be confirmed
-                automatically, so they are left out of the claim.
+                each one before making that claim — add a link back to this site on the profile, then use
+                <em>Check links now</em>.
+              </small>
+              <small class="field-note">
+                <strong>Networks we accept:</strong> {{ acceptedNetworks }}.
+              </small>
+              <small class="field-note">
+                {{ unconfirmableNetworks }} can be listed and are shown to visitors, but cannot be confirmed
+                automatically — so they are left out of the search-engine claim.
               </small>
             </div>
           </fieldset>
@@ -626,6 +632,26 @@ const SAME_AS_HOSTS = [
   "wikipedia.org", "x.com", "yelp.com", "youtube.com",
 ];
 const SAME_AS_MAX = 6;
+// Mirrors NETWORK_LABELS. Pinned to the Python side by tests/test_social_link_picker.py, which also
+// asserts every allowlisted host has a label -- so a host can never appear here as a bare domain.
+const NETWORK_LABELS = {
+  "bbb.org": "Better Business Bureau",
+  "crunchbase.com": "Crunchbase",
+  "facebook.com": "Facebook",
+  "github.com": "GitHub",
+  "instagram.com": "Instagram",
+  "linkedin.com": "LinkedIn",
+  "pinterest.com": "Pinterest",
+  "threads.net": "Threads",
+  "tiktok.com": "TikTok",
+  "trustpilot.com": "Trustpilot",
+  "twitter.com": "Twitter",
+  "wikidata.org": "Wikidata",
+  "wikipedia.org": "Wikipedia",
+  "x.com": "X",
+  "yelp.com": "Yelp",
+  "youtube.com": "YouTube",
+};
 // Cannot be confirmed by fetching: both serve a login wall or a JS shell to any unauthenticated request.
 // They are shown to visitors like any other link; they just never enter the identity claim.
 const UNVERIFIABLE_HOSTS = ["instagram.com", "tiktok.com"];
@@ -656,8 +682,14 @@ function onSocialUrlChange(row) {
   const host = sameAsHost(row.url);
   socialHostError.value = (!row.url || hostIn(host, SAME_AS_HOSTS))
     ? ""
-    : `We can only list profiles on known networks. “${host}” is not one we recognise.`;
+    : `“${host}” is not a network we can list. Accepted: ${acceptedNetworks.value}.`;
 }
+const acceptedNetworks = computed(() =>
+  [...new Set(SAME_AS_HOSTS.map((h) => NETWORK_LABELS[h] || h))].sort((a, b) => a.localeCompare(b)).join(", "));
+const unconfirmableNetworks = computed(() =>
+  [...new Set([...UNVERIFIABLE_HOSTS, ...SELF_EDITABLE_HOSTS].map((h) => NETWORK_LABELS[h] || h))]
+    .sort((a, b) => a.localeCompare(b)).join(", "));
+
 const anyCheckableSocial = computed(() =>
   form.org.same_as.some((r) => r.url && hostIn(sameAsHost(r.url), SAME_AS_HOSTS)
     && !hostIn(sameAsHost(r.url), UNVERIFIABLE_HOSTS) && !hostIn(sameAsHost(r.url), SELF_EDITABLE_HOSTS)));

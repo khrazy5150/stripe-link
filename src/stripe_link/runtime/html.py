@@ -13,6 +13,7 @@ from stripe_link.domain.business_types import BUSINESS_TYPES, resolve_entity_typ
 from stripe_link.domain.composition import compose_page, element_channel
 from stripe_link.domain.connect_sync import site_seo_enabled
 from stripe_link.domain.documents import PRODUCT_CONDITIONS
+from stripe_link.domain.social_links import network_label
 from stripe_link.domain.social_links import verified_urls as verified_same_as_urls
 from stripe_link.domain.opportunities import STAGE_LANDING, STAGE_POST_PURCHASE, derived_offer_type, stage_opportunities
 from stripe_link.domain.pricing import PricingError, expand_offer, find_price, resolve_offer, single_unit_price
@@ -5027,20 +5028,7 @@ def render_catalog_grid(
     ] if line)
 
 
-_SOCIAL_LABELS = {
-    "facebook.com": "Facebook", "instagram.com": "Instagram", "twitter.com": "Twitter", "x.com": "X",
-    "linkedin.com": "LinkedIn", "youtube.com": "YouTube", "tiktok.com": "TikTok", "pinterest.com": "Pinterest",
-    "threads.net": "Threads", "github.com": "GitHub", "yelp.com": "Yelp", "trustpilot.com": "Trustpilot",
-}
 
-
-def _social_label(url: str) -> str:
-    host = re.sub(r"^https?://", "", str(url or "").strip().lower()).split("/")[0]
-    host = host[4:] if host.startswith("www.") else host
-    for domain, label in _SOCIAL_LABELS.items():
-        if host == domain or host.endswith("." + domain):
-            return label
-    return host or "Profile"
 
 
 def render_seller_profile(section: dict[str, Any]) -> str:
@@ -5088,7 +5076,7 @@ def render_seller_profile(section: dict[str, Any]) -> str:
         parts.append(f'      <p class="sl-seller-gbp"><a href="{escape(gbp_url)}" rel="nofollow noopener" target="_blank">View on Google</a></p>')
     socials = verified_same_as_urls(org)
     if socials:
-        links = "".join(f'<li><a href="{escape(u)}" rel="nofollow ugc noopener" target="_blank">{escape(_social_label(u))}</a></li>' for u in socials)
+        links = "".join(f'<li><a href="{escape(u)}" rel="nofollow ugc noopener" target="_blank">{escape(network_label(u))}</a></li>' for u in socials)
         parts.append(f'      <ul class="sl-seller-social">{links}</ul>')
     home = (_RENDER_STATE.get("home_url") or "").rstrip("/")
     if home and _RENDER_CATEGORY_PAGES:

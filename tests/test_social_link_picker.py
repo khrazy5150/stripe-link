@@ -16,6 +16,7 @@ import re
 import unittest
 
 from stripe_link.domain.social_links import (
+    NETWORK_LABELS,
     SAME_AS_HOSTS,
     SAME_AS_MAX,
     SELF_EDITABLE_HOSTS,
@@ -30,6 +31,13 @@ def _js_array(name: str) -> set[str]:
     match = re.search(rf"const {name} = \[(.*?)\];", source, re.S)
     assert match, f"{name} not found in {SITES_VUE.name}"
     return set(re.findall(r'"([^"]+)"', match.group(1)))
+
+
+def _js_object(name: str) -> dict[str, str]:
+    source = SITES_VUE.read_text(encoding="utf-8")
+    match = re.search(rf"const {name} = \{{(.*?)\n\}};", source, re.S)
+    assert match, f"{name} not found in {SITES_VUE.name}"
+    return dict(re.findall(r'"([^"]+)":\s*"([^"]+)"', match.group(1)))
 
 
 def _js_number(name: str) -> int:
@@ -74,3 +82,15 @@ class SocialLinkPickerParityTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class NetworkLabelTests(unittest.TestCase):
+    def test_every_allowed_host_has_a_display_name(self):
+        # Without this, a host falls back to its bare domain: a Better Business Bureau link rendered as
+        # "bbb.org" on published pages until 2026-09-09, because the label map covered 12 of 16 hosts.
+        self.assertEqual(set(NETWORK_LABELS), set(SAME_AS_HOSTS))
+
+    def test_the_form_shows_the_same_names_as_the_renderer(self):
+        # The tenant picks a network by the name the form lists; the published page labels the link with
+        # the renderer's name. If those disagree, the tenant is told they added something they did not.
+        self.assertEqual(_js_object("NETWORK_LABELS"), dict(NETWORK_LABELS))
