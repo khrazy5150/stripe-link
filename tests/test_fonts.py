@@ -102,9 +102,15 @@ class WeightTests(unittest.TestCase):
         return "\n".join(render_head_seo_tags(page, {"name": "X"}, {}, {}, "T", "D"))
 
     def test_the_request_names_weights(self):
+        # Only meaningful while the page asks the service at render time. Referencing links pre-generated
+        # files instead, and the weights are baked into them — guarded by the generator test below.
+        if not html.FONT_EMBED:
+            self.skipTest("referencing mode: weights live in the generated stylesheets")
         self.assertIn(f"Pro:{','.join(REQUEST_WEIGHTS)}", self._head({"theme": {"preset": "techno-green"}}))
 
     def test_every_family_in_the_url_carries_them(self):
+        if not html.FONT_EMBED:
+            self.skipTest("referencing mode: weights live in the generated stylesheets")
         head = self._head({"theme": {"preset": "techno-green"}})
         import re
         families = re.findall(r"family=([^&\"]+)", head)
@@ -112,6 +118,24 @@ class WeightTests(unittest.TestCase):
         for family in families:
             with self.subTest(family=family):
                 self.assertIn(":", family, "a family without weights serves 400 only")
+
+    def test_the_generator_bakes_in_the_same_weights_we_would_have_requested(self):
+        """The invariant moved, so the guard moves with it.
+
+        In referencing mode nothing in the URL says 400,700 — the pre-generated stylesheets carry whichever
+        faces fonts-api/tools/build_family_css.py chose. If that list drifts from REQUEST_WEIGHTS, a static
+        family silently ships weight 400 alone and every heading is faux-bold: exactly the bug this class
+        was written for, reappearing one layer down.
+        """
+        generator = pathlib.Path(__file__).resolve().parents[2] / "fonts-api" / "tools" / "build_family_css.py"
+        if not generator.exists():
+            self.skipTest(f"sibling repo not present at {generator}")
+        import re as _re
+        block = _re.search(r"^WEIGHTS = \[([^\]]*)\]", generator.read_text(encoding="utf-8"), _re.M)
+        self.assertIsNotNone(block, "WEIGHTS not found in the generator")
+        baked = {w.strip() for w in block.group(1).split(",") if w.strip()}
+        self.assertEqual(baked, set(REQUEST_WEIGHTS),
+                         "the generated stylesheets and REQUEST_WEIGHTS disagree about which faces ship")
 
     def test_body_and_bold_are_both_covered(self):
         # Body text is 400; the template's 600-900 headings all resolve to the 700 face.
@@ -141,32 +165,36 @@ class RenderTests(unittest.TestCase):
     def test_the_stylesheet_matches_whichever_mode_is_configured(self):
         """FONT_EMBED decides, and each setting has its own contract.
 
-        Embedded (`fs=true`) puts the bytes in the stylesheet: one request, one host, no cross-origin font
-        fetch for anything to block. Referencing is smaller and lets one download be shared across pages,
-        but needs the cross-origin fetch to work -- which is what broke on 2026-09-08 and what the CORS fix
-        on 2026-09-09 addresses. Pinning only one of them made the flag untestable in its other position.
+        Embedded (`fs=true`) puts the bytes in the stylesheet the SERVICE renders: one request, one host,
+        no cross-origin font fetch. Referencing links PRE-GENERATED per-family stylesheets on the same
+        origin as the font files -- static and edge-cached, where asking the service meant a Lambda on the
+        critical path (`x-cache: Miss` every time, ~110ms in front of first paint).
         """
         head = self._head(PRESET_PAGE)
-        self.assertIn("fonts.juniorbay.com/?family=", head)
         if html.FONT_EMBED:
+            self.assertIn("fonts.juniorbay.com/?family=", head)
             self.assertIn("fs=true", head)
+            self.assertNotIn("/fonts/css/", head)
         else:
-            self.assertNotIn("fs=true", head)
+            self.assertIn("/fonts/css/", head)
+            self.assertNotIn("?family=", head, "referencing must not call the service at render time")
 
-    def test_a_preconnect_is_emitted_only_when_a_second_request_follows(self):
-        # Warming a handshake is worth it only when a font file is fetched on that origin. Embedded,
-        # nothing follows and the hint would cost a connection nobody uses.
+    def test_a_preconnect_warms_the_origin_the_page_will_actually_use(self):
         head = self._head(PRESET_PAGE)
-        if html.FONT_EMBED:
-            self.assertNotIn("preconnect", head)
-        else:
-            self.assertIn('rel="preconnect" href="https://fonts.juniorbay.com"', head)
+        expected = html.FONT_SERVICE_ORIGIN if html.FONT_EMBED else html.FONT_CSS_ORIGIN
+        self.assertIn(f'rel="preconnect" href="{expected}"', head)
 
     def test_only_the_families_the_page_needs(self):
         head = self._head(PRESET_PAGE)
-        self.assertIn("family=Lato", head)
-        self.assertIn("family=Raleway", head)
-        self.assertNotIn("family=Oswald", head)
+        if html.FONT_EMBED:
+            self.assertIn("family=Lato", head)
+            self.assertIn("family=Raleway", head)
+            self.assertNotIn("family=Oswald", head)
+        else:
+            # One stylesheet per family, so a page carries links for its own two and nothing else.
+            self.assertIn("/fonts/css/lato.css", head)
+            self.assertIn("/fonts/css/raleway.css", head)
+            self.assertNotIn("/fonts/css/oswald.css", head)
 
     def test_the_family_list_is_sorted_so_the_url_is_a_stable_cache_key(self):
         # Two orderings of one page would be two URLs and two downloads of the same fonts.
