@@ -1,8 +1,10 @@
 # Font service on published pages
 
-**Status:** SHIPPED to dev + prod 2026-09-07/08 — §3a/3b/3c, §9's resolution order, the catalogue audit,
-variable upgrades and Latin subsetting. **Still open:** §9's tenant-preference UI, §10 font import, and the
-unexplained CORS failure recorded in §12. Raised 2026-09-03 while checking whether `fonts.juniorbay.com`
+**Status:** SHIPPED. §3a/3b/3c, the catalogue audit, variable upgrades and Latin subsetting (2026-09-07/08);
+§9's store-level preference and §10 font import — upload, convert, store, delete (2026-09-09). **The CORS
+failure that shaped every decision in this plan is solved — read §12e before anything else here.** Still
+open: subsetting for imported fonts, which has nowhere to live until `fontTools` has a home outside
+`src/requirements.txt`. Raised 2026-09-03 while checking whether `fonts.juniorbay.com`
 carries Inter for the Quote element's opening quotation mark. It does not — but the check turned up
 something larger, which is what this plan is actually about.
 
@@ -397,20 +399,45 @@ not need, so the charset must be chosen up front. Subsetting is what makes that 
 - **Inter is genuinely variable** (`fvar`, `wght 100–900` plus `opsz 14–32`). Its PostScript name reads
   `Inter-Regular`, which is the default instance and a red herring; the catalogue's `100 900` is honest.
 
-### 12e. OPEN — the CORS failure is still unexplained
+### 12e. SOLVED (2026-09-09) — the CORS failure was a broken preflight
 
-Every server-side layer measures correct from the user's own machine, and their browsers still do not see the
-header. `fs=true` removes the request rather than explaining it. Anyone picking this up should start from
-§12b's ruled-out list rather than re-walking it, and should treat the fact that **`fonts.juniorbay.com` is an
-edge-optimized API Gateway custom domain** as the most suspicious remaining detail: it is an AWS-owned
-distribution that cannot take an S3 origin or a `/fonts/*` cache behaviour, which is why the files live on
-`juniorbay.com` and the two-host split exists in the first place.
+**Three things had to be true at once, which is why every single-layer check came back clean:**
 
-Related and separately measured: that stylesheet is **never cached at the edge** (`x-cache: Miss` on every
-request, `cacheClusterEnabled: false`), so every first page load invokes a Lambda for a render-blocking
-resource, with TTFB swinging 0.11–0.38s. There are only seven pairings — pre-generating seven static CSS
-files behind a real CloudFront distribution would remove the Lambda, fix the caching, and let the service
-serve its own font files under relative URLs, closing the two-host split that started all of this.
+| | |
+|---|---|
+| `/fonts/*` used `Managed-SimpleCORS` | its `AccessControlAllowMethods` is **`[]`** — it decorates responses but never answers a preflight |
+| the bucket had no CORS configuration | so nothing else could answer one either; `OPTIONS` fell through to S3 and returned **404** |
+| `Managed-CachingOptimized`, no origin-request policy | `Origin` was never forwarded, so S3 could not have evaluated a rule even if one existed |
+
+The fix is all three: `Managed-CORS-With-Preflight` on the behaviour, a CORS rule on the bucket, and
+`Managed-CORS-S3Origin` forwarding `Origin` and the `Access-Control-Request-*` headers. Verified by the
+preflight going 404 -> 200 and referenced fonts then rendering in Chromium and Firefox.
+
+`AllowedOrigins` is `*`, not a list. Pages are served from `*.jbay.be`, `*.jbay.uk` and arbitrary verified
+custom domains; an explicit list breaks the first time a tenant adds one.
+
+**Why it took a day: curl never sends a preflight.** Every check ran the request the browser was not
+failing on. `GET` returned `200` with `access-control-allow-origin: *` from every origin, over IPv4 and
+IPv6, on hits and misses, from the user's own machine — while the browser's `OPTIONS` was 404ing
+unobserved. Cache, DNS, TLS, content-type, content-encoding, coalescing, HTTP/3 and the WOFF2 files were
+all eliminated, correctly and uselessly, because none of them was ever the question.
+
+**The diagnostic that would have found it in five minutes:**
+
+```bash
+curl -i -X OPTIONS "$FONT_URL" \
+  -H 'Origin: https://your-page-origin' -H 'Access-Control-Request-Method: GET'
+```
+
+The lesson generalises past fonts: when a browser and curl disagree about CORS, **reproduce the browser's
+request, not the one you can think of**. A tool that cannot preflight cannot observe a preflight failure,
+so agreement between them proves nothing about the half curl does not send.
+
+**What it unwound.** `fs=true` embedding existed only to dodge this. With referencing working, subset fonts
+are better referenced: smaller HTML, and one download shared across pages instead of the same bytes inlined
+into every one. `FONT_EMBED` in `runtime/html.py` is now `False` and governs both halves — the catalogue's
+fonts and a tenant's imported ones — so they cannot disagree again. That disagreement is exactly what made
+an imported font invisible in the live preview while presets showed fine.
 
 ### 12f. Recurring shape: two homes, no link
 
