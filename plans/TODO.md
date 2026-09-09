@@ -685,8 +685,9 @@ BLOCKERS found while planning (both RE-VERIFIED 2026-09-09, still true; line num
     not currently exist. Same silent-drift shape as the SENSITIVE_FIELDS denylist.
 
 **Verification DECIDED 2026-09-09 — see SOCIAL_MEDIA_PAGES.md §7a-i.** Measured with a throwaway Lambda,
-not assumed: `rel="me"` is emitted by ZERO of the ten hosts tested, so option 1's mechanism is dead but its
-intent survives as a URL-presence check. Lambda fetches BETTER than a laptop, and an honest user-agent beats
+not assumed: `rel="me"` is emitted by just ONE of the ten hosts tested (GitHub, as `rel="nofollow me"` —
+corrected from an initial "zero" that came from a regex requiring the value to be exactly `me`), so a
+rel-parser would verify one host where a URL-presence check verifies eight. Lambda fetches BETTER than a laptop, and an honest user-agent beats
 a browser string (Facebook returned 400 to Chrome, 200 to us). 8 of 10 hosts verifiable; Instagram and TikTok
 are not, by any unauthenticated means. Wikipedia/Wikidata excluded — anyone can edit them, which is the
 impersonation vector itself. Two-tier result: unverifiable links still RENDER, they just never enter `sameAs`,

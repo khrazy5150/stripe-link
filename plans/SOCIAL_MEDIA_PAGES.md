@@ -144,11 +144,20 @@ The §7 model rests on "verified" meaning something. Pick one before building:
 Option 1 was chosen, then tested before building. A throwaway Lambda in us-west-2 (`jb-relme-probe`,
 deployed, run, deleted) fetched ten allowlisted hosts. Three results changed the design:
 
-**1. `rel="me"` does not exist any more — ZERO occurrences on all ten hosts, GitHub included.** The
-technique Mastodon and Google use is not emitted by anything on `SAME_AS_HOSTS`. Do not build a parser
-for it. What works instead is a **URL-presence check**: fetch the profile, confirm the tenant's own
-unique page URL appears in the HTML. It proves the same thing — someone controlling the profile put our
-URL on it — without depending on an attribute nobody sets.
+**1. `rel="me"` is emitted by ONE host out of ten — GitHub, and only as `rel="nofollow me"`.**
+
+*Corrected 2026-09-09, same day.* The first measurement reported ZERO because the regex required the
+attribute value to be exactly `me`, so `rel="nofollow me"` — a perfectly valid multi-token `rel` — did not
+match. Re-measured as a token: GitHub 5 occurrences, Instagram/TikTok/X/LinkedIn/YouTube 0.
+
+**The decision is unchanged, and the corrected number argues for it more strongly.** A `rel="me"` parser
+would verify exactly one host; the URL-presence check verifies that host AND the seven others. So: fetch
+the profile, confirm the tenant's own page URL appears in the HTML. It proves the same thing — someone
+controlling the profile put our URL there — without depending on an attribute only GitHub sets.
+
+Recorded rather than quietly amended because the rest of §7a-i is measurement too, and a reader who later
+finds `rel="nofollow me"` on GitHub should find it already accounted for instead of concluding the numbers
+here were guessed.
 
 **2. Lambda fetches BETTER than a laptop, and the HONEST user-agent beats a browser string.** Measured
 from a residential IP first, which was misleading: X, Facebook and LinkedIn looked dead and were not.
