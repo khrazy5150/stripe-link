@@ -208,6 +208,33 @@
               <button type="button" class="secondary-action compact" @click="addHoursRow">+ Add hours</button>
               <small class="field-note">Group days that share the same hours (e.g. Mon–Fri 9:00–17:00, then a separate Sat row).</small>
             </div>
+            <div class="offer-field">
+              <span>Social profiles</span>
+              <div v-for="(row, i) in form.org.same_as" :key="i" class="social-row">
+                <input
+                  v-model.trim="row.url"
+                  type="url"
+                  class="social-url"
+                  placeholder="https://instagram.com/yourname"
+                  @blur="onSocialUrlChange(row)"
+                />
+                <span class="social-status" :class="socialStatus(row).tone">{{ socialStatus(row).label }}</span>
+                <button type="button" class="link-danger-btn hours-remove" @click="removeSocialRow(i)">Remove</button>
+              </div>
+              <p v-if="socialHostError" class="social-error">{{ socialHostError }}</p>
+              <button
+                type="button"
+                class="secondary-action compact"
+                :disabled="form.org.same_as.length >= SAME_AS_MAX"
+                @click="addSocialRow"
+              >+ Add profile</button>
+              <small class="field-note">
+                Up to {{ SAME_AS_MAX }} profiles. These tell search engines which accounts are yours, so we confirm
+                each one before making that claim — add a link back to this site on the profile and we will check it.
+                Instagram and TikTok can be listed and will be shown to visitors, but they cannot be confirmed
+                automatically, so they are left out of the claim.
+              </small>
+            </div>
           </fieldset>
 
           <fieldset class="product-identifiers">
@@ -554,7 +581,8 @@ const BUSINESS_TYPE_GROUPS = [
   { parent: "LocalBusiness", label: "Other local", types: ["ChildCare", "DryCleaningOrLaundry", "SelfStorage", "EntertainmentBusiness"] },
 ];
 
-const form = reactive({ name: "", subdomain: "", org: { name: "", legal_name: "", entity_type: "OnlineStore", business_type: "", description: "", telephone: "", email: "", address: { locality: "", region: "" }, place_id: "", gbp_url: "", geo: { latitude: "", longitude: "" }, opening_hours: [], review_destination: "" }, seo: { google_site_verification: "", bing_site_verification: "" }, seo_enabled: true });
+const socialHostError = ref("");
+const form = reactive({ name: "", subdomain: "", org: { name: "", legal_name: "", entity_type: "OnlineStore", business_type: "", description: "", telephone: "", email: "", address: { locality: "", region: "" }, place_id: "", gbp_url: "", geo: { latitude: "", longitude: "" }, opening_hours: [], same_as: [], review_destination: "" }, seo: { google_site_verification: "", bing_site_verification: "" }, seo_enabled: true });
 
 // The specific-type options for the chosen broad entity_type (empty for OnlineStore/Organization).
 const specificTypes = computed(() => (BUSINESS_TYPE_GROUPS.find((g) => g.parent === form.org.entity_type)?.types) || []);
@@ -571,6 +599,60 @@ const WEEK_DAYS = [
   ["Monday", "Mon"], ["Tuesday", "Tue"], ["Wednesday", "Wed"], ["Thursday", "Thu"],
   ["Friday", "Fri"], ["Saturday", "Sat"], ["Sunday", "Sun"],
 ];
+// Mirrors SAME_AS_HOSTS and SAME_AS_MAX in src/stripe_link/domain/social_links.py. The dashboard cannot
+// import Python, so tests/test_social_link_picker.py pins the two together — adding a host on one side only
+// is the failure that test exists to catch.
+const SAME_AS_HOSTS = [
+  "bbb.org", "crunchbase.com", "facebook.com", "github.com", "instagram.com", "linkedin.com",
+  "pinterest.com", "threads.net", "tiktok.com", "trustpilot.com", "twitter.com", "wikidata.org",
+  "wikipedia.org", "x.com", "yelp.com", "youtube.com",
+];
+const SAME_AS_MAX = 6;
+// Cannot be confirmed by fetching: both serve a login wall or a JS shell to any unauthenticated request.
+// They are shown to visitors like any other link; they just never enter the identity claim.
+const UNVERIFIABLE_HOSTS = ["instagram.com", "tiktok.com"];
+// Anyone can edit these, so finding our link there would prove nothing about who runs the profile.
+const SELF_EDITABLE_HOSTS = ["wikipedia.org", "wikidata.org"];
+
+function sameAsHost(url) {
+  const text = String(url || "").trim().toLowerCase().replace(/^https?:\/\//, "");
+  const host = text.split("/")[0].split("?")[0].split("#")[0].split(":")[0];
+  return host.startsWith("www.") ? host.slice(4) : host;
+}
+function hostIn(host, group) {
+  return group.some((h) => host === h || host.endsWith("." + h));
+}
+function addSocialRow() {
+  if (form.org.same_as.length >= SAME_AS_MAX) return;
+  form.org.same_as.push({ url: "", verification: null });
+}
+function removeSocialRow(index) {
+  form.org.same_as.splice(index, 1);
+  socialHostError.value = "";
+}
+function onSocialUrlChange(row) {
+  // Editing the URL invalidates whatever we had proven about the old one, and the server enforces exactly
+  // that on save. Clearing it here so the badge does not keep claiming "Confirmed" for a link we have not
+  // checked — a stale badge would be a lie in the one place the tenant is deciding whether to trust it.
+  row.verification = null;
+  const host = sameAsHost(row.url);
+  socialHostError.value = (!row.url || hostIn(host, SAME_AS_HOSTS))
+    ? ""
+    : `We can only list profiles on known networks. “${host}” is not one we recognise.`;
+}
+function socialStatus(row) {
+  const host = sameAsHost(row.url);
+  if (!row.url) return { label: "", tone: "" };
+  if (!hostIn(host, SAME_AS_HOSTS)) return { label: "Not a known network", tone: "bad" };
+  if (hostIn(host, UNVERIFIABLE_HOSTS)) return { label: "Shown, not confirmable", tone: "muted" };
+  if (hostIn(host, SELF_EDITABLE_HOSTS)) return { label: "Shown, not confirmable", tone: "muted" };
+  const state = row.verification?.state || "unverified";
+  if (state === "verified") return { label: "Confirmed", tone: "good" };
+  if (state === "pending") return { label: "Checking…", tone: "muted" };
+  if (state === "failed") return { label: "Link back not found", tone: "bad" };
+  return { label: "Not yet confirmed", tone: "muted" };
+}
+
 function addHoursRow() {
   form.org.opening_hours.push({ days: [], opens: "09:00", closes: "17:00" });
 }
@@ -581,6 +663,12 @@ function toggleHoursDay(row, day) {
   const i = row.days.indexOf(day);
   if (i >= 0) row.days.splice(i, 1);
   else row.days.push(day);
+}
+function sameAsForSave(rows) {
+  // URL only. Verification state is server-owned: the backend restores it by URL and discards anything the
+  // client sends, so posting the badge back would be noise at best and an attempted forgery at worst.
+  const urls = rows.map((r) => String(r.url || "").trim()).filter(Boolean);
+  return urls.length ? urls.slice(0, SAME_AS_MAX).map((url) => ({ url })) : undefined;
 }
 function geoForSave(geo) {
   const lat = Number(geo.latitude), lng = Number(geo.longitude);
@@ -856,7 +944,10 @@ function openEdit(site) {
     place_id: org.place_id || "", gbp_url: org.gbp_url || "", review_destination: org.review_destination || "",
     geo: { latitude: org.geo?.latitude ?? "", longitude: org.geo?.longitude ?? "" },
     opening_hours: (org.opening_hours || []).map((h) => ({ days: [...(h.days || [])], opens: h.opens || "", closes: h.closes || "" })),
+    // verification is read-only here: it is server-owned, and the badge reports it rather than setting it.
+    same_as: (org.same_as || []).map((e) => ({ url: e.url || "", verification: e.verification || null })),
   };
+  socialHostError.value = "";
   const seo = site.seo || {};
   form.seo = { google_site_verification: seo.google_site_verification || "", bing_site_verification: seo.bing_site_verification || "" };
   form.seo_enabled = site.indexing?.seo_enabled !== false;  // default on
@@ -880,6 +971,7 @@ async function saveEdit() {
     review_destination: form.org.review_destination || undefined,
     geo: geoForSave(form.org.geo),
     opening_hours: hoursForSave(form.org.opening_hours),
+    same_as: sameAsForSave(form.org.same_as),
   };
   // Preserve any existing seo fields (title_suffix, indexnow_key) and overlay the editable verification tokens.
   const seo = Object.fromEntries(Object.entries({
@@ -1210,6 +1302,43 @@ onMounted(async () => {
   flex-wrap: wrap;
   gap: 8px;
   margin-bottom: 8px;
+}
+.social-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.social-url {
+  flex: 1 1 18rem;
+  min-width: 0;
+}
+/* The status is the whole point of the row: it says whether we are willing to vouch for this link.
+   Muted is the honest default -- "not confirmed" must not look like a failure, because for Instagram
+   and TikTok it never can be. */
+.social-status {
+  font-size: 0.82rem;
+  white-space: nowrap;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--sl-border, #d7d7dc);
+  color: var(--sl-muted, #6a6a72);
+}
+.social-status.good {
+  color: #146c43;
+  border-color: #a9d5bd;
+  background: #eaf6f0;
+}
+.social-status.bad {
+  color: #a12a2a;
+  border-color: #e2b4b4;
+  background: #fbeeee;
+}
+.social-error {
+  margin: 4px 0 8px;
+  font-size: 0.85rem;
+  color: #a12a2a;
 }
 .hours-days {
   display: flex;
