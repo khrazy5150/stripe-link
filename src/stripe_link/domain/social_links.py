@@ -172,3 +172,112 @@ def preserve_verification(incoming_org: Any, existing_org: Any) -> list[dict]:
         clean["verification"] = dict(prior) if isinstance(prior, dict) else initial_verification(url)
         merged.append(clean)
     return merged
+
+# ---------------------------------------------------------------------------------------------------
+# The check itself
+# ---------------------------------------------------------------------------------------------------
+
+MAX_FETCH_BYTES = 3 * 1024 * 1024
+FETCH_TIMEOUT_SECONDS = 15
+
+
+class ProfileFetchError(Exception):
+    """The profile could not be read. Distinct from 'read it, no backlink' -- see verify_entry."""
+
+
+def site_backlink_host(site: Any) -> str:
+    """The host a tenant is asked to link back to.
+
+    The custom domain once it is verified, otherwise the platform hostname -- mirroring siteStoreUrl in
+    Sites.vue, because the tenant will paste whatever the dashboard shows them.
+    """
+    hosting = (site or {}).get("hosting") or {}
+    custom = str(hosting.get("custom_domain") or "").strip()
+    verified = bool((hosting.get("verification") or {}).get("verified"))
+    if custom and verified:
+        return custom.lower()
+    return str(hosting.get("platform_hostname") or "").strip().lower()
+
+
+def backlink_present(html: str, host: str) -> bool:
+    """Is `host` linked from this page?
+
+    Checked raw AND percent-decoded, because platforms route outbound links through redirectors that
+    encode the destination -- YouTube's /redirect?q=, Facebook's l.php?u=. A raw-only match would report
+    "link back not found" for a link that is plainly on the page.
+    """
+    if not host:
+        return False
+    needle = host.lower()
+    body = (html or "").lower()
+    if needle in body:
+        return True
+    try:
+        from urllib.parse import unquote
+        return needle in unquote(body)
+    except Exception:
+        return False
+
+
+def fetch_profile(url: str) -> str:
+    """GET a profile page as ourselves.
+
+    We identify honestly rather than impersonating a browser. Measured 2026-09-09, that is also the
+    choice that WORKS: Facebook returned 400 to a Chrome UA and 200 to this one.
+
+    Redirects are re-checked against the allowlist. Starting from an allowlisted host is not enough on
+    its own -- a redirect is an attacker-influenced hop, and following one anywhere would turn this into
+    a fetch-anything proxy running inside our account.
+    """
+    import urllib.error
+    import urllib.request
+
+    class _AllowlistedRedirects(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self, req, fp, code, msg, headers, newurl):
+            if not is_allowed_host(same_as_host(newurl)):
+                raise ProfileFetchError(f"redirect to a host we do not fetch: {same_as_host(newurl)}")
+            return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+    if not is_checkable(url):
+        raise ProfileFetchError("this profile cannot be checked automatically")
+    opener = urllib.request.build_opener(_AllowlistedRedirects)
+    request = urllib.request.Request(url, headers={
+        "User-Agent": VERIFIER_USER_AGENT,
+        "Accept": "text/html,application/xhtml+xml",
+        "Accept-Language": "en-US,en;q=0.9",
+    })
+    try:
+        with opener.open(request, timeout=FETCH_TIMEOUT_SECONDS) as response:
+            return response.read(MAX_FETCH_BYTES).decode("utf-8", "replace")
+    except ProfileFetchError:
+        raise
+    except urllib.error.HTTPError as exc:
+        # A 404 is a real answer -- the profile is not there -- so let the caller record `failed`
+        # rather than an error the tenant can do nothing about.
+        if exc.code == 404:
+            return ""
+        raise ProfileFetchError(f"the profile returned HTTP {exc.code}") from exc
+    except Exception as exc:
+        raise ProfileFetchError(str(exc) or type(exc).__name__) from exc
+
+
+def verify_entry(entry: dict, backlink_host: str, now: int, fetcher=fetch_profile) -> dict:
+    """The verification state for one entry, after actually looking.
+
+    `fetcher` is injected so the decision logic can be tested without the network -- the logic is what
+    carries the security weight, and it should not be the part that only runs against live Instagram.
+    """
+    url = str((entry or {}).get("url") or "").strip()
+    if not is_checkable(url):
+        return {"state": UNVERIFIABLE, "method": None, "checked_at": now}
+    try:
+        html = fetcher(url)
+    except ProfileFetchError as exc:
+        # Could not read it. NOT `failed`: failed means "we looked and the link is not there", which is
+        # a statement about the tenant's profile. Conflating the two would tell a tenant to fix
+        # something that is already correct.
+        return {"state": UNVERIFIED, "method": "url_presence", "checked_at": now,
+                "detail": str(exc)[:200]}
+    if backlink_present(html, backlink_host):
+        return {"state": VERIFIED, "method": "url_presence", "checked_at": now}
+    return {"state": FAILED, "method": "url_presence", "checked_at": now}

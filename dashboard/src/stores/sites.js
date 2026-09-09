@@ -155,6 +155,10 @@ export const useSitesStore = defineStore("sites", {
       const res = await apiRequest(`/sites/${encodeURIComponent(siteId)}/domain/check`, { method: "POST" });
       return { site: this._replace(res.site), status: res.status, hint: res.hint, diagnostics: res.diagnostics || [] };
     },
+    async checkSocialLinks(siteId) {
+      const res = await apiRequest(`/sites/${encodeURIComponent(siteId)}/social/check`, { method: "POST" });
+      return { site: this._replace(res.site), checked: res.checked || 0, backlinkHost: res.backlink_host || "" };
+    },
     async disconnectDomain(siteId) {
       const res = await apiRequest(`/sites/${encodeURIComponent(siteId)}/domain`, { method: "DELETE" });
       return this._replace(res.site);

@@ -11,6 +11,8 @@ import unittest
 from handlers.sites import handler
 from stripe_link.domain.documents import DocumentValidationError, validate_site
 from stripe_link.domain.social_links import (
+    FAILED,
+    ProfileFetchError,
     UNVERIFIABLE,
     UNVERIFIED,
     VERIFIED,
@@ -19,8 +21,10 @@ from stripe_link.domain.social_links import (
     is_checkable,
     is_verified,
     preserve_verification,
+    site_backlink_host,
     url_key,
     verified_urls,
+    verify_entry,
 )
 from tests.fakes import FakeDocumentRepository, FakeSubdomainRegistry
 from tests.test_sites_handler import base_site
@@ -158,3 +162,77 @@ class SiteWriteBoundaryTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class VerifyEntryTests(unittest.TestCase):
+    """The decision logic, with the network injected out.
+
+    This is where the security weight sits, so it must not be the part that only runs against live
+    Instagram. The fetcher is a parameter precisely so these cases are reachable.
+    """
+
+    HOST = "axel-mart.jbay.uk"
+
+    def test_a_backlink_verifies(self):
+        result = verify_entry({"url": "https://github.com/acme"}, self.HOST, 100,
+                              fetcher=lambda url: '<a href="https://axel-mart.jbay.uk/">our shop</a>')
+        self.assertEqual(result["state"], VERIFIED)
+        self.assertEqual(result["method"], "url_presence")
+        self.assertEqual(result["checked_at"], 100)
+
+    def test_a_percent_encoded_backlink_still_verifies(self):
+        # YouTube and Facebook route outbound links through redirectors that encode the destination.
+        # A raw-only match would tell the tenant their link is missing when it is plainly on the page.
+        result = verify_entry({"url": "https://www.youtube.com/@acme"}, self.HOST, 100,
+                              fetcher=lambda url: "/redirect?q=https%3A%2F%2Faxel-mart.jbay.uk%2F")
+        self.assertEqual(result["state"], VERIFIED)
+
+    def test_a_page_without_the_backlink_fails(self):
+        result = verify_entry({"url": "https://github.com/acme"}, self.HOST, 100,
+                              fetcher=lambda url: "<html>nothing here</html>")
+        self.assertEqual(result["state"], FAILED)
+
+    def test_an_unreadable_profile_is_not_reported_as_a_failure(self):
+        # "failed" means "we looked and your link is not there" -- a statement about the tenant's
+        # profile. A network error is a statement about US. Conflating them tells a tenant to go fix
+        # something that is already correct.
+        def boom(url):
+            raise ProfileFetchError("connection reset")
+        result = verify_entry({"url": "https://github.com/acme"}, self.HOST, 100, fetcher=boom)
+        self.assertEqual(result["state"], UNVERIFIED)
+        self.assertIn("connection reset", result["detail"])
+
+    def test_unfetchable_hosts_are_never_even_attempted(self):
+        def explode(url):
+            raise AssertionError("must not fetch an unverifiable host")
+        for url in ("https://instagram.com/acme", "https://www.tiktok.com/@acme",
+                    "https://en.wikipedia.org/wiki/Acme"):
+            result = verify_entry({"url": url}, self.HOST, 100, fetcher=explode)
+            self.assertEqual(result["state"], UNVERIFIABLE, url)
+
+    def test_the_backlink_host_follows_the_verified_custom_domain(self):
+        platform = {"hosting": {"platform_hostname": "axel-mart.jbay.uk", "custom_domain": None}}
+        self.assertEqual(site_backlink_host(platform), "axel-mart.jbay.uk")
+        unverified = {"hosting": {"platform_hostname": "axel-mart.jbay.uk",
+                                  "custom_domain": "shop.example.com",
+                                  "verification": {"verified": False}}}
+        # Not yet verified, so the tenant is still being shown the platform address -- ask for that.
+        self.assertEqual(site_backlink_host(unverified), "axel-mart.jbay.uk")
+        verified = {"hosting": {"platform_hostname": "axel-mart.jbay.uk",
+                                "custom_domain": "shop.example.com",
+                                "verification": {"verified": True}}}
+        self.assertEqual(site_backlink_host(verified), "shop.example.com")
+
+
+class VerifierIsTheOnlyProducerTests(unittest.TestCase):
+    def test_a_check_writes_state_that_a_client_save_then_preserves(self):
+        # The two halves must compose: the verifier is the only writer, and the write boundary must not
+        # then throw its work away on the tenant's next save.
+        entry = {"url": "https://github.com/acme"}
+        entry["verification"] = verify_entry(
+            entry, "axel-mart.jbay.uk", 100,
+            fetcher=lambda url: '<a href="https://axel-mart.jbay.uk/">shop</a>')
+        self.assertEqual(entry["verification"]["state"], VERIFIED)
+        merged = preserve_verification({"same_as": [{"url": "https://github.com/acme"}]},
+                                       {"same_as": [entry]})
+        self.assertEqual(merged[0]["verification"]["state"], VERIFIED)

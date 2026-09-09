@@ -222,12 +222,21 @@
                 <button type="button" class="link-danger-btn hours-remove" @click="removeSocialRow(i)">Remove</button>
               </div>
               <p v-if="socialHostError" class="social-error">{{ socialHostError }}</p>
-              <button
-                type="button"
-                class="secondary-action compact"
-                :disabled="form.org.same_as.length >= SAME_AS_MAX"
-                @click="addSocialRow"
-              >+ Add profile</button>
+              <div class="button-row">
+                <button
+                  type="button"
+                  class="secondary-action compact"
+                  :disabled="form.org.same_as.length >= SAME_AS_MAX"
+                  @click="addSocialRow"
+                >+ Add profile</button>
+                <button
+                  type="button"
+                  class="secondary-action compact"
+                  :disabled="socialBusy || !anyCheckableSocial"
+                  @click="checkSocialLinks"
+                >{{ socialBusy ? "Checking…" : "Check links now" }}</button>
+              </div>
+              <p v-if="socialCheckNote" class="field-note">{{ socialCheckNote }}</p>
               <small class="field-note">
                 Up to {{ SAME_AS_MAX }} profiles. These tell search engines which accounts are yours, so we confirm
                 each one before making that claim — add a link back to this site on the profile and we will check it.
@@ -589,6 +598,8 @@ const BUSINESS_TYPE_GROUPS = [
 ];
 
 const socialHostError = ref("");
+const socialBusy = ref(false);
+const socialCheckNote = ref("");
 const form = reactive({ name: "", subdomain: "", org: { name: "", legal_name: "", entity_type: "OnlineStore", business_type: "", description: "", telephone: "", email: "", address: { locality: "", region: "" }, place_id: "", gbp_url: "", geo: { latitude: "", longitude: "" }, opening_hours: [], same_as: [], review_destination: "" }, seo: { google_site_verification: "", bing_site_verification: "" }, seo_enabled: true });
 
 // The specific-type options for the chosen broad entity_type (empty for OnlineStore/Organization).
@@ -647,6 +658,32 @@ function onSocialUrlChange(row) {
     ? ""
     : `We can only list profiles on known networks. “${host}” is not one we recognise.`;
 }
+const anyCheckableSocial = computed(() =>
+  form.org.same_as.some((r) => r.url && hostIn(sameAsHost(r.url), SAME_AS_HOSTS)
+    && !hostIn(sameAsHost(r.url), UNVERIFIABLE_HOSTS) && !hostIn(sameAsHost(r.url), SELF_EDITABLE_HOSTS)));
+
+async function checkSocialLinks() {
+  // Save first: the check runs against what is STORED, so an unsaved row would be checked as it was
+  // before the edit -- and the tenant would read the badge as being about what is on screen.
+  socialBusy.value = true;
+  socialCheckNote.value = "";
+  try {
+    await saveEdit({ keepOpen: true });
+    const { site, checked, backlinkHost } = await store.checkSocialLinks(editing.value.site_id);
+    editing.value = site;
+    const entries = site.organization?.same_as || [];
+    form.org.same_as = entries.map((e) => ({ url: e.url || "", verification: e.verification || null }));
+    const confirmed = entries.filter((e) => e.verification?.state === "verified").length;
+    socialCheckNote.value = checked
+      ? `Checked ${checked} profile${checked === 1 ? "" : "s"} for a link back to ${backlinkHost}. ${confirmed} confirmed.`
+      : "None of these profiles can be checked automatically.";
+  } catch (error) {
+    socialCheckNote.value = error.message || "Could not check the links just now.";
+  } finally {
+    socialBusy.value = false;
+  }
+}
+
 function socialStatus(row) {
   const host = sameAsHost(row.url);
   if (!row.url) return { label: "", tone: "" };
@@ -967,7 +1004,7 @@ function openEdit(site) {
   editCheck.check(form.subdomain, site.site_id);
 }
 
-async function saveEdit() {
+async function saveEdit({ keepOpen = false } = {}) {
   formError.value = "";
   const organization = {
     ...editing.value.organization,
@@ -1004,10 +1041,14 @@ async function saveEdit() {
   };
   if (!doc.seo) delete doc.seo;
   try {
-    await store.save(doc);
-    editing.value = null;
+    const saved = await store.save(doc);
+    // keepOpen: the link check saves first so it runs against stored data, then keeps editing so the
+    // tenant sees the badges update in place rather than being thrown back to the list.
+    if (keepOpen) editing.value = saved || editing.value;
+    else editing.value = null;
   } catch (error) {
     formError.value = error.message || "Failed to save site.";
+    if (keepOpen) throw error;
   }
 }
 

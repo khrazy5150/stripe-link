@@ -29,7 +29,11 @@ from stripe_link.domain.custom_domains import (
     retrigger_ssl_validation,
 )
 from stripe_link.domain.documents import DocumentValidationError, validate_site
-from stripe_link.domain.social_links import preserve_verification
+from stripe_link.domain.social_links import (
+    preserve_verification,
+    site_backlink_host,
+    verify_entry,
+)
 from stripe_link.domain.funnels import is_reserved_slug
 from stripe_link.entitlement_gate import require_capability
 from stripe_link.repositories.documents import (
@@ -149,6 +153,8 @@ def handler(event, context, repository=None, registry=None, tenant_repo=None):
         return update_site_status(event, repository, site_id, mode=mode)
     if method == "POST" and site_id and resource.endswith("/homepage"):
         return set_homepage(event, repository, site_id)
+    if method == "POST" and site_id and resource.endswith("/social/check"):
+        return check_social_links(event, repository, site_id)
     if method == "POST" and site_id and resource.endswith("/pages"):
         return attach_page(event, repository, site_id, mode=mode)
     if method == "DELETE" and site_id and resource.endswith("/pages"):
@@ -686,6 +692,46 @@ def _recompute_eligibility(site, tenant_id, now):
     )
     site["indexing"] = {**(site.get("indexing") or {}), "eligibility": eligibility, "eligibility_updated_at": now}
     return eligibility
+
+
+def check_social_links(event, repository, site_id):
+    """Re-check every checkable social profile on this Site and record what we found.
+
+    Deliberately checks ALL of them in one request rather than one per row. Each fetch is a second or
+    two and the cap is 6, so the worst case sits well inside API Gateway's 29s -- and a per-row endpoint
+    would invite a tenant to sit and click, turning a slow social host into a queue of retries.
+
+    Verification is only ever written HERE. The write boundary in create_site discards whatever a client
+    sends, so this is the single producer of a `verified` state.
+    """
+    tenant_id = tenant_id_from_event(event)
+    if not tenant_id:
+        return error_response("tenant_id is required.", code="missing_tenant")
+    site = repository.get(tenant_id, site_id)
+    if not site:
+        return error_response("Site not found.", status_code=404, code="not_found")
+    organization = site.get("organization") or {}
+    entries = organization.get("same_as") or []
+    if not entries:
+        return json_response({"site": site, "checked": 0})
+    backlink_host = site_backlink_host(site)
+    if not backlink_host:
+        return error_response(
+            "This Site has no address yet, so there is nothing for a profile to link back to.",
+            code="no_backlink_host")
+    now = int(time.time())
+    checked = 0
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        entry["verification"] = verify_entry(entry, backlink_host, now)
+        if entry["verification"].get("method"):
+            checked += 1
+    organization["same_as"] = entries
+    site["organization"] = organization
+    site["updated_at"] = now
+    saved = repository.put(site)
+    return json_response({"site": saved, "checked": checked, "backlink_host": backlink_host})
 
 
 LIVE_ONLY_MESSAGE = "Custom domains are available on your live Site only. Switch to Live to connect a domain."
