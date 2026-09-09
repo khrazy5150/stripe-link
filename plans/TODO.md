@@ -409,6 +409,37 @@ usage, which moved a real page +18 PageSpeed points.
 
 The original entry follows.
 
+### LOW — adding a font is five manual steps across three repos (noted 2026-09-08)
+
+Registering a new family means: upload the WOFF2; add it to `fonts-api/src/font_definitions.py` and deploy
+that stack; add it to `SERVABLE_FAMILIES` in `src/stripe_link/domain/fonts.py`; add it to
+`builderFontFamilies` in `LandingPages.vue`; deploy stripe-link + dashboard. **The builder dropdown does not
+update on its own.**
+
+Two of the three seams are already guarded; one is not:
+
+| seam | guard |
+|---|---|
+| bucket ↔ fonts-api catalogue | `fonts-api/tools/sync_catalogue.py` — but only when someone remembers to run it |
+| catalogue ↔ `SERVABLE_FAMILIES` | **nothing** |
+| `SERVABLE_FAMILIES` ↔ dropdown | `tests/test_font_picker_options.py`, automatic |
+
+So steps 3 and 4 cannot drift apart, but **nothing reports a font that was registered and never reached the
+picker** — it is simply servable and invisible. Skipping step 3 is worse than invisible: the picker would
+offer a family `families_to_load` filters out, so the page names it in the CSS stack, never downloads it,
+and silently renders the fallback.
+
+Benign today — the only unoffered families are the three deliberate exclusions (Themify is an icon font,
+Futura is a licensing exposure, Ubuntu Titling is the Junior Bay wordmark) — but a font added tomorrow lands
+in the same silent gap.
+
+**Preferred fix: a test**, not automation. It reads the fonts-api catalogue and fails when a family is
+servable but neither offered nor on an explicit exclusion list, which also forces the exclusions to be
+*stated* rather than implied. Deriving `SERVABLE_FAMILIES` from the catalogue instead would remove steps 3
+and 4, but the dashboard cannot import Python and a runtime fetch adds a request to the builder — and the
+exclusions need a human anyway: no derivation would have caught that Themify maps 0 of 62 Latin letters.
+
+
 ### ⭐ HIGH — add the font service to published pages (found 2026-09-03, plan plans/FONT_SERVICE.md)
 
 **Scope extended 2026-09-07 (§9-§11 of the plan).** Presets will carry font PAIRINGS, not just colour —
