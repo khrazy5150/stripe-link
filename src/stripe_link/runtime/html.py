@@ -13,6 +13,7 @@ from stripe_link.domain.business_types import BUSINESS_TYPES, resolve_entity_typ
 from stripe_link.domain.composition import compose_page, element_channel
 from stripe_link.domain.connect_sync import site_seo_enabled
 from stripe_link.domain.documents import PRODUCT_CONDITIONS
+from stripe_link.domain.social_links import verified_urls as verified_same_as_urls
 from stripe_link.domain.opportunities import STAGE_LANDING, STAGE_POST_PURCHASE, derived_offer_type, stage_opportunities
 from stripe_link.domain.pricing import PricingError, expand_offer, find_price, resolve_offer, single_unit_price
 from stripe_link.domain.semantic import is_bundle, resolve_semantic_model, subject_from_model
@@ -3642,8 +3643,7 @@ def organization_node(organization: dict[str, Any], origin: str, *, with_context
     # Only OWNERSHIP-VERIFIED profiles emit into sameAs (TENANT_PROFILE_REQUIREMENTS §4.4). An unverified
     # sameAs is an impersonation vector — a tenant could assert any brand's real social profile on our domain.
     # Capped at 6.
-    same_as = [str(e.get("url")).strip() for e in (organization.get("same_as") or [])
-               if isinstance(e, dict) and e.get("verified") is True and str(e.get("url") or "").strip()][:6]
+    same_as = verified_same_as_urls(organization)
     if same_as:
         payload["sameAs"] = same_as
     return payload
@@ -5086,8 +5086,7 @@ def render_seller_profile(section: dict[str, Any]) -> str:
     gbp_url = str(org.get("gbp_url") or "").strip()
     if gbp_url:
         parts.append(f'      <p class="sl-seller-gbp"><a href="{escape(gbp_url)}" rel="nofollow noopener" target="_blank">View on Google</a></p>')
-    socials = [str(e.get("url")).strip() for e in (org.get("same_as") or [])
-               if isinstance(e, dict) and e.get("verified") is True and str(e.get("url") or "").strip()][:6]
+    socials = verified_same_as_urls(org)
     if socials:
         links = "".join(f'<li><a href="{escape(u)}" rel="nofollow ugc noopener" target="_blank">{escape(_social_label(u))}</a></li>' for u in socials)
         parts.append(f'      <ul class="sl-seller-social">{links}</ul>')

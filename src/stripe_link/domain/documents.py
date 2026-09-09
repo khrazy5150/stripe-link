@@ -1883,13 +1883,16 @@ SITE_ENTITY_TYPES = {
     "Organization", "OnlineStore", "LocalBusiness", "HomeAndConstructionBusiness",
     "HealthAndBeautyBusiness", "FoodEstablishment", "ProfessionalService", "Store",
 }
-# sameAs destinations are whitelisted to major social/authority hosts (TENANT_PROFILE_REQUIREMENTS §4.4):
-# an arbitrary URL asserted as the tenant's identity on our domain's markup is an impersonation/abuse vector.
-SAME_AS_HOSTS = frozenset({
-    "facebook.com", "instagram.com", "twitter.com", "x.com", "linkedin.com", "youtube.com",
-    "tiktok.com", "pinterest.com", "threads.net", "github.com", "crunchbase.com", "bbb.org",
-    "wikidata.org", "wikipedia.org", "yelp.com", "trustpilot.com",
-})
+# The allowlist and everything else about same_as verification lives in domain/social_links.py, so the
+# renderer, the validator and the verifier cannot drift. Re-exported here because callers import it from
+# documents.
+from stripe_link.domain.social_links import (  # noqa: E402
+    SAME_AS_HOSTS,
+    SAME_AS_MAX,
+    VERIFICATION_STATES,
+    is_allowed_host,
+    same_as_host,
+)
 # Local-business identity on Site.organization (Business Profile Phase 1): opening hours + geo let the
 # renderer emit full LocalBusiness JSON-LD. Days are schema.org DayOfWeek names; times are 24h HH:MM.
 _ORG_DAYS = {"Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"}
@@ -2039,17 +2042,27 @@ def validate_site_organization(organization: Any) -> None:
     if same_as is not None:
         if not isinstance(same_as, list):
             raise DocumentValidationError("organization.same_as must be an array.")
-        if len(same_as) > 6:
-            raise DocumentValidationError("organization.same_as allows at most 6 entries.")
+        if len(same_as) > SAME_AS_MAX:
+            raise DocumentValidationError(f"organization.same_as allows at most {SAME_AS_MAX} entries.")
         for entry in same_as:
             if not isinstance(entry, dict) or not isinstance(entry.get("url"), str):
                 raise DocumentValidationError("Each organization.same_as entry must be an object with a url.")
-            host = re.sub(r"^https?://", "", entry["url"].strip().lower()).split("/")[0].split(":")[0]
-            host = host[4:] if host.startswith("www.") else host
-            if not any(host == h or host.endswith("." + h) for h in SAME_AS_HOSTS):
+            host = same_as_host(entry["url"])
+            if not is_allowed_host(host):
                 raise DocumentValidationError(f"organization.same_as host '{host}' is not an allowed profile host.")
-            if entry.get("verified") is not None and not isinstance(entry.get("verified"), bool):
-                raise DocumentValidationError("organization.same_as verified must be a boolean.")
+            # The pre-2026-09-09 boolean. It gated sameAs while being client-settable, so it was an
+            # impersonation hole rather than a guarantee. Rejected rather than ignored: a payload still
+            # sending it is asserting something we must not silently drop on the floor.
+            if "verified" in entry:
+                raise DocumentValidationError(
+                    "organization.same_as no longer accepts 'verified'; verification state is server-owned.")
+            verification = entry.get("verification")
+            if verification is not None:
+                if not isinstance(verification, dict):
+                    raise DocumentValidationError("organization.same_as verification must be an object.")
+                if verification.get("state") not in VERIFICATION_STATES:
+                    raise DocumentValidationError(
+                        f"organization.same_as verification.state must be one of {sorted(VERIFICATION_STATES)}.")
 
     # Local-business fields (Business Profile Phase 1) — power full LocalBusiness JSON-LD. All optional.
     optional_string(organization, "place_id", "organization.place_id", max_length=200)

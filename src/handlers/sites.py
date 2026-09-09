@@ -29,6 +29,7 @@ from stripe_link.domain.custom_domains import (
     retrigger_ssl_validation,
 )
 from stripe_link.domain.documents import DocumentValidationError, validate_site
+from stripe_link.domain.social_links import preserve_verification
 from stripe_link.domain.funnels import is_reserved_slug
 from stripe_link.entitlement_gate import require_capability
 from stripe_link.repositories.documents import (
@@ -395,12 +396,19 @@ def create_site(event, repository, registry=None, mode="test"):
         document.setdefault("created_at", now)
         document["updated_at"] = now
         _ensure_platform_hostname(document)
+        # Read the stored Site BEFORE validating: same_as verification state is server-owned and has to be
+        # restored from what we stored, not taken from the payload. A client that could send
+        # verification.state="verified" could assert any brand's real profile as its own identity in our
+        # JSON-LD -- which is the whole reason sameAs is gated. See domain/social_links.py.
+        existing = repository.get(str(document.get("tenant_id") or ""), str(document.get("site_id") or ""))
+        organization = document.get("organization")
+        if isinstance(organization, dict) and organization.get("same_as") is not None:
+            organization["same_as"] = preserve_verification(organization, (existing or {}).get("organization"))
         validate_site(document)
         _assert_pages_unassigned(repository, document)
         _reserve_subdomain(registry, document)
         # An edit that flips the Site's search visibility (seo_enabled) must re-render the pages, since robots +
         # the storefront chrome are baked into each artifact at publish time (mirrors archive re-render).
-        existing = repository.get(str(document.get("tenant_id") or ""), str(document.get("site_id") or ""))
         saved = repository.put(document)
         if existing is not None and site_seo_enabled(existing) != site_seo_enabled(saved):
             _republish_site_pages(str(saved.get("tenant_id") or ""), saved, mode=mode)

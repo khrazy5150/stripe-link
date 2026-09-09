@@ -376,8 +376,9 @@ class SellerProfileTests(unittest.TestCase):
             "organization": {
                 "name": "Bean Co", "entity_type": "OnlineStore", "description": "Great coffee.",
                 "telephone": "+18015550100", "email": "hi@bean.co",
-                "same_as": [{"url": "https://instagram.com/beanco", "verified": verified_social},
-                            {"url": "https://facebook.com/impostor", "verified": False}],
+                "same_as": [{"url": "https://instagram.com/beanco",
+                             "verification": {"state": "verified" if verified_social else "unverified"}},
+                            {"url": "https://facebook.com/impostor", "verification": {"state": "unverified"}}],
             },
             "hosting": {"type": "custom", "custom_domain": "shop.example.com", "verification": {"verified": True}},
             "pages": {"/about": {"page_id": "page_prof", "page_type": "about"},
@@ -456,8 +457,8 @@ class SiteOrganizationIdentityTests(unittest.TestCase):
         "email": "hi@axelmart.example",
         "address": {"street": "1493 Osage St", "locality": "Denver", "region": "Colorado",
                     "postal_code": "80204", "country": "US"},
-        "same_as": [{"url": "https://instagram.com/axelmart", "verified": True},
-                    {"url": "https://facebook.com/impostor", "verified": False}],
+        "same_as": [{"url": "https://instagram.com/axelmart", "verification": {"state": "verified"}},
+                    {"url": "https://facebook.com/impostor", "verification": {"state": "unverified"}}],
     }
     ORIGIN = "https://axel-mart.jbay.uk"
 

@@ -268,7 +268,16 @@ class DocumentValidationTests(unittest.TestCase):
 
     def test_same_as_host_whitelist_and_cap(self):
         validate_site(self._site(organization={"name": "X", "entity_type": "OnlineStore",
-                                               "same_as": [{"url": "https://instagram.com/x", "verified": True}]}))
+                                               "same_as": [{"url": "https://instagram.com/x",
+                                                            "verification": {"state": "verified"}}]}))
+        # The pre-2026-09-09 client-settable boolean is refused outright, not ignored.
+        with self.assertRaisesRegex(DocumentValidationError, "verification state is server-owned"):
+            validate_site(self._site(organization={"name": "X", "entity_type": "OnlineStore",
+                                                   "same_as": [{"url": "https://instagram.com/x", "verified": True}]}))
+        with self.assertRaisesRegex(DocumentValidationError, "verification.state must be one of"):
+            validate_site(self._site(organization={"name": "X", "entity_type": "OnlineStore",
+                                                   "same_as": [{"url": "https://instagram.com/x",
+                                                                "verification": {"state": "totally-verified"}}]}))
         with self.assertRaisesRegex(DocumentValidationError, "not an allowed profile host"):
             validate_site(self._site(organization={"name": "X", "entity_type": "OnlineStore",
                                                    "same_as": [{"url": "https://evil.example.com/x"}]}))
