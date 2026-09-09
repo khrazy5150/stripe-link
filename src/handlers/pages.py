@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 from stripe_link.common import error_response, json_response, parse_json_body, path_params, query_params, resolve_stripe_mode, tenant_id_from_event
 from stripe_link.domain.documents import DocumentValidationError, validate_page_document
 from stripe_link.entitlement_gate import require_capability
@@ -80,7 +82,31 @@ def lifecycle_only_change(existing: dict, incoming: dict) -> bool:
     # short_code is a system-assigned sticky field (the shareable-link id), not user content, so a
     # publish->draft flip that only differs by it still counts as lifecycle-only.
     ignored = {"status", "published_at", "archived_at", "updated_at", "short_code", "PK", "SK", "GSI1PK", "GSI1SK"}
-    return strip_lifecycle_fields(existing, ignored) == strip_lifecycle_fields(incoming, ignored)
+    return comparable(strip_lifecycle_fields(existing, ignored)) == comparable(
+        strip_lifecycle_fields(incoming, ignored)
+    )
+
+
+def comparable(value):
+    """Normalise numbers so a document compares equal to itself across the storage round trip.
+
+    `existing` comes back from DynamoDB, where every number is a Decimal; `incoming` is JSON straight from
+    the browser, where every number is a float. Decimal('0.563') != 0.563 -- the float is really
+    0.5629999999999999449, so the two never match -- while Decimal('0.5') == 0.5 does, because 0.5 is exact
+    in binary. Compared raw, an UNCHANGED page therefore looks edited whenever it carries a fraction that
+    is not a negative power of two, and unpublishing it is refused as a modification.
+
+    Image crop rects are the first fractions to reach these documents (they only became storable once
+    dynamo_safe started converting floats to Decimal at the repository boundary), which is why a page with
+    a cropped image could not be unpublished while every other page could.
+    """
+    if isinstance(value, Decimal):
+        return float(value)
+    if isinstance(value, dict):
+        return {key: comparable(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [comparable(item) for item in value]
+    return value
 
 
 def strip_lifecycle_fields(document: dict, ignored: set[str]) -> dict:
