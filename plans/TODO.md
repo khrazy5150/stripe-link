@@ -619,6 +619,44 @@ become handle/name/summary/Edit/Remove; editing happens in a modal and ONLY ther
 inline-vs-modal split. Adding opens the same modal empty, so Cancel creates nothing and empty cards stop
 existing (superseding 6ce24e1).
 
+
+### MEDIUM — Reddit is its own study, NOT another entry in the social allowlist (raised 2026-09-09)
+
+**Deliberately excluded from `SAME_AS_HOSTS` on 2026-09-09.** Adding it would have been a one-line change
+and it would have been wrong. Recording why, so it is not "fixed" later by someone adding the line.
+
+**1. It does not fit `sameAs` semantically.** `sameAs` asserts *this entity IS that profile*. A subreddit is
+a COMMUNITY, ordinarily not owned by the business — asserting `sameAs` on `r/whatever` claims an identity
+relationship that does not exist, and on a general-topic or competitor subreddit it is a false claim we
+would be emitting in our own structured data. A `/user/` account is a person, not the business. So the one
+field we would slot it into is the one place it does not belong. Yelp, BBB and Crunchbase are all
+third-party pages ABOUT the business; a subreddit is not.
+
+**2. The value on offer is CITATION, not identity.** The reason to care about Reddit is that its threads
+rank well and are heavily cited in AI answers — a visibility and content play. That is the
+`ATTENTION_PRIMITIVE.md` family (offer → channel → attribution), not a Business Profile field. Slotting it
+into `same_as` would file a content strategy under an identity claim and guarantee it gets built wrong.
+
+**3. Getting it wrong is worse than not doing it.** Reddit removes self-promotion, subreddits enforce their
+own rules, and astroturfing is bannable and reputationally expensive — for the TENANT, whose account and
+brand carry the damage, and for us if we built a feature that encouraged it. A naive "post your link"
+integration is a liability, not a channel. This is the strongest reason to design before building.
+
+**What to study before designing anything:**
+- Which URL shape, if any, we would ever record: `/r/<sub>`, `/user/<name>`, or a specific thread. They have
+  different owners and different meanings; only one of them could plausibly be an identity claim, and it is
+  probably `/user/` for a solo creator whose Reddit account IS their public presence.
+- Whether verification is even possible: `old.reddit.com` serves more in raw HTML than `www`, so a sidebar
+  or profile backlink check may work where the modern UI does not. UNMEASURED — probe before promising it,
+  the way Instagram/TikTok were probed (§7a-i).
+- Reddit's API terms and rate limits post-2023, which are paid and restrictive, and its robots policy. What
+  is technically possible and what is permitted are different questions here.
+- Whether the right primitive is participation (a tenant genuinely answering in their niche) rather than
+  anything automated. If so the product is guidance and measurement, not posting.
+
+**Do not add `reddit.com` to `SAME_AS_HOSTS` as a step toward any of this.** The allowlist is for identity
+claims. If Reddit earns a place in the product it will be somewhere else.
+
 ### ⭐ HIGH — Social Media Pages (link-in-bio) — plan plans/SOCIAL_MEDIA_PAGES.md, 2026-08-30, not built
 
 The "Social page" lead-capture action was a placeholder for this and is currently WRONG:

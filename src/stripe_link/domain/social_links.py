@@ -24,6 +24,12 @@ SAME_AS_HOSTS = frozenset({
     "wikidata.org", "wikipedia.org", "yelp.com", "trustpilot.com",
 })
 
+# Reddit is deliberately ABSENT, and the omission is load-bearing rather than an oversight. sameAs asserts
+# "this entity IS that profile"; a subreddit is a community the business does not own, so the claim would be
+# false, and a /user/ account is a person. Its actual value is citation, not identity, which belongs with the
+# attention/campaign work. See plans/TODO.md, "Reddit is its own study". Do not add it here as a step
+# toward that.
+
 # Display names for every allowlisted host. Complete by construction -- a host without a label used to
 # fall back to its bare domain, so a Better Business Bureau link rendered as "bbb.org". The parity test
 # asserts every host has one, on both sides.
