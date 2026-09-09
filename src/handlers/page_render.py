@@ -10,7 +10,11 @@ from stripe_link.domain.documents import (
     validate_service,
 )
 from stripe_link.domain.pricing import PricingError
-from stripe_link.repositories.documents import reviews_repository, sites_repository
+from stripe_link.repositories.documents import (
+    reviews_repository,
+    sites_repository,
+    tenant_profiles_repository,
+)
 from stripe_link.runtime.html import (
     RenderError,
     accessibility_warnings,
@@ -19,7 +23,13 @@ from stripe_link.runtime.html import (
     render_page,
     structured_data_warnings,
 )
-from stripe_link.runtime.publishing import find_site_for_page, load_page_reviews, render_funnel_step_html, site_page_type
+from stripe_link.runtime.publishing import (
+    find_site_for_page,
+    load_page_reviews,
+    load_tenant_preferences,
+    render_funnel_step_html,
+    site_page_type,
+)
 
 
 def handler(event, context, *, sites_repo=None, reviews_repo=None):
@@ -121,11 +131,19 @@ def handler(event, context, *, sites_repo=None, reviews_repo=None):
                 checkout_url=checkout_url, api_base_url=api_base_url, site=site, reviews=reviews,
             )
             return json_response({"html": funnel_html, "warnings": {"structured_data": [], "page_health": []}})
+        # The preview IS the published renderer, so it needs the same inputs -- including the store's font
+        # preference and its imported faces. Without this the preview resolved three of the four levels and
+        # a tenant's own font silently fell back to the system stack, while every preset font previewed
+        # fine. Same failure shape as the favicon: correct-looking output from a read nobody made.
+        preferences = load_tenant_preferences(
+            tenant_profiles_repository() if os.environ.get("TENANT_PROFILES_TABLE") else None,
+            str(page.get("tenant_id") or ""),
+        )
         html = render_page(
             page, offer, products_by_id, selected_prices, checkout_url, api_base_url,
             services_by_id=services_by_id, offers_by_id=offers_by_id, canonical_url=canonical_url,
             site=site, page_type=site_page_type(site, str(page.get("page_id") or "")), reviews=reviews,
-            price_context=price_context,
+            price_context=price_context, preferences=preferences,
         )
         # Page health, alongside the render: what would keep this page's structured data from earning a rich
         # result. Advisory only — the builder surfaces it, nothing blocks on it.

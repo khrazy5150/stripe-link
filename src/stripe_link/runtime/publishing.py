@@ -1,5 +1,6 @@
 import copy
 import json
+import base64
 import logging
 import os
 import time
@@ -44,6 +45,7 @@ from stripe_link.runtime.html import (
     indexable_word_count,
     page_robots_directive,
     render_page,
+    FONT_EMBED,
 )
 
 
@@ -907,6 +909,80 @@ def _bnpl_messaging_config(stripe_keys_repository: Any, tenant_id: str, offer: d
         return None
 
 
+def load_tenant_preferences(repository: Any | None, tenant_id: str) -> dict[str, Any]:
+    """The tenant's store-level preferences, from its TENANT PROFILE, or {} when unreadable.
+
+    Deliberately NOT user_preferences, which plans/FONT_SERVICE.md §9 originally specified. That table is
+    keyed (tenant_id, user_id), pages carry no owner, and publish runs from a DynamoDB stream holding only
+    the page -- so there is no user to look up. It is also the wrong home on its own terms: type is a
+    property of the STORE customers see, not of a staff login, and two people editing one store should not
+    produce pages in different typefaces.
+
+    Failsafe, in the same spirit as platform_config: a page must publish whether or not this read succeeds.
+    Failing closed would mean a page silently refusing to publish over a preference nobody set.
+    """
+    if repository is None or not tenant_id:
+        return {}
+    try:
+        return repository.get(tenant_id, tenant_id) or {}
+    except Exception:  # never let a preference read block a publish
+        logger.warning("Could not read the tenant profile for %s; falling back to the preset", tenant_id)
+        return {}
+
+
+# A tenant font is the ONE font a page still fetches cross-origin: the catalogue's are embedded by the
+# service via fs=true. That fetch is exactly the request Chromium and Firefox refuse for a missing
+# Access-Control-Allow-Origin which curl -- same machine, same network, same origin header -- is served
+# correctly every time (plans/FONT_SERVICE.md 12b, still unexplained). Embedding it removes the request
+# rather than the symptom, and matches what the catalogue fonts already do.
+#
+# Beyond this, fall back to the URL: a font this large would bloat every page carrying it, and a URL that
+# MIGHT be blocked beats a page that is certainly heavy.
+MAX_EMBEDDED_FONT_BYTES = 400 * 1024
+
+
+def embed_imported_fonts(preferences: dict[str, Any], s3_client: Any, bucket: str) -> dict[str, Any]:
+    """Return preferences whose imported faces carry their bytes as a data: URI.
+
+    Done at PUBLISH, so it costs one S3 read per font when a page is saved and nothing at view time.
+    Failsafe throughout: a face that cannot be read keeps its URL, because a page that publishes with a
+    possibly-blocked font is better than a page that will not publish at all.
+    """
+    fonts = (preferences or {}).get("fonts") if isinstance(preferences, dict) else None
+    imported = (fonts or {}).get("imported") if isinstance(fonts, dict) else None
+    if not isinstance(imported, list) or not imported or not s3_client or not bucket:
+        return preferences or {}
+
+    embedded = []
+    for face in imported:
+        if not isinstance(face, dict):
+            continue
+        key = _tenant_font_key(str(face.get("url") or ""))
+        if not key:
+            embedded.append(face)
+            continue
+        try:
+            body = s3_client.get_object(Bucket=bucket, Key=key)["Body"].read()
+            if not body or body[:4] != b"wOF2" or len(body) > MAX_EMBEDDED_FONT_BYTES:
+                embedded.append(face)
+                continue
+            embedded.append({**face, "data_uri":
+                             "data:font/woff2;base64," + base64.b64encode(body).decode("ascii")})
+        except Exception:
+            logger.warning("Could not embed tenant font %s; falling back to its URL", key)
+            embedded.append(face)
+    return {**preferences, "fonts": {**fonts, "imported": embedded}}
+
+
+def _tenant_font_key(url: str) -> str:
+    """The bucket key for a tenant font URL, or "" for anything outside that prefix."""
+    marker = "/fonts/tenant/"
+    index = url.find(marker)
+    if index < 0:
+        return ""
+    return "fonts/tenant/" + url[index + len(marker):]
+
+
 def publish_page_document(
     page: dict[str, Any],
     *,
@@ -919,6 +995,7 @@ def publish_page_document(
     reviews_repository: Any | None = None,
     collections_repository: Any | None = None,
     stripe_keys_repository: Any | None = None,
+    tenant_profiles_repository: Any | None = None,
     s3_client: Any,
     pages_bucket: str,
     preview_bucket: str,
@@ -1045,12 +1122,25 @@ def publish_page_document(
 
     bnpl_messaging = _bnpl_messaging_config(stripe_keys_repository, tenant_id, offer)
 
+    # The tenant's own font preference (plans/FONT_SERVICE.md §9). Read HERE, at publish, not per request:
+    # a page is a static artifact, so this costs one read when the page is saved and nothing at view time.
+    # Optional and failsafe -- a preferences read must never stop a page publishing, and its absence simply
+    # leaves the preset in charge, which is what every page did before this was wired up.
+    # ONE switch governs both halves of embedding: the catalogue's fonts (fs=true, in the stylesheet the
+    # renderer links) and the tenant's own (a data: URI, here). They existed for the same reason -- the
+    # cross-origin font fetch that Chromium and Firefox blocked -- so they should not be able to disagree.
+    tenant_preferences = load_tenant_preferences(tenant_profiles_repository, tenant_id)
+    if FONT_EMBED:
+        tenant_preferences = embed_imported_fonts(
+            tenant_preferences, s3_client, os.environ.get("FONTS_BUCKET", ""),
+        )
+
     def _render(robots: str) -> str:
         return render_page(
             page, offer, products_by_id, checkout_url=checkout, api_base_url=api_base_url,
             services_by_id=services_by_id, offers_by_id=offers_by_id, canonical_url=page_canonical,
             robots=robots, site=site, page_type=page_type, reviews=page_reviews, home_url=page_home_url,
-            bnpl_messaging=bnpl_messaging,
+            bnpl_messaging=bnpl_messaging, preferences=tenant_preferences,
         )
 
     artifacts = []

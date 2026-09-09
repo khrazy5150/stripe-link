@@ -19,6 +19,7 @@ from stripe_link.domain.fonts import (
     pairing_for_preset,
     resolve_families,
 )
+from stripe_link.runtime import html
 from stripe_link.runtime.html import UNIVERSAL_BUNDLE_THEME_PRESETS, font_vars, render_head_seo_tags
 
 PRESET_PAGE = {"theme": {"preset": "midnight-luxe"}}
@@ -137,21 +138,29 @@ class RenderTests(unittest.TestCase):
     def _head(self, page, preferences=None):
         return "\n".join(render_head_seo_tags(page, {"name": "X"}, {}, {}, "T", "D", preferences))
 
-    def test_the_stylesheet_carries_the_font_bytes_rather_than_pointing_at_them(self):
-        # `fs=true` makes the service answer with the fonts embedded as data: URIs. The referencing
-        # form needed a second cross-origin request per face, to a different host than the CSS, and
-        # that request is what Chromium and Firefox refused for a missing
-        # Access-Control-Allow-Origin -- a header curl was served correctly from the same machine.
-        # One request to one host cannot develop that disagreement.
+    def test_the_stylesheet_matches_whichever_mode_is_configured(self):
+        """FONT_EMBED decides, and each setting has its own contract.
+
+        Embedded (`fs=true`) puts the bytes in the stylesheet: one request, one host, no cross-origin font
+        fetch for anything to block. Referencing is smaller and lets one download be shared across pages,
+        but needs the cross-origin fetch to work -- which is what broke on 2026-09-08 and what the CORS fix
+        on 2026-09-09 addresses. Pinning only one of them made the flag untestable in its other position.
+        """
         head = self._head(PRESET_PAGE)
         self.assertIn("fonts.juniorbay.com/?family=", head)
-        self.assertIn("fs=true", head)
+        if html.FONT_EMBED:
+            self.assertIn("fs=true", head)
+        else:
+            self.assertNotIn("fs=true", head)
 
-    def test_no_preconnect_when_there_is_no_second_request_to_warm(self):
-        # A handshake is only worth pre-paying for when a font file follows on that origin. Embedded,
-        # nothing follows, and the hint would cost a connection nobody uses.
+    def test_a_preconnect_is_emitted_only_when_a_second_request_follows(self):
+        # Warming a handshake is worth it only when a font file is fetched on that origin. Embedded,
+        # nothing follows and the hint would cost a connection nobody uses.
         head = self._head(PRESET_PAGE)
-        self.assertNotIn("preconnect", head)
+        if html.FONT_EMBED:
+            self.assertNotIn("preconnect", head)
+        else:
+            self.assertIn('rel="preconnect" href="https://fonts.juniorbay.com"', head)
 
     def test_only_the_families_the_page_needs(self):
         head = self._head(PRESET_PAGE)

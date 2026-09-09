@@ -287,7 +287,12 @@
                       <select :value="fontFamilyFor(role.key)" @change="setFontFamily(role.key, $event.target.value)">
                         <option value="">Use preset</option>
                         <option value="system">System fonts (no download)</option>
-                        <option v-for="family in builderFontFamilies" :key="family" :value="family">{{ family }}</option>
+                        <optgroup v-if="tenantFontFamilies.length" label="Your fonts">
+                <option v-for="family in tenantFontFamilies" :key="family" :value="family">{{ family }}</option>
+              </optgroup>
+              <optgroup label="Junior Bay fonts">
+                <option v-for="family in builderFontFamilies" :key="family" :value="family">{{ family }}</option>
+              </optgroup>
                       </select>
                     </label>
                   </div>
@@ -2208,6 +2213,21 @@ const builderFontFamilies = [
 // Heading and body only. `accent` is permitted by the resolver but no preset proposes one, it follows the
 // heading when unset, and a third family is a third download on a page tuned for LCP — so it stays a
 // deliberate omission from the picker rather than a third dropdown nobody needs.
+// The store's imported faces. Kept out of builderFontFamilies on purpose: that list mirrors the fonts-api
+// catalogue and is pinned against it by tests/test_font_picker_options.py. These are the tenant's own, the
+// service has never heard of them, and the renderer emits their @font-face itself.
+const tenantFontFamilies = ref([]);
+
+async function loadTenantFonts() {
+  try {
+    const body = await apiRequest("/fonts/import");
+    // One entry per weight, so a family with Regular and Bold must appear once, not twice.
+    tenantFontFamilies.value = [...new Set((body.fonts || []).map((f) => f.family).filter(Boolean))].sort();
+  } catch {
+    tenantFontFamilies.value = [];   // never let this break the builder
+  }
+}
+
 const builderFontRoles = [
   { key: "heading", label: "Headings" },
   { key: "body", label: "Body text" },
@@ -3001,7 +3021,7 @@ async function loadTenantPageDefaults() {
     tenantPageDefaults.value = {};
   }
 }
-onMounted(() => { ensurePagesLoaded(); loadTenantPageDefaults(); });
+onMounted(() => { ensurePagesLoaded(); loadTenantPageDefaults(); loadTenantFonts(); });
 
 async function loadPages() {
   loading.value = true;

@@ -18,7 +18,9 @@ from stripe_link.domain.pricing import PricingError, expand_offer, find_price, r
 from stripe_link.domain.semantic import is_bundle, resolve_semantic_model, subject_from_model
 from stripe_link.domain.reviews import aggregate_reviews, markup_eligible
 from stripe_link.domain.image_crop import crop_style_vars
-from stripe_link.domain.fonts import REQUEST_WEIGHTS, families_to_load, is_system, resolve_families
+from stripe_link.domain.fonts import (
+    REQUEST_WEIGHTS, families_to_load, imported_faces_for, is_system, resolve_families,
+)
 from stripe_link.domain.video_embeds import parse_video_embed
 from stripe_link.domain.section_theme import section_theme_vars
 from stripe_link.domain.service_pricing import resolve_service_price
@@ -993,7 +995,12 @@ FONT_SERVICE_ORIGIN = "https://fonts.juniorbay.com"
 # Ask the font service to embed the font bytes in the stylesheet instead of pointing at them on a
 # second host. Kept as a flag so the referencing form can be restored in one edit once the fonts are
 # subset and the cross-origin fetch is understood.
-FONT_EMBED = True
+# TESTING 2026-09-09: flipped OFF to find out whether the CORS fix (preflight-capable response-headers
+# policy + bucket CORS + Origin forwarded to S3) actually resolved the cross-origin font block. Referencing
+# is the pattern that used to fail. If it now works, embedding stops being necessary -- and referenced fonts
+# are strictly better now that every family is subset: smaller HTML, and one download shared across pages
+# instead of the same bytes inlined into each.
+FONT_EMBED = False
 
 
 def font_stack(page: dict[str, Any], role: str) -> str:
@@ -1020,7 +1027,7 @@ def font_vars(page: dict[str, Any], preferences: dict[str, Any] | None = None) -
     `accent` follows the heading unless set, and `mono` is always the system stack -- neither justifies a
     third download on a page tuned for LCP.
     """
-    resolved = resolve_families(page, preferences)
+    resolved = resolve_families(page, render_preferences(preferences))
     heading = _family_with_fallback(page, "heading", resolved["heading"])
     # accent follows the heading unless the tenant named one -- no preset proposes a third family, but
     # taking the choice away is not the same as declining to make it for them.
@@ -1362,7 +1369,26 @@ def render_head_seo_tags(
     # their customers -- every page fell back to whatever the visitor's device happened to have
     # (plans/FONT_SERVICE.md). preconnect first: the stylesheet and the font file are two round trips to
     # a third origin, and the handshake is most of the first one.
-    families = families_to_load(page, preferences)
+    # The tenant's OWN faces first: the service has never heard of them, so the page carries their
+    # @font-face itself. Only the faces this page resolves to -- a tenant may have imported a dozen fonts,
+    # and putting all of them on every page is the opposite of what the subsetting work was for.
+    own = imported_faces_for(page, render_preferences(preferences))
+    if own:
+        lines.append("  <style>")
+        for face in own:
+            family = escape(str(face["family"]).strip())
+            # The embedded bytes when publishing could read them, else the URL. See embed_imported_fonts:
+            # a URL is the fallback, not the intent -- it is the one cross-origin font fetch left on a page.
+            url = escape(str(face.get("data_uri") or face["url"]).strip())
+            weight = escape(str(face.get("weight") or "400").strip())
+            style = "italic" if str(face.get("style") or "").strip().lower() == "italic" else "normal"
+            lines.append(
+                f"    @font-face{{font-family:'{family}';font-style:{style};font-weight:{weight};"
+                f"src:url('{url}') format('woff2');font-display:swap}}"
+            )
+        lines.append("  </style>")
+
+    families = families_to_load(page, render_preferences(preferences))
     if families:
         # `Name:400,700` -- the service's own syntax, not Google's `:wght@`. Without it a static family
         # serves weight 400 alone and every bold heading falls back.
@@ -1543,6 +1569,7 @@ def render_page(
     price_context: str = "standard",
     home_url: str | None = None,
     bnpl_messaging: dict[str, Any] | None = None,
+    preferences: dict[str, Any] | None = None,
 ) -> str:
     services_by_id = services_by_id or {}
     offers_by_id = offers_by_id or {str(offer.get("offer_id") or ""): offer}
@@ -1557,6 +1584,10 @@ def render_page(
     ))
     # Same lifecycle as the dims index: render-scoped, and cleared in the finally so one page's
     # descriptions can never leak into an unrelated render on a warm container.
+    # The tenant's font preference reaches the resolver from here. Cleared in the finally with the rest, so
+    # one tenant's preferences can never leak into another's page on a warm container.
+    _RENDER_PREFERENCES.clear()
+    _RENDER_PREFERENCES.update(preferences or {})
     _RENDER_ALTS_INDEX.clear()
     _RENDER_ALTS_INDEX.update(collect_image_alts(
         page, offer, *products_by_id.values(), *services_by_id.values(), *offers_by_id.values(),
@@ -1631,6 +1662,7 @@ def render_page(
     finally:
         _RENDER_DIMS_INDEX.clear()
         _RENDER_ALTS_INDEX.clear()
+        _RENDER_PREFERENCES.clear()
         _RENDER_STATE["canonical"] = ""
         _RENDER_STATE["robots"] = NOINDEX_ROBOTS
         _RENDER_STATE["home_url"] = ""
@@ -3805,6 +3837,17 @@ def collect_image_dims(*documents: dict[str, Any] | None) -> dict[str, tuple[int
 
 
 _RENDER_ALTS_INDEX: dict[str, str] = {}
+
+# The tenant's own preferences for this render. Render-scoped like the two indexes above, so the font
+# resolution can reach them without threading `preferences` through _render_page_body, render_template_styles
+# and every head-channel helper in between. A PAGE override still beats whatever is in here -- resolve_families
+# applies the tenant default first and lets the page win, which is the whole point of the four levels.
+_RENDER_PREFERENCES: dict[str, Any] = {}
+
+
+def render_preferences(explicit: dict[str, Any] | None = None) -> dict[str, Any]:
+    """The preferences to resolve fonts against: an explicit argument, else this render's."""
+    return explicit if explicit is not None else _RENDER_PREFERENCES
 
 
 def collect_image_alts(*documents: dict[str, Any] | None) -> dict[str, str]:

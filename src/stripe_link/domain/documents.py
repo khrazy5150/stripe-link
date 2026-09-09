@@ -1336,6 +1336,12 @@ def validate_tenant_profile(document: dict[str, Any]) -> None:
     owner = document.get("owner")
     if not isinstance(owner, dict):
         raise DocumentValidationError("Tenant profile owner must be an object.")
+    # The store's font preference (plans/FONT_SERVICE.md §9). Same shape the page carries, so one validator
+    # covers both and resolve_families reads them identically -- the only difference is which wins.
+    fonts = document.get("fonts")
+    if fonts is not None:
+        validate_font_settings(fonts, "Tenant profile fonts")
+        optional_bool(fonts, "override_presets", "Tenant profile fonts.override_presets")
     require_fields(owner, ["first_name", "last_name", "email"])
     # Platform->tenant SaaS billing fields (plans/SAAS_BILLING_PAYWALL.md). All optional.
     status = document.get("billing_status")

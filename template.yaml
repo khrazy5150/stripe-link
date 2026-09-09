@@ -1124,6 +1124,62 @@ Resources:
             Path: /refunds/{refund_request_id}/{action}
             Method: OPTIONS
 
+  FontImportFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${ProjectPrefix}-font-import-${Environment}"
+      CodeUri: src/
+      Handler: handlers.font_import.handler
+      Description: Converts a tenant's uploaded font and records it on their store profile.
+      Timeout: 60
+      Environment:
+        Variables:
+          # Conversion lives in ../sam/font-converter, which already does it and reports the font's real
+          # variation axes. Not done here: fontTools would go in src/requirements.txt, which is deliberately
+          # empty because every function shares CodeUri: src/ and one dependency bundles into all of them.
+          FONT_CONVERTER_URL: https://0lorga0syl.execute-api.us-west-2.amazonaws.com/prod/convert
+          # Same bucket and /fonts/ prefix the catalogue uses, so tenant faces inherit the CORS
+          # response-headers policy already attached to that path.
+          FONTS_BUCKET: jb-homepage-prod-150544707159
+          FONTS_PUBLIC_BASE: https://juniorbay.com/fonts
+      Policies:
+        # CRUD, not Read: importing appends the face to the store profile.
+        - DynamoDBCrudPolicy:
+            TableName: !Ref TenantProfilesTable
+        - Statement:
+            Effect: Allow
+            Action:
+              - s3:PutObject
+              - s3:DeleteObject
+            # Scoped to the tenant font prefix. The catalogue's own files live under /fonts/<Family>/ and
+            # must not be writable OR deletable from here.
+            Resource: "arn:aws:s3:::jb-homepage-prod-150544707159/fonts/tenant/*"
+      Events:
+        FontImport:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /fonts/import
+            Method: POST
+        FontList:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /fonts/import
+            Method: GET
+        FontDelete:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /fonts/import
+            Method: DELETE
+        FontImportOptions:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /fonts/import
+            Method: OPTIONS
+
   UploadFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -1439,6 +1495,10 @@ Resources:
             TableName: !Ref SitesTable
         - DynamoDBReadPolicy:
             TableName: !Ref ReviewsTable
+        # The live preview is the published renderer, so it needs the store's font preference too --
+        # otherwise an imported font previews as the system stack while presets preview correctly.
+        - DynamoDBReadPolicy:
+            TableName: !Ref TenantProfilesTable
       Events:
         PageRender:
           Type: Api
@@ -1717,6 +1777,9 @@ Resources:
       Handler: handlers.page_publish.handler
       Description: Renders page documents from the PagesTable stream into preview, test, and published page artifacts.
       Timeout: 60
+      Environment:
+        Variables:
+          FONTS_BUCKET: jb-homepage-prod-150544707159
       Policies:
         # app_config read: APP_CONFIG_TABLE is set in Globals for every function, so a missing grant
         # fails SILENTLY -- platform_config swallows the AccessDenied and returns empties, which shows up
@@ -1749,11 +1812,23 @@ Resources:
         # installment methods from the stripe_keys doc at publish — read-only.
         - DynamoDBReadPolicy:
             TableName: !Ref StripeKeysTable
+        # The store's font preference lives on its tenant profile (plans/FONT_SERVICE.md §9). Read once at
+        # publish, so it costs nothing at view time. Read-only: publishing never writes a profile.
+        - DynamoDBReadPolicy:
+            TableName: !Ref TenantProfilesTable
         # Publishing a page that embeds a manual collection auto-publishes its selected draft members
         # (plans/SITE_COLLECTIONS.md) — needs to READ the members and WRITE their published status back. The
         # handler otherwise gets pages only from the stream, so this is the only direct PagesTable access.
         - DynamoDBCrudPolicy:
             TableName: !Ref PagesTable
+        # Read the tenant's own font bytes so they can be embedded in the page rather than fetched
+        # cross-origin at view time (plans/FONT_SERVICE.md 12b). Read-only, and scoped to the tenant
+        # prefix: the catalogue's own files under /fonts/<Family>/ are not this function's business.
+        - Statement:
+            Effect: Allow
+            Action:
+              - s3:GetObject
+            Resource: "arn:aws:s3:::jb-homepage-prod-150544707159/fonts/tenant/*"
         - S3CrudPolicy:
             BucketName: !Ref PagesBucket
         - S3CrudPolicy:

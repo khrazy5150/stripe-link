@@ -57,6 +57,94 @@
         </label>
       </div>
     </section>
+
+    <section class="dashboard-card">
+      <header class="dashboard-card-header">
+        <h2>Store Fonts</h2>
+        <!-- Said plainly, because this card sits on a screen headed "personal dashboard settings": these
+             apply to the STORE, so a second login sees the same type. Deliberate — a font is what customers
+             see, not a per-user choice (plans/FONT_SERVICE.md §9). -->
+        <p>Used by every page on this store, for everyone who signs in. A page can still override them.</p>
+      </header>
+      <div class="dashboard-card-body">
+        <ul v-if="fonts.length" class="font-list">
+          <li v-for="font in fonts" :key="font.url">
+            <span :style="{ fontFamily: `'${font.family}', sans-serif` }">{{ font.family }}</span>
+            <small>
+              {{ font.variable ? "variable" : "static" }} · weight {{ font.weight }}
+              · {{ Math.round((font.bytes || 0) / 1024) }} KB
+            </small>
+            <button class="danger-action compact" type="button" :disabled="importing"
+                    @click="fontToRemove = font">Remove</button>
+          </li>
+        </ul>
+        <p v-else><small>No fonts imported. Your pages use the fonts built into each preset.</small></p>
+
+        <div>
+          <label class="offer-field">
+            <span>Font family name</span>
+            <input v-model.trim="fontForm.family" type="text" placeholder="e.g. Acme Display" />
+            <small>Leave blank to use the name inside the font. Use one name for every weight of a family.</small>
+          </label>
+        </div>
+
+        <!-- The honest constraint, BEFORE they upload. A static TTF cannot become a variable WOFF2: WOFF2
+             compresses, it does not add axes. Saying nothing is the cruelty — they upload Regular, see it
+             work, and cannot understand why bold comes out synthetically smeared. -->
+        <p><small>
+          A <strong>variable</strong> font covers every weight in one file. A <strong>static</strong> font is
+          one weight per file — upload each weight you want, using the same family name.
+        </small></p>
+
+        <label class="checkbox-row">
+          <input v-model="fontForm.licence" type="checkbox" />
+          <span>
+            I hold a licence permitting <strong>web embedding</strong> of this font. A desktop licence is
+            usually not enough — this font will be served publicly from our CDN.
+          </span>
+        </label>
+
+        <input ref="fontFile" type="file" accept=".ttf,.otf" hidden @change="importFont" />
+        <div class="button-row">
+          <button class="secondary-action" type="button"
+                  :disabled="importing || !fontForm.licence"
+                  @click="fontFile?.click()">
+            {{ importing ? "Converting..." : "Upload font file" }}
+          </button>
+        </div>
+        <small v-if="!fontForm.licence">Confirm the licence to enable upload.</small>
+        <p v-if="fontError" class="field-error">{{ fontError }}</p>
+        <p v-else-if="fontMessage"><small>{{ fontMessage }}</small></p>
+      </div>
+    </section>
+
+    <div v-if="fontToRemove" class="modal-backdrop" @click.self="fontToRemove = null">
+      <section class="modal-card" role="dialog" aria-modal="true" aria-labelledby="removeFontTitle">
+        <header class="modal-card-header">
+          <h2 id="removeFontTitle" class="danger-title">Remove font</h2>
+          <button type="button" class="modal-close" aria-label="Close" @click="fontToRemove = null">×</button>
+        </header>
+        <div class="dashboard-card-body">
+          <p>
+            Remove <strong>{{ fontToRemove.family }}</strong>
+            (weight {{ fontToRemove.weight }}{{ fontToRemove.style === "italic" ? ", italic" : "" }})?
+          </p>
+          <!-- Said rather than left to be discovered: removal is safe, and knowing that is what makes the
+               decision easy. Nothing emits the @font-face any more, so a page naming it falls through to
+               its preset font — the same result as a font that fails to load. -->
+          <p class="field-note">
+            Pages using it fall back to their preset font. Nothing else changes, and you can upload it again.
+          </p>
+          <p v-if="fontError" class="field-error">{{ fontError }}</p>
+        </div>
+        <footer class="config-save-bar">
+          <button class="secondary-action" type="button" :disabled="importing" @click="fontToRemove = null">Cancel</button>
+          <button class="danger-action" type="button" :disabled="importing" @click="confirmRemoveFont">
+            {{ importing ? "Removing…" : "Remove font" }}
+          </button>
+        </footer>
+      </section>
+    </div>
   </section>
 </template>
 
@@ -71,6 +159,93 @@ const saving = ref(false);
 const error = ref("");
 const message = ref("");
 const rawDoc = ref({});
+
+// Store fonts live on the TENANT PROFILE, not in this screen's user-scoped document, so they have their own
+// endpoint rather than riding the Save Preferences button (plans/FONT_SERVICE.md §9).
+const fonts = ref([]);
+const fontFile = ref(null);
+const importing = ref(false);
+const fontError = ref("");
+const fontMessage = ref("");
+const fontForm = reactive({ family: "", weight: "400", licence: false });
+const fontToRemove = ref(null);
+
+async function loadFonts() {
+  // Store fonts live on the tenant profile, not in this screen's user-scoped document, so they load
+  // separately. Failing here must not break the rest of the screen — the fonts list is not the reason the
+  // tenant opened Preferences.
+  try {
+    const body = await apiRequest("/fonts/import");
+    fonts.value = body.fonts || [];
+  } catch {
+    fonts.value = [];
+  }
+}
+
+async function confirmRemoveFont() {
+  const font = fontToRemove.value;
+  if (!font) return;
+  fontError.value = "";
+  fontMessage.value = "";
+  importing.value = true;
+  try {
+    const body = await apiRequest("/fonts/import", {
+      method: "DELETE",
+      body: { family: font.family, weight: font.weight, style: font.style || "normal" },
+    });
+    fonts.value = body.fonts || [];
+    fontMessage.value = `${font.family} removed.`;
+    fontToRemove.value = null;
+  } catch (err) {
+    fontError.value = err?.message || "That font could not be removed.";
+  } finally {
+    importing.value = false;
+  }
+}
+
+async function importFont(event) {
+  const file = event.target.files?.[0];
+  event.target.value = "";
+  if (!file) return;
+  fontError.value = "";
+  fontMessage.value = "";
+  importing.value = true;
+  try {
+    // Base64 because the API speaks JSON; the endpoint decodes and streams the bytes to the converter.
+    const data = await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result).split(",", 2)[1] || "");
+      reader.onerror = () => reject(new Error("That file could not be read."));
+      reader.readAsDataURL(file);
+    });
+    const body = await apiRequest("/fonts/import", {
+      method: "POST",
+      body: {
+        family: fontForm.family,
+        weight: fontForm.weight,
+        filename: file.name,
+        licence_affirmed: fontForm.licence,
+        data,
+      },
+    });
+    fonts.value = body.fonts || [];
+    const font = body.font || {};
+    // Tell them WHICH they got, because it decides whether they still need to upload more files.
+    // Report what was READ from the file, not what was submitted — the whole point is that the tenant
+    // does not have to know this.
+    const called = font.detected_family
+      ? ` The file calls itself “${font.detected_family}${font.detected_style ? " " + font.detected_style : ""}”.`
+      : "";
+    fontMessage.value = font.variable
+      ? `${font.family} imported — variable, covering weights ${font.weight}. One file covers them all.${called}`
+      : `${font.family} imported at weight ${font.weight}, read from the font.${called}`
+        + " Upload each other weight you want, using the same family name.";
+  } catch (err) {
+    fontError.value = err?.message || "That font could not be imported.";
+  } finally {
+    importing.value = false;
+  }
+}
 const form = reactive(defaultForm());
 
 function defaultForm() {
@@ -93,6 +268,10 @@ async function load() {
   loading.value = true;
   error.value = "";
   message.value = "";
+  // Store fonts are a DIFFERENT document on a different table, so they load independently. Chaining them
+  // after the preferences call meant a tenant who had never saved preferences got a 404, the catch handled
+  // it, and the font list silently stayed empty — reading "No fonts imported" for fonts that existed.
+  loadFonts();
   try {
     const body = await apiRequest("/preferences", { params: { user_id: userId } });
     applyPreferences(body.preferences || {});
@@ -140,3 +319,25 @@ async function save() {
 
 load();
 </script>
+
+<style scoped>
+/* Matches Configuration.vue's Danger Zone. Those styles are scoped to that component, so a destructive
+   control here has to restate them rather than inherit. */
+.danger-action {
+  border: 0;
+  border-radius: 8px;
+  background: #dc2626;
+  color: #fff;
+  font-weight: 700;
+  padding: 0.9rem 1.6rem;
+  cursor: pointer;
+}
+.danger-action:hover { background: #b91c1c; }
+.danger-action:disabled { opacity: 0.6; cursor: default; }
+.danger-action.compact { padding: 0.35rem 0.8rem; font-size: 0.8rem; font-weight: 600; }
+.danger-title { color: #dc2626; }
+.font-list { list-style: none; margin: 0 0 1rem; padding: 0; display: flex; flex-direction: column; gap: 0.5rem; }
+.font-list li { display: flex; align-items: center; gap: 0.75rem; }
+.font-list li span:first-child { font-size: 1.1rem; }
+.font-list li small { color: #64748b; flex: 1; }
+</style>

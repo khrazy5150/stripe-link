@@ -160,7 +160,45 @@ def families_to_load(page: Any, preferences: Any = None) -> list[str]:
     """
     # Filtered HERE: a family the service cannot serve would produce a stylesheet request that 404s, which
     # is worse than no webfont. It still appears in the CSS stack -- see _named_family.
+    # An imported family is excluded too, but for the opposite reason: the SERVICE cannot serve it, so
+    # asking would 404. The renderer emits its @font-face itself -- see imported_faces_for.
+    tenant_own = imported_families(preferences)
     return sorted({
         family for family in resolve_families(page, preferences).values()
-        if family in SERVABLE_FAMILIES
+        if family in SERVABLE_FAMILIES and family not in tenant_own
     })
+
+def imported_fonts(preferences: Any) -> list[dict[str, Any]]:
+    """The tenant's own uploaded faces, from their profile's `fonts.imported`.
+
+    These are NOT in SERVABLE_FAMILIES and never will be: that list is the fonts-api catalogue, which is a
+    hardcoded dict shared by every tenant. A tenant's own font is theirs alone, so the RENDERER emits its
+    @font-face directly rather than asking the service for a family it has never heard of.
+    """
+    preferences = preferences if isinstance(preferences, dict) else {}
+    fonts = preferences.get("fonts") if isinstance(preferences.get("fonts"), dict) else {}
+    entries = fonts.get("imported")
+    if not isinstance(entries, list):
+        return []
+    return [
+        entry for entry in entries
+        if isinstance(entry, dict)
+        and str(entry.get("family") or "").strip()
+        and str(entry.get("url") or "").strip()
+    ]
+
+
+def imported_families(preferences: Any) -> set[str]:
+    """Family names the tenant has uploaded, so the renderer can tell them from catalogue families."""
+    return {str(entry["family"]).strip() for entry in imported_fonts(preferences)}
+
+
+def imported_faces_for(page: Any, preferences: Any) -> list[dict[str, Any]]:
+    """The uploaded faces THIS page actually uses, so a page never carries a font it does not render.
+
+    A tenant may import a dozen fonts; a page resolves at most three roles. Emitting all of them would put
+    every upload on every page, which is the opposite of what the subsetting work was for.
+    """
+    used = set(resolve_families(page, preferences).values())
+    return [entry for entry in imported_fonts(preferences) if str(entry["family"]).strip() in used]
+
