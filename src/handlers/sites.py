@@ -157,10 +157,7 @@ def handler(event, context, repository=None, registry=None, tenant_repo=None):
         # Custom-domain serving is handled by the single production edge Worker, so the flow is live-only.
         # A test/dev Site can't serve a real domain — refuse rather than let a tenant reach a dead end.
         if os.environ.get("ENVIRONMENT") != "prod":
-            return error_response(
-                "Custom domains are available on your live Site only. Switch to Live to connect a domain.",
-                status_code=403, code="custom_domains_live_only",
-            )
+            return error_response(LIVE_ONLY_MESSAGE, status_code=403, code="custom_domains_live_only")
         if method == "POST" and resource.endswith("/domain/check"):
             return check_domain(event, repository, site_id, mode=mode)
         if method == "POST" and resource.endswith("/domain"):
@@ -691,6 +688,26 @@ def _recompute_eligibility(site, tenant_id, now):
     return eligibility
 
 
+LIVE_ONLY_MESSAGE = "Custom domains are available on your live Site only. Switch to Live to connect a domain."
+
+
+def _reject_non_live_site(site):
+    """Custom domains are a LIVE-only feature, and the axis that matters is the SITE's environment.
+
+    The reason is reputational, not technical: a test Site serving a real domain would present sandbox
+    pages as a real business, and search engines have no way to tell the difference. That is a
+    reputation the tenant cannot get back.
+
+    The router already refuses this on non-prod DEPLOYMENTS, but that is a different axis. On the prod
+    deployment a Site with environment="test" passed that check, and neither connect nor check looked
+    again -- so the only thing standing between a test Site and a real domain was the dashboard choosing
+    not to render the form. Client-side gates are not access control.
+    """
+    if str(site.get("environment") or "").lower() != "live":
+        return error_response(LIVE_ONLY_MESSAGE, status_code=403, code="custom_domains_live_only")
+    return None
+
+
 def connect_domain(event, repository, site_id):
     try:
         body = parse_json_body(event)
@@ -702,6 +719,9 @@ def connect_domain(event, repository, site_id):
     site = repository.get(tenant_id, site_id)
     if not site:
         return error_response("Site not found.", status_code=404, code="not_found")
+    gate = _reject_non_live_site(site)
+    if gate is not None:
+        return gate
     zone_id, api_token, target_host = _cloudflare_config()
     if not zone_id or not api_token:
         return error_response("Custom domains are not configured.", status_code=500, code="cloudflare_not_configured")
@@ -797,6 +817,9 @@ def check_domain(event, repository, site_id, pages_repo=None, mode="test"):
     site = repository.get(tenant_id, site_id)
     if not site:
         return error_response("Site not found.", status_code=404, code="not_found")
+    gate = _reject_non_live_site(site)
+    if gate is not None:
+        return gate
     was_verified = bool(((site.get("hosting") or {}).get("verification") or {}).get("verified"))
     provisioning = site.get("domain_provisioning") or {}
     hostname_id = str(provisioning.get("custom_hostname_id") or "")

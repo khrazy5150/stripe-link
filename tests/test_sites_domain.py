@@ -12,7 +12,9 @@ from tests.fakes import FakeDocumentRepository
 def base_site(pages=None, **overrides):
     site = {
         "schema_version": "2026-07-20", "document_type": "site", "site_id": "site_D1",
-        "tenant_id": "t1", "environment": "test", "name": "Axel Mart", "status": "active",
+        # live, because that is the only environment where a custom domain is legal at all -- a test Site
+        # serving a real domain would present sandbox pages as a real business. See _reject_non_live_site.
+        "tenant_id": "t1", "environment": "live", "name": "Axel Mart", "status": "active",
         "hosting": {"type": "platform", "platform_hostname": "axel-mart.jbay.uk", "custom_domain": None},
         "organization": {"name": "Axel Mart", "entity_type": "OnlineStore"},
         "indexing": {"eligibility": "blocked"},
@@ -439,3 +441,49 @@ class SitesDomainTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CustomDomainsAreLiveOnlyTests(unittest.TestCase):
+    """A test Site must not be able to serve a real domain.
+
+    The reason is reputational: sandbox pages presenting as a real business is a search reputation the
+    tenant cannot get back. Until 2026-09-09 the only guard was on the DEPLOYMENT (ENVIRONMENT != prod),
+    which is a different axis -- on the prod deployment a Site with environment="test" sailed past it, and
+    the sole remaining obstacle was the dashboard choosing not to render the form.
+    """
+
+    def setUp(self):
+        self.repo = FakeDocumentRepository("site_id")
+
+    def _test_site(self):
+        site = base_site(environment="test")
+        site["hosting"] = {"type": "platform", "platform_hostname": "axel-mart.jbay.uk",
+                           "custom_domain": None}
+        self.repo.put(site)
+        return site
+
+    def test_connect_is_refused_for_a_test_site(self):
+        self._test_site()
+        resp = sites_handler.connect_domain(
+            {"body": json.dumps({"tenant_id": "t1", "domain": "shop.example.com"})},
+            self.repo, "site_D1")
+        self.assertEqual(resp["statusCode"], 403)
+        self.assertEqual(json.loads(resp["body"])["error"], "custom_domains_live_only")
+
+    def test_check_is_refused_for_a_test_site(self):
+        # Refused BEFORE the "no domain connected" branch: a test Site that somehow acquired a domain
+        # (data predating this guard) must not be able to drive it to verified either.
+        site = self._test_site()
+        site["hosting"]["custom_domain"] = "shop.example.com"
+        site["domain_provisioning"] = {"custom_hostname_id": "ch_1"}
+        self.repo.put(site)
+        resp = sites_handler.check_domain({"queryStringParameters": {"tenant_id": "t1"}}, self.repo, "site_D1")
+        self.assertEqual(resp["statusCode"], 403)
+        self.assertEqual(json.loads(resp["body"])["error"], "custom_domains_live_only")
+
+    def test_a_live_site_is_not_affected(self):
+        self.repo.put(base_site())
+        resp = sites_handler.connect_domain(
+            {"body": json.dumps({"tenant_id": "t1", "domain": "shop.example.com"})},
+            self.repo, "site_D1")
+        self.assertNotEqual(resp["statusCode"], 403)

@@ -80,7 +80,7 @@
         <dl class="product-details-grid">
           <div><dt>Canonical hostname</dt><dd class="font-mono"><a v-if="siteStoreUrl(site)" :href="siteStoreUrl(site)" target="_blank" rel="noopener noreferrer">{{ canonicalHost(site) }}</a><template v-else>{{ canonicalHost(site) }}</template></dd></div>
           <div><dt>Platform host</dt><dd class="font-mono">{{ site.hosting?.platform_hostname }}</dd></div>
-          <div><dt>Custom domain</dt><dd>{{ site.hosting?.custom_domain || "Not connected" }}</dd></div>
+          <div><dt>Custom domain</dt><dd>{{ customDomainLabel(site) }}</dd></div>
           <div><dt>Organization</dt><dd>{{ site.organization?.name || "—" }}</dd></div>
           <div><dt>Pages</dt><dd>{{ Object.keys(site.pages || {}).length }}</dd></div>
           <div><dt>Status</dt><dd>{{ site.status }}</dd></div>
@@ -252,8 +252,14 @@
             <label class="offer-field"><span>Bing verification token</span><input v-model.trim="form.seo.bing_site_verification" type="text" placeholder="msvalidate.01 content…" /></label>
           </fieldset>
 
-          <fieldset v-if="customDomainsEnabled" class="product-identifiers">
+          <fieldset class="product-identifiers">
             <legend>Custom domain</legend>
+            <p v-if="!customDomainsEnabled" class="field-note">
+              Custom domains connect on your <strong>Live</strong> Site only. A sandbox Site is for testing, and
+              pointing a real domain at it would show test pages as your real business — something search engines
+              cannot tell apart, and a reputation that is hard to win back. Switch to Live to connect your domain.
+            </p>
+            <template v-else>
             <p class="field-note">Connect your own domain to serve this Site's homepage and become eligible for search indexing. On the free {{ hostingDomainHint }} address a Site is never indexed.</p>
             <div v-if="domainError" class="keys-status-banner error">{{ domainError }}</div>
 
@@ -323,6 +329,7 @@
                 </button>
                 <button type="button" class="secondary-action" :disabled="domainBusy" @click="disconnectDomain">Disconnect</button>
               </div>
+            </template>
             </template>
           </fieldset>
 
@@ -746,6 +753,12 @@ const dnsProviders = [
 ];
 // Custom-domain serving is production/Live-only (single prod edge Worker) — hide it in Test to avoid a dead end.
 const customDomainsEnabled = computed(() => getStripeMode() === "live");
+function customDomainLabel(site) {
+  // "Not connected" is only true-and-useful on a Live Site. On a sandbox Site it reads as an invitation to
+  // connect something the server refuses (custom_domains_live_only), so say why instead.
+  if (site.hosting?.custom_domain) return site.hosting.custom_domain;
+  return customDomainsEnabled.value ? "Not connected" : "Live environment only";
+}
 const dnsProvider = ref("route53");
 const openStep = ref(0);
 const copied = ref("");
