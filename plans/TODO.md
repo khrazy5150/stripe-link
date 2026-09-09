@@ -440,6 +440,45 @@ and 4, but the dashboard cannot import Python and a runtime fetch adds a request
 exclusions need a human anyway: no derivation would have caught that Themify maps 0 of 62 Latin letters.
 
 
+### LOW — the font pipeline is Latin-only, deliberately (decided 2026-09-09)
+
+Every font we accept is subset to Latin (ASCII + Latin-1 + Latin Extended-A) and, when it is variable,
+instanced down to the `wght` axis alone. That is what makes tenant font import work at all: before
+subsetting, Noto Sans, Noto Serif and Merriweather all returned 504 at API Gateway's 29-second ceiling;
+after subsetting and axis pinning, Merriweather is 273K and everything else is under 60K.
+
+**The cost is that a non-Latin script is not merely unsupported — it is silently stripped.** A tenant who
+uploads a Cyrillic, Greek, Arabic or CJK font gets a working file back with their glyphs removed.
+
+**Why we are not fixing it now.** The obvious-looking fix — a presigned S3 upload, so a font larger than
+Lambda's 6MB request ceiling can be ingested — does not work. Measured 2026-09-09 against Noto Sans SC:
+
+| | |
+|---|---|
+| source file | 14 MB (over the 6MB ceiling, hence the presigned idea) |
+| what Google emits for ONE weight | **101** `@font-face` blocks, ~23 KB each, 2,353 KB total |
+| what our pipeline would emit | ONE file per weight, ~2.3 MB, downloaded whole by every visitor |
+
+Google splits CJK across 101 `unicode-range` slices so a visitor fetches only the ranges their text
+touches. We would hand the tenant a single file more than twice the size of the unpinned Merriweather we
+rejected as too heavy. **The uploader unlocks a worse outcome than the one it was meant to fix.**
+
+**So the real work is a data-model change, not an uploader.** There is no `unicode-range` anywhere in either
+codebase, and `fonts-api/src/app.py` `generate_single_font_css` emits exactly one `src: url(...)` per face.
+Supporting non-Latin means a face becomes a *set* of files, which touches the CSS generator, the font
+definitions, and the tenant `@font-face` emission in `runtime/html.py`.
+
+**Revisit when a tenant asks for a script we cannot slice** — not when a font is merely heavy, which axis
+pinning already solved. For that first tenant the cheapest correct answer is probably a Google Fonts
+*reference* (`fonts.googleapis.com` has already done the slicing), accepted only as a validated family name
+we build the tag from — never as pasted markup. That path was declined for heavy Latin fonts on 2026-09-09
+because it sends every visitor's IP to Google for no benefit; for a script we genuinely cannot serve, the
+trade is different, and a CJK store is less likely to be an EU establishment.
+
+Related: the Latin subset itself is defined in `font-converter/src/handler.mjs` (`LATIN_SUBSET`), which
+deliberately includes Latin Extended-A so Polish, Czech, Turkish, Hungarian, Romanian, Croatian and the
+Baltic languages keep their characters.
+
 ### ⭐ HIGH — add the font service to published pages (found 2026-09-03, plan plans/FONT_SERVICE.md)
 
 **Scope extended 2026-09-07 (§9-§11 of the plan).** Presets will carry font PAIRINGS, not just colour —
