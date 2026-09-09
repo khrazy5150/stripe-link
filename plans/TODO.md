@@ -690,7 +690,7 @@ discloses it. These changes are about polish and accidental exposure, not secrec
 
 ## Platform architecture
 
-### MEDIUM — migrate `fonts-api` off python3.9 (raised 2026-09-08)
+### ✅ MEDIUM — migrate `fonts-api` off python3.9 — SHIPPED 2026-09-09 (fonts-api 2898a7a)
 
 - **What:** `fonts-api/template.yaml` declares `Runtime: python3.9`, which AWS has deprecated. It is the only
   stack still on it that we actively develop; `stripe-link` is on `python3.12` (141 deployed functions) and
@@ -698,8 +698,17 @@ discloses it. These changes are about polish and accidental exposure, not secrec
 - **Target `python3.12`, not the newest.** `python3.13` is the latest Lambda offers (confirmed against the
   runtime enum 2026-09-08), but matching `stripe-link` is worth more than being newest: one Python version
   across the platform removes "which version does this service use" as a question anyone has to ask.
-- **Low risk.** `fonts-api` is pure Python — no requirements.txt, boto3 comes from the runtime — so there is
-  no native wheel to rebuild. It is a one-line template change plus a redeploy.
+- **Low risk — confirmed.** `fonts-api` is pure Python — no requirements.txt, boto3 comes from the runtime — so
+  there was no native wheel to rebuild. It was a one-line template change plus a redeploy, exactly as predicted.
+- **DONE 2026-09-09.** `Runtime: python3.12`, deployed and confirmed on the live function. Verified by
+  equivalence, not inspection: the live endpoint WAS the 3.9 build, so its output was captured first and
+  re-diffed after the deploy. All eight queries byte-identical, including `family=*` (the whole catalogue) and
+  three `fs=true` embeds up to 317KB / 10 faces.
+- **The one real risk was `fs=true`**, which reads font files from S3 via boto3 — and 3.12 bundles a newer
+  boto3 than 3.9 did. It also fails SOFT: `font_bytes()` swallows the exception and falls back to a plain
+  `url()`, so a broken S3 read still returns 200 with a plausible stylesheet and merely stops embedding.
+  Counting `data:` URIs rather than status codes is what makes that visible. Worth remembering as the same
+  shape as every other silent-degradation bug on this list.
 - **Raised while asking whether the Node image processor was at risk.** It is not: AWS deprecates runtime
   VERSIONS, not languages, and Python gets the same treatment. Worth recording so the question is not
   re-litigated — and `sharp` is Node-only anyway (libvips binding; Python's equivalent is `pyvips`), so a
