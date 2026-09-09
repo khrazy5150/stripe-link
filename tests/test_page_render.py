@@ -105,7 +105,9 @@ class PageRenderTests(unittest.TestCase):
         # never reached their customers (plans/FONT_SERVICE.md).
         # No preset on this page, so it falls back to the default one (techno-green) and gets ITS fonts --
         # the same fallback colours already use. See DEFAULT_PRESET in domain/fonts.py.
-        self.assertIn("--sl-font-body:'Source Sans Pro',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Oxygen,Ubuntu,sans-serif", html)
+        # Source Sans 3, not Source Sans Pro: techno-green's pairing moved to the variable successor so a
+        # heading at any weight gets a real face. Source Sans Pro is still SERVABLE for pages naming it.
+        self.assertIn("--sl-font-body:'Source Sans 3',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Oxygen,Ubuntu,sans-serif", html)
         self.assertIn("font-family:var(--sl-font-body)", html)
         self.assertIn("data-section-type=\"offer_price_selector\"", html)
         self.assertIn("data-price-id=\"price_1bottle\"", html)
@@ -663,7 +665,7 @@ class ResponsiveImageTests(unittest.TestCase):
         # A processor rendition advertises every rendition (widths mirror the processor's SIZES
         # table) so a small slot can pick thumb/small instead of downloading the 1080px file.
         base = "https://images.juniorbay.com/products/ABC123"
-        for size, width in (("thumb", 200), ("small", 640), ("medium", 1080), ("large", 1920), ("full", 2560)):
+        for size, width in (("thumb", 200), ("small", 800), ("medium", 1080), ("large", 1920), ("full", 2560)):
             self.assertIn(f"{base}/{size}.webp {width}w", markup)
         self.assertIn('sizes="9rem"', markup)
         self.assertIn('loading="lazy"', markup)

@@ -10,7 +10,7 @@
  * Uploading is DELEGATED to the caller. The parent records image dimensions and refreshes the preview as
  * side effects of a successful upload, and those belong with the document, not in a presentation component.
  */
-import { computed, ref } from "vue";
+import { computed, inject, ref } from "vue";
 import ImageCropper from "./ImageCropper.vue";
 import { cropImage } from "../../api/uploads";
 
@@ -47,6 +47,20 @@ const previewRatio = computed(() => {
   if (props.crop?.ar > 0) return props.crop.ar;
   const first = Array.isArray(props.ratios) ? props.ratios[0] : props.ratios;
   return typeof first === "number" && first > 0 ? first : 1;
+});
+
+/**
+ * Alt text is stored per ASSET on the document's `image_alts` sidecar, not per placement, so the parent
+ * owns the keying and this field only renders the input. Injected rather than passed as a prop: there are
+ * seven call sites today and every future element that uploads an image would otherwise have to remember
+ * to wire one more binding -- which is exactly how images end up shipping without a description.
+ *
+ * A parent that provides nothing (Services) simply gets no input, rather than an error.
+ */
+const altStore = inject("imageAltStore", null);
+const altText = computed({
+  get: () => (altStore && props.modelValue ? altStore.get(props.modelValue) : ""),
+  set: (value) => altStore && props.modelValue && altStore.set(props.modelValue, value),
 });
 
 const input = ref(null);
@@ -169,6 +183,17 @@ function previewStyle() {
       @input="onUrlTyped"
     />
 
+    <label v-if="altStore && modelValue" class="image-alt-field">
+      <span>Describe this image</span>
+      <input
+        v-model="altText"
+        type="text"
+        maxlength="250"
+        placeholder="e.g. Bottle of NAD+ capsules on a mossy rock"
+      />
+      <small>Read aloud by screen readers and used by search engines. Leave blank to use the name nearby.</small>
+    </label>
+
     <p v-if="error" class="field-error">{{ error }}</p>
 
     <ImageCropper
@@ -190,4 +215,7 @@ function previewStyle() {
 }
 .image-upload-preview img { display: block; }
 .image-upload-actions { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+.image-alt-field { display: flex; flex-direction: column; gap: 0.25rem; }
+.image-alt-field input { width: 100%; }
+.image-alt-field small { color: #64748b; font-size: 0.75rem; }
 </style>

@@ -18,15 +18,26 @@ destroy a deliberate choice — and the tenant would not find out until a custom
 
 from typing import Any
 
-# Verified serving on fonts.juniorbay.com 2026-09-07. A family named here that the service cannot serve
-# emits CSS pointing at a 404, which is worse than no webfont at all -- so this list is an ALLOW-LIST, not
-# a wish list, and nothing joins it without being checked.
+# Every family the fonts-api catalogue can actually serve, audited 2026-09-08 against the files in the
+# bucket: all 34 catalogued families resolve to a file that exists, so this list is the catalogue minus
+# three deliberate exclusions.
+#
+# A family named here that the service cannot serve emits CSS pointing at a 404, which is worse than no
+# webfont at all -- so this stays an ALLOW-LIST, not a wish list, and nothing joins it unchecked.
+#
+# NOT offered, and why -- each would be a mistake to "restore":
+#   Themify        an ICON font. 0 of 62 Latin letters and digits are mapped (verified via its cmap), so
+#                  setting body text in it renders glyph soup, not words. Fontawesome is the same and is
+#                  not in the catalogue at all.
+#   Futura         a commercial typeface. Serving it to every tenant from a public font service is a
+#                  licensing exposure, not a technical one, and it carries neither a 400 nor a 700 face.
+#   Ubuntu Titling the Junior Bay wordmark face (self-hosted for the dashboard). Handing the platform's own
+#                  brand type to tenants is a branding decision, and it has no 400 for body text.
 SERVABLE_FAMILIES = {
-    "Inter", "Montserrat", "Poppins", "Lato", "Merriweather", "Oswald", "Roboto", "Raleway", "Nunito",
-    # Added 2026-09-07: converted from the TTFs already in the bucket and registered in fonts-api. Both
-    # are STATIC -- one file per weight -- because the source TTFs are, which is the constraint recorded
-    # in FONT_SERVICE.md section 10.
-    "Source Code Pro", "Source Sans Pro",
+    "Aileron", "Arapey", "Bebas Neue", "Comic Relief", "DM Serif Display", "Heebo", "Inter", "Karla",
+    "Konya", "Lato", "Lora", "Merriweather", "Merriweather Sans", "Montserrat", "Nunito", "Open Sans",
+    "Oswald", "Overpass", "Overpass Mono", "PT Sans Caption", "PT Serif", "Playfair", "Poppins",
+    "Quantico", "Quicksand", "Raleway", "Roboto", "Rubik", "Slabo", "Source Code Pro", "Source Sans 3", "Source Sans Pro",
 }
 
 # Six pairings across sixteen colour presets. Not one each: several presets are colour mimicry of a
@@ -42,7 +53,10 @@ PAIRINGS: dict[str, dict[str, str]] = {
     "impact": {"heading": "Poppins", "body": "Lato"},
     # techno-green gets its own: a monospace headline reads as technical in a way no sans does, which is
     # the whole point of that preset.
-    "terminal": {"heading": "Source Code Pro", "body": "Source Sans Pro"},
+    # Source Sans 3, not Source Sans Pro: the successor is variable (wght 200-900) in one file, so a
+    # heading at 600 or 800 gets a real face rather than a faked bold. Source Sans Pro stays SERVABLE for
+    # pages that already name it -- retiring a family out from under a published page is not an upgrade.
+    "terminal": {"heading": "Source Code Pro", "body": "Source Sans 3"},
     "elegant": {"heading": "Raleway", "body": "Lato"},
 }
 

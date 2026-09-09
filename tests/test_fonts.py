@@ -137,12 +137,21 @@ class RenderTests(unittest.TestCase):
     def _head(self, page, preferences=None):
         return "\n".join(render_head_seo_tags(page, {"name": "X"}, {}, {}, "T", "D", preferences))
 
-    def test_the_stylesheet_is_linked_with_a_preconnect(self):
-        # Stylesheet then font file is two round trips to a third origin; the handshake is most of the
-        # first one.
+    def test_the_stylesheet_carries_the_font_bytes_rather_than_pointing_at_them(self):
+        # `fs=true` makes the service answer with the fonts embedded as data: URIs. The referencing
+        # form needed a second cross-origin request per face, to a different host than the CSS, and
+        # that request is what Chromium and Firefox refused for a missing
+        # Access-Control-Allow-Origin -- a header curl was served correctly from the same machine.
+        # One request to one host cannot develop that disagreement.
         head = self._head(PRESET_PAGE)
-        self.assertIn('rel="preconnect" href="https://fonts.juniorbay.com"', head)
         self.assertIn("fonts.juniorbay.com/?family=", head)
+        self.assertIn("fs=true", head)
+
+    def test_no_preconnect_when_there_is_no_second_request_to_warm(self):
+        # A handshake is only worth pre-paying for when a font file follows on that origin. Embedded,
+        # nothing follows, and the hint would cost a connection nobody uses.
+        head = self._head(PRESET_PAGE)
+        self.assertNotIn("preconnect", head)
 
     def test_only_the_families_the_page_needs(self):
         head = self._head(PRESET_PAGE)

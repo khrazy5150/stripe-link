@@ -990,6 +990,10 @@ def css_var_name(token_name: str) -> str:
 
 
 FONT_SERVICE_ORIGIN = "https://fonts.juniorbay.com"
+# Ask the font service to embed the font bytes in the stylesheet instead of pointing at them on a
+# second host. Kept as a flag so the referencing form can be restored in one edit once the fonts are
+# subset and the cross-origin fetch is understood.
+FONT_EMBED = True
 
 
 def font_stack(page: dict[str, Any], role: str) -> str:
@@ -1360,11 +1364,22 @@ def render_head_seo_tags(
     # a third origin, and the handshake is most of the first one.
     families = families_to_load(page, preferences)
     if families:
-        lines.append(f'  <link rel="preconnect" href="{FONT_SERVICE_ORIGIN}" crossorigin>')
         # `Name:400,700` -- the service's own syntax, not Google's `:wght@`. Without it a static family
         # serves weight 400 alone and every bold heading falls back.
         weights = ",".join(REQUEST_WEIGHTS)
         query = "&".join(f"family={quote(family)}:{weights}" for family in families)
+        if FONT_EMBED:
+            # `fs=true` returns the font bytes INSIDE the stylesheet as data: URIs. The referencing
+            # form needs a second, cross-origin request per face to a DIFFERENT host than the CSS, and
+            # that request is what fails: Chromium and Firefox drop the fonts for a missing
+            # Access-Control-Allow-Origin that curl, from the same machine and network, is served
+            # correctly every time -- over IPv4 and IPv6, coalesced or not, cached or fresh. Embedding
+            # deletes the request rather than the symptom, so there is nothing left to block.
+            # Costs page weight until the faces are subset to Latin; see plans/FONT_SERVICE.md.
+            query += "&fs=true"
+        else:
+            # Only worth a handshake when the files are fetched separately.
+            lines.append(f'  <link rel="preconnect" href="{FONT_SERVICE_ORIGIN}" crossorigin>')
         lines.append(f'  <link rel="stylesheet" href="{escape(f"{FONT_SERVICE_ORIGIN}/?{query}")}">')
     return lines
 
@@ -1540,6 +1555,12 @@ def render_page(
     _RENDER_DIMS_INDEX.update(collect_image_dims(
         page, offer, *products_by_id.values(), *services_by_id.values(), *offers_by_id.values(),
     ))
+    # Same lifecycle as the dims index: render-scoped, and cleared in the finally so one page's
+    # descriptions can never leak into an unrelated render on a warm container.
+    _RENDER_ALTS_INDEX.clear()
+    _RENDER_ALTS_INDEX.update(collect_image_alts(
+        page, offer, *products_by_id.values(), *services_by_id.values(), *offers_by_id.values(),
+    ))
     _RENDER_STATE["canonical"] = canonical_page_url(canonical_url)
     # The caller computes the full robots directive (it has the Site + environment); `indexable` remains a
     # back-compat shorthand for the unit tests that exercise the head in isolation.
@@ -1609,6 +1630,7 @@ def render_page(
         )
     finally:
         _RENDER_DIMS_INDEX.clear()
+        _RENDER_ALTS_INDEX.clear()
         _RENDER_STATE["canonical"] = ""
         _RENDER_STATE["robots"] = NOINDEX_ROBOTS
         _RENDER_STATE["home_url"] = ""
@@ -1739,7 +1761,6 @@ def _render_page_body(
         "  </style>",
         analytics_tags,
         analytics_adapters,
-        render_page_interactions_script(page),
         "</head>",
         ("<body>" if _RENDER_STATE.get("seo_enabled", True) else "<body data-seo=\"off\">"),
         render_price_context_banner(page),
@@ -1753,6 +1774,12 @@ def _render_page_body(
         legal_footer,
         "  </main>",
         minicart,
+        # END OF BODY, not <head>. It is ~50KB of inline script, and an inline script cannot be deferred --
+        # `defer` is specified to have no effect without a `src` -- so in the head it stopped the parser
+        # before any content painted, costing LCP and Total Blocking Time on every page. Everything it does
+        # is already wrapped in DOMContentLoaded, so running it here changes no behaviour, and it now sits
+        # with the other page scripts instead of being the one exception.
+        render_page_interactions_script(page),
         render_price_context_script(),
         conversion_data,
         *render_bnpl_messaging_scripts(),
@@ -2145,7 +2172,11 @@ def render_video_embed(embed: dict[str, str], alt: str) -> str:
     label = escape(alt or "Play video")
     poster = embed.get("thumbnail_url") or ""
     art = (
-        f'<img class="sl-embed-poster" src="{escape(poster)}" alt="" loading="lazy" decoding="async">'
+        # DECORATIVE, and marked so. The play button beside it already carries aria-label="Play {label}",
+        # so describing the poster too would announce the same video twice. An empty alt alone is not enough:
+        # accessibility_warnings counts that as missing, which is exactly the warning tenants could not act
+        # on. aria-hidden is the accessible way to opt out -- the is-blank fallback below already did it.
+        f'<img class="sl-embed-poster" src="{escape(poster)}" alt="" aria-hidden="true" loading="lazy" decoding="async">'
         if poster else '<span class="sl-embed-poster is-blank" aria-hidden="true"></span>'
     )
     return (
@@ -3715,8 +3746,22 @@ def landing_page_price_sort_key(price: dict[str, Any], option: dict[str, Any], i
 # Intrinsic pixel widths of the renditions the image processor writes for every uploaded asset
 # (keyed by the URL size token). These mirror the processor's SIZES table (image-processing
 # stack); keep them in sync if that table changes.
-IMAGE_RENDITION_WIDTHS = {"thumb": 200, "small": 640, "medium": 1080, "large": 1920, "full": 2560}
-_RENDITION_URL_RE = re.compile(r"^(?P<base>.+)/(?:thumb|small|medium|large|full)\.(?:webp|jpe?g|png)$", re.IGNORECASE)
+# `small` is 800, not 640, and MUST match the ladder in image-processing/src/imageProcessorApp.js -- these
+# numbers are the `w` descriptors in the srcset, so a mismatch tells the browser a file is a size it is not
+# and it picks the wrong one. 800 exists so a phone (412 CSS px at DPR 1.75 ~ 721px) stops being served the
+# 1080 file; 1080 stays so a DPR-1 desktop does not jump to 1920.
+IMAGE_RENDITION_WIDTHS = {"thumb": 200, "small": 800, "medium": 1080, "large": 1920, "full": 2560}
+# `original` is listed alongside the sized renditions on purpose. When an upload stores the ORIGINAL url
+# rather than a rendition, this regex used to miss, responsive_img fell through to its plain-tag branch, and
+# the page shipped the full-size source with no srcset -- a 2000px 250KB PNG where a 12KB small.webp existed
+# for the same asset. It is NOT in IMAGE_RENDITION_WIDTHS, so it never appears in the srcset itself; it only
+# lets the base be recovered so the real renditions can be offered.
+#
+# The extension list keeps this to images: `original.mp4` deliberately does not match, because a video has no
+# webp renditions to point at.
+_RENDITION_URL_RE = re.compile(
+    r"^(?P<base>.+)/(?:thumb|small|medium|large|full|original)\.(?:webp|jpe?g|png)$", re.IGNORECASE
+)
 
 
 def rendition_base(url: str) -> str | None:
@@ -3759,6 +3804,41 @@ def collect_image_dims(*documents: dict[str, Any] | None) -> dict[str, tuple[int
     return merged
 
 
+_RENDER_ALTS_INDEX: dict[str, str] = {}
+
+
+def collect_image_alts(*documents: dict[str, Any] | None) -> dict[str, str]:
+    """Merge the image_alts sidecars of every supplied document into one base -> alt map.
+
+    Same keying as collect_image_dims: rendition bases are globally unique, so merging across
+    page/offer/products/services is conflict-free. Blank entries are dropped rather than stored, so an
+    empty description behaves as "no override" instead of blanking an alt the renderer would otherwise
+    derive -- an empty alt on a content image is exactly what accessibility_warnings flags.
+    """
+    merged: dict[str, str] = {}
+    for document in documents:
+        alts = (document or {}).get("image_alts")
+        if not isinstance(alts, dict):
+            continue
+        for key, text in alts.items():
+            if not isinstance(text, str) or not text.strip():
+                continue
+            base = rendition_base(str(key)) or str(key)
+            merged[base] = text.strip()
+    return merged
+
+
+def described_alt(url: str, fallback: str) -> str:
+    """The tenant's own description of this asset, else whatever the call site derived.
+
+    The sidecar WINS: a description typed against the image is more specific than a name borrowed from
+    the surrounding product or block, which is how alt text was produced before this existed. Absent or
+    blank, nothing changes -- every call site keeps the fallback it always passed.
+    """
+    base = rendition_base(url) or url
+    return _RENDER_ALTS_INDEX.get(base) or fallback
+
+
 def _dims_attrs(url: str, dims: tuple[int, int] | None) -> str:
     """width/height attributes for an <img>, from an explicit override or the render-scoped index.
 
@@ -3789,7 +3869,9 @@ def responsive_img(url: str, alt: str, *, sizes: str, eager: bool = False, dims:
     reserves layout space and crawlers learn the dimensions.
     """
     url = str(url or "")
-    alt_attr = escape(str(alt or ""))
+    # One lookup HERE covers every surface -- present and future -- instead of fourteen call sites each
+    # having to remember a sidecar they do not know about.
+    alt_attr = escape(str(described_alt(url, str(alt or ""))))
     loading = "eager" if eager else "lazy"
     priority = ' fetchpriority="high"' if eager else ""
     dims_attrs = _dims_attrs(url, dims)

@@ -213,11 +213,11 @@
     <!-- Page Settings. Page-wide options with no position on the page — which is why this is NOT a row in
          Page Content (plans/BUILDER_SECTION_ORDER.md §2: settings are a separate group). Accordions in
          order of how often a tenant touches them, matching the Post-Checkout Flow pattern. -->
-    <div v-if="pageSettingsOpen" class="modal-backdrop" @click.self="pageSettingsOpen = false">
+    <div v-if="pageSettingsOpen" class="modal-backdrop" @click.self="closePageSettings()">
       <section class="modal-card section-editor-modal" role="dialog" aria-modal="true" aria-labelledby="pageSettingsTitle">
         <header class="modal-card-header">
           <h2 id="pageSettingsTitle">Page Settings</h2>
-          <button type="button" class="modal-close" aria-label="Close" @click="pageSettingsOpen = false">✕</button>
+          <button type="button" class="modal-close" aria-label="Close" @click="closePageSettings()">✕</button>
         </header>
         <div class="section-editor-body">
             <SettingsAccordion label="Page Basics" hint="What this page is" :icon="SETTINGS_ICONS['Page Basics']" :open="openSetting === 'Page Basics'" @toggle="toggleSetting('Page Basics')">
@@ -270,15 +270,26 @@
 
                 <label class="builder-switch-row">
                   <span class="builder-switch" @click.stop>
-                    <input v-model="builder.advanced_colors" type="checkbox" aria-label="Advanced color settings" />
+                    <input v-model="builder.advanced_appearance" type="checkbox" aria-label="Advanced appearance settings" />
                     <span aria-hidden="true"></span>
                   </span>
-                  <span>Customize individual colors</span>
+                  <span>Customize fonts and colors</span>
                 </label>
-                <div v-if="builder.advanced_colors" class="advanced-colors">
+                <div v-if="builder.advanced_appearance" class="advanced-colors">
                   <div class="advanced-colors-head">
                     <small>The preset already looks good — only tweak here if you need to. Empty = use the preset.</small>
-                    <button class="secondary-action compact" type="button" @click="resetThemeTokens">Reset to preset</button>
+                    <button class="secondary-action compact" type="button" @click="resetAppearanceOverrides">Reset to preset</button>
+                  </div>
+                  <div class="color-group">
+                    <div class="color-group-title">Fonts</div>
+                    <label v-for="role in builderFontRoles" :key="role.key" class="font-row">
+                      <span class="color-label">{{ role.label }}</span>
+                      <select :value="fontFamilyFor(role.key)" @change="setFontFamily(role.key, $event.target.value)">
+                        <option value="">Use preset</option>
+                        <option value="system">System fonts (no download)</option>
+                        <option v-for="family in builderFontFamilies" :key="family" :value="family">{{ family }}</option>
+                      </select>
+                    </label>
                   </div>
                   <div v-for="group in tokenGroups()" :key="group.name" class="color-group">
                     <div class="color-group-title">{{ group.name }}</div>
@@ -378,7 +389,7 @@
             </SettingsAccordion>
         </div>
         <footer class="section-editor-footer">
-          <button class="primary-action" type="button" @click="pageSettingsOpen = false">Done</button>
+          <button class="primary-action" type="button" @click="closePageSettings()">Done</button>
         </footer>
       </section>
     </div>
@@ -1968,7 +1979,7 @@
 </template>
 
 <script setup>
-import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
+import { computed, onBeforeUnmount, onMounted, provide, reactive, ref, watch } from "vue";
 import SelectorCard from "./SelectorCard.vue";
 import ImageUploadField from "./shared/ImageUploadField.vue";
 import imageRatios from "../../../src/stripe_link/image_ratios.json";
@@ -2153,6 +2164,19 @@ const defaultFaviconUrl = assetUrl("/icon/favicon.png");  // configured asset CD
 // /legal/* links from the api_base_url we send with each render, and expands {{current_year}} itself.
 const defaultFooterCopyrightTemplate = "© {{current_year}} All rights reserved.";
 
+// The keying lives HERE, not in the upload field: the field stays presentational and simply reads and
+// writes a description for whatever image it currently holds.
+provide("imageAltStore", {
+  get: (url) => builder.image_alts?.[url] || "",
+  set: (url, value) => {
+    const text = String(value || "").trim();
+    // Blank means "no override" -- store nothing rather than an empty string, so the renderer falls back
+    // to the alt it derives from surrounding data instead of emitting alt="" on a content image.
+    if (text) builder.image_alts[url] = text;
+    else delete builder.image_alts[url];
+  },
+});
+
 const universalBundlePresets = [
   { value: "clean-slate", label: "Clean Slate" },
   { value: "techno-green", label: "Techno Green" },
@@ -2171,6 +2195,22 @@ const universalBundlePresets = [
   { value: "youtube-red", label: "YouTube Red" },
   { value: "twitter-dark", label: "Twitter Dark" },
   { value: "professional-gray", label: "Professional Gray" },
+];
+// MIRRORS SERVABLE_FAMILIES in src/stripe_link/domain/fonts.py. Offering a family the service cannot serve
+// produces a stylesheet request that 404s, which is worse than no webfont at all — so the two lists must
+// agree, and tests/test_font_picker_options.py fails if they drift.
+const builderFontFamilies = [
+  "Aileron", "Arapey", "Bebas Neue", "Comic Relief", "DM Serif Display", "Heebo", "Inter", "Karla", "Konya",
+  "Lato", "Lora", "Merriweather", "Merriweather Sans", "Montserrat", "Nunito", "Open Sans", "Oswald",
+  "Overpass", "Overpass Mono", "PT Sans Caption", "PT Serif", "Playfair", "Poppins", "Quantico",
+  "Quicksand", "Raleway", "Roboto", "Rubik", "Slabo", "Source Code Pro", "Source Sans 3", "Source Sans Pro",
+];
+// Heading and body only. `accent` is permitted by the resolver but no preset proposes one, it follows the
+// heading when unset, and a third family is a third download on a page tuned for LCP — so it stays a
+// deliberate omission from the picker rather than a third dropdown nobody needs.
+const builderFontRoles = [
+  { key: "heading", label: "Headings" },
+  { key: "body", label: "Body text" },
 ];
 const landingPagePriceContexts = new Set(["standard", "sale", "flash_sale", "flash sale"]);
 const productsById = computed(() => new Map(products.value.map((product) => [productId(product), product])));
@@ -2409,8 +2449,29 @@ function setTokenColor(token, value) {
   if (v) builder.theme_tokens[token] = v;
   else delete builder.theme_tokens[token];   // empty = fall back to the preset
 }
-function resetThemeTokens() {
+// A stored entry is either a bare family string or { family, fallback }. Read through both shapes so a
+// fallback set elsewhere is not invisible here — and, below, not destroyed on the next edit.
+function fontFamilyFor(role) {
+  const entry = builder.theme_fonts?.[role];
+  return String((entry && typeof entry === "object" ? entry.family : entry) || "");
+}
+function setFontFamily(role, value) {
+  const family = String(value || "").trim();
+  if (!family) {
+    delete builder.theme_fonts[role];   // empty = fall back to the preset, same rule as a colour token
+    return;
+  }
+  const entry = builder.theme_fonts[role];
+  // ALWAYS an object. validate_font_settings requires { family, fallback } and rejects a bare string with
+  // "theme.fonts.body must be an object" — resolve_families reads a plain string too, but the validator is
+  // the contract and it runs first. Spread any existing entry so a `fallback` stack survives the edit.
+  builder.theme_fonts[role] = { ...(entry && typeof entry === "object" ? entry : {}), family };
+}
+// "Reset to preset" means the whole appearance, not half of it: leaving fonts behind while colours reset
+// would make the button lie about what it did.
+function resetAppearanceOverrides() {
   builder.theme_tokens = {};
+  builder.theme_fonts = {};
 }
 // Native color inputs need a #rrggbb value; normalize the effective colour (rgba/short hex fall back).
 function pickerColor(token) {
@@ -2880,8 +2941,14 @@ function defaultBuilderForm() {
     brand_position: "top-right",
     // Advanced Color Settings (plans/ADVANCED_COLOR_SETTINGS.md): per-token overrides on top of the preset
     // (compact map, keyed by theme token -> hex). Empty = pure preset. Persisted as page.theme.tokens.
-    advanced_colors: false,
+    advanced_appearance: false,
     theme_tokens: {},
+    // Per-page font override (plans/FONT_SERVICE.md): role -> family, persisted as page.theme.fonts and
+    // beating both the preset and the tenant default. Empty = whatever the preset proposes.
+    theme_fonts: {},
+    // Per-ASSET alt text (page.image_alts), keyed by the stored image URL. The server normalises each key
+    // to its rendition base, so one description covers every size of the same upload.
+    image_alts: {},
     // Page Composer overrides: the tenant's deviations from the offer_type section defaults (compact map,
     // keyed by section key -> { enabled }). Empty = pure offer_type defaults.
     composition: {
@@ -3689,7 +3756,12 @@ function populateBuilderFromPage(page) {
   builder.composition.overrides = { ...(page.composition?.overrides || {}) };
   // Restore Advanced Color Settings overrides; auto-open the panel if any were set.
   builder.theme_tokens = { ...(page.theme?.tokens || {}) };
-  builder.advanced_colors = Object.keys(builder.theme_tokens).length > 0;
+  builder.theme_fonts = { ...(page.theme?.fonts || {}) };
+  builder.image_alts = { ...(page.image_alts || {}) };
+  // Open the panel for EITHER kind of override, or a page whose only deviation is a font would look
+  // untouched and the tenant would have no way to see what they had set.
+  builder.advanced_appearance =
+    Object.keys(builder.theme_tokens).length > 0 || Object.keys(builder.theme_fonts).length > 0;
   // Restore Sale / Flash-Sale toggles + dates (plans/SALES_FUNNELS.md P1d).
   Object.assign(builder.sale, defaultBuilderForm().sale, page.sale || {});
   Object.assign(builder.flash_sale, defaultBuilderForm().flash_sale, page.flash_sale || {});
@@ -3865,6 +3937,9 @@ function buildBuilderPageDocument() {
       preset: builder.preset,
       // Advanced Color Settings overrides (the server merges theme.tokens over the preset).
       ...(Object.keys(builder.theme_tokens || {}).length ? { tokens: { ...builder.theme_tokens } } : {}),
+      // Omitted entirely when empty, so an untouched page carries no font key and resolve_families falls
+      // straight through to the preset.
+      ...(Object.keys(builder.theme_fonts || {}).length ? { fonts: { ...builder.theme_fonts } } : {}),
     },
     post_checkout: intent === "transaction" ? {
       thank_you_page: {
@@ -3889,6 +3964,9 @@ function buildBuilderPageDocument() {
     composition: { overrides: { ...builder.composition.overrides } },
     // Intrinsic dimensions for uploaded page images so the renderer reserves layout space (no CLS).
     ...(Object.keys(builder.image_dims || {}).length ? { image_dims: { ...builder.image_dims } } : {}),
+    // Omitted when empty, so an untouched page carries no key and the renderer keeps deriving alt text
+    // from surrounding data exactly as it did before this field existed.
+    ...(Object.keys(builder.image_alts || {}).length ? { image_alts: { ...builder.image_alts } } : {}),
     // Without this the ids never persist and a saved crop stops being re-editable -- the payload is
     // an allow-list, so a field the builder holds but does not list here is silently dropped.
     ...(Object.keys(builder.image_assets || {}).length ? { image_assets: { ...builder.image_assets } } : {}),
@@ -4715,6 +4793,15 @@ async function autoSavePage() {
   // auto-save must not quietly try. Saving is not publishing, and it must never become publishing.
   if (isBuilderPublished.value) return;
   await saveBuilderPageWithStatus("", { silent: true });
+}
+
+// Page Settings SAVES on close, like a section editor's Done. Every field in it writes through live to
+// `builder`, so none of the three exits — Done, ✕, backdrop — reverts anything: closing already leaves the
+// change applied and merely unsaved, which looks identical to saved until the tenant navigates away and
+// loses it. There is no Cancel here to mean "discard", so persisting is the honest reading of all three.
+async function closePageSettings() {
+  pageSettingsOpen.value = false;
+  await autoSavePage();
 }
 
 // Cancel on an ADD throws the draft away — nothing was ever created, so there are no empty cards.

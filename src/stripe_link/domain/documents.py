@@ -535,6 +535,11 @@ def optional_string_list(document: dict[str, Any], field: str, label: str | None
         raise DocumentValidationError(f"{field_label} must be an array of strings.")
 
 
+# Screen readers announce the whole string and search engines truncate well before this; a limit also
+# stops a description field being used as hidden keyword copy.
+IMAGE_ALT_MAX_LENGTH = 250
+
+
 def optional_image_dims(document: dict[str, Any], label: str = "image_dims") -> None:
     """Validate the optional image_dims sidecar: a compact map of image URL/rendition-base -> [w, h].
 
@@ -554,6 +559,33 @@ def optional_image_dims(document: dict[str, Any], label: str = "image_dims") -> 
         if (not isinstance(pair, list) or len(pair) != 2
                 or any(isinstance(n, bool) or not isinstance(n, (int, float, Decimal)) or n <= 0 for n in pair)):
             raise DocumentValidationError(f"{label}['{key}'] must be [width, height] positive numbers.")
+
+
+def optional_image_alts(document: dict[str, Any], label: str = "image_alts") -> None:
+    """Validate the optional image_alts sidecar: a compact map of image URL/rendition-base -> alt text.
+
+    Keyed by ASSET, not by placement, exactly like image_dims: the same photo used on two sections is
+    described once, and the description follows it wherever it is reused. Captured in the builder's upload
+    field, so every surface that uploads an image gets the input without its own schema field.
+
+    Advisory, like image_dims -- a malformed entry must never block a render, but the shape is checked so
+    it cannot reach the renderer. Blank values are allowed and simply mean "no override": the renderer then
+    falls back to the alt derived from surrounding data, which is what it did before this existed.
+    """
+    value = document.get("image_alts")
+    if value is None:
+        return
+    if not isinstance(value, dict):
+        raise DocumentValidationError(f"{label} must be an object mapping image URL to alt text.")
+    for key, text in value.items():
+        if not isinstance(key, str) or not key:
+            raise DocumentValidationError(f"{label} keys must be non-empty image URLs.")
+        if not isinstance(text, str):
+            raise DocumentValidationError(f"{label}['{key}'] must be a string.")
+        if len(text) > IMAGE_ALT_MAX_LENGTH:
+            raise DocumentValidationError(
+                f"{label}['{key}'] must be {IMAGE_ALT_MAX_LENGTH} characters or fewer."
+            )
 
 
 def optional_limited_object_list(
@@ -664,6 +696,7 @@ def validate_product_document(document: dict[str, Any]) -> None:
     validate_gtin(document.get("gtin"))
     optional_string_list(document, "images")
     optional_image_dims(document, "Product image_dims")
+    optional_image_alts(document, "Product image_alts")
     validate_product_lead_capture(document)
     if "tags" not in document:
         raise DocumentValidationError("Product tags must be provided.")
@@ -955,6 +988,7 @@ def validate_offer_document(document: dict[str, Any]) -> None:
             optional_string(cta, "label", "Offer presentation.cta.label")
             optional_string(cta, "target", "Offer presentation.cta.target")
     optional_image_dims(document, "Offer image_dims")
+    optional_image_alts(document, "Offer image_alts")
     # Server-owned denormalized cache of the OfferSemanticModel (plans/OFFER_SEMANTIC_P4.md). Reserved now
     # (P4.0); the WRITE path lands with the AI enrichment tier. Validated when present so a persisted cache is
     # always well-formed — the dashboard never sends it (it is server-authoritative).
@@ -1098,6 +1132,7 @@ def validate_page_document(document: dict[str, Any]) -> None:
             raise DocumentValidationError("Page seo.favicon_url must be an HTTP(S) URL.")
 
     optional_image_dims(document, "Page image_dims")
+    optional_image_alts(document, "Page image_alts")
 
     theme = document.get("theme")
     if theme is not None:

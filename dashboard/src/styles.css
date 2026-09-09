@@ -4386,6 +4386,27 @@ button:disabled {
   gap: 0.8rem;
 }
 
+/* Font rows sit in the same panel as the colour rows and must line up with them: no swatch column, so the
+   label starts where a colour label starts and the control ends where a hex field ends. */
+.font-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 12rem;
+  align-items: center;
+  gap: 0.8rem;
+  margin-left: 3.2rem;
+}
+
+.font-row select {
+  width: 100%;
+}
+
+@media (max-width: 640px) {
+  .font-row {
+    grid-template-columns: minmax(0, 1fr);
+    margin-left: 0;
+  }
+}
+
 .color-picker {
   width: 2.4rem;
   height: 2.4rem;
