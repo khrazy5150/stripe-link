@@ -479,7 +479,10 @@ Related: the Latin subset itself is defined in `font-converter/src/handler.mjs` 
 deliberately includes Latin Extended-A so Polish, Czech, Turkish, Hungarian, Romanian, Croatian and the
 Baltic languages keep their characters.
 
-### ⭐ HIGH — add the font service to published pages (found 2026-09-03, plan plans/FONT_SERVICE.md)
+### 📄 SUPERSEDED — add the font service to published pages (found 2026-09-03, plan plans/FONT_SERVICE.md)
+
+**This is the ORIGINAL entry, kept for its design reasoning. The work SHIPPED — see the entry above.**
+It no longer carries a priority: it was still marked ⭐ HIGH on 2026-09-09 and read as an eighth open HIGH item.
 
 **Scope extended 2026-09-07 (§9-§11 of the plan).** Presets will carry font PAIRINGS, not just colour —
 "presets already carry the page's whole visual identity except its type" — but they PROPOSE rather than
@@ -637,11 +640,20 @@ cards. Resolved with a separate external-only `link_cards` element rather than a
 `catalog_grid` -- keeps the SEO contract intact and gives the §7 trust policy one enforcement site
 instead of two that must agree.
 
-BLOCKERS found while planning:
+BLOCKERS found while planning (both RE-VERIFIED 2026-09-09, still true; line numbers had drifted):
   - `same_as` has NO dashboard UI — validated, never enterable. Nothing works until P0.
-  - `same_as[].verified` is READ (html.py:3256, 4050) but SET NOWHERE, so no social link
+  - `same_as[].verified` is READ (now html.py:3646 and 5089) but SET NOWHERE, so no social link
     renders today and "verified" is self-assertable — the anti-impersonation guarantee does
     not currently exist. Same silent-drift shape as the SENSITIVE_FIELDS denylist.
+
+**Verification DECIDED 2026-09-09 — see SOCIAL_MEDIA_PAGES.md §7a-i.** Measured with a throwaway Lambda,
+not assumed: `rel="me"` is emitted by ZERO of the ten hosts tested, so option 1's mechanism is dead but its
+intent survives as a URL-presence check. Lambda fetches BETTER than a laptop, and an honest user-agent beats
+a browser string (Facebook returned 400 to Chrome, 200 to us). 8 of 10 hosts verifiable; Instagram and TikTok
+are not, by any unauthenticated means. Wikipedia/Wikidata excluded — anyone can edit them, which is the
+impersonation vector itself. Two-tier result: unverifiable links still RENDER, they just never enter `sameAs`,
+so the traffic-dominant platforms are unaffected. IG/TikTok verification later rides the aggregator already
+planned for campaign publishing.
 
 Trust model reuses the existing "reputation-isolation floor" (html.py:1193): verified
 business links render + feed sameAs; tenant overrides render nofollow but NEVER enter
@@ -1713,6 +1725,11 @@ Social and lead-specific elements still wait for those page types to exist.
 **Priority HIGH, but deliberately NOT next.** Author's sequencing 2026-08-30: pick this up
 once the remaining modules are complete — the pre-launch work first (see "Media field
 parity: video FILE upload + drag-reorder", tagged BEFORE LAUNCH).
+
+**Note 2026-09-09: that specific gate has CLEARED.** Media field parity shipped and was verified
+2026-09-02. The sequencing intent (finish the remaining modules first) still stands, but the one
+blocker this entry named by name is done — so re-read the intent rather than treating this as
+still-blocked.
 
 **Why it is on the critical path at all:** it is the gate on the Offer Semantic Analyzer's
 last phase. P1-P3 and P4.0 are SHIPPED; `smart_offer_slug` is already a thin wrapper over

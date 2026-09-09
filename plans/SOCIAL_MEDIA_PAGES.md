@@ -139,6 +139,64 @@ The §7 model rests on "verified" meaning something. Pick one before building:
 3. **Drop the pretense.** Remove `verified`, rely on the domain boundary alone. Honest, but
    forfeits `sameAs` — Google may ignore unverified identity claims anyway.
 
+### 7a-i. DECIDED 2026-09-09, after measuring: option 1's MECHANISM is dead, its INTENT survives
+
+Option 1 was chosen, then tested before building. A throwaway Lambda in us-west-2 (`jb-relme-probe`,
+deployed, run, deleted) fetched ten allowlisted hosts. Three results changed the design:
+
+**1. `rel="me"` does not exist any more — ZERO occurrences on all ten hosts, GitHub included.** The
+technique Mastodon and Google use is not emitted by anything on `SAME_AS_HOSTS`. Do not build a parser
+for it. What works instead is a **URL-presence check**: fetch the profile, confirm the tenant's own
+unique page URL appears in the HTML. It proves the same thing — someone controlling the profile put our
+URL on it — without depending on an attribute nobody sets.
+
+**2. Lambda fetches BETTER than a laptop, and the HONEST user-agent beats a browser string.** Measured
+from a residential IP first, which was misleading: X, Facebook and LinkedIn looked dead and were not.
+
+| host | our URL findable from Lambda | note |
+|---|---|---|
+| wikipedia.org | 756 | **EXCLUDED — see 3** |
+| threads.net | 40 | honest UA only (Chrome UA got a 272K empty shell) |
+| x.com | 24 | |
+| pinterest.com | 20 | |
+| facebook.com | 15 | honest UA only (Chrome UA got `400 Error`) |
+| youtube.com | 13 | |
+| github.com | 6 | |
+| linkedin.com | 2 | |
+| instagram.com | 0 | login wall |
+| tiktok.com | 0 | JS shell |
+
+Use `JuniorBayLinkVerifier/1.0 (+https://juniorbay.com/verify)`. We never need to impersonate a
+browser — the honest UA is strictly better, which is a rare and worth-keeping result.
+
+**3. Wikipedia and Wikidata must be EXCLUDED from auto-verification.** Anyone can edit them, so a
+tenant could add their own URL to a brand's article and claim `sameAs` with that brand — precisely the
+impersonation vector §7 exists to prevent. The check is only meaningful where the page is controlled by
+its owner. Presence is safe elsewhere because the needle is the tenant's OWN unique page URL, not a
+generic domain.
+
+**4. Instagram and TikTok cannot be verified by fetching, and no unauthenticated surface helps.**
+`/embed`, `api.instagram.com/oembed` and TikTok's `/embed` all return nothing useful. TikTok's oEmbed
+does work unauthenticated but returns only title/author_name/author_url — it proves a profile EXISTS,
+not what it links to. Testing with a personal account changes nothing: the wall is on the REQUESTER,
+not the target.
+
+**So: a TWO-TIER model.** Verifiable hosts get `verified: true` → render AND enter `sameAs`.
+Unverifiable hosts (Instagram, TikTok) render normally with `rel="nofollow ugc noopener"` and NEVER
+enter `sameAs`. The UI must say they cannot be verified rather than implying they were.
+
+**Do not conflate verification with traffic.** Verification gates `sameAs` ONLY. Every link renders and
+works either way, so the two platforms that dominate link-in-bio traffic are unaffected by being
+unverifiable. What is lost is a structured-data identity signal, which matters more to the Business
+Profile than to a creator page.
+
+**Path for Instagram/TikTok (author 2026-09-09):** OAuth, long-term — and it is STRONGER than any
+backlink check, because the tenant authenticating with the account IS proof of control. Short term this
+rides an **aggregator**, already planned for campaign publishing (`ATTENTION_PRIMITIVE.md`), which
+bypasses Meta and ByteDance app review for now. Note the synergy: a tenant who connects Instagram in
+order to PUBLISH has, by definition, proven they control it — connect once, use for both. So this is a
+downstream benefit of planned work, not a separate integration to justify.
+
 Also note this is the same silent-drift shape as the `SENSITIVE_FIELDS` denylist: a field
 that gates behaviour with nothing producing it. See the audit item in `TODO.md`.
 
@@ -339,7 +397,10 @@ of its own — sold-through products do, "here is my TikTok" does not.
 
 1. **P0 — Business Profile social links UI.** There is NO UI for `same_as` today; it is
    validated and never enterable. Nothing here works until a tenant can enter links.
-2. **P1 — verification decision (§7a)** and its implementation. Blocks the trust model.
+2. **P1 — verification DECIDED 2026-09-09 (§7a-i): URL-presence check, two-tier.** `rel="me"` is dead;
+   the mechanism is a Lambda fetch with an honest UA looking for the tenant's own page URL. Instagram and
+   TikTok are unverifiable by fetch and stay in the unverified tier until the aggregator/OAuth path lands.
+   Still to implement, but no longer a decision.
 3. **P2 — composition + `social_links` element.** New `composition_rules.json` entry,
    reusing `seller_profile` / `catalog_grid` / `profile_avatar`.
 4. **P3 — override + publish gate** (`source` flag, `on_custom_domain` check).
