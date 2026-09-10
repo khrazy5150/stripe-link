@@ -40,7 +40,11 @@ class CompositionKeyTests(unittest.TestCase):
 
 class LeadGenSectionsTests(unittest.TestCase):
     def test_the_purchase_spine_is_gone(self):
-        # No price to select, and nothing to reassure a buyer about because there is no purchase.
+        # Not a guard against bad data -- a lead-gen offer cannot carry purchasable items in the first
+        # place: validation forbids `checkout` and discounts on one, and the builder stamps intent from
+        # the selected products, so intents cannot mix in a single offer. This states the composition
+        # POSITIVELY, so the Page Sections panel recommends the right set instead of offering a price
+        # selector that would render empty.
         for key in ("offer_price_selector", "refund_policy", "trust_badges"):
             self.assertFalse(is_section_visible("lead_gen", key), key)
 
@@ -86,3 +90,22 @@ class BuilderParityTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class IntentsCannotMixTests(unittest.TestCase):
+    """The constraint the composition rests on, pinned so it cannot quietly relax.
+
+    If a lead-gen offer could ever carry checkout or a discount, the composition above would be papering
+    over a data problem instead of describing a page.
+    """
+
+    def test_a_lead_gen_offer_must_not_carry_checkout(self):
+        from stripe_link.domain.documents import DocumentValidationError, validate_offer_document
+        import json as _json
+        import pathlib as _pathlib
+        fixture = (_pathlib.Path(__file__).resolve().parents[1]
+                   / "schemas" / "examples" / "offer-simple-coffee.json")
+        offer = _json.loads(fixture.read_text(encoding="utf-8"))
+        offer["product_intent"] = "lead_gen"
+        with self.assertRaisesRegex(DocumentValidationError, "must not include checkout"):
+            validate_offer_document(offer)
