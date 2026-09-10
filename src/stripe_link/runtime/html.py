@@ -486,10 +486,15 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     "    .sl-hero-dot.is-active{background:var(--sl-brand)}",
     # Socialite hero overlays (plans/SOCIALITE_PARITY.md): positionable brand chip + profile avatar.
     "    .sl-hero-media.has-avatar{margin-bottom:6.4rem}",
+    "    .sl-hero-media.has-avatar-top{margin-top:6.4rem}",
     "    .sl-hero-brand{position:absolute;display:flex;align-items:center;gap:0.8rem;background:rgba(0,0,0,.5);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);padding:0.8rem 1.4rem;border-radius:999px;font-family:var(--sl-font-accent);font-size:1.1rem;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:rgba(255,255,255,.92);z-index:6;pointer-events:none}",
     "    .sl-hero-brand-dot{width:0.8rem;height:0.8rem;border-radius:50%;background:var(--sl-brand)}",
     # Opt-in only. A dot that pulses on every page would be noise; on one page it reads as a live signal.
     "    .sl-hero-brand-dot.is-pulsing{animation:sl-brand-pulse 1.8s ease-in-out infinite}",
+    # The same pulse on the brand LABEL's dot, which is a ::before rather than an element. The setting is
+    # about "the brand dot", and the brand appears in one place or the other -- never both -- so it has to
+    # reach whichever one the page actually has.
+    "    .sl-brand-label.is-pulsing::before{animation:sl-brand-pulse 1.8s ease-in-out infinite}",
     "    @keyframes sl-brand-pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.35;transform:scale(.78)}}",
     "    .sl-hero-brand--top-left{top:1.6rem;left:1.6rem}",
     "    .sl-hero-brand--top-right{top:1.6rem;right:1.6rem}",
@@ -500,9 +505,10 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     "    .sl-avatar-wrap{position:absolute;bottom:-5.8rem;left:2.4rem;z-index:10;width:12.3rem;height:12.3rem;border-radius:50%;padding:0.4rem;background:var(--sl-avatar-ring,var(--sl-avatar-border,#ffffff));box-shadow:0 0.4rem 1.2rem rgba(0,0,0,.15)}",
     # Placement variants. The base rule above IS the overlay, so `overlay` needs no override and a page
     # saved before this existed keeps rendering exactly as it did.
-    # Top-centre sits ON the artwork rather than overhanging it, so nothing above the hero has to make room
-    # -- an avatar straddling the TOP edge would push into the brand label or the page edge.
-    "    .sl-avatar-wrap.sl-avatar--overlay_top{bottom:auto;top:2.4rem;left:50%;transform:translateX(-50%)}",
+    # Hangs off the TOP edge exactly as the bottom-left overlay hangs off the bottom -- about half the
+    # avatar above the artwork. .has-avatar-top reserves the room, mirroring .has-avatar, so the overhang
+    # pushes the hero down rather than colliding with whatever sits above it.
+    "    .sl-avatar-wrap.sl-avatar--overlay_top{bottom:auto;top:-5.8rem;left:50%;transform:translateX(-50%)}",
     "    .sl-avatar-wrap.sl-avatar--inline,.sl-avatar-wrap.sl-avatar--centered{position:static;bottom:auto;left:auto;margin-top:1.6rem}",
     "    .sl-avatar-wrap.sl-avatar--centered{margin-left:auto;margin-right:auto}",
     "    .sl-avatar{width:100%;height:100%;border-radius:50%;object-fit:cover;background:var(--sl-hero-bg);display:block}",
@@ -814,7 +820,7 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     # A text entry is a WORDMARK in the page's own type, not text sitting in a logo-shaped white card.
     "    .sl-marquee-word{display:inline-flex;align-items:center;height:3.2rem;font-family:var(--sl-font-heading);font-size:1.8rem;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;white-space:nowrap;color:var(--sl-muted)}",
     "    @keyframes sl-marquee{from{transform:translateX(0)}to{transform:translateX(-50%)}}",
-    "    @media (prefers-reduced-motion: reduce){.sl-hero-brand-dot.is-pulsing{animation:none}.sl-marquee-track{animation:none;flex-wrap:wrap}.sl-faq summary::after{transition:none}}",
+    "    @media (prefers-reduced-motion: reduce){.sl-hero-brand-dot.is-pulsing{animation:none}.sl-brand-label.is-pulsing::before{animation:none}.sl-marquee-track{animation:none;flex-wrap:wrap}.sl-faq summary::after{transition:none}}",
     "    .sl-carousel-track{display:flex;gap:1.6rem;overflow-x:auto;scroll-snap-type:x mandatory;padding-bottom:1.2rem;-webkit-overflow-scrolling:touch}",
     "    .sl-carousel-slide{scroll-snap-align:start;flex:0 0 min(80%,28rem);display:flex;flex-direction:column;gap:0.8rem;background:var(--sl-price-card-bg);border:1px solid var(--sl-price-card-border);border-radius:1.2rem;padding:1.4rem}",
     "    .sl-carousel-slide img{width:100%;height:16rem;object-fit:cover;border-radius:0.8rem}",
@@ -2285,7 +2291,8 @@ def render_brand_label(section: dict[str, Any], page: dict[str, Any]) -> str:
     linkable = bool(home) and _RENDER_STATE.get("page_type") not in NONINDEXABLE_PAGE_TYPES
     inner = f'<a class="sl-brand-label-link" href="/">{label}</a>' if linkable else label
     return "\n".join([
-        f"    <section class=\"sl-brand-label\" data-section-id=\"{escape(str(section.get('id', 'brand-label')))}\" data-section-type=\"brand_label\">",
+        f"    <section class=\"sl-brand-label{' is-pulsing' if section.get('brand_dot_pulse') else ''}\""
+        f" data-section-id=\"{escape(str(section.get('id', 'brand-label')))}\" data-section-type=\"brand_label\">",
         f"      <p>{inner}</p>",
         "    </section>",
     ])
@@ -2480,11 +2487,14 @@ def render_hero_media(
     brand = render_hero_brand(section, offer)
     # has-avatar reserves the space the overlay OVERHANGS into. An inline or centred avatar sits in normal
     # flow and needs no reserved gap -- keeping it would leave a hole under the hero.
-    # Only the bottom-left overlay OVERHANGS the image; top-centre sits inside it and inline/centred sit
-    # below it, so none of those needs the reserved gap.
-    has_avatar = avatar_placement(section) == "overlay" and bool(
+    # Both OVERLAYS overhang the artwork and need room reserved -- one below, one above. inline/centred sit
+    # in normal flow and need none; hidden has nothing to reserve for.
+    placement = avatar_placement(section)
+    has_avatar = placement in ("overlay", "overlay_top") and bool(
         str(section.get("avatar_url") or "") or str(_RENDER_PREFERENCES.get("avatar_url") or ""))
-    media_class = "sl-hero-media" + (" has-avatar" if has_avatar else "")
+    overhang = ("" if not has_avatar else
+                (" has-avatar" if placement == "overlay" else " has-avatar-top"))
+    media_class = "sl-hero-media" + overhang
     slides = [
         f"        <div class=\"sl-hero-slide\">"
         f"{render_media_slide(url, alt, autoplay=autoplay, eager=(index == 0), poster=posters.get(url, ''))}</div>"

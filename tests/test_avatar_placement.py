@@ -193,12 +193,27 @@ class TopCentreAndPulseTests(unittest.TestCase):
     def test_top_centre_renders_the_avatar(self):
         self.assertIn("sl-avatar--overlay_top", self._hero("overlay_top"))
 
-    def test_only_the_bottom_overlay_reserves_an_overhang(self):
-        # Top-centre sits ON the artwork rather than hanging off it, so reserving a gap beneath the hero
-        # would leave an empty band under an avatar that never went there.
+    def test_each_overlay_reserves_room_on_the_side_it_overhangs(self):
+        """Both overlays hang half off the artwork -- one below, one above.
+
+        Changed 2026-09-10: top-centre first sat INSIDE the image, which read as pasted on rather than
+        overhanging. It now mirrors the bottom-left overlay, so the section has to reserve the room ABOVE
+        the hero or the avatar collides with the brand label sitting there.
+        """
         self.assertIn("has-avatar", self._hero("overlay"))
-        for placement in ("overlay_top", "inline", "centered", "hidden"):
+        self.assertNotIn("has-avatar-top", self._hero("overlay"))
+        self.assertIn("has-avatar-top", self._hero("overlay_top"))
+        for placement in ("inline", "centered", "hidden"):
+            # In normal flow, or absent: nothing overhangs, so nothing is reserved.
             self.assertNotIn("has-avatar", self._hero(placement), placement)
+
+    def test_the_brand_label_dot_pulses_too(self):
+        """The setting is about "the brand dot", and the brand appears EITHER on the hero chip OR above the
+        hero -- never both. Gating the option on the hero overlay left the pulse unreachable in the case it
+        suits best, which is the brand sitting above the image."""
+        from stripe_link.runtime.html import render_brand_label
+        self.assertIn("is-pulsing", render_brand_label({"label": "ACME", "brand_dot_pulse": True}, {}))
+        self.assertNotIn("is-pulsing", render_brand_label({"label": "ACME"}, {}))
 
     def test_the_brand_dot_pulses_only_when_asked(self):
         from stripe_link.runtime.html import render_hero_brand

@@ -564,10 +564,11 @@
                     <option value="bottom-right">Bottom right</option>
                   </select>
                 </label>
-                <label v-if="builder.brand_overlay" class="builder-toggle">
+                <label class="builder-toggle">
                   <input v-model="builder.brand_dot_pulse" type="checkbox" />
                   <span>Pulsate brand dot</span>
                 </label>
+                <small class="field-note">Applies to the brand dot wherever it appears — on the hero chip, or above the hero when the overlay is off.</small>
             </template>
             <template v-else-if="sectionEditor.row.editor === 'trust_badges'">
                 <div class="builder-repeat-list">
@@ -4116,6 +4117,8 @@ function builderSectionCandidates(intent) {
       type: "brand_label",
       enabled: true,
       label: brandText,
+      // Written from the SAME builder field as the hero chip's, so the two cannot disagree within a save.
+      brand_dot_pulse: builder.brand_dot_pulse ? true : undefined,
     });
   }
   // The hero-media carousel — for a listicle it's the product images (auto-filled into the field), driving
@@ -4132,7 +4135,7 @@ function builderSectionCandidates(intent) {
     avatar_placement: builder.avatar_placement || undefined,
     brand_overlay: Boolean(builder.brand_overlay),
     brand_position: builder.brand_position || "top-right",
-    brand_dot_pulse: builder.brand_overlay && builder.brand_dot_pulse ? true : undefined,
+    brand_dot_pulse: builder.brand_dot_pulse ? true : undefined,
     brand_text: builder.brand_overlay ? brandText : "",
   });
   // Hero copy. A listicle's hero is TARGET-BOUND (the renderer fills it with each carousel product's own

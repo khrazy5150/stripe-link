@@ -1221,6 +1221,7 @@ def validate_page_document(document: dict[str, Any]) -> None:
         elif section_type == "seo_title":
             optional_string(section, "label", "SEO title label")
         elif section_type == "brand_label":
+            optional_bool(section, "brand_dot_pulse", "Brand label brand_dot_pulse")
             optional_bool(section, "enabled", "Brand label enabled")
             optional_string(section, "label", "Brand label")
         elif section_type == "hero_media":
