@@ -538,7 +538,8 @@
                   <label v-if="effectiveAvatarUrl || builder.avatar_placement === 'hidden'" class="offer-field">
                     <span>Avatar placement</span>
                     <select v-model="builder.avatar_placement">
-                      <option value="overlay">Overlapping the hero image</option>
+                      <option value="overlay">Overlapping hero, bottom left</option>
+                      <option value="overlay_top">Overlapping hero, top center</option>
                       <option value="inline">Below the hero, left</option>
                       <option value="centered">Below the hero, centered</option>
                       <option value="hidden">Don't show an avatar on this page</option>
@@ -562,6 +563,10 @@
                     <option value="bottom-left">Bottom left</option>
                     <option value="bottom-right">Bottom right</option>
                   </select>
+                </label>
+                <label v-if="builder.brand_overlay" class="builder-toggle">
+                  <input v-model="builder.brand_dot_pulse" type="checkbox" />
+                  <span>Pulsate brand dot</span>
                 </label>
             </template>
             <template v-else-if="sectionEditor.row.editor === 'trust_badges'">
@@ -3020,6 +3025,7 @@ function defaultBuilderForm() {
     avatar_placement: "overlay",
     brand_overlay: false,
     brand_position: "top-right",
+    brand_dot_pulse: false,
     // Advanced Color Settings (plans/ADVANCED_COLOR_SETTINGS.md): per-token overrides on top of the preset
     // (compact map, keyed by theme token -> hex). Empty = pure preset. Persisted as page.theme.tokens.
     advanced_appearance: false,
@@ -3829,6 +3835,7 @@ function populateBuilderFromPage(page) {
     avatar_placement: heroMedia.avatar_placement || "overlay",
     brand_overlay: Boolean(heroMedia.brand_overlay),
     brand_position: heroMedia.brand_position || "top-right",
+    brand_dot_pulse: Boolean(heroMedia.brand_dot_pulse),
     cta_label: cta.label || (offerIntentLabel(offer) === "Lead generation" ? "Continue" : "Buy Now"),
     elements: elementsFromPage(sections),
     google_tag_id: page.analytics?.google_tag_id || "",
@@ -4125,6 +4132,7 @@ function builderSectionCandidates(intent) {
     avatar_placement: builder.avatar_placement || undefined,
     brand_overlay: Boolean(builder.brand_overlay),
     brand_position: builder.brand_position || "top-right",
+    brand_dot_pulse: builder.brand_overlay && builder.brand_dot_pulse ? true : undefined,
     brand_text: builder.brand_overlay ? brandText : "",
   });
   // Hero copy. A listicle's hero is TARGET-BOUND (the renderer fills it with each carousel product's own

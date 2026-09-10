@@ -172,3 +172,45 @@ class HeroStructureTests(unittest.TestCase):
         counter = markup.index("sl-hero-counter")
         self.assertLess(dots, counter)
         self.assertLess(counter, markup.index("</figure>"))
+
+
+class TopCentreAndPulseTests(unittest.TestCase):
+    """A second overlay position, and an opt-in pulse on the brand dot."""
+
+    def setUp(self):
+        from stripe_link.runtime import html as html_module
+        self.html = html_module
+        html_module._RENDER_PREFERENCES["avatar_url"] = "https://img.example/store.jpg"
+
+    def tearDown(self):
+        self.html._RENDER_PREFERENCES.clear()
+
+    def _hero(self, placement):
+        return self.html.render_hero_media(
+            {"type": "hero_media", "images": ["https://img.example/h.jpg"],
+             "avatar_placement": placement}, {}, {})
+
+    def test_top_centre_renders_the_avatar(self):
+        self.assertIn("sl-avatar--overlay_top", self._hero("overlay_top"))
+
+    def test_only_the_bottom_overlay_reserves_an_overhang(self):
+        # Top-centre sits ON the artwork rather than hanging off it, so reserving a gap beneath the hero
+        # would leave an empty band under an avatar that never went there.
+        self.assertIn("has-avatar", self._hero("overlay"))
+        for placement in ("overlay_top", "inline", "centered", "hidden"):
+            self.assertNotIn("has-avatar", self._hero(placement), placement)
+
+    def test_the_brand_dot_pulses_only_when_asked(self):
+        from stripe_link.runtime.html import render_hero_brand
+        section = {"brand_overlay": True, "brand_text": "ACME"}
+        self.assertNotIn("is-pulsing", "".join(render_hero_brand(section, {})))
+        self.assertIn("is-pulsing", "".join(render_hero_brand({**section, "brand_dot_pulse": True}, {})))
+
+    def test_the_pulse_stops_for_reduced_motion(self):
+        """A blinking element is exactly what that preference is for, and the marquee already honours it."""
+        import pathlib
+        source = (pathlib.Path(__file__).resolve().parents[1]
+                  / "src" / "stripe_link" / "runtime" / "html.py").read_text(encoding="utf-8")
+        reduced = [line for line in source.split("\n") if "prefers-reduced-motion" in line]
+        self.assertTrue(reduced)
+        self.assertIn(".sl-hero-brand-dot.is-pulsing{animation:none}", reduced[0])

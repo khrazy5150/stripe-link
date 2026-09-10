@@ -488,6 +488,9 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     "    .sl-hero-media.has-avatar{margin-bottom:6.4rem}",
     "    .sl-hero-brand{position:absolute;display:flex;align-items:center;gap:0.8rem;background:rgba(0,0,0,.5);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);padding:0.8rem 1.4rem;border-radius:999px;font-family:var(--sl-font-accent);font-size:1.1rem;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:rgba(255,255,255,.92);z-index:6;pointer-events:none}",
     "    .sl-hero-brand-dot{width:0.8rem;height:0.8rem;border-radius:50%;background:var(--sl-brand)}",
+    # Opt-in only. A dot that pulses on every page would be noise; on one page it reads as a live signal.
+    "    .sl-hero-brand-dot.is-pulsing{animation:sl-brand-pulse 1.8s ease-in-out infinite}",
+    "    @keyframes sl-brand-pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.35;transform:scale(.78)}}",
     "    .sl-hero-brand--top-left{top:1.6rem;left:1.6rem}",
     "    .sl-hero-brand--top-right{top:1.6rem;right:1.6rem}",
     "    .sl-hero-brand--bottom-left{bottom:1.6rem;left:1.6rem}",
@@ -497,6 +500,9 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     "    .sl-avatar-wrap{position:absolute;bottom:-5.8rem;left:2.4rem;z-index:10;width:12.3rem;height:12.3rem;border-radius:50%;padding:0.4rem;background:var(--sl-avatar-ring,var(--sl-avatar-border,#ffffff));box-shadow:0 0.4rem 1.2rem rgba(0,0,0,.15)}",
     # Placement variants. The base rule above IS the overlay, so `overlay` needs no override and a page
     # saved before this existed keeps rendering exactly as it did.
+    # Top-centre sits ON the artwork rather than overhanging it, so nothing above the hero has to make room
+    # -- an avatar straddling the TOP edge would push into the brand label or the page edge.
+    "    .sl-avatar-wrap.sl-avatar--overlay_top{bottom:auto;top:2.4rem;left:50%;transform:translateX(-50%)}",
     "    .sl-avatar-wrap.sl-avatar--inline,.sl-avatar-wrap.sl-avatar--centered{position:static;bottom:auto;left:auto;margin-top:1.6rem}",
     "    .sl-avatar-wrap.sl-avatar--centered{margin-left:auto;margin-right:auto}",
     "    .sl-avatar{width:100%;height:100%;border-radius:50%;object-fit:cover;background:var(--sl-hero-bg);display:block}",
@@ -808,7 +814,7 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     # A text entry is a WORDMARK in the page's own type, not text sitting in a logo-shaped white card.
     "    .sl-marquee-word{display:inline-flex;align-items:center;height:3.2rem;font-family:var(--sl-font-heading);font-size:1.8rem;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;white-space:nowrap;color:var(--sl-muted)}",
     "    @keyframes sl-marquee{from{transform:translateX(0)}to{transform:translateX(-50%)}}",
-    "    @media (prefers-reduced-motion: reduce){.sl-marquee-track{animation:none;flex-wrap:wrap}.sl-faq summary::after{transition:none}}",
+    "    @media (prefers-reduced-motion: reduce){.sl-hero-brand-dot.is-pulsing{animation:none}.sl-marquee-track{animation:none;flex-wrap:wrap}.sl-faq summary::after{transition:none}}",
     "    .sl-carousel-track{display:flex;gap:1.6rem;overflow-x:auto;scroll-snap-type:x mandatory;padding-bottom:1.2rem;-webkit-overflow-scrolling:touch}",
     "    .sl-carousel-slide{scroll-snap-align:start;flex:0 0 min(80%,28rem);display:flex;flex-direction:column;gap:0.8rem;background:var(--sl-price-card-bg);border:1px solid var(--sl-price-card-border);border-radius:1.2rem;padding:1.4rem}",
     "    .sl-carousel-slide img{width:100%;height:16rem;object-fit:cover;border-radius:0.8rem}",
@@ -2184,7 +2190,7 @@ def first_offer_product(offer: dict[str, Any], products_by_id: dict[str, dict[st
 # `hidden` exists because the avatar became a REFERENCE: an empty page-level avatar_url now means "inherit
 # the store's", not "no avatar", so without this a tenant who uploads a store avatar has no way to keep it
 # off one particular page.
-AVATAR_PLACEMENTS = ("overlay", "inline", "centered", "hidden")
+AVATAR_PLACEMENTS = ("overlay", "overlay_top", "inline", "centered", "hidden")
 
 
 def avatar_placement(section: dict[str, Any]) -> str:
@@ -2385,9 +2391,11 @@ def render_hero_brand(section: dict[str, Any], offer: dict[str, Any]) -> list[st
             position = str(section.get("brand_position") or "top-right")
             if position not in HERO_BRAND_POSITIONS:
                 position = "top-right"
+            # Opt-in per page: a dot pulsing on every page is noise; on one it reads as a live signal.
+            dot_class = "sl-hero-brand-dot is-pulsing" if section.get("brand_dot_pulse") else "sl-hero-brand-dot"
             lines.append(
                 f"      <div class=\"sl-hero-brand sl-hero-brand--{position}\">"
-                f"<span class=\"sl-hero-brand-dot\"></span>{escape(brand_text)}</div>"
+                f"<span class=\"{dot_class}\"></span>{escape(brand_text)}</div>"
             )
     return lines
 
@@ -2472,10 +2480,11 @@ def render_hero_media(
     brand = render_hero_brand(section, offer)
     # has-avatar reserves the space the overlay OVERHANGS into. An inline or centred avatar sits in normal
     # flow and needs no reserved gap -- keeping it would leave a hole under the hero.
-    has_avatar = avatar_placement(section) != "hidden" and bool(
+    # Only the bottom-left overlay OVERHANGS the image; top-centre sits inside it and inline/centred sit
+    # below it, so none of those needs the reserved gap.
+    has_avatar = avatar_placement(section) == "overlay" and bool(
         str(section.get("avatar_url") or "") or str(_RENDER_PREFERENCES.get("avatar_url") or ""))
-    media_class = "sl-hero-media" + (
-        " has-avatar" if has_avatar and avatar_placement(section) == "overlay" else "")
+    media_class = "sl-hero-media" + (" has-avatar" if has_avatar else "")
     slides = [
         f"        <div class=\"sl-hero-slide\">"
         f"{render_media_slide(url, alt, autoplay=autoplay, eager=(index == 0), poster=posters.get(url, ''))}</div>"

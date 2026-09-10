@@ -1226,8 +1226,10 @@ def validate_page_document(document: dict[str, Any]) -> None:
         elif section_type == "hero_media":
             optional_string_list(section, "images", "Hero media images")
             optional_string(section, "avatar_url", "Hero avatar_url")
+            optional_bool(section, "brand_dot_pulse", "Hero brand_dot_pulse")
             if section.get("avatar_placement") is not None:
-                require_enum(section, "avatar_placement", {"overlay", "inline", "centered", "hidden"},
+                require_enum(section, "avatar_placement",
+                             {"overlay", "overlay_top", "inline", "centered", "hidden"},
                              "Hero avatar_placement")
             optional_string(section, "brand_text", "Hero brand_text")
             optional_bool(section, "brand_overlay", "Hero brand_overlay")
