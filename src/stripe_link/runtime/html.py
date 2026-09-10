@@ -515,6 +515,11 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     # so clamping a tier's summary never hides the only copy of what the buyer is choosing between.
     "    .sl-price-option strong{display:-webkit-box;-webkit-line-clamp:2;line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere}",
     "    .sl-price-description{display:-webkit-box;-webkit-line-clamp:3;line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere}",
+    # Expanded state drops the clamp entirely. A price description is what the buyer is CHOOSING ON, and
+    # the title= tooltip that rescues a clamped link card does not exist on touch -- which is exactly where
+    # the clamp bites hardest, because the copy column is narrowest there.
+    "    .sl-price-description.is-expanded{display:block;-webkit-line-clamp:none;line-clamp:none;overflow:visible}",
+    "    .sl-price-more{align-self:start;background:none;border:0;padding:0;margin:.2rem 0 0;font:inherit;font-size:1.2rem;color:var(--sl-legal-link);text-decoration:underline;cursor:pointer}",
     "    .sl-price-row{display:flex;align-items:center;gap:1rem;flex-wrap:wrap;margin-top:1rem}",
     "    .sl-price-amount{font-family:var(--sl-font-accent);font-size:2rem;font-weight:700;color:var(--sl-price-amount)}",
     "    .sl-regular-price{color:var(--sl-price-regular);text-decoration:line-through;font-size:1.4rem}",
@@ -1887,6 +1892,7 @@ def _render_page_body(
         render_price_context_script(),
         conversion_data,
         *render_bnpl_messaging_scripts(),
+        render_price_description_toggle_script(page),
         render_view_beacon(page, kind, api_base_url),
         "</body>",
         "</html>",
@@ -2606,6 +2612,7 @@ def render_service_price_card(item, service_id, services_by_id, offer, display_i
         "        <div class=\"sl-price-copy\">",
         f"          <strong title=\"{label}\">{label}</strong>",
         f"          <p class=\"sl-price-description\" title=\"{description}\">{description}</p>" if description else "",
+        "          <button type=\"button\" class=\"sl-price-more\" aria-expanded=\"false\" hidden>See more</button>" if description else "",
         "          <div class=\"sl-price-row\">",
         f"            <span class=\"sl-price-amount\" data-price-amount>{escape(format_money(amount, currency))}</span>",
         f"            <span class=\"sl-regular-price\">{escape(format_money(int(compare_at_unit_amount), currency))}</span>" if compare_at_unit_amount else "",
@@ -2779,6 +2786,7 @@ def _item_price_option_cards(
             f"          <span class=\"sl-badge\">{badge}</span>" if badge else "",
             f"          <strong title=\"{label}\">{label}</strong>",
             f"          <p class=\"sl-price-description\" title=\"{description}\">{description}</p>" if description else "",
+            "          <button type=\"button\" class=\"sl-price-more\" aria-expanded=\"false\" hidden>See more</button>" if description else "",
             "          <div class=\"sl-price-row\">",
             f"            <span class=\"sl-price-amount\" data-price-amount>{escape(format_money(amount, currency))}</span>",
             f"            <span class=\"sl-regular-price\">{escape(format_money(int(compare_at_unit_amount), currency))}</span>" if compare_at_unit_amount else "",
@@ -5734,6 +5742,54 @@ def render_copyright_text(value: str) -> str:
     if CURRENT_YEAR_TOKEN not in value:
         return escape(value)
     return "<span data-sl-current-year></span>".join(escape(part) for part in value.split(CURRENT_YEAR_TOKEN))
+
+
+def render_price_description_toggle_script(page: dict[str, Any]) -> str:
+    """"See more" on a clamped price description.
+
+    Gated on ACTUAL OVERFLOW, not on a media query. A toggle that appears whenever the viewport is narrow
+    would sit under short descriptions doing nothing, which teaches the buyer to ignore it; measuring
+    scrollHeight means it appears exactly where there is something hidden, at any width. It also
+    re-measures on resize, because rotating a phone changes the answer.
+
+    stopPropagation is load-bearing. Clicking anywhere on a price option selects that tier
+    (`card.addEventListener('click', () => selectCard(card))`), so without it, reading a description would
+    silently change what the buyer is about to purchase.
+    """
+    types = {str(section.get("type") or "") for section in (page.get("sections") or [])}
+    if not types & {"offer_price_selector", "listicle_tiers"}:
+        return ""
+    return "\n".join([
+        "  <script>",
+        "    (function () {",
+        "      try {",
+        "        var pairs = [];",
+        "        document.querySelectorAll('.sl-price-description').forEach(function (copy) {",
+        "          var btn = copy.parentNode && copy.parentNode.querySelector('.sl-price-more');",
+        "          if (!btn) return;",
+        "          pairs.push([copy, btn]);",
+        "          btn.addEventListener('click', function (ev) {",
+        # Without this the click bubbles to the card and selects the tier -- reading becomes buying.
+        "            ev.stopPropagation();",
+        "            ev.preventDefault();",
+        "            var open = copy.classList.toggle('is-expanded');",
+        "            btn.setAttribute('aria-expanded', open ? 'true' : 'false');",
+        "            btn.textContent = open ? 'See less' : 'See more';",
+        "          });",
+        "        });",
+        "        var sync = function () {",
+        "          pairs.forEach(function (pair) {",
+        "            var copy = pair[0], btn = pair[1];",
+        "            if (copy.classList.contains('is-expanded')) return;",
+        "            btn.hidden = copy.scrollHeight <= copy.clientHeight + 1;",
+        "          });",
+        "        };",
+        "        sync();",
+        "        var t; window.addEventListener('resize', function () { clearTimeout(t); t = setTimeout(sync, 150); });",
+        "      } catch (e) {}",
+        "    })();",
+        "  </script>",
+    ])
 
 
 def render_view_beacon(page: dict[str, Any], kind: str, api_base_url: str | None) -> str:

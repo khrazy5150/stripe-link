@@ -1344,3 +1344,42 @@ class PriceCardClampTests(unittest.TestCase):
                   / "src" / "stripe_link" / "runtime" / "html.py").read_text(encoding="utf-8")
         self.assertEqual(source.count('<strong title=\\"{label}\\">{label}</strong>'), 2)
         self.assertEqual(source.count('class=\\"sl-price-description\\" title=\\"{description}\\"'), 2)
+
+
+class PriceDescriptionToggleTests(unittest.TestCase):
+    """"See more" appears only where something is actually hidden.
+
+    A price description is what the buyer is CHOOSING ON, and the title= tooltip that rescues a clamped
+    link card does not exist on touch -- which is exactly where the clamp bites hardest, because the copy
+    column is narrowest there.
+    """
+
+    def _script(self, *types):
+        from stripe_link.runtime.html import render_price_description_toggle_script
+        return render_price_description_toggle_script({"sections": [{"type": t} for t in types]})
+
+    def test_it_ships_only_on_pages_that_have_price_cards(self):
+        self.assertNotEqual(self._script("offer_price_selector"), "")
+        self.assertEqual(self._script("hero", "link_cards"), "")
+
+    def test_the_toggle_is_gated_on_overflow_not_on_viewport(self):
+        # A button that appears whenever the viewport is narrow would sit under short descriptions doing
+        # nothing, which teaches the buyer to ignore it.
+        script = self._script("offer_price_selector")
+        self.assertIn("scrollHeight <= copy.clientHeight", script)
+
+    def test_reading_a_description_cannot_change_the_selected_tier(self):
+        # Clicking anywhere on a price option selects that tier, so without stopPropagation, expanding a
+        # description would silently change what the buyer is about to purchase.
+        script = self._script("offer_price_selector")
+        self.assertIn("ev.stopPropagation()", script)
+
+    def test_it_re_measures_when_the_viewport_changes(self):
+        # Rotating a phone changes whether the text overflows.
+        self.assertIn("resize", self._script("offer_price_selector"))
+
+    def test_both_emitters_carry_the_button(self):
+        import pathlib
+        source = (pathlib.Path(__file__).resolve().parents[1]
+                  / "src" / "stripe_link" / "runtime" / "html.py").read_text(encoding="utf-8")
+        self.assertEqual(source.count('class=\\"sl-price-more\\"'), 2)
