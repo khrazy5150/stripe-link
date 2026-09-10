@@ -205,3 +205,29 @@ class LinkCardGridTests(unittest.TestCase):
         self.assertTrue(media)
         self.assertIn("repeat(2,minmax(0,1fr))", media[0])
         self.assertIn(":nth-child(2n+1):last-child{grid-column:1/-1}", media[0])
+
+    def test_long_text_is_clamped_by_LINES_not_characters(self):
+        """The card is constrained in pixels, and the tenant picks the font.
+
+        A maxlength would be a proxy for the wrong thing: Comic Relief at 40 characters is a different
+        width from Lato at 40. Clamping is font-agnostic by construction -- a heavier face fits fewer
+        words into the same two lines and the card is identical either way.
+        """
+        styles = self._styles()
+        self.assertIn("-webkit-line-clamp:2", styles)   # headline
+        self.assertIn("-webkit-line-clamp:3", styles)   # description
+        # NOT single-line: a phone card is ~146px, so nowrap would cut a headline at ~16 characters.
+        self.assertNotIn("white-space:nowrap", styles)
+        # A pasted URL has no break opportunity, so clamping alone would still widen the card.
+        self.assertIn("overflow-wrap:anywhere", styles)
+
+    def test_clamping_never_costs_the_text(self):
+        # Visual only: the full string stays in the DOM and in title=, so a screen reader and a hover
+        # both still get it.
+        import stripe_link.runtime.html as html_mod
+        html_mod._RENDER_STATE["home_url"] = "https://shop.example.com/"
+        label = "My Amazon Storefront With A Very Long Name Indeed"
+        markup = html_mod.render_link_cards({"id": "lc", "items": [
+            {"url": "https://amazon.com/x", "label": label, "description": "Long note here"}]})
+        self.assertIn(f'title="{label}"', markup)
+        self.assertIn('title="Long note here"', markup)

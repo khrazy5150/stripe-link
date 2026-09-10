@@ -830,6 +830,19 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     "    .sl-social-row a{display:inline-block;min-height:44px;line-height:44px;padding:0 1.25rem;border:1px solid var(--sl-legal-link);border-radius:999px;color:var(--sl-legal-link);text-decoration:none}",
     "    .sl-social-row a:hover{text-decoration:underline}",
     "    .sl-link-card-note{margin:.25rem 0 0;font-size:.95rem;opacity:.8}",
+    # Clamp by LINES, not by character count. The card is constrained in pixels, and the tenant picks the
+    # font -- Comic Relief at 40 characters is a different width from Lato at 40, so a maxlength would be a
+    # proxy for the wrong thing. Clamping is font-agnostic by construction: a heavier face simply fits
+    # fewer words in the same two lines, and every card in the row stays the same height.
+    #
+    # NOT `white-space:nowrap` + `text-overflow:ellipsis`, which is one line always: a phone card is about
+    # 146px wide, so a single line holds ~16 characters and "My Amazon storefront" truncates to "My Amazon
+    # st...". Mobile is where effectively all of this traffic lands.
+    #
+    # Visual only -- the full text stays in the DOM and in the title attribute, so nothing is lost to a
+    # screen reader or to someone hovering. Same technique as the dashboard's ListCard.
+    "    .sl-link-cards .sl-catalog-title{display:-webkit-box;-webkit-line-clamp:2;line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere}",
+    "    .sl-link-cards .sl-link-card-note{display:-webkit-box;-webkit-line-clamp:3;line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere}",
     # Link cards get a FIXED three-column grid rather than catalog_grid's auto-fill. auto-fill packs from
     # the left, so a creator with one link had it stranded against the left edge with two columns of empty
     # space beside it. The rules below are about the LAST row, which is the only one that can be partial:
@@ -5137,8 +5150,9 @@ def render_link_cards(section: dict[str, Any]) -> str:
         description = str((item or {}).get("description") or "").strip()
         inner = "\n".join(line for line in [
             (f"        {responsive_img(image, label, sizes=CONTENT_BLOCK_SIZES)}" if image else ""),
-            f'        <h3 class="sl-catalog-title">{render_headline_markup(label)}</h3>',
-            (f'        <p class="sl-link-card-note">{escape(description)}</p>' if description else ""),
+            f'        <h3 class="sl-catalog-title" title="{escape(label)}">{render_headline_markup(label)}</h3>',
+            (f'        <p class="sl-link-card-note" title="{escape(description)}">{escape(description)}</p>'
+             if description else ""),
         ] if line)
         if on_custom_domain or linkable_on_platform_host(url):
             cards.append(
