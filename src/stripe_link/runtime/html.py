@@ -830,6 +830,17 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     "    .sl-social-row a{display:inline-block;min-height:44px;line-height:44px;padding:0 1.25rem;border:1px solid var(--sl-legal-link);border-radius:999px;color:var(--sl-legal-link);text-decoration:none}",
     "    .sl-social-row a:hover{text-decoration:underline}",
     "    .sl-link-card-note{margin:.25rem 0 0;font-size:.95rem;opacity:.8}",
+    # Link cards get a FIXED three-column grid rather than catalog_grid's auto-fill. auto-fill packs from
+    # the left, so a creator with one link had it stranded against the left edge with two columns of empty
+    # space beside it. The rules below are about the LAST row, which is the only one that can be partial:
+    #   a row of one  -> centre column, so it reads as deliberate rather than left over
+    #   a row of two  -> the outer columns, spread to the edges
+    # Written with nth-child(3n+1) so they apply to any trailing remainder, not just to pages with one or
+    # two cards total: four cards strand the fourth exactly the way one card stranded the first.
+    "    .sl-link-cards .sl-catalog-cards{grid-template-columns:repeat(3,minmax(0,1fr))}",
+    "    .sl-link-cards .sl-catalog-cards>:nth-child(3n+1):last-child{grid-column:2}",
+    "    .sl-link-cards .sl-catalog-cards>:nth-child(3n+1):nth-last-child(2){grid-column:1}",
+    "    .sl-link-cards .sl-catalog-cards>:nth-child(3n+1):nth-last-child(2)+*{grid-column:3}",
     "    .sl-seller-social a,.sl-seller-catalog a{color:var(--sl-legal-link);text-decoration:none;font-size:1.4rem}",
     "    .sl-seller-social a:hover,.sl-seller-catalog a:hover{text-decoration:underline}",
     "    .sl-seller-hours{list-style:none;padding:0;margin:0;font-size:1.4rem;color:var(--sl-content-text)}",
@@ -921,7 +932,7 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     "    .sl-footernav ul{list-style:none;display:flex;flex-wrap:wrap;justify-content:center;gap:1.4rem;padding:0;margin:0}",
     "    .sl-footernav a{color:var(--sl-legal-link);text-decoration:none;font-size:1.3rem}",
     "    .sl-footernav a:hover{text-decoration:underline}",
-    "    @media (max-width: 700px){.sl-price-option{grid-template-columns:8.8rem minmax(0,1fr) 2.4rem;gap:1rem;padding:1.2rem}.sl-price-option img{width:8.8rem}.sl-content-block{grid-template-columns:1fr}.sl-headline h1{font-size:3rem}.sl-testimonial{grid-template-columns:1fr;padding:1.8rem 1.6rem 1.8rem 3.8rem}.sl-testimonial img{width:5.6rem;height:5.6rem;order:-1}.sl-testimonial blockquote{font-size:1.6rem}.sl-quote-fancy .sl-quote-photo{align-self:auto;min-height:0;height:20rem}.sl-quote-fancy .sl-quote-photo img{position:static;transform:none;height:100%}.sl-page-ribbon{padding:2rem;gap:1.4rem}.sl-page-ribbon.is-image_left,.sl-page-ribbon.is-compact{grid-template-columns:minmax(0,1fr)}.sl-page-ribbon .sl-ribbon-media:not(.sl-cropped) img{max-height:22rem;object-fit:cover}.sl-ribbon-cta{justify-self:stretch;text-align:center;justify-content:center}}",
+    "    @media (max-width: 700px){.sl-price-option{grid-template-columns:8.8rem minmax(0,1fr) 2.4rem;gap:1rem;padding:1.2rem}.sl-price-option img{width:8.8rem}.sl-content-block{grid-template-columns:1fr}.sl-headline h1{font-size:3rem}.sl-testimonial{grid-template-columns:1fr;padding:1.8rem 1.6rem 1.8rem 3.8rem}.sl-testimonial img{width:5.6rem;height:5.6rem;order:-1}.sl-testimonial blockquote{font-size:1.6rem}.sl-quote-fancy .sl-quote-photo{align-self:auto;min-height:0;height:20rem}.sl-quote-fancy .sl-quote-photo img{position:static;transform:none;height:100%}.sl-page-ribbon{padding:2rem;gap:1.4rem}.sl-page-ribbon.is-image_left,.sl-page-ribbon.is-compact{grid-template-columns:minmax(0,1fr)}.sl-page-ribbon .sl-ribbon-media:not(.sl-cropped) img{max-height:22rem;object-fit:cover}.sl-ribbon-cta{justify-self:stretch;text-align:center;justify-content:center}.sl-link-cards .sl-catalog-cards{grid-template-columns:repeat(2,minmax(0,1fr))}.sl-link-cards .sl-catalog-cards>:nth-child(3n+1):last-child,.sl-link-cards .sl-catalog-cards>:nth-child(3n+1):nth-last-child(2),.sl-link-cards .sl-catalog-cards>:nth-child(3n+1):nth-last-child(2)+*{grid-column:auto}.sl-link-cards .sl-catalog-cards>:nth-child(2n+1):last-child{grid-column:1/-1}}",
 ]
 
 TEMPLATE_STYLES = {

@@ -166,3 +166,42 @@ class LinkCardsElementTests(unittest.TestCase):
             {"label": "No destination"},                  # no url
         ]})
         self.assertEqual(markup, "")
+
+
+class LinkCardGridTests(unittest.TestCase):
+    """A partial last row must look deliberate, not left over.
+
+    catalog_grid uses auto-fill, which packs from the left -- so a creator with ONE link had it pinned
+    against the left edge with two columns of dead space beside it. Reported 2026-09-10.
+
+    The rules are written on nth-child(3n+1) rather than on the total count, because the same complaint
+    reappears at four cards: the fourth strands exactly the way the first did.
+    """
+
+    def _styles(self) -> str:
+        import re
+        source = (pathlib.Path(__file__).resolve().parents[1]
+                  / "src" / "stripe_link" / "runtime" / "html.py").read_text(encoding="utf-8")
+        return "\n".join(re.findall(r'"(\s*\.sl-link-cards[^"]*)"', source))
+
+    def test_link_cards_do_not_inherit_the_auto_fill_grid(self):
+        self.assertIn("grid-template-columns:repeat(3,minmax(0,1fr))", self._styles())
+
+    def test_a_lone_card_in_a_row_is_centred(self):
+        # Applies to one card, and to the fourth of four, and the seventh of seven.
+        self.assertIn(":nth-child(3n+1):last-child{grid-column:2}", self._styles())
+
+    def test_a_pair_in_a_row_spreads_to_the_outer_columns(self):
+        styles = self._styles()
+        self.assertIn(":nth-child(3n+1):nth-last-child(2){grid-column:1}", styles)
+        self.assertIn(":nth-child(3n+1):nth-last-child(2)+*{grid-column:3}", styles)
+
+    def test_the_phone_layout_is_two_columns_with_a_full_width_orphan(self):
+        # Effectively all of this traffic is a thumb arriving from an app's bio field, so the phone case
+        # is the one that matters most -- and three columns of cards on a phone is unreadable.
+        source = (pathlib.Path(__file__).resolve().parents[1]
+                  / "src" / "stripe_link" / "runtime" / "html.py").read_text(encoding="utf-8")
+        media = [line for line in source.split("\n") if "max-width: 700px" in line]
+        self.assertTrue(media)
+        self.assertIn("repeat(2,minmax(0,1fr))", media[0])
+        self.assertIn(":nth-child(2n+1):last-child{grid-column:1/-1}", media[0])
