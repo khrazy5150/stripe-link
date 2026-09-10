@@ -490,6 +490,10 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     # The ring is a solid disc (border colour, or a gradient) — never transparent padding, which would reveal
     # the page background and read as an uneven border where the avatar overhangs onto the page.
     "    .sl-avatar-wrap{position:absolute;bottom:-5.8rem;left:2.4rem;z-index:10;width:12.3rem;height:12.3rem;border-radius:50%;padding:0.4rem;background:var(--sl-avatar-ring,var(--sl-avatar-border,#ffffff));box-shadow:0 0.4rem 1.2rem rgba(0,0,0,.15)}",
+    # Placement variants. The base rule above IS the overlay, so `overlay` needs no override and a page
+    # saved before this existed keeps rendering exactly as it did.
+    "    .sl-avatar-wrap.sl-avatar--inline,.sl-avatar-wrap.sl-avatar--centered{position:static;bottom:auto;left:auto;margin-top:1.6rem}",
+    "    .sl-avatar-wrap.sl-avatar--centered{margin-left:auto;margin-right:auto}",
     "    .sl-avatar{width:100%;height:100%;border-radius:50%;object-fit:cover;background:var(--sl-hero-bg);display:block}",
     "    .sl-trust-badges{display:flex;flex-wrap:wrap;gap:0.8rem;justify-content:center}",
     "    .sl-trust-badge{display:flex;align-items:center;gap:0.6rem;border:1px solid var(--sl-trust-badge-border);background:var(--sl-trust-badge-bg);color:var(--sl-trust-badge-text);border-radius:999px;padding:0.8rem 1.4rem;font-family:var(--sl-font-accent);font-size:1.2rem;font-weight:800}",
@@ -2172,6 +2176,24 @@ def first_offer_product(offer: dict[str, Any], products_by_id: dict[str, dict[st
     return {}
 
 
+AVATAR_PLACEMENTS = ("overlay", "inline", "centered")
+
+
+def avatar_placement(section: dict[str, Any]) -> str:
+    """Where the avatar sits relative to the hero image.
+
+    `overlay` is the default and the pre-2026-09-10 behaviour: circular, overlapping the hero's bottom-left,
+    the shape a link-in-bio page uses. `inline` drops it below the hero in the normal flow (the eddieabbew
+    reference), and `centered` is inline but horizontally centred, which is what a page with no cover image
+    wants -- an overlay avatar hanging off nothing looks like a mistake.
+
+    Unknown values fall back to `overlay` rather than rendering an unstyled div, so a hand-edited document
+    degrades to the old behaviour instead of a broken page.
+    """
+    value = str((section or {}).get("avatar_placement") or "").strip().lower()
+    return value if value in AVATAR_PLACEMENTS else "overlay"
+
+
 def first_offer_lead_capture(offer: dict[str, Any], products_by_id: dict[str, dict[str, Any]]) -> dict[str, Any]:
     """The lead_capture block of the offer's primary lead-gen product — drives the inline form fields."""
     for item in stage_opportunities(offer, STAGE_LANDING):
@@ -2360,7 +2382,8 @@ def render_hero_overlays(section: dict[str, Any], offer: dict[str, Any]) -> list
         # The avatar carries brand identity, so it's a content image — name it (brand text, else the offer).
         avatar_alt = escape(str(section.get("brand_text") or offer_brand_fallback(offer) or "Brand avatar"))
         lines.append(
-            f"      <div class=\"sl-avatar-wrap\"><img class=\"sl-avatar\" src=\"{escape(avatar_url)}\" "
+            f"      <div class=\"sl-avatar-wrap sl-avatar--{avatar_placement(section)}\">"
+            f"<img class=\"sl-avatar\" src=\"{escape(avatar_url)}\" "
             f"alt=\"{avatar_alt}\" loading=\"lazy\" decoding=\"async\"></div>"
         )
     return lines
@@ -2421,7 +2444,10 @@ def render_hero_media(
     section_id = escape(str(section.get("id", "hero-media")))
     autoplay = bool(section.get("autoplay"))
     overlays = render_hero_overlays(section, offer)
-    media_class = "sl-hero-media" + (" has-avatar" if section.get("avatar_url") else "")
+    # has-avatar reserves the space the overlay OVERHANGS into. An inline or centred avatar sits in normal
+    # flow and needs no reserved gap -- keeping it would leave a hole under the hero.
+    media_class = "sl-hero-media" + (
+        " has-avatar" if section.get("avatar_url") and avatar_placement(section) == "overlay" else "")
     slides = [
         f"        <div class=\"sl-hero-slide\">"
         f"{render_media_slide(url, alt, autoplay=autoplay, eager=(index == 0), poster=posters.get(url, ''))}</div>"

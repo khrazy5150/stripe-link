@@ -534,6 +534,15 @@
                     <button v-if="builder.avatar_url" class="secondary-action compact" type="button" @click="builder.avatar_url = ''">Remove</button>
                   </div>
                   <small v-if="avatarUploadError" class="builder-upload-error">{{ avatarUploadError }}</small>
+                  <label v-if="builder.avatar_url" class="offer-field">
+                    <span>Avatar placement</span>
+                    <select v-model="builder.avatar_placement">
+                      <option value="overlay">Overlapping the hero image</option>
+                      <option value="inline">Below the hero, left</option>
+                      <option value="centered">Below the hero, centered</option>
+                    </select>
+                    <small class="field-note">Overlapping suits a page with a cover image. Without one, choose a position below the hero — an overlapping avatar with nothing behind it reads as a mistake.</small>
+                  </label>
                 </label>
 
                 <label class="builder-switch-row">
@@ -3000,6 +3009,7 @@ function defaultBuilderForm() {
     },
     // Socialite hero overlays (plans/SOCIALITE_PARITY.md).
     avatar_url: "",
+    avatar_placement: "overlay",
     brand_overlay: false,
     brand_position: "top-right",
     // Advanced Color Settings (plans/ADVANCED_COLOR_SETTINGS.md): per-token overrides on top of the preset
@@ -3808,6 +3818,7 @@ function populateBuilderFromPage(page) {
     hero_media_text: (heroMedia.images || [page.seo?.image || pageImage(page)].filter(Boolean)).join("\n"),
     autoplay: Boolean(heroMedia.autoplay),
     avatar_url: heroMedia.avatar_url || "",
+    avatar_placement: heroMedia.avatar_placement || "overlay",
     brand_overlay: Boolean(heroMedia.brand_overlay),
     brand_position: heroMedia.brand_position || "top-right",
     cta_label: cta.label || (offerIntentLabel(offer) === "Lead generation" ? "Continue" : "Buy Now"),
@@ -4100,6 +4111,7 @@ function builderSectionCandidates(intent) {
     images: heroMediaList.value,
     autoplay: Boolean(builder.autoplay),
     avatar_url: builder.avatar_url || "",
+    avatar_placement: builder.avatar_url ? (builder.avatar_placement || "overlay") : undefined,
     brand_overlay: Boolean(builder.brand_overlay),
     brand_position: builder.brand_position || "top-right",
     brand_text: builder.brand_overlay ? brandText : "",

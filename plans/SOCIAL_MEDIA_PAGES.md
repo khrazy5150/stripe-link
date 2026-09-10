@@ -245,7 +245,18 @@ that gates behaviour with nothing producing it. See the audit item in `TODO.md`.
   references 2026-09-10: it renders TEXT LABELS ("GitHub", "Instagram"), and these pages use platform
   ICONS** — a YouTube link should produce a clickable YouTube glyph. Needs an icon variant; the dashboard's
   existing icon-picker is the place to borrow the set from.
-- **`profile_avatar`** — already specified in `SOCIALITE_PARITY.md`; build there, reuse here.
+- **`profile_avatar`** — **mostly ALREADY BUILT, found 2026-09-10.** `render_hero_media` has read
+  `section.avatar_url` and emitted `.sl-avatar-wrap` since the hero work, pinned bottom-left over the hero,
+  and the builder already uploads/replaces/removes it. `SOCIALITE_PARITY.md` Deliverable 2 says "lift the
+  `.sl-avatar-wrap` CSS" — it is already lifted. What was missing was a CHOICE of position, now added as
+  `hero_media.avatar_placement`: `overlay` (default, unchanged), `inline`, `centered`. It is a field on
+  `hero_media` rather than its own element, which settles that plan's open decision — the avatar needs the
+  hero as a positioning context, so splitting them would mean an element that cannot render without its
+  neighbour.
+- **STILL MISSING: "use the tenant's saved image".** `user_profile.profile_images` is validated (max 10) and
+  written by NOTHING — no handler, no UI. So there is no saved image to choose from yet; upload is the only
+  path. Fourth field found this session that is read or validated with no producer (`same_as[].verified`,
+  `analytics_summary`, `profile_images`, and the CSS-only `platform` on `social_redirect`).
 - **`link_cards`** — DECIDED, see §8a. `catalog_grid` does NOT cover the external case.
 
 ## 8a. GAP: `catalog_grid` cards are internal-only, by design
