@@ -1330,6 +1330,12 @@ Resources:
             RestApiId: !Ref RestApi
             Path: /sites/{site_id}/domain/check
             Method: POST
+        SitesCheckSocial:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /sites/{site_id}/social/check
+            Method: POST
         SitesDisconnectDomain:
           Type: Api
           Properties:
