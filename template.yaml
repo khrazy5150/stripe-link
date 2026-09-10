@@ -237,6 +237,7 @@ Globals:
         PLATFORM_SERVING_ENABLED: !Ref PlatformServingEnabled
         CHECKOUT_SESSIONS_TABLE: !Ref CheckoutSessionsTable
         ORDERS_TABLE: !Ref OrdersTable
+        PAGE_VIEWS_TABLE: !Ref PageViewsTable
         REFUNDS_TABLE: !Ref RefundsTable
         LEDGER_TABLE: !Ref LedgerTable
         WEBHOOK_EVENTS_TABLE: !Ref WebhookEventsTable
@@ -1445,6 +1446,35 @@ Resources:
             Path: /coupons/{coupon_id}
             Method: OPTIONS
 
+  # Public, unauthenticated: it is called by an anonymous visitor from a published page. Always answers
+  # 204 with no body, so it cannot report whether a page exists or whether a view was counted.
+  PageViewFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/
+      Handler: handlers.page_view.handler
+      Description: Counts unique daily visitors per published page, from a sendBeacon call.
+      Environment:
+        Variables:
+          # Mixed into the visitor hash so an IP+user-agent digest is not a stable, testable identifier.
+          PAGE_VIEW_SALT: !Sub "${ProjectPrefix}-${Environment}-pv"
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref PageViewsTable
+      Events:
+        TrackView:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /t/view
+            Method: POST
+        TrackViewGet:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /t/view
+            Method: GET
+
   PagesFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -1463,6 +1493,8 @@ Resources:
         # writes an order.
         - DynamoDBReadPolicy:
             TableName: !Ref OrdersTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref PageViewsTable
       Events:
         PagesList:
           Type: Api
@@ -3714,6 +3746,31 @@ Resources:
               KeyType: RANGE
           Projection:
             ProjectionType: ALL
+
+  # Page views live here and NOT on PagesTable: any MODIFY there fires the publish stream, so counting a
+  # view on the page document would re-render and re-upload the artifact for every visitor, and the
+  # per-visitor dedupe rows would be handed to the publisher as though they were pages.
+  PageViewsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "${ProjectPrefix}-page-views-${Environment}"
+      BillingMode: PAY_PER_REQUEST
+      SSESpecification:
+        SSEEnabled: true
+      # The per-visitor dedupe rows expire; the per-page totals carry no ttl and are kept.
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
+      AttributeDefinitions:
+        - AttributeName: PK
+          AttributeType: S
+        - AttributeName: SK
+          AttributeType: S
+      KeySchema:
+        - AttributeName: PK
+          KeyType: HASH
+        - AttributeName: SK
+          KeyType: RANGE
 
   CollectionsTable:
     Type: AWS::DynamoDB::Table

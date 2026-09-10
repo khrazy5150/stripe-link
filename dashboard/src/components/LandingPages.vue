@@ -110,8 +110,10 @@
 
               <div class="landing-page-meta">
                 <span><strong>{{ itemCount(page) }}</strong> item(s)</span>
-                <!-- Views are NOT shown: nothing measures them, and a confident "0 views" is a claim about
-                     traffic we never counted. Conversions and revenue are derived from paid orders. -->
+                <!-- Views appear only when the rail has actually measured this page: the tracker exists in
+                     the PUBLISHED artifact alone, so an unpublished page has no number rather than a zero
+                     standing in for traffic nobody counted. -->
+                <span v-if="page.analytics_summary?.views !== undefined"><strong>{{ Number(page.analytics_summary.views) }}</strong> views</span>
                 <span><strong>{{ Number(page.analytics_summary?.conversions || 0) }}</strong> conversions</span>
                 <strong>{{ formatMoney(page.analytics_summary?.revenue_cents || 0) }}</strong>
                 <span>revenue</span>

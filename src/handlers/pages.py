@@ -4,7 +4,10 @@ from stripe_link.common import error_response, json_response, parse_json_body, p
 from stripe_link.domain.documents import DocumentValidationError, validate_page_document
 from stripe_link.entitlement_gate import require_capability
 from stripe_link.ids import generate_short_url_code
+import os
+
 from stripe_link.domain.page_analytics import attach_summaries
+from stripe_link.repositories.page_views import page_views_repository
 from stripe_link.repositories.documents import RepositoryError, orders_repository, pages_repository
 
 
@@ -128,7 +131,7 @@ def get_page(event, repository, page_id: str):
     return json_response({"page": page})
 
 
-def list_pages(event, repository, orders_repo=None, mode="test"):
+def list_pages(event, repository, orders_repo=None, views_repo=None, mode="test"):
     tenant_id = str(query_params(event).get("tenant_id") or "").strip() or tenant_id_from_event(event)
     if not tenant_id:
         return error_response("tenant_id is required.", code="missing_tenant")
@@ -139,7 +142,11 @@ def list_pages(event, repository, orders_repo=None, mode="test"):
     # unreadable, and pages without numbers are exactly what the cards showed before.
     try:
         orders = (orders_repo or orders_repository(mode=mode)).list_for_tenant(tenant_id)
-        attach_summaries(pages, orders)
+        views = {}
+        if os.environ.get("PAGE_VIEWS_TABLE"):
+            views = (views_repo or page_views_repository()).totals_for_pages(
+                [str(p.get("page_id") or "") for p in pages if p.get("page_id")])
+        attach_summaries(pages, orders, views)
     except Exception as exc:  # noqa: BLE001 - analytics are decoration on a listing, never its failure mode
         # Logged, not swallowed silently. A missing IAM grant fails exactly like "this tenant has no
         # orders", and an invisible AccessDenied is how the favicon bug survived a deploy.

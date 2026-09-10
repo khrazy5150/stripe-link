@@ -1135,12 +1135,12 @@ def publish_page_document(
             tenant_preferences, s3_client, os.environ.get("FONTS_BUCKET", ""),
         )
 
-    def _render(robots: str) -> str:
+    def _render(robots: str, kind: str = "") -> str:
         return render_page(
             page, offer, products_by_id, checkout_url=checkout, api_base_url=api_base_url,
             services_by_id=services_by_id, offers_by_id=offers_by_id, canonical_url=page_canonical,
             robots=robots, site=site, page_type=page_type, reviews=page_reviews, home_url=page_home_url,
-            bnpl_messaging=bnpl_messaging, preferences=tenant_preferences,
+            bnpl_messaging=bnpl_messaging, preferences=tenant_preferences, kind=kind,
         )
 
     artifacts = []
@@ -1155,7 +1155,7 @@ def publish_page_document(
         # (plans/STRIPE_MODE_DECOUPLING.md P5). Live pages are unaffected.
         if page_mode == "test":
             robots = NOINDEX_ROBOTS
-        html = _render(robots)
+        html = _render(robots, target["kind"])
         # Thin-content gate (SEO-08): an otherwise-indexable page with too little unique body text is demoted
         # to noindex,follow so a doorway-thin page can't drag the whole Site's ranking down. Body text is
         # robots-invariant, so measure once and re-render only the rare indexable+thin artifact.
@@ -1164,7 +1164,7 @@ def publish_page_document(
                 indexable_words = indexable_word_count(html)
             if indexable_words < THIN_CONTENT_MIN_WORDS:
                 robots = NOINDEX_FOLLOW_ROBOTS
-                html = _render(robots)
+                html = _render(robots, target["kind"])
         s3_client.put_object(
             Bucket=target["bucket"],
             Key=target["key"],

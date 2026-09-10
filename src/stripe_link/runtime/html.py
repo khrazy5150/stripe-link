@@ -1606,6 +1606,7 @@ def render_page(
     home_url: str | None = None,
     bnpl_messaging: dict[str, Any] | None = None,
     preferences: dict[str, Any] | None = None,
+    kind: str = "",
 ) -> str:
     services_by_id = services_by_id or {}
     offers_by_id = offers_by_id or {str(offer.get("offer_id") or ""): offer}
@@ -1693,7 +1694,7 @@ def render_page(
     try:
         return _render_page_body(
             page, offer, products_by_id, selected_prices, checkout_url, api_base_url,
-            services_by_id, offers_by_id,
+            services_by_id, offers_by_id, kind,
         )
     finally:
         _RENDER_DIMS_INDEX.clear()
@@ -1743,6 +1744,7 @@ def _render_page_body(
     api_base_url: str | None,
     services_by_id: dict[str, dict[str, Any]],
     offers_by_id: dict[str, dict[str, Any]],
+    kind: str = "",
 ) -> str:
     # Resolve against the prices this PAGE shows. The offer's default_price_id may point at an upsell /
     # downsell / order-bump price, which belongs to the post-checkout flow — letting it through made the CTA
@@ -1851,6 +1853,7 @@ def _render_page_body(
         render_price_context_script(),
         conversion_data,
         *render_bnpl_messaging_scripts(),
+        render_view_beacon(page, kind, api_base_url),
         "</body>",
         "</html>",
     ] if part != "")
@@ -5696,6 +5699,42 @@ def render_copyright_text(value: str) -> str:
     if CURRENT_YEAR_TOKEN not in value:
         return escape(value)
     return "<span data-sl-current-year></span>".join(escape(part) for part in value.split(CURRENT_YEAR_TOKEN))
+
+
+def render_view_beacon(page: dict[str, Any], kind: str, api_base_url: str | None) -> str:
+    """Count this view, on the PUBLISHED artifact only.
+
+    The gate is the artifact kind, not a runtime check, so preview and test artifacts do not merely skip
+    counting -- the script is not in them. A tenant editing their own page all afternoon cannot inflate
+    their own numbers, because the page they are looking at has no tracker in it.
+
+    Deliberately minimal: no cookie, no third-party script, no identifier we did not already have. The
+    first-party id is a random token in localStorage that survives a changed IP; when storage is
+    unavailable the endpoint falls back to a salted hash of IP + user-agent, which dedupes for the day and
+    cannot be correlated beyond it. Anything richer than "how many people looked at this" is what the GA4
+    and Meta adapters above are for.
+    """
+    if kind != "published":
+        return ""
+    page_id = str((page or {}).get("page_id") or "")
+    if not page_id:
+        return ""
+    base = str(api_base_url or "").rstrip("/")
+    if not base:
+        return ""
+    return (
+        "  <script>\n"
+        "    (function () {\n"
+        "      try {\n"
+        "        var k = 'sl_vid', v = '';\n"
+        "        try { v = localStorage.getItem(k) || ''; if (!v) { v = (Math.random().toString(36).slice(2) + Date.now().toString(36)); localStorage.setItem(k, v); } } catch (e) { v = ''; }\n"
+        f"        var u = {json.dumps(base)} + '/t/view?p=' + encodeURIComponent({json.dumps(page_id)}) + (v ? '&v=' + encodeURIComponent(v) : '');\n"
+        "        if (navigator.sendBeacon) { navigator.sendBeacon(u); }\n"
+        "        else { var i = new Image(); i.src = u; }\n"
+        "      } catch (e) {}\n"
+        "    })();\n"
+        "  </script>"
+    )
 
 
 def render_analytics_tags(analytics: dict[str, Any]) -> str:

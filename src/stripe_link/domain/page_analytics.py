@@ -41,7 +41,8 @@ def summarize_by_page(orders: Any) -> dict[str, dict[str, int]]:
     return summary
 
 
-def attach_summaries(pages: list[dict[str, Any]], orders: Any) -> list[dict[str, Any]]:
+def attach_summaries(pages: list[dict[str, Any]], orders: Any,
+                     views_by_page: dict[str, int] | None = None) -> list[dict[str, Any]]:
     """Give each page its derived analytics_summary.
 
     Written for every page, including pages with no orders, so the UI can distinguish "measured, zero
@@ -51,6 +52,12 @@ def attach_summaries(pages: list[dict[str, Any]], orders: Any) -> list[dict[str,
     for page in pages or []:
         if not isinstance(page, dict):
             continue
-        derived = summary.get(str(page.get("page_id") or ""), {"conversions": 0, "revenue_cents": 0})
-        page["analytics_summary"] = dict(derived)
+        page_id = str(page.get("page_id") or "")
+        derived = dict(summary.get(page_id, {"conversions": 0, "revenue_cents": 0}))
+        # Views are present ONLY when the rail has actually seen this page. A page that has never been
+        # published has no tracker in its artifact, so an absent key means "not measured" -- which the UI
+        # must be able to tell apart from "measured, nobody came".
+        if views_by_page and page_id in views_by_page:
+            derived["views"] = int(views_by_page[page_id])
+        page["analytics_summary"] = derived
     return pages
