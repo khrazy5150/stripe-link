@@ -4629,12 +4629,18 @@ function appendBlankItem(element) {
   list.push({ ...blank });
 }
 
-function removeElement(id) {
+async function removeElement(id) {
   const index = builder.elements.findIndex((element) => element.id === id);
-  if (index >= 0) builder.elements.splice(index, 1);
+  if (index < 0) return;
+  builder.elements.splice(index, 1);
   delete blurbImageUploading[id];
   delete blurbImageErrors[id];
   delete blurbImageInputs.value[id];
+  // Persist at once, like a section editor's Done and Page Settings' close. Reported 2026-09-09: a removed
+  // section reappeared, because Remove only mutated the local array. The row vanishing from the panel reads
+  // as "done" -- there is no visible difference between removed-and-saved and removed-and-not -- so the
+  // tenant has no way to tell the change is still pending until it is lost.
+  await autoSavePage();
 }
 
 function addSubItem(element, key, item) {
