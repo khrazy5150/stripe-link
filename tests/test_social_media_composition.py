@@ -110,3 +110,59 @@ class SocialLinksElementTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class LinkCardsElementTests(unittest.TestCase):
+    """External destinations, and the §7 trust boundary that governs them.
+
+    Kept separate from catalog_grid deliberately: catalog_grid's links must be FOLLOWABLE (it exists to
+    build the crawlable subfolder hierarchy), these must be nofollow ugc. One element holding both would
+    be a conditional someone eventually inverts without knowing why it was there.
+    """
+
+    SECTION = {"id": "lc", "items": [
+        {"url": "https://github.com/acme", "label": "Our code"},
+        {"url": "https://www.amazon.com/shops/acme", "label": "Amazon storefront"},
+    ]}
+
+    def _render(self, *, on_custom_domain):
+        html_module._RENDER_STATE["home_url"] = "https://shop.example.com/" if on_custom_domain else ""
+        return html_module.render_link_cards(self.SECTION)
+
+    def test_any_destination_is_linkable_on_the_tenants_own_domain(self):
+        markup = self._render(on_custom_domain=True)
+        self.assertEqual(markup.count('rel="nofollow ugc noopener"'), 2)
+        self.assertIn("amazon.com/shops/acme", markup)
+
+    def test_a_shared_platform_host_only_links_allowlisted_destinations(self):
+        # The reason is the URL bar, not SEO: noindex does nothing about a human tapping a phishing link
+        # on scammer.jbay.uk, which is a blocklist problem for OUR domain and every tenant on it.
+        markup = self._render(on_custom_domain=False)
+        self.assertEqual(markup.count('rel="nofollow ugc noopener"'), 1)
+        self.assertIn('href="https://github.com/acme"', markup)
+        self.assertNotIn('href="https://www.amazon.com/shops/acme"', markup)
+
+    def test_a_blocked_destination_is_shown_unlinked_rather_than_dropped(self):
+        # A card that silently vanishes tells the tenant nothing about why.
+        markup = self._render(on_custom_domain=False)
+        self.assertIn("Amazon Storefront", markup)
+        self.assertIn('<div class="sl-catalog-card sl-link-card">', markup)
+
+    def test_links_are_never_followable(self):
+        for on_domain in (True, False):
+            markup = self._render(on_custom_domain=on_domain)
+            self.assertNotIn('rel="noopener"', markup.replace('rel="nofollow ugc noopener"', ""))
+
+    def test_the_element_cannot_convert(self):
+        # No offer_id, no price, no resolve_offer -- it is visitor navigation, not catalog.
+        markup = self._render(on_custom_domain=True)
+        for forbidden in ("checkout", "sl-catalog-price", "data-offer-id", "add-to-cart"):
+            self.assertNotIn(forbidden, markup)
+
+    def test_incomplete_items_are_skipped(self):
+        html_module._RENDER_STATE["home_url"] = "https://shop.example.com/"
+        markup = html_module.render_link_cards({"id": "lc", "items": [
+            {"url": "https://github.com/acme"},          # no label
+            {"label": "No destination"},                  # no url
+        ]})
+        self.assertEqual(markup, "")

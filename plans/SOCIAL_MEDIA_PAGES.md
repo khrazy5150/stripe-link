@@ -424,9 +424,20 @@ of its own — sold-through products do, "here is my TikTok" does not.
      `first_offer_product` → `{}`), so nothing else had to change.
    - The Vue composer imports the same `composition_rules.json`, so preview and published agree by
      construction rather than by discipline.
-   - **STILL TO DO in this phase:** the `link_cards` element (§8a) for arbitrary EXTERNAL destinations.
-     Without it the page can show identity, social links and the tenant's own internal offers, but not
-     "here is my Amazon storefront". `profile_avatar` also remains, and belongs to `SOCIALITE_PARITY.md`.
+   - `link_cards` element SHIPPED 2026-09-09, to §8a's spec: `{url, label, image?, description?}`, no
+     `offer_id`, no price, no `resolve_offer`, repeatable, `rel="nofollow ugc noopener"` always. §7 is
+     enforced at render: on the tenant's own custom domain any destination is linkable (the reputation at
+     stake is theirs); on shared platform infrastructure only `PLATFORM_LINKABLE_HOSTS` become anchors and
+     everything else renders as an unlinked tile — mirroring what `catalog_grid` already does for a card it
+     cannot resolve a host for. Unlinked rather than DROPPED, because a card that silently vanishes tells
+     the tenant nothing.
+   - **`PLATFORM_LINKABLE_HOSTS` is deliberately conservative** — currently just the identity hosts. A real
+     creator page wants Amazon, Etsy, Substack, Patreon. Widening it is a P3 decision that should come with
+     an abuse story, and the safe direction to be wrong in is "too few links work on the free host", not
+     "we shipped an open redirect surface on a shared domain".
+   - **STILL TO DO in this phase:** `profile_avatar`, which belongs to `SOCIALITE_PARITY.md`. The builder UI
+     for adding/ordering `link_cards` items is also not built — the element renders, but nothing in the
+     dashboard creates one yet.
 4. **P3 — override + publish gate** (`source` flag, `on_custom_domain` check).
 5. **P4 — per-link analytics.**
 

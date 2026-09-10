@@ -318,3 +318,24 @@ def verify_entry(entry: dict, backlink_host: str, now: int, fetcher=fetch_profil
     if backlink_present(html, backlink_host):
         return {"state": VERIFIED, "method": "url_presence", "checked_at": now}
     return {"state": FAILED, "method": "url_presence", "checked_at": now}
+
+# ---------------------------------------------------------------------------------------------------
+# link_cards — arbitrary EXTERNAL destinations (plans/SOCIAL_MEDIA_PAGES.md §8a)
+# ---------------------------------------------------------------------------------------------------
+
+# Which hosts may be LINKED from a page served on platform infrastructure.
+#
+# The reason is the URL bar, not SEO. `noindex` protects our search reputation; it does nothing about a
+# human tapping a phishing link on scammer.jbay.uk, which is a browser-blocklist and registrar-abuse
+# problem for OUR domain and every tenant sharing it. On the tenant's own custom domain the reputation at
+# stake is theirs, so any destination is allowed there.
+#
+# Deliberately conservative to start: the same identity hosts, nothing more. A creator page wants Amazon,
+# Etsy, Substack, Patreon and a hundred others, so this list is NOT the long-term answer -- but the safe
+# direction to be wrong in is "too few links work on the free host", not "we shipped an open redirect
+# surface on a shared domain". Widening it is a P3 decision that should come with an abuse story.
+PLATFORM_LINKABLE_HOSTS = SAME_AS_HOSTS
+
+
+def linkable_on_platform_host(url: Any) -> bool:
+    return host_matches(same_as_host(url), PLATFORM_LINKABLE_HOSTS)

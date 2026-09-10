@@ -14,6 +14,7 @@ from stripe_link.domain.composition import compose_page, element_channel
 from stripe_link.domain.connect_sync import site_seo_enabled
 from stripe_link.domain.documents import PRODUCT_CONDITIONS
 from stripe_link.domain.social_links import display_entries as display_social_entries
+from stripe_link.domain.social_links import linkable_on_platform_host
 from stripe_link.domain.social_links import network_label
 from stripe_link.domain.social_links import verified_urls as verified_same_as_urls
 from stripe_link.domain.opportunities import STAGE_LANDING, STAGE_POST_PURCHASE, derived_offer_type, stage_opportunities
@@ -828,6 +829,7 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     "    .sl-social-row{list-style:none;display:flex;flex-wrap:wrap;justify-content:center;gap:.75rem;padding:0;margin:0}",
     "    .sl-social-row a{display:inline-block;min-height:44px;line-height:44px;padding:0 1.25rem;border:1px solid var(--sl-legal-link);border-radius:999px;color:var(--sl-legal-link);text-decoration:none}",
     "    .sl-social-row a:hover{text-decoration:underline}",
+    "    .sl-link-card-note{margin:.25rem 0 0;font-size:.95rem;opacity:.8}",
     "    .sl-seller-social a,.sl-seller-catalog a{color:var(--sl-legal-link);text-decoration:none;font-size:1.4rem}",
     "    .sl-seller-social a:hover,.sl-seller-catalog a:hover{text-decoration:underline}",
     "    .sl-seller-hours{list-style:none;padding:0;margin:0;font-size:1.4rem;color:var(--sl-content-text)}",
@@ -2068,6 +2070,7 @@ SECTION_REGISTRY: dict[str, dict[str, Any]] = {
     "related_products": {"render": lambda c: render_catalog_grid(c.section, c.offers_by_id, c.products_by_id, c.services_by_id), "version": 1},
     "seller_profile": {"render": lambda c: render_seller_profile(c.section), "version": 1},
     "social_links": {"render": lambda c: render_social_links(c.section), "version": 1},
+    "link_cards": {"render": lambda c: render_link_cards(c.section), "version": 1},
     "checkout_cta": {"render": lambda c: render_checkout_cta(c.page, c.section, c.offer, c.resolved_offer, c.checkout_url, c.api_base_url, c.products_by_id), "version": 1},
     "legal_footer": {"render": lambda c: render_legal_footer(c.page.get("legal") or {}, c.section, c.api_base_url), "version": 1},
 }
@@ -5043,6 +5046,59 @@ def render_catalog_grid(
 
 
 
+
+
+def render_link_cards(section: dict[str, Any]) -> str:
+    """A grid of arbitrary EXTERNAL destinations — "my Amazon storefront", "my Substack".
+
+    A separate element from `catalog_grid` on purpose (plans/SOCIAL_MEDIA_PAGES.md §8a). catalog_grid
+    builds every href with internal_href(slug) because it exists to make the crawlable subfolder hierarchy
+    work; its links MUST be followable. These links must carry rel="nofollow ugc noopener" — the exact
+    opposite. One element holding both would be a conditional someone eventually inverts without knowing
+    why it was there, and it would force §7's trust policy into a renderer that otherwise has nothing to
+    do with it. Keeping them apart gives that policy exactly one home.
+
+    Carries no offer_id, no price and no resolve_offer: this element cannot convert. It is visitor
+    navigation, not catalog, so it also stays out of the sitemap and structured data.
+
+    §7 in force: on the tenant's own custom domain any destination may be linked, because the reputation
+    at stake is theirs. On platform infrastructure the domain is shared with every other tenant, so only
+    allowlisted hosts become anchors — the rest render as plain unlinked tiles, mirroring what
+    catalog_grid already does for a card it cannot resolve a host for. Unlinked rather than dropped: a
+    card that silently vanishes tells the tenant nothing about why.
+    """
+    on_custom_domain = bool(_RENDER_STATE.get("home_url"))
+    cards = []
+    for item in section.get("items") or []:
+        url = str((item or {}).get("url") or "").strip()
+        label = str((item or {}).get("label") or "").strip()
+        if not url or not label:
+            continue
+        image = str((item or {}).get("image") or "").strip()
+        description = str((item or {}).get("description") or "").strip()
+        inner = "\n".join(line for line in [
+            (f"        {responsive_img(image, label, sizes=CONTENT_BLOCK_SIZES)}" if image else ""),
+            f'        <h3 class="sl-catalog-title">{render_headline_markup(label)}</h3>',
+            (f'        <p class="sl-link-card-note">{escape(description)}</p>' if description else ""),
+        ] if line)
+        if on_custom_domain or linkable_on_platform_host(url):
+            cards.append(
+                f'      <a class="sl-catalog-card sl-link-card" href="{escape(url)}" '
+                f'rel="nofollow ugc noopener" target="_blank">\n{inner}\n      </a>')
+        else:
+            cards.append(f'      <div class="sl-catalog-card sl-link-card">\n{inner}\n      </div>')
+    if not cards:
+        return ""
+    heading = str(section.get("heading") or "").strip()
+    heading_html = f'      <h2 class="sl-section-heading">{render_headline_markup(heading)}</h2>' if heading else ""
+    return "\n".join(line for line in [
+        f'    <section class="sl-catalog-grid sl-link-cards" data-section-id="{escape(str(section.get("id", "link-cards")))}" data-section-type="link_cards">',
+        heading_html,
+        '      <div class="sl-catalog-cards">',
+        *cards,
+        "      </div>",
+        "    </section>",
+    ] if line)
 
 
 def render_social_links(section: dict[str, Any]) -> str:

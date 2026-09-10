@@ -15,6 +15,7 @@
     "product_details",
     "product_carousel",
     "catalog_grid",
+    "link_cards",
     "rating",
     "testimonials",
     "author_bio",
@@ -489,6 +490,19 @@
       "tokens": [
         "content_heading",
         "content_text"
+      ]
+    },
+    "link_cards": {
+      "placement": "free",
+      "label": "Link cards",
+      "ui": "internal",
+      "kind": "capability",
+      "channel": "body",
+      "heading_role": "h2",
+      "repeatable": true,
+      "tokens": [
+        "price_card_bg",
+        "price_card_border"
       ]
     }
   },
