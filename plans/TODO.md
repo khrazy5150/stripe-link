@@ -664,7 +664,7 @@ low-traffic tenant account may well be served different HTML, which is exactly t
 exists to retire.
 
 
-### MEDIUM — the dashboard has no linter, and it cost nine days of broken product editing (2026-09-10)
+### ⭐ HIGH — the dashboard has no linter, and it cost nine days of broken product editing (2026-09-10)
 
 `Products.vue` called `productStore.fetchFull(row)` while declaring `const store = useProductsStore()`.
 Editing any product failed with `ReferenceError: productStore is not defined`. Shipped 2026-09-01
