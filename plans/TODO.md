@@ -722,7 +722,21 @@ integration is a liability, not a channel. This is the strongest reason to desig
 **Do not add `reddit.com` to `SAME_AS_HOSTS` as a step toward any of this.** The allowlist is for identity
 claims. If Reddit earns a place in the product it will be somewhere else.
 
-### ⭐ HIGH — Social Media Pages (link-in-bio) — plan plans/SOCIAL_MEDIA_PAGES.md, 2026-08-30, not built
+### ⭐ HIGH — Social Media Pages (link-in-bio) — P0–P4 SHIPPED PROD 2026-09-10 (plan plans/SOCIAL_MEDIA_PAGES.md)
+
+**Built and live in prod:** server-owned `same_as` verification + the backlink verifier (P0), the
+`social_media` composition with `social_links` and `link_cards` and builder support for both (P2),
+republish-on-domain-disconnect (P3), and derived page conversions/revenue plus the view-counting rail (P4).
+
+**What remains:**
+- `profile_avatar` — belongs to `SOCIALITE_PARITY.md`, not here.
+- **`PLATFORM_LINKABLE_HOSTS` is still just the 16 identity hosts**, so Amazon, Etsy, Substack and Patreon
+  render as inert tiles on a free `*.jbay.uk` address. This is the gap between "built" and "usable" for a
+  free-tier creator page, and it needs an abuse story rather than a longer list — see §7 on why the reason
+  is the URL bar and not SEO.
+- Per-link click counts: the rail exists (P4) and takes a second event type; not wired.
+
+The original entry follows.
 
 The "Social page" lead-capture action was a placeholder for this and is currently WRONG:
 `Offers.vue:1214` handles `social_redirect` in the SAME branch as `external_url` and emits
