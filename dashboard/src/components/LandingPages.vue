@@ -4862,12 +4862,25 @@ async function closeSectionEditor() {
 // which only exists inside the create-a-page wizard — calling it from the builder produced "Page could not
 // be generated." on every Done. saveBuilderPageWithStatus() with no override saves as a DRAFT and reports
 // into the builder's own error banner, which is what the tenant is looking at.
+let autoSaveQueued = false;
 async function autoSavePage() {
-  if (!builderOpen.value || saving.value) return;
+  if (!builderOpen.value) return;
   // Matches the Save Page button's own rule: a published page is not saveable from the builder, so
   // auto-save must not quietly try. Saving is not publishing, and it must never become publishing.
   if (isBuilderPublished.value) return;
+  // A save already in flight used to make this return, DROPPING the change silently -- the edit stayed in
+  // `builder`, looked applied, and was never written. Anything the tenant did while a save was running was
+  // lost the moment they navigated away. Queue instead: the in-flight save is already sending a document
+  // that predates this change, so exactly one more save is owed once it lands.
+  if (saving.value) {
+    autoSaveQueued = true;
+    return;
+  }
   await saveBuilderPageWithStatus("", { silent: true });
+  if (autoSaveQueued) {
+    autoSaveQueued = false;
+    await autoSavePage();
+  }
 }
 
 // Page Settings SAVES on close, like a section editor's Done. Every field in it writes through live to
