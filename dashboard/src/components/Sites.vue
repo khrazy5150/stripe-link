@@ -164,6 +164,48 @@
               <label class="offer-field"><span>Postal code</span><input v-model.trim="form.org.address.postal_code" type="text" /></label>
               <label class="offer-field"><span>Country</span><input v-model.trim="form.org.address.country" type="text" placeholder="US" /></label>
             </div>
+            <div class="offer-field">
+              <span>Social profiles</span>
+              <div v-for="(row, i) in form.org.same_as" :key="i" class="social-row">
+                <input
+                  v-model.trim="row.url"
+                  type="url"
+                  class="social-url"
+                  placeholder="https://instagram.com/yourname"
+                  @blur="onSocialUrlChange(row)"
+                />
+                <span class="social-status" :class="socialStatus(row).tone">{{ socialStatus(row).label }}</span>
+                <button type="button" class="link-danger-btn hours-remove" @click="removeSocialRow(i)">Remove</button>
+              </div>
+              <p v-if="socialHostError" class="social-error">{{ socialHostError }}</p>
+              <div class="button-row">
+                <button
+                  type="button"
+                  class="secondary-action compact"
+                  :disabled="form.org.same_as.length >= SAME_AS_MAX"
+                  @click="addSocialRow"
+                >+ Add profile</button>
+                <button
+                  type="button"
+                  class="secondary-action compact"
+                  :disabled="socialBusy || !anyCheckableSocial"
+                  @click="checkSocialLinks"
+                >{{ socialBusy ? "Checking…" : "Check links now" }}</button>
+              </div>
+              <p v-if="socialCheckNote" class="field-note">{{ socialCheckNote }}</p>
+              <small class="field-note">
+                Up to {{ SAME_AS_MAX }} profiles. These tell search engines which accounts are yours, so we confirm
+                each one before making that claim — add a link back to this site on the profile, then use
+                <em>Check links now</em>.
+              </small>
+              <small class="field-note">
+                <strong>Networks we accept:</strong> {{ acceptedNetworks }}.
+              </small>
+              <small class="field-note">
+                {{ unconfirmableNetworks }} can be listed and are shown to visitors, but cannot be confirmed
+                automatically — so they are left out of the search-engine claim.
+              </small>
+            </div>
           </fieldset>
 
           <fieldset class="product-identifiers">
@@ -207,48 +249,6 @@
               </div>
               <button type="button" class="secondary-action compact" @click="addHoursRow">+ Add hours</button>
               <small class="field-note">Group days that share the same hours (e.g. Mon–Fri 9:00–17:00, then a separate Sat row).</small>
-            </div>
-            <div class="offer-field">
-              <span>Social profiles</span>
-              <div v-for="(row, i) in form.org.same_as" :key="i" class="social-row">
-                <input
-                  v-model.trim="row.url"
-                  type="url"
-                  class="social-url"
-                  placeholder="https://instagram.com/yourname"
-                  @blur="onSocialUrlChange(row)"
-                />
-                <span class="social-status" :class="socialStatus(row).tone">{{ socialStatus(row).label }}</span>
-                <button type="button" class="link-danger-btn hours-remove" @click="removeSocialRow(i)">Remove</button>
-              </div>
-              <p v-if="socialHostError" class="social-error">{{ socialHostError }}</p>
-              <div class="button-row">
-                <button
-                  type="button"
-                  class="secondary-action compact"
-                  :disabled="form.org.same_as.length >= SAME_AS_MAX"
-                  @click="addSocialRow"
-                >+ Add profile</button>
-                <button
-                  type="button"
-                  class="secondary-action compact"
-                  :disabled="socialBusy || !anyCheckableSocial"
-                  @click="checkSocialLinks"
-                >{{ socialBusy ? "Checking…" : "Check links now" }}</button>
-              </div>
-              <p v-if="socialCheckNote" class="field-note">{{ socialCheckNote }}</p>
-              <small class="field-note">
-                Up to {{ SAME_AS_MAX }} profiles. These tell search engines which accounts are yours, so we confirm
-                each one before making that claim — add a link back to this site on the profile, then use
-                <em>Check links now</em>.
-              </small>
-              <small class="field-note">
-                <strong>Networks we accept:</strong> {{ acceptedNetworks }}.
-              </small>
-              <small class="field-note">
-                {{ unconfirmableNetworks }} can be listed and are shown to visitors, but cannot be confirmed
-                automatically — so they are left out of the search-engine claim.
-              </small>
             </div>
           </fieldset>
 
