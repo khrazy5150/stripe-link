@@ -645,11 +645,15 @@ at all, and does the profile then expose it in HTML we can fetch?
 | threads.net | website found (honest UA only) | |
 | yelp.com / trustpilot.com / bbb.org / crunchbase.com | UNPROBED | these are third-party listings ABOUT the business — the tenant may not control the website field at all |
 
-**Known blocked:** `pinterest.com` requires *claiming* the domain before it shows a website, and claiming
-needs a `p:domain_verify` meta tag (we emit only Google + Bing), an HTML file at the domain root, or a DNS
-TXT record. On a platform subdomain the tenant controls none of these, and the Site's root currently 404s
-because no page is attached at `/`. Facebook domain verification uses the same meta-tag mechanism, so one
-small `seo.*_site_verification` addition covers both — mirrors the existing google/bing fields exactly.
+**Pinterest — half unblocked 2026-09-09.** Claiming the domain is required before Pinterest shows a
+website at all, and `seo.pinterest_site_verification` now emits `<meta name="p:domain_verify">` on every
+page of the Site, alongside the google/bing tokens. What is STILL outstanding is a page at `/`: the Site
+root 404s because nothing is attached there, and Pinterest is expected to fetch the root (unconfirmed — it
+may accept any URL on the domain, in which case the existing pages already carry the tag). The Homepage
+picker on the Sites form should cover it. Note the claim is PER DOMAIN, so claiming a `.jbay.be` sandbox
+address is throwaway work — claim on the live Site, or wait for the tenant's real custom domain.
+Facebook domain verification uses the identical mechanism (`facebook-domain-verification`) and would be
+one more line if it is ever wanted.
 
 **Known unverifiable by design:** instagram.com, tiktok.com (login wall / JS shell). wikipedia.org,
 wikidata.org excluded on purpose — anyone can edit them, so a positive result proves nothing.

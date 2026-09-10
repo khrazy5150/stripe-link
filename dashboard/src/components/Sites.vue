@@ -265,6 +265,11 @@
             <p class="field-note">Verify your Site in Google/Bing Search Console so you can submit sitemaps. Paste the token from each provider's "HTML tag" verification method (just the content value).</p>
             <label class="offer-field"><span>Google verification token</span><input v-model.trim="form.seo.google_site_verification" type="text" placeholder="google-site-verification content…" /></label>
             <label class="offer-field"><span>Bing verification token</span><input v-model.trim="form.seo.bing_site_verification" type="text" placeholder="msvalidate.01 content…" /></label>
+            <label class="offer-field">
+              <span>Pinterest verification token</span>
+              <input v-model.trim="form.seo.pinterest_site_verification" type="text" placeholder="p:domain_verify content…" />
+              <small class="field-note">From Pinterest → Settings → Claimed accounts → Websites → Claim → “Add HTML tag”. Paste only the content value.</small>
+            </label>
           </fieldset>
 
           <fieldset class="product-identifiers">
@@ -606,7 +611,7 @@ const BUSINESS_TYPE_GROUPS = [
 const socialHostError = ref("");
 const socialBusy = ref(false);
 const socialCheckNote = ref("");
-const form = reactive({ name: "", subdomain: "", org: { name: "", legal_name: "", entity_type: "OnlineStore", business_type: "", description: "", telephone: "", email: "", address: { locality: "", region: "" }, place_id: "", gbp_url: "", geo: { latitude: "", longitude: "" }, opening_hours: [], same_as: [], review_destination: "" }, seo: { google_site_verification: "", bing_site_verification: "" }, seo_enabled: true });
+const form = reactive({ name: "", subdomain: "", org: { name: "", legal_name: "", entity_type: "OnlineStore", business_type: "", description: "", telephone: "", email: "", address: { locality: "", region: "" }, place_id: "", gbp_url: "", geo: { latitude: "", longitude: "" }, opening_hours: [], same_as: [], review_destination: "" }, seo: { google_site_verification: "", bing_site_verification: "", pinterest_site_verification: "" }, seo_enabled: true });
 
 // The specific-type options for the chosen broad entity_type (empty for OnlineStore/Organization).
 const specificTypes = computed(() => (BUSINESS_TYPE_GROUPS.find((g) => g.parent === form.org.entity_type)?.types) || []);
@@ -1031,7 +1036,8 @@ function openEdit(site) {
   };
   socialHostError.value = "";
   const seo = site.seo || {};
-  form.seo = { google_site_verification: seo.google_site_verification || "", bing_site_verification: seo.bing_site_verification || "" };
+  form.seo = { google_site_verification: seo.google_site_verification || "", bing_site_verification: seo.bing_site_verification || "",
+               pinterest_site_verification: seo.pinterest_site_verification || "" };
   form.seo_enabled = site.indexing?.seo_enabled !== false;  // default on
   editCheck.check(form.subdomain, site.site_id);
 }
@@ -1060,6 +1066,7 @@ async function saveEdit({ keepOpen = false } = {}) {
     ...editing.value.seo,
     google_site_verification: form.seo.google_site_verification || undefined,
     bing_site_verification: form.seo.bing_site_verification || undefined,
+    pinterest_site_verification: form.seo.pinterest_site_verification || undefined,
   }).filter(([, v]) => v !== undefined && v !== ""));
   const doc = {
     ...editing.value,

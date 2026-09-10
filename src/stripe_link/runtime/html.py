@@ -1320,6 +1320,13 @@ def render_head_seo_tags(
     bing_verify = str(_RENDER_SEO.get("bing_site_verification") or "").strip()
     if bing_verify:
         lines.append(f'  <meta name="msvalidate.01" content="{escape(bing_verify)}">')
+    # Pinterest claims a DOMAIN rather than a page, and only shows a website on the profile once claimed —
+    # so without this a tenant cannot get their URL onto Pinterest at all, and the backlink check has
+    # nothing to find. Emitted on every page of the Site, like the others, so the claim does not depend on
+    # which page Pinterest happens to fetch.
+    pinterest_verify = str(_RENDER_SEO.get("pinterest_site_verification") or "").strip()
+    if pinterest_verify:
+        lines.append(f'  <meta name="p:domain_verify" content="{escape(pinterest_verify)}">')
 
     product = first_offer_product(offer, products_by_id)
     presentation = offer.get("presentation") or {}

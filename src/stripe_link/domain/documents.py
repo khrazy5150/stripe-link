@@ -1961,7 +1961,8 @@ def validate_site(document: dict[str, Any]) -> None:
     if seo is not None:
         if not isinstance(seo, dict):
             raise DocumentValidationError("Site seo must be an object.")
-        for field in ("title_suffix", "google_site_verification", "bing_site_verification", "indexnow_key", "default_og_image", "description_cta"):
+        for field in ("title_suffix", "google_site_verification", "bing_site_verification",
+                      "pinterest_site_verification", "indexnow_key", "default_og_image", "description_cta"):
             optional_string(seo, field, f"Site seo.{field}")
 
     # pages: slug-keyed route map. May be empty — a Site can exist before any pages attach (the Site is
