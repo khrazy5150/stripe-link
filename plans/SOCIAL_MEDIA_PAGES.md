@@ -456,6 +456,27 @@ of its own — sold-through products do, "here is my TikTok" does not.
    - **A save-time refusal was considered and not built.** The pages handler has no Sites repository, so it
      cannot see hosting without new wiring, and the security goal is already met at render. Blocking publish
      outright would also make the free tier much worse while `PLATFORM_LINKABLE_HOSTS` stays this narrow.
-5. **P4 — per-link analytics.**
+5. **P4 — per-link analytics.** PREMISE CORRECTED 2026-09-09; first slice shipped.
+
+   §11 said *"Pages have `analytics_summary` (views/conversions/revenue) but nothing per-link."* **They do
+   not.** The dashboard read that field on every landing-page card and NOTHING in the backend ever wrote
+   it, so every card showed 0 views / 0 conversions / $0.00 from the day it shipped. Same shape as
+   `same_as[].verified`. There is no first-party analytics rail at all; per-link clicks would be the first,
+   not an addition.
+
+   - **SHIPPED: conversions + revenue, DERIVED not counted.** A paid order already records
+     `attribution.page_id`, which is how the A/B results are computed, so `domain/page_analytics.py` folds
+     orders into per-page numbers and the listing attaches them. No table, no endpoint, no counter. The
+     status set is now shared with the experiment results so the two cannot answer the same question
+     differently.
+   - **SHIPPED: views removed from the card.** Nothing measures them; a confident "0 views" is a claim
+     about traffic never counted. Absent, not zero — the summary omits the key so the UI shows nothing.
+   - **NOT built: click ingest.** It needs a public unauthenticated write endpoint with an abuse story, and
+     a counters store that is **NOT the Pages table** — `should_publish_record` republishes on any MODIFY,
+     so counting clicks there would re-render and re-upload the page on every click.
+   - **Use a beacon, NOT a redirect, when it is built.** `/go/{page}/{link}` is the obvious design and it
+     is wrong here: it makes the shared platform host an open redirector, which is precisely the abuse
+     surface §7 exists to prevent. `navigator.sendBeacon` on click keeps the real URL in the markup and
+     adds no redirect surface; it is lossy under ad blockers, and that is the honest trade.
 
 P0 and P2 are independent of the verification decision and can start first; P3 cannot.

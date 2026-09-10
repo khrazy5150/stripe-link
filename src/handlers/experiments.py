@@ -14,7 +14,9 @@ from stripe_link.repositories.documents import (
 )
 
 SCHEMA_VERSION = "2026-05-29"
-PAID_ORDER_STATUSES = {"paid", "complete", "completed"}
+# Shared with the landing-page summaries: both answer "which orders count?" about the same table, so a
+# status added to one must not be missing from the other.
+from stripe_link.domain.page_analytics import PAID_ORDER_STATUSES  # noqa: E402
 
 
 def handler(

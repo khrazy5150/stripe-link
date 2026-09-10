@@ -4,7 +4,8 @@ from stripe_link.common import error_response, json_response, parse_json_body, p
 from stripe_link.domain.documents import DocumentValidationError, validate_page_document
 from stripe_link.entitlement_gate import require_capability
 from stripe_link.ids import generate_short_url_code
-from stripe_link.repositories.documents import RepositoryError, pages_repository
+from stripe_link.domain.page_analytics import attach_summaries
+from stripe_link.repositories.documents import RepositoryError, orders_repository, pages_repository
 
 
 def handler(event, context, repository=None, tenant_repo=None):
@@ -21,7 +22,7 @@ def handler(event, context, repository=None, tenant_repo=None):
         page_id = path_params(event).get("page_id")
         if page_id:
             return get_page(event, repository, page_id)
-        return list_pages(event, repository)
+        return list_pages(event, repository, mode=resolve_stripe_mode(event))
     if method == "DELETE":
         page_id = path_params(event).get("page_id")
         if not page_id:
@@ -127,11 +128,23 @@ def get_page(event, repository, page_id: str):
     return json_response({"page": page})
 
 
-def list_pages(event, repository):
+def list_pages(event, repository, orders_repo=None, mode="test"):
     tenant_id = str(query_params(event).get("tenant_id") or "").strip() or tenant_id_from_event(event)
     if not tenant_id:
         return error_response("tenant_id is required.", code="missing_tenant")
-    return json_response({"pages": repository.list_for_tenant(tenant_id)})
+    pages = repository.list_for_tenant(tenant_id)
+    # Conversions and revenue are DERIVED from paid orders, not counted -- the same fold the A/B results
+    # use. `analytics_summary` has been read by the page cards since they were built and written by
+    # nothing, so every card showed zeros. Best-effort: a listing must not fail because orders are
+    # unreadable, and pages without numbers are exactly what the cards showed before.
+    try:
+        orders = (orders_repo or orders_repository(mode=mode)).list_for_tenant(tenant_id)
+        attach_summaries(pages, orders)
+    except Exception as exc:  # noqa: BLE001 - analytics are decoration on a listing, never its failure mode
+        # Logged, not swallowed silently. A missing IAM grant fails exactly like "this tenant has no
+        # orders", and an invisible AccessDenied is how the favicon bug survived a deploy.
+        print(f"page analytics unavailable for {tenant_id}: {type(exc).__name__}: {exc}")
+    return json_response({"pages": pages})
 
 
 def delete_page(event, repository, page_id: str):

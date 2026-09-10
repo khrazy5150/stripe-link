@@ -1458,6 +1458,11 @@ Resources:
             TableName: !Ref TenantProfilesTable
         - DynamoDBCrudPolicy:
             TableName: !Ref PagesTable
+        # The page listing derives conversions + revenue from paid orders (attribution.page_id) rather
+        # than maintaining a counter -- the same fold the A/B results use. Read-only: a listing never
+        # writes an order.
+        - DynamoDBReadPolicy:
+            TableName: !Ref OrdersTable
       Events:
         PagesList:
           Type: Api
