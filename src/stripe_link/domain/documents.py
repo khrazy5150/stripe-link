@@ -1358,6 +1358,10 @@ def validate_tenant_profile(document: dict[str, Any]) -> None:
     if fonts is not None:
         validate_font_settings(fonts, "Tenant profile fonts")
         optional_bool(fonts, "override_presets", "Tenant profile fonts.override_presets")
+    # The store's avatar, resolved BY REFERENCE at render: a page that has not overridden it shows whatever
+    # this points at today, so updating it updates every page at once. A page-level avatar_url overrides it
+    # for that page only. Same home and same reasoning as the font preference above.
+    optional_string(document, "avatar_url", "Tenant profile avatar_url", max_length=2048)
     require_fields(owner, ["first_name", "last_name", "email"])
     # Platform->tenant SaaS billing fields (plans/SAAS_BILLING_PAYWALL.md). All optional.
     status = document.get("billing_status")

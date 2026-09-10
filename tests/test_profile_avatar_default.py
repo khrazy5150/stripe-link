@@ -1,55 +1,101 @@
-"""The tenant's saved avatar is the default for every page they build.
+"""The store avatar is resolved BY REFERENCE, so changing it updates every page that never overrode it.
 
-`user_profile.profile_images` was validated (max 10) and written by NOTHING -- no handler, no UI -- so
-"use your saved image" had nothing behind it. The Profile screen now produces it and the builder consumes
-it, on checkout pages and link pages alike.
+A person's picture changes over time, and a published page should show the current one. Copying the URL
+onto each page at build time -- the first implementation -- froze each page at whatever the avatar was the
+day it was made, which is the opposite of what a profile picture is for.
 
-These are source-level pins rather than behavioural tests: the dashboard has no JS test runner (see the
-ESLint item in TODO.md), so this asserts the wiring exists at all -- which is the failure mode that has
-actually happened here, twice, with fields that had no producer.
+It lives on the TENANT profile rather than the user profile, for the reasons load_tenant_preferences already
+gives about the store's font: pages carry no owner, publish runs from a stream holding only the page, and
+the avatar is a property of the STORE customers see rather than of a staff login.
 """
+import json
 import pathlib
-import re
 import unittest
 
+from handlers.tenant_avatar import handler as avatar_handler
+from stripe_link.runtime import html as html_module
+from tests.fakes import FakeDocumentRepository
+
 ROOT = pathlib.Path(__file__).resolve().parents[1] / "dashboard" / "src"
+PREFERENCES = (ROOT / "components" / "Preferences.vue").read_text(encoding="utf-8")
 PROFILE_VUE = (ROOT / "components" / "Profile.vue").read_text(encoding="utf-8")
-PROFILE_STORE = (ROOT / "stores" / "profile.js").read_text(encoding="utf-8")
 BUILDER = (ROOT / "components" / "LandingPages.vue").read_text(encoding="utf-8")
 
 
-class ProducerTests(unittest.TestCase):
-    def test_the_profile_screen_can_now_write_profile_images(self):
-        # The whole point: the field had no producer, which is why "use your saved image" was empty.
-        self.assertIn("doc.profile_images = { images: profileImages.value }", PROFILE_VUE)
-
-    def test_removing_the_avatar_clears_the_field_rather_than_storing_an_empty_list(self):
-        self.assertIn("delete doc.profile_images", PROFILE_VUE)
-
-    def test_the_store_exposes_it_to_every_screen(self):
-        self.assertIn("profileImages", PROFILE_STORE)
-        self.assertIn("profile_images", PROFILE_STORE)
+def _hero(**overrides):
+    section = {"type": "hero_media", "images": ["https://img.example/hero.jpg"]}
+    section.update(overrides)
+    return section
 
 
-class BuilderDefaultTests(unittest.TestCase):
-    def test_a_new_page_starts_with_the_saved_avatar(self):
-        self.assertIn("builder.avatar_url = profileStore.profileImages[0]?.url", BUILDER)
+class ResolutionTests(unittest.TestCase):
+    def tearDown(self):
+        html_module._RENDER_PREFERENCES.clear()
 
-    def test_the_default_is_applied_only_when_the_page_has_none(self):
-        # An uploaded page avatar is an override and must survive.
-        match = re.search(r"if \(!builder\.avatar_url\) builder\.avatar_url = profileStore", BUILDER)
-        self.assertIsNotNone(match, "the default must be guarded on the page having no avatar")
+    def _render(self, section, store_avatar=""):
+        html_module._RENDER_PREFERENCES.clear()
+        if store_avatar:
+            html_module._RENDER_PREFERENCES["avatar_url"] = store_avatar
+        return html_module.render_hero_media(section, {}, {})
 
-    def test_the_default_is_NOT_applied_when_reopening_an_existing_page(self):
-        """On an existing page an empty avatar_url is a DECISION -- the tenant pressed Remove. Defaulting
-        there would silently undo it every time they reopened the builder, which is the same
-        'looks-applied-but-isn't' shape that cost a day on section removal."""
-        applied_at = BUILDER.index("builder.avatar_url = profileStore.profileImages[0]?.url")
-        wizard_at = BUILDER.index("function startBuilderFromWizard")
-        populate_at = BUILDER.index("function populateBuilderFromPage")
-        self.assertGreater(applied_at, wizard_at)
-        self.assertNotIn("profileStore.profileImages",
-                         BUILDER[populate_at:populate_at + 4000])
+    def test_a_page_with_no_avatar_inherits_the_store_one(self):
+        self.assertIn("store.jpg", self._render(_hero(), store_avatar="https://img.example/store.jpg"))
+
+    def test_a_page_upload_overrides_it_for_that_page_only(self):
+        markup = self._render(_hero(avatar_url="https://img.example/page.jpg"),
+                              store_avatar="https://img.example/store.jpg")
+        self.assertIn("page.jpg", markup)
+        self.assertNotIn("store.jpg", markup)
+
+    def test_no_avatar_anywhere_renders_none(self):
+        self.assertNotIn("sl-avatar", self._render(_hero()))
+
+    def test_the_reserved_overhang_follows_the_RESOLVED_avatar(self):
+        # has-avatar reserves the gap the overlay hangs into. An inherited avatar overhangs just as much as
+        # an uploaded one, so keying it on the page's own field would leave the overlay clipped.
+        self.assertIn("has-avatar", self._render(_hero(), store_avatar="https://img.example/store.jpg"))
+
+
+class EndpointTests(unittest.TestCase):
+    def setUp(self):
+        self.repo = FakeDocumentRepository("tenant_id")
+        self.repo.put({"schema_version": "2026-05-29", "document_type": "tenant_profile",
+                       "tenant_id": "t1", "owner": {"first_name": "A", "last_name": "B",
+                                                    "email": "a@b.c"}})
+
+    def _call(self, method, body=None):
+        event = {"httpMethod": method, "queryStringParameters": {"tenant_id": "t1"}}
+        if body is not None:
+            event["body"] = json.dumps(body)
+        return avatar_handler(event, None, repository=self.repo)
+
+    def test_setting_and_reading_it_back(self):
+        self._call("PUT", {"avatar_url": "https://img.example/a.jpg"})
+        self.assertEqual(json.loads(self._call("GET")["body"])["avatar_url"],
+                         "https://img.example/a.jpg")
+
+    def test_clearing_removes_the_field_rather_than_storing_an_empty_string(self):
+        self._call("PUT", {"avatar_url": "https://img.example/a.jpg"})
+        self._call("PUT", {"avatar_url": ""})
+        self.assertNotIn("avatar_url", self.repo.get("t1", "t1"))
+
+    def test_an_http_url_is_refused(self):
+        # It renders on the tenant's own pages; http:// would make every one of them mixed-content, which
+        # browsers block silently.
+        response = self._call("PUT", {"avatar_url": "http://img.example/a.jpg"})
+        self.assertEqual(response["statusCode"], 400)
+
+
+class WiringTests(unittest.TestCase):
+    def test_the_builder_never_copies_the_store_avatar_onto_a_page(self):
+        # The whole point of the reference: copying would freeze the page at today's picture.
+        self.assertNotIn("builder.avatar_url = profileStore", BUILDER)
+        self.assertIn("effectiveAvatarUrl", BUILDER)
+
+    def test_it_is_a_STORE_setting_not_a_personal_one(self):
+        # Two people editing one store must not put different faces on its pages.
+        self.assertIn("Store Avatar", PREFERENCES)
+        self.assertNotIn("Avatar</h2>", PROFILE_VUE)
 
 
 if __name__ == "__main__":

@@ -2377,7 +2377,11 @@ def render_hero_overlays(section: dict[str, Any], offer: dict[str, Any]) -> list
                 f"      <div class=\"sl-hero-brand sl-hero-brand--{position}\">"
                 f"<span class=\"sl-hero-brand-dot\"></span>{escape(brand_text)}</div>"
             )
-    avatar_url = str(section.get("avatar_url") or "")
+    # BY REFERENCE. A page that has not uploaded its own avatar shows the STORE's, resolved at render from
+    # the tenant profile -- so when the tenant changes their picture, every page that never overrode it
+    # shows the new one. Copying the URL onto each page at build time would have frozen each page at
+    # whatever the avatar was the day it was made, which is the opposite of what a profile picture is for.
+    avatar_url = str(section.get("avatar_url") or "") or str(_RENDER_PREFERENCES.get("avatar_url") or "")
     if avatar_url:
         # The avatar carries brand identity, so it's a content image — name it (brand text, else the offer).
         avatar_alt = escape(str(section.get("brand_text") or offer_brand_fallback(offer) or "Brand avatar"))
@@ -2446,8 +2450,9 @@ def render_hero_media(
     overlays = render_hero_overlays(section, offer)
     # has-avatar reserves the space the overlay OVERHANGS into. An inline or centred avatar sits in normal
     # flow and needs no reserved gap -- keeping it would leave a hole under the hero.
+    has_avatar = bool(str(section.get("avatar_url") or "") or str(_RENDER_PREFERENCES.get("avatar_url") or ""))
     media_class = "sl-hero-media" + (
-        " has-avatar" if section.get("avatar_url") and avatar_placement(section) == "overlay" else "")
+        " has-avatar" if has_avatar and avatar_placement(section) == "overlay" else "")
     slides = [
         f"        <div class=\"sl-hero-slide\">"
         f"{render_media_slide(url, alt, autoplay=autoplay, eager=(index == 0), poster=posters.get(url, ''))}</div>"

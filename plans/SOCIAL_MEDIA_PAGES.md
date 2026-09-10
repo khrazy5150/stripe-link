@@ -253,16 +253,20 @@ that gates behaviour with nothing producing it. See the audit item in `TODO.md`.
   `hero_media` rather than its own element, which settles that plan's open decision — the avatar needs the
   hero as a positioning context, so splitting them would mean an element that cannot render without its
   neighbour.
-- **DONE 2026-09-10: the saved avatar is the DEFAULT for every page**, checkout pages included. The Profile
-  screen gained an Avatar card, which is the producer `user_profile.profile_images` never had — it was
-  validated (max 10) and written by nothing, the fourth such field found this session alongside
-  `same_as[].verified`, `analytics_summary` and the unread `platform` on `social_redirect`.
-  The first entry in the list is the default; the list shape is kept so a multi-image picker is additive.
-- **The default applies on page CREATION only.** On an existing page an empty `avatar_url` is a DECISION —
-  the tenant pressed Remove — and defaulting on every open would silently undo it, which is the same
-  looks-applied-but-isn't shape that cost a day on section removal. Consequence: the page stores the
-  resolved URL, so changing the profile avatar later does not rewrite pages already built. That is the
-  right default for a published page, and re-picking is one click.
+- **DONE 2026-09-10: a STORE avatar, resolved BY REFERENCE.** `tenant_profile.avatar_url`, set in
+  Preferences beside Store Fonts, read at render from `_RENDER_PREFERENCES` (which already carries the whole
+  tenant profile, so no new plumbing). A page with no `avatar_url` of its own shows it; uploading in the
+  hero editor overrides that page ONLY. Changing the store avatar therefore updates every page that never
+  overrode it — which is the point: people's pictures change, and a published page should show the current
+  one.
+- **Two earlier attempts were wrong and are recorded so they are not retried.** (1) Copying the URL onto
+  each page at build time froze every page at whatever the avatar was the day it was made. (2) Putting it on
+  `user_profile.profile_images` is the wrong home for the same reasons `load_tenant_preferences` already
+  gives about the store's font: pages carry no owner, publish runs from a stream holding only the page, and
+  the avatar is a property of the STORE customers see, not of a staff login — two people editing one store
+  must not put different faces on its pages.
+- `user_profile.profile_images` remains validated and unwritten. It is now redundant rather than missing:
+  the store avatar is the feature it was reaching for. Retire it or give it a purpose.
 - **`link_cards`** — DECIDED, see §8a. `catalog_grid` does NOT cover the external case.
 
 ## 8a. GAP: `catalog_grid` cards are internal-only, by design

@@ -9,7 +9,7 @@ export const useProfileStore = defineStore("profile", {
     business: { name: "", phone: "", brands: [], address: {} },
     loading: false,
     loaded: false,
-    profileImages: [],
+    storeAvatarUrl: "",
   }),
   getters: {
     businessName: (state) => state.business.name || "",
@@ -36,9 +36,14 @@ export const useProfileStore = defineStore("profile", {
           brands: Array.isArray(business.brands) ? [...business.brands] : [],
           address: business.address || {},
         };
-        // profile_images is a LIST; the FIRST entry is the default avatar. Kept here so every screen that
-        // needs "the tenant's avatar" reads one place rather than re-fetching /profile.
-        this.profileImages = [...((body.profile || {}).profile_images || {}).images || []];
+        // The STORE avatar, so the builder can preview what a page will inherit without copying the URL
+        // onto the page. Separate call because it lives on the tenant profile, not this user's.
+        try {
+          const avatar = await apiRequest("/tenant/avatar");
+          this.storeAvatarUrl = avatar.avatar_url || "";
+        } catch {
+          this.storeAvatarUrl = "";
+        }
         this.loaded = true;
       } catch {
         // No profile yet (or load failed) — brand simply falls back to the product name. Non-fatal.

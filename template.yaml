@@ -1448,6 +1448,31 @@ Resources:
 
   # Public, unauthenticated: it is called by an anonymous visitor from a published page. Always answers
   # 204 with no body, so it cannot report whether a page exists or whether a view was counted.
+  # The store's avatar. Narrow on purpose: a general tenant-profile write endpoint would expose billing
+  # status and entitlements to the browser.
+  TenantAvatarFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/
+      Handler: handlers.tenant_avatar.handler
+      Description: Reads and sets the store avatar on the tenant profile.
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref TenantProfilesTable
+      Events:
+        GetTenantAvatar:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /tenant/avatar
+            Method: GET
+        SetTenantAvatar:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /tenant/avatar
+            Method: PUT
+
   PageViewFunction:
     Type: AWS::Serverless::Function
     Properties:

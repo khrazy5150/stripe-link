@@ -526,16 +526,16 @@
                   <span>Profile Avatar</span>
                   <small>Put a face on the page — the person behind the service. Overlaps the hero image.</small>
                   <div class="builder-avatar-row">
-                    <img v-if="builder.avatar_url" :src="builder.avatar_url" class="builder-avatar-preview" alt="" />
+                    <img v-if="effectiveAvatarUrl" :src="effectiveAvatarUrl" class="builder-avatar-preview" alt="" />
                     <input ref="avatarFileInput" type="file" accept="image/*" hidden @change="handleAvatarPicked" />
                     <button class="secondary-action compact" type="button" :disabled="avatarUploading" @click="avatarFileInput?.click()">
-                      {{ avatarUploading ? "Uploading..." : (builder.avatar_url ? "Replace avatar" : "Upload avatar") }}
+                      {{ avatarUploading ? "Uploading..." : (builder.avatar_url ? "Replace avatar" : "Override for this page") }}
                     </button>
-                    <button v-if="builder.avatar_url" class="secondary-action compact" type="button" @click="builder.avatar_url = ''">Remove</button>
+                    <button v-if="builder.avatar_url" class="secondary-action compact" type="button" @click="builder.avatar_url = ''">Use store avatar</button>
                   </div>
                   <small v-if="avatarUploadError" class="builder-upload-error">{{ avatarUploadError }}</small>
-                  <small v-else-if="avatarIsFromProfile" class="field-note">From your profile avatar. Uploading here changes this page only.</small>
-                  <label v-if="builder.avatar_url" class="offer-field">
+                  <small v-else-if="avatarIsFromProfile" class="field-note">Showing your store avatar. Change it in Preferences and every page that has not overridden it updates too.</small>
+                  <label v-if="effectiveAvatarUrl" class="offer-field">
                     <span>Avatar placement</span>
                     <select v-model="builder.avatar_placement">
                       <option value="overlay">Overlapping the hero image</option>
@@ -2441,10 +2441,12 @@ const isListicleOffer = computed(() => deriveOfferType(builderOffer.value) === "
 // Visibility comes from the SHARED rules file (imported by pageComposer.js — the exact file Python reads)
 // plus the tenant's overrides. The preview AND the saved section list both call sectionVisible(), and
 // Python's compose_page() applies the same rules, so preview and published can't disagree.
-// True when the page is simply showing the tenant's saved avatar rather than one uploaded for this page --
-// so the hint can say where the image came from instead of leaving them to wonder.
-const avatarIsFromProfile = computed(() =>
-  Boolean(builder.avatar_url) && builder.avatar_url === (profileStore.profileImages[0]?.url || ""));
+// The page's avatar is an OVERRIDE. Empty means "use the store avatar", resolved at render -- so the
+// builder must show the store's image as the effective preview without COPYING it onto the page, which
+// would freeze this page at whatever the avatar was the day it was built.
+const storeAvatarUrl = computed(() => profileStore.storeAvatarUrl || "");
+const effectiveAvatarUrl = computed(() => builder.avatar_url || storeAvatarUrl.value);
+const avatarIsFromProfile = computed(() => !builder.avatar_url && Boolean(storeAvatarUrl.value));
 const builderOfferType = computed(() => deriveOfferType(builderOffer.value));
 function sectionVisible(sectionType) {
   return isSectionVisible(builderOfferType.value, sectionType, builder.composition.overrides, builderGoal.value);
@@ -3739,10 +3741,6 @@ function startBuilderFromWizard() {
   }
   populateBuilderFromPage(page);
   seedGoalElements(form.goal);
-  // A NEW page starts with the tenant's saved avatar, so it never has to be re-uploaded per page. Applied
-  // only on creation: on an EXISTING page an empty avatar_url is a DECISION (the tenant pressed Remove),
-  // and defaulting there would silently undo it every time they reopened the builder.
-  if (!builder.avatar_url) builder.avatar_url = profileStore.profileImages[0]?.url || "";
   builderExistingPageId.value = "";
   builderOriginalPage.value = null;
   pendingSiteAttach.value = selectedSiteId.value;  // attach this offer page to the chosen Site on first save

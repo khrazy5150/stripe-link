@@ -60,6 +60,28 @@
 
     <section class="dashboard-card">
       <header class="dashboard-card-header">
+        <h2>Store Avatar</h2>
+      </header>
+      <!-- Same reasoning as Store Fonts below: this is what CUSTOMERS see, so it belongs to the store and
+           not to a login. Two people editing one store must not put different faces on its pages. -->
+      <p class="field-note">
+        Shown on every page that has not overridden it — checkout pages and link pages alike. Pages reference
+        this image rather than copying it, so updating it here updates them all. A square image works best;
+        it is shown as a circle.
+      </p>
+      <div class="builder-avatar-row">
+        <img v-if="storeAvatarUrl" :src="storeAvatarUrl" class="builder-avatar-preview" alt="" />
+        <input ref="storeAvatarInput" type="file" accept="image/*" hidden @change="onStoreAvatarPicked" />
+        <button class="secondary-action compact" type="button" :disabled="storeAvatarBusy" @click="storeAvatarInput?.click()">
+          {{ storeAvatarBusy ? "Uploading..." : (storeAvatarUrl ? "Replace avatar" : "Upload avatar") }}
+        </button>
+        <button v-if="storeAvatarUrl" class="secondary-action compact" type="button" :disabled="storeAvatarBusy" @click="clearStoreAvatar">Remove</button>
+      </div>
+      <small v-if="storeAvatarError" class="builder-upload-error">{{ storeAvatarError }}</small>
+    </section>
+
+    <section class="dashboard-card">
+      <header class="dashboard-card-header">
         <h2>Store Fonts</h2>
         <!-- Said plainly, because this card sits on a screen headed "personal dashboard settings": these
              apply to the STORE, so a second login sees the same type. Deliberate — a font is what customers
@@ -151,6 +173,7 @@
 <script setup>
 import { reactive, ref } from "vue";
 import { apiRequest, getAuthSession, getTenantId } from "../api/client";
+import { uploadImage } from "../api/uploads";
 
 const session = getAuthSession() || {};
 const userId = session.user_id || "";
@@ -169,6 +192,51 @@ const fontError = ref("");
 const fontMessage = ref("");
 const fontForm = reactive({ family: "", weight: "400", licence: false });
 const fontToRemove = ref(null);
+
+const storeAvatarInput = ref(null);
+const storeAvatarUrl = ref("");
+const storeAvatarBusy = ref(false);
+const storeAvatarError = ref("");
+
+async function loadStoreAvatar() {
+  try {
+    const body = await apiRequest("/tenant/avatar");
+    storeAvatarUrl.value = body.avatar_url || "";
+  } catch {
+    storeAvatarUrl.value = "";   // no avatar set, or unreadable -- either way there is nothing to show
+  }
+}
+
+async function saveStoreAvatar(url) {
+  storeAvatarError.value = "";
+  storeAvatarBusy.value = true;
+  try {
+    const body = await apiRequest("/tenant/avatar", { method: "PUT", body: { avatar_url: url } });
+    storeAvatarUrl.value = body.avatar_url || "";
+  } catch (err) {
+    storeAvatarError.value = err.message || "Could not save the store avatar.";
+  } finally {
+    storeAvatarBusy.value = false;
+  }
+}
+
+async function onStoreAvatarPicked(event) {
+  const file = event.target.files?.[0];
+  event.target.value = "";
+  if (!file) return;
+  storeAvatarError.value = "";
+  storeAvatarBusy.value = true;
+  try {
+    const { url } = await uploadImage(file);
+    await saveStoreAvatar(url);
+  } catch (err) {
+    storeAvatarError.value = err.message || "Avatar upload failed.";
+  } finally {
+    storeAvatarBusy.value = false;
+  }
+}
+
+const clearStoreAvatar = () => saveStoreAvatar("");
 
 async function loadFonts() {
   // Store fonts live on the tenant profile, not in this screen's user-scoped document, so they load
@@ -272,6 +340,7 @@ async function load() {
   // after the preferences call meant a tenant who had never saved preferences got a 404, the catch handled
   // it, and the font list silently stayed empty — reading "No fonts imported" for fonts that existed.
   loadFonts();
+  loadStoreAvatar();
   try {
     const body = await apiRequest("/preferences", { params: { user_id: userId } });
     applyPreferences(body.preferences || {});
