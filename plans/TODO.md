@@ -663,6 +663,28 @@ first, and whether the check goes green. The probes used high-profile public acc
 low-traffic tenant account may well be served different HTML, which is exactly the assumption this item
 exists to retire.
 
+
+### MEDIUM — the dashboard has no linter, and it cost nine days of broken product editing (2026-09-10)
+
+`Products.vue` called `productStore.fetchFull(row)` while declaring `const store = useProductsStore()`.
+Editing any product failed with `ReferenceError: productStore is not defined`. Shipped 2026-09-01
+(97186eb7), reported 2026-09-10.
+
+**Nothing caught it because nothing could.** Vite does not resolve identifiers inside a function body, so
+the build succeeded. The error only exists when the handler runs, and no test exercises the dashboard's
+JavaScript. There is no ESLint config in `dashboard/` at all — so `no-undef`, the rule that exists precisely
+for this, has never run against this codebase.
+
+`tests/test_dashboard_store_references.py` now pins the one shape that bit us: every `*Store` a component
+references must be declared in that component. That is a stand-in, not a fix. It catches `productStore`
+and would have caught this bug nine days earlier; it catches nothing about a mistyped method, an undefined
+helper, or an unused import.
+
+**The real fix is ESLint with `no-undef` + `eslint-plugin-vue`**, wired into the dashboard build so a
+broken identifier fails the build rather than the browser. That is a dependency and config decision rather
+than a code change, which is why it is recorded here instead of done: it needs a call on whether the build
+should fail on lint errors (it should) and how noisy the first run will be on an existing codebase.
+
 ### MEDIUM — Reddit is its own study, NOT another entry in the social allowlist (raised 2026-09-09)
 
 **Deliberately excluded from `SAME_AS_HOSTS` on 2026-09-09.** Adding it would have been a one-line change
