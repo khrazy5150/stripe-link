@@ -620,6 +620,45 @@ inline-vs-modal split. Adding opens the same modal empty, so Cancel creates noth
 existing (superseding 6ce24e1).
 
 
+
+### MEDIUM — verify the social backlink check host by host, with real tenant profiles (raised 2026-09-09)
+
+The checker works. What is NOT yet known is whether a real tenant can complete the round trip on each
+allowlisted network, because the two halves are independent: can the tenant get our URL onto that profile
+at all, and does the profile then expose it in HTML we can fetch?
+
+**Proven end to end (real tenant profile, real backlink, green badge):**
+
+| host | status |
+|---|---|
+| github.com | ✅ CONFIRMED 2026-09-09 — profile URL field, no ownership proof needed |
+
+**Probed only, with a public proxy profile (nasa/sindresorhus), NOT with a tenant link:**
+
+| host | probe result | what is still unknown |
+|---|---|---|
+| youtube.com | website found, via the /redirect? shim | whether a tenant's channel links behave the same |
+| linkedin.com | website found | company page vs personal profile may differ |
+| x.com | website found | whether a low-follower/new account is served the same HTML |
+| facebook.com | website found (honest UA only) | Pages vs profiles; login-walling varies by page |
+| pinterest.com | website found | **BLOCKED, see below** |
+| threads.net | website found (honest UA only) | |
+| yelp.com / trustpilot.com / bbb.org / crunchbase.com | UNPROBED | these are third-party listings ABOUT the business — the tenant may not control the website field at all |
+
+**Known blocked:** `pinterest.com` requires *claiming* the domain before it shows a website, and claiming
+needs a `p:domain_verify` meta tag (we emit only Google + Bing), an HTML file at the domain root, or a DNS
+TXT record. On a platform subdomain the tenant controls none of these, and the Site's root currently 404s
+because no page is attached at `/`. Facebook domain verification uses the same meta-tag mechanism, so one
+small `seo.*_site_verification` addition covers both — mirrors the existing google/bing fields exactly.
+
+**Known unverifiable by design:** instagram.com, tiktok.com (login wall / JS shell). wikipedia.org,
+wikidata.org excluded on purpose — anyone can edit them, so a positive result proves nothing.
+
+**Record per host as it is tested:** where the tenant enters the URL, whether ownership proof is required
+first, and whether the check goes green. The probes used high-profile public accounts as proxies; a new or
+low-traffic tenant account may well be served different HTML, which is exactly the assumption this item
+exists to retire.
+
 ### MEDIUM — Reddit is its own study, NOT another entry in the social allowlist (raised 2026-09-09)
 
 **Deliberately excluded from `SAME_AS_HOSTS` on 2026-09-09.** Adding it would have been a one-line change
