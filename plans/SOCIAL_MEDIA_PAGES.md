@@ -17,6 +17,36 @@ single offer.
 
 That framing decides everything below.
 
+## 2a. CORRECTED 2026-09-10 — the switch is `product_intent`, not `offer_type`
+
+The section below is right that this is a composition and not a second renderer. It is WRONG about the
+lever, and the first implementation followed it into a dead end.
+
+`offer_type: social_media` was added to `composition_rules.json`, validated, and rendered — and was
+**unreachable**, because `offer_type` is DERIVED now (`derived_offer_type`) and the derivation only ever
+produces single / bundle / listicle. Nothing in the dashboard could set it, and nothing could infer "this
+page sells nothing" from an offer's shape.
+
+**The real spine already exists and is live:**
+
+- `Product.product_intent` is already `"transaction" | "lead_gen"`, and `lead_gen` already REQUIRES a
+  `lead_capture` block (`documents.py`). The action enum already contains the tenant-facing options —
+  `capture_email`, `capture_phone`, `capture_email_phone`, `call_number`, `external_url`, `open_form`, and
+  **`social_redirect`**, which is the "Social Page" slot.
+- The Offer already carries `product_intent` (every fixture has it), so `compose_page(offer, page)` can see
+  it with no product lookup and no signature change.
+- The BUILDER already branches on it: `builderIntent` reads `product_intent`, and
+  `builderSectionCandidates` already gates the price selector behind `intent === "transaction"`. A lead-gen
+  offer already gets no price cards and "Continue" instead of "Buy Now".
+
+So this is finishing a path, not laying one. **When the builder sees a lead-gen offer it switches from a
+checkout-page builder to a link-page builder**, and the `lead_capture.action` seeds which elements start on
+the page rather than selecting a different page species. An inline capture form is then just one of the
+blocks (§11), not a separate kind of page.
+
+**What the first implementation got right and keeps:** `social_links` and `link_cards` are good elements on
+an ordinary checkout page too, and stay available there. Nothing built is discarded.
+
 ## 2. Key decision: a COMPOSITION, not a new page type
 
 **Cardinality: this is a ZERO-primary-offer page**, the storefront/collection shape — an identity
@@ -211,8 +241,10 @@ that gates behaviour with nothing producing it. See the audit item in `TODO.md`.
 
 ## 8. New elements needed
 
-- **`social_links`** — repeatable-adjacent ordered icon row (or a single element holding an
-  ordered list). Reads §6's list, obeys §7.
+- **`social_links`** — BUILT 2026-09-09, reading the Site's `organization.same_as`. **Gap found against the
+  references 2026-09-10: it renders TEXT LABELS ("GitHub", "Instagram"), and these pages use platform
+  ICONS** — a YouTube link should produce a clickable YouTube glyph. Needs an icon variant; the dashboard's
+  existing icon-picker is the place to borrow the set from.
 - **`profile_avatar`** — already specified in `SOCIALITE_PARITY.md`; build there, reuse here.
 - **`link_cards`** — DECIDED, see §8a. `catalog_grid` does NOT cover the external case.
 
@@ -255,6 +287,11 @@ So a creator's "my YouTube channel", "my Amazon storefront" or a raw affiliate l
 ### `link_cards` specification
 
 - `items[]` of `{ url, label, image?, description? }` — **no `offer_id`**, no price, no `resolve_offer`.
+- **Gap found against the references 2026-09-10:** the built version puts the image ABOVE the text, because
+  it was derived from `catalog_grid`. Both reference pages instead use the image as a BACKGROUND with the
+  caption overlaid, some with a CTA button on the card. That is a presentation variant of the same element,
+  not a second element. A creator's commercial link is then just a card pointing at one of their own
+  transactional landing pages — the link page itself never transacts.
 - Reuses the `product_carousel` card shape; no new CSS beyond the icon/compact variant.
 - Always `rel="nofollow ugc noopener"` and `target="_blank"`.
 - Repeatable, like `catalog_grid`.
@@ -379,9 +416,12 @@ of its own — sold-through products do, "here is my TikTok" does not.
 
 ## 10. Cleanup this supersedes
 
-- **Retire `social_redirect`.** It is redundant: `Offers.vue:1214` handles it in the *same
-  branch* as `external_url`, producing an identical CTA contract. Its required `platform`
-  string is never read. Migrate existing products to `external_url` and remove the action.
+- ~~**Retire `social_redirect`.**~~ **REVERSED 2026-09-10.** It is not redundant, it is UNFINISHED. It is
+  the "Social Page" option in the lead-capture action list — the thing that is supposed to CREATE a
+  link-in-bio page — and it looks like a duplicate of `external_url` only because it was never given a
+  renderer of its own. Its unread `platform` field is the tell: something was meant to read it. Complete
+  it rather than removing it. (The observation that it currently emits an identical CTA contract to
+  `external_url` remains true and is the bug.)
 - **`open_form` is inert.** It falls into the `capture_*` bucket and renders a generic
   `email` CTA; the `form_id` that validation requires is never read. Either give it a
   renderer or remove it — see the form-builder discussion (separate plan).
