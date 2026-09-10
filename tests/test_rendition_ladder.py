@@ -17,7 +17,8 @@ import pathlib
 import re
 import unittest
 
-from stripe_link.runtime.html import IMAGE_RENDITION_WIDTHS
+from stripe_link.runtime import html as html_module
+from stripe_link.runtime.html import IMAGE_RENDITION_WIDTHS, available_renditions
 
 REPO = pathlib.Path(__file__).resolve().parents[2] / "image-processing"
 PROCESSOR = REPO / "src" / "imageProcessorApp.js"
@@ -51,3 +52,53 @@ class RenditionLadderTests(unittest.TestCase):
                     if "SIZES_JSON" in line and not line.strip().startswith(("#", "//"))
                 ]
                 self.assertEqual(live, [], f"{path.name} reintroduces a size-ladder override")
+
+
+class SmallSourceRenditionTests(unittest.TestCase):
+    """A srcset must never name a rendition the processor did not emit.
+
+    Reported 2026-09-09: a link-card image rendered broken while its own URL loaded perfectly in the
+    address bar. The srcset named medium/large/full for a 225px upload, all of which 403, and
+    responsive_img additionally hardcoded `medium.webp` as the plain src -- so the BROWSER's chosen file
+    did not exist even though the file we were handed was fine.
+
+    The processor clamps each target to the source and drops a size that collapses onto the previous one,
+    so a small upload simply has no large renditions. Rather than reimplement that (it depends on upscale
+    settings this repo cannot see, and guessing wrong reintroduces the 403), the rule is: never name a
+    rendition wider than the SOURCE. Those can only be upscales -- bytes without detail -- so excluding
+    them is right even where the file happens to exist.
+    """
+
+    def test_a_small_source_names_only_renditions_that_can_exist(self):
+        self.assertEqual(available_renditions(225), ["thumb", "small"])
+
+    def test_a_large_source_is_unchanged(self):
+        self.assertEqual(available_renditions(3000), list(IMAGE_RENDITION_WIDTHS))
+
+    def test_upscales_are_excluded_even_when_the_file_exists(self):
+        # The 800x420 case from the same page: medium/large/full DO exist, and are upscales of an 800px
+        # source. Serving them costs bytes for no detail.
+        self.assertEqual(available_renditions(800), ["thumb", "small"])
+
+    def test_unknown_dimensions_change_nothing(self):
+        # Legacy images predate the image_dims sidecar and mostly come from large sources. Breaking those
+        # to fix a case we cannot detect would trade a known-good for a guess.
+        self.assertEqual(available_renditions(0), list(IMAGE_RENDITION_WIDTHS))
+
+    def test_the_src_is_never_a_rendition_the_ladder_excluded(self):
+        base = "https://images.example/offers/ABC"
+        html_module._RENDER_DIMS_INDEX.clear()
+        html_module._RENDER_DIMS_INDEX[base] = (225, 225)
+        markup = html_module.responsive_img(f"{base}/small.webp", "Card", sizes="100vw")
+        self.assertIn(f'src="{base}/small.webp"', markup)
+        for absent in ("medium.webp", "large.webp", "full.webp"):
+            self.assertNotIn(absent, markup)
+        html_module._RENDER_DIMS_INDEX.clear()
+
+    def test_a_large_source_still_gets_medium_as_its_src(self):
+        base = "https://images.example/offers/BIG"
+        html_module._RENDER_DIMS_INDEX.clear()
+        html_module._RENDER_DIMS_INDEX[base] = (4000, 3000)
+        markup = html_module.responsive_img(f"{base}/small.webp", "Card", sizes="100vw")
+        self.assertIn(f'src="{base}/medium.webp"', markup)
+        html_module._RENDER_DIMS_INDEX.clear()

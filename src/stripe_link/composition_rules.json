@@ -499,7 +499,7 @@
       "kind": "capability",
       "channel": "body",
       "heading_role": "h2",
-      "repeatable": true,
+      "repeatable": false,
       "tokens": [
         "price_card_bg",
         "price_card_border"

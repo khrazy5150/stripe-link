@@ -3937,6 +3937,47 @@ def _dims_attrs(url: str, dims: tuple[int, int] | None) -> str:
     return f' width="{int(dims[0])}" height="{int(dims[1])}"'
 
 
+def _source_long_edge(url: str, dims: tuple[int, int] | None) -> int:
+    """The source image's long edge, from the image_dims sidecar. 0 when unknown."""
+    if dims is None:
+        base = rendition_base(url)
+        dims = _RENDER_DIMS_INDEX.get(base) if base else _RENDER_DIMS_INDEX.get(url)
+    if not dims:
+        return 0
+    try:
+        return max(int(dims[0]), int(dims[1]))
+    except (TypeError, ValueError, IndexError):
+        return 0
+
+
+def available_renditions(long_edge: int) -> list[str]:
+    """Which renditions may be named in a srcset for a source whose long edge is `long_edge`.
+
+    Two problems, one rule. The processor does not emit a distinct file for every nominal size: it clamps
+    each target to the source and skips a size that collapses onto the previous one, so a 225px upload has
+    thumb and small and NOTHING above them. Naming medium/large/full for that asset gives the browser three
+    URLs that 403, and the <img> renders broken even though the file it was given is fine -- reported
+    2026-09-09 on a link card whose small.webp loaded perfectly in the address bar.
+
+    The rule is not "guess what the processor emitted" -- that depends on upscale settings this module
+    cannot see, and guessing wrong reintroduces the 403. It is: NEVER NAME A RENDITION WIDER THAN THE
+    SOURCE. Those can only ever be upscales, so they cost bytes and carry no extra detail; excluding them
+    is the right call even where the file does happen to exist.
+
+    thumb and small are always safe: the processor emits the smallest ladder entry unconditionally, clamped
+    to the source.
+
+    With no dimensions we cannot reason at all, so nothing changes -- the full ladder, exactly as before.
+    Legacy images predate the sidecar and mostly come from large sources, and breaking them to fix a case
+    we cannot detect would trade a known-good for a guess.
+    """
+    if long_edge <= 0:
+        return list(IMAGE_RENDITION_WIDTHS)
+    ladder = [size for size, width in IMAGE_RENDITION_WIDTHS.items()
+              if size in ("thumb", "small") or width <= long_edge]
+    return ladder or ["thumb"]
+
+
 def responsive_img(url: str, alt: str, *, sizes: str, eager: bool = False, dims: tuple[int, int] | None = None) -> str:
     """Render an <img> that lets the browser pick the right rendition per slot and DPR.
 
@@ -3959,12 +4000,16 @@ def responsive_img(url: str, alt: str, *, sizes: str, eager: bool = False, dims:
     if not match:
         return f'<img src="{escape(url)}" alt="{alt_attr}"{dims_attrs} loading="{loading}" decoding="async"{priority}>'
     base = match.group("base")
+    ladder = available_renditions(_source_long_edge(url, dims))
     srcset = ", ".join(
-        f"{escape(f'{base}/{size}.webp')} {width}w"
-        for size, width in IMAGE_RENDITION_WIDTHS.items()
+        f"{escape(f'{base}/{size}.webp')} {IMAGE_RENDITION_WIDTHS[size]}w"
+        for size in ladder
     )
+    # Prefer medium as the plain `src` (what a no-srcset client gets, and the default candidate), but never
+    # name a rendition the ladder excluded -- that is exactly the 403 this guards against.
+    fallback = "medium" if "medium" in ladder else ladder[-1]
     return (
-        f'<img src="{escape(f"{base}/medium.webp")}" srcset="{srcset}" sizes="{escape(sizes)}" '
+        f'<img src="{escape(f"{base}/{fallback}.webp")}" srcset="{srcset}" sizes="{escape(sizes)}" '
         f'alt="{alt_attr}"{dims_attrs} loading="{loading}" decoding="async"{priority}>'
     )
 

@@ -51,9 +51,11 @@ class RepeatableSectionTests(unittest.TestCase):
         # page_ribbon joined 2026-09-04: a page may legitimately carry a second interruption further down.
         # It is the one repeatable element with an UPPER bound rather than none — the builder caps it at
         # two, because a third stops being an interruption and becomes wallpaper.
-        # link_cards joined 2026-09-09 for the same reason catalog_grid is repeatable: a link-in-bio page
-        # groups destinations ("Shop", "Read", "Listen"), and one grid per group is the natural shape.
-        self.assertEqual(repeatable, {"content_block", "catalog_grid", "page_ribbon", "link_cards"})
+        # link_cards was briefly added here on 2026-09-09 and taken back out the same day. Repeatable is
+        # what makes the palette button open a NEW section every click, and for link cards that reads as a
+        # bug: a tenant clicking "Link cards" again means "another link", not "another grid". Grouping into
+        # "Shop"/"Read" was a guess about how these pages get used; the click behaviour was observed.
+        self.assertEqual(repeatable, {"content_block", "catalog_grid", "page_ribbon"})
 
     def test_container_sections_are_singletons(self):
         # Testimonials and FAQ are ONE section holding many items, each with its own add control. A
