@@ -534,6 +534,7 @@
                     <button v-if="builder.avatar_url" class="secondary-action compact" type="button" @click="builder.avatar_url = ''">Remove</button>
                   </div>
                   <small v-if="avatarUploadError" class="builder-upload-error">{{ avatarUploadError }}</small>
+                  <small v-else-if="avatarIsFromProfile" class="field-note">From your profile avatar. Uploading here changes this page only.</small>
                   <label v-if="builder.avatar_url" class="offer-field">
                     <span>Avatar placement</span>
                     <select v-model="builder.avatar_placement">
@@ -2440,6 +2441,10 @@ const isListicleOffer = computed(() => deriveOfferType(builderOffer.value) === "
 // Visibility comes from the SHARED rules file (imported by pageComposer.js — the exact file Python reads)
 // plus the tenant's overrides. The preview AND the saved section list both call sectionVisible(), and
 // Python's compose_page() applies the same rules, so preview and published can't disagree.
+// True when the page is simply showing the tenant's saved avatar rather than one uploaded for this page --
+// so the hint can say where the image came from instead of leaving them to wonder.
+const avatarIsFromProfile = computed(() =>
+  Boolean(builder.avatar_url) && builder.avatar_url === (profileStore.profileImages[0]?.url || ""));
 const builderOfferType = computed(() => deriveOfferType(builderOffer.value));
 function sectionVisible(sectionType) {
   return isSectionVisible(builderOfferType.value, sectionType, builder.composition.overrides, builderGoal.value);
@@ -3734,6 +3739,10 @@ function startBuilderFromWizard() {
   }
   populateBuilderFromPage(page);
   seedGoalElements(form.goal);
+  // A NEW page starts with the tenant's saved avatar, so it never has to be re-uploaded per page. Applied
+  // only on creation: on an EXISTING page an empty avatar_url is a DECISION (the tenant pressed Remove),
+  // and defaulting there would silently undo it every time they reopened the builder.
+  if (!builder.avatar_url) builder.avatar_url = profileStore.profileImages[0]?.url || "";
   builderExistingPageId.value = "";
   builderOriginalPage.value = null;
   pendingSiteAttach.value = selectedSiteId.value;  // attach this offer page to the chosen Site on first save

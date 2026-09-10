@@ -47,6 +47,24 @@
     </section>
 
     <section class="dashboard-card">
+      <header class="dashboard-card-header"><h2>Avatar</h2></header>
+      <p class="field-note">
+        Used as the default avatar on every page you build — checkout pages and link pages alike — so you
+        upload it once instead of on every page. Any page can still override it with its own image.
+        A square image works best; it is shown as a circle.
+      </p>
+      <div class="builder-avatar-row">
+        <img v-if="avatarUrl" :src="avatarUrl" class="builder-avatar-preview" alt="" />
+        <input ref="avatarInput" type="file" accept="image/*" hidden @change="onAvatarPicked" />
+        <button class="secondary-action compact" type="button" :disabled="avatarUploading" @click="avatarInput?.click()">
+          {{ avatarUploading ? "Uploading..." : (avatarUrl ? "Replace avatar" : "Upload avatar") }}
+        </button>
+        <button v-if="avatarUrl" class="secondary-action compact" type="button" @click="removeAvatar">Remove</button>
+      </div>
+      <small v-if="avatarError" class="builder-upload-error">{{ avatarError }}</small>
+    </section>
+
+    <section class="dashboard-card">
       <header class="dashboard-card-header"><h2>Business</h2></header>
       <div class="dashboard-card-body">
         <p class="field-note">
@@ -156,6 +174,7 @@
 <script setup>
 import { computed, reactive, ref } from "vue";
 import { apiRequest, getAuthSession, getTenantId } from "../api/client";
+import { uploadImage } from "../api/uploads";
 import { formatEpochDate, statusLabel } from "../utils/format";
 import { normalizeE164, phoneError } from "../utils/phone";
 import PhoneInput from "./PhoneInput.vue";
@@ -284,6 +303,7 @@ const businessPhoneError = computed(() => phoneError(form.business.phone));
 
 function applyProfile(profile) {
   rawDoc.value = profile || {};
+  profileImages.value = [...((profile.profile_images || {}).images || [])];
   email.value = profile.email || session.email || "";
   form.first_name = profile.first_name ?? session.first_name ?? "";
   form.last_name = profile.last_name ?? session.last_name ?? "";
@@ -325,6 +345,41 @@ async function load() {
   }
 }
 
+const avatarInput = ref(null);
+const avatarUploading = ref(false);
+const avatarError = ref("");
+// profile_images is a LIST (the schema allows up to 10) but only one avatar is meaningful today, so the
+// FIRST entry is the default. Keeping the list shape means adding a picker later is additive rather than
+// a migration.
+const profileImages = ref([]);
+const avatarUrl = computed(() => profileImages.value[0]?.url || "");
+
+async function onAvatarPicked(event) {
+  const file = event.target.files?.[0];
+  event.target.value = "";
+  if (!file) return;
+  avatarError.value = "";
+  avatarUploading.value = true;
+  try {
+    const { url, imageId } = await uploadImage(file);
+    profileImages.value = [{
+      image_id: imageId || `img_${Date.now()}`,
+      url,
+      uploaded_at: Math.floor(Date.now() / 1000),
+    }];
+    await save();
+  } catch (err) {
+    avatarError.value = err.message || "Avatar upload failed.";
+  } finally {
+    avatarUploading.value = false;
+  }
+}
+
+async function removeAvatar() {
+  profileImages.value = [];
+  await save();
+}
+
 async function save() {
   if (!userId) {
     error.value = "Could not determine your user account. Sign out and back in.";
@@ -350,6 +405,8 @@ async function save() {
     const business = cleanBusiness(form.business, rawDoc.value.business || {});
     if (business) doc.business = business;
     else delete doc.business;
+    if (profileImages.value.length) doc.profile_images = { images: profileImages.value };
+    else delete doc.profile_images;
     doc.updated_at = Math.floor(Date.now() / 1000);
     const body = await apiRequest("/profile", { method: "PUT", body: doc });
     applyProfile(body.profile || doc);

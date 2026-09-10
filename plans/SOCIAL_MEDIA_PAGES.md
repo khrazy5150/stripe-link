@@ -253,10 +253,16 @@ that gates behaviour with nothing producing it. See the audit item in `TODO.md`.
   `hero_media` rather than its own element, which settles that plan's open decision — the avatar needs the
   hero as a positioning context, so splitting them would mean an element that cannot render without its
   neighbour.
-- **STILL MISSING: "use the tenant's saved image".** `user_profile.profile_images` is validated (max 10) and
-  written by NOTHING — no handler, no UI. So there is no saved image to choose from yet; upload is the only
-  path. Fourth field found this session that is read or validated with no producer (`same_as[].verified`,
-  `analytics_summary`, `profile_images`, and the CSS-only `platform` on `social_redirect`).
+- **DONE 2026-09-10: the saved avatar is the DEFAULT for every page**, checkout pages included. The Profile
+  screen gained an Avatar card, which is the producer `user_profile.profile_images` never had — it was
+  validated (max 10) and written by nothing, the fourth such field found this session alongside
+  `same_as[].verified`, `analytics_summary` and the unread `platform` on `social_redirect`.
+  The first entry in the list is the default; the list shape is kept so a multi-image picker is additive.
+- **The default applies on page CREATION only.** On an existing page an empty `avatar_url` is a DECISION —
+  the tenant pressed Remove — and defaulting on every open would silently undo it, which is the same
+  looks-applied-but-isn't shape that cost a day on section removal. Consequence: the page stores the
+  resolved URL, so changing the profile avatar later does not rewrite pages already built. That is the
+  right default for a published page, and re-picking is one click.
 - **`link_cards`** — DECIDED, see §8a. `catalog_grid` does NOT cover the external case.
 
 ## 8a. GAP: `catalog_grid` cards are internal-only, by design
