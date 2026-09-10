@@ -173,9 +173,10 @@
 </template>
 
 <script setup>
-import { reactive, ref } from "vue";
+import { computed, reactive, ref } from "vue";
 import { apiRequest, getAuthSession, getTenantId } from "../api/client";
 import { uploadImage } from "../api/uploads";
+import { useProfileStore } from "../stores/profile";
 
 const session = getAuthSession() || {};
 const userId = session.user_id || "";
@@ -195,17 +196,21 @@ const fontMessage = ref("");
 const fontForm = reactive({ family: "", weight: "400", licence: false });
 const fontToRemove = ref(null);
 
+const profileStore = useProfileStore();
 const storeAvatarInput = ref(null);
-const storeAvatarUrl = ref("");
+// Read THROUGH the store, not into a local ref. The topbar pill renders profileStore.storeAvatarUrl, so a
+// card holding its own copy meant removing the avatar cleared the card and left the pill showing it until
+// the page was reloaded -- the same stale-second-copy shape as every other drift bug here.
+const storeAvatarUrl = computed(() => profileStore.storeAvatarUrl);
 const storeAvatarBusy = ref(false);
 const storeAvatarError = ref("");
 
 async function loadStoreAvatar() {
   try {
     const body = await apiRequest("/tenant/avatar");
-    storeAvatarUrl.value = body.avatar_url || "";
+    profileStore.storeAvatarUrl = body.avatar_url || "";
   } catch {
-    storeAvatarUrl.value = "";   // no avatar set, or unreadable -- either way there is nothing to show
+    profileStore.storeAvatarUrl = "";   // no avatar set, or unreadable -- nothing to show either way
   }
 }
 
@@ -214,7 +219,8 @@ async function saveStoreAvatar(url) {
   storeAvatarBusy.value = true;
   try {
     const body = await apiRequest("/tenant/avatar", { method: "PUT", body: { avatar_url: url } });
-    storeAvatarUrl.value = body.avatar_url || "";
+    // One place holds it, so the topbar pill updates with the card instead of after a refresh.
+    profileStore.storeAvatarUrl = body.avatar_url || "";
   } catch (err) {
     storeAvatarError.value = err.message || "Could not save the store avatar.";
   } finally {

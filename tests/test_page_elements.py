@@ -259,18 +259,30 @@ class HeroCopyTests(unittest.TestCase):
 
 class HeroOverlayTests(unittest.TestCase):
     def test_brand_overlay_and_avatar(self):
-        from stripe_link.runtime.html import render_hero_overlays
-        html = "\n".join(render_hero_overlays(
-            {"brand_overlay": True, "brand_position": "bottom-left", "avatar_url": "https://img/a.jpg"},
-            {"presentation": {"brand": "MinXin Chen"}},
-        ))
-        self.assertIn("sl-hero-brand sl-hero-brand--bottom-left", html)
-        self.assertIn("MinXin Chen", html)
-        self.assertIn("sl-avatar-wrap", html)
-        self.assertIn("https://img/a.jpg", html)
+        """Brand and avatar are rendered SEPARATELY on purpose (2026-09-10).
+
+        The brand is painted on the artwork and goes inside the <figure>; the avatar may sit below the
+        image in normal flow and stays outside it. While they shared a renderer the brand's containing
+        block was .sl-hero-media, which grows when an inline avatar appears -- so a bottom-left brand slid
+        down level with the avatar and overlapped it on a phone.
+        """
+        from stripe_link.runtime.html import render_hero_brand, render_hero_overlays
+        section = {"brand_overlay": True, "brand_position": "bottom-left",
+                   "avatar_url": "https://img/a.jpg"}
+        offer = {"presentation": {"brand": "MinXin Chen"}}
+        brand = "\n".join(render_hero_brand(section, offer))
+        avatar = "\n".join(render_hero_overlays(section, offer))
+        self.assertIn("sl-hero-brand sl-hero-brand--bottom-left", brand)
+        self.assertIn("MinXin Chen", brand)
+        self.assertNotIn("sl-avatar-wrap", brand)
+        self.assertIn("sl-avatar-wrap", avatar)
+        self.assertIn("https://img/a.jpg", avatar)
+        self.assertNotIn("sl-hero-brand", avatar)
 
     def test_brand_falls_back_to_product_headline_not_offer_name(self):
-        from stripe_link.runtime.html import render_hero_overlays
+        # render_hero_brand, not render_hero_overlays: the brand is emitted inside the <figure> so it
+        # anchors to the ARTWORK, while the avatar stays outside it (2026-09-10).
+        from stripe_link.runtime.html import render_hero_brand as render_hero_overlays
         # The internal offer name ("… Single Offer") must NOT leak as brand; fall back to the
         # product-derived headline (plans/LANDING_PAGE_DEFAULT_COPY.md).
         offer = {"name": "Acme Single Offer", "presentation": {"headline": "Acme Widget"}}
@@ -280,16 +292,17 @@ class HeroOverlayTests(unittest.TestCase):
         self.assertNotIn("Single Offer", html)
 
     def test_brand_prefers_picked_brand_over_headline(self):
-        from stripe_link.runtime.html import render_hero_overlays
+        from stripe_link.runtime.html import render_hero_brand as render_hero_overlays
         offer = {"name": "Acme Single Offer", "presentation": {"brand": "Acme Co", "headline": "Acme Widget"}}
         html = "\n".join(render_hero_overlays({"brand_overlay": True}, offer))
         self.assertIn("Acme Co", html)
 
     def test_empty_when_nothing_set(self):
-        from stripe_link.runtime.html import render_hero_overlays
+        from stripe_link.runtime.html import render_hero_brand, render_hero_overlays
         self.assertEqual(render_hero_overlays({}, {}), [])
+        self.assertEqual(render_hero_brand({}, {}), [])
         # brand_overlay on but no text anywhere -> nothing
-        self.assertEqual(render_hero_overlays({"brand_overlay": True}, {}), [])
+        self.assertEqual(render_hero_brand({"brand_overlay": True}, {}), [])
 
 
 class OfferActionsTests(unittest.TestCase):

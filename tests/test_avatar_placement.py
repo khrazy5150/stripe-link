@@ -130,3 +130,45 @@ class PlacementPersistenceTests(unittest.TestCase):
                    / "dashboard" / "src" / "components" / "LandingPages.vue").read_text(encoding="utf-8")
         self.assertIn("avatar_placement: builder.avatar_placement || undefined", builder)
         self.assertNotIn("avatar_placement: builder.avatar_url ?", builder)
+
+
+class HeroStructureTests(unittest.TestCase):
+    """Where each overlay lives in the DOM, because that is what decides how it positions.
+
+    All three reported 2026-09-10 on a real page.
+    """
+
+    def setUp(self):
+        from stripe_link.runtime import html as html_module
+        self.html = html_module
+        html_module._RENDER_PREFERENCES["avatar_url"] = "https://img.example/store.jpg"
+
+    def tearDown(self):
+        self.html._RENDER_PREFERENCES.clear()
+
+    def _markup(self, images, **overrides):
+        section = {"type": "hero_media", "images": images, "brand_overlay": True,
+                   "brand_text": "ACME", "brand_position": "bottom-left"}
+        section.update(overrides)
+        return self.html.render_hero_media(section, {}, {})
+
+    def test_the_brand_sits_inside_the_figure_so_it_anchors_to_the_artwork(self):
+        # Outside it, the containing block is .sl-hero-media, which GROWS when an inline avatar appears --
+        # so a bottom-left brand slid down level with the avatar and overlapped it on a phone.
+        for images in (["https://i/a.jpg"], ["https://i/a.jpg", "https://i/b.jpg"]):
+            markup = self._markup(images, avatar_placement="centered")
+            self.assertLess(markup.index("sl-hero-brand"), markup.index("</figure>"), images)
+
+    def test_the_avatar_stays_outside_the_figure(self):
+        # An inline or centred avatar is in normal flow BELOW the image, not painted on it.
+        markup = self._markup(["https://i/a.jpg"], avatar_placement="centered")
+        self.assertGreater(markup.index("sl-avatar-wrap"), markup.index("</figure>"))
+
+    def test_the_carousel_counter_sits_with_the_dots_not_over_the_image(self):
+        # Overlaid top-right it collided with a top-right brand chip: two translucent pills stacked on the
+        # artwork read as a bug rather than a design.
+        markup = self._markup(["https://i/a.jpg", "https://i/b.jpg"], brand_position="top-right")
+        dots = markup.index("sl-hero-dots")
+        counter = markup.index("sl-hero-counter")
+        self.assertLess(dots, counter)
+        self.assertLess(counter, markup.index("</figure>"))

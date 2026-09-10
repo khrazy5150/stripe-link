@@ -466,7 +466,10 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     "    .sl-hero h1{font-family:var(--sl-font-heading);font-size:clamp(2.4rem,5vw,3.2rem);line-height:1.2;font-weight:800;color:var(--sl-headline);letter-spacing:0;max-width:52rem;margin:0 auto}",
     "    .sl-hero p{font-size:1.5rem;line-height:1.55;color:var(--sl-subheadline-text);max-width:46rem;margin:0 auto}",
     "    .sl-hero-media{position:relative;padding-top:0.8rem}",
-    "    .sl-hero-figure{margin:0}",
+    # The brand overlay is absolutely positioned; without this its containing block is .sl-hero-media, which
+    # GROWS when an inline or centred avatar sits below the image -- so a bottom-left brand slid down to sit
+    # level with the avatar, and overlapped it on a phone. Anchoring to the figure pins it to the artwork.
+    "    .sl-hero-figure{margin:0;position:relative}",
     "    .sl-hero-caption{font-size:1.3rem;color:var(--sl-muted);text-align:center;margin-top:0.6rem;line-height:1.4}",
     "    .sl-hero-track{display:flex;overflow-x:auto;scroll-snap-type:x mandatory;scrollbar-width:none;border-radius:var(--sl-radius)}",
     "    .sl-hero-track::-webkit-scrollbar{display:none}",
@@ -475,8 +478,10 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     "    .sl-hero-nav{position:absolute;top:calc(50% + 0.4rem);transform:translateY(-50%);width:3.8rem;height:3.8rem;border-radius:50%;border:0;background:rgba(255,255,255,.9);color:#111;font-size:2.2rem;line-height:1;cursor:pointer;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 8px rgba(0,0,0,.18)}",
     "    .sl-hero-prev{left:0.8rem}",
     "    .sl-hero-next{right:0.8rem}",
-    "    .sl-hero-counter{position:absolute;top:1.6rem;right:0.8rem;background:rgba(0,0,0,.55);color:#fff;font-size:1.3rem;font-weight:700;padding:0.3rem 0.9rem;border-radius:99.9rem}",
-    "    .sl-hero-dots{display:flex;gap:0.6rem;justify-content:center;margin-top:0.8rem}",
+    "    .sl-hero-counter{position:absolute;right:0;top:50%;transform:translateY(-50%);font-size:1.1rem;font-weight:600;opacity:.6;letter-spacing:.02em}",
+    # position:relative so the counter can sit at the right end without pushing the dots off centre --
+    # the dots stay centred under the image whether or not there is a counter beside them.
+    "    .sl-hero-dots{position:relative;display:flex;gap:0.6rem;justify-content:center;align-items:center;margin-top:0.8rem}",
     "    .sl-hero-dot{width:0.8rem;height:0.8rem;border-radius:50%;background:var(--sl-border);cursor:pointer}",
     "    .sl-hero-dot.is-active{background:var(--sl-brand)}",
     # Socialite hero overlays (plans/SOCIALITE_PARITY.md): positionable brand chip + profile avatar.
@@ -2365,10 +2370,14 @@ def offer_brand_fallback(offer: dict[str, Any]) -> str:
     return str(presentation.get("brand") or presentation.get("headline") or "")
 
 
-def render_hero_overlays(section: dict[str, Any], offer: dict[str, Any]) -> list[str]:
-    """Socialite hero overlays (plans/SOCIALITE_PARITY.md): a positionable brand chip baked into the hero
-    image, and a circular profile avatar ("face behind the business") overhanging the bottom-left. Both live
-    inside the position:relative .sl-hero-media so toggling the brand never shifts layout."""
+def render_hero_brand(section: dict[str, Any], offer: dict[str, Any]) -> list[str]:
+    """The positionable brand chip (plans/SOCIALITE_PARITY.md), baked into the hero IMAGE.
+
+    Emitted inside the <figure> on purpose. As a sibling of the figure its containing block was
+    .sl-hero-media, which GROWS when an inline or centred avatar sits below the image -- so a bottom-left
+    brand slid down to sit level with the avatar, and overlapped it on a phone. Anchored to the figure it
+    stays on the artwork wherever the avatar goes.
+    """
     lines: list[str] = []
     if section.get("brand_overlay"):
         brand_text = str(section.get("brand_text") or offer_brand_fallback(offer))
@@ -2380,6 +2389,13 @@ def render_hero_overlays(section: dict[str, Any], offer: dict[str, Any]) -> list
                 f"      <div class=\"sl-hero-brand sl-hero-brand--{position}\">"
                 f"<span class=\"sl-hero-brand-dot\"></span>{escape(brand_text)}</div>"
             )
+    return lines
+
+
+def render_hero_overlays(section: dict[str, Any], offer: dict[str, Any]) -> list[str]:
+    """The avatar, which sits OUTSIDE the figure because an inline or centred one is in normal flow below
+    the image rather than painted on it."""
+    lines: list[str] = []
     # BY REFERENCE. A page that has not uploaded its own avatar shows the STORE's, resolved at render from
     # the tenant profile -- so when the tenant changes their picture, every page that never overrode it
     # shows the new one. Copying the URL onto each page at build time would have frozen each page at
@@ -2453,6 +2469,7 @@ def render_hero_media(
     section_id = escape(str(section.get("id", "hero-media")))
     autoplay = bool(section.get("autoplay"))
     overlays = render_hero_overlays(section, offer)
+    brand = render_hero_brand(section, offer)
     # has-avatar reserves the space the overlay OVERHANGS into. An inline or centred avatar sits in normal
     # flow and needs no reserved gap -- keeping it would leave a hole under the hero.
     has_avatar = avatar_placement(section) != "hidden" and bool(
@@ -2475,6 +2492,7 @@ def render_hero_media(
             "        <div class=\"sl-hero-track\">",
             *slides,
             "        </div>",
+            *brand,
             caption_html,
             "      </figure>",
             *overlays,
@@ -2493,10 +2511,14 @@ def render_hero_media(
         "      </div>",
         "      <button class=\"sl-hero-nav sl-hero-prev\" type=\"button\" data-hero-prev aria-label=\"Previous image\">‹</button>",
         "      <button class=\"sl-hero-nav sl-hero-next\" type=\"button\" data-hero-next aria-label=\"Next image\">›</button>",
-        f"      <span class=\"sl-hero-counter\" data-hero-counter>1 / {len(images)}</span>",
         "      <div class=\"sl-hero-dots\">",
         *dots,
+        # The counter sits WITH the dots below the image, not over it. Overlaid top-right it collided with
+        # a top-right brand overlay, and two translucent pills stacked on the artwork looked like a bug.
+        # Below the hero it is still exactly where someone looks to see how many images there are.
+        f"        <span class=\"sl-hero-counter\" data-hero-counter>1 / {len(images)}</span>",
         "      </div>",
+        *brand,
         caption_html,
         "      </figure>",
         *overlays,
