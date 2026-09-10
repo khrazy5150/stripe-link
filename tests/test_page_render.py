@@ -1308,3 +1308,39 @@ class CountdownBannerTests(unittest.TestCase):
         # 0 is not a speed — it falls back to the default rather than clamping to the floor.
         self.assertIn("--sl-countdown-marquee-duration:14s", self._render(marquee_seconds=0))
         self.assertIn("--sl-countdown-marquee-duration:14s", self._render())
+
+
+class PriceCardClampTests(unittest.TestCase):
+    """Price options clamp their label and description, like the link cards.
+
+    The failure mode differs from a side-by-side grid: options stack in ONE column, so a long
+    description does not distort a neighbour -- it pushes the checkout CTA down the page, which is
+    worse. Uniform heights also make tiers scannable, which is a price selector's entire job.
+    """
+
+    def _styles(self) -> str:
+        import pathlib
+        import re
+        source = (pathlib.Path(__file__).resolve().parents[1]
+                  / "src" / "stripe_link" / "runtime" / "html.py").read_text(encoding="utf-8")
+        return "\n".join(re.findall(r'"(\s*\.sl-price-(?:option strong|description)\{[^"]*)"', source))
+
+    def test_the_label_and_description_are_clamped(self):
+        styles = self._styles()
+        self.assertIn("-webkit-line-clamp:2", styles)   # label
+        self.assertIn("-webkit-line-clamp:3", styles)   # description
+        self.assertIn("overflow-wrap:anywhere", styles)
+
+    def test_clamping_is_by_lines_not_characters(self):
+        # The tenant picks the font, so a maxlength would be a proxy for pixels -- and one line would
+        # be brutal on a phone, where the copy column is narrow.
+        self.assertNotIn("white-space:nowrap", self._styles())
+
+    def test_both_emitters_keep_the_full_text_in_title(self):
+        # There are TWO price-card emitters (service options and product options) and they have to
+        # agree -- a fix applied to one and not the other is this codebase's recurring failure.
+        import pathlib
+        source = (pathlib.Path(__file__).resolve().parents[1]
+                  / "src" / "stripe_link" / "runtime" / "html.py").read_text(encoding="utf-8")
+        self.assertEqual(source.count('<strong title=\\"{label}\\">{label}</strong>'), 2)
+        self.assertEqual(source.count('class=\\"sl-price-description\\" title=\\"{description}\\"'), 2)

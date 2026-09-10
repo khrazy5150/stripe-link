@@ -505,6 +505,16 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     "    .sl-price-copy{display:grid;gap:0.4rem}",
     "    .sl-price-option strong{font-family:var(--sl-font-heading);font-size:1.6rem;line-height:1.2;font-weight:600;color:var(--sl-price-title)}",
     "    .sl-price-description{color:var(--sl-price-description);font-size:1.3rem;line-height:1.45}",
+    # Same line-clamp as the link cards, for the same reason: the tenant picks the font, so a character
+    # limit would be a proxy for pixels. Price options stack in one column rather than sitting side by
+    # side, so a long description does not distort a neighbour -- it pushes the CHECKOUT CTA down the
+    # page, which is worse. Uniform option heights also make tiers scannable, which is the whole job of
+    # a price selector.
+    #
+    # The full text is kept in title= and, on pages carrying product_details, rendered in full there --
+    # so clamping a tier's summary never hides the only copy of what the buyer is choosing between.
+    "    .sl-price-option strong{display:-webkit-box;-webkit-line-clamp:2;line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere}",
+    "    .sl-price-description{display:-webkit-box;-webkit-line-clamp:3;line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere}",
     "    .sl-price-row{display:flex;align-items:center;gap:1rem;flex-wrap:wrap;margin-top:1rem}",
     "    .sl-price-amount{font-family:var(--sl-font-accent);font-size:2rem;font-weight:700;color:var(--sl-price-amount)}",
     "    .sl-regular-price{color:var(--sl-price-regular);text-decoration:line-through;font-size:1.4rem}",
@@ -2594,8 +2604,8 @@ def render_service_price_card(item, service_id, services_by_id, offer, display_i
         f"      <article class=\"sl-price-option\" data-service-id=\"{escape(service_id)}\" data-product-id=\"\" data-price-id=\"{escape(price_id)}\" data-quantity=\"{checkout_quantity}\" data-default=\"true\" data-sale-amount=\"{amount}\" data-regular-amount=\"{int(compare_at_unit_amount) if compare_at_unit_amount else ''}\" data-currency=\"{escape(currency)}\" data-label=\"{label}\">",
         "        " + responsive_img(image_url, str(service.get("name") or label), sizes=PRICE_OPTION_SIZES) if image_url else "",
         "        <div class=\"sl-price-copy\">",
-        f"          <strong>{label}</strong>",
-        f"          <p class=\"sl-price-description\">{description}</p>" if description else "",
+        f"          <strong title=\"{label}\">{label}</strong>",
+        f"          <p class=\"sl-price-description\" title=\"{description}\">{description}</p>" if description else "",
         "          <div class=\"sl-price-row\">",
         f"            <span class=\"sl-price-amount\" data-price-amount>{escape(format_money(amount, currency))}</span>",
         f"            <span class=\"sl-regular-price\">{escape(format_money(int(compare_at_unit_amount), currency))}</span>" if compare_at_unit_amount else "",
@@ -2767,8 +2777,8 @@ def _item_price_option_cards(
             "        " + responsive_img(image_url, str(product.get("name") or label), sizes=PRICE_OPTION_SIZES) if image_url else "",
             "        <div class=\"sl-price-copy\">",
             f"          <span class=\"sl-badge\">{badge}</span>" if badge else "",
-            f"          <strong>{label}</strong>",
-            f"          <p class=\"sl-price-description\">{description}</p>" if description else "",
+            f"          <strong title=\"{label}\">{label}</strong>",
+            f"          <p class=\"sl-price-description\" title=\"{description}\">{description}</p>" if description else "",
             "          <div class=\"sl-price-row\">",
             f"            <span class=\"sl-price-amount\" data-price-amount>{escape(format_money(amount, currency))}</span>",
             f"            <span class=\"sl-regular-price\">{escape(format_money(int(compare_at_unit_amount), currency))}</span>" if compare_at_unit_amount else "",
