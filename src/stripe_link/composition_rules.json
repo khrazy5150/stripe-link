@@ -675,6 +675,21 @@
       ],
       "allowed_ctas": [],
       "_comment": "Link-in-bio: a ZERO-PRIMARY-OFFER page (plans/SOCIAL_MEDIA_PAGES.md \u00a72). The conversion spine is deliberately absent -- no offer_price_selector, no checkout_cta, no refund_policy, because the page has nothing to sell of its own; its cards each link to their own offer. allowed_ctas is empty for the same reason: this page cannot convert."
+    },
+    "lead_gen": {
+      "sections": [
+        "brand_label",
+        "hero_media",
+        "hero",
+        "checkout_cta",
+        "legal_footer"
+      ],
+      "allowed_ctas": [
+        "email_capture",
+        "phone_call",
+        "external"
+      ],
+      "_comment": "A lead-gen offer is not a checkout page with the price hidden -- it is a different page. The conversion spine goes (no offer_price_selector, no refund_policy, no trust_badges: there is no purchase to reassure anyone about) but checkout_cta STAYS, because that is what renders the inline lead-capture form for a capture_* action. `buy` is absent from allowed_ctas -- this page cannot transact. Identity and link elements (profile_avatar, social_links, link_cards) are ungoverned, so the tenant adds them and they render."
     }
   },
   "_goal_comment": "Second composition axis: the tenant's GOAL / traffic source (plans/LANDING_PAGE_GOAL_COMPOSITION.md). A goal enables capability PACKS on top of the offer_type base \u2014 never a hand-maintained offer_type x goal matrix. Packs are union-only: they add, never remove, so a page with no goal composes exactly as it did before goals existed (no migration). A pack has two halves because the two kinds of section behave differently. `seeds` are content-bearing body elements (faq, testimonials, ...) that render nothing until a tenant fills them in \u2014 the create wizard seeds them as empty scaffolds into builder state and they are tenant-owned from then on, so changing goal never deletes copy. `sections` are governed sections the goal turns on; that suits DERIVED head/sidecar output (structured_data, llms_txt) needing no tenant input, and is empty until those exist (Phase 3) \u2014 the mechanism is here so they slot in without a renderer change. Editing guide: docs/CONFIGURING_GOALS.md. NEVER delete or rename a goal \u2014 pages that stored it would stop validating and could no longer be saved or re-rendered. Retire one with \"deprecated\": true, which hides it from the wizard while existing pages keep validating and composing.",

@@ -182,6 +182,23 @@ def derived_head_sections(offer_type, overrides, goal, present) -> list[dict[str
 AUTHORED_PAGE_TYPES = ("funnel_step", "thank_you")
 
 
+def composition_key(offer: dict[str, Any]) -> str:
+    """Which composition this offer gets: "lead_gen", else its offer_type.
+
+    Deliberately NOT folded into derived_offer_type. That function answers "how does this offer PRICE" --
+    single, bundle or listicle -- and four places in the renderer branch on it to decide carousel and
+    minicart behaviour. Intent is a different question ("does this page transact at all?") and conflating
+    them would silently change those four.
+
+    Reads `product_intent` straight off the OFFER, which already carries it, so no product lookup and no
+    signature change. See plans/SOCIAL_MEDIA_PAGES.md §2a for why the first attempt used offer_type and
+    could never be reached: offer_type is derived, and no offer SHAPE can express "sells nothing".
+    """
+    if str((offer or {}).get("product_intent") or "") == "lead_gen":
+        return "lead_gen"
+    return derived_offer_type(offer or {})
+
+
 def compose_page(
     offer: dict[str, Any], page: dict[str, Any], page_type: str = "landing"
 ) -> list[dict[str, Any]]:
@@ -194,7 +211,7 @@ def compose_page(
 
     The renderer only iterates the result — it never decides.
     """
-    offer_type = derived_offer_type(offer or {})
+    offer_type = composition_key(offer or {})
     overrides = page_overrides(page)
     goal = page_goal(page)
     visible = [

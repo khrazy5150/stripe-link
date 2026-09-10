@@ -2415,6 +2415,10 @@ const selectedOfferCta = computed(() => selectedOffer.value?.presentation?.cta |
 // offer_type is being retired (plans/OFFER_MODEL_REDESIGN.md): read it through a derive helper — the stored
 // field wins during migration, else infer from the landing items — so this keeps working once it's dropped.
 function deriveOfferType(offer) {
+  // Mirrors composition_key() in domain/composition.py. A lead-gen offer gets its OWN composition rather
+  // than a checkout page with the price hidden -- and intent is a different question from pricing shape,
+  // which is why this sits here and not inside the items/prices derivation below.
+  if (offer?.product_intent === "lead_gen") return "lead_gen";
   if (offer?.offer_type) return offer.offer_type;
   const items = Array.isArray(offer?.items) ? offer.items : [];
   if (items.length > 1) return "listicle";
