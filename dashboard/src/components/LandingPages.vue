@@ -1055,6 +1055,41 @@
                       <p class="element-empty">Shows the current product's gallery, badges, and description — pulled from the offer and synced to the carousel. No configuration needed.</p>
                     </template>
 
+                    <template v-else-if="element.type === 'social_links'">
+                      <input v-model.trim="element.heading" type="text" placeholder="Section heading (optional)" />
+                      <p class="element-empty">
+                        Shows the social profiles from your Business Profile, so you enter them once instead of on
+                        every page. Add or change them in <strong>Sites → edit your Site → Business identity</strong>.
+                        Every profile you list is shown here, confirmed or not — confirming only affects what search
+                        engines are told, never what visitors can tap.
+                      </p>
+                    </template>
+
+                    <template v-else-if="element.type === 'link_cards'">
+                      <input v-model.trim="element.heading" type="text" placeholder="Section heading (optional)" />
+                      <div v-for="(item, i) in element.items" :key="i" class="element-subrow">
+                        <input :value="item.label" type="text" placeholder="Card title — e.g. My Amazon storefront" @input="applyTitleCaseInput((value) => { item.label = value; }, $event)" />
+                        <input v-model.trim="item.url" type="url" placeholder="https://…" autocapitalize="off" spellcheck="false" />
+                        <textarea v-model.trim="item.description" rows="2" placeholder="One line about it (optional)"></textarea>
+                        <div class="selectable-price-image-controls" :class="{ 'has-image-preview': item.image_url }">
+                          <div v-if="item.image_url" class="selectable-price-image-preview"><img :src="item.image_url" alt="Card image preview" /></div>
+                          <input :ref="(el) => setSubImageInput(subImgKey(element, 'items', i), el)" type="file" accept="image/*" hidden @change="handleSubImagePicked(item, 'image_url', subImgKey(element, 'items', i), $event)" />
+                          <button class="secondary-action compact" type="button" :disabled="Boolean(subImageUploading[subImgKey(element, 'items', i)])" @click.prevent="triggerSubImageUpload(subImgKey(element, 'items', i))">
+                            {{ subImageUploading[subImgKey(element, 'items', i)] ? "Uploading..." : "Upload image" }}
+                          </button>
+                          <input v-model.trim="item.image_url" type="url" placeholder="or paste image URL" />
+                        </div>
+                        <div v-if="subImageErrors[subImgKey(element, 'items', i)]" class="price-image-error">{{ subImageErrors[subImgKey(element, 'items', i)] }}</div>
+                        <button class="danger-action compact" type="button" @click="removeSubItem(element, 'items', i)">Remove</button>
+                      </div>
+                      <button class="secondary-action compact" type="button" @click="addSubItem(element, 'items', { url: '', label: '', description: '', image_url: '' })">+ Add link</button>
+                      <p v-if="!onCustomDomainForLinks" class="element-empty">
+                        On your free {{ hostingSuffixHint }} address only well-known destinations become tappable links —
+                        the rest still appear, just not clickable. This protects everyone sharing that address from
+                        one bad link. Connect your own domain and every destination becomes a real link.
+                      </p>
+                    </template>
+
                     <template v-else-if="element.type === 'related_products'">
                       <input v-model.trim="element.heading" type="text" placeholder="Section heading (optional)" />
                       <p class="element-empty">Automatically shows other Site pages in the same category as this one — a same-category rail for internal linking. It fills itself; there's nothing to pick.</p>
@@ -3270,6 +3305,15 @@ const storefrontSite = computed(() => {
   const siteId = form.page_id ? siteByPageId.value[form.page_id]?.site_id : "";
   return siteId ? sitesStore.sites.find((s) => s.site_id === siteId) || null : null;
 });
+// link_cards mirrors the renderer's rule exactly: html.py treats a page as "on a custom domain" only when
+// _RENDER_STATE.home_url is set, and that happens only for a VERIFIED custom domain. Anything looser here
+// would promise the tenant clickable links the published page then refuses to render.
+const onCustomDomainForLinks = computed(() => {
+  const hosting = storefrontSite.value?.hosting || {};
+  return Boolean(hosting.custom_domain && hosting.verification?.verified);
+});
+const hostingSuffixHint = computed(() => sitesStore.hostingDomain || "jbay.uk");
+
 const siteSlugByPageId = computed(() => {
   const m = new Map();
   for (const [slug, entry] of Object.entries(storefrontSite.value?.pages || {})) {
@@ -4518,6 +4562,10 @@ function newElement(type) {
   if (type === "client_marquee") return { ...base, heading: "Our Clients", logos: [{ image_url: "", name: "" }], scroll: "auto", scroll_seconds: 30, logo_backing: "card" };
   if (type === "faq") return { ...base, heading: "Frequently Asked Questions", items: [{ question: "", answer: "" }] };
   if (type === "related_products") return { ...base, heading: "Related products" };
+  // social_links has no per-page content: it reads the Site's Business Profile, so a tenant fills their
+  // profiles in once rather than retyping them on every page.
+  if (type === "social_links") return { ...base, heading: "" };
+  if (type === "link_cards") return { ...base, heading: "", items: [{ url: "", label: "", description: "", image_url: "" }] };
   // ONE ratio for the element, not one per image: locking both sides to the same shape is what makes the
   // wipe align. 4:3 is the common phone-photo shape, so most pairs need no change.
   if (type === "video") return { ...base, heading: "", url: "", poster: "", caption: "", aspect: 1.7777777778 };
@@ -4572,6 +4620,7 @@ function appendBlankItem(element) {
     testimonials: ["items", { quote: "", author: "", role: "", avatar_url: "" }, "quote"],
     faq: ["items", { question: "", answer: "" }, "question"],
     client_marquee: ["logos", { image_url: "", name: "" }, "image_url"],
+    link_cards: ["items", { url: "", label: "", description: "", image_url: "" }, "url"],
   }[element.type];
   if (!blanks) return;
   const [field, blank, probe] = blanks;
@@ -5136,6 +5185,26 @@ function elementSection(element) {
   if (element.type === "product_details") {
     return { id: element.id, type: "product_details" };   // content is the current target (offer-driven)
   }
+  if (element.type === "social_links") {
+    // No items of its own — the renderer reads the Site's organization.same_as.
+    return { id: element.id, type: "social_links", heading: formatHeadline(element.heading || "") || undefined };
+  }
+  if (element.type === "link_cards") {
+    // A card needs somewhere to go AND something to call it; either alone is not a card.
+    const items = (element.items || []).filter((item) => (item.url || "").trim() && (item.label || "").trim());
+    if (!items.length) return null;
+    return {
+      id: element.id,
+      type: "link_cards",
+      heading: formatHeadline(element.heading || "") || undefined,
+      items: items.map((item) => ({
+        url: item.url.trim(),
+        label: formatHeadline(item.label || ""),
+        description: (item.description || "").trim() || undefined,
+        image: (item.image_url || "").trim() || undefined,
+      })),
+    };
+  }
   if (element.type === "page_ribbon") {
     if (!(element.headline || "").trim() && !(element.body || "").trim()) return null;
     const theme = element.theme && element.theme.bg ? element.theme : undefined;
@@ -5276,6 +5345,16 @@ function elementsFromPage(sections) {
       elements.push({ id: localId("el"), type: "product_details" });
     } else if (section.type === "related_products") {
       elements.push({ id: localId("el"), type: "related_products", heading: section.heading || "Related products" });
+    } else if (section.type === "social_links") {
+      elements.push({ id: localId("el"), type: "social_links", heading: section.heading || "" });
+    } else if (section.type === "link_cards") {
+      // `image` on the wire, `image_url` in the form — the upload helper writes image_url, and every other
+      // element in this builder spells it that way.
+      elements.push({ id: localId("el"), type: "link_cards", heading: section.heading || "",
+        items: (section.items || []).map((item) => ({
+          url: item.url || "", label: item.label || "",
+          description: item.description || "", image_url: item.image || "",
+        })) });
     }
   }
   return elements;

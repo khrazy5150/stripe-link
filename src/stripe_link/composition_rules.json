@@ -482,7 +482,7 @@
     "social_links": {
       "placement": "free",
       "label": "Social links",
-      "ui": "internal",
+      "ui": "add",
       "kind": "capability",
       "channel": "body",
       "heading_role": "h2",
@@ -495,7 +495,7 @@
     "link_cards": {
       "placement": "free",
       "label": "Link cards",
-      "ui": "internal",
+      "ui": "add",
       "kind": "capability",
       "channel": "body",
       "heading_role": "h2",
