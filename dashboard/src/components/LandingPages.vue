@@ -2483,13 +2483,14 @@ function isSectionEnabled(key) {
   if (override && typeof override.enabled === "boolean") return override.enabled;
   return defaultVisible(builderOfferType.value, key, builderGoal.value);
 }
-function toggleSection(key, enabled) {
+async function toggleSection(key, enabled) {
   // Only persist a deviation from the offer_type default; clearing back to default drops the override.
   if (enabled === defaultVisible(builderOfferType.value, key, builderGoal.value)) {
     delete builder.composition.overrides[key];
   } else {
     builder.composition.overrides[key] = { enabled };
   }
+  await autoSavePage();
 }
 // --- Advanced Color Settings (plans/ADVANCED_COLOR_SETTINGS.md) ---
 const previewEl = ref(null);
@@ -4903,8 +4904,9 @@ const hasCustomOrder = computed(() => Boolean(builder.section_order?.length));
 
 // Hand the page back to the baseline. Because an absent section_order MEANS "use the baseline", giving
 // it up is the whole operation — there is no stored copy of the recommended sequence to restore.
-function resetSectionOrder() {
+async function resetSectionOrder() {
   builder.section_order = [];
+  await autoSavePage();
 }
 
 // Three ribbons stop being interruptions and become wallpaper, which destroys the only property that
@@ -5100,12 +5102,12 @@ function onRowDragStart(index) {
   rowDragFrom.value = index;
 }
 
-function onRowDrop(index) {
+async function onRowDrop(index) {
   const from = rowDragFrom.value;
   rowDragFrom.value = -1;
   const rows = sequenceRows.value;
   if (from < 0 || from === index || !rows[from] || !rows[index]) return;
-  moveSectionBefore(rows[from].key, rows[index].key);
+  await moveSectionBefore(rows[from].key, rows[index].key);
 }
 
 
@@ -5115,7 +5117,7 @@ function onRowDrop(index) {
 // Reorder by section KEY — used by the drag handles on the form blocks themselves, where there is no
 // row index to work from. Same builder.section_order the Section order list writes, so the two controls
 // are one mechanism with two surfaces rather than two mechanisms that must agree.
-function moveSectionBefore(dragKey, dropKey) {
+async function moveSectionBefore(dragKey, dropKey) {
   if (!dragKey || !dropKey || dragKey === dropKey) return;
   const rows = sequenceRows.value;
   // The sequence now includes PINNED rows, so this guard is load-bearing again — without it the hero
@@ -5129,6 +5131,11 @@ function moveSectionBefore(dragKey, dropKey) {
   const [moved] = keys.splice(from, 1);
   keys.splice(to, 0, moved);
   builder.section_order = keys;
+  // Both drag surfaces (the sequence rows and the form-block handles) route through here, so one call
+  // covers them. `composition.overrides` and `section_order` are saved page fields, not view state --
+  // before this they persisted only if the tenant happened to do something else that auto-saved
+  // afterwards, which made "did my change stick?" depend on what they did next.
+  await autoSavePage();
 }
 
 
