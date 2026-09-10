@@ -438,7 +438,24 @@ of its own — sold-through products do, "here is my TikTok" does not.
    - **STILL TO DO in this phase:** `profile_avatar`, which belongs to `SOCIALITE_PARITY.md`. The builder UI
      for adding/ordering `link_cards` items is also not built — the element renders, but nothing in the
      dashboard creates one yet.
-4. **P3 — override + publish gate** (`source` flag, `on_custom_domain` check).
+4. **P3 — override + publish gate.** PARTLY SHIPPED 2026-09-09.
+   - **The `on_custom_domain` check is enforced at RENDER**, not at publish: a non-allowlisted external
+     destination becomes an inert tile on platform infrastructure and a real anchor on the tenant's own
+     domain. Both the renderer and any future gate read ONE policy (`linkable_on_platform_host` in
+     `domain/social_links.py`), so the trust rule keeps the single home §8a asked for.
+   - **SHIPPED: disconnecting a domain now re-publishes the Site's pages.** This was the actual hole, and it
+     was stale state rather than a bad rule. `on_custom_domain` is baked into each artifact at publish time,
+     so a page published while the domain was live kept CLICKABLE arbitrary links, and that artifact went on
+     serving from the shared platform host after the domain was gone. First-verify already re-published for
+     the same reason (canonical/robots); disconnect is its mirror and was missing.
+   - **NOT built: the `source: "business" | "override"` flag.** Deferred deliberately. There is no per-page
+     social override list yet — `social_links` reads the Business Profile and every `link_cards` item is a
+     tenant override by construction — so the flag would have exactly one possible value at every call site.
+     A provenance flag that cannot vary is not a guarantee; it is decoration that invites the next person to
+     branch on it. Add it WITH the override list (§6's second list), not before.
+   - **A save-time refusal was considered and not built.** The pages handler has no Sites repository, so it
+     cannot see hosting without new wiring, and the security goal is already met at render. Blocking publish
+     outright would also make the free tier much worse while `PLATFORM_LINKABLE_HOSTS` stays this narrow.
 5. **P4 — per-link analytics.**
 
 P0 and P2 are independent of the verification decision and can start first; P3 cannot.

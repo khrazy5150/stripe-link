@@ -169,7 +169,7 @@ def handler(event, context, repository=None, registry=None, tenant_repo=None):
         if method == "POST" and resource.endswith("/domain"):
             return connect_domain(event, repository, site_id)
         if method == "DELETE" and resource.endswith("/domain"):
-            return disconnect_domain(event, repository, site_id)
+            return disconnect_domain(event, repository, site_id, mode=mode)
     if method == "POST":
         gate = require_capability(event, "sites", tenant_repo)
         if gate is not None:
@@ -938,7 +938,7 @@ def check_domain(event, repository, site_id, pages_repo=None, mode="test"):
     return json_response({"site": saved, "status": status, "dns_records": dns_records, "diagnostics": diagnostics, "hint": hint})
 
 
-def disconnect_domain(event, repository, site_id):
+def disconnect_domain(event, repository, site_id, pages_repo=None, mode="test"):
     tenant_id = tenant_id_from_event(event)
     if not tenant_id:
         return error_response("tenant_id is required.", code="missing_tenant")
@@ -974,6 +974,13 @@ def disconnect_domain(event, repository, site_id):
             custom_domains_index_repository().delete(tenant_id, domain)
         except RepositoryError:
             pass
+    # The mirror of the FIRST-VERIFY re-publish, and it was missing. `on_custom_domain` is baked into each
+    # published artifact -- canonical, robots, and (since 2026-09-09) whether an external link_cards
+    # destination is a real anchor or an inert tile. A page published while the domain was live therefore
+    # keeps CLICKABLE arbitrary links in its artifact, and that artifact goes on serving from the shared
+    # platform host after the domain is gone. That is precisely the reputation-isolation hole §7 exists to
+    # close, reopened by stale state rather than by a bad rule.
+    _republish_site_pages(tenant_id, saved, pages_repo, mode=mode)
     return json_response({"site": saved, "disconnected": True})
 
 

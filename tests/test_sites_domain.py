@@ -252,6 +252,25 @@ class SitesDomainTests(unittest.TestCase):
                     None, repository=self.repo)
         self.assertNotIn("www.axelmart.com", self.index.records)   # cleaned up
 
+    def test_disconnect_republishes_site_pages(self):
+        """The mirror of first-verify re-publish, and it was missing until 2026-09-09.
+
+        `on_custom_domain` is baked into each published artifact: canonical, robots, and whether an
+        external link_cards destination renders as a real anchor or an inert tile. A page published while
+        the domain was live keeps CLICKABLE arbitrary links in its artifact, and that artifact goes on
+        serving from the shared platform host once the domain is gone -- reopening the reputation-isolation
+        hole through stale state rather than a bad rule.
+        """
+        self.repo.put(base_site())
+        with patch.object(sites_handler, "create_custom_hostname", return_value=CF_PENDING):
+            self._connect({"tenant_id": "t1", "domain": "axelmart.com"})
+        self.pages.put({**self.pages.get("t1", "page_home01"), "updated_at": 1})
+        with patch.object(sites_handler, "delete_custom_hostname", return_value=None):
+            handler({"httpMethod": "DELETE", "resource": "/sites/{site_id}/domain",
+                     "pathParameters": {"site_id": "site_D1"}, "queryStringParameters": {"tenant_id": "t1"}},
+                    None, repository=self.repo)
+        self.assertNotEqual(self.pages.get("t1", "page_home01")["updated_at"], 1)
+
     def test_connect_reuses_existing_hostname_on_duplicate(self):
         # A prior partial attempt already created the Cloudflare hostname; retry must reuse it, not fail.
         self.repo.put(base_site())
