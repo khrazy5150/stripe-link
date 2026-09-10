@@ -64,6 +64,7 @@
       </header>
       <!-- Same reasoning as Store Fonts below: this is what CUSTOMERS see, so it belongs to the store and
            not to a login. Two people editing one store must not put different faces on its pages. -->
+      <div class="dashboard-card-body">
       <p class="field-note">
         Shown on every page that has not overridden it — checkout pages and link pages alike. Pages reference
         this image rather than copying it, so updating it here updates them all. A square image works best;
@@ -78,6 +79,7 @@
         <button v-if="storeAvatarUrl" class="secondary-action compact" type="button" :disabled="storeAvatarBusy" @click="clearStoreAvatar">Remove</button>
       </div>
       <small v-if="storeAvatarError" class="builder-upload-error">{{ storeAvatarError }}</small>
+      </div>
     </section>
 
     <section class="dashboard-card">

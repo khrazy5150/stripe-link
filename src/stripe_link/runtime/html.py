@@ -2176,7 +2176,10 @@ def first_offer_product(offer: dict[str, Any], products_by_id: dict[str, dict[st
     return {}
 
 
-AVATAR_PLACEMENTS = ("overlay", "inline", "centered")
+# `hidden` exists because the avatar became a REFERENCE: an empty page-level avatar_url now means "inherit
+# the store's", not "no avatar", so without this a tenant who uploads a store avatar has no way to keep it
+# off one particular page.
+AVATAR_PLACEMENTS = ("overlay", "inline", "centered", "hidden")
 
 
 def avatar_placement(section: dict[str, Any]) -> str:
@@ -2382,6 +2385,8 @@ def render_hero_overlays(section: dict[str, Any], offer: dict[str, Any]) -> list
     # shows the new one. Copying the URL onto each page at build time would have frozen each page at
     # whatever the avatar was the day it was made, which is the opposite of what a profile picture is for.
     avatar_url = str(section.get("avatar_url") or "") or str(_RENDER_PREFERENCES.get("avatar_url") or "")
+    if avatar_placement(section) == "hidden":
+        avatar_url = ""
     if avatar_url:
         # The avatar carries brand identity, so it's a content image — name it (brand text, else the offer).
         avatar_alt = escape(str(section.get("brand_text") or offer_brand_fallback(offer) or "Brand avatar"))
@@ -2450,7 +2455,8 @@ def render_hero_media(
     overlays = render_hero_overlays(section, offer)
     # has-avatar reserves the space the overlay OVERHANGS into. An inline or centred avatar sits in normal
     # flow and needs no reserved gap -- keeping it would leave a hole under the hero.
-    has_avatar = bool(str(section.get("avatar_url") or "") or str(_RENDER_PREFERENCES.get("avatar_url") or ""))
+    has_avatar = avatar_placement(section) != "hidden" and bool(
+        str(section.get("avatar_url") or "") or str(_RENDER_PREFERENCES.get("avatar_url") or ""))
     media_class = "sl-hero-media" + (
         " has-avatar" if has_avatar and avatar_placement(section) == "overlay" else "")
     slides = [

@@ -535,12 +535,13 @@
                   </div>
                   <small v-if="avatarUploadError" class="builder-upload-error">{{ avatarUploadError }}</small>
                   <small v-else-if="avatarIsFromProfile" class="field-note">Showing your store avatar. Change it in Preferences and every page that has not overridden it updates too.</small>
-                  <label v-if="effectiveAvatarUrl" class="offer-field">
+                  <label v-if="effectiveAvatarUrl || builder.avatar_placement === 'hidden'" class="offer-field">
                     <span>Avatar placement</span>
                     <select v-model="builder.avatar_placement">
                       <option value="overlay">Overlapping the hero image</option>
                       <option value="inline">Below the hero, left</option>
                       <option value="centered">Below the hero, centered</option>
+                      <option value="hidden">Don't show an avatar on this page</option>
                     </select>
                     <small class="field-note">Overlapping suits a page with a cover image. Without one, choose a position below the hero — an overlapping avatar with nothing behind it reads as a mistake.</small>
                   </label>
@@ -4118,7 +4119,10 @@ function builderSectionCandidates(intent) {
     images: heroMediaList.value,
     autoplay: Boolean(builder.autoplay),
     avatar_url: builder.avatar_url || "",
-    avatar_placement: builder.avatar_url ? (builder.avatar_placement || "overlay") : undefined,
+    // NOT gated on builder.avatar_url. Once the avatar became a REFERENCE, a page inheriting the store
+    // image has an empty avatar_url -- so gating here silently discarded the placement on exactly the
+    // pages most likely to use it, and every one of them rendered as an overlay whatever the tenant chose.
+    avatar_placement: builder.avatar_placement || undefined,
     brand_overlay: Boolean(builder.brand_overlay),
     brand_position: builder.brand_position || "top-right",
     brand_text: builder.brand_overlay ? brandText : "",

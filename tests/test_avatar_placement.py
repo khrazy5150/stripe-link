@@ -76,3 +76,57 @@ class ValidationTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class HiddenPlacementTests(unittest.TestCase):
+    """"hidden" exists because the avatar became a REFERENCE.
+
+    An empty page-level avatar_url now means "inherit the store's", not "no avatar" -- so without an
+    explicit hide, a tenant who uploads a store avatar has no way to keep it off one particular page.
+    Reported 2026-09-10.
+    """
+
+    def setUp(self):
+        from stripe_link.runtime import html as html_module
+        self.html = html_module
+        html_module._RENDER_PREFERENCES["avatar_url"] = "https://img.example/store.jpg"
+
+    def tearDown(self):
+        self.html._RENDER_PREFERENCES.clear()
+
+    def _render(self, placement):
+        return self.html.render_hero_media(
+            {"type": "hero_media", "images": ["https://img.example/h.jpg"],
+             "avatar_placement": placement}, {}, {})
+
+    def test_hidden_removes_an_inherited_avatar(self):
+        self.assertNotIn("sl-avatar", self._render("hidden"))
+
+    def test_hidden_removes_a_page_specific_avatar_too(self):
+        markup = self.html.render_hero_media(
+            {"type": "hero_media", "images": ["https://img.example/h.jpg"],
+             "avatar_url": "https://img.example/page.jpg", "avatar_placement": "hidden"}, {}, {})
+        self.assertNotIn("sl-avatar", markup)
+
+    def test_hidden_reserves_no_overhang(self):
+        # has-avatar would leave a gap under the hero for an avatar that is not there.
+        self.assertNotIn("has-avatar", self._render("hidden"))
+
+    def test_the_other_placements_still_show_it(self):
+        for placement in ("overlay", "inline", "centered"):
+            self.assertIn("sl-avatar", self._render(placement), placement)
+
+
+class PlacementPersistenceTests(unittest.TestCase):
+    def test_the_builder_saves_the_placement_even_when_the_avatar_is_INHERITED(self):
+        """Reported 2026-09-10: every placement rendered as an overlay.
+
+        The serializer gated avatar_placement on builder.avatar_url. Once the avatar became a reference,
+        a page inheriting the store image has an EMPTY avatar_url -- so the placement was discarded on
+        exactly the pages most likely to use it.
+        """
+        import pathlib
+        builder = (pathlib.Path(__file__).resolve().parents[1]
+                   / "dashboard" / "src" / "components" / "LandingPages.vue").read_text(encoding="utf-8")
+        self.assertIn("avatar_placement: builder.avatar_placement || undefined", builder)
+        self.assertNotIn("avatar_placement: builder.avatar_url ?", builder)
