@@ -97,7 +97,10 @@
             aria-haspopup="menu"
             @click="userMenuOpen = !userMenuOpen"
           >
-            <span>{{ auth.initials }}</span>
+            <!-- The store avatar when there is one, initials otherwise. Same image the pages show, so the
+                 pill matches what a customer sees rather than a generated placeholder. -->
+            <img v-if="profileStore.storeAvatarUrl" :src="profileStore.storeAvatarUrl" class="user-pill-avatar" alt="" />
+            <span v-else>{{ auth.initials }}</span>
             <div class="user-pill-text">
               <strong>{{ auth.displayName }}</strong>
               <small class="user-pill-sub" :title="connectedAccountTitle">{{ connectedAccountLabel }}</small>
@@ -221,6 +224,7 @@ import ToastHost from "./components/ToastHost.vue";
 import { iconPaths, menuGroupsForEnvironment } from "./config/menu";
 import { assetUrl, getStripeMode, loadAppConfigApiBase, setStripeMode } from "./api/client";
 import { useAuthStore } from "./stores/auth";
+import { useProfileStore } from "./stores/profile";
 import { useCollectionsStore } from "./stores/collections";
 import { useCouponsStore } from "./stores/coupons";
 import { useDashboardStore } from "./stores/dashboard";
@@ -232,6 +236,7 @@ import { useStripeKeysStore } from "./stores/stripeKeys";
 import { useToastsStore } from "./stores/toasts";
 
 const auth = useAuthStore();
+const profileStore = useProfileStore();
 const collections = useCollectionsStore();
 const coupons = useCouponsStore();
 const dashboard = useDashboardStore();
@@ -485,6 +490,9 @@ onMounted(() => {
     .then(maybeNudgeStripeSetup)
     .catch(() => {});
   platformBilling.load().catch(() => {});
+  // The pill shows the store avatar when there is one. Failure is silent: the initials are a perfectly
+  // good fallback, and a missing avatar must never be an error the tenant has to read.
+  profileStore.ensureLoaded().catch(() => {});
   // Keep the bell badge fresh while the dashboard is open.
   notificationsPoll = window.setInterval(() => {
     if (auth.isAuthenticated) notifications.load({ silent: true });

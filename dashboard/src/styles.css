@@ -498,6 +498,16 @@ main {
   font-weight: 900;
 }
 
+/* Matches the initials circle exactly, so swapping one for the other does not move the pill by a pixel. */
+.user-pill-avatar {
+  width: 4rem;
+  height: 4rem;
+  border-radius: 999px;
+  object-fit: cover;
+  display: block;
+  background: #6157d4;
+}
+
 .user-pill strong,
 .user-pill small {
   display: block;
