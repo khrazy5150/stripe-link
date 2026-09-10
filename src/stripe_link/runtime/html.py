@@ -13,6 +13,7 @@ from stripe_link.domain.business_types import BUSINESS_TYPES, resolve_entity_typ
 from stripe_link.domain.composition import compose_page, element_channel
 from stripe_link.domain.connect_sync import site_seo_enabled
 from stripe_link.domain.documents import PRODUCT_CONDITIONS
+from stripe_link.domain.social_links import display_entries as display_social_entries
 from stripe_link.domain.social_links import network_label
 from stripe_link.domain.social_links import verified_urls as verified_same_as_urls
 from stripe_link.domain.opportunities import STAGE_LANDING, STAGE_POST_PURCHASE, derived_offer_type, stage_opportunities
@@ -822,6 +823,11 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     "    .sl-seller-contact{font-size:1.4rem;color:var(--sl-muted);display:flex;flex-wrap:wrap;gap:0.6rem}",
     "    .sl-seller-contact a{color:var(--sl-legal-link);text-decoration:none}",
     "    .sl-seller-social,.sl-seller-catalog{list-style:none;display:flex;flex-wrap:wrap;gap:1rem;padding:0;margin:0}",
+    # The standalone row leads a link-in-bio page rather than sitting inside a profile block, so it centres
+    # and gets tap-sized targets: effectively all of this traffic is a thumb coming from an app's bio field.
+    "    .sl-social-row{list-style:none;display:flex;flex-wrap:wrap;justify-content:center;gap:.75rem;padding:0;margin:0}",
+    "    .sl-social-row a{display:inline-block;min-height:44px;line-height:44px;padding:0 1.25rem;border:1px solid var(--sl-legal-link);border-radius:999px;color:var(--sl-legal-link);text-decoration:none}",
+    "    .sl-social-row a:hover{text-decoration:underline}",
     "    .sl-seller-social a,.sl-seller-catalog a{color:var(--sl-legal-link);text-decoration:none;font-size:1.4rem}",
     "    .sl-seller-social a:hover,.sl-seller-catalog a:hover{text-decoration:underline}",
     "    .sl-seller-hours{list-style:none;padding:0;margin:0;font-size:1.4rem;color:var(--sl-content-text)}",
@@ -2061,6 +2067,7 @@ SECTION_REGISTRY: dict[str, dict[str, Any]] = {
     "catalog_grid": {"render": lambda c: render_catalog_grid(c.section, c.offers_by_id, c.products_by_id, c.services_by_id), "version": 1},
     "related_products": {"render": lambda c: render_catalog_grid(c.section, c.offers_by_id, c.products_by_id, c.services_by_id), "version": 1},
     "seller_profile": {"render": lambda c: render_seller_profile(c.section), "version": 1},
+    "social_links": {"render": lambda c: render_social_links(c.section), "version": 1},
     "checkout_cta": {"render": lambda c: render_checkout_cta(c.page, c.section, c.offer, c.resolved_offer, c.checkout_url, c.api_base_url, c.products_by_id), "version": 1},
     "legal_footer": {"render": lambda c: render_legal_footer(c.page.get("legal") or {}, c.section, c.api_base_url), "version": 1},
 }
@@ -5036,6 +5043,38 @@ def render_catalog_grid(
 
 
 
+
+
+def render_social_links(section: dict[str, Any]) -> str:
+    """A standalone row of the business's social profiles — the identity header of a link-in-bio page.
+
+    Reads the SITE's organization.same_as, so a tenant fills it in once on the Business Profile rather than
+    re-typing it per page.
+
+    Display is NOT gated on verification, and that is the whole point of the two-tier model
+    (plans/SOCIAL_MEDIA_PAGES.md §7a-i): Instagram and TikTok cannot be confirmed by any unauthenticated
+    fetch, and they are the two platforms this page exists to be linked FROM. Gating display would empty
+    the row of exactly the links that matter. Verification gates `sameAs` — the machine-readable identity
+    claim, emitted elsewhere — never what a visitor can see and tap.
+
+    Every link is rel="nofollow ugc noopener": these are tenant-entered destinations, so they must never
+    pass authority from our domain, and `ugc` says what they are.
+    """
+    entries = display_social_entries(_RENDER_ORG)
+    if not entries:
+        return ""
+    parts = [f'    <section class="sl-social-links" data-section-id="{escape(str(section.get("id", "social-links")))}" data-section-type="social_links">']
+    heading = str(section.get("heading") or "").strip()
+    if heading:
+        parts.append(f'      <h2 class="sl-section-heading">{render_headline_markup(heading)}</h2>')
+    links = "".join(
+        f'<li><a href="{escape(str(entry.get("url")).strip())}" rel="nofollow ugc noopener" target="_blank">'
+        f'{escape(network_label(entry.get("url")))}</a></li>'
+        for entry in entries
+    )
+    parts.append(f'      <ul class="sl-social-row">{links}</ul>')
+    parts.append("    </section>")
+    return "\n".join(parts)
 
 
 def render_seller_profile(section: dict[str, Any]) -> str:

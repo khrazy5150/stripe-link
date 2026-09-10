@@ -11,6 +11,7 @@
     "subheadline",
     "brand_hero",
     "seller_profile",
+    "social_links",
     "product_details",
     "product_carousel",
     "catalog_grid",
@@ -476,6 +477,19 @@
         "content_heading",
         "content_text"
       ]
+    },
+    "social_links": {
+      "placement": "free",
+      "label": "Social links",
+      "ui": "internal",
+      "kind": "capability",
+      "channel": "body",
+      "heading_role": "h2",
+      "repeatable": false,
+      "tokens": [
+        "content_heading",
+        "content_text"
+      ]
     }
   },
   "_token_catalog_comment": "Powers Advanced Color Settings \u2014 the panel is GENERATED from this, grouped by `group`. Keys match theme_tokens (server --sl-<key>, preview --preview-<key>). Adding a token here surfaces it automatically. `kind:gradient` pairs cta_from/cta_to.",
@@ -637,6 +651,16 @@
         "buy",
         "cart"
       ]
+    },
+    "social_media": {
+      "sections": [
+        "brand_label",
+        "hero_media",
+        "hero",
+        "legal_footer"
+      ],
+      "allowed_ctas": [],
+      "_comment": "Link-in-bio: a ZERO-PRIMARY-OFFER page (plans/SOCIAL_MEDIA_PAGES.md \u00a72). The conversion spine is deliberately absent -- no offer_price_selector, no checkout_cta, no refund_policy, because the page has nothing to sell of its own; its cards each link to their own offer. allowed_ctas is empty for the same reason: this page cannot convert."
     }
   },
   "_goal_comment": "Second composition axis: the tenant's GOAL / traffic source (plans/LANDING_PAGE_GOAL_COMPOSITION.md). A goal enables capability PACKS on top of the offer_type base \u2014 never a hand-maintained offer_type x goal matrix. Packs are union-only: they add, never remove, so a page with no goal composes exactly as it did before goals existed (no migration). A pack has two halves because the two kinds of section behave differently. `seeds` are content-bearing body elements (faq, testimonials, ...) that render nothing until a tenant fills them in \u2014 the create wizard seeds them as empty scaffolds into builder state and they are tenant-owned from then on, so changing goal never deletes copy. `sections` are governed sections the goal turns on; that suits DERIVED head/sidecar output (structured_data, llms_txt) needing no tenant input, and is empty until those exist (Phase 3) \u2014 the mechanism is here so they slot in without a renderer change. Editing guide: docs/CONFIGURING_GOALS.md. NEVER delete or rename a goal \u2014 pages that stored it would stop validating and could no longer be saved or re-rendered. Retire one with \"deprecated\": true, which hides it from the wizard while existing pages keep validating and composing.",

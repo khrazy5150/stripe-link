@@ -410,8 +410,23 @@ of its own — sold-through products do, "here is my TikTok" does not.
    the mechanism is a Lambda fetch with an honest UA looking for the tenant's own page URL. Instagram and
    TikTok are unverifiable by fetch and stay in the unverified tier until the aggregator/OAuth path lands.
    Still to implement, but no longer a decision.
-3. **P2 — composition + `social_links` element.** New `composition_rules.json` entry,
-   reusing `seller_profile` / `catalog_grid` / `profile_avatar`.
+3. **P2 — composition + `social_links` element. SHIPPED (code) 2026-09-09.**
+   - `offer_types.social_media` in `composition_rules.json`: `allowed_ctas: []` and the conversion spine
+     omitted (no `offer_price_selector`, `checkout_cta`, `refund_policy`, `trust_badges`). Only GOVERNED
+     sections need naming — `seller_profile`, `social_links` and `catalog_grid` are ungoverned and render
+     whenever present.
+   - `social_links` element: reads the Site's `organization.same_as`, so a tenant fills it in once on the
+     Business Profile. Display is NOT gated on verification — see §7a-i.
+   - Offer validation exempts `offer_type: social_media` from the non-empty items rule. A zero-primary-offer
+     page has no conversion, and the two alternatives were both worse: a $0 phantom product living in the
+     tenant's catalogue forever, or borrowing a real offer the page is not about and emitting false Product
+     markup. The read path already degraded gracefully (`landing_presentation` → `kind: "none"`,
+     `first_offer_product` → `{}`), so nothing else had to change.
+   - The Vue composer imports the same `composition_rules.json`, so preview and published agree by
+     construction rather than by discipline.
+   - **STILL TO DO in this phase:** the `link_cards` element (§8a) for arbitrary EXTERNAL destinations.
+     Without it the page can show identity, social links and the tenant's own internal offers, but not
+     "here is my Amazon storefront". `profile_avatar` also remains, and belongs to `SOCIALITE_PARITY.md`.
 4. **P3 — override + publish gate** (`source` flag, `on_custom_domain` check).
 5. **P4 — per-link analytics.**
 

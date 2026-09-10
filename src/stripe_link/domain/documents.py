@@ -905,7 +905,7 @@ def validate_offer_document(document: dict[str, Any]) -> None:
     # offer_type drives landing-page rendering: single/bundle -> pick-one price selector; listicle -> a
     # carousel of the offer's items, each add-to-cart (plans/LISTICLE_AND_CART.md). Optional, default single.
     if document.get("offer_type") is not None:
-        require_enum(document, "offer_type", {"single", "bundle", "listicle"}, "Offer offer_type")
+        require_enum(document, "offer_type", {"single", "bundle", "listicle", "social_media"}, "Offer offer_type")
     if document.get("context") is not None:
         require_enum(document, "context", {"standard", "sale", "flash_sale", "upsell", "downsell", "order_bump"}, "Offer context")
     # The Offer coordinates how its scheduled services are delivered (single_visit collapses them
@@ -918,6 +918,19 @@ def validate_offer_document(document: dict[str, Any]) -> None:
     opportunities = document.get("purchase_opportunities")
     if isinstance(opportunities, list) and opportunities:
         validate_purchase_opportunities(document, opportunities)
+    elif str(document.get("offer_type") or "") == "social_media":
+        # A link-in-bio page is a ZERO-PRIMARY-OFFER page (plans/SOCIAL_MEDIA_PAGES.md §2): identity header
+        # plus a grid whose cards each resolve their OWN offer. It genuinely has no conversion of its own,
+        # so requiring an item would mean inventing one -- a $0 phantom product sitting in the tenant's
+        # catalogue forever, or borrowing a real offer the page is not about and emitting false Product
+        # markup. Both were considered and rejected 2026-09-09; an empty offer is the honest encoding.
+        #
+        # Safe because the read path already degrades rather than assuming: landing_presentation returns
+        # kind="none", first_offer_product returns {}, stage_opportunities yields nothing.
+        items = document.get("items")
+        if isinstance(items, list):
+            for item in items:
+                _validate_offer_item(document, item)
     else:
         items = document.get("items")
         if not isinstance(items, list) or not items:
