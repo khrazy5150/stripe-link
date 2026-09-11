@@ -160,15 +160,34 @@ switch, as it does now.
 offer with no stored intent therefore gets a lead-gen CTA and transactional SECTIONS — which is how trust
 badges and a refund policy reached the observed page. One derivation, used by both.
 
-## 8. Element changes
+## 8. Element changes  ✅ DONE 2026-09-10
 
 - **`social_links` → platform ICONS**, not worded pills. A YouTube link should render a clickable YouTube
-  glyph. The dashboard's existing icon-picker is where the set comes from.
+  glyph. ~~The dashboard's existing icon-picker is where the set comes from.~~ **Wrong — that picker is the
+  EMOJI picker; no brand-mark set existed anywhere in the repo.** Brand marks are the one glyph where "close
+  enough" is not a thing, and path data typed from memory is subtly wrong in a way nobody notices until it is
+  on every tenant's page. So `scripts/generate_network_icons.py` extracts them from simple-icons (CC0-1.0)
+  into a committed Python table; nothing at runtime or deploy needs npm.
+
+  **LinkedIn and Twitter are absent from that set, having been removed at their owners' request**, and the BBB
+  was never in it. Those render the worded pill the whole row used to be — which is the correct answer to a
+  takedown, not a gap to paper over. `twitter.com` maps to the X mark: same service, and a twitter.com URL
+  redirects to x.com today. Glyph and label share one host matcher, so a link cannot show the Facebook mark
+  labelled "Instagram". `aria-label` carries the network name and the `<svg>` is `aria-hidden`, so a screen
+  reader announces it once; both forms are 44px, clearing WCAG 2.5.8 for a page whose entire traffic is a
+  thumb coming from a bio field.
+
+  `seller_profile`'s own social list is deliberately left worded: it is a prose block, not a tap-first hub.
 - **`social_redirect` must NOT require a target.** Validation demands `target.type == "social"`, but a
   link-in-bio page has no single destination — the cards do. Relax it for this action.
 - **Seed the page.** Nothing pre-adds `social_links` or `link_cards`, so a Social Page starts empty. The
   seeding machinery already works: the subheadline is auto-populated from the action's description today.
-  It is seeding the OLD meaning, not missing.
+  It is seeding the OLD meaning, not missing. `SHAPE_SEEDS` now sits beside the goal packs' seeds and carries
+  the same contract — a create-time starting point that becomes the tenant's, never re-seeded or retracted.
+
+  **Only `lead_social` is seeded.** `lead_call` was considered, since §4 puts `seller_profile` on that shape,
+  but `seller_profile` renders the Site's NAP whether or not the page asks for it — seeding one would put the
+  same block on the page twice.
 
 ## 9. Order
 
@@ -180,7 +199,7 @@ badges and a refund policy reached the observed page. One derivation, used by bo
    attempt is deleted. An offer that says lead_gen without naming an action falls back to `lead_capture` --
    the only shape that keeps a form, so nothing the tenant typed is lost.
 4. **§5 bridge noindex** — one rule, beside an existing one.
-5. **§8 element changes** — icons, target relaxation, seeding.
+5. ~~**§8 element changes**~~ ✅ DONE 2026-09-10 — icons, target relaxation, seeding.
 
 ### Found while doing §5: the builder offered hero fields no lead page could show  ✅ FIXED 2026-09-10
 

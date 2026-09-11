@@ -498,8 +498,10 @@ function leadCaptureShape(action = {}) {
     base.target = { type: "phone", value: action.target || "" };
   } else if (base.action === "external_url") {
     base.target = { type: "url", value: action.target || "", open: "new_tab" };
-  } else if (base.action === "social_redirect") {
-    base.target = { type: "social", value: action.target || "", platform: action.platform || "other", open: "new_tab" };
+  } else if (base.action === "social_redirect" && action.target) {
+    // Only when one was actually typed. A Social Page normally has none -- writing an empty target would
+    // store a destination the page does not have, and `value` is required whenever the object exists.
+    base.target = { type: "social", value: action.target, platform: action.platform || "other", open: "new_tab" };
   }
   return base;
 }

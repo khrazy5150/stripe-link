@@ -938,10 +938,13 @@ function applyLeadAction() {
   showLeadPicker.value = false;
 }
 
+// Which actions need ONE destination typed here. A Social Page is deliberately absent: its links live on the
+// page as cards, so asking for a profile URL here would be asking which of them is the real one
+// (plans/LEAD_GEN_PAGES.md §8). Also the form's required-field check, so removing it from this map is what
+// lets a Social Page save with nothing typed.
 function leadTargetLabelFor(action) {
   if (action === "call_number") return "Phone number";
   if (action === "external_url") return "Destination URL";
-  if (action === "social_redirect") return "Social profile URL";
   return "";
 }
 

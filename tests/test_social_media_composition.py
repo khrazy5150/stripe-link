@@ -107,9 +107,37 @@ class SocialLinksElementTests(unittest.TestCase):
         self.assertNotIn('rel="noopener"', markup.replace('rel="nofollow ugc noopener"', ""))
 
     def test_links_are_labelled_by_network(self):
+        # The row shows BRAND GLYPHS now (plans/LEAD_GEN_PAGES.md §8) -- a visitor scanning a link hub finds
+        # the YouTube mark faster than the word among nine other words. The network name is still carried,
+        # because a glyph nobody can see is not a label: aria-label names the link, and the svg is
+        # aria-hidden so a screen reader announces the network once instead of twice.
         markup = self._render(self.ORG)
-        self.assertIn(">GitHub<", markup)
-        self.assertIn(">Instagram<", markup)
+        self.assertIn('aria-label="GitHub"', markup)
+        self.assertIn('aria-label="Instagram"', markup)
+        self.assertEqual(markup.count('aria-hidden="true"'), 3)
+        self.assertEqual(markup.count("<svg "), 3)
+
+    def test_a_network_with_no_mark_keeps_the_worded_pill(self):
+        # NOT a degraded state. LinkedIn and Twitter were removed from the upstream icon set at their owners'
+        # request, so shipping a mark for them would redistribute a logo whose owner asked us not to. A tenant
+        # can also paste a host nobody has heard of. Both read as the pill the whole row used to be.
+        markup = self._render({"same_as": [{"url": "https://www.linkedin.com/company/acme"}]})
+        self.assertIn(">LinkedIn<", markup)
+        self.assertIn("sl-social-worded", markup)
+        self.assertNotIn("<svg ", markup)
+
+    def test_a_mixed_row_renders_both_forms(self):
+        markup = self._render({"same_as": [
+            {"url": "https://youtube.com/@acme"},
+            {"url": "https://www.linkedin.com/company/acme"},
+        ]})
+        self.assertIn("sl-social-glyph", markup)
+        self.assertIn("sl-social-worded", markup)
+        # Both are 44px tall so a mixed row sits on one baseline, and both clear the WCAG 2.5.8 target
+        # minimum -- this page is tapped on a phone, from a bio link, which is its entire traffic source.
+        css = "\n".join(html_module.UNIVERSAL_BUNDLE_TEMPLATE_STYLES)
+        self.assertIn("min-height:44px", css)
+        self.assertIn(".sl-social-row a.sl-social-glyph{width:44px;height:44px", css)
 
     def test_nothing_renders_without_links(self):
         self.assertEqual(self._render({}), "")

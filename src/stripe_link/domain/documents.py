@@ -644,6 +644,13 @@ def validate_product_lead_capture(document: dict[str, Any]) -> None:
             optional_bool(field, "required", "Product lead_capture.fields.required")
         return
     target = lead_capture.get("target")
+    # A Social Page has NO single destination -- its cards are the actions (plans/LEAD_GEN_PAGES.md §8).
+    # Demanding one made the tenant nominate a "primary" profile, which the page then rendered as a lone
+    # "Learn More" button pointing at one network: the exact bug the lead_social composition exists to undo.
+    # Optional rather than forbidden, because products created under the old rule still carry a target and
+    # there is no reason to make them invalid -- if one is present its shape is still checked below.
+    if target is None and action == "social_redirect":
+        return
     if not isinstance(target, dict):
         raise DocumentValidationError("Product lead_capture.target must be an object for target actions.")
     expected_type = {

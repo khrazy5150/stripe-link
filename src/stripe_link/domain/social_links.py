@@ -15,6 +15,8 @@ by ZERO of these hosts. See plans/SOCIAL_MEDIA_PAGES.md §7a-i.
 """
 from typing import Any
 
+from stripe_link.domain.network_icons import NETWORK_ICON_PATHS
+
 
 # sameAs destinations are whitelisted to major social/authority hosts (TENANT_PROFILE_REQUIREMENTS §4.4):
 # an arbitrary URL asserted as the tenant's identity on our domain's markup is an impersonation/abuse vector.
@@ -130,13 +132,32 @@ def url_key(url: Any) -> str:
     return f"{host.lower()}/{rest}".rstrip("/")
 
 
+def _network_lookup(url: Any, table: dict[str, Any]) -> Any:
+    """Match a profile URL's host against a network table, subdomains included.
+
+    Shared by the label and the icon so the two can never disagree about which network a URL belongs to --
+    a link showing the Facebook mark labelled "Instagram" would be worse than either alone.
+    """
+    host = same_as_host(url)
+    for domain, value in table.items():
+        if host == domain or host.endswith("." + domain):
+            return value
+    return None
+
+
 def network_label(url: Any) -> str:
     """The human name of the network a profile URL belongs to."""
-    host = same_as_host(url)
-    for domain, label in NETWORK_LABELS.items():
-        if host == domain or host.endswith("." + domain):
-            return label
-    return host or "Profile"
+    return _network_lookup(url, NETWORK_LABELS) or same_as_host(url) or "Profile"
+
+
+def network_icon_path(url: Any) -> str:
+    """The 24x24 brand-glyph path for this network, or "" when there is none.
+
+    Empty is a normal answer, not a failure: LinkedIn and Twitter were removed from the upstream icon set at
+    their owners' request, the BBB was never in it, and a tenant may paste any host at all. The renderer
+    falls back to the worded label, which stays readable and stays honest.
+    """
+    return _network_lookup(url, NETWORK_ICON_PATHS) or ""
 
 
 def is_verified(entry: Any) -> bool:

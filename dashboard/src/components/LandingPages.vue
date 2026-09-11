@@ -3808,6 +3808,7 @@ function startBuilderFromWizard() {
   }
   populateBuilderFromPage(page);
   seedGoalElements(form.goal);
+  seedShapeElements();
   builderExistingPageId.value = "";
   builderOriginalPage.value = null;
   pendingSiteAttach.value = selectedSiteId.value;  // attach this offer page to the chosen Site on first save
@@ -3822,6 +3823,29 @@ function startBuilderFromWizard() {
 // tenant-owned — nothing re-seeds or retracts them if the goal changes.
 function seedGoalElements(goal) {
   for (const type of packSeeds(goal)) {
+    if (builder.elements.some((element) => element.type === type)) continue;
+    builder.elements.push(newElement(type));
+  }
+}
+
+// Elements a SHAPE starts with, as opposed to the ones its goal seeds. A link-in-bio page is the case that
+// needs this: it has no checkout_cta, so with an empty elements list a brand-new Social Page rendered a
+// hero image, a footer, and nothing a visitor could act on -- the tenant reached a builder and had to guess
+// that the links were two "+ Add element" clicks away. Seeding is not new machinery; the subheadline was
+// already auto-populated from the action's description. It was seeding the OLD meaning of this shape.
+//
+// Same contract as the goal seeds above: a create-time starting point that becomes the tenant's the moment
+// it exists. Nothing re-seeds or retracts if the offer changes, and a type already present is left alone.
+//
+// lead_call is deliberately NOT here. seller_profile belongs on that shape and the composition says so, but
+// it is an ungoverned addable element -- and it renders the Site's NAP whether or not the page asks for it,
+// so seeding one would put the same block on the page twice.
+const SHAPE_SEEDS = {
+  lead_social: ["social_links", "link_cards"],
+};
+
+function seedShapeElements() {
+  for (const type of SHAPE_SEEDS[builderOfferType.value] || []) {
     if (builder.elements.some((element) => element.type === type)) continue;
     builder.elements.push(newElement(type));
   }
