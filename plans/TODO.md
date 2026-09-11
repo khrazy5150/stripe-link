@@ -685,6 +685,29 @@ broken identifier fails the build rather than the browser. That is a dependency 
 than a code change, which is why it is recorded here instead of done: it needs a call on whether the build
 should fail on lint errors (it should) and how noisy the first run will be on an existing codebase.
 
+
+### ⭐ HIGH — Lead-generation pages: four shapes, not one (plan plans/LEAD_GEN_PAGES.md, 2026-09-10)
+
+A lead-gen offer currently builds a **checkout page with the price hidden**. Observed on a real page: trust
+badges, a refund policy, the product name as both brand and headline, and a "Social page" CTA redirecting
+to one profile. The composer switching on `product_intent` (shipped) removes the price selector and is not
+enough — the seven lead-capture actions want genuinely different pages.
+
+- **Seven actions collapse to FOUR shapes:** capture form (the three `capture_*`), call, bridge
+  (`external_url`), link-in-bio (`social_redirect`).
+- **`open_form` is REMOVED, not deferred** — `form_id` read by nothing, blocked on a form builder that does
+  not exist, and verified ZERO products use it in dev or prod.
+- **The bridge page is ALWAYS noindex,nofollow**, no override. It is a thin bridge page by definition;
+  indexing one risks the Site's reputation for a page with no content of its own. Legitimate beyond
+  affiliate links — redirecting a stale but popular domain to a new one — and those uses do not want
+  indexing either.
+- **The composer must see the ACTION**, which means denormalising `lead_capture_action` onto the Offer the
+  way `product_intent` already is.
+- **Fix FIRST:** `builderIntent` and `deriveOfferType` derive intent differently, and the offer index row
+  stores `""` rather than null. That split is what put trust badges on the observed page.
+- Product creation becomes a WIZARD (intent first, then action, skipping transactional fields). A separate
+  top-level section like Services was considered and rejected: a lead-gen product is the same entity.
+
 ### MEDIUM — Reddit is its own study, NOT another entry in the social allowlist (raised 2026-09-09)
 
 **Deliberately excluded from `SAME_AS_HOSTS` on 2026-09-09.** Adding it would have been a one-line change
