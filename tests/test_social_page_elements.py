@@ -30,10 +30,11 @@ PRODUCTS_STORE = (DASHBOARD / "stores" / "products.js").read_text(encoding="utf-
 NO_MARK = {
     "bbb.org": "never in the upstream set, and not worth hand-drawing for its traffic",
 }
-# Recognised, named, but with no mark of their own -- they fall through to the globe. Fansly is here because
-# upstream does not carry it and I have no reference to draw it FROM: authoring a brand mark from memory is
-# the exact failure the generator's docstring warns about, and a wrong Fansly logo is worse than a globe.
-NO_MARK_RECOGNISED = {"fansly.com": "not in simple-icons, and not safe to draw without a reference"}
+# Recognised and named but with no mark of their own would fall through to the globe. Currently empty:
+# Fansly was here until the author supplied a reference, which is exactly what it was waiting for -- drawing a
+# brand mark from memory is the failure the generator's docstring warns about, drawing one from a reference
+# you can measure is not.
+NO_MARK_RECOGNISED = {}
 
 
 class GlyphTableTests(unittest.TestCase):
@@ -106,6 +107,15 @@ class ManualIconTests(unittest.TestCase):
         # there would be destroyed by the next refresh.
         self.assertNotIn("linkedin.com", GENERATED_ICON_PATHS)
         self.assertIn("linkedin.com", MANUAL_ICON_PATHS)
+
+    def test_a_recognised_host_without_a_mark_falls_through_to_the_globe(self):
+        # Empty today, and the assertion still earns its place: the globe is what keeps adding a NAME cheap.
+        # A host can be recognised and named long before anyone draws it, and the row stays uniform meanwhile.
+        from stripe_link.domain.social_links import RECOGNISED_LABELS, network_glyph
+        from stripe_link.domain.network_icons_manual import GLOBE_ICON_PATH
+
+        self.assertEqual(set(RECOGNISED_LABELS) - set(NETWORK_ICON_PATHS), set(NO_MARK_RECOGNISED))
+        self.assertEqual(network_glyph("https://example.org/acme"), GLOBE_ICON_PATH)
 
     def test_a_hand_drawn_mark_meets_the_same_contract(self):
         # Same shape as the generated ones: 24x24, single path, no fill-rule -- the renderer supplies a bare

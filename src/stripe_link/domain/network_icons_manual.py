@@ -37,6 +37,22 @@ GLOBE_ICON_PATH = (
 )
 
 MANUAL_ICON_PATHS = {
+    # Fansly: two ring-lobes over a wedge, with the aperture ring below. Not in simple-icons, so this was
+    # TRACED -- the author supplied a reference, which was sampled to an ASCII map to measure the lobe radius,
+    # the rim thickness and the ring's position rather than eyeballing them, then rendered and compared at the
+    # 22px it actually displays at. It is a faithful reconstruction, not a copy of an official asset: the
+    # interlocking tails of the real mark are simplified to a wedge, which is invisible at this size.
+    #
+    # Drawn as a UNION (three same-direction subpaths: two circles and the wedge) with the counters carved
+    # against them. The wedge's top edge sits below the lobe holes on purpose -- overlap there would re-fill
+    # them under nonzero winding and the holes would render as half-moons.
+    "fansly.com": (
+        "M6.9 2.9A4.3 4.3 0 1 1 6.9 11.5 4.3 4.3 0 1 1 6.9 2.9ZM17.1 2.9A4.3 4.3 0 1 1 17.1 11.5"
+        " 4.3 4.3 0 1 1 17.1 2.9ZM4.2 10.2 19.8 10.2 12 20.9ZM6.9 4.5A2.75 2.75 0 1 0 6.9 10"
+        " 2.75 2.75 0 1 0 6.9 4.5ZM17.1 4.5A2.75 2.75 0 1 0 17.1 10 2.75 2.75 0 1 0 17.1 4.5Z"
+        "M12 12.2A2.45 2.45 0 1 0 12 17.1 2.45 2.45 0 1 0 12 12.2ZM12 13.25A1.4 1.4 0 1 1 12 16.05"
+        " 1.4 1.4 0 1 1 12 13.25ZM13.2 13A0.7 0.7 0 1 0 13.2 14.4 0.7 0.7 0 1 0 13.2 13Z"
+    ),
     # The "in" square. Rounded rect drawn clockwise; the dot, the i-stem and the n are drawn
     # counter-clockwise so they knock out of it. Rendered at 240px and compared against the mark on
     # linkedin.com before committing.
