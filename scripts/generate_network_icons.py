@@ -8,10 +8,14 @@ enough" is not a thing. simple-icons is the maintained upstream (CC0-1.0, public
 pulls it into a temp directory, extracts only the hosts we actually support, and writes a committed Python
 table. Nothing at runtime -- or at deploy -- depends on npm.
 
-Some hosts have NO upstream icon and never will: LinkedIn and Twitter were removed from simple-icons after
-trademark requests from their owners, and the BBB was never added. Those fall back to the worded label,
-which is the correct answer to a takedown rather than a gap to paper over. `twitter.com` maps to the X mark
-because it is the same service under a new name -- a twitter.com URL redirects to x.com today.
+Some hosts have no upstream icon: LinkedIn and Twitter were removed from simple-icons after trademark
+requests from their owners, and the BBB was never added. `twitter.com` maps to the X mark because it is the
+same service under a new name -- a twitter.com URL redirects to x.com today.
+
+LinkedIn's mark is DRAWN instead, in `domain/network_icons_manual.py`. The removal request is about one
+library redistributing the asset; it is not a rule against showing a LinkedIn icon on a link to a LinkedIn
+profile, which is ordinary nominative use. That file is hand-authored and separate BECAUSE this script
+rewrites its output wholesale -- anything added to network_icons.py by hand is destroyed on the next run.
 """
 import json
 import pathlib

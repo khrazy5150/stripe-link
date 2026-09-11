@@ -36,6 +36,13 @@ together someone has collapsed them, so they are separated here permanently.
 | Failure mode | Domain blocklisted, every creator down. | Someone opens adult content unexpectedly; we look unmoderated. |
 | Today | `PLATFORM_LINKABLE_HOSTS = SAME_AS_HOSTS`, 16 hosts. | Does not exist. |
 
+**Glyphs, noted here because it is the same confusion in miniature (2026-09-11).** LinkedIn was rendering as a
+worded pill because simple-icons had removed it at LinkedIn's request — and that request is about one library
+redistributing the asset, NOT a rule against showing a LinkedIn icon on a link to a LinkedIn profile, which is
+ordinary nominative use and what every product in this category does. "We cannot source it from there" was
+read as "we may not show it". It is now hand-drawn in `domain/network_icons_manual.py`, rendered and compared
+against the real mark before shipping, and kept out of the generated file so a refresh cannot delete it.
+
 A third rule already exists and is untouched here: **`sameAs`** — the machine-readable identity claim, gated on
 the allowlist AND on server-owned verification. Page-local links never enter it (`LEAD_GEN_PAGES.md` §8a).
 Three rules, three reasons, one shared temptation to merge them.

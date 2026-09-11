@@ -8,20 +8,27 @@ import pathlib
 import unittest
 
 from stripe_link.domain.documents import DocumentValidationError, validate_product_lead_capture
-from stripe_link.domain.network_icons import NETWORK_ICON_PATHS
-from stripe_link.domain.social_links import NETWORK_LABELS, SAME_AS_HOSTS, network_icon_path, network_label
+from stripe_link.domain.network_icons import NETWORK_ICON_PATHS as GENERATED_ICON_PATHS
+from stripe_link.domain.network_icons_manual import MANUAL_ICON_PATHS
+from stripe_link.domain.social_links import (
+    NETWORK_ICON_PATHS,
+    NETWORK_LABELS,
+    SAME_AS_HOSTS,
+    network_icon_path,
+    network_label,
+)
 
 DASHBOARD = pathlib.Path(__file__).resolve().parents[1] / "dashboard" / "src"
 BUILDER = (DASHBOARD / "components" / "LandingPages.vue").read_text(encoding="utf-8")
 PRODUCTS_VUE = (DASHBOARD / "components" / "Products.vue").read_text(encoding="utf-8")
 PRODUCTS_STORE = (DASHBOARD / "stores" / "products.js").read_text(encoding="utf-8")
 
-# The hosts with no upstream mark, and why. Named here rather than left as a silent gap so that a later
-# "why is LinkedIn a text pill?" has an answer that does not require re-deriving it. twitter.com is NOT on
-# this list -- it wears the X mark, see below.
+# The hosts with no mark at all, and why. Named here rather than left as a silent gap so that a later "why is
+# this one a text pill?" has an answer that does not require re-deriving it. twitter.com is NOT on this list
+# -- it wears the X mark. Neither is linkedin.com any more: upstream cannot ship it, so it is DRAWN, see
+# ManualIconTests below.
 NO_MARK = {
-    "linkedin.com": "removed from simple-icons at LinkedIn's request",
-    "bbb.org": "never in the upstream set",
+    "bbb.org": "never in the upstream set, and not worth hand-drawing for its traffic",
 }
 
 
@@ -61,6 +68,41 @@ class GlyphTableTests(unittest.TestCase):
         # worse than either signal alone, and two near-identical host loops is exactly how that happens.
         self.assertIn("_network_lookup(url, NETWORK_LABELS)", _social_links_source())
         self.assertIn("_network_lookup(url, NETWORK_ICON_PATHS)", _social_links_source())
+
+
+class ManualIconTests(unittest.TestCase):
+    """Hand-drawn marks, for networks the generated set cannot supply.
+
+    LinkedIn asked to be removed from simple-icons. That request is about one library redistributing the mark
+    as a downloadable asset -- it was never a rule that nobody may show a LinkedIn icon on a link to a LinkedIn
+    profile, which is ordinary nominative use and what every product in this category does. So the answer was
+    "do not lift it from that library", not "do not show it".
+    """
+
+    def test_the_manual_table_is_layered_over_the_generated_one(self):
+        # Manual wins, because it exists precisely for what upstream cannot supply: a later regeneration must
+        # not be able to take a mark away again.
+        for host, path in MANUAL_ICON_PATHS.items():
+            self.assertEqual(NETWORK_ICON_PATHS[host], path, host)
+
+    def test_it_lives_outside_the_generated_file(self):
+        # scripts/generate_network_icons.py rewrites network_icons.py wholesale, so anything hand-authored
+        # there would be destroyed by the next refresh.
+        self.assertNotIn("linkedin.com", GENERATED_ICON_PATHS)
+        self.assertIn("linkedin.com", MANUAL_ICON_PATHS)
+
+    def test_a_hand_drawn_mark_meets_the_same_contract(self):
+        # Same shape as the generated ones: 24x24, single path, no fill-rule -- the renderer supplies a bare
+        # <svg fill="currentColor"> wrapper and would silently mis-fill anything that needed more.
+        for host, path in MANUAL_ICON_PATHS.items():
+            self.assertTrue(path[:1] in "Mm", host)
+            self.assertNotIn("<", path, host)
+            self.assertNotIn("fill-rule", path, host)
+
+    def test_linkedin_now_renders_as_a_glyph(self):
+        # The reported symptom: one worded pill in a row of glyphs, visibly wider than its neighbours.
+        self.assertTrue(network_icon_path("https://www.linkedin.com/in/keith-harris-interactive"))
+        self.assertEqual(network_label("https://www.linkedin.com/in/x"), "LinkedIn")
 
 
 def _social_links_source():

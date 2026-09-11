@@ -118,18 +118,18 @@ class SocialLinksElementTests(unittest.TestCase):
         self.assertEqual(markup.count("<svg "), 3)
 
     def test_a_network_with_no_mark_keeps_the_worded_pill(self):
-        # NOT a degraded state. LinkedIn and Twitter were removed from the upstream icon set at their owners'
-        # request, so shipping a mark for them would redistribute a logo whose owner asked us not to. A tenant
-        # can also paste a host nobody has heard of. Both read as the pill the whole row used to be.
-        markup = self._render({"same_as": [{"url": "https://www.linkedin.com/company/acme"}]})
-        self.assertIn(">LinkedIn<", markup)
+        # NOT a degraded state -- a tenant can paste a host nobody has heard of, and the row stays readable.
+        # LinkedIn used to be the example here and is no longer: upstream cannot ship its mark, so ours is
+        # hand-drawn (domain/network_icons_manual.py). The fallback still has to work for everything else.
+        markup = self._render({"same_as": [{"url": "https://example.org/acme"}]})
+        self.assertIn(">example.org<", markup)
         self.assertIn("sl-social-worded", markup)
         self.assertNotIn("<svg ", markup)
 
     def test_a_mixed_row_renders_both_forms(self):
         markup = self._render({"same_as": [
             {"url": "https://youtube.com/@acme"},
-            {"url": "https://www.linkedin.com/company/acme"},
+            {"url": "https://example.org/acme"},
         ]})
         self.assertIn("sl-social-glyph", markup)
         self.assertIn("sl-social-worded", markup)

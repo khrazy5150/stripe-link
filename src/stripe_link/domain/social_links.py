@@ -15,7 +15,12 @@ by ZERO of these hosts. See plans/SOCIAL_MEDIA_PAGES.md §7a-i.
 """
 from typing import Any
 
-from stripe_link.domain.network_icons import NETWORK_ICON_PATHS
+from stripe_link.domain.network_icons import NETWORK_ICON_PATHS as _GENERATED_ICON_PATHS
+from stripe_link.domain.network_icons_manual import MANUAL_ICON_PATHS
+
+# The generated set, with hand-drawn marks layered over it. Manual wins: it exists precisely for the networks
+# upstream cannot supply, and a later regeneration must not be able to take one away.
+NETWORK_ICON_PATHS = {**_GENERATED_ICON_PATHS, **MANUAL_ICON_PATHS}
 
 
 # sameAs destinations are whitelisted to major social/authority hosts (TENANT_PROFILE_REQUIREMENTS §4.4):
