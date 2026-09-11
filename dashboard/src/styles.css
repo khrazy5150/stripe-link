@@ -4508,6 +4508,17 @@ button:disabled {
   font-size: 1.3rem;
 }
 
+/* The same note, raised when the section would render NOTHING. Muted grey is right for "here is how this
+   works" and wrong for "this is empty right now" — the second is a state the tenant has to act on to see
+   anything at all on the page. */
+.element-empty.is-warning {
+  color: var(--text, #111827);
+  background: var(--warning-bg, #fffbeb);
+  border: 1px solid var(--warning-border, #fde68a);
+  border-radius: 0.6rem;
+  padding: 1rem 1.2rem;
+}
+
 /* SETTINGS — the boundary between "what is on the page" and "how the page is configured". */
 .builder-settings-head {
   margin: 2.4rem 0 1.6rem;

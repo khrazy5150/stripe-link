@@ -186,14 +186,25 @@ class PageHealthTests(unittest.TestCase):
         bridge = _offer(product_intent="lead_gen", lead_capture_action="external_url")
         self.assertEqual(thin_content_warnings(self.THIN, bridge), [])
 
-    def test_the_other_lead_shapes_keep_the_warning(self):
-        # They can be indexed, so thinness is still something worth telling them about.
+    def test_no_lead_shape_is_nagged_about_being_thin(self):
+        # Widened from bridge-only after the author saw it on a link-in-bio page: "lead-gen pages don't care
+        # about word count" (2026-09-10). Being short is the FORM of these pages, not a defect in them -- a
+        # squeeze page converts by asking one thing, a call page puts a number above the fold, a link hub is a
+        # list of links. Padding any of them to 150 words would damage the page to silence a notice.
         from stripe_link.runtime.html import thin_content_warnings
 
-        for action in ("capture_email", "call_number", "social_redirect"):
-            self.assertTrue(
+        for action in ("capture_email", "capture_phone", "capture_email_phone",
+                       "call_number", "external_url", "social_redirect"):
+            self.assertEqual(
                 thin_content_warnings(self.THIN, _offer(product_intent="lead_gen", lead_capture_action=action)),
-                action)
+                [], action)
+
+    def test_a_checkout_page_still_keeps_it(self):
+        # There thin really is thin: a product with no description is a page a crawler has no reason to rank,
+        # and writing one is work worth doing.
+        from stripe_link.runtime.html import thin_content_warnings
+
+        self.assertTrue(thin_content_warnings(self.THIN, _offer(product_intent="transaction")))
 
 
 if __name__ == "__main__":

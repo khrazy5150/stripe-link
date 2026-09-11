@@ -175,7 +175,9 @@ class PageRenderTests(unittest.TestCase):
         self.assertIn("main{width:100%;padding:0 0 12rem", html)
         self.assertIn("main > :not(.sl-countdown):not(.sl-checkout-cta){width:min(52rem,calc(100% - 3.2rem))", html)
         self.assertIn(".sl-countdown{width:100%", html)
-        self.assertIn(".sl-brand-label p{font-family:var(--sl-font-accent);font-size:1.3rem", html)
+        # One rule for both tags: the brand mark carries the page's H1 on a composition with no hero
+        # (plans/LEAD_GEN_PAGES.md §4), and which tag it is must say what the heading MEANS, never how it looks.
+        self.assertIn(".sl-brand-label p,.sl-brand-label h1{font-family:var(--sl-font-accent);font-size:1.3rem", html)
         self.assertIn(".sl-headline h1{font-family:var(--sl-font-heading);font-size:clamp(2.4rem,5vw,3.2rem)", html)
         self.assertIn(".sl-price-option strong{font-family:var(--sl-font-heading);font-size:1.6rem", html)
         self.assertIn(".sl-price-description{color:var(--sl-price-description);font-size:1.3rem", html)

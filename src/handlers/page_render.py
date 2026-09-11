@@ -119,7 +119,25 @@ def handler(event, context, *, sites_repo=None, reviews_repo=None):
         if sites_repo is None and os.environ.get("SITES_TABLE"):
             # Resolve the Site in the previewed page's own mode so preview matches published (P5).
             sites_repo = sites_repository(mode=resolve_stripe_mode(event, body))
-        site = find_site_for_page(sites_repo, str(page.get("tenant_id") or ""), str(page.get("page_id") or ""))
+        tenant_id = str(page.get("tenant_id") or "")
+        site = find_site_for_page(sites_repo, tenant_id, str(page.get("page_id") or ""))
+        # A page is attached to its Site on SAVE, so a page being built has no Site yet -- and the renderer
+        # reads the Site for the store's identity. Every unattached page therefore previewed as the platform
+        # brand with an empty Organization, which is invisible on a checkout page (the product carries the
+        # content) and total on a link-in-bio page: social_links reads the Site's profiles, so the element the
+        # tenant had just added rendered NOTHING, with no reason given.
+        #
+        # The builder knows which Site the page belongs to or will attach to, so it says. Tenant-scoped by
+        # construction -- repository.get takes the tenant from the PAGE, never from the request -- so this
+        # cannot reach another tenant's Site. Preview only: publish must keep reporting the truth about
+        # attachment, because there the answer decides whether the page serves at all.
+        if site is None and sites_repo is not None:
+            hint = str(body.get("site_id") or "").strip()
+            if hint:
+                try:
+                    site = sites_repo.get(tenant_id, hint)
+                except Exception:  # noqa: BLE001 - identity resolution must never break a preview
+                    site = None
         if reviews_repo is None and os.environ.get("REVIEWS_TABLE"):
             reviews_repo = reviews_repository()
         reviews = load_page_reviews(reviews_repo, str(page.get("tenant_id") or ""), products_by_id, str((site or {}).get("site_id") or ""))

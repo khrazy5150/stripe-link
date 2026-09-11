@@ -1094,11 +1094,21 @@
 
                     <template v-else-if="element.type === 'social_links'">
                       <input v-model.trim="element.heading" type="text" placeholder="Section heading (optional)" />
-                      <p class="element-empty">
-                        Shows the social profiles from your Business Profile, so you enter them once instead of on
-                        every page. Add or change them in <strong>Sites → edit your Site → Business identity</strong>.
-                        Every profile you list is shown here, confirmed or not — confirming only affects what search
-                        engines are told, never what visitors can tap.
+                      <!-- Say it when there is nothing to show. This section renders from the Site, so with an
+                           empty Business Profile it paints no pixels -- and a row that silently renders nothing
+                           beside prose explaining what it WOULD render is how a tenant concludes the feature is
+                           broken. Only the count is new; the explanation was already here. -->
+                      <p v-if="!builderSiteProfiles.length" class="element-empty is-warning">
+                        <strong>No social profiles yet, so this section shows nothing.</strong>
+                        Add them in <strong>Sites → edit your Site → Business identity</strong> and they appear
+                        here and on every other page that uses this section.
+                      </p>
+                      <p v-else class="element-empty">
+                        Showing {{ builderSiteProfiles.length }} profile{{ builderSiteProfiles.length === 1 ? "" : "s" }}
+                        from your Business Profile, so you enter them once instead of on every page. Add or change
+                        them in <strong>Sites → edit your Site → Business identity</strong>. Every profile you list
+                        is shown here, confirmed or not — confirming only affects what search engines are told,
+                        never what visitors can tap.
                       </p>
                     </template>
 
@@ -2807,6 +2817,12 @@ async function renderPreview() {
         canonical_url: artifactPageUrl({ page_id: page.page_id }),
         // Proof the /sale or /flash-sale context view inline (no custom domain needed).
         price_context: previewContext.value,
+        // Which Site this page belongs to -- or, for a page not yet saved, the one it will attach to. The
+        // renderer reads the Site for the store's identity, and attachment only happens on save, so without
+        // this every page under construction previewed as the platform brand with no social profiles. The
+        // server takes the tenant from the PAGE, never from here, so this only names WHICH of the tenant's
+        // own Sites to read.
+        site_id: builderSiteId.value || undefined,
       },
     });
     // Ignore a stale response that lands after a newer edit.
@@ -3357,6 +3373,22 @@ const siteByPageId = computed(() => {
 function siteForPage(page) {
   return siteByPageId.value[page?.page_id] || null;
 }
+// The Site the page being built belongs to, for preview identity. Attached wins; a page that has not been
+// saved yet is not attached to anything, so the wizard's choice stands in. A tenant with exactly one Site
+// gets it without having chosen -- reopening an older page has neither of the first two, and guessing wrong
+// is impossible when there is only one to guess.
+// The profiles this page's social_links section will actually render. Read from the SAME Site the preview
+// resolves, so the editor and the preview cannot disagree about whether there is anything to show.
+const builderSiteProfiles = computed(() => {
+  const site = sitesStore.sites.find((s) => s.site_id === builderSiteId.value);
+  return ((site?.organization || {}).same_as || []).filter((entry) => (entry?.url || "").trim());
+});
+const builderSiteId = computed(() => {
+  const attached = siteByPageId.value[builder.page_id];
+  if (attached) return attached.site_id;
+  if (pendingSiteAttach.value) return pendingSiteAttach.value;
+  return sitesStore.sites.length === 1 ? sitesStore.sites[0].site_id : "";
+});
 function siteNameForPage(page) {
   return siteForPage(page)?.name || "";
 }

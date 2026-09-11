@@ -450,7 +450,10 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     "    @keyframes sl-countdown-marquee{from{transform:translateX(100%)}to{transform:translateX(-100%)}}",
     "    .sl-brand-label{display:flex;align-items:center;justify-content:center;gap:0.8rem;color:var(--sl-brand-label-text);padding-top:1.6rem}",
     "    .sl-brand-label::before{content:'';width:1rem;height:1rem;border-radius:999px;background:var(--sl-brand-dot);box-shadow:0 0 0.8rem var(--sl-brand-dot)}",
-    "    .sl-brand-label p{font-family:var(--sl-font-accent);font-size:1.3rem;font-weight:700;letter-spacing:0.08em;line-height:1.2;text-transform:uppercase;color:var(--sl-brand-label-text)}",
+    # p OR h1 -- the brand mark carries the H1 on a composition with no hero (see render_brand_label). The
+    # styling is identical either way: which tag it is says what the heading MEANS, never how it looks, and a
+    # bare h1 would arrive with a browser default size and margin that the p never had.
+    "    .sl-brand-label p,.sl-brand-label h1{font-family:var(--sl-font-accent);font-size:1.3rem;font-weight:700;letter-spacing:0.08em;line-height:1.2;text-transform:uppercase;color:var(--sl-brand-label-text);margin:0}",
     "    .sl-brand-label a{color:inherit;text-decoration:none}",
     "    .sl-brand-label a:hover{text-decoration:underline;text-underline-offset:0.25em}",
     "    .sl-seo-title{text-align:center}",
@@ -1855,6 +1858,15 @@ def _render_page_body(
     has_brand_mark = any(
         s.get("type") == "brand_label" and s.get("enabled") is not False for s in body_sections
     )
+    # Who owns the page's single H1. Normally the hero headline -- but a link-in-bio composition has no hero
+    # at all (plans/LEAD_GEN_PAGES.md §4), which left those pages with NO H1 and a page-health notice the
+    # tenant could not act on: the missing heading was the composition's decision, not theirs. The brand mark
+    # is the honest answer there, because on a link hub the creator's name IS the page's heading. Decided ONCE
+    # here, from the composed list, so the two sections cannot both claim it -- brand_label renders before the
+    # hero would, so it cannot discover the answer on its own.
+    _RENDER_STATE["brand_label_is_h1"] = has_brand_mark and not any(
+        s.get("type") in H1_SECTION_TYPES for s in body_sections
+    )
     site_header = render_site_header(has_brand_mark=has_brand_mark)
     footer_nav = render_footer_nav()
     breadcrumb = render_breadcrumb(breadcrumb_trail(offer, products_by_id))
@@ -2286,21 +2298,30 @@ def render_seo_title(
     ])
 
 
+# Every section type that emits an <h1>. Three, not one, because a page saved before the hero family was
+# merged stores `headline` as its own section -- so checking only for "hero" would hand the H1 to the brand
+# mark on every legacy page and give it two. Keep this list in step with the <h1> emitters in this module.
+H1_SECTION_TYPES = frozenset({"hero", "headline", "brand_hero"})
+
+
 def render_brand_label(section: dict[str, Any], page: dict[str, Any]) -> str:
     if section.get("enabled") is False:
         return ""
     label = render_headline_markup(section.get("label") or (page.get("seo") or {}).get("title") or page.get("name") or "")
-    # heading_role: none in the element catalog — a brand label is not a heading (matches the preview's span).
+    # heading_role: none in the element catalog — a brand label is not a heading (matches the preview's span)
+    # WHEN there is a hero to be one. On a composition with no hero (link-in-bio) it becomes the page's H1
+    # rather than leaving the page without one; render_page decides, so the two can never both claim it.
     # This centered ● Brand mark is the page's single brand header (the old top-left store-header brand is retired).
     # On a served, browseable page it doubles as the crawlable store-root link (SEO-13); on a post-checkout page it
     # stays plain text so it can't leak the buyer back out.
     home = _RENDER_STATE.get("home_url") or ""
     linkable = bool(home) and _RENDER_STATE.get("page_type") not in NONINDEXABLE_PAGE_TYPES
     inner = f'<a class="sl-brand-label-link" href="/">{label}</a>' if linkable else label
+    tag = "h1" if _RENDER_STATE.get("brand_label_is_h1") else "p"
     return "\n".join([
         f"    <section class=\"sl-brand-label{' is-pulsing' if section.get('brand_dot_pulse') else ''}\""
         f" data-section-id=\"{escape(str(section.get('id', 'brand-label')))}\" data-section-type=\"brand_label\">",
-        f"      <p>{inner}</p>",
+        f"      <{tag}>{inner}</{tag}>",
         "    </section>",
     ])
 
@@ -3267,13 +3288,17 @@ def thin_content_warnings(html: str, offer: dict[str, Any] | None = None) -> lis
     platform-hosted page is noindex for those reasons regardless of word count, so claiming the word count
     causes it would be false, and adding 200 words would not change anything the tenant can observe.
 
-    A BRIDGE page is the case the conditional phrasing cannot save, so it is skipped outright: it is noindex by
-    rule (plans/LEAD_GEN_PAGES.md §5), being thin is the POINT of the shape, and there is no amount of content
-    that would make it eligible. Telling a tenant to pad a page that exists to forward would be asking them to
-    break it. A warning has to name something the tenant can do."""
-    from stripe_link.domain.composition import composition_forbids_indexing
+    EVERY LEAD SHAPE is skipped (author, 2026-09-10: "lead-gen pages don't care about word count"), and the
+    bridge page shows why the conditional phrasing could not save them. Being short is the FORM of these pages,
+    not a defect in them: a squeeze page converts by asking one thing, a click-to-call page puts a number above
+    the fold, and a link hub is a list of links. Padding any of them to 150 words would damage the page to
+    silence a notice. A warning has to name something the tenant can do AND should do.
 
-    if offer is not None and composition_forbids_indexing(offer):
+    Checkout pages keep it. There, thin really is thin -- a product with no description is a page a crawler has
+    no reason to rank, and adding one is work worth doing."""
+    from stripe_link.domain.composition import is_lead_composition
+
+    if offer is not None and is_lead_composition(offer):
         return []
     count = indexable_word_count(html)
     if count >= THIN_CONTENT_MIN_WORDS:

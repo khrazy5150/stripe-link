@@ -242,6 +242,11 @@ def composition_forbids_indexing(offer: dict[str, Any]) -> bool:
     return composition_key(offer) in NEVER_INDEXED_COMPOSITIONS
 
 
+def is_lead_composition(offer: dict[str, Any]) -> bool:
+    """Whether this offer composes as one of the four lead shapes rather than a checkout page."""
+    return composition_key(offer) in set(LEAD_COMPOSITIONS.values())
+
+
 def compose_page(
     offer: dict[str, Any], page: dict[str, Any], page_type: str = "landing"
 ) -> list[dict[str, Any]]:
