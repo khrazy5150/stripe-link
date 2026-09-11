@@ -24,6 +24,7 @@ from stripe_link.domain.documents import (
 )
 from stripe_link.runtime.artifacts import artifact_paths, cloudfront_path
 from stripe_link.domain.bnpl import messaging_method_types
+from stripe_link.domain.composition import composition_forbids_indexing
 from stripe_link.domain.connect_sync import site_domain_verified, site_seo_enabled
 from stripe_link.domain.custom_domains import domain_index_record, platform_domain_index_record
 from stripe_link.domain.funnels import funnel_slug_entries, post_purchase_plan
@@ -1145,6 +1146,7 @@ def publish_page_document(
 
     artifacts = []
     indexable_words = None
+    published_robots = ""
     for target in targets:
         robots = page_robots_directive(
             kind=target["kind"], environment=environment, eligibility=eligibility,
@@ -1154,6 +1156,12 @@ def publish_page_document(
         # Test-mode pages are never indexable, whatever the Site's eligibility — test data must not reach search
         # (plans/STRIPE_MODE_DECOUPLING.md P5). Live pages are unaffected.
         if page_mode == "test":
+            robots = NOINDEX_ROBOTS
+        # A bridge page is never indexable either, whatever the Site's eligibility (plans/LEAD_GEN_PAGES.md §5).
+        # It exists to send the visitor elsewhere, which is the thin doorway shape search engines penalise, and
+        # it carries no content of its own to rank. A rule with no tenant override, deliberately: every other
+        # robots input here is a condition the tenant can eventually satisfy, and this one never becomes true.
+        if composition_forbids_indexing(offer):
             robots = NOINDEX_ROBOTS
         html = _render(robots, target["kind"])
         # Thin-content gate (SEO-08): an otherwise-indexable page with too little unique body text is demoted
@@ -1165,6 +1173,8 @@ def publish_page_document(
             if indexable_words < THIN_CONTENT_MIN_WORDS:
                 robots = NOINDEX_FOLLOW_ROBOTS
                 html = _render(robots, target["kind"])
+        if target["kind"] == "published":
+            published_robots = robots
         s3_client.put_object(
             Bucket=target["bucket"],
             Key=target["key"],
@@ -1322,6 +1332,7 @@ def publish_page_document(
         crawl = publish_site_crawl_files(
             site=site, homepage_page_id=page_id, custom_domain=custom_domain, page=page,
             image_urls=_homepage_image_urls(offer, products_by_id), s3_client=s3_client, pages_bucket=pages_bucket,
+            homepage_indexable=published_robots == INDEXABLE_ROBOTS,
         )
 
     invalidation = invalidate_published_artifact(
@@ -1400,7 +1411,7 @@ def _homepage_image_urls(offer: dict[str, Any], products_by_id: dict[str, dict[s
     return [seo_image_url(image) for image in (product.get("images") or []) if image][:5]
 
 
-def publish_site_crawl_files(*, site, homepage_page_id, custom_domain, page, image_urls, s3_client, pages_bucket, indexnow_opener=None):
+def publish_site_crawl_files(*, site, homepage_page_id, custom_domain, page, image_urls, s3_client, pages_bucket, indexnow_opener=None, homepage_indexable=True):
     """Generate + write the Site's crawl files under the homepage artifact key, and submit the homepage URL to
     IndexNow. Best-effort on the IndexNow ping — never fail a publish on it."""
     from stripe_link.domain.sitemap import robots_txt, sitemap_xml
@@ -1409,8 +1420,16 @@ def publish_site_crawl_files(*, site, homepage_page_id, custom_domain, page, ima
     # domain from crawling: empty sitemap + disallow-all robots (paired with the noindex meta re-rendered onto
     # each page). No IndexNow ping either.
     suppress = (site or {}).get("status") == "archived" or not site_seo_enabled(site)
+    # The sitemap holds exactly ONE url — this homepage — so it must not advertise a homepage that just rendered
+    # with a noindex meta tag. Submitting a URL to IndexNow and then telling the crawler not to index it is a
+    # contradiction we send at our own expense. `homepage_indexable` is read from the artifact's FINAL directive
+    # rather than re-derived, so every reason it can be noindex counts here automatically: a bridge page
+    # (plans/LEAD_GEN_PAGES.md §5), a test-mode page, or one the thin-content gate demoted.
+    # robots.txt is deliberately NOT disallowed for this: only the homepage is known noindex, and the Site's other
+    # pages may well be indexable. A Site-level suppression above is what closes the whole domain.
+    listable = not suppress and homepage_indexable
     root = f"https://{custom_domain}/"
-    sitemap = sitemap_xml([] if suppress else [{"loc": root, "lastmod": page.get("updated_at") or page.get("published_at"), "images": image_urls}])
+    sitemap = sitemap_xml([] if not listable else [{"loc": root, "lastmod": page.get("updated_at") or page.get("published_at"), "images": image_urls}])
     robots = robots_txt(f"https://{custom_domain}/sitemap.xml", allow=not suppress)
     prefix = f"{homepage_page_id}/"
     cache = "public, max-age=300"
@@ -1419,11 +1438,11 @@ def publish_site_crawl_files(*, site, homepage_page_id, custom_domain, page, ima
     s3_client.put_object(Bucket=pages_bucket, Key=prefix + "robots.txt", Body=robots.encode("utf-8"),
                          ContentType="text/plain; charset=utf-8", CacheControl=cache)
     key = str(((site or {}).get("seo") or {}).get("indexnow_key") or "").strip()
-    if key and not suppress:
+    if key and listable:
         s3_client.put_object(Bucket=pages_bucket, Key=prefix + f"{key}.txt", Body=key.encode("utf-8"),
                              ContentType="text/plain; charset=utf-8", CacheControl=cache)
         submit_indexnow(custom_domain, key, [root], opener=indexnow_opener)
-    return {"root": root, "sitemap": root + "sitemap.xml", "indexnow_submitted": bool(key) and not suppress}
+    return {"root": root, "sitemap": root + "sitemap.xml", "indexnow_submitted": bool(key) and listable}
 
 
 def submit_indexnow(host: str, key: str, urls: list[str], *, opener=None) -> bool:

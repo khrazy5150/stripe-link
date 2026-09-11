@@ -484,7 +484,7 @@
                 <template v-if="isListicleOffer">
                   <small>This landing page shows several products in a carousel. The hero headline and subheadline follow the product you’re viewing — each product’s own name and description — so there’s nothing to set here.</small>
                 </template>
-                <template v-else>
+                <template v-else-if="sectionVisible('hero')">
                   <label class="offer-field">
                     <span>Hero Headline</span>
                     <input :value="builder.headline" type="text" @input="applyTitleCaseInput((value) => { builder.headline = value; }, $event)" />
@@ -494,6 +494,10 @@
                     <textarea v-model.trim="builder.subheadline" rows="3"></textarea>
                   </label>
                 </template>
+                <!-- Everything below belongs to hero_media, not hero: the carousel, the avatar that overlaps
+                     it, and the brand chip that sits inside it. A bridge page has no hero_media, so offering
+                     an avatar there would be offering a control with nothing to attach to. -->
+                <template v-if="sectionVisible('hero_media')">
                 <div class="offer-field">
                   <span>Hero Media</span>
                   <MediaListField
@@ -569,6 +573,7 @@
                   <span>Pulsate brand dot</span>
                 </label>
                 <small class="field-note">Applies to the brand dot wherever it appears — on the hero chip, or above the hero when the overlay is off.</small>
+                </template>
             </template>
             <template v-else-if="sectionEditor.row.editor === 'brand_label'">
                 <label class="offer-field">
@@ -4178,7 +4183,12 @@ function builderSectionCandidates(intent) {
   }
   // The hero-media carousel — for a listicle it's the product images (auto-filled into the field), driving
   // the price card. Carries the socialite overlays (avatar + brand chip) that render inside it.
-  sections.push({
+  // Composed like everything else below it. These two were the ONLY sections here pushed unconditionally, on
+  // the assumption that every page has a hero -- true until the lead shapes arrived. A bridge page omits
+  // hero_media (an image is weight on a page that exists to forward) and a link-in-bio page omits hero (the
+  // identity header already says who this is). Both still appeared in the builder, with editable copy that the
+  // server composer then dropped at publish: the form promised a headline the page would never show.
+  if (sectionVisible("hero_media")) sections.push({
     id: "hero-media",
     type: "hero_media",
     images: heroMediaList.value,
@@ -4196,7 +4206,7 @@ function builderSectionCandidates(intent) {
   // Hero copy. A listicle's hero is TARGET-BOUND (the renderer fills it with each carousel product's own
   // name/description and swaps per slide), so its stored copy is always empty — a fixed hero would sit static
   // and wrong on every other slide. Other offer types keep the name/default fallback so the hero is never empty.
-  sections.push({
+  if (sectionVisible("hero")) sections.push({
     id: "hero",
     type: "hero",
     headline: isListicleOffer.value ? "" : formatHeadline(builder.headline || builder.name || "Landing Page"),

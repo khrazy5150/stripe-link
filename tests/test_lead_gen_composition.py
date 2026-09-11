@@ -102,6 +102,44 @@ class BuilderParityTests(unittest.TestCase):
         self.assertLess(body.index('offerIntent'), body.index('offer?.offer_type'))
 
 
+class BuilderHeroGatingTests(unittest.TestCase):
+    """The builder must not offer a field the page will never show.
+
+    `hero` and `hero_media` were the only sections `builderSectionCandidates` pushed unconditionally -- true
+    while every offer type had both, and wrong the moment the lead shapes arrived. A link-in-bio page omits
+    `hero` (its identity header already says who this is) and a bridge page omits `hero_media` (an image is
+    weight on a page whose job is to forward). Both still rendered an editor, the tenant typed a headline into
+    it, and the server composer dropped the section at publish. The form promised something the page could
+    never honour -- and silently, because the two decisions were made in different files with nothing
+    forcing them to agree.
+    """
+
+    def test_the_hero_pushes_are_composed_like_every_other_section(self):
+        for key in ("hero_media", "hero"):
+            self.assertRegex(
+                BUILDER, re.compile(r'if \(sectionVisible\("%s"\)\) sections\.push' % key),
+                f"builderSectionCandidates pushes {key} unconditionally -- it must ask the composer, "
+                "like every other section around it")
+
+    def test_the_editor_halves_are_gated_separately(self):
+        # One "Hero" row holds two different sections' controls: the copy (hero) and the carousel, avatar and
+        # brand chip (hero_media). A shape can have either without the other, so one gate over both would
+        # still show a headline field on a link hub.
+        self.assertIn("v-else-if=\"sectionVisible('hero')\"", BUILDER)
+        self.assertIn("v-if=\"sectionVisible('hero_media')\"", BUILDER)
+
+    def test_each_lead_shape_keeps_the_half_it_actually_has(self):
+        # The gates are only correct if the rules file says what this claims. Asserted here so a later edit to
+        # composition_rules.json cannot quietly turn the headline field back on for a link hub.
+        self.assertFalse(is_section_visible("lead_social", "hero", {}, ""))
+        self.assertTrue(is_section_visible("lead_social", "hero_media", {}, ""))
+        self.assertTrue(is_section_visible("lead_bridge", "hero", {}, ""))
+        self.assertFalse(is_section_visible("lead_bridge", "hero_media", {}, ""))
+        for shape in ("single", "bundle", "listicle", "lead_capture", "lead_call"):
+            self.assertTrue(is_section_visible(shape, "hero", {}, ""), shape)
+            self.assertTrue(is_section_visible(shape, "hero_media", {}, ""), shape)
+
+
 if __name__ == "__main__":
     unittest.main()
 

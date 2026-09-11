@@ -455,6 +455,13 @@ class PagePublishingTests(unittest.TestCase):
     def test_homepage_publish_writes_crawl_files_and_submits_indexnow(self):
         page = copy.deepcopy(self.page)
         page["status"] = "published"
+        # The sitemap lists only homepages that actually render indexable, so this one has to clear the SEO-08
+        # thin-content floor -- without the padding the gate demotes it to noindex and it is (rightly) not
+        # advertised. See test_a_noindex_homepage_is_not_advertised_to_crawlers below.
+        page.setdefault("sections", []).append({
+            "id": "about", "type": "content_block",
+            "blocks": [{"title": "About this coffee", "text": " ".join(["freshly roasted single origin beans"] * 30)}],
+        })
         site = {
             "tenant_id": "tenant_demo", "site_id": "site_x",
             "hosting": {"type": "custom", "custom_domain": "shop.example.com", "verification": {"verified": True}},

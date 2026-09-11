@@ -101,7 +101,7 @@ and `seller_profile` already renders them. A hero is genuinely optional here.
 **No `checkout_cta`** — the cards are the calls to action. Optional: `content_block` for a bio line, and
 `catalog_grid` when the creator wants their own commercial pages as crawlable internal cards.
 
-## 5. The bridge page is ALWAYS `noindex, nofollow`
+## 5. The bridge page is ALWAYS `noindex, nofollow`  ✅ DONE 2026-09-10
 
 Not a default — a rule, with no tenant override.
 
@@ -115,7 +115,23 @@ destination should rank, never the bridge.
 
 Implementation: force `NOINDEX_ROBOTS` in `publishing.py` beside the existing test-mode override, which
 already does exactly this for the same reason ("test data must not reach search"). The offer is in scope
-there.
+there. `NEVER_INDEXED_COMPOSITIONS` in `composition.py` names the shape, so a future forwarding shape
+inherits the rule by being listed rather than by someone remembering.
+
+**Two more surfaces turned up, both the same contradiction seen from a different side.**
+
+**The sitemap.** A bridge is the shape MOST likely to be a homepage -- the stale-domain case above is exactly
+that -- and `publish_site_crawl_files` writes a one-entry sitemap naming the homepage, then pings IndexNow.
+So the noindex meta would have shipped alongside an active submission of the same URL, which Search Console
+reports back to the tenant as "Submitted URL marked noindex". The gate reads the published artifact's FINAL
+robots directive rather than re-deriving the reason, so every path to noindex closes it -- including the
+thin-content demotion, which had this bug already. `robots.txt` is deliberately NOT disallowed: only the
+homepage is known noindex, and closing the whole domain is a Site-level decision.
+
+**The page-health nudge.** `thin_content_warnings` told the tenant to add an FAQ "to make it eligible". On a
+bridge page that is advice that would never work, and following it would break the one thing the shape is
+for -- being thin IS the point. Skipped outright rather than reworded: a notice has to name something the
+tenant can do.
 
 ## 6. `open_form` is REMOVED, not deferred  ✅ DONE 2026-09-10
 
@@ -165,6 +181,14 @@ badges and a refund policy reached the observed page. One derivation, used by bo
    the only shape that keeps a form, so nothing the tenant typed is lost.
 4. **§5 bridge noindex** — one rule, beside an existing one.
 5. **§8 element changes** — icons, target relaxation, seeding.
+
+### Found while doing §5: the builder offered hero fields no lead page could show  ✅ FIXED 2026-09-10
+
+`hero` and `hero_media` were the only sections `builderSectionCandidates` pushed WITHOUT asking the composer
+-- safe while every offer type had both. A link-in-bio page omits `hero` and a bridge page omits `hero_media`,
+so both shapes rendered an editor whose copy the server composer then dropped at publish. The eighth instance
+this cycle of two decisions living in two files with nothing forcing them to agree. The one "Hero" row holds
+two sections' controls, so the copy half and the carousel/avatar/brand half are gated separately.
 6. **Product-creation wizard** — §10. LAST, deliberately: it makes creating these pleasant, and everything
    above makes them CORRECT.
 

@@ -154,7 +154,7 @@ def handler(event, context, *, sites_repo=None, reviews_repo=None):
                 # Quality baseline (plans/LANDING_PAGE_GOAL_COMPOSITION.md Phase 4): heading outline +
                 # accessibility (CLS next) + the SEO-08 thin-content floor. Checked on the rendered HTML —
                 # the source of truth for what ships.
-                "page_health": heading_outline_warnings(html) + accessibility_warnings(html) + thin_content_warnings(html),
+                "page_health": heading_outline_warnings(html) + accessibility_warnings(html) + thin_content_warnings(html, offer),
             },
         })
     except (DocumentValidationError, PricingError, RenderError, ValueError) as exc:

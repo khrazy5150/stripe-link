@@ -228,6 +228,20 @@ def composition_key(offer: dict[str, Any]) -> str:
     return derived_offer_type(offer or {})
 
 
+# Compositions that may NEVER be indexed, whatever the Site's eligibility says (plans/LEAD_GEN_PAGES.md §5).
+# This is a statement about what the page IS, not a preference, so there is no tenant override -- the same
+# standing as `excludes` above, and for the same reason. A bridge page's whole purpose is to send the visitor
+# somewhere else, which is the thin doorway shape search engines penalise; indexing one would put the Site's
+# entire reputation behind a page carrying no content of its own. The honest uses (an old domain forwarding to
+# a new one) do not want it indexed either: the DESTINATION should rank, never the bridge.
+NEVER_INDEXED_COMPOSITIONS = frozenset({"lead_bridge"})
+
+
+def composition_forbids_indexing(offer: dict[str, Any]) -> bool:
+    """Whether this offer's composition can never be indexed, regardless of Site eligibility."""
+    return composition_key(offer) in NEVER_INDEXED_COMPOSITIONS
+
+
 def compose_page(
     offer: dict[str, Any], page: dict[str, Any], page_type: str = "landing"
 ) -> list[dict[str, Any]]:

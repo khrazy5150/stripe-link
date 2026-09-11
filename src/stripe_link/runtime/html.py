@@ -3251,14 +3251,23 @@ def indexable_word_count(html: str) -> int:
     return len(text.split())
 
 
-def thin_content_warnings(html: str) -> list[str]:
+def thin_content_warnings(html: str, offer: dict[str, Any] | None = None) -> list[str]:
     """Builder page-health nudge (SEO-08): a page below the unique-content floor is too thin to index, so tell
     the tenant what to add. Warning, never a gate — publishing is never blocked.
 
     Phrased CONDITIONALLY on purpose. The thin-content demotion in publishing.py only runs on an already
     indexable artifact — live mode, published, verified custom domain, eligible page_type. A test-mode or
     platform-hosted page is noindex for those reasons regardless of word count, so claiming the word count
-    causes it would be false, and adding 200 words would not change anything the tenant can observe."""
+    causes it would be false, and adding 200 words would not change anything the tenant can observe.
+
+    A BRIDGE page is the case the conditional phrasing cannot save, so it is skipped outright: it is noindex by
+    rule (plans/LEAD_GEN_PAGES.md §5), being thin is the POINT of the shape, and there is no amount of content
+    that would make it eligible. Telling a tenant to pad a page that exists to forward would be asking them to
+    break it. A warning has to name something the tenant can do."""
+    from stripe_link.domain.composition import composition_forbids_indexing
+
+    if offer is not None and composition_forbids_indexing(offer):
+        return []
     count = indexable_word_count(html)
     if count >= THIN_CONTENT_MIN_WORDS:
         return []
