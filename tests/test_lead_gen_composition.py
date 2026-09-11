@@ -82,10 +82,12 @@ class BuilderParityTests(unittest.TestCase):
         match = re.search(r'function deriveOfferType\(offer\) \{(.*?)\n\}', BUILDER, re.S)
         self.assertIsNotNone(match, "deriveOfferType not found")
         body = match.group(1)
-        self.assertIn('product_intent === "lead_gen"', body)
+        # Asks offerIntent(), the ONE derivation -- it used to read offer.product_intent directly, which
+        # disagreed with the CTA's derivation whenever the intent came from the product.
+        self.assertIn('offerIntent(offer) === "lead_gen"', body)
         self.assertIn('return "lead_gen"', body)
         # and it must come FIRST -- a stored offer_type must not win over intent.
-        self.assertLess(body.index('product_intent'), body.index('offer?.offer_type'))
+        self.assertLess(body.index('offerIntent'), body.index('offer?.offer_type'))
 
 
 if __name__ == "__main__":

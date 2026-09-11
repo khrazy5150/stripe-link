@@ -2292,11 +2292,11 @@ const productsById = computed(() => new Map(products.value.map((product) => [pro
 const servicesById = computed(() => new Map(services.value.map((service) => [service.service_id, service])));
 const selectedOffer = computed(() => offers.value.find((offer) => offer.offer_id === form.offer_id) || null);
 const selectedOfferProducts = computed(() => offerProducts(selectedOffer.value));
-const selectedOfferIntent = computed(() => selectedOffer.value?.product_intent || selectedOfferProducts.value[0]?.product_intent || "transaction");
+const selectedOfferIntent = computed(() => offerIntent(selectedOffer.value));
 const selectedLeadAction = computed(() => selectedOfferProducts.value.find((product) => product.lead_capture)?.lead_capture || null);
 const builderOffer = computed(() => offers.value.find((offer) => offer.offer_id === builder.offer_id) || null);
 const builderOfferProducts = computed(() => offerProducts(builderOffer.value));
-const builderIntent = computed(() => builderOffer.value?.product_intent || builderOfferProducts.value[0]?.product_intent || "transaction");
+const builderIntent = computed(() => offerIntent(builderOffer.value));
 // Post-purchase funnel gating (P3.5): the upsell/downsell/carousel copy only matters when the offer carries a
 // funnel; the thank-you copy applies to every transaction funnel. MAX_SEQUENTIAL_UPSELLS=4 → the grid/carousel
 // screen (matches upsell_pages.py); expose the carousel copy only when there are that many upsells.
@@ -2435,7 +2435,7 @@ function deriveOfferType(offer) {
   // Mirrors composition_key() in domain/composition.py. A lead-gen offer gets its OWN composition rather
   // than a checkout page with the price hidden -- and intent is a different question from pricing shape,
   // which is why this sits here and not inside the items/prices derivation below.
-  if (offer?.product_intent === "lead_gen") return "lead_gen";
+  if (offerIntent(offer) === "lead_gen") return "lead_gen";
   if (offer?.offer_type) return offer.offer_type;
   const items = Array.isArray(offer?.items) ? offer.items : [];
   if (items.length > 1) return "listicle";
@@ -5849,13 +5849,21 @@ function trimForMeta(text, max = 155) {
   return clean.slice(0, clean.lastIndexOf(" ", max) > 0 ? clean.lastIndexOf(" ", max) : max).replace(/[,;:\s]+$/, "");
 }
 
+// ONE answer to "is this offer lead-gen?". Four places asked it and three agreed: deriveOfferType --
+// the one driving SECTION VISIBILITY -- read the offer alone, with no product fallback. An offer whose
+// intent had to come from its product therefore got a lead-gen CTA and TRANSACTIONAL sections, which is
+// a page wearing trust badges and a refund policy while selling nothing.
+function offerIntent(offer) {
+  return offer?.product_intent || offerProducts(offer)[0]?.product_intent || "transaction";
+}
+
 function offerProducts(offer) {
   const items = Array.isArray(offer?.items) ? offer.items : [];
   return items.map((item) => productsById.value.get(item.product_id)).filter(Boolean);
 }
 
 function offerIntentLabel(offer) {
-  const intent = offer?.product_intent || offerProducts(offer)[0]?.product_intent || "transaction";
+  const intent = offerIntent(offer);
   return intent === "lead_gen" ? "Lead generation" : "Transaction";
 }
 
