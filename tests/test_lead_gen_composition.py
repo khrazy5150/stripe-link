@@ -111,3 +111,45 @@ class IntentsCannotMixTests(unittest.TestCase):
         offer["product_intent"] = "lead_gen"
         with self.assertRaisesRegex(DocumentValidationError, "must not include checkout"):
             validate_offer_document(offer)
+
+
+class GoalCannotResurrectTransactionalSectionsTests(unittest.TestCase):
+    """Reported 2026-09-10 with a real saved document: a capture-email page carrying trust badges and a
+    refund policy, composition.overrides empty.
+
+    The cause was the GOAL axis, not the offer_type. It is union-only by design -- goals ADD sections and
+    can never subtract -- and the paid_ads pack turns on trust_badges and refund_policy. That is right for a
+    paid-traffic CHECKOUT page, where cold traffic needs reassurance, and incoherent on a page that takes no
+    money. So a composition can now declare sections IMPOSSIBLE, and that outranks both the goal union and a
+    tenant override: it is a statement about what the page is, not a preference.
+    """
+
+    def test_the_paid_ads_goal_does_not_put_trust_badges_on_a_lead_page(self):
+        for key in ("trust_badges", "refund_policy"):
+            self.assertFalse(is_section_visible("lead_gen", key, {}, "paid_ads"), key)
+
+    def test_an_override_cannot_resurrect_them_either(self):
+        for key in ("trust_badges", "refund_policy"):
+            self.assertFalse(
+                is_section_visible("lead_gen", key, {key: {"enabled": True}}, "paid_ads"), key)
+
+    def test_the_goal_still_works_for_everything_it_should(self):
+        # The exclusion is narrow: a lead page still gets its CTA and hero from the composition, and a
+        # goal can still union in anything not excluded.
+        self.assertTrue(is_section_visible("lead_gen", "checkout_cta", {}, "paid_ads"))
+        self.assertTrue(is_section_visible("lead_gen", "hero", {}, "paid_ads"))
+
+    def test_transactional_pages_are_untouched(self):
+        # The paid_ads pack must go on doing its job where it makes sense.
+        for offer_type in ("single", "bundle", "listicle"):
+            self.assertTrue(is_section_visible(offer_type, "trust_badges", {}, "paid_ads"), offer_type)
+            self.assertTrue(is_section_visible(offer_type, "refund_policy", {}, "paid_ads"), offer_type)
+
+    def test_the_builder_applies_the_same_exclusion(self):
+        """Preview and published must agree. Both read composition_rules.json, but each implements the
+        visibility logic itself -- so the exclusion has to exist on both sides."""
+        import pathlib
+        composer = (pathlib.Path(__file__).resolve().parents[1]
+                    / "dashboard" / "src" / "composables" / "pageComposer.js").read_text(encoding="utf-8")
+        self.assertIn("excludedSections", composer)
+        self.assertIn("if (excludedSections(offerType).has(key)) return false;", composer)

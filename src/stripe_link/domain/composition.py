@@ -117,9 +117,17 @@ def goal_sections(goal: str) -> set[str]:
     }
 
 
+def excluded_sections(offer_type: str) -> set[str]:
+    """Sections this offer_type can NEVER show, whatever else asks for them."""
+    return set(_offer_type_rule(offer_type).get("excludes") or ())
+
+
 def default_visible(offer_type: str, key: str, goal: str = "") -> bool:
     """Whether a governed section key is visible by DEFAULT for this offer_type + goal (before overrides).
-    Base sections from the offer_type, unioned with the sections the goal's packs enable."""
+    Base sections from the offer_type, unioned with the sections the goal's packs enable -- minus anything
+    the offer_type declares impossible."""
+    if key in excluded_sections(offer_type):
+        return False
     base = _offer_type_rule(offer_type).get("sections") or []
     return key in base or key in goal_sections(goal)
 
@@ -135,6 +143,11 @@ def is_section_visible(
     key = section_key(section_type)
     if key not in _GOVERNED:
         return True
+    # An exclusion outranks a tenant override too. Everything else here is a preference; this is a
+    # statement about what the page IS, and a refund policy on a page that takes no money is incoherent
+    # rather than merely unwanted.
+    if key in excluded_sections(offer_type):
+        return False
     override = (overrides or {}).get(key)
     if isinstance(override, dict) and "enabled" in override:
         return bool(override.get("enabled"))

@@ -28,6 +28,25 @@ see which action a page is for.
 | `social_redirect` | **Link-in-bio** | **none** — the cards are the actions |
 | ~~`open_form`~~ | **REMOVED** — see §6 | — |
 
+## 2a. The goal axis could resurrect them — FIXED 2026-09-10
+
+Diagnosed from a real saved document: a capture-email page carrying trust badges and a refund policy with
+`composition.overrides` EMPTY. The offer_type composition omitted both; they came back anyway.
+
+The cause is the GOAL axis. `default_visible` is `key in base OR key in goal_sections(goal)`, and the
+`paid_ads` pack turns on `trust_badges` and `refund_policy`. Goals are union-only by design (so that
+no-goal keeps the old behaviour and needs no migration) — they ADD and can never subtract. On a
+paid-traffic CHECKOUT page that is right: cold traffic wants reassurance. On a page that takes no money it
+is incoherent.
+
+**A composition can now declare sections IMPOSSIBLE** (`offer_types.<type>.excludes`), and an exclusion
+outranks BOTH the goal union and a tenant override. Everything else in the composer is a preference; this
+is a statement about what the page IS. A refund policy on a page that cannot take money is not
+unfashionable, it is wrong.
+
+Mirrored in `pageComposer.js`, since preview and published each implement the visibility logic over the
+shared rules file.
+
 ## 3. What every lead page drops
 
 `offer_price_selector`, `refund_policy`, `trust_badges`, `product_details`, `related_products`,

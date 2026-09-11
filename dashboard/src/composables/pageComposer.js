@@ -89,8 +89,16 @@ function goalSections(goal) {
 }
 
 // Visible by DEFAULT for this offer_type + goal (before overrides).
+// Sections this offer_type can NEVER show. The goal axis is union-only -- it adds and never subtracts --
+// so without this the paid_ads pack unioned trust_badges and a refund policy back onto a lead page that
+// sells nothing. Mirrors excluded_sections() in domain/composition.py.
+export function excludedSections(offerType) {
+  return new Set(offerTypeRule(offerType).excludes || []);
+}
+
 export function defaultVisible(offerType, sectionType, goal = "") {
   const key = sectionKey(sectionType);
+  if (excludedSections(offerType).has(key)) return false;
   return (offerTypeRule(offerType).sections || []).includes(key) || goalSections(goal).has(key);
 }
 
@@ -98,6 +106,9 @@ export function defaultVisible(offerType, sectionType, goal = "") {
 export function isSectionVisible(offerType, sectionType, overrides, goal = "") {
   const key = sectionKey(sectionType);
   if (!GOVERNED.has(key)) return true;
+  // An exclusion outranks a tenant override too: everything else here is a preference, this is a
+  // statement about what the page IS.
+  if (excludedSections(offerType).has(key)) return false;
   const override = (overrides || {})[key];
   if (override && typeof override.enabled === "boolean") return override.enabled;
   return defaultVisible(offerType, sectionType, goal);
