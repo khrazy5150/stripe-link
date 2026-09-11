@@ -60,6 +60,10 @@ def offer_index_entry(offer: dict[str, Any]) -> dict[str, Any]:
         "slug": str(offer.get("slug") or ""),
         "offer_type": str(offer.get("offer_type") or ""),
         "product_intent": str(offer.get("product_intent") or ""),
+        # The builder picks which of the four LEAD compositions from this, so a row without it sends a
+        # link-in-bio offer down the capture-page fallback. Same shape as the product row that carried
+        # lead_capture without product_intent -- the detail travelling without the flag that selects on it.
+        "lead_capture_action": str(offer.get("lead_capture_action") or ""),
         "status": str(offer.get("status") or ""),
         "created_at": str(offer.get("created_at") or ""),
         "updated_at": str(offer.get("updated_at") or ""),

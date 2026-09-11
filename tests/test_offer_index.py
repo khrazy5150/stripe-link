@@ -34,7 +34,10 @@ class OfferIndexEntryTests(unittest.TestCase):
         entry = offer_index_entry(FULL_OFFER)
         self.assertEqual(
             set(entry),
-            {"offer_id", "name", "slug", "offer_type", "product_intent", "status",
+            # lead_capture_action joined 2026-09-10: the builder picks which of the four LEAD compositions
+            # from this row, so without it a link-in-bio offer falls back to the capture page. It is a
+            # selector, not display data -- which is exactly the bar for being here.
+            {"offer_id", "name", "slug", "offer_type", "product_intent", "lead_capture_action", "status",
              "created_at", "updated_at", "item_ids", "landing_ids", "landing_tier_count", "image_url"},
         )
 

@@ -33,6 +33,13 @@ _PRICE_FIELDS = (
 _DOC_FIELDS = (
     "product_id", "name", "description", "product_category", "product_type", "tags",
     "status", "active", "stripe_product_id", "images", "lead_capture",
+    # product_intent was MISSING here while lead_capture was present, which is a shape that cannot be
+    # right: the row carried the lead-gen DETAIL and not the flag saying it was lead-gen. The dashboard
+    # defaults a missing intent to "transaction", so a lead-gen product was badged "Transaction" in the
+    # offer selector (indistinguishable from the rest) and the offer built from it was stamped
+    # transaction -- which the backend then rejected against the product's real intent. Reported
+    # 2026-09-10.
+    "product_intent",
 )
 
 
