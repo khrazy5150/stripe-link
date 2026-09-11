@@ -193,6 +193,41 @@ def display_entries(organization: Any) -> list[dict]:
             if isinstance(e, dict) and str(e.get("url") or "").strip()]
 
 
+def section_own_links(section: Any) -> list[dict]:
+    """The profile links typed into a social_links SECTION, as opposed to inherited from the Site.
+
+    Deliberately NOT filtered through SAME_AS_HOSTS. The allowlist exists to protect `sameAs`, which is a
+    machine-readable claim about who the tenant IS and therefore an impersonation vector. These links make no
+    such claim -- they are things a visitor can tap -- so a creator's Substack, Patreon or OnlyFans belongs
+    here even though none of them could ever be a sameAs. That is the whole point of the split: the page-local
+    list is FREER precisely because it asserts nothing.
+
+    (What may be LINKED from a page served on shared platform infrastructure is a different question again,
+    answered by linkable_on_platform_host at render time. That one is about the URL bar, not identity.)
+    """
+    if not isinstance(section, dict):
+        return []
+    return [{"url": str((item or {}).get("url") or "").strip()}
+            for item in (section.get("items") or [])
+            if isinstance(item, dict) and str((item or {}).get("url") or "").strip()]
+
+
+def section_link_entries(section: Any, organization: Any) -> list[dict]:
+    """Which profiles a social_links section renders: its OWN if it has any, else the Site's.
+
+    The same override-or-inherit rule the page avatar already uses, and for the same reason -- a business
+    fills its profiles in once on the Business Profile and every page picks them up, while a single page can
+    still say something different without that becoming the Site's identity.
+
+    Overriding is an explicit act: the section starts with no items, so a tenant who never touches it
+    inherits, which is the behaviour every page had before this existed. Attachment is deliberately NOT part
+    of the rule -- making it so would mean a page silently changing what it displays when it joins a Site,
+    which is exactly the kind of invisible dependency that made this element confusing in the first place.
+    """
+    own = section_own_links(section)
+    return own if own else display_entries(organization)
+
+
 def initial_verification(url: Any) -> dict:
     """The state a newly-entered link starts in."""
     if not is_checkable(url):

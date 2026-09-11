@@ -14,6 +14,7 @@ from stripe_link.domain.composition import compose_page, element_channel
 from stripe_link.domain.connect_sync import site_seo_enabled
 from stripe_link.domain.documents import PRODUCT_CONDITIONS
 from stripe_link.domain.social_links import display_entries as display_social_entries
+from stripe_link.domain.social_links import section_link_entries as social_section_entries
 from stripe_link.domain.social_links import linkable_on_platform_host
 from stripe_link.domain.social_links import network_icon_path, network_label
 from stripe_link.domain.social_links import verified_urls as verified_same_as_urls
@@ -873,6 +874,12 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     "    .sl-social-row a.sl-social-worded{padding:0 1.25rem;line-height:44px}",
     "    .sl-social-row a.sl-social-glyph{width:44px;height:44px;padding:0}",
     "    .sl-social-row a.sl-social-glyph svg{width:22px;height:22px;display:block}",
+    # An unlinked profile on a shared platform host: same tile, visibly inert. Not hidden -- the tenant put it
+    # there, and a card that silently vanishes tells them nothing about why.
+    "    .sl-social-row .is-unlinked{display:inline-flex;align-items:center;justify-content:center;min-height:44px;min-width:44px;border:1px dashed var(--sl-legal-link);border-radius:999px;color:var(--sl-muted);opacity:.65}",
+    "    .sl-social-row span.sl-social-worded{padding:0 1.25rem;line-height:44px}",
+    "    .sl-social-row span.sl-social-glyph{width:44px;height:44px;padding:0}",
+    "    .sl-social-row span.sl-social-glyph svg{width:22px;height:22px;display:block}",
     "    .sl-social-row a:hover{text-decoration:underline}",
     "    .sl-social-row a.sl-social-glyph:hover{background:var(--sl-legal-link);color:var(--sl-page-bg)}",
     "    .sl-link-card-note{margin:.25rem 0 0;font-size:.95rem;opacity:.8}",
@@ -5311,7 +5318,7 @@ def render_link_cards(section: dict[str, Any]) -> str:
     ] if line)
 
 
-def _social_link_item(url: Any) -> str:
+def _social_link_item(url: Any, *, linkable: bool = True) -> str:
     """One profile link: the network's brand glyph where there is one, the worded label where there is not.
 
     A link hub is scanned, not read -- a visitor looking for the YouTube channel finds the YouTube mark
@@ -5326,15 +5333,19 @@ def _social_link_item(url: Any) -> str:
     href = escape(str(url).strip())
     label = network_label(url)
     glyph = network_icon_path(url)
-    if not glyph:
-        return (f'<li><a class="sl-social-worded" href="{href}" rel="nofollow ugc noopener" target="_blank">'
-                f'{escape(label)}</a></li>')
-    return (
-        f'<li><a class="sl-social-glyph" href="{href}" rel="nofollow ugc noopener" target="_blank"'
-        f' aria-label="{escape(label)}" title="{escape(label)}">'
-        f'<svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor" aria-hidden="true" focusable="false">'
-        f'<path d="{escape(glyph)}"/></svg></a></li>'
-    )
+    inner = (f'<svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor" aria-hidden="true"'
+             f' focusable="false"><path d="{escape(glyph)}"/></svg>') if glyph else escape(label)
+    kind = "sl-social-glyph" if glyph else "sl-social-worded"
+    # §7, the same trust boundary render_link_cards applies, for the same reason and with the same shape: on a
+    # shared platform host only allowlisted destinations become anchors, because a human tapping a phishing
+    # link on someone.jbay.uk is a browser-blocklist problem for OUR domain and every tenant on it. Unlinked
+    # rather than dropped -- a tile that silently vanishes tells the tenant nothing about why.
+    if not linkable:
+        return (f'<li><span class="{kind} is-unlinked" title="{escape(label)}"'
+                f' aria-label="{escape(label)}">{inner}</span></li>')
+    title_attr = f' aria-label="{escape(label)}" title="{escape(label)}"' if glyph else ""
+    return (f'<li><a class="{kind}" href="{href}" rel="nofollow ugc noopener" target="_blank"'
+            f'{title_attr}>{inner}</a></li>')
 
 
 def render_social_links(section: dict[str, Any]) -> str:
@@ -5352,14 +5363,21 @@ def render_social_links(section: dict[str, Any]) -> str:
     Every link is rel="nofollow ugc noopener": these are tenant-entered destinations, so they must never
     pass authority from our domain, and `ugc` says what they are.
     """
-    entries = display_social_entries(_RENDER_ORG)
+    entries = social_section_entries(section, _RENDER_ORG)
     if not entries:
         return ""
+    on_custom_domain = bool(_RENDER_STATE.get("home_url"))
     parts = [f'    <section class="sl-social-links" data-section-id="{escape(str(section.get("id", "social-links")))}" data-section-type="social_links">']
     heading = str(section.get("heading") or "").strip()
     if heading:
         parts.append(f'      <h2 class="sl-section-heading">{render_headline_markup(heading)}</h2>')
-    links = "".join(_social_link_item(entry.get("url")) for entry in entries)
+    links = "".join(
+        _social_link_item(
+            entry.get("url"),
+            linkable=on_custom_domain or linkable_on_platform_host(entry.get("url")),
+        )
+        for entry in entries
+    )
     parts.append(f'      <ul class="sl-social-row">{links}</ul>')
     parts.append("    </section>")
     return "\n".join(parts)

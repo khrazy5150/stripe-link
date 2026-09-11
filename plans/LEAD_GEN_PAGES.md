@@ -189,6 +189,34 @@ badges and a refund policy reached the observed page. One derivation, used by bo
   but `seller_profile` renders the Site's NAP whether or not the page asks for it — seeding one would put the
   same block on the page twice.
 
+## 8a. A link hub may carry its OWN links (decided 2026-09-11)
+
+`social_links` read the Site because that is where the profile URLs are STORED -- not, as it first appeared,
+because of SEO. Two consequences were being conflated, and separating them is the whole design:
+
+- **Display** needs the URLs. They lived only on `Site.organization.same_as`, so a creator had to leave the
+  builder for a screen headed "Business identity (Organization)" to add an Instagram.
+- **`sameAs`** is a machine-readable claim about who the tenant IS, and an impersonation vector. Hence the
+  host allowlist and server-owned verification.
+
+So the section may now carry its own `items[]`, falling back to the Site's when it has none -- the same
+override-or-inherit rule the page avatar already uses, with the same two buttons. **Attachment is not part of
+the rule.** The proposal on the table was that attaching to a Site should override page-local links; rejected
+because a page would then silently change what it displays when it joined a Site (the same invisible
+dependency that made this element confusing), and because auto-attaching a Site would have made page-local
+links unreachable from birth.
+
+**Page-local links need no allowlist, and that is the point.** `SAME_AS_HOSTS` protects the claim; a link that
+makes no claim is free. A creator's Substack, Patreon or OnlyFans belongs on their hub and could never be a
+`sameAs`. The §7 platform-host boundary still applies at RENDER time, unchanged and for a different reason
+(the URL bar, not identity): on a free platform address a non-allowlisted profile shows but does not link.
+Worth revisiting -- widening `PLATFORM_LINKABLE_HOSTS` is the P3 item with an abuse story attached, and this
+is the use case that now argues for it.
+
+Also corrected while deciding: **the Site's list is not a "validated" list for display.** Display was never
+gated on verification -- Instagram and TikTok can never be confirmed and still render -- so "attached means
+validated links" described a distinction that does not exist.
+
 ## 9. Order
 
 1. **§7 intent split** — one derivation. Smallest, and it is actively producing wrong pages.

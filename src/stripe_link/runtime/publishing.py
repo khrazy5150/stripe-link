@@ -25,6 +25,7 @@ from stripe_link.domain.documents import (
 from stripe_link.runtime.artifacts import artifact_paths, cloudfront_path
 from stripe_link.domain.bnpl import messaging_method_types
 from stripe_link.domain.composition import composition_forbids_indexing, composition_key
+from stripe_link.domain.social_links import section_own_links
 from stripe_link.domain.connect_sync import site_domain_verified, site_seo_enabled
 from stripe_link.domain.custom_domains import domain_index_record, platform_domain_index_record
 from stripe_link.domain.funnels import funnel_slug_entries, post_purchase_plan
@@ -80,6 +81,15 @@ def site_homepage_page_id(site: dict[str, Any] | None) -> str:
     plans/SITE_OBJECT.md §2.6 first slice). "" when the Site has no root page yet."""
     root = ((site or {}).get("pages") or {}).get("/")
     return str(root.get("page_id") or "") if isinstance(root, dict) else ""
+
+
+def page_has_own_social_links(page: dict[str, Any]) -> bool:
+    """Whether the page carries its own profile links, rather than inheriting the Site's."""
+    return any(
+        section_own_links(section)
+        for section in (page.get("sections") or [])
+        if isinstance(section, dict) and section.get("type") == "social_links"
+    )
 
 
 def find_site_for_page(sites_repository: Any, tenant_id: str, page_id: str) -> dict[str, Any] | None:
@@ -1048,7 +1058,10 @@ def publish_page_document(
     # carries its own content, so losing the store's name and its Organization graph degrades it rather than
     # emptying it. A LINK-IN-BIO page is the exception: the Site is not the identity around the content, it IS
     # the content. social_links renders the Site's profiles and the brand mark renders its name, so an
-    # unattached one publishes as a blank page under the platform's brand.
+    # unattached one publishes as a blank page under the platform's brand -- UNLESS the page lists its own
+    # links, which is the whole point of the page-local override: a creator who never opens the Sites screen
+    # still gets a working hub. So the test is not "has a Site", it is "would render nothing", which is the
+    # only condition worth refusing over.
     #
     # Enforced HERE and not only in the builder because the builder's preview resolves the Site this page will
     # attach to -- which is exactly what made the failure baffling from the outside (reported 2026-09-10:
@@ -1057,10 +1070,11 @@ def publish_page_document(
     # Gated on PUBLISHED, not on every call: this function also runs for a draft save (it always writes the
     # preview artifact), and a draft is allowed to be incomplete -- that is what a draft is for. Refusing here
     # would have made a Social Page unsaveable until its Site existed, which is worse than the bug.
-    if site is None and page.get("status") == "published" and composition_key(offer) == "lead_social":
+    if (site is None and page.get("status") == "published"
+            and composition_key(offer) == "lead_social" and not page_has_own_social_links(page)):
         raise RenderError(
-            "This page shows your social profiles and your brand, and both of those live on a Site. "
-            "Attach it to a Site first, or it would publish with no links on it."
+            "This link page has no links on it. Either list them on the page itself, or attach the page to a "
+            "Site and it will use the profiles from your Business identity."
         )
     # Denormalize this landing page's offer + product category onto its Site route-map entry (so category
     # pages resolve off the map), then fill any related-products rail from other pages in the same category

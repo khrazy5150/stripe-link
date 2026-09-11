@@ -1094,22 +1094,44 @@
 
                     <template v-else-if="element.type === 'social_links'">
                       <input v-model.trim="element.heading" type="text" placeholder="Section heading (optional)" />
-                      <!-- Say it when there is nothing to show. This section renders from the Site, so with an
-                           empty Business Profile it paints no pixels -- and a row that silently renders nothing
-                           beside prose explaining what it WOULD render is how a tenant concludes the feature is
-                           broken. Only the count is new; the explanation was already here. -->
-                      <p v-if="!builderSiteProfiles.length" class="element-empty is-warning">
-                        <strong>No social profiles yet, so this section shows nothing.</strong>
-                        Add them in <strong>Sites → edit your Site → Business identity</strong> and they appear
-                        here and on every other page that uses this section.
-                      </p>
-                      <p v-else class="element-empty">
-                        Showing {{ builderSiteProfiles.length }} profile{{ builderSiteProfiles.length === 1 ? "" : "s" }}
-                        from your Business Profile, so you enter them once instead of on every page. Add or change
-                        them in <strong>Sites → edit your Site → Business identity</strong>. Every profile you list
-                        is shown here, confirmed or not — confirming only affects what search engines are told,
-                        never what visitors can tap.
-                      </p>
+
+                      <!-- INHERITING. The same override-or-inherit choice the page avatar has, shown the same
+                           way: say which source is in force, and give one button to change it. The element
+                           starts with no items, so a tenant who never opens this keeps the old behaviour. -->
+                      <template v-if="!(element.items || []).length">
+                        <p v-if="builderSiteProfiles.length" class="element-empty">
+                          Showing {{ builderSiteProfiles.length }} profile{{ builderSiteProfiles.length === 1 ? "" : "s" }}
+                          from <strong>{{ builderSiteName || "your Site" }}</strong>, so you enter them once instead
+                          of on every page. Change them in <strong>Sites → edit your Site → Business identity</strong>.
+                        </p>
+                        <p v-else class="element-empty is-warning">
+                          <strong>No links yet, so this section shows nothing.</strong>
+                          Add them to your Site's Business identity to reuse them on every page, or list them just
+                          for this page below.
+                        </p>
+                        <button class="secondary-action compact" type="button" @click="element.items = [{ url: '' }]">
+                          Use links just for this page
+                        </button>
+                      </template>
+
+                      <!-- OVERRIDDEN. -->
+                      <template v-else>
+                        <div v-for="(item, i) in element.items" :key="i" class="element-subrow">
+                          <input v-model.trim="item.url" type="url" placeholder="https://instagram.com/yourname" autocapitalize="off" spellcheck="false" />
+                          <button class="link-danger" type="button" @click="element.items.splice(i, 1)">Remove</button>
+                        </div>
+                        <button class="secondary-action compact" type="button" @click="element.items.push({ url: '' })">+ Add a link</button>
+                        <button class="secondary-action compact" type="button" @click="element.items = []">Use my Site's profiles</button>
+                        <p class="element-empty">
+                          Any link works here — these are shown to visitors, not claimed as your identity, so they
+                          never affect what search engines are told about who you are. Only profiles on your Site's
+                          Business identity do that.
+                          <template v-if="!builderSiteHasCustomDomain">
+                            On your free platform address only well-known profile sites become tappable links —
+                            anything else is shown but not clickable until you connect a custom domain.
+                          </template>
+                        </p>
+                      </template>
                     </template>
 
                     <template v-else-if="element.type === 'link_cards'">
@@ -3400,10 +3422,23 @@ const builderSiteProfiles = computed(() => {
 // right thing to render and the wrong thing to leave unexplained: the published artifact reads attachment,
 // which this page does not have yet. Scoped to lead_social because it is the only shape where the Site is not
 // the identity around the content but the content itself -- every other page still says something on its own.
+// Silent once the page lists its OWN links: then the preview and the published page agree, and there is
+// nothing left to warn about.
 const previewNeedsSite = computed(() =>
-  builderOfferType.value === "lead_social" && !siteByPageId.value[builder.page_id] && !!builderSiteId.value);
+  builderOfferType.value === "lead_social"
+  && !siteByPageId.value[builder.page_id]
+  && !!builderSiteId.value
+  && !builder.elements.some((el) => el.type === "social_links" && (el.items || []).some((i) => (i.url || "").trim())));
 const builderSiteName = computed(() =>
   sitesStore.sites.find((s) => s.site_id === builderSiteId.value)?.name || "");
+// Mirrors the renderer's §7 boundary (linkable_on_platform_host): on the tenant's OWN domain any destination
+// may be linked because the reputation at stake is theirs; on shared platform infrastructure only allowlisted
+// profile hosts become anchors. Said in the editor so a creator learns it while typing the link, not by
+// finding a dead tile on a published page.
+const builderSiteHasCustomDomain = computed(() => {
+  const hosting = sitesStore.sites.find((s) => s.site_id === builderSiteId.value)?.hosting || {};
+  return hosting.type === "custom" && !!(hosting.verification || {}).verified;
+});
 const builderSiteId = computed(() => {
   const attached = siteByPageId.value[builder.page_id];
   if (attached) return attached.site_id;
@@ -4748,7 +4783,10 @@ function newElement(type) {
   if (type === "related_products") return { ...base, heading: "Related products" };
   // social_links has no per-page content: it reads the Site's Business Profile, so a tenant fills their
   // profiles in once rather than retyping them on every page.
-  if (type === "social_links") return { ...base, heading: "" };
+  // Starts with NO items, which means "inherit the Site's profiles" -- the behaviour every page had before
+  // page-local links existed. Overriding is an explicit act, so nothing changes under a tenant who never
+  // opens this editor.
+  if (type === "social_links") return { ...base, heading: "", items: [] };
   if (type === "link_cards") return { ...base, heading: "", items: [{ url: "", label: "", description: "", image_url: "" }] };
   // ONE ratio for the element, not one per image: locking both sides to the same shape is what makes the
   // wipe align. 4:3 is the common phone-photo shape, so most pairs need no change.
@@ -5399,8 +5437,16 @@ function elementSection(element) {
     return { id: element.id, type: "product_details" };   // content is the current target (offer-driven)
   }
   if (element.type === "social_links") {
-    // No items of its own — the renderer reads the Site's organization.same_as.
-    return { id: element.id, type: "social_links", heading: formatHeadline(element.heading || "") || undefined };
+    // Its OWN links if the tenant typed any, otherwise none at all -- and "none" is what tells the renderer
+    // to fall back to the Site's organization.same_as. Absent rather than empty on purpose: an empty array
+    // would be indistinguishable from "override with nothing", which is a page showing no links at all.
+    const items = (element.items || []).filter((item) => (item.url || "").trim());
+    return {
+      id: element.id,
+      type: "social_links",
+      heading: formatHeadline(element.heading || "") || undefined,
+      items: items.length ? items.map((item) => ({ url: item.url.trim() })) : undefined,
+    };
   }
   if (element.type === "link_cards") {
     // A card needs somewhere to go AND something to call it; either alone is not a card.
@@ -5559,7 +5605,8 @@ function elementsFromPage(sections) {
     } else if (section.type === "related_products") {
       elements.push({ id: localId("el"), type: "related_products", heading: section.heading || "Related products" });
     } else if (section.type === "social_links") {
-      elements.push({ id: localId("el"), type: "social_links", heading: section.heading || "" });
+      elements.push({ id: localId("el"), type: "social_links", heading: section.heading || "",
+        items: (section.items || []).map((item) => ({ url: item.url || "" })) });
     } else if (section.type === "link_cards") {
       // `image` on the wire, `image_url` in the form — the upload helper writes image_url, and every other
       // element in this builder spells it that way.

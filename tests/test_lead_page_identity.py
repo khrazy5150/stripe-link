@@ -125,9 +125,15 @@ class PreviewSiteResolutionTests(unittest.TestCase):
 class SocialLinksEmptyStateTests(unittest.TestCase):
     def test_the_editor_says_when_it_would_render_nothing(self):
         # A row that silently renders nothing, beside prose explaining what it WOULD render, is how a tenant
-        # concludes the feature is broken. Only the count is new; the explanation was already there.
-        self.assertIn('v-if="!builderSiteProfiles.length"', BUILDER)
-        self.assertIn("No social profiles yet, so this section shows nothing.", BUILDER)
+        # concludes the feature is broken.
+        self.assertIn('v-else class="element-empty is-warning"', BUILDER)
+        self.assertIn("No links yet, so this section shows nothing.", BUILDER)
+
+    def test_the_editor_offers_both_directions(self):
+        # Override and inherit are both one button, the way the page avatar already does it. A one-way door
+        # would make trying the page-local list a decision rather than an experiment.
+        self.assertIn("Use links just for this page", BUILDER)
+        self.assertIn("Use my Site's profiles", BUILDER)
 
     def test_the_editor_reads_the_same_site_the_preview_does(self):
         # Both off builderSiteId. Two lookups would eventually disagree about whether there is anything to
@@ -154,12 +160,21 @@ class UnattachedPublishTests(unittest.TestCase):
         # publish_page_document also runs on a draft save (it always writes the preview artifact). Without the
         # status gate a Social Page would have been unsaveable until its Site existed, which is worse than the
         # bug it fixes -- a draft is allowed to be unfinished, that is what a draft is.
-        line = [l for l in self.PUBLISHING.splitlines() if 'composition_key(offer) == "lead_social"' in l][0]
-        self.assertIn('page.get("status") == "published"', line)
+        guard = self.PUBLISHING.split("if (site is None", 1)[1][:300]
+        self.assertIn('page.get("status") == "published"', guard)
 
-    def test_the_message_names_the_fix(self):
-        # "Attach it to a Site" is something the tenant can do. "No Site found" would not be.
-        self.assertIn("Attach it to a Site first", self.PUBLISHING)
+    def test_a_page_with_its_own_links_needs_no_site(self):
+        # The guard's real subject is "would render nothing", not "has a Site". A creator who lists their links
+        # on the page has a working hub without ever opening the Sites screen, which is the whole point of the
+        # page-local override.
+        guard = self.PUBLISHING.split("if (site is None", 1)[1][:300]
+        self.assertIn("not page_has_own_social_links(page)", guard)
+
+    def test_the_message_names_both_ways_out(self):
+        # Either fix works, so the message says both. Naming only one would send a creator to the Sites screen
+        # they were deliberately spared.
+        self.assertIn("list them on the page itself", self.PUBLISHING)
+        self.assertIn("attach the page to a", self.PUBLISHING)
 
     def test_the_builder_warns_before_publish_is_reached(self):
         # The server guard is the backstop. The tenant should learn this from the pane that is showing them
