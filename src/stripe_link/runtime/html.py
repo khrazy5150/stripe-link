@@ -17,7 +17,7 @@ from stripe_link.domain.page_views import link_id as link_click_id
 from stripe_link.domain.social_links import display_entries as display_social_entries
 from stripe_link.domain.social_links import section_link_entries as social_section_entries
 from stripe_link.domain.social_links import linkable_on_platform_host
-from stripe_link.domain.social_links import network_icon_path, network_label
+from stripe_link.domain.social_links import network_glyph, network_label
 from stripe_link.domain.social_links import verified_urls as verified_same_as_urls
 from stripe_link.domain.opportunities import STAGE_LANDING, STAGE_POST_PURCHASE, derived_offer_type, stage_opportunities
 from stripe_link.domain.pricing import PricingError, expand_offer, find_price, resolve_offer, single_unit_price
@@ -869,16 +869,14 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     # and gets tap-sized targets: effectively all of this traffic is a thumb coming from an app's bio field.
     "    .sl-social-row{list-style:none;display:flex;flex-wrap:wrap;justify-content:center;gap:.75rem;padding:0;margin:0}",
     "    .sl-social-row a{display:inline-flex;align-items:center;justify-content:center;min-height:44px;min-width:44px;border:1px solid var(--sl-legal-link);border-radius:999px;color:var(--sl-legal-link);text-decoration:none}",
-    # A worded fallback keeps the original pill; a glyph gets a 44px circle. Both are 44px tall so a mixed row
-    # sits on one baseline, and both clear the WCAG 2.5.8 target minimum -- these are tapped on a phone, from
-    # a bio link, which is the entire traffic source for this page.
-    "    .sl-social-row a.sl-social-worded{padding:0 1.25rem;line-height:44px}",
+    # Every tile is the same 44px circle now -- there is no worded variant, because one spelled-out host used
+    # to widen the row and break its rhythm. 44px also clears the WCAG 2.5.8 target minimum, which matters
+    # here more than anywhere: this page is tapped by a thumb, from a bio link, which is all of its traffic.
     "    .sl-social-row a.sl-social-glyph{width:44px;height:44px;padding:0}",
     "    .sl-social-row a.sl-social-glyph svg{width:22px;height:22px;display:block}",
     # An unlinked profile on a shared platform host: same tile, visibly inert. Not hidden -- the tenant put it
     # there, and a card that silently vanishes tells them nothing about why.
     "    .sl-social-row .is-unlinked{display:inline-flex;align-items:center;justify-content:center;min-height:44px;min-width:44px;border:1px dashed var(--sl-legal-link);border-radius:999px;color:var(--sl-muted);opacity:.65}",
-    "    .sl-social-row span.sl-social-worded{padding:0 1.25rem;line-height:44px}",
     "    .sl-social-row span.sl-social-glyph{width:44px;height:44px;padding:0}",
     "    .sl-social-row span.sl-social-glyph svg{width:22px;height:22px;display:block}",
     "    .sl-social-row a:hover{text-decoration:underline}",
@@ -5337,26 +5335,25 @@ def _social_link_item(url: Any, *, linkable: bool = True) -> str:
     glyph: aria-label on the link, and the SVG itself is aria-hidden so a screen reader announces the
     network once rather than twice.
 
-    The worded fallback is not a degraded state. LinkedIn and Twitter have no mark here because their owners
-    asked for it to be withdrawn from the upstream set, and a tenant can paste a host we have never heard of.
-    Both render as a readable pill, which is what the whole row was before this.
+    There is ALWAYS a glyph: the network's own mark, or a globe when we do not recognise the host. Spelling
+    the host out -- which is what this used to do -- put a wide text pill in a row of 44px circles and broke
+    the one visual property a link hub has (author, 2026-09-11: "adversely disrupts the organized look").
+    Nothing is lost by it, because the NAME was never in the glyph; it is on the link, where a screen reader
+    and a hover both still find it.
     """
     href = escape(str(url).strip())
-    label = network_label(url)
-    glyph = network_icon_path(url)
+    label = escape(network_label(url))
+    named = f' aria-label="{label}" title="{label}"'
     inner = (f'<svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor" aria-hidden="true"'
-             f' focusable="false"><path d="{escape(glyph)}"/></svg>') if glyph else escape(label)
-    kind = "sl-social-glyph" if glyph else "sl-social-worded"
+             f' focusable="false"><path d="{escape(network_glyph(url))}"/></svg>')
     # §7, the same trust boundary render_link_cards applies, for the same reason and with the same shape: on a
     # shared platform host only allowlisted destinations become anchors, because a human tapping a phishing
     # link on someone.jbay.uk is a browser-blocklist problem for OUR domain and every tenant on it. Unlinked
     # rather than dropped -- a tile that silently vanishes tells the tenant nothing about why.
     if not linkable:
-        return (f'<li><span class="{kind} is-unlinked" title="{escape(label)}"'
-                f' aria-label="{escape(label)}">{inner}</span></li>')
-    title_attr = f' aria-label="{escape(label)}" title="{escape(label)}"' if glyph else ""
-    return (f'<li><a class="{kind}" href="{href}" rel="nofollow ugc noopener" target="_blank"'
-            f'{title_attr} data-sl-link="{link_click_id(url)}">{inner}</a></li>')
+        return f'<li><span class="sl-social-glyph is-unlinked"{named}>{inner}</span></li>'
+    return (f'<li><a class="sl-social-glyph" href="{href}" rel="nofollow ugc noopener" target="_blank"'
+            f'{named} data-sl-link="{link_click_id(url)}">{inner}</a></li>')
 
 
 def render_social_links(section: dict[str, Any]) -> str:

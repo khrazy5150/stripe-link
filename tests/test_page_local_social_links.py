@@ -73,7 +73,7 @@ class IdentityBoundaryTests(unittest.TestCase):
         # Rendering a page whose section overrides with an unverifiable host changes nothing about it. The
         # section is not an input to the node -- there is no path from one to the other.
         markup = html_module.render_social_links({"id": "s1", "items": [{"url": "https://onlyfans.com/acme"}]})
-        self.assertIn("onlyfans.com", markup)
+        self.assertIn('aria-label="OnlyFans"', markup)  # rendered -- as an unlinked tile on a platform host
         self.assertEqual(html_module.organization_node(ORG, "https://acme.com").get("sameAs"),
                          ["https://github.com/acme"])
 
@@ -118,7 +118,7 @@ class RenderTests(unittest.TestCase):
         markup = self._render({"items": [{"url": "https://onlyfans.com/acme"}]})
         self.assertIn("is-unlinked", markup)
         self.assertNotIn("<a ", markup)
-        self.assertIn("onlyfans.com", markup)  # still visible, and still named
+        self.assertIn('aria-label="OnlyFans"', markup)  # still visible, and still named
 
     def test_the_same_link_is_tappable_on_the_tenants_own_domain(self):
         # There the reputation at stake is theirs.

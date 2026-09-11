@@ -24,13 +24,20 @@ import sys
 import tempfile
 
 # host -> simple-icons slug. The KEYS must be a subset of NETWORK_LABELS; the test enforces it, because a
-# glyph for a host we do not otherwise recognise would never be reachable.
+# glyph needs a name to put in its aria-label.
+#
+# NOT a subset of SAME_AS_HOSTS, and deliberately so. A glyph says "you recognise this place"; the identity
+# allowlist says "this may be asserted as who the tenant IS". Snapchat and OnlyFans are on a creator's hub
+# constantly and could never be a sameAs, so coupling the two tables would have meant spelling out exactly
+# the links a link hub exists to show.
 HOST_SLUGS = {
     "crunchbase.com": "crunchbase",
     "facebook.com": "facebook",
     "github.com": "github",
     "instagram.com": "instagram",
+    "onlyfans.com": "onlyfans",
     "pinterest.com": "pinterest",
+    "snapchat.com": "snapchat",
     "threads.net": "threads",
     "tiktok.com": "tiktok",
     "trustpilot.com": "trustpilot",

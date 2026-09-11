@@ -24,6 +24,18 @@ The brand owner's own usage guidelines govern the mark itself: do not restyle it
 not use it in a way that implies the network endorses the page.
 """
 
+# The fallback for a host we have no mark for. NOT a brand mark, so there is no reference to be faithful to --
+# but it was still rendered and looked at, because a glyph that reads as a smudge at 22px is worse than the
+# words it replaces. A globe rather than a question mark or a broken-link icon: the link works, we simply do
+# not recognise where it goes, and the tenant typed it deliberately.
+#
+# Annulus + equator bar + meridian ring, each a subpath, counters carved by winding direction.
+GLOBE_ICON_PATH = (
+    "M12 1A11 11 0 1 1 12 23 11 11 0 1 1 12 1ZM12 2.8A9.2 9.2 0 1 0 12 21.2 9.2 9.2 0 1 0 12 2.8Z"
+    "M1.9 11.15H22.1V12.85H1.9ZM12 1A5.4 11 0 1 1 12 23 5.4 11 0 1 1 12 1Z"
+    "M12 2.8A3.7 9.2 0 1 0 12 21.2 3.7 9.2 0 1 0 12 2.8Z"
+)
+
 MANUAL_ICON_PATHS = {
     # The "in" square. Rounded rect drawn clockwise; the dot, the i-stem and the n are drawn
     # counter-clockwise so they knock out of it. Rendered at 240px and compared against the mark on

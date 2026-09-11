@@ -16,7 +16,7 @@ by ZERO of these hosts. See plans/SOCIAL_MEDIA_PAGES.md §7a-i.
 from typing import Any
 
 from stripe_link.domain.network_icons import NETWORK_ICON_PATHS as _GENERATED_ICON_PATHS
-from stripe_link.domain.network_icons_manual import MANUAL_ICON_PATHS
+from stripe_link.domain.network_icons_manual import GLOBE_ICON_PATH, MANUAL_ICON_PATHS
 
 # The generated set, with hand-drawn marks layered over it. Manual wins: it exists precisely for the networks
 # upstream cannot supply, and a later regeneration must not be able to take one away.
@@ -150,9 +150,23 @@ def _network_lookup(url: Any, table: dict[str, Any]) -> Any:
     return None
 
 
+# Display names for hosts we RECOGNISE but would never let into sameAs. Separate from NETWORK_LABELS on
+# purpose: that table is the identity allowlist's names and is mirrored into the Business-identity picker in
+# the dashboard, so putting OnlyFans in it would offer the tenant a profile they can never actually claim.
+# This one only ever supplies the name under a glyph and in its aria-label.
+RECOGNISED_LABELS = {
+    "fansly.com": "Fansly",
+    "onlyfans.com": "OnlyFans",
+    "snapchat.com": "Snapchat",
+}
+
+
 def network_label(url: Any) -> str:
-    """The human name of the network a profile URL belongs to."""
-    return _network_lookup(url, NETWORK_LABELS) or same_as_host(url) or "Profile"
+    """The human name of the network a profile URL belongs to; its bare host when we do not know it."""
+    return (_network_lookup(url, NETWORK_LABELS)
+            or _network_lookup(url, RECOGNISED_LABELS)
+            or same_as_host(url)
+            or "Profile")
 
 
 def network_icon_path(url: Any) -> str:
@@ -163,6 +177,16 @@ def network_icon_path(url: Any) -> str:
     falls back to the worded label, which stays readable and stays honest.
     """
     return _network_lookup(url, NETWORK_ICON_PATHS) or ""
+
+
+def network_glyph(url: Any) -> str:
+    """The glyph to draw for this link: the network's mark, or a globe when we do not recognise the host.
+
+    Never empty. Spelling the host out instead -- which is what this used to do -- put a wide text pill in a
+    row of 44px circles and broke the one visual property a link hub has (author, 2026-09-11). The NAME is
+    still carried, on the link's aria-label and title, so nothing is lost but the disruption.
+    """
+    return network_icon_path(url) or GLOBE_ICON_PATH
 
 
 def is_verified(entry: Any) -> bool:

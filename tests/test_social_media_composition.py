@@ -117,22 +117,25 @@ class SocialLinksElementTests(unittest.TestCase):
         self.assertEqual(markup.count('aria-hidden="true"'), 3)
         self.assertEqual(markup.count("<svg "), 3)
 
-    def test_a_network_with_no_mark_keeps_the_worded_pill(self):
-        # NOT a degraded state -- a tenant can paste a host nobody has heard of, and the row stays readable.
-        # LinkedIn used to be the example here and is no longer: upstream cannot ship its mark, so ours is
-        # hand-drawn (domain/network_icons_manual.py). The fallback still has to work for everything else.
+    def test_a_network_with_no_mark_gets_a_globe(self):
+        # A tenant can paste any host. It used to be spelled out, which put a wide text pill in a row of 44px
+        # circles; now it gets a globe and the HOST goes on the link's name, where a screen reader and a hover
+        # still find it. The link works -- we just do not recognise where it goes.
         markup = self._render({"same_as": [{"url": "https://example.org/acme"}]})
-        self.assertIn(">example.org<", markup)
-        self.assertIn("sl-social-worded", markup)
-        self.assertNotIn("<svg ", markup)
+        self.assertIn('aria-label="example.org"', markup)
+        self.assertIn("sl-social-glyph", markup)
+        self.assertIn("<svg ", markup)
+        self.assertNotIn("sl-social-worded", markup)
 
-    def test_a_mixed_row_renders_both_forms(self):
+    def test_every_tile_in_a_row_is_the_same_shape(self):
+        # The point of the globe fallback: one unrecognised host used to widen the row and break its rhythm.
         markup = self._render({"same_as": [
             {"url": "https://youtube.com/@acme"},
             {"url": "https://example.org/acme"},
         ]})
-        self.assertIn("sl-social-glyph", markup)
-        self.assertIn("sl-social-worded", markup)
+        self.assertEqual(markup.count("sl-social-glyph"), 2)
+        self.assertEqual(markup.count("<svg "), 2)
+        self.assertNotIn("sl-social-worded", markup)
         # Both are 44px tall so a mixed row sits on one baseline, and both clear the WCAG 2.5.8 target
         # minimum -- this page is tapped on a phone, from a bio link, which is its entire traffic source.
         css = "\n".join(html_module.UNIVERSAL_BUNDLE_TEMPLATE_STYLES)

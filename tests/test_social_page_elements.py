@@ -30,16 +30,32 @@ PRODUCTS_STORE = (DASHBOARD / "stores" / "products.js").read_text(encoding="utf-
 NO_MARK = {
     "bbb.org": "never in the upstream set, and not worth hand-drawing for its traffic",
 }
+# Recognised, named, but with no mark of their own -- they fall through to the globe. Fansly is here because
+# upstream does not carry it and I have no reference to draw it FROM: authoring a brand mark from memory is
+# the exact failure the generator's docstring warns about, and a wrong Fansly logo is worse than a globe.
+NO_MARK_RECOGNISED = {"fansly.com": "not in simple-icons, and not safe to draw without a reference"}
 
 
 class GlyphTableTests(unittest.TestCase):
-    def test_every_glyph_belongs_to_a_host_we_recognise(self):
-        # A glyph for a host outside NETWORK_LABELS could never be reached: the lookup walks the label table
-        # first. This is the direction that actually rots -- adding an icon is easy, adding it for a host
-        # nobody allowlisted is easier.
+    def test_every_glyph_has_a_name(self):
+        # A glyph is announced by its aria-label, so a mark with no display name would reach a screen reader
+        # as a bare hostname under a picture.
+        from stripe_link.domain.social_links import RECOGNISED_LABELS
+
         for host in NETWORK_ICON_PATHS:
-            self.assertIn(host, NETWORK_LABELS, host)
-            self.assertIn(host, SAME_AS_HOSTS, host)
+            self.assertIn(host, {**NETWORK_LABELS, **RECOGNISED_LABELS}, host)
+
+    def test_a_glyph_does_not_imply_an_identity_claim(self):
+        # Decoupled 2026-09-11. A glyph says "you recognise this place"; SAME_AS_HOSTS says "this may be
+        # asserted as who the tenant IS". Snapchat and OnlyFans are on a creator's hub constantly and could
+        # never be a sameAs, so tying the tables would have meant spelling out exactly the links a link hub
+        # exists to show.
+        from stripe_link.domain.social_links import RECOGNISED_LABELS
+
+        self.assertIn("onlyfans.com", NETWORK_ICON_PATHS)
+        self.assertNotIn("onlyfans.com", SAME_AS_HOSTS)
+        # ...and the identity picker must not offer them, which is why they live in their own label table.
+        self.assertFalse(set(RECOGNISED_LABELS) & set(NETWORK_LABELS))
 
     def test_the_hosts_without_a_mark_are_the_expected_ones(self):
         missing = set(NETWORK_LABELS) - set(NETWORK_ICON_PATHS)

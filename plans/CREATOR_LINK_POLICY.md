@@ -36,6 +36,18 @@ together someone has collapsed them, so they are separated here permanently.
 | Failure mode | Domain blocklisted, every creator down. | Someone opens adult content unexpectedly; we look unmoderated. |
 | Today | `PLATFORM_LINKABLE_HOSTS = SAME_AS_HOSTS`, 16 hosts. | Does not exist. |
 
+**A glyph is a FOURTH thing, and not tied to any of the three above (2026-09-11).** It says only "you
+recognise this place". Snapchat and OnlyFans are on a creator's hub constantly and could never be a `sameAs`,
+so keying the icon table on `SAME_AS_HOSTS` meant spelling out exactly the links a link hub exists to show.
+Icons are now keyed on their own table, with display names in `RECOGNISED_LABELS` -- deliberately separate
+from `NETWORK_LABELS`, which is mirrored into the Business-identity picker and must keep offering only hosts a
+tenant can actually claim.
+
+**An unrecognised host gets a globe, never its spelled-out name** (author, 2026-09-11: a text pill "adversely
+disrupts the organized look of the social icons"). The name moves to `aria-label` and `title`, so a screen
+reader and a hover still name the destination; only the disruption is lost. A globe rather than a question
+mark: the link works, we simply do not know where it goes, and the tenant typed it on purpose.
+
 **Glyphs, noted here because it is the same confusion in miniature (2026-09-11).** LinkedIn was rendering as a
 worded pill because simple-icons had removed it at LinkedIn's request — and that request is about one library
 redistributing the asset, NOT a rule against showing a LinkedIn icon on a link to a LinkedIn profile, which is
