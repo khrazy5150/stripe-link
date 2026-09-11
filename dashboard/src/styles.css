@@ -6870,6 +6870,24 @@ button:disabled {
   color: #92400e;
 }
 
+/* Amber says "this could be better". Red says "publishing this now produces an empty page", which is the
+   one notice here that names a hard stop rather than a suggestion. */
+.page-health-warnings.is-blocking {
+  border-color: #fca5a5;
+  background: #fef2f2;
+}
+
+.page-health-warnings.is-blocking strong {
+  color: #991b1b;
+}
+
+.page-health-warnings.is-blocking p {
+  margin: 0.6rem 0 0;
+  font-size: 1.3rem;
+  line-height: 1.55;
+  color: var(--text, #111827);
+}
+
 .page-health-warnings ul {
   margin: 0.6rem 0 0;
   padding-left: 1.8rem;

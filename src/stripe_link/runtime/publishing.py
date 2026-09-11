@@ -24,7 +24,7 @@ from stripe_link.domain.documents import (
 )
 from stripe_link.runtime.artifacts import artifact_paths, cloudfront_path
 from stripe_link.domain.bnpl import messaging_method_types
-from stripe_link.domain.composition import composition_forbids_indexing
+from stripe_link.domain.composition import composition_forbids_indexing, composition_key
 from stripe_link.domain.connect_sync import site_domain_verified, site_seo_enabled
 from stripe_link.domain.custom_domains import domain_index_record, platform_domain_index_record
 from stripe_link.domain.funnels import funnel_slug_entries, post_purchase_plan
@@ -1044,6 +1044,24 @@ def publish_page_document(
     offer = _prune_unrenderable_landing_items(offer, products_by_id)
     if offer.get("offer_id"):
         offers_by_id[str(offer["offer_id"])] = offer
+    # A page with no Site normally still publishes, falling back to the interim identity -- a checkout page
+    # carries its own content, so losing the store's name and its Organization graph degrades it rather than
+    # emptying it. A LINK-IN-BIO page is the exception: the Site is not the identity around the content, it IS
+    # the content. social_links renders the Site's profiles and the brand mark renders its name, so an
+    # unattached one publishes as a blank page under the platform's brand.
+    #
+    # Enforced HERE and not only in the builder because the builder's preview resolves the Site this page will
+    # attach to -- which is exactly what made the failure baffling from the outside (reported 2026-09-10:
+    # glyphs in the preview, nothing on the saved page). The preview is right about the page and wrong about
+    # the page's situation; this is the line that says so, at the moment it starts to matter.
+    # Gated on PUBLISHED, not on every call: this function also runs for a draft save (it always writes the
+    # preview artifact), and a draft is allowed to be incomplete -- that is what a draft is for. Refusing here
+    # would have made a Social Page unsaveable until its Site existed, which is worse than the bug.
+    if site is None and page.get("status") == "published" and composition_key(offer) == "lead_social":
+        raise RenderError(
+            "This page shows your social profiles and your brand, and both of those live on a Site. "
+            "Attach it to a Site first, or it would publish with no links on it."
+        )
     # Denormalize this landing page's offer + product category onto its Site route-map entry (so category
     # pages resolve off the map), then fill any related-products rail from other pages in the same category
     # and bundle their offers. Best-effort — never blocks the artifact publish.

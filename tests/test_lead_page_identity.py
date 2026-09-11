@@ -136,5 +136,40 @@ class SocialLinksEmptyStateTests(unittest.TestCase):
         self.assertIn("builderSiteId.value", block)
 
 
+class UnattachedPublishTests(unittest.TestCase):
+    """Publishing a link hub with no Site is an ERROR, not a degraded page.
+
+    Every other page type publishes fine without a Site -- it loses the store's name and its Organization
+    graph, which degrades the page. A link hub loses everything it has, because the Site is not the identity
+    around the content, it IS the content.
+    """
+
+    PUBLISHING = (pathlib.Path(__file__).resolve().parents[1]
+                  / "src" / "stripe_link" / "runtime" / "publishing.py").read_text(encoding="utf-8")
+
+    def test_the_guard_is_scoped_to_the_link_hub(self):
+        self.assertIn('composition_key(offer) == "lead_social"', self.PUBLISHING)
+
+    def test_a_draft_may_still_be_incomplete(self):
+        # publish_page_document also runs on a draft save (it always writes the preview artifact). Without the
+        # status gate a Social Page would have been unsaveable until its Site existed, which is worse than the
+        # bug it fixes -- a draft is allowed to be unfinished, that is what a draft is.
+        line = [l for l in self.PUBLISHING.splitlines() if 'composition_key(offer) == "lead_social"' in l][0]
+        self.assertIn('page.get("status") == "published"', line)
+
+    def test_the_message_names_the_fix(self):
+        # "Attach it to a Site" is something the tenant can do. "No Site found" would not be.
+        self.assertIn("Attach it to a Site first", self.PUBLISHING)
+
+    def test_the_builder_warns_before_publish_is_reached(self):
+        # The server guard is the backstop. The tenant should learn this from the pane that is showing them
+        # the comforting half of the truth, not from an error after they press Publish.
+        self.assertIn('v-if="previewNeedsSite"', BUILDER)
+        self.assertIn("const previewNeedsSite = computed(", BUILDER)
+        block = BUILDER.split("const previewNeedsSite = computed(", 1)[1][:300]
+        self.assertIn('builderOfferType.value === "lead_social"', block)
+        self.assertIn("siteByPageId.value[builder.page_id]", block)
+
+
 if __name__ == "__main__":
     unittest.main()

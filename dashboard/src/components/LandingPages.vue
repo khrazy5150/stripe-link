@@ -1942,6 +1942,19 @@
         <!-- Quality-baseline nudges on the rendered page (heading outline; a11y/CLS later). Never blocks
              publishing — the outline is correct by construction, so this usually stays hidden and only
              appears if something regresses. plans/SEMANTIC_HTML.md -->
+        <!-- The preview resolves the Site this page WILL attach to, so it shows the profiles and the brand a
+             visitor would see once it is attached. Until then the saved page has neither. Say so here, beside
+             the thing that is telling the comforting half of the truth, rather than leaving the tenant to
+             discover it after publishing (reported 2026-09-10: glyphs in the preview, nothing on the page). -->
+        <div v-if="previewNeedsSite" class="page-health-warnings is-blocking">
+          <strong>Not attached to a Site yet</strong>
+          <p>
+            This preview is showing the brand and social profiles from
+            <strong>{{ builderSiteName || "your Site" }}</strong>, but the page is not attached to it. A link
+            page gets both from its Site, so publishing now would put out an empty page. Save the page and
+            attach it to a Site — everything you see here comes with it.
+          </p>
+        </div>
         <div v-if="pageHealthWarnings.length" class="page-health-warnings">
           <strong>Page health</strong>
           <ul>
@@ -3383,6 +3396,14 @@ const builderSiteProfiles = computed(() => {
   const site = sitesStore.sites.find((s) => s.site_id === builderSiteId.value);
   return ((site?.organization || {}).same_as || []).filter((entry) => (entry?.url || "").trim());
 });
+// A link page whose Site is only a PROMISE. The preview reads the Site the page will attach to, which is the
+// right thing to render and the wrong thing to leave unexplained: the published artifact reads attachment,
+// which this page does not have yet. Scoped to lead_social because it is the only shape where the Site is not
+// the identity around the content but the content itself -- every other page still says something on its own.
+const previewNeedsSite = computed(() =>
+  builderOfferType.value === "lead_social" && !siteByPageId.value[builder.page_id] && !!builderSiteId.value);
+const builderSiteName = computed(() =>
+  sitesStore.sites.find((s) => s.site_id === builderSiteId.value)?.name || "");
 const builderSiteId = computed(() => {
   const attached = siteByPageId.value[builder.page_id];
   if (attached) return attached.site_id;
