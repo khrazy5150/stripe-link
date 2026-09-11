@@ -47,6 +47,35 @@ unfashionable, it is wrong.
 Mirrored in `pageComposer.js`, since preview and published each implement the visibility logic over the
 shared rules file.
 
+## 2b. The goal question: kept for three shapes, skipped for one (decided 2026-09-10)
+
+"Should a lead-gen page have a goal at all?" was asked on the premise that nobody pays to drive traffic to
+a capture page. That premise is wrong — paid lead-gen is a large category in its own right (Meta has a
+"Leads" campaign objective; Google has lead-form extensions), and lead magnet + paid ads is a textbook
+acquisition play. Call pages are the backbone of local-services advertising.
+
+The useful question is not "would anyone buy traffic for this?" but "does the goal change anything here?"
+After §2a's exclusion, what each goal still contributes to a lead page is its SEEDS:
+
+| goal | sections on a lead page | seeds |
+|---|---|---|
+| `paid_ads` | none (excluded) | content_block, faq |
+| `search_seo` | structured_data | faq |
+| `social` | none | testimonials, rating, client_marquee |
+| `email_list` | none | none — a tautology for a capture page |
+| `minimal` | none | none |
+
+So capture, call and bridge KEEP the step: the seeds genuinely help, and social proof on a capture page
+converts.
+
+**The link-in-bio page skips it entirely, forced to `minimal`.** It is the one shape with no question to
+answer — its traffic is always a tap from a bio field — and every pack seeds the wrong thing for it.
+Skipped rather than pre-answered: an option nobody should change is a question that should not be asked.
+
+Open, noted while deciding: **`search_seo` puts `structured_data` on a lead page.** That section emits
+JSON-LD, and Product markup on a page that sells nothing would be wrong. Check what it derives for these
+before leaving that goal reachable.
+
 ## 3. What every lead page drops
 
 `offer_price_selector`, `refund_policy`, `trust_badges`, `product_details`, `related_products`,

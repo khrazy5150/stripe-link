@@ -153,3 +153,40 @@ class GoalCannotResurrectTransactionalSectionsTests(unittest.TestCase):
                     / "dashboard" / "src" / "composables" / "pageComposer.js").read_text(encoding="utf-8")
         self.assertIn("excludedSections", composer)
         self.assertIn("if (excludedSections(offerType).has(key)) return false;", composer)
+
+
+class SocialPageSkipsTheGoalTests(unittest.TestCase):
+    """The link-in-bio page is the ONE lead shape with no goal question to answer.
+
+    Its traffic is always a tap from a bio field, and every pack seeds the wrong thing for it -- ad_landing
+    seeds a content block and an FAQ, social_proof seeds testimonials and a rating. On a link hub those are
+    noise.
+
+    The other three KEEP the step, and the reasoning is recorded because it was nearly dropped for all of
+    them: paid traffic to lead-capture pages is a large category (Meta has a "Leads" objective, Google has
+    lead-form extensions), and after the exclusion the packs still contribute useful SEEDS there.
+    """
+
+    def _builder(self):
+        import pathlib
+        return (pathlib.Path(__file__).resolve().parents[1]
+                / "dashboard" / "src" / "components" / "LandingPages.vue").read_text(encoding="utf-8")
+
+    def test_the_goal_step_is_skipped_for_a_social_page(self):
+        builder = self._builder()
+        self.assertIn('product?.lead_capture?.action === "social_redirect"', builder)
+        self.assertIn('form.goal = "minimal"', builder)
+
+    def test_it_skips_rather_than_pre_answering(self):
+        # An option nobody should change is a question that should not be asked.
+        self.assertIn("wizardStep.value = 3;", self._builder())
+
+    def test_the_step_counter_has_no_hole_in_it(self):
+        # Without this a Social Page read "Step 2 of 5" then "Step 4 of 5", which looks like a lost step.
+        self.assertIn("wizardSkipsGoal", self._builder())
+
+    def test_minimal_really_does_nothing(self):
+        # The forced goal has to be inert, or skipping the question would quietly choose content for them.
+        from stripe_link.domain.composition import goal_packs, goal_sections
+        self.assertEqual(goal_packs("minimal"), [])
+        self.assertEqual(goal_sections("minimal"), set())

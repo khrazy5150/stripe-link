@@ -2293,6 +2293,12 @@ const servicesById = computed(() => new Map(services.value.map((service) => [ser
 const selectedOffer = computed(() => offers.value.find((offer) => offer.offer_id === form.offer_id) || null);
 const selectedOfferProducts = computed(() => offerProducts(selectedOffer.value));
 const selectedOfferIntent = computed(() => offerIntent(selectedOffer.value));
+// The link-in-bio page is the one lead shape with no goal question to answer: its traffic is ALWAYS a tap
+// from a bio field, and every pack seeds the wrong thing for it (testimonials and FAQs on a link hub are
+// noise). Capture, call and bridge pages keep the step -- "ads vs search vs social" is a real question
+// there, with useful seeds behind it.
+const selectedOfferIsSocialPage = computed(() =>
+  selectedOfferProducts.value.some((product) => product?.lead_capture?.action === "social_redirect"));
 const selectedLeadAction = computed(() => selectedOfferProducts.value.find((product) => product.lead_capture)?.lead_capture || null);
 const builderOffer = computed(() => offers.value.find((offer) => offer.offer_id === builder.offer_id) || null);
 const builderOfferProducts = computed(() => offerProducts(builderOffer.value));
@@ -3250,6 +3256,13 @@ function nextWizardStep() {
     wizardError.value = "Choose an offer before continuing.";
     return;
   }
+  if (wizardStep.value === 1 && selectedOfferIsSocialPage.value) {
+    // Skip the goal step entirely rather than showing it pre-answered: an option nobody should change is
+    // a question that should not be asked.
+    form.goal = "minimal";
+    wizardStep.value = 3;
+    return;
+  }
   if (wizardStep.value === 2 && !form.goal) {
     wizardError.value = "Choose a goal before continuing.";
     return;
@@ -3260,8 +3273,15 @@ function nextWizardStep() {
 const wizardTotalSteps = computed(() => (form.pageKind === "offer" ? 4 : 2));
 // The Site picker is a prepended step 1; the numbered build steps shift to 2..N+1 for display only
 // (internal wizardStep stays 1..N so the existing step logic is untouched).
-const displayTotal = computed(() => wizardTotalSteps.value + 1);
-const displayStep = computed(() => (sitePhase.value ? 1 : wizardStep.value + 1));
+// A skipped step must not leave a hole in the count: without this a Social Page read "Step 2 of 5" and
+// then "Step 4 of 5", which looks like the wizard lost one.
+const wizardSkipsGoal = computed(() => form.pageKind === "offer" && selectedOfferIsSocialPage.value);
+const displayTotal = computed(() => wizardTotalSteps.value + 1 - (wizardSkipsGoal.value ? 1 : 0));
+const displayStep = computed(() => {
+  if (sitePhase.value) return 1;
+  const step = wizardStep.value + 1;
+  return wizardSkipsGoal.value && wizardStep.value > 2 ? step - 1 : step;
+});
 
 // Distinct product categories the tenant actually uses (so a category page's key matches denormalized
 // landing pages). Keys stay normalized; labels are humanized for display.
