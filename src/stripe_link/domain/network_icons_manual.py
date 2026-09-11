@@ -37,21 +37,34 @@ GLOBE_ICON_PATH = (
 )
 
 MANUAL_ICON_PATHS = {
-    # Fansly: two ring-lobes over a wedge, with the aperture ring below. Not in simple-icons, so this was
-    # TRACED -- the author supplied a reference, which was sampled to an ASCII map to measure the lobe radius,
-    # the rim thickness and the ring's position rather than eyeballing them, then rendered and compared at the
-    # 22px it actually displays at. It is a faithful reconstruction, not a copy of an official asset: the
-    # interlocking tails of the real mark are simplified to a wedge, which is invisible at this size.
+    # Fansly: two padlocks rotated into a heart, with the keyhole ring on the left lock's body -- the author's
+    # own description ("two square locks in the shape of a heart") is what finally made the construction legible.
     #
-    # Drawn as a UNION (three same-direction subpaths: two circles and the wedge) with the counters carved
-    # against them. The wedge's top edge sits below the lobe holes on purpose -- overlap there would re-fill
-    # them under nonzero winding and the holes would render as half-moons.
+    # TRACED, not hand-fitted. Six attempts at fitting arcs by eye all failed on the same thing: the real mark
+    # is two interlocking LOCKS, and every approximation I reached for (a solid heart, ring-lobes over a wedge)
+    # was a different shape that merely looked heart-ish. So this comes off the reference bitmap the author
+    # supplied -- thresholded to a mask, unioned as pixel cells, smoothed with an open/close and simplified to
+    # a 0.055 tolerance in the 24-unit box, then rendered and checked at 240px AND at the 22px it displays at.
+    # Polygonal rather than arc-based, which is why it is longer than the generated marks; still under
+    # Instagram's, and indistinguishable at any size this is used.
+    #
+    # Regenerate with scratch tooling if the mark ever changes; there is no upstream to pull it from, since
+    # Fansly is not in simple-icons.
     "fansly.com": (
-        "M6.9 2.9A4.3 4.3 0 1 1 6.9 11.5 4.3 4.3 0 1 1 6.9 2.9ZM17.1 2.9A4.3 4.3 0 1 1 17.1 11.5"
-        " 4.3 4.3 0 1 1 17.1 2.9ZM4.2 10.2 19.8 10.2 12 20.9ZM6.9 4.5A2.75 2.75 0 1 0 6.9 10"
-        " 2.75 2.75 0 1 0 6.9 4.5ZM17.1 4.5A2.75 2.75 0 1 0 17.1 10 2.75 2.75 0 1 0 17.1 4.5Z"
-        "M12 12.2A2.45 2.45 0 1 0 12 17.1 2.45 2.45 0 1 0 12 12.2ZM12 13.25A1.4 1.4 0 1 1 12 16.05"
-        " 1.4 1.4 0 1 1 12 13.25ZM13.2 13A0.7 0.7 0 1 0 13.2 14.4 0.7 0.7 0 1 0 13.2 13Z"
+        "M1 9.01 1.36 10.37 1.82 11.28 2.43 12.08 11.30 20.86 11.60 21.05 12.29 21.05 12.61 20.86 18.53 15 "
+        "19.45 13.99 19.35 13.69 14.56 8.90 13.97 8.42 13.90 8.28 13.97 8.13 15.76 6.35 16.58 5.80 17.13 "
+        "5.62 18.13 5.62 18.68 5.80 19.32 6.16 19.96 6.90 20.24 7.54 20.25 7.87 20.34 8.02 20.25 8.99 19.61 "
+        "10.10 18.24 11.46 18.21 11.69 19.73 13.23 20.04 13.39 20.33 13.23 21.31 12.26 22.19 11.17 22.73 "
+        "10.11 22.91 9.47 22.91 9.15 23 9.01 23 7.54 22.82 6.71 22.36 5.62 21.66 4.65 20.77 3.86 19.78 3.31 "
+        "18.61 2.95 16.77 2.95 16.62 3.04 16.31 3.04 15.12 3.50 13.86 4.40 6.38 11.89 6.20 11.96 4.22 10.02 "
+        "3.76 9.28 3.57 8.64 3.58 7.91 3.76 7.27 4.13 6.62 4.59 6.16 5.41 5.71 5.81 5.61 6.69 5.62 7.33 5.80 "
+        "7.79 6.08 9.26 7.56 9.65 7.74 11.28 6.14 11.38 5.86 9.68 4.12 9.33 3.86 8.25 3.31 7.16 3.04 5.59 "
+        "3.04 4.49 3.31 3.41 3.86 2.08 5.09 1.36 6.35 1.18 6.90 1 7.72ZM9.25 13.70 9.34 13.55 9.35 13.21 "
+        "9.62 12.58 10.26 11.85 11.10 11.38 11.48 11.29 12.43 11.29 13.36 11.65 14.01 12.21 14.39 12.77 "
+        "14.57 13.32 14.66 14.03 14.57 14.18 14.57 14.60 14.20 15.41 13.47 16.15 12.63 16.52 11.66 16.61 "
+        "10.99 16.43 10.44 16.15 9.72 15.43 9.34 14.58ZM10.27 13.49 10.23 14.44 10.51 15 11.04 15.44 11.49 "
+        "15.63 12.40 15.64 12.95 15.36 13.40 14.92 13.59 14.54 13.69 13.75 13.58 13.34 13.44 13.24 12.88 "
+        "13.33 12.65 13.22 12.36 12.83 12.29 12.27 11.43 12.27 11.04 12.46 10.60 12.81Z"
     ),
     # The "in" square. Rounded rect drawn clockwise; the dot, the i-stem and the n are drawn
     # counter-clockwise so they knock out of it. Rendered at 240px and compared against the mark on

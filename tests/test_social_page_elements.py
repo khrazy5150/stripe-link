@@ -117,6 +117,23 @@ class ManualIconTests(unittest.TestCase):
         self.assertEqual(set(RECOGNISED_LABELS) - set(NETWORK_ICON_PATHS), set(NO_MARK_RECOGNISED))
         self.assertEqual(network_glyph("https://example.org/acme"), GLOBE_ICON_PATH)
 
+    def test_a_traced_mark_is_not_silently_truncated(self):
+        # A long path has to be wrapped across source lines, and Python concatenates the pieces with nothing
+        # between them -- so wrapping on whitespace DROPS the separator at every line break. It happened here:
+        # 1343 characters went in and 1330 came out, which is a path that still parses and draws the wrong
+        # shape. Every subpath opens with M and closes with Z; a lost separator breaks that count or leaves a
+        # fused coordinate pair, and either way this notices.
+        for host, path in MANUAL_ICON_PATHS.items():
+            self.assertEqual(path.count("M"), path.count("Z"), host)
+            for sub in [x for x in path.split("M") if x]:
+                self.assertTrue(sub.rstrip().endswith("Z"), f"{host}: subpath does not close")
+                if set(sub) - set("0123456789.- Z"):
+                    continue  # an arc-based subpath; the pair check below only describes a polygon
+                nums = sub.rstrip("Z").split()
+                self.assertEqual(len(nums) % 2, 0, f"{host}: odd coordinate count -- a separator was lost")
+                for n in nums:
+                    float(n)  # raises if two numbers were fused into one
+
     def test_a_hand_drawn_mark_meets_the_same_contract(self):
         # Same shape as the generated ones: 24x24, single path, no fill-rule -- the renderer supplies a bare
         # <svg fill="currentColor"> wrapper and would silently mis-fill anything that needed more.
