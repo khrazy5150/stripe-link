@@ -27,30 +27,28 @@ export const useProfileStore = defineStore("profile", {
         return;
       }
       this.loading = true;
-      try {
-        const body = await apiRequest("/profile", { params: { user_id: userId } });
-        const business = (body.profile || {}).business || {};
+      // TWO independent reads, deliberately not nested. The store avatar lives on the TENANT profile and the
+      // business identity on THIS USER's, so a user with no profile row yet -- or any failure of /profile at
+      // all -- used to take the avatar down with it, silently: the avatar fetch sat inside the /profile try,
+      // so one catch disabled a feature that had nothing to do with it. The symptom was a page that rendered
+      // its inherited avatar perfectly while the builder behaved as though there were none.
+      const [profile, avatar] = await Promise.allSettled([
+        apiRequest("/profile", { params: { user_id: userId } }),
+        apiRequest("/tenant/avatar"),
+      ]);
+      if (profile.status === "fulfilled") {
+        const business = (profile.value.profile || {}).business || {};
         this.business = {
           name: business.name || "",
           phone: business.phone || "",
           brands: Array.isArray(business.brands) ? [...business.brands] : [],
           address: business.address || {},
         };
-        // The STORE avatar, so the builder can preview what a page will inherit without copying the URL
-        // onto the page. Separate call because it lives on the tenant profile, not this user's.
-        try {
-          const avatar = await apiRequest("/tenant/avatar");
-          this.storeAvatarUrl = avatar.avatar_url || "";
-        } catch {
-          this.storeAvatarUrl = "";
-        }
-        this.loaded = true;
-      } catch {
-        // No profile yet (or load failed) — brand simply falls back to the product name. Non-fatal.
-        this.loaded = true;
-      } finally {
-        this.loading = false;
       }
+      // No profile yet (or the load failed) — brand simply falls back to the product name. Non-fatal.
+      this.storeAvatarUrl = avatar.status === "fulfilled" ? (avatar.value.avatar_url || "") : "";
+      this.loaded = true;
+      this.loading = false;
     },
   },
 });

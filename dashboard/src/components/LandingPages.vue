@@ -539,7 +539,15 @@
                   </div>
                   <small v-if="avatarUploadError" class="builder-upload-error">{{ avatarUploadError }}</small>
                   <small v-else-if="avatarIsFromProfile" class="field-note">Showing your store avatar. Change it in Preferences and every page that has not overridden it updates too.</small>
-                  <label v-if="effectiveAvatarUrl || builder.avatar_placement === 'hidden'" class="offer-field">
+                  <!-- NOT gated on knowing the avatar's URL. The renderer already learned this lesson where
+                       the section is written (see builderSectionCandidates): once the avatar became a
+                       REFERENCE, a page inheriting the store image has an empty avatar_url, so any gate on it
+                       silently withholds the control from exactly the pages most likely to want it. The gate
+                       here was the same mistake in the editor -- and worse, it depended on an async profile
+                       load, so the dropdown could vanish for a page that renders an avatar perfectly well.
+                       Placement is a page-level preference about WHERE an avatar goes; it is answerable
+                       before one exists, and "hidden" is a real answer. -->
+                  <label class="offer-field">
                     <span>Avatar placement</span>
                     <select v-model="builder.avatar_placement">
                       <option value="overlay">Overlapping hero, bottom left</option>

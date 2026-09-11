@@ -5,6 +5,7 @@ The avatar element already existed: render_hero_media reads section.avatar_url a
 overlapping a cover image (linkcloud) or inline under the name with no cover at all (eddieabbew), and an
 overlay avatar hanging off nothing reads as a mistake.
 """
+import pathlib
 import re
 import unittest
 
@@ -229,3 +230,39 @@ class TopCentreAndPulseTests(unittest.TestCase):
         reduced = [line for line in source.split("\n") if "prefers-reduced-motion" in line]
         self.assertTrue(reduced)
         self.assertIn(".sl-hero-brand-dot.is-pulsing{animation:none}", reduced[0])
+
+
+class PlacementControlTests(unittest.TestCase):
+    """The placement dropdown must not depend on the builder KNOWING the avatar's URL.
+
+    Reported 2026-09-11: the Hero modal on a link page had no avatar-placement dropdown, while the preview
+    beside it rendered the inherited store avatar quite happily.
+
+    Two causes, the same shape twice. The control was gated on `effectiveAvatarUrl`, which is empty for a page
+    INHERITING the store avatar -- the exact mistake the section-writing code carries a comment about, made
+    again in the editor. And that value came from a profile store whose avatar fetch sat inside the /profile
+    try block, so any failure of an unrelated request silently emptied it.
+    """
+
+    BUILDER = (pathlib.Path(__file__).resolve().parents[1]
+               / "dashboard" / "src" / "components" / "LandingPages.vue").read_text(encoding="utf-8")
+    STORE = (pathlib.Path(__file__).resolve().parents[1]
+             / "dashboard" / "src" / "stores" / "profile.js").read_text(encoding="utf-8")
+
+    def test_the_dropdown_is_not_gated_on_a_known_avatar_url(self):
+        self.assertNotIn("""v-if="effectiveAvatarUrl || builder.avatar_placement === 'hidden'\"""", self.BUILDER)
+        # Still inside hero_media: placement is meaningless where there is no hero for an avatar to sit on.
+        block = self.BUILDER.split("<span>Avatar placement</span>", 1)[0]
+        self.assertIn("sectionVisible('hero_media')", block)
+
+    def test_every_placement_is_offered(self):
+        for value in ("overlay", "overlay_top", "inline", "centered", "hidden"):
+            self.assertIn(f'value="{value}"', self.BUILDER, value)
+
+    def test_the_store_avatar_survives_a_profile_failure(self):
+        # They are different documents -- the avatar is on the TENANT profile, the business identity on this
+        # USER's -- so one must not be able to take the other down.
+        self.assertIn("Promise.allSettled", self.STORE)
+        block = self.STORE.split("Promise.allSettled", 1)[1][:400]
+        self.assertIn("/profile", block)
+        self.assertIn("/tenant/avatar", block)
