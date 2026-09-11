@@ -452,9 +452,8 @@ of its own — sold-through products do, "here is my TikTok" does not.
 
 ## 11. Also worth building (author asked for additions)
 
-- **Per-link click analytics.** Link-in-bio pages live or die on click data; every
-  competitor shows per-link clicks. Pages have `analytics_summary` (views/conversions/
-  revenue) but nothing per-link. Likely the single highest-value addition after v1.
+- ~~**Per-link click analytics.**~~ **SHIPPED 2026-09-11** — see P4 below for the mechanism and for why the
+  premise of this line ("pages have analytics_summary") was wrong when it was written.
 - **Mobile-first is not a nicety.** Effectively all traffic is a tap from an app's bio
   field. Design and test at 390px first.
 - **Link ordering = the queued drag-reorder work.** Ordering is core here; it shares the
@@ -499,9 +498,8 @@ of its own — sold-through products do, "here is my TikTok" does not.
      creator page wants Amazon, Etsy, Substack, Patreon. Widening it is a P3 decision that should come with
      an abuse story, and the safe direction to be wrong in is "too few links work on the free host", not
      "we shipped an open redirect surface on a shared domain".
-   - **STILL TO DO in this phase:** `profile_avatar`, which belongs to `SOCIALITE_PARITY.md`. The builder UI
-     for adding/ordering `link_cards` items is also not built — the element renders, but nothing in the
-     dashboard creates one yet.
+   - ~~**STILL TO DO in this phase:**~~ The `link_cards` builder UI SHIPPED 2026-09-10 (add/edit/remove items,
+     seeded on a Social Page). Only `profile_avatar` remains, and it belongs to `SOCIALITE_PARITY.md`.
 4. **P3 — override + publish gate.** PARTLY SHIPPED 2026-09-09.
    - **The `on_custom_domain` check is enforced at RENDER**, not at publish: a non-allowlisted external
      destination becomes an inert tile on platform infrastructure and a real anchor on the tenant's own
@@ -535,9 +533,22 @@ of its own — sold-through products do, "here is my TikTok" does not.
      differently.
    - **SHIPPED: views removed from the card.** Nothing measures them; a confident "0 views" is a claim
      about traffic never counted. Absent, not zero — the summary omits the key so the UI shows nothing.
-   - **NOT built: click ingest.** It needs a public unauthenticated write endpoint with an abuse story, and
-     a counters store that is **NOT the Pages table** — `should_publish_record` republishes on any MODIFY,
-     so counting clicks there would re-render and re-upload the page on every click.
+   - **SHIPPED 2026-09-11: per-link click ingest.** Both objections above were answered by the view rail
+     rather than by new machinery: same table (`PageViewsTable`, never `PagesTable`), same public endpoint
+     (`/t/view`, now with an `l=` param), same always-204 posture and the same salted per-day visitor key.
+     A click beacon has identical trust properties to a view beacon, so a second endpoint would have been a
+     second copy of those decisions to keep in step.
+     - The id is a hash of the **URL, not the position**. Position looked simpler and is wrong: reordering a
+       hub would silently reassign every link's history to its new neighbour, and the numbers would keep
+       looking plausible.
+     - **Clicks are deduped per (page, link, visitor, day) exactly as views are.** A decision about UNITS:
+       views count unique visitors, so raw taps would put the two numbers in different units and any
+       click-through rate computed from them would be nonsense.
+     - ONE delegated `pointerdown` listener, not a handler per link. `pointerdown` rather than `click`
+       because a tap that opens a new tab often unloads the page before a click handler's beacon flushes.
+     - Counts are resolved to URLs SERVER-side on the single-page read, including links a `social_links`
+       section is INHERITING from the Site. The id is ours; the dashboard should never reproduce the hash to
+       read its own numbers, which also keeps the hash a single implementation.
    - **Use a beacon, NOT a redirect, when it is built.** `/go/{page}/{link}` is the obvious design and it
      is wrong here: it makes the shared platform host an open redirector, which is precisely the abuse
      surface §7 exists to prevent. `navigator.sendBeacon` on click keeps the real URL in the markup and

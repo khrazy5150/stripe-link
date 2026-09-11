@@ -1,4 +1,6 @@
-"""Public beacon endpoint for page views: GET|POST /t/view?p={page_id}&v={visitor_id}
+"""Public beacon endpoint for page views and link clicks:
+    GET|POST /t/view?p={page_id}&v={visitor_id}          -- a view
+    GET|POST /t/view?p={page_id}&v={visitor_id}&l={link} -- a click on one of that page's links
 
 Unauthenticated by necessity -- it is called from a published page by an anonymous visitor. That shapes
 every decision here:
@@ -22,7 +24,10 @@ from stripe_link.domain.page_views import (
     counter_key,
     day_bucket,
     dedupe_item,
+    is_trackable_link_id,
     is_trackable_page_id,
+    link_counter_key,
+    link_dedupe_item,
     visitor_key,
 )
 from stripe_link.repositories.page_views import page_views_repository
@@ -62,10 +67,21 @@ def handler(event, context, repository=None, now=None):
         salt=os.environ.get("PAGE_VIEW_SALT", ""),
         day=day,
     )
+    # `l` present means this is a CLICK on one of the page's links rather than a view of the page. One
+    # endpoint for both: a click beacon has exactly the same trust properties as a view beacon (public,
+    # anonymous, always 204, nothing reaching a key unchecked), so a second endpoint would be a second copy
+    # of these decisions to keep in step. A malformed link id is dropped rather than counted as a view --
+    # silently recording the wrong event is worse than recording none.
+    link = str(params.get("l") or "").strip()
+    if link and not is_trackable_link_id(link):
+        return _no_content()
     try:
         repo = repository or page_views_repository()
-        if repo.claim_view(dedupe_item(page_id, day, visitor, now_ts)):
+        if link:
+            if repo.claim_view(link_dedupe_item(page_id, link, day, visitor, now_ts)):
+                repo.increment_link_total(link_counter_key(page_id, link), now_ts)
+        elif repo.claim_view(dedupe_item(page_id, day, visitor, now_ts)):
             repo.increment_total(counter_key(page_id), now_ts)
     except Exception as exc:  # noqa: BLE001 - a visitor must never see an analytics failure
-        print(f"page view not recorded for {page_id}: {type(exc).__name__}: {exc}")
+        print(f"page {'link click' if link else 'view'} not recorded for {page_id}: {type(exc).__name__}: {exc}")
     return _no_content()

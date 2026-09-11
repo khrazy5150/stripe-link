@@ -7,8 +7,10 @@ from stripe_link.ids import generate_short_url_code
 import os
 
 from stripe_link.domain.page_analytics import attach_summaries
+from stripe_link.domain.page_views import clicks_by_url
 from stripe_link.repositories.page_views import page_views_repository
-from stripe_link.repositories.documents import RepositoryError, orders_repository, pages_repository
+from stripe_link.repositories.documents import RepositoryError, orders_repository, pages_repository, sites_repository
+from stripe_link.domain.sites import find_site_for_page
 
 
 def handler(event, context, repository=None, tenant_repo=None):
@@ -121,13 +123,28 @@ def strip_lifecycle_fields(document: dict, ignored: set[str]) -> dict:
     }
 
 
-def get_page(event, repository, page_id: str):
+def get_page(event, repository, page_id: str, views_repo=None, sites_repo=None):
     tenant_id = tenant_id_from_event(event)
     if not tenant_id:
         return error_response("tenant_id is required.", code="missing_tenant")
     page = repository.get(tenant_id, page_id)
     if not page:
         return error_response("Page not found.", status_code=404, code="not_found")
+    # Per-link clicks, resolved to URLs here rather than in the dashboard (plans/SOCIAL_MEDIA_PAGES.md §11).
+    # On the single-page read, not the listing: it is one query per page, and the listing would need one per
+    # row. The Site is loaded because a social_links section may be INHERITING its profiles, and those links
+    # are rendered and clicked like any other -- resolving only the page document would leave them out.
+    # Best-effort throughout: numbers are decoration on a page, never the reason a tenant cannot open it.
+    try:
+        if os.environ.get("PAGE_VIEWS_TABLE"):
+            site = None
+            if os.environ.get("SITES_TABLE"):
+                site = find_site_for_page(
+                    sites_repo or sites_repository(mode=resolve_stripe_mode(event, {})), tenant_id, page_id)
+            totals = (views_repo or page_views_repository()).link_totals_for_page(page_id)
+            page = {**page, "link_clicks": clicks_by_url(page, totals, (site or {}).get("organization"))}
+    except Exception as exc:  # noqa: BLE001
+        print(f"link clicks unavailable for {page_id}: {type(exc).__name__}: {exc}")
     return json_response({"page": page})
 
 

@@ -49,6 +49,38 @@ class PageViewRepository:
         return totals
 
 
+    def link_totals_for_page(self, page_id: str) -> dict[str, int]:
+        """Clicks per link id for one page, in a single query -- every link shares the page's partition.
+
+        Returns {} on any failure rather than raising: a page's numbers are worth less than the page, and a
+        listing must not lose its rows because one counter partition is unreadable.
+        """
+        from boto3.dynamodb.conditions import Key
+
+        from stripe_link.domain.page_views import link_counter_partition
+
+        try:
+            response = self.table.query(
+                KeyConditionExpression=Key("PK").eq(link_counter_partition(page_id)))
+        except Exception:  # noqa: BLE001
+            return {}
+        totals: dict[str, int] = {}
+        for item in response.get("Items") or []:
+            link = str(item.get("SK") or "").split("#", 1)[-1]
+            if link:
+                totals[link] = int(item.get("clicks") or 0)
+        return totals
+
+    def increment_link_total(self, key: dict[str, str], now: int) -> None:
+        """Atomic ADD, for the same reason increment_total is one."""
+        self.table.update_item(
+            Key=key,
+            UpdateExpression="ADD #clicks :one SET last_click_at = :now",
+            ExpressionAttributeNames={"#clicks": "clicks"},
+            ExpressionAttributeValues={":one": 1, ":now": now},
+        )
+
+
 def page_views_repository(table: Any | None = None) -> PageViewRepository:
     if table is not None:
         return PageViewRepository(table)

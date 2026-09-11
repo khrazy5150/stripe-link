@@ -13,6 +13,7 @@ from stripe_link.domain.business_types import BUSINESS_TYPES, resolve_entity_typ
 from stripe_link.domain.composition import compose_page, element_channel
 from stripe_link.domain.connect_sync import site_seo_enabled
 from stripe_link.domain.documents import PRODUCT_CONDITIONS
+from stripe_link.domain.page_views import link_id as link_click_id
 from stripe_link.domain.social_links import display_entries as display_social_entries
 from stripe_link.domain.social_links import section_link_entries as social_section_entries
 from stripe_link.domain.social_links import linkable_on_platform_host
@@ -1941,6 +1942,7 @@ def _render_page_body(
         *render_bnpl_messaging_scripts(),
         render_price_description_toggle_script(page),
         render_view_beacon(page, kind, api_base_url),
+        render_link_click_beacon(page, kind, api_base_url),
         "</body>",
         "</html>",
     ] if part != "")
@@ -5301,7 +5303,8 @@ def render_link_cards(section: dict[str, Any]) -> str:
         if on_custom_domain or linkable_on_platform_host(url):
             cards.append(
                 f'      <a class="sl-catalog-card sl-link-card" href="{escape(url)}" '
-                f'rel="nofollow ugc noopener" target="_blank">\n{inner}\n      </a>')
+                f'rel="nofollow ugc noopener" target="_blank" data-sl-link="{link_click_id(url)}">'
+                f'\n{inner}\n      </a>')
         else:
             cards.append(f'      <div class="sl-catalog-card sl-link-card">\n{inner}\n      </div>')
     if not cards:
@@ -5345,7 +5348,7 @@ def _social_link_item(url: Any, *, linkable: bool = True) -> str:
                 f' aria-label="{escape(label)}">{inner}</span></li>')
     title_attr = f' aria-label="{escape(label)}" title="{escape(label)}"' if glyph else ""
     return (f'<li><a class="{kind}" href="{href}" rel="nofollow ugc noopener" target="_blank"'
-            f'{title_attr}>{inner}</a></li>')
+            f'{title_attr} data-sl-link="{link_click_id(url)}">{inner}</a></li>')
 
 
 def render_social_links(section: dict[str, Any]) -> str:
@@ -5981,6 +5984,49 @@ def render_view_beacon(page: dict[str, Any], kind: str, api_base_url: str | None
         f"        var u = {json.dumps(base)} + '/t/view?p=' + encodeURIComponent({json.dumps(page_id)}) + (v ? '&v=' + encodeURIComponent(v) : '');\n"
         "        if (navigator.sendBeacon) { navigator.sendBeacon(u); }\n"
         "        else { var i = new Image(); i.src = u; }\n"
+        "      } catch (e) {}\n"
+        "    })();\n"
+        "  </script>"
+    )
+
+
+def render_link_click_beacon(page: dict[str, Any], kind: str, api_base_url: str | None) -> str:
+    """Count clicks on the page's outbound links. Published artifact only, exactly as the view beacon is.
+
+    ONE delegated listener rather than a handler per link: a hub can carry thirty destinations, and the
+    element that renders them does not know it is being measured. It also keeps working for links added by
+    a later element without anything being wired up again.
+
+    `pointerdown`, not `click`. A tap that opens a new tab often unloads or backgrounds the page before a
+    click handler's beacon is flushed, so counting on click under-reports on exactly the platform this page
+    exists for. sendBeacon is specified to survive unload; the earlier event is belt and braces.
+
+    A missed click is the acceptable failure here, and the honest cost of not being a redirector: a
+    `/go/{page}/{link}` hop would count perfectly and turn the shared platform host into an open redirect,
+    which is the abuse surface plans/SOCIAL_MEDIA_PAGES.md §7 exists to prevent.
+    """
+    if kind != "published":
+        return ""
+    page_id = str((page or {}).get("page_id") or "")
+    base = str(api_base_url or "").rstrip("/")
+    if not page_id or not base:
+        return ""
+    return (
+        "  <script>\n"
+        "    (function () {\n"
+        "      try {\n"
+        "        document.addEventListener('pointerdown', function (e) {\n"
+        "          try {\n"
+        "            var a = e.target && e.target.closest ? e.target.closest('[data-sl-link]') : null;\n"
+        "            if (!a) { return; }\n"
+        "            var v = ''; try { v = localStorage.getItem('sl_vid') || ''; } catch (x) { v = ''; }\n"
+        f"            var u = {json.dumps(base)} + '/t/view?p=' + encodeURIComponent({json.dumps(page_id)})\n"
+        "              + '&l=' + encodeURIComponent(a.getAttribute('data-sl-link'))\n"
+        "              + (v ? '&v=' + encodeURIComponent(v) : '');\n"
+        "            if (navigator.sendBeacon) { navigator.sendBeacon(u); }\n"
+        "            else { var i = new Image(); i.src = u; }\n"
+        "          } catch (x) {}\n"
+        "        }, true);\n"
         "      } catch (e) {}\n"
         "    })();\n"
         "  </script>"

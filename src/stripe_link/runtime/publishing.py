@@ -25,6 +25,7 @@ from stripe_link.domain.documents import (
 from stripe_link.runtime.artifacts import artifact_paths, cloudfront_path
 from stripe_link.domain.bnpl import messaging_method_types
 from stripe_link.domain.composition import composition_forbids_indexing, composition_key
+from stripe_link.domain.sites import find_site_for_page  # re-exported: long-standing import site
 from stripe_link.domain.social_links import section_own_links
 from stripe_link.domain.connect_sync import site_domain_verified, site_seo_enabled
 from stripe_link.domain.custom_domains import domain_index_record, platform_domain_index_record
@@ -90,22 +91,6 @@ def page_has_own_social_links(page: dict[str, Any]) -> bool:
         for section in (page.get("sections") or [])
         if isinstance(section, dict) and section.get("type") == "social_links"
     )
-
-
-def find_site_for_page(sites_repository: Any, tenant_id: str, page_id: str) -> dict[str, Any] | None:
-    """Resolve the Site that owns `page_id` (plans/SITE_OBJECT.md §2.2). A page belongs to at most one Site,
-    so the first match is authoritative. Returns None when there's no Site yet (legacy pages) — the renderer
-    then falls back to its interim identity. Never raises: identity resolution must not block a publish."""
-    if sites_repository is None or not tenant_id or not page_id:
-        return None
-    try:
-        for site in sites_repository.list_for_tenant(tenant_id):
-            for entry in (site.get("pages") or {}).values():
-                if isinstance(entry, dict) and entry.get("page_id") == page_id:
-                    return site
-    except Exception:
-        return None
-    return None
 
 
 def site_page_slug(site: dict[str, Any] | None, page_id: str) -> str:

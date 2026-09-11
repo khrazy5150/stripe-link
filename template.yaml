@@ -1520,6 +1520,12 @@ Resources:
             TableName: !Ref OrdersTable
         - DynamoDBReadPolicy:
             TableName: !Ref PageViewsTable
+        # Per-link click counts are resolved to URLs on the single-page read, and a social_links section may
+        # be INHERITING its profiles from the Site -- those links are rendered and clicked like any other, so
+        # without this read they would be counted and then unlabelled. Read-only: the pages API never writes
+        # a Site (attach/detach goes through the Sites API).
+        - DynamoDBReadPolicy:
+            TableName: !Ref SitesTable
       Events:
         PagesList:
           Type: Api

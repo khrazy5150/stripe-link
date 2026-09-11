@@ -1104,6 +1104,12 @@
                           from <strong>{{ builderSiteName || "your Site" }}</strong>, so you enter them once instead
                           of on every page. Change them in <strong>Sites → edit your Site → Business identity</strong>.
                         </p>
+                        <ul v-if="builderSiteProfiles.some((p) => linkClicksFor(p.url) !== null)" class="link-click-list">
+                          <li v-for="p in builderSiteProfiles" :key="p.url">
+                            <span>{{ p.url }}</span>
+                            <strong>{{ linkClicksFor(p.url) ?? 0 }} ↗</strong>
+                          </li>
+                        </ul>
                         <p v-else class="element-empty is-warning">
                           <strong>No links yet, so this section shows nothing.</strong>
                           Add them to your Site's Business identity to reuse them on every page, or list them just
@@ -1118,6 +1124,7 @@
                       <template v-else>
                         <div v-for="(item, i) in element.items" :key="i" class="element-subrow">
                           <input v-model.trim="item.url" type="url" placeholder="https://instagram.com/yourname" autocapitalize="off" spellcheck="false" />
+                          <span v-if="linkClicksFor(item.url) !== null" class="link-click-count" :title="linkClicksFor(item.url) + ' people have tapped this link'">{{ linkClicksFor(item.url) }} ↗</span>
                           <button class="link-danger" type="button" @click="element.items.splice(i, 1)">Remove</button>
                         </div>
                         <button class="secondary-action compact" type="button" @click="element.items.push({ url: '' })">+ Add a link</button>
@@ -1139,6 +1146,7 @@
                       <div v-for="(item, i) in element.items" :key="i" class="element-subrow">
                         <input :value="item.label" type="text" placeholder="Card title — e.g. My Amazon storefront" @input="applyTitleCaseInput((value) => { item.label = value; }, $event)" />
                         <input v-model.trim="item.url" type="url" placeholder="https://…" autocapitalize="off" spellcheck="false" />
+                        <span v-if="linkClicksFor(item.url) !== null" class="link-click-count" :title="linkClicksFor(item.url) + ' people have tapped this card'">{{ linkClicksFor(item.url) }} ↗</span>
                         <textarea v-model.trim="item.description" rows="2" placeholder="One line about it (optional)"></textarea>
                         <div class="selectable-price-image-controls" :class="{ 'has-image-preview': item.image_url }">
                           <div v-if="item.image_url" class="selectable-price-image-preview"><img :src="item.image_url" alt="Card image preview" /></div>
@@ -3429,6 +3437,27 @@ const previewNeedsSite = computed(() =>
   && !siteByPageId.value[builder.page_id]
   && !!builderSiteId.value
   && !builder.elements.some((el) => el.type === "social_links" && (el.items || []).some((i) => (i.url || "").trim())));
+// Per-link clicks for the page in the builder, keyed by URL (plans/SOCIAL_MEDIA_PAGES.md §11). Fetched
+// lazily when a link page is opened rather than attached to the listing: it is one query per page, so the
+// listing would pay for it on every row while only a link hub has anything to show. The server resolves ids
+// to URLs -- the id is a hash we own, and the dashboard should never have to reproduce it to read its own
+// numbers.
+const linkClicks = ref({});
+async function loadLinkClicks(pageId) {
+  linkClicks.value = {};
+  if (!pageId) return;
+  try {
+    const body = await apiRequest(`/pages/${encodeURIComponent(pageId)}`);
+    linkClicks.value = body?.page?.link_clicks || {};
+  } catch (err) {
+    // Numbers are decoration on a builder. Never let them stop a tenant editing the page.
+    linkClicks.value = {};
+  }
+}
+function linkClicksFor(url) {
+  const key = (url || "").trim();
+  return key && Object.prototype.hasOwnProperty.call(linkClicks.value, key) ? linkClicks.value[key] : null;
+}
 const builderSiteName = computed(() =>
   sitesStore.sites.find((s) => s.site_id === builderSiteId.value)?.name || "");
 // Mirrors the renderer's §7 boundary (linkable_on_platform_host): on the tenant's OWN domain any destination
@@ -5726,6 +5755,7 @@ function editPage(page) {
     return;
   }
   populateBuilderFromPage(page);
+  loadLinkClicks(page.page_id);
   builderExistingPageId.value = page.page_id;
   builderOriginalPage.value = { ...page };
   builderOpen.value = true;

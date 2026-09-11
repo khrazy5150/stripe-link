@@ -6965,3 +6965,41 @@ button:disabled {
   color: #ffffff;
   box-shadow: 0 0.2rem 0.6rem rgba(0, 0, 0, 0.18);
 }
+
+/* Per-link click counts in the builder. Deliberately quiet: they are a fact about the link, not a control,
+   and a hub can carry thirty of them. Tabular figures so a column of counts lines up. */
+.link-click-count {
+  align-self: center;
+  font-size: 1.2rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted, #6b7280);
+  white-space: nowrap;
+}
+
+.link-click-list {
+  list-style: none;
+  margin: 0.8rem 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.link-click-list li {
+  display: flex;
+  justify-content: space-between;
+  gap: 1.2rem;
+  font-size: 1.2rem;
+  color: var(--text-muted, #6b7280);
+}
+
+.link-click-list li span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.link-click-list li strong {
+  font-variant-numeric: tabular-nums;
+  color: var(--text, #111827);
+}
