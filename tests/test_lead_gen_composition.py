@@ -250,3 +250,34 @@ class OpenFormIsRetiredTests(unittest.TestCase):
                 if "open_form" in line and not line.lstrip().startswith(("#", "//", "*")):
                     offenders.append(f"{path.name}: {line.strip()[:70]}")
         self.assertEqual(offenders, [], "open_form is retired but still referenced: " + str(offenders))
+
+
+class BuilderRowsMatchThePageTests(unittest.TestCase):
+    """The builder must not offer controls for things the page cannot have.
+
+    Reported 2026-09-10 on a real Social Page: the published page was correct -- brand and footer only --
+    while the BUILDER still showed a countdown timer and an uneditable Brand Label row. A control for a
+    section that cannot appear is worse than no control: it implies the page has a feature it does not.
+    """
+
+    def _builder(self):
+        import pathlib
+        return (pathlib.Path(__file__).resolve().parents[1]
+                / "dashboard" / "src" / "components" / "LandingPages.vue").read_text(encoding="utf-8")
+
+    def test_the_countdown_is_hidden_where_urgency_is_meaningless(self):
+        # A link hub and a redirect have no deadline to count down to. Capture and call pages KEEP it --
+        # "registration closes Friday" is a real lead-magnet device.
+        self.assertIn('!["lead_social", "lead_bridge"].includes(builderOfferType.value)', self._builder())
+
+    def test_the_brand_label_row_can_be_edited(self):
+        # It had a row and no editor, so it was a dead end: visible, named, and impossible to change.
+        builder = self._builder()
+        self.assertIn("brand_label: \"brand_label\",", builder)
+        self.assertIn("builder.brand_label_text", builder)
+
+    def test_the_brand_fallback_is_shown_rather_than_hidden(self):
+        """The brand resolves offer.brand -> business name -> PRODUCT name, which is why a page can end up
+        branded after the thing it sells. Showing that fallback as the placeholder makes it explicable
+        instead of looking like a bug."""
+        self.assertIn("brandLabelFallback", self._builder())

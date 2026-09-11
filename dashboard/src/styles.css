@@ -4113,7 +4113,13 @@ button:disabled {
   object-fit: contain;
 }
 
+/* Fills the media box rather than floating in it, so the derived colour reads as the card's identity at a
+   glance instead of as a letter on a grey field. */
 .selector-card-initial {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
   font-size: 4rem;
   font-weight: 700;
   color: var(--muted);

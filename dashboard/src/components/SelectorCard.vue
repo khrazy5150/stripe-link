@@ -15,12 +15,12 @@
     class="selector-card"
     :class="{ selected, disabled, 'has-overlay': overlay }"
     :disabled="disabled"
-    :title="disabledReason || undefined"
+    :title="disabledReason || title || fallbackTitle"
     @click="$emit('choose')"
   >
     <span class="selector-card-media">
       <img v-if="image" :src="image" :alt="title || 'Item image'" />
-      <span v-else class="selector-card-initial">{{ initial }}</span>
+      <span v-else class="selector-card-initial" :style="initialStyle">{{ initial }}</span>
       <span class="selector-card-check" aria-hidden="true">✓</span>
     </span>
 
@@ -54,4 +54,20 @@ const props = defineProps({
 defineEmits(["choose"]);
 
 const initial = computed(() => (props.title || props.fallbackTitle || "?").trim().charAt(0).toUpperCase());
+
+// An image-less card used to be a grey tile with one letter on it, so a grid of them was unreadable: the
+// tenant had to remember which product started with which letter, and two products sharing an initial were
+// indistinguishable. The colour is DERIVED from the name, so it is stable for a given product across
+// sessions and screens -- recognisable without being meaningful. Hue only; saturation and lightness are
+// fixed so every tile sits at the same weight and none of them shouts.
+const initialStyle = computed(() => {
+  const name = (props.title || props.fallbackTitle || "").trim();
+  if (!name) return {};
+  let hash = 0;
+  for (let i = 0; i < name.length; i += 1) hash = (hash * 31 + name.charCodeAt(i)) % 360;
+  return {
+    background: `hsl(${hash} 62% 88%)`,
+    color: `hsl(${hash} 55% 32%)`,
+  };
+});
 </script>

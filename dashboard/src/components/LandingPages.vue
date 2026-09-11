@@ -570,6 +570,18 @@
                 </label>
                 <small class="field-note">Applies to the brand dot wherever it appears — on the hero chip, or above the hero when the overlay is off.</small>
             </template>
+            <template v-else-if="sectionEditor.row.editor === 'brand_label'">
+                <label class="offer-field">
+                  <span>Brand name</span>
+                  <input v-model.trim="builder.brand_label_text" type="text" :placeholder="brandLabelFallback" />
+                  <small class="field-note">
+                    Leave blank to use your business name. Without one it falls back to the product's name,
+                    which is why a page can end up branded after the thing it sells — set a business name in
+                    Profile → Business, or override it here for this page.
+                  </small>
+                </label>
+            </template>
+
             <template v-else-if="sectionEditor.row.editor === 'trust_badges'">
                 <div class="builder-repeat-list">
                   <div v-for="(badge, index) in builder.trust_badges.badges" :key="`badge-${index}`" class="builder-repeat-row builder-trust-badge-row">
@@ -2475,6 +2487,9 @@ const isListicleOffer = computed(() => deriveOfferType(builderOffer.value) === "
 // The page's avatar is an OVERRIDE. Empty means "use the store avatar", resolved at render -- so the
 // builder must show the store's image as the effective preview without COPYING it onto the page, which
 // would freeze this page at whatever the avatar was the day it was built.
+// What the brand label would say if the tenant typed nothing -- shown as the placeholder so the fallback
+// is visible rather than mysterious.
+const brandLabelFallback = computed(() => offerBrandDefault(builderOffer.value) || "Your business name");
 const storeAvatarUrl = computed(() => profileStore.storeAvatarUrl || "");
 const effectiveAvatarUrl = computed(() => builder.avatar_url || storeAvatarUrl.value);
 const avatarIsFromProfile = computed(() => !builder.avatar_url && Boolean(storeAvatarUrl.value));
@@ -3051,6 +3066,7 @@ function defaultBuilderForm() {
     brand_overlay: false,
     brand_position: "top-right",
     brand_dot_pulse: false,
+    brand_label_text: "",
     // Advanced Color Settings (plans/ADVANCED_COLOR_SETTINGS.md): per-token overrides on top of the preset
     // (compact map, keyed by theme token -> hex). Empty = pure preset. Persisted as page.theme.tokens.
     advanced_appearance: false,
@@ -3875,6 +3891,7 @@ function populateBuilderFromPage(page) {
     brand_overlay: Boolean(heroMedia.brand_overlay),
     brand_position: heroMedia.brand_position || "top-right",
     brand_dot_pulse: Boolean(heroMedia.brand_dot_pulse),
+    brand_label_text: (sections.find((section) => section.type === "brand_label") || {}).label || "",
     cta_label: cta.label || (offerIntentLabel(offer) === "Lead generation" ? "Continue" : "Buy Now"),
     elements: elementsFromPage(sections),
     google_tag_id: page.analytics?.google_tag_id || "",
@@ -4147,7 +4164,7 @@ function builderSectionCandidates(intent) {
       marquee: Boolean(builder.countdown.marquee),
     });
   }
-  const brandText = formatHeadline(offerBrandDefault(builderOffer.value));
+  const brandText = formatHeadline(builder.brand_label_text || offerBrandDefault(builderOffer.value));
   // The brand overlay (on the hero) replaces the separate above-hero brand label so the brand shows once.
   if (sectionVisible("brand_label") && !builder.brand_overlay) {
     sections.push({
@@ -4800,6 +4817,7 @@ const HERO_FAMILY = ["hero_media", "hero", "headline", "subheadline"];
 
 // section type -> which editor block renders inside the row. Absent = a name-only row (no editor).
 const SECTION_EDITORS = {
+  brand_label: "brand_label",
   countdown_timer: "countdown",
   hero_media: "hero",
   trust_badges: "trust_badges",
@@ -4874,7 +4892,10 @@ const ALWAYS_PRESENT_SECTIONS = [
   { type: "trust_badges", available: () => sectionVisible("trust_badges") },
   // The countdown is NOT a governed section: its availability is builder.countdown.enabled, which is set
   // inside its own editor. So its row is always present — otherwise the feature can never be turned on.
-  { type: "countdown_timer", available: () => true },
+  // Except where urgency is meaningless: a link hub and a redirect have no deadline to count down to, and
+  // offering the control implies they do. Capture and call pages KEEP it — "registration closes Friday" is
+  // a real and common lead-magnet device.
+  { type: "countdown_timer", available: () => !["lead_social", "lead_bridge"].includes(builderOfferType.value) },
 ];
 
 // An element row is one of the tenant-added cards, which already have their own editors.
