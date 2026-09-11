@@ -490,8 +490,12 @@
               :badge-class="productIntentFor(product)"
               :selected="draftSelectedProductIds.has(productId(product))"
               :disabled="isIncompatibleDraftProduct(product)"
+              :icon-color-key="productId(product)"
               @choose="toggleDraftProduct(productId(product))"
             >
+              <template v-if="leadActionIcon(product.lead_capture?.action)" #icon>
+                <component :is="leadActionIcon(product.lead_capture.action)" />
+              </template>
               <strong>{{ priceText(product) }}</strong>
             </SelectorCard>
           </div>
@@ -555,6 +559,7 @@
 <script setup>
 import { computed, onMounted, reactive, ref, watch } from "vue";
 import SelectorCard from "./SelectorCard.vue";
+import { leadActionIcon } from "../utils/leadActionIcon";
 import { apiRequest, getStripeMode, getTenantId, toAssetCdnUrl } from "../api/client";
 import { formatCouponDiscount, useCouponsStore } from "../stores/coupons";
 import { defaultProductPrice, formatMoney, useProductsStore } from "../stores/products";

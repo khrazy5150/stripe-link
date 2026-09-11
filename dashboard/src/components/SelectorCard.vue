@@ -20,7 +20,11 @@
   >
     <span class="selector-card-media">
       <img v-if="image" :src="image" :alt="title || 'Item image'" />
-      <span v-else class="selector-card-initial" :style="initialStyle">{{ initial }}</span>
+      <!-- No image: the same id-tinted placeholder ListCard uses, holding whatever glyph the owner
+           supplies (a lead-action icon on the Products list, and now here). Falls back to the initial. -->
+      <span v-else class="selector-card-initial" :style="idColorStyle(iconColorKey || title)">
+        <slot name="icon">{{ initial }}</slot>
+      </span>
       <span class="selector-card-check" aria-hidden="true">✓</span>
     </span>
 
@@ -36,6 +40,7 @@
 
 <script setup>
 import { computed } from "vue";
+import { idColorStyle } from "../utils/iconColor";
 
 const props = defineProps({
   image: { type: String, default: "" },
@@ -49,25 +54,12 @@ const props = defineProps({
   // `overlay` lays the title over the image instead of beneath it — for grids where the picture is the
   // point and the name is the disambiguator (two pages can promote the same product and look identical).
   overlay: { type: Boolean, default: false },
+  // Hashed to the placeholder tint, exactly as ListCard does it -- so one product is the same colour in
+  // the catalogue list and in the offer selector.
+  iconColorKey: { type: String, default: "" },
 });
 
 defineEmits(["choose"]);
 
 const initial = computed(() => (props.title || props.fallbackTitle || "?").trim().charAt(0).toUpperCase());
-
-// An image-less card used to be a grey tile with one letter on it, so a grid of them was unreadable: the
-// tenant had to remember which product started with which letter, and two products sharing an initial were
-// indistinguishable. The colour is DERIVED from the name, so it is stable for a given product across
-// sessions and screens -- recognisable without being meaningful. Hue only; saturation and lightness are
-// fixed so every tile sits at the same weight and none of them shouts.
-const initialStyle = computed(() => {
-  const name = (props.title || props.fallbackTitle || "").trim();
-  if (!name) return {};
-  let hash = 0;
-  for (let i = 0; i < name.length; i += 1) hash = (hash * 31 + name.charCodeAt(i)) % 360;
-  return {
-    background: `hsl(${hash} 62% 88%)`,
-    color: `hsl(${hash} 55% 32%)`,
-  };
-});
 </script>
