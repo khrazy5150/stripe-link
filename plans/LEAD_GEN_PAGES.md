@@ -239,6 +239,34 @@ two sections' controls, so the copy half and the carousel/avatar/brand half are 
 6. **Product-creation wizard** — §10. LAST, deliberately: it makes creating these pleasant, and everything
    above makes them CORRECT.
 
+## 9a. VERIFIED end-to-end 2026-09-11, and what it exposed
+
+Walked the chain against the real dev documents rather than the plan. The page composes, renders and tracks
+correctly **once attached to a Site**: `lead_social`, sections `brand_label` / `social_links` / `legal_footer`,
+both profile glyphs with click ids, no CTA, no price selector. So it works.
+
+Two things it exposed, both from the transactional spine this composition is supposed to have left behind:
+
+**1. Every lead-gen product is given a $0 price, and that price is synced to Stripe.** `validate_product_document`
+requires a non-empty `default_price_id`; `validate_offer_document` requires each item to name a price; and
+`resolve_offer` raises `PricingError` without one. So the dashboard fabricates a $0 price to get past all
+three. `product_sync.py` checks neither `canonical` nor `product_intent`, so all three lead-gen products in dev
+have a real `stripe_product_id` and a $0 Price in the tenant's Stripe account.
+
+This is the "$0 phantom product living in the tenant's catalogue forever" that `SOCIAL_MEDIA_PAGES.md` §5
+explicitly rejected — shipped anyway, by the back door, and one step worse because it reaches Stripe. It is
+§10's real prerequisite: the wizard cannot "skip the transactional fields entirely" while three validators and
+the renderer demand a price. Fixing it means making price optional when `product_intent == "lead_gen"` in all
+four places, and skipping the Stripe sync for a non-canonical product.
+
+**2. The brand label was frozen at creation. FIXED 2026-09-11.** The wizard's draft hardcoded
+`label: formatHeadline("Junior Bay")` — the PLATFORM's name, written into the tenant's document as though they
+had typed it. A stored label beats every fallback, so a real link hub rendered headed "Junior Bay" and stayed
+that way through attaching a Site and both of this week's fixes to the render-time chain. Now only what the
+tenant types is stored, and the fallback resolves Site name → page SEO title → page name. The Site sits above
+the page name deliberately: a brand label names the business, not the document, and "My Links Landing Page" is
+a filename shown to a visitor.
+
 ## 10. Product creation becomes a wizard (author's design)
 
 Ask commercial intent FIRST: *"Choose whether this product collects payment or captures lead information.

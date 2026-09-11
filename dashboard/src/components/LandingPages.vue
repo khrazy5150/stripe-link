@@ -4310,6 +4310,8 @@ function builderSectionCandidates(intent) {
       marquee: Boolean(builder.countdown.marquee),
     });
   }
+  // What the hero chip shows. It resolves a default for DISPLAY, which is right for a chip that must never be
+  // blank -- but only the tenant's own text is persisted as the brand label below.
   const brandText = formatHeadline(builder.brand_label_text || offerBrandDefault(builderOffer.value));
   // The brand overlay (on the hero) replaces the separate above-hero brand label so the brand shows once.
   if (sectionVisible("brand_label") && !builder.brand_overlay) {
@@ -4317,7 +4319,10 @@ function builderSectionCandidates(intent) {
       id: "brand",
       type: "brand_label",
       enabled: true,
-      label: brandText,
+      // ONLY what the tenant typed. Storing the resolved default would freeze today's answer into the
+      // document: rename the business, attach a Site, fill in the Business Profile -- the page would go on
+      // showing whatever was true the moment it was first saved, and nothing would explain why.
+      label: formatHeadline(builder.brand_label_text || "") || undefined,
       // Written from the SAME builder field as the hero chip's, so the two cannot disagree within a save.
       brand_dot_pulse: builder.brand_dot_pulse ? true : undefined,
     });
@@ -4542,9 +4547,12 @@ function pageSections(intent, offer, leadAction) {
   const sections = [
     {
       id: "brand",
+      // No label. The draft used to bake in formatHeadline("Junior Bay") -- the PLATFORM's name, written into
+      // the tenant's page as though they had typed it, where it then outlived every later fix because a
+      // stored label beats any fallback. Seen live on a link hub headed "Junior Bay" instead of the creator's
+      // name. Absent means "derive at render", which is the same by-reference rule the page avatar follows.
       type: "brand_label",
       enabled: true,
-      label: formatHeadline("Junior Bay"),
     },
     {
       id: "hero",

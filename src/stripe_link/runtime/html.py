@@ -2316,7 +2316,15 @@ H1_SECTION_TYPES = frozenset({"hero", "headline", "brand_hero"})
 def render_brand_label(section: dict[str, Any], page: dict[str, Any]) -> str:
     if section.get("enabled") is False:
         return ""
-    label = render_headline_markup(section.get("label") or (page.get("seo") or {}).get("title") or page.get("name") or "")
+    # The tenant's own words first, then the Site's business identity, and only then the page's own name.
+    # The Site sits ABOVE the page name because a brand label names the business, not the document -- a link
+    # hub falling back to "My Links Landing Page" is showing a filename to a visitor. Resolved here rather
+    # than stored, so renaming the business or attaching a Site updates every page that never overrode it.
+    label = render_headline_markup(
+        section.get("label")
+        or str(_RENDER_ORG.get("name") or "").strip()
+        or (page.get("seo") or {}).get("title")
+        or page.get("name") or "")
     # heading_role: none in the element catalog — a brand label is not a heading (matches the preview's span)
     # WHEN there is a hero to be one. On a composition with no hero (link-in-bio) it becomes the page's H1
     # rather than leaving the page without one; render_page decides, so the two can never both claim it.

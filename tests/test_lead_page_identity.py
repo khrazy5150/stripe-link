@@ -188,3 +188,50 @@ class UnattachedPublishTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class BrandLabelResolutionTests(unittest.TestCase):
+    """The brand label is DERIVED, not frozen.
+
+    Found 2026-09-11 by rendering a real sandbox page: a link hub headed "Junior Bay". The wizard's draft
+    hardcoded `label: formatHeadline("Junior Bay")` -- the PLATFORM's name, written into the tenant's document
+    as though they had typed it. A stored label beats every fallback, so it outlived attaching a Site, filling
+    in the Business Profile, and both of this week's fixes to the render-time chain.
+
+    Same by-reference rule the page avatar already follows: store the override, resolve the default.
+    """
+
+    PAGE = {"page_id": "p1", "name": "My Links Landing Page", "seo": {}}
+
+    def tearDown(self):
+        html_module._RENDER_ORG.clear()
+        html_module._RENDER_STATE.pop("brand_label_is_h1", None)
+
+    def _render(self, section, org=None):
+        html_module._RENDER_ORG.clear()
+        html_module._RENDER_ORG.update(org or {})
+        return html_module.render_brand_label({"id": "b1", **section}, self.PAGE)
+
+    def test_the_tenants_own_words_always_win(self):
+        self.assertIn("Poliaxis", self._render({"label": "Poliaxis"}, {"name": "Other Co"}))
+
+    def test_it_falls_back_to_the_site_not_the_page_name(self):
+        # A brand label names the BUSINESS, not the document. Falling through to the page name showed a
+        # visitor a filename -- "My Links Landing Page" -- on the one page type where the heading is the
+        # creator's identity.
+        markup = self._render({}, {"name": "Poliaxis Nutrition"})
+        self.assertIn("Poliaxis Nutrition", markup)
+        self.assertNotIn("Landing Page", markup)
+
+    def test_the_page_name_is_still_the_last_resort(self):
+        self.assertIn("My Links Landing Page", self._render({}))
+
+    def test_the_wizard_no_longer_bakes_the_platform_name_in(self):
+        self.assertNotIn('label: formatHeadline("Junior Bay")', BUILDER)
+
+    def test_only_typed_text_is_persisted(self):
+        # Storing the RESOLVED default would freeze today's answer into the document: rename the business or
+        # attach a Site and the page would go on showing whatever was true when it was first saved.
+        block = BUILDER.split('type: "brand_label",\n      enabled: true,\n      // ONLY what the tenant typed', 1)
+        self.assertEqual(len(block), 2, "the brand_label push no longer writes a resolved default")
+        self.assertIn('label: formatHeadline(builder.brand_label_text || "") || undefined,', BUILDER)
