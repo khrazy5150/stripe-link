@@ -158,7 +158,7 @@ def handler(event, context, repository=None, registry=None, tenant_repo=None):
     if method == "POST" and site_id and resource.endswith("/pages"):
         return attach_page(event, repository, site_id, mode=mode)
     if method == "DELETE" and site_id and resource.endswith("/pages"):
-        return detach_page(event, repository, site_id)
+        return detach_page(event, repository, site_id, mode=mode)
     if site_id and resource.endswith(("/domain", "/domain/check")):
         # Custom-domain serving is handled by the single production edge Worker, so the flow is live-only.
         # A test/dev Site can't serve a real domain — refuse rather than let a tenant reach a dead end.
@@ -269,7 +269,7 @@ def set_homepage(event, repository, site_id):
     return error or json_response({"site": saved})
 
 
-def attach_page(event, repository, site_id, mode="test"):
+def attach_page(event, repository, site_id, mode="test", pages_repo=None):
     """Attach a page to the Site at a chosen slug with a page_type (+ optional category for a category page).
     The generalized route-map primitive (plans/SITE_OBJECT.md §2.5b Slice 2); the storefront/category builder
     uses it, and it seeds the full route-map editor later."""
@@ -304,6 +304,9 @@ def attach_page(event, repository, site_id, mode="test"):
     _record_offer_link_on_attach(pages, page_id, tenant_id, mode=mode)
     site["pages"] = pages
     saved, error = _save_site_pages(repository, site)
+    if error is None:
+        # The page now HAS an identity; its artifact was rendered without one. See _republish_page.
+        _republish_page(tenant_id, page_id, pages_repo, mode=mode)
     return error or json_response({"site": saved})
 
 
@@ -326,7 +329,7 @@ def _record_offer_link_on_attach(pages: dict, page_id: str, tenant_id: str, mode
             entry["offer_id"] = offer_id
 
 
-def detach_page(event, repository, site_id):
+def detach_page(event, repository, site_id, mode="test", pages_repo=None):
     """Remove a page from the Site's route map, freeing it to be attached to another Site (a page belongs to
     at most one Site — plans/SITE_OBJECT.md §2.5b). `page_id` comes from the query string. Idempotent: a page
     not on this Site is a no-op success."""
@@ -343,6 +346,9 @@ def detach_page(event, repository, site_id):
              if not (isinstance(entry, dict) and entry.get("page_id") == page_id)}
     site["pages"] = pages
     saved, error = _save_site_pages(repository, site)
+    if error is None:
+        # The mirror of attach: the page must stop claiming an identity it no longer has.
+        _republish_page(tenant_id, page_id, pages_repo, mode=mode)
     return error or json_response({"site": saved})
 
 
@@ -833,6 +839,29 @@ def connect_domain(event, repository, site_id):
     )
 
 
+def _republish_page(tenant_id, page_id, pages_repo=None, mode="test", now=None):
+    """Re-render ONE page by re-putting its document, which fires the publish stream.
+
+    Attaching a page to a Site writes the SITE, never the page -- so the Pages stream does not fire and the
+    artifact keeps whatever identity it was published with. For most page types that is a degraded page (no
+    store name, no Organization graph). For a link-in-bio page it is an EMPTY page: `social_links` renders the
+    Site's profiles, so an artifact published seconds before the attach has no links on it, and nothing ever
+    re-renders it. Measured on a real page 2026-09-11 -- artifact at 21:12:50, attach at 21:13:14.
+
+    Detach is the mirror: the page must stop claiming an identity it no longer has.
+
+    Best-effort, like every other re-publish here: attaching must not fail because a re-render did not happen.
+    """
+    try:
+        pages_repo = pages_repo or pages_repository(mode=mode)
+        page = pages_repo.get(tenant_id, page_id)
+        if page:
+            page["updated_at"] = int(now if now is not None else time.time())
+            pages_repo.put(page)  # a MODIFY fires page_publish, which re-runs publish_page_document
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def _republish_site_pages(tenant_id, site, pages_repo=None, mode="test"):
     """Re-publish every page attached to the Site by re-putting its page doc, firing the publish stream. Called
     when a custom domain FIRST verifies: the reserved /sale //flash-sale + post-purchase funnel slugs, and each
@@ -848,10 +877,7 @@ def _republish_site_pages(tenant_id, site, pages_repo=None, mode="test"):
             if not page_id or page_id in seen:
                 continue
             seen.add(page_id)
-            page = pages_repo.get(tenant_id, page_id)
-            if page:
-                page["updated_at"] = now
-                pages_repo.put(page)  # a MODIFY fires page_publish, which re-runs publish_page_document
+            _republish_page(tenant_id, page_id, pages_repo, mode=mode, now=now)
     except Exception:  # noqa: BLE001 - re-publish is a best-effort side effect of verification
         pass
 

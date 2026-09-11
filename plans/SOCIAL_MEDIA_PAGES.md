@@ -505,6 +505,13 @@ of its own — sold-through products do, "here is my TikTok" does not.
      destination becomes an inert tile on platform infrastructure and a real anchor on the tenant's own
      domain. Both the renderer and any future gate read ONE policy (`linkable_on_platform_host` in
      `domain/social_links.py`), so the trust rule keeps the single home §8a asked for.
+   - **SHIPPED 2026-09-11: ATTACHING or detaching a page now re-publishes it.** The third instance of this
+     same hole, and the one that made link hubs look broken. Attaching writes the SITE, never the page, and the
+     publish stream watches the PAGES table -- so the artifact keeps whatever identity it was rendered with and
+     nothing ever re-renders it. Measured on a real page: artifact at 21:12:50, attach at 21:13:14. On a
+     checkout page that is a degraded artifact (no store name, no Organization graph); on a link-in-bio page it
+     is an EMPTY one, because `social_links` renders the Site's profiles and there were none at render time.
+     The page stayed empty until the tenant happened to re-save, which is what made it look intermittent.
    - **SHIPPED: disconnecting a domain now re-publishes the Site's pages.** This was the actual hole, and it
      was stale state rather than a bad rule. `on_custom_domain` is baked into each artifact at publish time,
      so a page published while the domain was live kept CLICKABLE arbitrary links, and that artifact went on
