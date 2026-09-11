@@ -351,6 +351,9 @@ of its own — sold-through products do, "here is my TikTok" does not.
    single primary CTA" — today it always returns something, derived from
    `landingProducts[0]`.
 4. **Vanity URL — DECIDED 2026-08-30: `jbay.page`, path-on-apex (`jbay.page/username`).**
+   **Its admission ticket is `plans/CREATOR_LINK_POLICY.md` (2026-09-11)**: these pages carry no payment, so
+   the outbound link is the only lever an abuser has on the shared apex, which makes the allowlist, the adult
+   warning and the takedown path the things that keep the domain alive. Launch after those, not before.
 
    **The top constraint is surviving Instagram/TikTok link filtering.** A link-in-bio domain
    that cannot be pasted into a bio is not a product. This outranks price, length and

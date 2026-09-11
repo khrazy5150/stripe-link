@@ -756,7 +756,8 @@ republish-on-domain-disconnect (P3), and derived page conversions/revenue plus t
 - **`PLATFORM_LINKABLE_HOSTS` is still just the 16 identity hosts**, so Amazon, Etsy, Substack and Patreon
   render as inert tiles on a free `*.jbay.uk` address. This is the gap between "built" and "usable" for a
   free-tier creator page, and it needs an abuse story rather than a longer list — see §7 on why the reason
-  is the URL bar and not SEO.
+  is the URL bar and not SEO. **The abuse story is now written: `plans/CREATOR_LINK_POLICY.md` (2026-09-11)**
+  — creator-shaped allowlist, host-derived adult warning, reporting/takedown, and why it gates `jbay.page`.
 - Per-link click counts: the rail exists (P4) and takes a second event type; not wired.
 
 The original entry follows.
@@ -808,8 +809,10 @@ concentrated there. Two consequences are now REQUIRED, not optional: namespace t
 cart keys by tenant_id (all creator pages share one origin), and reserve a path wordlist before
 the first username is claimed.
 
-Also supersedes: retire `social_redirect`; decide whether `open_form` gets a renderer or is
-removed (see the form-builder plan, to be written).
+~~Also supersedes: retire `social_redirect`~~ — **REVERSED 2026-09-10**, see `SOCIAL_MEDIA_PAGES.md` §10:
+it is unfinished, not redundant, and the whole `lead_social` composition is now built on it. `open_form`
+was REMOVED 2026-09-10 (`LEAD_GEN_PAGES.md` §6). Admission ticket for the domain:
+`plans/CREATOR_LINK_POLICY.md`.
 
 ### ⭐ HIGH — Developer Mode: hide the raw JSON panels (plan: plans/DEVELOPER_MODE.md, 2026-08-30, not built)
 
