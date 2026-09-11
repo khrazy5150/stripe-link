@@ -229,7 +229,18 @@ validator:
 
 Unchanged: the honeypot's silent accept-and-drop, and idempotency.
 
-## 8. Retire `open_form` — and with it, `form_id`
+## 8. Retire `open_form` — and with it, `form_id`  ✅ DONE 2026-09-10
+
+Removed ahead of the rest of this plan, as part of `LEAD_GEN_PAGES.md` §6: it was one of seven lead-capture
+actions being split into four page compositions, and shrinking the surface first was cheaper than splitting
+a dead branch four ways. Verified ZERO products used it in dev or prod, so no migration was needed — the
+"migrate any existing rows" step below turned out to be empty.
+
+Gone from the action enum, the `expected_type` map, the `form_id` validation branch, `Product.schema.json`,
+the Products UI list, and the dashboard store. A test refuses the action and asserts no code still offers it.
+
+When this plan builds a real form, it introduces its own action on its own terms rather than reviving this one.
+
 
 **`form_id` is inert.** `documents.py:626` requires it, `stores/products.js:482` writes it, and NOTHING
 reads it. The product editor currently prompts the tenant to type one, which is why it feels broken.

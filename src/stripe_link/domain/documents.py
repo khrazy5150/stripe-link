@@ -627,7 +627,10 @@ def validate_product_lead_capture(document: dict[str, Any]) -> None:
     action = require_enum(
         lead_capture,
         "action",
-        {"capture_email", "capture_phone", "capture_email_phone", "call_number", "external_url", "open_form", "social_redirect"},
+        # `open_form` was retired 2026-09-10 (plans/LEAD_GEN_PAGES.md §6, plans/FORM_BUILDER.md §8): its
+        # form_id was read by nothing and it fell through to a generic email CTA. Zero products used it in
+        # dev or prod, so it left no data behind.
+        {"capture_email", "capture_phone", "capture_email_phone", "call_number", "external_url", "social_redirect"},
         "Product lead_capture.action",
     )
     require_string(lead_capture, "title", "Product lead_capture.title")
@@ -649,15 +652,11 @@ def validate_product_lead_capture(document: dict[str, Any]) -> None:
     expected_type = {
         "call_number": "phone",
         "external_url": "url",
-        "open_form": "form",
         "social_redirect": "social",
     }[action]
     if target.get("type") != expected_type:
         raise DocumentValidationError(f"Product lead_capture.target.type must be '{expected_type}'.")
-    if action == "open_form":
-        require_string(target, "form_id", "Product lead_capture.target.form_id")
-    else:
-        require_string(target, "value", "Product lead_capture.target.value")
+    require_string(target, "value", "Product lead_capture.target.value")
     if action == "social_redirect":
         require_string(target, "platform", "Product lead_capture.target.platform")
     optional_string(target, "open", "Product lead_capture.target.open")

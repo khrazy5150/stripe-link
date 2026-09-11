@@ -498,8 +498,6 @@ function leadCaptureShape(action = {}) {
     base.target = { type: "phone", value: action.target || "" };
   } else if (base.action === "external_url") {
     base.target = { type: "url", value: action.target || "", open: "new_tab" };
-  } else if (base.action === "open_form") {
-    base.target = { type: "form", form_id: action.target || "" };
   } else if (base.action === "social_redirect") {
     base.target = { type: "social", value: action.target || "", platform: action.platform || "other", open: "new_tab" };
   }

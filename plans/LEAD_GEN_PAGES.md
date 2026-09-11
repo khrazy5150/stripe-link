@@ -117,7 +117,7 @@ Implementation: force `NOINDEX_ROBOTS` in `publishing.py` beside the existing te
 already does exactly this for the same reason ("test data must not reach search"). The offer is in scope
 there.
 
-## 6. `open_form` is REMOVED, not deferred
+## 6. `open_form` is REMOVED, not deferred  ✅ DONE 2026-09-10
 
 Its required `form_id` is read by nothing, it renders a generic email CTA, and it is blocked on a form
 builder that does not exist. **Verified 2026-09-10: ZERO products use it in dev or prod**, so removal costs
@@ -157,7 +157,7 @@ badges and a refund policy reached the observed page. One derivation, used by bo
 ## 9. Order
 
 1. **§7 intent split** — one derivation. Smallest, and it is actively producing wrong pages.
-2. **§6 remove `open_form`** — no migration, shrinks the surface before it is split four ways.
+2. ~~**§6 remove `open_form`**~~ ✅ DONE 2026-09-10 — no migration, as predicted.
 3. **§7 action denormalisation + four compositions** — the substance.
 4. **§5 bridge noindex** — one rule, beside an existing one.
 5. **§8 element changes** — icons, target relaxation, seeding.

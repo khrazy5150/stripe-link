@@ -443,9 +443,9 @@ of its own — sold-through products do, "here is my TikTok" does not.
   renderer of its own. Its unread `platform` field is the tell: something was meant to read it. Complete
   it rather than removing it. (The observation that it currently emits an identical CTA contract to
   `external_url` remains true and is the bug.)
-- **`open_form` is inert.** It falls into the `capture_*` bucket and renders a generic
-  `email` CTA; the `form_id` that validation requires is never read. Either give it a
-  renderer or remove it — see the form-builder discussion (separate plan).
+- ~~**`open_form` is inert.**~~ **REMOVED 2026-09-10** (`LEAD_GEN_PAGES.md` §6, `FORM_BUILDER.md` §8).
+  "Either give it a renderer or remove it" was answered: removed. Its `form_id` was read by nothing, it
+  rendered a generic email CTA, and zero products used it in dev or prod.
 
 ## 11. Also worth building (author asked for additions)
 

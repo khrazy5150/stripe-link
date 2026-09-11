@@ -179,7 +179,6 @@
             "capture_email_phone",
             "call_number",
             "external_url",
-            "open_form",
             "social_redirect"
           ]
         },

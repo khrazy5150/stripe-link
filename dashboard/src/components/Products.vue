@@ -546,7 +546,6 @@ const leadActions = [
   { action: "capture_email_phone", label: "Capture email + phone", description: "Collect both primary contact channels.", tone: "purple" },
   { action: "call_number", label: "Call a number", description: "Prompt the visitor to call directly.", tone: "amber" },
   { action: "external_url", label: "Go to URL", description: "Send the visitor to an external page.", tone: "red" },
-  { action: "open_form", label: "Open a form", description: "Link to a quiz, application, or survey.", tone: "lime" },
   { action: "social_redirect", label: "Social page", description: "Direct the visitor to a social profile.", tone: "pink" },
 ];
 
@@ -631,7 +630,6 @@ const leadTargetLabel = computed(() => leadTargetLabelFor(draftLeadAction.value.
 const leadTargetPlaceholder = computed(() => {
   if (draftLeadAction.value.action === "call_number") return "+12065550100";
   if (draftLeadAction.value.action === "external_url") return "https://example.com";
-  if (draftLeadAction.value.action === "open_form") return "form_...";
   if (draftLeadAction.value.action === "social_redirect") return "https://instagram.com/example";
   return "";
 });
@@ -678,7 +676,6 @@ function leadIcon(action) {
     capture_email_phone: "M7.5 4.5h9v15h-9v-15Zm2.25 3h4.5m-4.5 3h4.5m-4.5 3h2.25",
     call_number: "M7.5 4.5h3l1.5 4-2 1.25a10 10 0 0 0 4.25 4.25l1.25-2 4 1.5v3a2 2 0 0 1-2.25 2c-7-.5-12.25-5.75-12.75-12.75A2 2 0 0 1 7.5 4.5Zm7.5 1.5a4.5 4.5 0 0 1 3 3m-3-5.25A6.75 6.75 0 0 1 20.25 9",
     external_url: "M8.25 8.25h-3v10.5h10.5v-3m-4.5-3 7.5-7.5m0 0h-4.5m4.5 0v4.5",
-    open_form: "M6.75 4.5h6l4.5 4.5v10.5H6.75v-15Zm6 0V9h4.5m-7.5 3h4.5m-4.5 3h4.5",
     social_redirect: "M7.5 12a2.25 2.25 0 1 1-4.5 0 2.25 2.25 0 0 1 4.5 0Zm13.5-5.25a2.25 2.25 0 1 1-4.5 0 2.25 2.25 0 0 1 4.5 0Zm0 10.5a2.25 2.25 0 1 1-4.5 0 2.25 2.25 0 0 1 4.5 0ZM7.1 11l9.3-3.25M7.1 13l9.3 3.25",
   };
   return {
@@ -960,7 +957,6 @@ function applyLeadAction() {
 function leadTargetLabelFor(action) {
   if (action === "call_number") return "Phone number";
   if (action === "external_url") return "Destination URL";
-  if (action === "open_form") return "Form ID";
   if (action === "social_redirect") return "Social profile URL";
   return "";
 }

@@ -1283,7 +1283,7 @@ function primaryCtaContract() {
       }
       return { type: "external", label: lc.title || "Learn More", target };
     }
-    // capture_email / capture_phone / capture_email_phone / open_form -> inline collector (Phase 2)
+    // capture_email / capture_phone / capture_email_phone -> inline collector (Phase 2)
     return { type: "email", label: lc.title || "Get Started" };
   }
   const row = serviceRows.value[0];

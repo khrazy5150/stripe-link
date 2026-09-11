@@ -190,3 +190,51 @@ class SocialPageSkipsTheGoalTests(unittest.TestCase):
         from stripe_link.domain.composition import goal_packs, goal_sections
         self.assertEqual(goal_packs("minimal"), [])
         self.assertEqual(goal_sections("minimal"), set())
+
+
+class OpenFormIsRetiredTests(unittest.TestCase):
+    """`open_form` is gone, not deferred.
+
+    Its required `form_id` was read by nothing and it fell through to a generic email CTA, so it looked
+    like a feature and behaved like a dead branch. It was blocked on a form builder that does not exist,
+    and plans/FORM_BUILDER.md §8 had already concluded it should be retired rather than implemented.
+    Verified before removal: ZERO products used it in dev or prod, so it left no data behind.
+    """
+
+    def test_the_action_is_refused(self):
+        from stripe_link.domain.documents import DocumentValidationError, validate_product_document
+        import json
+        import pathlib
+        fixture = next((pathlib.Path(__file__).resolve().parents[1] / "schemas" / "examples").glob("product-*.json"))
+        product = json.loads(fixture.read_text(encoding="utf-8"))
+        product["product_intent"] = "lead_gen"
+        product["lead_capture"] = {"action": "open_form", "title": "T", "description": "D",
+                                   "target": {"type": "form", "form_id": "form_1"}}
+        with self.assertRaises(DocumentValidationError):
+            validate_product_document(product)
+
+    def test_the_surviving_actions_still_validate(self):
+        from stripe_link.domain.documents import validate_product_document
+        import json
+        import pathlib
+        fixture = next((pathlib.Path(__file__).resolve().parents[1] / "schemas" / "examples").glob("product-*.json"))
+        for action, target in (("call_number", {"type": "phone", "value": "+12065550100"}),
+                               ("external_url", {"type": "url", "value": "https://example.com"}),
+                               ("social_redirect", {"type": "social", "value": "https://instagram.com/x",
+                                                    "platform": "instagram"})):
+            product = json.loads(fixture.read_text(encoding="utf-8"))
+            product["product_intent"] = "lead_gen"
+            product["lead_capture"] = {"action": action, "title": "T", "description": "D", "target": target}
+            validate_product_document(product)   # must not raise
+
+    def test_no_code_still_offers_it(self):
+        import pathlib
+        root = pathlib.Path(__file__).resolve().parents[1]
+        offenders = []
+        for path in list((root / "src").rglob("*.py")) + list((root / "dashboard" / "src").rglob("*.vue")) \
+                + list((root / "dashboard" / "src").rglob("*.js")) + [root / "schemas" / "Product.schema.json"]:
+            text = path.read_text(encoding="utf-8")
+            for line in text.split("\n"):
+                if "open_form" in line and not line.lstrip().startswith(("#", "//", "*")):
+                    offenders.append(f"{path.name}: {line.strip()[:70]}")
+        self.assertEqual(offenders, [], "open_form is retired but still referenced: " + str(offenders))
