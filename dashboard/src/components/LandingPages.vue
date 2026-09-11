@@ -2298,7 +2298,8 @@ const selectedOfferIntent = computed(() => offerIntent(selectedOffer.value));
 // noise). Capture, call and bridge pages keep the step -- "ads vs search vs social" is a real question
 // there, with useful seeds behind it.
 const selectedOfferIsSocialPage = computed(() =>
-  selectedOfferProducts.value.some((product) => product?.lead_capture?.action === "social_redirect"));
+  selectedOffer.value?.lead_capture_action === "social_redirect"
+  || selectedOfferProducts.value.some((product) => product?.lead_capture?.action === "social_redirect"));
 const selectedLeadAction = computed(() => selectedOfferProducts.value.find((product) => product.lead_capture)?.lead_capture || null);
 const builderOffer = computed(() => offers.value.find((offer) => offer.offer_id === builder.offer_id) || null);
 const builderOfferProducts = computed(() => offerProducts(builderOffer.value));
@@ -2437,11 +2438,28 @@ const flashSaleInvalid = computed(() => builder.flash_sale.enabled && !builder.f
 const selectedOfferCta = computed(() => selectedOffer.value?.presentation?.cta || { type: selectedOfferIntent.value === "lead_gen" ? "email" : "buy" });
 // offer_type is being retired (plans/OFFER_MODEL_REDESIGN.md): read it through a derive helper — the stored
 // field wins during migration, else infer from the landing items — so this keeps working once it's dropped.
+// Mirrors LEAD_COMPOSITIONS in domain/composition.py; pinned by tests/test_lead_gen_composition.py.
+const LEAD_COMPOSITIONS = {
+  capture_email: "lead_capture",
+  capture_phone: "lead_capture",
+  capture_email_phone: "lead_capture",
+  call_number: "lead_call",
+  external_url: "lead_bridge",
+  social_redirect: "lead_social",
+};
+
 function deriveOfferType(offer) {
   // Mirrors composition_key() in domain/composition.py. A lead-gen offer gets its OWN composition rather
   // than a checkout page with the price hidden -- and intent is a different question from pricing shape,
   // which is why this sits here and not inside the items/prices derivation below.
-  if (offerIntent(offer) === "lead_gen") return "lead_gen";
+  //
+  // The ACTION picks which of the four: the three capture_* actions share a page (the field differs, the
+  // page does not), while call, bridge and link-in-bio are genuinely different. Falls back to the offer's
+  // primary product when the offer predates the denormalised copy.
+  if (offerIntent(offer) === "lead_gen") {
+    const action = offer?.lead_capture_action || offerProducts(offer)[0]?.lead_capture?.action || "";
+    return LEAD_COMPOSITIONS[action] || "lead_capture";
+  }
   if (offer?.offer_type) return offer.offer_type;
   const items = Array.isArray(offer?.items) ? offer.items : [];
   if (items.length > 1) return "listicle";

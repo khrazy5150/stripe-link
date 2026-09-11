@@ -28,20 +28,28 @@ def _offer(**overrides):
 class SocialMediaCompositionTests(unittest.TestCase):
     def test_the_conversion_spine_is_absent(self):
         for key in ("offer_price_selector", "checkout_cta", "refund_policy", "trust_badges"):
-            self.assertFalse(is_section_visible("social_media", key), key)
+            self.assertFalse(is_section_visible("lead_social", key), key)
 
     def test_identity_and_links_are_present(self):
         # seller_profile / social_links / catalog_grid are UNGOVERNED, so they render whenever the page
         # carries them -- this asserts the composer does not accidentally start gating them.
         for key in ("seller_profile", "social_links", "catalog_grid"):
-            self.assertTrue(is_section_visible("social_media", key), key)
-        for key in ("brand_label", "hero_media", "hero", "legal_footer"):
-            self.assertTrue(is_section_visible("social_media", key), key)
+            self.assertTrue(is_section_visible("lead_social", key), key)
+        for key in ("brand_label", "hero_media", "legal_footer"):
+            self.assertTrue(is_section_visible("lead_social", key), key)
+
+    def test_the_offer_headline_block_is_absent(self):
+        """`hero` renders the OFFER's headline and subheadline. On a link hub the identity header does that
+        job -- brand name, avatar, then the links -- and an offer headline repeated above it is noise. This
+        is also what produced "Capture Email" as both brand and headline on the page reported 2026-09-10."""
+        self.assertFalse(is_section_visible("lead_social", "hero"))
+        # The capture page KEEPS it: a squeeze page is nothing without a promise at the top.
+        self.assertTrue(is_section_visible("lead_capture", "hero"))
 
     def test_the_page_cannot_convert(self):
         # Empty by design: a CTA here would contradict the cardinality guardrail. Every other offer_type
         # offers at least "buy".
-        self.assertEqual(allowed_ctas("social_media"), [])
+        self.assertEqual(allowed_ctas("lead_social"), [])
         self.assertIn("buy", allowed_ctas("single"))
 
     def test_the_existing_offer_types_are_untouched(self):

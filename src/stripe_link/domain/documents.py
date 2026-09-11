@@ -627,10 +627,7 @@ def validate_product_lead_capture(document: dict[str, Any]) -> None:
     action = require_enum(
         lead_capture,
         "action",
-        # `open_form` was retired 2026-09-10 (plans/LEAD_GEN_PAGES.md §6, plans/FORM_BUILDER.md §8): its
-        # form_id was read by nothing and it fell through to a generic email CTA. Zero products used it in
-        # dev or prod, so it left no data behind.
-        {"capture_email", "capture_phone", "capture_email_phone", "call_number", "external_url", "social_redirect"},
+        LEAD_CAPTURE_ACTIONS,
         "Product lead_capture.action",
     )
     require_string(lead_capture, "title", "Product lead_capture.title")
@@ -660,6 +657,15 @@ def validate_product_lead_capture(document: dict[str, Any]) -> None:
     if action == "social_redirect":
         require_string(target, "platform", "Product lead_capture.target.platform")
     optional_string(target, "open", "Product lead_capture.target.open")
+
+
+# `open_form` was retired 2026-09-10 (plans/LEAD_GEN_PAGES.md §6, plans/FORM_BUILDER.md §8): its form_id
+# was read by nothing and it fell through to a generic email CTA. Zero products used it, so it left no data.
+# Shared with the OFFER validator, which carries a denormalised copy of the primary product's action.
+LEAD_CAPTURE_ACTIONS = frozenset({
+    "capture_email", "capture_phone", "capture_email_phone",
+    "call_number", "external_url", "social_redirect",
+})
 
 
 def validate_product_document(document: dict[str, Any]) -> None:
@@ -900,6 +906,10 @@ def validate_offer_document(document: dict[str, Any]) -> None:
     if document.get("status") is not None:
         require_enum(document, "status", {"draft", "active", "archived"}, "Offer status")
     require_enum(document, "product_intent", {"transaction", "lead_gen"}, "Offer product_intent")
+    # Denormalised from the primary product so the composer can tell the four lead shapes apart --
+    # compose_page() gets the offer, never its products (plans/LEAD_GEN_PAGES.md §7).
+    if document.get("lead_capture_action") is not None:
+        require_enum(document, "lead_capture_action", LEAD_CAPTURE_ACTIONS, "Offer lead_capture_action")
     require_enum(document, "stripe_mode", {"test", "live"}, "Offer stripe_mode")
     # offer_type drives landing-page rendering: single/bundle -> pick-one price selector; listicle -> a
     # carousel of the offer's items, each add-to-cart (plans/LISTICLE_AND_CART.md). Optional, default single.

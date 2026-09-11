@@ -195,6 +195,21 @@ def derived_head_sections(offer_type, overrides, goal, present) -> list[dict[str
 AUTHORED_PAGE_TYPES = ("funnel_step", "thank_you")
 
 
+# Which composition each lead-capture action gets. The three capture_* actions share one page -- the FIELD
+# differs, the page does not -- while call, bridge and link-in-bio are genuinely different shapes.
+LEAD_COMPOSITIONS = {
+    "capture_email": "lead_capture",
+    "capture_phone": "lead_capture",
+    "capture_email_phone": "lead_capture",
+    "call_number": "lead_call",
+    "external_url": "lead_bridge",
+    "social_redirect": "lead_social",
+}
+# An offer that says lead_gen without naming an action still must not get a checkout page. The capture
+# shape is the safe default: it is the only one that keeps a form, so nothing the tenant typed is lost.
+DEFAULT_LEAD_COMPOSITION = "lead_capture"
+
+
 def composition_key(offer: dict[str, Any]) -> str:
     """Which composition this offer gets: "lead_gen", else its offer_type.
 
@@ -208,7 +223,8 @@ def composition_key(offer: dict[str, Any]) -> str:
     could never be reached: offer_type is derived, and no offer SHAPE can express "sells nothing".
     """
     if str((offer or {}).get("product_intent") or "") == "lead_gen":
-        return "lead_gen"
+        return LEAD_COMPOSITIONS.get(
+            str((offer or {}).get("lead_capture_action") or ""), DEFAULT_LEAD_COMPOSITION)
     return derived_offer_type(offer or {})
 
 

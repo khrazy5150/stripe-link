@@ -158,7 +158,11 @@ badges and a refund policy reached the observed page. One derivation, used by bo
 
 1. **§7 intent split** — one derivation. Smallest, and it is actively producing wrong pages.
 2. ~~**§6 remove `open_form`**~~ ✅ DONE 2026-09-10 — no migration, as predicted.
-3. **§7 action denormalisation + four compositions** — the substance.
+3. ~~**§7 action denormalisation + four compositions**~~ ✅ DONE 2026-09-10. `lead_capture_action` is
+   denormalised onto the offer beside `product_intent`; `composition_key` maps it to `lead_capture`,
+   `lead_call`, `lead_bridge` or `lead_social`. The unreachable `offer_type: social_media` from the first
+   attempt is deleted. An offer that says lead_gen without naming an action falls back to `lead_capture` --
+   the only shape that keeps a form, so nothing the tenant typed is lost.
 4. **§5 bridge noindex** — one rule, beside an existing one.
 5. **§8 element changes** — icons, target relaxation, seeding.
 6. **Product-creation wizard** — §10. LAST, deliberately: it makes creating these pleasant, and everything

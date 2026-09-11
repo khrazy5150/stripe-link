@@ -1382,6 +1382,12 @@ function buildOfferDocument() {
     name: form.userEditedName ? form.name : "",
     status: "active",
     product_intent: effectiveIntent,
+    // Denormalised onto the offer for the same reason product_intent already is: compose_page() receives
+    // the OFFER and not its products, and publish runs from a stream holding only the page. Without this
+    // the composer cannot tell a link-in-bio page from an email-capture one, and they are different pages.
+    lead_capture_action: effectiveIntent === "lead_gen"
+      ? (landingProducts.value[0]?.lead_capture?.action || undefined)
+      : undefined,
     offer_type: inferOfferType(),
     stripe_mode: getStripeMode(),
     items,

@@ -42,7 +42,7 @@ class SingleDerivationTests(unittest.TestCase):
         # The two that disagreed. If these ever read different things again, a lead-gen page can carry
         # transactional sections while its CTA says otherwise.
         self.assertIn("const builderIntent = computed(() => offerIntent(", BUILDER)
-        self.assertIn("if (offerIntent(offer) === \"lead_gen\") return \"lead_gen\";", BUILDER)
+        self.assertIn('if (offerIntent(offer) === "lead_gen") {', BUILDER)
 
 
 if __name__ == "__main__":

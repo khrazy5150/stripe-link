@@ -666,17 +666,7 @@
         "cart"
       ]
     },
-    "social_media": {
-      "sections": [
-        "brand_label",
-        "hero_media",
-        "hero",
-        "legal_footer"
-      ],
-      "allowed_ctas": [],
-      "_comment": "Link-in-bio: a ZERO-PRIMARY-OFFER page (plans/SOCIAL_MEDIA_PAGES.md \u00a72). The conversion spine is deliberately absent -- no offer_price_selector, no checkout_cta, no refund_policy, because the page has nothing to sell of its own; its cards each link to their own offer. allowed_ctas is empty for the same reason: this page cannot convert."
-    },
-    "lead_gen": {
+    "lead_capture": {
       "sections": [
         "brand_label",
         "hero_media",
@@ -686,10 +676,8 @@
       ],
       "allowed_ctas": [
         "email_capture",
-        "phone_call",
-        "external"
+        "phone_call"
       ],
-      "_comment": "A lead-gen offer is not a checkout page with the price hidden -- it is a different page. Note the purchase spine was never REACHABLE here anyway: validation requires the Offer's own product_intent, forbids `checkout` on a lead-gen offer entirely, forbids discounts, and the builder stamps intent from the selected products -- so transactional and lead-gen products cannot mix in one offer. Listing the sections is therefore about what the page IS, not a guard against bad data: it states the composition positively so the builder's Page Sections panel shows the right recommended set, instead of a price selector that would silently render empty. checkout_cta STAYS -- it is what renders the inline lead-capture form. `buy` is absent from allowed_ctas: this page cannot transact.",
       "excludes": [
         "offer_price_selector",
         "refund_policy",
@@ -699,7 +687,69 @@
         "price_highlight",
         "product_carousel"
       ],
-      "_excludes_comment": "Sections that CANNOT appear on this page, whatever else asks for them. The goal axis is union-only -- it adds and never subtracts -- so the paid_ads pack was unioning trust_badges and refund_policy back onto a lead page that sells nothing. Reported 2026-09-10 on a real capture-email page. This is not a preference a goal or a tenant override should be able to reverse: a refund policy on a page that takes no money is incoherent, not unfashionable."
+      "_comment": "Squeeze page. checkout_cta IS the inline form -- removing it would remove the thing the page exists for. hero_media is optional and doubles as a background image; a capture page works with no image at all. Covers capture_email, capture_phone and capture_email_phone: the field differs, the page does not."
+    },
+    "lead_call": {
+      "sections": [
+        "brand_label",
+        "hero_media",
+        "hero",
+        "checkout_cta",
+        "legal_footer"
+      ],
+      "allowed_ctas": [
+        "phone_call"
+      ],
+      "excludes": [
+        "offer_price_selector",
+        "refund_policy",
+        "trust_badges",
+        "product_details",
+        "related_products",
+        "price_highlight",
+        "product_carousel"
+      ],
+      "_comment": "Click-to-call. The local-business shape: hours, address and NAP ARE the persuasion, so seller_profile (ungoverned, so simply addable) earns its place here more than on any other lead page. A hero is genuinely optional -- a phone number above the fold beats a photograph."
+    },
+    "lead_bridge": {
+      "sections": [
+        "brand_label",
+        "hero",
+        "checkout_cta",
+        "legal_footer"
+      ],
+      "allowed_ctas": [
+        "external"
+      ],
+      "excludes": [
+        "offer_price_selector",
+        "refund_policy",
+        "trust_badges",
+        "product_details",
+        "related_products",
+        "price_highlight",
+        "product_carousel"
+      ],
+      "_comment": "The thinnest page here: one headline, one outbound button. ALWAYS noindex,nofollow -- see plans/LEAD_GEN_PAGES.md \u00a75. No hero_media: a bridge page that loads a hero image is a slower bridge."
+    },
+    "lead_social": {
+      "sections": [
+        "brand_label",
+        "hero_media",
+        "legal_footer"
+      ],
+      "allowed_ctas": [],
+      "excludes": [
+        "offer_price_selector",
+        "refund_policy",
+        "trust_badges",
+        "product_details",
+        "related_products",
+        "price_highlight",
+        "product_carousel",
+        "checkout_cta"
+      ],
+      "_comment": "Link-in-bio. The ONLY lead shape with no checkout_cta: its CARDS are the calls to action, and a stray 'Learn More' button pointing at one profile is the bug this composition exists to fix. No `hero` either -- the identity header (avatar + brand + links) does that job, and an offer headline repeated above a link hub is noise. social_links, link_cards and catalog_grid are ungoverned, so the tenant adds them and they render."
     }
   },
   "_goal_comment": "Second composition axis: the tenant's GOAL / traffic source (plans/LANDING_PAGE_GOAL_COMPOSITION.md). A goal enables capability PACKS on top of the offer_type base \u2014 never a hand-maintained offer_type x goal matrix. Packs are union-only: they add, never remove, so a page with no goal composes exactly as it did before goals existed (no migration). A pack has two halves because the two kinds of section behave differently. `seeds` are content-bearing body elements (faq, testimonials, ...) that render nothing until a tenant fills them in \u2014 the create wizard seeds them as empty scaffolds into builder state and they are tenant-owned from then on, so changing goal never deletes copy. `sections` are governed sections the goal turns on; that suits DERIVED head/sidecar output (structured_data, llms_txt) needing no tenant input, and is empty until those exist (Phase 3) \u2014 the mechanism is here so they slot in without a renderer change. Editing guide: docs/CONFIGURING_GOALS.md. NEVER delete or rename a goal \u2014 pages that stored it would stop validating and could no longer be saved or re-rendered. Retire one with \"deprecated\": true, which hides it from the wizard while existing pages keep validating and composing.",

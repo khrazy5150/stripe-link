@@ -23,7 +23,16 @@ def _offer(**overrides):
 
 class CompositionKeyTests(unittest.TestCase):
     def test_a_lead_gen_offer_gets_its_own_composition(self):
-        self.assertEqual(composition_key(_offer(product_intent="lead_gen")), "lead_gen")
+        # Four shapes now, chosen by the ACTION. An offer that says lead_gen without naming one still must
+        # not get a checkout page, so the capture shape is the safe default -- it is the only one that
+        # keeps a form, so nothing the tenant typed is lost.
+        self.assertEqual(composition_key(_offer(product_intent="lead_gen")), "lead_capture")
+        for action, expected in (("capture_email", "lead_capture"), ("capture_phone", "lead_capture"),
+                                 ("capture_email_phone", "lead_capture"), ("call_number", "lead_call"),
+                                 ("external_url", "lead_bridge"), ("social_redirect", "lead_social")):
+            self.assertEqual(
+                composition_key(_offer(product_intent="lead_gen", lead_capture_action=action)),
+                expected, action)
 
     def test_a_transactional_offer_is_unchanged(self):
         self.assertEqual(composition_key(_offer(product_intent="transaction")), "single")
@@ -34,7 +43,7 @@ class CompositionKeyTests(unittest.TestCase):
         on it for carousel and minicart behaviour. Intent is a different question, so folding them together
         would silently change those four."""
         lead = _offer(product_intent="lead_gen", offer_type="listicle")
-        self.assertEqual(composition_key(lead), "lead_gen")
+        self.assertEqual(composition_key(lead), "lead_capture")
         self.assertEqual(derived_offer_type(lead), "listicle")
 
 
@@ -46,20 +55,20 @@ class LeadGenSectionsTests(unittest.TestCase):
         # POSITIVELY, so the Page Sections panel recommends the right set instead of offering a price
         # selector that would render empty.
         for key in ("offer_price_selector", "refund_policy", "trust_badges"):
-            self.assertFalse(is_section_visible("lead_gen", key), key)
+            self.assertFalse(is_section_visible("lead_capture", key), key)
 
     def test_the_cta_stays_because_it_IS_the_capture_form(self):
         # render_lead_capture_form is reached through checkout_cta; removing it would remove the form.
-        self.assertTrue(is_section_visible("lead_gen", "checkout_cta"))
+        self.assertTrue(is_section_visible("lead_capture", "checkout_cta"))
 
     def test_the_page_cannot_transact(self):
-        self.assertNotIn("buy", allowed_ctas("lead_gen"))
-        self.assertIn("email_capture", allowed_ctas("lead_gen"))
+        self.assertNotIn("buy", allowed_ctas("lead_capture"))
+        self.assertIn("email_capture", allowed_ctas("lead_capture"))
         self.assertIn("buy", allowed_ctas("single"))   # unchanged
 
     def test_identity_and_link_elements_render(self):
         for key in ("social_links", "link_cards", "seller_profile"):
-            self.assertTrue(is_section_visible("lead_gen", key), key)
+            self.assertTrue(is_section_visible("lead_capture", key), key)
 
     def test_end_to_end_a_lead_gen_page_drops_the_price_selector(self):
         page = {"sections": [
@@ -69,7 +78,7 @@ class LeadGenSectionsTests(unittest.TestCase):
             {"type": "link_cards", "id": "lc", "items": []},
             {"type": "checkout_cta", "id": "cta"},
         ]}
-        types = [s["type"] for s in compose_page(_offer(product_intent="lead_gen"), page)]
+        types = [s["type"] for s in compose_page(_offer(product_intent="lead_gen", lead_capture_action="capture_email"), page)]
         self.assertNotIn("offer_price_selector", types)
         self.assertIn("checkout_cta", types)
         self.assertIn("social_links", types)
@@ -85,7 +94,10 @@ class BuilderParityTests(unittest.TestCase):
         # Asks offerIntent(), the ONE derivation -- it used to read offer.product_intent directly, which
         # disagreed with the CTA's derivation whenever the intent came from the product.
         self.assertIn('offerIntent(offer) === "lead_gen"', body)
-        self.assertIn('return "lead_gen"', body)
+        self.assertIn("LEAD_COMPOSITIONS[action]", body)
+        # No longer returns a literal "lead_gen": the ACTION picks one of four shapes, with the capture
+        # page as the fallback so an offer that names no action still never gets a checkout page.
+        self.assertIn('|| "lead_capture"', body)
         # and it must come FIRST -- a stored offer_type must not win over intent.
         self.assertLess(body.index('offerIntent'), body.index('offer?.offer_type'))
 
@@ -126,18 +138,18 @@ class GoalCannotResurrectTransactionalSectionsTests(unittest.TestCase):
 
     def test_the_paid_ads_goal_does_not_put_trust_badges_on_a_lead_page(self):
         for key in ("trust_badges", "refund_policy"):
-            self.assertFalse(is_section_visible("lead_gen", key, {}, "paid_ads"), key)
+            self.assertFalse(is_section_visible("lead_capture", key, {}, "paid_ads"), key)
 
     def test_an_override_cannot_resurrect_them_either(self):
         for key in ("trust_badges", "refund_policy"):
             self.assertFalse(
-                is_section_visible("lead_gen", key, {key: {"enabled": True}}, "paid_ads"), key)
+                is_section_visible("lead_capture", key, {key: {"enabled": True}}, "paid_ads"), key)
 
     def test_the_goal_still_works_for_everything_it_should(self):
         # The exclusion is narrow: a lead page still gets its CTA and hero from the composition, and a
         # goal can still union in anything not excluded.
-        self.assertTrue(is_section_visible("lead_gen", "checkout_cta", {}, "paid_ads"))
-        self.assertTrue(is_section_visible("lead_gen", "hero", {}, "paid_ads"))
+        self.assertTrue(is_section_visible("lead_capture", "checkout_cta", {}, "paid_ads"))
+        self.assertTrue(is_section_visible("lead_capture", "hero", {}, "paid_ads"))
 
     def test_transactional_pages_are_untouched(self):
         # The paid_ads pack must go on doing its job where it makes sense.
