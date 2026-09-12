@@ -439,11 +439,54 @@ def verify_entry(entry: dict, backlink_host: str, now: int, fetcher=fetch_profil
 # problem for OUR domain and every tenant sharing it. On the tenant's own custom domain the reputation at
 # stake is theirs, so any destination is allowed there.
 #
-# Deliberately conservative to start: the same identity hosts, nothing more. A creator page wants Amazon,
-# Etsy, Substack, Patreon and a hundred others, so this list is NOT the long-term answer -- but the safe
-# direction to be wrong in is "too few links work on the free host", not "we shipped an open redirect
-# surface on a shared domain". Widening it is a P3 decision that should come with an abuse story.
-PLATFORM_LINKABLE_HOSTS = SAME_AS_HOSTS
+# WIDENED 2026-09-11 (plans/CREATOR_LINK_POLICY.md §4). It used to be `SAME_AS_HOSTS` -- a list built to
+# answer "which hosts can make a credible IDENTITY claim", which is a different question. That list carries
+# Crunchbase, the Better Business Bureau and Wikidata, and carries no Substack, Patreon, Amazon or Etsy, so a
+# creator on the free host could not link the places creators actually link. One list answering two questions
+# was wrong for both.
+#
+# The abuse story the original note asked for is now written: these pages take no payment at all
+# (`lead_social` has no checkout_cta), so the outbound link is the only lever an abuser has on the shared
+# domain, and THIS LIST is what stands in front of it. Which is why it is curated by hand, every entry looked
+# at by a person, and not an open redirect.
+#
+# Adult platforms are HERE rather than excluded, because a visitor going to one now passes the age gate
+# (§5): we label rather than host, which is a defensible position where a quiet ban decided by omission is
+# not.
+#
+# Deliberately ABSENT, and the judgement worth re-reading before anyone adds them: payment handles
+# (paypal.me, venmo, cash.app). A payment request is the highest-value phishing target there is, and a
+# payment link on a domain shared with every other tenant is the one thing most likely to cost us the domain.
+# They want their own decision, not inclusion by association with "creator stuff".
+CREATOR_LINKABLE_HOSTS = {
+    # Commerce and storefronts
+    "amazon.com": "storefront", "etsy.com": "storefront", "ebay.com": "storefront",
+    "gumroad.com": "storefront", "shopify.com": "storefront", "bigcartel.com": "storefront",
+    "redbubble.com": "storefront", "teespring.com": "storefront", "teepublic.com": "storefront",
+    # Writing and publishing
+    "substack.com": "publishing", "medium.com": "publishing", "beehiiv.com": "publishing",
+    "ghost.io": "publishing", "wordpress.com": "publishing", "notion.so": "publishing",
+    # Memberships and tipping (a subscription page, not a payment handle)
+    "patreon.com": "membership", "ko-fi.com": "membership", "buymeacoffee.com": "membership",
+    # Audio and video
+    "spotify.com": "audio", "music.apple.com": "audio", "soundcloud.com": "audio",
+    "bandcamp.com": "audio", "twitch.tv": "video", "vimeo.com": "video",
+    "podcasts.apple.com": "audio",
+    # Community and messaging
+    "discord.gg": "community", "discord.com": "community", "t.me": "community",
+    "telegram.me": "community", "reddit.com": "community",
+    # Portfolio and professional
+    "behance.net": "portfolio", "dribbble.com": "portfolio", "artstation.com": "portfolio",
+    "calendly.com": "booking", "cal.com": "booking", "eventbrite.com": "events",
+    # Adult platforms -- linkable BECAUSE they are age-gated (§5e), not in spite of it
+    "onlyfans.com": "adult", "fansly.com": "adult",
+    # Recognised elsewhere in this module and wanted on a hub
+    "snapchat.com": "social",
+}
+# Every identity host stays linkable: a host trusted enough to be asserted as who the tenant IS cannot be
+# too dangerous to link to.
+PLATFORM_LINKABLE_HOSTS = frozenset(CREATOR_LINKABLE_HOSTS) | SAME_AS_HOSTS
+PLATFORM_LINKABLE_REVIEWED = "2026-09-11"
 
 
 def linkable_on_platform_host(url: Any) -> bool:

@@ -78,7 +78,7 @@ And separately: **illicit goods sold through Stripe is a different risk with a d
 underwriting, account termination). It threatens the platform account, not the domain. Neither control
 substitutes for the other.
 
-## 4. A creator-shaped allowlist, not the identity one
+## 4. A creator-shaped allowlist, not the identity one  ✅ BUILT 2026-09-11
 
 `PLATFORM_LINKABLE_HOSTS` is literally `SAME_AS_HOSTS` — a list built to answer *"which hosts can make a
 credible identity claim"*. It contains Crunchbase, the Better Business Bureau and Wikidata, and it contains no
@@ -93,6 +93,19 @@ subset. Reusing one list for two questions is how it came to be wrong for both.
 
 Sizing principle: large enough that a normal creator page has no dead tiles, curated enough that every entry
 was looked at by a person. Not an open redirect, not a hundred-host free-for-all.
+
+**Built 2026-09-11: `CREATOR_LINKABLE_HOSTS`, 55 hosts with the identity list as a subset**, each carrying a
+category and the table a `reviewed` date. Commerce, publishing, memberships, audio/video, community, portfolio
+and booking — the places a hub actually points at.
+
+**Adult platforms are ON it**, because a visitor going to one now passes the age gate (§5). That is the whole
+of §5e in practice: we label rather than host, which is a defensible position where a quiet ban decided by
+omission is not.
+
+**Payment handles are deliberately OFF it** — `paypal.me`, `venmo`, `cash.app`. A payment request is the
+highest-value phishing target there is, and one on a domain shared with every other tenant is the single thing
+most likely to cost us the domain. They want their own decision, not inclusion by association with "creator
+stuff". Written down here because the omission otherwise looks like an oversight the next person quietly fixes.
 
 ## 5. The adult-content warning
 

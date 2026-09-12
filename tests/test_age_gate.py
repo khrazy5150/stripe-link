@@ -136,3 +136,58 @@ class InterstitialTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CreatorAllowlistTests(unittest.TestCase):
+    """§4: what may be LINKED from a page on shared platform infrastructure.
+
+    Widened 2026-09-11 from SAME_AS_HOSTS -- a list built to answer "which hosts can make a credible IDENTITY
+    claim", which is a different question. That list carries Crunchbase, the BBB and Wikidata and carries no
+    Substack, Patreon, Amazon or Etsy, so a creator on the free host could not link the places creators link.
+    One list answering two questions was wrong for both.
+    """
+
+    def test_every_identity_host_stays_linkable(self):
+        # A host trusted enough to be asserted as who the tenant IS cannot be too dangerous to link to.
+        from stripe_link.domain.social_links import PLATFORM_LINKABLE_HOSTS
+
+        self.assertTrue(SAME_AS_HOSTS <= PLATFORM_LINKABLE_HOSTS)
+
+    def test_the_places_creators_actually_link_now_work(self):
+        from stripe_link.domain.social_links import linkable_on_platform_host
+
+        for url in ("https://substack.com/@acme", "https://patreon.com/acme", "https://ko-fi.com/acme",
+                    "https://www.amazon.com/shops/acme", "https://etsy.com/shop/acme",
+                    "https://twitch.tv/acme", "https://open.spotify.com/artist/x",
+                    "https://discord.gg/abc", "https://calendly.com/acme"):
+            self.assertTrue(linkable_on_platform_host(url), url)
+
+    def test_adult_platforms_are_linkable_because_they_are_gated(self):
+        # §5e: we label rather than host, which is defensible where a quiet ban decided by omission is not.
+        from stripe_link.domain.social_links import linkable_on_platform_host
+
+        for url in ("https://onlyfans.com/acme", "https://fansly.com/acme"):
+            self.assertTrue(linkable_on_platform_host(url), url)
+            self.assertTrue(is_adult_host(url), url)
+
+    def test_payment_handles_are_deliberately_absent(self):
+        # A payment request is the highest-value phishing target there is, and one on a domain shared with
+        # every other tenant is the single thing most likely to cost us the domain. They want their own
+        # decision, not inclusion by association with "creator stuff".
+        from stripe_link.domain.social_links import linkable_on_platform_host
+
+        for url in ("https://paypal.me/acme", "https://venmo.com/acme", "https://cash.app/$acme"):
+            self.assertFalse(linkable_on_platform_host(url), url)
+
+    def test_an_uncurated_host_is_still_refused(self):
+        # The list is curated by hand, entry by entry. It is not an open redirect.
+        from stripe_link.domain.social_links import linkable_on_platform_host
+
+        self.assertFalse(linkable_on_platform_host("https://shop.example.org/acme"))
+
+    def test_the_list_carries_a_review_date(self):
+        from stripe_link.domain.social_links import CREATOR_LINKABLE_HOSTS, PLATFORM_LINKABLE_REVIEWED
+
+        self.assertRegex(PLATFORM_LINKABLE_REVIEWED, r"^\d{4}-\d{2}-\d{2}$")
+        for host, why in CREATOR_LINKABLE_HOSTS.items():
+            self.assertTrue(why.strip(), host)

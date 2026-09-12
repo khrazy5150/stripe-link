@@ -114,19 +114,21 @@ class RenderTests(unittest.TestCase):
         self.assertIn("instagram.com/acme", markup)
         self.assertIn("sl-social-glyph", markup)
 
-    def test_an_unknown_host_shows_but_does_not_link_on_the_platform_host(self):
+    def test_an_uncurated_host_shows_but_does_not_link_on_the_platform_host(self):
         # §7, the same boundary render_link_cards applies: on shared infrastructure a phishing link is a
         # browser-blocklist problem for our domain and every tenant on it. Unlinked rather than dropped -- a
         # tile that silently vanishes tells the tenant nothing about why.
-        markup = self._render({"items": [{"url": "https://onlyfans.com/acme"}]})
+        # OnlyFans stood here until §4 curated it onto the list -- linkable BECAUSE it is age-gated. The
+        # case is really about a host nobody has reviewed.
+        markup = self._render({"items": [{"url": "https://shop.example.org/acme"}]})
         self.assertIn("is-unlinked", markup)
         self.assertNotIn("<a ", markup)
-        self.assertIn('aria-label="OnlyFans"', markup)  # still visible, and still named
+        self.assertIn('aria-label="shop.example.org"', markup)  # still visible, and still named
 
     def test_the_same_link_is_tappable_on_the_tenants_own_domain(self):
         # There the reputation at stake is theirs.
-        markup = self._render({"items": [{"url": "https://onlyfans.com/acme"}]}, own_domain=True)
-        self.assertIn('href="https://onlyfans.com/acme"', markup)
+        markup = self._render({"items": [{"url": "https://shop.example.org/acme"}]}, own_domain=True)
+        self.assertIn('href="https://shop.example.org/acme"', markup)
         self.assertIn('rel="nofollow ugc noopener"', markup)
         self.assertNotIn("is-unlinked", markup)
 
@@ -172,7 +174,8 @@ class TrustBoundarySourceTests(unittest.TestCase):
         html_module._RENDER_STATE["home_url"] = "https://acme.jbay.uk/"
         html_module._RENDER_STATE["own_domain"] = False
         try:
-            markup = html_module.render_social_links({"id": "s1", "items": [{"url": "https://onlyfans.com/a"}]})
+            markup = html_module.render_social_links(
+                {"id": "s1", "items": [{"url": "https://shop.example.org/a"}]})
         finally:
             html_module._RENDER_STATE["home_url"] = ""
             html_module._RENDER_STATE.pop("own_domain", None)

@@ -161,7 +161,9 @@ class LinkCardsElementTests(unittest.TestCase):
 
     SECTION = {"id": "lc", "items": [
         {"url": "https://github.com/acme", "label": "Our code"},
-        {"url": "https://www.amazon.com/shops/acme", "label": "Amazon storefront"},
+        # Amazon used to stand in for "blocked" and is now allowlisted (CREATOR_LINK_POLICY §4), which is
+        # the point of the widening. A host nobody has curated is what this case is actually about.
+        {"url": "https://shop.example.org/acme", "label": "My other shop"},
     ]}
 
     def _render(self, *, on_custom_domain):
@@ -172,7 +174,7 @@ class LinkCardsElementTests(unittest.TestCase):
     def test_any_destination_is_linkable_on_the_tenants_own_domain(self):
         markup = self._render(on_custom_domain=True)
         self.assertEqual(markup.count('rel="nofollow ugc noopener"'), 2)
-        self.assertIn("amazon.com/shops/acme", markup)
+        self.assertIn("shop.example.org/acme", markup)
 
     def test_a_shared_platform_host_only_links_allowlisted_destinations(self):
         # The reason is the URL bar, not SEO: noindex does nothing about a human tapping a phishing link
@@ -180,12 +182,12 @@ class LinkCardsElementTests(unittest.TestCase):
         markup = self._render(on_custom_domain=False)
         self.assertEqual(markup.count('rel="nofollow ugc noopener"'), 1)
         self.assertIn('href="https://github.com/acme"', markup)
-        self.assertNotIn('href="https://www.amazon.com/shops/acme"', markup)
+        self.assertNotIn('href="https://shop.example.org/acme"', markup)
 
     def test_a_blocked_destination_is_shown_unlinked_rather_than_dropped(self):
         # A card that silently vanishes tells the tenant nothing about why.
         markup = self._render(on_custom_domain=False)
-        self.assertIn("Amazon Storefront", markup)
+        self.assertIn("My Other Shop", markup)
         self.assertIn('<div class="sl-catalog-card sl-link-card">', markup)
 
     def test_links_are_never_followable(self):
