@@ -179,6 +179,30 @@ def network_icon_path(url: Any) -> str:
     return _network_lookup(url, NETWORK_ICON_PATHS) or ""
 
 
+# Hosts whose links get an age interstitial. HOST-DERIVED, never tenant-declared (author, 2026-09-11): a
+# checkbox nobody ticks is a decorative control, and it puts us in the position of accepting a creator's word
+# about their own content.
+#
+# The test is "is this class of URL PREDOMINANTLY adult", NOT "does the platform permit adult content".
+# The latter is true of most large UGC platforms and over-fires so badly the warning stops carrying
+# information -- people click through it reflexively, which destroys the value of the one that matters. X
+# permits adult content and is deliberately absent: the same domain hosts news organisations, governments and
+# every B2B brand, so an adult warning on a nutrition store's X profile is a bug. Accepted consequence: an
+# adult X profile on a hub will not warn. See plans/CREATOR_LINK_POLICY.md §5.
+#
+# Platform policies CHANGE -- X's did -- so this table is reviewed on a date, not on memory.
+ADULT_HOSTS = {
+    "fansly.com": "Adult content is the platform's principal business.",
+    "onlyfans.com": "Adult content is the platform's principal business.",
+}
+ADULT_HOSTS_REVIEWED = "2026-09-11"
+
+
+def is_adult_host(url: Any) -> bool:
+    """Whether a visitor should be warned before following this link."""
+    return _network_lookup(url, ADULT_HOSTS) is not None
+
+
 def network_glyph(url: Any) -> str:
     """The glyph to draw for this link: the network's mark, or a globe when we do not recognise the host.
 

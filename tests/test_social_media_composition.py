@@ -166,6 +166,7 @@ class LinkCardsElementTests(unittest.TestCase):
 
     def _render(self, *, on_custom_domain):
         html_module._RENDER_STATE["home_url"] = "https://shop.example.com/" if on_custom_domain else ""
+        html_module._RENDER_STATE["own_domain"] = on_custom_domain
         return html_module.render_link_cards(self.SECTION)
 
     def test_any_destination_is_linkable_on_the_tenants_own_domain(self):
@@ -200,6 +201,7 @@ class LinkCardsElementTests(unittest.TestCase):
 
     def test_incomplete_items_are_skipped(self):
         html_module._RENDER_STATE["home_url"] = "https://shop.example.com/"
+        html_module._RENDER_STATE["own_domain"] = True
         markup = html_module.render_link_cards({"id": "lc", "items": [
             {"url": "https://github.com/acme"},          # no label
             {"label": "No destination"},                  # no url
@@ -265,6 +267,7 @@ class LinkCardGridTests(unittest.TestCase):
         # both still get it.
         import stripe_link.runtime.html as html_mod
         html_mod._RENDER_STATE["home_url"] = "https://shop.example.com/"
+        html_mod._RENDER_STATE["own_domain"] = True
         label = "My Amazon Storefront With A Very Long Name Indeed"
         markup = html_mod.render_link_cards({"id": "lc", "items": [
             {"url": "https://amazon.com/x", "label": label, "description": "Long note here"}]})

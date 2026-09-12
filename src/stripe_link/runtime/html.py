@@ -17,7 +17,7 @@ from stripe_link.domain.page_views import link_id as link_click_id
 from stripe_link.domain.social_links import display_entries as display_social_entries
 from stripe_link.domain.social_links import section_link_entries as social_section_entries
 from stripe_link.domain.social_links import linkable_on_platform_host
-from stripe_link.domain.social_links import network_glyph, network_label
+from stripe_link.domain.social_links import is_adult_host, network_glyph, network_label
 from stripe_link.domain.social_links import verified_urls as verified_same_as_urls
 from stripe_link.domain.opportunities import STAGE_LANDING, STAGE_POST_PURCHASE, derived_offer_type, stage_opportunities
 from stripe_link.domain.pricing import PricingError, expand_offer, find_price, resolve_offer, single_unit_price
@@ -950,6 +950,12 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     "    .sl-notice-icon{width:4.4rem;height:4.4rem;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:2.2rem;font-weight:800;background:color-mix(in srgb,var(--sl-accent) 16%,transparent);color:var(--sl-accent)}",
     "    .sl-notice-msg{color:var(--sl-text);font-size:1.5rem;line-height:1.5;margin:0}",
     "    .sl-notice-ok{width:auto;min-width:12rem;background:linear-gradient(135deg,var(--sl-cta-from),var(--sl-cta-to));color:var(--sl-cta-text);border:0;border-radius:0.9rem;padding:1rem 2.4rem;font-family:var(--sl-font-accent);font-size:1.5rem;font-weight:800;cursor:pointer}",
+    # The same card with two actions, for the age gate (plans/CREATOR_LINK_POLICY.md §5d). Declining must be
+    # as easy to reach as continuing -- a dialog where only the affirmative answer is a real button is a dark
+    # pattern, and this one exists to let someone say no.
+    "    .sl-notice-actions{display:flex;flex-wrap:wrap;gap:1rem;justify-content:center}",
+    "    .sl-notice-cancel{width:auto;min-width:10rem;background:transparent;color:var(--sl-text);border:1px solid var(--sl-border);border-radius:0.9rem;padding:1rem 2rem;font-family:var(--sl-font-accent);font-size:1.5rem;font-weight:700;cursor:pointer}",
+    "    .sl-age-gate .sl-notice-icon{font-size:1.6rem;font-weight:900;letter-spacing:-0.02em}",
     "    .sl-minicart.is-visible{display:flex}",
     "    .sl-minicart-lines{display:flex;flex-direction:column;gap:0.3rem;max-height:34vh;overflow-y:auto}",
     "    .sl-minicart-line{display:flex;align-items:center;gap:0.8rem;font-size:1.35rem;color:var(--sl-text)}",
@@ -1733,6 +1739,18 @@ def render_page(
         custom_domain = str(hosting.get("custom_domain") or "").strip()
         domain_verified = bool((hosting.get("verification") or {}).get("verified"))
         _RENDER_STATE["home_url"] = f"https://{custom_domain}/" if custom_domain and domain_verified else ""
+    # Whose domain this artifact will be served on, which is a DIFFERENT question from whether the Site has a
+    # serving origin at all. §7's link trust boundary hangs on it: on the tenant's own verified domain any
+    # destination may be linked, because the reputation at stake is theirs; on shared platform infrastructure
+    # only allowlisted hosts become anchors. home_url is now true for a free *.jbay.uk address too (platform
+    # hostname serving), so inferring the boundary from it -- which is what render_social_links and
+    # render_link_cards did -- silently switched the check OFF on exactly the hosts it exists to protect.
+    # Derived here from the Site, once, so the two renderers cannot disagree about it.
+    hosting = (site or {}).get("hosting") or {}
+    _RENDER_STATE["own_domain"] = bool(
+        str(hosting.get("custom_domain") or "").strip()
+        and (hosting.get("verification") or {}).get("verified")
+    )
     _RENDER_STATE["page_type"] = str(page_type or "")
     # SEO opt-out (Site-level "discover in search" switch): when off, the storefront chrome renders in its plain
     # no-SEO form (breadcrumb hidden, brand centered) via a body marker CSS keys off. Robots noindex is applied
@@ -1940,7 +1958,7 @@ def _render_page_body(
         *render_bnpl_messaging_scripts(),
         render_price_description_toggle_script(page),
         render_view_beacon(page, kind, api_base_url),
-        render_link_click_beacon(page, kind, api_base_url),
+        render_outbound_link_script(page, kind, api_base_url),
         "</body>",
         "</html>",
     ] if part != "")
@@ -5291,7 +5309,7 @@ def render_link_cards(section: dict[str, Any]) -> str:
     catalog_grid already does for a card it cannot resolve a host for. Unlinked rather than dropped: a
     card that silently vanishes tells the tenant nothing about why.
     """
-    on_custom_domain = bool(_RENDER_STATE.get("home_url"))
+    on_custom_domain = bool(_RENDER_STATE.get("own_domain"))
     cards = []
     for item in section.get("items") or []:
         url = str((item or {}).get("url") or "").strip()
@@ -5309,7 +5327,8 @@ def render_link_cards(section: dict[str, Any]) -> str:
         if on_custom_domain or linkable_on_platform_host(url):
             cards.append(
                 f'      <a class="sl-catalog-card sl-link-card" href="{escape(url)}" '
-                f'rel="nofollow ugc noopener" target="_blank" data-sl-link="{link_click_id(url)}">'
+                f'rel="nofollow ugc noopener" target="_blank" data-sl-link="{link_click_id(url)}"'
+                f'{' data-sl-adult="1"' if is_adult_host(url) else ""}>'
                 f'\n{inner}\n      </a>')
         else:
             cards.append(f'      <div class="sl-catalog-card sl-link-card">\n{inner}\n      </div>')
@@ -5352,8 +5371,9 @@ def _social_link_item(url: Any, *, linkable: bool = True) -> str:
     # rather than dropped -- a tile that silently vanishes tells the tenant nothing about why.
     if not linkable:
         return f'<li><span class="sl-social-glyph is-unlinked"{named}>{inner}</span></li>'
+    adult = ' data-sl-adult="1"' if is_adult_host(url) else ""
     return (f'<li><a class="sl-social-glyph" href="{href}" rel="nofollow ugc noopener" target="_blank"'
-            f'{named} data-sl-link="{link_click_id(url)}">{inner}</a></li>')
+            f'{named} data-sl-link="{link_click_id(url)}"{adult}>{inner}</a></li>')
 
 
 def render_social_links(section: dict[str, Any]) -> str:
@@ -5374,7 +5394,7 @@ def render_social_links(section: dict[str, Any]) -> str:
     entries = social_section_entries(section, _RENDER_ORG)
     if not entries:
         return ""
-    on_custom_domain = bool(_RENDER_STATE.get("home_url"))
+    on_custom_domain = bool(_RENDER_STATE.get("own_domain"))
     parts = [f'    <section class="sl-social-links" data-section-id="{escape(str(section.get("id", "social-links")))}" data-section-type="social_links">']
     heading = str(section.get("heading") or "").strip()
     if heading:
@@ -5995,20 +6015,37 @@ def render_view_beacon(page: dict[str, Any], kind: str, api_base_url: str | None
     )
 
 
-def render_link_click_beacon(page: dict[str, Any], kind: str, api_base_url: str | None) -> str:
-    """Count clicks on the page's outbound links. Published artifact only, exactly as the view beacon is.
+def render_outbound_link_script(page: dict[str, Any], kind: str, api_base_url: str | None) -> str:
+    """Everything that happens when a visitor taps an outbound link: counting it, and the age gate.
 
-    ONE delegated listener rather than a handler per link: a hub can carry thirty destinations, and the
-    element that renders them does not know it is being measured. It also keeps working for links added by
-    a later element without anything being wired up again.
+    ONE script rather than two because both need the same beacon URL, and the age gate has to be able to
+    SUPPRESS the count -- a visitor who backs out of the interstitial did not click through to anything, and
+    reporting that they did would put a number in the dashboard that no one earned.
 
-    `pointerdown`, not `click`. A tap that opens a new tab often unloads or backgrounds the page before a
-    click handler's beacon is flushed, so counting on click under-reports on exactly the platform this page
-    exists for. sendBeacon is specified to survive unload; the earlier event is belt and braces.
+    Published artifact only, exactly as the view beacon is: the gate is the artifact kind, so a tenant editing
+    their own hub all afternoon has no tracker in the page they are looking at.
 
-    A missed click is the acceptable failure here, and the honest cost of not being a redirector: a
-    `/go/{page}/{link}` hop would count perfectly and turn the shared platform host into an open redirect,
-    which is the abuse surface plans/SOCIAL_MEDIA_PAGES.md §7 exists to prevent.
+    Counting is on `pointerdown` for ordinary links -- a tap that opens a new tab often unloads or backgrounds
+    the page before a click handler's beacon flushes, which would under-report on exactly the platform this
+    page exists for. Adult links are the exception: they count from the Continue button instead, because
+    until then nothing has been followed.
+
+    Still a beacon and not a redirector. `/go/{page}/{link}` would count perfectly and turn the shared
+    platform host into an open redirect, which is the abuse surface plans/SOCIAL_MEDIA_PAGES.md §7 exists to
+    prevent. A lossy count is the honest price.
+
+    The interstitial reuses `.sl-notice-backdrop` / `.sl-notice-card` -- the page's OWN dialog, added when the
+    checkout script needed one because a server-rendered page cannot use the dashboard's ConfirmDialog.vue.
+    It is never `window.confirm`: a browser chrome dialog on a creator's page reads as a malware warning.
+
+    **It asks EVERY time, and remembers nothing** (author, 2026-09-11, after checking what linkcloud.ai and
+    link.me actually do). Remembering would also mean storage on a shared creator origin, which is the hazard
+    plans/SOCIAL_MEDIA_PAGES.md §6 flags for the cart keys -- so the category norm and our architecture agree.
+
+    The wording is hedged on purpose: "may contain" is a claim about the PLATFORM, which is what we know.
+    "Contains" would be a claim about the creator, which we do not know and must not assert about a named
+    person. And it is an attestation, not age verification -- it earns its place by preventing accidental
+    exposure and by demonstrating a content policy, not by stopping anyone determined.
     """
     if kind != "published":
         return ""
@@ -6020,17 +6057,54 @@ def render_link_click_beacon(page: dict[str, Any], kind: str, api_base_url: str 
         "  <script>\n"
         "    (function () {\n"
         "      try {\n"
-        "        document.addEventListener('pointerdown', function (e) {\n"
+        f"        var API = {json.dumps(base)}, PAGE = {json.dumps(page_id)};\n"
+        "        var count = function (a) {\n"
         "          try {\n"
-        "            var a = e.target && e.target.closest ? e.target.closest('[data-sl-link]') : null;\n"
-        "            if (!a) { return; }\n"
         "            var v = ''; try { v = localStorage.getItem('sl_vid') || ''; } catch (x) { v = ''; }\n"
-        f"            var u = {json.dumps(base)} + '/t/view?p=' + encodeURIComponent({json.dumps(page_id)})\n"
+        "            var u = API + '/t/view?p=' + encodeURIComponent(PAGE)\n"
         "              + '&l=' + encodeURIComponent(a.getAttribute('data-sl-link'))\n"
         "              + (v ? '&v=' + encodeURIComponent(v) : '');\n"
         "            if (navigator.sendBeacon) { navigator.sendBeacon(u); }\n"
         "            else { var i = new Image(); i.src = u; }\n"
         "          } catch (x) {}\n"
+        "        };\n"
+        "        document.addEventListener('pointerdown', function (e) {\n"
+        "          var a = e.target && e.target.closest ? e.target.closest('[data-sl-link]') : null;\n"
+        "          if (a && !a.hasAttribute('data-sl-adult')) { count(a); }\n"
+        "        }, true);\n"
+        "        document.addEventListener('click', function (e) {\n"
+        "          var a = e.target && e.target.closest ? e.target.closest('[data-sl-adult]') : null;\n"
+        "          if (!a) { return; }\n"
+        "          e.preventDefault();\n"
+        "          var o = document.querySelector('.sl-notice-backdrop.sl-age-gate');\n"
+        "          if (!o) {\n"
+        "            o = document.createElement('div');\n"
+        "            o.className = 'sl-notice-backdrop sl-age-gate';\n"
+        "            o.innerHTML = '<div class=\"sl-notice-card\" role=\"alertdialog\" aria-modal=\"true\""
+        " aria-labelledby=\"sl-age-title\"><div class=\"sl-notice-icon\" aria-hidden=\"true\">18</div>"
+        "<p class=\"sl-notice-msg\" id=\"sl-age-title\">This link may contain adult content. You must be 18"
+        " or older to continue.</p><div class=\"sl-notice-actions\">"
+        "<button type=\"button\" class=\"sl-notice-cancel\">Cancel</button>"
+        "<button type=\"button\" class=\"sl-notice-ok\">Continue (18+)</button></div></div>';\n"
+        "            document.body.appendChild(o);\n"
+        "            var close = function () { o.classList.remove('is-visible'); o.dataset.href = ''; };\n"
+        "            o.addEventListener('click', function (ev) { if (ev.target === o) close(); });\n"
+        "            o.querySelector('.sl-notice-cancel').addEventListener('click', close);\n"
+        "            o.querySelector('.sl-notice-ok').addEventListener('click', function () {\n"
+        "              var href = o.dataset.href || '';\n"
+        "              var id = o.dataset.link || '';\n"
+        "              if (id) { count({ getAttribute: function () { return id; } }); }\n"
+        "              close();\n"
+        "              if (href) { window.open(href, '_blank', 'noopener'); }\n"
+        "            });\n"
+        "            document.addEventListener('keydown', function (ev) {\n"
+        "              if (ev.key === 'Escape' && o.classList.contains('is-visible')) { close(); }\n"
+        "            });\n"
+        "          }\n"
+        "          o.dataset.href = a.getAttribute('href') || '';\n"
+        "          o.dataset.link = a.getAttribute('data-sl-link') || '';\n"
+        "          o.classList.add('is-visible');\n"
+        "          var ok = o.querySelector('.sl-notice-ok'); if (ok) { ok.focus(); }\n"
         "        }, true);\n"
         "      } catch (e) {}\n"
         "    })();\n"

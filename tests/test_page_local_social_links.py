@@ -14,6 +14,7 @@ Attachment is not part of the rule at all.
 The separation the author wanted survives intact, but it falls out of WHERE THE LINKS LIVE rather than a
 hidden branch: inherited links can earn `sameAs`, page-local ones can never.
 """
+import pathlib
 import unittest
 
 from stripe_link.domain.social_links import (
@@ -91,14 +92,16 @@ class IdentityBoundaryTests(unittest.TestCase):
 
 
 class RenderTests(unittest.TestCase):
-    def _render(self, section, org=ORG, home_url=""):
+    def _render(self, section, org=ORG, own_domain=False):
         html_module._RENDER_ORG.clear()
         html_module._RENDER_ORG.update(org)
-        html_module._RENDER_STATE["home_url"] = home_url
+        # The §7 boundary keys on whose domain this is, NOT on whether the Site has a serving origin --
+        # a free *.jbay.uk address has one of those too.
+        html_module._RENDER_STATE["own_domain"] = own_domain
         try:
             return html_module.render_social_links({"id": "s1", **section})
         finally:
-            html_module._RENDER_STATE.pop("home_url", None)
+            html_module._RENDER_STATE.pop("own_domain", None)
 
     def test_own_links_render_instead_of_the_sites(self):
         markup = self._render({"items": [{"url": "https://youtube.com/@acme"}]})
@@ -122,7 +125,7 @@ class RenderTests(unittest.TestCase):
 
     def test_the_same_link_is_tappable_on_the_tenants_own_domain(self):
         # There the reputation at stake is theirs.
-        markup = self._render({"items": [{"url": "https://onlyfans.com/acme"}]}, home_url="https://acme.com")
+        markup = self._render({"items": [{"url": "https://onlyfans.com/acme"}]}, own_domain=True)
         self.assertIn('href="https://onlyfans.com/acme"', markup)
         self.assertIn('rel="nofollow ugc noopener"', markup)
         self.assertNotIn("is-unlinked", markup)
@@ -147,3 +150,36 @@ class PublishGuardTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TrustBoundarySourceTests(unittest.TestCase):
+    """§7 keys on WHOSE domain this is, not on whether the Site has a serving origin.
+
+    Reported 2026-09-11 as "the outline shows broken on the Preview but solid on the saved page". The preview
+    was right. `on_custom_domain` was inferred from `_RENDER_STATE["home_url"]`, and home_url became true for
+    a free *.jbay.uk address when platform hostname serving shipped -- so the check silently switched OFF on
+    exactly the shared hosts it exists to protect, and every destination became a live anchor there.
+
+    publishing.py had the correct value all along (`site_domain_verified(site) and page_site_slug`) and simply
+    never passed it; the renderer re-derived a different thing from a neighbouring field. Two things that had
+    to agree, with nothing making them.
+    """
+
+    def test_a_platform_host_does_not_count_as_the_tenants_own(self):
+        html_module._RENDER_ORG.clear()
+        html_module._RENDER_ORG.update(ORG)
+        # A Site serving on the free platform host: it HAS a home_url, and that must not unlock the boundary.
+        html_module._RENDER_STATE["home_url"] = "https://acme.jbay.uk/"
+        html_module._RENDER_STATE["own_domain"] = False
+        try:
+            markup = html_module.render_social_links({"id": "s1", "items": [{"url": "https://onlyfans.com/a"}]})
+        finally:
+            html_module._RENDER_STATE["home_url"] = ""
+            html_module._RENDER_STATE.pop("own_domain", None)
+        self.assertIn("is-unlinked", markup)
+
+    def test_the_renderer_reads_the_dedicated_flag(self):
+        source = (pathlib.Path(__file__).resolve().parents[1]
+                  / "src" / "stripe_link" / "runtime" / "html.py").read_text(encoding="utf-8")
+        self.assertNotIn('on_custom_domain = bool(_RENDER_STATE.get("home_url"))', source)
+        self.assertEqual(source.count('on_custom_domain = bool(_RENDER_STATE.get("own_domain"))'), 2)

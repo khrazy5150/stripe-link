@@ -106,24 +106,26 @@ class BeaconTests(unittest.TestCase):
         # The gate is the artifact KIND, not a runtime check, so a tenant editing their own hub all afternoon
         # cannot inflate their own numbers -- the page they are looking at has no tracker in it.
         for kind in ("preview", "", "draft"):
-            self.assertEqual(html_module.render_link_click_beacon(self.PAGE, kind, "https://api.example"), "")
+            self.assertEqual(html_module.render_outbound_link_script(self.PAGE, kind, "https://api.example"), "")
 
-    def test_it_listens_once_rather_than_per_link(self):
-        script = html_module.render_link_click_beacon(self.PAGE, "published", "https://api.example")
-        self.assertEqual(script.count("addEventListener"), 1)
+    def test_it_listens_by_delegation_rather_than_per_link(self):
+        # A hub can carry thirty destinations, and the element rendering them does not know it is measured.
+        script = html_module.render_outbound_link_script(self.PAGE, "published", "https://api.example")
         self.assertIn("[data-sl-link]", script)
+        self.assertNotIn("querySelectorAll('[data-sl-link]')", script)
 
-    def test_it_fires_on_pointerdown_not_click(self):
+    def test_it_counts_on_pointerdown_not_click(self):
         # A tap that opens a new tab often unloads or backgrounds the page before a click handler's beacon is
-        # flushed, so counting on click under-reports on exactly the platform this page exists for.
-        script = html_module.render_link_click_beacon(self.PAGE, "published", "https://api.example")
+        # flushed, so counting on click under-reports on exactly the platform this page exists for. The click
+        # listener that exists alongside it is the age gate, which counts from its own Continue button.
+        script = html_module.render_outbound_link_script(self.PAGE, "published", "https://api.example")
         self.assertIn("'pointerdown'", script)
-        self.assertNotIn("'click'", script)
+        self.assertIn("data-sl-adult", script.split("'pointerdown'", 1)[1][:300])
 
     def test_it_is_a_beacon_and_not_a_redirector(self):
         # A /go/{page}/{link} hop would count perfectly and turn the shared platform host into an open
         # redirect, which is the abuse surface §7 exists to prevent. The honest cost is a lossy count.
-        script = html_module.render_link_click_beacon(self.PAGE, "published", "https://api.example")
+        script = html_module.render_outbound_link_script(self.PAGE, "published", "https://api.example")
         self.assertIn("sendBeacon", script)
         self.assertNotIn("/go/", script)
 

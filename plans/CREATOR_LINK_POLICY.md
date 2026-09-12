@@ -129,7 +129,7 @@ same domain hosts news organisations, governments and every B2B brand.
 a nutrition store's X profile. Residual risk stated plainly: someone can put an adult X profile on a hub and it
 will not warn. That is the right trade, and it is the one every competitor makes.
 
-### 5d. The interstitial
+### 5d. The interstitial  ✅ BUILT 2026-09-11
 
 **Every click, no per-visitor memory.** Observed on linkcloud.ai and link.me: both warn on every tap. Two
 patterns in the wild — a modal ("Age Warning (18+) … Cancel / I'm 18+") and an in-place card blur ("Mature
@@ -157,6 +157,21 @@ first is how a policy ends up unwritten and unevenly applied.
 
 Author's framing, adopted: linking to OnlyFans is not a Stripe violation; selling adult content through Stripe
 Checkout is. Confirm against Stripe's current restricted-business list, since that governs the platform account.
+
+### 5f. Built 2026-09-11 — what shipped
+
+`ADULT_HOSTS` in `domain/social_links.py` (host-derived, with a reason per entry and a `reviewed` date),
+`data-sl-adult` on the rendered anchor, and the gate itself in `render_outbound_link_script`. It reuses the
+page's OWN dialog — `.sl-notice-backdrop` / `.sl-notice-card`, added when the checkout script needed one
+because a server-rendered page cannot use `ConfirmDialog.vue` — never `window.confirm`, which on a creator's
+page reads as a malware warning. Cancel is a real button beside Continue, and Escape closes it.
+
+**Counting and the gate are one script**, because the gate has to SUPPRESS the count: a visitor who backs out
+did not click through to anything, and reporting that they did would put a number in the dashboard nobody
+earned. Ordinary links count on `pointerdown`; an adult link counts from its Continue button instead.
+
+**Still to do from this section:** §6 reporting/takedown, and §4's creator allowlist — which is now the
+visible gap, since a flagged Snapchat/OnlyFans/Fansly link renders as an inert tile on a free platform host.
 
 ## 6. Reporting and takedown
 
