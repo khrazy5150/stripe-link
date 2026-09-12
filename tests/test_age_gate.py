@@ -209,3 +209,38 @@ class CreatorAllowlistTests(unittest.TestCase):
         self.assertRegex(PLATFORM_LINKABLE_REVIEWED, r"^\d{4}-\d{2}-\d{2}$")
         for host, why in CREATOR_LINKABLE_HOSTS.items():
             self.assertTrue(why.strip(), host)
+
+
+class AdultHostInterimTests(unittest.TestCase):
+    """Adult hosts are linkable on platform infrastructure ON PURPOSE, and only for now.
+
+    plans/CREATOR_LINK_POLICY.md §4a: they belong on the CREATOR domain (jbay.page) and not on jbay.uk /
+    jbay.be, which serve commerce Sites -- blocklists act per registered domain, and the creator domain exists
+    to absorb exactly the risk commerce must not carry. The §7 boundary is binary today (own domain vs "a
+    platform host") with no way to tell WHICH platform host, so the rule cannot be expressed yet.
+
+    Pinned so the interim is not mistaken for the final answer, and so whoever implements the third tier finds
+    this test rather than rediscovering the decision.
+    """
+
+    def test_adult_hosts_are_currently_linkable_anywhere_they_are_gated(self):
+        from stripe_link.domain.social_links import linkable_on_platform_host
+
+        for host in ADULT_HOSTS:
+            self.assertTrue(linkable_on_platform_host(f"https://{host}/acme"), host)
+
+    def test_the_gate_travels_with_them(self):
+        # The condition on which the interim is acceptable: they are linkable BECAUSE they are labelled.
+        for host in ADULT_HOSTS:
+            self.assertTrue(is_adult_host(f"https://{host}/acme"), host)
+
+    def test_the_boundary_still_has_only_two_tiers(self):
+        # When this starts failing, §4a is implementable: something now distinguishes one platform host from
+        # another, and the adult entries should move behind it.
+        import inspect
+
+        from stripe_link.runtime import html
+
+        source = inspect.getsource(html.render_social_links)
+        self.assertIn('_RENDER_STATE.get("own_domain")', source)
+        self.assertNotIn("jbay.page", source)

@@ -478,7 +478,14 @@ CREATOR_LINKABLE_HOSTS = {
     # Portfolio and professional
     "behance.net": "portfolio", "dribbble.com": "portfolio", "artstation.com": "portfolio",
     "calendly.com": "booking", "cal.com": "booking", "eventbrite.com": "events",
-    # Adult platforms -- linkable BECAUSE they are age-gated (§5e), not in spite of it
+    # Adult platforms -- linkable BECAUSE they are age-gated (§5e), not in spite of it.
+    #
+    # INTERIM (author, 2026-09-11). These belong on the CREATOR domain (`jbay.page`) and not on `jbay.uk` /
+    # `jbay.be`, which serve commerce Sites: the whole reason for a separate registered domain is that
+    # blocklists and registrar abuse desks act per domain, and adult links concentrate exactly the risk that
+    # domain exists to absorb. The boundary today is binary -- the tenant's own verified domain, or "a platform
+    # host" -- with no way to tell WHICH platform host, so the rule cannot be expressed yet. They stay here
+    # until `jbay.page` ships, then move behind that distinction. See plans/CREATOR_LINK_POLICY.md §4a.
     "onlyfans.com": "adult", "fansly.com": "adult",
     # Recognised elsewhere in this module and wanted on a hub
     "snapchat.com": "social",

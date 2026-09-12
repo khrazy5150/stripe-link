@@ -107,6 +107,30 @@ highest-value phishing target there is, and one on a domain shared with every ot
 most likely to cost us the domain. They want their own decision, not inclusion by association with "creator
 stuff". Written down here because the omission otherwise looks like an oversight the next person quietly fixes.
 
+## 4a. Adult links belong on the CREATOR domain only (decided 2026-09-11)
+
+Author's call, and it follows straight from why `jbay.page` was bought at all: blocklists and registrar abuse
+desks act **per registered domain**, so the creator domain exists to absorb exactly the risk that commerce
+must not carry. Adult links concentrate that risk. They should be linkable on `jbay.page` and **not** on
+`jbay.uk` / `jbay.be`, which serve commerce Sites — a blocklisting there would take marketing, dashboard,
+signup and billing with it.
+
+**This cannot be expressed today.** The §7 boundary is binary: the tenant's own verified domain, or "a platform
+host". Nothing tells the renderer WHICH platform host an artifact will be served on, because an artifact is
+rendered once and served on all of them. Implementing this means the boundary grows a third tier:
+
+| tier | what may be linked |
+|---|---|
+| the tenant's own verified domain | anything — the reputation at stake is theirs |
+| the creator domain (`jbay.page`) | `CREATOR_LINKABLE_HOSTS`, adult included, all age-gated |
+| commerce platform hosts (`jbay.uk`, `jbay.be`) | `CREATOR_LINKABLE_HOSTS` minus adult |
+
+Which in turn means an artifact must know its serving host, or be rendered per host. That is a real decision
+for the `jbay.page` build, not a detail of it — note it there before routing is designed.
+
+**Interim, on the author's instruction:** adult hosts follow `CREATOR_LINKABLE_HOSTS` like everything else
+until `jbay.page` ships. They are age-gated everywhere meanwhile, which is the control that matters most.
+
 ## 5. The adult-content warning
 
 ### 5a. Host-derived, never tenant-declared (author, 2026-09-11)
@@ -219,7 +243,8 @@ written; two index projections missing a field; `PLATFORM_LINKABLE_HOSTS` itself
 3. **Report + takedown.** Before `jbay.page` serves anything, not after.
 4. **`jbay.page` launch** — routing, username claiming, the reserved path wordlist, PSL registration, and the
    `tenant_id`-namespaced localStorage keys (`SOCIAL_MEDIA_PAGES.md` §6/§7). Its own plan; this one is its
-   admission ticket.
+   admission ticket. **It also has to carry §4a**: the link boundary grows a third tier there, which means an
+   artifact must know which host will serve it — settle that with the routing design, not after it.
 
 Nothing here gates the FEATURE: v1 link-in-bio pages work today on `{label}.jbay.uk` subdomains, and only the
 hostname changes later (`SOCIAL_MEDIA_PAGES.md` §5, "do not let this gate the feature").
