@@ -117,6 +117,11 @@ class InterstitialTests(unittest.TestCase):
         self.assertIn("Continue (18+)", s)
         self.assertIn("Escape", s)
 
+    def test_the_badge_names_a_minimum_not_an_age(self):
+        # "18" alone reads as an age; "18+" reads as the threshold, which is what it is (author, 2026-09-11).
+        s = self.script()
+        self.assertIn(">18+</div>", s)
+
     def test_the_wording_is_hedged(self):
         # "May contain" is a claim about the PLATFORM, which is what we know. "Contains" would be a claim
         # about the creator, which we do not know and must not assert about a named person.

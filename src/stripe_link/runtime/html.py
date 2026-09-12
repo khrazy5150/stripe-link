@@ -955,7 +955,9 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     # pattern, and this one exists to let someone say no.
     "    .sl-notice-actions{display:flex;flex-wrap:wrap;gap:1rem;justify-content:center}",
     "    .sl-notice-cancel{width:auto;min-width:10rem;background:transparent;color:var(--sl-text);border:1px solid var(--sl-border);border-radius:0.9rem;padding:1rem 2rem;font-family:var(--sl-font-accent);font-size:1.5rem;font-weight:700;cursor:pointer}",
-    "    .sl-age-gate .sl-notice-icon{font-size:1.6rem;font-weight:900;letter-spacing:-0.02em}",
+    # "18+", not "18": the threshold is the point, and a bare number reads as an age rather than a minimum.
+    # Sized down from the notice icon's 2.2rem because three glyphs have to sit inside the same 4.4rem circle.
+    "    .sl-age-gate .sl-notice-icon{font-size:1.5rem;font-weight:900;letter-spacing:-0.03em}",
     "    .sl-minicart.is-visible{display:flex}",
     "    .sl-minicart-lines{display:flex;flex-direction:column;gap:0.3rem;max-height:34vh;overflow-y:auto}",
     "    .sl-minicart-line{display:flex;align-items:center;gap:0.8rem;font-size:1.35rem;color:var(--sl-text)}",
@@ -6086,7 +6088,7 @@ def render_outbound_link_script(page: dict[str, Any], kind: str, api_base_url: s
         "            o = document.createElement('div');\n"
         "            o.className = 'sl-notice-backdrop sl-age-gate';\n"
         "            o.innerHTML = '<div class=\"sl-notice-card\" role=\"alertdialog\" aria-modal=\"true\""
-        " aria-labelledby=\"sl-age-title\"><div class=\"sl-notice-icon\" aria-hidden=\"true\">18</div>"
+        " aria-labelledby=\"sl-age-title\"><div class=\"sl-notice-icon\" aria-hidden=\"true\">18+</div>"
         "<p class=\"sl-notice-msg\" id=\"sl-age-title\">This link may contain adult content. You must be 18"
         " or older to continue.</p><div class=\"sl-notice-actions\">"
         "<button type=\"button\" class=\"sl-notice-cancel\">Cancel</button>"
