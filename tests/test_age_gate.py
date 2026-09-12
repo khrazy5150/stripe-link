@@ -82,9 +82,22 @@ class InterstitialTests(unittest.TestCase):
     def script(self, kind="published"):
         return html_module.render_outbound_link_script(self.PAGE, kind, "https://api.example")
 
-    def test_nothing_is_emitted_outside_a_published_artifact(self):
+    def test_the_gate_renders_on_every_artifact(self):
+        # It is a SAFETY control, not analytics. Gating it to published -- which it inherited from the counting
+        # script it shares -- meant it could not be tested from a draft's preview link, and anyone the tenant
+        # sent that link to got no warning at all.
+        for kind in ("published", "preview", "", "draft"):
+            self.assertIn("sl-age-gate", self.script(kind), kind)
+
+    def test_it_survives_having_no_page_id_or_api_base(self):
+        # The gate needs neither. Requiring them would make a safety control depend on analytics plumbing.
+        self.assertIn("sl-age-gate", html_module.render_outbound_link_script({}, "preview", None))
+
+    def test_counting_stays_published_only(self):
+        # A tenant editing their own hub all afternoon must not inflate their own numbers.
+        self.assertIn("COUNT = true", self.script("published"))
         for kind in ("preview", "", "draft"):
-            self.assertEqual(self.script(kind), "")
+            self.assertIn("COUNT = false", self.script(kind), kind)
 
     def test_it_uses_the_pages_own_dialog_not_the_browsers(self):
         # window.confirm on a creator's page reads as a malware warning. The page already has a themed dialog,

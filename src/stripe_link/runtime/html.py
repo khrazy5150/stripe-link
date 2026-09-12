@@ -6047,18 +6047,23 @@ def render_outbound_link_script(page: dict[str, Any], kind: str, api_base_url: s
     person. And it is an attestation, not age verification -- it earns its place by preventing accidental
     exposure and by demonstrating a content policy, not by stopping anyone determined.
     """
-    if kind != "published":
-        return ""
     page_id = str((page or {}).get("page_id") or "")
     base = str(api_base_url or "").rstrip("/")
-    if not page_id or not base:
-        return ""
+    # COUNTING is published-only -- a tenant editing their own hub all afternoon must not inflate their own
+    # numbers, so the tracker is simply not in the artifact they are looking at.
+    #
+    # The AGE GATE is not, and conflating the two was a bug: it rendered on nothing but the published artifact,
+    # so it could not even be TESTED from a draft's preview link, and anyone the tenant sent that link to got
+    # no warning at all. It is a safety control, not analytics. It needs no page id and no API base either, so
+    # it survives both being absent.
+    counting = kind == "published" and bool(page_id and base)
     return (
         "  <script>\n"
         "    (function () {\n"
         "      try {\n"
-        f"        var API = {json.dumps(base)}, PAGE = {json.dumps(page_id)};\n"
+        f"        var API = {json.dumps(base)}, PAGE = {json.dumps(page_id)}, COUNT = {'true' if counting else 'false'};\n"
         "        var count = function (a) {\n"
+        "          if (!COUNT) { return; }\n"
         "          try {\n"
         "            var v = ''; try { v = localStorage.getItem('sl_vid') || ''; } catch (x) { v = ''; }\n"
         "            var u = API + '/t/view?p=' + encodeURIComponent(PAGE)\n"

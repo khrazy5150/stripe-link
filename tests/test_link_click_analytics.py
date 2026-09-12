@@ -102,11 +102,16 @@ class ResolutionTests(unittest.TestCase):
 class BeaconTests(unittest.TestCase):
     PAGE = {"page_id": "page_abc"}
 
-    def test_nothing_is_emitted_outside_a_published_artifact(self):
-        # The gate is the artifact KIND, not a runtime check, so a tenant editing their own hub all afternoon
-        # cannot inflate their own numbers -- the page they are looking at has no tracker in it.
+    def test_counting_is_switched_off_outside_a_published_artifact(self):
+        # A tenant editing their own hub all afternoon must not inflate their own numbers. The SCRIPT still
+        # renders, because it also carries the age gate, which is a safety control and belongs on every
+        # artifact -- so the switch is a flag inside it rather than the absence of the whole block.
         for kind in ("preview", "", "draft"):
-            self.assertEqual(html_module.render_outbound_link_script(self.PAGE, kind, "https://api.example"), "")
+            script = html_module.render_outbound_link_script(self.PAGE, kind, "https://api.example")
+            self.assertIn("COUNT = false", script, kind)
+            self.assertIn("if (!COUNT) { return; }", script, kind)
+        self.assertIn("COUNT = true",
+                      html_module.render_outbound_link_script(self.PAGE, "published", "https://api.example"))
 
     def test_it_listens_by_delegation_rather_than_per_link(self):
         # A hub can carry thirty destinations, and the element rendering them does not know it is measured.
