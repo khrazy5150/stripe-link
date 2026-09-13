@@ -441,15 +441,15 @@ of its own — sold-through products do, "here is my TikTok" does not.
    accepts money (Ko-fi, Buy Me a Coffee, Patreon). It is a link, governed by §7 like any other, and it is
    what every reference page in this category actually does.
 
-   **(b) A FIRST-PARTY Junior Bay tip jar — what the author originally meant. NOT BUILT, and it is not an
-   element.** It is a payment product, and nothing in the codebase supports it yet:
+   **(b) A FIRST-PARTY Junior Bay tip jar — what the author originally meant. Planned:
+   `plans/PAY_WHAT_YOU_WANT.md`.** Corrected 2026-09-13: I claimed nothing supported it, and half of it
+   already does. `pricing_model: "customer_chooses"` is a real model with `min_amount`, `suggested_amount`,
+   a dashboard control and **its own fee class** (`fees.py:122`, 5/5/0 by tier).
 
-   - **Pay-what-you-want checkout does not exist.** There is no `custom_unit_amount` anywhere in `src/`; every
-     path assumes a Price with a fixed amount. A tip has no amount until the visitor picks one.
-   - **A tip is not an order**, but the receipt, refund, fee and ledger rails all assume one. Either it
-     becomes an order with no fulfilment, or those rails learn a second shape.
-   - **Tax treatment differs** from a sale and is jurisdictional. Stripe Tax is configured per product here.
-   - **The fee model has no class for it** (`docs/PLATFORM_PLANS.md` covers goods, services, digital).
+   What is missing is the RUNTIME: `pricing_model` appears nowhere in `checkout.py`, `pricing.py` or
+   `runtime/html.py`, all of which read `unit_amount` as a fixed integer. A `customer_chooses` price has none,
+   so it resolves to **zero** — a tenant can configure a tip jar today and get a $0 product with no error.
+   That gap comes first, ahead of any element work.
 
    **And it invalidates a premise the link policy leans on.** `CREATOR_LINK_POLICY.md` §3 argues that the
    allowlist IS the abuse story for `jbay.page` *because these pages carry no payment* -- the outbound link
