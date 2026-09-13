@@ -98,7 +98,7 @@ the legacy app has the switch, but shipping the switch is not the same as shippi
 buyer covering fees so the creator keeps the round number — is a product question the legacy form answers
 yes to.
 
-## 5a. Fee handling makes the maximum a moving target (author, 2026-09-13)
+## 5a. Fee handling, the maximum, and what presets MEAN
 
 Three modes, and two of them mean **the buyer is charged more than the tip**:
 
@@ -111,29 +111,28 @@ Three modes, and two of them mean **the buyer is charged more than the tip**:
 `calculate_price()` already does this: given a `tenant_keyed_amount` it returns `unit_amount`, the grossed-up
 figure the buyer is actually charged. The page shows that full figure, so nothing is hidden.
 
-**Therefore a maximum has to constrain the CHARGED total, not the keyed tip.** A $500 cap checked against the
-tip lets a `net_guaranteed` tip of $500 be charged at roughly $516 — over the cap, and the check that was
-supposed to prevent it passed.
+**`max_amount` is a reasonable-range guardrail, not a compliance boundary — so fees pushing the charge past
+it are fine.** Raised and then WITHDRAWN by the author 2026-09-13, after checking: tips are not capped by
+platforms, and Stripe's hard ceiling is one penny under $1,000,000. The legacy form's `$500` was an arbitrary
+sensible default (`products.js:2233`, `|| 500`), not a limit anyone imposes. A `net_guaranteed` tip of $500
+charging ~$516 needs no special handling.
 
-**Derive the keyed ceiling, do not re-derive the algebra.** `calculate_price` is monotonic in the keyed
-amount, so the tip ceiling is the largest keyed amount whose `unit_amount` still fits under the cap: take the
-analytic estimate and step down until it does, reusing that function. A second gross-up formula living in a
-validator would be one more pair of things that must agree — and this file already lists three bugs of exactly
-that shape.
+Recorded rather than deleted, because the worry is a natural one to have again: anyone meeting the three fee
+modes for the first time will wonder whether the cap has to bound the charge, and the answer is no.
 
-**Correction on the $500.** It is not a Stripe limit; it is the legacy form's DEFAULT
-(`products.js:2233`, `|| 500`), which the tenant can change. Stripe's own per-charge ceiling is far higher and
-currency-dependent. So there are potentially two ceilings — the tenant's `max_amount` and whatever platform or
-Stripe bound applies — and the rule above is the same for both: apply it to the charged total. Confirm the real
-Stripe bound before any number is written into code; a cap nobody can justify is worse than no cap.
+Two things that DO survive it:
 
-**And it makes the presets ambiguous, which is a decision.** Presets are stored as amounts, but under `split`
-and `net_guaranteed` a "$25" preset does not charge $25:
+**Unusually large tips get flagged and accounts frozen pending fraud review** (author's research). That is an
+argument for the tenant keeping a sane default maximum — which is what the $500 was — not for the platform
+enforcing one. Worth surfacing in the wizard as guidance rather than as a rule.
+
+**Presets are ambiguous, and that is a real decision.** Presets are stored as amounts, but under `split` and
+`net_guaranteed` a "$25" preset does not charge $25:
 
 - **Presets as KEYED amounts** — the creator receives round numbers, the buyer sees $25.85. Matches how the
   rest of pricing works (the tenant keys what they want to receive).
 - **Presets as CHARGED amounts** — the buyer taps round numbers, the creator receives $24.20. Matches the
-  "nothing is hidden" principle and how a tip actually reads to the person paying it.
+  "nothing is hidden" principle and how a tip reads to the person paying it.
 
 Under `standard` they are identical, which is why this stays invisible until someone switches mode. It needs
 answering before presets are built, because it changes what the stored number MEANS.
@@ -156,7 +155,7 @@ a link.
 2. **Widen the model** to the legacy shape: `presets[]`, `allow_custom`, `max_amount`, `allow_recurring`,
    `recurring_interval`. Migrate the existing `suggested_amount` into `presets`.
 3. **Runtime**: pricing resolution, the preset-button UI on the page, and checkout with validated inline
-   `price_data` — with the maximum applied to the CHARGED total per §5a, and the preset question answered.
+   `price_data` — with the preset question (§5a) answered first, since it decides what the stored number is.
 4. **The product wizard** (§4) — or before 2/3, if the wizard lands first.
 5. **The order/tax decisions** (§5) followed through receipts, refunds, fees and the ledger.
 6. **Re-make the `jbay.page` abuse argument** (§6) before a tip jar serves on a platform host.
