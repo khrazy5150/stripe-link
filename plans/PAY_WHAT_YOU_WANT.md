@@ -215,10 +215,15 @@ for. The author's copy —
 - **"free"** is accurate for the PAGE — landing pages are free-forever post-pivot — and should not be read as
   the tip being fee-free. At the free tier the platform's tip fee is 5% (`fees.py`, 5/5/0 by tier); what
   changes is who pays it.
-- **Do not claim "other platforms deduct fees and we don't."** Ko-fi charges no platform fee on donations,
-  and it is the most likely competitor in this exact field. The defensible claim is narrower and stronger:
-  *everywhere else the fees come out of the tip; here the customer can cover them.* That is true of Ko-fi too,
-  whose Stripe fees still come out of the creator's payout.
+- **The comparative claim is DECIDED and narrow** (author, 2026-09-13). We say:
+
+  > *Everywhere else, the fees come out of your tip. Here, your customer can cover them.*
+
+  We do **not** say "other platforms deduct fees and we don't". Ko-fi charges no platform fee on donations and
+  is the likeliest competitor in this exact field, so the broad version is falsifiable by the first person who
+  checks — and a marketing claim that fails a five-second check costs more than the claim was worth. The
+  narrow one is also true of Ko-fi, whose Stripe fees still come out of the creator's payout, which is what
+  makes it both safer AND stronger.
 
 ### Seeded defaults
 
