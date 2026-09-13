@@ -7003,3 +7003,18 @@ button:disabled {
   font-variant-numeric: tabular-nums;
   color: var(--text, #111827);
 }
+
+/* A heading inside a settings accordion, so a panel holding two unrelated things reads as two groups rather
+   than one list. Quiet: it labels, it does not compete with the fields under it. */
+.builder-settings-group {
+  margin: 1.6rem 0 0.4rem;
+  font-size: 1.1rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted, #6b7280);
+}
+
+.builder-settings-group:first-child {
+  margin-top: 0;
+}

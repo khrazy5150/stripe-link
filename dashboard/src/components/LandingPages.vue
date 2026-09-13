@@ -261,10 +261,15 @@
                   <small>{{ builderGoalNote }}</small>
                 </label>
             </SettingsAccordion>
-            <SettingsAccordion label="Appearance" hint="Theme preset and colour overrides" :icon="SETTINGS_ICONS['Appearance']" :open="openSetting === 'Appearance'" @toggle="toggleSetting('Appearance')">
+            <!-- Hint names the breadcrumb explicitly. It was in here under "Theme preset and colour overrides" and the
+             author looked for it on the Site, on the page, and could not find it -- reasonably, because nothing on
+             the closed accordion suggested header furniture lived inside. A control nobody can find is not a
+             control. -->
+            <SettingsAccordion label="Appearance" hint="Theme, colours, and the header breadcrumb" :icon="SETTINGS_ICONS['Appearance']" :open="openSetting === 'Appearance'" @toggle="toggleSetting('Appearance')">
                   <!-- Page CHROME, not content: it sits in the header above everything the composer places.
                        Shown for every page so the default is visible and reversible, rather than a behaviour
                        a tenant can only discover by noticing it. -->
+                  <p class="builder-settings-group">Header</p>
                   <label class="builder-switch-row">
                     <span class="builder-switch" @click.stop>
                       <input v-model="breadcrumbOn" type="checkbox" aria-label="Show breadcrumb trail" />
@@ -282,6 +287,7 @@
                     </template>
                   </small>
 
+                  <p class="builder-settings-group">Theme</p>
                   <label class="offer-field">
                     <span>Preset</span>
                     <select v-model="builder.preset">

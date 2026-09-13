@@ -119,6 +119,17 @@ class BuilderTests(unittest.TestCase):
         # label made, where a stored default outlived every later fix.
         self.assertIn("breadcrumbOn.value === breadcrumbDefault.value ? {} :", BUILDER)
 
+    def test_the_accordion_says_what_is_inside_it(self):
+        # It shipped inside "Appearance / Theme preset and colour overrides", and the author looked on the
+        # Site, looked on the page, and could not find it -- reasonably, because nothing on the closed
+        # accordion suggested header furniture was in there. A control nobody can find is not a control.
+        self.assertIn('hint="Theme, colours, and the header breadcrumb"', BUILDER)
+        self.assertNotIn('hint="Theme preset and colour overrides"', BUILDER)
+
+    def test_it_is_offered_in_exactly_one_place(self):
+        # Two copies of a setting is the drift pattern this codebase keeps paying for.
+        self.assertEqual(BUILDER.count('v-model="breadcrumbOn"'), 1)
+
     def test_the_default_mirrors_the_server(self):
         self.assertIn('LEAD_COMPOSITION_TYPES = new Set(["lead_capture", "lead_call", "lead_bridge", "lead_social"])',
                       BUILDER)
