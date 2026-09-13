@@ -686,6 +686,29 @@ than a code change, which is why it is recorded here instead of done: it needs a
 should fail on lint errors (it should) and how noisy the first run will be on an existing codebase.
 
 
+### ⭐ HIGH — Tip Jar ("Customer chooses") is half-imported and MIS-PRICES TODAY (plan plans/PAY_WHAT_YOU_WANT.md, 2026-09-13)
+
+A live bug, not a missing feature. stripe-cart ships this; stripe-link imported the fee class and the form
+control and stopped. `pricing.js` writes `min_amount`/`suggested_amount` on top of a normal `unit_amount` from
+the Sales price field, and `pricing_model` appears NOWHERE in `checkout.py`, `pricing.py` or
+`runtime/html.py` — so a tip jar saves without error and **sells at whatever the tenant typed**. A plausible
+wrong answer, which is the worst failure shape.
+
+**Nothing ever tracked it.** The only mention of `tip_jar` in this file was the FEE TABLE below — the pricing
+decision was recorded, the feature was not, and the gap had no owner. Noted because that is the failure worth
+learning from: a fee class for a thing nobody built reads as evidence the thing exists.
+
+`additionalProperties: false` on `Price.schema.json` was NOT a deliberate deferral — every schema in the repo
+is closed, it is house style. It silently refused the rest of the legacy model without anyone noticing, which
+is the closed-schema default doing its job with nobody reading the result.
+
+- ✅ **Price model DONE 2026-09-13** — `presets[]`, `max_amount`, `allow_custom`, `allow_recurring`,
+  `recurring_interval`; a `customer_chooses` price must now offer SOME way to choose, which is the rule that
+  stops this recurring. Presets are CHARGED amounts (author).
+- **Next: the product creation wizard** (`LEAD_GEN_PAGES.md` §10) — intent first, tip jar as a third answer.
+- Then the runtime: pricing resolution, preset buttons, checkout with validated inline `price_data`.
+- Open: is a tip an ORDER; gratuity tax treatment; whether v1 ships recurring tips.
+
 ### ⭐ HIGH — Lead-generation pages: four shapes, not one (plan plans/LEAD_GEN_PAGES.md, 2026-09-10)
 
 A lead-gen offer currently builds a **checkout page with the price hidden**. Observed on a real page: trust
