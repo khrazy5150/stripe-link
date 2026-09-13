@@ -267,8 +267,12 @@ a link.
 
 1. **Stop the silent wrong answer.** Either honour `customer_chooses` end to end, or refuse to save one. A
    product that sells at a price the tenant did not intend is the live bug here.
-2. **Widen the model** to the legacy shape: `presets[]`, `allow_custom`, `max_amount`, `allow_recurring`,
-   `recurring_interval`. Migrate the existing `suggested_amount` into `presets`.
+2. ~~**Widen the model**~~ ✅ **DONE 2026-09-13.** `Price.schema.json` carries `presets[]`, `max_amount`,
+   `allow_custom`, `allow_recurring`, `recurring_interval`; `suggested_amount` is deprecated in place rather
+   than deleted, so existing documents keep validating. Validation now REFUSES a `customer_chooses` price that
+   offers no way to choose — the rule that stops the original bug recurring — plus presets outside the bounds,
+   duplicates, more than eight, and inverted bounds. The schema stays `additionalProperties: false`, which is
+   what caught the gap in the first place. Still to migrate: fold a legacy `suggested_amount` into `presets`.
 3. **Runtime**: pricing resolution, the preset-button UI on the page, and checkout with validated inline
    `price_data` — presets being CHARGED amounts per §5a.
 4. **The product wizard** (§4) — or before 2/3, if the wizard lands first.

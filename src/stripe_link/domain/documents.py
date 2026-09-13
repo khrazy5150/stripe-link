@@ -774,9 +774,43 @@ def validate_product_document(document: dict[str, Any]) -> None:
         if pricing_model not in {"one_time", "recurring", "customer_chooses"}:
             raise DocumentValidationError("price.pricing_model must be one of: customer_chooses, one_time, recurring.")
         if pricing_model == "customer_chooses":
+            # A TIP JAR. unit_amount is not the answer here -- the buyer picks -- so the price must offer at
+            # least one way to pick. Without this a customer_chooses price validates while being unusable,
+            # which is how the half-imported version shipped: it saved, and then sold at whatever the tenant
+            # happened to type in the Sales price field.
             optional_non_negative_int(price, "unit_amount", "price.unit_amount")
             optional_non_negative_int(price, "min_amount", "price.min_amount")
+            optional_non_negative_int(price, "max_amount", "price.max_amount")
             optional_non_negative_int(price, "suggested_amount", "price.suggested_amount")
+            optional_bool(price, "allow_custom", "price.allow_custom")
+            optional_bool(price, "allow_recurring", "price.allow_recurring")
+            if price.get("recurring_interval") is not None:
+                require_enum(price, "recurring_interval", {"month", "year"}, "price.recurring_interval")
+            presets = price.get("presets")
+            if presets is not None:
+                if not isinstance(presets, list) or len(presets) > 8:
+                    raise DocumentValidationError("price.presets must be an array of at most 8 amounts.")
+                for index, amount in enumerate(presets):
+                    if not isinstance(amount, int) or isinstance(amount, bool) or amount < 0:
+                        raise DocumentValidationError(
+                            f"price.presets[{index}] must be a non-negative integer amount.")
+                if len(set(presets)) != len(presets):
+                    raise DocumentValidationError("price.presets must not repeat an amount.")
+            # Migration comfort: a legacy suggested_amount counts as a way to pick until it is folded into
+            # presets, so existing documents keep validating.
+            has_choice = bool(presets) or price.get("allow_custom") or price.get("suggested_amount")
+            if not has_choice:
+                raise DocumentValidationError(
+                    "A customer_chooses price must offer presets or allow a custom amount; otherwise the "
+                    "customer has nothing to choose.")
+            minimum, maximum = price.get("min_amount"), price.get("max_amount")
+            if minimum is not None and maximum is not None and maximum < minimum:
+                raise DocumentValidationError("price.max_amount must not be less than price.min_amount.")
+            for index, amount in enumerate(presets or []):
+                if minimum is not None and amount < minimum:
+                    raise DocumentValidationError(f"price.presets[{index}] is below price.min_amount.")
+                if maximum is not None and amount > maximum:
+                    raise DocumentValidationError(f"price.presets[{index}] is above price.max_amount.")
         else:
             if price.get("unit_amount") is None:
                 raise DocumentValidationError("price.unit_amount must be provided unless pricing_model is customer_chooses.")

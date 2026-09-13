@@ -15,11 +15,17 @@
       "minLength": 1
     },
     "stripe_price_id": {
-      "type": ["string", "null"],
+      "type": [
+        "string",
+        "null"
+      ],
       "description": "Stripe price ID after synchronization. Null for local prices that have not synced yet."
     },
     "previous_price_id": {
-      "type": ["string", "null"],
+      "type": [
+        "string",
+        "null"
+      ],
       "description": "Optional lineage pointer when an archived Stripe Price is replaced."
     },
     "currency": {
@@ -58,7 +64,14 @@
     },
     "context": {
       "type": "string",
-      "enum": ["standard", "sale", "flash_sale", "upsell", "downsell", "order_bump"]
+      "enum": [
+        "standard",
+        "sale",
+        "flash_sale",
+        "upsell",
+        "downsell",
+        "order_bump"
+      ]
     },
     "discount_pct": {
       "type": "number",
@@ -67,30 +80,44 @@
     },
     "pricing_model": {
       "type": "string",
-      "enum": ["one_time", "recurring", "customer_chooses"],
-      "default": "one_time"
+      "enum": [
+        "one_time",
+        "recurring",
+        "customer_chooses"
+      ],
+      "default": "one_time",
+      "description": "How the amount is decided. customer_chooses is a TIP JAR: the buyer picks, so unit_amount is not the answer for it -- presets and/or allow_custom are."
     },
     "min_amount": {
       "type": "integer",
       "minimum": 0,
-      "description": "Minimum amount the customer can enter. Used when pricing_model is customer_chooses."
+      "description": "Smallest amount the buyer may pay, in the smallest currency unit. customer_chooses only. Enforced server-side at checkout, never only in the UI."
     },
     "suggested_amount": {
       "type": "integer",
       "minimum": 0,
-      "description": "Pre-filled suggested amount shown to the customer. Used when pricing_model is customer_chooses."
+      "description": "DEPRECATED 2026-09-13 in favour of presets[]. Kept so existing documents still validate; migrate it in as the single preset and stop writing it."
     },
     "recurring": {
       "oneOf": [
-        { "type": "null" },
+        {
+          "type": "null"
+        },
         {
           "type": "object",
           "additionalProperties": false,
-          "required": ["interval"],
+          "required": [
+            "interval"
+          ],
           "properties": {
             "interval": {
               "type": "string",
-              "enum": ["day", "week", "month", "year"]
+              "enum": [
+                "day",
+                "week",
+                "month",
+                "year"
+              ]
             },
             "interval_count": {
               "type": "integer",
@@ -107,13 +134,22 @@
     },
     "fee_handling": {
       "type": "string",
-      "enum": ["standard", "split", "net_guaranteed"],
+      "enum": [
+        "standard",
+        "split",
+        "net_guaranteed"
+      ],
       "description": "Merchant's share of the fees: standard = merchant absorbs all, split = shared 50/50 (buyer price grossed up by half the fees), net_guaranteed = buyer covers all (merchant nets tenant_keyed_amount)."
     },
     "fee_breakdown": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["tenant_keyed_amount", "stripe_fee", "platform_fee", "net_payout"],
+      "required": [
+        "tenant_keyed_amount",
+        "stripe_fee",
+        "platform_fee",
+        "net_payout"
+      ],
       "properties": {
         "tenant_keyed_amount": {
           "type": "integer",
@@ -136,7 +172,13 @@
     "metadata": {
       "type": "object",
       "additionalProperties": {
-        "type": ["string", "number", "integer", "boolean", "null"]
+        "type": [
+          "string",
+          "number",
+          "integer",
+          "boolean",
+          "null"
+        ]
       }
     },
     "created_at": {
@@ -146,20 +188,58 @@
     "updated_at": {
       "type": "integer",
       "minimum": 0
+    },
+    "presets": {
+      "type": "array",
+      "items": {
+        "type": "integer",
+        "minimum": 0
+      },
+      "maxItems": 8,
+      "description": "Amounts offered as buttons, in the smallest currency unit. CHARGED amounts -- what the buyer pays, inclusive of whatever the fee_handling mode adds, exactly as unit_amount is for a fixed price. customer_chooses only."
+    },
+    "max_amount": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Largest amount the buyer may pay. A tenant guardrail for a sensible range, NOT a compliance limit -- platforms do not cap tips. customer_chooses only."
+    },
+    "allow_custom": {
+      "type": "boolean",
+      "description": "Whether the buyer may type their own amount alongside the presets. customer_chooses only."
+    },
+    "allow_recurring": {
+      "type": "boolean",
+      "description": "Whether the buyer may make the tip recurring. customer_chooses only."
+    },
+    "recurring_interval": {
+      "type": "string",
+      "enum": [
+        "month",
+        "year"
+      ],
+      "description": "Interval offered when allow_recurring is true."
     }
   },
   "if": {
-    "required": ["pricing_model"],
+    "required": [
+      "pricing_model"
+    ],
     "properties": {
-      "pricing_model": { "const": "customer_chooses" }
+      "pricing_model": {
+        "const": "customer_chooses"
+      }
     }
   },
   "then": {
     "properties": {
-      "unit_amount": { "minimum": 0 }
+      "unit_amount": {
+        "minimum": 0
+      }
     }
   },
   "else": {
-    "required": ["unit_amount"]
+    "required": [
+      "unit_amount"
+    ]
   }
 }
