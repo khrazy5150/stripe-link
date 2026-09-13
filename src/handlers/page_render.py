@@ -28,7 +28,9 @@ from stripe_link.runtime.publishing import (
     load_page_reviews,
     load_tenant_preferences,
     render_funnel_step_html,
+    site_page_slug,
     site_page_type,
+    site_serving_origin,
 )
 
 
@@ -138,6 +140,20 @@ def handler(event, context, *, sites_repo=None, reviews_repo=None):
                     site = sites_repo.get(tenant_id, hint)
                 except Exception:  # noqa: BLE001 - identity resolution must never break a preview
                     site = None
+        # The preview IS the published renderer, so it has to anchor the page at the SAME origin the artifact
+        # will. render_page's fallback -- used whenever the caller passes no home_url -- resolves only a
+        # verified custom domain, while publishing resolves the free platform host too. So a Site serving on
+        # *.jbay.uk published a breadcrumb and a storefront header that the preview never showed, and the
+        # tenant could not see what they were shipping. Same divergence, same cause, as the social row that
+        # rendered in the preview and vanished on the saved page.
+        page_site_slug = site_page_slug(site, str(page.get("page_id") or ""))
+        serving_origin = site_serving_origin(site, page_site_slug)
+        if serving_origin:
+            preview_home_url = f"{serving_origin}/"
+            slug_path = "" if page_site_slug in ("", "/") else page_site_slug.lstrip("/")
+            canonical_url = f"{serving_origin}/{slug_path}"
+        else:
+            preview_home_url = None   # None, not "": render_page treats None as "derive it yourself"
         if reviews_repo is None and os.environ.get("REVIEWS_TABLE"):
             reviews_repo = reviews_repository()
         reviews = load_page_reviews(reviews_repo, str(page.get("tenant_id") or ""), products_by_id, str((site or {}).get("site_id") or ""))
@@ -161,6 +177,7 @@ def handler(event, context, *, sites_repo=None, reviews_repo=None):
             page, offer, products_by_id, selected_prices, checkout_url, api_base_url,
             services_by_id=services_by_id, offers_by_id=offers_by_id, canonical_url=canonical_url,
             site=site, page_type=site_page_type(site, str(page.get("page_id") or "")), reviews=reviews,
+            home_url=preview_home_url,
             price_context=price_context, preferences=preferences,
         )
         # Page health, alongside the render: what would keep this page's structured data from earning a rich

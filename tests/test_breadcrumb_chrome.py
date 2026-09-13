@@ -137,3 +137,34 @@ class BuilderTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PreviewParityTests(unittest.TestCase):
+    """The preview has to anchor the page at the SAME origin the published artifact will.
+
+    Asked 2026-09-12: "the breadcrumbs don't show in the Preview (they never did) -- is that by design?" It
+    was not. render_page's fallback -- used whenever the caller passes no home_url -- resolves only a VERIFIED
+    CUSTOM DOMAIN, while publishing resolves the free platform host too. So a Site serving on *.jbay.uk shipped
+    a breadcrumb and a storefront header the tenant could never see before publishing.
+
+    Third instance of one shape this week: the preview and the publisher deriving the same fact separately.
+    The social row that rendered in the preview and vanished on the saved page was the first; the link trust
+    boundary reading home_url instead of the tenant's own domain was the second.
+    """
+
+    HANDLER = (pathlib.Path(__file__).resolve().parents[1]
+               / "src" / "handlers" / "page_render.py").read_text(encoding="utf-8")
+
+    def test_the_preview_resolves_the_serving_origin(self):
+        self.assertIn("site_serving_origin(site, page_site_slug)", self.HANDLER)
+        self.assertIn("home_url=preview_home_url", self.HANDLER)
+
+    def test_it_uses_the_publishers_own_helper(self):
+        # Not a second derivation that has to agree -- literally the function publishing calls.
+        self.assertIn("site_serving_origin", self.HANDLER.split("import", 1)[1][:2000])
+
+    def test_no_site_still_means_derive_rather_than_none(self):
+        # None tells render_page "work it out yourself"; "" would assert there IS no origin and kill the
+        # chrome on a page whose Site simply was not resolved. The distinction is load-bearing.
+        block = self.HANDLER.split("serving_origin = site_serving_origin", 1)[1][:500]
+        self.assertIn("preview_home_url = None", block)
