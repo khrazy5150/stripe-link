@@ -188,14 +188,9 @@
         <header class="modal-card-header">
           <div>
             <h2 id="stripe-onboarding-title">{{ wizardTitle }}</h2>
-            <p>Step {{ wizardStep }} of {{ wizardMaxStep }}</p>
-            <div class="onboarding-progress" aria-hidden="true">
-              <span
-                v-for="step in wizardMaxStep"
-                :key="step"
-                :class="['onboarding-dot', { active: step === wizardStep, complete: step < wizardStep }]"
-              ></span>
-            </div>
+            <!-- The shared rail (components/shared/WizardSteps.vue). The dots said how MANY steps there
+                 were and nothing about what they held, and the counter above them said the same thing twice. -->
+            <WizardSteps :steps="WIZARD_STEPS" :current="wizardStep" label="Stripe connection progress" />
           </div>
           <button class="modal-close" type="button" aria-label="Close" @click="closeWizard">&times;</button>
         </header>
@@ -303,6 +298,7 @@
 </template>
 
 <script setup>
+import WizardSteps from "./shared/WizardSteps.vue";
 import { computed, onMounted, ref, watch } from "vue";
 import StripeKeyPanel from "./StripeKeyPanel.vue";
 import { useStripeKeysStore } from "../stores/stripeKeys";
@@ -335,6 +331,9 @@ function bnplStatusLabel(status) {
 }
 const wizardMaxStep = 4;
 const wizardOpen = ref(false);
+// Named steps for the shared rail. Names, not numbers: "Step 2 of 4" tells you how far
+// along you are and nothing about what is left.
+const WIZARD_STEPS = ["Permission", "Authorize", "Confirm", "Onboarding"];
 const wizardStep = ref(1);
 const wizardIntent = ref("create");
 const wizardSaving = ref(false);

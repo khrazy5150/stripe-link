@@ -1303,7 +1303,8 @@
         <header class="modal-card-header">
           <div>
             <h2 id="landingWizardTitle">{{ isEditingOfferless ? "Edit page" : "Create Landing Page" }}</h2>
-            <p v-if="!isEditingOfferless">Step {{ displayStep }} of {{ displayTotal }}</p>
+            <!-- No "Step 1 of 5" line: the rail below says where you are AND what each step holds,
+                 which is strictly more than a counter, and two of them disagreeing is a bug waiting. -->
           </div>
           <button type="button" class="modal-close" aria-label="Close landing page wizard" @click="closeWizard">×</button>
         </header>
@@ -3481,13 +3482,18 @@ const wizardTotalSteps = computed(() => (form.pageKind === "offer" ? 4 : 2));
 // then "Step 4 of 5", which looks like the wizard lost one.
 const wizardSkipsGoal = computed(() => form.pageKind === "offer" && selectedOfferIsSocialPage.value);
 const displayTotal = computed(() => wizardTotalSteps.value + 1 - (wizardSkipsGoal.value ? 1 : 0));
-// Labels for the shared step rail. Built rather than constant because the Site step is prepended and the goal
-// step is skipped for a Social Page -- the rail has to describe the path this page is actually taking.
+// Labels for the shared step rail. Built rather than constant because this wizard has THREE possible paths:
+// an offer page runs Site > Type > Goal > Configure > Review, a Social Page drops the goal step, and an
+// offer-less page (storefront, category, profile) finishes at Details.
+//
+// The list must always be exactly displayTotal long. The first version was four labels sliced to length,
+// which silently showed a four-step rail on the five-step offer path -- a rail that lies about how much is
+// left is worse than the dots it replaced. wizardStepCountMatchesLabels() below is asserted by a test.
 const wizardStepLabels = computed(() => {
+  if (form.pageKind !== "offer") return ["Site", "Type", "Details"];
   const labels = ["Site", "Type"];
   if (!wizardSkipsGoal.value) labels.push("Goal");
-  labels.push("Details");
-  return labels.slice(0, displayTotal.value);
+  return [...labels, "Configure", "Review"];
 });
 const displayStep = computed(() => {
   if (sitePhase.value) return 1;

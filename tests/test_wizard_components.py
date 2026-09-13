@@ -23,7 +23,11 @@ CARD = (SHARED / "WizardChoiceCard.vue").read_text(encoding="utf-8")
 CSS = (ROOT / "dashboard" / "src" / "styles.css").read_text(encoding="utf-8")
 PRODUCTS = (ROOT / "dashboard" / "src" / "components" / "Products.vue").read_text(encoding="utf-8")
 PAGES = (ROOT / "dashboard" / "src" / "components" / "LandingPages.vue").read_text(encoding="utf-8")
+DASHBOARD = (ROOT / "dashboard" / "src" / "components" / "Dashboard.vue").read_text(encoding="utf-8")
+KEYS = (ROOT / "dashboard" / "src" / "components" / "StripeKeys.vue").read_text(encoding="utf-8")
 WIZARDS = {"Products.vue": PRODUCTS, "LandingPages.vue": PAGES}
+# Every wizard in the app, including the two Stripe Connect ones, which do not use choice cards.
+ALL_WIZARDS = {**WIZARDS, "Dashboard.vue": DASHBOARD, "StripeKeys.vue": KEYS}
 
 
 def _base_check_rule():
@@ -46,10 +50,19 @@ class AdoptionTests(unittest.TestCase):
             self.assertIn('shared/WizardChoiceCard.vue"', src, name)
 
     def test_no_wizard_still_draws_its_own_progress(self):
-        # The landing-page wizard's dots and the product wizard's hand-rolled <ol> are both gone.
-        for name, src in WIZARDS.items():
+        # Four wizards, four hand-rolled rails: the landing page's dots, the product wizard's <ol>, and the
+        # two Stripe Connect ones' onboarding-dots. All four now render the same component.
+        for name, src in ALL_WIZARDS.items():
+            self.assertIn("WizardSteps", src, name)
             self.assertNotIn('class="wizard-progress"', src, name)
             self.assertNotIn('<ol class="wizard-steps"', src, name)
+            self.assertNotIn("onboarding-dot", src, name)
+
+    def test_no_wizard_counts_its_own_steps_in_prose(self):
+        # "Step 2 of 4" beside a rail says the same thing twice, and the two can disagree -- which is exactly
+        # what happened when the landing-page rail was built four labels long for a five-step path.
+        for name, src in ALL_WIZARDS.items():
+            self.assertNotIn("Step {{", src, name)
 
     def test_no_wizard_still_draws_its_own_choice_card(self):
         for name, src in WIZARDS.items():
@@ -108,11 +121,32 @@ class StepRailTests(unittest.TestCase):
         # A visual-only rail tells a screen-reader user nothing about where they are.
         self.assertIn('aria-current', STEPS)
 
+    def test_every_landing_wizard_path_is_fully_labelled(self):
+        """The rail must be exactly as long as the wizard, on all three paths.
+
+        The first version was four labels `.slice()`d to length, which showed a FOUR-step rail on the
+        five-step offer path -- a rail that lies about how much is left is worse than the dots it replaced.
+        Recomputed here from the same expressions the component uses.
+        """
+        # wizardTotalSteps: offer -> 4, else 2. displayTotal: that + 1 (the prepended Site step) - 1 if the
+        # goal step is skipped (a Social Page).
+        for kind, skips_goal, expected in (("offer", False, 5), ("offer", True, 4), ("storefront", False, 3)):
+            total = (4 if kind == "offer" else 2) + 1 - (1 if skips_goal else 0)
+            if kind != "offer":
+                labels = ["Site", "Type", "Details"]
+            else:
+                labels = ["Site", "Type"] + ([] if skips_goal else ["Goal"]) + ["Configure", "Review"]
+            self.assertEqual(len(labels), total, f"{kind} skips_goal={skips_goal}")
+            self.assertEqual(total, expected)
+
     def test_the_landing_wizard_labels_the_path_it_is_actually_taking(self):
         # Its step count varies -- a Social Page skips the goal step -- so constant labels would mislabel it.
         block = PAGES.split("const wizardStepLabels = computed(", 1)[1].split("});", 1)[0]
         self.assertIn("wizardSkipsGoal", block)
-        self.assertIn("displayTotal", block)
+        self.assertIn("form.pageKind", block)
+        # Built, not truncated. `.slice()`-to-length is what produced the four-label rail on a five-step path:
+        # it hides the mismatch instead of failing on it.
+        self.assertNotIn(".slice(", block)
 
 
 if __name__ == "__main__":

@@ -2194,23 +2194,8 @@ button:disabled {
   font-weight: 700;
 }
 
-.onboarding-progress {
-  display: flex;
-  gap: 0.8rem;
-  margin-top: 1.2rem;
-}
 
-.onboarding-dot {
-  width: 1rem;
-  height: 1rem;
-  border-radius: 999px;
-  background: var(--line-strong);
-}
 
-.onboarding-dot.active,
-.onboarding-dot.complete {
-  background: var(--success-strong);
-}
 
 .onboarding-body {
   display: grid;
@@ -6972,6 +6957,8 @@ button:disabled {
   font-variant-numeric: tabular-nums;
   color: var(--text, #111827);
 }
+
+/* .onboarding-progress / .onboarding-dot retired 2026-09-13 -- every wizard uses WizardSteps. */
 
 /* --- Shared wizard chrome (components/shared/WizardSteps.vue, WizardChoiceCard.vue) --- */
 .wizard-steps {
