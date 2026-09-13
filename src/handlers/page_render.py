@@ -24,6 +24,7 @@ from stripe_link.runtime.html import (
     structured_data_warnings,
 )
 from stripe_link.runtime.publishing import (
+    attach_owner_display_name,
     find_site_for_page,
     load_page_reviews,
     load_tenant_preferences,
@@ -171,8 +172,16 @@ def handler(event, context, *, sites_repo=None, reviews_repo=None):
         # fine. Same failure shape as the favicon: correct-looking output from a read nobody made.
         preferences = load_tenant_preferences(
             tenant_profiles_repository() if os.environ.get("TENANT_PROFILES_TABLE") else None,
-            str(page.get("tenant_id") or ""),
+            tenant_id,
         )
+        # Same name the published artifact will show -- the preview IS the published renderer, and this is the
+        # fourth time this week that deriving it separately would have made the two disagree.
+        owner_repo = None
+        if os.environ.get("USER_PROFILES_TABLE"):
+            from stripe_link.repositories.documents import user_profiles_repository
+
+            owner_repo = user_profiles_repository()
+        preferences = attach_owner_display_name(preferences, owner_repo, tenant_id)
         html = render_page(
             page, offer, products_by_id, selected_prices, checkout_url, api_base_url,
             services_by_id=services_by_id, offers_by_id=offers_by_id, canonical_url=canonical_url,

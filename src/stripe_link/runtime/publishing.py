@@ -926,6 +926,32 @@ def load_tenant_preferences(repository: Any | None, tenant_id: str) -> dict[str,
         return {}
 
 
+def attach_owner_display_name(preferences: dict[str, Any], repository: Any | None, tenant_id: str) -> dict[str, Any]:
+    """Copy the owner's display name onto the render preferences, for the hero identity block.
+
+    The canonical string lives on the USER profile -- it is what the Profile page edits and what the
+    dashboard's user pill shows -- while the tenant profile only carries `owner.first_name`/`last_name`,
+    written once at signup and never updated since. So a tenant who renamed themselves would see the old name
+    on every page, which is the freezing problem this codebase keeps rediscovering.
+
+    Read at (tenant_id, tenant_id) because that IS the owner: signup derives the tenant id from the first
+    user's id (`auth.py`, custom:client_id defaulting to user_id), so the owner's row is the one whose
+    user_id equals the tenant. A page carries no author and publish runs from a stream holding only the page,
+    so the owner is the only person there is to ask about.
+
+    Best-effort, like every other preference read here: a page must publish whether or not this succeeds, and
+    the tenant profile's signup-time name is a perfectly good fallback.
+    """
+    if repository is None or not tenant_id:
+        return preferences
+    try:
+        profile = repository.get(tenant_id, tenant_id) or {}
+    except Exception:  # noqa: BLE001
+        return preferences
+    name = str(profile.get("display_name") or "").strip()
+    return {**preferences, "display_name": name} if name else preferences
+
+
 # A tenant font is the ONE font a page still fetches cross-origin: the catalogue's are embedded by the
 # service via fs=true. That fetch is exactly the request Chromium and Firefox refuse for a missing
 # Access-Control-Allow-Origin which curl -- same machine, same network, same origin header -- is served
@@ -1148,6 +1174,15 @@ def publish_page_document(
     # renderer links) and the tenant's own (a data: URI, here). They existed for the same reason -- the
     # cross-origin font fetch that Chromium and Firefox blocked -- so they should not be able to disagree.
     tenant_preferences = load_tenant_preferences(tenant_profiles_repository, tenant_id)
+    # The hero identity block renders the OWNER's current name, not the one recorded at signup. Imported
+    # inside the function, as the other optional repositories here are, so the module does not pull a table
+    # binding it may never use.
+    owner_repo = None
+    if os.environ.get("USER_PROFILES_TABLE"):
+        from stripe_link.repositories.documents import user_profiles_repository
+
+        owner_repo = user_profiles_repository()
+    tenant_preferences = attach_owner_display_name(tenant_preferences, owner_repo, tenant_id)
     if FONT_EMBED:
         tenant_preferences = embed_imported_fonts(
             tenant_preferences, s3_client, os.environ.get("FONTS_BUCKET", ""),

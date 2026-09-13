@@ -513,7 +513,17 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     # Hangs off the TOP edge exactly as the bottom-left overlay hangs off the bottom -- about half the
     # avatar above the artwork. .has-avatar-top reserves the room, mirroring .has-avatar, so the overhang
     # pushes the hero down rather than colliding with whatever sits above it.
+    # Hangs off the BOTTOM edge, centred -- the linkcloud/linktree shape, and what a page with a name and a
+    # slogan under the avatar wants. Same overhang as the bottom-left overlay, so it reuses .has-avatar.
+    "    .sl-avatar-wrap.sl-avatar--overlay_bottom{left:50%;transform:translateX(-50%)}",
     "    .sl-avatar-wrap.sl-avatar--overlay_top{bottom:auto;top:-5.8rem;left:50%;transform:translateX(-50%)}",
+    # Name + slogan, the identity block under the avatar. Centred always: it belongs to a centred avatar, and
+    # every reference page in this category centres it.
+    "    .sl-hero-identity{display:grid;gap:0.4rem;justify-items:center;text-align:center;margin:1.6rem 0 0}",
+    "    .sl-hero-identity-name{font-family:var(--sl-font-heading);font-weight:800;font-size:2.4rem;line-height:1.2;color:var(--sl-text);margin:0}",
+    # One line, always. A slogan that wraps on a phone stops being a slogan and starts being a paragraph --
+    # the length cap makes that rare, and this makes it impossible.
+    "    .sl-hero-identity-tagline{font-size:1.5rem;line-height:1.4;color:var(--sl-muted);margin:0;max-width:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}",
     "    .sl-avatar-wrap.sl-avatar--inline,.sl-avatar-wrap.sl-avatar--centered{position:static;bottom:auto;left:auto;margin-top:1.6rem}",
     "    .sl-avatar-wrap.sl-avatar--centered{margin-left:auto;margin-right:auto}",
     "    .sl-avatar{width:100%;height:100%;border-radius:50%;object-fit:cover;background:var(--sl-hero-bg);display:block}",
@@ -2243,7 +2253,7 @@ def first_offer_product(offer: dict[str, Any], products_by_id: dict[str, dict[st
 # `hidden` exists because the avatar became a REFERENCE: an empty page-level avatar_url now means "inherit
 # the store's", not "no avatar", so without this a tenant who uploads a store avatar has no way to keep it
 # off one particular page.
-AVATAR_PLACEMENTS = ("overlay", "overlay_top", "inline", "centered", "hidden")
+AVATAR_PLACEMENTS = ("overlay", "overlay_bottom", "overlay_top", "inline", "centered", "hidden")
 
 
 def avatar_placement(section: dict[str, Any]) -> str:
@@ -2471,6 +2481,60 @@ def render_hero_brand(section: dict[str, Any], offer: dict[str, Any]) -> list[st
     return lines
 
 
+# ONE cap, defined where the document is validated. Two constants that must agree is how a value ends up
+# enforced at 40 in one place and 60 in another, and the renderer clipping a string the validator accepted.
+from stripe_link.domain.documents import HERO_TAGLINE_MAX_LENGTH as TAGLINE_MAX_LENGTH
+
+
+def tenant_display_name() -> str:
+    """The creator's own name, as the dashboard's user pill shows it.
+
+    Read from the tenant profile the renderer ALREADY loads, so this costs no extra work at publish. Two
+    sources in one document, preferred in this order:
+
+    - `display_name`, which publish copies in from the owner's user profile. That is the canonical string --
+      the Profile page edits it, and it is what the pill displays.
+    - `owner.first_name` + `owner.last_name`, written at signup. The fallback for when the copy is absent
+      (a tenant that has not published since this shipped) or the read failed.
+
+    It is the OWNER's name specifically, never "a user's": a page carries no author, and publish runs from a
+    DynamoDB stream holding only the page, so there is no signed-in user to ask. The owner is the one person
+    a tenant always has exactly one of.
+    """
+    prefs = _RENDER_PREFERENCES
+    name = str(prefs.get("display_name") or "").strip()
+    if name:
+        return name
+    owner = prefs.get("owner") or {}
+    parts = [str(owner.get("first_name") or "").strip(), str(owner.get("last_name") or "").strip()]
+    return " ".join(part for part in parts if part)
+
+
+def render_hero_identity(section: dict[str, Any]) -> list[str]:
+    """The creator's name and slogan, under the avatar.
+
+    Opt-in per page: most pages are selling something and want the product's headline, not a person's name.
+    The NAME is derived, never stored -- same rule as the avatar and the brand label, so renaming yourself
+    updates every page instead of leaving each one frozen at whatever was true the day it was made. Only the
+    slogan is the page's own, because it is the page's own sentence.
+    """
+    if not section.get("show_identity"):
+        return []
+    name = tenant_display_name()
+    tagline = str(section.get("tagline") or "").strip()[:TAGLINE_MAX_LENGTH]
+    if not name and not tagline:
+        return []
+    lines = ['      <div class="sl-hero-identity">']
+    if name:
+        # Not a heading: on a link hub the brand mark already carries the page's H1, and a second one here
+        # would give the page two. plans/SEMANTIC_HTML.md keeps the outline to a single H1.
+        lines.append(f'        <p class="sl-hero-identity-name">{escape(name)}</p>')
+    if tagline:
+        lines.append(f'        <p class="sl-hero-identity-tagline">{escape(tagline)}</p>')
+    lines.append("      </div>")
+    return lines
+
+
 def render_hero_overlays(section: dict[str, Any], offer: dict[str, Any]) -> list[str]:
     """The avatar, which sits OUTSIDE the figure because an inline or centred one is in normal flow below
     the image rather than painted on it."""
@@ -2547,17 +2611,17 @@ def render_hero_media(
     alt = localized_alt(str(product.get("name") or offer.get("name") or "Product image"))
     section_id = escape(str(section.get("id", "hero-media")))
     autoplay = bool(section.get("autoplay"))
-    overlays = render_hero_overlays(section, offer)
+    overlays = render_hero_overlays(section, offer) + render_hero_identity(section)
     brand = render_hero_brand(section, offer)
     # has-avatar reserves the space the overlay OVERHANGS into. An inline or centred avatar sits in normal
     # flow and needs no reserved gap -- keeping it would leave a hole under the hero.
     # Both OVERLAYS overhang the artwork and need room reserved -- one below, one above. inline/centred sit
     # in normal flow and need none; hidden has nothing to reserve for.
     placement = avatar_placement(section)
-    has_avatar = placement in ("overlay", "overlay_top") and bool(
+    has_avatar = placement in ("overlay", "overlay_bottom", "overlay_top") and bool(
         str(section.get("avatar_url") or "") or str(_RENDER_PREFERENCES.get("avatar_url") or ""))
     overhang = ("" if not has_avatar else
-                (" has-avatar" if placement == "overlay" else " has-avatar-top"))
+                (" has-avatar-top" if placement == "overlay_top" else " has-avatar"))
     media_class = "sl-hero-media" + overhang
     slides = [
         f"        <div class=\"sl-hero-slide\">"

@@ -551,6 +551,7 @@
                     <span>Avatar placement</span>
                     <select v-model="builder.avatar_placement">
                       <option value="overlay">Overlapping hero, bottom left</option>
+                      <option value="overlay_bottom">Overlapping hero, bottom center</option>
                       <option value="overlay_top">Overlapping hero, top center</option>
                       <option value="inline">Below the hero, left</option>
                       <option value="centered">Below the hero, centered</option>
@@ -558,6 +559,45 @@
                     </select>
                     <small class="field-note">Overlapping suits a page with a cover image. Without one, choose a position below the hero — an overlapping avatar with nothing behind it reads as a mistake.</small>
                   </label>
+                </label>
+
+                <!-- Not every tenant has a brand to promote; most creators are promoting themselves. Hiding it
+                     writes a composition override, the SAME mechanism the Page Sections panel uses, rather than
+                     a second way to switch a section off. -->
+                <label class="builder-switch-row">
+                  <span class="builder-switch" @click.stop>
+                    <input v-model="brandLabelHidden" type="checkbox" aria-label="Hide the brand name" />
+                    <span aria-hidden="true"></span>
+                  </span>
+                  <span>Hide brand name</span>
+                </label>
+                <small class="field-note">
+                  Removes the <strong>● {{ brandLabelFallback || "brand" }}</strong> mark above the hero. Turn it off
+                  if this page is about a person rather than a business — the name below can stand in for it.
+                </small>
+
+                <label class="builder-switch-row">
+                  <span class="builder-switch" @click.stop>
+                    <input v-model="builder.show_identity" type="checkbox" aria-label="Show name and slogan" />
+                    <span aria-hidden="true"></span>
+                  </span>
+                  <span>Show name and slogan</span>
+                </label>
+                <small class="field-note">
+                  Puts <strong>{{ ownerDisplayName || "your name" }}</strong> under the avatar, with an optional line
+                  beneath it. The name comes from your Profile, so changing it there updates every page.
+                </small>
+                <label v-if="builder.show_identity" class="offer-field">
+                  <span>Slogan <em>(optional)</em></span>
+                  <input
+                    v-model.trim="builder.tagline"
+                    type="text"
+                    :maxlength="HERO_TAGLINE_MAX"
+                    placeholder="be kind" />
+                  <small class="field-note">
+                    {{ HERO_TAGLINE_MAX - (builder.tagline || "").length }} characters left — the cap keeps it to one
+                    line on a phone, where nearly all of this traffic is.
+                  </small>
                 </label>
 
                 <label class="builder-switch-row">
@@ -2536,6 +2576,9 @@ const selectedOfferCta = computed(() => selectedOffer.value?.presentation?.cta |
 // offer_type is being retired (plans/OFFER_MODEL_REDESIGN.md): read it through a derive helper — the stored
 // field wins during migration, else infer from the landing items — so this keeps working once it's dropped.
 // Mirrors LEAD_COMPOSITIONS in domain/composition.py; pinned by tests/test_lead_gen_composition.py.
+// Mirrors HERO_TAGLINE_MAX_LENGTH in domain/documents.py -- a slogan has to fit ONE line on a phone, which
+// is where nearly all of this traffic is. Pinned by a test so the two cannot drift.
+const HERO_TAGLINE_MAX = 40;
 const LEAD_COMPOSITION_TYPES = new Set(["lead_capture", "lead_call", "lead_bridge", "lead_social"]);
 const LEAD_COMPOSITIONS = {
   capture_email: "lead_capture",
@@ -2659,6 +2702,18 @@ async function toggleSection(key, enabled) {
   }
   await autoSavePage();
 }
+// "Hide brand name" writes a composition OVERRIDE -- the same mechanism the Page Sections panel uses, so the
+// two switches describe one state instead of becoming two ways to turn brand_label off that can disagree.
+// Inverted, because the control is phrased as hiding: a tenant reaching for it wants the brand gone, and a
+// switch labelled "hide" that has to be turned OFF to hide is a puzzle.
+const brandLabelHidden = computed({
+  get: () => !isSectionEnabled("brand_label"),
+  set: (hidden) => { toggleSection("brand_label", !hidden); },
+});
+// The name the identity block will show. Mirrors tenant_display_name() in runtime/html.py: the owner's
+// display name as the Profile page and the user pill show it.
+const ownerDisplayName = computed(() => profileStore.displayName || "");
+
 // --- Advanced Color Settings (plans/ADVANCED_COLOR_SETTINGS.md) ---
 const previewEl = ref(null);
 // Effective colour for a token: the override if set, else the preset's value read off the live preview.
@@ -3167,6 +3222,8 @@ function defaultBuilderForm() {
     // Socialite hero overlays (plans/SOCIALITE_PARITY.md).
     avatar_url: "",
     avatar_placement: "overlay",
+    show_identity: false,
+    tagline: "",
     brand_overlay: false,
     brand_position: "top-right",
     brand_dot_pulse: false,
@@ -4076,6 +4133,8 @@ function populateBuilderFromPage(page) {
     autoplay: Boolean(heroMedia.autoplay),
     avatar_url: heroMedia.avatar_url || "",
     avatar_placement: heroMedia.avatar_placement || "overlay",
+    show_identity: Boolean(heroMedia.show_identity),
+    tagline: heroMedia.tagline || "",
     brand_overlay: Boolean(heroMedia.brand_overlay),
     brand_position: heroMedia.brand_position || "top-right",
     brand_dot_pulse: Boolean(heroMedia.brand_dot_pulse),
@@ -4393,6 +4452,11 @@ function builderSectionCandidates(intent) {
     brand_position: builder.brand_position || "top-right",
     brand_dot_pulse: builder.brand_dot_pulse ? true : undefined,
     brand_text: builder.brand_overlay ? brandText : "",
+    // The identity block. The NAME is not stored -- it resolves from the owner's profile at render, so
+    // renaming yourself updates every page instead of leaving each one frozen. Only the switch and the
+    // page's own sentence travel with the document.
+    show_identity: builder.show_identity ? true : undefined,
+    tagline: builder.show_identity && builder.tagline ? builder.tagline.slice(0, HERO_TAGLINE_MAX) : undefined,
   });
   // Hero copy. A listicle's hero is TARGET-BOUND (the renderer fills it with each carousel product's own
   // name/description and swaps per slide), so its stored copy is always empty — a fixed hero would sit static

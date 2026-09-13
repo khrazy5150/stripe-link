@@ -10,6 +10,9 @@ export const useProfileStore = defineStore("profile", {
     loading: false,
     loaded: false,
     storeAvatarUrl: "",
+    // The owner's own name, as the user pill shows it -- distinct from the BUSINESS name above. A link page
+    // is often about a person rather than a company, which is the whole reason the brand mark can be hidden.
+    displayName: "",
   }),
   getters: {
     businessName: (state) => state.business.name || "",
@@ -37,7 +40,11 @@ export const useProfileStore = defineStore("profile", {
         apiRequest("/tenant/avatar"),
       ]);
       if (profile.status === "fulfilled") {
-        const business = (profile.value.profile || {}).business || {};
+        const doc = profile.value.profile || {};
+        this.displayName = String(doc.display_name
+          || [doc.first_name, doc.last_name].filter(Boolean).join(" ")
+          || "").trim();
+        const business = doc.business || {};
         this.business = {
           name: business.name || "",
           phone: business.phone || "",

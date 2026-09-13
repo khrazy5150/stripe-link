@@ -1511,6 +1511,11 @@ Resources:
         # Entitlement gate reads the tenant's denormalized entitlements to gate this feature on the plan.
         - DynamoDBReadPolicy:
             TableName: !Ref TenantProfilesTable
+        # The hero identity block renders the OWNER's CURRENT name. The canonical string is on the user
+        # profile -- the tenant profile only carries the one recorded at signup, which goes stale the moment
+        # someone renames themselves.
+        - DynamoDBReadPolicy:
+            TableName: !Ref UserProfilesTable
         - DynamoDBCrudPolicy:
             TableName: !Ref PagesTable
         # The page listing derives conversions + revenue from paid orders (attribution.page_id) rather
@@ -1573,6 +1578,11 @@ Resources:
         # otherwise an imported font previews as the system stack while presets preview correctly.
         - DynamoDBReadPolicy:
             TableName: !Ref TenantProfilesTable
+        # The hero identity block renders the OWNER's CURRENT name. The canonical string is on the user
+        # profile -- the tenant profile only carries the one recorded at signup, which goes stale the moment
+        # someone renames themselves.
+        - DynamoDBReadPolicy:
+            TableName: !Ref UserProfilesTable
       Events:
         PageRender:
           Type: Api

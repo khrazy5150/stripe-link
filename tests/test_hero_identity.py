@@ -1,0 +1,145 @@
+"""The link-in-bio identity header: a centred avatar, the creator's name, and a slogan.
+
+Built 2026-09-13 from the linkcloud/Lola Greiner reference the author supplied: hero image, avatar overlapping
+its BOTTOM CENTRE, name, one-line slogan, then the social row. Three additions, and the through-line is that
+not every tenant is a business -- most creators are promoting themselves, so the brand mark has to be
+optional and a person's name has to be able to take its place.
+"""
+import pathlib
+import unittest
+
+from stripe_link.domain.documents import (
+    HERO_TAGLINE_MAX_LENGTH,
+    DocumentValidationError,
+    validate_page_document,
+)
+from stripe_link.runtime import html as html_module
+
+BUILDER = (pathlib.Path(__file__).resolve().parents[1]
+           / "dashboard" / "src" / "components" / "LandingPages.vue").read_text(encoding="utf-8")
+
+
+def _page(**hero):
+    return {"schema_version": "1", "document_type": "page", "tenant_id": "t", "page_id": "p1",
+            "name": "P", "offer_id": "o1", "route": {"slug": "p"},
+            "sections": [{"id": "hm", "type": "hero_media", **hero}]}
+
+
+class PlacementTests(unittest.TestCase):
+    def test_bottom_centre_is_a_placement(self):
+        self.assertIn("overlay_bottom", html_module.AVATAR_PLACEMENTS)
+        self.assertEqual(html_module.avatar_placement({"avatar_placement": "overlay_bottom"}), "overlay_bottom")
+        validate_page_document(_page(avatar_placement="overlay_bottom"))
+
+    def test_it_overhangs_like_the_bottom_left_one(self):
+        # Same edge, same overhang, so it reuses .has-avatar -- the class that reserves the room the circle
+        # hangs into. Without it the avatar collides with whatever follows the hero.
+        html_module._RENDER_PREFERENCES.clear()
+        html_module._RENDER_PREFERENCES["avatar_url"] = "https://img.example/a.webp"
+        try:
+            markup = html_module.render_hero_media(
+                {"id": "hm", "images": ["https://img.example/h.webp"], "avatar_placement": "overlay_bottom"},
+                {}, {})
+        finally:
+            html_module._RENDER_PREFERENCES.clear()
+        self.assertIn("has-avatar", markup)
+        self.assertNotIn("has-avatar-top", markup)
+        self.assertIn("sl-avatar--overlay_bottom", markup)
+
+    def test_the_css_centres_it(self):
+        css = "\n".join(html_module.UNIVERSAL_BUNDLE_TEMPLATE_STYLES)
+        self.assertIn(".sl-avatar-wrap.sl-avatar--overlay_bottom{left:50%;transform:translateX(-50%)}", css)
+
+
+class IdentityBlockTests(unittest.TestCase):
+    def setUp(self):
+        html_module._RENDER_PREFERENCES.clear()
+
+    def tearDown(self):
+        html_module._RENDER_PREFERENCES.clear()
+
+    def test_nothing_renders_unless_it_is_switched_on(self):
+        # Opt-in: most pages are selling something and want the product's headline, not a person's name.
+        html_module._RENDER_PREFERENCES["display_name"] = "Lola Greiner"
+        self.assertEqual(html_module.render_hero_identity({"tagline": "be kind"}), [])
+
+    def test_the_name_is_derived_never_stored(self):
+        # Same rule as the avatar and the brand label: renaming yourself updates every page, instead of
+        # leaving each one frozen at whatever was true the day it was made.
+        html_module._RENDER_PREFERENCES["display_name"] = "Lola Greiner"
+        markup = "\n".join(html_module.render_hero_identity({"show_identity": True}))
+        self.assertIn("Lola Greiner", markup)
+        # ...and the builder writes only the switch and the slogan into the section -- never the name itself.
+        written = BUILDER.split("show_identity: builder.show_identity", 1)[1].split("});", 1)[0]
+        for frozen in ("display_name", "owner_name", "identity_name"):
+            self.assertNotIn(frozen, written, frozen)
+
+    def test_it_falls_back_to_the_signup_name(self):
+        # display_name is copied in at publish from the owner's user profile. A tenant that has not published
+        # since that shipped has only the signup-time owner block, and a name is better than a blank.
+        html_module._RENDER_PREFERENCES["owner"] = {"first_name": "Keith", "last_name": "De Costa"}
+        self.assertEqual(html_module.tenant_display_name(), "Keith De Costa")
+
+    def test_the_copied_name_wins_over_the_signup_one(self):
+        # Because the signup block is never updated: profile.py edits the USER profile and does not touch it.
+        html_module._RENDER_PREFERENCES["owner"] = {"first_name": "Keith", "last_name": "De Costa"}
+        html_module._RENDER_PREFERENCES["display_name"] = "Lola Greiner"
+        self.assertEqual(html_module.tenant_display_name(), "Lola Greiner")
+
+    def test_the_slogan_is_the_pages_own(self):
+        html_module._RENDER_PREFERENCES["display_name"] = "Lola Greiner"
+        markup = "\n".join(html_module.render_hero_identity({"show_identity": True, "tagline": "be kind"}))
+        self.assertIn("be kind", markup)
+
+    def test_the_name_is_not_a_second_h1(self):
+        # The brand mark already carries the page's H1 on a link hub; a heading here would give it two, which
+        # is exactly what plans/SEMANTIC_HTML.md exists to prevent.
+        html_module._RENDER_PREFERENCES["display_name"] = "Lola Greiner"
+        markup = "\n".join(html_module.render_hero_identity({"show_identity": True, "tagline": "be kind"}))
+        self.assertNotIn("<h1", markup)
+        self.assertNotIn("<h2", markup)
+
+
+class TaglineCapTests(unittest.TestCase):
+    def test_one_cap_not_two(self):
+        # Two constants that must agree is how a value ends up enforced at 40 in one place and 60 in another,
+        # with the renderer clipping a string the validator accepted.
+        self.assertIs(html_module.TAGLINE_MAX_LENGTH, HERO_TAGLINE_MAX_LENGTH)
+        self.assertIn(f"const HERO_TAGLINE_MAX = {HERO_TAGLINE_MAX_LENGTH};", BUILDER)
+
+    def test_a_long_slogan_is_refused(self):
+        validate_page_document(_page(tagline="x" * HERO_TAGLINE_MAX_LENGTH))
+        with self.assertRaises(DocumentValidationError):
+            validate_page_document(_page(tagline="x" * (HERO_TAGLINE_MAX_LENGTH + 1)))
+
+    def test_it_can_never_wrap(self):
+        # The cap makes wrapping rare; this makes it impossible, including for a value saved before the cap.
+        css = "\n".join(html_module.UNIVERSAL_BUNDLE_TEMPLATE_STYLES)
+        tagline = [line for line in css.splitlines() if "sl-hero-identity-tagline" in line][0]
+        self.assertIn("white-space:nowrap", tagline)
+        self.assertIn("text-overflow:ellipsis", tagline)
+
+
+class BuilderTests(unittest.TestCase):
+    def test_hiding_the_brand_uses_the_existing_override(self):
+        # Not a second way to switch brand_label off. Two mechanisms for one state is how they come to
+        # disagree -- the Page Sections panel and this switch now describe the same override.
+        block = BUILDER.split("const brandLabelHidden = computed(", 1)[1][:400]
+        self.assertIn('isSectionEnabled("brand_label")', block)
+        self.assertIn('toggleSection("brand_label"', block)
+
+    def test_the_hide_switch_is_not_inverted_against_its_label(self):
+        # A switch labelled "hide" that must be turned OFF to hide is a puzzle.
+        block = BUILDER.split("const brandLabelHidden = computed(", 1)[1][:400]
+        self.assertIn('get: () => !isSectionEnabled("brand_label")', block)
+
+    def test_the_slogan_input_is_capped_and_counts_down(self):
+        self.assertIn(':maxlength="HERO_TAGLINE_MAX"', BUILDER)
+        self.assertIn("characters left", BUILDER)
+
+    def test_the_slogan_only_appears_once_the_block_is_on(self):
+        self.assertIn('v-if="builder.show_identity" class="offer-field"', BUILDER)
+
+
+if __name__ == "__main__":
+    unittest.main()

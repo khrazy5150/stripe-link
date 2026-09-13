@@ -1123,6 +1123,12 @@ def validate_page_pricing_modes(document: dict[str, Any]) -> None:
                 raise DocumentValidationError("Page flash_sale.starts_on must be before ends_at.")
 
 
+# A slogan has to fit ONE line on a phone -- it stops being a slogan and starts being a paragraph the moment
+# it wraps. 40 characters is what fits at the rendered size on a 360px viewport with the page's padding; the
+# renderer also clips with an ellipsis, so an older/longer value degrades rather than reflows.
+HERO_TAGLINE_MAX_LENGTH = 40
+
+
 def validate_page_document(document: dict[str, Any]) -> None:
     require_document_fields(document, "page", "page_id")
     require_string(document, "name")
@@ -1255,8 +1261,13 @@ def validate_page_document(document: dict[str, Any]) -> None:
             optional_bool(section, "brand_dot_pulse", "Hero brand_dot_pulse")
             if section.get("avatar_placement") is not None:
                 require_enum(section, "avatar_placement",
-                             {"overlay", "overlay_top", "inline", "centered", "hidden"},
+                             {"overlay", "overlay_bottom", "overlay_top", "inline", "centered", "hidden"},
                              "Hero avatar_placement")
+            # The identity block: the creator's name and a slogan under the avatar. The NAME is not stored --
+            # it is derived from the owner's profile at render, so renaming yourself updates every page --
+            # so only the switch and the page's own sentence live here.
+            optional_bool(section, "show_identity", "Hero show_identity")
+            optional_string(section, "tagline", "Hero tagline", max_length=HERO_TAGLINE_MAX_LENGTH)
             optional_string(section, "brand_text", "Hero brand_text")
             optional_bool(section, "brand_overlay", "Hero brand_overlay")
             if section.get("brand_position") is not None:
