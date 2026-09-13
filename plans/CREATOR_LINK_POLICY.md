@@ -61,6 +61,11 @@ Three rules, three reasons, one shared temptation to merge them.
 
 ## 3. The allowlist is the abuse story
 
+> **This premise has a known expiry.** A FIRST-PARTY tip jar is wanted (author, 2026-09-13;
+> `SOCIAL_MEDIA_PAGES.md` §9.8b) and would make a link hub a page that takes money on a shared,
+> anonymous-signup domain -- a card-testing and scam-donation surface, which the link allowlist does nothing
+> about. The argument below holds only while these pages stay payment-free; re-make it before that changes.
+
 Stated plainly because it decides the launch order: **these pages carry no payment.** `lead_social` is the one
 composition with no `checkout_cta` at all. So a bad actor on `jbay.page` has exactly one lever — the outbound
 link — and `PLATFORM_LINKABLE_HOSTS` is the thing standing in front of it.

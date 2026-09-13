@@ -435,8 +435,30 @@ of its own — sold-through products do, "here is my TikTok" does not.
    `.jbay.uk` that `b.jbay.uk` reads. PSL registration is how `github.io` and `vercel.app`
    close this. Free, independent of the vanity-URL decision, and applies to whichever domain
    ends up serving tenant content.
-8. **Donation button.** Author raised it. Needs either a new CTA type or a priceless/
-   pay-what-you-want checkout. Out of scope for v1 unless decided otherwise.
+8. **Donation / tip jar — SPLIT 2026-09-13 into two different things.**
+
+   **(a) An outbound tip link. SHIPPED.** The `tip_jar` element points at wherever the creator already
+   accepts money (Ko-fi, Buy Me a Coffee, Patreon). It is a link, governed by §7 like any other, and it is
+   what every reference page in this category actually does.
+
+   **(b) A FIRST-PARTY Junior Bay tip jar — what the author originally meant. NOT BUILT, and it is not an
+   element.** It is a payment product, and nothing in the codebase supports it yet:
+
+   - **Pay-what-you-want checkout does not exist.** There is no `custom_unit_amount` anywhere in `src/`; every
+     path assumes a Price with a fixed amount. A tip has no amount until the visitor picks one.
+   - **A tip is not an order**, but the receipt, refund, fee and ledger rails all assume one. Either it
+     becomes an order with no fulfilment, or those rails learn a second shape.
+   - **Tax treatment differs** from a sale and is jurisdictional. Stripe Tax is configured per product here.
+   - **The fee model has no class for it** (`docs/PLATFORM_PLANS.md` covers goods, services, digital).
+
+   **And it invalidates a premise the link policy leans on.** `CREATOR_LINK_POLICY.md` §3 argues that the
+   allowlist IS the abuse story for `jbay.page` *because these pages carry no payment* -- the outbound link
+   being the only lever an abuser has. A first-party tip jar makes a link hub a page that takes money on a
+   shared, anonymous-signup domain, which is a card-testing and scam-donation surface, not a link one. That
+   argument has to be re-made before this ships, not after.
+
+   Sequencing consequence: (b) is a prerequisite-heavy build that touches checkout, orders, fees and tax --
+   it belongs with the pay-what-you-want work, not with the link-in-bio elements.
 
 ## 10. Cleanup this supersedes
 
