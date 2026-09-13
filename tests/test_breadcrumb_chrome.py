@@ -124,8 +124,18 @@ class BuilderTests(unittest.TestCase):
         # they are one header and are edited in one place. It shipped in "Appearance / Theme preset and colour
         # overrides" first, where the author looked on the Site, looked on the page, and reasonably never
         # opened it -- a control nobody can find is not a control.
-        brand = BUILDER.split("sectionEditor.row.editor === 'brand_label'", 1)[1].split("</template>", 1)[0]
+        brand = BUILDER.split("sectionEditor.row.editor === 'brand_label'", 1)[1].split("trust_badges'", 1)[0]
         self.assertIn('v-model="breadcrumbOn"', brand)
+        # Split on the NEXT editor, not on "</template>": the breadcrumb note contains a nested <template>,
+        # and slicing at the first closer cuts the block in half. That mis-slice is exactly what corrupted
+        # this file when the two controls were reordered.
+        self.assertIn("Brand name", brand)
+
+    def test_the_editor_is_ordered_the_way_the_header_renders(self):
+        # The trail sits above the brand mark on the page, so reading the two controls top to bottom should
+        # match reading the page top to bottom (author, 2026-09-12).
+        brand = BUILDER.split("sectionEditor.row.editor === 'brand_label'", 1)[1].split("trust_badges'", 1)[0]
+        self.assertLess(brand.index('v-model="breadcrumbOn"'), brand.index("Brand name"))
 
     def test_it_is_offered_in_exactly_one_place(self):
         # Two copies of a setting is the drift pattern this codebase keeps paying for.

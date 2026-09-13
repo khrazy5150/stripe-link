@@ -584,20 +584,9 @@
                 </template>
             </template>
             <template v-else-if="sectionEditor.row.editor === 'brand_label'">
-                <label class="offer-field">
-                  <span>Brand name</span>
-                  <input v-model.trim="builder.brand_label_text" type="text" :placeholder="brandLabelFallback" />
-                  <small class="field-note">
-                    Leave blank to use your business name. Without one it falls back to the product's name,
-                    which is why a page can end up branded after the thing it sells — set a business name in
-                    Profile → Business, or override it here for this page.
-                  </small>
-                </label>
-
-                <!-- The breadcrumb lives here rather than in Appearance because it renders IMMEDIATELY above
-                     this brand mark: they are one header, so they are edited in one place (author, 2026-09-12).
-                     It sat under "Appearance / Theme preset and colour overrides" first, where the author
-                     looked for it on the Site, looked for it on the page, and reasonably never opened it. -->
+                <!-- Breadcrumb FIRST, brand name second: this editor is ordered the way the header renders
+                     (author, 2026-09-12). The trail sits above the brand mark on the page, so reading the two
+                     controls top to bottom matches reading the page top to bottom. -->
                 <label class="builder-switch-row">
                   <span class="builder-switch" @click.stop>
                     <input v-model="breadcrumbOn" type="checkbox" aria-label="Show breadcrumb trail" />
@@ -613,6 +602,16 @@
                     catalogue, so it is off here by default.
                   </template>
                 </small>
+
+                <label class="offer-field">
+                  <span>Brand name</span>
+                  <input v-model.trim="builder.brand_label_text" type="text" :placeholder="brandLabelFallback" />
+                  <small class="field-note">
+                    Leave blank to use your business name. Without one it falls back to the product's name,
+                    which is why a page can end up branded after the thing it sells — set a business name in
+                    Profile → Business, or override it here for this page.
+                  </small>
+                </label>
             </template>
 
             <template v-else-if="sectionEditor.row.editor === 'trust_badges'">
