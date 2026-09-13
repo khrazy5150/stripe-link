@@ -2181,7 +2181,7 @@ import SelectorCard from "./SelectorCard.vue";
 import ImageUploadField from "./shared/ImageUploadField.vue";
 import imageRatios from "../../../src/stripe_link/image_ratios.json";
 import { offerViewTargets, offerViewTargetsFromExpanded } from "../composables/useConversionContext";
-import { isSectionVisible, defaultVisible, recommendedSectionKeys, optionalSectionKeys, governedKeys, elementLabel, elementChannel, addableElements, tokenGroups, previewVar, supportedGoals, goalLabel, packSeeds, orderSections, sectionOrderKey, isMovable, elementPlacement, orderSectionKeys, isRepeatableSection } from "../composables/pageComposer";
+import { isSectionVisible, defaultVisible, excludedSections, recommendedSectionKeys, optionalSectionKeys, governedKeys, elementLabel, elementChannel, addableElements, tokenGroups, previewVar, supportedGoals, goalLabel, packSeeds, orderSections, sectionOrderKey, isMovable, elementPlacement, orderSectionKeys, isRepeatableSection } from "../composables/pageComposer";
 import { apiRequest, assetUrl, getApiBase, getAuthSession, getStripeMode, getOtherEnvironment, getPagesBaseUrl, getPreviewPagesBaseUrl, getTestPagesHost, getTenantId } from "../api/client";
 import { useToastsStore } from "../stores/toasts";
 import { formatMoney } from "../stores/products";
@@ -2657,6 +2657,11 @@ const optionalSections = computed(() => optionalSectionKeys(builderOfferType.val
 const MANDATORY_SECTION_KEYS = new Set(["hero", "hero_media", "offer_price_selector", "legal_footer", "checkout_cta"]);
 const optionalGovernedSections = computed(() => governedKeys().filter((key) => {
   if (MANDATORY_SECTION_KEYS.has(key)) return false;
+  // A section the composition declares IMPOSSIBLE cannot be switched on, so listing it offers a control that
+  // does nothing -- reported on a link page, where Trust badges and Refund policy sat there inert. An
+  // exclusion is a statement about what the page IS (a page that takes no money has no refund policy), not a
+  // preference, so the honest thing is to not offer it rather than to offer it and ignore the answer.
+  if (excludedSections(builderOfferType.value).has(key)) return false;
   // Don't offer a toggle the page can't honour: refund policy copy comes from the offer or its product
   // (render_refund_policy does offer.refund_policy or product.refund_policy). Service offers have items
   // keyed by service_id with no product and no policy of their own, so the section renders nothing on the

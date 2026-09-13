@@ -308,3 +308,75 @@ class BrandSuppressionTests(unittest.TestCase):
             html_module._RENDER_ORG.clear()
             html_module._RENDER_STATE["home_url"] = ""
             html_module._RENDER_STATE["page_type"] = ""
+
+
+class BrandOverrideSourceTests(unittest.TestCase):
+    """The suppression reads the tenant's OVERRIDE, not the page's sections and not the composition.
+
+    Reported 2026-09-13: "it worked only once". It did. The first version asked the page document whether it
+    had a brand_label section -- but the builder OMITS a hidden one entirely rather than writing it disabled,
+    so a page that had just turned the brand off looked identical to a page that never had one. It rendered
+    correctly until the page was re-saved, and then reverted.
+
+    Asking the COMPOSITION instead ("does this shape own a brand mark?") answers yes for every offer page,
+    which would silence the header on a legacy page whose sections predate brand_label and leave it with no
+    brand anywhere. A real test caught that one.
+
+    The override is the tenant's own statement about this page, so it is the thing to read.
+    """
+
+    SOURCE = (pathlib.Path(__file__).resolve().parents[1]
+              / "src" / "stripe_link" / "runtime" / "html.py").read_text(encoding="utf-8")
+
+    def test_it_reads_the_override(self):
+        self.assertIn('.get("overrides") or {}).get("brand_label", {}) \\\n        .get("enabled") is False',
+                      self.SOURCE)
+
+    def test_it_does_not_infer_from_the_saved_sections(self):
+        # The builder omits a hidden section, so this question cannot be answered from the document.
+        self.assertNotIn('s.get("type") == "brand_label" for s in (page.get("sections") or [])', self.SOURCE)
+
+    def test_hiding_works_even_when_the_builder_drops_the_section(self):
+        # The exact document the builder produces for a hidden brand: override set, section absent.
+        import re
+
+        page = {"page_id": "p1", "tenant_id": "t", "name": "My Links", "route": {"slug": "x"},
+                "sections": [{"id": "hm", "type": "hero_media", "images": ["https://img.example/h.webp"]},
+                             {"id": "lf", "type": "legal_footer"}],
+                "composition": {"overrides": {"brand_label": {"enabled": False}}}}
+        html = html_module.render_page(
+            page, BrandSuppressionTests.OFFER, BrandSuppressionTests.PRODUCTS,
+            checkout_url="https://c", api_base_url="https://a", site=BrandSuppressionTests.SITE,
+            home_url="https://poliaxis.jbay.uk/", preferences={}, kind="published")
+        body = re.sub(r"<(script|style)\b[^>]*>.*?</\1>", " ",
+                      html.split("<body>", 1)[-1].split("</body>", 1)[0], flags=re.S | re.I)
+        self.assertNotIn("Poliaxis Nutrition", body)
+
+
+class ExcludedToggleTests(unittest.TestCase):
+    """Page Sections must not offer a switch the composition forbids.
+
+    Reported alongside: on a link page, Trust badges and Refund policy were listed and ticking them did
+    nothing. They could not work -- an exclusion outranks the goal union AND a tenant override, by design,
+    because it is a statement about what the page IS (a page that takes no money has no refund policy) rather
+    than a preference. So the honest thing is not to offer the control.
+    """
+
+    def test_the_toggle_list_drops_excluded_sections(self):
+        block = BUILDER.split("const optionalGovernedSections = computed(", 1)[1][:700]
+        self.assertIn("excludedSections(builderOfferType.value).has(key)", block)
+
+    def test_the_lead_shapes_really_do_exclude_them(self):
+        # The filter is only correct if the rules file says what it claims, so assert the rule too.
+        from stripe_link.domain.composition import excluded_sections
+
+        for shape in ("lead_capture", "lead_call", "lead_bridge", "lead_social"):
+            excluded = excluded_sections(shape)
+            self.assertIn("trust_badges", excluded, shape)
+            self.assertIn("refund_policy", excluded, shape)
+
+    def test_a_checkout_page_still_offers_them(self):
+        from stripe_link.domain.composition import excluded_sections
+
+        for shape in ("single", "bundle"):
+            self.assertNotIn("trust_badges", excluded_sections(shape), shape)

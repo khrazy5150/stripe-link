@@ -1902,9 +1902,20 @@ def _render_page_body(
     #
     # The header's brand exists for pages with no mark of their own (an offer-less storefront or category
     # page), and those carry no brand_label section at all.
-    composes_brand_mark = any(
-        isinstance(s, dict) and s.get("type") == "brand_label" for s in (page.get("sections") or [])
-    )
+    # Did the tenant explicitly HIDE the brand? That is the fact that matters, and neither of the two things
+    # I reached for first can express it.
+    #
+    # Reading the page's saved sections says "no brand_label here" -- but the builder omits a hidden one
+    # entirely rather than writing it disabled, so a page that just turned the brand off looks identical to a
+    # page that never had one. That is why suppressing on the document appeared to work once and then stopped
+    # the moment the page was re-saved.
+    #
+    # Reading the composition says "this shape owns a brand mark" for every offer page -- which would silence
+    # the header on a legacy page whose sections predate brand_label, leaving it with no brand anywhere.
+    #
+    # The override is the tenant's own statement, so it is the one to read.
+    brand_hidden = ((page.get("composition") or {}).get("overrides") or {}).get("brand_label", {}) \
+        .get("enabled") is False
     has_brand_mark = any(
         s.get("type") == "brand_label" and s.get("enabled") is not False for s in body_sections
     )
@@ -1932,7 +1943,7 @@ def _render_page_body(
         h1_owner = ""
     _RENDER_STATE["h1_owner"] = h1_owner
     _RENDER_STATE["brand_label_is_h1"] = h1_owner == "brand_label"
-    site_header = render_site_header(has_brand_mark=has_brand_mark or composes_brand_mark)
+    site_header = render_site_header(has_brand_mark=has_brand_mark or brand_hidden)
     footer_nav = render_footer_nav()
     breadcrumb = render_breadcrumb(breadcrumb_trail(offer, products_by_id))
     body = "\n".join(
@@ -3528,11 +3539,10 @@ def render_site_header(*, has_brand_mark: bool = False) -> str:
     every page, SEO-13) plus the primary menu. Rendered only when there's a home host; "" on a post-checkout
     page (a Home link would leak the buyer out) or when there's nothing to show.
 
-    `has_brand_mark` means the page OWNS a brand mark, not that one is currently visible. Where the page has
-    its own the header carries the menu alone and the mark takes over the store-root link; where the tenant
-    has HIDDEN that mark, the header must still stay quiet, because a brand switched off is not a brand to be
-    supplied from somewhere else in a different style. The header's brand is for pages with no mark of their
-    own -- an offer-less storefront or category page."""
+    `has_brand_mark` means "this page's brand is already handled" -- either it renders its own mark, or the
+    tenant has switched the brand OFF. Both must silence the header: a brand turned off is not a brand to be
+    supplied from somewhere else in a different style. The header's brand is for pages that have neither --
+    an offer-less storefront or category page, or one whose sections predate brand_label."""
     home = _RENDER_STATE.get("home_url") or ""
     if not home or _RENDER_STATE.get("page_type") in NONINDEXABLE_PAGE_TYPES:
         return ""
