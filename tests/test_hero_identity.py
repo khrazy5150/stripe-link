@@ -143,3 +143,100 @@ class BuilderTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class LayoutTests(unittest.TestCase):
+    """The identity block is a SIBLING of the hero section, not a child of it.
+
+    Reported 2026-09-13: with the name and slogan on, they rendered BEHIND the avatar and the avatar lost its
+    bottom-centre position. Both from one cause. The avatar is absolutely positioned against .sl-hero-media,
+    and .has-avatar reserves the room it overhangs into with a margin BELOW that section -- so a block placed
+    INSIDE the section rendered into the figure's flow (under the image, behind the avatar) and grew the
+    section, which moved the avatar's `bottom` anchor down with it.
+    """
+
+    def setUp(self):
+        html_module._RENDER_PREFERENCES.clear()
+        html_module._RENDER_PREFERENCES.update(
+            {"avatar_url": "https://img.example/a.webp", "display_name": "Lola Greiner"})
+
+    def tearDown(self):
+        html_module._RENDER_PREFERENCES.clear()
+
+    def _media(self, **extra):
+        return html_module.render_hero_media(
+            {"id": "hm", "images": ["https://img.example/h.webp"],
+             "avatar_placement": "overlay_bottom", "show_identity": True, **extra}, {}, {})
+
+    def test_it_renders_outside_the_hero_section(self):
+        markup = self._media(tagline="be kind")
+        self.assertGreater(markup.index("sl-hero-identity"), markup.index("</section>"))
+
+    def test_the_avatar_still_anchors_to_the_hero(self):
+        # The avatar stays INSIDE the section -- it is positioned against it. Only the identity block moved.
+        markup = self._media(tagline="be kind")
+        self.assertLess(markup.index("sl-avatar-wrap"), markup.index("</section>"))
+
+    def test_the_overhang_is_still_reserved(self):
+        self.assertIn("has-avatar", self._media())
+
+    def test_a_carousel_hero_places_it_the_same_way(self):
+        # Two branches build the hero, and the bug would have been fixed in one of them.
+        markup = html_module.render_hero_media(
+            {"id": "hm", "images": ["https://img.example/a.webp", "https://img.example/b.webp"],
+             "avatar_placement": "overlay_bottom", "show_identity": True}, {}, {})
+        self.assertGreater(markup.index("sl-hero-identity"), markup.index("</section>"))
+
+
+class HeadingOwnerTests(unittest.TestCase):
+    """Exactly one H1, decided in one place.
+
+    Reported 2026-09-13: hiding the brand name produced a page-health warning ("no main heading") on a page
+    type where the tenant had done nothing wrong. The brand mark had been carrying the H1; hiding it left the
+    page with none, while the visible heading -- the creator's name -- was a <p>.
+
+    The candidates render in different places and none can see the others, so render_page decides and each
+    reads the verdict.
+    """
+
+    def tearDown(self):
+        html_module._RENDER_STATE.pop("h1_owner", None)
+        html_module._RENDER_PREFERENCES.clear()
+
+    def test_the_name_takes_the_h1_when_the_brand_is_hidden(self):
+        html_module._RENDER_PREFERENCES["display_name"] = "Lola Greiner"
+        html_module._RENDER_STATE["h1_owner"] = "identity"
+        markup = "\n".join(html_module.render_hero_identity({"show_identity": True}))
+        self.assertIn("<h1 class=\"sl-hero-identity-name\">Lola Greiner</h1>", markup)
+
+    def test_it_stays_a_paragraph_when_something_else_owns_the_heading(self):
+        html_module._RENDER_PREFERENCES["display_name"] = "Lola Greiner"
+        for owner in ("hero", "brand_label", ""):
+            html_module._RENDER_STATE["h1_owner"] = owner
+            markup = "\n".join(html_module.render_hero_identity({"show_identity": True}))
+            self.assertIn("<p class=\"sl-hero-identity-name\">", markup, owner)
+
+    def test_the_styling_does_not_depend_on_the_tag(self):
+        css = "\n".join(html_module.UNIVERSAL_BUNDLE_TEMPLATE_STYLES)
+        self.assertIn(".sl-hero-identity-name,h1.sl-hero-identity-name{", css)
+
+    def test_a_page_with_the_brand_hidden_and_a_name_has_exactly_one_h1(self):
+        import re
+
+        page = {"page_id": "p1", "tenant_id": "t", "name": "My Links", "route": {"slug": "x"},
+                "sections": [{"id": "hm", "type": "hero_media", "images": ["https://img.example/h.webp"],
+                              "avatar_placement": "overlay_bottom", "show_identity": True},
+                             {"id": "lf", "type": "legal_footer"}],
+                "composition": {"overrides": {"brand_label": {"enabled": False}}}}
+        offer = {"offer_id": "o", "status": "active", "items": [{"product_id": "p", "price_id": "pr"}],
+                 "presentation": {}, "product_intent": "lead_gen", "lead_capture_action": "social_redirect"}
+        products = {"p": {"product_id": "p", "name": "My Links", "default_price_id": "pr",
+                          "prices": [{"price_id": "pr", "unit_amount": 0, "currency": "usd"}]}}
+        html = html_module.render_page(
+            page, offer, products, checkout_url="https://c", api_base_url="https://a",
+            preferences={"avatar_url": "https://img.example/a.webp", "display_name": "Lola Greiner"},
+            kind="published")
+        body = html.split("<body>", 1)[-1].split("</body>", 1)[0]
+        self.assertEqual(re.findall(r"<h1[^>]*>(.*?)</h1>", body, re.S), ["Lola Greiner"])
+        # ...and therefore no page-health warning for the tenant to puzzle over.
+        self.assertEqual(html_module.heading_outline_warnings(html), [])

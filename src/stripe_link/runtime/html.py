@@ -520,7 +520,9 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     # Name + slogan, the identity block under the avatar. Centred always: it belongs to a centred avatar, and
     # every reference page in this category centres it.
     "    .sl-hero-identity{display:grid;gap:0.4rem;justify-items:center;text-align:center;margin:1.6rem 0 0}",
-    "    .sl-hero-identity-name{font-family:var(--sl-font-heading);font-weight:800;font-size:2.4rem;line-height:1.2;color:var(--sl-text);margin:0}",
+    # p OR h1 -- the name carries the H1 when the brand mark is hidden (see render_page). Identical either
+    # way: which tag it is says what the heading MEANS, never how it looks.
+    "    .sl-hero-identity-name,h1.sl-hero-identity-name{font-family:var(--sl-font-heading);font-weight:800;font-size:2.4rem;line-height:1.2;color:var(--sl-text);margin:0}",
     # One line, always. A slogan that wraps on a phone stops being a slogan and starts being a paragraph --
     # the length cap makes that rare, and this makes it impossible.
     "    .sl-hero-identity-tagline{font-size:1.5rem;line-height:1.4;color:var(--sl-muted);margin:0;max-width:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}",
@@ -1901,9 +1903,24 @@ def _render_page_body(
     # is the honest answer there, because on a link hub the creator's name IS the page's heading. Decided ONCE
     # here, from the composed list, so the two sections cannot both claim it -- brand_label renders before the
     # hero would, so it cannot discover the answer on its own.
-    _RENDER_STATE["brand_label_is_h1"] = has_brand_mark and not any(
-        s.get("type") in H1_SECTION_TYPES for s in body_sections
-    )
+    # WHO owns the page's single H1, decided once here because the candidates render in different places and
+    # none of them can see the others. A hero headline wins where there is one. Otherwise the brand mark --
+    # and where the tenant has HIDDEN the brand because this page is about a person rather than a business,
+    # the person's name takes it. A link hub whose visible heading is a name should say so in its markup, and
+    # without this it published with no H1 at all and a page-health warning the tenant could not act on.
+    hero_owns_h1 = any(s.get("type") in H1_SECTION_TYPES for s in body_sections)
+    identity_section = next((s for s in body_sections if s.get("type") == "hero_media"
+                             and s.get("show_identity")), None)
+    if hero_owns_h1:
+        h1_owner = "hero"
+    elif has_brand_mark:
+        h1_owner = "brand_label"
+    elif identity_section is not None and tenant_display_name():
+        h1_owner = "identity"
+    else:
+        h1_owner = ""
+    _RENDER_STATE["h1_owner"] = h1_owner
+    _RENDER_STATE["brand_label_is_h1"] = h1_owner == "brand_label"
     site_header = render_site_header(has_brand_mark=has_brand_mark)
     footer_nav = render_footer_nav()
     breadcrumb = render_breadcrumb(breadcrumb_trail(offer, products_by_id))
@@ -2526,9 +2543,11 @@ def render_hero_identity(section: dict[str, Any]) -> list[str]:
         return []
     lines = ['      <div class="sl-hero-identity">']
     if name:
-        # Not a heading: on a link hub the brand mark already carries the page's H1, and a second one here
-        # would give the page two. plans/SEMANTIC_HTML.md keeps the outline to a single H1.
-        lines.append(f'        <p class="sl-hero-identity-name">{escape(name)}</p>')
+        # An H1 only when nothing else claims it -- render_page decides, so the hero headline, the brand mark
+        # and this name can never all think they are the heading. plans/SEMANTIC_HTML.md keeps the outline to
+        # exactly one.
+        tag = "h1" if _RENDER_STATE.get("h1_owner") == "identity" else "p"
+        lines.append(f'        <{tag} class="sl-hero-identity-name">{escape(name)}</{tag}>')
     if tagline:
         lines.append(f'        <p class="sl-hero-identity-tagline">{escape(tagline)}</p>')
     lines.append("      </div>")
@@ -2611,7 +2630,13 @@ def render_hero_media(
     alt = localized_alt(str(product.get("name") or offer.get("name") or "Product image"))
     section_id = escape(str(section.get("id", "hero-media")))
     autoplay = bool(section.get("autoplay"))
-    overlays = render_hero_overlays(section, offer) + render_hero_identity(section)
+    overlays = render_hero_overlays(section, offer)
+    # OUTSIDE the section, deliberately. The avatar is absolutely positioned against .sl-hero-media, and
+    # .has-avatar reserves the room it overhangs into with a margin BELOW that section. Putting the identity
+    # block inside meant it rendered into the figure's flow -- under the image and behind the avatar -- and
+    # grew the section, which moved the avatar's `bottom` anchor with it. As a sibling it lands after the
+    # reserved margin, which is exactly where the overhang ends.
+    identity = render_hero_identity(section)
     brand = render_hero_brand(section, offer)
     # has-avatar reserves the space the overlay OVERHANGS into. An inline or centred avatar sits in normal
     # flow and needs no reserved gap -- keeping it would leave a hole under the hero.
@@ -2644,6 +2669,7 @@ def render_hero_media(
             "      </figure>",
             *overlays,
             "    </section>",
+            *identity,
         ])
     # Multiple images -> a swipeable carousel with prev/next arrows, a counter, and dots.
     dots = [
@@ -2670,6 +2696,7 @@ def render_hero_media(
         "      </figure>",
         *overlays,
         "    </section>",
+        *identity,
     ])
 
 
