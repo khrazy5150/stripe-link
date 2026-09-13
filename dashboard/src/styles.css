@@ -5525,9 +5525,8 @@ button:disabled {
   text-align: left;
 }
 
-.wizard-offer-card.selected .wizard-card-check,
-.wizard-goal-card.selected .wizard-card-check {
-  display: grid;
+.wizard-offer-card.selected .wizard-choice-check {
+  display: block;
 }
 
 .wizard-offer-card:hover,
@@ -5778,38 +5777,8 @@ button:disabled {
   vertical-align: middle;
 }
 
-.wizard-goal-card {
-  position: relative;
-  display: grid;
-  gap: 0.4rem;
-  border: 2px solid var(--line);
-  border-radius: var(--radius-md);
-  background: var(--panel);
-  color: var(--text);
-  cursor: pointer;
-  padding: 1.2rem 1.4rem;
-  /* room for the check so the note never runs under it */
-  padding-right: 4.6rem;
-  text-align: left;
-}
+/* .wizard-goal-card retired 2026-09-13 -- every wizard now uses WizardChoiceCard. */
 
-.wizard-goal-card:hover,
-.wizard-goal-card.selected {
-  border-color: var(--accent);
-  box-shadow: 0 0.8rem 2rem rgba(75, 73, 172, 0.14);
-}
-
-.wizard-goal-card strong {
-  font-size: 1.5rem;
-}
-
-/* The check is a span too, and this rule outranks .wizard-card-check (0,1,1 vs 0,1,0) — without the
-   :not() it repaints the tick muted grey, shrinks it, and knocks it off-centre with line-height. */
-.wizard-goal-card span:not(.wizard-card-check) {
-  font-size: 1.3rem;
-  color: var(--muted);
-  line-height: 1.5;
-}
 
 .wizard-goal-adds {
   font-weight: 700;
@@ -7004,9 +6973,10 @@ button:disabled {
   color: var(--text, #111827);
 }
 
-/* --- Product creation wizard (plans/LEAD_GEN_PAGES.md §10) --- */
+/* --- Shared wizard chrome (components/shared/WizardSteps.vue, WizardChoiceCard.vue) --- */
 .wizard-steps {
   display: flex;
+  flex-wrap: wrap;
   gap: 1.6rem;
   list-style: none;
   margin: 0 0 2rem;
@@ -7021,7 +6991,7 @@ button:disabled {
   gap: 0.6rem;
 }
 
-.wizard-steps li span {
+.wizard-steps-num {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -7034,7 +7004,62 @@ button:disabled {
 }
 
 .wizard-steps li.is-current { color: var(--accent, #4f46e5); font-weight: 700; }
+
 .wizard-steps li.is-done { color: var(--success, #16a34a); }
+
+.wizard-steps li.is-done .wizard-steps-num {
+  background: var(--success, #16a34a);
+  border-color: var(--success, #16a34a);
+  color: #fff;
+}
+
+/* One choice card, used by every wizard. */
+.wizard-choice-card {
+  position: relative;
+  display: grid;
+  gap: 0.4rem;
+  width: 100%;
+  text-align: left;
+  padding: 1.4rem 4.4rem 1.4rem 1.6rem;   /* room on the right so the check never sits on the text */
+  border: 1px solid var(--border, #e5e7eb);
+  border-radius: var(--radius-md, 0.8rem);
+  background: var(--surface, #fff);
+  cursor: pointer;
+}
+
+.wizard-choice-card:hover,
+.wizard-choice-card.selected {
+  border-color: var(--accent, #4f46e5);
+  box-shadow: 0 0.8rem 2rem rgba(75, 73, 172, 0.14);
+}
+
+.wizard-choice-card strong { font-size: 1.5rem; }
+
+.wizard-choice-card > span { color: var(--text-muted, #6b7280); font-size: 1.3rem; }
+
+/* The SAME circled check the Offer item picker uses (.selector-card-check). Hidden until selected, so an
+   unselected card carries no stray glyph -- which is what the landing-page wizard's bare tick looked like. */
+.wizard-choice-check {
+  display: none;
+  position: absolute;
+  top: 1.2rem;
+  right: 1.2rem;
+  width: 2.4rem;
+  height: 2.4rem;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #fff;
+  font-size: 1.4rem;
+  line-height: 2.4rem;
+  text-align: center;
+}
+
+.wizard-choice-card.selected .wizard-choice-check { display: block; }
+
+.wizard-choice-list {
+  display: grid;
+  gap: 1rem;
+}
 
 .wizard-panel {
   display: flex;

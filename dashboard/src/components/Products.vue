@@ -181,31 +181,21 @@
         <form v-if="wizardMode" class="product-create-body" @submit.prevent="wizardStep === 3 ? saveProduct() : wizardNext()">
           <div v-if="formError" class="keys-status-banner error">{{ formError }}</div>
 
-          <ol class="wizard-steps" aria-label="Progress">
-            <li v-for="(label, index) in WIZARD_STEPS" :key="label"
-                :class="{ 'is-current': wizardStep === index + 1, 'is-done': wizardStep > index + 1 }">
-              <span aria-hidden="true">{{ index + 1 }}</span>{{ label }}
-            </li>
-          </ol>
+          <WizardSteps :steps="WIZARD_STEPS" :current="wizardStep" />
 
           <!-- STEP 1 — intent, asked FIRST because it decides which of the next questions are even real.
                A tip jar has no SKU, no categories, no condition, no shipping; a lead magnet has no price. -->
           <section v-if="wizardStep === 1" class="wizard-panel">
-            <p class="wizard-lede">What is this product for?</p>
-            <div class="lead-picker-grid">
-              <button
+            <p class="wizard-lede">What is your intended purpose for this product?</p>
+            <div class="wizard-choice-list">
+              <WizardChoiceCard
                 v-for="intent in PRODUCT_INTENTS"
                 :key="intent.key"
-                class="lead-action-card"
-                :class="{ selected: wizardIntent === intent.key }"
-                type="button"
-                @click="wizardIntent = intent.key"
-              >
-                <span class="lead-action-icon" :class="intent.tone"><component :is="intentIcon(intent.key)" /></span>
-                <strong>{{ intent.label }}</strong>
-                <small>{{ intent.description }}</small>
-                <span v-if="wizardIntent === intent.key" class="lead-selected-check">✓</span>
-              </button>
+                :title="intent.label"
+                :description="intent.description"
+                :selected="wizardIntent === intent.key"
+                @select="wizardIntent = intent.key"
+              />
             </div>
           </section>
 
@@ -640,6 +630,8 @@ import { apiRequest, toAssetCdnUrl } from "../api/client";
 import { defaultProductPrice, formatMoney, generateSku, isValidGtin, useProductsStore } from "../stores/products";
 // The lead-action glyph is shared with the Offers selector, so the same product looks the same on both.
 import { leadActionIcon as leadIcon } from "../utils/leadActionIcon";
+import WizardChoiceCard from "./shared/WizardChoiceCard.vue";
+import WizardSteps from "./shared/WizardSteps.vue";
 import { fetchCategoriesForScope, filterCategories, humanizeCategory, normalizeCategory } from "../utils/categories";
 import { useCachedSuggestions } from "../composables/useCachedSuggestions";
 import { dimsFromStatus, recordImageDims } from "../utils/imageDims";
@@ -679,11 +671,13 @@ const showCreateModal = ref(false);
 // (plans/PAY_WHAT_YOU_WANT.md §4). The wizard's three answers are a UI vocabulary, not a document field.
 const WIZARD_STEPS = ["Purpose", "Details", "Image"];
 const PRODUCT_INTENTS = [
-  { key: "transaction", label: "Sell something", tone: "blue",
+  // No icons, deliberately: three tinted glyphs made a list of three sentences read as a toolbar, and the
+  // titles already carry the meaning (author, 2026-09-13).
+  { key: "transaction", label: "Sell something",
     description: "A product or service people pay a set price for." },
-  { key: "lead_gen", label: "Capture a lead", tone: "green",
+  { key: "lead_gen", label: "Capture a lead",
     description: "A free download, a call, or a link. Never sold." },
-  { key: "tip_jar", label: "Receive tips", tone: "pink",
+  { key: "tip_jar", label: "Receive tips",
     description: "Supporters choose what to pay. You can have them cover the fees." },
 ];
 const wizardMode = ref(false);
@@ -710,11 +704,6 @@ const wizardCanAdvance = computed(() => {
   }
   return true;
 });
-
-function intentIcon(key) {
-  // Reuses the lead-action glyph vocabulary so the two pickers read as one family.
-  return leadIcon({ transaction: "external_url", lead_gen: "capture_email", tip_jar: "call_number" }[key]);
-}
 
 function wizardNext() {
   if (!wizardCanAdvance.value) return;

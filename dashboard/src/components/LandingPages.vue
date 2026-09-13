@@ -1308,9 +1308,10 @@
           <button type="button" class="modal-close" aria-label="Close landing page wizard" @click="closeWizard">×</button>
         </header>
 
-        <div v-if="!isEditingOfferless" class="wizard-progress" aria-hidden="true">
-          <span v-for="step in displayTotal" :key="step" :class="{ active: step <= displayStep }"></span>
-        </div>
+        <!-- The shared step rail, replacing three anonymous dots. Dots said how MANY steps there were and
+             nothing about what they held; the labels answer "how much is left" without counting.
+             The step count varies here -- a Social Page skips the goal step -- so the labels are computed. -->
+        <WizardSteps v-if="!isEditingOfferless" :steps="wizardStepLabels" :current="displayStep" />
 
         <div class="landing-wizard-body">
           <section v-if="sitePhase" class="wizard-step">
@@ -1318,29 +1319,21 @@
               <h3>Choose a Site</h3>
               <p>Which website will this page live under? A landing page belongs to one Site.</p>
             </header>
-            <div v-if="sitesStore.sites.length" class="wizard-goal-list">
-              <button
+            <div v-if="sitesStore.sites.length" class="wizard-choice-list">
+              <WizardChoiceCard
                 v-for="s in sitesStore.sites"
                 :key="s.site_id"
-                type="button"
-                class="wizard-goal-card"
-                :class="{ selected: !siteCreateOpen && selectedSiteId === s.site_id }"
-                @click="selectExistingSite(s.site_id)"
-              >
-                <strong>{{ s.name || s.site_id }}</strong>
-                <span>{{ s.hosting?.custom_domain || s.hosting?.platform_hostname || "" }}</span>
-                <span class="wizard-card-check" aria-hidden="true">✓</span>
-              </button>
-              <button
-                type="button"
-                class="wizard-goal-card"
-                :class="{ selected: siteCreateOpen }"
-                @click="openInlineSiteCreate"
-              >
-                <strong>+ New Site</strong>
-                <span>Create a new website to hold this page.</span>
-                <span class="wizard-card-check" aria-hidden="true">✓</span>
-              </button>
+                :title="s.name || s.site_id"
+                :description="s.hosting?.custom_domain || s.hosting?.platform_hostname || ''"
+                :selected="!siteCreateOpen && selectedSiteId === s.site_id"
+                @select="selectExistingSite(s.site_id)"
+              />
+              <WizardChoiceCard
+                title="+ New Site"
+                description="Create a new website to hold this page."
+                :selected="siteCreateOpen"
+                @select="openInlineSiteCreate"
+              />
             </div>
             <div v-if="siteCreateOpen || !sitesStore.sites.length" class="wizard-inline-site-create">
               <p v-if="!sitesStore.sites.length" class="field-note">You don't have a Site yet — create your first one to hold this page.</p>
@@ -1366,27 +1359,19 @@
           </section>
 
           <section v-else-if="wizardStep === 1" class="wizard-step">
-            <div class="wizard-goal-list">
-              <button type="button" class="wizard-goal-card" :class="{ selected: form.pageKind === 'offer' }" @click="form.pageKind = 'offer'">
-                <strong>Offer page</strong>
-                <span>A landing page for a single offer — checkout or lead capture.</span>
-                <span class="wizard-card-check" aria-hidden="true">✓</span>
-              </button>
-              <button type="button" class="wizard-goal-card" :class="{ selected: form.pageKind === 'storefront' }" @click="form.pageKind = 'storefront'">
-                <strong>Storefront homepage</strong>
-                <span>A brand hero + a grid of your products, each linking to its page.</span>
-                <span class="wizard-card-check" aria-hidden="true">✓</span>
-              </button>
-              <button type="button" class="wizard-goal-card" :class="{ selected: form.pageKind === 'category' }" @click="selectCategoryKind">
-                <strong>Category page</strong>
-                <span>Lists every attached page in one category — fills itself as you add products.</span>
-                <span class="wizard-card-check" aria-hidden="true">✓</span>
-              </button>
-              <button type="button" class="wizard-goal-card" :class="{ selected: form.pageKind === 'profile' }" @click="form.pageKind = 'profile'">
-                <strong>Store profile</strong>
-                <span>An "about" page with your store's identity, contact, and catalog — builds trust and SEO.</span>
-                <span class="wizard-card-check" aria-hidden="true">✓</span>
-              </button>
+            <div class="wizard-choice-list">
+              <WizardChoiceCard title="Offer page" :selected="form.pageKind === 'offer'"
+                description="A landing page for a single offer — checkout or lead capture."
+                @select="form.pageKind = 'offer'" />
+              <WizardChoiceCard title="Storefront homepage" :selected="form.pageKind === 'storefront'"
+                description="A brand hero + a grid of your products, each linking to its page."
+                @select="form.pageKind = 'storefront'" />
+              <WizardChoiceCard title="Category page" :selected="form.pageKind === 'category'"
+                description="Lists every attached page in one category — fills itself as you add products."
+                @select="selectCategoryKind" />
+              <WizardChoiceCard title="Store profile" :selected="form.pageKind === 'profile'"
+                description="An &quot;about&quot; page with your store's identity, contact, and catalog — builds trust and SEO."
+                @select="form.pageKind = 'profile'" />
             </div>
             <template v-if="form.pageKind === 'offer'">
               <header class="wizard-step-header">
@@ -1415,7 +1400,9 @@
                   <strong>{{ offer.name || "Untitled Offer" }}</strong>
                   <small>{{ offerIntentLabel(offer) }} · {{ offerItemCount(offer) }} item(s)</small>
                 </span>
-                <span class="wizard-card-check" aria-hidden="true">✓</span>
+                <!-- The offer picker keeps its own card shape (it carries an image) but shares the ONE
+                     selected-state, so "chosen" looks the same everywhere a tenant chooses something. -->
+                <span class="wizard-choice-check" aria-hidden="true">✓</span>
               </button>
             </div>
             </template>
@@ -1552,23 +1539,22 @@
               <p>Where will this page's traffic come from? This decides what the page starts with — you can change any of it later.</p>
               <p class="field-note">This only sets what's <em>on</em> the page. Whether it appears in search is a Site-level setting (Sites → search visibility), not a per-page choice.</p>
             </header>
-            <div class="wizard-goal-list">
-              <button
+            <div class="wizard-choice-list">
+              <!-- The goal card carries an extra line the others do not (what the goal SEEDS), which is what
+                   the component's default slot is for -- rather than every card growing a third prop. -->
+              <WizardChoiceCard
                 v-for="option in goalOptions"
                 :key="option.value"
-                type="button"
-                class="wizard-goal-card"
-                :class="{ selected: form.goal === option.value }"
-                @click="form.goal = option.value"
+                :title="option.label"
+                :description="option.note"
+                :selected="form.goal === option.value"
+                @select="form.goal = option.value"
               >
-                <strong>{{ option.label }}</strong>
-                <span>{{ option.note }}</span>
                 <span v-if="goalSeedLabels(option.value).length" class="wizard-goal-adds">
                   Starts with: {{ goalSeedLabels(option.value).join(", ") }}
                 </span>
                 <span v-else class="wizard-goal-adds is-lean">Starts with the offer only</span>
-                <span class="wizard-card-check" aria-hidden="true">✓</span>
-              </button>
+              </WizardChoiceCard>
             </div>
           </section>
 
@@ -2209,6 +2195,8 @@ import { filterRows } from "../composables/indexedList";
 import { stagesFromSavedOffer } from "../composables/purchaseFlow";
 import { useCollectionsStore } from "../stores/collections";
 import SettingsAccordion from "./shared/SettingsAccordion.vue";
+import WizardChoiceCard from "./shared/WizardChoiceCard.vue";
+import WizardSteps from "./shared/WizardSteps.vue";
 import MediaListField from "./shared/MediaListField.vue";
 import StoreAddressField from "./StoreAddressField.vue";
 import { resolvePageDeps, copyCatalogToEnv, pageForTarget } from "../composables/environmentCopy";
@@ -3493,6 +3481,14 @@ const wizardTotalSteps = computed(() => (form.pageKind === "offer" ? 4 : 2));
 // then "Step 4 of 5", which looks like the wizard lost one.
 const wizardSkipsGoal = computed(() => form.pageKind === "offer" && selectedOfferIsSocialPage.value);
 const displayTotal = computed(() => wizardTotalSteps.value + 1 - (wizardSkipsGoal.value ? 1 : 0));
+// Labels for the shared step rail. Built rather than constant because the Site step is prepended and the goal
+// step is skipped for a Social Page -- the rail has to describe the path this page is actually taking.
+const wizardStepLabels = computed(() => {
+  const labels = ["Site", "Type"];
+  if (!wizardSkipsGoal.value) labels.push("Goal");
+  labels.push("Details");
+  return labels.slice(0, displayTotal.value);
+});
 const displayStep = computed(() => {
   if (sitePhase.value) return 1;
   const step = wizardStep.value + 1;
