@@ -179,6 +179,54 @@ type that bills like a tip would break the coupling silently, and it would break
 free: whichever shape wins has to carry this classification durably through receipts, refunds and exports. A
 refunded tip is a reversal of tip income, not of a sale.
 
+## 5c. The element offers a Junior Bay tip jar, created on the fly (author, 2026-09-13)
+
+The `tip_jar` element already links out to Ko-fi, Patreon or Buy Me a Coffee. It should also be able to point
+at a Junior Bay tip jar — **and offer to create one**, in the same field where the tenant would otherwise
+paste a competitor's URL.
+
+**Why create-on-the-fly rather than "go make one first".** A first-party tip jar needs a Product, an Offer and
+a Page. Sending someone off to build three documents, then come back and link them, is the friction that makes
+pasting a Ko-fi URL the obvious choice instead. Seeded defaults invert that: it is far easier to edit a page
+that exists than to build one that does not. The tenant then opens it and changes whatever they like.
+
+**Reuse the provisioning state machine, do not invent one.** `DIGITAL_MARKETPLACE.md` §4.2 already answers
+this exact problem: DynamoDB transactions do not span the tables this repo uses, so multi-document creation is
+a **resumable, idempotent state machine, not a transaction** — anchor row first, then Product, then Offer,
+then the draft page via the existing composition pipeline, each step keyed off the anchor so a retry resumes
+instead of duplicating. The tip jar is a smaller instance of the same shape and should share it.
+
+**Say what was created, and where.** Three catalogue rows appearing from one click is exactly the kind of
+thing a tenant finds a month later and does not recognise. The confirmation names the product, the offer and
+the page, and links to the page.
+
+### The pitch, and keeping it true
+
+The differentiator is real: every other platform in this slot takes its cut **out of the tip**. Junior Bay can
+put the fees on the customer instead (`net_guaranteed`), so the creator receives the full amount they asked
+for. The author's copy —
+
+> *"Want to keep most or all of your tip income? Create your free Tip Jar page here!"*
+
+— is accurate as written, and worth protecting from being "improved" into something that is not:
+
+- **"most or all"** is exact. Under `net_guaranteed` the buyer covers everything and the creator nets the full
+  keyed amount; under `split` they cover half. Both are real options; "all" alone would not be.
+- **"free"** is accurate for the PAGE — landing pages are free-forever post-pivot — and should not be read as
+  the tip being fee-free. At the free tier the platform's tip fee is 5% (`fees.py`, 5/5/0 by tier); what
+  changes is who pays it.
+- **Do not claim "other platforms deduct fees and we don't."** Ko-fi charges no platform fee on donations,
+  and it is the most likely competitor in this exact field. The defensible claim is narrower and stronger:
+  *everywhere else the fees come out of the tip; here the customer can cover them.* That is true of Ko-fi too,
+  whose Stripe fees still come out of the creator's payout.
+
+### Seeded defaults
+
+- `fee_handling: net_guaranteed` — it IS the pitch, and a default that contradicts the sentence that sold it
+  would be strange. The trade-off is honest and visible: the buyer sees a slightly higher number. Editable.
+- Presets, a minimum, and custom amounts on — per §5a, once the keyed-vs-charged question is answered.
+- A page seeded from the tip-jar composition, attached to the same Site as the page that created it.
+
 ## 6. It changes the abuse story for `jbay.page`
 
 `CREATOR_LINK_POLICY.md` §3 argues the link allowlist IS the abuse story for the creator domain **because
@@ -202,4 +250,5 @@ a link.
 5. **The order/tax decisions** (§5) followed through receipts, refunds, fees and the ledger — carrying the
    `entry_type: "tip"` classification of §5b, frozen at transaction time.
 6. **Re-make the `jbay.page` abuse argument** (§6) before a tip jar serves on a platform host.
-7. **The `tip_jar` element's first-party mode** — smallest piece, depends on all of the above.
+7. **The `tip_jar` element's first-party mode and its create-on-the-fly** (§5c) — smallest piece, depends on
+   all of the above, and reuses the `DIGITAL_MARKETPLACE.md` §4.2 provisioning state machine.
