@@ -22,6 +22,23 @@ wrong answer, which is the worst failure shape. It is the same family as `same_a
 
 **This is a regression against the legacy app, not a missing feature.** stripe-cart ships it.
 
+## 1a. The schema models a tip jar as a discounted sale, and forbids the rest
+
+Checked 2026-09-13 at the author's prompting. `Price.schema.json` **does** carry `pricing_model`
+(`one_time | recurring | customer_chooses`), `min_amount` and `suggested_amount` — so it is not absent. It is
+**partial, and closed**:
+
+- `additionalProperties: false`. The legacy fields — `presets`, `max_amount`, `allow_custom`,
+  `allow_recurring`, `recurring_interval` — would be **rejected on write**. The schema does not merely omit
+  the correct model; it currently blocks it.
+- `unit_amount` is described as *"Sale amount charged to the customer"* and is the field every runtime path
+  reads. A tip jar is therefore modelled as a sale with two decorative extra fields, which is exactly why it
+  behaves as one.
+
+So the author's read is right in substance: nobody designed a tip jar here, the transaction shape was reused
+and two fields were bolted on. Widening the schema (§7 step 2) is a prerequisite for everything else, and it
+is a schema change rather than an addition — `unit_amount` has to stop being the answer for this model.
+
 ## 2. The legacy behaviour, which is the spec
 
 From stripe-cart's plan doc and its product form:
@@ -129,13 +146,16 @@ enforcing one. Worth surfacing in the wizard as guidance rather than as a rule.
 **Presets are ambiguous, and that is a real decision.** Presets are stored as amounts, but under `split` and
 `net_guaranteed` a "$25" preset does not charge $25:
 
-- **Presets as KEYED amounts** — the creator receives round numbers, the buyer sees $25.85. Matches how the
-  rest of pricing works (the tenant keys what they want to receive).
-- **Presets as CHARGED amounts** — the buyer taps round numbers, the creator receives $24.20. Matches the
-  "nothing is hidden" principle and how a tip reads to the person paying it.
+**DECIDED 2026-09-13 (author): presets are CHARGED amounts.** The stored number always includes the platform
+fee, so the buyer taps round numbers and the creator receives what is left after whichever fee mode applies.
 
-Under `standard` they are identical, which is why this stays invisible until someone switches mode. It needs
-answering before presets are built, because it changes what the stored number MEANS.
+Not a new rule — it is **exactly what product prices already do** under `split` and `net_guaranteed`, where
+the tenant keys an amount and `calculate_price()` returns the grossed-up figure the buyer is charged. A tip
+jar behaving differently from every other price in the system would be the surprising choice, and it also
+matches "nothing is hidden": the number on the button is the number on the card statement.
+
+Under `standard` the two readings are identical, which is why the question only appears once someone switches
+mode — and why it had to be settled before presets were built rather than after.
 
 ## 5b. Every tip must be RECORDED as a tip (author, 2026-09-13)
 
@@ -250,7 +270,7 @@ a link.
 2. **Widen the model** to the legacy shape: `presets[]`, `allow_custom`, `max_amount`, `allow_recurring`,
    `recurring_interval`. Migrate the existing `suggested_amount` into `presets`.
 3. **Runtime**: pricing resolution, the preset-button UI on the page, and checkout with validated inline
-   `price_data` — with the preset question (§5a) answered first, since it decides what the stored number is.
+   `price_data` — presets being CHARGED amounts per §5a.
 4. **The product wizard** (§4) — or before 2/3, if the wizard lands first.
 5. **The order/tax decisions** (§5) followed through receipts, refunds, fees and the ledger — carrying the
    `entry_type: "tip"` classification of §5b, frozen at transaction time.
