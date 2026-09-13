@@ -446,10 +446,12 @@ of its own — sold-through products do, "here is my TikTok" does not.
    already does. `pricing_model: "customer_chooses"` is a real model with `min_amount`, `suggested_amount`,
    a dashboard control and **its own fee class** (`fees.py:122`, 5/5/0 by tier).
 
-   What is missing is the RUNTIME: `pricing_model` appears nowhere in `checkout.py`, `pricing.py` or
-   `runtime/html.py`, all of which read `unit_amount` as a fixed integer. A `customer_chooses` price has none,
-   so it resolves to **zero** — a tenant can configure a tip jar today and get a $0 product with no error.
-   That gap comes first, ahead of any element work.
+   What is missing is the RUNTIME, and the current state is worse than absent: `pricing.js` writes
+   `min_amount`/`suggested_amount` on top of a normal `unit_amount` from the Sales price field, and
+   `pricing_model` appears nowhere in `checkout.py`, `pricing.py` or `runtime/html.py`. So a tip jar saves
+   without error and **sells at whatever the tenant typed in Sales price** — a plausible wrong answer rather
+   than a failure. It is also a REGRESSION against stripe-cart, which ships the feature. That gap comes first,
+   ahead of any element work.
 
    **And it invalidates a premise the link policy leans on.** `CREATOR_LINK_POLICY.md` §3 argues that the
    allowlist IS the abuse story for `jbay.page` *because these pages carry no payment* -- the outbound link

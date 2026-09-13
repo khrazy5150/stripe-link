@@ -1,98 +1,123 @@
 # Pay what you want (Tip Jar)
 
-Status: PLANNED 2026-09-13, not built. Supersedes `SOCIAL_MEDIA_PAGES.md` §9.8b, which assumed far more was
-missing than actually is.
-Related: `SOCIAL_MEDIA_PAGES.md` §9.8, `CREATOR_LINK_POLICY.md` §3, `LEAD_GEN_PAGES.md` §4, `docs/PLATFORM_PLANS.md`.
+Status: PLANNED 2026-09-13, not built. Supersedes `SOCIAL_MEDIA_PAGES.md` §9.8b.
+Related: `LEAD_GEN_PAGES.md` §10 (the product wizard this belongs in), `CREATOR_LINK_POLICY.md` §3,
+`docs/PLATFORM_PLANS.md`, and stripe-cart `plans/one-time-and-recurring-payment-product-implementation.md`
+(the behavioural spec — it is BUILT and working there).
 
 ---
 
-## 1. It is half-built already, and the half that exists is the half I assumed was missing
+## 1. What is wrong today: it looks configured and silently sells at a fixed price
 
-Corrected 2026-09-13 after the author pointed at the pricing form. `customer_chooses` is a real pricing model
-with a UI, a document contract and its own fee class:
+"Customer chooses" exists in the product form and is a **lossy, half-imported** copy of the legacy feature.
 
-| Piece | State |
-|---|---|
-| `pricing_model: "customer_chooses"` + `min_amount` + `suggested_amount` | **Exists** — `documents.py:774-779` |
-| Dashboard control ("Customer chooses", Minimum, Suggested, fee preview) | **Exists** — `PricingCard.vue` |
-| Fee class `tip_jar`, distinct rates per tier | **Exists** — `fees.py:122`, 5% / 5% / 0% |
-| `suggested_amount` on the product index projection | **Exists** — `product_index.py` |
-| Pricing resolution | **Missing** |
-| Rendered price card / CTA | **Missing** |
-| Stripe Checkout | **Missing** |
+`pricing.js:138` writes `min_amount` and `suggested_amount` **on top of a normal `unit_amount`** taken from
+the Sales price field. Then `pricing_model` appears **nowhere** in `checkout.py`, `pricing.py` or
+`runtime/html.py` — all three read `int(price.get("unit_amount", 0))` and treat it as fixed.
 
-**`pricing_model` appears NOWHERE in `checkout.py`, `pricing.py` or `runtime/html.py`.** Every one of them
-reads `int(price.get("unit_amount", 0))` and treats it as fixed. A `customer_chooses` price has no
-`unit_amount`, so it resolves to **zero** — the page would show $0.00 and checkout would send
-`unit_amount=0`.
+So a tenant configures a tip jar, saves it without error, and gets **a product sold at whatever they typed in
+Sales price**, with no way for the customer to choose anything. Not a crash, not a $0 product: a plausible
+wrong answer, which is the worst failure shape. It is the same family as `same_as[].verified` and
+`analytics_summary` — a control the UI offers that nothing downstream honours — and the third one found.
 
-So this is a configured capability with no runtime behind it: the tenant can set it up today and nothing
-downstream honours it. The same shape as `same_as[].verified` (read, never written) and `analytics_summary`
-(read by the cards, written by nothing) — both of which shipped looking complete and were not. **Before
-anything else, that gap should either be filled or the control should refuse to save**, because a tenant who
-configures a tip jar today gets a $0 product and no error.
+**This is a regression against the legacy app, not a missing feature.** stripe-cart ships it.
 
-## 2. The buyer names the amount on STRIPE'S page, not ours
+## 2. The legacy behaviour, which is the spec
 
-Stripe Checkout takes `price_data[custom_unit_amount][enabled|minimum|maximum|preset]`. The buyer types the
-amount on the Checkout page.
+From stripe-cart's plan doc and its product form:
 
-That is the right first move for a reason beyond effort. An amount typed on OUR page has to travel to our
-checkout endpoint as a client-supplied number, and a client-supplied amount is a tampering surface that has to
-be re-validated server-side against the product's `min_amount` on every path. Letting Stripe collect it means
-the amount never passes through anything of ours that could be lied to. `minimum` is enforced by Stripe, and
-`preset` is exactly what `suggested_amount` already stores.
+```json
+{ "pricing_model": "customer_chooses", "nickname": "Tip Jar", "currency": "usd",
+  "presets": [200, 500, 1000, 2500], "allow_custom": true,
+  "min_amount": 100, "max_amount": 50000,
+  "allow_recurring": true, "recurring_interval": "month" }
+```
 
-The page-side affordance is then a button, not an input, which is also what a link hub wants.
+- **Preset amounts are a LIST** rendered as buttons ($2 / $5 / $10 / $25), not one "suggested amount".
+- **Allow custom amount** is a separate switch, with **minimum AND maximum**.
+- **Allow monthly recurring** — a tip can be a subscription.
+- **No Stripe Price is created.** The config lives in the document; a placeholder Stripe *Product* exists so
+  checkout can reference it from inline `price_data`.
+- **Checkout takes the chosen amount from the page**, builds inline `price_data`, and validates against
+  min/max.
 
-## 3. Decisions to make before building
+stripe-link today has `min_amount` + a single `suggested_amount`, and no max, no presets, no custom-amount
+switch, no recurring. The model needs widening to match before any of it can work.
 
-**Is a tip an ORDER?** The receipt, refund, fee and ledger rails all assume one, and a tip has no line item to
-fulfil, no shipping, no return. Options: (a) an order with a synthetic line and `fulfillment: none`, reusing
-every rail; (b) a second document type, and every rail learns a shape. (a) is cheaper and (b) is more honest;
-the answer decides most of the work.
+## 3. Where the amount is chosen — corrected
 
-**Tax.** Stripe Tax is configured per product here. A gratuity is not a sale of goods and its treatment is
-jurisdictional. This needs an answer from someone qualified, not a default.
+I first proposed letting Stripe collect it via `custom_unit_amount[minimum|preset]`, on the grounds that an
+amount typed on our page reaches our endpoint as a client-supplied number.
 
-**Refunds.** A tip is refundable in principle, and the existing refund path assumes an order (see above).
+**That does not deliver the behaviour.** `custom_unit_amount` gives ONE input on Stripe's page; it cannot
+render a row of preset buttons, which is the whole affordance — most people tap $5, they do not type it. So
+the amount is chosen on OUR page, as it is in the legacy app.
 
-**Minimum.** `min_amount` is already in the document and already validated. It must be passed to Stripe, not
-merely displayed — a minimum enforced only in the UI is decoration.
+The security concern does not go away, it just gets answered properly instead of avoided:
 
-**Currency.** `customer_chooses` inherits the price's currency. No new decision, but worth stating.
+- **The server validates, always.** A preset must match the stored list EXACTLY; a custom amount must fall
+  within `min_amount`/`max_amount` AND `allow_custom` must be true. A client-supplied amount is never
+  trusted, only checked.
+- **The fee is computed server-side from the validated amount**, never sent by the page.
+- Rejection is an error, not a clamp: silently charging someone a different number than they chose is worse
+  than refusing.
 
-## 4. It changes the abuse story for `jbay.page`
+## 4. It belongs in the NEW product wizard, not the current form
+
+Author, 2026-09-13. The product screen is changing anyway (`LEAD_GEN_PAGES.md` §10: ask commercial intent
+first, then skip the fields that intent does not need), and a tip jar is a third answer to that first
+question — not "I want a payment" and not "I want to capture a lead", but "I want to receive tips".
+
+Bolting presets, min, max, custom and recurring onto the existing Pricing card would make the busiest part of
+the busiest form worse, right before that form is replaced. So:
+
+- **The wizard asks intent, and "Tip jar" is one of the answers.**
+- Choosing it **skips** the transactional fields a tip has no use for — SKU, categories, condition, shipping,
+  variants, compare-at price — exactly as the lead-gen branch does.
+- What it asks instead: preset amounts, allow-custom (+ min/max), allow-recurring, currency, fee handling.
+- The `customer_chooses` pricing model stays the underlying representation, so nothing about Offers, the fee
+  class or the index projection has to change shape.
+
+**Sequencing consequence: §10's wizard is now a dependency, not a nicety.** Build the wizard first, or build
+the runtime first and the wizard second — but do not extend the current Pricing card.
+
+## 5. Decisions still open
+
+**Is a tip an ORDER?** The receipt, refund, fee and ledger rails all assume one, and a tip has nothing to
+fulfil. (a) an order with a synthetic line and `fulfillment: none`, reusing every rail; (b) a second document
+type, and every rail learns a shape. (a) is cheaper, (b) is more honest. This decides most of the work.
+
+**Tax.** A gratuity is not a sale of goods and the treatment is jurisdictional. Stripe Tax is configured per
+product here. Needs someone qualified, not a default.
+
+**Recurring tips mean `mode: subscription`.** A monthly tip is a Stripe subscription, with everything that
+implies: cancellation, dunning, and a customer portal path. Worth asking whether v1 ships one-time only —
+the legacy app has the switch, but shipping the switch is not the same as shipping the lifecycle.
+
+**Fee handling on a tip.** The fee class (`tip_jar`, 5/5/0) exists. Whether "Net-guaranteed" is offered — the
+buyer covering fees so the creator keeps the round number — is a product question the legacy form answers
+yes to.
+
+## 6. It changes the abuse story for `jbay.page`
 
 `CREATOR_LINK_POLICY.md` §3 argues the link allowlist IS the abuse story for the creator domain **because
-these pages carry no payment** — the outbound link being an abuser's only lever. A first-party tip jar makes a
-link hub a page that takes money on a shared, anonymous-signup domain.
+these pages carry no payment**. A first-party tip jar makes a link hub a page that takes money on a shared,
+anonymous-signup domain: card testing against a low minimum, and scam donation pages that look like a person.
+The allowlist does nothing about either.
 
-That is a different surface and the allowlist does nothing about it: card testing against a $1-minimum
-endpoint, and scam donation pages that look like a person. Neither is hypothetical for this product category.
+That argument must be re-made before a tip jar can exist on a platform host — at minimum, what onboarding is
+required before one can take money, and what §6's takedown path does when a tip jar is reported rather than
+a link.
 
-**So the §3 argument must be re-made, not inherited.** At minimum: what does signup require before a tip jar
-can take money (Connect onboarding already gates payouts — does it gate this?), and what does the takedown
-path in §6 do when a tip jar is reported rather than a link?
+## 7. Order
 
-## 5. The `tip_jar` element gains a second mode
-
-Today it is an outbound link (shipped 2026-09-13). It should become: link to a destination, OR take the tip
-here. Same element, one switch, because from the visitor's side it is one button either way.
-
-The first-party mode needs a product with a `customer_chooses` price — which the tenant already creates in the
-form pictured above — so the element references a product rather than growing its own pricing.
-
-**Note the composition tension.** `lead_social` excludes `checkout_cta` on the grounds that a link hub's cards
-ARE its calls to action and a page that takes no money needs no checkout. A first-party tip jar does not
-reintroduce `checkout_cta` — it is its own element with its own button — but "this page sells nothing" stops
-being true of the SHAPE, and §4's exclusions were justified partly on that. Worth re-reading them together.
-
-## 6. Order
-
-1. **Make the existing control honest** — either resolve/render/checkout a `customer_chooses` price, or refuse
-   to save one. Today it saves and silently produces $0.
-2. **Checkout**: `custom_unit_amount` with `minimum` and `preset`, amount collected by Stripe.
-3. **Decide the order question** (§3) and follow it through receipts, refunds, fees and the ledger.
-4. **Re-make the `jbay.page` abuse argument** (§4) before a tip jar can exist on a platform host.
-5. **The element's second mode** (§5). Last: it is the smallest piece and it depends on all of the above.
+1. **Stop the silent wrong answer.** Either honour `customer_chooses` end to end, or refuse to save one. A
+   product that sells at a price the tenant did not intend is the live bug here.
+2. **Widen the model** to the legacy shape: `presets[]`, `allow_custom`, `max_amount`, `allow_recurring`,
+   `recurring_interval`. Migrate the existing `suggested_amount` into `presets`.
+3. **Runtime**: pricing resolution, the preset-button UI on the page, and checkout with validated inline
+   `price_data`.
+4. **The product wizard** (§4) — or before 2/3, if the wizard lands first.
+5. **The order/tax decisions** (§5) followed through receipts, refunds, fees and the ledger.
+6. **Re-make the `jbay.page` abuse argument** (§6) before a tip jar serves on a platform host.
+7. **The `tip_jar` element's first-party mode** — smallest piece, depends on all of the above.
