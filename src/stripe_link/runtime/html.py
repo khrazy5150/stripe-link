@@ -10,7 +10,7 @@ from urllib.parse import quote, urlencode, urlparse
 from stripe_link.platform_config import default_favicon_url
 from stripe_link.domain.bargain import FROM_PREFIX, derived_bargain
 from stripe_link.domain.business_types import BUSINESS_TYPES, resolve_entity_type
-from stripe_link.domain.composition import compose_page, element_channel
+from stripe_link.domain.composition import compose_page, element_channel, shows_breadcrumb
 from stripe_link.domain.connect_sync import site_seo_enabled
 from stripe_link.domain.documents import PRODUCT_CONDITIONS
 from stripe_link.domain.page_views import link_id as link_click_id
@@ -1753,6 +1753,7 @@ def render_page(
         str(hosting.get("custom_domain") or "").strip()
         and (hosting.get("verification") or {}).get("verified")
     )
+    _RENDER_STATE["breadcrumb"] = shows_breadcrumb(offer or {}, page)
     _RENDER_STATE["page_type"] = str(page_type or "")
     # SEO opt-out (Site-level "discover in search" switch): when off, the storefront chrome renders in its plain
     # no-SEO form (breadcrumb hidden, brand centered) via a body marker CSS keys off. Robots noindex is applied
@@ -3462,6 +3463,8 @@ def breadcrumb_trail(offer: dict[str, Any], products_by_id: dict[str, dict[str, 
     page is served on the Site's verified custom domain (a resolvable Home), below the root (the homepage is
     the root), and on a browseable page_type (never a post-checkout page). The trail is deliberately shallow
     until category pages exist (SEO-13); a category level slots in between Home and the leaf then."""
+    if not _RENDER_STATE.get("breadcrumb", True):
+        return []   # composition says this shape has no hierarchy, or the tenant turned it off for this page
     home = _RENDER_STATE.get("home_url") or ""
     if not home or _RENDER_STATE.get("page_type") in NONINDEXABLE_PAGE_TYPES:
         return []

@@ -1143,6 +1143,15 @@ def validate_page_document(document: dict[str, Any]) -> None:
             optional_string(document, "goal", "Page goal")
     optional_non_negative_int(document, "revision")
 
+    # Per-page chrome: the header furniture a page carries, as opposed to its content sections. Absent means
+    # "use the default for this shape" -- never false -- so a page saved before this existed keeps whatever
+    # its composition says (plans/SITE_COLLECTIONS.md, "per-page chrome").
+    chrome = document.get("chrome")
+    if chrome is not None:
+        if not isinstance(chrome, dict):
+            raise DocumentValidationError("Page chrome must be an object.")
+        optional_bool(chrome, "breadcrumb", "Page chrome.breadcrumb")
+
     route = document.get("route")
     if not isinstance(route, dict) or not route.get("slug"):
         raise DocumentValidationError("Page route.slug is required.")

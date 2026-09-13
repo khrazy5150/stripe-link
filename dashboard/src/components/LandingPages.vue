@@ -262,6 +262,26 @@
                 </label>
             </SettingsAccordion>
             <SettingsAccordion label="Appearance" hint="Theme preset and colour overrides" :icon="SETTINGS_ICONS['Appearance']" :open="openSetting === 'Appearance'" @toggle="toggleSetting('Appearance')">
+                  <!-- Page CHROME, not content: it sits in the header above everything the composer places.
+                       Shown for every page so the default is visible and reversible, rather than a behaviour
+                       a tenant can only discover by noticing it. -->
+                  <label class="builder-switch-row">
+                    <span class="builder-switch" @click.stop>
+                      <input v-model="breadcrumbOn" type="checkbox" aria-label="Show breadcrumb trail" />
+                      <span aria-hidden="true"></span>
+                    </span>
+                    <span>Show breadcrumb trail</span>
+                  </label>
+                  <small class="field-note">
+                    The <strong>Home / {{ builder.name || "This page" }}</strong> trail in the header. It says where
+                    a page sits in your store, so it only appears once the page is on a Site served by your own
+                    verified domain.
+                    <template v-if="!breadcrumbDefault">
+                      A {{ builderOfferType === "lead_social" ? "link page" : "lead page" }} is not part of a
+                      catalogue, so it is off here by default.
+                    </template>
+                  </small>
+
                   <label class="offer-field">
                     <span>Preset</span>
                     <select v-model="builder.preset">
@@ -2517,6 +2537,7 @@ const selectedOfferCta = computed(() => selectedOffer.value?.presentation?.cta |
 // offer_type is being retired (plans/OFFER_MODEL_REDESIGN.md): read it through a derive helper — the stored
 // field wins during migration, else infer from the landing items — so this keeps working once it's dropped.
 // Mirrors LEAD_COMPOSITIONS in domain/composition.py; pinned by tests/test_lead_gen_composition.py.
+const LEAD_COMPOSITION_TYPES = new Set(["lead_capture", "lead_call", "lead_bridge", "lead_social"]);
 const LEAD_COMPOSITIONS = {
   capture_email: "lead_capture",
   capture_phone: "lead_capture",
@@ -2560,6 +2581,18 @@ const storeAvatarUrl = computed(() => profileStore.storeAvatarUrl || "");
 const effectiveAvatarUrl = computed(() => builder.avatar_url || storeAvatarUrl.value);
 const avatarIsFromProfile = computed(() => !builder.avatar_url && Boolean(storeAvatarUrl.value));
 const builderOfferType = computed(() => deriveOfferType(builderOffer.value));
+// Mirrors shows_breadcrumb() in domain/composition.py. A breadcrumb says "you are HERE in a hierarchy", which
+// is true of a product inside a catalogue and false of the lead shapes -- a link hub is an identity page, not
+// a node under a store, and a bridge page is noindex by rule, so a crawlable trail on it has no reader.
+const breadcrumbDefault = computed(() => !LEAD_COMPOSITION_TYPES.has(builderOfferType.value));
+// The checkbox binds to the EFFECTIVE value, not the stored one. builder.breadcrumb is undefined until the
+// tenant touches it -- that is what "derive from the shape" looks like in the document -- and an undefined
+// v-model renders unchecked, which would have shown every checkout page as breadcrumb-off while it rendered
+// one. Reading through the default keeps the control honest about what the page actually does.
+const breadcrumbOn = computed({
+  get: () => (typeof builder.breadcrumb === "boolean" ? builder.breadcrumb : breadcrumbDefault.value),
+  set: (value) => { builder.breadcrumb = value; },
+});
 function sectionVisible(sectionType) {
   return isSectionVisible(builderOfferType.value, sectionType, builder.composition.overrides, builderGoal.value);
 }
@@ -4020,6 +4053,8 @@ function populateBuilderFromPage(page) {
     // from the saved sections array — which made every page a fixed point, since whatever order it
     // happened to be saved with came back as "the tenant's order" and the baseline never got a look in.
     section_order: Array.isArray(page.section_order) ? page.section_order.filter((k) => typeof k === "string") : [],
+    // Absent means "derive from the shape", which is why this reads the default rather than defaulting to true.
+    breadcrumb: typeof page.chrome?.breadcrumb === "boolean" ? page.chrome.breadcrumb : undefined,
     page_id: page.page_id || localId("page"),
     thank_you_page_id: page.post_checkout?.thank_you_page?.page_id || localId("page"),
     post_purchase: loadPostPurchase(page),
@@ -4240,6 +4275,9 @@ function buildBuilderPageDocument() {
     },
     offer_id: builder.offer_id,
     goal: builder.goal || undefined,
+    // Absent means "use the default for this shape", so only a DEVIATION is stored. Writing the resolved
+    // value would freeze today's answer into the document -- the same mistake the brand label made.
+    ...(breadcrumbOn.value === breadcrumbDefault.value ? {} : { chrome: { breadcrumb: breadcrumbOn.value } }),
     theme: {
       template: "universal_bundle",
       preset: builder.preset,

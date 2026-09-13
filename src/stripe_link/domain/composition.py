@@ -242,6 +242,25 @@ def composition_forbids_indexing(offer: dict[str, Any]) -> bool:
     return composition_key(offer) in NEVER_INDEXED_COMPOSITIONS
 
 
+def shows_breadcrumb(offer: dict[str, Any], page: dict[str, Any] | None = None) -> bool:
+    """Whether this page shows the Home > ... trail in its header.
+
+    A breadcrumb says "you are HERE in a hierarchy", which is true of a product inside a catalogue and false
+    of the lead shapes: a link hub is an identity page, not a node under a store, and a bridge page is noindex
+    by rule -- a crawlable trail on a page no crawler may index is clutter with no reader. So the lead shapes
+    default OFF, the transactional ones default ON, and `page.chrome.breadcrumb` overrides either way, because
+    a standalone checkout page attached to a Site is a real case with no rule that settles it.
+
+    Gates BOTH the visible nav and the BreadcrumbList JSON-LD, which is why it lives inside breadcrumb_trail
+    rather than beside one of its callers: structured data has to describe what is on the page, and markup for
+    a breadcrumb a visitor cannot see is exactly the mismatch Google's guidelines call out.
+    """
+    override = ((page or {}).get("chrome") or {}).get("breadcrumb")
+    if isinstance(override, bool):
+        return override
+    return not is_lead_composition(offer)
+
+
 def is_lead_composition(offer: dict[str, Any]) -> bool:
     """Whether this offer composes as one of the four lead shapes rather than a checkout page."""
     return composition_key(offer) in set(LEAD_COMPOSITIONS.values())
