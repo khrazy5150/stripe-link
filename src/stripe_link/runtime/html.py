@@ -1894,6 +1894,17 @@ def _render_page_body(
     # trail (SEO-11) sits above the page content, matching the BreadcrumbList JSON-LD.
     # If the page composes its own ● Brand mark, the store header drops its brand so there's only one (SITE_COLLECTIONS.md
     # "Chrome / header composition"). A disabled brand_label section still counts as absent.
+    # Does this page have a brand mark OF ITS OWN -- shown or deliberately hidden? The storefront header
+    # drops its brand either way, and the distinction matters: brand_label is in EVERY composition, so
+    # "not in body_sections" means the tenant turned it off, not that the page never had one. Reading only
+    # the composed list made hiding the brand HAND it to the header, which then printed the Organization name
+    # in a different style at the top of the page -- the tenant switched the brand off and it moved.
+    #
+    # The header's brand exists for pages with no mark of their own (an offer-less storefront or category
+    # page), and those carry no brand_label section at all.
+    composes_brand_mark = any(
+        isinstance(s, dict) and s.get("type") == "brand_label" for s in (page.get("sections") or [])
+    )
     has_brand_mark = any(
         s.get("type") == "brand_label" and s.get("enabled") is not False for s in body_sections
     )
@@ -1921,7 +1932,7 @@ def _render_page_body(
         h1_owner = ""
     _RENDER_STATE["h1_owner"] = h1_owner
     _RENDER_STATE["brand_label_is_h1"] = h1_owner == "brand_label"
-    site_header = render_site_header(has_brand_mark=has_brand_mark)
+    site_header = render_site_header(has_brand_mark=has_brand_mark or composes_brand_mark)
     footer_nav = render_footer_nav()
     breadcrumb = render_breadcrumb(breadcrumb_trail(offer, products_by_id))
     body = "\n".join(
@@ -3514,10 +3525,14 @@ def render_nav_list(items: list[dict[str, str]], *, css_class: str, aria_label: 
 
 def render_site_header(*, has_brand_mark: bool = False) -> str:
     """The storefront header: the Organization name linking to the store root (an internal link to the root on
-    every page, SEO-13) plus the primary menu. When the page renders its own centered ● Brand mark
-    (render_brand_label), the header drops the brand to avoid two competing brand marks and carries the menu
-    alone — the brand mark takes over the store-root link. Rendered only when there's a home host; "" on a
-    post-checkout page (a Home link would leak the buyer out) or when there's nothing to show."""
+    every page, SEO-13) plus the primary menu. Rendered only when there's a home host; "" on a post-checkout
+    page (a Home link would leak the buyer out) or when there's nothing to show.
+
+    `has_brand_mark` means the page OWNS a brand mark, not that one is currently visible. Where the page has
+    its own the header carries the menu alone and the mark takes over the store-root link; where the tenant
+    has HIDDEN that mark, the header must still stay quiet, because a brand switched off is not a brand to be
+    supplied from somewhere else in a different style. The header's brand is for pages with no mark of their
+    own -- an offer-less storefront or category page."""
     home = _RENDER_STATE.get("home_url") or ""
     if not home or _RENDER_STATE.get("page_type") in NONINDEXABLE_PAGE_TYPES:
         return ""

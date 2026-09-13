@@ -240,3 +240,71 @@ class HeadingOwnerTests(unittest.TestCase):
         self.assertEqual(re.findall(r"<h1[^>]*>(.*?)</h1>", body, re.S), ["Lola Greiner"])
         # ...and therefore no page-health warning for the tenant to puzzle over.
         self.assertEqual(html_module.heading_outline_warnings(html), [])
+
+
+class BrandSuppressionTests(unittest.TestCase):
+    """Hiding the brand has to hide it EVERYWHERE, not move it.
+
+    Reported 2026-09-13: switching the brand off -- from the Hero editor or from Page Sections, either way --
+    made the store name reappear at the top of the page in a different style.
+
+    It was the storefront site header. Its rule was "if the page composes its own brand mark, drop mine, so
+    there are not two". Sound, until you notice brand_label is in EVERY composition, so `not in body_sections`
+    means the tenant TURNED IT OFF -- and the rule then read that as "this page has no brand mark" and
+    helpfully supplied one. The switch did not remove the brand; it relocated it.
+
+    The header's brand exists for pages that own no mark at all -- an offer-less storefront or category page.
+    So the question it asks is now whether the page OWNS a brand mark, not whether one is currently visible.
+    """
+
+    SITE = {"site_id": "s", "hosting": {"type": "platform", "platform_hostname": "poliaxis.jbay.uk"},
+            "organization": {"name": "Poliaxis Nutrition"}, "pages": {"/links": {"page_id": "p1"}}}
+    OFFER = {"offer_id": "o", "status": "active", "items": [{"product_id": "p", "price_id": "pr"}],
+             "presentation": {}, "product_intent": "lead_gen", "lead_capture_action": "social_redirect"}
+    PRODUCTS = {"p": {"product_id": "p", "name": "My Links", "default_price_id": "pr",
+                      "prices": [{"price_id": "pr", "unit_amount": 0, "currency": "usd"}]}}
+
+    def _body(self, *, hidden):
+        import re
+
+        page = {"page_id": "p1", "tenant_id": "t", "name": "My Links", "route": {"slug": "x"},
+                "sections": [{"id": "brand", "type": "brand_label"},
+                             {"id": "hm", "type": "hero_media", "images": ["https://img.example/h.webp"]},
+                             {"id": "lf", "type": "legal_footer"}]}
+        if hidden:
+            page["composition"] = {"overrides": {"brand_label": {"enabled": False}}}
+        html = html_module.render_page(
+            page, self.OFFER, self.PRODUCTS, checkout_url="https://c", api_base_url="https://a",
+            site=self.SITE, home_url="https://poliaxis.jbay.uk/",
+            preferences={"avatar_url": "https://img.example/a.webp"}, kind="published")
+        body = html.split("<body>", 1)[-1].split("</body>", 1)[0]
+        return re.sub(r"<(script|style)\b[^>]*>.*?</\1>", " ", body, flags=re.S | re.I)
+
+    def test_hiding_the_brand_removes_it_from_the_page_entirely(self):
+        body = self._body(hidden=True)
+        self.assertNotIn("Poliaxis Nutrition", body)
+        self.assertNotIn('data-section-type="brand_label"', body)
+
+    def test_showing_it_still_renders_exactly_one(self):
+        body = self._body(hidden=False)
+        self.assertIn('data-section-type="brand_label"', body)
+        self.assertEqual(body.count("Poliaxis Nutrition"), 1)
+
+    def test_the_header_never_supplies_a_brand_the_page_owns(self):
+        # Either way, the header carries the menu alone -- the mark is the page's job.
+        for hidden in (True, False):
+            self.assertNotIn('<a class="sl-brand" href="/">', self._body(hidden=hidden), hidden)
+
+    def test_a_page_with_no_brand_mark_still_gets_the_header_brand(self):
+        # The case the header's brand exists for: an offer-less storefront or category page owns no mark.
+        html_module._RENDER_ORG.clear()
+        html_module._RENDER_ORG["name"] = "Poliaxis Nutrition"
+        html_module._RENDER_STATE["home_url"] = "https://poliaxis.jbay.uk/"
+        html_module._RENDER_STATE["page_type"] = "category"
+        try:
+            self.assertIn("Poliaxis Nutrition", html_module.render_site_header(has_brand_mark=False))
+            self.assertNotIn("Poliaxis Nutrition", html_module.render_site_header(has_brand_mark=True))
+        finally:
+            html_module._RENDER_ORG.clear()
+            html_module._RENDER_STATE["home_url"] = ""
+            html_module._RENDER_STATE["page_type"] = ""
