@@ -19,6 +19,13 @@ export function defaultPriceForm() {
     context: "standard",
     min_amount: 0,
     suggested_amount: 0,
+    // Tip jar (pricing_model customer_chooses). presets are CHARGED amounts -- what the buyer taps is what
+    // the buyer pays -- exactly as sales_price is for a fixed price under split/net_guaranteed.
+    presets: [],
+    max_amount: 0,
+    allow_custom: true,
+    allow_recurring: false,
+    recurring_interval: "month",
   };
 }
 
@@ -42,6 +49,16 @@ export function priceFormFromDocument(price) {
     context: price.context || "standard",
     min_amount: centsToMoneyInput(price.min_amount || 0, quantity),
     suggested_amount: centsToMoneyInput(price.suggested_amount || 0, quantity),
+    // A legacy suggested_amount becomes the first preset, which is what it always meant -- one amount offered
+    // to the buyer. The document keeps its own copy until it is migrated; this is the form's reading of it.
+    presets: (Array.isArray(price.presets) && price.presets.length
+      ? price.presets
+      : [price.suggested_amount].filter(Boolean)
+    ).map((amount) => centsToMoneyInput(amount, quantity)),
+    max_amount: centsToMoneyInput(price.max_amount || 0, quantity),
+    allow_custom: price.allow_custom !== false,
+    allow_recurring: Boolean(price.allow_recurring),
+    recurring_interval: price.recurring_interval === "year" ? "year" : "month",
   };
 }
 

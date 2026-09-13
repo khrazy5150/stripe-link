@@ -279,7 +279,16 @@ tenant types is stored, and the fallback resolves Site name → page SEO title �
 the page name deliberately: a brand label names the business, not the document, and "My Links Landing Page" is
 a filename shown to a visitor.
 
-## 10. Product creation becomes a wizard (author's design)
+## 10. Product creation becomes a wizard (author's design) — ✅ BUILT 2026-09-13
+
+Shipped with a THIRD intent the original entry did not have: "Receive tips". It is not a third
+`product_intent` — a tip jar is a transaction product priced `customer_chooses`, so Offers, the fee class and
+the index projection need no new shape (`plans/PAY_WHAT_YOU_WANT.md` §4). The wizard's three answers are a UI
+vocabulary, not a document field.
+
+CREATE goes through the wizard; EDIT keeps the full form. A wizard is the wrong shape for changing something
+that already exists — you want every field at once, not a path through three of them — and it keeps this
+change off the working edit path entirely.
 
 Ask commercial intent FIRST: *"Choose whether this product collects payment or captures lead information.
 Payment products are set up to charge through Stripe automatically."* → **"I want a payment"** /

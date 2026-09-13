@@ -136,8 +136,22 @@ export async function buildPriceDocument(priceForm, productType, now) {
     updated_at: now,
   };
   if (pricingModel === "customer_chooses") {
+    // A TIP JAR. unit_amount is meaningless here -- the buyer picks -- so the document says how they pick
+    // and nothing pretends there is a fixed price. Writing one is what made the half-imported version sell
+    // at whatever sat in the Sales price field (plans/PAY_WHAT_YOU_WANT.md §1).
+    delete price.unit_amount;
+    delete price.compare_at_unit_amount;
+    const presets = (priceForm.presets || [])
+      .map((amount) => cents(amount))
+      .filter((amount) => amount > 0);
+    price.presets = [...new Set(presets)].sort((a, b) => a - b);
     price.min_amount = cents(priceForm.min_amount);
-    price.suggested_amount = cents(priceForm.suggested_amount);
+    if (cents(priceForm.max_amount) > 0) price.max_amount = cents(priceForm.max_amount);
+    price.allow_custom = priceForm.allow_custom !== false;
+    if (priceForm.allow_recurring) {
+      price.allow_recurring = true;
+      price.recurring_interval = priceForm.recurring_interval === "year" ? "year" : "month";
+    }
   }
   return price;
 }

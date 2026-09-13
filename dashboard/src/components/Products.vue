@@ -174,7 +174,144 @@
           <button type="button" class="modal-close" aria-label="Close create product modal" @click="closeCreateModal">×</button>
         </header>
 
-        <form class="product-create-body" @submit.prevent="saveProduct">
+        <!-- CREATE goes through the wizard; EDIT keeps the full form. A wizard is the wrong shape for
+             changing something that already exists -- you want every field at once, not a path through three
+             of them -- and keeping edit on the old body holds the blast radius of this change down.
+             plans/LEAD_GEN_PAGES.md §10. -->
+        <form v-if="wizardMode" class="product-create-body" @submit.prevent="wizardStep === 3 ? saveProduct() : wizardNext()">
+          <div v-if="formError" class="keys-status-banner error">{{ formError }}</div>
+
+          <ol class="wizard-steps" aria-label="Progress">
+            <li v-for="(label, index) in WIZARD_STEPS" :key="label"
+                :class="{ 'is-current': wizardStep === index + 1, 'is-done': wizardStep > index + 1 }">
+              <span aria-hidden="true">{{ index + 1 }}</span>{{ label }}
+            </li>
+          </ol>
+
+          <!-- STEP 1 — intent, asked FIRST because it decides which of the next questions are even real.
+               A tip jar has no SKU, no categories, no condition, no shipping; a lead magnet has no price. -->
+          <section v-if="wizardStep === 1" class="wizard-panel">
+            <p class="wizard-lede">What is this product for?</p>
+            <div class="lead-picker-grid">
+              <button
+                v-for="intent in PRODUCT_INTENTS"
+                :key="intent.key"
+                class="lead-action-card"
+                :class="{ selected: wizardIntent === intent.key }"
+                type="button"
+                @click="wizardIntent = intent.key"
+              >
+                <span class="lead-action-icon" :class="intent.tone"><component :is="intentIcon(intent.key)" /></span>
+                <strong>{{ intent.label }}</strong>
+                <small>{{ intent.description }}</small>
+                <span v-if="wizardIntent === intent.key" class="lead-selected-check">✓</span>
+              </button>
+            </div>
+          </section>
+
+          <!-- STEP 2 — only what this intent needs. -->
+          <section v-if="wizardStep === 2" class="wizard-panel">
+            <label>
+              Product Name <span class="required">*</span>
+              <input v-model.trim="form.name" required autocomplete="off" :placeholder="intentNamePlaceholder" />
+            </label>
+            <label>
+              Description
+              <textarea v-model.trim="form.description" rows="3" placeholder="Describe it in a line or two..."></textarea>
+            </label>
+
+            <template v-if="wizardIntent === 'transaction'">
+              <div class="modal-inline-grid">
+                <label>
+                  Type
+                  <select v-model="form.product_type">
+                    <option value="physical">Physical — requires shipping</option>
+                    <option value="digital">Digital — no shipping</option>
+                    <option value="service">Service — opens booking flow</option>
+                  </select>
+                </label>
+                <label>
+                  Price
+                  <input v-model.number="form.prices[0].sales_price" type="number" min="0" step="0.01" />
+                  <span class="field-note">You can add more prices, SKUs and categories after saving.</span>
+                </label>
+              </div>
+            </template>
+
+            <template v-else-if="wizardIntent === 'lead_gen'">
+              <p class="field-note">
+                A lead magnet is never sold, so it has no price, SKU or category — just the action it performs.
+              </p>
+              <button class="secondary-action" type="button" @click="showLeadPicker = true">
+                {{ form.lead_capture.label ? `Action: ${form.lead_capture.label}` : "Choose an action" }}
+              </button>
+              <label v-if="leadTargetLabel">
+                {{ leadTargetLabel }}
+                <input v-model.trim="form.lead_capture.target" :placeholder="leadTargetPlaceholder" />
+              </label>
+            </template>
+
+            <template v-else>
+              <p class="field-note">
+                A tip jar has no SKU, category, condition or shipping — nothing about it is a catalogue item.
+                The amounts below are what the customer PAYS, fees included, so the button and their statement
+                agree.
+              </p>
+              <div class="wizard-presets">
+                <span v-for="(amount, index) in form.prices[0].presets" :key="index" class="wizard-preset">
+                  <input v-model.number="form.prices[0].presets[index]" type="number" min="1" step="1" aria-label="Preset amount" />
+                  <button type="button" class="link-danger" @click="form.prices[0].presets.splice(index, 1)">×</button>
+                </span>
+                <button v-if="form.prices[0].presets.length < 8" class="secondary-action compact" type="button"
+                        @click="form.prices[0].presets.push(5)">+ Amount</button>
+              </div>
+              <label class="modal-checkbox">
+                <input v-model="form.prices[0].allow_custom" type="checkbox" />
+                Let them enter their own amount
+              </label>
+              <div class="modal-inline-grid">
+                <label>Minimum<input v-model.number="form.prices[0].min_amount" type="number" min="0" step="1" /></label>
+                <label>Maximum <em>(optional)</em><input v-model.number="form.prices[0].max_amount" type="number" min="0" step="1" /></label>
+              </div>
+              <label>
+                Who pays the fees
+                <select v-model="form.prices[0].fee_handling">
+                  <option value="net_guaranteed">The customer — you keep the full amount</option>
+                  <option value="split">Split 50/50</option>
+                  <option value="standard">You do — fees come out of the tip</option>
+                </select>
+                <span class="field-note">
+                  Everywhere else, the fees come out of your tip. Here, your customer can cover them.
+                </span>
+              </label>
+            </template>
+          </section>
+
+          <!-- STEP 3 — an image, optional. Last because it is the one step someone may reasonably skip. -->
+          <section v-if="wizardStep === 3" class="wizard-panel">
+            <p class="wizard-lede">Add an image <em>(optional)</em></p>
+            <p class="field-note">
+              You can skip this and add one later. A page with no image is not broken — it is just plainer.
+            </p>
+            <input ref="wizardFileInput" type="file" accept="image/*" hidden multiple @change="onWizardImagePicked" />
+            <button class="secondary-action" type="button" :disabled="uploadingAsset" @click="wizardFileInput?.click()">
+              {{ uploadingAsset ? "Uploading..." : "Choose image" }}
+            </button>
+            <p v-if="uploadStatus" class="upload-status" :class="uploadStatusKind">{{ uploadStatus }}</p>
+            <p v-if="form.uploaded_images.length" class="field-note">{{ form.uploaded_images.length }} image(s) added.</p>
+          </section>
+
+          <footer class="product-modal-footer">
+            <button class="secondary-action" type="button" @click="wizardStep === 1 ? closeCreateModal() : wizardBack()">
+              {{ wizardStep === 1 ? "Cancel" : "Back" }}
+            </button>
+            <button class="primary-action" type="submit" :disabled="store.savingStatus || !wizardCanAdvance">
+              {{ wizardStep === 3 ? (store.savingStatus ? "Saving..." : "Create product") : "Continue" }}
+            </button>
+          </footer>
+        </form>
+
+        <form v-else class="product-create-body" @submit.prevent="saveProduct">
           <div v-if="formError" class="keys-status-banner error">{{ formError }}</div>
 
           <label>
@@ -531,6 +668,91 @@ const gtinWarning = computed(() =>
     : "",
 );
 const showCreateModal = ref(false);
+
+// --- Product creation wizard (plans/LEAD_GEN_PAGES.md §10) ---
+// Intent is asked FIRST because it decides which of the later questions are even real: a tip jar has no SKU,
+// category, condition or shipping; a lead magnet has no price. Asking everything and hiding most of it is how
+// the single form got to 1,200 lines.
+//
+// "Tip jar" is NOT a third product_intent. It is a transaction product whose price is customer_chooses --
+// mapping it that way means Offers, the fee class and the index projection need no new shape
+// (plans/PAY_WHAT_YOU_WANT.md §4). The wizard's three answers are a UI vocabulary, not a document field.
+const WIZARD_STEPS = ["Purpose", "Details", "Image"];
+const PRODUCT_INTENTS = [
+  { key: "transaction", label: "Sell something", tone: "blue",
+    description: "A product or service people pay a set price for." },
+  { key: "lead_gen", label: "Capture a lead", tone: "green",
+    description: "A free download, a call, or a link. Never sold." },
+  { key: "tip_jar", label: "Receive tips", tone: "pink",
+    description: "Supporters choose what to pay. You can have them cover the fees." },
+];
+const wizardMode = ref(false);
+const wizardStep = ref(1);
+const wizardIntent = ref("transaction");
+const wizardFileInput = ref(null);
+
+const intentNamePlaceholder = computed(() => ({
+  transaction: "e.g. Premium Widget",
+  lead_gen: "e.g. Free Starter Guide",
+  tip_jar: "e.g. Buy me a coffee",
+}[wizardIntent.value] || "e.g. Premium Widget"));
+
+// Step 1 needs a choice; step 2 needs a name, and a lead product needs its action -- without one there is
+// nothing for the page to do. Everything else on step 2 has a workable default.
+const wizardCanAdvance = computed(() => {
+  if (wizardStep.value === 1) return Boolean(wizardIntent.value);
+  if (wizardStep.value === 2) {
+    if (!form.value.name.trim()) return false;
+    if (wizardIntent.value === "lead_gen") return Boolean(form.value.lead_capture.action);
+    if (wizardIntent.value === "tip_jar") {
+      return form.value.prices[0].allow_custom || (form.value.prices[0].presets || []).some((a) => Number(a) > 0);
+    }
+  }
+  return true;
+});
+
+function intentIcon(key) {
+  // Reuses the lead-action glyph vocabulary so the two pickers read as one family.
+  return leadIcon({ transaction: "external_url", lead_gen: "capture_email", tip_jar: "call_number" }[key]);
+}
+
+function wizardNext() {
+  if (!wizardCanAdvance.value) return;
+  // Apply the intent as soon as it is chosen, so step 2 edits a form that already matches it.
+  if (wizardStep.value === 1) applyWizardIntent();
+  wizardStep.value = Math.min(3, wizardStep.value + 1);
+}
+
+async function onWizardImagePicked(event) {
+  await handleImageFiles(Array.from(event.target.files || []));
+  event.target.value = "";   // so picking the same file twice still fires a change
+}
+
+function wizardBack() {
+  wizardStep.value = Math.max(1, wizardStep.value - 1);
+}
+
+function applyWizardIntent() {
+  const price = form.value.prices[0];
+  if (wizardIntent.value === "lead_gen") {
+    form.value.product_intent = "lead_gen";
+    price.pricing_model = "one_time";
+  } else if (wizardIntent.value === "tip_jar") {
+    // A transaction product, priced customer_chooses. Digital because nothing ships and nothing is booked.
+    form.value.product_intent = "transaction";
+    form.value.product_type = "digital";
+    price.pricing_model = "customer_chooses";
+    // The pitch's default: the customer covers the fees, so the creator keeps the full amount. Editable, and
+    // the trade-off is visible -- the buyer sees a slightly higher number.
+    price.fee_handling = "net_guaranteed";
+    if (!price.presets.length) price.presets = [5, 10, 25];
+    if (!price.min_amount) price.min_amount = 1;
+  } else {
+    form.value.product_intent = "transaction";
+    price.pricing_model = "one_time";
+  }
+}
+
 const showLeadPicker = ref(false);
 const tagInputVisible = ref(false);
 const tagInput = ref("");
@@ -782,6 +1004,9 @@ function openCreateModal() {
   uploadStatusKind.value = "";
   tagInput.value = "";
   tagInputVisible.value = false;
+  wizardMode.value = true;
+  wizardStep.value = 1;
+  wizardIntent.value = "transaction";
   showCreateModal.value = true;
 }
 
@@ -803,6 +1028,7 @@ async function openEditModal(row) {
   uploadStatusKind.value = "";
   tagInput.value = "";
   tagInputVisible.value = false;
+  wizardMode.value = false;   // editing shows every field at once; a wizard is the wrong shape for that
   showCreateModal.value = true;
   await nextTick();
   hydratingForm.value = false;
@@ -810,6 +1036,7 @@ async function openEditModal(row) {
 
 function closeCreateModal() {
   showCreateModal.value = false;
+  wizardMode.value = false;
   showLeadPicker.value = false;
   editingProduct.value = null;
 }
