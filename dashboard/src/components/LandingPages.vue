@@ -1208,6 +1208,22 @@
                       </template>
                     </template>
 
+                    <template v-else-if="element.type === 'tip_jar'">
+                      <input v-model.trim="element.heading" type="text" placeholder="Section heading (optional)" />
+                      <input v-model.trim="element.url" type="url" placeholder="https://ko-fi.com/yourname" autocapitalize="off" spellcheck="false" />
+                      <input v-model.trim="element.label" type="text" placeholder="Leave a tip" />
+                      <input v-model.trim="element.note" type="text" placeholder="One line under the button (optional)" />
+                      <p class="element-empty">
+                        A link, not a checkout — this page takes no money itself, so the tip lands wherever you
+                        already accept them (Ko-fi, Buy Me a Coffee, Patreon).
+                        <template v-if="!builderSiteHasCustomDomain">
+                          On your free platform address only well-known destinations become tappable, and payment
+                          handles like PayPal.me are deliberately not among them; connect a custom domain to link
+                          anywhere.
+                        </template>
+                      </p>
+                    </template>
+
                     <template v-else-if="element.type === 'link_cards'">
                       <input v-model.trim="element.heading" type="text" placeholder="Section heading (optional)" />
                       <div v-for="(item, i) in element.items" :key="i" class="element-subrow">
@@ -4814,7 +4830,14 @@ async function handleAvatarPicked(event) {
 // A listicle is now driven by the offer (offer_type: listicle renders its items as a carousel), so the
 // page-level multi-offer carousel element was retired — see plans/LISTICLE_AND_CART.md.
 // The addable body elements come from the shared element catalog (Builder Reframe) — one source, one label.
-const ELEMENT_TYPES = computed(() => addableElements());
+// What ADD CONTENT offers. Filtered by the composition, because an excluded element is unreachable at render
+// -- is_section_visible short-circuits on excludes, ahead of the goal union and any tenant override -- so
+// offering it adds a button that appears to work and then produces nothing. Three of these (product details,
+// related products, price highlight) were already excluded and still listed, which is how the gap showed up.
+const ELEMENT_TYPES = computed(() => {
+  const excluded = excludedSections(builderOfferType.value);
+  return addableElements().filter((entry) => !excluded.has(entry.type));
+});
 
 // The pattern break is driven by the BACKGROUND: the ink derives from it, so clearing the background is
 // what returns the section to the page preset. A default is seeded on enable so the toggle does something
@@ -4939,6 +4962,9 @@ function newElement(type) {
   // opens this editor.
   if (type === "social_links") return { ...base, heading: "", items: [] };
   if (type === "link_cards") return { ...base, heading: "", items: [{ url: "", label: "", description: "", image_url: "" }] };
+  // A tip jar is ONE destination, not a list: two tip jars on a page is two answers to the same question.
+  // The label defaults to something a visitor understands, because a blank button reads as broken.
+  if (type === "tip_jar") return { ...base, heading: "", url: "", label: "Leave a tip", note: "" };
   // ONE ratio for the element, not one per image: locking both sides to the same shape is what makes the
   // wipe align. 4:3 is the common phone-photo shape, so most pairs need no change.
   if (type === "video") return { ...base, heading: "", url: "", poster: "", caption: "", aspect: 1.7777777778 };
@@ -5599,6 +5625,19 @@ function elementSection(element) {
       items: items.length ? items.map((item) => ({ url: item.url.trim() })) : undefined,
     };
   }
+  if (element.type === "tip_jar") {
+    // No URL, no button. An element that renders a dead control is worse than one that renders nothing.
+    const url = (element.url || "").trim();
+    if (!url) return null;
+    return {
+      id: element.id,
+      type: "tip_jar",
+      heading: formatHeadline(element.heading || "") || undefined,
+      url,
+      label: (element.label || "").trim() || undefined,
+      note: (element.note || "").trim() || undefined,
+    };
+  }
   if (element.type === "link_cards") {
     // A card needs somewhere to go AND something to call it; either alone is not a card.
     const items = (element.items || []).filter((item) => (item.url || "").trim() && (item.label || "").trim());
@@ -5755,6 +5794,9 @@ function elementsFromPage(sections) {
       elements.push({ id: localId("el"), type: "product_details" });
     } else if (section.type === "related_products") {
       elements.push({ id: localId("el"), type: "related_products", heading: section.heading || "Related products" });
+    } else if (section.type === "tip_jar") {
+      elements.push({ id: localId("el"), type: "tip_jar", heading: section.heading || "",
+        url: section.url || "", label: section.label || "Leave a tip", note: section.note || "" });
     } else if (section.type === "social_links") {
       elements.push({ id: localId("el"), type: "social_links", heading: section.heading || "",
         items: (section.items || []).map((item) => ({ url: item.url || "" })) });

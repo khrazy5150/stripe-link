@@ -97,7 +97,19 @@ and `seller_profile` already renders them. A hero is genuinely optional here.
 
 **Bridge** — the thinnest: `brand_label`, `hero`, `checkout_cta`, `legal_footer`. See §5.
 
-**Link-in-bio** — `brand_label`, `hero_media` + avatar, `social_links`, `link_cards`, `legal_footer`.
+**Link-in-bio** — `brand_label`, `hero_media` + avatar, `social_links`, `link_cards`, `tip_jar`,
+`legal_footer`.
+
+*Narrowed 2026-09-13 (author).* The sales-page furniture is EXCLUDED, not merely unused: testimonials,
+ratings, client logos, FAQ, before/after, quotes and content blocks all persuade a visitor of something, and a
+link hub has nothing to persuade them of. The name and slogan under the avatar cover the one line of prose
+these pages want, which retires the "optional `content_block` for a bio line" this section used to suggest.
+
+*`tip_jar` added, and available on this shape ONLY* — expressed as an exclusion on every other composition,
+the mechanism the builder already honours, so there is no second list to keep in step. It is a LINK, never a
+checkout: the page sells nothing, so the tip lands wherever the creator already accepts money. §7 therefore
+governs it, and payment handles stay off the platform allowlist, so a `paypal.me` tip jar is inert on a free
+address and live on the tenant's own domain.
 **No `checkout_cta`** — the cards are the calls to action. Optional: `content_block` for a bio line, and
 `catalog_grid` when the creator wants their own commercial pages as crawlable internal cards.
 

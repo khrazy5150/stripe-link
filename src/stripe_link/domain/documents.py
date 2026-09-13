@@ -1255,6 +1255,12 @@ def validate_page_document(document: dict[str, Any]) -> None:
             optional_bool(section, "brand_dot_pulse", "Brand label brand_dot_pulse")
             optional_bool(section, "enabled", "Brand label enabled")
             optional_string(section, "label", "Brand label")
+        elif section_type == "tip_jar":
+            # A URL is the whole element -- without one there is nothing to render and nothing to tip.
+            require_string(section, "url", "Tip jar url")
+            optional_string(section, "heading", "Tip jar heading")
+            optional_string(section, "label", "Tip jar label", max_length=40)
+            optional_string(section, "note", "Tip jar note", max_length=120)
         elif section_type == "hero_media":
             optional_string_list(section, "images", "Hero media images")
             optional_string(section, "avatar_url", "Hero avatar_url")

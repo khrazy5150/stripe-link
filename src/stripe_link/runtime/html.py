@@ -892,8 +892,17 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     "    .sl-social-row span.sl-social-glyph{width:44px;height:44px;padding:0}",
     "    .sl-social-row span.sl-social-glyph svg{width:22px;height:22px;display:block}",
     "    .sl-social-row a:hover{text-decoration:underline}",
+    # The tip jar: one button, centred, reusing the CTA gradient so it reads as the page's primary action --
+    # which on a hub with no checkout it is.
+    "    .sl-tip-jar{display:grid;gap:0.8rem;justify-items:center;text-align:center}",
+    "    .sl-tip-jar-btn{display:inline-flex;align-items:center;justify-content:center;min-height:4.4rem;padding:0 2.8rem;border-radius:999px;background:linear-gradient(135deg,var(--sl-cta-from),var(--sl-cta-to));color:var(--sl-cta-text);font-family:var(--sl-font-accent);font-size:1.6rem;font-weight:800;text-decoration:none}",
+    "    .sl-tip-jar-btn.is-unlinked{background:none;border:1px dashed var(--sl-legal-link);color:var(--sl-muted);opacity:.65}",
+    "    .sl-tip-jar-note{margin:0;font-size:1.3rem;color:var(--sl-legal-link)}",
     "    .sl-social-row a.sl-social-glyph:hover{background:var(--sl-legal-link);color:var(--sl-page-bg)}",
-    "    .sl-link-card-note{margin:.25rem 0 0;font-size:.95rem;opacity:.8}",
+    # The note inherits the card's ink at 80% on a dark card, which left it very nearly invisible (reported
+    # 2026-09-13 -- "Hiking Gear" as dark blue on dark navy). --sl-legal-link is the one link colour the theme
+    # guarantees is legible against the page ground, because the footer's links depend on it.
+    "    .sl-link-card-note{margin:.25rem 0 0;font-size:.95rem;color:var(--sl-legal-link)}",
     # Clamp by LINES, not by character count. The card is constrained in pixels, and the tenant picks the
     # font -- Comic Relief at 40 characters is a different width from Lato at 40, so a maxlength would be a
     # proxy for the wrong thing. Clamping is font-agnostic by construction: a heavier face simply fits
@@ -2230,6 +2239,7 @@ SECTION_REGISTRY: dict[str, dict[str, Any]] = {
     "related_products": {"render": lambda c: render_catalog_grid(c.section, c.offers_by_id, c.products_by_id, c.services_by_id), "version": 1},
     "seller_profile": {"render": lambda c: render_seller_profile(c.section), "version": 1},
     "social_links": {"render": lambda c: render_social_links(c.section), "version": 1},
+    "tip_jar": {"render": lambda c: render_tip_jar(c.section), "version": 1},
     "link_cards": {"render": lambda c: render_link_cards(c.section), "version": 1},
     "checkout_cta": {"render": lambda c: render_checkout_cta(c.page, c.section, c.offer, c.resolved_offer, c.checkout_url, c.api_base_url, c.products_by_id), "version": 1},
     "legal_footer": {"render": lambda c: render_legal_footer(c.page.get("legal") or {}, c.section, c.api_base_url), "version": 1},
@@ -5463,6 +5473,43 @@ def render_link_cards(section: dict[str, Any]) -> str:
         '      <div class="sl-catalog-cards">',
         *cards,
         "      </div>",
+        "    </section>",
+    ] if line)
+
+
+def render_tip_jar(section: dict[str, Any]) -> str:
+    """A single prominent outbound button: "Leave a tip", pointing at wherever the creator takes them.
+
+    A LINK, not a checkout. A link hub sells nothing -- `lead_social` has no checkout_cta and its product
+    carries no price -- so a tip has to land somewhere that already handles money: Ko-fi, Buy Me a Coffee,
+    Patreon. Building a payment flow here would mean giving a page that takes no money a way to take money.
+
+    §7 applies exactly as it does to link_cards, and it is why the destination matters. On the tenant's own
+    verified domain any host is linkable; on shared platform infrastructure only curated ones are, and
+    payment HANDLES (paypal.me, venmo, cash.app) are deliberately absent from that list -- a payment request
+    is the highest-value phishing target there is, and one on a domain shared with every tenant is the single
+    thing most likely to cost us the domain (plans/CREATOR_LINK_POLICY.md §4). So a paypal.me tip jar renders
+    as an inert button on a free address, which is the honest outcome rather than a silent one.
+    """
+    url = str(section.get("url") or "").strip()
+    if not url:
+        return ""
+    label = escape(str(section.get("label") or "").strip() or "Leave a tip")
+    heading = str(section.get("heading") or "").strip()
+    note = str(section.get("note") or "").strip()
+    linkable = bool(_RENDER_STATE.get("own_domain")) or linkable_on_platform_host(url)
+    button = (
+        f'<a class="sl-tip-jar-btn" href="{escape(url)}" rel="nofollow ugc noopener" target="_blank"'
+        f' data-sl-link="{link_click_id(url)}">{label}</a>'
+        if linkable else
+        f'<span class="sl-tip-jar-btn is-unlinked">{label}</span>'
+    )
+    return "\n".join(line for line in [
+        f'    <section class="sl-tip-jar" data-section-id="{escape(str(section.get("id", "tip-jar")))}"'
+        f' data-section-type="tip_jar">',
+        (f'      <h2 class="sl-section-heading">{render_headline_markup(heading)}</h2>' if heading else ""),
+        f"      {button}",
+        (f'      <p class="sl-tip-jar-note">{escape(note)}</p>' if note else ""),
         "    </section>",
     ] if line)
 
