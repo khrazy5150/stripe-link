@@ -137,6 +137,48 @@ enforcing one. Worth surfacing in the wizard as guidance rather than as a rule.
 Under `standard` they are identical, which is why this stays invisible until someone switches mode. It needs
 answering before presets are built, because it changes what the stored number MEANS.
 
+## 5b. Every tip must be RECORDED as a tip (author, 2026-09-13)
+
+Not a display concern — an accounting one. The money has to be classifiable as tip income after the fact,
+separately from sales.
+
+**Motivation, as the author put it:** most tenants will not qualify for the US federal deduction on tip income
+(~$25,000 annually, currently scoped to occupations that customarily receive tips, which does not obviously
+include content creators). But the classification is worth keeping regardless — for ordinary accounting, and
+because the scope of that rule could widen. The treatment itself is a question for someone qualified; what
+engineering owes is that the DATA supports whatever answer they give.
+
+**Where it goes.** `domain/ledger.py` already types every entry — `entry_type` is `"sale"` or `"refund"`. A
+tip is a third sibling, `"tip"`, which gives the tenant's books the separation for free and needs no new
+table. Plus:
+
+- the order (or whatever §5 decides a tip is) carrying the same classification on the line, so a receipt and
+  an export agree with the ledger;
+- Stripe metadata on the PaymentIntent, so the tenant's own Stripe reporting shows it without going through
+  us at all.
+
+**Freeze it at transaction time. Do NOT derive it later from the product.** The classification must be written
+onto the ledger entry when the money moves, never reconstructed by looking up whether that product's
+`pricing_model` is still `customer_chooses`. A product can be edited, re-priced or archived, and last year's
+books must not change when this year's catalogue does.
+
+That deliberately **inverts the rule this codebase has been applying all week.** Identity and presentation are
+derived on purpose — the avatar, the brand label, the creator's name — so that changing them updates every
+page, and freezing any of those caused a bug each time. Financial records are the opposite: a transaction is a
+statement about a moment, and re-deriving it later is how history quietly rewrites itself. Both rules are
+right; they apply to different kinds of fact, and the distinction is worth naming because the recent
+precedent all points the other way.
+
+**Do not reuse `fee_class_for()` as the classifier.** It returns `"tip_jar"` today for exactly this pricing
+model, which makes it tempting. But it answers *"what does the PLATFORM charge for this?"* — our pricing — and
+the income classification answers *"what kind of income is this for the TENANT?"* Two questions that happen to
+agree today and have no reason to stay aligned: a future fee tier, a promotional rate, or a second product
+type that bills like a tip would break the coupling silently, and it would break it inside someone's books.
+
+**Consequence for §5.** The open "is a tip an ORDER?" question now has a constraint on it rather than being
+free: whichever shape wins has to carry this classification durably through receipts, refunds and exports. A
+refunded tip is a reversal of tip income, not of a sale.
+
 ## 6. It changes the abuse story for `jbay.page`
 
 `CREATOR_LINK_POLICY.md` §3 argues the link allowlist IS the abuse story for the creator domain **because
@@ -157,6 +199,7 @@ a link.
 3. **Runtime**: pricing resolution, the preset-button UI on the page, and checkout with validated inline
    `price_data` — with the preset question (§5a) answered first, since it decides what the stored number is.
 4. **The product wizard** (§4) — or before 2/3, if the wizard lands first.
-5. **The order/tax decisions** (§5) followed through receipts, refunds, fees and the ledger.
+5. **The order/tax decisions** (§5) followed through receipts, refunds, fees and the ledger — carrying the
+   `entry_type: "tip"` classification of §5b, frozen at transaction time.
 6. **Re-make the `jbay.page` abuse argument** (§6) before a tip jar serves on a platform host.
 7. **The `tip_jar` element's first-party mode** — smallest piece, depends on all of the above.
