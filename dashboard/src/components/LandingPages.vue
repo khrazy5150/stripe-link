@@ -261,33 +261,7 @@
                   <small>{{ builderGoalNote }}</small>
                 </label>
             </SettingsAccordion>
-            <!-- Hint names the breadcrumb explicitly. It was in here under "Theme preset and colour overrides" and the
-             author looked for it on the Site, on the page, and could not find it -- reasonably, because nothing on
-             the closed accordion suggested header furniture lived inside. A control nobody can find is not a
-             control. -->
-            <SettingsAccordion label="Appearance" hint="Theme, colours, and the header breadcrumb" :icon="SETTINGS_ICONS['Appearance']" :open="openSetting === 'Appearance'" @toggle="toggleSetting('Appearance')">
-                  <!-- Page CHROME, not content: it sits in the header above everything the composer places.
-                       Shown for every page so the default is visible and reversible, rather than a behaviour
-                       a tenant can only discover by noticing it. -->
-                  <p class="builder-settings-group">Header</p>
-                  <label class="builder-switch-row">
-                    <span class="builder-switch" @click.stop>
-                      <input v-model="breadcrumbOn" type="checkbox" aria-label="Show breadcrumb trail" />
-                      <span aria-hidden="true"></span>
-                    </span>
-                    <span>Show breadcrumb trail</span>
-                  </label>
-                  <small class="field-note">
-                    The <strong>Home / {{ builder.name || "This page" }}</strong> trail in the header. It says where
-                    a page sits in your store, so it only appears once the page is on a Site served by your own
-                    verified domain.
-                    <template v-if="!breadcrumbDefault">
-                      A {{ builderOfferType === "lead_social" ? "link page" : "lead page" }} is not part of a
-                      catalogue, so it is off here by default.
-                    </template>
-                  </small>
-
-                  <p class="builder-settings-group">Theme</p>
+                        <SettingsAccordion label="Appearance" hint="Theme preset and colour overrides" :icon="SETTINGS_ICONS['Appearance']" :open="openSetting === 'Appearance'" @toggle="toggleSetting('Appearance')">
                   <label class="offer-field">
                     <span>Preset</span>
                     <select v-model="builder.preset">
@@ -619,6 +593,26 @@
                     Profile → Business, or override it here for this page.
                   </small>
                 </label>
+
+                <!-- The breadcrumb lives here rather than in Appearance because it renders IMMEDIATELY above
+                     this brand mark: they are one header, so they are edited in one place (author, 2026-09-12).
+                     It sat under "Appearance / Theme preset and colour overrides" first, where the author
+                     looked for it on the Site, looked for it on the page, and reasonably never opened it. -->
+                <label class="builder-switch-row">
+                  <span class="builder-switch" @click.stop>
+                    <input v-model="breadcrumbOn" type="checkbox" aria-label="Show breadcrumb trail" />
+                    <span aria-hidden="true"></span>
+                  </span>
+                  <span>Show breadcrumb trail</span>
+                </label>
+                <small class="field-note">
+                  The <strong>Home / {{ builder.name || "This page" }}</strong> trail above the brand. It says where
+                  this page sits in your store, so it only appears once the page is attached to a Site.
+                  <template v-if="!breadcrumbDefault">
+                    A {{ builderOfferType === "lead_social" ? "link page" : "lead page" }} is not part of a
+                    catalogue, so it is off here by default.
+                  </template>
+                </small>
             </template>
 
             <template v-else-if="sectionEditor.row.editor === 'trust_badges'">

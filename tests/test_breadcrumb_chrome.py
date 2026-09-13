@@ -119,12 +119,13 @@ class BuilderTests(unittest.TestCase):
         # label made, where a stored default outlived every later fix.
         self.assertIn("breadcrumbOn.value === breadcrumbDefault.value ? {} :", BUILDER)
 
-    def test_the_accordion_says_what_is_inside_it(self):
-        # It shipped inside "Appearance / Theme preset and colour overrides", and the author looked on the
-        # Site, looked on the page, and could not find it -- reasonably, because nothing on the closed
-        # accordion suggested header furniture was in there. A control nobody can find is not a control.
-        self.assertIn('hint="Theme, colours, and the header breadcrumb"', BUILDER)
-        self.assertNotIn('hint="Theme preset and colour overrides"', BUILDER)
+    def test_it_lives_with_the_brand_mark_it_renders_above(self):
+        # Author's placement, and the right one: the breadcrumb renders IMMEDIATELY above the brand mark, so
+        # they are one header and are edited in one place. It shipped in "Appearance / Theme preset and colour
+        # overrides" first, where the author looked on the Site, looked on the page, and reasonably never
+        # opened it -- a control nobody can find is not a control.
+        brand = BUILDER.split("sectionEditor.row.editor === 'brand_label'", 1)[1].split("</template>", 1)[0]
+        self.assertIn('v-model="breadcrumbOn"', brand)
 
     def test_it_is_offered_in_exactly_one_place(self):
         # Two copies of a setting is the drift pattern this codebase keeps paying for.
