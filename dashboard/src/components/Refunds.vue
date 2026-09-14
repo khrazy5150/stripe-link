@@ -82,6 +82,14 @@
       <template v-if="pendingExecute">
         Issue a Stripe refund of {{ formatMoneyCents(refundRequestedAmount(pendingExecute), pendingExecute.amount?.currency) }}
         to {{ pendingExecute.customer?.email || "the customer" }}? This cannot be undone.
+        <!-- Said HERE, at the last screen before money moves, and nowhere earlier: beside a price it would be
+             a caveat the tenant cannot act on, and the only action it suggests -- switching fee mode -- costs
+             them more than it saves (plans/TODO.md, "say on the refund dialog that the fees are not coming
+             back"). Here they can still offer a replacement or a partial instead. -->
+        <p class="refund-fee-note">
+          <strong>Stripe's fee and the Junior Bay fee are not returned.</strong>
+          You refund the full amount your customer paid, and those fees come out of your own pocket.
+        </p>
       </template>
     </ConfirmDialog>
 

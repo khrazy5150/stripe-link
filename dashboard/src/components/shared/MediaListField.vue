@@ -126,7 +126,7 @@
 // in runtime/html.py. Keep VIDEO_EXTENSIONS below in sync with that list.
 import { computed, nextTick, ref } from "vue";
 import ImageCropper from "./ImageCropper.vue";
-import { cropImage } from "../../api/uploads";
+import { cropBox, cropImage } from "../../api/uploads";
 
 const VIDEO_EXTENSIONS = [".mp4", ".webm", ".mov", ".m4v", ".ogv"];
 
@@ -205,8 +205,7 @@ async function applyCrop(rect) {
   const id = props.assets[oldUrl];
   cropBusy.value = true;
   try {
-    const height = Math.round(1600 / (rect.ar || 1));
-    const url = await cropImage(id, rect, { width: 1600, height });
+    const url = await cropImage(id, rect, cropBox(rect.ar));
     emit("update:modelValue", items.value.map((item) => (item === oldUrl ? url : item)));
     emit("crop-applied", { oldUrl, url, imageId: id, rect });
     croppingUrl.value = "";

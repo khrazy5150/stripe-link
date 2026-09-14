@@ -12,7 +12,7 @@
  */
 import { computed, inject, ref } from "vue";
 import ImageCropper from "./ImageCropper.vue";
-import { cropImage } from "../../api/uploads";
+import { cropBox, cropImage } from "../../api/uploads";
 
 const props = defineProps({
   modelValue: { type: String, default: "" },
@@ -122,8 +122,7 @@ async function applyCrop(rect) {
   error.value = "";
   uploading.value = true;
   try {
-    const height = Math.round(props.bakeWidth / (rect.ar || 1));
-    const url = await cropImage(id, rect, { width: props.bakeWidth, height });
+    const url = await cropImage(id, rect, cropBox(rect.ar, props.bakeWidth));
     emit("update:modelValue", url);
     // The rect is kept so the crop stays re-editable, alongside what it needs to crop the ORIGINAL again.
     emit("update:crop", { ...rect, image_id: id, original_url: original });

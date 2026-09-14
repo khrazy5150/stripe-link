@@ -182,6 +182,26 @@ function formatMb(bytes) {
  * Always cropped from the ORIGINAL (the service reads the source by id), so re-cropping never compounds
  * a previous crop.
  */
+// The output box for a baked crop, for an aspect ratio and the longest edge we want out of it.
+// The service refuses an edge over 2048 (upload.py CROP_MAX_EDGE), so the long edge is the one that gets the
+// budget: a 3:4 portrait asked for 1600 wide used to ask for 2133 tall and come back a 400.
+export function cropBox(aspectRatio, longEdge = 1600) {
+  const ar = Number(aspectRatio) > 0 ? Number(aspectRatio) : 1;
+  const width = ar >= 1 ? longEdge : Math.round(longEdge * ar);
+  const height = ar >= 1 ? Math.round(longEdge / ar) : longEdge;
+  return { width: Math.max(16, width), height: Math.max(16, height) };
+}
+
+// A crop answers with a FLAT {format: url} map, because it renders exactly the box that was asked for --
+// unlike /upload/status, which answers with the nested small/medium/large sizes it generated. Reading a crop
+// response with the status reader finds nothing at all, which is why every crop failed with "the cropped
+// image could not be generated" while the request itself had succeeded.
+function croppedUrlCandidates(urls) {
+  return [urls.webp, urls.jpg, urls.jpeg, urls.png, urls.avif]
+    .filter((url) => typeof url === "string" && url)
+    .map(cdnImageUrl);
+}
+
 export async function cropImage(imageId, crop, { width = 1600, height = 1600 } = {}) {
   if (!imageId) throw new Error("This image was added before cropping existed, so it cannot be cropped.");
   const body = await apiRequest("/upload/crop", {
@@ -193,7 +213,8 @@ export async function cropImage(imageId, crop, { width = 1600, height = 1600 } =
       crop: { x: crop.x, y: crop.y, w: crop.w, h: crop.h },
     },
   });
-  const url = imageUrlCandidates(body.urls || {})[0];
+  const urls = body.urls || {};
+  const url = croppedUrlCandidates(urls)[0] || imageUrlCandidates(urls)[0];
   if (!url) throw new Error("The cropped image could not be generated.");
   return url;
 }
