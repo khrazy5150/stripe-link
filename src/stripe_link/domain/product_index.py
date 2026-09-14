@@ -12,7 +12,8 @@ landing item. What it drops is the parts of each price nothing reads.
 Field choices were measured, not guessed — every field the dashboard demonstrably accesses is kept:
   kept on the price   price_id, context, unit_amount, currency, pricing_model, quantity,
                       stripe_price_id (the edit form's "not synced" warning), compare_at_unit_amount
-                      (discount %), fee_handling, suggested_amount, tenant_keyed_amount
+                      (discount %), fee_handling, suggested_amount, tenant_keyed_amount,
+                      presets + allow_custom (a tip jar has no unit_amount; these ARE its price)
   dropped             fee_breakdown (93B, the single largest), previous_price_id, created_at/updated_at
   dropped on the doc  refund_policy (~10%), variants, image_dims, sync, fulfillment detail, identifiers
 
@@ -27,6 +28,12 @@ _PRICE_FIELDS = (
     "price_id", "context", "unit_amount", "currency", "pricing_model", "quantity",
     "stripe_price_id", "compare_at_unit_amount", "fee_handling", "suggested_amount",
     "tenant_keyed_amount", "label",
+    # A TIP JAR carries no unit_amount, so the list row has nothing to show without these. Dropping them
+    # made a saved tip jar read "Any amount" after a reload while the amounts were right on screen the
+    # moment it was saved -- the default was wrong rather than absent, which is this projection's
+    # characteristic failure (2026-09-14). Absent fields cost an ordinary price nothing: the copy below
+    # skips what a price does not carry.
+    "presets", "allow_custom",
 )
 
 # Card display, search (stores/products.js productSearchText) and status filtering.
