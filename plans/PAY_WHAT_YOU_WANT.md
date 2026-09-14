@@ -487,6 +487,29 @@ taken up, accounts earn themselves there and cancellation rides along. Revisit i
 tip, never a gate before it. The link keeps working for everyone who ignores the prompt, which is most
 people.
 
+### SHIPPED 2026-09-14 (dev)
+
+`handlers/tip_manage.py` + `GET /tips/manage?t=<token>`. The webhook mints a token when a RECURRING tip's
+subscription is created (`mint_tip_manage_link`), the receipt carries the link, and the endpoint hands the
+supporter to Stripe's billing portal on the **connected** account, where the subscription lives. The token
+is `secrets.token_urlsafe(24)`, stored (the `cart_token` precedent: no customer id, no email in a URL that
+will sit in an inbox for a year) with a **400-day TTL** — a supporter may cancel a monthly tip a year in, so
+a 30-day cart-style token would have expired before the moment it exists for.
+
+Failure shapes, deliberately: minting is best-effort inside the webhook (raising would make Stripe retry and
+duplicate every write that already succeeded), an unknown or expired token renders a branded "Link expired"
+page rather than a stack trace, and Stripe being unreachable answers 503 with a "try again" page. The route
+is `noindex` at the header.
+
+Also captured on the way through, because this is what first put a tip through checkout:
+`metadata[tip_keyed_amount]` is now stamped on the session and `tip_keyed_amount` frozen onto the resolved
+line — the §5f prerequisite, which could not be recovered afterwards for a typed amount.
+
+**Still missing: the re-send page.** The receipt link is the primary path; the backstop for "the receipt
+never arrived / I deleted it" is a small public page that takes an email and mails a fresh token. Until it
+exists, that supporter has to reply to the receipt or contact support — which the runbook below covers, but
+self-serve is the point.
+
 ### The mechanism — every piece already exists here
 
 1. Checkout in `mode: subscription` already creates a Stripe Customer on the tenant's **connected** account.

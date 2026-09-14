@@ -19,6 +19,7 @@ def receipt_content(
     business_name: str = "",
     support_email: str = "",
     download_links: list[dict[str, str]] | None = None,
+    manage_url: str = "",
 ) -> dict[str, str]:
     business = str(business_name or "").strip() or "Your order"
     customer = order.get("customer") or {}
@@ -45,6 +46,11 @@ def receipt_content(
     if links:
         text_lines += ["", "Your downloads:"]
         text_lines += [f"- {link.get('label') or 'Download'}: {link.get('url', '')}" for link in links]
+    # A repeating tip has to carry its own OFF switch. We ask for no account, so this link is the whole of
+    # how a supporter stops one (plans/PAY_WHAT_YOU_WANT.md §5g) -- without it the only route is asking the
+    # creator, which is the behaviour that design deliberately rejected.
+    if manage_url:
+        text_lines += ["", f"Manage or cancel this recurring tip: {manage_url}"]
     if support_email:
         text_lines += ["", f"Questions? Reply to this email or contact {support_email}."]
     text = "\n".join(text_lines)
@@ -66,6 +72,11 @@ def receipt_content(
             '<h3 style="font-size:16px;margin:24px 0 8px">Your downloads</h3>'
             f'<ul style="padding-left:18px;margin:0">{items}</ul>'
         )
+    manage_html = (
+        f'<p style="margin:24px 0 0"><a href="{escape(manage_url)}" '
+        f'style="color:#4f46b5;font-weight:600">Manage or cancel this recurring tip</a></p>'
+        if manage_url else ""
+    )
     support_html = (
         f'<p style="color:#6b7280;font-size:13px;margin:24px 0 0">Questions? Reply to this email'
         f'{f" or contact {escape(support_email)}" if support_email else ""}.</p>'
@@ -78,6 +89,7 @@ def receipt_content(
         '<table style="width:100%;border-collapse:collapse;font-size:14px">'
         f'{"".join(rows)}</table>'
         f'{downloads_html}'
+        f'{manage_html}'
         f'{support_html}'
         '</div>'
     )

@@ -1754,6 +1754,47 @@ Resources:
             Path: /checkout
             Method: OPTIONS
 
+  # A supporter cancelling their own recurring tip, without an account (plans/PAY_WHAT_YOU_WANT.md 5g).
+  # Public and unauthenticated: the opaque token in the link IS the credential, and the action behind it is
+  # fail-safe -- the worst a leaked link does is stop a donation the supporter can start again.
+  TipManageFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${ProjectPrefix}-tip-manage-${Environment}"
+      CodeUri: src/
+      Handler: handlers.tip_manage.handler
+      Description: Opens a supporter's Stripe billing portal from a tokenized manage link.
+      Policies:
+        # The token rows share CartsTable (the cart_token precedent for short-lived buyer tokens).
+        - DynamoDBReadPolicy:
+            TableName: !Ref CartsTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref StripeKeysTable
+        - Statement:
+            Effect: Allow
+            Action:
+              - kms:Decrypt
+              - kms:DescribeKey
+            Resource: !GetAtt StripeKeysEncryptionKey.Arn
+        - Statement:
+            Effect: Allow
+            Action:
+              - secretsmanager:GetSecretValue
+            Resource: "*"
+      Events:
+        TipManage:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /tips/manage
+            Method: GET
+        TipManageOptions:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /tips/manage
+            Method: OPTIONS
+
   PaymentMethodsFunction:
     Type: AWS::Serverless::Function
     Properties:

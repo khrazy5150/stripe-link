@@ -3,6 +3,7 @@ import hashlib
 import hmac
 import json
 import os
+import secrets
 import time
 from base64 import b64encode
 from typing import Any, Callable
@@ -27,6 +28,7 @@ from stripe_link.domain.fees import cached_billing_config, calculate_price
 from stripe_link.delegation import apply_delegation
 from stripe_link.domain.ledger import refund_entry as build_ledger_refund_entry, sale_entry, sale_entry_from_order
 from stripe_link.domain.receipts import receipt_content
+from stripe_link.domain.tips import manage_token_doc
 from stripe_link.domain.reminders import plan_reminders
 from stripe_link.domain.review_invites import plan_invite
 from stripe_link.domain.refund_ledger import build_refund_entry, initial_payment_aggregates, set_refund_aggregates
@@ -47,6 +49,7 @@ from stripe_link.repositories.documents import (
     products_repository,
     refunds_repository,
     review_invites_repository,
+    tip_tokens_repository,
     services_repository,
     sites_repository,
     stripe_keys_repository,
@@ -425,6 +428,7 @@ def persist_checkout_session_completed(
     ledger_repo=None,
     invites_repo=None,
     carts_repo=None,
+    tip_tokens_repo=None,
     now_fn: Callable[[], int] = lambda: int(time.time()),
     billing_config_loader: Callable[[], dict[str, Any]] | None = None,
     receipt_mailer: Callable[..., Any] | None = None,
@@ -445,6 +449,8 @@ def persist_checkout_session_completed(
     ledger_repo = ledger_repo or (ledger_repository() if os.environ.get("LEDGER_TABLE") else None)
     invites_repo = invites_repo or (review_invites_repository() if os.environ.get("REVIEWS_TABLE") else None)
     carts_repo = carts_repo or (carts_repository(mode=mode) if os.environ.get("CARTS_TABLE") else None)
+    if tip_tokens_repo is None and os.environ.get("CARTS_TABLE"):
+        tip_tokens_repo = tip_tokens_repository(mode=mode)
     orders_repo = orders_repo or (orders_repository(mode=mode) if os.environ.get("ORDERS_TABLE") else None)
 
     fees = fee_breakdown_from_session(session, billing_config_loader)
@@ -515,9 +521,13 @@ def persist_checkout_session_completed(
         written.append("cart_converted")
 
     download_links = resolve_download_links(order_record, tenant_id, products_repo)
+    manage_url = mint_tip_manage_link(session, order_record, tenant_id, tip_tokens_repo, now)
+    if manage_url:
+        written.append("tip_manage_token")
     receipt = send_order_receipt(
         order_record, tenant_id,
         mailer_send=receipt_mailer, context_loader=email_context_loader, download_links=download_links,
+        manage_url=manage_url,
     )
 
     return {
@@ -1074,6 +1084,38 @@ def reconcile_dispute(
     return {"status": "disputed", "order_id": order.get("order_id", "")}
 
 
+def mint_tip_manage_link(session, order, tenant_id, tip_tokens_repo, now) -> str:
+    """The link a supporter uses to stop a RECURRING tip, minted when the subscription is created.
+
+    We ask supporters for no account (plans/PAY_WHAT_YOU_WANT.md §5g), so this link is the whole of how one
+    cancels. Only for repeating tips: a one-off has nothing to manage.
+
+    Best-effort, like every other side effect here -- a webhook that raises gets retried and duplicates
+    writes. A missing link costs the supporter the self-serve route, not the tip.
+    """
+    metadata = session.get("metadata") if isinstance(session.get("metadata"), dict) else {}
+    if not metadata.get("tip_recurring") or session.get("mode") != "subscription":
+        return ""
+    base_url = os.environ.get("PUBLIC_API_BASE_URL", "").rstrip("/")
+    customer_id = str((order.get("customer") or {}).get("stripe_customer_id") or "").strip()
+    email = str((order.get("customer") or {}).get("email") or "").strip()
+    if not base_url or not customer_id or tip_tokens_repo is None:
+        return ""
+    try:
+        token = secrets.token_urlsafe(24)
+        tip_tokens_repo.put(manage_token_doc(
+            tenant_id, token,
+            email=email,
+            stripe_customer_id=customer_id,
+            subscription_id=str(session.get("subscription") or ""),
+            mode="live" if session.get("livemode") else "test",
+            now=int(now),
+        ))
+        return f"{base_url}/tips/manage?t={token}"
+    except Exception:  # noqa: BLE001 - a missing manage link must not fail the webhook
+        return ""
+
+
 def resolve_download_links(order: dict[str, Any], tenant_id: str, products_repo) -> list[dict[str, str]]:
     """Download links for any digital product on the order (for the receipt). Best-effort."""
     try:
@@ -1108,6 +1150,7 @@ def send_order_receipt(
     mailer_send: Callable[..., Any] | None = None,
     context_loader: Callable[[str], dict[str, str]] | None = None,
     download_links: list[dict[str, str]] | None = None,
+    manage_url: str = "",
 ) -> dict[str, Any]:
     """Best-effort receipt email. Never raises -- Stripe would retry and duplicate writes."""
     if mailer_send is None and not os.environ.get("EMAIL_FROM_ADDRESS"):
@@ -1122,6 +1165,7 @@ def send_order_receipt(
             business_name=context.get("business_name", ""),
             support_email=context.get("support_email", ""),
             download_links=download_links,
+            manage_url=manage_url,
         )
         (mailer_send or send_email)(
             to=email,

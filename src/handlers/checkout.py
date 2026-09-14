@@ -243,6 +243,9 @@ def apply_tip_amount(resolved, products_by_id, *, amount, source, tenant_id, rec
         charge = tips.resolve_charge(price, amount, source=source, gross_up=gross_up)
         line["unit_amount"] = charge
         line["line_amount"] = charge * int(line.get("quantity") or 1)
+        # FROZEN at transaction time, because it cannot be recovered later: a typed amount exists only in
+        # this request. What the tenant keeps is what a refund returns (plans/PAY_WHAT_YOU_WANT.md §5f).
+        line["tip_keyed_amount"] = tips.keyed_amount(price, charge, source=source)
         if recurring:
             # A repeating tip is a Stripe SUBSCRIPTION, so the interval has to reach the session. Refused
             # rather than quietly charged once when the price never offered one: a supporter who chose
@@ -402,6 +405,15 @@ def build_checkout_payload(
     for index, (stripe_price_id, _price_id) in enumerate(order_bumps):
         payload[f"optional_items[{index}][price]"] = stripe_price_id
         payload[f"optional_items[{index}][quantity]"] = "1"
+
+    # A tip is a different kind of transaction and has to be recognisable as one downstream: the receipt
+    # carries a manage link only for a repeating tip, and the refund rule reads the keyed amount.
+    tip_line = next((item for item in resolved.get("items") or [] if item.get("tip_keyed_amount")), None)
+    if tip_line:
+        payload["metadata[tip]"] = "1"
+        payload["metadata[tip_keyed_amount]"] = str(int(tip_line.get("tip_keyed_amount") or 0))
+        if tip_line.get("recurring"):
+            payload["metadata[tip_recurring]"] = str((tip_line.get("recurring") or {}).get("interval") or "month")
 
     payload["metadata[clientID]"] = tenant_id
     payload["metadata[client_id]"] = tenant_id

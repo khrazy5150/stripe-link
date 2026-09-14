@@ -726,8 +726,9 @@ is the closed-schema default doing its job with nobody reading the result.
   whether a gratuity is a "sale" under consumer statutes at all (jurisdictional — needs someone qualified),
   who owns the decision under direct charges, what happens to the platform fee, and how a recurring tip is
   cancelled (there is no buyer-facing way today). Pairs with the tip-income tax question.
-- ⛔ **Recurring tips are BUILT but must stay OFF for live tenants** until the cancel link ships — see the
-  next entry. Checkout opens real subscriptions; today the only way to stop one is to ask the creator.
+- ✅ **Recurring tips are unblocked**: the cancel link shipped 2026-09-14 (next entry). The re-send page and
+  the support runbook are still open, so a supporter whose receipt never arrived still has no self-serve
+  route.
 - **Open: is a tip an ORDER** — receipts/refunds/fees/ledger all assume one, and a tip has nothing to
   fulfil. Plus gratuity tax treatment.
 
@@ -849,7 +850,7 @@ gross and the only live question is whether WE return our cut.
 
 Decide, then say it somewhere a tenant reads before their first refund.
 
-### ⭐ HIGH — a supporter cannot cancel a recurring tip (DECIDED 2026-09-14, plan plans/PAY_WHAT_YOU_WANT.md §5g)
+### ✅ HIGH — a supporter cannot cancel a recurring tip — SHIPPED dev 2026-09-14 (plan §5g)
 
 Checkout now opens a real `mode: subscription` session for a repeating tip. Nothing lets the supporter stop
 it: the only path today is asking the creator to cancel it in their Stripe dashboard — the Ko-fi behaviour
@@ -862,18 +863,20 @@ product, at least not initially... I certainly don't want to create friction bet
 when it comes to giving them a tip or purchasing a product"). The reasoning, including the lost-email
 objection and why an account does not actually answer it, is §5g — worth reading before anyone reopens it.
 
-Build (every piece exists already):
-- **Receipt link** for a recurring tip, minted as an opaque token — the `cart_token_doc` pattern from
-  abandoned-cart recovery (no PII in the URL, TTL).
-- **Portal session** on the CONNECTED account: the same `/billing_portal/sessions` call
-  `handlers/platform_subscription.py:280` makes for tenant billing, plus `stripe_account`. Check whether the
-  portal needs per-account configuration first.
-- **"Manage an existing tip"** on the tip page: takes an email, re-sends a fresh token. This is what makes a
-  short TTL safe and what covers a receipt that never arrived — email deliverability is the single point of
-  failure in this design, so it gets a second door.
-- **A support runbook**: verify ONE of card last-4 + expiry / exact amount + date / billing postcode, then
+- ✅ **Receipt link**, minted as an opaque `secrets.token_urlsafe(24)` when the subscription is created,
+  stored with a 400-day TTL (a supporter may cancel a year in).
+- ✅ **Portal session** on the CONNECTED account (`handlers/tip_manage.py`, `GET /tips/manage?t=`).
+- ✅ **`metadata[tip_keyed_amount]`** stamped on the session — the §5f refund prerequisite, captured here
+  because this is what first put a tip through checkout.
+- ⬜ **"Manage an existing tip"** on the tip page: takes an email, re-sends a fresh token. The backstop for a
+  receipt that never arrived — email deliverability is this design's single point of failure, so it wants a
+  second door. NOT built.
+- ⬜ **A support runbook**: verify ONE of card last-4 + expiry / exact amount + date / billing postcode, then
   cancel. The bar is low on purpose — cancellation is fail-safe, and an agent who refuses to act sends the
-  supporter to their bank instead, which costs the tenant a dispute fee.
+  supporter to their bank instead, which costs the tenant a dispute fee. NOT written.
+- ⬜ **Verify the portal is configured** on a connected account in live mode before relying on it: Stripe
+  requires a billing-portal configuration per account, and an unconfigured one answers an error the endpoint
+  currently renders as "try again in a minute".
 
 **Deferred, on its own merits:** buyer-side accounts. The question they belong to is "do we want a
 buyer-side product?" (a supporter dashboard across creators, i.e. plans/DIGITAL_MARKETPLACE.md), not "how do

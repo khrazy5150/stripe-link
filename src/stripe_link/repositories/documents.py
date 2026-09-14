@@ -991,6 +991,19 @@ def cart_tokens_repository(table: Any | None = None, *, mode: str | None = None)
     )
 
 
+def tip_tokens_repository(table: Any | None = None, *, mode: str | None = None) -> DynamoDocumentRepository:
+    # CARTS_TABLE is where this codebase keeps short-lived, opaque, BUYER-facing tokens with a TTL — the
+    # cart_token precedent. A tip's manage link is the same kind of object, so it shares the table with its
+    # own document_type rather than standing up a table for one row per recurring supporter.
+    return DynamoDocumentRepository(
+        os.environ.get("CARTS_TABLE", ""),
+        document_type="tip_token",
+        id_field="token",
+        table=table,
+        mode=mode,
+    )
+
+
 def review_invites_repository(table: Any | None = None) -> DynamoDocumentRepository:
     # Post-purchase invite records — same table as reviews, distinct document_type (own SK prefix + scan_type).
     return DynamoDocumentRepository(

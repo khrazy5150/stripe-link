@@ -207,3 +207,55 @@ def offer_is_tip_jar(offer: dict[str, Any], products_by_id: dict[str, Any]) -> b
         if not is_tip_price(price):
             return False
     return True
+
+
+def keyed_amount(price: dict[str, Any], charge: Any, *, source: str = "preset") -> int:
+    """What the TENANT keeps out of a charge — the other half of the pair presets store.
+
+    Frozen onto the order at checkout because it cannot be recovered afterwards: a preset's keyed amount is
+    recoverable from the pair, but a TYPED amount only ever existed in the request. Without it, "refund the
+    tip and keep the fees" (plans/PAY_WHAT_YOU_WANT.md §5f) is uncomputable for exactly the tips most likely
+    to be disputed.
+    """
+    charge = int(charge)
+    if source == "custom":
+        return charge  # the supporter typed what they meant to GIVE; the fees were added on top
+    pairs = preset_pairs(price)
+    return next((keyed for keyed, offered in pairs if offered == charge), charge)
+
+
+# A manage link has to outlive a cart-recovery nudge: a supporter may cancel a monthly tip a year in. It is
+# still not forever -- a link that leaks stays useful for exactly this long, and the page's re-send flow
+# mints a fresh one.
+MANAGE_TOKEN_TTL_SECONDS = 400 * 24 * 60 * 60
+
+
+def manage_token_doc(
+    tenant_id: str,
+    token: str,
+    *,
+    email: str,
+    stripe_customer_id: str,
+    subscription_id: str = "",
+    mode: str = "live",
+    now: int,
+    ttl_seconds: int = MANAGE_TOKEN_TTL_SECONDS,
+) -> dict[str, Any]:
+    """An opaque link that opens ONE supporter's Stripe billing portal.
+
+    The same shape as `cart_token_doc`: the token dereferences server-side, so no customer id and no email
+    ride in the URL. This is the whole of "a supporter can cancel without an account" (§5g) -- the peers
+    solve it with a login, which is a product we deliberately are not building.
+    """
+    return {
+        "schema_version": "2026-09-14",
+        "document_type": "tip_token",
+        "tenant_id": tenant_id,
+        "token": token,
+        "email": str(email or "").strip().lower(),
+        "stripe_customer_id": str(stripe_customer_id or ""),
+        "subscription_id": str(subscription_id or ""),
+        "stripe_mode": "live" if str(mode) == "live" else "test",
+        "created_at": int(now),
+        "expires_at": int(now) + int(ttl_seconds),
+    }
