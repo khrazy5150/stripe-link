@@ -97,10 +97,14 @@ if [[ -n "${DASHBOARD_CUSTOM_DOMAIN_NAME}" || -n "${DASHBOARD_CUSTOM_DOMAIN_CERT
   PARAMETER_OVERRIDES+=("DashboardCustomDomainHostedZoneName=${DASHBOARD_CUSTOM_DOMAIN_HOSTED_ZONE_NAME}")
 fi
 
+# --no-fail-on-empty-changeset: with `set -e`, an unchanged stack made `sam deploy` exit non-zero and the
+# script stopped BEFORE uploading the billing config below — so a config-only change could never be
+# deployed. That is how a stale fee table stayed live after the pricing pivot (2026-09-14).
 sam deploy \
   --stack-name "${STACK_NAME}" \
   --region "${REGION}" \
   --capabilities CAPABILITY_IAM \
+  --no-fail-on-empty-changeset \
   --resolve-s3 \
   --parameter-overrides "${PARAMETER_OVERRIDES[@]}" \
   --tags "Project=stripe-link" "Environment=${ENVIRONMENT}" "ManagedBy=sam"

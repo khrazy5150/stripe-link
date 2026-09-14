@@ -274,7 +274,10 @@ class AccountHandlerTests(unittest.TestCase):
         card = body["stripe_connect_card"]
         self.assertEqual(response["statusCode"], 200)
         self.assertEqual(card["tier_id"], "basic")
-        self.assertEqual(card["platform_fees"]["rates"]["physical"], 10.0)
+        # 5%, the free-tier rate the 2026-08-26 pricing pivot decided. This asserted 10.0 until 2026-09-14 —
+        # the stale rate in the deployed config fixture, which the pivot never updated. The test was pinning
+        # the bug in place: see tests/test_billing_config_deployed.py.
+        self.assertEqual(card["platform_fees"]["rates"]["physical"], 5.0)
         self.assertEqual(card["stripe_connect"]["connect_account_id"], "acct_test_demo")
 
     def test_kms_secret_cipher_encrypts_and_decrypts_with_context(self):
