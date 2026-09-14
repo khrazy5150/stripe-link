@@ -225,6 +225,12 @@ def composition_key(offer: dict[str, Any]) -> str:
     if str((offer or {}).get("product_intent") or "") == "lead_gen":
         return LEAD_COMPOSITIONS.get(
             str((offer or {}).get("lead_capture_action") or ""), DEFAULT_LEAD_COMPOSITION)
+    # A TIP JAR is a transaction page, but not a sales page: there is no product, no delivery and nothing to
+    # be reassured about, so the persuasion furniture of a checkout page does not belong on it. Read off the
+    # offer like `lead_capture_action`, because the composer never sees the products; the renderer stamps it
+    # from them, so an offer saved before the field existed still composes correctly.
+    if str((offer or {}).get("pricing_model") or "") == "customer_chooses":
+        return "tip_jar"
     return derived_offer_type(offer or {})
 
 
@@ -264,6 +270,27 @@ def shows_breadcrumb(offer: dict[str, Any], page: dict[str, Any] | None = None) 
 def is_lead_composition(offer: dict[str, Any]) -> bool:
     """Whether this offer composes as one of the four lead shapes rather than a checkout page."""
     return composition_key(offer) in set(LEAD_COMPOSITIONS.values())
+
+
+# Pages whose FORM is short. Being brief is what these pages ARE, not a defect in them, so the thin-content
+# nudge is skipped for all of them (plans/LEAD_GEN_PAGES.md, and the tip jar for the same reason: there is no
+# product to describe, so "add a specifications table or condition details" is advice that cannot be taken).
+THIN_BY_DESIGN = set(LEAD_COMPOSITIONS.values()) | {"tip_jar"}
+
+
+def is_thin_by_design(offer: dict[str, Any]) -> bool:
+    return composition_key(offer) in THIN_BY_DESIGN
+
+
+def default_cta_label(offer: dict[str, Any]) -> str:
+    """What this page's button says when the tenant has not written their own.
+
+    In the rules file with the rest of the composition, because the builder and the renderer both need it and
+    a default that disagrees between them is a page whose preview and published copy differ. "" = no opinion,
+    and the caller keeps whatever it used before.
+    """
+    rules = RULES.get("offer_types", {}).get(composition_key(offer), {})
+    return str(rules.get("default_cta_label") or "")
 
 
 def compose_page(

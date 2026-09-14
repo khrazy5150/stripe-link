@@ -25,8 +25,9 @@ from stripe_link.domain.documents import (
 from stripe_link.runtime.artifacts import artifact_paths, cloudfront_path
 from stripe_link.domain.bnpl import messaging_method_types
 from stripe_link.domain.composition import composition_forbids_indexing, composition_key
-from stripe_link.domain.sites import find_site_for_page  # re-exported: long-standing import site
+from stripe_link.domain.sites import find_site_for_page
 from stripe_link.domain.social_links import section_own_links
+from stripe_link.domain.tips import stamp_tip_jar
 from stripe_link.domain.connect_sync import site_domain_verified, site_seo_enabled
 from stripe_link.domain.custom_domains import domain_index_record, platform_domain_index_record
 from stripe_link.domain.funnels import funnel_slug_entries, post_purchase_plan
@@ -832,6 +833,9 @@ def load_render_context(
             services_repository=services_repository, products_by_id=products_by_id, services_by_id=services_by_id,
         )
 
+    # What this page IS, decided once and carried by the offer from here on: the composer, the CTA label and
+    # the page-health checks all read the offer and never its products (domain/tips.py stamp_tip_jar).
+    offer = stamp_tip_jar(offer, products_by_id)
     return offer, products_by_id, services_by_id, offers_by_id
 
 

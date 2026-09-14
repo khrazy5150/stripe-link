@@ -28,10 +28,12 @@
       </div>
 
       <div class="price-top-row">
-        <label>Sales price
+        <!-- A tip jar has no sales price: the buyer picks from the amounts below, and a number typed here
+             was the field that used to decide what a "customer chooses" product actually sold for. -->
+        <label v-if="price.pricing_model !== 'customer_chooses'">Sales price
           <input v-model.number="price.sales_price" type="number" min="0" step="0.01" />
         </label>
-        <label>Regular price
+        <label v-if="price.pricing_model !== 'customer_chooses'">Regular price
           <input v-model.number="price.regular_price" type="number" min="0" step="0.01" />
         </label>
         <label>Currency
@@ -66,16 +68,14 @@
       </label>
       <small v-if="redundancyWarning(price, index)" class="price-context-warning">⚠ {{ redundancyWarning(price, index) }}</small>
 
-      <div v-if="price.pricing_model === 'customer_chooses'" class="modal-inline-grid">
-        <label>Minimum amount
-          <input v-model.number="price.min_amount" type="number" min="0" step="0.01" />
-        </label>
-        <label>Suggested amount
-          <input v-model.number="price.suggested_amount" type="number" min="0" step="0.01" />
-        </label>
-      </div>
+      <!-- A tip jar's real pricing: the amounts it offers, each showing what the buyer pays and what the
+           tenant keeps under the mode above. The old pair of inputs here (Minimum / Suggested amount) is
+           gone -- the platform owns the range now, and "suggested" was the deprecated single-amount shape
+           presets replaced. -->
+      <TipAmountsField v-if="price.pricing_model === 'customer_chooses'" :price="price" :product-type="productType" />
 
-      <div class="price-preview">
+      <!-- One amount, one preview. A tip jar's previews are per-amount, inside the field above. -->
+      <div v-if="price.pricing_model !== 'customer_chooses'" class="price-preview">
         <span>Preview:</span>
         <strong>{{ previewFor(price).amount }}</strong>
         <span v-if="previewFor(price).compareAt" class="price-preview-compare">{{ previewFor(price).compareAt }}</span>
@@ -93,6 +93,7 @@
 
 <script setup>
 import { defaultPriceForm, pricePreviewFor } from "../../utils/priceForm";
+import TipAmountsField from "./TipAmountsField.vue";
 
 const props = defineProps({
   prices: { type: Array, required: true },

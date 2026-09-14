@@ -10,7 +10,7 @@ from urllib.parse import quote, urlencode, urlparse
 from stripe_link.platform_config import default_favicon_url
 from stripe_link.domain.bargain import FROM_PREFIX, derived_bargain
 from stripe_link.domain.business_types import BUSINESS_TYPES, resolve_entity_type
-from stripe_link.domain.composition import compose_page, element_channel, shows_breadcrumb
+from stripe_link.domain.composition import compose_page, default_cta_label, element_channel, shows_breadcrumb
 from stripe_link.domain.connect_sync import site_seo_enabled
 from stripe_link.domain.documents import PRODUCT_CONDITIONS
 from stripe_link.domain.page_views import link_id as link_click_id
@@ -29,6 +29,12 @@ from stripe_link.domain.fonts import (
 )
 from stripe_link.domain.video_embeds import parse_video_embed
 from stripe_link.domain.section_theme import section_theme_vars
+from stripe_link.domain.tips import MAX_AMOUNT as TIP_MAX_AMOUNT
+from stripe_link.domain.tips import MIN_AMOUNT as TIP_MIN_AMOUNT
+from stripe_link.domain.tips import allows_custom as tip_allows_custom
+from stripe_link.domain.tips import is_tip_price
+from stripe_link.domain.tips import stamp_tip_jar
+from stripe_link.domain.tips import preset_charges as tip_preset_charges
 from stripe_link.domain.service_pricing import resolve_service_price
 
 
@@ -543,6 +549,18 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     "    .sl-price-copy{display:grid;gap:0.4rem}",
     "    .sl-price-option strong{font-family:var(--sl-font-heading);font-size:1.6rem;line-height:1.2;font-weight:600;color:var(--sl-price-title)}",
     "    .sl-price-description{color:var(--sl-price-description);font-size:1.3rem;line-height:1.45}",
+    # A TIP JAR's cards carry no image, so the picture column is dropped rather than left empty -- an empty
+    # 9rem column reads as a missing image. The amount is the card, so it gets the larger type.
+    "    .sl-tip-option{grid-template-columns:minmax(0,1fr) 2.2rem}",
+    "    .sl-tip-option strong{font-size:2.2rem;-webkit-line-clamp:1;line-clamp:1}",
+    "    .sl-tip-input{display:inline-flex;align-items:center;gap:0.4rem;margin-top:0.4rem;border:1px solid var(--sl-price-card-border);border-radius:0.8rem;padding:0.4rem 1rem;background:var(--sl-background);color:var(--sl-price-title);font-family:var(--sl-font-heading);font-size:1.8rem;width:max-content}",
+    "    .sl-tip-input input{width:9rem;border:0;background:transparent;color:inherit;font:inherit;padding:0.2rem 0}",
+    "    .sl-tip-input input:focus{outline:none}",
+    "    .sl-tip-note{margin:0.4rem 0 0;color:var(--sl-price-description);font-size:1.3rem;line-height:1.45}",
+    "    .sl-tip-freq{color:var(--sl-price-description);font-size:1.2rem;letter-spacing:0.04em;text-transform:uppercase}",
+    "    .sl-tip-frequency{display:flex;gap:0.6rem;justify-content:center;margin:0 auto 1.4rem;padding:0.4rem;border:1px solid var(--sl-price-card-border);border-radius:999px;width:max-content;background:var(--sl-price-card-bg)}",
+    "    .sl-tip-freq-option{border:0;border-radius:999px;padding:0.6rem 1.6rem;background:transparent;color:var(--sl-price-description);font-family:var(--sl-font-accent);font-size:1.3rem;font-weight:700;cursor:pointer}",
+    "    .sl-tip-freq-option.is-selected{background:var(--sl-price-card-selected-border);color:var(--sl-cta-text)}",
     # Same line-clamp as the link cards, for the same reason: the tenant picks the font, so a character
     # limit would be a proxy for pixels. Price options stack in one column rather than sitting side by
     # side, so a long description does not distort a neighbour -- it pushes the CHECKOUT CTA down the
@@ -1469,7 +1487,8 @@ def render_head_seo_tags(
             tags.append(("og:image:alt", alt))
     if canonical:
         tags.append(("og:url", canonical))
-    if selected:
+    # A TIP JAR has no price to advertise, and "0.00" would tell every share preview the page is free.
+    if selected and not is_tip_price(selected):
         tags.append(("product:price:amount", money_string(selected["unit_amount"])))
         tags.append(("product:price:currency", str(selected.get("currency") or "usd").upper()))
     for prop, content in tags:
@@ -1735,6 +1754,11 @@ def render_page(
         page, offer, *products_by_id.values(), *services_by_id.values(), *offers_by_id.values(),
     ))
     _RENDER_STATE["canonical"] = canonical_page_url(canonical_url)
+    # Where an island may call back to, and on whose behalf. The CTA carries these too, but only once a page
+    # has a checkout_url -- which a PREVIEW has not, and a tip jar's amount box needs them to price a typed
+    # amount. Cleared in the finally with the rest of the render-scoped state.
+    _RENDER_STATE["api_base_url"] = str(api_base_url or "").rstrip("/")
+    _RENDER_STATE["tenant_id"] = str(page.get("tenant_id") or offer.get("tenant_id") or "")
     # The caller computes the full robots directive (it has the Site + environment); `indexable` remains a
     # back-compat shorthand for the unit tests that exercise the head in isolation.
     _RENDER_STATE["robots"] = robots if robots is not None else (INDEXABLE_ROBOTS if indexable else NOINDEX_ROBOTS)
@@ -1819,6 +1843,8 @@ def render_page(
         _RENDER_ALTS_INDEX.clear()
         _RENDER_PREFERENCES.clear()
         _RENDER_STATE["canonical"] = ""
+        _RENDER_STATE["api_base_url"] = ""
+        _RENDER_STATE["tenant_id"] = ""
         _RENDER_STATE["robots"] = NOINDEX_ROBOTS
         _RENDER_STATE["home_url"] = ""
         _RENDER_STATE["page_type"] = ""
@@ -1892,7 +1918,11 @@ def _render_page_body(
     styles = render_template_styles(page)
     # Page Composer decides which sections render (plans/PAGE_COMPOSER.md). The renderer only iterates the
     # composed list — it never decides visibility itself.
-    composed_sections = compose_page(offer, page, str(_RENDER_STATE.get("page_type") or "landing"))
+    # The composer takes the OFFER and never its products, so the one product fact it needs -- is this a tip
+    # jar? -- is stamped on first. Derived rather than read, so an offer saved before the field existed
+    # composes the same way (domain/tips.py offer_is_tip_jar).
+    composed_sections = compose_page(
+        stamp_tip_jar(offer, products_by_id), page, str(_RENDER_STATE.get("page_type") or "landing"))
     # Each element declares a channel (plans/LANDING_PAGE_GOAL_COMPOSITION.md): "body" paints markup, "head"
     # emits meta/JSON-LD, "sidecar" writes its own artifact. Route by it rather than assuming everything is
     # body — a head section rendered into <main> would be visible junk, and vice versa.
@@ -2994,6 +3024,105 @@ def render_listicle_carousel(
     ] if part != "")
 
 
+ONE_TIME_LABEL = "one-time"
+# What each interval reads as on a card, and on the button that switches to it. The tenant offers ONE
+# interval and the supporter chooses whether to use it, so a recurring jar still takes one-off tips -- and
+# each card has to say which of the two it is about to charge.
+TIP_INTERVAL_WORDS = {"day": ("daily", "Daily"), "week": ("weekly", "Weekly"),
+                      "month": ("monthly", "Monthly"), "year": ("yearly", "Yearly")}
+
+
+def tip_recurring_price(offer, products_by_id):
+    """The offer's tip price, when it offers a recurring option. None otherwise."""
+    for item in stage_opportunities(offer or {}, STAGE_LANDING):
+        product = products_by_id.get(str(item.get("product_id") or "")) or {}
+        for price in product.get("prices") or []:
+            if str(price.get("price_id") or "") != str(item.get("price_id") or ""):
+                continue
+            if is_tip_price(price) and price.get("allow_recurring"):
+                return price
+    return None
+
+
+def render_tip_frequency(price):
+    """One-time or repeating, asked ONCE above the amounts rather than per card.
+
+    The amount and the frequency are two different questions; pairing every preset with every interval would
+    be eight cards to say four things. The choice restates itself on each card, so whichever amount is
+    selected always says what it is about to charge.
+    """
+    interval = str(price.get("recurring_interval") or "month")
+    word, title = TIP_INTERVAL_WORDS.get(interval, TIP_INTERVAL_WORDS["month"])
+    return "\n".join([
+        f'      <div class="sl-tip-frequency" role="group" aria-label="How often" data-tip-frequency data-tip-interval="{escape(interval)}" data-tip-word="{escape(word)}">',
+        '        <button type="button" class="sl-tip-freq-option is-selected" data-tip-frequency-value="once" aria-pressed="true">One-time</button>',
+        f'        <button type="button" class="sl-tip-freq-option" data-tip-frequency-value="recurring" aria-pressed="false">{escape(title)}</button>',
+        "      </div>",
+    ])
+
+
+def _tip_option_cards(
+    item: dict[str, Any], product: dict[str, Any], price: dict[str, Any], display_index: int
+) -> tuple[list[tuple[tuple[int, int, int], str]], int]:
+    """A TIP JAR's cards: one per preset amount, plus an "Other" card holding a number input.
+
+    The same `.sl-price-option` radio card the tier selector uses, because a supporter choosing between $5,
+    $10 and $25 is doing exactly what a buyer choosing between tiers does -- and reusing it means the CTA,
+    the selection JS and the styling all work already. What differs is where the amount comes from: these
+    carry `data-tip-amount` instead of a Stripe price id, and the server re-decides the charge at checkout
+    (plans/PAY_WHAT_YOU_WANT.md §3).
+    """
+    product_id = str(item.get("product_id") or "")
+    price_id = str(price.get("price_id") or "")
+    currency = str(price.get("currency") or "usd")
+    quantity = int(item.get("quantity") or 1)
+    radio_name = f"sl-price-{escape(product_id)}"
+    cards: list[tuple[tuple[int, int, int], str]] = []
+    # The CHARGE, not the tenant's keyed amount: the button says what the card will be charged, so the
+    # number on it and the number on the statement are the same one (plans/PAY_WHAT_YOU_WANT.md §5e).
+    amounts = tip_preset_charges(price)
+    for position, amount in enumerate(amounts):
+        label = escape(format_money(amount, currency))
+        cards.append(((0, position, display_index), "\n".join(line for line in [
+            f"      <article class=\"sl-price-option sl-tip-option\" data-product-id=\"{escape(product_id)}\" data-price-id=\"{escape(price_id)}\" data-tip-amount=\"{amount}\" data-tip-source=\"preset\" data-quantity=\"{quantity}\" data-default=\"{'true' if position == 0 else 'false'}\" data-sale-amount=\"{amount}\" data-regular-amount=\"\" data-currency=\"{escape(currency)}\" data-label=\"{label}\">",
+            "        <div class=\"sl-price-copy\">",
+            f"          <strong>{label}</strong>",
+            f"          <span class=\"sl-tip-freq\" data-tip-freq>{ONE_TIME_LABEL}</span>",
+            "        </div>",
+            f"        <input type=\"radio\" name=\"{radio_name}\" value=\"tip-{amount}\" aria-label=\"Tip {label}\"{' checked' if position == 0 else ''}>",
+            "      </article>",
+        ] if line)))
+        display_index += 1
+    if tip_allows_custom(price):
+        # The last card is a box, not a button. Its amount is what the supporter means to GIVE, so the fee
+        # mode applies on top of it -- the note under the input says the resulting charge, computed by the
+        # same server calculation that will charge it (author, 2026-09-13).
+        minimum, maximum = TIP_MIN_AMOUNT, TIP_MAX_AMOUNT
+        fee_handling = escape(str(price.get("fee_handling") or "standard"))
+        product_type = escape(str(product.get("product_type") or "digital"))
+        # The box prices a typed amount through the platform's own calculation, so it needs somewhere to ask
+        # and someone to ask as. Carried on the CARD rather than read off the CTA: a preview has no
+        # checkout_url, so the CTA carries nothing, and the box silently quoted the tip without its fees.
+        tip_api = escape(str(_RENDER_STATE.get("api_base_url") or ""))
+        tip_tenant = escape(str(_RENDER_STATE.get("tenant_id") or ""))
+        cards.append(((0, len(amounts), display_index), "\n".join(line for line in [
+            f"      <article class=\"sl-price-option sl-tip-option sl-tip-custom\" data-product-id=\"{escape(product_id)}\" data-price-id=\"{escape(price_id)}\" data-tip-source=\"custom\" data-tip-min=\"{minimum}\" data-tip-max=\"{maximum}\" data-tip-fee-handling=\"{fee_handling}\" data-tip-product-type=\"{product_type}\" data-tip-api=\"{tip_api}\" data-tip-tenant=\"{tip_tenant}\" data-quantity=\"{quantity}\" data-default=\"{'true' if not amounts else 'false'}\" data-sale-amount=\"0\" data-regular-amount=\"\" data-currency=\"{escape(currency)}\" data-label=\"Other\">",
+            "        <div class=\"sl-price-copy\">",
+            "          <strong>Other</strong>",
+            "          <label class=\"sl-tip-input\">",
+            f"            <span aria-hidden=\"true\">{escape(CURRENCY_SYMBOLS.get(currency.lower(), currency.upper()))}</span>",
+            f"            <input type=\"number\" inputmode=\"decimal\" min=\"{minimum // 100}\" max=\"{maximum // 100}\" step=\"1\" placeholder=\"{minimum // 100}\" aria-label=\"Enter your own amount\" data-tip-input>",
+            "          </label>",
+            f"          <span class=\"sl-tip-freq\" data-tip-freq>{ONE_TIME_LABEL}</span>",
+            f"          <p class=\"sl-tip-note\" data-tip-note>{escape(format_money(minimum, currency))} to {escape(format_money(maximum, currency))}.</p>",
+            "        </div>",
+            f"        <input type=\"radio\" name=\"{radio_name}\" value=\"tip-custom\" aria-label=\"Enter your own amount\"{' checked' if not amounts else ''}>",
+            "      </article>",
+        ] if line)))
+        display_index += 1
+    return cards, display_index
+
+
 def _item_price_option_cards(
     item: dict[str, Any], product: dict[str, Any], offer: dict[str, Any], display_index: int
 ) -> tuple[list[tuple[tuple[int, int, int], str]], int]:
@@ -3008,6 +3137,12 @@ def _item_price_option_cards(
     for option in item_price_options(item):
         price = find_price(product, option.get("price_id", ""))
         if not is_landing_page_price(price):
+            continue
+        if is_tip_price(price):
+            # No unit_amount to render -- the buyer picks. Rendering this as an ordinary tier card is what
+            # put "$0.00" on a tip jar's page.
+            tip_cards, display_index = _tip_option_cards(item, product, price, display_index)
+            cards.extend(tip_cards)
             continue
         # A selectable option carries its own label; a synthesized fixed option has none, so fall back
         # to the product name rather than a generic "Option".
@@ -3088,8 +3223,10 @@ def render_offer_price_selector(
             raise RenderError(f"Product '{product_id}' was not provided for offer '{offer.get('offer_id', '')}'.")
         item_cards, display_index = _item_price_option_cards(item, product, offer, display_index)
         cards.extend(item_cards)
+    recurring_tip = tip_recurring_price(offer, products_by_id)
     return "\n".join(part for part in [
         "    <section class=\"sl-price-selector\" data-section-type=\"offer_price_selector\">",
+        render_tip_frequency(recurring_tip) if recurring_tip else "",
         "      <div class=\"sl-price-options\">",
         *(card for _, card in sorted(cards, key=lambda item: item[0])),
         "      </div>",
@@ -3338,6 +3475,9 @@ def landing_page_offer_prices(
             prices.append({
                 "unit_amount": int(price.get("unit_amount") or 0),
                 "currency": str(price.get("currency") or "usd"),
+                # Carried so the markup can tell "this costs nothing" from "the buyer decides" -- both
+                # arrive here as unit_amount 0, and only one of them may be quoted as a price.
+                "pricing_model": str(price.get("pricing_model") or "one_time"),
             })
     return prices
 
@@ -3454,10 +3594,11 @@ def thin_content_warnings(html: str, offer: dict[str, Any] | None = None) -> lis
     silence a notice. A warning has to name something the tenant can do AND should do.
 
     Checkout pages keep it. There, thin really is thin -- a product with no description is a page a crawler has
-    no reason to rank, and adding one is work worth doing."""
-    from stripe_link.domain.composition import is_lead_composition
+    no reason to rank, and adding one is work worth doing. A TIP JAR is not one of those: it has no product,
+    so every remedy the notice offers is uncallable (author, 2026-09-14)."""
+    from stripe_link.domain.composition import is_thin_by_design
 
-    if offer is not None and is_lead_composition(offer):
+    if offer is not None and is_thin_by_design(offer):
         return []
     count = indexable_word_count(html)
     if count >= THIN_CONTENT_MIN_WORDS:
@@ -3847,6 +3988,17 @@ def product_json_ld(
         "priceCurrency": str(selected.get("currency") or "usd").upper(),
         "availability": "https://schema.org/InStock",
     }
+    if is_tip_price(selected):
+        # A TIP JAR has no price to state, and stating the absent unit_amount would tell Google this is
+        # free -- a fabricated claim, which is the one thing this markup may never carry. The honest shape
+        # for "the buyer decides" is the RANGE they may decide within.
+        offer_payload.pop("price")
+        offer_payload["priceSpecification"] = {
+            "@type": "PriceSpecification",
+            "minPrice": money_string(TIP_MIN_AMOUNT),
+            "maxPrice": money_string(TIP_MAX_AMOUNT),
+            "priceCurrency": str(selected.get("currency") or "usd").upper(),
+        }
     canonical = _RENDER_STATE.get("canonical") or ""
     if canonical:
         offer_payload["url"] = canonical
@@ -4042,7 +4194,11 @@ def selected_landing_page_price(
         except PricingError:
             continue
         if is_landing_page_price(price):
-            return {"unit_amount": int(price.get("unit_amount") or 0), "currency": price.get("currency") or "usd"}
+            return {
+                "unit_amount": int(price.get("unit_amount") or 0),
+                "currency": price.get("currency") or "usd",
+                "pricing_model": str(price.get("pricing_model") or "one_time"),
+            }
     return min(prices, key=lambda p: int(p["unit_amount"]))
 
 
@@ -5850,7 +6006,14 @@ def render_buy_cta(
     checkout_url: str | None,
     api_base_url: str | None = None,
 ) -> str:
-    label = escape(str(section.get("label") or (offer.get("presentation") or {}).get("cta_label") or "Checkout"))
+    # The composition gets a say before the generic fallback: on a tip jar the button reads "Send tip", since
+    # nothing is being bought and the verb is the last thing a supporter reads before their card is charged.
+    label = escape(str(
+        section.get("label")
+        or (offer.get("presentation") or {}).get("cta_label")
+        or default_cta_label(offer)
+        or "Checkout"
+    ))
     subtotal = int(resolved_offer.get("subtotal", 0))
     currency = str(resolved_offer.get("currency") or "usd")
     # An upsell screen bakes the price into its accept label ("… for $22.17"), so it suppresses the CTA's own
@@ -6899,6 +7062,10 @@ def render_page_interactions_script(page: dict[str, Any]) -> str:
         "      const cta = ctaType === 'buy' ? document.querySelector('[data-section-type=\"checkout_cta\"] .sl-cta') : null;",
         "      const declineCta = document.querySelector('[data-section-type=\"checkout_cta\"] .sl-decline-cta');",
         "      const cards = Array.from(document.querySelectorAll('.sl-price-option'));",
+        # One-time vs repeating. The tenant offers ONE interval; this is the supporter choosing whether to
+        # use it, so a recurring jar still takes one-off tips.
+        "      const tipFreq = document.querySelector('[data-tip-frequency]');",
+        "      const tipRecurring = () => Boolean(tipFreq && tipFreq.dataset.tipChosen === 'recurring');",
         "      const pageUrl = () => `${window.location.origin}${window.location.pathname}`;",
         "      const funnelParams = new URLSearchParams(window.location.search);",
         "      const funnelPageId = funnelParams.get('funnel_page') || '';",
@@ -6943,6 +7110,14 @@ def render_page_interactions_script(page: dict[str, Any]) -> str:
         "        if (productId) params.set('product_id', productId);",
         "        if (priceId) params.set('price_id', priceId);",
         "        if (quantity) params.set('quantity', quantity);",
+        # A TIP JAR line has no per-amount Stripe price: the buyer's choice travels as tip_amount and the
+        # server re-decides it (a preset must be one it offers; a typed amount must sit in the platform's
+        # range). tipKeyed is what the supporter typed, BEFORE fees -- the charge is the server's to compute.
+        "        if (card?.dataset.tipSource && tipRecurring()) params.set('tip_recurring', '1');",
+        "        if (card?.dataset.tipSource) {",
+        "          const keyed = card.dataset.tipSource === 'custom' ? card.dataset.tipKeyed : card.dataset.tipAmount;",
+        "          if (keyed) { params.set('tip_amount', keyed); params.set('tip_source', card.dataset.tipSource); }",
+        "        }",
         "        const current = pageUrl();",
         "        params.set('success_url', successUrl());",
         "        params.set('cancel_url', current);",
@@ -6957,8 +7132,14 @@ def render_page_interactions_script(page: dict[str, Any]) -> str:
         "        const label = cta.dataset.ctaLabel || 'Checkout';",
         "        cta.dataset.ctaAmount = amount || '0';",
         "        cta.href = checkoutHref(card);",
+        # The tip box with nothing typed in it: the CTA says what is missing instead of offering to charge
+        # $0.00, and refuses the click (below) rather than letting the server answer with an error page.
+        "        const needsTip = card.dataset.tipSource === 'custom' && !card.dataset.tipKeyed;",
+        "        cta.dataset.tipNeedsAmount = needsTip ? 'true' : 'false';",
+        "        if (needsTip) { cta.textContent = 'Enter an amount'; return; }",
         # An upsell CTA bakes the price into its label, so don't re-append the amount (avoids '$X - $X').
-        "        cta.textContent = cta.dataset.ctaHideAmount === 'true' ? label : `${label} - ${money(amount, currency)}`;",
+        "        const every = tipRecurring() && tipFreq ? ` / ${tipFreq.dataset.tipWord || 'monthly'}` : '';",
+        "        cta.textContent = cta.dataset.ctaHideAmount === 'true' ? label : `${label} - ${money(amount, currency)}${every}`;",
         "      };",
         "      if (cta && cta.dataset.checkoutBaseUrl) cta.href = checkoutHref(document.querySelector('.sl-price-option.selected') || cards[0]);",
         "      const selectCard = (card) => {",
@@ -6972,6 +7153,12 @@ def render_page_interactions_script(page: dict[str, Any]) -> str:
         "        cta.addEventListener('click', (event) => {",
         "          if (cta.dataset.connecting === 'true') {",
         "            event.preventDefault();",
+        "            return;",
+        "          }",
+        "          if (cta.dataset.tipNeedsAmount === 'true') {",
+        "            event.preventDefault();",
+        "            const box = document.querySelector('.sl-tip-custom [data-tip-input]');",
+        "            if (box) box.focus();",
         "            return;",
         "          }",
         "          const href = cta.href;",
@@ -6989,6 +7176,102 @@ def render_page_interactions_script(page: dict[str, Any]) -> str:
         "        const radio = card.querySelector('input[type=\"radio\"]');",
         "        if (radio) radio.addEventListener('change', () => selectCard(card));",
         "      });",
+        # --- Tip jar: the "Other" card is a box, and what it charges depends on who pays the fees.
+        # The figure shown comes from the SERVER's own calculation (/prices/calculate, the same endpoint the
+        # authoring form uses) rather than from a copy of the fee formula living in this script -- a second
+        # implementation of the fee maths is how the number on the button and the number on the statement
+        # come to disagree. Standard fees need no call at all: the tip IS the charge.
+        "      if (tipFreq) {",
+        "        const tipFreqWord = tipFreq.dataset.tipWord || 'monthly';",
+        "        const options = Array.from(tipFreq.querySelectorAll('[data-tip-frequency-value]'));",
+        "        const applyFrequency = (value) => {",
+        "          tipFreq.dataset.tipChosen = value;",
+        "          options.forEach((option) => {",
+        "            const on = option.dataset.tipFrequencyValue === value;",
+        "            option.classList.toggle('is-selected', on);",
+        "            option.setAttribute('aria-pressed', on ? 'true' : 'false');",
+        "          });",
+        # Every card restates it, so whichever amount is selected says what it is about to charge.
+        "          document.querySelectorAll('[data-tip-freq]').forEach((label) => {",
+        "            label.textContent = value === 'recurring' ? tipFreqWord : 'one-time';",
+        "          });",
+        "          const current = document.querySelector('.sl-price-option.selected') || cards[0];",
+        "          updateCta(current);",
+        "        };",
+        "        options.forEach((option) => option.addEventListener('click', () => applyFrequency(option.dataset.tipFrequencyValue)));",
+        "        applyFrequency('once');",
+        "      }",
+        "      const tipCard = document.querySelector('.sl-tip-custom');",
+        "      if (tipCard) {",
+        "        const tipInput = tipCard.querySelector('[data-tip-input]');",
+        "        const tipNote = tipCard.querySelector('[data-tip-note]');",
+        "        const tipCurrency = tipCard.dataset.currency || 'usd';",
+        "        const tipMin = Number(tipCard.dataset.tipMin || 100);",
+        "        const tipMax = Number(tipCard.dataset.tipMax || 50000);",
+        "        const tipRange = `${money(tipMin, tipCurrency)} to ${money(tipMax, tipCurrency)}.`;",
+        # The card's own endpoint first: a PREVIEW has no checkout_url, so the CTA carries no api base, and
+        # reading it off the CTA made the box quote the tip without its fees (author, 2026-09-13).
+        "        const tipBase = tipCard.dataset.tipApi || (cta && cta.dataset.checkoutApiBaseUrl) || '';",
+        "        const tipTenant = tipCard.dataset.tipTenant || (cta && cta.dataset.checkoutTenantId) || '';",
+        "        const tipApi = tipBase ? `${tipBase}/prices/calculate` : '';",
+        "        let tipSeq = 0;",
+        "        const setTip = (keyed, charge, note) => {",
+        "          tipCard.dataset.tipKeyed = keyed ? String(keyed) : '';",
+        "          tipCard.dataset.saleAmount = charge ? String(charge) : '0';",
+        "          if (tipNote) tipNote.textContent = note;",
+        "          if (tipCard.classList.contains('selected')) updateCta(tipCard);",
+        "        };",
+        "        const tipChanged = async () => {",
+        "          const keyed = Math.round(Number(tipInput.value || 0) * 100);",
+        "          if (!keyed) { setTip(0, 0, tipRange); return; }",
+        "          if (keyed < tipMin || keyed > tipMax) { setTip(0, 0, `Please choose ${tipRange}`); return; }",
+        "          const feeHandling = tipCard.dataset.tipFeeHandling || 'standard';",
+        "          if (feeHandling === 'standard') {",
+        # The creator absorbs the fees, so the tip IS the charge -- no round trip, and nothing to add.
+        "            setTip(keyed, keyed, `You will be charged ${money(keyed, tipCurrency)}.`);",
+        "            return;",
+        "          }",
+        "          if (!tipApi || !tipTenant) {",
+        # Fees apply but we cannot price them here. Say so, rather than quote a total that is wrong by
+        # exactly the fees -- the server adds them at checkout either way.
+        "            setTip(keyed, keyed, `${money(keyed, tipCurrency)} plus the card and platform fees.`);",
+        "            return;",
+        "          }",
+        "          const seq = ++tipSeq;",
+        "          setTip(keyed, keyed, 'Working out the total...');",
+        "          try {",
+        "            const response = await fetch(tipApi, {",
+        "              method: 'POST',",
+        "              headers: { 'Content-Type': 'application/json' },",
+        "              body: JSON.stringify({",
+        "                tenant_id: tipTenant,",
+        "                tenant_keyed_amount: keyed,",
+        "                currency: tipCurrency,",
+        "                product_type: tipCard.dataset.tipProductType || 'digital',",
+        "                pricing_model: 'customer_chooses',",
+        "                fee_handling: feeHandling,",
+        "              }),",
+        "            });",
+        "            const data = await response.json();",
+        "            if (seq !== tipSeq) return;",   # a later keystroke already won
+        "            const charge = Number(data && data.unit_amount) || keyed;",
+        "            setTip(keyed, charge, charge > keyed",
+        "              ? `You will be charged ${money(charge, tipCurrency)} — ${money(charge - keyed, tipCurrency)} covers the fees.`",
+        "              : `You will be charged ${money(charge, tipCurrency)}.`);",
+        "          } catch (err) {",
+        # The server prices it again at checkout, so a failed estimate must not block the tip -- it only
+        # means we cannot promise the total here.
+        "            if (seq === tipSeq) setTip(keyed, keyed, `${money(keyed, tipCurrency)} plus the card and platform fees.`);",
+        "          }",
+        "        };",
+        "        let tipTimer = 0;",
+        "        tipInput.addEventListener('input', () => {",
+        "          selectCard(tipCard);",
+        "          window.clearTimeout(tipTimer);",
+        "          tipTimer = window.setTimeout(tipChanged, 350);",
+        "        });",
+        "        tipInput.addEventListener('change', () => { window.clearTimeout(tipTimer); tipChanged(); });",
+        "      }",
         "      selectCard(cards.find((card) => card.dataset.default === 'true') || cards[0]);",
         "      let upsellCustomerId = '';",
         "      let upsellCustomerInfo = {};",

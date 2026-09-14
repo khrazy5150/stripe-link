@@ -243,26 +243,12 @@
 
             <template v-else>
               <p class="field-note">
-                A tip jar has no SKU, category, condition or shipping — nothing about it is a catalogue item.
-                The amounts below are what the customer PAYS, fees included, so the button and their statement
-                agree.
+                A tip jar has no SKU, condition or shipping — nothing about it is a catalogue item, and its
+                category is simply “Tip”.
               </p>
-              <div class="wizard-presets">
-                <span v-for="(amount, index) in form.prices[0].presets" :key="index" class="wizard-preset">
-                  <input v-model.number="form.prices[0].presets[index]" type="number" min="1" step="1" aria-label="Preset amount" />
-                  <button type="button" class="link-danger" @click="form.prices[0].presets.splice(index, 1)">×</button>
-                </span>
-                <button v-if="form.prices[0].presets.length < 8" class="secondary-action compact" type="button"
-                        @click="form.prices[0].presets.push(5)">+ Amount</button>
-              </div>
-              <label class="modal-checkbox">
-                <input v-model="form.prices[0].allow_custom" type="checkbox" />
-                Let them enter their own amount
-              </label>
-              <div class="modal-inline-grid">
-                <label>Minimum<input v-model.number="form.prices[0].min_amount" type="number" min="0" step="1" /></label>
-                <label>Maximum <em>(optional)</em><input v-model.number="form.prices[0].max_amount" type="number" min="0" step="1" /></label>
-              </div>
+              <!-- Fees FIRST, then the amounts: the mode decides what each amount means, and every amount
+                   below restates itself when this changes. Asking it afterwards made the tenant type three
+                   numbers and then discover they meant something else. -->
               <label>
                 Who pays the fees
                 <select v-model="form.prices[0].fee_handling">
@@ -274,6 +260,7 @@
                   Everywhere else, the fees come out of your tip. Here, your customer can cover them.
                 </span>
               </label>
+              <TipAmountsField :price="form.prices[0]" :product-type="form.product_type" />
             </template>
           </section>
 
@@ -288,7 +275,22 @@
               {{ uploadingAsset ? "Uploading..." : "Choose image" }}
             </button>
             <p v-if="uploadStatus" class="upload-status" :class="uploadStatusKind">{{ uploadStatus }}</p>
-            <p v-if="form.uploaded_images.length" class="field-note">{{ form.uploaded_images.length }} image(s) added.</p>
+            <!-- The SAME previews and cropper the full form shows. The first cut printed a count and nothing
+                 else, so the tenant could neither see what they had uploaded nor frame it -- and the crop is
+                 what decides the shape the page renders (plans/IMAGE_CROPPER.md). -->
+            <div v-if="form.uploaded_images.length" class="product-image-previews">
+              <figure v-for="url in form.uploaded_images" :key="url" class="product-image-preview">
+                <img :src="url" alt="Uploaded product image" />
+                <figcaption>{{ shortImageName(url) }}</figcaption>
+                <button
+                  v-if="canCrop(url)"
+                  type="button"
+                  class="secondary-action compact"
+                  :disabled="cropBusy"
+                  @click.prevent="croppingUrl = url"
+                >Crop</button>
+              </figure>
+            </div>
           </section>
 
           <footer class="product-modal-footer">
@@ -517,15 +519,6 @@
                 >Crop</button>
               </figure>
             </div>
-            <ImageCropper
-              v-if="croppingUrl"
-              :src="cropSourceUrl(croppingUrl)"
-              :ratios="imageRatios.asset.product"
-              :crop="existingCrop(croppingUrl)"
-              title="Crop this product photo"
-              @apply="applyProductCrop"
-              @cancel="croppingUrl = ''"
-            />
             <div v-if="uploadStatus" class="upload-status" :class="uploadStatusKind">{{ uploadStatus }}</div>
             <label>Paste image URLs, one per line
               <textarea v-model.trim="form.images" rows="3" placeholder="https://example.com/image1.jpg"></textarea>
@@ -580,6 +573,18 @@
             </button>
           </footer>
         </form>
+
+        <!-- ONE cropper for both bodies (wizard and full form), because both now show image previews and a
+             cropper nested inside one of the two <form>s opens nothing from the other. -->
+        <ImageCropper
+          v-if="croppingUrl"
+          :src="cropSourceUrl(croppingUrl)"
+          :ratios="imageRatios.asset.product"
+          :crop="existingCrop(croppingUrl)"
+          title="Crop this product photo"
+          @apply="applyProductCrop"
+          @cancel="croppingUrl = ''"
+        />
       </section>
     </div>
 
@@ -627,17 +632,19 @@
 <script setup>
 import { computed, h, nextTick, ref, watch } from "vue";
 import { apiRequest, toAssetCdnUrl } from "../api/client";
-import { defaultProductPrice, formatMoney, generateSku, isValidGtin, useProductsStore } from "../stores/products";
+import { defaultProductPrice, formatMoney, generateSku, isValidGtin, priceSummary, useProductsStore } from "../stores/products";
 // The lead-action glyph is shared with the Offers selector, so the same product looks the same on both.
 import { leadActionIcon as leadIcon } from "../utils/leadActionIcon";
+import TipAmountsField from "./shared/TipAmountsField.vue";
 import WizardChoiceCard from "./shared/WizardChoiceCard.vue";
 import WizardSteps from "./shared/WizardSteps.vue";
 import { fetchCategoriesForScope, filterCategories, humanizeCategory, normalizeCategory } from "../utils/categories";
 import { useCachedSuggestions } from "../composables/useCachedSuggestions";
 import { dimsFromStatus, recordImageDims } from "../utils/imageDims";
-import { cropImage } from "../api/uploads";
+import { cropBox, cropImage } from "../api/uploads";
 import ImageCropper from "./shared/ImageCropper.vue";
 import imageRatios from "../../../src/stripe_link/image_ratios.json";
+import { TIP_MAX, TIP_MIN, TIP_RULES, maxTipPresets } from "../config/tips";
 import { defaultPriceForm, priceFormFromDocument } from "../utils/priceForm";
 import { idColorStyle } from "../utils/iconColor";
 import PricingCard from "./shared/PricingCard.vue";
@@ -685,10 +692,16 @@ const wizardStep = ref(1);
 const wizardIntent = ref("transaction");
 const wizardFileInput = ref(null);
 
+// Every tip jar is filed under the same category (author, 2026-09-13), so tips group together in the list and
+// nobody is asked to invent a taxonomy entry for one. It is a real category, not a blank: the shared taxonomy
+// counts DISTINCT tenants before promoting a key to a suggestion, and "tip" is a key that deserves promoting.
+const TIP_CATEGORY = "tip";
+
 const intentNamePlaceholder = computed(() => ({
   transaction: "e.g. Premium Widget",
   lead_gen: "e.g. Free Starter Guide",
-  tip_jar: "e.g. Buy me a coffee",
+  // Deliberately not the coffee example: it names a competitor (author, 2026-09-13).
+  tip_jar: "e.g. Support the cause",
 }[wizardIntent.value] || "e.g. Premium Widget"));
 
 // Step 1 needs a choice; step 2 needs a name, and a lead product needs its action -- without one there is
@@ -729,13 +742,19 @@ function applyWizardIntent() {
   } else if (wizardIntent.value === "tip_jar") {
     // A transaction product, priced customer_chooses. Digital because nothing ships and nothing is booked.
     form.value.product_intent = "transaction";
+    // hydratingForm suppresses the product_type watcher, which clears the category and SKU when the type
+    // changes. Here the type and the category are both set BY the intent, so the watcher would undo the
+    // second assignment and the tenant would be asked for a category the wizard never shows -- which is
+    // exactly what blocked every tip jar from being created.
+    hydratingForm.value = true;
     form.value.product_type = "digital";
+    form.value.product_category = TIP_CATEGORY;
+    nextTick(() => { hydratingForm.value = false; });
     price.pricing_model = "customer_chooses";
     // The pitch's default: the customer covers the fees, so the creator keeps the full amount. Editable, and
     // the trade-off is visible -- the buyer sees a slightly higher number.
     price.fee_handling = "net_guaranteed";
     if (!price.presets.length) price.presets = [5, 10, 25];
-    if (!price.min_amount) price.min_amount = 1;
   } else {
     form.value.product_intent = "transaction";
     price.pricing_model = "one_time";
@@ -865,8 +884,8 @@ function lifecycleStatus(product) {
 }
 
 function priceText(product) {
-  const price = defaultProductPrice(product);
-  return price ? formatMoney(price.unit_amount, price.currency) : "No price";
+  // priceSummary, not formatMoney: a tip jar has no unit_amount and would otherwise read "No price".
+  return priceSummary(defaultProductPrice(product));
 }
 
 function compareAtText(product) {
@@ -1164,9 +1183,31 @@ function leadTargetLabelFor(action) {
   return "";
 }
 
+// Tip amounts, checked where the tenant can read the reason. The server enforces the same rules (it owns
+// the range outright and overwrites it), so this is the message, not the guard.
+function validateTipAmounts() {
+  const price = form.value.prices[0];
+  if (!price || price.pricing_model !== "customer_chooses") return "";
+  const presets = (price.presets || []).map(Number).filter((amount) => amount > 0);
+  if (presets.some((amount) => amount < TIP_MIN || amount > TIP_MAX)) {
+    return `Tip amounts must be between ${formatMoney(TIP_RULES.min_amount, "usd")} and ${formatMoney(TIP_RULES.max_amount, "usd")}.`;
+  }
+  if (new Set(presets).size !== presets.length) return "Each tip amount must be different.";
+  const cap = maxTipPresets(price.allow_custom !== false);
+  if (presets.length > cap) {
+    return `At most ${cap} tip amounts fit in the row${price.allow_custom !== false ? " alongside “enter your own”" : ""}.`;
+  }
+  return "";
+}
+
 function validateProductForm() {
   if (!form.value.name.trim()) return "Product name is required.";
-  if (!form.value.product_category) return "Choose a product category.";
+  // The wizard never SHOWS a category field -- its whole point is to ask only what the chosen intent needs,
+  // and its own note promises categories can be added after saving. Demanding one here rejected every
+  // product the wizard could produce, with an error pointing at a field that was not on the screen.
+  if (!wizardMode.value && !form.value.product_category) return "Choose a product category.";
+  const tipError = validateTipAmounts();
+  if (tipError) return tipError;
   if (form.value.product_intent === "lead_gen" && leadTargetLabelFor(form.value.lead_capture.action) && !form.value.lead_capture.target) {
     return `${form.value.lead_capture.label} requires a target.`;
   }
@@ -1413,8 +1454,7 @@ async function applyProductCrop(rect) {
   uploadStatusKind.value = "";
   uploadStatus.value = "Applying crop...";
   try {
-    const height = Math.round(1600 / (rect.ar || 1));
-    const url = await cropImage(id, rect, { width: 1600, height });
+    const url = await cropImage(id, rect, cropBox(rect.ar));
     replaceImageUrl(oldUrl, url);
     const assets = { ...(form.value.image_assets || {}) };
     delete assets[oldUrl];

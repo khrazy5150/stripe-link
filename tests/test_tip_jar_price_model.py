@@ -15,6 +15,7 @@ import json
 import pathlib
 import unittest
 
+from stripe_link.domain import tips
 from stripe_link.domain.documents import DocumentValidationError, validate_product_document
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -31,6 +32,16 @@ def _product(**price):
 
 
 class SchemaTests(unittest.TestCase):
+    def test_the_charges_must_line_up_with_the_presets(self):
+        # One charge per preset, in the same order -- otherwise a card displays one preset's price against
+        # another's, which is a wrong number presented as a right one.
+        validate_product_document(_product(presets=[500, 1000], preset_charges=[545, 1060]))
+        with self.assertRaises(DocumentValidationError):
+            validate_product_document(_product(presets=[500, 1000], preset_charges=[545]))
+        with self.assertRaises(DocumentValidationError):
+            # Fees are ADDED to a tip; a charge below what the tenant keeps cannot be honest.
+            validate_product_document(_product(presets=[500], preset_charges=[400]))
+
     def test_the_legacy_shape_is_now_expressible(self):
         # It was not: additionalProperties is false, so these were rejected on write. The schema did not
         # merely omit the right model, it blocked it.
@@ -42,10 +53,19 @@ class SchemaTests(unittest.TestCase):
         # place, by refusing the fields nobody had modelled.
         self.assertIs(SCHEMA.get("additionalProperties"), False)
 
-    def test_presets_are_documented_as_charged_amounts(self):
-        # DECIDED (author, 2026-09-13). The stored number includes the platform fee, exactly as unit_amount
-        # does for a fixed price under split/net_guaranteed -- so the button and the card statement agree.
-        self.assertIn("CHARGED", SCHEMA["properties"]["presets"]["description"])
+    def test_a_preset_stores_both_what_the_tenant_keeps_and_what_the_buyer_pays(self):
+        """REVERSES the first reading of this, same day.
+
+        Presets were briefly modelled as charged amounts outright. That made `net_guaranteed` -- "the
+        customer covers the fees, you keep the full amount" -- false of every button, since the tenant's
+        round $25 became $25 charged and ~$23 kept. The pair is what an ordinary price already stores
+        (tenant_keyed_amount beside unit_amount), and what the legacy app stored per preset price
+        (`unit_amount` + `_gross_amount`, api_products.py:151).
+        """
+        self.assertIn("KEEPS", SCHEMA["properties"]["presets"]["description"])
+        self.assertIn("BUYER", SCHEMA["properties"]["preset_charges"]["description"])
+        self.assertEqual(SCHEMA["properties"]["preset_charges"]["maxItems"],
+                         SCHEMA["properties"]["presets"]["maxItems"])
 
     def test_suggested_amount_is_marked_deprecated_not_deleted(self):
         # Existing documents carry it; deleting it from the schema would fail them on their next save.
@@ -72,32 +92,59 @@ class ChoiceRequiredTests(unittest.TestCase):
 
 
 class BoundsTests(unittest.TestCase):
+    """The range is the PLATFORM's (author, 2026-09-13: "System set range: $1 - $500. Don't allow tenants to
+    change it"), so the server does not check what the tenant sent -- it replaces it."""
+
+    def test_the_range_is_imposed_not_accepted(self):
+        # A request that names its own range -- which the builder cannot produce, but curl can -- comes back
+        # carrying the platform's. Checking instead of setting would leave the rule true only of documents
+        # the builder happened to write.
+        doc = _product(allow_custom=True, min_amount=1, max_amount=100_000_000)
+        validate_product_document(doc)
+        self.assertEqual(doc["prices"][0]["min_amount"], tips.MIN_AMOUNT)
+        self.assertEqual(doc["prices"][0]["max_amount"], tips.MAX_AMOUNT)
+
+    def test_the_range_is_written_even_when_nobody_asked(self):
+        # So the runtime never has to ask "and what if it is absent?"
+        doc = _product(presets=[500])
+        validate_product_document(doc)
+        self.assertEqual(doc["prices"][0]["min_amount"], tips.MIN_AMOUNT)
+        self.assertEqual(doc["prices"][0]["max_amount"], tips.MAX_AMOUNT)
+
     def test_a_preset_outside_the_bounds_is_refused(self):
         # A preset the buyer cannot actually pay is a button that fails at checkout.
         with self.assertRaises(DocumentValidationError):
-            validate_product_document(_product(presets=[50], min_amount=100))
+            validate_product_document(_product(presets=[tips.MIN_AMOUNT - 1]))
         with self.assertRaises(DocumentValidationError):
-            validate_product_document(_product(presets=[9999], max_amount=5000))
-
-    def test_the_bounds_must_be_the_right_way_round(self):
-        with self.assertRaises(DocumentValidationError):
-            validate_product_document(_product(allow_custom=True, min_amount=500, max_amount=100))
+            validate_product_document(_product(presets=[tips.MAX_AMOUNT + 1]))
 
     def test_presets_must_be_distinct(self):
         with self.assertRaises(DocumentValidationError):
             validate_product_document(_product(presets=[500, 500]))
 
     def test_there_is_a_ceiling_on_how_many(self):
-        # Eight buttons is already a lot on a phone, which is the only screen that matters here.
-        validate_product_document(_product(presets=[100 * n for n in range(1, 9)]))
+        # Five buttons fit in the row on a phone, which is the only screen that matters here.
+        validate_product_document(_product(presets=[100 * n for n in range(1, 6)]))
         with self.assertRaises(DocumentValidationError):
-            validate_product_document(_product(presets=[100 * n for n in range(1, 10)]))
+            validate_product_document(_product(presets=[100 * n for n in range(1, 7)]))
+
+    def test_offering_a_custom_amount_costs_one_of_the_places(self):
+        # "Enter your own" is a button too. Four presets plus it is the full row; five plus it overflows.
+        validate_product_document(_product(allow_custom=True, presets=[100 * n for n in range(1, 5)]))
+        with self.assertRaises(DocumentValidationError):
+            validate_product_document(_product(allow_custom=True, presets=[100 * n for n in range(1, 6)]))
 
 
 class RecurringTests(unittest.TestCase):
     def test_a_recurring_tip_is_expressible(self):
         validate_product_document(
             _product(presets=[500], allow_recurring=True, recurring_interval="month"))
+
+    def test_every_stripe_interval_is_offered(self):
+        # Asked for by name (author, 2026-09-13): "daily, weekly, monthly, yearly or whatever Stripe
+        # supports". A donation that repeats weekly is as ordinary as one that repeats monthly.
+        for interval in ("day", "week", "month", "year"):
+            validate_product_document(_product(presets=[500], allow_recurring=True, recurring_interval=interval))
 
     def test_the_interval_is_constrained(self):
         with self.assertRaises(DocumentValidationError):

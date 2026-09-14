@@ -2184,7 +2184,7 @@ import SelectorCard from "./SelectorCard.vue";
 import ImageUploadField from "./shared/ImageUploadField.vue";
 import imageRatios from "../../../src/stripe_link/image_ratios.json";
 import { offerViewTargets, offerViewTargetsFromExpanded } from "../composables/useConversionContext";
-import { isSectionVisible, defaultVisible, excludedSections, recommendedSectionKeys, optionalSectionKeys, governedKeys, elementLabel, elementChannel, addableElements, tokenGroups, previewVar, supportedGoals, goalLabel, packSeeds, orderSections, sectionOrderKey, isMovable, elementPlacement, orderSectionKeys, isRepeatableSection } from "../composables/pageComposer";
+import { isSectionVisible, defaultCtaLabel, defaultVisible, excludedSections, recommendedSectionKeys, optionalSectionKeys, governedKeys, elementLabel, elementChannel, addableElements, tokenGroups, previewVar, supportedGoals, goalLabel, packSeeds, orderSections, sectionOrderKey, isMovable, elementPlacement, orderSectionKeys, isRepeatableSection } from "../composables/pageComposer";
 import { apiRequest, assetUrl, getApiBase, getAuthSession, getStripeMode, getOtherEnvironment, getPagesBaseUrl, getPreviewPagesBaseUrl, getTestPagesHost, getTenantId } from "../api/client";
 import { useToastsStore } from "../stores/toasts";
 import { formatMoney } from "../stores/products";
@@ -2594,6 +2594,17 @@ const LEAD_COMPOSITIONS = {
   social_redirect: "lead_social",
 };
 
+function offerIsTipJar(offer) {
+  const items = (Array.isArray(offer?.items) ? offer.items : []).filter((item) => !item?.service_id);
+  if (!items.length) return false;
+  const products = offerProducts(offer);
+  return items.every((item) => {
+    const product = products.find((candidate) => candidate?.product_id === item?.product_id);
+    const price = (product?.prices || []).find((candidate) => candidate?.price_id === item?.price_id);
+    return price?.pricing_model === "customer_chooses";
+  });
+}
+
 function deriveOfferType(offer) {
   // Mirrors composition_key() in domain/composition.py. A lead-gen offer gets its OWN composition rather
   // than a checkout page with the price hidden -- and intent is a different question from pricing shape,
@@ -2606,6 +2617,11 @@ function deriveOfferType(offer) {
     const action = offer?.lead_capture_action || offerProducts(offer)[0]?.lead_capture?.action || "";
     return LEAD_COMPOSITIONS[action] || "lead_capture";
   }
+  // A TIP JAR is transactional but not a sales page, so it gets its own composition (no trust badges --
+  // nothing ships, and there is no purchase decision to de-risk). Mirrors composition_key(): the
+  // denormalised flag wins, and an offer saved before it existed is read off its products, exactly as the
+  // renderer does with domain/tips.py offer_is_tip_jar.
+  if (offer?.pricing_model === "customer_chooses" || offerIsTipJar(offer)) return "tip_jar";
   if (offer?.offer_type) return offer.offer_type;
   const items = Array.isArray(offer?.items) ? offer.items : [];
   if (items.length > 1) return "listicle";
@@ -2628,6 +2644,11 @@ const storeAvatarUrl = computed(() => profileStore.storeAvatarUrl || "");
 const effectiveAvatarUrl = computed(() => builder.avatar_url || storeAvatarUrl.value);
 const avatarIsFromProfile = computed(() => !builder.avatar_url && Boolean(storeAvatarUrl.value));
 const builderOfferType = computed(() => deriveOfferType(builderOffer.value));
+// A tip jar's button says "Send tip", not "Buy Now" — nothing is being bought, and the verb is the last
+// thing a supporter reads before their card is charged. From the shared rules file, so the builder and the
+// renderer agree; "" there means the composition has no opinion and the old default stands.
+const ctaLabelDefault = computed(() =>
+  defaultCtaLabel(builderOfferType.value) || (builderIntent.value === "lead_gen" ? "Continue" : "Buy Now"));
 // Mirrors shows_breadcrumb() in domain/composition.py. A breadcrumb says "you are HERE in a hierarchy", which
 // is true of a product inside a catalogue and false of the lead shapes -- a link hub is an identity page, not
 // a node under a store, and a bridge page is noindex by rule, so a crawlable trail on it has no reader.
@@ -4523,7 +4544,7 @@ function builderSectionCandidates(intent) {
     sections.push({
       id: "checkout-cta",
       type: "checkout_cta",
-      label: builder.cta_label || (intent === "transaction" ? "Buy Now" : "Continue"),
+      label: builder.cta_label || ctaLabelDefault.value,
     });
   }
   // previewRefundPolicy mirrors the server's lookup (offer.refund_policy, then the product's). With no
@@ -5462,7 +5483,7 @@ function rowSummary(row) {
     return on ? `${on} showing` : "none showing";
   }
   if (row.type === "refund_policy") return builder.refund_policy.enabled === false ? "hidden" : "shown";
-  if (row.type === "checkout_cta") return builder.cta_label || "Buy Now";
+  if (row.type === "checkout_cta") return builder.cta_label || ctaLabelDefault.value;
   if (row.type === "offer_price_selector") return "from the offer";
   if (row.type === "legal_footer") return "generated";
   if (row.type === "countdown_timer") return builder.countdown.enabled ? `${builder.countdown.duration_minutes || 15} min` : "off";
@@ -5843,7 +5864,7 @@ async function onBuilderOfferChange() {
   }
   // The offer is the page's contract: take the CTA label it snapshotted, falling back to a sensible default.
   builder.cta_label = offer.presentation?.cta?.label || offer.presentation?.cta_label
-    || (builderIntent.value === "lead_gen" ? "Continue" : "Buy Now");
+    || ctaLabelDefault.value;
   builder.template = "universal_bundle";
   builder.preset = builder.preset || "clean-slate";
 }

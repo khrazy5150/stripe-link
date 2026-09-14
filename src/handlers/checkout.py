@@ -9,7 +9,7 @@ logger = logging.getLogger(__name__)
 from stripe_link.common import error_response, json_response, query_params, resolve_stripe_mode, tenant_id_from_event
 from stripe_link.domain.billing_status import BillingStatusError, assert_billing_in_good_standing
 from stripe_link.domain.bnpl import checkout_payment_method_types
-from stripe_link.domain.fees import build_fee_context
+from stripe_link.domain.fees import build_fee_context, cached_billing_config, calculate_price, normalize_tier_id
 from stripe_link.domain.opportunities import STAGE_CHECKOUT, STAGE_POST_PURCHASE, stage_opportunities
 from stripe_link.domain.pricing import (
     PricingError,
@@ -18,6 +18,7 @@ from stripe_link.domain.pricing import (
     load_offer_services,
     resolve_offer,
 )
+from stripe_link.domain import tips
 from stripe_link.kms_secrets import KmsSecretCipher
 from stripe_link.runtime.error_pages import render_error_page
 from stripe_link.repositories.documents import (
@@ -67,6 +68,12 @@ def handler(
     page_id = str(params.get("page_id") or "").strip()
     success_url = str(params.get("success_url") or "").strip()
     cancel_url = str(params.get("cancel_url") or "").strip()
+    # A TIP JAR's amount comes from the buyer, so it arrives here and is re-decided server-side: a preset must
+    # be one the price actually offers, and a typed amount must sit inside the platform's range
+    # (plans/PAY_WHAT_YOU_WANT.md §5d). The page's number is an input, never the authority.
+    tip_amount = str(params.get("tip_amount") or "").strip()
+    tip_source = "custom" if str(params.get("tip_source") or "").strip() == "custom" else "preset"
+    tip_recurring = str(params.get("tip_recurring") or "").strip() in {"1", "true", "yes"}
 
     if not tenant_id:
         return error_response("clientID or tenant_id is required.", code="missing_tenant")
@@ -133,6 +140,11 @@ def handler(
         services_by_id = load_offer_services(tenant_id, offer, services_repo)
         selected_prices = {product_id: price_id} if product_id and price_id else {}
         resolved = resolve_offer(offer, products_by_id, selected_prices, services_by_id=services_by_id)
+        apply_tip_amount(
+            resolved, products_by_id,
+            amount=tip_amount, source=tip_source, recurring=tip_recurring, tenant_id=tenant_id,
+            tenant_repo=tenant_repo, billing_config_loader=billing_config_loader,
+        )
 
         stripe_keys = stripe_repo.get(tenant_id, mode=mode) or {}
         api_key, stripe_account = checkout_credentials(tenant_id, mode, stripe_keys, secret_cipher)
@@ -175,12 +187,72 @@ def handler(
         if not checkout_url:
             return error_response("Stripe did not return a checkout URL.", status_code=502, code="checkout_error")
         return redirect_response(checkout_url)
+    except tips.TipAmountError as exc:
+        return error_response(str(exc), code="invalid_tip_amount")
     except BillingStatusError as exc:
         return error_response(str(exc), status_code=402, code="tenant_billing_hold")
     except PricingError as exc:
         return error_response(str(exc), code="checkout_error")
     except Exception as exc:
         return error_response(str(exc), status_code=500, code="checkout_error")
+
+
+def apply_tip_amount(resolved, products_by_id, *, amount, source, tenant_id, recurring=False,
+                     tenant_repo=None, billing_config_loader=None):
+    """Price a TIP JAR line from the amount the buyer chose, in place.
+
+    A `customer_chooses` price carries no unit_amount by design, so a resolved tip line arrives here worth
+    zero. Left alone it would create a Checkout Session for $0.00 — the failure this whole feature exists to
+    stop, in its other direction.
+
+    A typed amount is grossed up by the SERVER's fee calculation, the same one the authoring form and the
+    page's live estimate call, so the figure on the card and the figure on the statement come from one place.
+    """
+    for line in resolved.get("items") or []:
+        product = products_by_id.get(line.get("product_id")) or {}
+        price = find_price(product, line.get("price_id") or "")
+        if not tips.is_tip_price(price):
+            continue
+        if not amount:
+            # No amount in the request: the line already resolved to the preset the page shows checked, so a
+            # CTA clicked before any JS ran still charges a real, offered amount. A jar with no presets at
+            # all has nothing to fall back to.
+            if int(line.get("unit_amount") or 0) > 0:
+                continue
+            raise tips.TipAmountError("Choose an amount before checking out.")
+        tenant_plan = "basic"
+        if tenant_repo is not None:
+            tenant_plan = normalize_tier_id((tenant_repo.get(tenant_id, tenant_id) or {}).get("tier_id"))
+
+        def gross_up(keyed, _price=price, _product=product, _plan=tenant_plan):
+            return calculate_price(
+                tenant_keyed_amount=keyed,
+                currency=_price.get("currency") or "usd",
+                product_type=_product.get("product_type") or "digital",
+                fee_handling=_price.get("fee_handling") or "standard",
+                pricing_model="customer_chooses",
+                tenant_plan=_plan,
+                billing_config=cached_billing_config(billing_config_loader),
+            )["unit_amount"]
+
+        charge = tips.resolve_charge(price, amount, source=source, gross_up=gross_up)
+        line["unit_amount"] = charge
+        line["line_amount"] = charge * int(line.get("quantity") or 1)
+        if recurring:
+            # A repeating tip is a Stripe SUBSCRIPTION, so the interval has to reach the session. Refused
+            # rather than quietly charged once when the price never offered one: a supporter who chose
+            # "monthly" and was billed a single time got a different thing than the one they picked.
+            if not price.get("allow_recurring"):
+                raise tips.TipAmountError("This tip jar does not offer a repeating tip.")
+            interval = str(price.get("recurring_interval") or "month")
+            if interval not in tips.INTERVALS:
+                interval = "month"
+            line["recurring"] = {"interval": interval, "interval_count": 1}
+        # A tip jar is never a Stripe-synced price: the amount is decided per buyer, so checkout prices it
+        # inline. Clearing the id here is belt-and-braces -- a stale synced id would charge the wrong number.
+        price.pop("stripe_price_id", None)
+    resolved["subtotal"] = sum(int(line.get("line_amount") or 0) for line in resolved.get("items") or [])
+    return resolved
 
 
 def order_bump_optional_items(offer, products_by_id, key_mode):
@@ -222,6 +294,10 @@ def build_checkout_payload(
 ):
     checkout = offer.get("checkout") or {}
     mode = checkout.get("mode") or "payment"
+    # A repeating TIP is chosen by the buyer, not configured on the offer, so the session's mode follows the
+    # resolved line. Everything else keeps reading the offer's own checkout.mode.
+    if any((item or {}).get("recurring") for item in resolved.get("items") or []):
+        mode = "subscription"
     # The Stripe key was chosen from the offer's stripe_mode, so that IS the active key's mode. A stored
     # stripe_price_id only belongs to the account of the same mode — if a product's own stripe_mode disagrees
     # (a wrong-environment id from a bad copy or manual tinkering), we must NOT send it (it 500s at Stripe).
@@ -276,7 +352,9 @@ def build_checkout_payload(
             payload[f"{prefix}[price_data][product_data][name]"] = product.get("name") or item.get("product_name") or "Product"
             if product.get("description"):
                 payload[f"{prefix}[price_data][product_data][description]"] = product.get("description")
-            recurring = price.get("recurring") or {}
+            # The resolved line wins: a tip's interval is decided per checkout, and the product's price
+            # document carries none.
+            recurring = item.get("recurring") or price.get("recurring") or {}
             if recurring:
                 payload[f"{prefix}[price_data][recurring][interval]"] = recurring.get("interval") or "month"
                 payload[f"{prefix}[price_data][recurring][interval_count]"] = str(int(recurring.get("interval_count") or 1))

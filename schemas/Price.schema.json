@@ -91,7 +91,7 @@
     "min_amount": {
       "type": "integer",
       "minimum": 0,
-      "description": "Smallest amount the buyer may pay, in the smallest currency unit. customer_chooses only. Enforced server-side at checkout, never only in the UI."
+      "description": "Smallest amount the buyer may pay, in the smallest currency unit. customer_chooses only. SET BY THE PLATFORM (src/stripe_link/tip_rules.json) and overwritten on validation -- a tenant does not choose the range. Enforced server-side at checkout, never only in the UI."
     },
     "suggested_amount": {
       "type": "integer",
@@ -195,13 +195,13 @@
         "type": "integer",
         "minimum": 0
       },
-      "maxItems": 8,
-      "description": "Amounts offered as buttons, in the smallest currency unit. CHARGED amounts -- what the buyer pays, inclusive of whatever the fee_handling mode adds, exactly as unit_amount is for a fixed price. customer_chooses only."
+      "maxItems": 5,
+      "description": "Amounts offered as buttons, in the smallest currency unit. What the TENANT KEEPS -- their keyed amount, exactly as tenant_keyed_amount is for a fixed price. What the buyer pays for each sits in preset_charges, and the fee_handling mode decides the distance between them. At most five (four when allow_custom is set, since 'enter your own' takes one of the five places in the row). customer_chooses only."
     },
     "max_amount": {
       "type": "integer",
       "minimum": 0,
-      "description": "Largest amount the buyer may pay. A tenant guardrail for a sensible range, NOT a compliance limit -- platforms do not cap tips. customer_chooses only."
+      "description": "Largest amount the buyer may pay. SET BY THE PLATFORM (src/stripe_link/tip_rules.json) and overwritten on validation: a ceiling keeps a mistyped amount from becoming a dispute. customer_chooses only."
     },
     "allow_custom": {
       "type": "boolean",
@@ -214,10 +214,21 @@
     "recurring_interval": {
       "type": "string",
       "enum": [
+        "day",
+        "week",
         "month",
         "year"
       ],
-      "description": "Interval offered when allow_recurring is true."
+      "description": "Interval offered when allow_recurring is true. Stripe's four."
+    },
+    "preset_charges": {
+      "type": "array",
+      "items": {
+        "type": "integer",
+        "minimum": 0
+      },
+      "maxItems": 5,
+      "description": "What the BUYER is charged for each entry in presets[], same order, smallest first. Computed at authoring time by the platform's price calculation, because the renderer has no billing config to gross up with. Absent on documents written before presets carried a keyed/charged split -- there, presets[] were themselves the charged amounts."
     }
   },
   "if": {

@@ -5,6 +5,7 @@
 
 import { apiRequest } from "../api/client";
 import { usePlatformBillingStore } from "./platformBilling";
+import { TIP_RULES } from "../config/tips";
 
 export function priceLocalId(prefix = "price") {
   const alphabet = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
@@ -145,12 +146,26 @@ export async function buildPriceDocument(priceForm, productType, now) {
       .map((amount) => cents(amount))
       .filter((amount) => amount > 0);
     price.presets = [...new Set(presets)].sort((a, b) => a - b);
-    price.min_amount = cents(priceForm.min_amount);
-    if (cents(priceForm.max_amount) > 0) price.max_amount = cents(priceForm.max_amount);
+    // What the BUYER pays for each preset, priced by the same server calculation as every other amount and
+    // stored beside them: the page renderer has no billing config to gross up with, and a tip jar's buttons
+    // must say the number the card statement will say. presets[] stay the tenant's keyed amounts.
+    price.preset_charges = await Promise.all(price.presets.map(async (keyed) => {
+      const preset = await calculatePriceWithFallback({
+        tenantKeyedAmount: keyed, currency: price.currency, productType, pricingModel, feeHandling, platformRate,
+      });
+      return preset.unit_amount;
+    }));
+    // The range is the PLATFORM's, so it is not read from the form -- there is no field for it, and the
+    // server overwrites whatever arrives anyway (domain/tips.py). Written here so the document the builder
+    // holds says the same thing the stored one will.
+    price.min_amount = TIP_RULES.min_amount;
+    price.max_amount = TIP_RULES.max_amount;
     price.allow_custom = priceForm.allow_custom !== false;
     if (priceForm.allow_recurring) {
       price.allow_recurring = true;
-      price.recurring_interval = priceForm.recurring_interval === "year" ? "year" : "month";
+      price.recurring_interval = TIP_RULES.intervals.includes(priceForm.recurring_interval)
+        ? priceForm.recurring_interval
+        : "month";
     }
   }
   return price;

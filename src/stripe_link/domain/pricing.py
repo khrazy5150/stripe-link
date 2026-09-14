@@ -2,6 +2,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any
 
+from stripe_link.domain import tips
 from stripe_link.domain.opportunities import STAGE_LANDING, stage_opportunities
 from stripe_link.domain.service_pricing import resolve_service_price, service_booking_flow
 
@@ -350,6 +351,12 @@ def resolve_offer_item(
     item_quantity = int(item.get("quantity", 1))
     override = selectable_price_override(item, price_id)
     unit_amount = int(price.get("unit_amount", 0))
+    if not unit_amount and tips.is_tip_price(price):
+        # A TIP JAR carries no unit_amount -- the buyer picks -- so the line resolves to the amount the page
+        # shows CHECKED: the smallest preset. Without it every surface that reads a resolved line (the CTA's
+        # label, the fee context, a checkout that somehow arrives with no chosen amount) reported $0.00.
+        charges = tips.preset_charges(price)
+        unit_amount = charges[0] if charges else 0
     return ResolvedOfferItem(
         product_id=product_id,
         product_name=product.get("name", ""),

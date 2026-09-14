@@ -3682,22 +3682,12 @@ button:disabled {
   font-weight: 900;
 }
 
-.wizard-progress {
-  display: flex;
-  gap: 0.8rem;
-  border-bottom: 1px solid var(--line);
-  padding: 1.2rem 2.4rem;
-}
-
-.wizard-progress span {
-  width: 1rem;
-  height: 1rem;
-  border-radius: 999px;
-  background: var(--line);
-}
-
-.wizard-progress span.active {
-  background: var(--accent);
+/* The landing wizard's rail is a direct child of the modal card, not of a padded body like the product
+   wizard's -- so it carries the modal's own 2.4rem gutter or it runs edge to edge. The dots it replaced
+   had that padding built into `.wizard-progress`; the shared rail doesn't, and losing it was the whole
+   regression. Aligns the rail with the title above it and the step body below it. */
+.landing-wizard-modal .wizard-steps {
+  padding: 0 2.4rem;
 }
 
 .landing-wizard-body {
@@ -7062,25 +7052,58 @@ button:disabled {
 
 /* Preset amounts: a row of small money inputs, because a tip jar's amounts are a SET rather than a list of
    records — giving each one a full repeat-row would bury three numbers in three panels. */
-.wizard-presets {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.8rem;
+/* The fee warning on the "Issue refund?" dialog. Set apart from the sentence above it, because it is the
+   part a tenant has not met before -- and it is the last moment they can choose something else. */
+.refund-fee-note {
+  margin: 1.2rem 0 0;
+  padding: 1rem 1.2rem;
+  border-left: 3px solid var(--warning, #f59e0b);
+  background: var(--surface-muted, #f9fafb);
+  color: var(--text-muted, #6b7280);
+  font-size: 1.3rem;
+  line-height: 1.5;
 }
 
-.wizard-preset {
+.refund-fee-note strong { color: var(--text, #111827); }
+
+/* A tip jar's amounts: one row each, because every amount carries its own "customer pays / you keep" line
+   and pills in a wrapping row have nowhere to put it. */
+.tip-amount-rows {
+  display: grid;
+  gap: 0.6rem;
+  margin: 0 0 0.8rem;
+  padding: 0;
+  list-style: none;
+}
+
+.tip-amount-rows li {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.tip-amount-input {
   display: inline-flex;
   align-items: center;
   gap: 0.2rem;
-  padding: 0.2rem 0.4rem 0.2rem 0.8rem;
+  padding: 0.2rem 0.8rem;
   border: 1px solid var(--border, #e5e7eb);
   border-radius: 999px;
+  background: var(--surface, #fff);
 }
 
-.wizard-preset input {
+.tip-amount-input input {
   width: 6rem;
   border: 0;
   padding: 0.4rem 0;
   background: transparent;
 }
+
+.tip-amount-preview {
+  flex: 1;
+  color: var(--text-muted, #6b7280);
+  font-size: 1.3rem;
+}
+
+.tip-amount-preview strong { color: var(--text, #111827); }
+

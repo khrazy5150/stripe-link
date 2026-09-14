@@ -40,6 +40,13 @@ function offerTypeRule(offerType) {
   return OFFER_TYPES[offerType] || OFFER_TYPES.single || { sections: [], allowed_ctas: [] };
 }
 
+// What this page's button says when the tenant has not written their own — from the SAME rules file the
+// renderer reads (domain/composition.py default_cta_label), so the preview and the published page cannot
+// disagree about the verb. "" = the composition has no opinion, and the caller keeps its old default.
+export function defaultCtaLabel(offerType) {
+  return String(rules.offer_types?.[offerType]?.default_cta_label || "");
+}
+
 export function isGoverned(sectionType) {
   return GOVERNED.has(sectionKey(sectionType));
 }

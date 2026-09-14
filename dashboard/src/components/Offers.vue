@@ -562,7 +562,8 @@ import SelectorCard from "./SelectorCard.vue";
 import { leadActionIcon } from "../utils/leadActionIcon";
 import { apiRequest, getStripeMode, getTenantId, toAssetCdnUrl } from "../api/client";
 import { formatCouponDiscount, useCouponsStore } from "../stores/coupons";
-import { defaultProductPrice, formatMoney, useProductsStore } from "../stores/products";
+import { defaultProductPrice, formatMoney, priceSummary, useProductsStore } from "../stores/products";
+import { defaultCtaLabel } from "../composables/pageComposer";
 import { useServicesStore } from "../stores/services";
 import { useProfileStore } from "../stores/profile";
 import { sanitizeSlug, slugTokens, uniqueSlug } from "../composables/slugs";
@@ -684,6 +685,13 @@ function landingPrices(product) {
 // Only products with a landing price are landing items. A product priced ONLY as a bump/upsell/downsell is a
 // funnel-only product (selected in Select Items, but never rendered as a landing card).
 const landingProducts = computed(() => selectedProducts.value.filter((product) => landingPrices(product).length > 0));
+
+// Every landing price a tip? Then the offer is a tip jar, and its page composes as one.
+function landingPricesAreTips() {
+  const products = landingProducts.value;
+  return products.length > 0
+    && products.every((product) => landingPrices(product).every((price) => price.pricing_model === "customer_chooses"));
+}
 
 // Inferred funnel roles — read-only, derived from the selected products' contexts (§6).
 const inferredOrderBumps = computed(() => selectedProducts.value.filter((product) => contextPrice(product, "order_bump")));
@@ -1277,6 +1285,9 @@ function primaryCtaContract() {
   // page's contract, so cta.type (buy/call/email/external/booking) drives which CTA component renders.
   const product = landingProducts.value[0];
   if (product) {
+    // A tip jar is a transaction, but nothing is bought: the button says so, from the shared rules file the
+    // renderer reads, so the snapshot the offer carries is the verb the page will show.
+    if (landingPricesAreTips()) return { type: "buy", label: defaultCtaLabel("tip_jar") || "Send tip" };
     if ((product.product_intent || "transaction") !== "lead_gen") return { type: "buy", label: "Buy Now" };
     const lc = product.lead_capture || {};
     const target = lc.target?.value || "";
@@ -1393,6 +1404,10 @@ function buildOfferDocument() {
     lead_capture_action: effectiveIntent === "lead_gen"
       ? (landingProducts.value[0]?.lead_capture?.action || undefined)
       : undefined,
+    // Denormalised for the same reason: a tip jar composes differently from a sales page (no trust badges),
+    // and the composer sees the offer without its products. The renderer derives it too, so an offer saved
+    // before this existed still composes right -- this only saves it the lookup.
+    pricing_model: landingPricesAreTips() ? "customer_chooses" : undefined,
     offer_type: inferOfferType(),
     stripe_mode: getStripeMode(),
     items,
@@ -1760,8 +1775,8 @@ function inferredCheckoutMode() {
 }
 
 function priceText(product) {
-  const price = defaultProductPrice(product);
-  return price ? formatMoney(price.unit_amount, price.currency) : "No price";
+  // priceSummary, not formatMoney: a tip jar has no unit_amount and would otherwise read "No price".
+  return priceSummary(defaultProductPrice(product));
 }
 
 function priceOptionLabel(price) {

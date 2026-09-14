@@ -1,0 +1,11 @@
+{
+  "_comment": "What a tip jar (a customer_chooses price) may offer. Read by BOTH the builder (dashboard/src/config/tips.js) and the server (domain/tips.py), because a form that caps at five and a server that accepts eight is the same bug this codebase keeps shipping: two things that must agree with nothing forcing them to. See plans/PAY_WHAT_YOU_WANT.md.",
+  "_amounts": "In the smallest currency unit, like every other amount in a Price document.",
+  "min_amount": 100,
+  "max_amount": 50000,
+  "_presets": "Preset buttons sit in ONE row on the page. Five fit; 'enter your own' takes one of the five when it is offered, so the cap drops to four.",
+  "max_presets": 5,
+  "max_presets_with_custom": 4,
+  "_intervals": "Offered when the tenant lets a supporter make the tip recurring. Stripe's four intervals, unabridged -- a donation that repeats weekly is as ordinary as one that repeats monthly.",
+  "intervals": ["day", "week", "month", "year"]
+}

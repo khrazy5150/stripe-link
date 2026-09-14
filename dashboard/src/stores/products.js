@@ -103,6 +103,16 @@ export function defaultProductPrice(product) {
     || null;
 }
 
+// What a price READS as in a list. A tip jar deliberately has NO unit_amount -- the buyer picks -- so
+// formatMoney reported "No price", which is true of the field and false of the product: it offers several.
+export function priceSummary(price) {
+  if (!price) return "No price";
+  if (price.pricing_model !== "customer_chooses") return formatMoney(price.unit_amount, price.currency);
+  const parts = (price.presets || []).map((amount) => formatMoney(amount, price.currency));
+  if (price.allow_custom !== false) parts.push(parts.length ? "or any amount" : "Any amount");
+  return parts.length ? parts.join(" · ") : "No price";
+}
+
 export function formatMoney(cents, currency = "usd") {
   if (cents === undefined || cents === null || cents === "") return "No price";
   return new Intl.NumberFormat("en-US", {

@@ -6,6 +6,7 @@ from stripe_link.domain.business_types import BUSINESS_TYPES
 from stripe_link.domain.cart import CART_STATUSES, MAX_CART_LINES, MAX_LINE_QTY
 from stripe_link.domain.composition import ELEMENTS, supported_goals
 from stripe_link.domain.semantic_schema import OFFER_SEMANTIC_MODEL_SCHEMA, check_schema
+from stripe_link.domain import tips
 
 
 class DocumentValidationError(ValueError):
@@ -779,23 +780,48 @@ def validate_product_document(document: dict[str, Any]) -> None:
             # which is how the half-imported version shipped: it saved, and then sold at whatever the tenant
             # happened to type in the Sales price field.
             optional_non_negative_int(price, "unit_amount", "price.unit_amount")
-            optional_non_negative_int(price, "min_amount", "price.min_amount")
-            optional_non_negative_int(price, "max_amount", "price.max_amount")
+            # min_amount/max_amount are deliberately NOT validated: they are overwritten below with the
+            # platform's range, so whatever arrived in them never reaches a document.
             optional_non_negative_int(price, "suggested_amount", "price.suggested_amount")
             optional_bool(price, "allow_custom", "price.allow_custom")
             optional_bool(price, "allow_recurring", "price.allow_recurring")
             if price.get("recurring_interval") is not None:
-                require_enum(price, "recurring_interval", {"month", "year"}, "price.recurring_interval")
+                require_enum(price, "recurring_interval", tips.INTERVALS, "price.recurring_interval")
             presets = price.get("presets")
+            # The buttons sit in one row, and "enter your own" takes one of the places when it is offered.
+            cap = tips.max_presets(bool(price.get("allow_custom")))
             if presets is not None:
-                if not isinstance(presets, list) or len(presets) > 8:
-                    raise DocumentValidationError("price.presets must be an array of at most 8 amounts.")
+                if not isinstance(presets, list) or len(presets) > cap:
+                    raise DocumentValidationError(
+                        f"price.presets must be an array of at most {cap} amounts.")
+                # tips.whole_amount, not isinstance(int): a stored document's numbers are Decimals, and an
+                # int-only check refused every tip jar that had been through the table -- which meant no
+                # artifact, and a published page that 404'd.
                 for index, amount in enumerate(presets):
-                    if not isinstance(amount, int) or isinstance(amount, bool) or amount < 0:
+                    if tips.whole_amount(amount) is None:
                         raise DocumentValidationError(
                             f"price.presets[{index}] must be a non-negative integer amount.")
+                presets = [tips.whole_amount(amount) for amount in presets]
+                price["presets"] = presets
                 if len(set(presets)) != len(presets):
                     raise DocumentValidationError("price.presets must not repeat an amount.")
+            # presets are what the TENANT keys; preset_charges is what the buyer pays for each, in the same
+            # order (§5e). Stored rather than derived because the renderer has no billing config -- so the
+            # two must line up here, or a card would display one preset's price against another's.
+            charges = price.get("preset_charges")
+            if charges is not None:
+                if not isinstance(charges, list) or len(charges) != len(presets or []):
+                    raise DocumentValidationError(
+                        "price.preset_charges must carry one charged amount per entry in price.presets.")
+                for index, amount in enumerate(charges):
+                    if tips.whole_amount(amount) is None:
+                        raise DocumentValidationError(
+                            f"price.preset_charges[{index}] must be a non-negative integer amount.")
+                    charges[index] = amount = tips.whole_amount(amount)
+                    if amount < sorted(presets or [])[index]:
+                        raise DocumentValidationError(
+                            f"price.preset_charges[{index}] is less than the amount the tenant keeps; fees "
+                            "are added to a tip, never taken off the buyer's side.")
             # Migration comfort: a legacy suggested_amount counts as a way to pick until it is folded into
             # presets, so existing documents keep validating.
             has_choice = bool(presets) or price.get("allow_custom") or price.get("suggested_amount")
@@ -803,14 +829,17 @@ def validate_product_document(document: dict[str, Any]) -> None:
                 raise DocumentValidationError(
                     "A customer_chooses price must offer presets or allow a custom amount; otherwise the "
                     "customer has nothing to choose.")
-            minimum, maximum = price.get("min_amount"), price.get("max_amount")
-            if minimum is not None and maximum is not None and maximum < minimum:
-                raise DocumentValidationError("price.max_amount must not be less than price.min_amount.")
+            # The range belongs to the PLATFORM, not the tenant (author, 2026-09-13): a floor Stripe will
+            # actually charge, and a ceiling that keeps a mistyped amount from becoming a dispute. So it is
+            # SET here rather than checked -- whatever the client sent is overwritten, which is the only way
+            # "the tenant cannot change it" survives a request the builder did not make.
+            minimum, maximum = tips.MIN_AMOUNT, tips.MAX_AMOUNT
+            price["min_amount"], price["max_amount"] = minimum, maximum
             for index, amount in enumerate(presets or []):
-                if minimum is not None and amount < minimum:
-                    raise DocumentValidationError(f"price.presets[{index}] is below price.min_amount.")
-                if maximum is not None and amount > maximum:
-                    raise DocumentValidationError(f"price.presets[{index}] is above price.max_amount.")
+                if amount < minimum:
+                    raise DocumentValidationError(f"price.presets[{index}] is below the {minimum} minimum.")
+                if amount > maximum:
+                    raise DocumentValidationError(f"price.presets[{index}] is above the {maximum} maximum.")
         else:
             if price.get("unit_amount") is None:
                 raise DocumentValidationError("price.unit_amount must be provided unless pricing_model is customer_chooses.")

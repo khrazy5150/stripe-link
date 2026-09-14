@@ -1,7 +1,7 @@
 // Shared price-row FORM helpers for the authoring modals (products + services).
 // The form model is dollars-in-inputs; buildPriceDocument (stores/pricing.js) serializes to cents.
 import { formatMoney } from "../stores/products";
-import { grossedCustomerAmount, platformFeeRate } from "../stores/pricing";
+import { feeBreakdown, grossedCustomerAmount, platformFeeRate } from "../stores/pricing";
 
 export function priceFormId() {
   return `price-${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -59,6 +59,26 @@ export function priceFormFromDocument(price) {
     allow_custom: price.allow_custom !== false,
     allow_recurring: Boolean(price.allow_recurring),
     recurring_interval: price.recurring_interval === "year" ? "year" : "month",
+  };
+}
+
+// What ONE keyed amount means under this price's fee mode: what the customer pays, and what is left after
+// Stripe's cut and the platform's. Used per preset amount in a tip jar, where "Sales price" alone says
+// nothing about who covers the fees -- the point the tenant needs to see before choosing a mode.
+// Approximation, like every preview here; /prices/calculate is the authority and runs on save.
+export function amountPreviewFor(keyedAmount, price, productType = "digital") {
+  const currency = price.currency || "usd";
+  const tenantAmount = Math.max(0, Math.round(Number(keyedAmount || 0) * 100));
+  const platformRate = platformFeeRate(productType, price.pricing_model);
+  const unitAmount = grossedCustomerAmount(tenantAmount, platformRate, price.fee_handling);
+  const breakdown = feeBreakdown({
+    tenantKeyedAmount: tenantAmount, unitAmount, platformRate, feeHandling: price.fee_handling,
+  });
+  return {
+    unitAmount,
+    netPayout: breakdown.net_payout,
+    pays: formatMoney(unitAmount, currency),
+    keeps: formatMoney(breakdown.net_payout, currency),
   };
 }
 

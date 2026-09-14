@@ -702,12 +702,183 @@ learning from: a fee class for a thing nobody built reads as evidence the thing 
 is closed, it is house style. It silently refused the rest of the legacy model without anyone noticing, which
 is the closed-schema default doing its job with nobody reading the result.
 
-- ✅ **Price model DONE 2026-09-13** — `presets[]`, `max_amount`, `allow_custom`, `allow_recurring`,
-  `recurring_interval`; a `customer_chooses` price must now offer SOME way to choose, which is the rule that
-  stops this recurring. Presets are CHARGED amounts (author).
-- **Next: the product creation wizard** (`LEAD_GEN_PAGES.md` §10) — intent first, tip jar as a third answer.
-- Then the runtime: pricing resolution, preset buttons, checkout with validated inline `price_data`.
-- Open: is a tip an ORDER; gratuity tax treatment; whether v1 ships recurring tips.
+- ✅ **Price model DONE 2026-09-13** — `presets[]`, `preset_charges[]`, `max_amount`, `allow_custom`,
+  `allow_recurring`, `recurring_interval`; a `customer_chooses` price must now offer SOME way to choose,
+  which is the rule that stops this recurring. A preset stores BOTH numbers — what the tenant keeps and what
+  the buyer pays (§5e, reversing the first day's "presets are charged amounts").
+- ✅ **Product wizard DONE 2026-09-13** (`LEAD_GEN_PAGES.md` §10) — intent first, tip jar as a third answer;
+  tips file themselves as `digital`/`tip`, and each amount previews "customer pays / you keep".
+- ✅ **Runtime DONE 2026-09-13** — a card per preset plus an optional "Other" box priced through the server's
+  own `/prices/calculate`; `apply_tip_amount` re-decides the charge at checkout; a repeating tip becomes a
+  Stripe subscription; the page composes as `tip_jar` (no trust badges — nothing ships).
+- ⭐ **Refund a tip NET, not gross** (DECIDED 2026-09-14, plan §5f): a refund returns the TIP, and whoever
+  paid the fees loses them — the fee mode applied a second time. Under `net_guaranteed` (the default) the
+  creator ends at $0.00 on a refunded tip; under `standard` they absorb ~11% for doing nothing, which the
+  wizard should say. Needs, in order: (1) **record the keyed amount on the order** — a typed custom amount
+  exists only in the checkout request today (`handlers/checkout.py` writes no `tip_keyed_amount`), so the
+  net is uncomputable afterwards; (2) refund the net in `handlers/refunds.py`, which today refunds
+  `order.amount_total`; (3) say it on the receipt and the refund confirmation, not only on the card.
+- **Open: the refund policy WORDING** (plan §5f, raised 2026-09-13). There is nothing to return, so the policy has
+  to answer a different question: how long may a supporter change their mind, and who decides? Known so far:
+  Stripe sets no card-refund deadline (the 180-day limit is ACH/SEPA); Ko-fi and Buy Me a Coffee both say
+  tips are non-refundable and leave it to the creator, and Ko-fi caps its own refund flow at 180 days; the
+  binding deadline is really the chargeback window (~120 days, longer in some cases). Still unanswered:
+  whether a gratuity is a "sale" under consumer statutes at all (jurisdictional — needs someone qualified),
+  who owns the decision under direct charges, what happens to the platform fee, and how a recurring tip is
+  cancelled (there is no buyer-facing way today). Pairs with the tip-income tax question.
+- ⛔ **Recurring tips are BUILT but must stay OFF for live tenants** until the cancel link ships — see the
+  next entry. Checkout opens real subscriptions; today the only way to stop one is to ask the creator.
+- **Open: is a tip an ORDER** — receipts/refunds/fees/ledger all assume one, and a tip has nothing to
+  fulfil. Plus gratuity tax treatment.
+
+### ⭐⭐ HIGH — the DEPLOYED fee table was three weeks stale, on dev AND prod (found 2026-09-14)
+
+The Payments screen showed a free tenant "Physical 10% / Digital 15%". Not a display bug: `/prices/calculate`
+on dev really answered 10% (probed live — $100 keyed, split fees, came back $107.06 with a $10.71 platform
+fee instead of $104.27 / $5.21).
+
+**Cause.** `deploy.sh` uploads `schemas/examples/global-billing-config.json` to the config bucket, and
+`cached_billing_config()` prefers that S3 object over `DEFAULT_GLOBAL_BILLING_CONFIG`. The 2026-08-26 pricing
+pivot updated the code default (5/6/7 free, 2/2/2/0 premium) and never touched the file, so the deployed
+config silently outranked the decision. The file still said basic 10/15, standard 8/13, pro 5/10/2, and had
+no `service` class at all — services fell through to the code default and were accidentally right while
+physical and digital were wrong. `tip_jar` was 5% in BOTH tables, which is why three weeks of tip-jar work
+never tripped over it.
+
+**It was visibly inconsistent the whole time.** The dashboard's own `TIER_RATES` mirror in `stores/pricing.js`
+carried the correct post-pivot rates, so the authoring preview quoted $104.27 while the server charged
+$107.06. A tenant could read one number and be billed another.
+
+**A test was pinning it in place.** `test_billing_connect_card_uses_tenant_tier_and_billing_config` asserted
+`physical == 10.0` against that fixture — the bug had a passing test.
+
+**Second bug, same cause.** `set -euo pipefail` plus `sam deploy` exiting non-zero on "No changes to deploy"
+meant the script stopped BEFORE the config upload whenever the stack itself was unchanged — so a
+config-only change could never be deployed. Fixed with `--no-fail-on-empty-changeset`.
+
+- ✅ Fixed 2026-09-14: file now matches the code default; `deploy.sh` reaches the upload; the stale test
+  assertion corrected; `tests/test_billing_config_deployed.py` pins the deployed document to
+  `DEFAULT_GLOBAL_BILLING_CONFIG` field for field, checks every tier prices every fee class, and asserts the
+  path `deploy.sh` actually uploads.
+- ✅ Dev config re-uploaded and verified in the bucket (the running Lambdas pick it up within the 300s
+  `BILLING_CONFIG_CACHE_TTL_SECONDS`).
+- ⛔ **PROD IS STILL STALE — needs a deploy.** Until then live tenants are charged 10%/15% instead of 5%/7%,
+  and premium subscribers 5/10/2 instead of 2/2/2/0 (proportionally the worst hit).
+- ⛔ **Decide what to do about fees already over-collected on prod** since 2026-08-27. The money went to the
+  platform as `application_fee_amount`, so it is ours to give back if that is the call. Needs a number first:
+  sum the platform fees on prod orders in that window and compare against the pivot rates.
+- **Deeper smell worth fixing:** the canonical RUNTIME config lives in `schemas/examples/` and reads as test
+  data, which is exactly why a pricing change skipped it. Move it to a real config path (e.g.
+  `config/global_billing_config.json`) so the next person editing fee rates finds it.
+
+### MEDIUM — say on the refund dialog that the fees are not coming back (DECIDED 2026-09-14)
+
+`handlers/refunds.py` issues refunds without `refund_application_fee`, which defaults to **false** — so the
+platform keeps its application fee on every refunded order. The module docstring calls it "legacy behavior",
+carried from stripe-cart; it had never been a decision and was stated to tenants nowhere in the product.
+
+**DECIDED: keep the fee, and disclose it** (author, 2026-09-14). Keeping it prices refund risk to the only
+party who can reduce it — the tenant chooses what to sell, how to describe it and how to fulfil it, and we
+do not. A tenant whose products generate constant refunds would otherwise be subsidised by every tenant
+whose products do not. What was missing was not the policy but the sentence.
+
+**Where it goes: the "Issue refund?" confirm dialog** (`dashboard/src/components/Refunds.vue`) — the last
+screen before money moves, where the tenant can still choose a replacement or a partial instead. Wording to
+be plain and NON-numeric (author): *Stripe's fee and the Junior Bay fee are not returned. You refund the
+full amount your customer paid, and those fees come out of your own pocket.*
+
+**NOT on the pricing form** (author overruled the earlier proposal, and was right): a refund caveat beside a
+price is unactionable at that moment — the tenant is deciding what to charge, and the only "action" it
+suggests is switching fee mode, which the break-even below shows is the wrong move. It would be a scare that
+costs them money.
+
+✅ **The sentence SHIPPED 2026-09-14** on the confirm dialog (`Refunds.vue`), with a test that also pins it
+OFF the pricing form.
+
+**Still to add: "this refund will cost you $X", in the same dialog** (author approved the placement). Not
+free, which is why it did not ship with the sentence: a refund request carries `amount.paid_amount` and
+nothing about fees, and the accurate figure needs the ORDER (its `amount_total` + the `product_type` /
+`tenant_plan` metadata `fee_breakdown_from_session` reads). Two ways:
+- Look the order up in `list_refund_requests` — a new Orders read from the Notifications function, so a
+  template grant too, and a per-row lookup.
+- **Freeze the fee cost onto the refund request when it is created** (`save_refund_request`). Preferred: it
+  matches the derive-vs-freeze rule this codebase already follows for financial records, needs no grant and
+  no lookup, and the number is then the one that was true at the time rather than a recomputation. Pairs
+  with the tip work, which must freeze `tip_keyed_amount` on the order for the same reason.
+Do NOT compute it in the dashboard: the fee maths has one implementation, server-side, and a second copy on
+a refund screen is the drift this repo keeps paying for.
+
+What it costs them, run through `calculate_price` on a $100 keyed product, free tier, physical (5%):
+
+| mode | buyer pays | Stripe | Junior Bay | tenant nets | **after a refund** | if we returned ours |
+|---|---|---|---|---|---|---|
+| `standard` | $100.00 | $3.20 | $5.00 | $91.80 | **−$8.20** | −$3.20 |
+| `split` | $104.27 | $3.33 | $5.21 | $95.73 | **−$8.54** | −$3.33 |
+| `net_guaranteed` | $108.91 | $3.46 | $5.45 | $100.00 | **−$8.91** | −$3.46 |
+
+Digital (7%, free tier) is worse: −$10.20 / −$10.74 / **−$11.32**. Premium (2%): −$5.20 / −$5.33 / −$5.47.
+
+**The finding that matters: `net_guaranteed` is the WORST mode for a tenant on a product refund** — exactly
+inverted from tips (§5f), where it is the mode that saves them. The fees scale with the gross, and
+`net_guaranteed` has the biggest gross: the tenant received $100 and returns $108.91. The net-refund trick
+that makes a tip cost $0.00 cannot rescue this, because for a product the grossed number IS the advertised
+price and the buyer is owed all of it back.
+
+The only lever is our own fee, worth $5.00–$7.79 per refunded $100 to the tenant. Weighed and KEPT (above).
+The case against keeping it, recorded because it is the one a tenant will make: the fee is the entire revenue
+model of a free tier whose pitch is "you keep more", and a charge levied on a sale that no longer exists is
+the kind of thing tenants screenshot.
+
+**But `net_guaranteed` is NOT the risk it looks like, and a warning aimed at it would mislead.** Per $100
+order it earns the tenant **+$8.20** on every completed sale and costs **+$0.71** on a refunded one
+(digital: +$10.21 / +$1.12). Break-even is a refund rate of **92%** (digital 90%) — so `net_guaranteed` is
+the better deal for any real business, and steering a tenant to `standard` to dodge $0.71 would cost them
+$8.20 per sale. The ~$8.20 baseline loss is the REFUND, not the mode. Any disclosure has to be about what a
+refund costs, in every mode, not about net-guaranteed.
+
+Good news on defaults: products already default to `standard` (`utils/priceForm.js` defaultPriceForm) and
+only tips default to `net_guaranteed` (the wizard sets it). That split is already right.
+
+For proportion: a CHARGEBACK costs the tenant the full $108.91 plus a ~$15 dispute fee. A refund at −$8.91
+is the cheap outcome, which argues for making refunds easy however this is decided.
+
+NOT the same question as tips, where §5f settles it: there the buyer volunteered the fee and the page says
+so, so keeping it costs the tenant nothing. For products under `net_guaranteed` the grossed amount IS the
+advertised price — a net refund there short-changes the buyer for a returned good, so the refund must stay
+gross and the only live question is whether WE return our cut.
+
+Decide, then say it somewhere a tenant reads before their first refund.
+
+### ⭐ HIGH — a supporter cannot cancel a recurring tip (DECIDED 2026-09-14, plan plans/PAY_WHAT_YOU_WANT.md §5g)
+
+Checkout now opens a real `mode: subscription` session for a repeating tip. Nothing lets the supporter stop
+it: the only path today is asking the creator to cancel it in their Stripe dashboard — the Ko-fi behaviour
+we spent a design conversation arguing against. **Recurring tips must not be enabled for live tenants until
+this ships.** Not a polish item: a recurring charge nobody can stop is a chargeback generator, and under
+direct charges the dispute fee AND the ratio land on the TENANT's account.
+
+**DECIDED: a tokenized link, not a buyer account** (author: "NO, we don't want to create a buyer-side
+product, at least not initially... I certainly don't want to create friction between customers and tenants
+when it comes to giving them a tip or purchasing a product"). The reasoning, including the lost-email
+objection and why an account does not actually answer it, is §5g — worth reading before anyone reopens it.
+
+Build (every piece exists already):
+- **Receipt link** for a recurring tip, minted as an opaque token — the `cart_token_doc` pattern from
+  abandoned-cart recovery (no PII in the URL, TTL).
+- **Portal session** on the CONNECTED account: the same `/billing_portal/sessions` call
+  `handlers/platform_subscription.py:280` makes for tenant billing, plus `stripe_account`. Check whether the
+  portal needs per-account configuration first.
+- **"Manage an existing tip"** on the tip page: takes an email, re-sends a fresh token. This is what makes a
+  short TTL safe and what covers a receipt that never arrived — email deliverability is the single point of
+  failure in this design, so it gets a second door.
+- **A support runbook**: verify ONE of card last-4 + expiry / exact amount + date / billing postcode, then
+  cancel. The bar is low on purpose — cancellation is fail-safe, and an agent who refuses to act sends the
+  supporter to their bank instead, which costs the tenant a dispute fee.
+
+**Deferred, on its own merits:** buyer-side accounts. The question they belong to is "do we want a
+buyer-side product?" (a supporter dashboard across creators, i.e. plans/DIGITAL_MARKETPLACE.md), not "how do
+people cancel?". If they ever arrive they are ADDITIVE — an optional prompt after the tip, never a gate
+before it.
 
 ### ⭐ HIGH — Lead-generation pages: four shapes, not one (plan plans/LEAD_GEN_PAGES.md, 2026-09-10)
 

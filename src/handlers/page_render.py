@@ -15,6 +15,7 @@ from stripe_link.repositories.documents import (
     sites_repository,
     tenant_profiles_repository,
 )
+from stripe_link.domain.tips import stamp_tip_jar
 from stripe_link.runtime.html import (
     RenderError,
     accessibility_warnings,
@@ -182,6 +183,9 @@ def handler(event, context, *, sites_repo=None, reviews_repo=None):
 
             owner_repo = user_profiles_repository()
         preferences = attach_owner_display_name(preferences, owner_repo, tenant_id)
+        # Say what this page IS before anything asks: the composer, the CTA label and page health all read
+        # the offer, and only the products know a tip jar when they see one.
+        offer = stamp_tip_jar(offer, products_by_id)
         html = render_page(
             page, offer, products_by_id, selected_prices, checkout_url, api_base_url,
             services_by_id=services_by_id, offers_by_id=offers_by_id, canonical_url=canonical_url,

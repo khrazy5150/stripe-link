@@ -139,6 +139,25 @@ class StepRailTests(unittest.TestCase):
             self.assertEqual(len(labels), total, f"{kind} skips_goal={skips_goal}")
             self.assertEqual(total, expected)
 
+    def test_the_landing_wizard_rail_keeps_the_modal_gutter(self):
+        """It hangs off the modal card itself, so nothing else supplies its side padding.
+
+        The dots it replaced had `padding: 1.2rem 2.4rem` baked into `.wizard-progress`; the shared rail has
+        no padding of its own (the product wizard's sits inside an already-padded body), so swapping them ran
+        the rail edge to edge -- the labels touched both sides of the modal.
+        """
+        block = CSS.split("\n.landing-wizard-modal .wizard-steps {", 1)[1].split("}", 1)[0]
+        self.assertRegex(block, r"padding:[^;]*2\.4rem")
+        # The gutter it borrows is the modal's own, so the rail lines up with the title and the step body.
+        body = CSS.split("\n.landing-wizard-body {", 1)[1].split("}", 1)[0]
+        self.assertIn("2.4rem", body)
+
+    def test_the_dot_rail_styling_is_gone_too(self):
+        # No component draws `.wizard-progress` any more; leaving its rules behind invites the next wizard to
+        # pick them back up. Matched on the SELECTOR, not the bare name -- the replacement rule's comment
+        # mentions the class it supersedes, and the first version of this test failed on that comment.
+        self.assertNotRegex(CSS, r"(?m)^\.wizard-progress\b")
+
     def test_the_landing_wizard_labels_the_path_it_is_actually_taking(self):
         # Its step count varies -- a Social Page skips the goal step -- so constant labels would mislabel it.
         block = PAGES.split("const wizardStepLabels = computed(", 1)[1].split("});", 1)[0]
