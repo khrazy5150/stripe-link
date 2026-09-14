@@ -22,3 +22,13 @@ export const TIP_INTERVALS = [
 export function maxTipPresets(allowCustom) {
   return allowCustom ? rules.max_presets_with_custom : rules.max_presets;
 }
+
+// Starting amounts, in major units, trimmed to what the row holds. Two ladders per currency on purpose: $50
+// is an ordinary one-off tip and a steep monthly commitment, so a jar that repeats gets the lower one —
+// which is where membership tiers actually cluster. Turning on "enter your own" drops the top amount,
+// because that is the place it takes. An unlisted currency falls back to the USD ladder.
+export function recommendedTipPresets(allowRecurring, allowCustom, currency = "usd") {
+  const ladders = rules.recommended[String(currency || "usd").toLowerCase()] || rules.recommended.usd;
+  const ladder = allowRecurring ? ladders.recurring : ladders.one_time;
+  return ladder.slice(0, maxTipPresets(allowCustom)).map((amount) => amount / 100);
+}

@@ -213,6 +213,11 @@ def apply_tip_amount(resolved, products_by_id, *, amount, source, tenant_id, rec
         price = find_price(product, line.get("price_id") or "")
         if not tips.is_tip_price(price):
             continue
+        # A membership jar offers no one-off tip, so a request for one is refused rather than quietly
+        # upgraded to a subscription: charging a buyer a repeating amount they did not ask for is the worse
+        # of the two failures by a distance.
+        if not recurring and not tips.allows_one_time(price):
+            raise tips.TipAmountError("This tip jar only accepts a repeating tip.")
         if not amount:
             # No amount in the request: the line already resolved to the preset the page shows checked, so a
             # CTA clicked before any JS ran still charges a real, offered amount. A jar with no presets at

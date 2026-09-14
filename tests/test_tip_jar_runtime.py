@@ -17,11 +17,16 @@ from decimal import Decimal
 
 from handlers.checkout import apply_tip_amount, build_checkout_payload
 from stripe_link.domain import tips
-from stripe_link.domain.documents import validate_product_document
+from stripe_link.domain.documents import DocumentValidationError, validate_product_document
 from stripe_link.domain.composition import default_cta_label
 from stripe_link.domain.pricing import resolve_offer
 from stripe_link.domain.tips import stamp_tip_jar
-from stripe_link.runtime.html import product_json_ld, render_page, thin_content_warnings
+from stripe_link.runtime.html import (
+    product_json_ld,
+    render_page,
+    render_template_styles,
+    thin_content_warnings,
+)
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 HTML = (ROOT / "src" / "stripe_link" / "runtime" / "html.py").read_text(encoding="utf-8")
@@ -312,6 +317,22 @@ class FrequencyTests(unittest.TestCase):
     def _recurring(self, **overrides):
         return _render(allow_recurring=True, recurring_interval="week", **overrides)
 
+    def test_a_tip_card_is_the_standard_price_card_minus_its_picture(self):
+        """The ONE deviation, and it has to hold at every width.
+
+        Written as a bare `.sl-tip-option` it lost to the mobile `.sl-price-option` rule further down the
+        sheet -- equal specificity, later wins -- so under 700px the card got its three-column template
+        back: the amount fell into the picture column and the radio into the middle one instead of the
+        right edge. Two classes on the selector beats the media query without a second copy inside it.
+        """
+        css = "\n".join(render_template_styles({}))
+        self.assertIn(".sl-price-option.sl-tip-option{grid-template-columns:minmax(0,1fr) auto}", css)
+        self.assertNotIn("\n    .sl-tip-option{grid-template-columns", css)
+        # And it is the same card otherwise: same class, same radio, same selection JS.
+        card = _selector(_render()).split("<article", 1)[1]
+        self.assertIn('class="sl-price-option sl-tip-option"', _selector(_render()))
+        self.assertIn('type="radio"', card)
+
     def test_every_card_says_what_it_will_charge(self):
         html = _selector(_render())
         self.assertEqual(html.count('class="sl-tip-freq" data-tip-freq>one-time</span>'), 4)
@@ -418,6 +439,78 @@ class PageShapeTests(unittest.TestCase):
         plain_html = render_page(_fixture("page-creatine-standard.json"), plain_offer,
                                  {plain["product_id"]: plain}, api_base_url="https://x")
         self.assertTrue(thin_content_warnings(plain_html, plain_offer))
+
+
+class FrequencyDefaultTests(unittest.TestCase):
+    """Repeating is PRE-SELECTED, and a tenant may offer it alone (author, 2026-09-14).
+
+    NextAfter: defaulting a donation form to monthly raised monthly gifts 187.7% with one-time still ON the
+    form. The default is the lever, not exclusivity -- removing one-time converts the supporter who will
+    never commit to $0 rather than to $5/month. So three states, and the tenant picks.
+    """
+
+    def _render_state(self, **price):
+        return _selector(_render(**price)), _render(**price)
+
+    def test_both_offers_the_choice_with_repeating_chosen(self):
+        selector, html = self._render_state(allow_recurring=True, recurring_interval="month")
+        self.assertIn('data-tip-chosen="recurring"', selector)
+        self.assertIn('data-tip-frequency-value="recurring" aria-pressed="true"', selector)
+        self.assertIn('data-tip-frequency-value="once" aria-pressed="false"', selector)
+        # Server-side, so nothing flashes "one-time" before the island runs.
+        self.assertIn('data-tip-freq>monthly</span>', selector)
+        self.assertNotIn("data-tip-freq>one-time", selector)
+
+    def test_recurring_only_presents_no_choice_at_all(self):
+        selector, html = self._render_state(
+            allow_recurring=True, recurring_interval="month", allow_one_time=False)
+        # The control still carries the state the cards and the island read -- there is just nothing to pick.
+        self.assertIn("data-tip-chosen=\"recurring\" hidden></div>", selector)
+        self.assertNotIn("data-tip-frequency-value", selector)
+        self.assertIn('data-tip-freq>monthly</span>', selector)
+
+    def test_a_one_time_jar_is_unchanged(self):
+        selector, html = self._render_state()
+        self.assertNotIn("sl-tip-frequency", selector)
+        self.assertIn("data-tip-freq>one-time</span>", selector)
+
+    def test_the_island_starts_from_the_servers_choice(self):
+        # It used to hardcode 'once', which overrode the default the moment the page finished loading.
+        self.assertIn("applyFrequency(tipFreq.dataset.tipChosen || 'recurring')", HTML)
+        self.assertNotIn("applyFrequency('once')", HTML)
+
+    def test_the_button_carries_the_frequency(self):
+        # Asserted on the SUFFIX: this fixture's page section carries its own CTA label, and the label is a
+        # separate decision from the frequency the button has to state.
+        self.assertIn("- $5.45 / weekly</a>", _render(allow_recurring=True, recurring_interval="week"))
+        self.assertNotIn(" / weekly</a>", _render())
+
+
+class MembershipCheckoutTests(unittest.TestCase):
+    def _resolved(self, **price_overrides):
+        product = _product(**price_overrides)
+        products = {product["product_id"]: product}
+        return resolve_offer(_offer(product), products), products
+
+    def test_a_membership_jar_refuses_a_one_off(self):
+        # Charging a buyer a repeating amount they did not ask for is the worse failure, so the request is
+        # refused rather than quietly upgraded.
+        resolved, products = self._resolved(
+            allow_recurring=True, recurring_interval="month", allow_one_time=False)
+        with self.assertRaises(tips.TipAmountError):
+            apply_tip_amount(resolved, products, amount="545", source="preset", tenant_id="t1")
+        apply_tip_amount(resolved, products, amount="545", source="preset", recurring=True, tenant_id="t1")
+        self.assertEqual(resolved["items"][0]["unit_amount"], 545)
+
+    def test_an_ordinary_jar_still_takes_a_one_off(self):
+        resolved, products = self._resolved(allow_recurring=True, recurring_interval="month")
+        apply_tip_amount(resolved, products, amount="545", source="preset", tenant_id="t1")
+        self.assertEqual(resolved["items"][0]["unit_amount"], 545)
+
+    def test_a_jar_that_accepts_nothing_is_not_a_document(self):
+        product = _product(allow_one_time=False)  # no allow_recurring
+        with self.assertRaises(DocumentValidationError):
+            validate_product_document(product)
 
 
 if __name__ == "__main__":

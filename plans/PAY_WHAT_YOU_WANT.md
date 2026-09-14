@@ -514,6 +514,60 @@ mode to avoid is a support agent refusing to act and the supporter calling their
 subscriptions today; the only way to stop one right now is to ask the creator to do it in their Stripe
 dashboard — which is exactly the Ko-fi behaviour this section argues against.
 
+## 5h. Repeating is the DEFAULT, not the only option (DECIDED, author 2026-09-14)
+
+The first cut offered one-time and repeating as two equal choices, with **one-time pre-selected** — on a page
+whose tenant had gone to the trouble of setting up a monthly plan. The author raised it as a marketer:
+"narrowing choices is better than offering too many", and "if a tenant sets up a $5 a month plan, they don't
+really want a one-time gift of $5."
+
+Right about the lever, and the evidence names it precisely. [NextAfter's
+experiment](https://www.nextafter.com/experiments/how-defaulting-a-form-to-monthly-adding-a-monthly-callout-affects-donor-conversion/)
+defaulted a donation form to monthly and saw **monthly gifts rise 187.7%** (99.9% confidence) while one-time
+gifts fell 34.2% — the people who would have given once gave monthly instead. **One-time was still on the
+form.** The default did the work.
+
+Which is why exclusivity is the wrong instrument. The 34% who switched were persuadable; the supporter who
+will never put a subscription on their card is a different population, and hiding the one-off button turns
+them into $0, not into $5/month. A tip jar's core case is impulse gratitude — someone who just read one
+useful thing — and recurring-only breaks it.
+
+So: three states, and the TENANT picks.
+
+| setup | the page |
+|---|---|
+| no recurring | amounts only (unchanged) |
+| recurring **and** one-time — the default | the control, **repeating pre-selected** |
+| recurring only | no control; every card reads "$5.76 monthly" |
+
+`allow_one_time` (default true) beside `allow_recurring`, so every document written before this keeps
+offering both — which is what those pages already do. Both false is refused: the jar would accept nothing.
+Recurring-only is the MEMBERSHIP case, the one Ko-fi separates out, where the repeating payment unlocks
+something and a one-off would buy nothing. It is a statement the tenant makes, never inferred from having
+enabled recurring.
+
+Server-side the page renders the frequency word itself, so nothing flashes "one-time" before the island
+runs, and a membership jar REFUSES a one-off request rather than quietly upgrading it to a subscription —
+charging a buyer a repeating amount they did not ask for is the worse of the two failures by a distance.
+
+**The shared ladder, SETTLED 2026-09-14: "Recommended defaults".** One button that writes a sensible ladder,
+so no tenant has to invent one — and it reads the jar before it writes. A one-off jar gets 5 / 10 / 25 / 50 /
+100; a repeating one gets 3 / 5 / 10 / 25 / 50, because $50 is an ordinary tip and a steep monthly
+commitment. The bottoms are the platforms' own defaults ([Ko-fi opens at
+$3](https://talkspresso.com/blog/ko-fi-vs-buy-me-a-coffee-vs-talkspresso), Buy Me a Coffee at $5) and the
+repeating ladder tops out where membership tiers cluster.
+
+Turning on "enter your own" drops the top amount — which needs no rule of its own, because the ladder is
+trimmed to the SAME preset cap the row already enforces (5, or 4 alongside the custom box). The wizard seeds
+a new jar from the same ladder; a hardcoded `[5, 10, 25]` there would be a second answer to "what should a
+new tip jar offer?".
+
+The ladders are keyed by CURRENCY. EUR, set by the author 2026-09-14: **€2 / €5 / €10 / €25 / €50**, the same
+ladder for both frequencies (€50 is a generous one-off tip, so it does not need the higher top USD gets).
+A currency with no ladder of its own falls back to USD, which reads oddly at a different magnitude — the same
+open question the $1–$500 range in §5d has, and it should be answered once for both. Note the currency picker
+offers USD only today, so the EUR ladder is groundwork rather than a live path.
+
 ## 6. It changes the abuse story for `jbay.page`
 
 `CREATOR_LINK_POLICY.md` §3 argues the link allowlist IS the abuse story for the creator domain **because

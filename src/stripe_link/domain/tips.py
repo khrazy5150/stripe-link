@@ -117,6 +117,16 @@ def allows_custom(price: dict[str, Any]) -> bool:
     return bool(price.get("allow_custom"))
 
 
+def allows_one_time(price: dict[str, Any]) -> bool:
+    """Whether a single, non-repeating tip is on offer. Default YES.
+
+    Absent means yes, so every document written before the field existed keeps offering both -- which is
+    what those pages already do. Setting it false is how a tenant says "this is a membership": monthly
+    unlocks something, and a one-off payment for it would buy nothing (author, 2026-09-14).
+    """
+    return price.get("allow_one_time") is not False
+
+
 def resolve_charge(
     price: dict[str, Any],
     amount: Any,

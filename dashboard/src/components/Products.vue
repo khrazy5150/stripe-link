@@ -644,7 +644,7 @@ import { dimsFromStatus, recordImageDims } from "../utils/imageDims";
 import { cropBox, cropImage } from "../api/uploads";
 import ImageCropper from "./shared/ImageCropper.vue";
 import imageRatios from "../../../src/stripe_link/image_ratios.json";
-import { TIP_MAX, TIP_MIN, TIP_RULES, maxTipPresets } from "../config/tips";
+import { TIP_MAX, TIP_MIN, TIP_RULES, maxTipPresets, recommendedTipPresets } from "../config/tips";
 import { defaultPriceForm, priceFormFromDocument } from "../utils/priceForm";
 import { idColorStyle } from "../utils/iconColor";
 import PricingCard from "./shared/PricingCard.vue";
@@ -754,7 +754,11 @@ function applyWizardIntent() {
     // The pitch's default: the customer covers the fees, so the creator keeps the full amount. Editable, and
     // the trade-off is visible -- the buyer sees a slightly higher number.
     price.fee_handling = "net_guaranteed";
-    if (!price.presets.length) price.presets = [5, 10, 25];
+    // The same ladder the "Use recommended amounts" button writes -- a second hardcoded seed here would be
+    // two answers to "what should a new tip jar offer?".
+    if (!price.presets.length) {
+      price.presets = recommendedTipPresets(false, price.allow_custom !== false, price.currency);
+    }
   } else {
     form.value.product_intent = "transaction";
     price.pricing_model = "one_time";

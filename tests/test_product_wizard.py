@@ -9,6 +9,7 @@ CREATE goes through the wizard; EDIT keeps the full form. A wizard is the wrong 
 that already exists -- you want every field at once, not a path through three of them -- and it keeps the
 blast radius of this change off the working edit path.
 """
+import json
 import pathlib
 import re
 import unittest
@@ -217,6 +218,15 @@ class RecurringTipTests(unittest.TestCase):
         self.assertIn('v-model="price.recurring_interval"', TIP_FIELD)
         self.assertIn("<TipAmountsField", TEMPLATE)
 
+    def test_the_tenant_chooses_whether_one_off_tips_are_taken_too(self):
+        # Three states, not two: no recurring / both (repeating pre-selected) / repeating only. Turning
+        # one-time OFF is how a tenant says "this is a membership" -- it is not inferred from enabling
+        # recurring, because removing the one-off converts the supporter who will never commit to $0.
+        self.assertIn('v-model="price.allow_one_time"', TIP_FIELD)
+        self.assertIn("Also accept one-time tips", TIP_FIELD)
+        # And it says what turning it off costs, where the tenant is deciding.
+        self.assertIn("has no way to give", TIP_FIELD)
+
     def test_the_intervals_come_from_the_rules_file(self):
         self.assertIn("TIP_INTERVALS", TIP_FIELD)
         for interval in ('"day"', '"week"', '"month"', '"year"'):
@@ -292,6 +302,69 @@ class KeyedVersusChargedTests(unittest.TestCase):
         self.assertNotIn('v-model.number="price.suggested_amount"', PRICING_CARD)
         # A tip jar has no sales price -- that field is what used to decide what it sold for.
         self.assertIn("price.pricing_model !== 'customer_chooses'", PRICING_CARD)
+
+
+class RecommendedAmountsTests(unittest.TestCase):
+    """One click, sensible amounts, and the tenant never has to invent a ladder (author, 2026-09-14).
+
+    Frequency-aware because the same number means two different things: $50 is an ordinary one-off tip and a
+    steep monthly commitment. The bottoms are the platforms' own defaults -- Ko-fi opens at $3, Buy Me a
+    Coffee at $5 -- and the repeating ladder tops out where membership tiers cluster.
+    """
+
+    def _rules(self):
+        return json.loads((ROOT / "src" / "stripe_link" / "tip_rules.json").read_text(encoding="utf-8"))
+
+    def test_the_button_is_there_and_writes_the_ladder(self):
+        self.assertIn("Use recommended amounts", TIP_FIELD)
+        self.assertIn("props.price.presets = [...recommended.value]", TIP_FIELD)
+        # And the tenant can see what it would write before clicking it.
+        self.assertIn("recommendedSummary", TIP_FIELD)
+
+    def test_a_repeating_jar_gets_the_lower_ladder(self):
+        usd = self._rules()["recommended"]["usd"]
+        self.assertEqual(usd["one_time"], [500, 1000, 2500, 5000, 10000])
+        self.assertEqual(usd["recurring"], [300, 500, 1000, 2500, 5000])
+        self.assertLess(usd["recurring"][-1], usd["one_time"][-1])
+        self.assertIn("allowRecurring ? ladders.recurring : ladders.one_time", TIPS_CONFIG)
+
+    def test_the_ladder_is_keyed_by_currency(self):
+        # EUR set by the author 2026-09-14: 2 / 5 / 10 / 25 / 50. A currency with no ladder of its own falls
+        # back to USD, which reads oddly at a different magnitude -- the open question the range shares.
+        recommended = self._rules()["recommended"]
+        self.assertEqual(recommended["eur"]["one_time"], [200, 500, 1000, 2500, 5000])
+        self.assertEqual(recommended["eur"]["recurring"], [200, 500, 1000, 2500, 5000])
+        self.assertIn('rules.recommended[String(currency || "usd").toLowerCase()] || rules.recommended.usd',
+                      TIPS_CONFIG)
+        # The field asks for the ladder in the PRICE's currency, not a default.
+        self.assertIn("props.price.currency", TIP_FIELD)
+
+    def test_the_button_is_the_primary_one(self):
+        # It is the shortcut past the decision most tenants stall on; white undersold it.
+        block = TIP_FIELD.split("Use recommended amounts", 1)[0]
+        self.assertIn('class="primary-action compact" type="button" @click="useRecommended()"', block)
+
+    def test_enter_your_own_drops_the_top_amount(self):
+        # Not a second rule: the ladder is trimmed to the SAME preset cap the row already enforces.
+        self.assertIn("ladder.slice(0, maxTipPresets(allowCustom))", TIPS_CONFIG)
+
+    def test_every_recommended_amount_is_inside_the_platform_range(self):
+        # A recommended amount the server would refuse is a button that fails on save.
+        rules = self._rules()
+        for currency, ladders in rules["recommended"].items():
+            for frequency, ladder in ladders.items():
+                where = f"{currency}/{frequency}"
+                for amount in ladder:
+                    self.assertGreaterEqual(amount, rules["min_amount"], where)
+                    self.assertLessEqual(amount, rules["max_amount"], where)
+                self.assertEqual(ladder, sorted(set(ladder)), where)
+                self.assertGreaterEqual(len(ladder), rules["max_presets"], where)
+
+    def test_the_wizard_seeds_from_the_same_ladder(self):
+        # A hardcoded [5, 10, 25] here would be a second answer to "what should a new tip jar offer?".
+        apply_block = SCRIPT.split("function applyWizardIntent", 1)[1].split("\n}", 1)[0]
+        self.assertIn("recommendedTipPresets(", apply_block)
+        self.assertNotIn("[5, 10, 25]", apply_block)
 
 
 if __name__ == "__main__":

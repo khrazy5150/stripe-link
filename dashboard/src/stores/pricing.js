@@ -163,6 +163,9 @@ export async function buildPriceDocument(priceForm, productType, now) {
     price.allow_custom = priceForm.allow_custom !== false;
     if (priceForm.allow_recurring) {
       price.allow_recurring = true;
+      // Only meaningful alongside a repeating tip: false makes the jar a membership. Written only when the
+      // tenant turned it off, so an ordinary jar's document stays as small as it was.
+      if (priceForm.allow_one_time === false) price.allow_one_time = false;
       price.recurring_interval = TIP_RULES.intervals.includes(priceForm.recurring_interval)
         ? priceForm.recurring_interval
         : "month";

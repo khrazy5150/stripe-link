@@ -25,6 +25,7 @@ export function defaultPriceForm() {
     max_amount: 0,
     allow_custom: true,
     allow_recurring: false,
+    allow_one_time: true,
     recurring_interval: "month",
   };
 }
@@ -58,6 +59,8 @@ export function priceFormFromDocument(price) {
     max_amount: centsToMoneyInput(price.max_amount || 0, quantity),
     allow_custom: price.allow_custom !== false,
     allow_recurring: Boolean(price.allow_recurring),
+    // Absent means yes: every jar saved before the field existed offers both, which is what it already does.
+    allow_one_time: price.allow_one_time !== false,
     recurring_interval: price.recurring_interval === "year" ? "year" : "month",
   };
 }

@@ -785,6 +785,12 @@ def validate_product_document(document: dict[str, Any]) -> None:
             optional_non_negative_int(price, "suggested_amount", "price.suggested_amount")
             optional_bool(price, "allow_custom", "price.allow_custom")
             optional_bool(price, "allow_recurring", "price.allow_recurring")
+            optional_bool(price, "allow_one_time", "price.allow_one_time")
+            # A jar that takes neither a one-off nor a repeating tip takes nothing. allow_one_time defaults
+            # to true, so this can only be reached by turning it off without turning recurring on.
+            if not tips.allows_one_time(price) and not price.get("allow_recurring"):
+                raise DocumentValidationError(
+                    "A tip jar must accept a one-time tip, a recurring one, or both.")
             if price.get("recurring_interval") is not None:
                 require_enum(price, "recurring_interval", tips.INTERVALS, "price.recurring_interval")
             presets = price.get("presets")

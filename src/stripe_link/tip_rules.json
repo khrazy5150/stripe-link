@@ -7,5 +7,45 @@
   "max_presets": 5,
   "max_presets_with_custom": 4,
   "_intervals": "Offered when the tenant lets a supporter make the tip recurring. Stripe's four intervals, unabridged -- a donation that repeats weekly is as ordinary as one that repeats monthly.",
-  "intervals": ["day", "week", "month", "year"]
+  "intervals": [
+    "day",
+    "week",
+    "month",
+    "year"
+  ],
+  "_recommended": "Starting amounts, so a tenant does not have to invent a ladder. Keyed by CURRENCY, then by frequency, because the same number means different things in each: $50 is an ordinary one-off tip and a steep monthly commitment. Bottoms follow the platforms' own defaults -- Ko-fi opens at $3, Buy Me a Coffee at $5. Trimmed to the preset cap, so turning on 'enter your own' drops the top amount. An unlisted currency falls back to usd, which reads oddly for a currency of a different magnitude -- the same open question the min/max range has (plans/PAY_WHAT_YOU_WANT.md 5d).",
+  "recommended": {
+    "usd": {
+      "one_time": [
+        500,
+        1000,
+        2500,
+        5000,
+        10000
+      ],
+      "recurring": [
+        300,
+        500,
+        1000,
+        2500,
+        5000
+      ]
+    },
+    "eur": {
+      "one_time": [
+        200,
+        500,
+        1000,
+        2500,
+        5000
+      ],
+      "recurring": [
+        200,
+        500,
+        1000,
+        2500,
+        5000
+      ]
+    }
+  }
 }

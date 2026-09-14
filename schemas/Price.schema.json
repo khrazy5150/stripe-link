@@ -211,6 +211,11 @@
       "type": "boolean",
       "description": "Whether the buyer may make the tip recurring. customer_chooses only."
     },
+    "allow_one_time": {
+      "type": "boolean",
+      "default": true,
+      "description": "Whether a single, non-repeating tip is offered. Absent means YES. Setting it false alongside allow_recurring makes the jar recurring-only -- a membership, where a one-off payment would buy nothing. Both false is refused: the jar would accept nothing. customer_chooses only."
+    },
     "recurring_interval": {
       "type": "string",
       "enum": [

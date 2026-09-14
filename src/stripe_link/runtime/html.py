@@ -32,6 +32,7 @@ from stripe_link.domain.section_theme import section_theme_vars
 from stripe_link.domain.tips import MAX_AMOUNT as TIP_MAX_AMOUNT
 from stripe_link.domain.tips import MIN_AMOUNT as TIP_MIN_AMOUNT
 from stripe_link.domain.tips import allows_custom as tip_allows_custom
+from stripe_link.domain.tips import allows_one_time as tip_allows_one_time
 from stripe_link.domain.tips import is_tip_price
 from stripe_link.domain.tips import stamp_tip_jar
 from stripe_link.domain.tips import preset_charges as tip_preset_charges
@@ -551,7 +552,13 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     "    .sl-price-description{color:var(--sl-price-description);font-size:1.3rem;line-height:1.45}",
     # A TIP JAR's cards carry no image, so the picture column is dropped rather than left empty -- an empty
     # 9rem column reads as a missing image. The amount is the card, so it gets the larger type.
-    "    .sl-tip-option{grid-template-columns:minmax(0,1fr) 2.2rem}",
+    # Two class names on the selector, deliberately: the ONLY deviation a tip card makes from the standard
+    # price card is dropping the image column, and written as a plain `.sl-tip-option` it lost to the mobile
+    # `.sl-price-option` rule further down the sheet -- same specificity, later wins. Under 700px the card
+    # got its 3-column template back, the amount fell into the picture column and the radio into the middle
+    # one instead of the right edge. Raising specificity settles it at every width, in one rule rather than
+    # a second copy inside the media query that would have to be kept in step.
+    "    .sl-price-option.sl-tip-option{grid-template-columns:minmax(0,1fr) auto}",
     "    .sl-tip-option strong{font-size:2.2rem;-webkit-line-clamp:1;line-clamp:1}",
     "    .sl-tip-input{display:inline-flex;align-items:center;gap:0.4rem;margin-top:0.4rem;border:1px solid var(--sl-price-card-border);border-radius:0.8rem;padding:0.4rem 1rem;background:var(--sl-background);color:var(--sl-price-title);font-family:var(--sl-font-heading);font-size:1.8rem;width:max-content}",
     "    .sl-tip-input input{width:9rem;border:0;background:transparent;color:inherit;font:inherit;padding:0.2rem 0}",
@@ -1845,6 +1852,7 @@ def render_page(
         _RENDER_STATE["canonical"] = ""
         _RENDER_STATE["api_base_url"] = ""
         _RENDER_STATE["tenant_id"] = ""
+        _RENDER_STATE["tip_frequency_word"] = ""
         _RENDER_STATE["robots"] = NOINDEX_ROBOTS
         _RENDER_STATE["home_url"] = ""
         _RENDER_STATE["page_type"] = ""
@@ -1921,8 +1929,16 @@ def _render_page_body(
     # The composer takes the OFFER and never its products, so the one product fact it needs -- is this a tip
     # jar? -- is stamped on first. Derived rather than read, so an offer saved before the field existed
     # composes the same way (domain/tips.py offer_is_tip_jar).
+    composing_offer = stamp_tip_jar(offer, products_by_id)
+    # The frequency a tip jar defaults to, resolved here rather than inside a section: the cards, the
+    # frequency control and the CTA all state it, and they render in whatever order the tenant arranged.
+    recurring_tip = tip_recurring_price(composing_offer, products_by_id)
+    _RENDER_STATE["tip_frequency_word"] = (
+        TIP_INTERVAL_WORDS.get(str(recurring_tip.get("recurring_interval") or "month"),
+                               TIP_INTERVAL_WORDS["month"])[0] if recurring_tip else ""
+    )
     composed_sections = compose_page(
-        stamp_tip_jar(offer, products_by_id), page, str(_RENDER_STATE.get("page_type") or "landing"))
+        composing_offer, page, str(_RENDER_STATE.get("page_type") or "landing"))
     # Each element declares a channel (plans/LANDING_PAGE_GOAL_COMPOSITION.md): "body" paints markup, "head"
     # emits meta/JSON-LD, "sidecar" writes its own artifact. Route by it rather than assuming everything is
     # body — a head section rendered into <main> would be visible junk, and vice versa.
@@ -3050,13 +3066,26 @@ def render_tip_frequency(price):
     The amount and the frequency are two different questions; pairing every preset with every interval would
     be eight cards to say four things. The choice restates itself on each card, so whichever amount is
     selected always says what it is about to charge.
+
+    **Repeating is pre-selected.** Defaulting a donation form to monthly rather than merely offering it
+    raised monthly gifts 187.7% in NextAfter's experiment, with one-time still on the form -- the DEFAULT is
+    the lever, not exclusivity. A tenant who went to the trouble of enabling a monthly tip is asking for
+    monthly (author, 2026-09-14).
+
+    When the tenant offers ONLY the repeating tip, the control still renders -- hidden, carrying the state
+    the island and the cards read -- because there is no choice left to present, only a fact the cards
+    already state.
     """
     interval = str(price.get("recurring_interval") or "month")
     word, title = TIP_INTERVAL_WORDS.get(interval, TIP_INTERVAL_WORDS["month"])
+    attrs = (f'class="sl-tip-frequency" role="group" aria-label="How often" data-tip-frequency '
+             f'data-tip-interval="{escape(interval)}" data-tip-word="{escape(word)}" data-tip-chosen="recurring"')
+    if not tip_allows_one_time(price):
+        return f'      <div {attrs} hidden></div>'
     return "\n".join([
-        f'      <div class="sl-tip-frequency" role="group" aria-label="How often" data-tip-frequency data-tip-interval="{escape(interval)}" data-tip-word="{escape(word)}">',
-        '        <button type="button" class="sl-tip-freq-option is-selected" data-tip-frequency-value="once" aria-pressed="true">One-time</button>',
-        f'        <button type="button" class="sl-tip-freq-option" data-tip-frequency-value="recurring" aria-pressed="false">{escape(title)}</button>',
+        f"      <div {attrs}>",
+        '        <button type="button" class="sl-tip-freq-option" data-tip-frequency-value="once" aria-pressed="false">One-time</button>',
+        f'        <button type="button" class="sl-tip-freq-option is-selected" data-tip-frequency-value="recurring" aria-pressed="true">{escape(title)}</button>',
         "      </div>",
     ])
 
@@ -3087,7 +3116,7 @@ def _tip_option_cards(
             f"      <article class=\"sl-price-option sl-tip-option\" data-product-id=\"{escape(product_id)}\" data-price-id=\"{escape(price_id)}\" data-tip-amount=\"{amount}\" data-tip-source=\"preset\" data-quantity=\"{quantity}\" data-default=\"{'true' if position == 0 else 'false'}\" data-sale-amount=\"{amount}\" data-regular-amount=\"\" data-currency=\"{escape(currency)}\" data-label=\"{label}\">",
             "        <div class=\"sl-price-copy\">",
             f"          <strong>{label}</strong>",
-            f"          <span class=\"sl-tip-freq\" data-tip-freq>{ONE_TIME_LABEL}</span>",
+            f"          <span class=\"sl-tip-freq\" data-tip-freq>{_RENDER_STATE.get('tip_frequency_word') or ONE_TIME_LABEL}</span>",
             "        </div>",
             f"        <input type=\"radio\" name=\"{radio_name}\" value=\"tip-{amount}\" aria-label=\"Tip {label}\"{' checked' if position == 0 else ''}>",
             "      </article>",
@@ -3113,7 +3142,7 @@ def _tip_option_cards(
             f"            <span aria-hidden=\"true\">{escape(CURRENCY_SYMBOLS.get(currency.lower(), currency.upper()))}</span>",
             f"            <input type=\"number\" inputmode=\"decimal\" min=\"{minimum // 100}\" max=\"{maximum // 100}\" step=\"1\" placeholder=\"{minimum // 100}\" aria-label=\"Enter your own amount\" data-tip-input>",
             "          </label>",
-            f"          <span class=\"sl-tip-freq\" data-tip-freq>{ONE_TIME_LABEL}</span>",
+            f"          <span class=\"sl-tip-freq\" data-tip-freq>{_RENDER_STATE.get('tip_frequency_word') or ONE_TIME_LABEL}</span>",
             f"          <p class=\"sl-tip-note\" data-tip-note>{escape(format_money(minimum, currency))} to {escape(format_money(maximum, currency))}.</p>",
             "        </div>",
             f"        <input type=\"radio\" name=\"{radio_name}\" value=\"tip-custom\" aria-label=\"Enter your own amount\"{' checked' if not amounts else ''}>",
@@ -6021,7 +6050,10 @@ def render_buy_cta(
     # The decline link's text is the scaffold's decline_label (falls back to the generic default).
     hide_amount = bool(section.get("hide_amount"))
     decline_label = escape(str(section.get("decline_label") or "No thanks, continue"))
+    every = _RENDER_STATE.get("tip_frequency_word") or ""
     cta_text = label if hide_amount else f"{label} - {escape(format_money(subtotal, currency))}"
+    if every and not hide_amount:
+        cta_text += f" / {escape(every)}"
     hide_attr = " data-cta-hide-amount=\"true\"" if hide_amount else ""
     # An upsell CTA can carry its product's downsell price; the island swaps to it in place on decline/expiry.
     downsell_price_id = str(section.get("downsell_price_id") or "")
@@ -7199,7 +7231,7 @@ def render_page_interactions_script(page: dict[str, Any]) -> str:
         "          updateCta(current);",
         "        };",
         "        options.forEach((option) => option.addEventListener('click', () => applyFrequency(option.dataset.tipFrequencyValue)));",
-        "        applyFrequency('once');",
+        "        applyFrequency(tipFreq.dataset.tipChosen || 'recurring');",
         "      }",
         "      const tipCard = document.querySelector('.sl-tip-custom');",
         "      if (tipCard) {",

@@ -26,11 +26,20 @@
                 @click="price.presets.splice(index, 1)">Remove</button>
       </li>
     </ul>
-    <button v-if="price.presets.length < presetCap" class="secondary-action compact" type="button"
-            @click="addPreset()">+ Amount</button>
+    <div class="button-row">
+      <button v-if="price.presets.length < presetCap" class="secondary-action compact" type="button"
+              @click="addPreset()">+ Amount</button>
+      <!-- So nobody has to invent a ladder. Frequency-aware on purpose: the same number means different
+           things — $50 is an ordinary one-off tip and a steep monthly commitment. -->
+      <!-- Primary, not secondary: it is the shortcut past the decision most tenants stall on, and a white
+           button undersells it (author, 2026-09-14). -->
+      <button class="primary-action compact" type="button" @click="useRecommended()">
+        Use recommended amounts
+      </button>
+    </div>
     <span class="field-note">
       You enter what you want to keep. Up to {{ presetCap }} amounts — the buttons sit in one row, and
-      “enter your own” takes one of the places.
+      “enter your own” takes one of the places. Recommended: {{ recommendedSummary }}.
     </span>
 
     <label class="modal-checkbox">
@@ -49,19 +58,36 @@
       <input v-model="price.allow_recurring" type="checkbox" />
       Let them make it a recurring donation
     </label>
-    <label v-if="price.allow_recurring">
-      How often
-      <select v-model="price.recurring_interval">
-        <option v-for="option in TIP_INTERVALS" :key="option.value" :value="option.value">{{ option.label }}</option>
-      </select>
-      <span class="field-note">The supporter opts in — a one-off tip is always possible too.</span>
-    </label>
+    <template v-if="price.allow_recurring">
+      <label>
+        How often
+        <select v-model="price.recurring_interval">
+          <option v-for="option in TIP_INTERVALS" :key="option.value" :value="option.value">{{ option.label }}</option>
+        </select>
+        <span class="field-note">
+          The page offers {{ intervalLabel }} first — defaulting a donation form to repeating rather than
+          merely offering it raises repeating gifts sharply, and the default is the lever, not the only
+          option.
+        </span>
+      </label>
+      <!-- Off = a membership: repeating unlocks something, and a one-off payment for it would buy nothing.
+           On (the default) = both, with the repeating option pre-selected. -->
+      <label class="modal-checkbox">
+        <input v-model="price.allow_one_time" type="checkbox" />
+        Also accept one-time tips
+      </label>
+      <p v-if="!price.allow_one_time" class="field-note">
+        This jar takes {{ intervalLabel.toLowerCase() }} support only. Someone who will not commit to a
+        repeating tip has no way to give — worth it when {{ intervalLabel.toLowerCase() }} unlocks something,
+        and costly when it does not.
+      </p>
+    </template>
   </div>
 </template>
 
 <script setup>
 import { computed, watch } from "vue";
-import { TIP_INTERVALS, TIP_MAX, TIP_MIN, TIP_RULES, maxTipPresets } from "../../config/tips";
+import { TIP_INTERVALS, TIP_MAX, TIP_MIN, TIP_RULES, maxTipPresets, recommendedTipPresets } from "../../config/tips";
 import { amountPreviewFor } from "../../utils/priceForm";
 import { formatMoney } from "../../stores/products";
 
@@ -75,6 +101,19 @@ const currencySymbol = computed(() => formatMoney(0, props.price.currency).repla
 
 // How many preset buttons fit, from the rules file the server validates against.
 const presetCap = computed(() => maxTipPresets(props.price.allow_custom !== false));
+
+const intervalLabel = computed(() =>
+  (TIP_INTERVALS.find((option) => option.value === props.price.recurring_interval) || TIP_INTERVALS[0]).label);
+
+// The ladder this jar would get: lower when it repeats, one shorter when "enter your own" takes a place.
+const recommended = computed(() => recommendedTipPresets(
+  Boolean(props.price.allow_recurring), props.price.allow_custom !== false, props.price.currency));
+const recommendedSummary = computed(() =>
+  recommended.value.map((amount) => formatMoney(amount * 100, props.price.currency)).join(" · "));
+
+function useRecommended() {
+  props.price.presets = [...recommended.value];
+}
 
 function previewFor(amount) {
   return amountPreviewFor(amount, props.price, props.productType);
