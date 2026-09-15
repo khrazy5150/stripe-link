@@ -513,6 +513,28 @@ Also captured on the way through, because this is what first put a tip through c
 `metadata[tip_keyed_amount]` is now stamped on the session and `tip_keyed_amount` frozen onto the resolved
 line — the §5f prerequisite, which could not be recovered afterwards for a typed amount.
 
+### A fresh link on EVERY charge, and the intervals narrowed (author, 2026-09-14)
+
+The first receipt's link is the one a supporter cannot find a year later, so every repeat charge now sends a
+short notice carrying a NEW one (`notify_tip_renewal`, on `invoice.payment_succeeded` with billing_reason
+`subscription_cycle` — the subscription's first invoice is the checkout that already sent a receipt). The
+newest email always works, which is what stops the token's lifetime from being load-bearing. It also closes
+a gap that existed before any of this: a repeat charge produced NO email from us at all, and a silent
+recurring charge is the most reliable way to produce a dispute.
+
+Renewals are identifiable because checkout stamps `subscription_data[metadata]`: session metadata never
+reaches the subscription, and a renewal invoice arriving months later carries only what the SUBSCRIPTION
+knows.
+
+**And the intervals narrowed to monthly + yearly — in the BUILDER only.** The charge cadence is the email
+cadence (every recurring charge has to be acknowledged), so 365 charges a year would be 365 emails a year.
+No peer offers finer than monthly for creator support, and a $5 daily tip is $1,825 a year, which reads as a
+mistake to the supporter. Author, 2026-09-14: *"just because you can doesn't mean you should... the
+restriction is in the UI, but the software should be capable"*, reversing the earlier "whatever Stripe
+supports". So `tip_rules.json` carries BOTH lists: `intervals` is what the runtime accepts (Stripe's four —
+a document carrying `week` validates, renders, charges and notifies correctly) and `offered_intervals` is
+what the picker shows. Nothing needed migrating: the only recurring tip in either environment was `month`.
+
 **Still missing: the re-send page.** The receipt link is the primary path; the backstop for "the receipt
 never arrived / I deleted it" is a small public page that takes an email and mails a fresh token. Until it
 exists, that supporter has to reply to the receipt or contact support — which the runbook below covers, but

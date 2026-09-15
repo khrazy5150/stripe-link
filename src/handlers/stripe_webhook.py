@@ -27,7 +27,7 @@ from stripe_link.domain.downloads import digital_download_links
 from stripe_link.domain.fees import cached_billing_config, calculate_price
 from stripe_link.delegation import apply_delegation
 from stripe_link.domain.ledger import refund_entry as build_ledger_refund_entry, sale_entry, sale_entry_from_order
-from stripe_link.domain.receipts import receipt_content
+from stripe_link.domain.receipts import receipt_content, tip_renewal_content
 from stripe_link.domain.tips import manage_token_doc
 from stripe_link.domain.reminders import plan_reminders
 from stripe_link.domain.review_invites import plan_invite
@@ -152,6 +152,7 @@ def handler(
     orders_repo=None,
     user_profiles_repo=None,
     sites_repo=None,
+    tip_tokens_repo=None,
     webhook_secret_loader: Callable[[str, str], str | None] = get_platform_webhook_secret,
     now_fn: Callable[[], int] = lambda: int(time.time()),
     billing_config_loader: Callable[[], dict[str, Any]] | None = None,
@@ -276,6 +277,16 @@ def handler(
             invoices_repo=invoices_repo, notifications_repo=notifications_repo,
             now_fn=now_fn, billing_config_loader=billing_config_loader,
         )
+        # A REPEATING TIP renews here, and this is the only moment the supporter hears from us about it.
+        if tip_tokens_repo is None and os.environ.get("CARTS_TABLE"):
+            tip_tokens_repo = tip_tokens_repository(mode=mode)
+        renewal = notify_tip_renewal(
+            stripe_event, tenant_id=tenant_id, event_type=event_type, mode=mode,
+            tip_tokens_repo=tip_tokens_repo, mailer_send=receipt_mailer,
+            context_loader=email_context_loader, now_fn=now_fn,
+        )
+        if renewal.get("status") == "sent":
+            persistence = {**(persistence or {}), "tip_renewal": renewal}
     elif event_type == "account.updated" and tenant_document:
         persistence = reconcile_account_updated(
             stripe_event, mode=mode, tenant_document=tenant_document,
@@ -1084,6 +1095,99 @@ def reconcile_dispute(
     return {"status": "disputed", "order_id": order.get("order_id", "")}
 
 
+def _tip_manage_url(tenant_id, tip_tokens_repo, *, customer_id, email, subscription_id, live, now) -> str:
+    """Mint one manage link. Shared by the first charge and every renewal, so both mint the same thing."""
+    base_url = os.environ.get("PUBLIC_API_BASE_URL", "").rstrip("/")
+    if not base_url or not customer_id or tip_tokens_repo is None:
+        return ""
+    token = secrets.token_urlsafe(24)
+    tip_tokens_repo.put(manage_token_doc(
+        tenant_id, token,
+        email=email,
+        stripe_customer_id=customer_id,
+        subscription_id=subscription_id,
+        mode="live" if live else "test",
+        now=int(now),
+    ))
+    return f"{base_url}/tips/manage?t={token}"
+
+
+def notify_tip_renewal(
+    stripe_event,
+    *,
+    tenant_id,
+    event_type,
+    mode="test",
+    tip_tokens_repo=None,
+    mailer_send=None,
+    context_loader=None,
+    now_fn=lambda: int(time.time()),
+) -> dict[str, Any]:
+    """Tell a supporter their repeating tip was charged, with a FRESH cancel link.
+
+    Every repeat charge gets one (author, 2026-09-14). Two reasons, and the second is the load-bearing one:
+    a recurring charge nobody was told about is the most reliable way to produce a dispute, and the link in
+    the first receipt is the one a supporter cannot find a year later — so the newest email always carries a
+    working one, and the token's lifetime stops being the thing holding this up.
+
+    Only `subscription_cycle`: the subscription's FIRST invoice is the checkout the supporter just completed,
+    and it already produced a receipt carrying a link. Sending this too would be two emails for one charge.
+    """
+    if event_type != "invoice.payment_succeeded":
+        return {"status": "ignored", "event": event_type}
+    invoice = _event_data_object(stripe_event)
+    if str(invoice.get("billing_reason") or "") != "subscription_cycle":
+        return {"status": "skipped", "reason": "not_a_renewal"}
+
+    # Session metadata never reaches the subscription, so checkout stamps subscription_data[metadata]; the
+    # invoice carries it back under subscription_details (line metadata is the older shape, kept as a
+    # fallback rather than an API round trip inside a webhook).
+    details = invoice.get("subscription_details") if isinstance(invoice.get("subscription_details"), dict) else {}
+    metadata = details.get("metadata") if isinstance(details.get("metadata"), dict) else {}
+    if not metadata:
+        lines = ((invoice.get("lines") or {}).get("data") or [])
+        first = lines[0] if lines and isinstance(lines[0], dict) else {}
+        metadata = first.get("metadata") if isinstance(first.get("metadata"), dict) else {}
+    if str(metadata.get("tip") or "") != "1":
+        return {"status": "skipped", "reason": "not_a_tip"}
+
+    email = str(invoice.get("customer_email") or "").strip()
+    if not email:
+        return {"status": "skipped", "reason": "no_customer_email"}
+
+    now = int(now_fn())
+    try:
+        manage_url = _tip_manage_url(
+            tenant_id, tip_tokens_repo,
+            customer_id=str(invoice.get("customer") or ""),
+            email=email,
+            subscription_id=str(invoice.get("subscription") or ""),
+            live=bool(invoice.get("livemode")),
+            now=now,
+        )
+        context = (context_loader or load_tenant_email_context)(tenant_id)
+        content = tip_renewal_content(
+            business_name=context.get("business_name", ""),
+            amount=int(invoice.get("amount_paid") or 0),
+            currency=str(invoice.get("currency") or "usd"),
+            interval=str(metadata.get("tip_recurring") or "month"),
+            manage_url=manage_url,
+            support_email=context.get("support_email", ""),
+        )
+        (mailer_send or send_email)(
+            to=email,
+            subject=content["subject"],
+            html=content["html"],
+            text=content["text"],
+            from_name=context.get("business_name", ""),
+            reply_to=context.get("support_email", ""),
+            tenant_id=tenant_id,
+        )
+        return {"status": "sent", "to": email, "manage_link": bool(manage_url)}
+    except Exception as exc:  # noqa: BLE001 - a renewal notice must never fail the webhook
+        return {"status": "failed", "error": str(exc)}
+
+
 def mint_tip_manage_link(session, order, tenant_id, tip_tokens_repo, now) -> str:
     """The link a supporter uses to stop a RECURRING tip, minted when the subscription is created.
 
@@ -1102,16 +1206,12 @@ def mint_tip_manage_link(session, order, tenant_id, tip_tokens_repo, now) -> str
     if not base_url or not customer_id or tip_tokens_repo is None:
         return ""
     try:
-        token = secrets.token_urlsafe(24)
-        tip_tokens_repo.put(manage_token_doc(
-            tenant_id, token,
-            email=email,
-            stripe_customer_id=customer_id,
+        return _tip_manage_url(
+            tenant_id, tip_tokens_repo,
+            customer_id=customer_id, email=email,
             subscription_id=str(session.get("subscription") or ""),
-            mode="live" if session.get("livemode") else "test",
-            now=int(now),
-        ))
-        return f"{base_url}/tips/manage?t={token}"
+            live=bool(session.get("livemode")), now=now,
+        )
     except Exception:  # noqa: BLE001 - a missing manage link must not fail the webhook
         return ""
 

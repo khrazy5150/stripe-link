@@ -413,7 +413,15 @@ def build_checkout_payload(
         payload["metadata[tip]"] = "1"
         payload["metadata[tip_keyed_amount]"] = str(int(tip_line.get("tip_keyed_amount") or 0))
         if tip_line.get("recurring"):
-            payload["metadata[tip_recurring]"] = str((tip_line.get("recurring") or {}).get("interval") or "month")
+            interval = str((tip_line.get("recurring") or {}).get("interval") or "month")
+            payload["metadata[tip_recurring]"] = interval
+            # Session metadata does NOT reach the subscription, and a renewal invoice arrives months later
+            # carrying only what the SUBSCRIPTION knows. Without this the webhook cannot tell a tip renewal
+            # from any other invoice, and the supporter's next manage link never gets minted.
+            payload["subscription_data[metadata][tip]"] = "1"
+            payload["subscription_data[metadata][tip_recurring]"] = interval
+            payload["subscription_data[metadata][tenant_id]"] = tenant_id
+            payload["subscription_data[metadata][tip_keyed_amount]"] = str(int(tip_line.get("tip_keyed_amount") or 0))
 
     payload["metadata[clientID]"] = tenant_id
     payload["metadata[client_id]"] = tenant_id

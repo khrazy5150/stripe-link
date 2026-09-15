@@ -11,13 +11,14 @@ receipt, dereferenced server-side, handing the supporter to Stripe's own portal 
 where the subscription actually lives.
 """
 import os
+import pathlib
 import unittest
 from unittest.mock import patch
 
 import handlers.tip_manage as tip_manage
-from handlers.stripe_webhook import mint_tip_manage_link, send_order_receipt
-from stripe_link.domain.receipts import receipt_content
-from stripe_link.domain.tips import keyed_amount, manage_token_doc
+from handlers.stripe_webhook import mint_tip_manage_link, notify_tip_renewal, send_order_receipt
+from stripe_link.domain.receipts import receipt_content, tip_renewal_content
+from stripe_link.domain.tips import INTERVALS, keyed_amount, manage_token_doc
 
 
 class FakeTokens:
@@ -237,6 +238,135 @@ class KeyedAmountTests(unittest.TestCase):
     def test_an_unrecognised_charge_falls_back_to_itself(self):
         # Rather than raising inside a checkout that has already been priced.
         self.assertEqual(keyed_amount(self.PRICE, 777), 777)
+
+
+class RenewalNoticeTests(unittest.TestCase):
+    """Every repeat charge carries a FRESH link (author, 2026-09-14).
+
+    Two reasons, and the second is load-bearing: a recurring charge nobody was told about is the most
+    reliable way to produce a dispute, and the link in the FIRST receipt is the one a supporter cannot find
+    a year later. The newest email always carries a working one, which is what stops the token's lifetime
+    from being the thing holding this up.
+    """
+
+    def _invoice(self, **overrides):
+        invoice = {
+            "id": "in_1", "customer": "cus_1", "customer_email": "sam@example.com",
+            "subscription": "sub_1", "amount_paid": 1119, "currency": "usd", "livemode": True,
+            "billing_reason": "subscription_cycle",
+            "subscription_details": {"metadata": {"tip": "1", "tip_recurring": "month"}},
+        }
+        invoice.update(overrides)
+        return {"type": "invoice.payment_succeeded", "data": {"object": invoice}}
+
+    def _notify(self, event, repo=None, event_type="invoice.payment_succeeded"):
+        sent = {}
+        with patch.dict(os.environ, {"PUBLIC_API_BASE_URL": "https://api.example.com"}, clear=False):
+            result = notify_tip_renewal(
+                event, tenant_id="t1", event_type=event_type,
+                tip_tokens_repo=repo if repo is not None else FakeTokens(),
+                mailer_send=lambda **kwargs: sent.update(kwargs),
+                context_loader=lambda tenant: {"business_name": "Poliaxis", "support_email": ""},
+                now_fn=lambda: 1000,
+            )
+        return result, sent
+
+    def test_a_renewal_emails_a_fresh_link(self):
+        repo = FakeTokens()
+        result, sent = self._notify(self._invoice(), repo)
+        self.assertEqual(result["status"], "sent")
+        self.assertTrue(result["manage_link"])
+        self.assertIn("Change or cancel this monthly tip", sent["text"])
+        self.assertIn("/tips/manage?t=", sent["text"])
+        # A NEW token, so the newest email is the one that works.
+        self.assertEqual(len(repo.written), 1)
+        self.assertEqual(repo.written[0]["subscription_id"], "sub_1")
+
+    def test_it_says_what_was_charged(self):
+        _, sent = self._notify(self._invoice())
+        self.assertIn("11.19", sent["text"])
+        self.assertIn("Poliaxis", sent["subject"])
+
+    def test_the_first_invoice_is_not_a_renewal(self):
+        # The subscription's own first invoice IS the checkout that just sent a receipt with a link. Sending
+        # this too would be two emails for one charge.
+        result, sent = self._notify(self._invoice(billing_reason="subscription_create"))
+        self.assertEqual(result["reason"], "not_a_renewal")
+        self.assertEqual(sent, {})
+
+    def test_an_ordinary_subscription_invoice_is_left_alone(self):
+        result, _ = self._notify(self._invoice(subscription_details={"metadata": {}}, lines={"data": []}))
+        self.assertEqual(result["reason"], "not_a_tip")
+
+    def test_older_invoices_carry_the_metadata_on_the_line(self):
+        # subscription_details is the modern shape; line metadata is the fallback, so a renewal is never
+        # missed for want of an API round trip inside a webhook.
+        event = self._invoice(subscription_details={},
+                              lines={"data": [{"metadata": {"tip": "1", "tip_recurring": "year"}}]})
+        result, sent = self._notify(event)
+        self.assertEqual(result["status"], "sent")
+        self.assertIn("yearly", sent["text"])
+
+    def test_no_email_address_means_no_email(self):
+        result, sent = self._notify(self._invoice(customer_email=""))
+        self.assertEqual(result["reason"], "no_customer_email")
+        self.assertEqual(sent, {})
+
+    def test_other_invoice_events_are_ignored(self):
+        result, _ = self._notify(self._invoice(), event_type="invoice.payment_failed")
+        self.assertEqual(result["status"], "ignored")
+
+    def test_a_broken_mailer_never_fails_the_webhook(self):
+        class Broken:
+            def put(self, document):
+                raise RuntimeError("table gone")
+
+        result, _ = self._notify(self._invoice(), Broken())
+        self.assertEqual(result["status"], "failed")
+
+
+class OfferedIntervalTests(unittest.TestCase):
+    """The restriction is in the BUILDER, not the runtime (author, 2026-09-14).
+
+    "Just because you can doesn't mean you should": every recurring charge has to be acknowledged, so the
+    charge cadence IS the email cadence — 365 charges a year would be 365 emails. No peer offers finer than
+    monthly for creator support. But a document that somehow carries `week` or `day` still has to work end
+    to end, which is why validation keeps Stripe's four.
+    """
+
+    def _rules(self):
+        import json
+        import pathlib
+        return json.loads((pathlib.Path(__file__).resolve().parents[1] / "src" / "stripe_link"
+                           / "tip_rules.json").read_text(encoding="utf-8"))
+
+    def test_the_builder_offers_monthly_and_yearly(self):
+        self.assertEqual(self._rules()["offered_intervals"], ["month", "year"])
+        config = (pathlib.Path(__file__).resolve().parents[1] / "dashboard" / "src" / "config"
+                  / "tips.js").read_text(encoding="utf-8")
+        self.assertIn("(rules.offered_intervals || rules.intervals).includes(option.value)", config)
+
+    def test_the_runtime_still_accepts_all_four(self):
+        # A weekly tip is not offered, but if one exists it validates, renders, charges and notifies.
+        self.assertEqual(self._rules()["intervals"], ["day", "week", "month", "year"])
+        self.assertEqual(INTERVALS, {"day", "week", "month", "year"})
+        for interval in ("day", "week", "month", "year"):
+            content = tip_renewal_content(amount=500, interval=interval, manage_url="https://x")
+            self.assertIn("Change or cancel", content["text"])
+
+    def test_every_offered_interval_is_one_the_runtime_accepts(self):
+        self.assertTrue(set(self._rules()["offered_intervals"]) <= set(self._rules()["intervals"]))
+
+
+class SubscriptionMetadataTests(unittest.TestCase):
+    def test_checkout_stamps_the_subscription_so_renewals_are_identifiable(self):
+        # Session metadata never reaches the subscription, and a renewal invoice arrives months later
+        # carrying only what the SUBSCRIPTION knows.
+        source = (pathlib.Path(__file__).resolve().parents[1] / "src" / "handlers"
+                  / "checkout.py").read_text(encoding="utf-8")
+        for key in ("subscription_data[metadata][tip]", "subscription_data[metadata][tip_recurring]",
+                    "subscription_data[metadata][tenant_id]"):
+            self.assertIn(key, source, key)
 
 
 if __name__ == "__main__":

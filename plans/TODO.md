@@ -868,6 +868,9 @@ objection and why an account does not actually answer it, is §5g — worth read
 - ✅ **Portal session** on the CONNECTED account (`handlers/tip_manage.py`, `GET /tips/manage?t=`).
 - ✅ **`metadata[tip_keyed_amount]`** stamped on the session — the §5f refund prerequisite, captured here
   because this is what first put a tip through checkout.
+- ✅ **A fresh link on every charge** (`notify_tip_renewal`): each renewal emails a short notice carrying a
+  new token, so the newest email always works. Also the first time a repeat charge produced any email from
+  us at all. Intervals narrowed to monthly + yearly in the BUILDER only — the runtime still handles all four.
 - ⬜ **"Manage an existing tip"** on the tip page: takes an email, re-sends a fresh token. The backstop for a
   receipt that never arrived — email deliverability is this design's single point of failure, so it wants a
   second door. NOT built.

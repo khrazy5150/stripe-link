@@ -6,10 +6,14 @@
   "_presets": "Preset buttons sit in ONE row on the page. Five fit; 'enter your own' takes one of the five when it is offered, so the cap drops to four.",
   "max_presets": 5,
   "max_presets_with_custom": 4,
-  "_intervals": "Offered when the tenant lets a supporter make the tip recurring. Stripe's four intervals, unabridged -- a donation that repeats weekly is as ordinary as one that repeats monthly.",
+  "_intervals": "What the RUNTIME accepts. Stripe's four, unabridged: a document carrying `week` or `day` validates, renders, charges and notifies correctly. The builder simply does not offer them -- see offered_intervals.",
   "intervals": [
     "day",
     "week",
+    "month",
+    "year"
+  ],
+  "offered_intervals": [
     "month",
     "year"
   ],
@@ -47,5 +51,6 @@
         5000
       ]
     }
-  }
+  },
+  "_offered_intervals": "What the BUILDER offers. A practical restriction, not a technical one (author, 2026-09-14: 'just because you can doesn't mean you should'). Every recurring charge has to be acknowledged -- the card networks expect it and a silent one is how disputes start -- so the charge cadence IS the email cadence: 365 charges a year means 365 emails a year. No peer offers finer than monthly for creator support (Patreon, Ko-fi, Buy Me a Coffee), and a $5 DAILY tip is $1,825 a year, which reads as a mistake to the supporter."
 }

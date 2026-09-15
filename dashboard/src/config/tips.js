@@ -11,12 +11,16 @@ export const TIP_RULES = rules;
 export const TIP_MIN = rules.min_amount / 100;
 export const TIP_MAX = rules.max_amount / 100;
 
+// What the builder OFFERS, which is narrower than what the runtime accepts. Every recurring charge has to
+// be acknowledged, so the charge cadence is also the email cadence — 365 charges a year would mean 365
+// emails a year, and no peer offers finer than monthly for creator support. A document that somehow carries
+// `week` or `day` still works end to end; it just cannot be created here.
 export const TIP_INTERVALS = [
   { value: "day", label: "Daily" },
   { value: "week", label: "Weekly" },
   { value: "month", label: "Monthly" },
   { value: "year", label: "Yearly" },
-].filter((option) => rules.intervals.includes(option.value));
+].filter((option) => (rules.offered_intervals || rules.intervals).includes(option.value));
 
 // "Enter your own" is a button too, and takes one of the five places in the row.
 export function maxTipPresets(allowCustom) {
