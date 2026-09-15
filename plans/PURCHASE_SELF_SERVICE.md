@@ -12,9 +12,23 @@ page, next to the refund policy, because **that is where someone goes when they 
 
 One entry point on every page: identify ONE transaction, then do the one thing that transaction allows.
 
-**It is TENANT-AGNOSTIC** (author). Any Junior Bay page can start a request about any Junior Bay purchase.
-The footer link is identical everywhere, needs no per-page plumbing, and works from a receipt, the platform
-site, or the page of a tenant the customer never bought from.
+**v1 is TENANT-SCOPED** — the button handles purchases made from THAT tenant. Cross-tenant is §5a, recorded
+as a later phase rather than built on speculation.
+
+The reason is what Stripe can and cannot do. `customers/search` matches on `email` (and `phone`), but only
+within ONE Stripe account, and under direct charges every tenant is their own account — there is no
+cross-account search, so a tenant-agnostic lookup means fanning out over every connected account per request
+against a 20-reads-per-second limit. Worse, **charges and payment intents cannot be searched by email at
+all** (the searchable fields are amount, card last4, postal code, metadata, status), and a Customer object
+only exists for subscriptions or when we explicitly ask for one — so an ordinary one-off purchase is
+invisible to an email search. Our own orders are the real index; Stripe resolves identifiers, it does not
+find purchases by email.
+
+**The durable entry point is the RECEIPT, not the page** (author, 2026-09-14: a link-in-bio page can be
+swapped by the creator, so the page a charge came from may be gone or changed). Every receipt and every
+renewal notice already carries a direct link, which is page-independent. The footer button is the fallback
+for someone who lost the receipt AND can still find the page — which is why losing the page is survivable,
+and why the re-send path matters more than the button does.
 
 ## 2. The rule that decides what the button may do
 
@@ -84,20 +98,42 @@ Both stay narrow: a token opens one action on one transaction, never an account 
 what makes "a leaked link is fail-safe" true, and what pays for the long lifetime on the cancel side
 (`PAY_WHAT_YOU_WANT.md` §5g).
 
-## 5. The cross-tenant index — a deliberate decision, not a side effect
+## 5. Finding the order, and what v1 needs
 
-Orders are keyed `(tenant_id, order_id)`, so today a purchase cannot be found without knowing whose it was.
-Tenant-agnostic lookup needs an index on buyer email/phone that spans every tenant.
+Orders are keyed `(tenant_id, order_id)` with a `PaymentIntentIndex` GSI. v1 is tenant-scoped, so the tenant
+is known and the match is within one tenant's orders: **email (or phone) + optional approximate date ->
+latest match**.
 
-**That object is the buyer graph of the whole platform in one place.** It deserves its own access rules —
-who can query it, what a query returns, what is logged — rather than arriving as a convenience. Options:
+That still wants an index, because scanning a tenant's orders per request does not age well: a GSI on
+`(tenant_id, contact_key)` where `contact_key` is a normalized, hashed email or phone. Hashed so the index
+itself carries no readable contact data.
 
-- A GSI on the orders table keyed by normalized email/phone (simplest; the index inherits the table's
-  access).
-- A dedicated lookup table holding only `(contact_hash -> tenant_id, order_id)`, so the index itself carries
-  no readable contact data and a compromise of it yields nothing without the orders table too.
+### 5a. Cross-tenant, deferred
 
-The second is the better shape and is not much more work. Decide before building.
+Widening this so any page can start a request about any purchase needs an index spanning every tenant —
+**the buyer graph of the whole platform in one place.** That object deserves its own access rules (who may
+query it, what a query returns, what is logged) rather than arriving as a convenience, and the case for it
+is speculative until support volume shows people genuinely arriving at the wrong page. Build it when there
+is evidence, as a dedicated lookup table holding only `(contact_hash -> tenant_id, order_id)` so a
+compromise of the index alone yields nothing without the orders table.
+
+### 5b. Adding the GSI later is fine — the attribute is the part to think about
+
+Checked 2026-09-14, because it decides how much has to be right up front:
+
+- **A GSI can be added to a live table with no downtime and no data loss.** DynamoDB backfills it in the
+  background; the table stays available throughout.
+- **One GSI per stack update.** The UpdateTable API creates or deletes exactly one index per call, and
+  CloudFormation treats a resource update as one atomic operation — so adding two indexes in a single deploy
+  FAILS. Ours would have to land one deploy at a time.
+- **A GSI only indexes items that carry its key attribute.** Orders written before we start stamping
+  `contact_key` would be absent from the index (a sparse index), so they need a one-off backfill — a script
+  that rewrites existing orders with the attribute.
+
+The practical consequence: the *index* is easy to add whenever, the *attribute* is what wants to exist early.
+At current volume a backfill is a short script either way, so this is not a reason to build ahead of the
+feature — it IS a reason to add `contact_key` to the order record the moment this work starts, before the
+index, so the backfill only ever covers history rather than history plus everything written in between.
 
 ## 6. What already exists
 
@@ -114,7 +150,7 @@ More than it looks, and this button is the missing front door:
 
 ## 7. What does not exist
 
-- The cross-tenant contact index (§5).
+- The per-tenant contact index and the `contact_key` attribute on orders (§5).
 - The form, and the identify-one-match logic with the neutral answer.
 - The transaction page: confirm what was found, act, or "not this one?".
 - **Policy-aware messaging.** Today a refund policy is text on a page. Here it decides what the button
@@ -125,8 +161,9 @@ More than it looks, and this button is the missing front door:
 
 ## 8. Build order
 
-1. **Footer link** next to Refund Policy, on every transactional page, tenant-agnostic.
-2. **The contact index** (§5) — decide the shape first.
+1. **Footer link** next to Refund Policy, on every transactional page, scoped to that page's tenant.
+2. **`contact_key` on the order record first, then the GSI** (§5b) — the attribute wants to exist before the
+   index so the backfill only covers history.
 3. **Form → one match → one link**, with the neutral answer and a rate limit (the lead-capture abuse gate is
    the existing shape).
 4. **The transaction page** with the two actions that already have back ends: cancel a subscription (built)

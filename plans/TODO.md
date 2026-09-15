@@ -867,8 +867,20 @@ It is the missing FRONT DOOR for things already built: `refund_request` document
 approve/reject/execute on the Refunds screen, and a creation endpoint (`PUT /notifications/refund-requests`)
 that nothing calls.
 
-Decide before building: the cross-tenant contact index (§5) is the buyer graph of the whole platform in one
-place, and deserves its own access rules rather than arriving as a GSI nobody discussed.
+**v1 is TENANT-SCOPED** — the button handles purchases made from that tenant's page. Stripe cannot do better:
+`customers/search` matches email/phone but only within ONE account, and under direct charges every tenant is
+their own; charges and payment intents cannot be searched by email at all; and a Customer object only exists
+for subscriptions or when we ask, so a one-off purchase is invisible to an email search. Our own orders are
+the index.
+
+- ⬜ **Widen to cross-tenant in a later version** (plan §5a). Wanted because a link-in-bio page can be
+  SWAPPED by the creator, so the page a charge came from may be gone (author, 2026-09-14) — though the
+  receipt link is page-independent and already covers that case. Needs an index spanning every tenant, which
+  is the buyer graph of the whole platform in one place and wants its own access rules. Build it when
+  support volume shows people arriving at the wrong page, not on speculation.
+- ⬜ **Add `contact_key` to the order record BEFORE the GSI** (plan §5b). A GSI can be added to a live table
+  with no downtime, but it only indexes items that carry its key attribute, and CloudFormation allows ONE
+  index change per stack update. Stamping the attribute early means a later backfill covers history only.
 
 Supersedes the tip-specific re-send page in PAY_WHAT_YOU_WANT.md §5g, which becomes one narrow answer here.
 
