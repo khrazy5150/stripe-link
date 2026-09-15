@@ -31,8 +31,11 @@ from stripe_link.domain.purchase_lookup import (
     select_order,
 )
 from handlers.legal import handler as legal_handler
+from stripe_link.domain.leads import HONEYPOT_FIELD
 from stripe_link.domain.legal import manage_purchase_block
+from stripe_link.domain.request_throttle import TENANT_LIMIT, is_over_limit, next_count, throttle_doc, throttle_id
 from stripe_link.runtime.html import render_page
+from stripe_link.runtime.purchase_pages import render_lookup_sent
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 HTML_SOURCE = (ROOT / "src" / "stripe_link" / "runtime" / "html.py").read_text(encoding="utf-8")
@@ -335,6 +338,127 @@ class EntryPointTests(unittest.TestCase):
         self.assertIn("Manage a purchase", refund["body"])
         self.assertNotIn("Manage a purchase", bare["body"])
         self.assertNotIn("Manage a purchase", terms["body"])
+
+
+class ThrottleTests(unittest.TestCase):
+    """The gate on a public endpoint that reads a whole order list and sends mail.
+
+    Unthrottled, one HTTP request amplified into a full read of a tenant's orders (in BOTH modes) plus an
+    outbound email — with the tenant id sitting in a public footer URL. Two counters: per (tenant, contact)
+    so one address cannot be mailed repeatedly, and per tenant so enumerating DIFFERENT addresses is capped
+    too, which the first counter cannot see.
+    """
+
+    class Throttles:
+        def __init__(self):
+            self.rows = {}
+
+        def get(self, tenant_id, identifier):
+            return self.rows.get((tenant_id, identifier))
+
+        def put(self, document):
+            self.rows[(document["tenant_id"], document["throttle_id"])] = document
+            return document
+
+    def setUp(self):
+        self.orders = FakeOrders()
+        self.tokens = FakeTokens()
+        self.throttles = self.Throttles()
+        self.sent = []
+        self.reads = []
+        self._business = pm._business_name
+        pm._business_name = lambda tenant_id: "Poliaxis"
+        orders = self.orders
+        outer = self
+
+        class CountingOrders:
+            def list_for_tenant(self, tenant_id):
+                outer.reads.append(tenant_id)
+                return orders.list_for_tenant(tenant_id)
+
+            def get(self, tenant_id, order_id):
+                return orders.get(tenant_id, order_id)
+
+        self.counting = CountingOrders()
+
+    def tearDown(self):
+        pm._business_name = self._business
+
+    def _lookup(self, contact="sam@example.com", now=1000, extra=""):
+        return pm.handler({"httpMethod": "POST",
+                           "body": f"action=lookup&tenant=t1&contact={contact}{extra}"}, None,
+                          orders_repo=self.counting, tokens_repo=self.tokens,
+                          throttles_repo=self.throttles,
+                          mailer_send=lambda **mail: self.sent.append(mail),
+                          now_fn=lambda: now)
+
+    def test_the_same_contact_is_mailed_once_per_window(self):
+        first = self._lookup()
+        second = self._lookup()
+        self.assertEqual(len(self.sent), 1)
+        # And the refusal is INDISTINGUISHABLE from the first answer, or the throttle itself leaks which
+        # addresses matched.
+        self.assertEqual(first["body"], second["body"])
+
+    def test_a_blocked_request_does_no_work_at_all(self):
+        self._lookup()
+        reads_after_first = len(self.reads)
+        self._lookup()
+        self.assertEqual(len(self.reads), reads_after_first)
+
+    def test_the_window_eventually_rolls(self):
+        self._lookup(now=1000)
+        self._lookup(now=1000 + 16 * 60)
+        self.assertEqual(len(self.sent), 2)
+
+    def test_enumerating_different_addresses_is_capped_too(self):
+        # The per-contact gate cannot see this: every address is its own counter.
+        for index in range(30):
+            self._lookup(contact=f"person{index}%40example.com")
+        self.assertLessEqual(len(self.reads), TENANT_LIMIT * 2)  # two modes per allowed request
+
+    def test_the_honeypot_is_rendered_and_read(self):
+        form = pm.handler({"httpMethod": "GET", "queryStringParameters": {"tenant": "t1"}}, None)
+        self.assertIn(f'name="{HONEYPOT_FIELD}"', form["body"])
+        # A bot that fills every field gets the same page and nothing else happens.
+        response = self._lookup(extra=f"&{HONEYPOT_FIELD}=http%3A%2F%2Fspam")
+        self.assertEqual(response["body"], render_lookup_sent())
+        self.assertEqual(self.sent, [])
+        self.assertEqual(self.reads, [])
+
+    def test_it_fails_OPEN_when_the_counter_is_unavailable(self):
+        """A throttle table that is down must not take the cancel-my-subscription path with it.
+
+        Being wrong this way costs some extra reads. Being wrong the other way costs a customer who cannot
+        stop a recurring charge — and that is the failure this whole flow exists to prevent.
+        """
+        class Broken:
+            def get(self, *args, **kwargs):
+                raise RuntimeError("table gone")
+
+            def put(self, *args, **kwargs):
+                raise RuntimeError("table gone")
+
+        response = pm.handler({"httpMethod": "POST", "body": "action=lookup&tenant=t1&contact=sam%40example.com"},
+                              None, orders_repo=self.counting, tokens_repo=self.tokens,
+                              throttles_repo=Broken(),
+                              mailer_send=lambda **mail: self.sent.append(mail), now_fn=lambda: 1000)
+        self.assertEqual(response["statusCode"], 200)
+        self.assertEqual(len(self.sent), 1)
+
+
+class ThrottleCounterTests(unittest.TestCase):
+    def test_a_counter_from_an_earlier_window_counts_for_nothing(self):
+        old = throttle_doc("t1", "x", now=0, window_seconds=900, count=99)
+        self.assertFalse(is_over_limit(old, now=100000, window_seconds=900, limit=1))
+        self.assertEqual(next_count(old, now=100000, window_seconds=900), 1)
+
+    def test_the_id_carries_no_readable_contact(self):
+        # A primary key is the one value that ends up in logs and metrics without anyone deciding it should.
+        identifier = throttle_id("contact", "t1", "e:sam@example.com")
+        self.assertNotIn("sam", identifier)
+        self.assertNotIn("@", identifier)
+        self.assertEqual(identifier, throttle_id("contact", "t1", "e:sam@example.com"))
 
 
 if __name__ == "__main__":

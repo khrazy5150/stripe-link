@@ -26,6 +26,7 @@ from urllib.parse import parse_qs, urlencode
 from urllib.request import urlopen
 
 from stripe_link.common import error_response, query_params
+from stripe_link.domain.leads import HONEYPOT_FIELD, is_spam
 from stripe_link.domain.purchase_lookup import (
     contact_key,
     purchase_summary,
@@ -34,6 +35,16 @@ from stripe_link.domain.purchase_lookup import (
     select_order,
     subscription_id,
 )
+from stripe_link.domain.request_throttle import (
+    CONTACT_LIMIT,
+    CONTACT_WINDOW_SECONDS,
+    TENANT_LIMIT,
+    TENANT_WINDOW_SECONDS,
+    is_over_limit,
+    next_count,
+    throttle_doc,
+    throttle_id,
+)
 from stripe_link.ids import generate_id
 from stripe_link.kms_secrets import KmsSecretCipher
 from stripe_link.mailer import send_email
@@ -41,6 +52,7 @@ from stripe_link.repositories.documents import (
     RepositoryError,
     notifications_repository,
     orders_repository,
+    purchase_throttles_repository,
     purchase_tokens_repository,
     refund_requests_repository,
     stripe_keys_repository,
@@ -103,6 +115,7 @@ def handler(
     notifications_repo=None,
     stripe_repo=None,
     secret_cipher=None,
+    throttles_repo=None,
     mailer_send=None,
     opener=None,
     now_fn=lambda: int(time.time()),
@@ -118,7 +131,9 @@ def handler(
         if token:
             return _transaction_page(token, tokens_repo=tokens_repo, orders_repo=orders_repo)
         if tenant_id:
-            return _html(render_lookup_form(_manage_url(), tenant_id, business=_business_name(tenant_id)))
+            return _html(render_lookup_form(_manage_url(), tenant_id,
+                                            business=_business_name(tenant_id),
+                                            honeypot_field=HONEYPOT_FIELD))
         return _html(_EXPIRED_HTML, 404)
 
     if method != "POST":
@@ -128,7 +143,7 @@ def handler(
     action = str(body.get("action") or "").strip()
     if action == "lookup":
         return _lookup(body, orders_repo=orders_repo, tokens_repo=tokens_repo,
-                       mailer_send=mailer_send, now_fn=now_fn)
+                       throttles_repo=throttles_repo, mailer_send=mailer_send, now_fn=now_fn)
     if action in {"cancel", "refund"}:
         return _act(action, body, tokens_repo=tokens_repo, orders_repo=orders_repo,
                     refunds_repo=refunds_repo, notifications_repo=notifications_repo,
@@ -152,15 +167,24 @@ def _orders_for(tenant_id, orders_repo, mode):
     return repo.list_for_tenant(tenant_id)
 
 
-def _lookup(body, *, orders_repo, tokens_repo, mailer_send, now_fn):
-    """Find ONE order and email a link to it — answering identically either way."""
+def _lookup(body, *, orders_repo, tokens_repo, throttles_repo, mailer_send, now_fn):
+    """Find ONE order and email a link to it — answering identically either way.
+
+    This endpoint is unauthenticated and, unthrottled, amplifies one HTTP request into a full read of a
+    tenant's order list plus an outbound email — with the tenant id available in a public footer URL. The
+    gates below run BEFORE any of that, so a blocked request costs two gets and nothing else.
+    """
     tenant_id = str(body.get("tenant") or "").strip()
     key = contact_key(body.get("contact") or "")
     when = _parse_date(body.get("when") or "")
-    if not tenant_id or not key:
+    # The same honeypot the lead forms use: one hidden field, one name across the product, and a bot that
+    # fills every input gets nothing. Silently — telling it would only teach it to leave the field alone.
+    if not tenant_id or not key or is_spam(body):
         return _html(render_lookup_sent())
 
     now = int(now_fn())
+    if _throttled(tenant_id, key, throttles_repo, now):
+        return _html(render_lookup_sent())
     try:
         # Both modes: a tenant testing their own page has test orders, and a real buyer has live ones. The
         # token records which, so the action taken later runs against the right Stripe account.
@@ -182,6 +206,40 @@ def _lookup(body, *, orders_repo, tokens_repo, mailer_send, now_fn):
     except Exception:  # noqa: BLE001 - a lookup failure must look exactly like a miss, never like an error
         pass
     return _html(render_lookup_sent())
+
+
+def _throttled(tenant_id, key, throttles_repo, now) -> bool:
+    """Two counters, checked before any work and recorded after.
+
+    Per (tenant, contact) so one address cannot be mailed repeatedly and one contact cannot make us re-read
+    the orders; per tenant so enumerating DIFFERENT addresses — which the first gate cannot see — is capped
+    too.
+
+    Fails OPEN. A throttle table that is unavailable must not take the cancel-my-subscription path down with
+    it: the cost of being wrong here is some extra reads, and the cost of being wrong the other way is a
+    customer who cannot stop a recurring charge.
+    """
+    repo = throttles_repo
+    if repo is None:
+        if not os.environ.get("CARTS_TABLE"):
+            return False
+        repo = purchase_throttles_repository()
+    contact_id = throttle_id("contact", tenant_id, key)
+    tenant_bucket = throttle_id("tenant", tenant_id)
+    try:
+        contact_row = repo.get(tenant_id, contact_id)
+        tenant_row = repo.get(tenant_id, tenant_bucket)
+        if is_over_limit(contact_row, now=now, window_seconds=CONTACT_WINDOW_SECONDS, limit=CONTACT_LIMIT):
+            return True
+        if is_over_limit(tenant_row, now=now, window_seconds=TENANT_WINDOW_SECONDS, limit=TENANT_LIMIT):
+            return True
+        repo.put(throttle_doc(tenant_id, contact_id, now=now, window_seconds=CONTACT_WINDOW_SECONDS,
+                              count=next_count(contact_row, now=now, window_seconds=CONTACT_WINDOW_SECONDS)))
+        repo.put(throttle_doc(tenant_id, tenant_bucket, now=now, window_seconds=TENANT_WINDOW_SECONDS,
+                              count=next_count(tenant_row, now=now, window_seconds=TENANT_WINDOW_SECONDS)))
+    except Exception:  # noqa: BLE001 - see the docstring: this gate fails open on purpose
+        return False
+    return False
 
 
 def _send_link(order, token, tenant_id, mailer_send):

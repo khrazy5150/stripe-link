@@ -1016,6 +1016,17 @@ def purchase_tokens_repository(table: Any | None = None, *, mode: str | None = N
     )
 
 
+def purchase_throttles_repository(table: Any | None = None) -> DynamoDocumentRepository:
+    # Counters for the public /purchase/manage lookup. Same table as the tokens they gate, TTL'd the same
+    # way, distinguished by document_type. NOT mode-scoped: an abuser does not pick a Stripe mode.
+    return DynamoDocumentRepository(
+        os.environ.get("CARTS_TABLE", ""),
+        document_type="purchase_throttle",
+        id_field="throttle_id",
+        table=table,
+    )
+
+
 def review_invites_repository(table: Any | None = None) -> DynamoDocumentRepository:
     # Post-purchase invite records — same table as reviews, distinct document_type (own SK prefix + scan_type).
     return DynamoDocumentRepository(

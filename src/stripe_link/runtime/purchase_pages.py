@@ -59,7 +59,8 @@ def _date(epoch: int) -> str:
     return datetime.fromtimestamp(int(epoch), tz=timezone.utc).strftime("%d %b %Y")
 
 
-def render_lookup_form(action_url: str, tenant_id: str, *, business: str = "", message: str = "") -> str:
+def render_lookup_form(action_url: str, tenant_id: str, *, business: str = "", message: str = "",
+                       honeypot_field: str = "company_website") -> str:
     """Step one: who are you, and roughly when.
 
     Deliberately asks for nothing else. A static page cannot verify a card, and asking for one would only
@@ -75,6 +76,10 @@ link to that purchase. You can cancel a recurring payment or ask for a refund fr
 <form method="POST" action="{escape(action_url)}">
   <input type="hidden" name="action" value="lookup">
   <input type="hidden" name="tenant" value="{escape(tenant_id)}">
+  <div style="position:absolute;left:-9999px" aria-hidden="true">
+    <label for="{escape(honeypot_field)}">Leave this empty</label>
+    <input id="{escape(honeypot_field)}" name="{escape(honeypot_field)}" tabindex="-1" autocomplete="off">
+  </div>
   <label for="contact">Email or phone</label>
   <input id="contact" name="contact" autocomplete="email" required placeholder="you@example.com">
   <label for="when">Roughly when? <span class="fine">(optional — helps if you bought more than once)</span></label>

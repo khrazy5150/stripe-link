@@ -852,8 +852,8 @@ Decide, then say it somewhere a tenant reads before their first refund.
 
 ### ⭐ HIGH — one button for "stop charging me / I want my money back" — v1 SHIPPED dev 2026-09-14 (plan plans/PURCHASE_SELF_SERVICE.md §9)
 
-**Still open after v1:** a rate limit on the lookup POST (it mails an address a stranger typed, so it is a
-spam vector — reuse the lead-capture abuse gate); policy-aware copy on the transaction page ("6 days left"
+**Still open after v1** (the lookup POST is now gated — honeypot + per-contact and per-tenant counters,
+failing open): policy-aware copy on the transaction page ("6 days left"
 vs "non-refundable", which is where PAY_WHAT_YOU_WANT.md §5f's tip rule gets written for buyers); SMS
 delivery for the phone path; and re-download / booking cancellation as actions.
 

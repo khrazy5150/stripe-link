@@ -1,7 +1,7 @@
 # Self-service for a purchase: one button, one transaction, one request
 
-**Status:** v1 BUILT and on dev 2026-09-14 (§8 steps 1-4). Step 5 (policy-aware copy) and the rate limit
-are outstanding — see §9. Supersedes the tip-specific "re-send page"
+**Status:** v1 BUILT, on dev and prod 2026-09-14/15 (§8 steps 1-4, plus the gate). Step 5 (policy-aware
+copy) is outstanding — see §9. Supersedes the tip-specific "re-send page"
 (`PAY_WHAT_YOU_WANT.md` §5g), which becomes one narrow answer from this flow.
 
 A customer who wants to stop paying, or wants their money back, currently has two routes: find our email, or
@@ -197,13 +197,25 @@ More than it looks, and this button is the missing front door:
   computes from `customer.email` when the stored field is absent — which is why v1 needed no backfill and no
   index.
 
+**The gate** (shipped 2026-09-15). The lookup POST is unauthenticated and, unthrottled, amplified one HTTP
+request into a full read of a tenant's order list IN BOTH MODES plus an outbound email — with the tenant id
+sitting in a public footer URL. Three cheap defences, all of which run before any of that work:
+
+- The **honeypot** the lead forms already use — one hidden field, one name across the product.
+- **Per (tenant, contact): one lookup per 15 minutes.** Caps both halves: the same address cannot be mailed
+  repeatedly, and the same contact cannot make us re-read the orders.
+- **Per tenant: 20 per hour.** Someone enumerating DIFFERENT addresses is invisible to the first counter.
+
+Two properties worth keeping: a throttled request returns the SAME page as any other, or the gate itself
+leaks which addresses matched; and the gate **fails open** — a counter table that is unavailable must not
+take the cancel-my-subscription path down with it, since being wrong that way costs a few reads and being
+wrong the other way costs a customer who cannot stop a recurring charge.
+
 **Not built yet:**
 
-1. **A rate limit** on the lookup POST. It sends mail to an address a stranger typed (though only ever to
-   the address on the order), so it is a spam vector. The lead-capture abuse gate is the existing shape.
-2. **Policy-aware copy** (§8 step 5). The transaction page shows the order's refund-policy label if it has
+1. **Policy-aware copy** (§8 step 5). The transaction page shows the order's refund-policy label if it has
    one; it does not yet compute "6 days left" versus "outside the window" versus "non-refundable", which is
    where `PAY_WHAT_YOU_WANT.md` §5f's tip rule finally gets written for buyers.
-3. **Phone delivery.** The form accepts a phone number and matches on it, but the link is only ever emailed,
+2. **Phone delivery.** The form accepts a phone number and matches on it, but the link is only ever emailed,
    because that is the address the order carries. SMS delivery would use `sms.py`.
-4. **Re-download** for digital products, and booking cancellation — §2 lists them; neither is wired.
+3. **Re-download** for digital products, and booking cancellation — §2 lists them; neither is wired.
