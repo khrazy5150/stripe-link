@@ -493,8 +493,16 @@ people.
 subscription is created (`mint_tip_manage_link`), the receipt carries the link, and the endpoint hands the
 supporter to Stripe's billing portal on the **connected** account, where the subscription lives. The token
 is `secrets.token_urlsafe(24)`, stored (the `cart_token` precedent: no customer id, no email in a URL that
-will sit in an inbox for a year) with a **400-day TTL** — a supporter may cancel a monthly tip a year in, so
-a 30-day cart-style token would have expired before the moment it exists for.
+will sit in an inbox for a year) with a **400-day TTL** — the subscription is open-ended and this link is the
+only self-serve way to stop it, so a token that expires while the charge continues strands the supporter at
+exactly the moment it exists for. Thirteen months covers an annual tip plus a grace month.
+
+**The link is NARROW, which is what buys that lifetime.** It opens Stripe's `subscription_cancel` flow for
+the one subscription it was minted for, and Stripe hides the portal's navigation inside a flow. So a leaked
+link can only stop a donation the supporter can restart — the fail-safe claim this design rests on is
+actually true. An account-wide portal would have shown invoice history and the card's last four and allowed
+a payment-method change; a year-old link to THAT is a data exposure, not an off switch, and would have
+demanded a short TTL and a re-send page as the primary path rather than the backstop.
 
 Failure shapes, deliberately: minting is best-effort inside the webhook (raising would make Stripe retry and
 duplicate every write that already succeeded), an unknown or expired token renders a branded "Link expired"

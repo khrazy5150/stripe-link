@@ -136,7 +136,8 @@ class ReceiptTests(unittest.TestCase):
 
 
 class EndpointTests(unittest.TestCase):
-    RECORD = {"tenant_id": "t1", "stripe_customer_id": "cus_1", "stripe_mode": "live"}
+    RECORD = {"tenant_id": "t1", "stripe_customer_id": "cus_1", "stripe_mode": "live",
+              "subscription_id": "sub_1"}
 
     def _handler(self, token, record=RECORD, stripe=None):
         calls = []
@@ -165,6 +166,25 @@ class EndpointTests(unittest.TestCase):
         self.assertEqual(calls[0]["path"], "/billing_portal/sessions")
         self.assertEqual(calls[0]["account"], "acct_1")
         self.assertEqual(calls[0]["data"]["customer"], "cus_1")
+
+    def test_the_link_opens_the_cancel_flow_and_nothing_else(self):
+        """The narrowing that makes "a leaked link is harmless" actually true.
+
+        An account-wide portal shows invoice history and the card's last four and allows a payment-method
+        change. Stripe hides the portal's navigation inside a flow, so this link does one thing: cancel the
+        subscription it was minted for.
+        """
+        _, calls = self._handler("good")
+        flow = calls[0]["data"]["flow_data"]
+        self.assertEqual(flow["type"], "subscription_cancel")
+        self.assertEqual(flow["subscription_cancel"]["subscription"], "sub_1")
+
+    def test_a_record_with_no_subscription_still_opens_something(self):
+        # Defensive: a token minted before the subscription id was stored would otherwise 500 on a missing
+        # key. It degrades to the account portal rather than to nothing.
+        _, calls = self._handler("good", record={"tenant_id": "t1", "stripe_customer_id": "cus_1",
+                                                 "stripe_mode": "live"})
+        self.assertNotIn("flow_data", calls[0]["data"])
 
     def test_an_unknown_token_is_a_page_not_a_stack_trace(self):
         response, calls = self._handler("nope")

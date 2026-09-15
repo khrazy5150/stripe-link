@@ -224,9 +224,15 @@ def keyed_amount(price: dict[str, Any], charge: Any, *, source: str = "preset") 
     return next((keyed for keyed, offered in pairs if offered == charge), charge)
 
 
-# A manage link has to outlive a cart-recovery nudge: a supporter may cancel a monthly tip a year in. It is
-# still not forever -- a link that leaks stays useful for exactly this long, and the page's re-send flow
-# mints a fresh one.
+# A manage link has to outlive a cart-recovery nudge by a long way: the SUBSCRIPTION is open-ended, and this
+# link is the only self-serve way to stop it, so a token that expires while the charge continues strands the
+# supporter at exactly the moment it exists for. 13 months covers an annual tip plus a grace month.
+#
+# Long-lived is safe here only because the link is NARROW: it opens Stripe's cancel flow for the one
+# subscription it was minted for, not the account portal (handlers/tip_manage.py). A full portal would show
+# invoice history and the card's last four and allow a payment-method change -- at which point a year-old
+# link in an inbox would be a data exposure rather than an off switch, and a short TTL would be the right
+# answer instead. The narrowing is what buys the lifetime.
 MANAGE_TOKEN_TTL_SECONDS = 400 * 24 * 60 * 60
 
 

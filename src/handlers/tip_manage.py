@@ -11,8 +11,11 @@ So the link is the surface. It carries an opaque token that dereferences server-
 precedent — no customer id, no email in the URL), and hands the supporter to Stripe's own portal on the
 connected account, where the subscription actually lives.
 
-Public and unauthenticated by design. The token IS the credential, and the action behind it is fail-safe:
-the worst a leaked link does is stop a donation that the supporter can start again.
+Public and unauthenticated by design. The token IS the credential, so the link is narrowed to Stripe's
+CANCEL FLOW for the one subscription it was minted for — the worst a leaked link can do is stop a donation
+the supporter can start again. An account-wide portal would have shown invoice history and the card's last
+four and allowed a payment-method change, which is not fail-safe and would not have justified a long-lived
+link sitting in an inbox.
 """
 
 import os
@@ -96,11 +99,23 @@ def handler(event, context, *, tokens_repo=None, stripe_repo=None, secret_cipher
 
     # The subscription lives on the CONNECTED account (direct charges), so the portal session is created
     # there — the same call the platform makes for its own billing, with stripe_account set.
+    #
+    # And it opens the CANCEL FLOW for that one subscription, not the account portal. Stripe hides the
+    # portal's navigation in a flow, so the link does exactly one thing. That is what makes the claim behind
+    # this whole design true: the worst a leaked link can do is stop a donation the supporter can restart.
+    # The full portal would also show invoice history, the card's last four and let someone change the
+    # payment method — a modest data exposure sitting in an inbox for a year, which is not fail-safe at all.
+    data = {"customer": customer_id, "return_url": _return_url(record)}
+    subscription_id = str(record.get("subscription_id") or "")
+    if subscription_id:
+        data["flow_data"] = {
+            "type": "subscription_cancel",
+            "subscription_cancel": {"subscription": subscription_id},
+        }
     try:
         session = stripe_request(
             "POST", "/billing_portal/sessions",
-            api_key=api_key, stripe_account=stripe_account, opener=opener or urlopen,
-            data={"customer": customer_id, "return_url": _return_url(record)},
+            api_key=api_key, stripe_account=stripe_account, opener=opener or urlopen, data=data,
         )
     except StripeApiError:
         return _html(_UNAVAILABLE_HTML, 503)
