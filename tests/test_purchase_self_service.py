@@ -300,6 +300,23 @@ class EntryPointTests(unittest.TestCase):
         self.assertIn("/purchase/manage?tenant=tenant_demo", block)
         self.assertIn("Manage a purchase", block)
 
+    def test_the_button_label_is_readable_on_the_button(self):
+        """Purple text on a purple button, i.e. invisible.
+
+        `.content a` sets the link colour for everything inside the article and outranks a single class, so
+        `.manage-cta` lost. Second time in two days a rule of mine was written at equal-or-lower specificity
+        than one that already existed -- the fix is the selector, not another rule further down.
+        """
+        from stripe_link.domain.legal import render_public_page
+
+        html = render_public_page({"title": "Refund", "content": "<p>x</p>"}, {}, 2026,
+                                  manage_block=manage_purchase_block("t1", "https://api.example.com"))
+        css = html[html.index("<style>"):html.index("</style>")]
+        self.assertIn(".content a.manage-cta", css)
+        self.assertGreater(css.index(".content a.manage-cta"), css.index(".content a {"))
+        button_rule = css.split(".content a.manage-cta", 1)[1].split("}", 1)[0]
+        self.assertIn("color:#fff", button_rule)
+
     def test_the_refund_page_shows_it_and_other_pages_do_not(self):
         class Repo:
             def get(self, tenant_id, page_id):

@@ -388,9 +388,11 @@ def render_public_page(
     .content h3 {{ margin-top:20px; margin-bottom:8px; font-size:17px; }}
     .content p, .content li {{ margin:0 0 12px; color:var(--text); }}
     .content a {{ color:var(--accent); }}
+    /* `.content a` further up sets the link colour and outranks a single class, so the button's label came
+       out accent-on-accent -- purple text on a purple button, i.e. invisible. Two classes settle it. */
     .manage {{ margin-top:32px; padding:20px 22px; border:1px solid var(--line); border-radius:12px; background:#fbfbff; }}
     .manage h2 {{ margin-top:0; }}
-    .manage-cta {{ display:inline-block; margin-top:4px; padding:11px 18px; border-radius:10px; background:var(--accent); color:#fff; font-weight:700; text-decoration:none; }}
+    .content a.manage-cta {{ display:inline-block; margin-top:4px; padding:11px 18px; border-radius:10px; background:var(--accent); color:#fff; font-weight:700; text-decoration:none; }}
     .footer {{ padding:20px 28px 28px; border-top:1px solid var(--line); display:flex; flex-wrap:wrap; gap:16px; align-items:center; justify-content:space-between; }}
     .links {{ display:flex; gap:18px; flex-wrap:wrap; }}
     .links a {{ color:var(--accent); text-decoration:none; font-weight:600; }}
