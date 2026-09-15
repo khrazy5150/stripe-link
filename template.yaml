@@ -1757,6 +1757,66 @@ Resources:
   # A supporter cancelling their own recurring tip, without an account (plans/PAY_WHAT_YOU_WANT.md 5g).
   # Public and unauthenticated: the opaque token in the link IS the credential, and the action behind it is
   # fail-safe -- the worst a leaked link does is stop a donation the supporter can start again.
+  # Self-service for ONE purchase (plans/PURCHASE_SELF_SERVICE.md): the form, the emailed link, and the two
+  # actions behind it. Public and unauthenticated -- the token in the link is the credential, and it is
+  # scoped to a single order so a leaked one can never sweep a history.
+  PurchaseManageFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${ProjectPrefix}-purchase-manage-${Environment}"
+      CodeUri: src/
+      Handler: handlers.purchase_manage.handler
+      Description: Customer self-service for one purchase - cancel future payments or request a refund.
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref OrdersTable
+        # Tokens share CartsTable; refund_requests AND their notification share NotificationsTable.
+        - DynamoDBCrudPolicy:
+            TableName: !Ref CartsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref NotificationsTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref TenantProfilesTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref StripeKeysTable
+        - Statement:
+            Effect: Allow
+            Action:
+              - kms:Decrypt
+              - kms:DescribeKey
+            Resource: !GetAtt StripeKeysEncryptionKey.Arn
+        - Statement:
+            Effect: Allow
+            Action:
+              - secretsmanager:GetSecretValue
+            Resource: "*"
+        - Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Action:
+                - ses:SendEmail
+                - sesv2:SendEmail
+              Resource: "*"
+      Events:
+        PurchaseManageGet:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /purchase/manage
+            Method: GET
+        PurchaseManagePost:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /purchase/manage
+            Method: POST
+        PurchaseManageOptions:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /purchase/manage
+            Method: OPTIONS
+
   TipManageFunction:
     Type: AWS::Serverless::Function
     Properties:

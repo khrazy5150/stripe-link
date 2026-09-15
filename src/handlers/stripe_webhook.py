@@ -27,6 +27,7 @@ from stripe_link.domain.downloads import digital_download_links
 from stripe_link.domain.fees import cached_billing_config, calculate_price
 from stripe_link.delegation import apply_delegation
 from stripe_link.domain.ledger import refund_entry as build_ledger_refund_entry, sale_entry, sale_entry_from_order
+from stripe_link.domain.purchase_lookup import order_contact_keys as _order_contact_keys
 from stripe_link.domain.receipts import receipt_content, tip_renewal_content
 from stripe_link.domain.tips import manage_token_doc
 from stripe_link.domain.reminders import plan_reminders
@@ -1448,6 +1449,14 @@ def order_record_from_session(session: dict[str, Any], tenant_id: str, now: int,
             "phone": details.get("phone", ""),
             "stripe_customer_id": session.get("customer", ""),
         },
+        # How a customer finds this order later without knowing its id: they type the email or phone they
+        # bought with (plans/PURCHASE_SELF_SERVICE.md §5). Written from day one so that if the lookup ever
+        # needs an index, the backfill covers history ONLY -- a GSI indexes nothing that lacks its key.
+        "contact_keys": _order_contact_keys({
+            "customer": {"email": details.get("email", ""), "phone": details.get("phone", "")}
+        }),
+        # The subscription this order started, so "stop future charges" can act without a second lookup.
+        "subscription_id": str(session.get("subscription") or ""),
         "product": {
             "product_id": metadata.get("product_id", ""),
             "price_id": metadata.get("price_id", ""),

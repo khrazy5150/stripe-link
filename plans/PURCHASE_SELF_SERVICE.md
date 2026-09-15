@@ -1,6 +1,7 @@
 # Self-service for a purchase: one button, one transaction, one request
 
-**Status:** designed 2026-09-14, not built. Supersedes the tip-specific "re-send page"
+**Status:** v1 BUILT and on dev 2026-09-14 (§8 steps 1-4). Step 5 (policy-aware copy) and the rate limit
+are outstanding — see §9. Supersedes the tip-specific "re-send page"
 (`PAY_WHAT_YOU_WANT.md` §5g), which becomes one narrow answer from this flow.
 
 A customer who wants to stop paying, or wants their money back, currently has two routes: find our email, or
@@ -174,3 +175,33 @@ More than it looks, and this button is the missing front door:
    and request a refund (the orphan endpoint).
 5. **Policy-aware copy**, which is where §5f's tip refund rule gets written down for buyers.
 6. Downloads and bookings fold in after.
+
+
+## 9. What v1 shipped, and what it did not
+
+**Shipped** (`handlers/purchase_manage.py`, `domain/purchase_lookup.py`, `runtime/purchase_pages.py`):
+
+- The footer link, straight after Refund Policy, on every page that has a legal footer and a tenant.
+- `GET ?tenant=` the form (email or phone, optional approximate date — never a card number).
+- `POST action=lookup` -> ONE order (latest, or nearest the date), a token scoped to it, and a link emailed
+  to the address ON THE ORDER rather than the one typed. Identical answer on a hit and a miss.
+- `GET ?t=` the transaction page: what we found, stated, with only the actions it allows, and "Not this
+  one?" back to the form.
+- `POST action=cancel` -> `cancel_at_period_end` on the subscription, immediately. Not an immediate delete:
+  they paid for the period they are in, and taking it away is a refund nobody asked for.
+- `POST action=refund` -> a `refund_request` in the tenant's existing queue, with their notification. The
+  copy says REQUESTED, never refunded.
+- `contact_keys` + `subscription_id` on new orders. Older orders still match, because `order_contact_keys`
+  computes from `customer.email` when the stored field is absent — which is why v1 needed no backfill and no
+  index.
+
+**Not built yet:**
+
+1. **A rate limit** on the lookup POST. It sends mail to an address a stranger typed (though only ever to
+   the address on the order), so it is a spam vector. The lead-capture abuse gate is the existing shape.
+2. **Policy-aware copy** (§8 step 5). The transaction page shows the order's refund-policy label if it has
+   one; it does not yet compute "6 days left" versus "outside the window" versus "non-refundable", which is
+   where `PAY_WHAT_YOU_WANT.md` §5f's tip rule finally gets written for buyers.
+3. **Phone delivery.** The form accepts a phone number and matches on it, but the link is only ever emailed,
+   because that is the address the order carries. SMS delivery would use `sms.py`.
+4. **Re-download** for digital products, and booking cancellation — §2 lists them; neither is wired.

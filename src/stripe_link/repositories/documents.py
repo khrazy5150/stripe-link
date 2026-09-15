@@ -1004,6 +1004,18 @@ def tip_tokens_repository(table: Any | None = None, *, mode: str | None = None) 
     )
 
 
+def purchase_tokens_repository(table: Any | None = None, *, mode: str | None = None) -> DynamoDocumentRepository:
+    # Shares CARTS_TABLE with the cart and tip tokens: the same kind of object -- short-lived, opaque,
+    # buyer-facing, TTL'd -- distinguished by document_type.
+    return DynamoDocumentRepository(
+        os.environ.get("CARTS_TABLE", ""),
+        document_type="purchase_token",
+        id_field="token",
+        table=table,
+        mode=mode,
+    )
+
+
 def review_invites_repository(table: Any | None = None) -> DynamoDocumentRepository:
     # Post-purchase invite records — same table as reviews, distinct document_type (own SK prefix + scan_type).
     return DynamoDocumentRepository(

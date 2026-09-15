@@ -850,7 +850,12 @@ gross and the only live question is whether WE return our cut.
 
 Decide, then say it somewhere a tenant reads before their first refund.
 
-### ⭐ HIGH — one button for "stop charging me / I want my money back" (plan plans/PURCHASE_SELF_SERVICE.md, designed 2026-09-14)
+### ⭐ HIGH — one button for "stop charging me / I want my money back" — v1 SHIPPED dev 2026-09-14 (plan plans/PURCHASE_SELF_SERVICE.md §9)
+
+**Still open after v1:** a rate limit on the lookup POST (it mails an address a stranger typed, so it is a
+spam vector — reuse the lead-capture abuse gate); policy-aware copy on the transaction page ("6 days left"
+vs "non-refundable", which is where PAY_WHAT_YOU_WANT.md §5f's tip rule gets written for buyers); SMS
+delivery for the phone path; and re-download / booking cancellation as actions.
 
 A customer who wants to cancel or be refunded has two routes today: find our email, or find the tenant. This
 is the third and the one they will look for — a link at the bottom of the page NEXT TO THE REFUND POLICY,
@@ -1087,12 +1092,14 @@ discloses it. These changes are about polish and accidental exposure, not secrec
 Instagram profile works. Raised while designing the refund button — a customer who cannot find the page they
 bought from could search for the creator instead.
 
-**Not needed for that, which is why it is LOW.** The Site IS the tenant profile: the schema calls it "the
-public aggregate root: a tenant's website", it owns the hostname, Organization identity, navigation and a
-slug->page map with a `homepage` role, and it already serves on `*.jbay.uk` / `*.jbay.be`. The refund button
-lands on every page of that Site including its home, and the receipt link works regardless of pages. What a
-directory adds is DISCOVERABILITY, not a home for the button — so building a parallel "profile" concept
-beside Site would be the duplicate-implementation trap, two things that must agree about who a tenant is.
+**A Site is NOT this** (author, 2026-09-14). A Site is a BUSINESS — one tenant can run many — and a tenant
+profile identifies the PERSON, which is exactly the creator case: someone who may run three businesses but
+is one identity to their audience. An Instagram profile is person-level; a Site is not. So this is a real
+missing layer, not a renaming of one we have.
+
+**It is LOW because the refund button does not need it.** That button lands on every page of a Site
+(including its home), and the receipt link works regardless of what happened to any page. What a profile and
+a directory add is DISCOVERABILITY — finding a creator by name — which is worth deciding on its own merits.
 
 **Decide it on its own merits, not as a side effect:**
 - It is the marketplace direction (plans/DIGITAL_MARKETPLACE.md) and adjacent to the `jbay.page/name` vanity
