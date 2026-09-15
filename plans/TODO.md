@@ -850,6 +850,28 @@ gross and the only live question is whether WE return our cut.
 
 Decide, then say it somewhere a tenant reads before their first refund.
 
+### ⭐ HIGH — one button for "stop charging me / I want my money back" (plan plans/PURCHASE_SELF_SERVICE.md, designed 2026-09-14)
+
+A customer who wants to cancel or be refunded has two routes today: find our email, or find the tenant. This
+is the third and the one they will look for — a link at the bottom of the page NEXT TO THE REFUND POLICY,
+because that is where someone goes when they want the money to stop (author). Tenant-agnostic: any Junior
+Bay page can start a request about any Junior Bay purchase.
+
+The rule it runs on: **actions that cost the tenant nothing are self-serve (cancel a subscription, download
+again); actions that move money are a REQUEST the tenant answers.** And it identifies exactly ONE
+transaction — the latest, or the nearest to an approximate date the customer gives — and never enumerates.
+A list behind one emailed link is both a privacy target and the screen that ends three subscriptions instead
+of the one they came for.
+
+It is the missing FRONT DOOR for things already built: `refund_request` documents, the tenant notification,
+approve/reject/execute on the Refunds screen, and a creation endpoint (`PUT /notifications/refund-requests`)
+that nothing calls.
+
+Decide before building: the cross-tenant contact index (§5) is the buyer graph of the whole platform in one
+place, and deserves its own access rules rather than arriving as a GSI nobody discussed.
+
+Supersedes the tip-specific re-send page in PAY_WHAT_YOU_WANT.md §5g, which becomes one narrow answer here.
+
 ### ✅ HIGH — a supporter cannot cancel a recurring tip — SHIPPED dev 2026-09-14 (plan §5g)
 
 Checkout now opens a real `mode: subscription` session for a repeating tip. Nothing lets the supporter stop
@@ -871,9 +893,8 @@ objection and why an account does not actually answer it, is §5g — worth read
 - ✅ **A fresh link on every charge** (`notify_tip_renewal`): each renewal emails a short notice carrying a
   new token, so the newest email always works. Also the first time a repeat charge produced any email from
   us at all. Intervals narrowed to monthly + yearly in the BUILDER only — the runtime still handles all four.
-- ⬜ **"Manage an existing tip"** on the tip page: takes an email, re-sends a fresh token. The backstop for a
-  receipt that never arrived — email deliverability is this design's single point of failure, so it wants a
-  second door. NOT built.
+- ⬜ **The re-send path** — SUPERSEDED by plans/PURCHASE_SELF_SERVICE.md, where it becomes one answer from
+  a tenant-agnostic "manage a purchase" flow rather than a tip-specific page. NOT built.
 - ⬜ **A support runbook**: verify ONE of card last-4 + expiry / exact amount + date / billing postcode, then
   cancel. The bar is low on purpose — cancellation is fail-safe, and an agent who refuses to act sends the
   supporter to their bank instead, which costs the tenant a dispute fee. NOT written.
