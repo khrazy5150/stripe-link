@@ -1,8 +1,10 @@
+import os
 from datetime import datetime, timezone
 
-from stripe_link.common import json_response, path_params
+from stripe_link.common import json_response, path_params, query_params
 from stripe_link.platform_config import legal_overrides
 from stripe_link.domain.legal import (
+    manage_purchase_block,
     LEGAL_CONFIG,
     merge_page_with_default,
     pages_with_defaults,
@@ -38,7 +40,11 @@ def handler(event, context, *, repository=None, config=None, year_fn=None):
 
     if not page_id:
         return list_pages(repository, config)
-    return serve_page(repository, config, page_id, year_fn)
+    # The REFUND page carries the "manage a purchase" action, because that is the page someone opens when
+    # they want the money to stop (plans/PURCHASE_SELF_SERVICE.md). The page is platform-global, so the
+    # tenant rides in on the query string a storefront footer puts there.
+    tenant_id = str(query_params(event).get("tenant") or "").strip() if page_id == "refund" else ""
+    return serve_page(repository, config, page_id, year_fn, tenant_id=tenant_id)
 
 
 def list_pages(repository, config):
@@ -60,7 +66,7 @@ def list_pages(repository, config):
     return json_response({"pages": links, "company_name": config.get("company_name", "")})
 
 
-def serve_page(repository, config, page_id, year_fn):
+def serve_page(repository, config, page_id, year_fn, *, tenant_id=""):
     try:
         stored = repository.get(PLATFORM_TENANT_ID, page_id)
     except RepositoryError:
@@ -69,7 +75,8 @@ def serve_page(repository, config, page_id, year_fn):
     if not page or not page.get("enabled", True):
         return _html_response("<h1>Page not found</h1>", status_code=404)
     year = int(year_fn()) if year_fn else datetime.now(timezone.utc).year
-    return _html_response(render_public_page(page, config, year))
+    manage = manage_purchase_block(tenant_id, os.environ.get("PUBLIC_API_BASE_URL", "")) if tenant_id else ""
+    return _html_response(render_public_page(page, config, year, manage_block=manage))
 
 
 def _html_response(body, status_code=200):

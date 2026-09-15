@@ -6260,18 +6260,19 @@ LEGAL_FOOTER_LINKS = (
 )
 
 
-def purchase_manage_href(api_base_url: str) -> str:
-    """Where "Manage a purchase" points: the platform's self-service page, scoped to THIS tenant.
+def refund_page_tenant_query() -> str:
+    """`?tenant=` for the footer's Refund Policy link, or "".
 
-    Tenant-scoped in v1 (plans/PURCHASE_SELF_SERVICE.md §5): once the tenant is known, finding the order is
-    a query on that tenant, so there is no cross-tenant index and no platform-wide buyer graph. Empty when
-    the page has no api_base_url or no tenant -- a half-built link is worse than none.
+    The self-service action lives ON the refund policy page rather than beside it in the footer: someone
+    opens Refund Policy because they want the money to stop, and a second footer link would compete with the
+    page they are already going to (author, 2026-09-14). That page is platform-global, so the tenant has to
+    travel with the link — this is the whole of that plumbing.
+
+    Only added to the PLATFORM refund page. A tenant who supplies their own absolute refund_url owns that
+    page, and we do not rewrite it.
     """
-    base = str(api_base_url or "").rstrip("/")
     tenant_id = str(_RENDER_STATE.get("tenant_id") or "")
-    if not base or not tenant_id:
-        return ""
-    return f"{base}/purchase/manage?tenant={quote(tenant_id, safe='')}"
+    return f"?tenant={quote(tenant_id, safe='')}" if tenant_id else ""
 
 
 def _legal_href(stored_url: Any, page_id: str, api_base_url: str) -> str:
@@ -6282,7 +6283,11 @@ def _legal_href(stored_url: Any, page_id: str, api_base_url: str) -> str:
     if stored.startswith("http://") or stored.startswith("https://"):
         return stored
     base = str(api_base_url or "").rstrip("/")
-    return f"{base}/legal/{page_id}" if base else ""
+    if not base:
+        return ""
+    # The refund page carries the "manage a purchase" action, and needs to know whose purchase.
+    suffix = refund_page_tenant_query() if page_id == "refund" else ""
+    return f"{base}/legal/{page_id}{suffix}"
 
 
 def render_legal_footer(legal: dict[str, Any], section: dict[str, Any] | None = None, api_base_url: str = "") -> str:
@@ -6291,13 +6296,6 @@ def render_legal_footer(legal: dict[str, Any], section: dict[str, Any] | None = 
         for page_id, label, field in LEGAL_FOOTER_LINKS
         if (href := _legal_href(legal.get(field), page_id, api_base_url))
     ]
-    # Straight after the refund policy, because that is where someone goes when they want the money to stop
-    # (author, 2026-09-14). Terms and Privacy are for reading; Refund is for doing, and this is the doing.
-    # NOT in LEGAL_FOOTER_LINKS: those map to /legal/{page_id} documents, and this is an action.
-    manage_href = purchase_manage_href(api_base_url)
-    if manage_href:
-        rendered_links.append(
-            f"      <a href=\"{escape(manage_href)}\" rel=\"nofollow\">Manage a purchase</a>")
     copyright_text = (section or {}).get("copyright")
     if not rendered_links and not copyright_text:
         return ""

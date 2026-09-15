@@ -15,8 +15,10 @@ The rules these tests exist to hold:
   on the spot. A refund moves their money, so it goes in their queue and the copy must not imply otherwise.
 """
 import json
+import os
 import pathlib
 import unittest
+from unittest.mock import patch
 
 import handlers.purchase_manage as pm
 from stripe_link.domain.documents import validate_refund_request
@@ -28,7 +30,9 @@ from stripe_link.domain.purchase_lookup import (
     refund_request_doc,
     select_order,
 )
-from stripe_link.runtime.html import purchase_manage_href, render_page
+from handlers.legal import handler as legal_handler
+from stripe_link.domain.legal import manage_purchase_block
+from stripe_link.runtime.html import render_page
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 HTML_SOURCE = (ROOT / "src" / "stripe_link" / "runtime" / "html.py").read_text(encoding="utf-8")
@@ -248,8 +252,15 @@ class CancelTests(unittest.TestCase):
         self.assertIn("not returned by this", response["body"])
 
 
-class FooterLinkTests(unittest.TestCase):
-    def test_the_link_sits_after_the_refund_policy(self):
+class EntryPointTests(unittest.TestCase):
+    """The way in is ON the refund policy page, not beside it.
+
+    Someone opens Refund Policy because they want the money to stop; a second footer link would compete with
+    the page they are already going to (author, 2026-09-14). The page is platform-global, so the tenant
+    travels with the footer link.
+    """
+
+    def _footer(self, legal=None):
         product = json.loads((ROOT / "schemas" / "examples" / "product-creatine-gummies.json")
                              .read_text(encoding="utf-8"))
         offer = json.loads((ROOT / "schemas" / "examples" / "offer-creatine-standard.json")
@@ -257,19 +268,56 @@ class FooterLinkTests(unittest.TestCase):
         page = json.loads((ROOT / "schemas" / "examples" / "page-creatine-standard.json")
                           .read_text(encoding="utf-8"))
         page["sections"].append({"id": "legal", "type": "legal_footer", "copyright": "(c) Poliaxis"})
+        if legal is not None:
+            page["legal"] = legal
         html = render_page(page, offer, {product["product_id"]: product},
                            api_base_url="https://api.example.com")
-        footer = html.split('class="sl-legal"', 1)[1].split("</footer>", 1)[0]
-        self.assertLess(footer.index("Refund Policy"), footer.index("Manage a purchase"))
-        self.assertIn("/purchase/manage?tenant=tenant_demo", footer)
+        return html.split('class="sl-legal"', 1)[1].split("</footer>", 1)[0]
 
-    def test_it_is_not_a_legal_document(self):
-        # LEGAL_FOOTER_LINKS entries map to /legal/{page_id}; this is an action, not a page to read.
-        block = HTML_SOURCE.split("LEGAL_FOOTER_LINKS = (", 1)[1].split(")", 1)[0]
-        self.assertNotIn("purchase", block)
+    def test_the_refund_link_carries_the_tenant(self):
+        footer = self._footer(legal={})
+        self.assertIn("/legal/refund?tenant=tenant_demo", footer)
 
-    def test_a_page_with_no_tenant_or_api_base_gets_no_half_built_link(self):
-        self.assertEqual(purchase_manage_href(""), "")
+    def test_there_is_no_second_footer_link(self):
+        # One way in, on the page someone is already opening.
+        self.assertNotIn("Manage a purchase", self._footer(legal={}))
+
+    def test_terms_and_privacy_carry_nothing(self):
+        footer = self._footer(legal={})
+        self.assertIn("/legal/terms\"", footer)
+        self.assertIn("/legal/privacy\"", footer)
+
+    def test_a_tenants_own_refund_url_is_left_alone(self):
+        # They own that page; we do not rewrite someone else's URL.
+        footer = self._footer(legal={"refund_url": "https://example.com/refunds"})
+        self.assertIn('href="https://example.com/refunds"', footer)
+        self.assertNotIn("tenant=", footer)
+
+    def test_the_block_only_renders_for_a_real_tenant(self):
+        self.assertEqual(manage_purchase_block("", "https://api.example.com"), "")
+        self.assertEqual(manage_purchase_block("../evil", "https://api.example.com"), "")
+        block = manage_purchase_block("tenant_demo", "https://api.example.com")
+        self.assertIn("/purchase/manage?tenant=tenant_demo", block)
+        self.assertIn("Manage a purchase", block)
+
+    def test_the_refund_page_shows_it_and_other_pages_do_not(self):
+        class Repo:
+            def get(self, tenant_id, page_id):
+                return None
+
+            def list_for_tenant(self, tenant_id):
+                return []
+
+        with patch.dict(os.environ, {"PUBLIC_API_BASE_URL": "https://api.example.com"}, clear=False):
+            refund = legal_handler({"httpMethod": "GET", "pathParameters": {"page_id": "refund"},
+                                    "queryStringParameters": {"tenant": "tenant_demo"}}, None, repository=Repo())
+            bare = legal_handler({"httpMethod": "GET", "pathParameters": {"page_id": "refund"}},
+                                 None, repository=Repo())
+            terms = legal_handler({"httpMethod": "GET", "pathParameters": {"page_id": "terms"},
+                                   "queryStringParameters": {"tenant": "tenant_demo"}}, None, repository=Repo())
+        self.assertIn("Manage a purchase", refund["body"])
+        self.assertNotIn("Manage a purchase", bare["body"])
+        self.assertNotIn("Manage a purchase", terms["body"])
 
 
 if __name__ == "__main__":

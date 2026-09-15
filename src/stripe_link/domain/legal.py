@@ -8,7 +8,9 @@ any field per page (title, link_text, display_order, enabled, content).
 This module is pure -- no I/O. The handler supplies stored pages and the current year.
 """
 
+import re
 from html import escape
+from urllib.parse import quote
 from typing import Any
 
 # Platform legal constants. In the legacy implementation these were app-config values
@@ -314,7 +316,44 @@ def pages_with_defaults(
     return pages
 
 
-def render_public_page(page: dict[str, Any], config: dict[str, str] | None = None, current_year: int = 0) -> str:
+# Tenant ids are generated ids, never free text -- anything else in the query string is dropped rather than
+# reflected into a page we serve.
+_TENANT_ID = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+
+
+def manage_purchase_block(tenant_id: str, api_base_url: str = "") -> str:
+    """The "stop charging me / I want my money back" action, ON the refund policy page.
+
+    Where a customer looks for it (author, 2026-09-14): they click Refund Policy because they want the money
+    to stop, and the thing that stops it should be in front of them there rather than as a second footer
+    link competing with it.
+
+    The page itself is platform-global, so the tenant rides in on the query string that the page's own
+    footer link puts there. No tenant, no block -- a "manage your purchase" button that cannot tell whose
+    purchase is worse than no button.
+    """
+    tenant_id = str(tenant_id or "").strip()
+    if not tenant_id or not _TENANT_ID.match(tenant_id):
+        return ""
+    base = str(api_base_url or "").rstrip("/")
+    href = f"{base}/purchase/manage?tenant={quote(tenant_id, safe='')}"
+    return (
+        '<aside class="manage">'
+        "<h2>Cancel a payment or ask for a refund</h2>"
+        "<p>If you bought something and want to stop a recurring payment, or ask for your money back, "
+        "start here. We will email you a link to your purchase.</p>"
+        f'<p><a class="manage-cta" href="{escape(href)}">Manage a purchase</a></p>'
+        "</aside>"
+    )
+
+
+def render_public_page(
+    page: dict[str, Any],
+    config: dict[str, str] | None = None,
+    current_year: int = 0,
+    *,
+    manage_block: str = "",
+) -> str:
     cfg = {**LEGAL_CONFIG, **(config or {})}
     title = escape(str(page.get("title", "Legal Page")))
     content = str(page.get("content", ""))
@@ -349,6 +388,9 @@ def render_public_page(page: dict[str, Any], config: dict[str, str] | None = Non
     .content h3 {{ margin-top:20px; margin-bottom:8px; font-size:17px; }}
     .content p, .content li {{ margin:0 0 12px; color:var(--text); }}
     .content a {{ color:var(--accent); }}
+    .manage {{ margin-top:32px; padding:20px 22px; border:1px solid var(--line); border-radius:12px; background:#fbfbff; }}
+    .manage h2 {{ margin-top:0; }}
+    .manage-cta {{ display:inline-block; margin-top:4px; padding:11px 18px; border-radius:10px; background:var(--accent); color:#fff; font-weight:700; text-decoration:none; }}
     .footer {{ padding:20px 28px 28px; border-top:1px solid var(--line); display:flex; flex-wrap:wrap; gap:16px; align-items:center; justify-content:space-between; }}
     .links {{ display:flex; gap:18px; flex-wrap:wrap; }}
     .links a {{ color:var(--accent); text-decoration:none; font-weight:600; }}
@@ -371,6 +413,7 @@ def render_public_page(page: dict[str, Any], config: dict[str, str] | None = Non
       </header>
       <article class="content">
         {content}
+        {manage_block}
       </article>
       <footer class="footer">
         <nav class="links">{footer_links}</nav>

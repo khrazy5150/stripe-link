@@ -407,7 +407,9 @@ class PageRenderTests(unittest.TestCase):
 
         self.assertIn("<a href=\"https://api.example.com/prod/legal/terms\" target=\"_blank\" rel=\"noopener\">Terms of Service</a>", html)
         self.assertIn("<a href=\"https://api.example.com/prod/legal/privacy\" target=\"_blank\" rel=\"noopener\">Privacy Policy</a>", html)
-        self.assertIn("<a href=\"https://api.example.com/prod/legal/refund\" target=\"_blank\" rel=\"noopener\">Refund Policy</a>", html)
+        # The refund link carries ?tenant=: that page hosts the "manage a purchase" action, and being
+        # platform-global it has no other way to know whose purchase (plans/PURCHASE_SELF_SERVICE.md).
+        self.assertIn("<a href=\"https://api.example.com/prod/legal/refund?tenant=tenant_demo\" target=\"_blank\" rel=\"noopener\">Refund Policy</a>", html)
         self.assertNotIn("#terms", html)
         self.assertNotIn("#refund-policy", html)
 

@@ -181,7 +181,9 @@ More than it looks, and this button is the missing front door:
 
 **Shipped** (`handlers/purchase_manage.py`, `domain/purchase_lookup.py`, `runtime/purchase_pages.py`):
 
-- The footer link, straight after Refund Policy, on every page that has a legal footer and a tenant.
+- The way in: a block on `/legal/refund` ("Cancel a payment or ask for a refund"), reached from the footer's
+  Refund Policy link, which now carries `?tenant=`. Not a second footer link — that competed with the page
+  it pointed at.
 - `GET ?tenant=` the form (email or phone, optional approximate date — never a card number).
 - `POST action=lookup` -> ONE order (latest, or nearest the date), a token scoped to it, and a link emailed
   to the address ON THE ORDER rather than the one typed. Identical answer on a hit and a miss.
