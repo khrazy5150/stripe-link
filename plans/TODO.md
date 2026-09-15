@@ -878,7 +878,9 @@ the index.
   receipt link is page-independent and already covers that case. Needs an index spanning every tenant, which
   is the buyer graph of the whole platform in one place and wants its own access rules. Build it when
   support volume shows people arriving at the wrong page, not on speculation.
-- ⬜ **Add `contact_key` to the order record BEFORE the GSI** (plan §5b). A GSI can be added to a live table
+- ⬜ **No GSI needed for v1**: orders are keyed `(tenant_id, order_id)`, so once the tenant is known the
+  lookup is a query on that tenant filtered by email — the index is a scale optimisation, not a
+  prerequisite. Still **add `contact_key` to the order record BEFORE any index** (plan §5b). A GSI can be added to a live table
   with no downtime, but it only indexes items that carry its key attribute, and CloudFormation allows ONE
   index change per stack update. Stamping the attribute early means a later backfill covers history only.
 
@@ -1078,6 +1080,28 @@ Note the schema itself cannot be kept secret: shipping a JSON API to a browser S
 discloses it. These changes are about polish and accidental exposure, not secrecy.
 
 ## Platform architecture
+
+### LOW — a creator directory: find a tenant by NAME (raised 2026-09-14)
+
+**What:** a platform-level way to look a creator up by name and land on their storefront, the way an
+Instagram profile works. Raised while designing the refund button — a customer who cannot find the page they
+bought from could search for the creator instead.
+
+**Not needed for that, which is why it is LOW.** The Site IS the tenant profile: the schema calls it "the
+public aggregate root: a tenant's website", it owns the hostname, Organization identity, navigation and a
+slug->page map with a `homepage` role, and it already serves on `*.jbay.uk` / `*.jbay.be`. The refund button
+lands on every page of that Site including its home, and the receipt link works regardless of pages. What a
+directory adds is DISCOVERABILITY, not a home for the button — so building a parallel "profile" concept
+beside Site would be the duplicate-implementation trap, two things that must agree about who a tenant is.
+
+**Decide it on its own merits, not as a side effect:**
+- It is the marketplace direction (plans/DIGITAL_MARKETPLACE.md) and adjacent to the `jbay.page/name` vanity
+  idea in plans/CREATOR_LINK_POLICY.md — the same identity, so decide them together.
+- It is a small reopening of "do we want a buyer-facing surface?" (plans/PAY_WHAT_YOU_WANT.md §5g settled
+  the ACCOUNT half as no). A directory is not an account, but it is a platform-owned page listing other
+  people's creators.
+- **It is a moderation surface.** A directory is closer to endorsement than hosting is, which is precisely
+  the abuse argument that gates `jbay.page`. Whatever allowlist/takedown policy that lands on, this inherits.
 
 ### ✅ MEDIUM — migrate `fonts-api` off python3.9 — SHIPPED 2026-09-09 (fonts-api 2898a7a)
 

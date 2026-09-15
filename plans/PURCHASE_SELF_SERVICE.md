@@ -104,9 +104,13 @@ Orders are keyed `(tenant_id, order_id)` with a `PaymentIntentIndex` GSI. v1 is 
 is known and the match is within one tenant's orders: **email (or phone) + optional approximate date ->
 latest match**.
 
-That still wants an index, because scanning a tenant's orders per request does not age well: a GSI on
-`(tenant_id, contact_key)` where `contact_key` is a normalized, hashed email or phone. Hashed so the index
-itself carries no readable contact data.
+**v1 needs no new index.** Orders are keyed `PK = tenant_id`, so once the tenant is known this is a QUERY on
+that tenant with a filter on the buyer's email — not a scan, and not a cross-tenant problem. It reads that
+tenant's orders per lookup, which for an action this rare is fine well past the point where anything else
+here needs attention.
+
+The index is a scale optimisation for later: a GSI on `(tenant_id, contact_key)` where `contact_key` is a
+normalized, hashed email or phone — hashed so the index itself carries no readable contact data.
 
 ### 5a. Cross-tenant, deferred
 
@@ -150,7 +154,7 @@ More than it looks, and this button is the missing front door:
 
 ## 7. What does not exist
 
-- The per-tenant contact index and the `contact_key` attribute on orders (§5).
+- The `contact_key` attribute on orders (§5) — the index itself can wait.
 - The form, and the identify-one-match logic with the neutral answer.
 - The transaction page: confirm what was found, act, or "not this one?".
 - **Policy-aware messaging.** Today a refund policy is text on a page. Here it decides what the button
@@ -162,8 +166,8 @@ More than it looks, and this button is the missing front door:
 ## 8. Build order
 
 1. **Footer link** next to Refund Policy, on every transactional page, scoped to that page's tenant.
-2. **`contact_key` on the order record first, then the GSI** (§5b) — the attribute wants to exist before the
-   index so the backfill only covers history.
+2. **`contact_key` on the order record** (§5b) — no index yet; the attribute wants to exist before one so a
+   later backfill covers history only.
 3. **Form → one match → one link**, with the neutral answer and a rate limit (the lead-capture abuse gate is
    the existing shape).
 4. **The transaction page** with the two actions that already have back ends: cancel a subscription (built)
