@@ -240,5 +240,67 @@ class HeroDerivationTests(unittest.TestCase):
 
 
 
+class HeroRoundTripTests(unittest.TestCase):
+    """The load/save loop that wrote the page's FILENAME into its own headline.
+
+    Storing nothing was right; the builder then loaded `page.name` in its place, and the next save wrote that
+    back as though the tenant had typed it. So a hero that derived correctly on Monday read "2025 Guide to
+    Junk Food Restaurants Landing Page" on Tuesday — the document title, plus two words nobody wrote. Every
+    step of the round trip has to agree on what "nothing stored" means, or one of them fills the gap.
+    """
+
+    @staticmethod
+    def _code(block):
+        """The block with comment lines removed — these assertions are about what RUNS, and the comments
+        here quote the very fallbacks they describe removing."""
+        return "\n".join(line for line in block.splitlines() if not line.strip().startswith("//"))
+
+    def test_loading_falls_back_to_the_derived_value_not_the_filename(self):
+        load = self._code(BUILDER.split("const hero = sections.find(", 1)[1][:3000])
+        self.assertIn("formatHeadline(offerHeadline(offer)", load)
+        self.assertIn("offerDescription(offer)", load)
+        self.assertNotIn("|| page.name", load)
+
+    def test_saving_has_no_page_name_fallback_either(self):
+        build = self._code(BUILDER.split('if (sectionVisible("hero")) sections.push(', 1)[1][:1400])
+        self.assertIn('heroOverride(formatHeadline(builder.headline || "")', build)
+        self.assertNotIn("builder.name", build)
+
+    def test_the_round_trip_is_a_no_op(self):
+        """Load then save must not turn a derived value into a stored one.
+
+        The builder loads the derived text so the field shows what the page says; heroOverride then drops it
+        because it equals the derived value. If either half changes, the page silently opts out of every
+        later correction to the offer — which is the bug, one layer up.
+        """
+        self.assertIn("function heroOverride(typed, derived)", BUILDER)
+        fn = BUILDER.split("function heroOverride(typed, derived)", 1)[1].split("\n}", 1)[0]
+        self.assertIn("value === String(derived || \"\").trim()", fn)
+        self.assertIn("return undefined", fn)
+
+    def test_the_cta_label_loads_from_the_offers_contract(self):
+        # The renderer reads offer_cta(offer), so loading a generic "Continue" would show the tenant a label
+        # their page does not use — and then store it.
+        load = BUILDER.split("cta_label: cta.label", 1)[1][:300]
+        self.assertIn("offer?.presentation?.cta?.label", load)
+
+
+class CtaSourceTests(unittest.TestCase):
+    def test_the_lead_button_reads_the_offer_not_the_page(self):
+        # Pinned because it decides where a wrong button label has to be FIXED: in the offer, not the page.
+        markup = _render()
+        self.assertIn("Get the guide", markup)
+
+    def test_a_page_section_label_cannot_override_it(self):
+        page = _page()
+        for section in page["sections"]:
+            if section["type"] == "checkout_cta":
+                section["label"] = "Stale label"
+        markup = html_module.render_page(page, _offer(), _products())
+        self.assertNotIn("Stale label", markup)
+        self.assertIn("Get the guide", markup)
+
+
+
 if __name__ == "__main__":
     unittest.main()

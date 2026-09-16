@@ -4224,8 +4224,15 @@ function populateBuilderFromPage(page) {
     seo_title: isAutoBakedSeoTitle(page) ? "" : page.seo.title,
     seo_description: isAutoBakedSeoTitle(page) ? "" : (page.seo?.description || ""),
     seo_image: page.seo?.image || pageImage(page),
-    headline: hero.headline || sectionText(sections, "headline") || page.name || "",
-    subheadline: hero.subheadline || sectionText(sections, "subheadline") || "",
+    // The stored override, else the SAME value the renderer would derive -- so the field shows what the page
+    // actually says, and saving it back is a no-op (heroOverride drops anything equal to the derived value).
+    //
+    // `page.name` used to be the last resort here, and it closed a loop: the page stored no headline, the
+    // builder loaded the page NAME instead, and the next save wrote that back as though the tenant had typed
+    // it. That is how a hero came to read "2025 Guide to Junk Food Restaurants Landing Page" -- the document
+    // title, with the word the tenant never wrote (author, 2026-09-16).
+    headline: hero.headline || sectionText(sections, "headline") || formatHeadline(offerHeadline(offer) || ""),
+    subheadline: hero.subheadline || sectionText(sections, "subheadline") || offerDescription(offer) || "",
     hero_media_text: (heroMedia.images || [page.seo?.image || pageImage(page)].filter(Boolean)).join("\n"),
     autoplay: Boolean(heroMedia.autoplay),
     avatar_url: heroMedia.avatar_url || "",
@@ -4236,7 +4243,9 @@ function populateBuilderFromPage(page) {
     brand_position: heroMedia.brand_position || "top-right",
     brand_dot_pulse: Boolean(heroMedia.brand_dot_pulse),
     brand_label_text: (sections.find((section) => section.type === "brand_label") || {}).label || "",
-    cta_label: cta.label || (offerIntentLabel(offer) === "Lead generation" ? "Continue" : "Buy Now"),
+    cta_label: cta.label
+      || offer?.presentation?.cta?.label || offer?.presentation?.cta_label
+      || (offerIntentLabel(offer) === "Lead generation" ? "Continue" : "Buy Now"),
     elements: elementsFromPage(sections),
     google_tag_id: page.analytics?.google_tag_id || "",
     pixel_id: page.analytics?.pixel_id || "",
@@ -4566,7 +4575,9 @@ function builderSectionCandidates(intent) {
     // the page at whatever the offer said the day it was made -- which is how a lead page kept announcing
     // "Capture Email" long after its offer had been given a real headline (author, 2026-09-15). Same rule
     // the SEO fields already follow: only an edit is written.
-    headline: heroOverride(formatHeadline(builder.headline || builder.name || "Landing Page"),
+    // No page-name fallback. An empty headline means "derive it", not "use the filename": substituting
+    // builder.name here is what made the loop above write a document title into the page.
+    headline: heroOverride(formatHeadline(builder.headline || ""),
                            formatHeadline(offerHeadline(builderOffer.value) || "")),
     subheadline: heroOverride(builder.subheadline || "", offerDescription(builderOffer.value) || ""),
   });
