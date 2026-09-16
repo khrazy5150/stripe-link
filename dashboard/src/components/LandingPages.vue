@@ -6656,7 +6656,10 @@ function ctaTypeLabel(type, leadAction = "") {
   if (type === "email" && LEAD_ACTION_CTA_LABELS[leadAction]) return LEAD_ACTION_CTA_LABELS[leadAction];
   const labels = {
     buy: "Buy — price + checkout",
-    call: "Call — click-to-call",
+    // "inbound phone calls" spelled out, because "click-to-call" reads as the OPPOSITE to anyone who has
+    // just configured a phone CAPTURE: one collects a number so the tenant rings the visitor, the other
+    // hands the visitor a number to ring. The author lost time to exactly that (2026-09-16).
+    call: "Call — inbound phone calls",
     email: "Email — inline capture form",
     external: "External link",
     download: "Download — file",
@@ -6670,7 +6673,7 @@ function ctaTypeDescription(type, leadAction = "") {
   if (type === "email" && LEAD_ACTION_CTA_DESCRIPTIONS[leadAction]) return LEAD_ACTION_CTA_DESCRIPTIONS[leadAction];
   const descriptions = {
     buy: "Shows the price card(s) and a Stripe checkout button.",
-    call: "Shows a tel: call button and the phone number.",
+    call: "Shows your number and a tap-to-dial button, so the visitor calls YOU.",
     email: "Collects the visitor's contact details inline.",
     external: "Sends the visitor to an external URL.",
     download: "Downloads a file for the visitor.",

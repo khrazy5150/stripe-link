@@ -247,9 +247,13 @@
                   {{ form.lead_capture.label || "Choose an action…" }}
                 </button>
               </div>
+              <!-- ONE phone control, the same one the Profile screen uses: country picker, per-country
+                   formatting, and a plain E.164 string out. A free-form textbox produced whatever the tenant
+                   typed, and a tel: link built from that is only as good as their punctuation. -->
               <label v-if="leadTargetLabel">
                 {{ leadTargetLabel }}
-                <input v-model.trim="form.lead_capture.target" :placeholder="leadTargetPlaceholder" />
+                <PhoneInput v-if="leadTargetIsPhone" v-model="form.lead_capture.target" />
+                <input v-else v-model.trim="form.lead_capture.target" :placeholder="leadTargetPlaceholder" />
               </label>
             </template>
 
@@ -393,6 +397,13 @@
             <span class="field-note">Buyers receive a secure, purchase-verified download link in their receipt email.</span>
           </section>
 
+          <label v-if="form.product_intent === 'lead_gen' && leadTargetLabelFor(form.lead_capture.action)">
+            {{ leadTargetLabelFor(form.lead_capture.action) }}
+            <PhoneInput v-if="form.lead_capture.action === 'call_number'" v-model="form.lead_capture.target" />
+            <input v-else v-model.trim="form.lead_capture.target"
+                   :placeholder="leadTargetPlaceholderFor(form.lead_capture.action)" />
+          </label>
+
           <div v-if="form.product_intent === 'lead_gen'" class="lead-action-toast">
             <span class="lead-action-info" aria-hidden="true">i</span>
             <div>
@@ -490,11 +501,6 @@
             <span v-if="draftLeadAction.action === action.action" class="lead-selected-check">✓</span>
           </button>
         </div>
-        <div v-if="leadTargetLabel" class="lead-target-fields">
-          <label>{{ leadTargetLabel }}
-            <input v-model.trim="draftLeadAction.target" :placeholder="leadTargetPlaceholder" />
-          </label>
-        </div>
         <footer class="product-modal-footer">
           <p>Selected: <strong>{{ draftLeadAction.label }}</strong></p>
           <div class="lead-picker-actions">
@@ -513,6 +519,7 @@ import { apiRequest, toAssetCdnUrl } from "../api/client";
 import { defaultProductPrice, formatMoney, generateSku, normalizeTag, priceSummary, useProductsStore } from "../stores/products";
 // The lead-action glyph is shared with the Offers selector, so the same product looks the same on both.
 import { leadActionIcon as leadIcon } from "../utils/leadActionIcon";
+import PhoneInput from "./PhoneInput.vue";
 import TipAmountsField from "./shared/TipAmountsField.vue";
 import WizardChoiceCard from "./shared/WizardChoiceCard.vue";
 import WizardSteps from "./shared/WizardSteps.vue";
@@ -722,13 +729,17 @@ const statusMessage = computed(() => {
 });
 
 const leadTargetLabel = computed(() => leadTargetLabelFor(draftLeadAction.value.action));
+const leadTargetIsPhone = computed(() => draftLeadAction.value.action === "call_number");
 
-const leadTargetPlaceholder = computed(() => {
-  if (draftLeadAction.value.action === "call_number") return "+12065550100";
-  if (draftLeadAction.value.action === "external_url") return "https://example.com";
-  if (draftLeadAction.value.action === "social_redirect") return "https://instagram.com/example";
+// By ACTION rather than off the draft, because the full edit form asks for the same destination without a
+// draft in play. The phone case is absent: PhoneInput supplies its own per-country placeholder.
+function leadTargetPlaceholderFor(action) {
+  if (action === "external_url") return "https://example.com";
+  if (action === "social_redirect") return "https://instagram.com/example";
   return "";
-});
+}
+
+const leadTargetPlaceholder = computed(() => leadTargetPlaceholderFor(draftLeadAction.value.action));
 
 const leadTargetPreview = computed(() => form.value.lead_capture.target || "");
 
@@ -960,7 +971,13 @@ function customTagsFromProduct(product) {
 }
 
 function applyLeadAction() {
-  form.value.lead_capture = { ...draftLeadAction.value };
+  // The picker chooses WHICH action; the destination is asked once, on the step that follows (author,
+  // 2026-09-16 -- it used to be asked in both places, which meant two phone controls to build and keep
+  // agreeing). Re-opening the picker and confirming the same action therefore has to KEEP what was typed;
+  // switching to a different one drops it, because a phone number is not a URL.
+  const sameAction = form.value.lead_capture.action === draftLeadAction.value.action;
+  const target = sameAction ? form.value.lead_capture.target : "";
+  form.value.lead_capture = { ...draftLeadAction.value, target };
   showLeadPicker.value = false;
 }
 

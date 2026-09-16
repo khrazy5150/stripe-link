@@ -367,13 +367,22 @@ class ExcludedToggleTests(unittest.TestCase):
         self.assertIn("excludedSections(builderOfferType.value).has(key)", block)
 
     def test_the_lead_shapes_really_do_exclude_them(self):
-        # The filter is only correct if the rules file says what it claims, so assert the rule too.
+        """The filter is only correct if the rules file says what it claims, so assert the rule too.
+
+        NARROWED 2026-09-16 (author): trust_badges now belong on lead_call and lead_bridge. Those two ask the
+        visitor to phone a stranger or leave the site, with no price, checkout or cart to reassure them --
+        badges are the only slot for licensed / insured / 24-hour. A capture page has a form doing the
+        persuading and a link hub sells nothing, so both still exclude them. refund_policy stays excluded
+        everywhere: nothing here is bought.
+        """
         from stripe_link.domain.composition import excluded_sections
 
         for shape in ("lead_capture", "lead_call", "lead_bridge", "lead_social"):
-            excluded = excluded_sections(shape)
-            self.assertIn("trust_badges", excluded, shape)
-            self.assertIn("refund_policy", excluded, shape)
+            self.assertIn("refund_policy", excluded_sections(shape), shape)
+        for shape in ("lead_capture", "lead_social"):
+            self.assertIn("trust_badges", excluded_sections(shape), shape)
+        for shape in ("lead_call", "lead_bridge"):
+            self.assertNotIn("trust_badges", excluded_sections(shape), shape)
 
     def test_a_checkout_page_still_offers_them(self):
         from stripe_link.domain.composition import excluded_sections

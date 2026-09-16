@@ -658,14 +658,19 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     # entirely: the footer floated up under the hero and the form sat pinned to the bottom of the viewport
     # with a screen of white space between them -- the page the author called an abomination (2026-09-15).
     # The reserved strip the fixed bar needs goes with it, or the page ends in 12rem of nothing.
-    "    .sl-checkout-cta.sl-email-cta{position:static;z-index:auto;background:none;padding:0}",
-    "    body:has(.sl-email-cta){padding-bottom:0}",
-    "    body:has(.sl-email-cta) main{padding-bottom:4rem}",
+    "    .sl-checkout-cta.sl-email-cta,.sl-checkout-cta.sl-call-cta,.sl-checkout-cta.sl-external-cta{position:static;z-index:auto;background:none;padding:0}",
+    "    body:has(.sl-email-cta),body:has(.sl-call-cta),body:has(.sl-external-cta){padding-bottom:0}",
+    "    body:has(.sl-email-cta) main,body:has(.sl-call-cta) main,body:has(.sl-external-cta) main{padding-bottom:4rem}",
+    # The call CTA stacks its number over its button and centres the pair; fixed, the flex row did that for it.
+    "    .sl-checkout-cta.sl-call-cta{display:grid;justify-items:center;gap:1rem}",
     "    .sl-cta{display:inline-flex;width:min(52rem,100%);align-items:center;justify-content:center;background:linear-gradient(135deg,var(--sl-cta-from),var(--sl-cta-to));color:var(--sl-cta-text);border:0;border-radius:1rem;padding:1.5rem 1.8rem;font-family:var(--sl-font-accent);font-size:1.7rem;font-weight:900;text-decoration:none}",
     "    .sl-cta.is-connecting{opacity:.72;cursor:wait;pointer-events:none}",
     "    .sl-decline-cta{width:auto;background:none;color:var(--sl-muted);text-decoration:underline;font-weight:600;font-size:1.3rem;padding:0.4rem}",
     "    .sl-downsell-note{text-align:center;color:var(--sl-muted);font-size:1.4rem;font-weight:600;margin-bottom:0.4rem}",
-    "    .sl-call-number{width:auto;color:var(--sl-cta-text);font-family:var(--sl-font-accent);font-weight:900;font-size:2.2rem;letter-spacing:0.02em;text-decoration:none}",
+    # The page's own ink, not --sl-cta-text. That token is white BY DESIGN -- it is the colour of text sitting
+    # ON the CTA scrim -- so the moment this line renders in the document flow it is white on white. The
+    # number was invisible on every click-to-call page (author, 2026-09-16).
+    "    .sl-call-number{width:auto;color:var(--sl-price-amount);font-family:var(--sl-font-accent);font-weight:900;font-size:2.2rem;letter-spacing:0.02em;text-decoration:none}",
     "    .sl-lead-form{display:flex;flex-direction:column;gap:1rem;width:min(52rem,100%);background:var(--sl-price-card-bg);border:1px solid var(--sl-price-card-border);border-radius:1.2rem;padding:1.6rem}",
     "    .sl-lead-title{font-family:var(--sl-font-heading);font-weight:800;font-size:1.8rem;color:var(--sl-price-title)}",
     "    .sl-lead-description{font-size:1.4rem;color:var(--sl-price-description)}",

@@ -71,9 +71,11 @@ class FooterPositionTests(unittest.TestCase):
     """
 
     def test_the_lead_form_is_in_the_flow(self):
-        rule = [line for line in CSS.splitlines() if ".sl-email-cta{" in line]
+        rule = [line for line in CSS.splitlines()
+                if ".sl-email-cta" in line and "position:static" in line]
         self.assertTrue(rule, "no rule returns the lead CTA to the flow")
-        self.assertIn("position:static", rule[0])
+        # Widened 2026-09-16: the call and bridge CTAs are page content for the same reason.
+        self.assertIn(".sl-call-cta", rule[0])
 
     def test_the_sales_bar_is_still_fixed(self):
         # Narrowed to the lead variant, not removed: every other page still wants the sticky buy bar.
@@ -83,7 +85,7 @@ class FooterPositionTests(unittest.TestCase):
     def test_the_strip_reserved_for_a_fixed_bar_goes_with_it(self):
         # body/main carry bottom padding so the fixed bar never covers content. In flow it is just a screen
         # of trailing white space.
-        self.assertIn("body:has(.sl-email-cta){padding-bottom:0}", CSS)
+        self.assertIn("body:has(.sl-email-cta),body:has(.sl-call-cta),body:has(.sl-external-cta){padding-bottom:0}", CSS)
 
     def test_the_rendered_order_puts_the_footer_last(self):
         markup = _render()
