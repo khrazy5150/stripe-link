@@ -32,7 +32,9 @@ class OfferCtaTests(unittest.TestCase):
         html = _render({"type": "call", "label": "Call Kristin", "target": "+1 (555) 123-4567"})
         self.assertIn('data-cta-type="call"', html)
         self.assertIn('href="tel:+15551234567"', html)
-        self.assertIn("+1 (555) 123-4567", html)
+        # DISPLAYED in national form from 2026-09-16 (dialable_number): the stored value is E.164, and a
+        # string of digits is not a phone number to the eye. The href still carries the raw digits.
+        self.assertIn("(555) 123-4567", html)
         self.assertIn("Call Kristin", html)
         self.assertNotIn("$150.00", html)  # a call CTA must never show a price
 

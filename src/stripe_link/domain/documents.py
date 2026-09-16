@@ -1416,6 +1416,8 @@ def validate_page_document(document: dict[str, Any]) -> None:
             require_string(section, "text", "Subheadline text")
         elif section_type == "trust_badges":
             optional_bool(section, "enabled", "Trust badges enabled")
+            if section.get("orientation") is not None:
+                require_enum(section, "orientation", {"horizontal", "vertical"}, "Trust badges orientation")
             badges = optional_limited_object_list(section, "badges", 3, "Trust badges")
             for badge in badges:
                 optional_string(badge, "emoji", "Trust badge emoji")
@@ -1497,6 +1499,8 @@ def validate_page_document(document: dict[str, Any]) -> None:
                 optional_string(item, "slug", "Catalog grid item slug")
         elif section_type == "checkout_cta":
             optional_string(section, "label", "Checkout CTA label")
+            # One line above a click-to-call page's number -- "Available 24 hours", "Se habla espanol".
+            optional_string(section, "call_kicker", "Checkout CTA call_kicker", max_length=60)
             # The inline lead form's own heading and sub-line, overriding the product's per-action default.
             # Capped because they sit inside a card above the field, not in the hero.
             optional_string(section, "form_title", "Checkout CTA form_title", max_length=80)

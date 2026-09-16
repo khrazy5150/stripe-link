@@ -680,10 +680,25 @@
                 </label>
                 <small>Refund policy copy comes from the selected offer.</small>
               </template>
+            <template v-else-if="sectionEditor.row.editor === 'trust_badges'">
+                <label class="offer-field">
+                  <span>Orientation</span>
+                  <select v-model="builder.trust_badges.orientation">
+                    <option value="horizontal">Horizontal — a row of pills</option>
+                    <option value="vertical">Vertical — one claim per line</option>
+                  </select>
+                </label>
+              </template>
             <template v-else-if="sectionEditor.row.editor === 'checkout_cta'">
                 <label class="offer-field">
                   <span>Button Label</span>
                   <input v-model.trim="builder.cta_label" type="text" />
+                </label>
+                <!-- One line above the number on a click-to-call page. The tenant's claim, never ours. -->
+                <label v-if="builderCta.type === 'call'" class="offer-field">
+                  <span>Line above the number <small>(optional)</small></span>
+                  <input v-model.trim="builder.cta_call_kicker" type="text"
+                         placeholder="e.g. Available 24 hours a day" maxlength="60" />
                 </label>
                 <!-- The inline form's own words. Seeded per lead action, but a phone capture is a different
                      business on every page that uses it -- a roofer's "Where can we reach you?" is not an
@@ -3277,6 +3292,7 @@ function defaultBuilderForm() {
     // The inline lead form's own heading and sub-line. Empty means "use the product's per-action default",
     // which is what the placeholder shows -- only an edit is stored.
     cta_form_title: "",
+    cta_call_kicker: "",
     cta_form_description: "",
     countdown: {
       enabled: false,
@@ -3323,6 +3339,9 @@ function defaultBuilderForm() {
     },
     trust_badges: {
       enabled: true,
+      // A wrapping pill row, or one claim per line. Vertical earns its place on a page whose whole argument
+      // IS the claims -- licensed, answers at 3am, covers your county (author, 2026-09-16).
+      orientation: "horizontal",
       badges: [
         { enabled: true, emoji: "🚀", label: "Fast Checkout" },
         { enabled: true, emoji: "✅", label: "Satisfaction Guarantee" },
@@ -4278,6 +4297,7 @@ function populateBuilderFromPage(page) {
     // Only the OVERRIDE is loaded. The product's default shows as a placeholder, so loading it as a value
     // would store it back on the next save -- the same loop that wrote a filename into the hero.
     cta_form_title: cta.form_title || "",
+    cta_call_kicker: cta.call_kicker || "",
     cta_form_description: cta.form_description || "",
     elements: elementsFromPage(sections),
     google_tag_id: page.analytics?.google_tag_id || "",
@@ -4324,6 +4344,7 @@ function populateBuilderFromPage(page) {
   });
   Object.assign(builder.trust_badges, defaultBuilderForm().trust_badges, {
     enabled: trustBadges.enabled !== false,
+    orientation: trustBadges.orientation === "vertical" ? "vertical" : "horizontal",
     badges: Array.isArray(trustBadges.badges) && trustBadges.badges.length
       ? trustBadges.badges.map((badge) => ({
         ...badge,
@@ -4622,6 +4643,7 @@ function builderSectionCandidates(intent) {
       id: "trust-badges",
       type: "trust_badges",
       enabled: true,
+      orientation: builder.trust_badges.orientation === "vertical" ? "vertical" : undefined,
       badges: visibleTrustBadges.value.map((badge) => ({
         enabled: true,
         emoji: badge.emoji,
@@ -4648,6 +4670,7 @@ function builderSectionCandidates(intent) {
       id: "checkout-cta",
       type: "checkout_cta",
       label: builder.cta_label || ctaLabelDefault.value,
+      call_kicker: builder.cta_call_kicker || undefined,
       form_title: builder.cta_form_title || undefined,
       form_description: builder.cta_form_description || undefined,
     });

@@ -19,7 +19,7 @@ CSS = "\n".join(html_module.UNIVERSAL_BUNDLE_TEMPLATE_STYLES)
 RULES = json.loads((ROOT / "src" / "stripe_link" / "composition_rules.json").read_text(encoding="utf-8"))
 
 
-def _render(badges=None, phone="+12065654418"):
+def _render(badges=None, phone="+12065654418", kicker="", orientation=None):
     product = {
         "product_id": "p1", "tenant_id": "t1", "name": "Emergency Water Damage",
         "description": "For 24-hour service water damage", "product_intent": "lead_gen",
@@ -38,8 +38,11 @@ def _render(badges=None, phone="+12065654418"):
     }
     sections = [{"id": "b", "type": "brand_label"}, {"id": "h", "type": "hero"}]
     if badges:
-        sections.append({"id": "tb", "type": "trust_badges", "enabled": True, "badges": badges})
-    sections += [{"id": "c", "type": "checkout_cta"},
+        badge_section = {"id": "tb", "type": "trust_badges", "enabled": True, "badges": badges}
+        if orientation:
+            badge_section["orientation"] = orientation
+        sections.append(badge_section)
+    sections += [{"id": "c", "type": "checkout_cta", **({"call_kicker": kicker} if kicker else {})},
                  {"id": "lf", "type": "legal_footer", "copyright": "(c)"}]
     page = {"page_id": "pg", "tenant_id": "t1", "offer_id": "o1", "name": "N", "status": "draft",
             "route": {"slug": "s"}, "theme": {"template": "universal_bundle", "preset": "clean-slate"},
@@ -56,7 +59,11 @@ class NumberLegibilityTests(unittest.TestCase):
         """
         rule = [line for line in CSS.splitlines() if ".sl-call-number{" in line][0]
         self.assertNotIn("var(--sl-cta-text)", rule)
-        self.assertIn("color:var(--sl-price-amount)", rule)
+        # It INHERITS the panel's ink now, so the number is legible against whatever the panel is painted --
+        # which is the only version that cannot go wrong when a theme changes one and not the other.
+        self.assertIn("color:inherit", rule)
+        panel = [line for line in CSS.splitlines() if ".sl-call-panel{" in line][0]
+        self.assertIn("color:var(--sl-section-ink", panel)
 
     def test_the_number_is_shown_and_dialable(self):
         markup = _render()
@@ -148,6 +155,120 @@ class OnePhoneControlTests(unittest.TestCase):
         self.assertIn("const sameAction = form.value.lead_capture.action === draftLeadAction.value.action",
                       apply_block)
         self.assertIn("sameAction ? form.value.lead_capture.target : \"\"", apply_block)
+
+
+class CallPanelTests(unittest.TestCase):
+    """The number is the page's headline act, so it is the size of one (author's design, 2026-09-16).
+
+    It was a line of small text above a short button on an otherwise empty page. The shape is borrowed from
+    the page ribbon rather than invented -- the author reached for a ribbon to mock this up, which said the
+    shape was already right and just not reachable from a CTA.
+    """
+
+    def test_the_number_is_formatted_the_way_it_is_read_aloud(self):
+        self.assertEqual(html_module.dialable_number("+12065654418"), "(206) 565-4418")
+        self.assertEqual(html_module.dialable_number("2065654418"), "(206) 565-4418")
+
+    def test_a_non_nanp_number_keeps_its_e164_form(self):
+        """NANP only, deliberately.
+
+        Every other country's E.164 is correct and universally dialable; getting the rest right means
+        libphonenumber, and a 220KB dependency in the PUBLISH path to prettify a label is not a trade worth
+        making.
+        """
+        self.assertEqual(html_module.dialable_number("+4930901820"), "+4930901820")
+        self.assertEqual(html_module.dialable_number("+442071838750"), "+442071838750")
+
+    def test_the_href_always_uses_the_raw_digits(self):
+        # Formatting is for the eye. A tel: built from "(206) 565-4418" is a gamble on the dialler.
+        markup = _render()
+        self.assertIn('href="tel:+12065654418"', markup)
+        self.assertIn("(206) 565-4418", markup)
+
+    def test_the_panel_carries_kicker_number_and_button(self):
+        markup = _render(kicker="Available 24 hours per day")
+        self.assertIn("sl-call-panel", markup)
+        self.assertIn("Available 24 hours per day", markup)
+        self.assertIn("sl-call-number", markup)
+        self.assertIn("sl-call-button", markup)
+
+    def test_the_kicker_is_the_tenants_line_and_never_ours(self):
+        # It is a claim about their availability. Absent means absent.
+        self.assertNotIn('<p class="sl-call-kicker">', _render())
+
+    def test_the_panel_is_constrained_to_the_content_column(self):
+        # .sl-checkout-cta is EXCLUDED from main's column rule, because that exclusion exists for the fixed
+        # sales bar which must span the viewport. In flow the panel has to be put back, or it bleeds.
+        rule = [line for line in CSS.splitlines() if ".sl-checkout-cta.sl-call-cta{width:" in line]
+        self.assertTrue(rule, "the call panel is not constrained")
+        self.assertIn("52rem", rule[0])
+
+    def test_the_number_has_exactly_one_colour_rule(self):
+        # The pre-rewrite rule survived once and, sitting later in the sheet, won -- blue on navy inside the
+        # new dark panel. Two rules for one element is how that happens.
+        self.assertEqual(len([line for line in CSS.splitlines() if ".sl-call-number{" in line]), 1)
+
+
+class StickyCallTests(unittest.TestCase):
+    """Restored on the author's instruction: "it pays to have that call button stick to the bottom".
+
+    Someone scrolling a phone should never have to find their way back to the number. It is its OWN element
+    rather than the panel being made sticky, so the panel can still be read in place.
+    """
+
+    def test_there_is_a_sticky_bar(self):
+        self.assertIn('data-call-sticky', _render())
+
+    def test_it_is_fixed_to_the_bottom(self):
+        rule = [line for line in CSS.splitlines() if ".sl-call-sticky{" in line][0]
+        self.assertIn("position:fixed", rule)
+        self.assertIn("bottom:0", rule)
+        # A phone's home indicator sits in that strip.
+        self.assertIn("safe-area-inset-bottom", rule)
+
+    def test_the_page_reserves_the_strip_it_covers(self):
+        # The same bargain the sales bar makes. Without it the bar hides the end of the page.
+        self.assertIn("body:has(.sl-call-sticky) main{padding-bottom:", CSS)
+
+    def test_the_panel_is_not_the_sticky_one(self):
+        # Two tap targets, and only one of them travels.
+        panel = [line for line in CSS.splitlines() if ".sl-call-panel{" in line][0]
+        self.assertNotIn("position:fixed", panel)
+
+
+class BadgeOrientationTests(unittest.TestCase):
+    def test_vertical_is_one_claim_per_line(self):
+        """A pill row reads as decoration.
+
+        On a page whose whole argument IS the claims -- licensed, answers at 3am, covers your county -- each
+        one deserves its own line.
+        """
+        markup = _render(badges=[{"enabled": True, "emoji": "🛡️", "label": "Licensed"}], orientation="vertical")
+        self.assertIn("sl-trust-badges is-vertical", markup)
+        self.assertIn(".sl-trust-badges.is-vertical{flex-direction:column", CSS)
+
+    def test_horizontal_is_still_the_default(self):
+        markup = _render(badges=[{"enabled": True, "emoji": "🛡️", "label": "Licensed"}])
+        self.assertIn("sl-trust-badges is-horizontal", markup)
+
+    def test_the_validator_knows_both_and_nothing_else(self):
+        from stripe_link.domain.documents import DocumentValidationError, validate_page_document
+
+        def page(orientation):
+            return {"schema_version": "1", "document_type": "page", "tenant_id": "t", "page_id": "p1",
+                    "name": "P", "offer_id": "o1", "route": {"slug": "p"},
+                    "sections": [{"id": "tb", "type": "trust_badges", "orientation": orientation,
+                                  "badges": [{"label": "Licensed"}]}]}
+
+        for good in ("horizontal", "vertical"):
+            validate_page_document(page(good))
+        with self.assertRaises(DocumentValidationError):
+            validate_page_document(page("diagonal"))
+
+    def test_the_builder_offers_the_choice(self):
+        self.assertIn('<option value="vertical">', BUILDER)
+        self.assertIn("builder.trust_badges.orientation", BUILDER)
+
 
 
 if __name__ == "__main__":

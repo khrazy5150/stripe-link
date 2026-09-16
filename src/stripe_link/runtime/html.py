@@ -537,6 +537,9 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     "    .sl-avatar-wrap.sl-avatar--centered{margin-left:auto;margin-right:auto}",
     "    .sl-avatar{width:100%;height:100%;border-radius:50%;object-fit:cover;background:var(--sl-hero-bg);display:block}",
     "    .sl-trust-badges{display:flex;flex-wrap:wrap;gap:0.8rem;justify-content:center}",
+    # One claim per line, each its own card. Same badge markup; only the container changes.
+    "    .sl-trust-badges.is-vertical{flex-direction:column;flex-wrap:nowrap;align-items:stretch;gap:1rem}",
+    "    .sl-trust-badges.is-vertical .sl-trust-badge{justify-content:flex-start;border-radius:1rem;padding:1.4rem 1.8rem;font-size:1.5rem}",
     "    .sl-trust-badge{display:flex;align-items:center;gap:0.6rem;border:1px solid var(--sl-trust-badge-border);background:var(--sl-trust-badge-bg);color:var(--sl-trust-badge-text);border-radius:999px;padding:0.8rem 1.4rem;font-family:var(--sl-font-accent);font-size:1.2rem;font-weight:800}",
     "    .sl-price-options{display:grid;grid-template-columns:1fr;gap:1.4rem;width:100%;margin:0 auto}",
     "    .sl-bnpl-message{margin:1rem auto 0;width:min(42rem,100%);min-height:1.2rem}",
@@ -660,17 +663,26 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     # The reserved strip the fixed bar needs goes with it, or the page ends in 12rem of nothing.
     "    .sl-checkout-cta.sl-email-cta,.sl-checkout-cta.sl-call-cta,.sl-checkout-cta.sl-external-cta{position:static;z-index:auto;background:none;padding:0}",
     "    body:has(.sl-email-cta),body:has(.sl-call-cta),body:has(.sl-external-cta){padding-bottom:0}",
-    "    body:has(.sl-email-cta) main,body:has(.sl-call-cta) main,body:has(.sl-external-cta) main{padding-bottom:4rem}",
-    # The call CTA stacks its number over its button and centres the pair; fixed, the flex row did that for it.
-    "    .sl-checkout-cta.sl-call-cta{display:grid;justify-items:center;gap:1rem}",
+    "    body:has(.sl-email-cta) main,body:has(.sl-external-cta) main{padding-bottom:4rem}",
+    # THE CALL PANEL. Ribbon-shaped on purpose (see render_call_cta): the number is the page's headline act,
+    # so it gets a block of its own rather than a line of small text above a short button.
+    "    .sl-checkout-cta.sl-call-cta{display:block}",
+    "    .sl-checkout-cta.sl-call-cta{width:min(52rem,calc(100% - 3.2rem));margin-left:auto;margin-right:auto}",
+    "    .sl-call-panel{display:grid;justify-items:center;gap:1.2rem;padding:3.2rem 2.4rem;border-radius:1.4rem;background:var(--sl-section-bg,var(--sl-text));color:var(--sl-section-ink,var(--sl-cta-text));text-align:center}",
+    "    .sl-call-kicker{margin:0;font-family:var(--sl-font-accent);font-size:1.3rem;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;opacity:.75}",
+    # Sized to be read across a room and tapped without aiming. `tabular-nums` so the digits do not shimmy.
+    "    .sl-call-number{display:block;color:inherit;font-family:var(--sl-font-accent);font-weight:900;font-size:clamp(3.2rem,9vw,4.4rem);line-height:1.05;letter-spacing:0.01em;font-variant-numeric:tabular-nums;text-decoration:none}",
+    "    .sl-call-panel .sl-call-button{background:var(--sl-cta-text);color:var(--sl-text);min-width:16rem}",
+    # The STICKY bar. A phone scroller should never have to find their way back to the number.
+    "    .sl-call-sticky{position:fixed;left:0;right:0;bottom:0;z-index:10;display:flex;justify-content:center;padding:1.2rem 1.6rem calc(1.2rem + env(safe-area-inset-bottom));background:linear-gradient(transparent,var(--sl-cta-scrim) 35%)}",
+    "    .sl-call-sticky .sl-call-button{width:min(52rem,100%);text-align:center}",
+    # It is fixed, so the page has to reserve the strip it covers -- the same bargain the sales bar makes.
+    "    body:has(.sl-call-sticky){padding-bottom:0}",
+    "    body:has(.sl-call-sticky) main{padding-bottom:11rem}",
     "    .sl-cta{display:inline-flex;width:min(52rem,100%);align-items:center;justify-content:center;background:linear-gradient(135deg,var(--sl-cta-from),var(--sl-cta-to));color:var(--sl-cta-text);border:0;border-radius:1rem;padding:1.5rem 1.8rem;font-family:var(--sl-font-accent);font-size:1.7rem;font-weight:900;text-decoration:none}",
     "    .sl-cta.is-connecting{opacity:.72;cursor:wait;pointer-events:none}",
     "    .sl-decline-cta{width:auto;background:none;color:var(--sl-muted);text-decoration:underline;font-weight:600;font-size:1.3rem;padding:0.4rem}",
     "    .sl-downsell-note{text-align:center;color:var(--sl-muted);font-size:1.4rem;font-weight:600;margin-bottom:0.4rem}",
-    # The page's own ink, not --sl-cta-text. That token is white BY DESIGN -- it is the colour of text sitting
-    # ON the CTA scrim -- so the moment this line renders in the document flow it is white on white. The
-    # number was invisible on every click-to-call page (author, 2026-09-16).
-    "    .sl-call-number{width:auto;color:var(--sl-price-amount);font-family:var(--sl-font-accent);font-weight:900;font-size:2.2rem;letter-spacing:0.02em;text-decoration:none}",
     "    .sl-lead-form{display:flex;flex-direction:column;gap:1rem;width:min(52rem,100%);background:var(--sl-price-card-bg);border:1px solid var(--sl-price-card-border);border-radius:1.2rem;padding:1.6rem}",
     "    .sl-lead-title{font-family:var(--sl-font-heading);font-weight:800;font-size:1.8rem;color:var(--sl-price-title)}",
     "    .sl-lead-description{font-size:1.4rem;color:var(--sl-price-description)}",
@@ -2870,8 +2882,12 @@ def render_trust_badges(section: dict[str, Any]) -> str:
     ]
     if not rendered:
         return ""
+    # Vertical stacks them as full-width rows instead of a wrapping pill row. A pill row reads as
+    # decoration; on a page whose whole argument is "we are licensed, we answer at 3am, we cover your
+    # county", each claim deserves its own line (author, 2026-09-16).
+    orientation = "vertical" if str(section.get("orientation") or "").strip() == "vertical" else "horizontal"
     return "\n".join([
-        f"    <section class=\"sl-trust-badges\" data-section-id=\"{escape(str(section.get('id', 'trust-badges')))}\" data-section-type=\"trust_badges\">",
+        f"    <section class=\"sl-trust-badges is-{orientation}\" data-section-id=\"{escape(str(section.get('id', 'trust-badges')))}\" data-section-type=\"trust_badges\">",
         *rendered,
         "    </section>",
     ])
@@ -6051,7 +6067,7 @@ class CtaRenderContext:
 # JS island (client), which is where a conversion is actually performed (plans/CONVERSION_CONTEXT.md).
 CTA_REGISTRY: dict[str, dict[str, Any]] = {
     "buy": {"render": lambda c: render_buy_cta(c.page, c.section, c.offer, c.resolved_offer, c.checkout_url, c.api_base_url), "version": 1},
-    "call": {"render": lambda c: render_call_cta(c.cta), "version": 1},
+    "call": {"render": lambda c: render_call_cta(c.cta, c.section), "version": 1},
     "external": {"render": lambda c: render_external_cta(c.cta), "version": 1},
     "email": {"render": lambda c: render_email_cta(c.page, c.offer, c.cta, c.products_by_id, c.api_base_url, c.section), "version": 1},
     "download": {"render": lambda c: render_download_cta(c.cta), "version": 1},
@@ -6264,19 +6280,58 @@ def render_buy_cta(
     ] if line)
 
 
-def render_call_cta(cta: dict[str, str]) -> str:
-    """Phone/call CTA: a prominent number banner + a tel: call button."""
+def dialable_number(phone: str) -> str:
+    """The number as a human reads it aloud, from the E.164 the tenant stored.
+
+    NANP only, deliberately. "+12065654418" is a string of digits nobody scans; "(206) 565-4418" is a phone
+    number. Every other country keeps its E.164 form, which is correct and universally dialable -- getting
+    the rest right means libphonenumber, and a 220KB dependency in the PUBLISH path to prettify a label is
+    not a trade worth making. The tel: href always uses the raw digits either way.
+    """
+    digits = re.sub(r"[^\d]", "", phone or "")
+    if phone.strip().startswith("+1") and len(digits) == 11:
+        return f"({digits[1:4]}) {digits[4:7]}-{digits[7:]}"
+    if not phone.strip().startswith("+") and len(digits) == 10:
+        return f"({digits[0:3]}) {digits[3:6]}-{digits[6:]}"
+    return phone.strip()
+
+
+def render_call_cta(cta: dict[str, str], section: dict[str, Any] | None = None) -> str:
+    """The call panel: a ribbon-shaped block built around the NUMBER, plus a sticky bar that follows.
+
+    Rebuilt 2026-09-16 on the author's design. The number was a line of small text above a short button on an
+    otherwise empty page; it is the single most important thing here, so it is now the size of one. Borrowed
+    from the page ribbon rather than invented, because the author reached for a ribbon to mock this up -- the
+    shape was already right, it was just not reachable from a CTA.
+
+    The number itself is a tap target, not decoration: on a phone it dials, and on a desktop it is the thing
+    the visitor writes down.
+    """
+    section = section or {}
     phone = cta["target"].strip()
     label = escape(cta["label"] or "Call Now")
     tel = re.sub(r"[^\d+]", "", phone)
     href = f"tel:{escape(tel)}" if tel else "#"
-    number_line = f"      <a class=\"sl-call-number\" href=\"{href}\">{escape(phone)}</a>" if phone else ""
-    return "\n".join(line for line in [
+    # One line above the number -- "Available 24 hours", "Se habla espanol". The tenant's, never invented.
+    kicker = str(section.get("call_kicker") or "").strip()
+    panel = [
         "    <section class=\"sl-checkout-cta sl-call-cta\" data-section-type=\"checkout_cta\" data-cta-type=\"call\">",
-        number_line,
-        f"      <a class=\"sl-cta sl-call-button\" href=\"{href}\">{label}</a>",
+        "      <div class=\"sl-call-panel\">",
+        (f"        <p class=\"sl-call-kicker\">{escape(kicker)}</p>" if kicker else ""),
+        (f"        <a class=\"sl-call-number\" href=\"{href}\">{escape(dialable_number(phone))}</a>" if phone else ""),
+        f"        <a class=\"sl-cta sl-call-button\" href=\"{href}\">{label}</a>",
+        "      </div>",
         "    </section>",
-    ] if line)
+    ]
+    # A SECOND, sticky tap target. Someone scrolling a phone should never have to find their way back to the
+    # number (author, 2026-09-16: "it pays to have that call button stick to the bottom no matter what").
+    # Its own element rather than making the panel sticky, so the panel can be read in place.
+    sticky = [
+        "    <div class=\"sl-call-sticky\" data-call-sticky>",
+        f"      <a class=\"sl-cta sl-call-button\" href=\"{href}\">{label}</a>",
+        "    </div>",
+    ]
+    return "\n".join(line for line in panel + sticky if line)
 
 
 def render_external_cta(cta: dict[str, str]) -> str:
