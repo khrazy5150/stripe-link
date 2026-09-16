@@ -279,6 +279,58 @@ class RecurringTipTests(unittest.TestCase):
         self.assertIn("TIP_RULES.intervals.includes(priceForm.recurring_interval)", block)
 
 
+class LeadMagnetTests(unittest.TestCase):
+    """A lead magnet files itself, because the wizard never asks it to (author, 2026-09-15).
+
+    `product_category` is required of EVERY product server-side, and the lead flow shows no category field —
+    there is nothing to categorise and nothing is sold. So the wizard produced a document the API rejected
+    with "Product product_category must be a non-empty string": an error naming a field that was never on the
+    screen. Exactly the shape that blocked every tip jar in September.
+    """
+
+    def _apply(self):
+        return SCRIPT.split("function applyWizardIntent", 1)[1].split("\n}", 1)[0]
+
+    def test_a_lead_magnet_files_itself(self):
+        lead = self._apply().split('if (wizardIntent.value === "lead_gen")', 1)[1].split("} else if", 1)[0]
+        self.assertIn('form.value.product_type = "digital"', lead)
+        self.assertIn("form.value.product_category = LEAD_CATEGORY", lead)
+
+    def test_it_is_filed_under_a_curated_public_safe_category(self):
+        """"other", not a "lead_gen" key of its own.
+
+        product_category is PUBLIC — it becomes schema.org `category`, a breadcrumb label, and the key a
+        Site's category rail groups by. "Other" is meaningless there but harmless; "Lead Gen" would put
+        internal jargon on a buyer-facing label. It is also already curated, so unlike "tip" it needs no
+        exclusion from the suggestion list.
+        """
+        self.assertIn('const LEAD_CATEGORY = "other"', SCRIPT)
+        from stripe_link.domain.categories import CURATED_CATEGORIES, SYSTEM_CATEGORIES
+        self.assertIn("other", CURATED_CATEGORIES)
+        self.assertIn("digital", CURATED_CATEGORIES["other"]["types"])
+        self.assertNotIn("other", SYSTEM_CATEGORIES)
+
+    def test_the_type_watcher_cannot_undo_it(self):
+        # Changing product_type clears product_category. The lead branch sets BOTH, so without the guard the
+        # watcher wipes the category the line above just wrote — the same trap the tip branch hit.
+        lead = self._apply().split('if (wizardIntent.value === "lead_gen")', 1)[1].split("} else if", 1)[0]
+        self.assertIn("hydratingForm.value = true", lead)
+
+    def test_switching_back_to_selling_does_not_inherit_a_filed_category(self):
+        # Its field IS shown on that flow, so inheriting "Tip" from an abandoned pass would pre-fill a
+        # category the picker no longer offers, on a product that is actually for sale.
+        transaction = self._apply().rsplit("} else {", 1)[1]
+        self.assertIn("[TIP_CATEGORY, LEAD_CATEGORY].includes(form.value.product_category)", transaction)
+        self.assertIn('form.value.product_category = ""', transaction)
+
+    def test_the_action_field_is_labelled_like_every_other_field(self):
+        # The bare button read as an instruction ("Action: Capture email") rather than as the value of
+        # something called Lead Capture Action.
+        panel = TEMPLATE.split("wizardStepKey === 'details'", 1)[1].split("\n          </section>", 1)[0]
+        self.assertIn("Lead Capture Action", panel)
+        self.assertNotIn("`Action: ${form.lead_capture.label}`", TEMPLATE)
+
+
 class PricingModelTests(unittest.TestCase):
     """"Customer chooses" is not a pricing model a tenant picks (author, 2026-09-15).
 

@@ -4580,6 +4580,20 @@ button:disabled {
   padding: 1rem 1.2rem;
 }
 
+/* A wizard field whose control is a BUTTON rather than an input — it still needs the label every field
+   beside it has, or it reads as a stray instruction instead of a value. */
+.wizard-field {
+  display: grid;
+  gap: 0.6rem;
+  justify-items: start;
+}
+
+.wizard-field-label {
+  font-size: 1.3rem;
+  font-weight: 600;
+  color: var(--text, #111827);
+}
+
 /* The tip-jar element's pitch: prose, then the action it is arguing for. Stacked rather than inline so the
    button is a target rather than a phrase, and `justify-self: start` on .primary-action keeps it from
    stretching the full width of the element panel. */

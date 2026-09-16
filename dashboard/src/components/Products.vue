@@ -238,9 +238,15 @@
               <p class="field-note">
                 A lead magnet is never sold, so it has no price, SKU or category — just the action it performs.
               </p>
-              <button class="secondary-action" type="button" @click="showLeadPicker = true">
-                {{ form.lead_capture.label ? `Action: ${form.lead_capture.label}` : "Choose an action" }}
-              </button>
+              <!-- Labelled like every other field on this step. The bare button read as an instruction
+                   ("Action: Capture email") rather than as the value of something called Lead Capture
+                   Action, which is what it is. -->
+              <div class="wizard-field">
+                <span class="wizard-field-label">Lead Capture Action <span class="required">*</span></span>
+                <button class="secondary-action" type="button" @click="showLeadPicker = true">
+                  {{ form.lead_capture.label || "Choose an action…" }}
+                </button>
+              </div>
               <label v-if="leadTargetLabel">
                 {{ leadTargetLabel }}
                 <input v-model.trim="form.lead_capture.target" :placeholder="leadTargetPlaceholder" />
@@ -586,6 +592,9 @@ const onLastWizardStep = computed(() => wizardStep.value >= wizardFlow.value.len
 // counts DISTINCT tenants before promoting a key to a suggestion, and "tip" is a key that deserves promoting.
 const TIP_CATEGORY = "tip";
 
+// Where a lead magnet is filed. Curated, neutral, and public-facing-safe -- see applyWizardIntent.
+const LEAD_CATEGORY = "other";
+
 const intentNamePlaceholder = computed(() => ({
   transaction: "e.g. Premium Widget",
   lead_gen: "e.g. Free Starter Guide",
@@ -634,6 +643,24 @@ function applyWizardIntent() {
   if (wizardIntent.value === "lead_gen") {
     form.value.product_intent = "lead_gen";
     price.pricing_model = "one_time";
+    // A lead magnet FILES ITSELF, the same way a tip jar does. The wizard never shows a category field on
+    // this flow -- there is nothing to categorise, nothing is sold -- but `product_category` is required of
+    // every product server-side, so without this the wizard produced a document the API rejected with
+    // "Product product_category must be a non-empty string": an error naming a field that was never on the
+    // screen (author, 2026-09-15).
+    //
+    // "other" rather than a "lead_gen" key of its own, on the author's preference and for a reason worth
+    // keeping: product_category is PUBLIC. It becomes schema.org `category`, a breadcrumb label and the key
+    // a Site's category rail groups by. "Other" is meaningless there but harmless; "Lead Gen" would put
+    // internal jargon on a buyer-facing label. It is also already curated, so unlike "tip" it needs no
+    // exclusion from the suggestion list.
+    //
+    // hydratingForm suppresses the product_type watcher, which clears the category when the type changes --
+    // the same trap the tip branch below hit, where the watcher undid the line that had just run.
+    hydratingForm.value = true;
+    form.value.product_type = "digital";
+    form.value.product_category = LEAD_CATEGORY;
+    nextTick(() => { hydratingForm.value = false; });
   } else if (wizardIntent.value === "tip_jar") {
     // A transaction product, priced customer_chooses. Digital because nothing ships and nothing is booked.
     form.value.product_intent = "transaction";
@@ -657,6 +684,13 @@ function applyWizardIntent() {
   } else {
     form.value.product_intent = "transaction";
     price.pricing_model = "one_time";
+    // Going BACK and picking "Sell something" after one of the self-filing intents must not leave their
+    // category behind. Its field is shown on this flow, so inheriting "Tip" from an abandoned pass would
+    // pre-fill a category the picker no longer even offers -- and a product for sale filed under "Tip" is
+    // wrong in the product list, the breadcrumb and the schema alike.
+    if ([TIP_CATEGORY, LEAD_CATEGORY].includes(form.value.product_category)) {
+      form.value.product_category = "";
+    }
   }
 }
 
