@@ -1082,6 +1082,21 @@ buyer-side product?" (a supporter dashboard across creators, i.e. plans/DIGITAL_
 people cancel?". If they ever arrive they are ADDITIVE — an optional prompt after the tip, never a gate
 before it.
 
+### FUTURE — SMS capture is its OWN page, not a checkbox on the phone one (author, 2026-09-16)
+
+Decided while finishing the phone-capture page, and recorded because the cheap-looking version is wrong.
+
+A phone capture collects a number so the tenant can **call the person back**. That is an inquiry the visitor
+asked for. Marketing texts to the same number are a different permission entirely: in the US, TCPA requires
+prior express **written** consent for marketing calls and texts, with its own disclosure wording, its own
+record-keeping, and statutory damages per message when it is missing. The email opt-ins were removed from
+the phone page for a related reason — no address means no list — and reusing either box for SMS would
+manufacture a consent that does not meet that bar.
+
+So when marketing SMS is enabled it gets its own page shape (a fifth alongside capture / call / bridge /
+social), with its own consent language, not a third checkbox on this one. Gated on the SMS capability being
+live; the note in `render_email_cta` points here.
+
 ### ⭐ HIGH — Lead-generation pages: four shapes, not one (plan plans/LEAD_GEN_PAGES.md, 2026-09-10)
 
 A lead-gen offer currently builds a **checkout page with the price hidden**. Observed on a real page: trust
