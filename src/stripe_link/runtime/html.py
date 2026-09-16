@@ -654,6 +654,13 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     "    .sl-faq-heading{font-family:var(--sl-font-heading);font-size:1.8rem;line-height:1.25;margin-bottom:0.2rem;color:var(--sl-faq-summary)}",
     "    .sl-faq p{color:var(--sl-faq-text);font-size:1.4rem;line-height:1.6;padding:0 2rem 1.6rem}",
     "    .sl-checkout-cta{position:fixed;left:0;right:0;bottom:0;z-index:10;background:linear-gradient(transparent,var(--sl-cta-scrim) 20%);padding:1.6rem;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:0.8rem}",
+    # A LEAD page's cta is the FORM, not a buy bar, so it belongs in the flow. Fixed, it left the document
+    # entirely: the footer floated up under the hero and the form sat pinned to the bottom of the viewport
+    # with a screen of white space between them -- the page the author called an abomination (2026-09-15).
+    # The reserved strip the fixed bar needs goes with it, or the page ends in 12rem of nothing.
+    "    .sl-checkout-cta.sl-email-cta{position:static;z-index:auto;background:none;padding:0}",
+    "    body:has(.sl-email-cta){padding-bottom:0}",
+    "    body:has(.sl-email-cta) main{padding-bottom:4rem}",
     "    .sl-cta{display:inline-flex;width:min(52rem,100%);align-items:center;justify-content:center;background:linear-gradient(135deg,var(--sl-cta-from),var(--sl-cta-to));color:var(--sl-cta-text);border:0;border-radius:1rem;padding:1.5rem 1.8rem;font-family:var(--sl-font-accent);font-size:1.7rem;font-weight:900;text-decoration:none}",
     "    .sl-cta.is-connecting{opacity:.72;cursor:wait;pointer-events:none}",
     "    .sl-decline-cta{width:auto;background:none;color:var(--sl-muted);text-decoration:underline;font-weight:600;font-size:1.3rem;padding:0.4rem}",
@@ -6047,7 +6054,14 @@ def render_email_cta(
     tenant_id = escape(str(page.get("tenant_id") or offer.get("tenant_id") or ""))
     offer_id = escape(str(offer.get("offer_id") or ""))
     page_id = escape(str(page.get("page_id") or ""))
-    brand = escape(str(offer_brand_fallback(offer) or "us"))
+    # WHOSE list this is. The BUSINESS name first -- the same _RENDER_ORG the brand label at the top of the
+    # page uses -- because a consent line naming the offer read as "Join capture email's mailing list", which
+    # is not a thing anyone can consent to. The offer's brand is the fallback, and "us" the last resort.
+    brand = escape(str(
+        str(_RENDER_ORG.get("name") or "").strip()
+        or offer_brand_fallback(offer)
+        or "us"
+    ))
 
     inputs = []
     for field in declared:
@@ -6065,6 +6079,12 @@ def render_email_cta(
 
     tenant_consent_text = f"Join {brand}'s mailing list."
     platform_consent_text = "Also hear from Junior Bay about offers like this."
+    # PRE-TICKED, on the author's instruction (2026-09-15). Recorded plainly because it is a reversal, not an
+    # oversight: plans/LEAD_CAPTURE.md specified opt-in, and GDPR recital 32 says in terms that "silence,
+    # pre-ticked boxes or inactivity" do not constitute consent. Both boxes remain visible, labelled and
+    # un-ticked-able by the visitor, and the checked state is recorded per lead exactly as before -- so what
+    # changes is the default, and reversing it is deleting `checked` from the two lines below.
+    checked = "checked "
     return "\n".join([
         "    <section class=\"sl-checkout-cta sl-email-cta\" data-section-type=\"checkout_cta\" data-cta-type=\"email\">",
         f"      <form class=\"sl-lead-form\" data-lead-form data-endpoint=\"{endpoint}\" "
@@ -6076,9 +6096,9 @@ def render_email_cta(
         # Honeypot — visually hidden, off-screen; bots fill it, humans don't.
         "        <input class=\"sl-hp\" type=\"text\" name=\"company_website\" tabindex=\"-1\" autocomplete=\"off\" aria-hidden=\"true\" />",
         "        <label class=\"sl-lead-consent\"><input type=\"checkbox\" data-consent=\"tenant_marketing\" "
-        f"data-consent-text=\"{escape(tenant_consent_text)}\" /> {escape(tenant_consent_text)}</label>",
+        f"{checked}data-consent-text=\"{escape(tenant_consent_text)}\" /> {escape(tenant_consent_text)}</label>",
         "        <label class=\"sl-lead-consent\"><input type=\"checkbox\" data-consent=\"platform_marketing\" "
-        f"data-consent-text=\"{escape(platform_consent_text)}\" /> {escape(platform_consent_text)}</label>",
+        f"{checked}data-consent-text=\"{escape(platform_consent_text)}\" /> {escape(platform_consent_text)}</label>",
         f"        <button class=\"sl-cta\" type=\"submit\">{label}</button>",
         "        <p class=\"sl-lead-status\" data-lead-status role=\"status\" aria-live=\"polite\"></p>",
         "      </form>",

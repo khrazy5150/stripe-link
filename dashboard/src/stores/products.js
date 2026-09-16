@@ -367,7 +367,10 @@ export async function buildProductDocument(form) {
     status: form.status === "archived" ? "archived" : "active",
     name: String(form.name || "").trim(),
     description: String(form.description || "").trim(),
-    images: isLeadGen ? [] : images,
+    // A lead magnet keeps its images. They were stripped because it is "never sold" -- but the picture is
+    // what the squeeze page shows ABOVE the form, and emptying the array left the hero_media section with
+    // nothing to render, so every lead page was text on white (author, 2026-09-15).
+    images,
     ...(Object.keys(imageDims).length ? { image_dims: imageDims } : {}),
     product_intent: isLeadGen ? "lead_gen" : "transaction",
     product_type: productType,

@@ -4706,7 +4706,6 @@ function buildPageDocument() {
   const offer = selectedOffer.value;
   const intent = selectedOfferIntent.value;
   const pageId = form.page_id || localId("page");
-  const leadAction = selectedLeadAction.value;
   return cleanObject({
     schema_version: "2026-05-29",
     document_type: "page",
@@ -4720,7 +4719,10 @@ function buildPageDocument() {
     },
     seo: {
       title: form.name || offer.name,
-      description: offer.presentation?.headline || leadAction?.description || "",
+      // The offer's own subheadline, then the product's description. NOT presentation.headline (that is the
+      // title again) and NOT the lead action's description, which describes the FORM ("Collect the visitor's
+      // email address.") rather than the thing being offered.
+      description: offer.presentation?.subheadline || offerDescription(offer) || "",
       image: offerImage(offer),
     },
     offer_id: offer.offer_id,
@@ -4731,7 +4733,7 @@ function buildPageDocument() {
     },
     post_checkout: intent === "transaction" ? postCheckoutBlock() : undefined,
     legal: legalLinks(),
-    sections: pageSections(intent, offer, leadAction),
+    sections: pageSections(intent, offer),
     revision: 1,
     created_at: now,
     updated_at: now,
@@ -4746,7 +4748,7 @@ function postCheckoutBlock() {
   };
 }
 
-function pageSections(intent, offer, leadAction) {
+function pageSections(intent, offer) {
   // One section list for every offer type. The CTA component is chosen by the offer's cta.type at
   // render time (server + preview), so the page only needs a hero, an optional price selector, and a
   // checkout_cta — never a lead-flow content block or a page-level CTA override.
@@ -4764,7 +4766,10 @@ function pageSections(intent, offer, leadAction) {
       id: "hero",
       type: "hero",
       headline: formatHeadline(offerHeadline(offer) || (intent === "transaction" ? "Complete your order" : "Get started")),
-      subheadline: offerDescription(offer) || leadAction?.description || "Choose your option and continue.",
+      // The PRODUCT's words, never the lead action's. `leadAction.description` describes the mechanism --
+      // "Collect the visitor's email address." -- and putting it under the headline made every capture page
+      // introduce itself as a form instead of as the thing on offer (author, 2026-09-15).
+      subheadline: offerDescription(offer) || "Choose your option and continue.",
     },
   ];
   if (intent === "transaction") {
