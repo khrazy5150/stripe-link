@@ -291,14 +291,19 @@ class CtaSourceTests(unittest.TestCase):
         markup = _render()
         self.assertIn("Get the guide", markup)
 
-    def test_a_page_section_label_cannot_override_it(self):
+    def test_the_page_label_now_overrides_the_offer(self):
+        """Reversed on 2026-09-16, deliberately.
+
+        This used to pin "the offer always wins", which meant the builder's Button Label field was a no-op on
+        every lead page -- the tenant typed a label, saved, and nothing changed. render_buy_cta had always
+        read section.label; the lead CTAs had not. The offer is still the fallback.
+        """
         page = _page()
         for section in page["sections"]:
             if section["type"] == "checkout_cta":
-                section["label"] = "Stale label"
+                section["label"] = "Call Me Back"
         markup = html_module.render_page(page, _offer(), _products())
-        self.assertNotIn("Stale label", markup)
-        self.assertIn("Get the guide", markup)
+        self.assertIn("Call Me Back", markup)
 
 
 
@@ -367,18 +372,22 @@ class PhoneCaptureTests(unittest.TestCase):
         markup = self._render("capture_email_phone", [{"name": "company_size", "type": "text"}], "Get in Touch")
         self.assertIn('placeholder="Company Size"', markup)
 
+    def _email(self, **kw):
+        return self._render("capture_email", [{"name": "email", "type": "email", "required": True}],
+                            "Get Instant Access", **kw)
+
     def test_the_consent_line_names_the_business_not_the_product(self):
         """The half left behind when the brand label was fixed.
 
-        `offer_brand_fallback` ends at the offer's headline, which IS the product name -- so a roofing
-        company's page asked the visitor to join "Free Roof Inspection's mailing list", which is not a thing
-        that has a mailing list.
+        `offer_brand_fallback` ends at the offer's headline, which IS the product name -- so a page asked the
+        visitor to join "Free Roof Inspection's mailing list", which is not a thing that has a mailing list.
+        Checked on an EMAIL capture: a phone capture now shows no consent at all.
         """
         self.assertIn("Join Apex Roofing&#x27;s mailing list.",
-                      self._phone(prefs={"business_name": "Apex Roofing"}))
+                      self._email(prefs={"business_name": "Apex Roofing"}))
 
     def test_the_product_name_is_never_the_list_owner(self):
-        markup = self._phone(prefs={"display_name": "Dana Reeve"})
+        markup = self._email(prefs={"display_name": "Dana Reeve"})
         self.assertIn("Join Dana Reeve&#x27;s mailing list.", markup)
         self.assertNotIn("Free Roof Inspection&#x27;s mailing list", markup)
 
@@ -389,8 +398,112 @@ class PhoneCaptureTests(unittest.TestCase):
         self.assertIn("A 20-minute check and a written report.", markup)
 
     def test_neither_consent_box_is_ticked_here_either(self):
-        form = self._phone().split("sl-lead-form", 1)[1].split("</form>", 1)[0]
+        form = self._email().split("sl-lead-form", 1)[1].split("</form>", 1)[0]
         self.assertNotIn("checked", form)
+
+
+
+class PhoneCaptureTenantControlTests(unittest.TestCase):
+    """A phone capture page is for OUTBOUND CALLS -- contractors, insurance, real estate (author, 2026-09-16).
+
+    Which means the seeded copy cannot be a fixture: a roofer's "Where can we reach you?" is not an insurance
+    broker's. The defaults stay; what changes is that they are now a starting point.
+    """
+
+    def _render(self, section_extra=None, fields=None):
+        product = {**_products()["prod_lead"],
+                   "lead_capture": {"action": "capture_phone", "title": "Where can we reach you?",
+                                    "description": "Enter your number and we'll be in touch.",
+                                    "fields": fields or [{"name": "phone", "type": "tel", "required": True}]}}
+        offer = _offer()
+        offer["presentation"] = {**offer["presentation"], "cta": {"type": "email", "label": "Offer Snapshot"}}
+        page = _page()
+        for section in page["sections"]:
+            if section["type"] == "checkout_cta":
+                section.update(section_extra or {})
+        return html_module.render_page(page, offer, {"prod_lead": product})
+
+    def test_the_page_can_replace_the_form_heading_and_description(self):
+        markup = self._render({"form_title": "Get a free roof quote",
+                               "form_description": "We call back within one business day."})
+        self.assertIn("Get a free roof quote", markup)
+        self.assertIn("We call back within one business day.", markup)
+        self.assertNotIn("Where can we reach you?", markup)
+
+    def test_the_products_default_shows_when_the_page_says_nothing(self):
+        markup = self._render()
+        self.assertIn("Where can we reach you?", markup)
+
+    def test_the_button_label_on_the_PAGE_finally_works(self):
+        """render_buy_cta read section.label; the lead CTAs never did.
+
+        So the builder's "Button Label" field was a no-op on exactly the pages whose whole job is that
+        button -- the tenant typed a label, saved, and the offer's snapshot kept winning.
+        """
+        self.assertIn("Call Me Back Today", self._render({"label": "Call Me Back Today"}))
+
+    def test_the_offer_still_supplies_it_when_the_page_does_not(self):
+        self.assertIn("Offer Snapshot", self._render({"label": ""}))
+
+
+class ConsentScopeTests(unittest.TestCase):
+    """Mailing-list consent belongs on a page that collects a mailing address."""
+
+    def _boxes(self, action, fields):
+        product = {**_products()["prod_lead"],
+                   "lead_capture": {"action": action, "title": "T", "description": "D", "fields": fields}}
+        markup = html_module.render_page(_page(), _offer(), {"prod_lead": product})
+        return re.findall(r'<label class="sl-lead-consent"><input type="checkbox" data-consent="(\w+)"', markup)
+
+    def test_a_phone_capture_asks_for_no_email_consent(self):
+        # There is no address to add to a list, so both boxes asked the visitor to agree to something that
+        # cannot happen -- and a consent nothing can act on is worse than not asking.
+        self.assertEqual(self._boxes("capture_phone", [{"name": "phone", "type": "tel", "required": True}]), [])
+
+    def test_an_email_capture_still_asks(self):
+        self.assertEqual(
+            self._boxes("capture_email", [{"name": "email", "type": "email", "required": True}]),
+            ["tenant_marketing", "platform_marketing"])
+
+    def test_asking_for_both_keeps_the_consents(self):
+        self.assertEqual(
+            self._boxes("capture_email_phone", [{"name": "email", "type": "email", "required": True},
+                                                {"name": "phone", "type": "tel", "required": True}]),
+            ["tenant_marketing", "platform_marketing"])
+
+    def test_the_possessive_does_not_produce_uss(self):
+        # "Join us's mailing list." is what the last-resort brand did to the apostrophe.
+        product = {**_products()["prod_lead"],
+                   "lead_capture": {"action": "capture_email", "title": "T", "description": "D",
+                                    "fields": [{"name": "email", "type": "email", "required": True}]}}
+        offer = _offer()
+        offer["presentation"] = {"cta": {"type": "email", "label": "Go"}}
+        markup = html_module.render_page(_page(), offer, {"prod_lead": product})
+        self.assertIn("Join our mailing list.", markup)
+        self.assertNotIn("us&#x27;s", markup)
+
+
+class CtaDialogTests(unittest.TestCase):
+    def test_the_dialog_names_the_action_not_the_shared_type(self):
+        # One cta type ("email") backs three lead actions, so a phone capture announced itself as
+        # "Email — inline capture form" in the very dialog that edits it.
+        labels = BUILDER.split("const LEAD_ACTION_CTA_LABELS = {", 1)[1].split("};", 1)[0]
+        self.assertIn('capture_phone: "Phone — outbound calls"', labels)
+        self.assertIn('capture_email_phone: "Email + phone', labels)
+
+    def test_the_form_fields_are_offered_only_for_the_inline_collector(self):
+        dialog = BUILDER.split("sectionEditor.row.editor === 'checkout_cta'", 1)[1][:1600]
+        self.assertIn("builder.cta_form_title", dialog)
+        self.assertIn("builder.cta_form_description", dialog)
+        self.assertIn("builderCta.type === 'email'", dialog)
+
+    def test_only_an_edit_is_stored(self):
+        # The product's default is a PLACEHOLDER. Loading it as a value would store it back on the next
+        # save, which is the loop that wrote a filename into the hero.
+        load = BUILDER.split("cta_form_title: cta.form_title", 1)[1][:120]
+        self.assertIn('|| ""', load)
+        save = BUILDER.split('id: "checkout-cta"', 1)[1][:400]
+        self.assertIn("form_title: builder.cta_form_title || undefined", save)
 
 
 

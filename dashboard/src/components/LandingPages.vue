@@ -685,9 +685,22 @@
                   <span>Button Label</span>
                   <input v-model.trim="builder.cta_label" type="text" />
                 </label>
+                <!-- The inline form's own words. Seeded per lead action, but a phone capture is a different
+                     business on every page that uses it -- a roofer's "Where can we reach you?" is not an
+                     insurance broker's -- so the default is a starting point, not a fixture. -->
+                <template v-if="builderCta.type === 'email'">
+                  <label class="offer-field">
+                    <span>Form heading</span>
+                    <input v-model.trim="builder.cta_form_title" type="text" :placeholder="leadFormPlaceholder.title" maxlength="80" />
+                  </label>
+                  <label class="offer-field">
+                    <span>Form description</span>
+                    <input v-model.trim="builder.cta_form_description" type="text" :placeholder="leadFormPlaceholder.description" maxlength="200" />
+                  </label>
+                </template>
                 <div class="lead-action-summary">
-                  <strong>{{ ctaTypeLabel(builderCta.type) }}</strong>
-                  <span>{{ ctaTypeDescription(builderCta.type) }} This comes from the offer and can't be changed here.</span>
+                  <strong>{{ ctaTypeLabel(builderCta.type, builderLeadAction) }}</strong>
+                  <span>{{ ctaTypeDescription(builderCta.type, builderLeadAction) }} The kind of action comes from the offer and can't be changed here.</span>
                   <code v-if="builderCta.target">{{ builderCta.target }}</code>
                 </div>
               </template>
@@ -2497,6 +2510,18 @@ const selectedOfferIsSocialPage = computed(() =>
   || selectedOfferProducts.value.some((product) => product?.lead_capture?.action === "social_redirect"));
 const selectedLeadAction = computed(() => selectedOfferProducts.value.find((product) => product.lead_capture)?.lead_capture || null);
 const builderOffer = computed(() => offers.value.find((offer) => offer.offer_id === builder.offer_id) || null);
+// Which lead action this page's offer performs. The cta TYPE cannot say: one type ("email") backs three.
+const builderLeadAction = computed(() => String(
+  builderOffer.value?.lead_capture_action
+  || offerProducts(builderOffer.value)[0]?.lead_capture?.action
+  || "",
+));
+// What the form says when the tenant has typed nothing -- shown as a placeholder so the field reads as a
+// default they may replace rather than as a blank they must fill.
+const leadFormPlaceholder = computed(() => {
+  const capture = offerProducts(builderOffer.value)[0]?.lead_capture || {};
+  return { title: capture.title || "", description: capture.description || "" };
+});
 const builderOfferProducts = computed(() => offerProducts(builderOffer.value));
 const builderIntent = computed(() => offerIntent(builderOffer.value));
 // Post-purchase funnel gating (P3.5): the upsell/downsell/carousel copy only matters when the offer carries a
@@ -3249,6 +3274,10 @@ function defaultBuilderForm() {
     hero_media_text: "",
     autoplay: false,
     cta_label: "Buy Now",
+    // The inline lead form's own heading and sub-line. Empty means "use the product's per-action default",
+    // which is what the placeholder shows -- only an edit is stored.
+    cta_form_title: "",
+    cta_form_description: "",
     countdown: {
       enabled: false,
       duration_minutes: 15,
@@ -4246,6 +4275,10 @@ function populateBuilderFromPage(page) {
     cta_label: cta.label
       || offer?.presentation?.cta?.label || offer?.presentation?.cta_label
       || (offerIntentLabel(offer) === "Lead generation" ? "Continue" : "Buy Now"),
+    // Only the OVERRIDE is loaded. The product's default shows as a placeholder, so loading it as a value
+    // would store it back on the next save -- the same loop that wrote a filename into the hero.
+    cta_form_title: cta.form_title || "",
+    cta_form_description: cta.form_description || "",
     elements: elementsFromPage(sections),
     google_tag_id: page.analytics?.google_tag_id || "",
     pixel_id: page.analytics?.pixel_id || "",
@@ -4615,6 +4648,8 @@ function builderSectionCandidates(intent) {
       id: "checkout-cta",
       type: "checkout_cta",
       label: builder.cta_label || ctaLabelDefault.value,
+      form_title: builder.cta_form_title || undefined,
+      form_description: builder.cta_form_description || undefined,
     });
   }
   // previewRefundPolicy mirrors the server's lookup (offer.refund_policy, then the product's). With no
@@ -6603,7 +6638,22 @@ function toggleMenu(pageId) {
 }
 
 // The offer's cta.type is the single source of truth for the on-page CTA; these just label it for the UI.
-function ctaTypeLabel(type) {
+// ONE cta type ("email" — the inline collector) backs three different lead actions, so the type alone
+// cannot name what the page does: a phone capture was announcing itself as "Email — inline capture form"
+// in the dialog that edits it (author, 2026-09-16). The action decides when there is one.
+const LEAD_ACTION_CTA_LABELS = {
+  capture_email: "Email — inline capture form",
+  capture_phone: "Phone — outbound calls",
+  capture_email_phone: "Email + phone — inline capture form",
+};
+const LEAD_ACTION_CTA_DESCRIPTIONS = {
+  capture_email: "Collects the visitor's email address inline.",
+  capture_phone: "Collects the visitor's phone number so you can call them back.",
+  capture_email_phone: "Collects the visitor's email address and phone number inline.",
+};
+
+function ctaTypeLabel(type, leadAction = "") {
+  if (type === "email" && LEAD_ACTION_CTA_LABELS[leadAction]) return LEAD_ACTION_CTA_LABELS[leadAction];
   const labels = {
     buy: "Buy — price + checkout",
     call: "Call — click-to-call",
@@ -6616,7 +6666,8 @@ function ctaTypeLabel(type) {
   return labels[type] || "Buy — price + checkout";
 }
 
-function ctaTypeDescription(type) {
+function ctaTypeDescription(type, leadAction = "") {
+  if (type === "email" && LEAD_ACTION_CTA_DESCRIPTIONS[leadAction]) return LEAD_ACTION_CTA_DESCRIPTIONS[leadAction];
   const descriptions = {
     buy: "Shows the price card(s) and a Stripe checkout button.",
     call: "Shows a tel: call button and the phone number.",

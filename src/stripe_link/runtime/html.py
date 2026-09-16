@@ -6048,7 +6048,7 @@ CTA_REGISTRY: dict[str, dict[str, Any]] = {
     "buy": {"render": lambda c: render_buy_cta(c.page, c.section, c.offer, c.resolved_offer, c.checkout_url, c.api_base_url), "version": 1},
     "call": {"render": lambda c: render_call_cta(c.cta), "version": 1},
     "external": {"render": lambda c: render_external_cta(c.cta), "version": 1},
-    "email": {"render": lambda c: render_email_cta(c.page, c.offer, c.cta, c.products_by_id, c.api_base_url), "version": 1},
+    "email": {"render": lambda c: render_email_cta(c.page, c.offer, c.cta, c.products_by_id, c.api_base_url, c.section), "version": 1},
     "download": {"render": lambda c: render_download_cta(c.cta), "version": 1},
     # An appointment IS a booking — reuse the inline calendar widget rather than duplicate it.
     "booking": {"render": lambda c: render_booking_cta(c.cta, c.api_base_url, c.offer), "version": 1},
@@ -6066,6 +6066,12 @@ def render_checkout_cta(
     products_by_id: dict[str, dict[str, Any]] | None = None,
 ) -> str:
     cta = offer_cta(offer)
+    # The PAGE's label overrides the offer's snapshot. render_buy_cta already did this for itself; the lead
+    # CTAs did not, so the builder's "Button Label" field was a no-op on exactly the pages whose whole job is
+    # that button (author, 2026-09-16). Resolved once here so all five types behave the same.
+    section_label = str(section.get("label") or "").strip()
+    if section_label:
+        cta = {**cta, "label": section_label}
     entry = CTA_REGISTRY.get(cta["type"], CTA_REGISTRY["buy"])
     ctx = CtaRenderContext(
         cta=cta, page=page, section=section, offer=offer, resolved_offer=resolved_offer,
@@ -6090,14 +6096,19 @@ def render_email_cta(
     cta: dict[str, str],
     products_by_id: dict[str, dict[str, Any]],
     api_base_url: str | None,
+    section: dict[str, Any] | None = None,
 ) -> str:
     """Inline lead-capture form. Renders the primary product's declared lead_capture.fields[], a honeypot,
     and two independent GDPR opt-ins (tenant list + Junior Bay list). Submits to POST /leads via JS."""
     lead_capture = first_offer_lead_capture(offer, products_by_id)
     declared = lead_capture.get("fields") or [{"name": "email", "type": "email", "required": True}]
     label = escape(cta["label"] or "Get Started")
-    title = escape(str(lead_capture.get("title") or ""))
-    description = escape(str(lead_capture.get("description") or ""))
+    # The PAGE first, then the product's. A phone capture is a different business on every page that uses it
+    # -- a roofer's "Where can we reach you?" is not an insurance broker's -- so the seeded default has to be
+    # a starting point the tenant can replace rather than a fixed string (author, 2026-09-16).
+    section = section or {}
+    title = escape(str(section.get("form_title") or lead_capture.get("title") or "").strip())
+    description = escape(str(section.get("form_description") or lead_capture.get("description") or "").strip())
     endpoint = escape(f"{str(api_base_url or '').rstrip('/')}/leads")
     tenant_id = escape(str(page.get("tenant_id") or offer.get("tenant_id") or ""))
     offer_id = escape(str(offer.get("offer_id") or ""))
@@ -6136,8 +6147,28 @@ def render_email_cta(
             f"placeholder=\"{placeholder}\"{extras} {required} />"
         )
 
-    tenant_consent_text = f"Join {brand}'s mailing list."
+    # MAILING-LIST consent belongs on a page that collects a mailing address. A phone capture has no email to
+    # add to a list, so both boxes were asking the visitor to agree to something that cannot happen -- and
+    # recording a consent nothing can act on is worse than not asking (author, 2026-09-16).
+    #
+    # Note for whoever adds SMS or call marketing later: this is NOT the box to reuse. Marketing calls and
+    # texts to a submitted number are governed separately (TCPA in the US requires prior express WRITTEN
+    # consent, and a callback the visitor asked for is a different thing from a marketing campaign).
+    collects_email = any(
+        str(field.get("type") or "").strip().lower() == "email"
+        or str(field.get("name") or "").strip().lower() == "email"
+        for field in declared
+    )
+    # "Join us's mailing list." is what the possessive did with the last-resort brand. When we cannot name
+    # the business, say it the way a person would.
+    tenant_consent_text = f"Join {brand}'s mailing list." if brand != "us" else "Join our mailing list."
     platform_consent_text = "Also hear from Junior Bay about offers like this."
+    consent_rows = [
+        "        <label class=\"sl-lead-consent\"><input type=\"checkbox\" data-consent=\"tenant_marketing\" "
+        f"data-consent-text=\"{escape(tenant_consent_text)}\" /> {escape(tenant_consent_text)}</label>",
+        "        <label class=\"sl-lead-consent\"><input type=\"checkbox\" data-consent=\"platform_marketing\" "
+        f"data-consent-text=\"{escape(platform_consent_text)}\" /> {escape(platform_consent_text)}</label>",
+    ] if collects_email else []
     # UNTICKED, and it has to stay that way. GDPR recital 32 says in terms that "silence, pre-ticked boxes or
     # inactivity" do not constitute consent, and Art. 4(11) requires "a clear affirmative action" -- a box the
     # visitor must UNtick is the absence of one. Settled in CJEU Planet49 (C-673/17), which reasoned straight
@@ -6157,10 +6188,7 @@ def render_email_cta(
         *inputs,
         # Honeypot — visually hidden, off-screen; bots fill it, humans don't.
         "        <input class=\"sl-hp\" type=\"text\" name=\"company_website\" tabindex=\"-1\" autocomplete=\"off\" aria-hidden=\"true\" />",
-        "        <label class=\"sl-lead-consent\"><input type=\"checkbox\" data-consent=\"tenant_marketing\" "
-        f"data-consent-text=\"{escape(tenant_consent_text)}\" /> {escape(tenant_consent_text)}</label>",
-        "        <label class=\"sl-lead-consent\"><input type=\"checkbox\" data-consent=\"platform_marketing\" "
-        f"data-consent-text=\"{escape(platform_consent_text)}\" /> {escape(platform_consent_text)}</label>",
+        *consent_rows,
         f"        <button class=\"sl-cta\" type=\"submit\">{label}</button>",
         "        <p class=\"sl-lead-status\" data-lead-status role=\"status\" aria-live=\"polite\"></p>",
         "      </form>",
