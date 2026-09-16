@@ -45,6 +45,42 @@ Deferred, non-blocking follow-ups. Each item notes what, why it was deferred, an
 
 ## Security
 
+### ⭐⭐ HIGH — the API never verifies who is calling; tenant_id is taken from the request (found 2026-09-15)
+
+Noticed while smoke-testing a newly deployed endpoint on prod, NOT introduced by it. This is repo-wide and
+pre-existing.
+
+**What was verified, concretely:**
+
+- `template.yaml` defines no `Auth:`, no `Authorizer`, no `DefaultAuthorizer`. The RestApi has none.
+- `tenant_id_from_event` (`stripe_link/common.py:109`) reads the tenant from, in order: the JSON body, `?
+  tenant_id=`, `?tenantID=`, `X-Tenant-Id`, `X-Client-Id`. All client-supplied.
+- The `Authorization: Bearer` header the dashboard sends on every request (`api/client.js`) is named in the
+  CORS allow-list and **read nowhere else in `src/`**. There is no JWKS fetch, no token decode, no signature
+  check anywhere in the repo.
+- `POST /pages`, `POST /offers` and `POST /tip-jar` with no credentials all return **400** ("tenant_id is
+  required") rather than 401/403 — the Lambda ran. Supplying a tenant_id is what the handler is waiting for.
+
+**So, on the face of it:** anyone who knows or guesses a tenant_id can call the tenant-scoped write endpoints
+as that tenant. `require_capability` does not help — it reads the tenant's plan, it does not establish who is
+asking.
+
+**NOT verified, deliberately:** no cross-tenant write was attempted against prod. The reasoning above is from
+the code and from unauthenticated status codes only. Confirm with a deliberate test in dev before sizing the
+fix — it is possible something outside this repo (a WAF rule, a CloudFront function, an edge Worker) is
+checking the token, and that would change the answer.
+
+**Why it matters more now than last week:** provisioning endpoints create real, externally-visible things. A
+tip jar provision writes four documents and claims a GLOBALLY UNIQUE platform subdomain that is never
+recycled by design. Squatting those under another tenant's id is the kind of damage that cannot be fully
+undone by deleting rows.
+
+**The fix is not small**, which is why it is recorded rather than attempted: a Cognito authorizer on the
+RestApi, `tenant_id` derived from the verified claims instead of the request, and every handler that calls
+`tenant_id_from_event` re-pointed at it — including the genuinely public endpoints (`/purchase/manage`,
+`/leads`, published-page checkout) which must keep working WITHOUT a token and therefore need the boundary
+drawn explicitly rather than by omission. Pre-launch is the cheapest time.
+
 ### ⭐⭐ stop returning the Connect OAuth token ciphertext to the browser — SHIPPED dev+prod 2026-08-30 (175bce7)
 
 `SENSITIVE_FIELDS` (src/stripe_link/security.py) is a DENYLIST that never grew with the
