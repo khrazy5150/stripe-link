@@ -1817,6 +1817,45 @@ Resources:
             Path: /purchase/manage
             Method: OPTIONS
 
+  TipJarProvisionFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${ProjectPrefix}-tip-jar-provision-${Environment}"
+      CodeUri: src/
+      Handler: handlers.tip_jar_provision.handler
+      Description: One click - seed a tenant a working tip jar (product, offer, Site, published page). plans/PAY_WHAT_YOU_WANT.md 5c.
+      Policies:
+        # The Site is the provisioning ANCHOR and also holds the global subdomain reservation, so this needs
+        # write access to SitesTable rather than the read the other seeded tables would suggest.
+        - DynamoDBCrudPolicy:
+            TableName: !Ref SitesTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ProductsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref OffersTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref PagesTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref TenantProfilesTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref UserProfilesTable
+        # The seeded preset ladder is grossed up by the same fee table the authoring form reads.
+        - S3ReadPolicy:
+            BucketName: !Ref ConfigBucket
+      Events:
+        TipJarProvision:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /tip-jar
+            Method: POST
+        TipJarProvisionOptions:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /tip-jar
+            Method: OPTIONS
+
   TipManageFunction:
     Type: AWS::Serverless::Function
     Properties:
