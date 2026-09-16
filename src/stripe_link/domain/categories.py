@@ -105,6 +105,19 @@ def is_promoted(item: dict[str, Any]) -> bool:
         return False
 
 
+# Categories the SYSTEM assigns, which must never be offered back as a suggestion.
+#
+# "tip" is filed automatically by the Receive-tips purpose so that tips group together in the product list
+# (author, 2026-09-13). That made it a category the tenant had USED, so the shared taxonomy offered it back
+# to them in the picker for every other product — and, once three tenants owned a tip jar, was on course to
+# promote it to a suggestion for everybody. A category that means "this row is a tip jar" is meaningless on a
+# T-shirt, and picking it there would file the T-shirt wrongly.
+#
+# Excluded from SUGGESTIONS rather than from storage: the stored key still groups the tip jars, and filtering
+# here covers the rows already recorded as well as any written from now on.
+SYSTEM_CATEGORIES = frozenset({"tip"})
+
+
 def search_suggestions(
     query: str,
     contributed: list[dict[str, Any]],
@@ -125,7 +138,7 @@ def search_suggestions(
     results: dict[str, dict[str, Any]] = {}
 
     def add(key: str, label: str, source: str, types: set[str]) -> None:
-        if not key or key in results:
+        if not key or key in results or key in SYSTEM_CATEGORIES:
             return
         if ptype and types and ptype not in types:
             return

@@ -53,8 +53,34 @@ class ShapeTests(unittest.TestCase):
         close = SCRIPT.split("function closeCreateModal", 1)[1][:300]
         self.assertIn("wizardMode.value = false", close)
 
-    def test_three_steps_in_the_order_the_plan_gives(self):
-        self.assertIn('const WIZARD_STEPS = ["Purpose", "Details", "Image"]', SCRIPT)
+    def test_the_flow_depends_on_the_intent(self):
+        """Author, 2026-09-15: "Sell something" is five steps; the other two are still three.
+
+        The intent decides which questions are REAL, so it has to decide how many there are: selling
+        something has a price list, identifiers and a package, and a tip jar has none of those. One shared
+        five-step rail would show a creator two screens that never apply to them.
+        """
+        flows = SCRIPT.split("const WIZARD_FLOWS = {", 1)[1].split("};", 1)[0]
+        self.assertIn('transaction: ["purpose", "details", "pricing", "identifiers", "image"]', flows)
+        self.assertIn('lead_gen: ["purpose", "details", "image"]', flows)
+        self.assertIn('tip_jar: ["purpose", "details", "image"]', flows)
+
+    def test_panels_are_addressed_by_key_not_by_number(self):
+        # A panel gated on `wizardStep === 3` lands on a different question the moment a flow gains or loses
+        # a step -- which is exactly what happened to this wizard.
+        self.assertIn("const wizardStepKey = computed(", SCRIPT)
+        self.assertNotIn('v-if="wizardStep === 2"', TEMPLATE)
+        self.assertNotIn('v-if="wizardStep === 3"', TEMPLATE)
+        for key in ("purpose", "details", "pricing", "identifiers", "image"):
+            self.assertIn(f"wizardStepKey === '{key}'", TEMPLATE, key)
+
+    def test_the_last_step_saves_whatever_number_it_is(self):
+        # The submit handler used to hardcode step 3. On the five-step flow that would have saved the product
+        # from the Pricing screen and never shown the last two.
+        self.assertIn("const onLastWizardStep = computed(() => wizardStep.value >= wizardFlow.value.length)", SCRIPT)
+        submit = SCRIPT.split("function onWizardSubmit", 1)[1].split("\n}", 1)[0]
+        self.assertIn("onLastWizardStep.value", submit)
+        self.assertIn("saveProduct()", submit)
 
 
 class IntentTests(unittest.TestCase):
@@ -98,7 +124,7 @@ class GatingTests(unittest.TestCase):
     def test_the_image_step_is_skippable(self):
         # Last on purpose: it is the one step someone may reasonably skip, and a page with no image is
         # plainer rather than broken.
-        panel = TEMPLATE.split('v-if="wizardStep === 3"', 1)[1].split("</section>", 1)[0]
+        panel = TEMPLATE.split("wizardStepKey === 'image'", 1)[1].split("</section>", 1)[0]
         self.assertIn("optional", panel.lower())
 
 
@@ -143,10 +169,24 @@ class CategoryTests(unittest.TestCase):
     an error pointing at a field that was not on the screen, for all three intents.
     """
 
-    def test_the_wizard_is_not_asked_for_a_field_it_never_shows(self):
-        self.assertIn('if (!wizardMode.value && !form.value.product_category)', SCRIPT)
-        # The full form still asks, and still requires it.
-        self.assertIn('Product Category <span class="required">*</span>', TEMPLATE)
+    def test_a_category_is_required_wherever_it_is_asked_for(self):
+        """Required on the flows that show the field, and nowhere else.
+
+        It used to be exempt for the whole wizard, because the wizard showed no category field at all.
+        Now the "Sell something" Details step asks for one, so it is required there -- while a tip jar (which
+        files itself under "tip") and a lead magnet (never sold) are still not asked and still not blocked.
+        """
+        self.assertIn('const categoryAsked = !wizardMode.value || wizardIntent.value === "transaction"', SCRIPT)
+        self.assertIn('if (categoryAsked && !form.value.product_category)', SCRIPT)
+        # And the step will not advance without it, so it is caught on the screen that asks rather than at save.
+        advance = SCRIPT.split("const wizardCanAdvance = computed(", 1)[1].split("\n});", 1)[0]
+        self.assertIn('wizardIntent.value === "transaction" && !form.value.product_category', advance)
+
+    def test_the_category_field_is_the_same_one_in_both_bodies(self):
+        # Two copies of an autocomplete over a SHARED taxonomy is how the two quietly stop agreeing about
+        # what a category is.
+        self.assertEqual(TEMPLATE.count("<ProductCategoryField"), 2)
+        self.assertNotIn("categoryQuery", TEMPLATE)
 
     def test_a_tip_jar_files_itself(self):
         # Author, 2026-09-13: "Auto-set all tips as 'Digital Product' and 'Tip' as the product category."
@@ -239,14 +279,153 @@ class RecurringTipTests(unittest.TestCase):
         self.assertIn("TIP_RULES.intervals.includes(priceForm.recurring_interval)", block)
 
 
+class PricingModelTests(unittest.TestCase):
+    """"Customer chooses" is not a pricing model a tenant picks (author, 2026-09-15).
+
+    It is what the "Receive tips" purpose produces. Offering the same outcome as a radio on a product being
+    SOLD gave two routes to one thing — and the radio route skipped the question the tip wizard asks first
+    (who pays the fees), which is the question that decides what every amount below it means.
+    """
+
+    CARD = (ROOT / "dashboard" / "src" / "components" / "shared" / "PricingCard.vue").read_text(encoding="utf-8")
+
+    def test_the_radio_offers_only_the_two_a_seller_picks_between(self):
+        offered = self.CARD.split("pricingModels: {", 1)[1].split("},", 1)[0]
+        self.assertIn('["one_time", "One-time"]', offered)
+        self.assertIn('["recurring", "Recurring"]', offered)
+        self.assertNotIn("customer_chooses", offered)
+
+    def test_an_existing_tip_jar_still_says_what_it_is(self):
+        # Removing the radio must not leave a tip product with a blank pricing model, or with no way to see
+        # why its amounts behave differently from every other price.
+        self.assertIn('v-else-if="isTipPrice(price)"', self.CARD)
+        self.assertIn("Supporters choose the amount", self.CARD)
+
+    def test_a_tip_jars_amounts_are_still_editable(self):
+        # The whole card already branches on the model; only the radio was removed. If this regressed, a
+        # tenant could no longer change the presets on a jar they already have.
+        self.assertIn("<TipAmountsField v-if=\"price.pricing_model === 'customer_chooses'\"", self.CARD)
+
+    def test_the_value_itself_is_untouched(self):
+        # The model is the STORAGE a tip jar runs on -- checkout, the composer, the fee class and the
+        # renderer all key off it. This change is about the picker, not the data.
+        tips = (ROOT / "src" / "stripe_link" / "domain" / "tips.py").read_text(encoding="utf-8")
+        self.assertIn('"customer_chooses"', tips)
+        apply_block = SCRIPT.split("function applyWizardIntent", 1)[1].split("\n}", 1)[0]
+        self.assertIn('price.pricing_model = "customer_chooses"', apply_block)
+
+
+class SellSomethingStepsTests(unittest.TestCase):
+    """The five-step "Sell something" flow (author, 2026-09-15).
+
+    The old Details step asked for a name, a description, a type and a price, and promised the rest could be
+    added "after saving" -- which meant the wizard produced a product the tenant then had to go and finish in
+    the very form the wizard existed to replace. Breaking it up is what lets each screen ask one thing.
+    """
+
+    def _panel(self, key):
+        return TEMPLATE.split(f"wizardStepKey === '{key}'", 1)[1].split("\n          </section>", 1)[0]
+
+    def test_details_asks_what_the_thing_is_and_nothing_about_money(self):
+        panel = self._panel("details")
+        self.assertIn("form.name", panel)
+        self.assertIn("form.description", panel)
+        self.assertIn("form.product_type", panel)
+        self.assertIn("<ProductCategoryField", panel)
+        # Pricing is its own screen now. A price typed beside the product name reads as a detail of the name;
+        # it is a decision with a fee mode and a preview attached.
+        self.assertNotIn("<PricingCard", panel)
+        self.assertNotIn("sales_price", panel)
+
+    def test_only_something_that_ships_is_asked_about_a_box(self):
+        panel = self._panel("details")
+        self.assertIn("<ProductVariantsField", panel)
+        self.assertIn("form.product_type === 'physical'", panel)
+
+    def test_package_dimensions_and_variants_are_the_same_field_in_both_bodies(self):
+        self.assertEqual(TEMPLATE.count("<ProductVariantsField"), 2)
+        field = (ROOT / "dashboard" / "src" / "components" / "products" / "ProductVariantsField.vue").read_text(encoding="utf-8")
+        for label in ("Length (inches)", "Width (inches)", "Height (inches)", "Weight (pounds)"):
+            self.assertIn(label, field, label)
+        self.assertIn("Item Size", field)
+        self.assertIn("Item Color", field)
+
+    def test_pricing_is_the_price_card_the_edit_form_uses(self):
+        panel = self._panel("pricing")
+        self.assertIn("<PricingCard", panel)
+        self.assertIn('v-model:default-index="form.default_price_index"', panel)
+
+    def test_identifiers_carries_the_optional_fields_the_sku_and_the_tags(self):
+        panel = self._panel("identifiers")
+        self.assertIn("<ProductIdentifiersField", panel)
+        self.assertIn("<ProductTagsField", panel)
+        # Open here, because this step exists to ask for exactly these fields; collapsed in the edit form,
+        # where it is one section among a dozen.
+        self.assertIn("sku-open", panel)
+        self.assertIn("optional", panel.lower())
+
+    def test_the_sku_flag_stays_with_the_watcher_that_respects_it(self):
+        # A SKU follows the product NAME only until the tenant types their own. The component owns the input;
+        # the parent owns the auto-SKU watcher, so the "they typed it" flag has to live with the watcher.
+        self.assertIn('@sku-edited="skuTouched = true"', TEMPLATE)
+        watcher = SCRIPT.split("watch(() => form.value.name,", 1)[1].split("});", 1)[0]
+        self.assertIn("skuTouched.value", watcher)
+
+
+class SharedProductFieldsTests(unittest.TestCase):
+    """Every block the wizard and the edit form both show is ONE component.
+
+    The alternative was a second copy of each in the wizard body. Two copies of the field that talks to the
+    shared category taxonomy, or that enforces Stripe's 8-image limit, is how the two quietly stop agreeing.
+    """
+
+    FIELDS = ("ProductCategoryField", "ProductIdentifiersField", "ProductImagesField",
+              "ProductTagsField", "ProductVariantsField")
+
+    def test_each_block_is_rendered_twice_and_defined_once(self):
+        for name in self.FIELDS:
+            path = ROOT / "dashboard" / "src" / "components" / "products" / f"{name}.vue"
+            self.assertTrue(path.exists(), name)
+            self.assertEqual(TEMPLATE.count(f"<{name}"), 2, name)
+            self.assertIn(f'import {name} from "./products/{name}.vue"', SCRIPT, name)
+
+    def test_uploading_stayed_out_of_the_image_component(self):
+        # Presigning, counting the remaining slots and recording dimensions are business logic; the component
+        # raises the files and renders the progress it is handed (CLAUDE.md: keep business logic out of Vue
+        # components).
+        field = (ROOT / "dashboard" / "src" / "components" / "products" / "ProductImagesField.vue").read_text(encoding="utf-8")
+        self.assertNotIn("apiRequest", field)
+        self.assertNotIn("uploadProductImage", field)
+        self.assertIn('emit("files"', field)
+        self.assertIn("handleImageFiles", SCRIPT)
+
+    def test_the_variant_shape_has_one_definition(self):
+        # Two places build these rows -- the field, and the hydration that widens a legacy string variant --
+        # so the factory is shared rather than copied.
+        util = (ROOT / "dashboard" / "src" / "utils" / "productVariants.js").read_text(encoding="utf-8")
+        self.assertIn("export function defaultSizeVariant", util)
+        self.assertIn("export function defaultColorVariant", util)
+        self.assertNotIn("function defaultSizeVariant", SCRIPT)
+        self.assertIn('from "../utils/productVariants"', SCRIPT)
+
+    def test_normalize_tag_has_one_definition(self):
+        # Products.vue carried a byte-identical private copy of the store's until 2026-09-15.
+        store = (ROOT / "dashboard" / "src" / "stores" / "products.js").read_text(encoding="utf-8")
+        self.assertIn("export function normalizeTag", store)
+        self.assertNotIn("function normalizeTag", SCRIPT)
+
+
 class WizardImageStepTests(unittest.TestCase):
     def test_the_uploaded_image_is_shown_not_counted(self):
         # It said "1 image(s) added." and nothing else -- the tenant could not see what they had uploaded.
-        panel = TEMPLATE.split('v-if="wizardStep === 3"', 1)[1].split("</section>", 1)[0]
-        self.assertIn('class="product-image-previews"', panel)
-        self.assertIn("<img", panel)
-        self.assertIn('@click.prevent="croppingUrl = url"', panel)
-        self.assertNotIn("image(s) added", panel)
+        field = (ROOT / "dashboard" / "src" / "components" / "products" / "ProductImagesField.vue").read_text(encoding="utf-8")
+        self.assertIn('class="product-image-previews"', field)
+        self.assertIn("<img", field)
+        self.assertIn("emit('crop', url)", field)
+        self.assertNotIn("image(s) added", field)
+        # And the wizard's image step renders that field rather than a second copy of it.
+        panel = TEMPLATE.split("wizardStepKey === 'image'", 1)[1].split("</section>", 1)[0]
+        self.assertIn("<ProductImagesField", panel)
 
     def test_there_is_one_cropper_for_both_bodies(self):
         # It used to live inside the full form's <form>. A Crop button in the wizard's <form> would set

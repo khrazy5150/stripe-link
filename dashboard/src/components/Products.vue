@@ -178,14 +178,15 @@
              changing something that already exists -- you want every field at once, not a path through three
              of them -- and keeping edit on the old body holds the blast radius of this change down.
              plans/LEAD_GEN_PAGES.md §10. -->
-        <form v-if="wizardMode" class="product-create-body" @submit.prevent="wizardStep === 3 ? saveProduct() : wizardNext()">
+        <form v-if="wizardMode" class="product-create-body" @submit.prevent="onWizardSubmit">
           <div v-if="formError" class="keys-status-banner error">{{ formError }}</div>
 
-          <WizardSteps :steps="WIZARD_STEPS" :current="wizardStep" />
+          <WizardSteps :steps="wizardStepLabels" :current="wizardStep" />
 
-          <!-- STEP 1 — intent, asked FIRST because it decides which of the next questions are even real.
-               A tip jar has no SKU, no categories, no condition, no shipping; a lead magnet has no price. -->
-          <section v-if="wizardStep === 1" class="wizard-panel">
+          <!-- STEP — intent, asked FIRST because it decides which of the next questions are even real, and
+               now also HOW MANY there are: selling something has a price list, identifiers and a package;
+               a tip jar has none of those and a lead magnet is not sold at all. -->
+          <section v-if="wizardStepKey === 'purpose'" class="wizard-panel">
             <p class="wizard-lede">What is your intended purpose for this product?</p>
             <div class="wizard-choice-list">
               <WizardChoiceCard
@@ -199,8 +200,10 @@
             </div>
           </section>
 
-          <!-- STEP 2 — only what this intent needs. -->
-          <section v-if="wizardStep === 2" class="wizard-panel">
+          <!-- STEP — what the thing IS. Name, description, type, category, and for something that ships,
+               the variants and the box. Nothing about money and nothing about identifiers: those are their
+               own steps now, because one screen asking all of it was the screen this wizard replaced. -->
+          <section v-if="wizardStepKey === 'details'" class="wizard-panel">
             <label>
               Product Name <span class="required">*</span>
               <input v-model.trim="form.name" required autocomplete="off" :placeholder="intentNamePlaceholder" />
@@ -219,13 +222,16 @@
                     <option value="digital">Digital — no shipping</option>
                     <option value="service">Service — opens booking flow</option>
                   </select>
+                  <span class="field-note">Determines fulfillment behavior and address collection at checkout.</span>
                 </label>
-                <label>
-                  Price
-                  <input v-model.number="form.prices[0].sales_price" type="number" min="0" step="0.01" />
-                  <span class="field-note">You can add more prices, SKUs and categories after saving.</span>
-                </label>
+                <ProductCategoryField v-model="form.product_category" :product-type="form.product_type" />
               </div>
+
+              <!-- Only for something that ships. A digital download has no box and no size chart, and
+                   showing the fields anyway is what made the old single form feel like a tax form. -->
+              <section v-if="form.product_type === 'physical'" class="wizard-subsection">
+                <ProductVariantsField :form="form" />
+              </section>
             </template>
 
             <template v-else-if="wizardIntent === 'lead_gen'">
@@ -264,33 +270,43 @@
             </template>
           </section>
 
-          <!-- STEP 3 — an image, optional. Last because it is the one step someone may reasonably skip. -->
-          <section v-if="wizardStep === 3" class="wizard-panel">
+          <!-- STEP — the price list, on its own screen. It carries the pricing model, who pays the fees and
+               a live preview of both, which is a decision in its own right rather than a number to type
+               beside the product name. -->
+          <section v-if="wizardStepKey === 'pricing'" class="wizard-panel">
+            <PricingCard
+              :prices="form.prices"
+              v-model:default-index="form.default_price_index"
+              :product-type="form.product_type"
+              subtitle="Product owns the canonical price list. Labels and bundle presentation are set in Offers."
+            />
+          </section>
+
+          <!-- STEP — how the world identifies this product. Optional to a fault: every field here can be
+               left blank and the product still sells. -->
+          <section v-if="wizardStepKey === 'identifiers'" class="wizard-panel">
+            <p class="wizard-lede">How should shoppers and search engines identify this? <em>(optional)</em></p>
+            <ProductIdentifiersField :form="form" sku-open @sku-edited="skuTouched = true" />
+            <ProductTagsField :tags="form.tags" />
+          </section>
+
+          <!-- STEP — an image, optional. Last because it is the one step someone may reasonably skip. -->
+          <section v-if="wizardStepKey === 'image'" class="wizard-panel">
             <p class="wizard-lede">Add an image <em>(optional)</em></p>
             <p class="field-note">
               You can skip this and add one later. A page with no image is not broken — it is just plainer.
             </p>
-            <input ref="wizardFileInput" type="file" accept="image/*" hidden multiple @change="onWizardImagePicked" />
-            <button class="secondary-action" type="button" :disabled="uploadingAsset" @click="wizardFileInput?.click()">
-              {{ uploadingAsset ? "Uploading..." : "Choose image" }}
-            </button>
-            <p v-if="uploadStatus" class="upload-status" :class="uploadStatusKind">{{ uploadStatus }}</p>
-            <!-- The SAME previews and cropper the full form shows. The first cut printed a count and nothing
-                 else, so the tenant could neither see what they had uploaded nor frame it -- and the crop is
-                 what decides the shape the page renders (plans/IMAGE_CROPPER.md). -->
-            <div v-if="form.uploaded_images.length" class="product-image-previews">
-              <figure v-for="url in form.uploaded_images" :key="url" class="product-image-preview">
-                <img :src="url" alt="Uploaded product image" />
-                <figcaption>{{ shortImageName(url) }}</figcaption>
-                <button
-                  v-if="canCrop(url)"
-                  type="button"
-                  class="secondary-action compact"
-                  :disabled="cropBusy"
-                  @click.prevent="croppingUrl = url"
-                >Crop</button>
-              </figure>
-            </div>
+            <ProductImagesField
+              :uploaded="form.uploaded_images"
+              v-model:urls="form.images"
+              :status="uploadStatus"
+              :status-kind="uploadStatusKind"
+              :crop-busy="cropBusy"
+              :can-crop="canCrop"
+              :short-name="shortImageName"
+              @files="handleImageFiles"
+              @crop="croppingUrl = $event"
+            />
           </section>
 
           <footer class="product-modal-footer">
@@ -298,7 +314,7 @@
               {{ wizardStep === 1 ? "Cancel" : "Back" }}
             </button>
             <button class="primary-action" type="submit" :disabled="store.savingStatus || !wizardCanAdvance">
-              {{ wizardStep === 3 ? (store.savingStatus ? "Saving..." : "Create product") : "Continue" }}
+              {{ onLastWizardStep ? (store.savingStatus ? "Saving..." : "Create product") : "Continue" }}
             </button>
           </footer>
         </form>
@@ -326,34 +342,7 @@
               </select>
               <span class="field-note">Determines fulfillment behavior and address collection at checkout.</span>
             </label>
-            <!-- Autocomplete over the shared, growing taxonomy (plans/PRODUCT_CATEGORY_AUTOCOMPLETE.md).
-                 Suggestions are scoped to the product type; typing something new is allowed and becomes the
-                 tenant's category immediately (only shared with others once enough tenants use it). -->
-            <label class="category-autocomplete">
-              Product Category <span class="required">*</span>
-              <input
-                v-model="categoryQuery"
-                type="text"
-                placeholder="Search or type a category"
-                autocomplete="off"
-                @focus="onCategoryFocus"
-                @input="onCategoryInput"
-                @blur="onCategoryBlur"
-                @keydown.enter.prevent="commitCategoryFreeText"
-              />
-              <ul v-if="showCategoryMenu && categorySuggestions.length" class="category-menu">
-                <li
-                  v-for="suggestion in categorySuggestions"
-                  :key="suggestion.key"
-                  :class="{ 'is-selected': suggestion.key === form.product_category }"
-                  @mousedown.prevent="pickCategory(suggestion)"
-                >
-                  <span>{{ suggestion.label }}</span>
-                  <span v-if="suggestion.source === 'yours'" class="category-tag">your category</span>
-                </li>
-              </ul>
-              <span class="field-note">Pick a suggestion or type your own. New categories become suggestions for others once several sellers use them.</span>
-            </label>
+            <ProductCategoryField v-model="form.product_category" :product-type="form.product_type" />
           </div>
 
           <!-- Both feed the landing page's structured data (schema.org sku / itemCondition). Condition is
@@ -370,44 +359,7 @@
             <span class="field-note">Stated in search results. Only change this if you are not selling new goods.</span>
           </label>
 
-          <!-- Product identifiers (plans/ON_PAGE_SEO_REQUIREMENTS.md SEO-06). Optional; brand is the
-               manufacturer, not the store name. Google matches products by GTIN, or by Brand + MPN.
-               Only physical goods appear in shopping results, so hide these for digital/service products. -->
-          <fieldset v-if="form.product_type === 'physical'" class="product-identifiers">
-            <legend>Product identifiers</legend>
-            <p class="field-note">
-              Optional, but strongly recommended. Search engines match your products to shopping results using
-              either a GTIN, or a Brand and MPN together. Used and refurbished items often have no GTIN — Brand
-              plus MPN works just as well.
-            </p>
-            <div class="modal-inline-grid">
-              <label>
-                Product Brand
-                <input v-model.trim="form.brand" type="text" placeholder="Apple" maxlength="70" />
-                <span class="field-note">The manufacturer of this product — not your store name.</span>
-              </label>
-              <label>
-                MPN
-                <input v-model.trim="form.mpn" type="text" placeholder="MPXQ2LL/A" maxlength="70" />
-                <span class="field-note">Manufacturer Part Number, usually printed on the product or its box.</span>
-              </label>
-            </div>
-            <label>
-              GTIN
-              <input v-model.trim="form.gtin" type="text" placeholder="012345678905" @input="gtinTouched = true" />
-              <span class="field-note">UPC, EAN, or ISBN barcode number. Leave blank if this item has none.</span>
-              <span v-if="gtinWarning" class="field-warning">{{ gtinWarning }}</span>
-            </label>
-          </fieldset>
-
-          <details class="sku-disclosure">
-            <summary>Advanced · Stock keeping unit (SKU)</summary>
-            <label>
-              SKU
-              <input v-model.trim="form.sku" type="text" placeholder="Generated automatically" @input="skuTouched = true" />
-              <span class="field-note">Generated from the product name and its ID, and kept stable after that. Edit it only if you have your own stock keeping unit.</span>
-            </label>
-          </details>
+          <ProductIdentifiersField :form="form" @sku-edited="skuTouched = true" />
 
           <!-- Intent alone decides whether payment is collected: "I want a payment" enables the payment
                gateway (Stripe sync); "capture a lead" turns it off. The old "Enable Payment Gateway" toggle
@@ -445,27 +397,7 @@
             <button class="secondary-action" type="button" @click="showLeadPicker = true">Choose action</button>
           </div>
 
-          <section class="product-tags-field">
-            <div class="field-heading">
-              <span>Tags</span>
-              <button type="button" class="secondary-action" @click="tagInputVisible = true">+ Add Tag</button>
-            </div>
-            <input
-              v-if="tagInputVisible"
-              v-model.trim="tagInput"
-              placeholder="Type a tag and press Enter"
-              autocomplete="off"
-              @keydown.enter.prevent="addTag"
-              @blur="hideEmptyTagInput"
-            />
-            <div class="product-tag-list">
-              <span v-for="tag in form.tags" :key="tag" class="product-tag-pill dismissible">
-                {{ tag }}
-                <button type="button" :aria-label="`Remove ${tag} tag`" @click="removeTag(tag)">×</button>
-              </span>
-            </div>
-            <span class="field-note">Product name and category are automatically added as tags. Add custom tags here.</span>
-          </section>
+          <ProductTagsField :tags="form.tags" />
 
           <section v-if="form.product_intent === 'transaction'" class="modal-form-section">
             <PricingCard
@@ -488,82 +420,22 @@
           </section>
 
           <section v-if="form.product_intent === 'transaction'" class="modal-form-section">
-            <h3>Image URLs</h3>
-            <div class="info-toast">Image Limit: Maximum of 8 images allowed per product.</div>
-            <input ref="imageFileInput" type="file" accept="image/*" multiple hidden @change="handlePickedImages" />
-            <div
-              class="upload-dropzone product-upload-dropzone"
-              :class="{ dragging: imageDragActive }"
-              role="button"
-              tabindex="0"
-              @click="imageFileInput?.click()"
-              @keydown.enter.prevent="imageFileInput?.click()"
-              @keydown.space.prevent="imageFileInput?.click()"
-              @dragover.prevent="imageDragActive = true"
-              @dragleave.prevent="imageDragActive = false"
-              @drop.prevent="handleDroppedImages"
-            >
-              <strong>Click to upload or drag and drop</strong>
-              <small>PNG, JPG, WEBP up to 10MB</small>
-            </div>
-            <div v-if="form.uploaded_images.length" class="product-image-previews">
-              <figure v-for="url in form.uploaded_images" :key="url" class="product-image-preview">
-                <img :src="url" alt="Uploaded product image" />
-                <figcaption>{{ shortImageName(url) }}</figcaption>
-                <button
-                  v-if="canCrop(url)"
-                  type="button"
-                  class="secondary-action compact"
-                  :disabled="cropBusy"
-                  @click.prevent="croppingUrl = url"
-                >Crop</button>
-              </figure>
-            </div>
-            <div v-if="uploadStatus" class="upload-status" :class="uploadStatusKind">{{ uploadStatus }}</div>
-            <label>Paste image URLs, one per line
-              <textarea v-model.trim="form.images" rows="3" placeholder="https://example.com/image1.jpg"></textarea>
-            </label>
+            <ProductImagesField
+              heading="Image URLs"
+              :uploaded="form.uploaded_images"
+              v-model:urls="form.images"
+              :status="uploadStatus"
+              :status-kind="uploadStatusKind"
+              :crop-busy="cropBusy"
+              :can-crop="canCrop"
+              :short-name="shortImageName"
+              @files="handleImageFiles"
+              @crop="croppingUrl = $event"
+            />
           </section>
 
           <section v-if="form.product_intent === 'transaction' && form.product_type === 'physical'" class="modal-form-section">
-            <label class="switch-row variant-toggle">
-              <input v-model="form.size_enabled" type="checkbox" @change="ensureSizeVariant" />
-              <span><strong>Item Size</strong><small>Enable size variants, such as S, M, L, XL.</small></span>
-            </label>
-            <div v-if="form.size_enabled" class="variant-options">
-              <div class="variant-row-list">
-                <div v-for="(size, index) in form.sizes" :key="size.form_id" class="variant-item-row">
-                  <input v-model.trim="size.label" class="variant-label-input" :aria-label="`Size ${index + 1} label`" maxlength="10" placeholder="S" />
-                  <input v-model.trim="size.description" :aria-label="`Size ${index + 1} description`" placeholder="e.g., Waist: 30-32in, Hips: 37-39in" />
-                  <button type="button" class="variant-remove-button" :aria-label="`Remove size ${index + 1}`" @click="removeSizeVariant(index)">×</button>
-                </div>
-              </div>
-              <button type="button" class="secondary-action" @click="addSizeVariant">+ New Size</button>
-            </div>
-
-            <label class="switch-row variant-toggle">
-              <input v-model="form.color_enabled" type="checkbox" @change="ensureColorVariant" />
-              <span><strong>Item Color</strong><small>Enable color variants, such as Black, White, Navy.</small></span>
-            </label>
-            <div v-if="form.color_enabled" class="variant-options">
-              <div class="variant-row-list">
-                <div v-for="(color, index) in form.colors" :key="color.form_id" class="variant-item-row color-variant-row">
-                  <input v-model.trim="color.label" class="variant-label-input" :aria-label="`Color ${index + 1} label`" maxlength="20" placeholder="Black" />
-                  <input v-model="color.hex_color" class="variant-color-preview" type="color" :aria-label="`Color ${index + 1} swatch`" />
-                  <input v-model.trim="color.description" :aria-label="`Color ${index + 1} description`" placeholder="e.g., Jet black finish" />
-                  <button type="button" class="variant-remove-button" :aria-label="`Remove color ${index + 1}`" @click="removeColorVariant(index)">×</button>
-                </div>
-              </div>
-              <button type="button" class="secondary-action" @click="addColorVariant">+ New Color</button>
-            </div>
-
-            <h3>Package Dimensions</h3>
-            <div class="modal-dimensions-grid">
-              <label>Length (inches)<input v-model.number="form.length_in" type="number" min="0" step="0.1" /></label>
-              <label>Width (inches)<input v-model.number="form.width_in" type="number" min="0" step="0.1" /></label>
-              <label>Height (inches)<input v-model.number="form.height_in" type="number" min="0" step="0.1" /></label>
-              <label>Weight (pounds)<input v-model.number="form.weight_lb" type="number" min="0" step="0.1" /></label>
-            </div>
+            <ProductVariantsField :form="form" />
           </section>
 
           <footer class="product-modal-footer">
@@ -632,14 +504,12 @@
 <script setup>
 import { computed, h, nextTick, ref, watch } from "vue";
 import { apiRequest, toAssetCdnUrl } from "../api/client";
-import { defaultProductPrice, formatMoney, generateSku, isValidGtin, priceSummary, useProductsStore } from "../stores/products";
+import { defaultProductPrice, formatMoney, generateSku, normalizeTag, priceSummary, useProductsStore } from "../stores/products";
 // The lead-action glyph is shared with the Offers selector, so the same product looks the same on both.
 import { leadActionIcon as leadIcon } from "../utils/leadActionIcon";
 import TipAmountsField from "./shared/TipAmountsField.vue";
 import WizardChoiceCard from "./shared/WizardChoiceCard.vue";
 import WizardSteps from "./shared/WizardSteps.vue";
-import { fetchCategoriesForScope, filterCategories, humanizeCategory, normalizeCategory } from "../utils/categories";
-import { useCachedSuggestions } from "../composables/useCachedSuggestions";
 import { dimsFromStatus, recordImageDims } from "../utils/imageDims";
 import { cropBox, cropImage } from "../api/uploads";
 import ImageCropper from "./shared/ImageCropper.vue";
@@ -649,6 +519,14 @@ import { defaultPriceForm, priceFormFromDocument } from "../utils/priceForm";
 import { idColorStyle } from "../utils/iconColor";
 import PricingCard from "./shared/PricingCard.vue";
 import ConfirmDialog from "./shared/ConfirmDialog.vue";
+// The product form's blocks, shared by the create WIZARD and the full EDIT form. Two copies of a field that
+// talks to the shared taxonomy, or to Stripe's image limit, is how the two quietly stop agreeing.
+import ProductCategoryField from "./products/ProductCategoryField.vue";
+import ProductIdentifiersField from "./products/ProductIdentifiersField.vue";
+import ProductImagesField from "./products/ProductImagesField.vue";
+import ProductTagsField from "./products/ProductTagsField.vue";
+import ProductVariantsField from "./products/ProductVariantsField.vue";
+import { defaultColorVariant, defaultSizeVariant } from "../utils/productVariants";
 import ListCard from "./shared/ListCard.vue";
 
 const store = useProductsStore();
@@ -659,13 +537,6 @@ const editingProduct = ref(null);
 // A SKU is an identifier, so it is generated once and then left alone. It follows the name only while a NEW
 // product is still being named; once the product exists, renaming it must never re-identify it.
 const skuTouched = ref(false);
-const gtinTouched = ref(false);
-// Non-blocking GTIN warning (SEO-06): the product still saves (an invalid GTIN is simply dropped).
-const gtinWarning = computed(() =>
-  gtinTouched.value && form.value.gtin && !isValidGtin(form.value.gtin)
-    ? "This doesn't look like a valid barcode number — it won't be saved. Check the digits, or leave it blank."
-    : "",
-);
 const showCreateModal = ref(false);
 
 // --- Product creation wizard (plans/LEAD_GEN_PAGES.md §10) ---
@@ -676,7 +547,22 @@ const showCreateModal = ref(false);
 // "Tip jar" is NOT a third product_intent. It is a transaction product whose price is customer_chooses --
 // mapping it that way means Offers, the fee class and the index projection need no new shape
 // (plans/PAY_WHAT_YOU_WANT.md §4). The wizard's three answers are a UI vocabulary, not a document field.
-const WIZARD_STEPS = ["Purpose", "Details", "Image"];
+// The flow DEPENDS on the intent, because the intent decides which questions are real. Selling something
+// has a price list, identifiers and (if it ships) a package; a tip jar has none of those and a lead magnet is
+// never sold at all. Steps are addressed by KEY rather than by number so a panel cannot drift onto the wrong
+// screen the next time a flow gains or loses one.
+const WIZARD_STEP_LABELS = {
+  purpose: "Purpose",
+  details: "Product details",
+  pricing: "Pricing",
+  identifiers: "Identifiers",
+  image: "Image",
+};
+const WIZARD_FLOWS = {
+  transaction: ["purpose", "details", "pricing", "identifiers", "image"],
+  lead_gen: ["purpose", "details", "image"],
+  tip_jar: ["purpose", "details", "image"],
+};
 const PRODUCT_INTENTS = [
   // No icons, deliberately: three tinted glyphs made a list of three sentences read as a toolbar, and the
   // titles already carry the meaning (author, 2026-09-13).
@@ -690,7 +576,10 @@ const PRODUCT_INTENTS = [
 const wizardMode = ref(false);
 const wizardStep = ref(1);
 const wizardIntent = ref("transaction");
-const wizardFileInput = ref(null);
+const wizardFlow = computed(() => WIZARD_FLOWS[wizardIntent.value] || WIZARD_FLOWS.transaction);
+const wizardStepLabels = computed(() => wizardFlow.value.map((key) => WIZARD_STEP_LABELS[key]));
+const wizardStepKey = computed(() => wizardFlow.value[wizardStep.value - 1] || "purpose");
+const onLastWizardStep = computed(() => wizardStep.value >= wizardFlow.value.length);
 
 // Every tip jar is filed under the same category (author, 2026-09-13), so tips group together in the list and
 // nobody is asked to invent a taxonomy entry for one. It is a real category, not a blank: the shared taxonomy
@@ -707,9 +596,15 @@ const intentNamePlaceholder = computed(() => ({
 // Step 1 needs a choice; step 2 needs a name, and a lead product needs its action -- without one there is
 // nothing for the page to do. Everything else on step 2 has a workable default.
 const wizardCanAdvance = computed(() => {
-  if (wizardStep.value === 1) return Boolean(wizardIntent.value);
-  if (wizardStep.value === 2) {
+  if (wizardStepKey.value === "purpose") return Boolean(wizardIntent.value);
+  if (wizardStepKey.value === "pricing") {
+    return !form.value.prices.some((price) => price.pricing_model === "recurring" && !price.billing_interval);
+  }
+  if (wizardStepKey.value === "details") {
     if (!form.value.name.trim()) return false;
+    // A category is what files the product in the shared taxonomy, and the Details step now ASKS for one --
+    // so it can be required here rather than discovered as a save error pointing at an off-screen field.
+    if (wizardIntent.value === "transaction" && !form.value.product_category) return false;
     if (wizardIntent.value === "lead_gen") return Boolean(form.value.lead_capture.action);
     if (wizardIntent.value === "tip_jar") {
       return form.value.prices[0].allow_custom || (form.value.prices[0].presets || []).some((a) => Number(a) > 0);
@@ -718,16 +613,16 @@ const wizardCanAdvance = computed(() => {
   return true;
 });
 
-function wizardNext() {
-  if (!wizardCanAdvance.value) return;
-  // Apply the intent as soon as it is chosen, so step 2 edits a form that already matches it.
-  if (wizardStep.value === 1) applyWizardIntent();
-  wizardStep.value = Math.min(3, wizardStep.value + 1);
+function onWizardSubmit() {
+  if (onLastWizardStep.value) return saveProduct();
+  return wizardNext();
 }
 
-async function onWizardImagePicked(event) {
-  await handleImageFiles(Array.from(event.target.files || []));
-  event.target.value = "";   // so picking the same file twice still fires a change
+function wizardNext() {
+  if (!wizardCanAdvance.value) return;
+  // Apply the intent as soon as it is chosen, so the next step edits a form that already matches it.
+  if (wizardStepKey.value === "purpose") applyWizardIntent();
+  wizardStep.value = Math.min(wizardFlow.value.length, wizardStep.value + 1);
 }
 
 function wizardBack() {
@@ -766,11 +661,8 @@ function applyWizardIntent() {
 }
 
 const showLeadPicker = ref(false);
-const tagInputVisible = ref(false);
-const tagInput = ref("");
 const formError = ref("");
 const imageFileInput = ref(null);
-const imageDragActive = ref(false);
 const uploadStatus = ref("");
 const uploadStatusKind = ref("");
 const syncing = ref(false);
@@ -794,72 +686,6 @@ const statusMessage = computed(() => {
   if (!store.loaded) return store.message;
   return `${store.shownCount} of ${store.products.length} product${store.products.length === 1 ? "" : "s"} shown.`;
 });
-
-// --- Product Category autocomplete (plans/PRODUCT_CATEGORY_AUTOCOMPLETE.md) ---------------------------
-// form.product_category stores the normalized KEY; categoryQuery is the label the tenant sees/types.
-const categoryQuery = ref("");
-// Fetch once per product_type and filter locally, instead of calling the API on every focus AND every
-// 180ms typing pause — each of which was a Lambda invoke plus a full scan of contributed categories.
-// plans/CACHED_SUGGESTION_FIELD.md. The whole scoped set is fetched (the endpoint's default of 20 would
-// truncate 30 categories, making local filtering fast and wrong).
-const {
-  suggestions: categorySuggestions,
-  open: openCategorySuggestions,
-  search: filterCategorySuggestions,
-} = useCachedSuggestions({
-  fetchAll: (productType) => fetchCategoriesForScope(productType),
-  filter: filterCategories,
-  scope: () => form.value.product_type,
-});
-const showCategoryMenu = ref(false);
-
-function initCategoryQuery() {
-  // Show the stored key's label. The proper server label arrives when the menu first opens; humanize is a
-  // fine placeholder (e.g. "dietary_supplement" -> "Dietary Supplement").
-  categoryQuery.value = form.value.product_category ? humanizeCategory(form.value.product_category) : "";
-}
-
-function onCategoryFocus() {
-  showCategoryMenu.value = true;
-  // Refreshes on OPEN: the only moment staleness is observable, since a category the tenant typed a
-  // moment ago must reappear. Cached results render immediately while that refresh is in flight.
-  openCategorySuggestions();
-  filterCategorySuggestions(categoryQuery.value);
-}
-
-function onCategoryInput() {
-  showCategoryMenu.value = true;
-  // Local. No debounce needed, because there is no request to debounce.
-  filterCategorySuggestions(categoryQuery.value);
-}
-
-function pickCategory(suggestion) {
-  form.value.product_category = suggestion.key;
-  categoryQuery.value = suggestion.label;
-  showCategoryMenu.value = false;
-}
-
-// Typed text with no pick becomes the tenant's own category: store the normalized key so it dedups with
-// existing entries (and matches what the server records). An exact-label match to a suggestion picks it.
-function commitCategoryFreeText() {
-  const typed = categoryQuery.value.trim();
-  showCategoryMenu.value = false;
-  if (!typed) {
-    form.value.product_category = "";
-    return;
-  }
-  const exact = categorySuggestions.value.find((s) => s.label.toLowerCase() === typed.toLowerCase());
-  if (exact) {
-    pickCategory(exact);
-    return;
-  }
-  form.value.product_category = normalizeCategory(typed);
-}
-
-function onCategoryBlur() {
-  // Delay so a mousedown on a suggestion (which fires before blur) can win.
-  setTimeout(() => { if (showCategoryMenu.value || categoryQuery.value) commitCategoryFreeText(); }, 150);
-}
 
 const leadTargetLabel = computed(() => leadTargetLabelFor(draftLeadAction.value.action));
 
@@ -950,53 +776,6 @@ function defaultProductForm() {
   };
 }
 
-function variantFormId(prefix) {
-  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-}
-
-function defaultSizeVariant() {
-  return {
-    form_id: variantFormId("size"),
-    label: "",
-    description: "",
-  };
-}
-
-function defaultColorVariant() {
-  return {
-    form_id: variantFormId("color"),
-    label: "",
-    hex_color: "#000000",
-    description: "",
-  };
-}
-
-function ensureSizeVariant() {
-  if (form.value.size_enabled && !form.value.sizes.length) addSizeVariant();
-}
-
-function ensureColorVariant() {
-  if (form.value.color_enabled && !form.value.colors.length) addColorVariant();
-}
-
-function addSizeVariant() {
-  form.value.sizes.push(defaultSizeVariant());
-}
-
-function addColorVariant() {
-  form.value.colors.push(defaultColorVariant());
-}
-
-function removeSizeVariant(index) {
-  form.value.sizes.splice(index, 1);
-  if (!form.value.sizes.length) form.value.size_enabled = false;
-}
-
-function removeColorVariant(index) {
-  form.value.colors.splice(index, 1);
-  if (!form.value.colors.length) form.value.color_enabled = false;
-}
-
 // Auto-SKU while a new product is being named. Guarded three ways so it can never re-identify a product:
 // only when creating, only if the tenant hasn't typed their own, and never once the product exists.
 watch(() => form.value.name, (name) => {
@@ -1007,15 +786,11 @@ watch(() => form.value.name, (name) => {
 function openCreateModal() {
   editingProduct.value = null;
   skuTouched.value = false;
-  gtinTouched.value = false;
   form.value = defaultProductForm();
-  initCategoryQuery();
   draftLeadAction.value = { ...defaultLeadAction };
   formError.value = "";
   uploadStatus.value = "";
   uploadStatusKind.value = "";
-  tagInput.value = "";
-  tagInputVisible.value = false;
   wizardMode.value = true;
   wizardStep.value = 1;
   wizardIntent.value = "transaction";
@@ -1029,17 +804,13 @@ async function openEditModal(row) {
   editingProduct.value = product;
   hydratingForm.value = true;
   skuTouched.value = false;
-  gtinTouched.value = false;
   form.value = productFormFromDocument(product);
   // Products created before SKUs existed get one now, from the same name+id inputs a new product would use.
   if (!form.value.sku) form.value.sku = generateSku(product.name, product.product_id);
-  initCategoryQuery();
   draftLeadAction.value = { ...form.value.lead_capture };
   formError.value = "";
   uploadStatus.value = "";
   uploadStatusKind.value = "";
-  tagInput.value = "";
-  tagInputVisible.value = false;
   wizardMode.value = false;   // editing shows every field at once; a wizard is the wrong shape for that
   showCreateModal.value = true;
   await nextTick();
@@ -1154,24 +925,6 @@ function customTagsFromProduct(product) {
   return (product.tags || []).map(normalizeTag).filter((tag) => tag && !autoTags.has(tag));
 }
 
-function normalizeTag(value) {
-  return String(value || "").trim().toLowerCase().replace(/[_-]+/g, " ").replace(/\s+/g, " ");
-}
-
-function addTag() {
-  const tag = normalizeTag(tagInput.value);
-  if (tag && !form.value.tags.includes(tag)) form.value.tags.push(tag);
-  tagInput.value = "";
-}
-
-function hideEmptyTagInput() {
-  if (!tagInput.value) tagInputVisible.value = false;
-}
-
-function removeTag(tag) {
-  form.value.tags = form.value.tags.filter((item) => item !== tag);
-}
-
 function applyLeadAction() {
   form.value.lead_capture = { ...draftLeadAction.value };
   showLeadPicker.value = false;
@@ -1206,16 +959,23 @@ function validateTipAmounts() {
 
 function validateProductForm() {
   if (!form.value.name.trim()) return "Product name is required.";
-  // The wizard never SHOWS a category field -- its whole point is to ask only what the chosen intent needs,
-  // and its own note promises categories can be added after saving. Demanding one here rejected every
-  // product the wizard could produce, with an error pointing at a field that was not on the screen.
-  if (!wizardMode.value && !form.value.product_category) return "Choose a product category.";
+  // Required wherever it is ASKED FOR, and nowhere else. The full form always asks. The wizard asks only on
+  // the flow that has one -- a tip jar files itself under "tip" and a lead magnet is never sold -- and
+  // demanding one on those pointed the tenant at a field that was not on their screen, which rejected every
+  // product the wizard could produce (2026-09-13).
+  const categoryAsked = !wizardMode.value || wizardIntent.value === "transaction";
+  if (categoryAsked && !form.value.product_category) return "Choose a product category.";
   const tipError = validateTipAmounts();
   if (tipError) return tipError;
   if (form.value.product_intent === "lead_gen" && leadTargetLabelFor(form.value.lead_capture.action) && !form.value.lead_capture.target) {
     return `${form.value.lead_capture.label} requires a target.`;
   }
   if (form.value.product_intent === "transaction" && form.value.prices.some((price) => Number(price.quantity || 0) < 1)) return "Each price quantity must be at least 1.";
+  // Caught here as well as server-side, so the tenant is told on the screen holding the field rather than by
+  // a rejected save. A recurring price with no interval used to save happily and then charge once.
+  if (form.value.prices.some((price) => price.pricing_model === "recurring" && !price.billing_interval)) {
+    return "Choose a billing interval for your recurring price.";
+  }
   return "";
 }
 
@@ -1297,16 +1057,6 @@ function syncBadgeClass(product) {
   if (product?.sync?.status === "failed") return "archived";
   if (product?.sync?.status === "success" || product?.stripe_product_id) return "active";
   return "inactive";
-}
-
-async function handlePickedImages(event) {
-  await handleImageFiles(Array.from(event.target.files || []));
-  event.target.value = "";
-}
-
-async function handleDroppedImages(event) {
-  imageDragActive.value = false;
-  await handleImageFiles(Array.from(event.dataTransfer?.files || []));
 }
 
 async function handleImageFiles(files) {

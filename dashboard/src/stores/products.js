@@ -82,7 +82,7 @@ function cents(value) {
   return Math.max(0, Math.round(Number(value || 0) * 100));
 }
 
-function normalizeTag(value) {
+export function normalizeTag(value) {
   return String(value || "").trim().toLowerCase().replace(/[_-]+/g, " ").replace(/\s+/g, " ");
 }
 

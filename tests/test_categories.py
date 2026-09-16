@@ -6,6 +6,7 @@ from stripe_link.domain.categories import (
     PROMOTION_THRESHOLD,
     category_label,
     is_promoted,
+    SYSTEM_CATEGORIES,
     normalize_category,
     search_suggestions,
 )
@@ -90,6 +91,46 @@ class SearchTests(unittest.TestCase):
         self.assertEqual(category_label("dietary_supplement"), "Dietary Supplement")
         self.assertEqual(category_label("artisan_candles", "Artisan Candles"), "Artisan Candles")
         self.assertEqual(category_label("artisan_candles"), "Artisan Candles")
+
+
+class SystemCategoryTests(unittest.TestCase):
+    """A category the SYSTEM assigns is not one the tenant may pick (author, 2026-09-15).
+
+    "tip" is filed automatically by the Receive-tips purpose so tips group together in the product list. That
+    made it a category the tenant had USED, so the picker offered it back to them on every other product —
+    and, once three tenants owned a tip jar, it was on course to be promoted to a suggestion for everybody.
+    "Tip" is meaningless on a T-shirt, and picking it there files the T-shirt wrongly.
+    """
+
+    def _contributed(self, key, label, tenants=("t1",), types=("digital",)):
+        return {"category_key": key, "label": label,
+                "tenant_ids": set(tenants), "product_types": set(types)}
+
+    def test_the_tenants_own_tip_category_is_not_offered_back(self):
+        contributed = [self._contributed("tip", "Tip")]
+        keys = [row["key"] for row in search_suggestions("", contributed, tenant_id="t1")]
+        self.assertNotIn("tip", keys)
+
+    def test_it_cannot_be_promoted_to_everybody(self):
+        # The promotion threshold counts DISTINCT tenants, and every tenant with a tip jar contributes one.
+        contributed = [self._contributed("tip", "Tip", tenants=("t1", "t2", "t3", "t4"))]
+        keys = [row["key"] for row in search_suggestions("", contributed, tenant_id="t9")]
+        self.assertNotIn("tip", keys)
+
+    def test_searching_for_it_by_name_finds_nothing(self):
+        contributed = [self._contributed("tip", "Tip")]
+        self.assertEqual(search_suggestions("tip", contributed, tenant_id="t1"), [])
+
+    def test_other_contributed_categories_are_untouched(self):
+        # The filter is a named set, not a heuristic — nothing else should have gone with it.
+        contributed = [self._contributed("tip", "Tip"), self._contributed("hiking_gear", "Hiking Gear")]
+        # Past the default page of 20, which the curated list fills on its own.
+        keys = [row["key"] for row in search_suggestions("", contributed, tenant_id="t1", limit=500)]
+        self.assertIn("hiking_gear", keys)
+        self.assertNotIn("tip", keys)
+
+    def test_the_excluded_set_is_named_where_it_can_be_found(self):
+        self.assertIn("tip", SYSTEM_CATEGORIES)
 
 
 if __name__ == "__main__":
