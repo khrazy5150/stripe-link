@@ -148,6 +148,52 @@ class PageHandlerTests(unittest.TestCase):
         self.assertEqual(response["statusCode"], 201, json.loads(response["body"]).get("message"))
         self.assertEqual(json.loads(response["body"])["page"]["status"], "draft")
 
+    def test_a_page_the_listing_measured_can_still_be_unpublished(self):
+        """The listing hands the client a field the table does not hold, and the client hands it back.
+
+        `attach_summaries` writes `analytics_summary` onto the very page dicts the listing returns, and the
+        status menu posts one of those dicts straight back to unpublish it -- so the incoming document
+        carried a key the stored one could not have, every published page looked edited, and unpublishing
+        was refused. Third instance of the same shape: two things that must agree, with nothing forcing them
+        to. The derived field is now stripped at the write boundary, which is also what keeps it from being
+        stored inside the document it was derived from.
+        """
+        stored = dict(self.page)
+        stored["status"] = "published"
+        self.repository.put(stored)
+
+        from_listing = dict(stored)
+        from_listing["analytics_summary"] = {"conversions": 0, "revenue_cents": 0, "views": 1}
+        from_listing["status"] = "draft"
+
+        response = handler({
+            "httpMethod": "POST",
+            "body": json.dumps(from_listing),
+        }, None, repository=self.repository)
+
+        self.assertEqual(response["statusCode"], 201, json.loads(response["body"]).get("message"))
+        self.assertEqual(json.loads(response["body"])["page"]["status"], "draft")
+        self.assertNotIn("analytics_summary", self.repository.get(stored["tenant_id"], stored["page_id"]))
+
+    def test_a_real_edit_arriving_with_analytics_is_still_refused(self):
+        # Stripping the derived field must not become a way to smuggle an edit past the guard.
+        stored = dict(self.page)
+        stored["status"] = "published"
+        self.repository.put(stored)
+
+        from_listing = dict(stored)
+        from_listing["analytics_summary"] = {"conversions": 2, "revenue_cents": 900}
+        from_listing["status"] = "draft"
+        from_listing["name"] = "Edited on the way out"
+
+        response = handler({
+            "httpMethod": "POST",
+            "body": json.dumps(from_listing),
+        }, None, repository=self.repository)
+
+        self.assertEqual(response["statusCode"], 400)
+        self.assertIn("Published pages cannot be modified", json.loads(response["body"])["message"])
+
     def test_a_cropped_page_still_cannot_be_edited_while_published(self):
         # Normalising numbers must not weaken the guard: a real content change is still refused.
         stored = dict(self.page)

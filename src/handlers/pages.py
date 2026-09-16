@@ -36,9 +36,26 @@ def handler(event, context, repository=None, tenant_repo=None):
     return error_response(f"Unsupported method '{method}'.", status_code=405, code="method_not_allowed")
 
 
+# Fields the LISTING adds to each page and the table never holds. `attach_summaries` writes
+# `analytics_summary` onto the very dicts it returns, and the page cards' status menu posts one of those
+# dicts straight back to unpublish or archive it -- so the document arriving here carried a field the stored
+# one could not have, every published page looked edited, and unpublishing was refused as a modification.
+#
+# Stripped on the way IN rather than patched into the comparison, because the comparison is not the only
+# thing that would have been wrong: `repository.put` stores what it is given, so the alternative fix leaves
+# derived analytics persisted inside the document they were derived from.
+DERIVED_PAGE_FIELDS = {"analytics_summary"}
+
+
+def strip_derived_fields(document: dict) -> dict:
+    if not isinstance(document, dict):
+        return document
+    return {key: value for key, value in document.items() if key not in DERIVED_PAGE_FIELDS}
+
+
 def create_page(event, repository):
     try:
-        document = parse_json_body(event)
+        document = strip_derived_fields(parse_json_body(event))
         existing = existing_page_for_document(repository, document)
         assign_short_code(existing, document)
         validate_published_page_mutation(existing, document)
