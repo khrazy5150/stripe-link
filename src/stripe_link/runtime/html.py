@@ -2462,11 +2462,19 @@ def render_brand_label(section: dict[str, Any], page: dict[str, Any]) -> str:
     # The Site sits ABOVE the page name because a brand label names the business, not the document -- a link
     # hub falling back to "My Links Landing Page" is showing a filename to a visitor. Resolved here rather
     # than stored, so renaming the business or attaching a Site updates every page that never overrode it.
+    # A brand label names the BUSINESS. Every step here is an identity; none is a document title, because a
+    # page headed "2025 Guide to Junk Food Restaurants Landing Page" is showing a visitor a filename
+    # (author, 2026-09-16). The Site is the best answer when the page has one; the tenant's own business name
+    # covers a page not yet attached to one; the owner's name is the last resort, and is what a solo creator
+    # would have put there anyway. page.name is deliberately NOT in the chain any more.
     label = render_headline_markup(
         section.get("label")
         or str(_RENDER_ORG.get("name") or "").strip()
-        or (page.get("seo") or {}).get("title")
-        or page.get("name") or "")
+        or str(_RENDER_PREFERENCES.get("business_name") or "").strip()
+        or str(_RENDER_PREFERENCES.get("display_name") or "").strip()
+        or "")
+    if not label:
+        return ""
     # heading_role: none in the element catalog — a brand label is not a heading (matches the preview's span)
     # WHEN there is a hero to be one. On a composition with no hero (link-in-bio) it becomes the page's H1
     # rather than leaving the page without one; render_page decides, so the two can never both claim it.

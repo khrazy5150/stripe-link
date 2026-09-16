@@ -953,7 +953,16 @@ def attach_owner_display_name(preferences: dict[str, Any], repository: Any | Non
     except Exception:  # noqa: BLE001
         return preferences
     name = str(profile.get("display_name") or "").strip()
-    return {**preferences, "display_name": name} if name else preferences
+    # The BUSINESS name travels with it. It is the canonical one (plans/LANDING_PAGE_DEFAULT_COPY.md puts
+    # business identity on the user profile), and without it here a page not yet attached to a Site had no
+    # business to name at all -- so the brand label fell through to the page's own filename.
+    business = str(((profile.get("business") or {}).get("name") or "")).strip()
+    resolved = dict(preferences)
+    if name:
+        resolved["display_name"] = name
+    if business:
+        resolved["business_name"] = business
+    return resolved
 
 
 # A tenant font is the ONE font a page still fetches cross-origin: the catalogue's are embedded by the

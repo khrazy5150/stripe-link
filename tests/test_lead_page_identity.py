@@ -223,8 +223,46 @@ class BrandLabelResolutionTests(unittest.TestCase):
         self.assertIn("Poliaxis Nutrition", markup)
         self.assertNotIn("Landing Page", markup)
 
-    def test_the_page_name_is_still_the_last_resort(self):
-        self.assertIn("My Links Landing Page", self._render({}))
+    def test_the_page_name_is_never_the_answer(self):
+        """Was the last resort until 2026-09-16, and it was wrong every time it fired.
+
+        A page not yet attached to a Site rendered its own filename as the business — "2025 Guide to Junk
+        Food Restaurants Landing Page" — which is the exact failure the fallback's own comment described and
+        then performed. Every step in the chain is now an identity.
+        """
+        self.assertNotIn("Landing Page", self._render({}))
+
+    def test_the_tenants_business_name_covers_a_page_with_no_site(self):
+        # The canonical one (plans/LANDING_PAGE_DEFAULT_COPY.md puts business identity on the user profile),
+        # carried onto the render preferences by attach_owner_display_name.
+        html_module._RENDER_PREFERENCES.update({"business_name": "Poliaxis Nutrition"})
+        try:
+            self.assertIn("Poliaxis Nutrition", self._render({}))
+        finally:
+            html_module._RENDER_PREFERENCES.clear()
+
+    def test_the_site_still_outranks_the_profile(self):
+        # A page that HAS a Site is naming that Site's business, not whatever the owner typed on their profile.
+        html_module._RENDER_PREFERENCES.update({"business_name": "Old Co"})
+        try:
+            self.assertIn("Poliaxis Nutrition", self._render({}, {"name": "Poliaxis Nutrition"}))
+        finally:
+            html_module._RENDER_PREFERENCES.clear()
+
+    def test_the_owner_is_the_last_resort_not_the_document(self):
+        # A solo creator with no Site and no business name still gets a name, and it is a person's rather
+        # than a file's.
+        html_module._RENDER_PREFERENCES.update({"display_name": "Keith De Costa"})
+        try:
+            markup = self._render({})
+            self.assertIn("Keith De Costa", markup)
+            self.assertNotIn("Landing Page", markup)
+        finally:
+            html_module._RENDER_PREFERENCES.clear()
+
+    def test_nothing_at_all_renders_nothing(self):
+        # Better an absent brand mark than a confident wrong one.
+        self.assertEqual(self._render({}), "")
 
     def test_the_wizard_no_longer_bakes_the_platform_name_in(self):
         self.assertNotIn('label: formatHeadline("Junior Bay")', BUILDER)
