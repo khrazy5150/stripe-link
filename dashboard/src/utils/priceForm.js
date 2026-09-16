@@ -27,8 +27,31 @@ export function defaultPriceForm() {
     allow_recurring: false,
     allow_one_time: true,
     recurring_interval: "month",
+    // A RECURRING price (pricing_model "recurring"). Separate from the tip jar's `recurring_interval` above
+    // on purpose: that one is a repeating TIP the buyer opts into, restricted to month/year (§5h), while
+    // these are the subscription terms the tenant sets and Stripe stores on the Price itself.
+    //
+    // No interval is chosen here. "month" would be a plausible wrong answer — the same shape as the bug this
+    // fixes — so the field starts empty and the form refuses to save until the tenant says.
+    billing_interval: "",
+    interval_count: 1,
+    trial_enabled: false,
+    trial_days: 7,
+    // 0 = the free trial Stripe does natively. Anything else is charged once, up front, as its own line.
+    trial_price: 0,
   };
 }
+
+// Stripe's four, and what the legacy builder offered. The plural is for "every 2 month(s)".
+export const BILLING_INTERVALS = [
+  ["day", "Daily", "day"],
+  ["week", "Weekly", "week"],
+  ["month", "Monthly", "month"],
+  ["year", "Yearly", "year"],
+];
+
+// Stripe will not bill less often than once a year, so the ceiling is real rather than defensive.
+export const MAX_INTERVAL_COUNT = { day: 365, week: 52, month: 12, year: 1 };
 
 export function centsToMoneyInput(cents, quantity = 1) {
   return Number((Number(cents || 0) / Math.max(1, Number(quantity || 1)) / 100).toFixed(2));
@@ -62,6 +85,13 @@ export function priceFormFromDocument(price) {
     // Absent means yes: every jar saved before the field existed offers both, which is what it already does.
     allow_one_time: price.allow_one_time !== false,
     recurring_interval: price.recurring_interval === "year" ? "year" : "month",
+    // Read from the NESTED object, which is the shape Stripe takes and the document stores. Coercing this
+    // through the tip's month/year field would turn a weekly subscription into a monthly one on the way in.
+    billing_interval: String(price.recurring?.interval || ""),
+    interval_count: Math.max(1, Number(price.recurring?.interval_count || 1)),
+    trial_enabled: Number(price.trial_period_days || 0) > 0,
+    trial_days: Number(price.trial_period_days || 0) || 7,
+    trial_price: centsToMoneyInput(price.trial_price || 0),
   };
 }
 

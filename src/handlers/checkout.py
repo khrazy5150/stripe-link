@@ -423,6 +423,33 @@ def build_checkout_payload(
             payload["subscription_data[metadata][tenant_id]"] = tenant_id
             payload["subscription_data[metadata][tip_keyed_amount]"] = str(int(tip_line.get("tip_keyed_amount") or 0))
 
+    # A TRIAL, when the subscribing line carries one. Trials belong to the SUBSCRIPTION, never to the Stripe
+    # Price -- which is why they are read off the resolved line here rather than baked in at sync time.
+    if payload["mode"] == "subscription":
+        trial_line = next(
+            (item for item in resolved.get("items") or []
+             if item.get("recurring") and int(item.get("trial_period_days") or 0) > 0),
+            None,
+        )
+        if trial_line:
+            payload["subscription_data[trial_period_days]"] = str(int(trial_line["trial_period_days"]))
+            trial_price = int(trial_line.get("trial_price") or 0)
+            if trial_price > 0:
+                # A PAID trial. Stripe has no such thing -- its trial is free by definition, and Checkout
+                # always renders "X days free" with no way to reword it -- so the fee is charged as its own
+                # one-time line beside the subscription. Same shape the legacy builder used
+                # (stripe-cart create_checkout.py, "Added paid trial line item").
+                #
+                # Indexed at the item COUNT: every resolved item consumes its own line index above, services
+                # included, so this is the first free one and cannot overwrite a real line.
+                index = len(resolved.get("items") or [])
+                prefix = f"line_items[{index}]"
+                payload[f"{prefix}[price_data][currency]"] = str(trial_line.get("currency") or "usd")
+                payload[f"{prefix}[price_data][unit_amount]"] = str(trial_price)
+                payload[f"{prefix}[price_data][product_data][name]"] = (
+                    f"{trial_line.get('product_name') or first_product_name or 'Subscription'} trial")
+                payload[f"{prefix}[quantity]"] = "1"
+
     payload["metadata[clientID]"] = tenant_id
     payload["metadata[client_id]"] = tenant_id
     payload["metadata[product_id]"] = first_product_id

@@ -136,6 +136,21 @@ export async function buildPriceDocument(priceForm, productType, now) {
     created_at: priceForm.created_at || now,
     updated_at: now,
   };
+  if (pricingModel === "recurring" && priceForm.billing_interval) {
+    // The NESTED shape Stripe takes and `build_price_params` reads. Writing it is the whole fix: a price
+    // saved as "recurring" with nothing here synced to Stripe as a one-time price and charged once.
+    price.recurring = {
+      interval: priceForm.billing_interval,
+      interval_count: Math.max(1, Math.round(Number(priceForm.interval_count || 1))),
+    };
+    if (priceForm.trial_enabled && Number(priceForm.trial_days) > 0) {
+      // Written on the PRICE document but never sent to the Stripe Price: Stripe applies trials at the
+      // subscription level, so checkout reads these again when it builds the session.
+      price.trial_period_days = Math.round(Number(priceForm.trial_days));
+      const trialPrice = cents(priceForm.trial_price);
+      if (trialPrice > 0) price.trial_price = trialPrice;
+    }
+  }
   if (pricingModel === "customer_chooses") {
     // A TIP JAR. unit_amount is meaningless here -- the buyer picks -- so the document says how they pick
     // and nothing pretends there is a fixed price. Writing one is what made the half-imported version sell

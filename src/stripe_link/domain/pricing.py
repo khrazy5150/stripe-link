@@ -199,6 +199,13 @@ class ResolvedOfferItem:
     line_amount: int
     selectable: bool
     kind: str = "product"
+    # How often this line CHARGES, when it charges more than once: {"interval", "interval_count"}, straight
+    # off the price. Carried on the resolved line rather than re-read from the product later because the
+    # checkout session's mode is decided from the lines -- and a subscription price on a line that does not
+    # say so becomes a one-off charge with nothing reporting it.
+    recurring: dict[str, Any] | None = None
+    trial_period_days: int = 0
+    trial_price: int = 0
     service_id: str = ""
     booking_flow: str = ""
     fulfillment_mode: str = "scheduled"
@@ -369,7 +376,29 @@ def resolve_offer_item(
         context=price_context,
         line_amount=unit_amount * item_quantity,
         selectable=bool(item.get("selectable_prices")),
+        **recurring_terms(price),
     )
+
+
+def recurring_terms(price: dict[str, Any]) -> dict[str, Any]:
+    """The repeat terms of one price, or nothing when it does not repeat.
+
+    Gated on `pricing_model` rather than on the mere presence of a `recurring` object, so a stale block left
+    on a price that was switched back to one-time cannot quietly resubscribe anybody.
+    """
+    if str(price.get("pricing_model") or "") != "recurring":
+        return {}
+    recurring = price.get("recurring")
+    if not isinstance(recurring, dict) or not recurring.get("interval"):
+        return {}
+    return {
+        "recurring": {
+            "interval": str(recurring["interval"]),
+            "interval_count": int(recurring.get("interval_count") or 1),
+        },
+        "trial_period_days": int(price.get("trial_period_days") or 0),
+        "trial_price": int(price.get("trial_price") or 0),
+    }
 
 
 def resolve_offer(
@@ -424,6 +453,9 @@ def resolve_offer(
                 "context": item.context,
                 "line_amount": item.line_amount,
                 "selectable": item.selectable,
+                "recurring": item.recurring,
+                "trial_period_days": item.trial_period_days,
+                "trial_price": item.trial_price,
                 "booking_flow": item.booking_flow,
                 "fulfillment_mode": item.fulfillment_mode,
                 "duration_minutes": item.duration_minutes,
