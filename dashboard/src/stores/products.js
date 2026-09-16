@@ -492,11 +492,30 @@ function refundPolicy(productType, form) {
   };
 }
 
+// What the FORM says to a visitor, per action. Deliberately separate from the picker's label and
+// description (leadActions[] in Products.vue), which are written for the TENANT choosing an action: "Capture
+// email / Collect the visitor's email address." describes what the software does TO the visitor, and putting
+// it on their screen is how a lead page came to introduce itself by explaining its own plumbing
+// (author, 2026-09-15). The schema requires both fields, so these are prompts rather than nothing.
+const LEAD_FORM_COPY = {
+  capture_email: { title: "Where should we send it?", description: "Enter your email and we'll send it straight over." },
+  capture_phone: { title: "Where can we reach you?", description: "Enter your number and we'll be in touch." },
+  capture_email_phone: { title: "How should we reach you?", description: "Leave your details and we'll follow up." },
+  call_number: { title: "Talk to us", description: "Give us a call and we'll take it from there." },
+  external_url: { title: "Keep going", description: "Follow the link to continue." },
+  social_redirect: { title: "Find us there", description: "Follow the link to continue." },
+};
+
 function leadCaptureShape(action = {}) {
+  const key = action.action || "capture_email";
+  const copy = LEAD_FORM_COPY[key] || LEAD_FORM_COPY.capture_email;
   const base = {
-    action: action.action || "capture_email",
-    title: action.title || action.label || "Capture email",
-    description: action.description || "Collect lead information.",
+    action: key,
+    // Derived from the action KEY, never carried over from the picked action object. The picker hands us its
+    // own `label` and `description` -- tenant-facing vocabulary -- and reading either here is precisely the
+    // leak. There is no tenant-editable field for these today; when one exists it can feed in deliberately.
+    title: copy.title,
+    description: copy.description,
   };
   if (base.action === "capture_email") {
     base.fields = [{ name: "email", type: "email", required: true }];

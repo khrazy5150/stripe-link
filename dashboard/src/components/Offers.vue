@@ -1291,16 +1291,20 @@ function primaryCtaContract() {
     if ((product.product_intent || "transaction") !== "lead_gen") return { type: "buy", label: "Buy Now" };
     const lc = product.lead_capture || {};
     const target = lc.target?.value || "";
-    if (lc.action === "call_number") return { type: "call", label: lc.title || "Call Now", target };
+    // NOT `lc.title`. That field holds the ACTION's picker label -- "Capture email" -- which is vocabulary
+    // for the tenant choosing an action, not a verb to put in front of a visitor. Using it here is how the
+    // page came to sport a button reading "Capture email", telling the visitor what the FORM does to them
+    // (author, 2026-09-15). The defaults below were already sitting right there, shadowed.
+    if (lc.action === "call_number") return { type: "call", label: "Call Now", target };
     if (lc.action === "external_url" || lc.action === "social_redirect") {
       // A downloadable file target renders a download CTA; any other URL is an external link.
       if (/\.(pdf|zip|epub|mp3|mp4|mov|docx?|xlsx?|pptx?|csv|png|jpe?g)(\?|#|$)/i.test(target)) {
-        return { type: "download", label: lc.title || "Download", target };
+        return { type: "download", label: "Download", target };
       }
-      return { type: "external", label: lc.title || "Learn More", target };
+      return { type: "external", label: "Learn More", target };
     }
     // capture_email / capture_phone / capture_email_phone -> inline collector (Phase 2)
-    return { type: "email", label: lc.title || "Get Started" };
+    return { type: "email", label: "Get Instant Access" };
   }
   const row = serviceRows.value[0];
   if (row) {

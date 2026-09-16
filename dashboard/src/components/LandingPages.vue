@@ -4561,8 +4561,14 @@ function builderSectionCandidates(intent) {
   if (sectionVisible("hero")) sections.push({
     id: "hero",
     type: "hero",
-    headline: isListicleOffer.value ? "" : formatHeadline(builder.headline || builder.name || "Landing Page"),
-    subheadline: isListicleOffer.value ? "" : (builder.subheadline || "Continue when you are ready."),
+    // Stored ONLY when the tenant's words differ from what the page would derive anyway. The renderer
+    // resolves page -> offer.presentation -> product (hero_copy), so copying the derived value in freezes
+    // the page at whatever the offer said the day it was made -- which is how a lead page kept announcing
+    // "Capture Email" long after its offer had been given a real headline (author, 2026-09-15). Same rule
+    // the SEO fields already follow: only an edit is written.
+    headline: heroOverride(formatHeadline(builder.headline || builder.name || "Landing Page"),
+                           formatHeadline(offerHeadline(builderOffer.value) || "")),
+    subheadline: heroOverride(builder.subheadline || "", offerDescription(builderOffer.value) || ""),
   });
   // The Page Composer decides which optional sections exist (sectionVisible). A listicle hides the fluff
   // (trust badges, elements, refund, sticky CTA — the add-to-cart lives in the price card); other offer
@@ -4765,11 +4771,9 @@ function pageSections(intent, offer) {
     {
       id: "hero",
       type: "hero",
-      headline: formatHeadline(offerHeadline(offer) || (intent === "transaction" ? "Complete your order" : "Get started")),
-      // The PRODUCT's words, never the lead action's. `leadAction.description` describes the mechanism --
-      // "Collect the visitor's email address." -- and putting it under the headline made every capture page
-      // introduce itself as a form instead of as the thing on offer (author, 2026-09-15).
-      subheadline: offerDescription(offer) || "Choose your option and continue.",
+      // NOTHING stored. The renderer derives page -> offer.presentation -> product, so a freshly seeded page
+      // stays correct as the offer is edited instead of freezing at the moment it was created. A tenant who
+      // types their own headline in the builder gets it stored then (heroOverride).
     },
   ];
   if (intent === "transaction") {
@@ -6387,6 +6391,16 @@ function offerItemModels(offer) {
 // --- Offer presentation contract: the fields the landing page derives from any offer by default ---
 function offerImage(offer) {
   return offer?.presentation?.image_url || offer?.presentation?.hero_image_url || offerItemModels(offer)[0]?.image || "";
+}
+
+// A stored hero field, or undefined when it says exactly what the renderer would derive. A listicle keeps
+// nothing at all: its hero is target-bound and swaps per slide, so any fixed copy is wrong on every slide
+// but one.
+function heroOverride(typed, derived) {
+  if (isListicleOffer.value) return "";
+  const value = String(typed || "").trim();
+  if (!value || value === String(derived || "").trim()) return undefined;
+  return value;
 }
 
 function offerHeadline(offer) {

@@ -138,9 +138,22 @@ class HeroCopyTests(unittest.TestCase):
         # so every capture page whose offer had no subheadline announced its own plumbing.
         self.assertNotIn("leadAction?.description", BUILDER)
 
-    def test_the_subheadline_falls_back_to_the_product(self):
+    def test_a_new_page_stores_no_hero_copy_at_all(self):
+        # The renderer derives it, so copying it in only freezes the page at what the offer said the day it
+        # was made. That is how a lead page kept announcing "Capture Email" after its offer had a real one.
         block = BUILDER.split("function pageSections(", 1)[1][:1400]
-        self.assertIn("subheadline: offerDescription(offer)", block)
+        hero = block.split('type: "hero"', 1)[1].split("},", 1)[0]
+        self.assertNotIn("headline:", hero)
+        self.assertNotIn("subheadline:", hero)
+
+    def test_the_builder_stores_only_what_the_tenant_changed(self):
+        # Same rule the SEO fields already follow. A typed headline that matches the derived one is not an
+        # edit, and storing it would silently opt the page out of every later correction to the offer.
+        self.assertIn("function heroOverride(typed, derived)", BUILDER)
+        build = BUILDER.split('if (sectionVisible("hero")) sections.push(', 1)[1][:1000]
+        self.assertIn("heroOverride(", build)
+        self.assertIn("offerHeadline(builderOffer.value)", build)
+        self.assertIn("offerDescription(builderOffer.value)", build)
 
     def test_the_seo_description_is_not_the_headline_again(self):
         block = BUILDER.split("function buildPageDocument(", 1)[1][:1600]
