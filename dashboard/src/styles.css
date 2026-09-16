@@ -1302,6 +1302,92 @@ textarea:focus {
   gap: 1.4rem;
 }
 
+/* A recurring price's terms. Boxed like the legacy builder's, because "every 2 months, 7-day trial" is one
+   set of decisions and reads as noise scattered among the single fields around it. */
+.price-recurring-field {
+  display: grid;
+  gap: 1.2rem;
+  margin: 1.2rem 0 0;
+  padding: 1.4rem;
+  border: 1px solid var(--border, #e5e7eb);
+  border-radius: 0.8rem;
+}
+
+.price-recurring-row,
+.price-trial-options {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+  gap: 1.2rem;
+  align-items: start;
+}
+
+/* The number and its unit read as one phrase — "every [2] month(s)" — rather than as a stray input. */
+.price-interval-count {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+}
+
+.price-interval-count input { width: 8rem; }
+
+.price-interval-count span {
+  color: var(--text-muted, #6b7280);
+  font-size: 1.3rem;
+}
+
+/* Not decorative: an interval-less recurring price is the bug this field exists to stop, so the warning
+   names the consequence rather than the omission. */
+.price-recurring-warning {
+  color: var(--warning-text, #b45309);
+  font-size: 1.25rem;
+  line-height: 1.5;
+}
+
+@media (max-width: 640px) {
+  .price-recurring-row,
+  .price-trial-options { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* A pricing model that is STATED, not chosen — a tip jar's. Same box as the radio fieldset beside it so the
+   two read as one row, but no controls: this is a fact about the product, not a question. */
+.price-model-stated strong {
+  display: block;
+  margin: 0.4rem 0 0.2rem;
+  font-size: 1.4rem;
+}
+
+.price-model-stated small {
+  display: block;
+  color: var(--text-muted, #6b7280);
+  font-size: 1.2rem;
+  line-height: 1.5;
+}
+
+/* The product form's extracted blocks. Each was previously a run of SIBLINGS inside a grid that supplied
+   the gap between them; wrapping each run in one component collapsed that gap, so the wrapper restates it.
+   Same numbers as .modal-form-section, because these are the sections it used to hold. */
+.product-identifiers-group,
+.product-variants-group,
+.product-images-field {
+  display: grid;
+  gap: 1.4rem;
+}
+
+.product-images-field h3,
+.product-variants-group h3 {
+  margin: 0;
+}
+
+/* A distinct group INSIDE a wizard step — the variants and package a physical product needs, under the
+   details every product needs. Ruled off rather than spaced, so the step still reads as one question with a
+   follow-up rather than as two questions crammed together. */
+.wizard-subsection {
+  display: grid;
+  gap: 1.4rem;
+  padding-top: 1.4rem;
+  border-top: 1px solid var(--border, #e5e7eb);
+}
+
 .modal-form-section h3 {
   margin: 0;
 }
@@ -4492,6 +4578,19 @@ button:disabled {
   border: 1px solid var(--warning-border, #fde68a);
   border-radius: 0.6rem;
   padding: 1rem 1.2rem;
+}
+
+/* The tip-jar element's pitch: prose, then the action it is arguing for. Stacked rather than inline so the
+   button is a target rather than a phrase, and `justify-self: start` on .primary-action keeps it from
+   stretching the full width of the element panel. */
+.element-empty.tip-jar-pitch {
+  display: grid;
+  gap: 0.8rem;
+  justify-items: start;
+}
+
+.element-empty.tip-jar-pitch p {
+  margin: 0;
 }
 
 /* SETTINGS — the boundary between "what is on the page" and "how the page is configured". */

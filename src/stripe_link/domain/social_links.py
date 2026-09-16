@@ -13,6 +13,7 @@ impersonation vector:
 Verification method is a URL-presence check, not `rel="me"`: measured 2026-09-09, `rel="me"` is emitted
 by ZERO of these hosts. See plans/SOCIAL_MEDIA_PAGES.md §7a-i.
 """
+import os
 from typing import Any
 
 from stripe_link.domain.network_icons import NETWORK_ICON_PATHS as _GENERATED_ICON_PATHS
@@ -495,6 +496,18 @@ CREATOR_LINKABLE_HOSTS = {
 PLATFORM_LINKABLE_HOSTS = frozenset(CREATOR_LINKABLE_HOSTS) | SAME_AS_HOSTS
 PLATFORM_LINKABLE_REVIEWED = "2026-09-11"
 
+# Our own addresses. A page linking to another page on the same infrastructure is not the risk this gate
+# exists for -- the gate is about where a stranger's tap LEAVES us for. Without this a tenant's tip_jar
+# element pointing at their own Junior Bay tip jar renders as an inert button, which is the one destination
+# we can actually vouch for. The hosting domain is per-environment, so it is read rather than hardcoded.
+_OWN_DOMAINS = ("juniorbay.com",)
+
+
+def own_platform_hosts() -> frozenset:
+    hosting = str(os.environ.get("PLATFORM_HOSTING_DOMAIN") or "").strip().lower()
+    return frozenset([*_OWN_DOMAINS, *( [hosting] if hosting else [] )])
+
 
 def linkable_on_platform_host(url: Any) -> bool:
-    return host_matches(same_as_host(url), PLATFORM_LINKABLE_HOSTS)
+    host = same_as_host(url)
+    return host_matches(host, PLATFORM_LINKABLE_HOSTS) or host_matches(host, own_platform_hosts())

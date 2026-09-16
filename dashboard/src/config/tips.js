@@ -36,3 +36,19 @@ export function recommendedTipPresets(allowRecurring, allowCustom, currency = "u
   const ladder = allowRecurring ? ladders.recurring : ladders.one_time;
   return ladder.slice(0, maxTipPresets(allowCustom)).map((amount) => amount / 100);
 }
+
+// Where the tip_jar ELEMENT can point, from the same file the renderer validates against. The external
+// platforms take a HANDLE, not a URL: a handle cannot be a phishing link, cannot be pasted wrong, and builds
+// a host the platform-host allowlist already accepts.
+export const TIP_DESTINATIONS = Object.entries(rules.destinations || {})
+  .map(([value, entry]) => ({ value, label: entry.label, url: entry.url || "" }));
+
+export function tipDestinationUrl(destination, handle) {
+  const template = (rules.destinations?.[destination] || {}).url || "";
+  const clean = String(handle || "").trim().replace(/^@+/, "").replace(/\/+$/, "");
+  if (!template || !clean) return "";
+  // A handle is a handle. Anything with a slash or a scheme is a URL pasted into the wrong box, and
+  // building https://ko-fi.com/https://evil.example out of it would be worse than refusing.
+  if (/[\s/?#@\\:]/.test(clean)) return "";
+  return template.replace("{handle}", clean);
+}

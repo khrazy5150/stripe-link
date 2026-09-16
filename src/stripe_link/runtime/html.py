@@ -585,6 +585,8 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     "    .sl-price-more{align-self:start;background:none;border:0;padding:0;margin:.2rem 0 0;font:inherit;font-size:1.2rem;color:var(--sl-legal-link);text-decoration:underline;cursor:pointer}",
     "    .sl-price-row{display:flex;align-items:center;gap:1rem;flex-wrap:wrap;margin-top:1rem}",
     "    .sl-price-amount{font-family:var(--sl-font-accent);font-size:2rem;font-weight:700;color:var(--sl-price-amount)}",
+    # Attached to the amount and quieter than it: it qualifies the number rather than competing with it.
+    "    .sl-price-every{margin-left:0.2rem;font-family:var(--sl-font-accent);font-size:1.4rem;font-weight:600;color:var(--sl-muted)}",
     "    .sl-regular-price{color:var(--sl-price-regular);text-decoration:line-through;font-size:1.4rem}",
     "    .sl-featured-price{display:flex;justify-content:center}",
     "    .sl-featured-price-card{width:min(42rem,100%);text-align:center;border:2px solid var(--sl-price-card-border);border-radius:var(--sl-radius);background:var(--sl-price-card-bg);padding:2rem 2.4rem;display:grid;gap:1rem;justify-items:center}",
@@ -919,9 +921,18 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     "    .sl-social-row a:hover{text-decoration:underline}",
     # The tip jar: one button, centred, reusing the CTA gradient so it reads as the page's primary action --
     # which on a hub with no checkout it is.
-    "    .sl-tip-jar{display:grid;gap:0.8rem;justify-items:center;text-align:center}",
-    "    .sl-tip-jar-btn{display:inline-flex;align-items:center;justify-content:center;min-height:4.4rem;padding:0 2.8rem;border-radius:999px;background:linear-gradient(135deg,var(--sl-cta-from),var(--sl-cta-to));color:var(--sl-cta-text);font-family:var(--sl-font-accent);font-size:1.6rem;font-weight:800;text-decoration:none}",
+    # A PANEL, not loose text on the page ground. The section used to be a heading, a button and a line of
+    # prose floating between two bordered neighbours, so the one thing on the page asking for money read as
+    # the least deliberate thing on it. The tint is mixed from the theme accent rather than picked, so it
+    # follows every preset instead of fighting the ones it was not designed against.
+    "    .sl-tip-jar{display:grid;gap:1.2rem;justify-items:center;text-align:center;padding:2.8rem 2.4rem;border-radius:1.6rem;background:color-mix(in srgb,var(--sl-accent) 7%,var(--sl-card));border:1px solid color-mix(in srgb,var(--sl-accent) 22%,transparent)}",
+    # Older Safari and Firefox have no color-mix: they get the plain card, which is still a panel.
+    "    @supports not (background:color-mix(in srgb,red 50%,blue)){.sl-tip-jar{background:var(--sl-card);border-color:var(--sl-content-border)}}",
+    "    .sl-tip-jar .sl-section-heading{margin:0}",
+    "    .sl-tip-jar-btn{display:inline-flex;align-items:center;justify-content:center;gap:0.9rem;min-height:4.4rem;padding:0 2.8rem;border-radius:999px;background:linear-gradient(135deg,var(--sl-cta-from),var(--sl-cta-to));color:var(--sl-cta-text);font-family:var(--sl-font-accent);font-size:1.6rem;font-weight:800;text-decoration:none}",
     "    .sl-tip-jar-btn.is-unlinked{background:none;border:1px dashed var(--sl-legal-link);color:var(--sl-muted);opacity:.65}",
+    # The icon inherits the label's colour and scales with it, so it stays right on the unlinked variant too.
+    "    .sl-tip-jar-icon{flex:none;width:2.1rem;height:2.1rem}",
     "    .sl-tip-jar-note{margin:0;font-size:1.3rem;color:var(--sl-legal-link)}",
     "    .sl-social-row a.sl-social-glyph:hover{background:var(--sl-legal-link);color:var(--sl-page-bg)}",
     # The note inherits the card's ink at 80% on a dark card, which left it very nearly invisible (reported
@@ -2925,7 +2936,8 @@ def render_service_price_card(item, service_id, services_by_id, offer, display_i
         f"          <p class=\"sl-price-description\" title=\"{description}\">{description}</p>" if description else "",
         "          <button type=\"button\" class=\"sl-price-more\" aria-expanded=\"false\" hidden>See more</button>" if description else "",
         "          <div class=\"sl-price-row\">",
-        f"            <span class=\"sl-price-amount\" data-price-amount>{escape(format_money(amount, currency))}</span>",
+        f"            <span class=\"sl-price-amount\" data-price-amount>{escape(format_money(amount, currency))}</span>"
+        f"{f'<span class=\"sl-price-every\">{escape(recurring_suffix(price))}</span>' if recurring_suffix(price) else ''}",
         f"            <span class=\"sl-regular-price\">{escape(format_money(int(compare_at_unit_amount), currency))}</span>" if compare_at_unit_amount else "",
         f"            <span class=\"sl-savings\">Save {int(savings_pct)}%</span>" if savings_pct else "",
         "          </div>",
@@ -3058,6 +3070,32 @@ def tip_recurring_price(offer, products_by_id):
             if is_tip_price(price) and price.get("allow_recurring"):
                 return price
     return None
+
+
+def recurring_suffix(price: dict[str, Any]) -> str:
+    """"/month", "every 3 weeks" -- what to append to a repeating price's amount.
+
+    A subscription that renders as a bare number is the BUYER-facing half of the bug that let a recurring
+    price sync as a one-off: the tenant meant a subscription, the page showed a price, and the first the
+    buyer learned of it was the second charge. Empty for anything that does not repeat.
+
+    Tips are excluded deliberately -- a repeating tip's frequency is chosen by the supporter at checkout, not
+    fixed on the price, and `render_tip_frequency` already says so in its own words.
+    """
+    if str(price.get("pricing_model") or "") != "recurring":
+        return ""
+    recurring = price.get("recurring")
+    if not isinstance(recurring, dict) or not recurring.get("interval"):
+        return ""
+    interval = str(recurring["interval"])
+    try:
+        count = int(recurring.get("interval_count") or 1)
+    except (TypeError, ValueError):
+        count = 1
+    if count <= 1:
+        return f"/{interval}"
+    # "every 3 months" rather than "/3 month": a slash reads as "per one", and the number is the whole point.
+    return f" every {count} {interval}s"
 
 
 def render_tip_frequency(price):
@@ -3217,7 +3255,8 @@ def _item_price_option_cards(
             f"          <p class=\"sl-price-description\" title=\"{description}\">{description}</p>" if description else "",
             "          <button type=\"button\" class=\"sl-price-more\" aria-expanded=\"false\" hidden>See more</button>" if description else "",
             "          <div class=\"sl-price-row\">",
-            f"            <span class=\"sl-price-amount\" data-price-amount>{escape(format_money(amount, currency))}</span>",
+            f"            <span class=\"sl-price-amount\" data-price-amount>{escape(format_money(amount, currency))}</span>"
+            f"{f'<span class=\"sl-price-every\">{escape(recurring_suffix(display_price))}</span>' if recurring_suffix(display_price) else ''}",
             f"            <span class=\"sl-regular-price\">{escape(format_money(int(compare_at_unit_amount), currency))}</span>" if compare_at_unit_amount else "",
             f"            <span class=\"sl-savings\">Save {int(savings_pct)}%</span>" if savings_pct else "",
             "          </div>",
@@ -5662,6 +5701,25 @@ def render_link_cards(section: dict[str, Any]) -> str:
     ] if line)
 
 
+# A coin being handed over: the gesture the button asks for, drawn rather than named. Stroked in
+# currentColor so it takes the CTA's text colour on a themed button and the muted ink when the destination
+# is not linkable -- one glyph, never two states to keep in sync. aria-hidden because the label beside it
+# already says "Leave a tip"; announcing the drawing again would just make the button take twice as long.
+TIP_JAR_ICON = (
+    '<svg class="sl-tip-jar-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"'
+    ' stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">'
+    '<circle cx="12" cy="6.1" r="4.6"/>'
+    # The $ is drawn thinner than the rest. At this size a 1.7 stroke inside a 9px coin closes up into a
+    # blob -- the glyph has to be lighter than the shape holding it to stay a glyph.
+    '<path d="M13.3 4.6a1.3 1.3 0 0 0-1.3-.75c-.78 0-1.4.42-1.4 1s.55.85 1.4 1.05 1.4.5 1.4 1.05-.62 1-1.4 1a1.3 1.3 0 0 1-1.3-.75"'
+    ' stroke-width="1.15"/>'
+    '<path d="M12 3.1v.75M12 8.35v.75" stroke-width="1.15"/>'
+    '<path d="M2.6 15.6l2.5-1.1a2.2 2.2 0 0 1 1.9.05l2.4 1.15h3a1.45 1.45 0 0 1 0 2.9H9.8"/>'
+    '<path d="M9.4 18.6h4.2c.4 0 .8-.08 1.2-.24l4.9-2.1a1.55 1.55 0 0 1 1.25 2.83l-6.4 3a4.4 4.4 0 0 1-3.1.3l-5.8-1.55-2.7-.95"/>'
+    "</svg>"
+)
+
+
 def render_tip_jar(section: dict[str, Any]) -> str:
     """A single prominent outbound button: "Leave a tip", pointing at wherever the creator takes them.
 
@@ -5683,11 +5741,12 @@ def render_tip_jar(section: dict[str, Any]) -> str:
     heading = str(section.get("heading") or "").strip()
     note = str(section.get("note") or "").strip()
     linkable = bool(_RENDER_STATE.get("own_domain")) or linkable_on_platform_host(url)
+    inner = f"{TIP_JAR_ICON}<span>{label}</span>"
     button = (
         f'<a class="sl-tip-jar-btn" href="{escape(url)}" rel="nofollow ugc noopener" target="_blank"'
-        f' data-sl-link="{link_click_id(url)}">{label}</a>'
+        f' data-sl-link="{link_click_id(url)}">{inner}</a>'
         if linkable else
-        f'<span class="sl-tip-jar-btn is-unlinked">{label}</span>'
+        f'<span class="sl-tip-jar-btn is-unlinked">{inner}</span>'
     )
     return "\n".join(line for line in [
         f'    <section class="sl-tip-jar" data-section-id="{escape(str(section.get("id", "tip-jar")))}"'

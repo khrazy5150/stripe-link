@@ -676,6 +676,61 @@ LEAD_CAPTURE_ACTIONS = frozenset({
 })
 
 
+# How often a subscription charges. Stripe's four, and the legacy builder offered all four
+# (stripe-cart plans/one-time-and-recurring-payment-product-implementation.md §1.3).
+RECURRING_INTERVALS = ("day", "week", "month", "year")
+# Stripe's own ceiling is one year between charges, so "every 5 years" is not a thing to allow through and
+# discover at sync time.
+MAX_INTERVAL_COUNT = {"day": 365, "week": 52, "month": 12, "year": 1}
+# Stripe caps a Checkout trial at 730 days.
+MAX_TRIAL_DAYS = 730
+
+
+def validate_recurring_price(price: dict[str, Any]) -> None:
+    """A recurring price MUST say how often it recurs.
+
+    This rule is the whole reason the bug it fixes could exist. A price saved as `pricing_model: "recurring"`
+    with no `recurring` object validated fine, synced to Stripe as a ONE-TIME price, and charged the buyer
+    once -- with nothing anywhere saying so. A plausible wrong answer, which is the worst failure shape there
+    is (the tip jar shipped the same way; see plans/PAY_WHAT_YOU_WANT.md §1).
+
+    So the interval is required rather than defaulted. Defaulting to "month" here would have been the same
+    bug wearing a hat: it would silently pick a billing frequency on the tenant's behalf and charge their
+    customers on it.
+    """
+    recurring = price.get("recurring")
+    if not isinstance(recurring, dict) or not recurring.get("interval"):
+        raise DocumentValidationError(
+            "A recurring price must carry recurring.interval; otherwise it is sold as a one-time charge.")
+    require_enum(recurring, "interval", set(RECURRING_INTERVALS), "price.recurring.interval")
+    interval = str(recurring["interval"])
+    count = recurring.setdefault("interval_count", 1)
+    if not isinstance(count, bool) and isinstance(count, (int, float)) and float(count).is_integer():
+        count = int(count)
+    else:
+        raise DocumentValidationError("price.recurring.interval_count must be a whole number.")
+    if count < 1 or count > MAX_INTERVAL_COUNT[interval]:
+        raise DocumentValidationError(
+            f"price.recurring.interval_count must be between 1 and {MAX_INTERVAL_COUNT[interval]} "
+            f"for a {interval}ly price.")
+    recurring["interval_count"] = count
+
+    # The trial lives on the PRICE document but never on the Stripe Price: Stripe applies trials at the
+    # subscription/checkout level, so these are read again when the session is built.
+    if price.get("trial_period_days") is not None:
+        optional_non_negative_int(price, "trial_period_days", "price.trial_period_days")
+        days = int(price["trial_period_days"])
+        if days < 1 or days > MAX_TRIAL_DAYS:
+            raise DocumentValidationError(
+                f"price.trial_period_days must be between 1 and {MAX_TRIAL_DAYS}.")
+        # A PAID trial: charged once, up front, as its own line item beside the subscription (the legacy
+        # shape). Absent or zero means the trial is free, which is what Stripe's own trial does.
+        optional_non_negative_int(price, "trial_price", "price.trial_price")
+    elif price.get("trial_price"):
+        raise DocumentValidationError(
+            "price.trial_price needs price.trial_period_days; a trial fee with no trial is just a surcharge.")
+
+
 def validate_product_document(document: dict[str, Any]) -> None:
     require_document_fields(document, "product", "product_id")
     require_string(document, "name")
@@ -850,6 +905,8 @@ def validate_product_document(document: dict[str, Any]) -> None:
             if price.get("unit_amount") is None:
                 raise DocumentValidationError("price.unit_amount must be provided unless pricing_model is customer_chooses.")
             optional_non_negative_int(price, "unit_amount", "price.unit_amount")
+            if pricing_model == "recurring":
+                validate_recurring_price(price)
         require_positive_int(price, "quantity", "price.quantity")
         if "label" in price:
             raise DocumentValidationError("price.label is no longer supported; labels belong on offer items.")
@@ -1325,11 +1382,17 @@ def validate_page_document(document: dict[str, Any]) -> None:
             optional_bool(section, "enabled", "Brand label enabled")
             optional_string(section, "label", "Brand label")
         elif section_type == "tip_jar":
-            # A URL is the whole element -- without one there is nothing to render and nothing to tip.
+            # A URL is the whole element -- without one there is nothing to render and nothing to tip. The
+            # fields below record HOW it was chosen so the builder can reopen it; the renderer only ever
+            # reads `url`, which is resolved at choose-time and re-resolved on save.
             require_string(section, "url", "Tip jar url")
             optional_string(section, "heading", "Tip jar heading")
             optional_string(section, "label", "Tip jar label", max_length=40)
             optional_string(section, "note", "Tip jar note", max_length=120)
+            if section.get("destination") is not None:
+                require_enum(section, "destination", set(tips.DESTINATIONS), "Tip jar destination")
+            optional_string(section, "handle", "Tip jar handle", max_length=64)
+            optional_string(section, "page_id", "Tip jar page_id")
         elif section_type == "hero_media":
             optional_string_list(section, "images", "Hero media images")
             optional_string(section, "avatar_url", "Hero avatar_url")

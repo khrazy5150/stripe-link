@@ -136,6 +136,31 @@ for the `jbay.page` build, not a detail of it — note it there before routing i
 **Interim, on the author's instruction:** adult hosts follow `CREATOR_LINKABLE_HOSTS` like everything else
 until `jbay.page` ships. They are age-gated everywhere meanwhile, which is the control that matters most.
 
+## 4b. Tip jars and social pages both belong on `jbay.page` (author, 2026-09-15)
+
+Recorded after the tip-jar provisioner shipped, which puts seeded Sites on `jbay.uk` / `jbay.be` today.
+**That is interim.** Once `jbay.page` exists, both page families move there:
+
+- **link-in-bio / social pages** (`lead_social`) — already the motivating case for the domain (§1).
+- **tip jar pages** (`tip_jar`) — same audience, same traffic shape, same reason.
+
+The argument is §4a's, read forwards rather than backwards. The creator domain exists so that blocklists and
+registrar abuse desks, which act per registered domain, hit something that is not carrying marketing,
+dashboard, signup and billing. A creator page is the page type most likely to attract that attention, and a
+tip jar is a creator page that additionally asks for money — so if anything belongs behind the isolation, it
+is these two.
+
+It also resolves the smaller thing §7 already trips over: `social_links.own_platform_hosts()` had to be
+widened so a tenant's own tip jar was linkable from their own link hub, because the allowlist was built to
+answer "which OTHER platforms are safe" and nobody had asked about ours. When both page types sit on one
+creator domain, that is one host to trust rather than a growing list.
+
+**Not built, and deliberately not worked around.** The provisioner reads `PLATFORM_HOSTING_DOMAIN`, so the
+seeded Site follows whatever that is set to; nothing hardcodes `jbay.uk`. What is genuinely unsolved is
+MIGRATION — a Site's platform subdomain is a permanent global reservation that is never recycled precisely so
+old shared URLs keep resolving, so moving existing pages to a new domain is a redirect problem, not a rename.
+Decide that as part of the `jbay.page` build, alongside the per-host rendering §4a needs.
+
 ## 5. The adult-content warning
 
 ### 5a. Host-derived, never tenant-declared (author, 2026-09-11)

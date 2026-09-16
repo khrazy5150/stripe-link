@@ -44,6 +44,25 @@ def max_presets(allow_custom: bool) -> int:
     return int(RULES[key])
 
 
+def recommended_presets(currency: str = "usd", *, recurring: bool = False,
+                        allow_custom: bool = True) -> list[int]:
+    """The starting ladder, in MINOR units, trimmed to the places the row actually has.
+
+    Two ladders per currency on purpose: $50 is an ordinary one-off tip and a steep monthly commitment, so a
+    jar that repeats gets the lower one -- which is where membership tiers actually cluster. Turning on
+    "enter your own" drops the top amount, because that is the place it takes. An unlisted currency falls
+    back to the USD ladder rather than to nothing.
+
+    The JS mirror is `recommendedTipPresets` in dashboard/src/config/tips.js, reading the same file. It
+    returns MAJOR units because that is what the form field holds; this one stays in minor units because
+    that is what a stored price holds.
+    """
+    ladders = RULES.get("recommended") or {}
+    ladder_set = ladders.get(str(currency or "usd").lower()) or ladders.get("usd") or {}
+    ladder = ladder_set.get("recurring" if recurring else "one_time") or []
+    return [int(amount) for amount in ladder[:max_presets(allow_custom)]]
+
+
 def whole_amount(value: Any) -> int | None:
     """One stored amount as an int, or None when it is not a whole, non-negative number.
 
@@ -265,3 +284,26 @@ def manage_token_doc(
         "created_at": int(now),
         "expires_at": int(now) + int(ttl_seconds),
     }
+
+
+# Where the tip_jar ELEMENT points. Shared with the builder through tip_rules.json, so the label a tenant
+# picks and the URL a page renders can never disagree about what "Ko-fi" means.
+DESTINATIONS: dict[str, Any] = RULES.get("destinations") or {}
+
+
+def destination_url(destination: str, handle: str) -> str:
+    """The URL a destination + handle builds, or "" when that pair does not build one.
+
+    A handle rather than a URL for the external platforms: a handle cannot be a phishing link, cannot be
+    pasted wrong, and builds a host the platform-host allowlist already accepts. `junior_bay` and `other`
+    return "" because their URL comes from somewhere else -- a page the tenant picked, or one they typed.
+    """
+    template = str((DESTINATIONS.get(str(destination)) or {}).get("url") or "")
+    handle = str(handle or "").strip().lstrip("@").strip("/")
+    if not template or not handle:
+        return ""
+    # A handle is a handle. Anything with a slash or a scheme in it is someone pasting a URL into the wrong
+    # box, and quietly building https://ko-fi.com/https://evil.example from it would be worse than refusing.
+    if any(character in handle for character in " /?#@\\") or ":" in handle:
+        return ""
+    return template.replace("{handle}", handle)

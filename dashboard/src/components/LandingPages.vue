@@ -1210,13 +1210,65 @@
 
                     <template v-else-if="element.type === 'tip_jar'">
                       <input v-model.trim="element.heading" type="text" placeholder="Section heading (optional)" />
-                      <input v-model.trim="element.url" type="url" placeholder="https://ko-fi.com/yourname" autocapitalize="off" spellcheck="false" />
+                      <!-- WHERE the tip lands, chosen rather than typed. The three platforms take a handle,
+                           which cannot be a phishing link and cannot be pasted wrong. -->
+                      <select v-model="element.destination" @change="onTipDestinationChange(element)">
+                        <option v-for="option in TIP_DESTINATIONS" :key="option.value" :value="option.value">
+                          {{ option.label }}
+                        </option>
+                      </select>
+
+                      <template v-if="element.destination === 'junior_bay'">
+                        <div v-if="tipJarPages.length" class="element-subrow">
+                          <select v-model="element.page_id" @change="applyTipJarPage(element)">
+                            <option value="">Choose your tip jar page…</option>
+                            <option v-for="page in tipJarPages" :key="page.page_id" :value="page.page_id">
+                              {{ page.name || "Untitled page" }}
+                            </option>
+                          </select>
+                        </div>
+                        <div v-else class="element-empty tip-jar-pitch">
+                          <p>
+                            <strong>Want to keep most or all of your tip income?</strong>
+                            Everywhere else, the fees come out of your tip. Here, your customer can cover them.
+                          </p>
+                          <!-- A button, not a link: this is an action that takes the tenant somewhere and
+                               changes what they have, which is the one thing a link in a paragraph reads as
+                               least like. -->
+                          <button class="primary-action compact" type="button"
+                                  :disabled="tipJarCreating" @click="startTipJarProduct(element)">
+                            {{ tipJarCreating ? "Creating your page…" : "Create your free Tip Jar page" }}
+                          </button>
+                          <p>We'll build it, publish it and link it here — yours to edit afterwards.</p>
+                        </div>
+                      </template>
+
+                      <input
+                        v-else-if="element.destination !== 'other'"
+                        v-model.trim="element.handle"
+                        type="text"
+                        :placeholder="tipHandlePlaceholder(element.destination)"
+                        autocapitalize="off"
+                        spellcheck="false"
+                        @input="applyTipHandle(element)"
+                      />
+
+                      <input v-else v-model.trim="element.url" type="url" placeholder="https://…"
+                             autocapitalize="off" spellcheck="false" />
+
                       <input v-model.trim="element.label" type="text" placeholder="Leave a tip" />
                       <input v-model.trim="element.note" type="text" placeholder="One line under the button (optional)" />
+                      <p v-if="element.url" class="element-empty">Goes to <code>{{ element.url }}</code></p>
+                      <!-- A handle that built nothing is silent otherwise: the button simply never appears,
+                           and the tenant is left to guess that they pasted a whole URL into a name box. -->
+                      <p v-else-if="element.handle" class="element-empty">
+                        That looks like a full address. Enter just your username — the
+                        {{ tipHandlePlaceholder(element.destination).split("/")[0] }} part is added for you.
+                      </p>
                       <p class="element-empty">
                         A link, not a checkout — this page takes no money itself, so the tip lands wherever you
-                        already accept them (Ko-fi, Buy Me a Coffee, Patreon).
-                        <template v-if="!builderSiteHasCustomDomain">
+                        already accept them.
+                        <template v-if="!builderSiteHasCustomDomain && element.destination === 'other'">
                           On your free platform address only well-known destinations become tappable, and payment
                           handles like PayPal.me are deliberately not among them; connect a custom domain to link
                           anywhere.
@@ -2184,6 +2236,7 @@ import SelectorCard from "./SelectorCard.vue";
 import ImageUploadField from "./shared/ImageUploadField.vue";
 import imageRatios from "../../../src/stripe_link/image_ratios.json";
 import { offerViewTargets, offerViewTargetsFromExpanded } from "../composables/useConversionContext";
+import { TIP_DESTINATIONS, tipDestinationUrl } from "../config/tips";
 import { isSectionVisible, defaultCtaLabel, defaultVisible, excludedSections, recommendedSectionKeys, optionalSectionKeys, governedKeys, elementLabel, elementChannel, addableElements, tokenGroups, previewVar, supportedGoals, goalLabel, packSeeds, orderSections, sectionOrderKey, isMovable, elementPlacement, orderSectionKeys, isRepeatableSection } from "../composables/pageComposer";
 import { apiRequest, assetUrl, getApiBase, getAuthSession, getStripeMode, getOtherEnvironment, getPagesBaseUrl, getPreviewPagesBaseUrl, getTestPagesHost, getTenantId } from "../api/client";
 import { useToastsStore } from "../stores/toasts";
@@ -4987,7 +5040,10 @@ function newElement(type) {
   if (type === "link_cards") return { ...base, heading: "", items: [{ url: "", label: "", description: "", image_url: "" }] };
   // A tip jar is ONE destination, not a list: two tip jars on a page is two answers to the same question.
   // The label defaults to something a visitor understands, because a blank button reads as broken.
-  if (type === "tip_jar") return { ...base, heading: "", url: "", label: "Leave a tip", note: "" };
+  if (type === "tip_jar") {
+    return { ...base, heading: "", destination: "junior_bay", handle: "", page_id: "", url: "",
+             label: "Leave a tip", note: "" };
+  }
   // ONE ratio for the element, not one per image: locking both sides to the same shape is what makes the
   // wipe align. 4:3 is the common phone-photo shape, so most pairs need no change.
   if (type === "video") return { ...base, heading: "", url: "", poster: "", caption: "", aspect: 1.7777777778 };
@@ -5437,6 +5493,106 @@ function ribbonTargetPage(element) {
   return id ? pages.value.find((p) => p.page_id === id) || null : null;
 }
 
+// --- Tip jar element: WHERE the tip lands ------------------------------------------------------------
+// The tenant's own tip jar pages, so "Junior Bay" is a choice from what they already have rather than a URL
+// they have to go and find. A page is a tip jar when its offer prices customer_chooses -- the same
+// derivation the composer and the renderer use, so all three agree about what a tip jar page IS.
+const tipJarPages = computed(() => pages.value.filter((page) => {
+  // PUBLISHED only, like the ribbon's picker: a draft has no live URL, so offering one would be offering a
+  // choice we would then have to warn them out of.
+  if (page.status !== "published" || page.page_id === builder.page_id) return false;
+  const offer = offers.value.find((candidate) => candidate.offer_id === page.offer_id);
+  return offer ? deriveOfferType(offer) === "tip_jar" : false;
+}));
+
+function tipHandlePlaceholder(destination) {
+  const option = TIP_DESTINATIONS.find((entry) => entry.value === destination);
+  return option?.url ? option.url.replace("{handle}", "yourname").replace(/^https?:\/\//, "") : "yourname";
+}
+
+function applyTipHandle(element) {
+  element.url = tipDestinationUrl(element.destination, element.handle);
+  element.page_id = "";
+}
+
+function applyTipJarPage(element) {
+  const page = tipJarPages.value.find((candidate) => candidate.page_id === element.page_id);
+  // Resolved now AND again on save, the same as the ribbon's page picker: a slug or domain change later
+  // must not leave a tip button pointing at a URL that has moved.
+  element.url = page ? pageUrl(page) : "";
+  element.handle = "";
+}
+
+function onTipDestinationChange(element) {
+  // Switching destination clears what belonged to the old one. Keeping a stale handle or page_id around is
+  // how an element ends up claiming Ko-fi while pointing at a Patreon URL.
+  element.handle = "";
+  element.page_id = "";
+  element.url = "";
+}
+
+// What currency this tenant actually sells in. There is no tenant-level currency setting -- every price
+// carries its own -- so the catalogue is the only honest answer, and a jar seeded in dollars for a tenant
+// whose whole catalogue is in euros would be wrong in a way they would have to notice to fix.
+const catalogCurrency = computed(() => {
+  for (const product of products.value) {
+    for (const price of product.prices || []) {
+      if (price.currency) return String(price.currency).toLowerCase();
+    }
+  }
+  return "usd";
+});
+
+const tipJarCreating = ref(false);
+// One key per click, held for the life of the attempt. It is what makes a retry RESUME the half-finished
+// job on the server instead of starting a second one -- four documents across four tables cannot be written
+// atomically, so idempotency is the guarantee on offer (plans/PAY_WHAT_YOU_WANT.md §5c).
+let tipJarRequestId = "";
+
+async function startTipJarProduct(element) {
+  if (tipJarCreating.value) return;
+  tipJarCreating.value = true;
+  tipJarRequestId = tipJarRequestId || `tj_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+  try {
+    const body = await apiRequest("/tip-jar", {
+      method: "POST",
+      body: { request_id: tipJarRequestId, currency: catalogCurrency.value },
+    });
+    // The server wrote four documents; the three lists this screen reasons about have to see them, or the
+    // picker below would come up empty on the page we just made.
+    const page = body.page;
+    pages.value = [page, ...pages.value.filter((existing) => existing.page_id !== page.page_id)];
+    if (body.offer) offers.value = [body.offer, ...offers.value.filter((o) => o.offer_id !== body.offer.offer_id)];
+    await sitesStore.load().catch(() => {});
+    if (element) {
+      element.destination = "junior_bay";
+      element.page_id = page.page_id;
+      // Through the same resolver every other pick uses, so this URL is built exactly once, in one place.
+      applyTipJarPage(element);
+    }
+    // Named, because four catalogue rows appearing from one click is the kind of thing a tenant finds a
+    // month later and does not recognise.
+    toasts.push({
+      key: "tip-jar-created",
+      severity: "success",
+      icon: "🎉",
+      message: `Your tip jar is live. We created the page “${page.name}”, its offer and product, on a new Site `
+        + `called “${body.site?.name || "your tip jar"}” — all yours to edit.`,
+    });
+    tipJarRequestId = "";
+  } catch (err) {
+    // The key is deliberately KEPT on failure: pressing the button again resumes the same job.
+    toasts.push({
+      key: "tip-jar-create-failed",
+      severity: "error",
+      icon: "⚠️",
+      message: err.message || "We could not create your tip jar page. Try again in a moment.",
+    });
+  } finally {
+    tipJarCreating.value = false;
+  }
+}
+
 function openRibbonPagePicker(element) {
   ribbonPicker.element = element;
   ribbonPicker.search = "";
@@ -5649,14 +5805,29 @@ function elementSection(element) {
     };
   }
   if (element.type === "tip_jar") {
+    // Re-resolve on SAVE, not just at choose-time: a tip button pointing at a page whose slug or domain
+    // moved is a dead end the tenant never sees, because they are not the ones tapping it.
+    const destination = element.destination || "other";
+    const page = destination === "junior_bay"
+      ? pages.value.find((candidate) => candidate.page_id === element.page_id)
+      : null;
+    const url = (
+      destination === "junior_bay" ? (page ? pageUrl(page) : "")
+      : destination === "other" ? (element.url || "").trim()
+      : tipDestinationUrl(destination, element.handle)
+    ).trim();
     // No URL, no button. An element that renders a dead control is worse than one that renders nothing.
-    const url = (element.url || "").trim();
     if (!url) return null;
     return {
       id: element.id,
       type: "tip_jar",
       heading: formatHeadline(element.heading || "") || undefined,
       url,
+      // Recorded so the builder can reopen the choice as the tenant made it. The RENDERER reads none of
+      // this -- it only ever reads `url`, which is the one field that has to be right.
+      destination,
+      handle: (element.handle || "").trim() || undefined,
+      page_id: destination === "junior_bay" ? (element.page_id || undefined) : undefined,
       label: (element.label || "").trim() || undefined,
       note: (element.note || "").trim() || undefined,
     };
@@ -5818,8 +5989,15 @@ function elementsFromPage(sections) {
     } else if (section.type === "related_products") {
       elements.push({ id: localId("el"), type: "related_products", heading: section.heading || "Related products" });
     } else if (section.type === "tip_jar") {
-      elements.push({ id: localId("el"), type: "tip_jar", heading: section.heading || "",
-        url: section.url || "", label: section.label || "Leave a tip", note: section.note || "" });
+      elements.push({
+        id: localId("el"), type: "tip_jar", heading: section.heading || "",
+        // A page saved before the picker existed has a URL and no destination: read it as "Another link",
+        // which is exactly what it was, rather than silently reassigning it to a platform.
+        destination: section.destination || "other",
+        handle: section.handle || "",
+        page_id: section.page_id || "",
+        url: section.url || "", label: section.label || "Leave a tip", note: section.note || "",
+      });
     } else if (section.type === "social_links") {
       elements.push({ id: localId("el"), type: "social_links", heading: section.heading || "",
         items: (section.items || []).map((item) => ({ url: item.url || "" })) });
