@@ -2881,6 +2881,36 @@ def _first_target_copy(
             str(product.get("subheadline") or product.get("description") or ""))
 
 
+def hero_copy(
+    section: dict[str, Any],
+    offer: dict[str, Any],
+    products_by_id: dict[str, dict[str, Any]],
+) -> tuple[str, str]:
+    """The hero's headline and subheadline: the page's own words, else the offer's, else the product's.
+
+    The page wins, because a tenant who typed something meant it. Below that sits the offer's presentation --
+    which is a snapshot of the PRODUCT's name and description, not the offer's internal label -- and then the
+    product itself, for an offer written before presentation existed.
+
+    Deliberately NOT a lead product's `lead_capture.description`. That sentence describes the FORM ("Collect
+    the visitor's email address."), and using it here made every capture page introduce itself by explaining
+    its own plumbing instead of naming the thing on offer (author, 2026-09-15: "an abomination").
+    """
+    presentation = offer.get("presentation") or {}
+    product = first_offer_product(offer, products_by_id) if products_by_id else {}
+    headline = (
+        str(section.get("headline") or "").strip()
+        or str(presentation.get("headline") or "").strip()
+        or str(product.get("name") or "").strip()
+    )
+    subheadline = (
+        str(section.get("subheadline") or "").strip()
+        or str(presentation.get("subheadline") or "").strip()
+        or str(product.get("description") or "").strip()
+    )
+    return headline, subheadline
+
+
 def render_hero(
     section: dict[str, Any],
     offer: dict[str, Any] | None = None,
@@ -2902,10 +2932,13 @@ def render_hero(
         sub_html, sub_attr = (
             (escape(dyn_sub), " data-conversion-bind=\"subheadline\"") if dyn_sub else ("", ""))
     else:
-        explicit_headline = str(section.get("headline") or "").strip()
-        explicit_sub = str(section.get("subheadline") or "").strip()
-        headline_html, headline_attr = (render_headline_markup(explicit_headline), "") if explicit_headline else ("", "")
-        sub_html, sub_attr = (escape(explicit_sub), "") if explicit_sub else ("", "")
+        # DERIVED when the page does not say, exactly as hero_media_images derives the picture. A hero with
+        # nothing in it used to render an empty <section>; more importantly, this is the half of the pattern
+        # the brand label already follows ("absent means derive at render"), and following it here is what
+        # stops a page freezing at whatever copy it happened to be seeded with.
+        headline, subheadline = hero_copy(section, offer or {}, products_by_id or {})
+        headline_html, headline_attr = (render_headline_markup(headline), "") if headline else ("", "")
+        sub_html, sub_attr = (escape(subheadline), "") if subheadline else ("", "")
 
     return "\n".join([
         f"    <section class=\"sl-hero\" data-section-id=\"{escape(str(section.get('id', 'hero')))}\" data-section-type=\"hero\">",
@@ -6079,12 +6112,15 @@ def render_email_cta(
 
     tenant_consent_text = f"Join {brand}'s mailing list."
     platform_consent_text = "Also hear from Junior Bay about offers like this."
-    # PRE-TICKED, on the author's instruction (2026-09-15). Recorded plainly because it is a reversal, not an
-    # oversight: plans/LEAD_CAPTURE.md specified opt-in, and GDPR recital 32 says in terms that "silence,
-    # pre-ticked boxes or inactivity" do not constitute consent. Both boxes remain visible, labelled and
-    # un-ticked-able by the visitor, and the checked state is recorded per lead exactly as before -- so what
-    # changes is the default, and reversing it is deleting `checked` from the two lines below.
-    checked = "checked "
+    # UNTICKED, and it has to stay that way. GDPR recital 32 says in terms that "silence, pre-ticked boxes or
+    # inactivity" do not constitute consent, and Art. 4(11) requires "a clear affirmative action" -- a box the
+    # visitor must UNtick is the absence of one. Settled in CJEU Planet49 (C-673/17), which reasoned straight
+    # from that definition. The platform box is the weaker of the two by a distance: third-party marketing is
+    # never covered by the ePrivacy soft opt-in that can otherwise excuse a tenant's own list.
+    #
+    # Briefly shipped pre-ticked on 2026-09-15 and reverted the same day once the rule was checked. Left here
+    # so the next person reaches for the citation instead of the checkbox (author's decision: "we must comply
+    # to legal statutes").
     return "\n".join([
         "    <section class=\"sl-checkout-cta sl-email-cta\" data-section-type=\"checkout_cta\" data-cta-type=\"email\">",
         f"      <form class=\"sl-lead-form\" data-lead-form data-endpoint=\"{endpoint}\" "
@@ -6096,9 +6132,9 @@ def render_email_cta(
         # Honeypot — visually hidden, off-screen; bots fill it, humans don't.
         "        <input class=\"sl-hp\" type=\"text\" name=\"company_website\" tabindex=\"-1\" autocomplete=\"off\" aria-hidden=\"true\" />",
         "        <label class=\"sl-lead-consent\"><input type=\"checkbox\" data-consent=\"tenant_marketing\" "
-        f"{checked}data-consent-text=\"{escape(tenant_consent_text)}\" /> {escape(tenant_consent_text)}</label>",
+        f"data-consent-text=\"{escape(tenant_consent_text)}\" /> {escape(tenant_consent_text)}</label>",
         "        <label class=\"sl-lead-consent\"><input type=\"checkbox\" data-consent=\"platform_marketing\" "
-        f"{checked}data-consent-text=\"{escape(platform_consent_text)}\" /> {escape(platform_consent_text)}</label>",
+        f"data-consent-text=\"{escape(platform_consent_text)}\" /> {escape(platform_consent_text)}</label>",
         f"        <button class=\"sl-cta\" type=\"submit\">{label}</button>",
         "        <p class=\"sl-lead-status\" data-lead-status role=\"status\" aria-live=\"polite\"></p>",
         "      </form>",

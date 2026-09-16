@@ -105,15 +105,23 @@ class ConsentTests(unittest.TestCase):
         self.assertIn("mailing list.", markup)
         self.assertNotIn("Join &#x27;s mailing list.", markup)
 
-    def test_both_boxes_start_ticked(self):
-        """Author's instruction, 2026-09-15. Recorded as a REVERSAL, not an oversight.
+    def test_neither_box_starts_ticked(self):
+        """Consent needs an affirmative action, and this is the test that keeps it that way.
 
-        plans/LEAD_CAPTURE.md specified opt-in, and GDPR recital 32 says in terms that "silence, pre-ticked
-        boxes or inactivity" do not constitute consent. Both boxes stay visible, labelled and un-tickable by
-        the visitor, and the chosen state is still recorded per lead — what changed is the default.
+        GDPR recital 32 says in terms that "silence, pre-ticked boxes or inactivity" do not constitute
+        consent; Art. 4(11) requires "a clear affirmative action"; CJEU Planet49 (C-673/17) settled it. The
+        platform box is weaker still — third-party marketing is never covered by the ePrivacy soft opt-in
+        that can otherwise excuse a tenant's own list.
+
+        Briefly shipped pre-ticked on 2026-09-15 and reverted the same day. This test is the guard.
         """
         markup = _render()
-        self.assertEqual(markup.count("checked data-consent-text"), 2)
+        self.assertNotIn("checked", markup.split("sl-lead-form", 1)[1].split("</form>", 1)[0])
+
+    def test_the_chosen_state_is_still_recorded(self):
+        # Unticking the default must not quietly stop recording what the visitor actually chose.
+        script = _render()
+        self.assertIn("granted: box.checked", script)
 
     def test_the_two_opt_ins_stay_independent(self):
         # The tenant's list and Junior Bay's are separate decisions and separate records.
@@ -159,6 +167,64 @@ class HeroImageTests(unittest.TestCase):
         # were wrong to drop.
         self.assertIn("isLeadGen ? [freeLeadPrice(", PRODUCTS_STORE)
         self.assertIn("requires_shipping: isPhysical && !isLeadGen", PRODUCTS_STORE)
+
+
+class HeroDerivationTests(unittest.TestCase):
+    """A page that stores no hero copy DERIVES it, the way the picture already did.
+
+    `hero_media_images` has always fallen back to the offer and then the product. The words had no such
+    fallback, so whatever a page was seeded with was what it showed forever — the freezing problem this
+    codebase keeps rediscovering, and the reason the brand label stopped storing its own text.
+    """
+
+    def _render_without(self, *fields):
+        page = _page()
+        for section in page["sections"]:
+            if section["type"] == "hero":
+                for field in fields:
+                    section.pop(field, None)
+        return html_module.render_page(page, _offer(), _products())
+
+    def test_the_headline_falls_back_to_the_offer_then_the_product(self):
+        markup = self._render_without("headline", "subheadline")
+        self.assertIn("2026 Guide to Junk Food Restaurants", markup)
+        self.assertIn("My comprehensive list of fast food restaurants.", markup)
+
+    def test_the_page_still_wins_when_it_says_something(self):
+        # A tenant who typed a headline meant it; derivation is only for silence.
+        markup = html_module.render_page(_page(), _offer(), _products())
+        h1 = re.search(r"<h1[^>]*>(.*?)</h1>", markup, re.S).group(1)
+        self.assertIn("2026 Guide to Junk Food Restaurants", h1)
+
+    def test_it_falls_all_the_way_to_the_product(self):
+        # An offer written before `presentation` existed.
+        offer = _offer()
+        offer["presentation"] = {"cta": {"type": "email", "label": "Get the guide"}}
+        page = _page()
+        for section in page["sections"]:
+            if section["type"] == "hero":
+                section.pop("headline", None)
+                section.pop("subheadline", None)
+        markup = html_module.render_page(page, offer, _products())
+        self.assertIn("2026 Guide to Junk Food Restaurants", markup)
+
+    def test_the_forms_own_description_is_never_the_subheadline(self):
+        # lead_capture.description describes the FORM. The product's words are what belong under the
+        # headline; this is the same leak as the seeder's, one layer down.
+        markup = self._render_without("headline", "subheadline")
+        hero = markup.split('class="sl-hero"', 1)[1].split("</section>", 1)[0]
+        self.assertNotIn("We&#x27;ll email it to you.", hero)
+
+    def test_the_picture_derives_from_the_product_too(self):
+        # Already true, and pinned here because the two halves are the same rule: an existing page shows the
+        # image as soon as the product HAS one, with no edit to the page.
+        products = _products()
+        products["prod_lead"]["images"] = ["https://images.juniorbay.com/products/abc/medium.webp"]
+        page = _page()
+        page["sections"].insert(1, {"id": "hero-media", "type": "hero_media", "images": []})
+        markup = html_module.render_page(page, _offer(), products)
+        self.assertIn("products/abc", markup)
+
 
 
 if __name__ == "__main__":
