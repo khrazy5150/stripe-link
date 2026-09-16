@@ -686,6 +686,126 @@ than a code change, which is why it is recorded here instead of done: it needs a
 should fail on lint errors (it should) and how noisy the first run will be on an existing codebase.
 
 
+### ✅ "Recurring" pricing saves cleanly and then charges ONCE — FIXED dev 2026-09-15
+
+Raised by the author against the wizard's Pricing step ("Recurring — needs work"). It is not only a missing
+interval picker; the model is not wired end to end, and it fails as a **plausible wrong answer** — the same
+shape as the half-imported tip jar, and the worst shape there is.
+
+**What I verified in the code today:**
+
+1. **No interval is ever asked for.** `PricingCard` offers the radio and nothing else — no interval, no
+   interval count. `defaultPriceForm()` in `stores/products.js` has no field to hold one either. (The flat
+   `recurring_interval` on `utils/priceForm.js` belongs to TIPS and is only read on the `customer_chooses`
+   branch.)
+2. **Nothing is written.** `buildPriceDocument` (`stores/pricing.js`) writes `pricing_model: "recurring"` and
+   never writes a `recurring` object.
+3. **So Stripe gets a one-off price.** `build_price_params` (`domain/stripe_products.py`) sets
+   `params["recurring"]` only when `price["recurring"]["interval"]` is present. It never is.
+4. **And checkout would not subscribe even if it were.** `checkout.py` flips the session to
+   `mode: "subscription"` on `item.get("recurring")` (line ~307), while the price-level fallback
+   (`item.get("recurring") or price.get("recurring")`, line ~365) is read further down when building the line
+   — so a price-level interval alone does not reach the mode decision.
+
+**So today:** a tenant picks Recurring, the product saves with no error, the Stripe price is one-time, and the
+buyer is charged once. Nothing anywhere says so.
+
+**What the fix needs.** An interval control on `PricingCard` (interval + interval_count) writing a nested
+`recurring` object; `buildPriceDocument` carrying it; the offer resolver lifting it onto the line so the mode
+decision sees it; and a validator rule that a `recurring` price MUST have an interval, so this can never
+again save as a silent one-off. The tip jar's own repeating path is separate and already works — reuse its
+interval vocabulary (`tips.INTERVALS`), and note §5h's decision that the UI offers only month/year while the
+runtime supports all four.
+
+**What shipped**, built against the legacy spec the author supplied
+(`stripe-cart/plans/one-time-and-recurring-payment-product-implementation.md` §1.3 and its Recurring screen):
+
+- **Builder** — `PricingCard` grew a Billing block: interval (all four of Stripe's), "every N unit(s)"
+  capped per interval, and an optional trial with a length and a price. The interval starts EMPTY and both
+  the save and the wizard's Continue refuse without it; defaulting it to "month" would have been the same
+  bug wearing a hat, silently choosing a billing frequency on the tenant's behalf.
+- **Document** — `buildPriceDocument` writes the nested `recurring {interval, interval_count}` Stripe takes,
+  plus `trial_period_days` / `trial_price`. `priceFormFromDocument` reads that nested shape back rather than
+  through the tip's month-or-year field, which would have turned a weekly subscription into a monthly one.
+- **Validator** — `validate_recurring_price`: an interval is REQUIRED and enum-checked, interval_count is
+  bounded by what Stripe will actually bill, a trial is bounded at 730 days, and a trial fee with no trial is
+  refused. This is the rule that makes the original bug impossible to reproduce.
+- **Resolver** — `ResolvedOfferItem` carries `recurring` / trial terms, gated on `pricing_model` so a stale
+  block left on a price switched back to one-time cannot resubscribe anybody.
+- **Checkout** — the session flips to `subscription` off the resolved line (so it works for a SYNCED Stripe
+  price too, where there is no inline `price_data` to read), adds `subscription_data[trial_period_days]`, and
+  charges a PAID trial as its own one-time line indexed past every real line. Stripe has no paid trial — its
+  trial is free by definition and Checkout always renders "X days free" — so this matches the legacy shape.
+- **Published page** — `recurring_suffix` appends "/month" or "every 3 weeks" to the amount. A subscription
+  rendered as a bare number was the buyer-facing half of the same bug.
+
+32 tests in `tests/test_recurring_pricing.py` walk the whole chain, because every link was individually
+reasonable and the gap only existed BETWEEN them.
+
+**Why a PAID trial exists at all** (author, 2026-09-15, and worth protecting from being "simplified" into a
+free one): a physical product has a real unit cost before shipping is even counted, so giving one away for a
+trial period is a straightforward way to lose money on every sign-up. A paid trial covers that cost and keeps
+freeloaders out, while still pricing the first period below the subscription. It is not a watered-down free
+trial — it is the only trial a physical subscription can afford to offer.
+
+**The fee class for a subscription follows the PRODUCT TYPE** — confirmed by the author 2026-09-15, closing
+the question this entry previously left open. `fee_class_for` keying off `product_type` is correct and
+deliberate: a physical subscription and a digital one have different costs behind them and the fee schedule
+already distinguishes them. `pricing_model` does not enter into it (except for `customer_chooses`, which is
+its own class because a tip is its own kind of transaction). Nothing to change; recorded so the next person
+does not re-derive it as a bug.
+
+**QA is outstanding and is tracked as its own HIGH item below** — the author owns it (see "QA: watch a real
+subscription renew"). Nothing here has been exercised against live Stripe.
+
+### ⭐ HIGH — QA: watch a real subscription renew (author's, 2026-09-15)
+
+**Owner: the author.** This is manual QA against live Stripe test mode, not a code task — recorded here so it
+is not mistaken for done just because the unit tests are green.
+
+Recurring pricing shipped to dev on 2026-09-15 with 32 tests walking the chain (see the entry above), but
+every one of them stops at the payload. **Nothing has been watched actually happen at Stripe.** That matters
+more than usual here: the bug this replaced was precisely "correct everywhere except in production" — a price
+that saved cleanly, synced cleanly, and charged once.
+
+**What only a live run can tell us**, because it is where the interval, the trial boundary and the fee all
+meet for the first time:
+
+1. The Stripe Price is created as `type: recurring` with the interval and count the builder sent.
+2. Checkout opens in `subscription` mode and the buyer sees the interval before paying.
+3. A **free trial** delays the first charge by the right number of days.
+4. A **paid trial** charges its one-time line up front AND still starts the trial — Checkout renders "X days
+   free" regardless, so the two have to be seen together to confirm the fee was not lost.
+5. The **renewal invoice** arrives on schedule, for the right amount, with
+   `subscription_data[application_fee_percent]` taking the platform's cut — the percent is computed from the
+   subtotal at session time, so this is the first moment it is applied to a real charge.
+6. Editing the interval on a live product replaces the Stripe price rather than mutating it (`price_differs`),
+   and existing subscribers keep their original terms.
+
+Stripe test clocks are the practical way to do 5 without waiting a month.
+
+### MEDIUM — a just-provisioned tip jar shows no URL until the page is refreshed (found 2026-09-15)
+
+Reported by the author immediately after the provisioner shipped. Clicking "Create your free Tip Jar page"
+creates everything correctly and the toast is right, but the "Goes to …" line stays empty until a reload.
+
+**Cause, confirmed not guessed.** `deriveOfferType()` calls `offerIsTipJar(offer)`, which looks the offer's
+items up in `products.value` to find a `customer_chooses` price. The provisioning response pushes the new
+PAGE and OFFER into their lists but not the PRODUCT, so the lookup misses, the offer reads as `single`, the
+brand-new page is filtered out of `tipJarPages`, and `applyTipJarPage` resolves nothing. A refresh reloads
+products and it all resolves.
+
+**Two fixes, and the second is the real one.**
+
+1. Push `body.product` into `products.value` alongside the other two. One line, fixes this screen.
+2. Stamp `pricing_model: "customer_chooses"` onto the SEEDED OFFER document. `stamp_tip_jar()` already does
+   exactly this at render time, for exactly this reason — "the composer takes the OFFER and never its
+   products". A seeded offer that says what it is needs no product lookup from anyone, ever, and the class of
+   bug (a derivation that silently needs a second document to be loaded) stops applying to it.
+
+Do both. (2) alone would fix this symptom, but (1) is what keeps the three lists this screen reasons about
+honest after a write.
+
 ### ⭐ HIGH — Tip Jar ("Customer chooses") is half-imported and MIS-PRICES TODAY (plan plans/PAY_WHAT_YOU_WANT.md, 2026-09-13)
 
 A live bug, not a missing feature. stripe-cart ships this; stripe-link imported the fee class and the form
