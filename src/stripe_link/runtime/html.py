@@ -6076,6 +6076,13 @@ def render_checkout_cta(
 
 LEAD_FIELD_INPUT_TYPES = {"email": "email", "phone": "tel", "tel": "tel", "number": "number"}
 
+# What each input tells the BROWSER, and what it shows before anything is typed. A placeholder of "Phone" is
+# a restatement of the label; a shaped example tells the visitor which number and in what form.
+LEAD_FIELD_HINTS = {
+    "email": {"autocomplete": "email", "inputmode": "email", "placeholder": "you@example.com"},
+    "tel": {"autocomplete": "tel", "inputmode": "tel", "placeholder": "(555) 555-0100"},
+}
+
 
 def render_email_cta(
     page: dict[str, Any],
@@ -6095,12 +6102,16 @@ def render_email_cta(
     tenant_id = escape(str(page.get("tenant_id") or offer.get("tenant_id") or ""))
     offer_id = escape(str(offer.get("offer_id") or ""))
     page_id = escape(str(page.get("page_id") or ""))
-    # WHOSE list this is. The BUSINESS name first -- the same _RENDER_ORG the brand label at the top of the
-    # page uses -- because a consent line naming the offer read as "Join capture email's mailing list", which
-    # is not a thing anyone can consent to. The offer's brand is the fallback, and "us" the last resort.
+    # WHOSE list this is -- and it is a BUSINESS's, never a product's. The same chain the brand label at the
+    # top of the page resolves, for the same reason: "Join Free Roof Inspection's mailing list" asks the
+    # visitor to consent to something that does not exist. `offer_brand_fallback` ends at the offer's
+    # headline, which IS the product name, so it sits below the tenant's own business identity rather than
+    # above it (author, 2026-09-16 -- fixed on the brand label first, and this was the half left behind).
     brand = escape(str(
         str(_RENDER_ORG.get("name") or "").strip()
-        or offer_brand_fallback(offer)
+        or str(_RENDER_PREFERENCES.get("business_name") or "").strip()
+        or str((offer.get("presentation") or {}).get("brand") or "").strip()
+        or str(_RENDER_PREFERENCES.get("display_name") or "").strip()
         or "us"
     ))
 
@@ -6112,10 +6123,17 @@ def render_email_cta(
         field_type = str(field.get("type") or "text").strip().lower()
         input_type = LEAD_FIELD_INPUT_TYPES.get(field_type, "text")
         required = "required" if field.get("required") else ""
-        placeholder = escape(name.replace("_", " ").title())
+        hints = LEAD_FIELD_HINTS.get(input_type, {})
+        placeholder = escape(hints.get("placeholder") or name.replace("_", " ").title())
+        # autocomplete + inputmode, because this form is ONE field and the visitor is on a phone. Without
+        # them a tel input offers no numeric keypad and neither field offers the browser's saved value --
+        # on a page whose entire conversion is "type the one thing we asked for", that is the whole funnel.
+        extras = f' autocomplete="{hints["autocomplete"]}"' if hints.get("autocomplete") else ""
+        if hints.get("inputmode"):
+            extras += f' inputmode="{hints["inputmode"]}"'
         inputs.append(
             f"        <input class=\"sl-lead-input\" type=\"{input_type}\" name=\"{escape(name)}\" "
-            f"placeholder=\"{placeholder}\" {required} />"
+            f"placeholder=\"{placeholder}\"{extras} {required} />"
         )
 
     tenant_consent_text = f"Join {brand}'s mailing list."

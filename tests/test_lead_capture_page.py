@@ -302,5 +302,97 @@ class CtaSourceTests(unittest.TestCase):
 
 
 
+class PhoneCaptureTests(unittest.TestCase):
+    """capture_phone and capture_email_phone, given the same pass as capture_email (author, 2026-09-16).
+
+    They share ONE cta type (the inline collector) and one page composition, which is why they were carried
+    along by the email fixes -- and also why the two places that must still differ went unnoticed.
+    """
+
+    def _render(self, action, fields, cta_label, prefs=None):
+        product = _products()["prod_lead"]
+        product = {**product, "name": "Free Roof Inspection",
+                   "description": "A 20-minute check and a written report.",
+                   "lead_capture": {"action": action, "title": "Where can we reach you?",
+                                    "description": "Enter your number and we'll be in touch.",
+                                    "fields": fields}}
+        offer = _offer()
+        offer["lead_capture_action"] = action
+        offer["presentation"] = {**offer["presentation"],
+                                 "headline": "Free Roof Inspection",
+                                 "cta": {"type": "email", "label": cta_label}, "cta_label": cta_label}
+        page = _page()
+        for section in page["sections"]:
+            if section["type"] == "hero":
+                section.pop("headline", None)
+                section.pop("subheadline", None)
+        return html_module.render_page(page, offer, {"prod_lead": product}, preferences=prefs or {})
+
+    def _phone(self, **kw):
+        return self._render("capture_phone", [{"name": "phone", "type": "tel", "required": True}],
+                            "Request a Callback", **kw)
+
+    def test_the_button_does_not_promise_a_download(self):
+        # One CTA type, three different promises. "Get Instant Access" on a form that only takes a phone
+        # number promises a download that is never coming.
+        offers = (ROOT / "dashboard" / "src" / "components" / "Offers.vue").read_text(encoding="utf-8")
+        labels = offers.split("const CAPTURE_CTA_LABELS = {", 1)[1].split("};", 1)[0]
+        self.assertIn('capture_email: "Get Instant Access"', labels)
+        self.assertIn('capture_phone: "Request a Callback"', labels)
+        self.assertIn('capture_email_phone: "Get in Touch"', labels)
+
+    def test_the_phone_field_is_typed_and_autofillable(self):
+        # This form is ONE field and the visitor is on a phone: without autocomplete there is no saved value
+        # and without inputmode no numeric keypad. On a page whose entire conversion is "type the one thing
+        # we asked for", that IS the funnel.
+        markup = self._phone()
+        field = [line for line in markup.splitlines() if "<input class=\"sl-lead-input\"" in line][0]
+        self.assertIn('type="tel"', field)
+        self.assertIn('autocomplete="tel"', field)
+        self.assertIn('inputmode="tel"', field)
+
+    def test_the_placeholder_shows_a_shape_not_the_label_again(self):
+        self.assertIn("(555) 555-0100", self._phone())
+        self.assertNotIn('placeholder="Phone"', self._phone())
+
+    def test_both_fields_are_hinted_when_both_are_asked_for(self):
+        markup = self._render("capture_email_phone",
+                              [{"name": "email", "type": "email", "required": True},
+                               {"name": "phone", "type": "tel", "required": True}], "Get in Touch")
+        self.assertIn('autocomplete="email"', markup)
+        self.assertIn('autocomplete="tel"', markup)
+
+    def test_an_unhinted_field_still_renders(self):
+        # A tenant-declared field we have no hints for falls back to the humanised name, as before.
+        markup = self._render("capture_email_phone", [{"name": "company_size", "type": "text"}], "Get in Touch")
+        self.assertIn('placeholder="Company Size"', markup)
+
+    def test_the_consent_line_names_the_business_not_the_product(self):
+        """The half left behind when the brand label was fixed.
+
+        `offer_brand_fallback` ends at the offer's headline, which IS the product name -- so a roofing
+        company's page asked the visitor to join "Free Roof Inspection's mailing list", which is not a thing
+        that has a mailing list.
+        """
+        self.assertIn("Join Apex Roofing&#x27;s mailing list.",
+                      self._phone(prefs={"business_name": "Apex Roofing"}))
+
+    def test_the_product_name_is_never_the_list_owner(self):
+        markup = self._phone(prefs={"display_name": "Dana Reeve"})
+        self.assertIn("Join Dana Reeve&#x27;s mailing list.", markup)
+        self.assertNotIn("Free Roof Inspection&#x27;s mailing list", markup)
+
+    def test_the_hero_still_derives_from_the_product(self):
+        # The rest of the email-page work applies unchanged, because the composition is shared.
+        markup = self._phone()
+        self.assertIn("Free Roof Inspection", markup)
+        self.assertIn("A 20-minute check and a written report.", markup)
+
+    def test_neither_consent_box_is_ticked_here_either(self):
+        form = self._phone().split("sl-lead-form", 1)[1].split("</form>", 1)[0]
+        self.assertNotIn("checked", form)
+
+
+
 if __name__ == "__main__":
     unittest.main()

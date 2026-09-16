@@ -1280,6 +1280,15 @@ function primaryOfferItemDisplay() {
   return { name: "", description: "", image: "" };
 }
 
+// The default verb per capture action. Deliberately modest: the tenant can overwrite it in the builder, so
+// these have to be true of every business using the action rather than the most persuasive thing to say.
+// "Request a Callback" is a promise the tenant keeps; "Get Instant Access" would not be.
+const CAPTURE_CTA_LABELS = {
+  capture_email: "Get Instant Access",
+  capture_phone: "Request a Callback",
+  capture_email_phone: "Get in Touch",
+};
+
 function primaryCtaContract() {
   // Snapshot the CTA the landing page should render, derived from the primary landing item. The offer is the
   // page's contract, so cta.type (buy/call/email/external/booking) drives which CTA component renders.
@@ -1303,8 +1312,11 @@ function primaryCtaContract() {
       }
       return { type: "external", label: "Learn More", target };
     }
-    // capture_email / capture_phone / capture_email_phone -> inline collector (Phase 2)
-    return { type: "email", label: "Get Instant Access" };
+    // capture_email / capture_phone / capture_email_phone -> inline collector (Phase 2). One CTA TYPE, three
+    // different promises: an email capture SENDS something, a phone capture means someone rings you back, and
+    // asking for both is a conversation rather than a delivery. "Get Instant Access" on a form that only
+    // takes a phone number promises a download that is never coming.
+    return { type: "email", label: CAPTURE_CTA_LABELS[lc.action] || "Get Instant Access" };
   }
   const row = serviceRows.value[0];
   if (row) {
