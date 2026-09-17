@@ -63,10 +63,39 @@ class BandTests(unittest.TestCase):
             self.assertIn("sl-hero-band", markup)
             self.assertIn("Everything in one place", markup)
 
+    def test_the_brand_chip_alone_is_enough(self):
+        """Reported 2026-09-17, second miss on the same guard.
+
+        Name and slogan off, avatar hidden, but the brand overlay is inside the hero -- and the page still
+        went blank. Every occupant counts, which is why the guard now asks the occupants rather than
+        re-deriving the conditions that produce them.
+        """
+        markup = _render(section={"avatar_placement": "hidden", "brand_overlay": True,
+                                  "brand_text": "Lemon & Thyme"}, preferences={})
+        self.assertIn("sl-hero-band", markup)
+        self.assertIn("sl-hero-brand", markup)
+
     def test_nothing_to_seat_means_no_band(self):
-        # No picture, no name, no slogan: a bare strip of colour carrying nothing.
+        # No picture, no name, no slogan, no brand chip: a bare strip of colour carrying nothing.
         self.assertEqual(_render(preferences={}), "")
         self.assertEqual(_render(section={"avatar_placement": "hidden"}, preferences={}), "")
+
+    def test_the_guard_asks_the_occupants_not_their_conditions(self):
+        """The structural point, so the next occupant cannot reintroduce this.
+
+        Twice the band was gated on a hand-listed subset of what the hero holds, and twice a real page fell
+        through the gap. The decision now reads the RENDERED occupants, which cannot go stale.
+        """
+        import inspect
+
+        source = inspect.getsource(html_module.render_hero_media)
+        decision = source.split("if not images and composition_key", 1)[1].split("\n", 1)[0]
+        for occupant in ("overlays", "identity", "brand"):
+            self.assertIn(occupant, decision, occupant)
+        # ...and each was BUILT before the question was asked, not re-derived inside it.
+        before = source.split("if not images and composition_key", 1)[0]
+        for builder in ("render_hero_overlays(", "render_hero_identity(", "render_hero_brand("):
+            self.assertIn(builder, before, builder)
 
     def test_no_other_page_shape_invents_one(self):
         # A product or bridge page with no image renders no hero, exactly as before. Furniture with no

@@ -2804,26 +2804,27 @@ def render_hero_media(
     # hole -- it is the real estate the avatar needs in order to exist, on the one page shape whose entire
     # job is identity. Every other shape still renders nothing, because inventing furniture on a product or
     # bridge page would be furniture with no reason to be there.
-    # ...and only when there is something to put ON it. First cut said "an avatar", which was too narrow:
-    # hiding the avatar took the whole hero with it, and the NAME and SLOGAN live in there too, so the page
-    # went blank (author, 2026-09-17). They are identity as much as the picture is -- the band seats all of
-    # it. Still guarded rather than unconditional: with no avatar, no name and no slogan there is genuinely
-    # nothing to seat, and a bare strip of colour is decoration for its own sake.
-    identity = render_hero_identity(section)
-    if not images and composition_key(offer) == "lead_social" and (avatar_source(section) or identity):
-        images = [HERO_BAND]
-    if not images:
-        return ""
-    alt = localized_alt(str(product.get("name") or offer.get("name") or "Product image"))
-    section_id = escape(str(section.get("id", "hero-media")))
-    autoplay = bool(section.get("autoplay"))
+    # ...and only when the hero has an OCCUPANT to seat, asked by rendering them and looking. Enumerating
+    # the conditions instead got this wrong twice (author, 2026-09-17): gated on the avatar, hiding it
+    # blanked the name and slogan; gated on those too, it still blanked a page whose only occupant was the
+    # brand chip. Everything the hero can hold is built before the question is asked, so a fifth occupant
+    # cannot reintroduce the bug. Still guarded rather than unconditional: an empty hero has nothing to
+    # seat, and a bare strip of colour is decoration for its own sake.
     overlays = render_hero_overlays(section, offer)
     # OUTSIDE the section, deliberately. The avatar is absolutely positioned against .sl-hero-media, and
     # .has-avatar reserves the room it overhangs into with a margin BELOW that section. Putting the identity
     # block inside meant it rendered into the figure's flow -- under the image and behind the avatar -- and
     # grew the section, which moved the avatar's `bottom` anchor with it. As a sibling it lands after the
     # reserved margin, which is exactly where the overhang ends.
+    identity = render_hero_identity(section)
     brand = render_hero_brand(section, offer)
+    if not images and composition_key(offer) == "lead_social" and (overlays or identity or brand):
+        images = [HERO_BAND]
+    if not images:
+        return ""
+    alt = localized_alt(str(product.get("name") or offer.get("name") or "Product image"))
+    section_id = escape(str(section.get("id", "hero-media")))
+    autoplay = bool(section.get("autoplay"))
     # has-avatar reserves the space the overlay OVERHANGS into. An inline or centred avatar sits in normal
     # flow and needs no reserved gap -- keeping it would leave a hole under the hero.
     # Both OVERLAYS overhang the artwork and need room reserved -- one below, one above. inline/centred sit
