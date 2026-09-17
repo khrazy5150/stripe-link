@@ -494,7 +494,8 @@ class CtaDialogTests(unittest.TestCase):
         self.assertIn('capture_email_phone: "Email + phone', labels)
 
     def test_the_form_fields_are_offered_only_for_the_inline_collector(self):
-        dialog = BUILDER.split("sectionEditor.row.editor === 'checkout_cta'", 1)[1][:1600]
+        # Widened 2026-09-16: the call panel's own controls now sit between the button label and these.
+        dialog = BUILDER.split("sectionEditor.row.editor === 'checkout_cta'", 1)[1][:3200]
         self.assertIn("builder.cta_form_title", dialog)
         self.assertIn("builder.cta_form_description", dialog)
         self.assertIn("builderCta.type === 'email'", dialog)

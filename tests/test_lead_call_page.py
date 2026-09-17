@@ -19,7 +19,7 @@ CSS = "\n".join(html_module.UNIVERSAL_BUNDLE_TEMPLATE_STYLES)
 RULES = json.loads((ROOT / "src" / "stripe_link" / "composition_rules.json").read_text(encoding="utf-8"))
 
 
-def _render(badges=None, phone="+12065654418", kicker="", orientation=None):
+def _render(badges=None, phone="+12065654418", kicker="", orientation=None, tone=None):
     product = {
         "product_id": "p1", "tenant_id": "t1", "name": "Emergency Water Damage",
         "description": "For 24-hour service water damage", "product_intent": "lead_gen",
@@ -42,7 +42,9 @@ def _render(badges=None, phone="+12065654418", kicker="", orientation=None):
         if orientation:
             badge_section["orientation"] = orientation
         sections.append(badge_section)
-    sections += [{"id": "c", "type": "checkout_cta", **({"call_kicker": kicker} if kicker else {})},
+    sections += [{"id": "c", "type": "checkout_cta",
+                  **({"call_kicker": kicker} if kicker else {}),
+                  **({"call_tone": tone} if tone else {})},
                  {"id": "lf", "type": "legal_footer", "copyright": "(c)"}]
     page = {"page_id": "pg", "tenant_id": "t1", "offer_id": "o1", "name": "N", "status": "draft",
             "route": {"slug": "s"}, "theme": {"template": "universal_bundle", "preset": "clean-slate"},
@@ -60,10 +62,12 @@ class NumberLegibilityTests(unittest.TestCase):
         rule = [line for line in CSS.splitlines() if ".sl-call-number{" in line][0]
         self.assertNotIn("var(--sl-cta-text)", rule)
         # It INHERITS the panel's ink now, so the number is legible against whatever the panel is painted --
-        # which is the only version that cannot go wrong when a theme changes one and not the other.
+        # which is the only version that cannot go wrong when a theme changes one and not the other. The ink
+        # itself moved onto the TONE rules when the panel became tenant-adjustable.
         self.assertIn("color:inherit", rule)
-        panel = [line for line in CSS.splitlines() if ".sl-call-panel{" in line][0]
-        self.assertIn("color:var(--sl-section-ink", panel)
+        for tone in ("dark", "accent", "light"):
+            tone_rule = [line for line in CSS.splitlines() if f".sl-call-panel.is-{tone}{{" in line][0]
+            self.assertIn("color:var(--sl-", tone_rule)
 
     def test_the_number_is_shown_and_dialable(self):
         markup = _render()
@@ -268,6 +272,77 @@ class BadgeOrientationTests(unittest.TestCase):
     def test_the_builder_offers_the_choice(self):
         self.assertIn('<option value="vertical">', BUILDER)
         self.assertIn("builder.trust_badges.orientation", BUILDER)
+
+
+
+class PanelToneTests(unittest.TestCase):
+    """The panel is part of the CALL TO ACTION section, and editable there.
+
+    Author, 2026-09-16: they went looking for a "page ribbon" in Page Sections and did not find one. The
+    ribbon's SHAPE was borrowed; the element was not. Whatever is adjustable about the panel therefore has to
+    be adjustable from the CTA editor, or it is adjustable nowhere.
+    """
+
+    def test_dark_is_the_default(self):
+        # An emergency number wants to be the loudest thing on the page.
+        self.assertIn("sl-call-panel is-dark", _render())
+
+    def test_the_tenant_can_change_it(self):
+        self.assertIn("sl-call-panel is-accent", _render(tone="accent"))
+        self.assertIn("sl-call-panel is-light", _render(tone="light"))
+
+    def test_an_unknown_tone_falls_back_rather_than_rendering_a_class_nobody_styled(self):
+        self.assertIn("sl-call-panel is-dark", _render(tone="chartreuse"))
+
+    def test_every_tone_is_painted_from_the_page_theme(self):
+        """Named tones rather than a colour picker.
+
+        Each resolves to the theme's own tokens, so the panel cannot end up off-palette or with unreadable
+        text, and it restyles itself when the preset changes. Per-token colour control is its own project
+        (plans/ADVANCED_COLOR_SETTINGS.md) and this must not pre-empt it with a one-off hex field.
+        """
+        for tone in ("dark", "accent", "light"):
+            rule = [line for line in CSS.splitlines() if f".sl-call-panel.is-{tone}{{" in line][0]
+            self.assertIn("var(--sl-", rule)
+            self.assertNotRegex(rule, r"#[0-9a-fA-F]{3,6}")
+
+    def test_the_button_stays_a_button_on_a_light_panel(self):
+        # Inverted against the dark panel, it would be white on white on the light one.
+        self.assertIn(".sl-call-panel.is-light .sl-call-button{", CSS)
+
+    def test_the_validator_knows_the_three(self):
+        from stripe_link.domain.documents import DocumentValidationError, validate_page_document
+
+        def page(tone):
+            return {"schema_version": "1", "document_type": "page", "tenant_id": "t", "page_id": "p1",
+                    "name": "P", "offer_id": "o1", "route": {"slug": "p"},
+                    "sections": [{"id": "c", "type": "checkout_cta", "call_tone": tone}]}
+
+        for good in ("dark", "accent", "light"):
+            validate_page_document(page(good))
+        with self.assertRaises(DocumentValidationError):
+            validate_page_document(page("chartreuse"))
+
+
+class EditorReachabilityTests(unittest.TestCase):
+    """Every knob added here must be reachable from the dialog that owns it.
+
+    The orientation picker shipped into a SECOND `v-else-if` for trust_badges, which the editor chain never
+    reached because the first one matched -- so the control existed, passed its test, and could not be seen.
+    """
+
+    def test_there_is_exactly_one_editor_branch_per_section(self):
+        for editor in ("trust_badges", "checkout_cta", "refund_policy"):
+            self.assertEqual(BUILDER.count(f"sectionEditor.row.editor === '{editor}'"), 1, editor)
+
+    def test_the_orientation_picker_is_inside_the_badge_editor(self):
+        branch = BUILDER.split("sectionEditor.row.editor === 'trust_badges'", 1)[1].split("</template>", 1)[0]
+        self.assertIn("builder.trust_badges.orientation", branch)
+
+    def test_the_call_controls_are_inside_the_cta_editor(self):
+        branch = BUILDER.split("sectionEditor.row.editor === 'checkout_cta'", 1)[1].split("\n            <template", 1)[0]
+        self.assertIn("builder.cta_call_kicker", branch)
+        self.assertIn("builder.cta_call_tone", branch)
 
 
 
