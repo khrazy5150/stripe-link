@@ -2561,7 +2561,7 @@ const builderOffer = computed(() => offers.value.find((offer) => offer.offer_id 
 // Which lead action this page's offer performs. The cta TYPE cannot say: one type ("email") backs three.
 // The CTA types that wear the shared panel (render_cta_panel): a phone number, a destination host, a
 // filename. `email` is the inline form and `buy` is the price card -- neither is a panel.
-const PANEL_CTA_TYPES = ["call", "external", "download"];
+const PANEL_CTA_TYPES = ["call", "external"];
 // The offer's snapshotted CTA type, for a page being LOADED (builderCta reads the live builder state, which
 // is not populated yet at that point).
 function offerCtaType(offer) {

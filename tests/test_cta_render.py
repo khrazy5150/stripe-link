@@ -78,16 +78,28 @@ class OfferCtaTests(unittest.TestCase):
 class CtaRegistryTests(unittest.TestCase):
     def test_registry_covers_every_cta_type_and_defaults_to_buy(self):
         from stripe_link.runtime.html import CTA_REGISTRY
-        for kind in ("buy", "call", "email", "external", "download", "booking", "appointment"):
+        # No "download": removed 2026-09-17. A CTA type is what a BUTTON does, and the only thing that
+        # ever produced one was an extension sniff on a bridge page's typed destination.
+        for kind in ("buy", "call", "email", "external", "booking", "appointment"):
             self.assertIn(kind, CTA_REGISTRY)
             self.assertTrue(callable(CTA_REGISTRY[kind]["render"]))
 
-    def test_download_cta_renders_a_download_link_no_price(self):
+    def test_there_is_no_download_cta_type(self):
+        """A bridge page's button redirects, full stop (author, 2026-09-17).
+
+        The type existed only because primaryCtaContract sniffed the destination's file extension -- and it
+        was wrong twice: it overrode the tenant's button label with "Download", and the `download` attribute
+        it emitted is ignored by browsers for CROSS-ORIGIN URLs, so it navigated like a link while claiming
+        otherwise. Real file delivery is the page ribbon's download action, backed by an uploaded asset.
+        Neither table held an offer with this type when it was removed.
+        """
+        from stripe_link.runtime.html import CTA_REGISTRY, CTA_TYPES
+
+        self.assertNotIn("download", CTA_TYPES)
+        self.assertNotIn("download", CTA_REGISTRY)
+        # An offer that somehow carries it falls back to buy rather than rendering nothing.
         html = _render({"type": "download", "label": "Get the PDF", "target": "https://x/guide.pdf"})
-        self.assertIn('data-cta-type="download"', html)
-        self.assertIn("download", html)               # the download attribute
-        self.assertIn("guide.pdf", html)
-        self.assertNotIn("$150.00", html)
+        self.assertIn('data-cta-type="buy"', html)
 
     def test_appointment_reuses_the_booking_widget(self):
         html = _render({"type": "appointment", "label": "Book", "target": "svc_1"})

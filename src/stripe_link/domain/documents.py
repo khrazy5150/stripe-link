@@ -1143,7 +1143,10 @@ def validate_offer_document(document: dict[str, Any]) -> None:
         if cta is not None:
             if not isinstance(cta, dict):
                 raise DocumentValidationError("Offer presentation.cta must be an object.")
-            require_enum(cta, "type", {"buy", "call", "email", "external", "download", "booking", "appointment"}, "Offer presentation.cta.type")
+            # No "download": a bridge page's button redirects (author, 2026-09-17). Nothing produced this
+            # type but an extension sniff on a typed URL, and no stored offer carried it (both tables checked
+            # before removing). Real file delivery is the page ribbon's download action.
+            require_enum(cta, "type", {"buy", "call", "email", "external", "booking", "appointment"}, "Offer presentation.cta.type")
             optional_string(cta, "label", "Offer presentation.cta.label")
             optional_string(cta, "target", "Offer presentation.cta.target")
     optional_image_dims(document, "Offer image_dims")

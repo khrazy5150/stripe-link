@@ -205,7 +205,7 @@ class CallPanelTests(unittest.TestCase):
                 if ".sl-checkout-cta.sl-call-cta" in line and "52rem" in line]
         self.assertTrue(rule, "the call panel is not constrained")
         # All three panelled CTAs, since they share the rule.
-        for variant in ("call", "external", "download"):
+        for variant in ("call", "external"):
             self.assertIn(f".sl-checkout-cta.sl-{variant}-cta", rule[0], variant)
 
     def test_the_number_has_exactly_one_colour_rule(self):

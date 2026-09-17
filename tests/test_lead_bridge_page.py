@@ -39,21 +39,15 @@ class DestinationTests(unittest.TestCase):
         self.assertEqual(html_module.destination_label("https://www.opentable.com/r/x"), "opentable.com")
         self.assertIn('href="https://www.opentable.com/r/lemon-thyme"', _render())
 
-    def test_a_file_target_shows_its_filename_only_for_a_DOWNLOAD(self):
-        """`as_file` is the caller's, never guessed from the string.
+    def test_a_file_path_is_still_just_a_host(self):
+        """The label is ALWAYS the host now (author, 2026-09-17: a bridge button redirects, period).
 
-        Guessing produced "index.html" as the headline act of a live advertorial: every page ending .html,
-        .php or .aspx is a page, not a file, and only the CTA type knows which of the two this is.
+        It briefly returned a filename when the path looked like one, which put "index.html" on a live
+        advertorial in 4.4rem type.
         """
-        self.assertEqual(
-            html_module.destination_label("https://cdn.x.com/f/2026-price-list.pdf", as_file=True),
-            "2026-price-list.pdf")
-        # As a LINK the same URL is a host, and a .html path never becomes the label at all.
-        self.assertEqual(html_module.destination_label("https://cdn.x.com/f/2026-price-list.pdf"), "cdn.x.com")
         self.assertEqual(html_module.destination_label("https://miniguardcam.com/index.html"),
                          "miniguardcam.com")
-        self.assertEqual(html_module.destination_label("https://shop.example.com/buy.php", as_file=True),
-                         "shop.example.com")
+        self.assertEqual(html_module.destination_label("https://cdn.x.com/f/2026-price-list.pdf"), "cdn.x.com")
 
     def test_query_strings_and_fragments_do_not_leak_in(self):
         # An affiliate tag is not part of where you are going, and is not something to show a visitor.
@@ -111,27 +105,23 @@ class SharedFurnitureTests(unittest.TestCase):
         self.assertIn("sl-cta-panel sl-tone-accent", _render(tone="accent"))
         self.assertIn("sl-cta-panel sl-tone-dark", _render())
 
-    def test_a_download_target_gets_the_same_treatment(self):
-        """Same composition as a bridge page, so it must not look like a different page type.
-
-        Otherwise one page renders two ways depending on whether its URL happens to end in .pdf.
-        """
-        markup = html_module.render_download_cta(
-            {"type": "download", "label": "Download", "target": "https://cdn.x.com/list.pdf"}, {})
-        self.assertIn("sl-cta-panel", markup)
-        self.assertIn('data-cta-sticky="download"', markup)
-        self.assertIn("list.pdf", markup)
-        self.assertIn("download", markup)
-
-    def test_one_panel_implementation_serves_all_three(self):
+    def test_one_panel_implementation_serves_both(self):
         runtime = (ROOT / "src" / "stripe_link" / "runtime" / "html.py").read_text(encoding="utf-8")
         self.assertEqual(runtime.count("def render_cta_panel("), 1)
-        for fn in ("render_call_cta", "render_external_cta", "render_download_cta"):
+        for fn in ("render_call_cta", "render_external_cta"):
             body = runtime.split(f"def {fn}(", 1)[1].split("\ndef ", 1)[0]
             self.assertIn("render_cta_panel(", body, fn)
+        # ...and the third caller is gone with the type it served.
+        self.assertNotIn("def render_download_cta(", runtime)
+
+    def test_the_offer_never_produces_a_download_cta_again(self):
+        offers = (ROOT / "dashboard" / "src" / "components" / "Offers.vue").read_text(encoding="utf-8")
+        contract = offers.split("function primaryCtaContract", 1)[1].split("\n}", 1)[0]
+        self.assertNotIn('type: "download"', contract)
+        self.assertIn('return { type: "external", label: "Learn More", target };', contract)
 
     def test_the_builder_offers_the_controls_for_every_panelled_cta(self):
-        self.assertIn('const PANEL_CTA_TYPES = ["call", "external", "download"];', BUILDER)
+        self.assertIn('const PANEL_CTA_TYPES = ["call", "external"];', BUILDER)
         self.assertIn("PANEL_CTA_TYPES.includes(builderCta.type)", BUILDER)
 
 

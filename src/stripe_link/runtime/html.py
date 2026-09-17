@@ -673,7 +673,7 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     "    body:has(.sl-email-cta) main{padding-bottom:4rem}",
     # THE CTA PANEL -- one implementation for call, external and download (see render_cta_panel). They differ
     # only in what the big line says: a phone number, a hostname, a filename.
-    "    .sl-checkout-cta.sl-call-cta,.sl-checkout-cta.sl-external-cta,.sl-checkout-cta.sl-download-cta{display:block;width:min(52rem,calc(100% - 3.2rem));margin-left:auto;margin-right:auto}",
+    "    .sl-checkout-cta.sl-call-cta,.sl-checkout-cta.sl-external-cta{display:block;width:min(52rem,calc(100% - 3.2rem));margin-left:auto;margin-right:auto}",
     # THE TONE SCALE. Sets the --sl-section-* tokens and paints nothing itself, so every element that already
     # reads them (author bio, bragging points, quote, page ribbon, price highlight, cta panel) gains tones
     # from a single class. Every value comes from the page theme -- no literal colours here, ever.
@@ -4894,7 +4894,10 @@ def render_thank_you_footer(section: dict[str, Any]) -> str:
     ])
 
 
-CTA_TYPES = {"buy", "call", "email", "external", "download", "booking", "appointment"}
+# No "download": a CTA type is what a BUTTON does, and the only thing that ever produced one was an
+# extension sniff on a bridge page's destination (removed 2026-09-17). File delivery is the page
+# ribbon's download action, backed by an uploaded asset rather than a guess about a URL.
+CTA_TYPES = {"buy", "call", "email", "external", "booking", "appointment"}
 
 
 def offer_cta(offer: dict[str, Any]) -> dict[str, str]:
@@ -4918,7 +4921,6 @@ CTA_TO_ACTION = {
     "call": "call_phone",
     "email": "submit_form",
     "external": "redirect",
-    "download": "download",
     "booking": "appointment",
     "appointment": "appointment",
 }
@@ -6093,7 +6095,6 @@ CTA_REGISTRY: dict[str, dict[str, Any]] = {
     "call": {"render": lambda c: render_call_cta(c.cta, c.section), "version": 1},
     "external": {"render": lambda c: render_external_cta(c.cta, c.section), "version": 1},
     "email": {"render": lambda c: render_email_cta(c.page, c.offer, c.cta, c.products_by_id, c.api_base_url, c.section), "version": 1},
-    "download": {"render": lambda c: render_download_cta(c.cta, c.section), "version": 1},
     # An appointment IS a booking — reuse the inline calendar widget rather than duplicate it.
     "booking": {"render": lambda c: render_booking_cta(c.cta, c.api_base_url, c.offer), "version": 1},
     "appointment": {"render": lambda c: render_booking_cta(c.cta, c.api_base_url, c.offer), "version": 1},
@@ -6319,34 +6320,18 @@ def dialable_number(phone: str) -> str:
     return phone.strip()
 
 
-# What counts as a FILE for the purpose of naming a download. Mirrors the extension test in Offers.vue that
-# picks the download CTA in the first place, so the two agree about what a file is.
-DOWNLOADABLE_EXTENSIONS = (
-    "pdf", "zip", "epub", "mp3", "mp4", "mov", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "csv",
-    "png", "jpg", "jpeg",
-)
+def destination_label(url: str) -> str:
+    """Where a bridge button GOES, as the visitor would say it: the HOST.
 
-
-def destination_label(url: str, *, as_file: bool = False) -> str:
-    """Where a bridge button actually GOES, as the visitor would say it.
-
-    The HOST for a link ("opentable.com"); the filename only for a real download ("2026-price-list.pdf").
-
-    `as_file` is the caller's, not a guess from the string. Guessing produced "index.html" as the headline
-    act of a live advertorial (author, 2026-09-16: "an eyesore") -- every page ending in .html, .php or
-    .aspx is a page, not a file, and only the CTA type knows which of the two this is.
+    Always the host. It briefly returned a filename when the path looked like one, which put "index.html" on
+    a live advertorial in 4.4rem type (author, 2026-09-16: "an eyesore"), and the file case is gone entirely
+    now -- a bridge button redirects, full stop (author, 2026-09-17).
     """
     raw = str(url or "").strip()
     if not raw:
         return ""
     without_scheme = re.sub(r"^[a-zA-Z][a-zA-Z0-9+.-]*://", "", raw)
     host = without_scheme.split("/", 1)[0].split("?", 1)[0].split("#", 1)[0]
-    if as_file:
-        path = without_scheme[len(host):].split("?", 1)[0].split("#", 1)[0]
-        filename = path.rsplit("/", 1)[-1] if path else ""
-        extension = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
-        if extension in DOWNLOADABLE_EXTENSIONS:
-            return filename
     return re.sub(r"^www\.", "", host) or raw
 
 
@@ -6443,25 +6428,6 @@ def render_external_cta(cta: dict[str, str], section: dict[str, Any] | None = No
         lead_href=escape(url) if url else "#",
         label=escape(cta["label"] or "Learn More"),
         link_attrs=' target="_blank" rel="noopener noreferrer"',
-        default_show_lead=False,
-    )
-
-
-def render_download_cta(cta: dict[str, str], section: dict[str, Any] | None = None) -> str:
-    """Download CTA: the same panel, with the FILENAME as its identifying line.
-
-    Same composition as a bridge page, so it gets the same treatment -- otherwise one page type would look
-    like two depending on whether its URL happened to end in .pdf. The `download` attribute prompts a save;
-    the browser owns execution, no JS needed.
-    """
-    url = cta["target"].strip()
-    return render_cta_panel(
-        section or {},
-        variant="download",
-        lead=destination_label(url, as_file=True),
-        lead_href=escape(url) if url else "#",
-        label=escape(cta["label"] or "Download"),
-        link_attrs=' download rel="noopener"',
         default_show_lead=False,
     )
 
