@@ -29,6 +29,33 @@ LIGHT_INK = "#ffffff"
 # cannot inject arbitrary CSS.
 ALLOWED_TOKENS = ("bg", "accent", "border")
 
+# TONES: the second way to fill the same tokens, and the complement to the picker above (author,
+# 2026-09-16 -- "I personally like the dropdown of color contrasts better than the color picker. But maybe
+# we could offer both").
+#
+# The two differ in a way worth keeping straight:
+#   theme  a LITERAL colour the tenant picked. Pinned -- it stays that colour when the preset changes, and
+#          its ink is derived from its luminance so it can never be unreadable.
+#   tone   a NAME. Resolves to the page theme's own tokens in CSS, so the section restyles itself when the
+#          tenant changes preset, and it cannot land off-palette.
+#
+# They coexist without a precedence rule to maintain: `theme` is an inline style and `tone` is a class, so
+# a picked colour beats a named tone by the cascade's own arithmetic.
+SECTION_TONES = ("dark", "accent", "light")
+
+
+def tone_class(value: Any, default: str = "") -> str:
+    """The class that paints a section from the page theme, or "" when it should inherit the page.
+
+    An UNRECOGNISED tone falls back to `default` rather than to nothing. The validator refuses unknown tones,
+    so this only fires for a hand-edited or legacy document -- and there the class saying what is painting
+    beats a silent reliance on a CSS fallback that happens to agree.
+    """
+    tone = str(value or "").strip()
+    if tone not in SECTION_TONES:
+        tone = str(default or "").strip()
+    return f"sl-tone-{tone}" if tone in SECTION_TONES else ""
+
 
 
 def _channel(value: int) -> float:

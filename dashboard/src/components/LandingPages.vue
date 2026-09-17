@@ -701,13 +701,13 @@
                     <input v-model.trim="builder.cta_call_kicker" type="text"
                            placeholder="e.g. Available 24 hours a day" maxlength="60" />
                   </label>
-                  <!-- Named tones rather than a colour picker: each resolves to the PAGE THEME's own tokens,
-                       so the panel cannot end up off-palette or with unreadable text, and it restyles itself
-                       when the preset changes. Per-token colour control is its own project
-                       (plans/ADVANCED_COLOR_SETTINGS.md). -->
+                  <!-- The SHARED tone vocabulary (domain/section_theme.py), not a checkout-specific one:
+                       the same names paint a page ribbon, an author bio or a quote. A tone follows the page
+                       preset; picking a literal colour on the section beats it, because an inline style
+                       beats a class. -->
                   <label class="offer-field">
                     <span>Panel colour</span>
-                    <select v-model="builder.cta_call_tone">
+                    <select v-model="builder.cta_tone">
                       <option value="dark">Dark — the page's ink</option>
                       <option value="accent">Accent — your brand colour</option>
                       <option value="light">Light — a quiet card</option>
@@ -3307,7 +3307,7 @@ function defaultBuilderForm() {
     // which is what the placeholder shows -- only an edit is stored.
     cta_form_title: "",
     cta_call_kicker: "",
-    cta_call_tone: "dark",
+    cta_tone: "dark",
     cta_form_description: "",
     countdown: {
       enabled: false,
@@ -4313,7 +4313,7 @@ function populateBuilderFromPage(page) {
     // would store it back on the next save -- the same loop that wrote a filename into the hero.
     cta_form_title: cta.form_title || "",
     cta_call_kicker: cta.call_kicker || "",
-    cta_call_tone: cta.call_tone || "dark",
+    cta_tone: cta.tone || "dark",
     cta_form_description: cta.form_description || "",
     elements: elementsFromPage(sections),
     google_tag_id: page.analytics?.google_tag_id || "",
@@ -4687,7 +4687,7 @@ function builderSectionCandidates(intent) {
       type: "checkout_cta",
       label: builder.cta_label || ctaLabelDefault.value,
       call_kicker: builder.cta_call_kicker || undefined,
-      call_tone: builder.cta_call_tone !== "dark" ? builder.cta_call_tone : undefined,
+      tone: builder.cta_tone !== "dark" ? builder.cta_tone : undefined,
       form_title: builder.cta_form_title || undefined,
       form_description: builder.cta_form_description || undefined,
     });

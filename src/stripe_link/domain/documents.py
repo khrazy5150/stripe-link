@@ -7,6 +7,7 @@ from stripe_link.domain.cart import CART_STATUSES, MAX_CART_LINES, MAX_LINE_QTY
 from stripe_link.domain.composition import ELEMENTS, supported_goals
 from stripe_link.domain.semantic_schema import OFFER_SEMANTIC_MODEL_SCHEMA, check_schema
 from stripe_link.domain import tips
+from stripe_link.domain.section_theme import SECTION_TONES
 
 
 class DocumentValidationError(ValueError):
@@ -1501,9 +1502,10 @@ def validate_page_document(document: dict[str, Any]) -> None:
             optional_string(section, "label", "Checkout CTA label")
             # One line above a click-to-call page's number -- "Available 24 hours", "Se habla espanol".
             optional_string(section, "call_kicker", "Checkout CTA call_kicker", max_length=60)
-            if section.get("call_tone") is not None:
-                require_enum(section, "call_tone", {"dark", "accent", "light"},
-                             "Checkout CTA call_tone")
+            # `tone` is the SHARED name (domain/section_theme.py), not a checkout-specific one: the same
+            # vocabulary paints a page ribbon, an author bio or a quote.
+            if section.get("tone") is not None:
+                require_enum(section, "tone", set(SECTION_TONES), "Checkout CTA tone")
             # The inline lead form's own heading and sub-line, overriding the product's per-action default.
             # Capped because they sit inside a card above the field, not in the hero.
             optional_string(section, "form_title", "Checkout CTA form_title", max_length=80)

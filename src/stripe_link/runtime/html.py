@@ -28,7 +28,7 @@ from stripe_link.domain.fonts import (
     REQUEST_WEIGHTS, families_to_load, imported_faces_for, is_system, resolve_families,
 )
 from stripe_link.domain.video_embeds import parse_video_embed
-from stripe_link.domain.section_theme import section_theme_vars
+from stripe_link.domain.section_theme import SECTION_TONES, section_theme_vars, tone_class
 from stripe_link.domain.tips import MAX_AMOUNT as TIP_MAX_AMOUNT
 from stripe_link.domain.tips import MIN_AMOUNT as TIP_MIN_AMOUNT
 from stripe_link.domain.tips import allows_custom as tip_allows_custom
@@ -668,18 +668,19 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     # so it gets a block of its own rather than a line of small text above a short button.
     "    .sl-checkout-cta.sl-call-cta{display:block}",
     "    .sl-checkout-cta.sl-call-cta{width:min(52rem,calc(100% - 3.2rem));margin-left:auto;margin-right:auto}",
-    "    .sl-call-panel{display:grid;justify-items:center;gap:1.2rem;padding:3.2rem 2.4rem;border-radius:1.4rem;text-align:center}",
-    # Three tones, every colour from the page theme. `dark` is the default because an emergency number wants
-    # to be the loudest thing on the page.
-    "    .sl-call-panel.is-dark{background:var(--sl-text);color:var(--sl-cta-text)}",
-    "    .sl-call-panel.is-accent{background:linear-gradient(135deg,var(--sl-cta-from),var(--sl-cta-to));color:var(--sl-cta-text)}",
-    "    .sl-call-panel.is-light{background:var(--sl-card);color:var(--sl-text);border:1px solid var(--sl-content-border)}",
-    # The button inverts against whatever the panel is, so it stays a button rather than dissolving into it.
-    "    .sl-call-panel.is-light .sl-call-button{background:linear-gradient(135deg,var(--sl-cta-from),var(--sl-cta-to));color:var(--sl-cta-text)}",
+    # THE TONE SCALE. Sets the --sl-section-* tokens and paints nothing itself, so every element that already
+    # reads them (author bio, bragging points, quote, page ribbon, price highlight, call panel) gains tones
+    # from a single class. Every value comes from the page theme -- no literal colours here, ever.
+    "    .sl-tone-dark{--sl-section-bg:var(--sl-text);--sl-section-ink:var(--sl-cta-text);--sl-section-border:transparent}",
+    "    .sl-tone-accent{--sl-section-bg:linear-gradient(135deg,var(--sl-cta-from),var(--sl-cta-to));--sl-section-ink:var(--sl-cta-text);--sl-section-border:transparent}",
+    "    .sl-tone-light{--sl-section-bg:var(--sl-card);--sl-section-ink:var(--sl-text);--sl-section-border:var(--sl-content-border)}",
+    # A button sitting ON a toned section inverts, so it stays a button rather than dissolving into it.
+    "    .sl-tone-dark .sl-cta,.sl-tone-accent .sl-cta{background:var(--sl-cta-text);color:var(--sl-text)}",
+    "    .sl-call-panel{display:grid;justify-items:center;gap:1.2rem;padding:3.2rem 2.4rem;border-radius:1.4rem;text-align:center;background:var(--sl-section-bg,var(--sl-text));color:var(--sl-section-ink,var(--sl-cta-text));border:1px solid var(--sl-section-border,transparent)}",
     "    .sl-call-kicker{margin:0;font-family:var(--sl-font-accent);font-size:1.3rem;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;opacity:.75}",
     # Sized to be read across a room and tapped without aiming. `tabular-nums` so the digits do not shimmy.
     "    .sl-call-number{display:block;color:inherit;font-family:var(--sl-font-accent);font-weight:900;font-size:clamp(3.2rem,9vw,4.4rem);line-height:1.05;letter-spacing:0.01em;font-variant-numeric:tabular-nums;text-decoration:none}",
-    "    .sl-call-panel .sl-call-button{background:var(--sl-cta-text);color:var(--sl-text);min-width:16rem}",
+    "    .sl-call-panel .sl-call-button{min-width:16rem}",
     # The STICKY bar. A phone scroller should never have to find their way back to the number.
     "    .sl-call-sticky{position:fixed;left:0;right:0;bottom:0;z-index:10;display:flex;justify-content:center;padding:1.2rem 1.6rem calc(1.2rem + env(safe-area-inset-bottom));background:linear-gradient(transparent,var(--sl-cta-scrim) 35%)}",
     "    .sl-call-sticky .sl-call-button{width:min(52rem,100%);text-align:center}",
@@ -5249,8 +5250,11 @@ def render_page_ribbon(section: dict[str, Any], page: dict[str, Any] | None = No
     style = section_theme_vars(section)
     style_attr = f' style="{escape(style)}"' if style else ""
     themed = " sl-section-themed" if style else ""
+    # The same named tone the call panel uses. A ribbon has always been able to take a picked colour; this
+    # is the theme-following half of the pair, and it costs one class.
+    ribbon_tone = f" {tone_class(section.get('tone'))}".rstrip()
     return "\n".join([
-        f'    <section class="sl-page-ribbon is-{presentation}{themed}" data-section-id="{section_id}"'
+        f'    <section class="sl-page-ribbon is-{presentation}{themed}{ribbon_tone}" data-section-id="{section_id}"'
         f' data-section-type="page_ribbon"{style_attr}>',
         *parts,
         "    </section>",
@@ -6287,9 +6291,6 @@ def render_buy_cta(
     ] if line)
 
 
-CALL_PANEL_TONES = ("dark", "accent", "light")
-
-
 def dialable_number(phone: str) -> str:
     """The number as a human reads it aloud, from the E.164 the tenant stored.
 
@@ -6324,15 +6325,15 @@ def render_call_cta(cta: dict[str, str], section: dict[str, Any] | None = None) 
     href = f"tel:{escape(tel)}" if tel else "#"
     # One line above the number -- "Available 24 hours", "Se habla espanol". The tenant's, never invented.
     kicker = str(section.get("call_kicker") or "").strip()
-    # Named tones, not a colour. Each resolves to the PAGE THEME's own tokens, so the panel cannot end up
-    # off-palette or with unreadable text, and it restyles itself when the tenant changes preset. Per-token
-    # colour control is its own project (plans/ADVANCED_COLOR_SETTINGS.md).
-    tone = str(section.get("call_tone") or "dark").strip()
-    if tone not in CALL_PANEL_TONES:
-        tone = "dark"
+    # Painted the same two ways every other toned section is: a NAMED tone that follows the page preset, or
+    # a picked colour via section.theme, which wins because an inline style beats a class. Dark by default --
+    # an emergency number wants to be the loudest thing on the page.
+    tone = tone_class(section.get("tone"), default="dark")
+    style = section_theme_vars(section)
+    style_attr = f' style="{escape(style)}"' if style else ""
     panel = [
         "    <section class=\"sl-checkout-cta sl-call-cta\" data-section-type=\"checkout_cta\" data-cta-type=\"call\">",
-        f"      <div class=\"sl-call-panel is-{tone}\">",
+        f'      <div class="sl-call-panel {tone}"{style_attr}>',
         (f"        <p class=\"sl-call-kicker\">{escape(kicker)}</p>" if kicker else ""),
         (f"        <a class=\"sl-call-number\" href=\"{href}\">{escape(dialable_number(phone))}</a>" if phone else ""),
         f"        <a class=\"sl-cta sl-call-button\" href=\"{href}\">{label}</a>",

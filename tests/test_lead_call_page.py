@@ -44,7 +44,7 @@ def _render(badges=None, phone="+12065654418", kicker="", orientation=None, tone
         sections.append(badge_section)
     sections += [{"id": "c", "type": "checkout_cta",
                   **({"call_kicker": kicker} if kicker else {}),
-                  **({"call_tone": tone} if tone else {})},
+                  **({"tone": tone} if tone else {})},
                  {"id": "lf", "type": "legal_footer", "copyright": "(c)"}]
     page = {"page_id": "pg", "tenant_id": "t1", "offer_id": "o1", "name": "N", "status": "draft",
             "route": {"slug": "s"}, "theme": {"template": "universal_bundle", "preset": "clean-slate"},
@@ -61,13 +61,11 @@ class NumberLegibilityTests(unittest.TestCase):
         """
         rule = [line for line in CSS.splitlines() if ".sl-call-number{" in line][0]
         self.assertNotIn("var(--sl-cta-text)", rule)
-        # It INHERITS the panel's ink now, so the number is legible against whatever the panel is painted --
-        # which is the only version that cannot go wrong when a theme changes one and not the other. The ink
-        # itself moved onto the TONE rules when the panel became tenant-adjustable.
+        # It INHERITS the panel's ink, which is the only version that cannot go wrong when a theme changes
+        # one and not the other. The ink itself now comes from the shared --sl-section-ink token.
         self.assertIn("color:inherit", rule)
-        for tone in ("dark", "accent", "light"):
-            tone_rule = [line for line in CSS.splitlines() if f".sl-call-panel.is-{tone}{{" in line][0]
-            self.assertIn("color:var(--sl-", tone_rule)
+        panel = [line for line in CSS.splitlines() if ".sl-call-panel{" in line][0]
+        self.assertIn("color:var(--sl-section-ink", panel)
 
     def test_the_number_is_shown_and_dialable(self):
         markup = _render()
@@ -285,38 +283,46 @@ class PanelToneTests(unittest.TestCase):
 
     def test_dark_is_the_default(self):
         # An emergency number wants to be the loudest thing on the page.
-        self.assertIn("sl-call-panel is-dark", _render())
+        self.assertIn("sl-call-panel sl-tone-dark", _render())
 
     def test_the_tenant_can_change_it(self):
-        self.assertIn("sl-call-panel is-accent", _render(tone="accent"))
-        self.assertIn("sl-call-panel is-light", _render(tone="light"))
+        self.assertIn("sl-call-panel sl-tone-accent", _render(tone="accent"))
+        self.assertIn("sl-call-panel sl-tone-light", _render(tone="light"))
 
-    def test_an_unknown_tone_falls_back_rather_than_rendering_a_class_nobody_styled(self):
-        self.assertIn("sl-call-panel is-dark", _render(tone="chartreuse"))
+    def test_an_unknown_tone_falls_back_to_the_default(self):
+        # Only reachable on a hand-edited document -- the validator refuses unknown tones. The class saying
+        # what paints beats a silent reliance on a CSS fallback that happens to agree.
+        self.assertIn("sl-call-panel sl-tone-dark", _render(tone="chartreuse"))
 
-    def test_every_tone_is_painted_from_the_page_theme(self):
-        """Named tones rather than a colour picker.
+    def test_a_tone_paints_by_SETTING_the_shared_tokens(self):
+        """The whole point of the refactor.
 
-        Each resolves to the theme's own tokens, so the panel cannot end up off-palette or with unreadable
-        text, and it restyles itself when the preset changes. Per-token colour control is its own project
-        (plans/ADVANCED_COLOR_SETTINGS.md) and this must not pre-empt it with a one-off hex field.
+        A tone paints nothing itself -- it fills --sl-section-bg / -ink / -border, which six element
+        families already read. So the scale lives once and every one of them gains it from a class.
         """
         for tone in ("dark", "accent", "light"):
-            rule = [line for line in CSS.splitlines() if f".sl-call-panel.is-{tone}{{" in line][0]
-            self.assertIn("var(--sl-", rule)
+            rule = [line for line in CSS.splitlines() if f".sl-tone-{tone}{{" in line][0]
+            self.assertIn("--sl-section-bg:", rule)
+            self.assertIn("--sl-section-ink:", rule)
+            # Every value from the page theme: a literal here would be a colour that ignores the preset.
             self.assertNotRegex(rule, r"#[0-9a-fA-F]{3,6}")
 
-    def test_the_button_stays_a_button_on_a_light_panel(self):
-        # Inverted against the dark panel, it would be white on white on the light one.
-        self.assertIn(".sl-call-panel.is-light .sl-call-button{", CSS)
+    def test_the_panel_reads_those_tokens_rather_than_owning_colours(self):
+        rule = [line for line in CSS.splitlines() if ".sl-call-panel{" in line][0]
+        self.assertIn("var(--sl-section-bg", rule)
+        self.assertIn("var(--sl-section-ink", rule)
 
-    def test_the_validator_knows_the_three(self):
+    def test_the_button_inverts_on_any_toned_section_not_just_this_one(self):
+        # Written against the TONE, so a ribbon with a button gets it too.
+        self.assertIn(".sl-tone-dark .sl-cta,.sl-tone-accent .sl-cta{", CSS)
+
+    def test_the_validator_knows_the_shared_three(self):
         from stripe_link.domain.documents import DocumentValidationError, validate_page_document
 
         def page(tone):
             return {"schema_version": "1", "document_type": "page", "tenant_id": "t", "page_id": "p1",
                     "name": "P", "offer_id": "o1", "route": {"slug": "p"},
-                    "sections": [{"id": "c", "type": "checkout_cta", "call_tone": tone}]}
+                    "sections": [{"id": "c", "type": "checkout_cta", "tone": tone}]}
 
         for good in ("dark", "accent", "light"):
             validate_page_document(page(good))
@@ -342,7 +348,57 @@ class EditorReachabilityTests(unittest.TestCase):
     def test_the_call_controls_are_inside_the_cta_editor(self):
         branch = BUILDER.split("sectionEditor.row.editor === 'checkout_cta'", 1)[1].split("\n            <template", 1)[0]
         self.assertIn("builder.cta_call_kicker", branch)
-        self.assertIn("builder.cta_call_tone", branch)
+        self.assertIn("builder.cta_tone", branch)
+
+
+
+class SharedToneTests(unittest.TestCase):
+    """One tone scale, many consumers -- the author's point, and he was right.
+
+    The call panel had shipped its own copy of "dark / accent / light" while a per-section colour mechanism
+    (domain/section_theme.py) already existed and was already honoured by four elements. Two vocabularies for
+    one idea is the duplication this codebase keeps producing -- slug rules, funnel roles, entry readers,
+    chips -- and the module's own docstring says so.
+    """
+
+    def test_the_scale_is_defined_once_where_section_theming_lives(self):
+        from stripe_link.domain.section_theme import SECTION_TONES, tone_class
+
+        self.assertEqual(SECTION_TONES, ("dark", "accent", "light"))
+        self.assertEqual(tone_class("accent"), "sl-tone-accent")
+        self.assertEqual(tone_class("chartreuse"), "")
+        self.assertEqual(tone_class(None, default="dark"), "sl-tone-dark")
+
+    def test_the_renderer_holds_no_second_copy(self):
+        runtime = (ROOT / "src" / "stripe_link" / "runtime" / "html.py").read_text(encoding="utf-8")
+        self.assertNotIn("CALL_PANEL_TONES", runtime)
+        self.assertIn("from stripe_link.domain.section_theme import", runtime)
+
+    def test_the_page_ribbon_takes_the_same_tone(self):
+        markup = html_module.render_page_ribbon(
+            {"id": "r", "headline": "Call us", "presentation": "centered", "tone": "dark"})
+        self.assertIn("sl-tone-dark", markup)
+
+    def test_a_picked_colour_still_works_on_the_panel(self):
+        # The call panel now honours section.theme like the four elements that already did -- which is the
+        # reuse half of this. The tenant gets the picker AND the dropdown.
+        markup = html_module.render_call_cta(
+            {"type": "call", "label": "Call Now", "target": "+12065654418"}, {"theme": {"bg": "#1e1033"}})
+        self.assertIn("--sl-section-bg:#1e1033", markup)
+        # ...and its ink is DERIVED from that colour's luminance, never authored, so it cannot be unreadable.
+        self.assertIn("--sl-section-ink:", markup)
+
+    def test_a_picked_colour_beats_a_named_tone_by_the_cascade(self):
+        """No precedence rule to maintain: `theme` is an inline style, `tone` is a class.
+
+        Getting this for free is the reason the two mechanisms can coexist without a third thing arbitrating
+        between them.
+        """
+        markup = html_module.render_call_cta(
+            {"type": "call", "label": "Call Now", "target": "+12065654418"},
+            {"tone": "accent", "theme": {"bg": "#1e1033"}})
+        self.assertIn("sl-tone-accent", markup)
+        self.assertIn('style="--sl-section-bg:#1e1033', markup)
 
 
 
