@@ -908,9 +908,14 @@ class DocumentValidationTests(unittest.TestCase):
             validate_user_preferences(preferences)
 
     def test_page_rejects_too_many_universal_bundle_badges(self):
+        # The cap rose 3 -> 7 on 2026-09-16 (the vertical orientation is a list, not a pill row), so this
+        # fills to the cap and adds one rather than assuming the fixture is already at it.
+        from stripe_link.domain.documents import MAX_TRUST_BADGES
+
         page = load_fixture("page-universal-bundle.json")
         badges = next(section for section in page["sections"] if section["type"] == "trust_badges")
-        badges["badges"].append({"emoji": "⭐", "label": "Bonus badge"})
+        while len(badges["badges"]) <= MAX_TRUST_BADGES:
+            badges["badges"].append({"emoji": "⭐", "label": f"Bonus badge {len(badges['badges'])}"})
 
         with self.assertRaisesRegex(DocumentValidationError, "Trust badges"):
             validate_page_document(page)

@@ -540,6 +540,13 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     # One claim per line, each its own card. Same badge markup; only the container changes.
     "    .sl-trust-badges.is-vertical{flex-direction:column;flex-wrap:nowrap;align-items:stretch;gap:1rem}",
     "    .sl-trust-badges.is-vertical .sl-trust-badge{justify-content:flex-start;border-radius:1rem;padding:1.4rem 1.8rem;font-size:1.5rem}",
+    # Directional glyphs, coloured by the glyph itself so one choice looks the same everywhere it is used.
+    # Tokens rather than literals, so a theme can take them over later; the defaults are the gold and red the
+    # author asked for (2026-09-16).
+    # ...and sized up: a text glyph next to an emoji reads as punctuation at the same font-size. `em` so it
+    # tracks the badge, which is smaller in the horizontal pill row than in the vertical list.
+    "    .sl-trust-badge [data-icon='\\276F'],.sl-trust-badge [data-icon='\\2771'],.sl-trust-badge [data-icon='\\BB'],.sl-trust-badge [data-icon='\\27A4']{color:var(--sl-icon-gold,#d4a12a);font-size:1.35em;line-height:1}",
+    "    .sl-trust-badge [data-icon='\\2794']{color:var(--sl-icon-alert,#dc2626);font-size:1.35em;line-height:1}",
     "    .sl-trust-badge{display:flex;align-items:center;gap:0.6rem;border:1px solid var(--sl-trust-badge-border);background:var(--sl-trust-badge-bg);color:var(--sl-trust-badge-text);border-radius:999px;padding:0.8rem 1.4rem;font-family:var(--sl-font-accent);font-size:1.2rem;font-weight:800}",
     "    .sl-price-options{display:grid;grid-template-columns:1fr;gap:1.4rem;width:100%;margin:0 auto}",
     "    .sl-bnpl-message{margin:1rem auto 0;width:min(42rem,100%);min-height:1.2rem}",
@@ -2882,7 +2889,11 @@ def render_trust_badges(section: dict[str, Any]) -> str:
     rendered = [
         "\n".join([
             "      <div class=\"sl-trust-badge\">",
-            f"        <span>{escape(str(badge.get('emoji') or ''))}</span>",
+            # data-icon carries the glyph so the STYLESHEET can colour specific ones. Emoji bring their own
+            # colour; the chevrons and arrows added 2026-09-16 are text glyphs that inherit currentColor, so
+            # without this they would be badge-text blue rather than the gold and red they were asked for.
+            f"        <span data-icon=\"{escape(str(badge.get('emoji') or ''))}\">"
+            f"{escape(str(badge.get('emoji') or ''))}</span>",
             f"        <strong>{escape(str(badge.get('label') or ''))}</strong>",
             "      </div>",
         ])

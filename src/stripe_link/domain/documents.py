@@ -9,6 +9,9 @@ from stripe_link.domain.semantic_schema import OFFER_SEMANTIC_MODEL_SCHEMA, chec
 from stripe_link.domain import tips
 from stripe_link.domain.section_theme import SECTION_TONES
 
+# How many claims one badge row may carry.
+MAX_TRUST_BADGES = 7
+
 
 class DocumentValidationError(ValueError):
     pass
@@ -1419,7 +1422,9 @@ def validate_page_document(document: dict[str, Any]) -> None:
             optional_bool(section, "enabled", "Trust badges enabled")
             if section.get("orientation") is not None:
                 require_enum(section, "orientation", {"horizontal", "vertical"}, "Trust badges orientation")
-            badges = optional_limited_object_list(section, "badges", 3, "Trust badges")
+            # 7, raised from 3 (author, 2026-09-16). A horizontal pill row never wanted more than three;
+            # the vertical orientation is a LIST, and a contractor's list of credentials is longer than that.
+            badges = optional_limited_object_list(section, "badges", MAX_TRUST_BADGES, "Trust badges")
             for badge in badges:
                 optional_string(badge, "emoji", "Trust badge emoji")
                 require_string(badge, "label", "Trust badge label")

@@ -402,5 +402,99 @@ class SharedToneTests(unittest.TestCase):
 
 
 
+class TrustBadgeCapacityTests(unittest.TestCase):
+    """Raised 3 -> 7 (author, 2026-09-16).
+
+    Three was right for a horizontal pill row. The VERTICAL orientation is a list, and a contractor's
+    credentials -- licensed, bonded, insured, 24-hour, free estimates, insurance claims, years in business --
+    run past three long before they run past seven.
+    """
+
+    def test_the_cap_is_seven_and_defined_once(self):
+        from stripe_link.domain.documents import MAX_TRUST_BADGES
+
+        self.assertEqual(MAX_TRUST_BADGES, 7)
+        self.assertIn("const MAX_TRUST_BADGES = 7;", BUILDER)
+
+    def test_seven_badges_validate(self):
+        from stripe_link.domain.documents import DocumentValidationError, validate_page_document
+
+        def page(count):
+            return {"schema_version": "1", "document_type": "page", "tenant_id": "t", "page_id": "p1",
+                    "name": "P", "offer_id": "o1", "route": {"slug": "p"},
+                    "sections": [{"id": "tb", "type": "trust_badges",
+                                  "badges": [{"label": f"Claim {i}"} for i in range(count)]}]}
+
+        validate_page_document(page(7))
+        with self.assertRaises(DocumentValidationError):
+            validate_page_document(page(8))
+
+    def test_all_seven_render(self):
+        badges = [{"enabled": True, "emoji": "\u276f", "label": f"Claim {i}"} for i in range(7)]
+        markup = _render(badges=badges, orientation="vertical")
+        self.assertEqual(markup.count('class="sl-trust-badge"'), 7)
+
+    def test_the_builder_can_add_and_remove_them(self):
+        # The row list used to be a fixed three, so a seventh was unreachable from the dashboard even once
+        # the validator allowed it.
+        self.assertIn("function addTrustBadge()", BUILDER)
+        self.assertIn("function removeTrustBadge(index)", BUILDER)
+        self.assertIn("builder.trust_badges.badges.length < MAX_TRUST_BADGES", BUILDER)
+
+    def test_removing_never_empties_the_list(self):
+        # An empty row is what the tenant types into; no rows at all has no way back short of toggling the
+        # whole section off and on.
+        remove = BUILDER.split("function removeTrustBadge(index)", 1)[1].split("\n}", 1)[0]
+        self.assertIn("length <= 1", remove)
+
+
+class DirectionalIconTests(unittest.TestCase):
+    """Chevrons in gold, an arrow in red (author, 2026-09-16)."""
+
+    GOLD = ("\u276f", "\u2771", "\u00bb", "\u27a4")
+    RED = "\u2794"
+
+    def test_the_glyph_travels_as_an_attribute_so_css_can_colour_it(self):
+        # Emoji bring their own colour; these are TEXT glyphs inheriting currentColor, so without this they
+        # would be badge-text blue rather than gold and red.
+        markup = _render(badges=[{"enabled": True, "emoji": self.GOLD[0], "label": "Fast"}])
+        self.assertIn(f'data-icon="{self.GOLD[0]}"', markup)
+
+    def test_every_new_glyph_is_coloured(self):
+        gold_rule = [line for line in CSS.splitlines() if "icon-gold" in line][0]
+        for glyph in self.GOLD:
+            self.assertIn(f"{ord(glyph):X}", gold_rule.upper(), glyph)
+        alert_rule = [line for line in CSS.splitlines() if "icon-alert" in line][0]
+        self.assertIn(f"{ord(self.RED):X}", alert_rule.upper())
+
+    def test_the_colours_are_tokens_with_defaults_not_bare_literals(self):
+        # A theme can take them over later; until then the default is the gold and red asked for.
+        gold = [line for line in CSS.splitlines() if "icon-gold" in line][0]
+        self.assertIn("var(--sl-icon-gold,#d4a12a)", gold)
+        alert = [line for line in CSS.splitlines() if "icon-alert" in line][0]
+        self.assertIn("var(--sl-icon-alert,#dc2626)", alert)
+
+    def test_the_picker_offers_them_in_the_same_colours(self):
+        picker = (ROOT / "dashboard" / "src" / "icon-picker.js").read_text(encoding="utf-8")
+        self.assertIn("ICON_PICKER_COLORS", picker)
+        for glyph in self.GOLD + (self.RED,):
+            # The file writes them as \uXXXX escapes, so compare hex without touching the escape's case.
+            self.assertIn(f"{ord(glyph):04x}", picker.lower(), glyph)
+        self.assertIn("#d4a12a", picker)
+        self.assertIn("#dc2626", picker)
+
+    def test_they_are_text_presentation_not_emoji_lookalikes(self):
+        """The reason ▶️ and ➡️ are NOT the glyphs used.
+
+        An emoji-presentation character carries its own colour and ignores CSS, so a "gold chevron" would
+        render in whatever the vendor font decided. Every glyph here is a text-presentation ornament or
+        dingbat, and none carries a variation selector.
+        """
+        picker = (ROOT / "dashboard" / "src" / "icon-picker.js").read_text(encoding="utf-8")
+        directional = picker.split("Directional glyphs", 1)[1].split("];", 1)[0]
+        self.assertNotIn("FE0F", directional.upper())   # VS16 forces emoji presentation
+
+
+
 if __name__ == "__main__":
     unittest.main()

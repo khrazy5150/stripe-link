@@ -670,8 +670,21 @@
                       @click.stop="showIconPicker(badge.emoji, (emoji) => { badge.emoji = emoji; }, 'Choose an Icon')"
                     >{{ badge.emoji || '—' }}</button>
                     <input v-model.trim="badge.label" type="text" :disabled="!badge.enabled" aria-label="Badge label" />
+                    <button
+                      type="button"
+                      class="variant-remove-button"
+                      :disabled="builder.trust_badges.badges.length <= 1"
+                      :aria-label="`Remove trust badge ${index + 1}`"
+                      @click.stop="removeTrustBadge(index)"
+                    >×</button>
                   </div>
                 </div>
+                <button
+                  v-if="builder.trust_badges.badges.length < MAX_TRUST_BADGES"
+                  type="button"
+                  class="secondary-action"
+                  @click="addTrustBadge()"
+                >+ Add badge</button>
                 <label class="offer-field">
                   <span>Orientation</span>
                   <select v-model="builder.trust_badges.orientation">
@@ -2948,7 +2961,22 @@ const builderDerivedHeroMedia = computed(() => {
   return (only.images || []).filter(Boolean).map((url) => ({ url, label: only.name || "Product" }));
 });
 const previewHeroImage = computed(() => heroMediaList.value[0] || offerImage(builderOffer.value) || "");
+// Raised from 3 on 2026-09-16: a horizontal pill row never wanted more, but the VERTICAL orientation is a
+// list, and a contractor's credentials run longer than three. Mirrors MAX_TRUST_BADGES in domain/documents.py.
+const MAX_TRUST_BADGES = 7;
 const visibleTrustBadges = computed(() => builder.trust_badges.badges.filter((badge) => badge.enabled !== false && badge.label));
+
+function addTrustBadge() {
+  if (builder.trust_badges.badges.length >= MAX_TRUST_BADGES) return;
+  builder.trust_badges.badges.push({ enabled: true, emoji: "", label: "" });
+}
+
+function removeTrustBadge(index) {
+  // Never down to zero: an empty row is what the tenant types into, and a section with no rows at all has
+  // no way back short of toggling the whole section off and on.
+  if (builder.trust_badges.badges.length <= 1) return;
+  builder.trust_badges.badges.splice(index, 1);
+}
 // ---------------------------------------------------------------------------------------------------
 // Live Preview = the published renderer. We send the draft page document to /pages/render, which runs the
 // same render_page() that publishes the page, and drop the HTML into an iframe. The builder no longer

@@ -17,8 +17,18 @@ const ICON_PICKER_EMOJIS = [
     '👍', '👌', '🤝', '🙌', '💯', '🎉', '🌟', '⚙️',
     '🔔', '📣', '💬', '📱', '🖥️', '🌿', '♻️', '🌱',
     '📧', '✉️', '📩', '💊', '🧴', '🏠', '🔗', '📋',
-    '👑', '💫', '🌠', '🙏', '☮️'
+    '👑', '💫', '🌠', '🙏', '☮️',
+    // Directional glyphs (author, 2026-09-16). TEXT-presentation characters, not emoji: they inherit
+    // currentColor, which is what lets the chevrons render gold and the arrow red. Emoji-presentation
+    // look-alikes (▶️, ➡️) bring their own colour and would ignore both.
+    '\u276F', '\u2771', '\u00BB', '\u27A4', '\u2794'
 ];
+
+// The same colours the published page paints them, so the swatch a tenant picks is the one they get.
+const ICON_PICKER_COLORS = {
+    '\u276F': '#d4a12a', '\u2771': '#d4a12a', '\u00BB': '#d4a12a', '\u27A4': '#d4a12a',
+    '\u2794': '#dc2626',
+};
 
 /**
  * Show the icon picker modal.
@@ -36,9 +46,11 @@ export function showIconPicker(currentEmoji, callback, title) {
 
     const noIconHtml = `<button type="button" class="emoji-picker-item no-icon-option ${noIconSelected ? 'selected' : ''}" data-emoji="" title="No icon">—</button>`;
 
-    const emojisHtml = ICON_PICKER_EMOJIS.map(emoji =>
-        `<button type="button" class="emoji-picker-item ${emoji === currentEmoji ? 'selected' : ''}" data-emoji="${emoji}">${emoji}</button>`
-    ).join('');
+    const emojisHtml = ICON_PICKER_EMOJIS.map(emoji => {
+        const color = ICON_PICKER_COLORS[emoji];
+        const style = color ? ` style="color:${color}"` : '';
+        return `<button type="button" class="emoji-picker-item ${emoji === currentEmoji ? 'selected' : ''}" data-emoji="${emoji}"${style}>${emoji}</button>`;
+    }).join('');
 
     const overlay = document.createElement('div');
     overlay.id = 'sharedIconPickerOverlay';
