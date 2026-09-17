@@ -134,7 +134,10 @@ class BuilderHeroGatingTests(unittest.TestCase):
         self.assertFalse(is_section_visible("lead_social", "hero", {}, ""))
         self.assertTrue(is_section_visible("lead_social", "hero_media", {}, ""))
         self.assertTrue(is_section_visible("lead_bridge", "hero", {}, ""))
-        self.assertFalse(is_section_visible("lead_bridge", "hero_media", {}, ""))
+        # hero_media turned ON for lead_bridge 2026-09-16, reversing "a bridge page that loads a hero image
+        # is a slower bridge" -- the author saw a real advertorial and the speed argument lost to a stronger
+        # one: a bridge page that looks unfinished does not get the click it was optimised to deliver fast.
+        self.assertTrue(is_section_visible("lead_bridge", "hero_media", {}, ""))
         for shape in ("single", "bundle", "listicle", "lead_capture", "lead_call"):
             self.assertTrue(is_section_visible(shape, "hero", {}, ""), shape)
             self.assertTrue(is_section_visible(shape, "hero_media", {}, ""), shape)

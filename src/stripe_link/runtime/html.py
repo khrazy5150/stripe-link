@@ -6319,22 +6319,34 @@ def dialable_number(phone: str) -> str:
     return phone.strip()
 
 
-def destination_label(url: str) -> str:
+# What counts as a FILE for the purpose of naming a download. Mirrors the extension test in Offers.vue that
+# picks the download CTA in the first place, so the two agree about what a file is.
+DOWNLOADABLE_EXTENSIONS = (
+    "pdf", "zip", "epub", "mp3", "mp4", "mov", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "csv",
+    "png", "jpg", "jpeg",
+)
+
+
+def destination_label(url: str, *, as_file: bool = False) -> str:
     """Where a bridge button actually GOES, as the visitor would say it.
 
-    The host for a link ("opentable.com"), the filename for a file ("2026-price-list.pdf"). A bridge page
-    asks someone to leave the site, and the one question that earns that click is "leave for where?" -- the
-    full URL answers it in a form nobody reads, and a bare button does not answer it at all.
+    The HOST for a link ("opentable.com"); the filename only for a real download ("2026-price-list.pdf").
+
+    `as_file` is the caller's, not a guess from the string. Guessing produced "index.html" as the headline
+    act of a live advertorial (author, 2026-09-16: "an eyesore") -- every page ending in .html, .php or
+    .aspx is a page, not a file, and only the CTA type knows which of the two this is.
     """
     raw = str(url or "").strip()
     if not raw:
         return ""
     without_scheme = re.sub(r"^[a-zA-Z][a-zA-Z0-9+.-]*://", "", raw)
     host = without_scheme.split("/", 1)[0].split("?", 1)[0].split("#", 1)[0]
-    path = without_scheme[len(host):].split("?", 1)[0].split("#", 1)[0]
-    filename = path.rsplit("/", 1)[-1] if path else ""
-    if filename and "." in filename:
-        return filename
+    if as_file:
+        path = without_scheme[len(host):].split("?", 1)[0].split("#", 1)[0]
+        filename = path.rsplit("/", 1)[-1] if path else ""
+        extension = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+        if extension in DOWNLOADABLE_EXTENSIONS:
+            return filename
     return re.sub(r"^www\.", "", host) or raw
 
 
@@ -6347,6 +6359,7 @@ def render_cta_panel(
     label: str,
     link_attrs: str = "",
     default_tone: str = "dark",
+    default_show_lead: bool = True,
 ) -> str:
     """The panel every lead CTA now wears: an optional kicker, the thing that identifies the destination,
     and a button -- plus a sticky bar that follows the visitor down the page.
@@ -6362,6 +6375,15 @@ def render_cta_panel(
     style = section_theme_vars(section)
     style_attr = f' style="{escape(style)}"' if style else ""
     kicker = str(section.get("kicker") or "").strip()
+    # SUPPRESSIBLE, and the default differs by what the line is. A phone number IS the call page -- hiding it
+    # would leave a button with nothing to say. A destination host is a useful answer to "leave for where?"
+    # only when the host means something to the visitor; when it is a CDN hostname or an artifact URL it is
+    # noise, and we cannot tell which from here. So the tenant decides, and the quiet default wins the tie.
+    show_lead = section.get("show_destination")
+    if show_lead is None:
+        show_lead = default_show_lead
+    if not show_lead:
+        lead = ""
     panel = [
         f'    <section class="sl-checkout-cta sl-{variant}-cta" data-section-type="checkout_cta"'
         f' data-cta-type="{variant}">',
@@ -6421,6 +6443,7 @@ def render_external_cta(cta: dict[str, str], section: dict[str, Any] | None = No
         lead_href=escape(url) if url else "#",
         label=escape(cta["label"] or "Learn More"),
         link_attrs=' target="_blank" rel="noopener noreferrer"',
+        default_show_lead=False,
     )
 
 
@@ -6435,10 +6458,11 @@ def render_download_cta(cta: dict[str, str], section: dict[str, Any] | None = No
     return render_cta_panel(
         section or {},
         variant="download",
-        lead=destination_label(url),
+        lead=destination_label(url, as_file=True),
         lead_href=escape(url) if url else "#",
         label=escape(cta["label"] or "Download"),
         link_attrs=' download rel="noopener"',
+        default_show_lead=False,
     )
 
 

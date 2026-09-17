@@ -720,6 +720,10 @@
                        the same names paint a page ribbon, an author bio or a quote. A tone follows the page
                        preset; picking a literal colour on the section beats it, because an inline style
                        beats a class. -->
+                  <label class="builder-toggle">
+                    <input v-model="builder.cta_show_destination" type="checkbox" />
+                    <span>{{ builderCta.type === 'call' ? 'Show the phone number' : 'Show where the button goes' }}</span>
+                  </label>
                   <label class="offer-field">
                     <span>Panel colour</span>
                     <select v-model="builder.cta_tone">
@@ -2558,6 +2562,11 @@ const builderOffer = computed(() => offers.value.find((offer) => offer.offer_id 
 // The CTA types that wear the shared panel (render_cta_panel): a phone number, a destination host, a
 // filename. `email` is the inline form and `buy` is the price card -- neither is a panel.
 const PANEL_CTA_TYPES = ["call", "external", "download"];
+// The offer's snapshotted CTA type, for a page being LOADED (builderCta reads the live builder state, which
+// is not populated yet at that point).
+function offerCtaType(offer) {
+  return String(offer?.presentation?.cta?.type || "buy");
+}
 const builderLeadAction = computed(() => String(
   builderOffer.value?.lead_capture_action
   || offerProducts(builderOffer.value)[0]?.lead_capture?.action
@@ -3340,6 +3349,9 @@ function defaultBuilderForm() {
     // which is what the placeholder shows -- only an edit is stored.
     cta_form_title: "",
     cta_kicker: "",
+    // Absent on the document means "the default for this CTA type" -- the number shows, a destination host
+    // does not. The builder has to resolve it to a real boolean for the checkbox.
+    cta_show_destination: true,
     cta_tone: "dark",
     cta_form_description: "",
     countdown: {
@@ -4346,6 +4358,9 @@ function populateBuilderFromPage(page) {
     // would store it back on the next save -- the same loop that wrote a filename into the hero.
     cta_form_title: cta.form_title || "",
     cta_kicker: cta.kicker || "",
+    cta_show_destination: typeof cta.show_destination === "boolean"
+      ? cta.show_destination
+      : offerCtaType(offer) === "call",
     cta_tone: cta.tone || "dark",
     cta_form_description: cta.form_description || "",
     elements: elementsFromPage(sections),
@@ -4720,6 +4735,7 @@ function builderSectionCandidates(intent) {
       type: "checkout_cta",
       label: builder.cta_label || ctaLabelDefault.value,
       kicker: builder.cta_kicker || undefined,
+      show_destination: builder.cta_show_destination,
       tone: builder.cta_tone !== "dark" ? builder.cta_tone : undefined,
       form_title: builder.cta_form_title || undefined,
       form_description: builder.cta_form_description || undefined,

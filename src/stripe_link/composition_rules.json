@@ -740,6 +740,7 @@
     "lead_bridge": {
       "sections": [
         "brand_label",
+        "hero_media",
         "hero",
         "trust_badges",
         "checkout_cta",
@@ -757,7 +758,7 @@
         "related_products",
         "tip_jar"
       ],
-      "_comment": "The thinnest page here: one headline, one outbound button. ALWAYS noindex,nofollow -- see plans/LEAD_GEN_PAGES.md §5. No hero_media: a bridge page that loads a hero image is a slower bridge. trust_badges ADDED 2026-09-16 (author): same reasoning as lead_call -- a bridge page asks the visitor to leave for somewhere else, and has no commerce furniture of its own to earn that."
+      "_comment": "The thinnest page here: one headline, one outbound button. ALWAYS noindex,nofollow -- see plans/LEAD_GEN_PAGES.md 5. trust_badges ADDED 2026-09-16 (author): a bridge page asks the visitor to leave for somewhere else, and has no commerce furniture of its own to earn that. hero_media ADDED 2026-09-16, REVERSING \"No hero_media: a bridge page that loads a hero image is a slower bridge\" (author, seeing a real advertorial: \"Hero-less page works but doesn't look as good\"). The speed argument was sound and lost to a stronger one -- a bridge page that looks unfinished does not get the click it was optimised to deliver quickly. Tenants who want the faster page can still switch the section off per page."
     },
     "lead_social": {
       "sections": [

@@ -1512,6 +1512,10 @@ def validate_page_document(document: dict[str, Any]) -> None:
             # vocabulary paints a page ribbon, an author bio or a quote.
             if section.get("tone") is not None:
                 require_enum(section, "tone", set(SECTION_TONES), "Checkout CTA tone")
+            # Whether the panel shows the line that identifies where the button goes. Absent means "use the
+            # default for this CTA type", which differs: a phone number is the point, a destination host
+            # often is not.
+            optional_bool(section, "show_destination", "Checkout CTA show_destination")
             # The inline lead form's own heading and sub-line, overriding the product's per-action default.
             # Capped because they sit inside a card above the field, not in the hero.
             optional_string(section, "form_title", "Checkout CTA form_title", max_length=80)

@@ -16,8 +16,9 @@ BUILDER = (ROOT / "dashboard" / "src" / "components" / "LandingPages.vue").read_
 CSS = "\n".join(html_module.UNIVERSAL_BUNDLE_TEMPLATE_STYLES)
 
 
-def _render(target="https://www.opentable.com/r/lemon-thyme", kicker="", tone=None, label="Book a table"):
-    section = {"id": "c", "type": "checkout_cta"}
+def _render(target="https://www.opentable.com/r/lemon-thyme", kicker="", tone=None, label="Book a table",
+            show_destination=True):
+    section = {"id": "c", "type": "checkout_cta", "show_destination": show_destination}
     if kicker:
         section["kicker"] = kicker
     if tone:
@@ -38,9 +39,21 @@ class DestinationTests(unittest.TestCase):
         self.assertEqual(html_module.destination_label("https://www.opentable.com/r/x"), "opentable.com")
         self.assertIn('href="https://www.opentable.com/r/lemon-thyme"', _render())
 
-    def test_a_file_target_shows_its_filename(self):
-        self.assertEqual(html_module.destination_label("https://cdn.x.com/f/2026-price-list.pdf"),
-                         "2026-price-list.pdf")
+    def test_a_file_target_shows_its_filename_only_for_a_DOWNLOAD(self):
+        """`as_file` is the caller's, never guessed from the string.
+
+        Guessing produced "index.html" as the headline act of a live advertorial: every page ending .html,
+        .php or .aspx is a page, not a file, and only the CTA type knows which of the two this is.
+        """
+        self.assertEqual(
+            html_module.destination_label("https://cdn.x.com/f/2026-price-list.pdf", as_file=True),
+            "2026-price-list.pdf")
+        # As a LINK the same URL is a host, and a .html path never becomes the label at all.
+        self.assertEqual(html_module.destination_label("https://cdn.x.com/f/2026-price-list.pdf"), "cdn.x.com")
+        self.assertEqual(html_module.destination_label("https://miniguardcam.com/index.html"),
+                         "miniguardcam.com")
+        self.assertEqual(html_module.destination_label("https://shop.example.com/buy.php", as_file=True),
+                         "shop.example.com")
 
     def test_query_strings_and_fragments_do_not_leak_in(self):
         # An affiliate tag is not part of where you are going, and is not something to show a visitor.
@@ -53,6 +66,23 @@ class DestinationTests(unittest.TestCase):
     def test_nothing_in_nothing_out(self):
         self.assertEqual(html_module.destination_label(""), "")
         self.assertNotIn("sl-cta-lead", _render(target=""))
+
+    def test_the_line_is_suppressible_and_off_by_default_here(self):
+        """The author, on seeing "index.html": "Either pick a better choice or remove it altogether."
+
+        Both. The choice is fixed above; and a destination host answers "leave for where?" only when the host
+        means something to the visitor -- a CDN hostname or an artifact URL is noise, and we cannot tell
+        which from here. So the tenant decides, and the quiet default wins the tie.
+        """
+        self.assertNotIn("sl-cta-lead", _render(show_destination=None))
+        self.assertNotIn("sl-cta-lead", _render(show_destination=False))
+        self.assertIn("sl-cta-lead", _render(show_destination=True))
+
+    def test_a_phone_number_still_shows_by_default(self):
+        # It IS the call page; hiding it would leave a button with nothing to say.
+        markup = html_module.render_call_cta(
+            {"type": "call", "label": "Call Now", "target": "+12065654418"}, {})
+        self.assertIn("sl-cta-lead", markup)
 
     def test_the_destination_is_itself_a_link(self):
         # On a page with one job the identifying detail should be clickable, not decorative.
@@ -109,17 +139,19 @@ class BridgeCompositionTests(unittest.TestCase):
     def test_trust_badges_are_on_by_default(self):
         self.assertTrue(default_visible("lead_bridge", "trust_badges"))
 
-    def test_a_hero_image_stays_OFF_by_default_and_that_is_deliberate(self):
-        """The one element NOT copied from the call page.
+    def test_a_hero_image_is_ON_by_default(self):
+        """Reversed 2026-09-16 after the author saw a real advertorial.
 
-        The composition records why: "a bridge page that loads a hero image is a slower bridge" -- its whole
-        job is to get the visitor through. It is not EXCLUDED though, so a tenant who wants one can switch it
-        on per page; the default just stays fast.
+        The old rule was "a bridge page that loads a hero image is a slower bridge" -- a sound argument that
+        lost to a stronger one: a page that looks unfinished does not get the click it was optimised to
+        deliver quickly. The reversal is recorded in the rules file rather than the old reason being deleted,
+        so the trade-off is still legible.
         """
-        self.assertFalse(default_visible("lead_bridge", "hero_media"))
-        self.assertNotIn("hero_media", excluded_sections("lead_bridge"))
+        self.assertTrue(default_visible("lead_bridge", "hero_media"))
         rules = json.loads((ROOT / "src" / "stripe_link" / "composition_rules.json").read_text(encoding="utf-8"))
-        self.assertIn("slower bridge", rules["offer_types"]["lead_bridge"]["_comment"])
+        comment = rules["offer_types"]["lead_bridge"]["_comment"]
+        self.assertIn("REVERSING", comment)
+        self.assertIn("slower bridge", comment)
 
     def test_nothing_that_takes_money_is_allowed(self):
         for key in ("offer_price_selector", "price_highlight", "refund_policy", "tip_jar"):
