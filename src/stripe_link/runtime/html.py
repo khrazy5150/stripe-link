@@ -669,31 +669,32 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     # with a screen of white space between them -- the page the author called an abomination (2026-09-15).
     # The reserved strip the fixed bar needs goes with it, or the page ends in 12rem of nothing.
     "    .sl-checkout-cta.sl-email-cta,.sl-checkout-cta.sl-call-cta,.sl-checkout-cta.sl-external-cta{position:static;z-index:auto;background:none;padding:0}",
-    "    body:has(.sl-email-cta),body:has(.sl-call-cta),body:has(.sl-external-cta){padding-bottom:0}",
-    "    body:has(.sl-email-cta) main,body:has(.sl-external-cta) main{padding-bottom:4rem}",
-    # THE CALL PANEL. Ribbon-shaped on purpose (see render_call_cta): the number is the page's headline act,
-    # so it gets a block of its own rather than a line of small text above a short button.
-    "    .sl-checkout-cta.sl-call-cta{display:block}",
-    "    .sl-checkout-cta.sl-call-cta{width:min(52rem,calc(100% - 3.2rem));margin-left:auto;margin-right:auto}",
+    "    body:has(.sl-email-cta){padding-bottom:0}",
+    "    body:has(.sl-email-cta) main{padding-bottom:4rem}",
+    # THE CTA PANEL -- one implementation for call, external and download (see render_cta_panel). They differ
+    # only in what the big line says: a phone number, a hostname, a filename.
+    "    .sl-checkout-cta.sl-call-cta,.sl-checkout-cta.sl-external-cta,.sl-checkout-cta.sl-download-cta{display:block;width:min(52rem,calc(100% - 3.2rem));margin-left:auto;margin-right:auto}",
     # THE TONE SCALE. Sets the --sl-section-* tokens and paints nothing itself, so every element that already
-    # reads them (author bio, bragging points, quote, page ribbon, price highlight, call panel) gains tones
+    # reads them (author bio, bragging points, quote, page ribbon, price highlight, cta panel) gains tones
     # from a single class. Every value comes from the page theme -- no literal colours here, ever.
     "    .sl-tone-dark{--sl-section-bg:var(--sl-text);--sl-section-ink:var(--sl-cta-text);--sl-section-border:transparent}",
     "    .sl-tone-accent{--sl-section-bg:linear-gradient(135deg,var(--sl-cta-from),var(--sl-cta-to));--sl-section-ink:var(--sl-cta-text);--sl-section-border:transparent}",
     "    .sl-tone-light{--sl-section-bg:var(--sl-card);--sl-section-ink:var(--sl-text);--sl-section-border:var(--sl-content-border)}",
     # A button sitting ON a toned section inverts, so it stays a button rather than dissolving into it.
     "    .sl-tone-dark .sl-cta,.sl-tone-accent .sl-cta{background:var(--sl-cta-text);color:var(--sl-text)}",
-    "    .sl-call-panel{display:grid;justify-items:center;gap:1.2rem;padding:3.2rem 2.4rem;border-radius:1.4rem;text-align:center;background:var(--sl-section-bg,var(--sl-text));color:var(--sl-section-ink,var(--sl-cta-text));border:1px solid var(--sl-section-border,transparent)}",
-    "    .sl-call-kicker{margin:0;font-family:var(--sl-font-accent);font-size:1.3rem;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;opacity:.75}",
-    # Sized to be read across a room and tapped without aiming. `tabular-nums` so the digits do not shimmy.
-    "    .sl-call-number{display:block;color:inherit;font-family:var(--sl-font-accent);font-weight:900;font-size:clamp(3.2rem,9vw,4.4rem);line-height:1.05;letter-spacing:0.01em;font-variant-numeric:tabular-nums;text-decoration:none}",
-    "    .sl-call-panel .sl-call-button{min-width:16rem}",
-    # The STICKY bar. A phone scroller should never have to find their way back to the number.
-    "    .sl-call-sticky{position:fixed;left:0;right:0;bottom:0;z-index:10;display:flex;justify-content:center;padding:1.2rem 1.6rem calc(1.2rem + env(safe-area-inset-bottom));background:linear-gradient(transparent,var(--sl-cta-scrim) 35%)}",
-    "    .sl-call-sticky .sl-call-button{width:min(52rem,100%);text-align:center}",
+    "    .sl-cta-panel{display:grid;justify-items:center;gap:1.2rem;padding:3.2rem 2.4rem;border-radius:1.4rem;text-align:center;background:var(--sl-section-bg,var(--sl-text));color:var(--sl-section-ink,var(--sl-cta-text));border:1px solid var(--sl-section-border,transparent)}",
+    "    .sl-cta-kicker{margin:0;font-family:var(--sl-font-accent);font-size:1.3rem;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;opacity:.75}",
+    # The identifying line. Sized to be read across a room and tapped without aiming. `tabular-nums` so a
+    # number's digits do not shimmy; `break-word` because a hostname runs longer than a phone number and must
+    # not escape the panel.
+    "    .sl-cta-lead{display:block;max-width:100%;color:inherit;font-family:var(--sl-font-accent);font-weight:900;font-size:clamp(2.6rem,7vw,4.4rem);line-height:1.05;letter-spacing:0.01em;font-variant-numeric:tabular-nums;overflow-wrap:break-word;text-decoration:none}",
+    "    .sl-cta-panel .sl-cta-panel-button{min-width:16rem}",
+    # The STICKY bar. A phone scroller should never have to find their way back to the action.
+    "    .sl-cta-sticky{position:fixed;left:0;right:0;bottom:0;z-index:10;display:flex;justify-content:center;padding:1.2rem 1.6rem calc(1.2rem + env(safe-area-inset-bottom));background:linear-gradient(transparent,var(--sl-cta-scrim) 35%)}",
+    "    .sl-cta-sticky .sl-cta-panel-button{width:min(52rem,100%);text-align:center}",
     # It is fixed, so the page has to reserve the strip it covers -- the same bargain the sales bar makes.
-    "    body:has(.sl-call-sticky){padding-bottom:0}",
-    "    body:has(.sl-call-sticky) main{padding-bottom:11rem}",
+    "    body:has(.sl-cta-sticky){padding-bottom:0}",
+    "    body:has(.sl-cta-sticky) main{padding-bottom:11rem}",
     "    .sl-cta{display:inline-flex;width:min(52rem,100%);align-items:center;justify-content:center;background:linear-gradient(135deg,var(--sl-cta-from),var(--sl-cta-to));color:var(--sl-cta-text);border:0;border-radius:1rem;padding:1.5rem 1.8rem;font-family:var(--sl-font-accent);font-size:1.7rem;font-weight:900;text-decoration:none}",
     "    .sl-cta.is-connecting{opacity:.72;cursor:wait;pointer-events:none}",
     "    .sl-decline-cta{width:auto;background:none;color:var(--sl-muted);text-decoration:underline;font-weight:600;font-size:1.3rem;padding:0.4rem}",
@@ -6090,9 +6091,9 @@ class CtaRenderContext:
 CTA_REGISTRY: dict[str, dict[str, Any]] = {
     "buy": {"render": lambda c: render_buy_cta(c.page, c.section, c.offer, c.resolved_offer, c.checkout_url, c.api_base_url), "version": 1},
     "call": {"render": lambda c: render_call_cta(c.cta, c.section), "version": 1},
-    "external": {"render": lambda c: render_external_cta(c.cta), "version": 1},
+    "external": {"render": lambda c: render_external_cta(c.cta, c.section), "version": 1},
     "email": {"render": lambda c: render_email_cta(c.page, c.offer, c.cta, c.products_by_id, c.api_base_url, c.section), "version": 1},
-    "download": {"render": lambda c: render_download_cta(c.cta), "version": 1},
+    "download": {"render": lambda c: render_download_cta(c.cta, c.section), "version": 1},
     # An appointment IS a booking — reuse the inline calendar widget rather than duplicate it.
     "booking": {"render": lambda c: render_booking_cta(c.cta, c.api_base_url, c.offer), "version": 1},
     "appointment": {"render": lambda c: render_booking_cta(c.cta, c.api_base_url, c.offer), "version": 1},
@@ -6318,6 +6319,70 @@ def dialable_number(phone: str) -> str:
     return phone.strip()
 
 
+def destination_label(url: str) -> str:
+    """Where a bridge button actually GOES, as the visitor would say it.
+
+    The host for a link ("opentable.com"), the filename for a file ("2026-price-list.pdf"). A bridge page
+    asks someone to leave the site, and the one question that earns that click is "leave for where?" -- the
+    full URL answers it in a form nobody reads, and a bare button does not answer it at all.
+    """
+    raw = str(url or "").strip()
+    if not raw:
+        return ""
+    without_scheme = re.sub(r"^[a-zA-Z][a-zA-Z0-9+.-]*://", "", raw)
+    host = without_scheme.split("/", 1)[0].split("?", 1)[0].split("#", 1)[0]
+    path = without_scheme[len(host):].split("?", 1)[0].split("#", 1)[0]
+    filename = path.rsplit("/", 1)[-1] if path else ""
+    if filename and "." in filename:
+        return filename
+    return re.sub(r"^www\.", "", host) or raw
+
+
+def render_cta_panel(
+    section: dict[str, Any],
+    *,
+    variant: str,
+    lead: str,
+    lead_href: str,
+    label: str,
+    link_attrs: str = "",
+    default_tone: str = "dark",
+) -> str:
+    """The panel every lead CTA now wears: an optional kicker, the thing that identifies the destination,
+    and a button -- plus a sticky bar that follows the visitor down the page.
+
+    ONE implementation for call / external / download (author, 2026-09-16: "re-using elements rather than
+    create special ones is the best way to go"). They differ only in what the big line says: a phone number,
+    a hostname, a filename. Writing that three times is how three pages come to look like three products.
+
+    `lead` is a tap target in its own right -- the number dials, the host navigates -- because on a page with
+    one job the identifying detail should be clickable, not decorative.
+    """
+    tone = tone_class(section.get("tone"), default=default_tone)
+    style = section_theme_vars(section)
+    style_attr = f' style="{escape(style)}"' if style else ""
+    kicker = str(section.get("kicker") or "").strip()
+    panel = [
+        f'    <section class="sl-checkout-cta sl-{variant}-cta" data-section-type="checkout_cta"'
+        f' data-cta-type="{variant}">',
+        f'      <div class="sl-cta-panel {tone}"{style_attr}>',
+        (f'        <p class="sl-cta-kicker">{escape(kicker)}</p>' if kicker else ""),
+        (f'        <a class="sl-cta-lead" href="{lead_href}"{link_attrs}>{escape(lead)}</a>' if lead else ""),
+        f'        <a class="sl-cta sl-cta-panel-button" href="{lead_href}"{link_attrs}>{label}</a>',
+        "      </div>",
+        "    </section>",
+    ]
+    # A SECOND, sticky tap target. Someone scrolling a phone should never have to find their way back to the
+    # action (author, 2026-09-16: "it pays to have that call button stick to the bottom no matter what").
+    # Its own element rather than making the panel sticky, so the panel can be read in place.
+    sticky = [
+        f'    <div class="sl-cta-sticky" data-cta-sticky="{variant}">',
+        f'      <a class="sl-cta sl-cta-panel-button" href="{lead_href}"{link_attrs}>{label}</a>',
+        "    </div>",
+    ]
+    return "\n".join(line for line in panel + sticky if line)
+
+
 def render_call_cta(cta: dict[str, str], section: dict[str, Any] | None = None) -> str:
     """The call panel: a ribbon-shaped block built around the NUMBER, plus a sticky bar that follows.
 
@@ -6331,60 +6396,50 @@ def render_call_cta(cta: dict[str, str], section: dict[str, Any] | None = None) 
     """
     section = section or {}
     phone = cta["target"].strip()
-    label = escape(cta["label"] or "Call Now")
     tel = re.sub(r"[^\d+]", "", phone)
-    href = f"tel:{escape(tel)}" if tel else "#"
-    # One line above the number -- "Available 24 hours", "Se habla espanol". The tenant's, never invented.
-    kicker = str(section.get("call_kicker") or "").strip()
-    # Painted the same two ways every other toned section is: a NAMED tone that follows the page preset, or
-    # a picked colour via section.theme, which wins because an inline style beats a class. Dark by default --
-    # an emergency number wants to be the loudest thing on the page.
-    tone = tone_class(section.get("tone"), default="dark")
-    style = section_theme_vars(section)
-    style_attr = f' style="{escape(style)}"' if style else ""
-    panel = [
-        "    <section class=\"sl-checkout-cta sl-call-cta\" data-section-type=\"checkout_cta\" data-cta-type=\"call\">",
-        f'      <div class="sl-call-panel {tone}"{style_attr}>',
-        (f"        <p class=\"sl-call-kicker\">{escape(kicker)}</p>" if kicker else ""),
-        (f"        <a class=\"sl-call-number\" href=\"{href}\">{escape(dialable_number(phone))}</a>" if phone else ""),
-        f"        <a class=\"sl-cta sl-call-button\" href=\"{href}\">{label}</a>",
-        "      </div>",
-        "    </section>",
-    ]
-    # A SECOND, sticky tap target. Someone scrolling a phone should never have to find their way back to the
-    # number (author, 2026-09-16: "it pays to have that call button stick to the bottom no matter what").
-    # Its own element rather than making the panel sticky, so the panel can be read in place.
-    sticky = [
-        "    <div class=\"sl-call-sticky\" data-call-sticky>",
-        f"      <a class=\"sl-cta sl-call-button\" href=\"{href}\">{label}</a>",
-        "    </div>",
-    ]
-    return "\n".join(line for line in panel + sticky if line)
+    return render_cta_panel(
+        section,
+        variant="call",
+        # Read aloud, not stored: "(206) 565-4418" rather than "+12065654418".
+        lead=dialable_number(phone),
+        lead_href=f"tel:{escape(tel)}" if tel else "#",
+        label=escape(cta["label"] or "Call Now"),
+    )
 
 
-def render_external_cta(cta: dict[str, str]) -> str:
-    """External-link CTA: a button that navigates out to the target URL in a new tab."""
+def render_external_cta(cta: dict[str, str], section: dict[str, Any] | None = None) -> str:
+    """External-link CTA: the shared panel, with the DESTINATION as its identifying line.
+
+    A bridge page asks someone to leave the site, and the question that earns the click is "leave for
+    where?". A bare button never answered it; the hostname does, in the form a person would say it.
+    """
     url = cta["target"].strip()
-    label = escape(cta["label"] or "Learn More")
-    href = escape(url) if url else "#"
-    return "\n".join([
-        "    <section class=\"sl-checkout-cta sl-external-cta\" data-section-type=\"checkout_cta\" data-cta-type=\"external\">",
-        f"      <a class=\"sl-cta\" href=\"{href}\" target=\"_blank\" rel=\"noopener noreferrer\">{label}</a>",
-        "    </section>",
-    ])
+    return render_cta_panel(
+        section or {},
+        variant="external",
+        lead=destination_label(url),
+        lead_href=escape(url) if url else "#",
+        label=escape(cta["label"] or "Learn More"),
+        link_attrs=' target="_blank" rel="noopener noreferrer"',
+    )
 
 
-def render_download_cta(cta: dict[str, str]) -> str:
-    """Download CTA: a button that downloads the target file (a free lead-magnet / digital file). The
-    `download` attribute prompts a save; the browser owns execution — no JS needed."""
+def render_download_cta(cta: dict[str, str], section: dict[str, Any] | None = None) -> str:
+    """Download CTA: the same panel, with the FILENAME as its identifying line.
+
+    Same composition as a bridge page, so it gets the same treatment -- otherwise one page type would look
+    like two depending on whether its URL happened to end in .pdf. The `download` attribute prompts a save;
+    the browser owns execution, no JS needed.
+    """
     url = cta["target"].strip()
-    label = escape(cta["label"] or "Download")
-    href = escape(url) if url else "#"
-    return "\n".join([
-        "    <section class=\"sl-checkout-cta sl-download-cta\" data-section-type=\"checkout_cta\" data-cta-type=\"download\">",
-        f"      <a class=\"sl-cta\" href=\"{href}\" download rel=\"noopener\">{label}</a>",
-        "    </section>",
-    ])
+    return render_cta_panel(
+        section or {},
+        variant="download",
+        lead=destination_label(url),
+        lead_href=escape(url) if url else "#",
+        label=escape(cta["label"] or "Download"),
+        link_attrs=' download rel="noopener"',
+    )
 
 
 def render_booking_cta(cta: dict[str, str], api_base_url: str | None, offer: dict[str, Any] | None = None) -> str:

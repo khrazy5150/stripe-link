@@ -1505,8 +1505,9 @@ def validate_page_document(document: dict[str, Any]) -> None:
                 optional_string(item, "slug", "Catalog grid item slug")
         elif section_type == "checkout_cta":
             optional_string(section, "label", "Checkout CTA label")
-            # One line above a click-to-call page's number -- "Available 24 hours", "Se habla espanol".
-            optional_string(section, "call_kicker", "Checkout CTA call_kicker", max_length=60)
+            # One line above the panel's identifying detail -- "Available 24 hours", "No account needed".
+            # Shared by call / external / download, so the name is not call-specific.
+            optional_string(section, "kicker", "Checkout CTA kicker", max_length=60)
             # `tone` is the SHARED name (domain/section_theme.py), not a checkout-specific one: the same
             # vocabulary paints a page ribbon, an author bio or a quote.
             if section.get("tone") is not None:

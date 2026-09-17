@@ -85,7 +85,10 @@ class FooterPositionTests(unittest.TestCase):
     def test_the_strip_reserved_for_a_fixed_bar_goes_with_it(self):
         # body/main carry bottom padding so the fixed bar never covers content. In flow it is just a screen
         # of trailing white space.
-        self.assertIn("body:has(.sl-email-cta),body:has(.sl-call-cta),body:has(.sl-external-cta){padding-bottom:0}", CSS)
+        # Narrowed 2026-09-16: the call/external/download panels reserve their OWN, taller strip for the
+        # sticky bar, so only the email form's rule lives here now.
+        self.assertIn("body:has(.sl-email-cta){padding-bottom:0}", CSS)
+        self.assertIn("body:has(.sl-cta-sticky) main{padding-bottom:", CSS)
 
     def test_the_rendered_order_puts_the_footer_last(self):
         markup = _render()

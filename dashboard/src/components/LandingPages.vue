@@ -705,14 +705,16 @@
                   <span>Button Label</span>
                   <input v-model.trim="builder.cta_label" type="text" />
                 </label>
-                <!-- The call panel's own controls. It is part of THIS section -- the shape is borrowed from
-                     the page ribbon, but it is not a separate ribbon element, so it is edited here. -->
-                <template v-if="builderCta.type === 'call'">
-                  <!-- One line above the number. The tenant's claim, never ours. -->
+                <!-- The CTA panel's own controls. It is part of THIS section -- the shape is borrowed from
+                     the page ribbon, but it is not a separate ribbon element, so it is edited here. One
+                     panel serves call, external and download, so one set of controls does too. -->
+                <template v-if="PANEL_CTA_TYPES.includes(builderCta.type)">
+                  <!-- One line above the panel's identifying detail. The tenant's claim, never ours. -->
                   <label class="offer-field">
-                    <span>Line above the number <small>(optional)</small></span>
-                    <input v-model.trim="builder.cta_call_kicker" type="text"
-                           placeholder="e.g. Available 24 hours a day" maxlength="60" />
+                    <span>Line above the {{ builderCta.type === 'call' ? 'number' : 'destination' }} <small>(optional)</small></span>
+                    <input v-model.trim="builder.cta_kicker" type="text"
+                           :placeholder="builderCta.type === 'call' ? 'e.g. Available 24 hours a day' : 'e.g. No account needed'"
+                           maxlength="60" />
                   </label>
                   <!-- The SHARED tone vocabulary (domain/section_theme.py), not a checkout-specific one:
                        the same names paint a page ribbon, an author bio or a quote. A tone follows the page
@@ -2553,6 +2555,9 @@ const selectedOfferIsSocialPage = computed(() =>
 const selectedLeadAction = computed(() => selectedOfferProducts.value.find((product) => product.lead_capture)?.lead_capture || null);
 const builderOffer = computed(() => offers.value.find((offer) => offer.offer_id === builder.offer_id) || null);
 // Which lead action this page's offer performs. The cta TYPE cannot say: one type ("email") backs three.
+// The CTA types that wear the shared panel (render_cta_panel): a phone number, a destination host, a
+// filename. `email` is the inline form and `buy` is the price card -- neither is a panel.
+const PANEL_CTA_TYPES = ["call", "external", "download"];
 const builderLeadAction = computed(() => String(
   builderOffer.value?.lead_capture_action
   || offerProducts(builderOffer.value)[0]?.lead_capture?.action
@@ -3334,7 +3339,7 @@ function defaultBuilderForm() {
     // The inline lead form's own heading and sub-line. Empty means "use the product's per-action default",
     // which is what the placeholder shows -- only an edit is stored.
     cta_form_title: "",
-    cta_call_kicker: "",
+    cta_kicker: "",
     cta_tone: "dark",
     cta_form_description: "",
     countdown: {
@@ -4340,7 +4345,7 @@ function populateBuilderFromPage(page) {
     // Only the OVERRIDE is loaded. The product's default shows as a placeholder, so loading it as a value
     // would store it back on the next save -- the same loop that wrote a filename into the hero.
     cta_form_title: cta.form_title || "",
-    cta_call_kicker: cta.call_kicker || "",
+    cta_kicker: cta.kicker || "",
     cta_tone: cta.tone || "dark",
     cta_form_description: cta.form_description || "",
     elements: elementsFromPage(sections),
@@ -4714,7 +4719,7 @@ function builderSectionCandidates(intent) {
       id: "checkout-cta",
       type: "checkout_cta",
       label: builder.cta_label || ctaLabelDefault.value,
-      call_kicker: builder.cta_call_kicker || undefined,
+      kicker: builder.cta_kicker || undefined,
       tone: builder.cta_tone !== "dark" ? builder.cta_tone : undefined,
       form_title: builder.cta_form_title || undefined,
       form_description: builder.cta_form_description || undefined,

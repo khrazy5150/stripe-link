@@ -43,7 +43,7 @@ def _render(badges=None, phone="+12065654418", kicker="", orientation=None, tone
             badge_section["orientation"] = orientation
         sections.append(badge_section)
     sections += [{"id": "c", "type": "checkout_cta",
-                  **({"call_kicker": kicker} if kicker else {}),
+                  **({"kicker": kicker} if kicker else {}),
                   **({"tone": tone} if tone else {})},
                  {"id": "lf", "type": "legal_footer", "copyright": "(c)"}]
     page = {"page_id": "pg", "tenant_id": "t1", "offer_id": "o1", "name": "N", "status": "draft",
@@ -59,12 +59,12 @@ class NumberLegibilityTests(unittest.TestCase):
         The moment the CTA rendered in the document flow, the number was white on white. It had been there
         the whole time; the page just looked sparse rather than broken.
         """
-        rule = [line for line in CSS.splitlines() if ".sl-call-number{" in line][0]
+        rule = [line for line in CSS.splitlines() if ".sl-cta-lead{" in line][0]
         self.assertNotIn("var(--sl-cta-text)", rule)
         # It INHERITS the panel's ink, which is the only version that cannot go wrong when a theme changes
         # one and not the other. The ink itself now comes from the shared --sl-section-ink token.
         self.assertIn("color:inherit", rule)
-        panel = [line for line in CSS.splitlines() if ".sl-call-panel{" in line][0]
+        panel = [line for line in CSS.splitlines() if ".sl-cta-panel{" in line][0]
         self.assertIn("color:var(--sl-section-ink", panel)
 
     def test_the_number_is_shown_and_dialable(self):
@@ -189,26 +189,29 @@ class CallPanelTests(unittest.TestCase):
 
     def test_the_panel_carries_kicker_number_and_button(self):
         markup = _render(kicker="Available 24 hours per day")
-        self.assertIn("sl-call-panel", markup)
+        self.assertIn("sl-cta-panel", markup)
         self.assertIn("Available 24 hours per day", markup)
-        self.assertIn("sl-call-number", markup)
-        self.assertIn("sl-call-button", markup)
+        self.assertIn("sl-cta-lead", markup)
+        self.assertIn("sl-cta-panel-button", markup)
 
     def test_the_kicker_is_the_tenants_line_and_never_ours(self):
         # It is a claim about their availability. Absent means absent.
-        self.assertNotIn('<p class="sl-call-kicker">', _render())
+        self.assertNotIn('<p class="sl-cta-kicker">', _render())
 
     def test_the_panel_is_constrained_to_the_content_column(self):
         # .sl-checkout-cta is EXCLUDED from main's column rule, because that exclusion exists for the fixed
         # sales bar which must span the viewport. In flow the panel has to be put back, or it bleeds.
-        rule = [line for line in CSS.splitlines() if ".sl-checkout-cta.sl-call-cta{width:" in line]
+        rule = [line for line in CSS.splitlines()
+                if ".sl-checkout-cta.sl-call-cta" in line and "52rem" in line]
         self.assertTrue(rule, "the call panel is not constrained")
-        self.assertIn("52rem", rule[0])
+        # All three panelled CTAs, since they share the rule.
+        for variant in ("call", "external", "download"):
+            self.assertIn(f".sl-checkout-cta.sl-{variant}-cta", rule[0], variant)
 
     def test_the_number_has_exactly_one_colour_rule(self):
         # The pre-rewrite rule survived once and, sitting later in the sheet, won -- blue on navy inside the
         # new dark panel. Two rules for one element is how that happens.
-        self.assertEqual(len([line for line in CSS.splitlines() if ".sl-call-number{" in line]), 1)
+        self.assertEqual(len([line for line in CSS.splitlines() if ".sl-cta-lead{" in line]), 1)
 
 
 class StickyCallTests(unittest.TestCase):
@@ -219,10 +222,10 @@ class StickyCallTests(unittest.TestCase):
     """
 
     def test_there_is_a_sticky_bar(self):
-        self.assertIn('data-call-sticky', _render())
+        self.assertIn('data-cta-sticky', _render())
 
     def test_it_is_fixed_to_the_bottom(self):
-        rule = [line for line in CSS.splitlines() if ".sl-call-sticky{" in line][0]
+        rule = [line for line in CSS.splitlines() if ".sl-cta-sticky{" in line][0]
         self.assertIn("position:fixed", rule)
         self.assertIn("bottom:0", rule)
         # A phone's home indicator sits in that strip.
@@ -230,11 +233,11 @@ class StickyCallTests(unittest.TestCase):
 
     def test_the_page_reserves_the_strip_it_covers(self):
         # The same bargain the sales bar makes. Without it the bar hides the end of the page.
-        self.assertIn("body:has(.sl-call-sticky) main{padding-bottom:", CSS)
+        self.assertIn("body:has(.sl-cta-sticky) main{padding-bottom:", CSS)
 
     def test_the_panel_is_not_the_sticky_one(self):
         # Two tap targets, and only one of them travels.
-        panel = [line for line in CSS.splitlines() if ".sl-call-panel{" in line][0]
+        panel = [line for line in CSS.splitlines() if ".sl-cta-panel{" in line][0]
         self.assertNotIn("position:fixed", panel)
 
 
@@ -283,16 +286,16 @@ class PanelToneTests(unittest.TestCase):
 
     def test_dark_is_the_default(self):
         # An emergency number wants to be the loudest thing on the page.
-        self.assertIn("sl-call-panel sl-tone-dark", _render())
+        self.assertIn("sl-cta-panel sl-tone-dark", _render())
 
     def test_the_tenant_can_change_it(self):
-        self.assertIn("sl-call-panel sl-tone-accent", _render(tone="accent"))
-        self.assertIn("sl-call-panel sl-tone-light", _render(tone="light"))
+        self.assertIn("sl-cta-panel sl-tone-accent", _render(tone="accent"))
+        self.assertIn("sl-cta-panel sl-tone-light", _render(tone="light"))
 
     def test_an_unknown_tone_falls_back_to_the_default(self):
         # Only reachable on a hand-edited document -- the validator refuses unknown tones. The class saying
         # what paints beats a silent reliance on a CSS fallback that happens to agree.
-        self.assertIn("sl-call-panel sl-tone-dark", _render(tone="chartreuse"))
+        self.assertIn("sl-cta-panel sl-tone-dark", _render(tone="chartreuse"))
 
     def test_a_tone_paints_by_SETTING_the_shared_tokens(self):
         """The whole point of the refactor.
@@ -308,7 +311,7 @@ class PanelToneTests(unittest.TestCase):
             self.assertNotRegex(rule, r"#[0-9a-fA-F]{3,6}")
 
     def test_the_panel_reads_those_tokens_rather_than_owning_colours(self):
-        rule = [line for line in CSS.splitlines() if ".sl-call-panel{" in line][0]
+        rule = [line for line in CSS.splitlines() if ".sl-cta-panel{" in line][0]
         self.assertIn("var(--sl-section-bg", rule)
         self.assertIn("var(--sl-section-ink", rule)
 
@@ -347,7 +350,7 @@ class EditorReachabilityTests(unittest.TestCase):
 
     def test_the_call_controls_are_inside_the_cta_editor(self):
         branch = BUILDER.split("sectionEditor.row.editor === 'checkout_cta'", 1)[1].split("\n            <template", 1)[0]
-        self.assertIn("builder.cta_call_kicker", branch)
+        self.assertIn("builder.cta_kicker", branch)
         self.assertIn("builder.cta_tone", branch)
 
 
