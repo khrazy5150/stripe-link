@@ -2804,10 +2804,13 @@ def render_hero_media(
     # hole -- it is the real estate the avatar needs in order to exist, on the one page shape whose entire
     # job is identity. Every other shape still renders nothing, because inventing furniture on a product or
     # bridge page would be furniture with no reason to be there.
-    # ...and only when there is actually an avatar to seat. The band exists to give one real estate, so a
-    # tenant with no avatar (or who set `hidden` on this page) would otherwise get a bare strip of colour
-    # carrying nothing -- decoration for its own sake, which is the thing this is not.
-    if not images and composition_key(offer) == "lead_social" and avatar_source(section):
+    # ...and only when there is something to put ON it. First cut said "an avatar", which was too narrow:
+    # hiding the avatar took the whole hero with it, and the NAME and SLOGAN live in there too, so the page
+    # went blank (author, 2026-09-17). They are identity as much as the picture is -- the band seats all of
+    # it. Still guarded rather than unconditional: with no avatar, no name and no slogan there is genuinely
+    # nothing to seat, and a bare strip of colour is decoration for its own sake.
+    identity = render_hero_identity(section)
+    if not images and composition_key(offer) == "lead_social" and (avatar_source(section) or identity):
         images = [HERO_BAND]
     if not images:
         return ""
@@ -2820,7 +2823,6 @@ def render_hero_media(
     # block inside meant it rendered into the figure's flow -- under the image and behind the avatar -- and
     # grew the section, which moved the avatar's `bottom` anchor with it. As a sibling it lands after the
     # reserved margin, which is exactly where the overhang ends.
-    identity = render_hero_identity(section)
     brand = render_hero_brand(section, offer)
     # has-avatar reserves the space the overlay OVERHANGS into. An inline or centred avatar sits in normal
     # flow and needs no reserved gap -- keeping it would leave a hole under the hero.
@@ -3689,14 +3691,21 @@ _HEADING_RE = re.compile(r"<h([1-6])\b[^>]*>(.*?)</h\1>", re.IGNORECASE | re.DOT
 _TAG_RE = re.compile(r"<[^>]+>")
 
 
-def heading_outline_warnings(html: str) -> list[str]:
+def heading_outline_warnings(html: str, offer: dict[str, Any] | None = None) -> list[str]:
     """Page-health checks on the rendered document outline (plans/SEMANTIC_HTML.md, the quality baseline from
     plans/LANDING_PAGE_GOAL_COMPOSITION.md). Warnings, never gates — a correct outline (one H1, ordered
     H2/H3, no empty or skipped levels) is foundational for SEO, accessibility, and LLM parsing, and this
     catches regressions the renderer's by-construction guarantees don't.
 
     Validates the visible body only: `<head>` (meta/JSON-LD) carries no headings.
+
+    The missing-H1 check does not apply to a LINK HUB. Its composition has no `hero`, so there is no headline
+    element to add and no control that would silence the notice -- the tenant can only read it and be stuck.
+    A notice needs an action the tenant must take, or it is noise that teaches them to ignore the panel. The
+    page is also always noindex, so the SEO argument the check exists for has no purchase on it either. Every
+    OTHER outline rule still applies: this suppresses one unactionable line, not the standard.
     """
+    link_hub = bool(offer) and composition_key(offer) == "lead_social"
     body = html.split("<body>", 1)[-1].split("</body>", 1)[0]
     headings = [
         (int(level), _TAG_RE.sub("", text).strip())
@@ -3705,7 +3714,7 @@ def heading_outline_warnings(html: str) -> list[str]:
     warnings: list[str] = []
 
     h1_count = sum(1 for level, _ in headings if level == 1)
-    if h1_count == 0:
+    if h1_count == 0 and not link_hub:
         warnings.append("The page has no main heading (H1). The hero headline should be the page's single H1.")
     elif h1_count > 1:
         warnings.append(f"The page has {h1_count} main headings (H1); a page should have exactly one.")

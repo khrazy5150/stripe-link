@@ -12,6 +12,7 @@ preset added, an LCP-sized download on the page type most likely to be opened on
 that is simply wrong the moment the tenant switches preset. A band built from the preset's own designed CTA
 pair re-skins with the theme and cannot land off-palette -- the same rule that fixed the section tones.
 """
+import pathlib
 import unittest
 
 from stripe_link.runtime import html as html_module
@@ -31,6 +32,11 @@ def _render(offer=None, section=None, preferences=None):
         html_module._RENDER_PREFERENCES = {}
 
 
+def _identity(**section):
+    """A page showing its name and slogan -- identity without a picture."""
+    return {"show_identity": True, "tagline": "Everything in one place", **section}
+
+
 class BandTests(unittest.TestCase):
     def test_a_social_page_with_no_image_gets_the_band(self):
         self.assertIn('class="sl-hero-band"', _render())
@@ -46,13 +52,21 @@ class BandTests(unittest.TestCase):
         self.assertNotIn("sl-hero-band", markup)
         self.assertIn("cover.webp", markup)
 
-    def test_no_avatar_means_no_band(self):
-        """A band with nothing on it is a bare strip of colour -- decoration for its own sake.
+    def test_hiding_the_avatar_keeps_the_name_and_slogan(self):
+        """Reported 2026-09-17: removing the avatar blanked the whole page.
 
-        Both ways of having no avatar: never uploaded one, and hid it on this page.
+        The name and slogan live in the hero too, so gating the band on the PICTURE alone took them with it.
+        They are identity as much as the picture is, and the band seats all of it.
         """
+        for section in (_identity(avatar_placement="hidden"), _identity()):
+            markup = _render(section=section, preferences={"display_name": "Lemon & Thyme"})
+            self.assertIn("sl-hero-band", markup)
+            self.assertIn("Everything in one place", markup)
+
+    def test_nothing_to_seat_means_no_band(self):
+        # No picture, no name, no slogan: a bare strip of colour carrying nothing.
         self.assertEqual(_render(preferences={}), "")
-        self.assertEqual(_render(section={"avatar_placement": "hidden"}), "")
+        self.assertEqual(_render(section={"avatar_placement": "hidden"}, preferences={}), "")
 
     def test_no_other_page_shape_invents_one(self):
         # A product or bridge page with no image renders no hero, exactly as before. Furniture with no
@@ -110,3 +124,39 @@ class AvatarSourceTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class LinkHubHeadingTests(unittest.TestCase):
+    """The builder's missing-H1 notice does not belong on a link hub.
+
+    Author, 2026-09-17: "social media pages don't need to strictly adhere to technical HTML conventions".
+    The sharper reason it is noise here: `lead_social` composition has no `hero`, so there is no headline
+    element to add and no control that silences it -- the tenant can only read the notice and be stuck. A
+    notice needs an action the tenant must take.
+    """
+
+    BARE = "<html><body><p>links</p></body></html>"
+
+    def test_a_link_hub_is_not_told_to_add_one(self):
+        self.assertEqual(html_module.heading_outline_warnings(self.BARE, SOCIAL), [])
+
+    def test_every_other_page_still_is(self):
+        self.assertTrue(any("no main heading" in w
+                            for w in html_module.heading_outline_warnings(self.BARE, SHOP)))
+        # ...including with no offer at all, so the default cannot quietly disable the check product-wide.
+        self.assertTrue(any("no main heading" in w for w in html_module.heading_outline_warnings(self.BARE)))
+
+    def test_the_other_outline_rules_still_apply_to_a_link_hub(self):
+        # One line is suppressed, not the standard.
+        two = "<html><body><h1>A</h1><h1>B</h1></body></html>"
+        self.assertTrue(any("main headings" in w for w in html_module.heading_outline_warnings(two, SOCIAL)))
+        empty = "<html><body><h1>A</h1><h2></h2></body></html>"
+        self.assertTrue(any("empty heading" in w for w in html_module.heading_outline_warnings(empty, SOCIAL)))
+        skip = "<html><body><h1>A</h1><h4>D</h4></body></html>"
+        self.assertTrue(any("skips" in w for w in html_module.heading_outline_warnings(skip, SOCIAL)))
+
+    def test_the_renderer_passes_the_offer_in(self):
+        # A signature nobody uses is a suppression that never fires.
+        handler = (pathlib.Path(__file__).resolve().parents[1] / "src" / "handlers"
+                   / "page_render.py").read_text(encoding="utf-8")
+        self.assertIn("heading_outline_warnings(html, offer)", handler)
