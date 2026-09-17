@@ -103,7 +103,7 @@ class SharedFurnitureTests(unittest.TestCase):
 
     def test_it_takes_the_shared_tone(self):
         self.assertIn("sl-cta-panel sl-tone-accent", _render(tone="accent"))
-        self.assertIn("sl-cta-panel sl-tone-dark", _render())
+        self.assertIn("sl-cta-panel sl-tone-contrast", _render())
 
     def test_one_panel_implementation_serves_both(self):
         runtime = (ROOT / "src" / "stripe_link" / "runtime" / "html.py").read_text(encoding="utf-8")

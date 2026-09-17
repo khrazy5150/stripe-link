@@ -726,10 +726,13 @@
                   </label>
                   <label class="offer-field">
                     <span>Panel colour</span>
+                    <!-- RELATIONAL labels. "Dark" was a lie on the eight dark presets, where it painted a
+                         white panel: what the tone actually does is invert the page, whichever way the page
+                         happens to point. -->
                     <select v-model="builder.cta_tone">
-                      <option value="dark">Dark — the page's ink</option>
+                      <option value="contrast">Bold — high contrast with the page</option>
                       <option value="accent">Accent — your brand colour</option>
-                      <option value="light">Light — a quiet card</option>
+                      <option value="soft">Soft — a quiet card</option>
                     </select>
                   </label>
                 </template>
@@ -3352,7 +3355,7 @@ function defaultBuilderForm() {
     // Absent on the document means "the default for this CTA type" -- the number shows, a destination host
     // does not. The builder has to resolve it to a real boolean for the checkbox.
     cta_show_destination: true,
-    cta_tone: "dark",
+    cta_tone: "contrast",
     cta_form_description: "",
     countdown: {
       enabled: false,
@@ -4361,7 +4364,7 @@ function populateBuilderFromPage(page) {
     cta_show_destination: typeof cta.show_destination === "boolean"
       ? cta.show_destination
       : offerCtaType(offer) === "call",
-    cta_tone: cta.tone || "dark",
+    cta_tone: cta.tone || "contrast",
     cta_form_description: cta.form_description || "",
     elements: elementsFromPage(sections),
     google_tag_id: page.analytics?.google_tag_id || "",
@@ -4736,7 +4739,7 @@ function builderSectionCandidates(intent) {
       label: builder.cta_label || ctaLabelDefault.value,
       kicker: builder.cta_kicker || undefined,
       show_destination: builder.cta_show_destination,
-      tone: builder.cta_tone !== "dark" ? builder.cta_tone : undefined,
+      tone: builder.cta_tone !== "contrast" ? builder.cta_tone : undefined,
       form_title: builder.cta_form_title || undefined,
       form_description: builder.cta_form_description || undefined,
     });

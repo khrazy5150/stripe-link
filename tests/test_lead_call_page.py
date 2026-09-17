@@ -284,18 +284,18 @@ class PanelToneTests(unittest.TestCase):
     be adjustable from the CTA editor, or it is adjustable nowhere.
     """
 
-    def test_dark_is_the_default(self):
+    def test_contrast_is_the_default(self):
         # An emergency number wants to be the loudest thing on the page.
-        self.assertIn("sl-cta-panel sl-tone-dark", _render())
+        self.assertIn("sl-cta-panel sl-tone-contrast", _render())
 
     def test_the_tenant_can_change_it(self):
         self.assertIn("sl-cta-panel sl-tone-accent", _render(tone="accent"))
-        self.assertIn("sl-cta-panel sl-tone-light", _render(tone="light"))
+        self.assertIn("sl-cta-panel sl-tone-soft", _render(tone="soft"))
 
     def test_an_unknown_tone_falls_back_to_the_default(self):
         # Only reachable on a hand-edited document -- the validator refuses unknown tones. The class saying
         # what paints beats a silent reliance on a CSS fallback that happens to agree.
-        self.assertIn("sl-cta-panel sl-tone-dark", _render(tone="chartreuse"))
+        self.assertIn("sl-cta-panel sl-tone-contrast", _render(tone="chartreuse"))
 
     def test_a_tone_paints_by_SETTING_the_shared_tokens(self):
         """The whole point of the refactor.
@@ -303,7 +303,7 @@ class PanelToneTests(unittest.TestCase):
         A tone paints nothing itself -- it fills --sl-section-bg / -ink / -border, which six element
         families already read. So the scale lives once and every one of them gains it from a class.
         """
-        for tone in ("dark", "accent", "light"):
+        for tone in ("contrast", "accent", "soft"):
             rule = [line for line in CSS.splitlines() if f".sl-tone-{tone}{{" in line][0]
             self.assertIn("--sl-section-bg:", rule)
             self.assertIn("--sl-section-ink:", rule)
@@ -317,7 +317,7 @@ class PanelToneTests(unittest.TestCase):
 
     def test_the_button_inverts_on_any_toned_section_not_just_this_one(self):
         # Written against the TONE, so a ribbon with a button gets it too.
-        self.assertIn(".sl-tone-dark .sl-cta,.sl-tone-accent .sl-cta{", CSS)
+        self.assertIn(".sl-tone-contrast .sl-cta,.sl-tone-accent .sl-cta{", CSS)
 
     def test_the_validator_knows_the_shared_three(self):
         from stripe_link.domain.documents import DocumentValidationError, validate_page_document
@@ -327,7 +327,7 @@ class PanelToneTests(unittest.TestCase):
                     "name": "P", "offer_id": "o1", "route": {"slug": "p"},
                     "sections": [{"id": "c", "type": "checkout_cta", "tone": tone}]}
 
-        for good in ("dark", "accent", "light"):
+        for good in ("contrast", "accent", "soft"):
             validate_page_document(page(good))
         with self.assertRaises(DocumentValidationError):
             validate_page_document(page("chartreuse"))
@@ -358,7 +358,7 @@ class EditorReachabilityTests(unittest.TestCase):
 class SharedToneTests(unittest.TestCase):
     """One tone scale, many consumers -- the author's point, and he was right.
 
-    The call panel had shipped its own copy of "dark / accent / light" while a per-section colour mechanism
+    The call panel had shipped its own copy of "contrast / accent / soft" while a per-section colour mechanism
     (domain/section_theme.py) already existed and was already honoured by four elements. Two vocabularies for
     one idea is the duplication this codebase keeps producing -- slug rules, funnel roles, entry readers,
     chips -- and the module's own docstring says so.
@@ -367,10 +367,10 @@ class SharedToneTests(unittest.TestCase):
     def test_the_scale_is_defined_once_where_section_theming_lives(self):
         from stripe_link.domain.section_theme import SECTION_TONES, tone_class
 
-        self.assertEqual(SECTION_TONES, ("dark", "accent", "light"))
+        self.assertEqual(SECTION_TONES, ("contrast", "accent", "soft"))
         self.assertEqual(tone_class("accent"), "sl-tone-accent")
         self.assertEqual(tone_class("chartreuse"), "")
-        self.assertEqual(tone_class(None, default="dark"), "sl-tone-dark")
+        self.assertEqual(tone_class(None, default="contrast"), "sl-tone-contrast")
 
     def test_the_renderer_holds_no_second_copy(self):
         runtime = (ROOT / "src" / "stripe_link" / "runtime" / "html.py").read_text(encoding="utf-8")
@@ -379,8 +379,8 @@ class SharedToneTests(unittest.TestCase):
 
     def test_the_page_ribbon_takes_the_same_tone(self):
         markup = html_module.render_page_ribbon(
-            {"id": "r", "headline": "Call us", "presentation": "centered", "tone": "dark"})
-        self.assertIn("sl-tone-dark", markup)
+            {"id": "r", "headline": "Call us", "presentation": "centered", "tone": "contrast"})
+        self.assertIn("sl-tone-contrast", markup)
 
     def test_a_picked_colour_still_works_on_the_panel(self):
         # The call panel now honours section.theme like the four elements that already did -- which is the

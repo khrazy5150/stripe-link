@@ -677,11 +677,16 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     # THE TONE SCALE. Sets the --sl-section-* tokens and paints nothing itself, so every element that already
     # reads them (author bio, bragging points, quote, page ribbon, price highlight, cta panel) gains tones
     # from a single class. Every value comes from the page theme -- no literal colours here, ever.
-    "    .sl-tone-dark{--sl-section-bg:var(--sl-text);--sl-section-ink:var(--sl-cta-text);--sl-section-border:transparent}",
+    # Each tone pairs a surface with the ink the PRESET designed for it -- (text, background),
+    # (cta gradient, cta_text), (card, text). Never one pair's surface with another's ink: that is what
+    # inverted on the eight dark presets, where --sl-text is near-white.
+    "    .sl-tone-contrast{--sl-section-bg:var(--sl-text);--sl-section-ink:var(--sl-background);--sl-section-border:transparent}",
     "    .sl-tone-accent{--sl-section-bg:linear-gradient(135deg,var(--sl-cta-from),var(--sl-cta-to));--sl-section-ink:var(--sl-cta-text);--sl-section-border:transparent}",
-    "    .sl-tone-light{--sl-section-bg:var(--sl-card);--sl-section-ink:var(--sl-text);--sl-section-border:var(--sl-content-border)}",
-    # A button sitting ON a toned section inverts, so it stays a button rather than dissolving into it.
-    "    .sl-tone-dark .sl-cta,.sl-tone-accent .sl-cta{background:var(--sl-cta-text);color:var(--sl-text)}",
+    "    .sl-tone-soft{--sl-section-bg:var(--sl-card);--sl-section-ink:var(--sl-text);--sl-section-border:var(--sl-content-border)}",
+    # A button sitting on a FILLED panel becomes the page's own surface -- background + text, the one pair
+    # that is readable on every preset in either polarity -- so it reads as cut out of the panel rather than
+    # dissolving into it. `soft` is already the card colour, so its button stays the ordinary gradient CTA.
+    "    .sl-tone-contrast .sl-cta,.sl-tone-accent .sl-cta{background:var(--sl-background);color:var(--sl-text)}",
     "    .sl-cta-panel{display:grid;justify-items:center;gap:1.2rem;padding:3.2rem 2.4rem;border-radius:1.4rem;text-align:center;background:var(--sl-section-bg,var(--sl-text));color:var(--sl-section-ink,var(--sl-cta-text));border:1px solid var(--sl-section-border,transparent)}",
     "    .sl-cta-kicker{margin:0;font-family:var(--sl-font-accent);font-size:1.3rem;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;opacity:.75}",
     # The identifying line. Sized to be read across a room and tapped without aiming. `tabular-nums` so a
@@ -6343,7 +6348,7 @@ def render_cta_panel(
     lead_href: str,
     label: str,
     link_attrs: str = "",
-    default_tone: str = "dark",
+    default_tone: str = "contrast",
     default_show_lead: bool = True,
 ) -> str:
     """The panel every lead CTA now wears: an optional kicker, the thing that identifies the destination,

@@ -820,6 +820,26 @@ meet for the first time:
 
 Stripe test clocks are the practical way to do 5 without waiting a month.
 
+### LOW — three shipped presets pair their CTA gradient with white below WCAG AA (measured 2026-09-17)
+
+Found while fixing the section tones, and deliberately NOT fixed there. Measured on the shipped
+`UNIVERSAL_BUNDLE_THEME_PRESETS`, `cta_text` (`#ffffff`) against the first gradient stop:
+
+| preset | first stop | contrast | AA-large |
+|---|---|---|---|
+| natural-calm | `#22c55e` | 2.28 | 3.0 |
+| clean-slate | `#0ea5e9` | 2.77 | 3.0 |
+| coral-sunrise | `#f97316` | 2.80 | 3.0 |
+
+This is not a tone bug and not a regression: it is the pair those presets have always used, so it is already
+true of **every ordinary CTA button** on every page wearing them — the tones only made it measurable. The
+other thirteen presets clear 3.0 on all three tones (`tests/test_section_tone_contrast.py` prints the grid).
+
+Why it is left alone: changing a preset's `cta_text` or gradient restyles every page already wearing it,
+including pages whose artifacts were baked at publish time and would then disagree with pages republished
+later. Nudging the stops darker (`#16a34a`, `#0284c7`, `#ea580c` all clear 3.0) is the small fix, but it is
+a product-wide visual change and the author's call, not a quiet one to make inside a bug fix.
+
 ### MEDIUM — a just-provisioned tip jar shows no URL until the page is refreshed (found 2026-09-15)
 
 Reported by the author immediately after the provisioner shipped. Clicking "Create your free Tip Jar page"

@@ -41,7 +41,14 @@ ALLOWED_TOKENS = ("bg", "accent", "border")
 #
 # They coexist without a precedence rule to maintain: `theme` is an inline style and `tone` is a class, so
 # a picked colour beats a named tone by the cascade's own arithmetic.
-SECTION_TONES = ("dark", "accent", "light")
+# RELATIONAL names, not absolute ones (author, 2026-09-17: "keep in mind the difference between dark and
+# light themes"). "dark" meant `--sl-section-bg: var(--sl-text)` -- which is a DARK colour on a light preset
+# and a near-WHITE one on the eight dark presets, where it painted a white panel and wrote white on it.
+#
+# The rule the fix follows, and the one to keep: a tone may only pair tokens the PRESET designed together --
+# (background, text), (card, text), (cta_from/to, cta_text). Mixing one pair's surface with another pair's
+# ink is what inverts when the preset does.
+SECTION_TONES = ("contrast", "accent", "soft")
 
 
 def tone_class(value: Any, default: str = "") -> str:

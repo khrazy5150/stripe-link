@@ -497,8 +497,11 @@ class CtaDialogTests(unittest.TestCase):
         self.assertIn('capture_email_phone: "Email + phone', labels)
 
     def test_the_form_fields_are_offered_only_for_the_inline_collector(self):
-        # Widened 2026-09-16: the call panel's own controls now sit between the button label and these.
-        dialog = BUILDER.split("sectionEditor.row.editor === 'checkout_cta'", 1)[1][:3200]
+        # Bounded by the BRANCH, not by a character count. It was `[:3200]`, and every control added to the
+        # CTA editor since pushed these fields closer to the edge until a comment tipped them over it -- a
+        # test that fails on the length of a comment is measuring the wrong thing.
+        dialog = BUILDER.split("sectionEditor.row.editor === 'checkout_cta'", 1)[1]
+        dialog = dialog.split("sectionEditor.row.editor === '", 1)[0]
         self.assertIn("builder.cta_form_title", dialog)
         self.assertIn("builder.cta_form_description", dialog)
         self.assertIn("builderCta.type === 'email'", dialog)
