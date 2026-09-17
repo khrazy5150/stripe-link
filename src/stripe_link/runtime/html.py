@@ -10,7 +10,8 @@ from urllib.parse import quote, urlencode, urlparse
 from stripe_link.platform_config import default_favicon_url
 from stripe_link.domain.bargain import FROM_PREFIX, derived_bargain
 from stripe_link.domain.business_types import BUSINESS_TYPES, resolve_entity_type
-from stripe_link.domain.composition import compose_page, default_cta_label, element_channel, shows_breadcrumb
+from stripe_link.domain.composition import (
+    compose_page, composition_key, default_cta_label, element_channel, shows_breadcrumb)
 from stripe_link.domain.connect_sync import site_seo_enabled
 from stripe_link.domain.documents import PRODUCT_CONDITIONS
 from stripe_link.domain.page_views import link_id as link_click_id
@@ -487,6 +488,12 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     "    .sl-hero-track::-webkit-scrollbar{display:none}",
     "    .sl-hero-slide{flex:0 0 100%;scroll-snap-align:center}",
     "    .sl-hero-slide img,.sl-hero-slide video{width:100%;height:auto;aspect-ratio:1/1;object-fit:cover;border-radius:var(--sl-radius);border:1px solid var(--sl-hero-border);background:var(--sl-hero-bg)}",
+    # The DEFAULT social cover: a link-in-bio page with no uploaded image still needs somewhere for the
+    # avatar to sit, and an avatar overlapping nothing looks like a mistake. Painted from the preset's own
+    # designed CTA pair, so it re-skins with the theme, cannot land off-palette, and weighs nothing -- no
+    # file, no request, no LCP cost on the page type most likely to be opened from a phone. 5:2 rather than
+    # the slides' 1:1 because it is a cover band; a square of flat colour is a colour field.
+    "    .sl-hero-band{width:100%;aspect-ratio:5/2;border-radius:var(--sl-radius);border:1px solid var(--sl-hero-border);background:linear-gradient(135deg,var(--sl-cta-from),var(--sl-cta-to))}",
     "    .sl-hero-nav{position:absolute;top:calc(50% + 0.4rem);transform:translateY(-50%);width:3.8rem;height:3.8rem;border-radius:50%;border:0;background:rgba(255,255,255,.9);color:#111;font-size:2.2rem;line-height:1;cursor:pointer;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 8px rgba(0,0,0,.18)}",
     "    .sl-hero-prev{left:0.8rem}",
     "    .sl-hero-next{right:0.8rem}",
@@ -2422,6 +2429,21 @@ def avatar_placement(section: dict[str, Any]) -> str:
     return value if value in AVATAR_PLACEMENTS else "overlay"
 
 
+def avatar_source(section: dict[str, Any]) -> str:
+    """The avatar this section actually renders, or "" for none.
+
+    By REFERENCE: an empty page-level `avatar_url` inherits the STORE's rather than meaning "none", so a
+    tenant who changes their profile picture changes it everywhere instead of leaving each page frozen at
+    whatever it was the day it was made. Only `hidden` means none.
+
+    One reader, because three callers need this answer -- the img, the overhang margin, and the cover band --
+    and a fourth copy of "page url, else store url, unless hidden" is how they drift apart.
+    """
+    if avatar_placement(section) == "hidden":
+        return ""
+    return str((section or {}).get("avatar_url") or "") or str(_RENDER_PREFERENCES.get("avatar_url") or "")
+
+
 def first_offer_lead_capture(offer: dict[str, Any], products_by_id: dict[str, dict[str, Any]]) -> dict[str, Any]:
     """The lead_capture block of the offer's primary lead-gen product — drives the inline form fields."""
     for item in stage_opportunities(offer, STAGE_LANDING):
@@ -2582,6 +2604,13 @@ def render_video_embed(embed: dict[str, str], alt: str) -> str:
     )
 
 
+# Not a URL: the marker that this slide is the generated cover band. A data: URI was the obvious move --
+# PLACEHOLDER_IMAGE already is one -- but an SVG cannot read a CSS custom property, so its colours would have
+# to be baked in at publish time and the cover would then disagree with the page the first time the tenant
+# changed preset. Deriving beats freezing (the rule the hero copy and brand label both learned the hard way).
+HERO_BAND = "\x00hero-band"
+
+
 def render_media_slide(url: str, alt: str, *, autoplay: bool, eager: bool = False, poster: str = "") -> str:
     """The MediaViewer's image/video modes (plans/CONVERSION_CONTEXT.md review 4). A video URL renders a
     <video>. Autoplay adds muted+loop because every browser refuses to autoplay with sound.
@@ -2590,6 +2619,10 @@ def render_media_slide(url: str, alt: str, *, autoplay: bool, eager: bool = Fals
     way to unmute, pause or scrub — the tenant enabled autoplay, not silence, and a visitor who wants the
     audio had no affordance at all. It is also a WCAG 2.2.2 (Pause, Stop, Hide) failure: content that
     plays automatically for more than five seconds must offer a way to stop it."""
+    if url == HERO_BAND:
+        # Decorative: it carries no information the identity block below does not already say, so it takes
+        # no alt text and is hidden from a screen reader rather than announced as "image".
+        return '<div class="sl-hero-band" role="presentation"></div>'
     embed = parse_video_embed(url)
     if embed:
         # A tenant poster wins: YouTube's auto-frame is often a blurred mid-sentence, and Vimeo has no
@@ -2704,9 +2737,7 @@ def render_hero_overlays(section: dict[str, Any], offer: dict[str, Any]) -> list
     # the tenant profile -- so when the tenant changes their picture, every page that never overrode it
     # shows the new one. Copying the URL onto each page at build time would have frozen each page at
     # whatever the avatar was the day it was made, which is the opposite of what a profile picture is for.
-    avatar_url = str(section.get("avatar_url") or "") or str(_RENDER_PREFERENCES.get("avatar_url") or "")
-    if avatar_placement(section) == "hidden":
-        avatar_url = ""
+    avatar_url = avatar_source(section)
     if avatar_url:
         # The avatar carries brand identity, so it's a content image — name it (brand text, else the offer).
         avatar_alt = escape(str(section.get("brand_text") or offer_brand_fallback(offer) or "Brand avatar"))
@@ -2767,6 +2798,17 @@ def render_hero_media(
             service_image = first_offer_service_image(offer, services_by_id or {})
             if service_image:
                 images = [service_image]
+    # A link-in-bio page with no uploaded cover gets a THEMED BAND instead of no hero at all. Not a fix to
+    # the early return below, which is right for every other page: the avatar complements a cover image, so
+    # where there is no cover there is nothing for one to complement. The band is not decoration filling a
+    # hole -- it is the real estate the avatar needs in order to exist, on the one page shape whose entire
+    # job is identity. Every other shape still renders nothing, because inventing furniture on a product or
+    # bridge page would be furniture with no reason to be there.
+    # ...and only when there is actually an avatar to seat. The band exists to give one real estate, so a
+    # tenant with no avatar (or who set `hidden` on this page) would otherwise get a bare strip of colour
+    # carrying nothing -- decoration for its own sake, which is the thing this is not.
+    if not images and composition_key(offer) == "lead_social" and avatar_source(section):
+        images = [HERO_BAND]
     if not images:
         return ""
     alt = localized_alt(str(product.get("name") or offer.get("name") or "Product image"))
@@ -2785,8 +2827,7 @@ def render_hero_media(
     # Both OVERLAYS overhang the artwork and need room reserved -- one below, one above. inline/centred sit
     # in normal flow and need none; hidden has nothing to reserve for.
     placement = avatar_placement(section)
-    has_avatar = placement in ("overlay", "overlay_bottom", "overlay_top") and bool(
-        str(section.get("avatar_url") or "") or str(_RENDER_PREFERENCES.get("avatar_url") or ""))
+    has_avatar = placement in ("overlay", "overlay_bottom", "overlay_top") and bool(avatar_source(section))
     overhang = ("" if not has_avatar else
                 (" has-avatar-top" if placement == "overlay_top" else " has-avatar"))
     media_class = "sl-hero-media" + overhang
