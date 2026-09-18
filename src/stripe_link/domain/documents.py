@@ -2127,6 +2127,8 @@ SITE_PAGE_TYPES = {
     "legal", "checkout", "thank_you", "funnel_step", "blog", "article", "search_results",
 }
 _HOSTNAME_RE = re.compile(r"^(?!https?://)([a-z0-9-]+\.)+[a-z]{2,}$")
+# Same shape as a platform subdomain label -- they share a namespace, so they must share a syntax.
+_CREATOR_USERNAME_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]{1,61}[a-z0-9])$")
 _SITE_SLUG_RE = re.compile(r"^/$|^/[a-z0-9]+(?:-[a-z0-9]+)*(?:/[a-z0-9]+(?:-[a-z0-9]+)*)*$")
 
 
@@ -2149,6 +2151,15 @@ def validate_site(document: dict[str, Any]) -> None:
     platform_hostname = hosting.get("platform_hostname")
     if not isinstance(platform_hostname, str) or not _HOSTNAME_RE.match(platform_hostname):
         raise DocumentValidationError("Site hosting.platform_hostname must be a bare hostname.")
+    # The link-in-bio handle (plans/CREATOR_DOMAIN_SERVING.md). Optional -- absent means "use the subdomain
+    # label" -- and shaped exactly like a subdomain label, because it lives in the same namespace and the same
+    # first-claim-wins registry. Validated here so a hand-posted Site cannot claim a handle the wizard would
+    # have refused, e.g. one with a slash in it, which would break the path-on-apex routing key.
+    creator_handle = hosting.get("creator_username")
+    if creator_handle is not None and (
+            not isinstance(creator_handle, str) or not _CREATOR_USERNAME_RE.match(creator_handle)):
+        raise DocumentValidationError(
+            "Site hosting.creator_username must be 3-63 lowercase letters, numbers or hyphens.")
     custom_domain = hosting.get("custom_domain")
     if custom_domain is not None and not (isinstance(custom_domain, str) and _HOSTNAME_RE.match(custom_domain)):
         raise DocumentValidationError("Site hosting.custom_domain must be a bare hostname or null.")

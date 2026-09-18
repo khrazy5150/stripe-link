@@ -2,6 +2,9 @@
   <label class="offer-field store-address-field">
     <span>{{ label }}</span>
     <div class="subdomain-input">
+      <!-- A link-in-bio handle reads `jbay.page/name`, not `name.jbay.uk`: same namespace and same
+           availability check, opposite side of the separator. -->
+      <span v-if="prefix" class="subdomain-suffix">{{ hostingDomain }}/</span>
       <input
         :value="modelValue"
         type="text"
@@ -11,7 +14,7 @@
         spellcheck="false"
         @input="onInput"
       />
-      <span class="subdomain-suffix">.{{ hostingDomain }}</span>
+      <span v-if="!prefix" class="subdomain-suffix">.{{ hostingDomain }}</span>
     </div>
     <small :class="availabilityClass">{{ availabilityText }}</small>
     <div v-if="check.state.suggestions.length" class="subdomain-suggestions">
@@ -32,6 +35,7 @@ const props = defineProps({
   modelValue: { type: String, default: "" },
   name: { type: String, default: "" },               // Site name to auto-fill / slugify from
   hostingDomain: { type: String, default: "jbay.uk" },
+  prefix: { type: Boolean, default: false },         // render the domain BEFORE the value (path-on-apex)
   siteId: { type: String, default: "" },             // set in edit mode to exclude the current Site from the check
   label: { type: String, default: "Store address" },
   placeholder: { type: String, default: "my-shop" },

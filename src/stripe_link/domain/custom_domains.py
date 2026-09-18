@@ -178,16 +178,24 @@ def creator_host_key(creator_domain: str, username: str) -> str:
 
 
 def creator_username(site: dict[str, Any]) -> str:
-    """The username a Site's link hub serves under -- its PLATFORM SUBDOMAIN LABEL, not a new field.
+    """The username a Site's link hub serves under: `hosting.creator_username`, else its subdomain label.
 
-    Reusing the label means one namespace platform-wide: `maria.jbay.uk` and `jbay.page/maria` are the same
-    tenant by construction, so neither can impersonate the other. It also inherits, for free, the three things
-    a username namespace needs and would otherwise have to grow its own copy of -- the syntax rule, the
-    first-claim-wins reservation registry, and RESERVED_SUBDOMAINS (which already holds `about`, `login`,
-    `api`, `admin`, ... the path wordlist plans/SOCIAL_MEDIA_PAGES.md #4 says must exist before the first
-    username is claimed).
+    Its OWN field, because a creator's handle and a store's address are different things that happen to be
+    shaped alike -- `poliaxis-nutrition.jbay.uk` is a fine store address and a poor link-in-bio handle, and a
+    tenant should not have to change where their shop lives to fix the second.
+
+    But ONE NAMESPACE: it is reserved in the same registry as subdomain labels, so `maria.jbay.uk` and
+    `jbay.page/maria` can only ever be the same tenant, and it inherits the syntax rule and
+    RESERVED_SUBDOMAINS (`about`, `login`, `api`, `admin`, ... -- the path wordlist
+    plans/SOCIAL_MEDIA_PAGES.md #4 says must exist before the first username is claimed).
+
+    Falls back to the label so every Site that predates the field already has a working username, and so a
+    tenant who never picks one still gets a URL rather than an error.
     """
     hosting = site.get("hosting") or {}
+    chosen = str(hosting.get("creator_username") or "").strip().lower()
+    if chosen:
+        return chosen
     hostname = str(hosting.get("platform_hostname") or "").strip().lower()
     return hostname.split(".")[0] if hostname else ""
 

@@ -124,6 +124,24 @@
             <small class="field-note">Changing this claims a new address; your old one stays reserved to you, so existing links keep working. Not indexed by search engines.</small>
           </label>
 
+          <!-- The link-in-bio handle. Shown only where that serving is configured, and separate from the store
+               address on purpose: a good store address is often a poor handle, and nobody should have to move
+               their shop to fix their bio link. Same namespace, though — so a handle and an address can never
+               belong to two different tenants. The wizard asks for this on the Social Page path; this is where
+               it is CHANGED (author, 2026-09-17). -->
+          <StoreAddressField
+            v-if="store.creatorDomain"
+            v-model="form.creatorUsername"
+            v-model:available="creatorAvailable"
+            v-model:normalized="creatorNormalized"
+            :site-id="editing.site_id"
+            :hosting-domain="store.creatorDomain"
+            :autofill="false"
+            prefix
+            label="Link-in-bio username"
+            placeholder="yourname"
+          />
+
           <fieldset class="product-identifiers">
             <legend>Business identity (Organization)</legend>
             <p class="field-note">The single source of truth for your business's structured data — every page's Organization, seller, and local-business markup derives from here.</p>
@@ -487,6 +505,9 @@ const store = useSitesStore();
 const profileStore = useProfileStore();
 const pages = ref([]);
 const editing = ref(null);
+// Output halves of the username field, which reuses StoreAddressField and therefore its availability check.
+const creatorAvailable = ref(true);
+const creatorNormalized = ref("");
 const formError = ref("");
 const hostingDomainHint = computed(() => store.hostingDomain || "jbay.uk");
 const entityTypes = ["OnlineStore", "Organization", "LocalBusiness", "HomeAndConstructionBusiness", "HealthAndBeautyBusiness", "FoodEstablishment", "ProfessionalService", "Store"];
@@ -611,7 +632,7 @@ const BUSINESS_TYPE_GROUPS = [
 const socialHostError = ref("");
 const socialBusy = ref(false);
 const socialCheckNote = ref("");
-const form = reactive({ name: "", subdomain: "", org: { name: "", legal_name: "", entity_type: "OnlineStore", business_type: "", description: "", telephone: "", email: "", address: { locality: "", region: "" }, place_id: "", gbp_url: "", geo: { latitude: "", longitude: "" }, opening_hours: [], same_as: [], review_destination: "" }, seo: { google_site_verification: "", bing_site_verification: "", pinterest_site_verification: "" }, seo_enabled: true });
+const form = reactive({ name: "", subdomain: "", creatorUsername: "", org: { name: "", legal_name: "", entity_type: "OnlineStore", business_type: "", description: "", telephone: "", email: "", address: { locality: "", region: "" }, place_id: "", gbp_url: "", geo: { latitude: "", longitude: "" }, opening_hours: [], same_as: [], review_destination: "" }, seo: { google_site_verification: "", bing_site_verification: "", pinterest_site_verification: "" }, seo_enabled: true });
 
 // The specific-type options for the chosen broad entity_type (empty for OnlineStore/Organization).
 const specificTypes = computed(() => (BUSINESS_TYPE_GROUPS.find((g) => g.parent === form.org.entity_type)?.types) || []);
@@ -1023,6 +1044,11 @@ function openEdit(site) {
   const address = org.address || {};
   form.name = site.name || "";
   form.subdomain = (site.hosting?.platform_hostname || "").split(".")[0] || "";
+  // Blank when unset rather than pre-filled with the subdomain label: the fallback is what the URL USES, not
+  // a value the tenant chose, and showing it as chosen would freeze it the next time they saved.
+  form.creatorUsername = site.hosting?.creator_username || "";
+  creatorAvailable.value = true;
+  creatorNormalized.value = form.creatorUsername;
   form.org = {
     name: org.name || "", legal_name: org.legal_name || "", entity_type: org.entity_type || "OnlineStore",
     business_type: org.business_type || "",
@@ -1071,7 +1097,11 @@ async function saveEdit({ keepOpen = false } = {}) {
   const doc = {
     ...editing.value,
     name: form.name || editing.value.name,
-    hosting: { ...editing.value.hosting, platform_subdomain: form.subdomain || undefined },
+    hosting: {
+      ...editing.value.hosting,
+      platform_subdomain: form.subdomain || undefined,
+      creator_username: form.creatorUsername || undefined,
+    },
     organization: Object.fromEntries(Object.entries(organization).filter(([, v]) => v !== undefined && !(typeof v === "object" && !Object.keys(v).length))),
     seo: Object.keys(seo).length ? seo : undefined,
     // Search visibility toggle (default on). Persisted on indexing alongside the computed eligibility; the

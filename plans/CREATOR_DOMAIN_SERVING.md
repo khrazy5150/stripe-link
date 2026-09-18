@@ -34,10 +34,19 @@ root exactly the way `maria.jbay.uk/` is.
 is a single hot item, unbounded in size, where one tenant's publish rewrites every other tenant's routes and
 one bad write takes the whole domain down.
 
-## 3. The username is the platform subdomain label
+## 3. The username is its own field, in the subdomain namespace
 
-Not a new field. `maria.jbay.uk` and `jbay.page/maria` are the same tenant **by construction**, so neither can
-impersonate the other — and it inherits, rather than reimplements, the three things a username namespace needs:
+**Revised 2026-09-17.** The first cut derived it from the store's subdomain label — no new field, and the
+namespace properties below came free. The author rejected the consequence, correctly:
+`poliaxis-nutrition.jbay.uk` is a fine store address and a poor link-in-bio handle, and nobody should have to
+move their shop to fix their bio link.
+
+So `hosting.creator_username` is its own optional field, **reserved in the same registry as subdomain
+labels**. That keeps the property that mattered — `maria.jbay.uk` and `jbay.page/maria` can only ever be the
+same tenant — while letting the two names differ. Absent means "use the label", so every Site predating the
+field already has a working username and a tenant who never picks one gets a URL rather than an error.
+
+Sharing the namespace means it inherits, rather than reimplements, the three things a username namespace needs:
 
 | Need | Already exists |
 |---|---|
@@ -47,6 +56,16 @@ impersonate the other — and it inherits, rather than reimplements, the three t
 
 That last row closes an open item: plans/SOCIAL_MEDIA_PAGES.md #4 says a path wordlist must exist before the
 first username is claimed. It does, and it has been enforced on every Site created so far.
+
+**Where it is asked.** In the create-page wizard, standing exactly where a Social Page skips the Goal step —
+*"we cannot let the tenant get into the weeds of a site to add a username for a page"*. It is a question only
+this page shape has, asked at the only moment the tenant is thinking about it. Changing it later is a Site
+setting, which is where a per-Site value belongs. The wizard asks only where link-in-bio serving is actually
+configured: collecting an answer with no visible effect is the same unactionable-control failure as a notice
+nobody can act on.
+
+The field is `StoreAddressField` with a `prefix` flag — a handle and a store address share a namespace, a
+syntax rule and an availability check, and differ only in which side of the separator the domain sits.
 
 ## 4. What serves there: the hub, and nothing else
 
@@ -150,5 +169,6 @@ one. Fixed in this slice rather than left as a launch note.
   it is unclaimable — but the apex should serve a real robots.txt. Cloudflare-level, not application-level.
 - **The bare apex** redirects to `juniorbay.com` from the Worker. Fine as a placeholder; it is the domain's
   front door and deserves a decision.
-- **A username cannot differ from the store label.** See §3 before adding a second field — one namespace is
-  what stops `maria.jbay.uk` and `jbay.page/maria` being different people.
+- **No handle-change redirect.** Changing a username claims the new one and leaves the old reserved to the
+  Site (the registry never releases), but the old URL stops resolving — unlike the store address, where the
+  note promises existing links keep working. Decide whether a renamed hub should 301.

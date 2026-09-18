@@ -451,6 +451,32 @@ def _reserve_subdomain(registry, document: dict) -> None:
         suggestions = suggest_subdomains(label, registry)
         hint = f" Try: {', '.join(suggestions)}." if suggestions else ""
         raise DocumentValidationError(f"The address '{hostname}' is already taken.{hint}")
+    _reserve_creator_username(registry, document, fallback=label)
+
+
+def _reserve_creator_username(registry, document: dict, *, fallback: str) -> None:
+    """Claim the Site's link-in-bio handle in the SAME registry as subdomain labels.
+
+    One namespace is what stops `maria.jbay.uk` and `jbay.page/maria` being different people. It costs a
+    second row only when the handle differs from the label; when it matches, `reserve` is idempotent for the
+    Site that already owns it, so the common case writes nothing new.
+    """
+    handle = str((document.get("hosting") or {}).get("creator_username") or "").strip().lower()
+    if not handle or handle == fallback:
+        return
+    rule = subdomain_rule_error(handle)
+    if rule:
+        raise DocumentValidationError(rule)
+    claimed = registry.reserve(
+        handle,
+        site_id=str(document.get("site_id") or ""),
+        tenant_id=str(document.get("tenant_id") or ""),
+        now=int(time.time()),
+    )
+    if not claimed:
+        suggestions = suggest_subdomains(handle, registry)
+        hint = f" Try: {', '.join(suggestions)}." if suggestions else ""
+        raise DocumentValidationError(f"The username '{handle}' is already taken.{hint}")
 
 
 def get_site(event, repository, site_id):

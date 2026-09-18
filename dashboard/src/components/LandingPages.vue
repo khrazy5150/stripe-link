@@ -1650,6 +1650,31 @@
             </label>
           </section>
 
+          <!-- A link hub is addressed by its HANDLE, not by a page slug, so the wizard asks for one here
+               rather than sending the tenant into Site settings to find a field they would not think to look
+               for (author, 2026-09-17: "we cannot let the tenant get into the weeds of a site"). It stands
+               exactly where the Goal step would be, which a Social Page skips. -->
+          <section v-else-if="wizardStep === 2 && wizardAsksUsername" class="wizard-step">
+            <header class="wizard-step-header">
+              <h3>Choose your username</h3>
+              <p>This is your link-in-bio address — the one you put in your profile. Short is better.</p>
+            </header>
+            <StoreAddressField
+              v-model="form.creatorUsername"
+              v-model:available="creatorNameAvailable"
+              v-model:normalized="creatorNameNormalized"
+              :name="creatorUsernameSeed"
+              :hosting-domain="sitesStore.creatorDomain"
+              :site-id="selectedSiteId"
+              prefix
+              label="Username"
+              placeholder="yourname"
+            />
+            <p class="field-note">
+              You can change this later in Sites. Your store keeps its own address either way.
+            </p>
+          </section>
+
           <section v-else-if="wizardStep === 2" class="wizard-step">
             <header class="wizard-step-header">
               <h3>Page Goal</h3>
@@ -2346,6 +2371,10 @@ const creatingSite = ref(false);
 // Store-address availability + canonical value are owned by the StoreAddressField component and surfaced here.
 const siteAvailable = ref(false);
 const siteNormalized = ref("");
+// Same two output halves for the username field, which reuses StoreAddressField because a handle and a store
+// address share a namespace, a syntax rule and an availability check -- only the separator differs.
+const creatorNameAvailable = ref(false);
+const creatorNameNormalized = ref("");
 
 const selectedSite = computed(() => sitesStore.sites.find((s) => s.site_id === selectedSiteId.value) || null);
 const selectedSiteHomepageLabel = computed(() => {
@@ -3312,6 +3341,9 @@ function defaultWizardForm() {
     // Second composition axis: why the page exists / where its traffic comes from. Presets which capability
     // packs the page starts with (plans/LANDING_PAGE_GOAL_COMPOSITION.md).
     goal: "",
+    // The link-in-bio handle, asked on the Social Page path. Lives on the SITE, not the page -- one handle
+    // per Site, however many hubs it ever has -- so the wizard only carries it as far as the first save.
+    creatorUsername: "",
     storefront: { headline: "", brand: "", nameMode: "", tagline: "", heading: "Shop all", logo_url: "", items: [], autoFill: true, collection_id: "", source: "new", existingCollectionId: "" },
     categoryKey: "",
   };
@@ -3648,8 +3680,20 @@ function nextWizardStep() {
   }
   if (wizardStep.value === 1 && selectedOfferIsSocialPage.value) {
     // Skip the goal step entirely rather than showing it pre-answered: an option nobody should change is
-    // a question that should not be asked.
+    // a question that should not be asked. Where link-in-bio serving is configured, that slot asks for the
+    // handle instead -- a question only this page shape has, at the only moment the tenant is thinking about it.
     form.goal = "minimal";
+    wizardStep.value = wizardAsksUsername.value ? 2 : 3;
+    return;
+  }
+  if (wizardStep.value === 2 && wizardAsksUsername.value) {
+    if (!creatorNameAvailable.value) {
+      wizardError.value = creatorNameNormalized.value
+        ? "That username is not available. Pick another."
+        : "Choose a username for your link-in-bio address.";
+      return;
+    }
+    form.creatorUsername = creatorNameNormalized.value;
     wizardStep.value = 3;
     return;
   }
@@ -3666,10 +3710,22 @@ const wizardTotalSteps = computed(() => (form.pageKind === "offer" ? 4 : 2));
 // A skipped step must not leave a hole in the count: without this a Social Page read "Step 2 of 5" and
 // then "Step 4 of 5", which looks like the wizard lost one.
 const wizardSkipsGoal = computed(() => form.pageKind === "offer" && selectedOfferIsSocialPage.value);
-const displayTotal = computed(() => wizardTotalSteps.value + 1 - (wizardSkipsGoal.value ? 1 : 0));
-// Labels for the shared step rail. Built rather than constant because this wizard has THREE possible paths:
-// an offer page runs Site > Type > Goal > Configure > Review, a Social Page drops the goal step, and an
-// offer-less page (storefront, category, profile) finishes at Details.
+// A Social Page is asked for a username INSTEAD of a goal -- but only where link-in-bio serving is actually
+// configured. Asking for a handle in an environment that serves none would be collecting an answer with no
+// visible effect, which is the same unactionable-control failure as a notice nobody can act on.
+const wizardAsksUsername = computed(() => wizardSkipsGoal.value && !!sitesStore.creatorDomain);
+// Seed the handle from the Site's own name, the way the store address is seeded from it.
+const creatorUsernameSeed = computed(() =>
+  sitesStore.sites.find((s) => s.site_id === selectedSiteId.value)?.name || "");
+// Whether the rail is one step SHORTER than the offer path, which is a different question from whether the
+// goal step is skipped -- a Social Page that is asked for a username SUBSTITUTES that step rather than
+// dropping it, so the count is unchanged. One predicate, read by all three of the rail's calculations,
+// because they have to agree and nothing else forces them to.
+const wizardDropsAStep = computed(() => wizardSkipsGoal.value && !wizardAsksUsername.value);
+const displayTotal = computed(() => wizardTotalSteps.value + 1 - (wizardDropsAStep.value ? 1 : 0));
+// Labels for the shared step rail. Built rather than constant because this wizard has FOUR possible paths:
+// an offer page runs Site > Type > Goal > Configure > Review, a Social Page swaps Goal for Username (or
+// drops it where link-in-bio serving is not configured), and an offer-less page finishes at Details.
 //
 // The list must always be exactly displayTotal long. The first version was four labels sliced to length,
 // which silently showed a four-step rail on the five-step offer path -- a rail that lies about how much is
@@ -3677,13 +3733,14 @@ const displayTotal = computed(() => wizardTotalSteps.value + 1 - (wizardSkipsGoa
 const wizardStepLabels = computed(() => {
   if (form.pageKind !== "offer") return ["Site", "Type", "Details"];
   const labels = ["Site", "Type"];
-  if (!wizardSkipsGoal.value) labels.push("Goal");
+  if (wizardAsksUsername.value) labels.push("Username");
+  else if (!wizardSkipsGoal.value) labels.push("Goal");
   return [...labels, "Configure", "Review"];
 });
 const displayStep = computed(() => {
   if (sitePhase.value) return 1;
   const step = wizardStep.value + 1;
-  return wizardSkipsGoal.value && wizardStep.value > 2 ? step - 1 : step;
+  return wizardDropsAStep.value && wizardStep.value > 2 ? step - 1 : step;
 });
 
 // Distinct product categories the tenant actually uses (so a category page's key matches denormalized
@@ -4041,6 +4098,18 @@ async function attachCreatedPageToSite(saved, siteId, kind, category, errorRef =
   } catch (err) {
     errorRef.value = `Page created, but attaching it to the Site failed: ${err.message || err}. Attach it on the Sites screen.`;
     return false;
+  }
+}
+
+// Write the handle the wizard asked for onto its Site. Non-fatal: the page is saved and attached either way,
+// and the Site's own screen can set it -- losing the page over a taken username would be a bad trade.
+async function saveCreatorUsername(site) {
+  const handle = String(form.creatorUsername || "").trim().toLowerCase();
+  if (!site || !handle || (site.hosting || {}).creator_username === handle) return;
+  try {
+    await sitesStore.save({ ...site, hosting: { ...(site.hosting || {}), creator_username: handle } });
+  } catch (err) {
+    error.value = `Page saved, but the username could not be claimed: ${err.message || err}. Set it in Sites.`;
   }
 }
 
@@ -4822,6 +4891,7 @@ async function saveBuilderPageWithStatus(statusOverride = "", { silent = false }
       if (await attachCreatedPageToSite(saved, pendingSiteAttach.value, "offer", undefined, error)) {
         attachedName = site?.name || "your Site";
       }
+      await saveCreatorUsername(site);
       pendingSiteAttach.value = "";
     }
     if (!silent) {

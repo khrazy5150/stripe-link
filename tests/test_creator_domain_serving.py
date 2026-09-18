@@ -232,3 +232,88 @@ class SwitchTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class UsernameFieldTests(unittest.TestCase):
+    """The handle is its OWN field, asked in the wizard.
+
+    Author, 2026-09-17: "We cannot let the tenant get into the weeds of a site to add a username for a page.
+    Let's ask for a username right in the wizard. Once a page is created, if the tenant wants to change his or
+    her username, then they can go into the Site."
+
+    This reverses the earlier decision to derive it from the store label. `poliaxis-nutrition.jbay.uk` is a
+    fine store address and a poor link-in-bio handle, and nobody should have to move their shop to fix their
+    bio link. What is KEPT from that decision is the single namespace.
+    """
+
+    def test_a_chosen_handle_wins_over_the_label(self):
+        site = _site()
+        site["hosting"]["creator_username"] = "maria-cooks"
+        self.assertEqual(creator_username(site), "maria-cooks")
+        self.assertEqual(creator_page_url(site, "page_hub", DOMAIN), "https://jbay.page/maria-cooks")
+
+    def test_the_label_still_serves_when_none_is_chosen(self):
+        # So every Site predating the field has a working username, and a tenant who never picks one gets a
+        # URL rather than an error.
+        self.assertEqual(creator_username(_site()), "maria")
+
+    def test_a_handle_must_be_shaped_like_a_label_because_it_shares_the_namespace(self):
+        from stripe_link.domain.documents import DocumentValidationError, validate_site
+
+        def site_with(handle):
+            s = _site()
+            s.update({"schema_version": "1", "document_type": "site", "name": "S", "status": "active",
+                      "indexing": {"eligibility": "blocked"}, "created_at": 1, "updated_at": 1})
+            s["hosting"]["creator_username"] = handle
+            return s
+
+        validate_site(site_with("maria-cooks"))
+        for bad in ("Maria", "a", "has/slash", "has.dot", "-lead", "trail-"):
+            # A slash would break the path-on-apex routing key outright.
+            with self.assertRaises(DocumentValidationError, msg=bad):
+                validate_site(site_with(bad))
+
+    def test_it_is_claimed_in_the_SAME_registry_as_subdomains(self):
+        """One namespace is what stops maria.jbay.uk and jbay.page/maria being different people."""
+        handler = (pathlib.Path(__file__).resolve().parents[1] / "src" / "handlers"
+                   / "sites.py").read_text(encoding="utf-8")
+        block = handler.split("def _reserve_creator_username(", 1)[1].split("\ndef ", 1)[0]
+        self.assertIn("registry.reserve(", block)
+        self.assertIn("subdomain_rule_error(handle)", block)
+        # ...and nothing is written when the handle matches the label the Site already owns.
+        self.assertIn("handle == fallback", block)
+
+
+class WizardTests(unittest.TestCase):
+    BUILDER = (pathlib.Path(__file__).resolve().parents[1] / "dashboard" / "src" / "components"
+               / "LandingPages.vue").read_text(encoding="utf-8")
+
+    def test_the_username_step_stands_where_the_goal_step_is_skipped(self):
+        self.assertIn('wizardStep === 2 && wizardAsksUsername', self.BUILDER)
+        self.assertIn('wizardStep.value = wizardAsksUsername.value ? 2 : 3', self.BUILDER)
+
+    def test_it_is_only_asked_where_the_url_would_exist(self):
+        # Collecting an answer with no visible effect is the unactionable-control failure again.
+        self.assertIn("wizardSkipsGoal.value && !!sitesStore.creatorDomain", self.BUILDER)
+
+    def test_the_step_rail_counts_a_SUBSTITUTED_step_correctly(self):
+        """Swapping Goal for Username does not shorten the wizard; skipping it does.
+
+        One predicate reads by all three rail calculations, because they have to agree and the comment above
+        them records what happens when they do not: a rail that lies about how much is left.
+        """
+        self.assertIn("wizardDropsAStep = computed(() => wizardSkipsGoal.value && !wizardAsksUsername.value)",
+                      self.BUILDER)
+        for calc in ("const displayTotal", "const displayStep"):
+            block = self.BUILDER.split(calc, 1)[1][:260]
+            self.assertIn("wizardDropsAStep", block, calc)
+
+    def test_the_handle_is_written_to_the_SITE_not_the_page(self):
+        # One handle per Site, however many hubs it ever has.
+        self.assertIn("creator_username: handle", self.BUILDER)
+        self.assertIn("await saveCreatorUsername(site)", self.BUILDER)
+
+    def test_a_taken_username_does_not_cost_the_tenant_their_page(self):
+        block = self.BUILDER.split("async function saveCreatorUsername(", 1)[1].split("\n}", 1)[0]
+        self.assertIn("catch", block)
+        self.assertIn("Set it in Sites.", block)
