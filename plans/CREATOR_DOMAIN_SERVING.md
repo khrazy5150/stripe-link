@@ -184,12 +184,31 @@ Retired lists are **server-owned**. They decide what the edge does with an addre
 them could name someone else's hostname and point it at itself. The update path overwrites from the stored
 document; the create path strips them.
 
+## 4e. The Worker is NOT deployed by deploy.sh
+
+Worth its own heading because it cost a round trip. `deploy/cloudflare-custom-domain-worker.js` is a file in
+this repo that only reaches the edge when somebody runs
+`deploy/setup-cloudflare-custom-domain-worker.sh` against a zone. A normal `./deploy/deploy.sh <env>` does
+nothing to it. Change the file, commit it, deploy the stack, and the OLD worker is still answering every
+request — which is exactly what happened on 2026-09-18: the ported error page was live in git and absent from
+the internet, and only a `curl` showed it (`content-type: text/plain`, the old body).
+
+**Anything touching that file needs a run per zone**, and the zones are environment-scoped:
+
+```
+CLOUDFLARE_ZONE_ID=d5a70f95c54659e26600cae1bb0ce48a STACK_NAME=jb-stripe-link-stack-dev  ENVIRONMENT=dev  ./deploy/setup-cloudflare-custom-domain-worker.sh   # jbay.be
+CLOUDFLARE_ZONE_ID=d842792b5a5240f5518f263835220df6 STACK_NAME=jb-stripe-link-stack-prod ENVIRONMENT=prod ./deploy/setup-cloudflare-custom-domain-worker.sh   # jbay.uk
+```
+
+Verify with `curl -i`, never by reading the repo: the file says what SHOULD be at the edge, not what is.
+
 ## 5. Before it can be flipped on
 
 1. **plans/CREATOR_LINK_POLICY.md must ship.** Allowlist, host-derived adult warning, takedown path. These
    pages carry no payment, so the outbound link is the only lever an abuser has on the shared apex. This is
    the gate, not a nice-to-have.
-2. **Buy `jbay.page`; add the zone to the same Cloudflare account.** The API token is already all-zones.
+2. ~~**Buy `jbay.page`; add the zone.**~~ **DONE** — the zone is already on the account (verified 2026-09-18,
+   id `b9b06f81f20542a12a67e9f6fb70c552`), alongside `jbay.uk` and `jbay.be`. The API token is all-zones.
 3. **Run the Worker setup for the new zone, once per environment** — it is already zone-parameterised, and
    the route pattern is what separates them:
    ```

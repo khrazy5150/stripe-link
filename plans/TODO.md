@@ -884,6 +884,17 @@ they fire on pages that cannot be indexed at all, which is the same unactionable
 **Not** an argument for making the goal picker do more work at create time. The goal governs composition; the
 gap is that a name promising search performance is attached to a pack that seeds an FAQ.
 
+### LOW — a draft page's Site URL serves a raw CloudFront 403 (found 2026-09-18)
+
+Noticed while verifying the new edge error page. A page attached to a Site but still a DRAFT has no published
+artifact, so the resolver hands the Worker an origin_url that does not exist and the visitor gets
+CloudFront's own 403 — platform plumbing, in the one place a stranger might land. Three dev Sites do this
+today (`/creatine-gummies`, `/mini-guard-cam`, `/emergency-water-damage`).
+
+It should be the same 404 page everything else now gets. Pre-existing and unrelated to the archive work, but
+the same class: a visitor seeing our internals because a URL resolved further than the content did. Cheapest
+fix is probably the Worker treating a non-OK origin response as a not-found rather than proxying it through.
+
 ### LOW — three shipped presets pair their CTA gradient with white below WCAG AA (measured 2026-09-17)
 
 Found while fixing the section tones, and deliberately NOT fixed there. Measured on the shipped
