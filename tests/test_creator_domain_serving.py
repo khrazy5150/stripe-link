@@ -142,15 +142,37 @@ class PublicUrlTests(unittest.TestCase):
         self.assertIn("page_home_url = creator_url", block)
 
     def test_the_dashboard_is_told_the_apex_rather_than_hardcoding_it(self):
-        """It differs per environment and is off until configured, so a hardcoded default would show a URL
-        that does not resolve."""
+        """The apex differs per environment, so a hardcoded default would show a URL for the wrong one."""
         root = pathlib.Path(__file__).resolve().parents[1]
         handler = (root / "src" / "handlers" / "sites.py").read_text(encoding="utf-8")
-        self.assertIn('"creator_domain": creator_hosting_domain() if creator_serving_enabled() else ""', handler)
+        self.assertIn('"creator_domain": creator_hosting_domain()', handler)
         store = (root / "dashboard" / "src" / "stores" / "sites.js").read_text(encoding="utf-8")
         self.assertIn('creatorDomain: ""', store)
+
+    def test_having_an_apex_and_serving_on_it_are_separate_facts(self):
+        """Reported 2026-09-17: the username step never appeared and the rail dropped to four steps.
+
+        Working as designed, and the design was wrong. Gating the QUESTION on serving meant no handle could be
+        claimed until the domain went live -- so every tenant created in the meantime would have had one
+        auto-derived from their store label, which is exactly what the field exists to avoid.
+
+        So: ask as soon as the environment has an apex; advertise the URL only once it resolves.
+        """
+        root = pathlib.Path(__file__).resolve().parents[1]
+        handler = (root / "src" / "handlers" / "sites.py").read_text(encoding="utf-8")
+        self.assertIn('"creator_serving": creator_serving_enabled()', handler)
         builder = (root / "dashboard" / "src" / "components" / "LandingPages.vue").read_text(encoding="utf-8")
-        self.assertIn('entry?.composition === "lead_social" && sitesStore.creatorDomain', builder)
+        # asked on having an apex...
+        self.assertIn("wizardSkipsGoal.value && !!sitesStore.creatorDomain", builder)
+        # ...advertised only on serving.
+        self.assertIn('entry?.composition === "lead_social" && sitesStore.creatorServing', builder)
+
+    def test_the_tenant_is_told_it_is_not_live_yet(self):
+        # Claiming a name for a URL that does not resolve is fine; letting them think it resolves is not.
+        builder = (pathlib.Path(__file__).resolve().parents[1] / "dashboard" / "src" / "components"
+                   / "LandingPages.vue").read_text(encoding="utf-8")
+        self.assertIn('v-if="!sitesStore.creatorServing"', builder)
+        self.assertIn("choosing now reserves this name for you", builder)
 
 
 class NoIndexTests(unittest.TestCase):

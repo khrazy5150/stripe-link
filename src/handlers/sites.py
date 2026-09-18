@@ -497,11 +497,14 @@ def list_sites(event, repository):
     _refresh_eligibility(repository, tenant_id, sites)
     # Tell the dashboard THIS environment's free-tier hosting domain (prod jbay.uk / test jbay.be) so the
     # "store address" suffix + copy reflect the env instead of a hardcoded value.
-    # creator_domain is "" until link-in-bio serving is configured for this environment. That empty string is
-    # the signal the dashboard uses to decide whether a link hub has a creator URL to show at all -- read from
-    # the same place the publisher reads it, rather than the dashboard hardcoding an apex that differs per env.
+    # TWO facts, deliberately separate. `creator_domain` is the apex, present as soon as the environment has
+    # one -- the dashboard needs it to ASK for a handle, and handles must be claimable before the domain goes
+    # live or every tenant created in the meantime ends up with one auto-derived from their store label, which
+    # is the thing the field exists to avoid. `creator_serving` says whether it actually RESOLVES yet, which is
+    # the narrower question of whether a hub may advertise that URL as its public address.
     return json_response({"sites": sites, "hosting_domain": hosting_domain(),
-                          "creator_domain": creator_hosting_domain() if creator_serving_enabled() else ""})
+                          "creator_domain": creator_hosting_domain(),
+                          "creator_serving": creator_serving_enabled()})
 
 
 def _refresh_eligibility(repository, tenant_id, sites):

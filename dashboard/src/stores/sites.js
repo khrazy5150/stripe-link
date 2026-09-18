@@ -80,10 +80,13 @@ export const useSitesStore = defineStore("sites", {
     error: "",
     message: "",
     hostingDomain: "jbay.uk",  // this environment's free-tier Site domain; overwritten from the API (jbay.be in test)
-    // The link-in-bio apex, from the API. Starts EMPTY and stays empty until the server says otherwise --
-    // it differs per environment (jbay.page / test.jbay.page) and is off entirely until configured, so a
-    // hardcoded default here would show tenants a URL that does not resolve.
+    // The link-in-bio apex, from the API -- empty until the environment has one, and never hardcoded here
+    // because it differs per environment (jbay.page / test.jbay.page).
     creatorDomain: "",
+    // ...and whether it RESOLVES yet. Separate from having an apex: a handle is claimable before the domain
+    // goes live (otherwise every tenant in the meantime gets one derived from their store label), but only a
+    // serving domain may be shown as a page's public address.
+    creatorServing: false,
   }),
   getters: {
     hasSites: (state) => state.sites.length > 0,
@@ -109,6 +112,7 @@ export const useSitesStore = defineStore("sites", {
         this.sites = Array.isArray(body.sites) ? body.sites : [];
         if (body.hosting_domain) this.hostingDomain = body.hosting_domain;
         this.creatorDomain = body.creator_domain || "";
+        this.creatorServing = !!body.creator_serving;
         this.loaded = true;
       } catch (error) {
         this.error = error.message || "Failed to load sites.";

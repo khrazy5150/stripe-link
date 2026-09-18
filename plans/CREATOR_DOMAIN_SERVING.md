@@ -67,6 +67,15 @@ nobody can act on.
 The field is `StoreAddressField` with a `prefix` flag — a handle and a store address share a namespace, a
 syntax rule and an availability check, and differ only in which side of the separator the domain sits.
 
+**Asked as soon as the environment has an apex, not once it serves.** The first cut gated the question on
+`creator_serving`, so on a stack with serving off the step silently vanished and the rail dropped to four —
+reported 2026-09-17, working as designed, and the design was wrong. No handle could be claimed until the
+domain went live, which means every tenant created in the meantime would have had one auto-derived from their
+store label: exactly what the field exists to avoid. `GET /sites` therefore returns two separate facts —
+`creator_domain` (an apex exists, so ask) and `creator_serving` (it resolves, so a hub may advertise it). The
+wizard says plainly that addresses are not live yet, because claiming a name for a future URL is fine and
+letting someone think it already works is not.
+
 ## 4. What serves there: the hub, and nothing else
 
 `creator_domain_index_record` returns an **empty route table** and one `target_page_id`. That is the

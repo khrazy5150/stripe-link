@@ -1672,6 +1672,9 @@
             />
             <p class="field-note">
               You can change this later in Sites. Your store keeps its own address either way.
+              <template v-if="!sitesStore.creatorServing">
+                Link-in-bio addresses aren't live yet — choosing now reserves this name for you.
+              </template>
             </p>
           </section>
 
@@ -3710,9 +3713,11 @@ const wizardTotalSteps = computed(() => (form.pageKind === "offer" ? 4 : 2));
 // A skipped step must not leave a hole in the count: without this a Social Page read "Step 2 of 5" and
 // then "Step 4 of 5", which looks like the wizard lost one.
 const wizardSkipsGoal = computed(() => form.pageKind === "offer" && selectedOfferIsSocialPage.value);
-// A Social Page is asked for a username INSTEAD of a goal -- but only where link-in-bio serving is actually
-// configured. Asking for a handle in an environment that serves none would be collecting an answer with no
-// visible effect, which is the same unactionable-control failure as a notice nobody can act on.
+// A Social Page is asked for a username INSTEAD of a goal, as soon as the environment HAS an apex -- not
+// only once it serves. Handles have to be claimable before the domain goes live, or every tenant created in
+// the meantime gets one auto-derived from their store label, which is the thing the field exists to avoid.
+// Whether the URL resolves yet is a different question, answered by creatorServing where it matters: which
+// address the page advertises as its own.
 const wizardAsksUsername = computed(() => wizardSkipsGoal.value && !!sitesStore.creatorDomain);
 // Seed the handle from the Site's own name, the way the store address is seeded from it.
 const creatorUsernameSeed = computed(() =>
@@ -3858,7 +3863,7 @@ function sitePublicUrl(page) {
       // jbay.page/maria IS the page. Shown only once the server says this environment serves them, so a
       // tenant is never handed a URL that does not resolve. The hub stays reachable on the Site's host too —
       // this is which of the two to show, and matches the canonical the published artifact carries.
-      if (entry?.composition === "lead_social" && sitesStore.creatorDomain) {
+      if (entry?.composition === "lead_social" && sitesStore.creatorServing) {
         const username = String(hosting.platform_hostname || "").split(".")[0];
         if (username) return `https://${sitesStore.creatorDomain}/${username}`;
       }
