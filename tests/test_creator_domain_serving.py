@@ -18,7 +18,8 @@ from unittest import mock
 
 from handlers import custom_domains_resolve
 from stripe_link.domain.custom_domains import (
-    creator_domain_index_record, creator_host_key, creator_page_entry, creator_username)
+    creator_domain_index_record, creator_host_key, creator_page_entry, creator_page_url,
+    creator_username)
 
 DOMAIN = "jbay.page"
 
@@ -107,6 +108,49 @@ class ResolverTests(unittest.TestCase):
     def test_it_is_inert_until_the_domain_is_configured(self):
         # An unset CREATOR_HOSTING_DOMAIN must not turn some other host into a creator apex.
         self.assertEqual(self._lookup("jbay.page", "/maria", domain=""), ("", "/maria"))
+
+
+class PublicUrlTests(unittest.TestCase):
+    """Resolution was only half of it.
+
+    Reported 2026-09-17: "publishing a social page goes here: poliaxis-nutrition.jbay.uk/link-bio NOT to
+    jbay.page". Correct at the time -- serving was off and the domain unbought -- but it exposed that the
+    index record makes the creator URL RESOLVE while nothing made it the page's identity or showed it to the
+    tenant. A URL that works and that nobody is told about is not shipped.
+    """
+
+    def test_the_hub_url_is_the_username_not_the_slug(self):
+        # jbay.page/maria IS the page. jbay.page/maria/link-bio would be a slug nobody typed.
+        self.assertEqual(creator_page_url(_site(), "page_hub", DOMAIN), "https://jbay.page/maria")
+
+    def test_only_the_hub_gets_one(self):
+        for other in ("page_home", "page_buy", ""):
+            self.assertEqual(creator_page_url(_site(), other, DOMAIN), "", other)
+
+    def test_an_unconfigured_environment_offers_no_url(self):
+        self.assertEqual(creator_page_url(_site(), "page_hub", ""), "")
+
+    def test_the_artifact_takes_it_as_canonical_and_home(self):
+        """Which of the two addresses is the real one -- the hub stays reachable on the Site's host too."""
+        import inspect
+
+        from stripe_link.runtime import publishing
+
+        source = inspect.getsource(publishing)
+        block = source.split("creator_url = creator_page_url(", 1)[1].split("eligibility =", 1)[0]
+        self.assertIn("page_canonical = creator_url", block)
+        self.assertIn("page_home_url = creator_url", block)
+
+    def test_the_dashboard_is_told_the_apex_rather_than_hardcoding_it(self):
+        """It differs per environment and is off until configured, so a hardcoded default would show a URL
+        that does not resolve."""
+        root = pathlib.Path(__file__).resolve().parents[1]
+        handler = (root / "src" / "handlers" / "sites.py").read_text(encoding="utf-8")
+        self.assertIn('"creator_domain": creator_hosting_domain() if creator_serving_enabled() else ""', handler)
+        store = (root / "dashboard" / "src" / "stores" / "sites.js").read_text(encoding="utf-8")
+        self.assertIn('creatorDomain: ""', store)
+        builder = (root / "dashboard" / "src" / "components" / "LandingPages.vue").read_text(encoding="utf-8")
+        self.assertIn('entry?.composition === "lead_social" && sitesStore.creatorDomain', builder)
 
 
 class NoIndexTests(unittest.TestCase):

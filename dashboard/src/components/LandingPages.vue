@@ -3796,7 +3796,16 @@ function sitePublicUrl(page) {
     const host = (hosting.custom_domain && hosting.verification?.verified) ? hosting.custom_domain : hosting.platform_hostname;
     if (!host) continue;
     for (const [slug, entry] of Object.entries(s.pages || {})) {
-      if (entry?.page_id === page.page_id) return `https://${host}${slug === "/" ? "/" : slug}`;
+      if (entry?.page_id !== page.page_id) continue;
+      // A LINK HUB's public URL is its creator URL, and it is the username rather than the page's own slug:
+      // jbay.page/maria IS the page. Shown only once the server says this environment serves them, so a
+      // tenant is never handed a URL that does not resolve. The hub stays reachable on the Site's host too —
+      // this is which of the two to show, and matches the canonical the published artifact carries.
+      if (entry?.composition === "lead_social" && sitesStore.creatorDomain) {
+        const username = String(hosting.platform_hostname || "").split(".")[0];
+        if (username) return `https://${sitesStore.creatorDomain}/${username}`;
+      }
+      return `https://${host}${slug === "/" ? "/" : slug}`;
     }
   }
   return "";

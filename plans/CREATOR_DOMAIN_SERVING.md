@@ -94,6 +94,27 @@ across an ordinary deploy rather than resetting it — the same rule platform se
 The Worker's bare-apex guard is templated (`REPLACE_WITH_CREATOR_HOST`) for the same reason: a dev worker
 must not treat the prod apex as its own front door.
 
+## 4c. Which URL the page calls its own
+
+Added 2026-09-17 after the author published a hub and got `poliaxis-nutrition.jbay.uk/link-bio`. Correct at
+the time — serving was off and the domain unbought — but it exposed that §2 only made the creator URL
+**resolve**. Nothing made it the page's identity, and nothing told the tenant it existed. A URL that works
+and that nobody is told about is not shipped.
+
+A hub is attached to its Site like any other page, so it stays reachable at `{site}.jbay.uk/{slug}`. What
+changed is which of the two addresses is the real one:
+
+- The published artifact's **canonical and home_url** become the creator URL.
+- The dashboard shows the creator URL for a hub, from `GET /sites` → `creator_domain` — empty until the
+  environment is configured, so a tenant is never handed a URL that does not resolve.
+
+Both take the URL **whole**, not as origin + slug: `jbay.page/maria` IS the page, where
+`jbay.page/maria/link-bio` would be a slug nobody typed and nobody would share.
+
+Still open: whether `{site}.jbay.uk/{slug}` should 301 to the creator URL rather than serve the same page at
+two addresses. The canonical already says which is preferred; a redirect would make it unambiguous, at the
+cost of breaking any link already shared. Worth deciding before the first tenant shares one.
+
 ## 5. Before it can be flipped on
 
 1. **plans/CREATOR_LINK_POLICY.md must ship.** Allowlist, host-derived adult warning, takedown path. These
@@ -129,5 +150,5 @@ one. Fixed in this slice rather than left as a launch note.
   it is unclaimable — but the apex should serve a real robots.txt. Cloudflare-level, not application-level.
 - **The bare apex** redirects to `juniorbay.com` from the Worker. Fine as a placeholder; it is the domain's
   front door and deserves a decision.
-- **No dashboard surface yet.** Nothing shows a tenant their creator URL, and nothing lets them pick a
-  username distinct from their store label. Deliberate: the URL should not be advertised before §5.1 ships.
+- **A username cannot differ from the store label.** See §3 before adding a second field — one namespace is
+  what stops `maria.jbay.uk` and `jbay.page/maria` being different people.

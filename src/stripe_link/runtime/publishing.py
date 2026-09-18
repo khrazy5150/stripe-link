@@ -30,7 +30,8 @@ from stripe_link.domain.social_links import section_own_links
 from stripe_link.domain.tips import stamp_tip_jar
 from stripe_link.domain.connect_sync import site_domain_verified, site_seo_enabled
 from stripe_link.domain.custom_domains import (
-    creator_domain_index_record, domain_index_record, platform_domain_index_record)
+    creator_domain_index_record, creator_hosting_domain, creator_page_url, creator_serving_enabled,
+    domain_index_record, platform_domain_index_record)
 from stripe_link.domain.funnels import funnel_slug_entries, post_purchase_plan
 from stripe_link.domain.opportunities import STAGE_LANDING, STAGE_POST_PURCHASE, stage_opportunities
 from stripe_link.runtime.upsell_pages import (
@@ -110,28 +111,6 @@ def platform_serving_enabled() -> bool:
     relative internal links that dead-end before the *.jbay.uk/*.jbay.be edge Worker is wired. Default off;
     flip PLATFORM_SERVING_ENABLED on per environment once the edge route is live (the ops slice)."""
     return str(os.environ.get("PLATFORM_SERVING_ENABLED") or "").strip().lower() in ("1", "true", "yes", "on")
-
-
-def creator_hosting_domain() -> str:
-    """The apex link-in-bio pages serve under, per environment: `jbay.page` on prod, `test.jbay.page` on dev.
-
-    Deliberately NOT the platform hosting domain -- it is the only surface carrying tenant-authored outbound
-    links, and a reputation hit there must not reach commerce.
-
-    NO built-in default, and that is the point. A hardcoded fallback would have made a dev stack with an unset
-    variable write `jbay.page/{username}` records for TEST pages, on the apex prod serves live ones from. The
-    per-environment split is the same one the platform host already makes (jbay.uk vs jbay.be); empty means
-    the feature is off, which is what an unconfigured environment should get."""
-    return str(os.environ.get("CREATOR_HOSTING_DOMAIN") or "").strip()
-
-
-def creator_serving_enabled() -> bool:
-    """Whether link hubs serve on {creator domain}/{username}. Default OFF, and it stays off until three
-    things are true, not one: the zone exists, the Worker route is live, and plans/CREATOR_LINK_POLICY.md has
-    shipped. That policy is the admission ticket for a shared apex carrying outbound links -- the pages carry
-    no payment, so the link is the only lever an abuser has, and the allowlist/warning/takedown path is what
-    keeps the domain alive."""
-    return str(os.environ.get("CREATOR_SERVING_ENABLED") or "").strip().lower() in ("1", "true", "yes", "on")
 
 
 def site_is_served(site: dict[str, Any] | None) -> bool:
@@ -1212,6 +1191,15 @@ def publish_page_document(
     canonical_path = "" if page_site_slug in ("", "/") else page_site_slug.lstrip("/")
     page_canonical = f"{serving_origin}/{canonical_path}" if serving_origin else canonical_url
     page_home_url = f"{serving_origin}/" if serving_origin else ""
+    # A link hub PREFERS its creator URL, and takes it whole rather than as origin + slug: `jbay.page/maria`
+    # IS the page, where `jbay.page/maria/link-bio` would be a slug nobody typed. It stays reachable on the
+    # Site's own host -- it is attached there like any other page -- so the canonical is what says which of
+    # the two addresses is the real one, and the hub's `home` is itself.
+    if creator_serving_enabled() and site:
+        creator_url = creator_page_url(site, page_id, creator_hosting_domain())
+        if creator_url:
+            page_canonical = creator_url
+            page_home_url = creator_url
     eligibility = ((site or {}).get("indexing") or {}).get("eligibility") or "blocked"
     site_archived = (site or {}).get("status") == "archived"
     seo_enabled = site_seo_enabled(site)  # Site-level "discover in search" switch; off → force noindex + no crawl

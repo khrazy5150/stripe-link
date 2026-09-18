@@ -11,6 +11,8 @@ from stripe_link.domain.sitemap import generate_indexnow_key
 from stripe_link.stripe_client import stripe_request
 from stripe_link.stripe_platform_secrets import get_platform_secret_key
 from stripe_link.domain.custom_domains import (
+    creator_hosting_domain,
+    creator_serving_enabled,
     CustomDomainError,
     assert_valid_domain,
     create_custom_hostname,
@@ -469,7 +471,11 @@ def list_sites(event, repository):
     _refresh_eligibility(repository, tenant_id, sites)
     # Tell the dashboard THIS environment's free-tier hosting domain (prod jbay.uk / test jbay.be) so the
     # "store address" suffix + copy reflect the env instead of a hardcoded value.
-    return json_response({"sites": sites, "hosting_domain": hosting_domain()})
+    # creator_domain is "" until link-in-bio serving is configured for this environment. That empty string is
+    # the signal the dashboard uses to decide whether a link hub has a creator URL to show at all -- read from
+    # the same place the publisher reads it, rather than the dashboard hardcoding an apex that differs per env.
+    return json_response({"sites": sites, "hosting_domain": hosting_domain(),
+                          "creator_domain": creator_hosting_domain() if creator_serving_enabled() else ""})
 
 
 def _refresh_eligibility(repository, tenant_id, sites):

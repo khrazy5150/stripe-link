@@ -1,4 +1,5 @@
 import json
+import os
 import re
 from typing import Any
 from urllib.error import HTTPError
@@ -147,6 +148,28 @@ def platform_domain_index_record(site: dict[str, Any]) -> dict[str, Any] | None:
 # That alternative reads cheaper and is a single hot item, unbounded in size, where one tenant's publish
 # rewrites every other tenant's routes and one bad write takes the whole domain down. Per-username records are
 # the same shape the resolver already reads: one tenant, one page.
+def creator_hosting_domain() -> str:
+    """The apex link-in-bio pages serve under, per environment: `jbay.page` on prod, `test.jbay.page` on dev.
+
+    Deliberately NOT the platform hosting domain -- it is the only surface carrying tenant-authored outbound
+    links, and a reputation hit there must not reach commerce.
+
+    NO built-in default, and that is the point. A hardcoded fallback would have made a dev stack with an unset
+    variable write `jbay.page/{username}` records for TEST pages, on the apex prod serves live ones from. The
+    per-environment split is the same one the platform host already makes (jbay.uk vs jbay.be); empty means
+    the feature is off, which is what an unconfigured environment should get."""
+    return str(os.environ.get("CREATOR_HOSTING_DOMAIN") or "").strip()
+
+
+def creator_serving_enabled() -> bool:
+    """Whether link hubs serve on {creator domain}/{username}. Default OFF, and it stays off until three
+    things are true, not one: the zone exists, the Worker route is live, and plans/CREATOR_LINK_POLICY.md has
+    shipped. That policy is the admission ticket for a shared apex carrying outbound links -- the pages carry
+    no payment, so the link is the only lever an abuser has, and the allowlist/warning/takedown path is what
+    keeps the domain alive."""
+    return str(os.environ.get("CREATOR_SERVING_ENABLED") or "").strip().lower() in ("1", "true", "yes", "on")
+
+
 def creator_host_key(creator_domain: str, username: str) -> str:
     """The domain-index key for a creator page: `{domain}/{username}`, both normalized."""
     domain = normalize_domain(creator_domain)
@@ -179,6 +202,20 @@ def creator_page_entry(site: dict[str, Any]) -> tuple[str, dict[str, Any]] | Non
                if isinstance(entry, dict) and entry.get("composition") == "lead_social"
                and str(entry.get("page_id") or "")]
     return sorted(entries)[0] if entries else None
+
+
+def creator_page_url(site: dict[str, Any], page_id: str, creator_domain: str) -> str:
+    """The public URL of this Site's link hub: `https://{creator_domain}/{username}`, or "" when it is not one.
+
+    The hub's URL is the username -- NOT the origin plus the page's own slug, the way every other page on a
+    Site is addressed. A link hub is the whole point of the apex it sits on, so `jbay.page/maria` IS the page;
+    `jbay.page/maria/link-bio` would be a slug nobody typed and nobody would share.
+    """
+    found = creator_page_entry(site)
+    if not found or not page_id or str(found[1].get("page_id") or "") != str(page_id):
+        return ""
+    host_key = creator_host_key(creator_domain, creator_username(site))
+    return f"https://{host_key}" if host_key else ""
 
 
 def creator_domain_index_record(site: dict[str, Any], creator_domain: str) -> dict[str, Any] | None:
