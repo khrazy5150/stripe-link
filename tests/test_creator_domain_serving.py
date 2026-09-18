@@ -333,7 +333,7 @@ class WizardTests(unittest.TestCase):
     def test_the_handle_is_written_to_the_SITE_not_the_page(self):
         # One handle per Site, however many hubs it ever has.
         self.assertIn("creator_username: handle", self.BUILDER)
-        self.assertIn("await saveCreatorUsername(site)", self.BUILDER)
+        self.assertIn("await saveCreatorUsername(siteId)", self.BUILDER)
 
     def test_a_taken_username_does_not_cost_the_tenant_their_page(self):
         block = self.BUILDER.split("async function saveCreatorUsername(", 1)[1].split("\n}", 1)[0]

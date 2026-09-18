@@ -4108,8 +4108,15 @@ async function attachCreatedPageToSite(saved, siteId, kind, category, errorRef =
 
 // Write the handle the wizard asked for onto its Site. Non-fatal: the page is saved and attached either way,
 // and the Site's own screen can set it -- losing the page over a taken username would be a bad trade.
-async function saveCreatorUsername(site) {
+//
+// Takes an ID and reads the Site HERE, never a document handed in by the caller. It runs immediately after
+// the attach, which rewrites that Site's `pages` map server-side; a snapshot taken before it is already
+// stale, and saving one posts the pre-attach map back and silently un-attaches the page that was just
+// attached. That is what this function did on its first day (reported 2026-09-17: the "not attached to a
+// Site" notice reappearing right after a successful create).
+async function saveCreatorUsername(siteId) {
   const handle = String(form.creatorUsername || "").trim().toLowerCase();
+  const site = sitesStore.sites.find((entry) => entry.site_id === siteId);
   if (!site || !handle || (site.hosting || {}).creator_username === handle) return;
   try {
     await sitesStore.save({ ...site, hosting: { ...(site.hosting || {}), creator_username: handle } });
@@ -4892,11 +4899,14 @@ async function saveBuilderPageWithStatus(statusOverride = "", { silent = false }
     // the tenant's answer was dropped, and they were told to go and give it again from the page menu.
     let attachedName = "";
     if (firstSave && pendingSiteAttach.value) {
-      const site = sitesStore.sites.find((entry) => entry.site_id === pendingSiteAttach.value);
-      if (await attachCreatedPageToSite(saved, pendingSiteAttach.value, "offer", undefined, error)) {
-        attachedName = site?.name || "your Site";
+      const siteId = pendingSiteAttach.value;
+      // The NAME is safe to read up front (the attach does not change it); the DOCUMENT is not, so
+      // saveCreatorUsername re-reads it after the attach has rewritten the Site's page map.
+      const siteName = sitesStore.sites.find((entry) => entry.site_id === siteId)?.name;
+      if (await attachCreatedPageToSite(saved, siteId, "offer", undefined, error)) {
+        attachedName = siteName || "your Site";
       }
-      await saveCreatorUsername(site);
+      await saveCreatorUsername(siteId);
       pendingSiteAttach.value = "";
     }
     if (!silent) {

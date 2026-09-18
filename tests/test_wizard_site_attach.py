@@ -55,8 +55,7 @@ class AttachOnFirstSaveTests(unittest.TestCase):
         # The helper defaulted to `wizardError`, which the builder does not render -- the attach would fail
         # silently and the tenant would find out by publishing an unattached page.
         self.assertIn("errorRef = wizardError", BUILDER)
-        self.assertIn('attachCreatedPageToSite(saved, pendingSiteAttach.value, "offer", undefined, error)',
-                      BUILDER)
+        self.assertIn('attachCreatedPageToSite(saved, siteId, "offer", undefined, error)', BUILDER)
 
 
 class NoOrphanedCopyTests(unittest.TestCase):
@@ -73,7 +72,10 @@ class NoOrphanedCopyTests(unittest.TestCase):
 
         Clearing it in resetWizard does not count: that discards the choice, it does not honour it.
         """
-        self.assertEqual(BUILDER.count("attachCreatedPageToSite(saved, pendingSiteAttach.value"), 1)
+        # Counted on the CHOICE being acted on, not on the call's literal text -- the helper's own parameter
+        # is named siteId too, so matching that counted the definition as a second consumer.
+        self.assertEqual(BUILDER.count("firstSave && pendingSiteAttach.value"), 1)
+        self.assertEqual(BUILDER.count("const siteId = pendingSiteAttach.value;"), 1)
 
 
 class NoticeTests(unittest.TestCase):
@@ -94,3 +96,30 @@ class NoticeTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class StaleSiteAfterAttachTests(unittest.TestCase):
+    """Nothing between the attach and the end of the save may write a Site document it read BEFORE it.
+
+    Reported 2026-09-17, the "not attached to a Site" notice reappearing right after a successful create. The
+    username save, added the same day, took the Site as an argument -- captured a line above the attach, which
+    rewrites that Site's `pages` map server-side. Saving the snapshot posted the pre-attach map back and
+    un-attached the page that had just been attached.
+
+    The shape is the one this codebase keeps producing: a value read before the write that invalidates it. The
+    fix is that the function takes an ID and reads the document itself, so there is no window to be stale in.
+    """
+
+    def test_the_username_save_takes_an_id_not_a_document(self):
+        self.assertIn("async function saveCreatorUsername(siteId)", BUILDER)
+        self.assertIn("await saveCreatorUsername(siteId)", BUILDER)
+
+    def test_it_reads_the_site_after_the_attach_not_before(self):
+        body = _function("saveCreatorUsername")
+        self.assertIn("sitesStore.sites.find((entry) => entry.site_id === siteId)", body)
+
+    def test_the_save_block_holds_no_site_document_across_the_attach(self):
+        """Only the NAME is carried over, which the attach cannot change."""
+        block = BUILDER.split("if (firstSave && pendingSiteAttach.value) {", 1)[1].split("\n    }", 1)[0]
+        self.assertIn("const siteName =", block)
+        self.assertNotIn("const site =", block)
