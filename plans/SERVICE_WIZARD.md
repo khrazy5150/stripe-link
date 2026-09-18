@@ -76,7 +76,16 @@ Consequences to accept if we go that way:
 The alternative — keep both, and ask a fourth question ("does this need appointments?") — is more honest to
 today's data model and worse to use: the tenant is made to understand our schema in order to sell a haircut.
 
-## 4. The wizard (the actual ask)
+## 4. The wizard (the actual ask) — **BUILT 2026-09-18**
+
+Shipped as described below, with one change the author's framing forced: *"a service tenant has NO IDEA about
+the physical products screen and vice-versa"*. So the wizard is the front door on **Services**, not a branch
+inside the Products wizard — a service tenant never has to find the product screen to use it. The Products
+wizard's "Service" option now hands off to it (via a new `navigateTo` provided by the shell) instead of
+running the physical path, which is what it used to do.
+
+Built as a presentation over ONE form and ONE save, not a second of either. `savePage()` in LandingPages.vue
+was the other approach and quietly stopped being called, taking its behaviour with it for weeks.
 
 Mirror the Products wizard exactly, because tenants have learned it. Four steps, not five — a service has no
 SKU/identifier step worth asking about at creation.
@@ -84,10 +93,13 @@ SKU/identifier step worth asking about at creation.
 | Step | Asks | Notes |
 |---|---|---|
 | 1. Purpose | already exists | "Sell something" → type "Service" routes here |
-| 2. Details | name, description, **duration** | the three required fields live here + step 3 |
+| 2. Details | name, description | "What do you offer?" |
 | 3. Pricing | reuse `PricingCard` | services already use the shared Price primitive |
-| 4. Scheduling | *does this need appointments?* → calendar, who performs it | defaults: yes, tenant's own calendar, tenant as fulfiller |
-| 5. Image | reuse `ProductImagesField` | identical to the product flow |
+| 4. Scheduling | *"Customers book an appointment for this"* → duration | writes `fulfillment_mode`; duration only when it is scheduled |
+| 5. Photo | hero image | optional |
+
+Deferred to the editor because each has a default that suits a first service: `location_mode`,
+`booking_flow`, and the whole fulfiller/compensation/check-in console.
 
 Everything else — fulfillers beyond oneself, compensation, overrides, check-in/completion labels and windows,
 location mode, tips-to-fulfiller — **moves to the editor**, exactly as the product wizard defers identifiers

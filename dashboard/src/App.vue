@@ -195,7 +195,7 @@
 </template>
 
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { computed, onBeforeUnmount, onMounted, provide, ref, watch } from "vue";
 import ABTesting from "./components/ABTesting.vue";
 import AuthPage from "./components/AuthPage.vue";
 import Billing from "./components/Billing.vue";
@@ -257,6 +257,10 @@ let toastSeen = new Set();
 let toastBaselined = false;
 let notificationsPoll = null;
 const activeView = ref("dashboard");
+// One screen handing off to another. Added 2026-09-18 so the product wizard can send a tenant to Services
+// instead of offering a "Service" type it does not build. Provided rather than emitted because the shell
+// owns which view is showing and nothing between it and a wizard step needs to know.
+provide("navigateTo", (view) => { activeView.value = view; });
 
 // The active Stripe MODE (test/live) — the dashboard toggle. Drives view remounts + data reloads and the theme
 // class; the backend base is hostname-derived, not this value (plans/STRIPE_MODE_DECOUPLING.md).

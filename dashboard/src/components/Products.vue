@@ -220,10 +220,24 @@
                   <select v-model="form.product_type">
                     <option value="physical">Physical — requires shipping</option>
                     <option value="digital">Digital — no shipping</option>
-                    <option value="service">Service — opens booking flow</option>
+                    <option value="service">Service — booked by appointment</option>
                   </select>
                   <span class="field-note">Determines fulfillment behavior and address collection at checkout.</span>
                 </label>
+                <!-- A service is not built here. This wizard collects SKUs, package dimensions and shipping;
+                     a service needs a duration, a calendar and who performs it, and has its own wizard. The
+                     option stays in the list because that is where a tenant looks for it -- it now hands off
+                     instead of quietly running the physical-product path, which is what it used to do
+                     (author, 2026-09-18: "the wizard incorrectly treats it like a physical product"). -->
+                <div v-if="form.product_type === 'service'" class="wizard-subsection">
+                  <p class="field-note">
+                    Services are set up in <strong>Services</strong>, where you can give them a duration and a
+                    calendar. It only takes a minute.
+                  </p>
+                  <button type="button" class="secondary-action compact" @click="goCreateService">
+                    Create a service instead →
+                  </button>
+                </div>
                 <ProductCategoryField v-model="form.product_category" :product-type="form.product_type" />
               </div>
 
@@ -515,7 +529,7 @@
 </template>
 
 <script setup>
-import { computed, h, nextTick, ref, watch } from "vue";
+import { computed, h, inject, nextTick, ref, watch } from "vue";
 import { apiRequest, toAssetCdnUrl } from "../api/client";
 import { defaultProductPrice, formatMoney, generateSku, normalizeTag, priceSummary, useProductsStore } from "../stores/products";
 // The lead-action glyph is shared with the Offers selector, so the same product looks the same on both.
@@ -587,6 +601,12 @@ const PRODUCT_INTENTS = [
   { key: "tip_jar", label: "Receive tips",
     description: "Supporters choose what to pay. You can have them cover the fees." },
 ];
+// Provided by the shell (App.vue). Absent in a test harness or a stray mount, hence the fallback.
+const navigateTo = inject("navigateTo", null);
+function goCreateService() {
+  if (navigateTo) navigateTo("services");
+}
+
 const wizardMode = ref(false);
 const wizardStep = ref(1);
 const wizardIntent = ref("transaction");
