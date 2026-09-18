@@ -471,6 +471,7 @@
           :ratios="imageRatios.asset.product"
           :crop="existingCrop(croppingUrl)"
           title="Crop this product photo"
+          :busy="cropBusy"
           @apply="applyProductCrop"
           @cancel="croppingUrl = ''"
         />

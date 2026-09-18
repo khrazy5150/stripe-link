@@ -28,6 +28,14 @@ const props = defineProps({
   // Reopen with the crop already applied, so a crop is an editable decision rather than a one-shot.
   crop: { type: Object, default: null },
   title: { type: String, default: "Crop, zoom, or move" },
+  /*
+   * The PARENT's crop is in flight. Applying a crop is a round trip to the image service, and the dialog
+   * stays open for it -- so without this the button sat enabled and unchanged while the work happened, which
+   * reads as "nothing happened" and invites a second click (reported 2026-09-17). Every caller already had
+   * this flag for its own buttons; none of them told the dialog, which is the only place the tenant is
+   * looking at that moment.
+   */
+  busy: { type: Boolean, default: false },
 });
 const emit = defineEmits(["apply", "cancel"]);
 
@@ -179,6 +187,7 @@ function apply() {
   // Round to the fifth decimal: enough precision for any real image, and it keeps the stored document and
   // the generated cache key stable instead of churning on floating-point noise.
   const round = (n) => Math.round(n * 1e5) / 1e5;
+  if (props.busy) return;   // a second apply mid-flight would upload the same crop twice
   emit("apply", {
     x: round(rect.x), y: round(rect.y), w: round(rect.w), h: round(rect.h),
     ar: Math.round(activeRatio.value * 1e5) / 1e5,
@@ -187,7 +196,10 @@ function apply() {
 </script>
 
 <template>
-  <div class="cropper-backdrop" role="dialog" aria-modal="true" :aria-label="title" @click.self="emit('cancel')">
+  <!-- Dismissal is blocked while a crop is in flight: cancelling does not abort the request, so it would
+       leave the tenant looking at the old image while the new one was still being written. -->
+  <div class="cropper-backdrop" role="dialog" aria-modal="true" :aria-label="title" :aria-busy="busy"
+       @click.self="busy || emit('cancel')">
     <div class="cropper-panel">
       <h3 class="cropper-title">{{ title }}</h3>
 
@@ -244,8 +256,10 @@ function apply() {
       <p v-else class="cropper-hint">This image is only large enough for one framing.</p>
 
       <div class="cropper-actions">
-        <button type="button" class="secondary-action" @click="emit('cancel')">Cancel</button>
-        <button type="button" class="primary-action" :disabled="!natural.width" @click="apply">Use this photo</button>
+        <button type="button" class="secondary-action" :disabled="busy" @click="emit('cancel')">Cancel</button>
+        <button type="button" class="primary-action" :disabled="!natural.width || busy" @click="apply">
+          {{ busy ? "Applying…" : "Use this photo" }}
+        </button>
       </div>
     </div>
   </div>

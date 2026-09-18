@@ -46,6 +46,7 @@
         :src="croppingUrl"
         :ratios="cropRatios"
         title="Crop this hero image"
+        :busy="cropBusy"
         @apply="applyCrop"
         @cancel="croppingUrl = ''"
       />

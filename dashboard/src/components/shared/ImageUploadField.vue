@@ -200,6 +200,7 @@ function previewStyle() {
       :src="cropSource"
       :ratios="ratios"
       :crop="crop"
+      :busy="uploading"
       @apply="applyCrop"
       @cancel="cropping = false"
     />
