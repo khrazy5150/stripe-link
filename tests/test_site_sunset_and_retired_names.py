@@ -212,3 +212,117 @@ class OneBuilderTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RenameActuallyRenamesTests(unittest.TestCase):
+    """Reported 2026-09-18: "Renaming a site isn't allowed. It's ignored."
+
+    Pre-existing, and it hid inside a reasonable-looking guard. The editor posts the whole Site back, so the
+    payload carries the OLD platform_hostname beside the newly typed platform_subdomain -- and
+    _ensure_platform_hostname saw a valid hostname, threw the subdomain away and returned. The rename did
+    nothing, silently, which is also why the retired-hostname redirect had never fired once in practice.
+    """
+
+    def setUp(self):
+        import os
+        from unittest import mock
+
+        self.env = mock.patch.dict(os.environ, {"PLATFORM_HOSTING_DOMAIN": "jbay.uk"})
+        self.env.start()
+        self.addCleanup(self.env.stop)
+
+    def test_a_typed_subdomain_beats_the_hostname_posted_alongside_it(self):
+        from handlers.sites import _ensure_platform_hostname
+
+        document = {"hosting": {"platform_hostname": "toys.jbay.uk", "platform_subdomain": "clothes"}}
+        _ensure_platform_hostname(document)
+        self.assertEqual(document["hosting"]["platform_hostname"], "clothes.jbay.uk")
+
+    def test_the_desired_name_never_survives_into_the_document(self):
+        from handlers.sites import _ensure_platform_hostname
+
+        document = {"hosting": {"platform_hostname": "toys.jbay.uk", "platform_subdomain": "clothes"}}
+        _ensure_platform_hostname(document)
+        self.assertNotIn("platform_subdomain", document["hosting"])
+
+    def test_no_subdomain_keeps_the_hostname_it_has(self):
+        from handlers.sites import _ensure_platform_hostname
+
+        document = {"hosting": {"platform_hostname": "toys.jbay.uk"}}
+        _ensure_platform_hostname(document)
+        self.assertEqual(document["hosting"]["platform_hostname"], "toys.jbay.uk")
+
+    def test_and_a_rename_now_leaves_a_redirect_behind(self):
+        # The end-to-end point: the fix above is what makes retired_hostnames reachable at all.
+        from handlers.sites import _ensure_platform_hostname
+
+        existing = _site()
+        document = _site()
+        document["hosting"]["platform_subdomain"] = "clothes"
+        _ensure_platform_hostname(document)
+        record_hosting_history(existing, document)
+        self.assertEqual(_by_domain(document)["toys.jbay.uk"]["redirect_to"], "clothes.jbay.uk")
+
+
+class ErrorPageTests(unittest.TestCase):
+    """Ported from stripe-cart's _error_page at the author's request."""
+
+    def setUp(self):
+        import pathlib
+
+        self.worker = (pathlib.Path(__file__).resolve().parents[1] / "deploy"
+                       / "cloudflare-custom-domain-worker.js").read_text(encoding="utf-8")
+
+    def test_it_is_a_real_page_not_a_line_of_text(self):
+        self.assertNotIn('"This store is not active."', self.worker)
+        self.assertIn("Oops! This page doesn't exist.", self.worker)
+
+    def test_it_carries_the_legacy_design(self):
+        for token in ("linear-gradient(135deg,#0f172a 0%,#1e293b 100%)",   # the slate ground
+                      "linear-gradient(135deg,#f59e0b,#ef4444)",           # amber->red heading
+                      "background-clip:text"):
+            self.assertIn(token, self.worker, token)
+
+    def test_it_is_reusable_for_other_statuses(self):
+        # The author's note: this surface is useful for more than a 404.
+        self.assertIn("function errorPage(status, message)", self.worker)
+        self.assertIn("status,", self.worker)
+
+    def test_it_never_says_why(self):
+        # Naming the cause tells a stranger about the tenant.
+        for leak in ("archived", "suspended", "retired", "renamed"):
+            self.assertNotIn(leak, self.worker.split("function errorPage", 1)[1].split("function notFound", 1)[0])
+
+    def test_it_is_not_indexed(self):
+        self.assertIn('name="robots" content="noindex,nofollow"', self.worker)
+
+
+class PillTests(unittest.TestCase):
+    """Colour is the whole message on a pill.
+
+    It was binary -- green when eligible, RED for everything else -- so a Site that has simply not connected a
+    custom domain, which is every free Site and not a problem, wore the same alarm colour as a closed one.
+    """
+
+    def setUp(self):
+        import pathlib
+
+        root = pathlib.Path(__file__).resolve().parents[1]
+        self.ui = (root / "dashboard" / "src" / "components" / "Sites.vue").read_text(encoding="utf-8")
+        self.css = (root / "dashboard" / "src" / "styles.css").read_text(encoding="utf-8")
+
+    def test_each_state_reads_differently(self):
+        block = self.ui.split("function indexClass(site)", 1)[1].split("\n}", 1)[0]
+        for state, klass in (('site.status === "archived"', '"archived"'),
+                             ('state === "eligible"', '"active"'),
+                             ('state === "pending"', '"pending"'),
+                             ('state === "revoked"', '"archived"')):
+            self.assertIn(state, block, state)
+            self.assertIn(klass, block, klass)
+        self.assertIn('return "inactive"', block)
+
+    def test_the_beige_is_the_one_already_defined(self):
+        # Reused rather than a second beige minted beside the first.
+        rule = self.css.split(".product-status.expired,", 1)[1].split("}", 1)[0]
+        self.assertIn(".product-status.pending", rule)
+        self.assertIn("#fef3c7", rule)

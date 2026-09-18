@@ -1166,8 +1166,16 @@ function indexLabel(site) {
   if (site.status === "archived") return "Archived";
   return ELIGIBILITY_LABELS[site.indexing?.eligibility] || "Not indexed";
 }
+// Four states, four readings. It used to be binary -- green when eligible, RED for everything else -- so a
+// Site that simply has not connected a custom domain yet, which is every free Site and not a problem at all,
+// wore the same alarm colour as a closed one. Colour is the whole message on a pill.
 function indexClass(site) {
-  return site.status !== "archived" && site.indexing?.eligibility === "eligible" ? "active" : "archived";
+  if (site.status === "archived") return "archived";             // red: closed
+  const state = site.indexing?.eligibility;
+  if (state === "eligible") return "active";                     // green: indexed
+  if (state === "pending") return "pending";                     // beige: on its way, nothing wrong
+  if (state === "revoked") return "archived";                    // red: Stripe restricted, needs action
+  return "inactive";                                             // grey: the ordinary free-address state
 }
 function indexReason(site) {
   if (site.status === "archived") return "This Site is closed — it has stopped serving and visitors see a page-not-found. Its addresses and usernames are still reserved to you; reactivate anytime to bring it back.";

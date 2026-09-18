@@ -76,22 +76,41 @@ async function handleShortUrl(sourceUrl) {
 }
 
 // What a visitor sees when an address does not resolve: a renamed creator handle, an archived Site, a slug
-// that was never published. Deliberately ONE page for all of them and deliberately vague -- "this store is
-// suspended" or "this creator renamed" tells a stranger about the tenant, and a bare Cloudflare 404 tells the
-// visitor the whole domain is broken. The status is a real 404, so crawlers drop it.
-function notFound() {
+// that was never published. Ported from stripe-cart's `_error_page` (src/test_page_serve.py) at the author's
+// request, so the platform's error surface looks the same either side of the migration.
+//
+// Deliberately ONE page for every cause, and deliberately vague. "This store is suspended" or "this creator
+// renamed" tells a stranger something about the tenant; a bare Cloudflare 404 tells the visitor the whole
+// domain is broken. Single-theme dark by design, like the original -- it is a standalone page with no host
+// theme to inherit, so it commits rather than guessing.
+//
+// Parameterised (status, message) because this is the platform's error page, not the 404: the same surface
+// should answer a 500 or a suspension when those need one.
+function errorPage(status, message) {
   const body = `<!doctype html><html lang="en"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow">
-<title>Page not found</title><style>
-:root{color-scheme:light dark}
-body{margin:0;min-height:100vh;display:grid;place-items:center;text-align:center;padding:2rem;
-background:#fbfbfc;color:#16161a;font:400 16px/1.6 ui-sans-serif,-apple-system,"Segoe UI",Roboto,sans-serif}
-@media (prefers-color-scheme:dark){body{background:#111114;color:#ececf1}}
-h1{margin:0 0 .5rem;font-size:1.6rem;font-weight:620;letter-spacing:-.02em}
-p{margin:0;opacity:.7;max-width:34ch}
-</style></head><body><div><h1>Oops! This page doesn't exist.</h1>
-<p>The link may be out of date, or the page may have moved.</p></div></body></html>`;
-  return new Response(body, { status: 404, headers: { "content-type": "text/html; charset=utf-8" } });
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<title>${status}</title><style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;
+background:linear-gradient(135deg,#0f172a 0%,#1e293b 100%);color:#f1f5f9;
+min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px}
+.container{text-align:center;max-width:500px}
+h1{font-size:4rem;line-height:1;margin-bottom:1rem;font-weight:800;letter-spacing:-.03em;
+background:linear-gradient(135deg,#f59e0b,#ef4444);-webkit-background-clip:text;background-clip:text;
+-webkit-text-fill-color:transparent;color:#f59e0b}
+p{font-size:1.25rem;color:#94a3b8;margin-bottom:2rem;text-wrap:balance}
+.badge{display:inline-block;background:rgba(245,158,11,.1);border:1px solid rgba(245,158,11,.3);
+color:#f59e0b;padding:.5rem 1rem;border-radius:9999px;font-size:.875rem}
+</style></head><body><div class="container">
+<h1>${status}</h1><p>${message}</p>
+<span class="badge">Junior Bay</span>
+</div></body></html>`;
+  return new Response(body, { status, headers: { "content-type": "text/html; charset=utf-8" } });
+}
+
+function notFound() {
+  return errorPage(404, "Oops! This page doesn't exist. The link may be out of date, or the page may have moved.");
 }
 
 // Serve a Site host — a tenant custom domain OR a free platform host. The resolve endpoint keys off the

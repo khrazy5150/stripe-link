@@ -974,6 +974,7 @@ main {
 }
 
 .product-status.expired,
+.product-status.pending,
 .product-status.fully_redeemed {
   background: #fef3c7;
   color: #92400e;

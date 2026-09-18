@@ -136,12 +136,19 @@ def _ensure_platform_hostname(document: dict) -> None:
     if not isinstance(hosting, dict):
         return
     hosting.setdefault("type", "platform")
-    if _HOSTNAME_RE.match(str(hosting.get("platform_hostname") or "")):
-        hosting.pop("platform_subdomain", None)
+    # An explicitly-sent platform_subdomain WINS. It used to lose: the editor posts the Site back whole, so it
+    # carries the old platform_hostname alongside the newly typed subdomain, and a valid hostname made this
+    # return early having thrown the subdomain away. Renaming a store address from the editor therefore did
+    # nothing at all, silently (reported 2026-09-18) -- which is also why the retired-hostname redirect had
+    # never once fired in practice. The field means "this is the name I want"; nothing else can mean that.
+    desired = normalize_subdomain(hosting.pop("platform_subdomain", "") or "")
+    if desired:
+        hosting["platform_hostname"] = f"{desired}.{hosting_domain()}"
         return
-    subdomain = normalize_subdomain(hosting.get("platform_subdomain") or document.get("name") or document.get("site_id")) or "site"
+    if _HOSTNAME_RE.match(str(hosting.get("platform_hostname") or "")):
+        return
+    subdomain = normalize_subdomain(document.get("name") or document.get("site_id")) or "site"
     hosting["platform_hostname"] = f"{subdomain}.{hosting_domain()}"
-    hosting.pop("platform_subdomain", None)
 
 
 def handler(event, context, repository=None, registry=None, tenant_repo=None):
