@@ -820,20 +820,23 @@ meet for the first time:
 
 Stripe test clocks are the practical way to do 5 without waiting a month.
 
-### ⭐ HIGH — turn on `jbay.page` link-in-bio serving (infrastructure BUILT dark 2026-09-17)
+### ✅ SHIPPED PROD 2026-09-18 — `jbay.page` link-in-bio serving is LIVE
 
 Application side is done and shipped behind `CreatorServingEnabled="false"` — plans/CREATOR_DOMAIN_SERVING.md.
 A Site now emits a THIRD domain-index record (`jbay.page/{username}`) alongside its custom-domain and
 platform-host records; no second Site, no duplicated infrastructure.
 
-What remains is ops and policy, in this order:
+**DONE:** zone + `A jbay.page` (proxied) + `jbay.page/*` Worker route + `CreatorServingEnabled=true` on prod
++ the hub 301 off the platform host. `jbay.page/poliaxis-nutrition` serves; `jbay.uk/link-bio` redirects to
+it; the apex is `X-Robots-Tag: noindex`. Sequence recorded in plans/CREATOR_DOMAIN_SERVING.md §5.
 
-1. **plans/CREATOR_LINK_POLICY.md ships first.** The gate, not a nice-to-have: these pages carry no payment,
-   so the outbound link is the only lever an abuser has on a shared apex.
-2. Buy `jbay.page`, add the zone (token is already all-zones).
-3. Re-run `deploy/setup-cloudflare-custom-domain-worker.sh` with the new zone id — already parameterised.
-4. Flip `CreatorServingEnabled=true` and republish existing hubs (the record is written on publish).
-5. Submit `jbay.page` to the Public Suffix List — slow, so start it early.
+**STILL OPEN, and it is the one that matters:**
+
+1. ⭐ **plans/CREATOR_LINK_POLICY.md has not shipped.** It was named the admission ticket for this domain and
+   the domain went live without it. No third-party exposure yet — the only hub on it is ours — but that ends
+   with the first tenant who publishes one. Allowlist, host-derived adult warning, takedown path.
+2. Public Suffix List submission — slow, start early.
+3. Dev serving (`test.jbay.page`) has no DNS or route; dev stays dark until someone needs it.
 
 Then the dashboard surface: show a tenant their creator URL, and decide whether a username may differ from
 the store label (today it IS the platform subdomain label, which buys one namespace, one registry and the

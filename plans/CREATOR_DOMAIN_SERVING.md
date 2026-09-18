@@ -1,7 +1,22 @@
 # Link-in-bio serving on `jbay.page/{username}`
 
-Built 2026-09-17. **Shipped dark:** `CreatorServingEnabled` defaults to `"false"` in every environment, so
-nothing about today's behaviour changes until it is deliberately flipped. §5 is what has to be true first.
+Built 2026-09-17. **LIVE ON PROD 2026-09-18** — `https://jbay.page/poliaxis-nutrition` serves, and
+`poliaxis-nutrition.jbay.uk/link-bio` 301s to it. Dev remains dark (`test.jbay.page` has no DNS).
+
+Verified on prod at switch-on:
+
+```
+jbay.page/poliaxis-nutrition   200   serves the hub
+jbay.uk/link-bio               301 → https://jbay.page/poliaxis-nutrition
+jbay.uk/creatine-gummies       403   unchanged, the rest of the store untouched
+jbay.page/                     302 → juniorbay.com          (Worker apex guard)
+x-robots-tag: noindex, nofollow                             (shared apex never indexed)
+```
+
+**The gate is still open.** plans/CREATOR_LINK_POLICY.md has NOT shipped, and §5.1 called it the admission
+ticket: these pages carry no payment, so the outbound link is the only lever an abuser has on a shared apex,
+and the allowlist / adult warning / takedown path is what keeps the domain alive. One tenant's own hub is
+live today, so there is no third-party exposure yet. That changes with the first hub that is not ours.
 
 The domain choice, and why a cheap TLD was rejected, is plans/SOCIAL_MEDIA_PAGES.md #4. The admission ticket
 is plans/CREATOR_LINK_POLICY.md. This document is only how it serves.
@@ -202,7 +217,22 @@ CLOUDFLARE_ZONE_ID=d842792b5a5240f5518f263835220df6 STACK_NAME=jb-stripe-link-st
 
 Verify with `curl -i`, never by reading the repo: the file says what SHOULD be at the edge, not what is.
 
-## 5. Before it can be flipped on
+## 5. Switch-on, as actually performed (2026-09-18)
+
+Recorded because the order matters and two of these are invisible from the repo.
+
+1. **DNS on the `jbay.page` zone** — there was none, and a Worker route needs a proxied record to attach to.
+   `A jbay.page → 192.0.2.1`, proxied, matching the `*.jbay.uk` / `*.jbay.be` dummy-origin convention.
+2. **Worker route** `jbay.page/*` on that zone (prod stack, prod API base).
+3. **Worker redeploy on `jbay.uk`** — it was still running pre-`preserve_path` code.
+4. **`CREATOR_SERVING_ENABLED=true ./deploy/deploy.sh prod`**.
+5. **Re-publish each hub.** The creator record AND the platform-host 301 are both written at publish time, so
+   nothing moves until the page goes through publishing once.
+
+Remaining, when a second environment needs it: `test.jbay.page` DNS + route for dev, and the Public Suffix
+List submission (§5 below, slow — start early).
+
+## 5b. Originally: before it could be flipped on
 
 1. **plans/CREATOR_LINK_POLICY.md must ship.** Allowlist, host-derived adult warning, takedown path. These
    pages carry no payment, so the outbound link is the only lever an abuser has on the shared apex. This is
