@@ -103,7 +103,9 @@
                    @input="applyTitleCaseInput((value) => { form.name = value; }, $event)" />
           </label>
           <label class="offer-field">
-            <span>Free address (subdomain)</span>
+            <!-- "Store name", not "subdomain": the tenant is naming their store, and the suffix beside the
+                 box already shows it is an address. -->
+            <span>Store name</span>
             <div class="subdomain-input">
               <input
                 v-model.trim="form.subdomain"

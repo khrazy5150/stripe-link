@@ -952,10 +952,17 @@ main {
 }
 
 .product-status {
+  /* inline-flex + centring, matching .environment-pill. As a plain inline box the text sat on the baseline,
+     so the padding was even but the glyphs were not -- visible the moment a status pill sits beside the
+     environment pill, which does centre. */
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   border-radius: 999px;
   font-size: var(--text-label);
   font-weight: 900;
-  padding: 0.4rem 1rem;
+  line-height: 1;
+  padding: 0.5rem 1rem;
 }
 
 .product-status.active {
