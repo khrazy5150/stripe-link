@@ -19,7 +19,7 @@ from unittest import mock
 from handlers import custom_domains_resolve
 from stripe_link.domain.custom_domains import (
     creator_domain_index_record, creator_host_key, creator_page_entry, creator_page_url,
-    creator_username)
+    creator_username, site_index_records)
 
 DOMAIN = "jbay.page"
 
@@ -339,3 +339,57 @@ class WizardTests(unittest.TestCase):
         block = self.BUILDER.split("async function saveCreatorUsername(", 1)[1].split("\n}", 1)[0]
         self.assertIn("catch", block)
         self.assertIn("Set it in Sites.", block)
+
+
+class HubMovesOffThePlatformHostTests(unittest.TestCase):
+    """One address for a link hub, not two.
+
+    After the creator record shipped, the hub answered on BOTH `{label}.jbay.uk/{slug}` and
+    `jbay.page/{username}`, with only the canonical saying which was preferred. That undercuts the reason the
+    creator apex is a separate domain: a commerce host still carrying tenant-authored outbound links is
+    exactly what the split exists to quarantine.
+    """
+
+    SITE = {
+        "tenant_id": "t1", "site_id": "site_1", "environment": "live", "status": "active",
+        "hosting": {"type": "platform", "platform_hostname": "maria.jbay.uk"},
+        "pages": {"/shop": {"page_id": "buy"}, "/links": {"page_id": "hub", "composition": "lead_social"}},
+    }
+
+    def _records(self, site=None, creator_domain=DOMAIN):
+        return {r.get("host_kind", "custom"): r for r in site_index_records(site or self.SITE, creator_domain)}
+
+    def test_the_hub_slug_301s_to_the_creator_url(self):
+        route = self._records()["platform"]["routes"]["/links"]
+        self.assertEqual(route["target"], {"kind": "redirect", "location": "https://jbay.page/maria"})
+
+    def test_the_path_is_not_appended_to_it(self):
+        """`/links` → `jbay.page/maria`, never `jbay.page/maria/links`.
+
+        The Worker used to append the request path to EVERY redirect, which is right for a host-level
+        www→apex move and wrong for a target that names its exact destination -- a latent bug in the per-path
+        redirect feature too, not only here. `preserve_path` now separates them.
+        """
+        self.assertNotIn("preserve_path", self._records()["platform"]["routes"]["/links"])
+        worker = (pathlib.Path(__file__).resolve().parents[1] / "deploy"
+                  / "cloudflare-custom-domain-worker.js").read_text(encoding="utf-8")
+        self.assertIn("route.preserve_path", worker)
+        resolver = (pathlib.Path(__file__).resolve().parents[1] / "src" / "handlers"
+                    / "custom_domains_resolve.py").read_text(encoding="utf-8")
+        self.assertIn('"preserve_path": True', resolver)
+
+    def test_the_rest_of_the_store_is_untouched(self):
+        routes = self._records()["platform"]["routes"]
+        self.assertEqual(routes["/shop"]["target"]["kind"], "page")
+
+    def test_a_custom_domain_keeps_serving_the_hub(self):
+        """Their domain, their content, their reputation -- and indexable there, which the apex never is."""
+        site = {**self.SITE, "hosting": {**self.SITE["hosting"], "custom_domain": "maria.example",
+                                         "verification": {"verified": True}}}
+        custom = self._records(site)["custom"]
+        self.assertEqual(custom["routes"]["/links"]["target"]["kind"], "page")
+
+    def test_nothing_moves_where_the_apex_is_not_configured(self):
+        # Serving off: the hub must keep answering where it always did, not 301 into a void.
+        route = self._records(creator_domain="")["platform"]["routes"]["/links"]
+        self.assertEqual(route.get("target", {}).get("kind"), "page")

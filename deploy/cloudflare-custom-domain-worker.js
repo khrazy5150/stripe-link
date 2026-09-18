@@ -128,10 +128,16 @@ async function handleSiteHost(request, hostname) {
   const resolveUrl = `${CUSTOM_DOMAIN_RESOLVE}?host=${encodeURIComponent(hostname)}&path=${encodeURIComponent(path)}`;
   const resolved = await resolveJson("custom-domain-router", `${hostname}${path}`, resolveUrl);
   const route = resolved && resolved.route;
-  // A www→apex redirect: 301 to the canonical apex, carrying the path + query through.
+  // Two kinds of 301, and they differ in whether the path comes along. A HOST-level move (www→apex) carries
+  // it, so /a/b lands on /a/b at the new host. A per-path target names its exact destination, and appending
+  // to that invents a URL nobody asked for -- `/link-bio` → `jbay.page/maria` must not become
+  // `jbay.page/maria/link-bio`. Everything used to preserve the path, which silently broke the second case.
   if (route && route.type === "redirect" && route.location) {
     const url = new URL(request.url);
-    return Response.redirect(route.location.replace(/\/$/, "") + url.pathname + url.search, 301);
+    const target = route.preserve_path
+      ? route.location.replace(/\/$/, "") + url.pathname + url.search
+      : route.location + url.search;
+    return Response.redirect(target, 301);
   }
   if (!route || route.type !== "origin_url" || !route.origin_url) {
     return notFound();

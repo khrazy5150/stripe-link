@@ -371,7 +371,37 @@ def site_index_records(site: dict[str, Any], creator_domain: str = "") -> list[d
     status = _record_status(site)
     for record in records:
         record["status"] = status
+    _redirect_hub_off_the_platform_host(records, site, creator_domain)
     return records + retired_hostname_records(site) + retired_username_records(site, creator_domain)
+
+
+def _redirect_hub_off_the_platform_host(records: list[dict[str, Any]], site: dict[str, Any],
+                                        creator_domain: str) -> None:
+    """A link hub answers on its creator URL, and 301s there from the free platform host.
+
+    Serving it at both was the state after the creator record shipped, with only the canonical saying which
+    address was preferred. That undercuts the reason the creator apex is a SEPARATE domain: if the hub also
+    answers on the commerce host, that host is carrying exactly the tenant-authored outbound links the split
+    exists to quarantine, and anyone judging a domain by its content finds them there anyway.
+
+    The platform host ONLY. A tenant's verified custom domain is theirs -- their content, their reputation,
+    their call -- and a hub is indexable there, which the creator apex never is. So that record is untouched
+    and keeps serving the page.
+    """
+    found = creator_page_entry(site)
+    if not found:
+        return
+    slug, entry = found
+    url = creator_page_url(site, str(entry.get("page_id") or ""), creator_domain)
+    if not url:
+        return
+    for record in records:
+        if record.get("host_kind") != "platform":
+            continue
+        routes = record.get("routes") or {}
+        if slug in routes:
+            # No preserve_path on this one: the destination IS the page, not a host to re-walk the path under.
+            routes[slug] = {"target": {"kind": "redirect", "location": url}, "enabled": True}
 
 
 def build_domain(apex_domain: str, subdomain_label: str) -> str:

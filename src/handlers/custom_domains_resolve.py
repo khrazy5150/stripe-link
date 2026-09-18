@@ -118,7 +118,11 @@ def handler(event, context, *, index_repo=None, pages_domain=None):
     # them to this scheme+host base). plans/SITE_OBJECT.md §2.6b.
     redirect_to = str(record.get("redirect_to") or "").strip()
     if redirect_to:
-        return json_response({"route": {"type": "redirect", "location": f"https://{redirect_to}"}})
+        # preserve_path: this is a HOST-level move (www -> apex), so /a/b must land on /a/b at the new host.
+        # A per-path target below is the opposite -- it names the exact destination and appending to it would
+        # invent a URL nobody asked for.
+        return json_response({"route": {"type": "redirect", "location": f"https://{redirect_to}",
+                                        "preserve_path": True}})
 
     tenant_id = str(record.get("tenant_id") or "")
     homepage_page_id = str(record.get("target_page_id") or "")
