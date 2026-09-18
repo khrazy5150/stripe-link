@@ -255,6 +255,125 @@ def creator_domain_index_record(site: dict[str, Any], creator_domain: str) -> di
     }
 
 
+# How many times a Site may change its link-in-bio handle, ever. Names are never released (see
+# `retired_username_records`), so an unbounded rename is an unbounded private hoard of good short names -- the
+# author's case: a novice renaming every couple of days quietly accumulates twenty of them. Three is enough
+# for a genuine rebrand and few enough that hoarding is not a strategy.
+MAX_USERNAME_CHANGES = 3
+
+
+def usernames_left(site: dict[str, Any]) -> int:
+    """Handle changes this Site has remaining. Surfaced BEFORE the change, never at the point of refusal."""
+    retired = (site.get("hosting") or {}).get("retired_usernames") or []
+    return max(0, MAX_USERNAME_CHANGES - len(retired))
+
+
+def record_hosting_history(existing: dict[str, Any] | None, document: dict[str, Any]) -> None:
+    """Remember the addresses this Site used to answer on, so the edge can stop answering on them CORRECTLY.
+
+    Two kinds, treated differently on purpose:
+
+    `retired_usernames` -- a handle is an IDENTITY. When a creator renames, the old handle must stop resolving
+    rather than forward: forwarding ties the old name to the new person forever, which is wrong for the
+    rebrand the rename usually is. The reservation is kept (nothing in this codebase releases one), so nobody
+    can ever claim it -- the name is retired, not freed.
+
+    `retired_hostnames` -- a store address is an ADDRESS. Nothing about identity is at stake, the UI promises
+    "existing links keep working", and the links live in the tenant's own marketing. So these REDIRECT.
+
+    Mutates `document` in place, and raises when the handle cap is spent.
+    """
+    hosting = document.setdefault("hosting", {})
+    if existing is None:
+        # First save: picking a name is not changing one, and a NEW Site has no history. Stripped rather than
+        # trusted -- these fields decide what the edge does with an address (a moved-from hostname REDIRECTS
+        # to this Site), so a client free to seed them could name someone else's hostname and point it here.
+        # On the update path below every branch overwrites from the STORED document, so this is the only way in.
+        hosting.pop("retired_usernames", None)
+        hosting.pop("retired_hostnames", None)
+        return
+    old_hosting = existing.get("hosting") or {}
+
+    old_handle, new_handle = creator_username(existing), creator_username(document)
+    if old_handle and old_handle != new_handle:
+        retired = [h for h in (old_hosting.get("retired_usernames") or []) if h != new_handle]
+        if len(retired) >= MAX_USERNAME_CHANGES:
+            raise CustomDomainError(
+                f"This Site has used all {MAX_USERNAME_CHANGES} username changes.", status_code=400)
+        hosting["retired_usernames"] = [*retired, old_handle]
+    else:
+        hosting["retired_usernames"] = old_hosting.get("retired_usernames") or []
+
+    old_host, new_host = str(old_hosting.get("platform_hostname") or ""), str(hosting.get("platform_hostname") or "")
+    if old_host and old_host != new_host:
+        previous = [h for h in (old_hosting.get("retired_hostnames") or []) if h != new_host]
+        hosting["retired_hostnames"] = [*previous, old_host]
+    else:
+        hosting["retired_hostnames"] = old_hosting.get("retired_hostnames") or []
+
+    for key in ("retired_usernames", "retired_hostnames"):
+        if not hosting.get(key):
+            hosting.pop(key, None)
+
+
+def _record_status(site: dict[str, Any]) -> str:
+    """Whether the edge should SERVE this Site's records.
+
+    An archived Site stops serving. It used to keep serving, which made `archived` a near-duplicate of the
+    `seo_enabled` switch -- the only functional difference between them was one `noarchive` token -- while
+    nothing did the thing a tenant winding a business down actually needs. Two states, two meanings:
+    seo_enabled=false is "open, don't rank me"; archived is "closed".
+    """
+    return "archived" if str(site.get("status") or "") == "archived" else "active"
+
+
+def retired_username_records(site: dict[str, Any], creator_domain: str) -> list[dict[str, Any]]:
+    """Index rows for handles this Site has given up: present, so nobody else resolves there, and NOT serving."""
+    rows = []
+    for handle in (site.get("hosting") or {}).get("retired_usernames") or []:
+        host_key = creator_host_key(creator_domain, handle)
+        if host_key:
+            rows.append({"tenant_id": str(site.get("tenant_id") or ""), "domain": host_key,
+                         "site_id": str(site.get("site_id") or ""), "status": "retired",
+                         "host_kind": "creator", "target_page_id": "", "routes": {}})
+    return rows
+
+
+def retired_hostname_records(site: dict[str, Any]) -> list[dict[str, Any]]:
+    """Index rows for store addresses this Site has moved off: a 301 to the current one.
+
+    Without these the OLD record simply stayed behind, still `active`, still pointing at the route table as it
+    was on the day of the rename -- so the old address kept serving a snapshot that could never update again.
+    The UI's promise that "existing links keep working" was being met by a page frozen in the past.
+    """
+    current = str((site.get("hosting") or {}).get("platform_hostname") or "")
+    if not current:
+        return []
+    return [{"tenant_id": str(site.get("tenant_id") or ""), "domain": normalize_domain(host),
+             "site_id": str(site.get("site_id") or ""), "status": _record_status(site),
+             "host_kind": "platform", "redirect_to": current, "target_page_id": "", "routes": {}}
+            for host in (site.get("hosting") or {}).get("retired_hostnames") or []]
+
+
+def site_index_records(site: dict[str, Any], creator_domain: str = "") -> list[dict[str, Any]]:
+    """EVERY edge record a Site should have: the addresses it answers on, plus the ones it must stop
+    answering on. One builder, because two callers used to assemble this list separately (the sites handler
+    and the publisher) and a rule added to one would simply not exist in the other.
+    """
+    records: list[dict[str, Any]] = []
+    if ((site.get("hosting") or {}).get("custom_domain") or "").strip():
+        records.append(domain_index_record(site))
+    for builder in (platform_domain_index_record, lambda s: creator_domain_index_record(s, creator_domain)):
+        record = builder(site)
+        if record:
+            records.append(record)
+    # A Site's own status governs every address it answers on; a retired handle is off regardless.
+    status = _record_status(site)
+    for record in records:
+        record["status"] = status
+    return records + retired_hostname_records(site) + retired_username_records(site, creator_domain)
+
+
 def build_domain(apex_domain: str, subdomain_label: str) -> str:
     apex = normalize_domain(apex_domain)
     label = str(subdomain_label or "").strip().lower()

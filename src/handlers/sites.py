@@ -13,6 +13,9 @@ from stripe_link.stripe_platform_secrets import get_platform_secret_key
 from stripe_link.domain.custom_domains import (
     creator_hosting_domain,
     creator_serving_enabled,
+    record_hosting_history,
+    site_index_records,
+    usernames_left,
     CustomDomainError,
     assert_valid_domain,
     create_custom_hostname,
@@ -223,11 +226,8 @@ def _put_site_index_records(saved: dict) -> None:
     too (navigable free/test stores, plans/PLATFORM_HOSTNAME_SERVING.md). Best-effort — never fail a save on it."""
     try:
         repo = custom_domains_index_repository()
-        if ((saved.get("hosting") or {}).get("custom_domain") or "").strip():
-            repo.put(domain_index_record(saved))
-        platform = platform_domain_index_record(saved)
-        if platform:
-            repo.put(platform)
+        for record in site_index_records(saved, creator_hosting_domain() if creator_serving_enabled() else ""):
+            repo.put(record)
     except Exception:  # noqa: BLE001
         pass
 
@@ -415,6 +415,7 @@ def create_site(event, repository, registry=None, mode="test"):
         organization = document.get("organization")
         if isinstance(organization, dict) and organization.get("same_as") is not None:
             organization["same_as"] = preserve_verification(organization, (existing or {}).get("organization"))
+        record_hosting_history(existing, document)
         validate_site(document)
         _assert_pages_unassigned(repository, document)
         _reserve_subdomain(registry, document)
@@ -424,7 +425,9 @@ def create_site(event, repository, registry=None, mode="test"):
         if existing is not None and site_seo_enabled(existing) != site_seo_enabled(saved):
             _republish_site_pages(str(saved.get("tenant_id") or ""), saved, mode=mode)
         return json_response({"site": saved}, status_code=201)
-    except (DocumentValidationError, ValueError, RepositoryError) as exc:
+    # CustomDomainError included because the username cap raises it. Left out, a tenant spending their last
+    # rename would have got a 500 instead of the sentence explaining what happened.
+    except (CustomDomainError, DocumentValidationError, ValueError, RepositoryError) as exc:
         return error_response(str(exc), code="invalid_site")
 
 
@@ -502,6 +505,10 @@ def list_sites(event, repository):
     # live or every tenant created in the meantime ends up with one auto-derived from their store label, which
     # is the thing the field exists to avoid. `creator_serving` says whether it actually RESOLVES yet, which is
     # the narrower question of whether a hub may advertise that URL as its public address.
+    # usernames_left travels WITH each Site so the builder can say "2 changes left" before the tenant commits
+    # to one. A cap discovered at the point of refusal reads as a bug; one known in advance is a guardrail.
+    for site in sites:
+        site["usernames_left"] = usernames_left(site)
     return json_response({"sites": sites, "hosting_domain": hosting_domain(),
                           "creator_domain": creator_hosting_domain(),
                           "creator_serving": creator_serving_enabled()})

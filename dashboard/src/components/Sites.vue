@@ -121,7 +121,7 @@
               <span class="field-note">Try:</span>
               <button v-for="s in editCheck.state.suggestions" :key="s" type="button" class="subdomain-chip" @click="pickEdit(s)">{{ s }}</button>
             </div>
-            <small class="field-note">Changing this claims a new address; your old one stays reserved to you, so existing links keep working. Not indexed by search engines.</small>
+            <small class="field-note">Changing this claims a new address; your old one stays reserved to you and redirects here, so existing links keep working. Not indexed by search engines.</small>
           </label>
 
           <!-- The link-in-bio handle. Shown only where that serving is configured, and separate from the store
@@ -141,6 +141,19 @@
             label="Link-in-bio username"
             placeholder="yourname"
           />
+          <!-- Said BEFORE the change, not at the point of refusal: a cap you discover by being refused reads
+               as a bug. Names are never released to anyone else, so an uncapped rename is an uncapped private
+               hoard of good short names. -->
+          <small v-if="store.creatorDomain" class="field-note">
+            <template v-if="usernameChangesLeft > 0">
+              Changing this retires your current username — anyone with the old link will see a page-not-found,
+              and the old name stays reserved to you. {{ usernameChangesLeft }}
+              {{ usernameChangesLeft === 1 ? "change" : "changes" }} left.
+            </template>
+            <template v-else>
+              You've used all your username changes for this Site.
+            </template>
+          </small>
 
           <fieldset class="product-identifiers">
             <legend>Business identity (Organization)</legend>
@@ -458,10 +471,10 @@
       @confirm="confirmArchive"
     >
       <template v-if="pendingArchive === 'archive'">
-        Archiving <strong>{{ editing?.name }}</strong> tells search engines to drop all its pages (noindex, nofollow, noarchive). Its published pages are re-rendered now so it takes effect immediately. The Site keeps serving — reactivate anytime.
+        Archiving <strong>{{ editing?.name }}</strong> closes it: every address it answers on stops serving and visitors see a page-not-found. Search engines are told to drop its pages (noindex, nofollow, noarchive). Its addresses and usernames stay reserved to you, and reactivating brings it all back — nothing is given up.
       </template>
       <template v-else>
-        Reactivating <strong>{{ editing?.name }}</strong> restores normal indexing and re-renders its published pages.
+        Reactivating <strong>{{ editing?.name }}</strong> starts serving it again at every address it had, restores normal indexing, and re-renders its published pages.
       </template>
     </ConfirmDialog>
 
@@ -508,6 +521,11 @@ const editing = ref(null);
 // Output halves of the username field, which reuses StoreAddressField and therefore its availability check.
 const creatorAvailable = ref(true);
 const creatorNormalized = ref("");
+// Counted by the server (it owns the history), so the dashboard cannot disagree with what a save will allow.
+const usernameChangesLeft = computed(() => {
+  const site = store.sites.find((s) => s.site_id === editing.value?.site_id);
+  return Number.isFinite(site?.usernames_left) ? site.usernames_left : 3;
+});
 const formError = ref("");
 const hostingDomainHint = computed(() => store.hostingDomain || "jbay.uk");
 const entityTypes = ["OnlineStore", "Organization", "LocalBusiness", "HomeAndConstructionBusiness", "HealthAndBeautyBusiness", "FoodEstablishment", "ProfessionalService", "Store"];
@@ -1152,7 +1170,7 @@ function indexClass(site) {
   return site.status !== "archived" && site.indexing?.eligibility === "eligible" ? "active" : "archived";
 }
 function indexReason(site) {
-  if (site.status === "archived") return "This Site is archived — its pages tell search engines noindex, nofollow, noarchive and are dropped from results. It keeps serving; reactivate anytime to restore indexing.";
+  if (site.status === "archived") return "This Site is closed — it has stopped serving and visitors see a page-not-found. Its addresses and usernames are still reserved to you; reactivate anytime to bring it back.";
   const state = site.indexing?.eligibility;
   if (state === "eligible") return "This Site is eligible for search indexing.";
   if (state === "revoked") return "Indexing was revoked because your Stripe account is restricted. Resolve it in Stripe to restore eligibility.";

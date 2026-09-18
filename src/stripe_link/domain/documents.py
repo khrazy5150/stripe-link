@@ -2160,6 +2160,15 @@ def validate_site(document: dict[str, Any]) -> None:
             not isinstance(creator_handle, str) or not _CREATOR_USERNAME_RE.match(creator_handle)):
         raise DocumentValidationError(
             "Site hosting.creator_username must be 3-63 lowercase letters, numbers or hyphens.")
+    # Addresses this Site used to answer on. Server-owned history, not tenant input -- they drive what the
+    # edge does with the OLD address (a retired handle stops resolving, a moved-from hostname redirects), so a
+    # client that could write arbitrary entries here could point a stranger's address at itself.
+    for field in ("retired_usernames", "retired_hostnames"):
+        entries = hosting.get(field)
+        if entries is None:
+            continue
+        if not isinstance(entries, list) or not all(isinstance(e, str) and e.strip() for e in entries):
+            raise DocumentValidationError(f"Site hosting.{field} must be a list of strings.")
     custom_domain = hosting.get("custom_domain")
     if custom_domain is not None and not (isinstance(custom_domain, str) and _HOSTNAME_RE.match(custom_domain)):
         raise DocumentValidationError("Site hosting.custom_domain must be a bare hostname or null.")

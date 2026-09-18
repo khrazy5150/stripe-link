@@ -75,6 +75,25 @@ async function handleShortUrl(sourceUrl) {
   return Response.redirect(route.destination_url, 302);
 }
 
+// What a visitor sees when an address does not resolve: a renamed creator handle, an archived Site, a slug
+// that was never published. Deliberately ONE page for all of them and deliberately vague -- "this store is
+// suspended" or "this creator renamed" tells a stranger about the tenant, and a bare Cloudflare 404 tells the
+// visitor the whole domain is broken. The status is a real 404, so crawlers drop it.
+function notFound() {
+  const body = `<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow">
+<title>Page not found</title><style>
+:root{color-scheme:light dark}
+body{margin:0;min-height:100vh;display:grid;place-items:center;text-align:center;padding:2rem;
+background:#fbfbfc;color:#16161a;font:400 16px/1.6 ui-sans-serif,-apple-system,"Segoe UI",Roboto,sans-serif}
+@media (prefers-color-scheme:dark){body{background:#111114;color:#ececf1}}
+h1{margin:0 0 .5rem;font-size:1.6rem;font-weight:620;letter-spacing:-.02em}
+p{margin:0;opacity:.7;max-width:34ch}
+</style></head><body><div><h1>Oops! This page doesn't exist.</h1>
+<p>The link may be out of date, or the page may have moved.</p></div></body></html>`;
+  return new Response(body, { status: 404, headers: { "content-type": "text/html; charset=utf-8" } });
+}
+
 // Serve a Site host — a tenant custom domain OR a free platform host. The resolve endpoint keys off the
 // incoming hostname and returns the same shape for both; a platform host additionally carries
 // `route.noindex`, which we translate into an X-Robots-Tag header on the proxied response.
@@ -83,7 +102,7 @@ async function handleSiteHost(request, hostname) {
   // well-known crawl files (robots.txt/sitemap.xml/{key}.txt) — so forward the path and key the cache by it.
   const path = new URL(request.url).pathname;
   // The bare creator apex belongs to the platform, not to whoever claims it first. Without this, `jbay.page/`
-  // resolves as a Site host and answers "This store is not active." on the domain's own front door.
+  // resolves as a Site host and answers a page-not-found on the domain's own front door.
   if (hostname === CREATOR_HOST && path.replace(/\/+$/, "") === "") {
     return Response.redirect("https://juniorbay.com/", 302);
   }
@@ -96,7 +115,7 @@ async function handleSiteHost(request, hostname) {
     return Response.redirect(route.location.replace(/\/$/, "") + url.pathname + url.search, 301);
   }
   if (!route || route.type !== "origin_url" || !route.origin_url) {
-    return new Response("This store is not active.", { status: 404 });
+    return notFound();
   }
   const proxied = new Request(route.origin_url, request);
   proxied.headers.set("X-Junior-Bay-Custom-Host", hostname);

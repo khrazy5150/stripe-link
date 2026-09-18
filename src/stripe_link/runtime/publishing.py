@@ -30,8 +30,7 @@ from stripe_link.domain.social_links import section_own_links
 from stripe_link.domain.tips import stamp_tip_jar
 from stripe_link.domain.connect_sync import site_domain_verified, site_seo_enabled
 from stripe_link.domain.custom_domains import (
-    creator_domain_index_record, creator_hosting_domain, creator_page_url, creator_serving_enabled,
-    domain_index_record, platform_domain_index_record)
+    creator_hosting_domain, creator_page_url, creator_serving_enabled, site_index_records)
 from stripe_link.domain.funnels import funnel_slug_entries, post_purchase_plan
 from stripe_link.domain.opportunities import STAGE_LANDING, STAGE_POST_PURCHASE, stage_opportunities
 from stripe_link.runtime.upsell_pages import (
@@ -616,18 +615,12 @@ def _sync_domain_index(site: dict[str, Any], domains_index_repository: Any | Non
         from stripe_link.repositories.documents import custom_domains_index_repository
 
         repo = custom_domains_index_repository()
-    if ((site.get("hosting") or {}).get("custom_domain") or "").strip():
-        repo.put(domain_index_record(site))
-    platform = platform_domain_index_record(site)
-    if platform:
-        repo.put(platform)
-    # ...and the link-in-bio record, when this Site has a published link hub. A THIRD record off the SAME
-    # Site -- not a second Site. Every surface a Site is reachable on is one row here; that is what makes
-    # adding a surface cheap and why a dedicated creator Site would have been duplicated infrastructure.
-    if creator_serving_enabled():
-        creator = creator_domain_index_record(site, creator_hosting_domain())
-        if creator:
-            repo.put(creator)
+    # ONE builder for every row: the addresses this Site answers on (custom domain, platform host, creator
+    # apex) AND the ones it must stop answering on (retired handles, moved-from hostnames, an archived Site).
+    # The two callers used to assemble that list separately, so a rule added here would not have existed in
+    # the sites handler.
+    for record in site_index_records(site, creator_hosting_domain() if creator_serving_enabled() else ""):
+        repo.put(record)
 
 
 def artifact_targets(

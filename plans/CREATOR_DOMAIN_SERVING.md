@@ -143,6 +143,47 @@ Still open: whether `{site}.jbay.uk/{slug}` should 301 to the creator URL rather
 two addresses. The canonical already says which is preferred; a redirect would make it unambiguous, at the
 cost of breaking any link already shared. Worth deciding before the first tenant shares one.
 
+## 4d. Addresses that must stop answering
+
+Decided and built 2026-09-18. Three requests that turned out to be one mechanism: **an index record that
+outlives what it pointed at, and a resolver that needs to know why.** `site_index_records()` is now the only
+place that list is assembled — two callers used to build it separately, so a rule added to one simply did not
+exist in the other.
+
+| | What the record does | Why |
+|---|---|---|
+| Renamed handle | `status: "retired"` → 404 | A handle is an **identity**. Forwarding ties the old name to the new person forever, which is wrong for the rebrand a rename usually is. |
+| Moved-from store address | `redirect_to` → 301 | An address is an **address**. Nothing about identity is at stake and the UI already promised existing links keep working. |
+| Archived Site | `status: "archived"` → 404 | The tenant closed it. |
+
+Retired names are **never released**. The reservation stays with the Site, so the row exists purely to say
+"claimed, not serving" — closing a shop must not put its address back on the market.
+
+**Sunset is archive, not a new switch.** Archiving used to keep serving, which made it a near-duplicate of the
+`seo_enabled` toggle: the only functional difference between the two was one `noarchive` token, while nothing
+did what a tenant winding a business down actually needs. Now there are two states with two meanings —
+`seo_enabled = false` is "open, don't rank me"; `archived` is "closed". Zero Sites were archived in dev or
+prod when this changed, so there was no migration and nobody to surprise. A third "disable this Site" control
+was considered and rejected: three controls across two meanings would leave tenants guessing which one closes
+the shop.
+
+**The stale-record bug this uncovered.** Superseded index records were never cleaned up, so a renamed store
+address kept serving the route table as it stood on the day of the rename — forever, never updating. The UI's
+promise that "existing links keep working" was technically kept, by a frozen page. It is now kept by a 301.
+
+**Three username changes per Site, ever** (`MAX_USERNAME_CHANGES`). Since names are never released, an
+uncapped rename is an uncapped private hoard of good short names — the author's case is a novice renaming
+every couple of days and quietly accumulating twenty. The count travels with each Site on `GET /sites` and is
+shown in the editor *before* the change: a cap discovered at the point of refusal reads as a bug, one known in
+advance is a guardrail. Renaming back to a name you already hold costs nothing.
+
+The 404 is also the main brake on churn, and it only works because the rename does not redirect: once
+renaming kills every link you have shared, renaming has a real cost.
+
+Retired lists are **server-owned**. They decide what the edge does with an address, so a client free to seed
+them could name someone else's hostname and point it at itself. The update path overwrites from the stored
+document; the create path strips them.
+
 ## 5. Before it can be flipped on
 
 1. **plans/CREATOR_LINK_POLICY.md must ship.** Allowlist, host-derived adult warning, takedown path. These
