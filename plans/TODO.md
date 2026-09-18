@@ -887,6 +887,23 @@ they fire on pages that cannot be indexed at all, which is the same unactionable
 **Not** an argument for making the goal picker do more work at create time. The goal governs composition; the
 gap is that a name promising search performance is attached to a pack that seeds an FAQ.
 
+### ⭐ HIGH — the Products wizard promises a booking flow that does not exist (raised 2026-09-18)
+
+Plan: **plans/SERVICE_WIZARD.md**. Picking "Service — opens booking flow" runs the physical-product path,
+package dimensions and all: `WIZARD_FLOWS` branches on intent and nothing in Products.vue branches on
+product_type. Meanwhile the only way to create a Service is a 22-field modal for a document whose validator
+requires three fields.
+
+The scope is smaller than it looks. The SELLING half is built and tested -- expand_offer resolves service_id,
+checkout handles service lines, `booking` is a real CTA with a handler behind it, 59 tests pass across five
+service/booking files, multi-calendar shipped. The gap is authoring: nobody can create a service.
+
+Blocked on one decision (doc §3): is a "service" a Product with product_type=service, or a Service document
+with fulfillment_mode scheduled|no_booking? Today both exist and nothing links them. Recommendation is the
+latter -- one concept, two modes -- which dissolves the confusion instead of documenting it.
+
+Zero service products and zero prod Services exist, so there is nothing to migrate. Cheapest possible moment.
+
 ### LOW — a draft page's Site URL serves a raw CloudFront 403 (found 2026-09-18)
 
 Noticed while verifying the new edge error page. A page attached to a Site but still a DRAFT has no published
