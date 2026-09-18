@@ -820,6 +820,51 @@ meet for the first time:
 
 Stripe test clocks are the practical way to do 5 without waiting a month.
 
+### MEDIUM — the "Search-friendly" goal does not mean what a tenant reads it to mean (raised 2026-09-17)
+
+Author, 2026-09-17: *"if I want to create a page that can rank on Google, that's the choice I want to make.
+Clearly adding structured data and FAQ are not nearly enough."*
+
+**What it does today.** `search_seo` carries exactly one pack, `discoverability`, whose entire contents are
+seeding an `faq` element and making `structured_data` available (`composition_rules.json`). The tenant picks
+a goal named "Search-friendly", is shown the note "adds search-friendly content", and gets an FAQ box. Two of
+the five goals (`email_list`, `minimal`) already carry no packs at all, so the goal layer is thin generally --
+but this is the only one whose LABEL promises an outcome the product is responsible for delivering.
+
+**What the tenant reads it as.** "Set this page up to rank." That is a real job, and most of its parts either
+exist unconnected or are already planned:
+
+1. **On-page fundamentals** -- heading outline, unique-content floor, image alt. All three already have
+   checkers (`heading_outline_warnings`, `thin_content_warnings`, `accessibility_warnings`, runtime/html.py)
+   and surface in the builder's Page health panel. They are not connected to the goal in either direction.
+2. **Google Business Profile** -- plans/BUSINESS_PROFILE_AND_GBP.md Phase 2 (GBP OAuth + sync), deferred.
+   The canonical NAP that feeds LocalBusiness JSON-LD is Phase 1 of the same doc.
+3. **Backlinks** -- the social backlink verification already built for `sameAs` is the nearest existing
+   machinery; whether an SEO goal should do more than verify is undecided.
+4. **Indexability itself** -- the thing a tenant would most expect this switch to control, and the one thing
+   it has no bearing on whatsoever. `page_robots_directive` (html.py:1697) needs a verified custom domain and
+   verified Connect; a platform host is noindex,nofollow regardless of goal. A tenant who picks
+   "Search-friendly" on a platform-hosted page has been told they are optimising for a search index the page
+   cannot enter.
+
+**The sharpest single change, and the reason this is worth doing.** The page-health warnings matter MOST when
+the goal is search, and mostly do not matter otherwise -- so gate them on the goal:
+
+- **SEO-only, gate on `goal == "search_seo"`:** thin content, heading outline. Both are about ranking. Note
+  `thin_content_warnings` has already been carved back twice by hand (every lead shape, then tip jars) for
+  exactly this reason -- "a warning has to name something the tenant can do AND should do". The goal is the
+  general form of those two special cases, and would subsume both.
+- **ALWAYS, never gated:** image alt text. A screen-reader user does not care what the page's marketing goal
+  is, and alt text is an accessibility floor with legal weight, not an SEO nicety. Heading outline is
+  genuinely dual-purpose (screen readers navigate by headings), so if it moves behind the goal the
+  accessibility half of its value moves with it -- worth deciding deliberately rather than by omission.
+
+Also consider suppressing the SEO-only warnings on any page whose robots directive is already noindex: today
+they fire on pages that cannot be indexed at all, which is the same unactionable-notice failure in bulk.
+
+**Not** an argument for making the goal picker do more work at create time. The goal governs composition; the
+gap is that a name promising search performance is attached to a pack that seeds an FAQ.
+
 ### LOW — three shipped presets pair their CTA gradient with white below WCAG AA (measured 2026-09-17)
 
 Found while fixing the section tones, and deliberately NOT fixed there. Measured on the shipped
