@@ -189,16 +189,18 @@ def creator_domain_index_record(site: dict[str, Any], creator_domain: str) -> di
     `jbay.page/maria/...`, putting commerce on the one domain whose entire premise is that it carries no
     payment and can therefore be judged on its outbound links alone.
 
-    None when the Site has no username or no published link hub -- there is nothing to serve.
+    None when this environment has no creator domain configured, or the Site has no username, or it has no
+    published link hub -- in each case there is nothing to serve.
     """
     username = creator_username(site)
     found = creator_page_entry(site)
-    if not username or not found:
+    host_key = creator_host_key(creator_domain, username)
+    if not host_key or not found:
         return None
     _, entry = found
     return {
         "tenant_id": str(site.get("tenant_id") or ""),
-        "domain": creator_host_key(creator_domain, username),
+        "domain": host_key,
         "target_page_id": str(entry.get("page_id") or ""),
         "routes": {},
         "status": "active",

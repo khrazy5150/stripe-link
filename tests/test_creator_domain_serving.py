@@ -12,6 +12,7 @@ The one real difference is WHERE the tenant is named. A custom domain and a plat
 tenant by hostname; on a shared apex the hostname identifies nobody, so the first path segment does.
 """
 import os
+import pathlib
 import unittest
 from unittest import mock
 
@@ -145,12 +146,44 @@ class SwitchTests(unittest.TestCase):
         with mock.patch.dict(os.environ, {"CREATOR_SERVING_ENABLED": "true"}):
             self.assertTrue(creator_serving_enabled())
 
-    def test_the_creator_domain_is_not_the_platform_domain(self):
-        """Separate domains is the entire reputation argument; a shared default would quietly undo it."""
-        from stripe_link.runtime.publishing import DEFAULT_CREATOR_DOMAIN
-        from handlers.sites import DEFAULT_HOSTING_DOMAIN
+    def test_an_unconfigured_environment_serves_nothing(self):
+        """No built-in default, deliberately.
 
-        self.assertNotEqual(DEFAULT_CREATOR_DOMAIN, DEFAULT_HOSTING_DOMAIN)
+        A hardcoded `jbay.page` fallback would have made a dev stack with an unset variable write records for
+        TEST pages on the apex prod serves live ones from. Empty is what an unconfigured environment gets.
+        """
+        from stripe_link.runtime.publishing import creator_hosting_domain
+
+        with mock.patch.dict(os.environ, {}, clear=True):
+            self.assertEqual(creator_hosting_domain(), "")
+        self.assertIsNone(creator_domain_index_record(_site(), ""))
+
+    def test_the_two_environments_use_different_apexes(self):
+        """The same live/test split the platform host makes with jbay.uk vs jbay.be.
+
+        Asserted on the deploy script, because that is where the value is actually decided -- a constant in
+        Python would be a second copy of a fact CloudFormation owns.
+        """
+        deploy = (pathlib.Path(__file__).resolve().parents[1] / "deploy" / "deploy.sh").read_text(encoding="utf-8")
+        self.assertIn("CreatorHostingDomain=jbay.page", deploy)
+        self.assertIn("CreatorHostingDomain=test.jbay.page", deploy)
+        # ...and the creator apex is never the platform one: separate domains IS the reputation argument.
+        self.assertNotIn("CreatorHostingDomain=jbay.uk", deploy)
+
+    def test_an_ordinary_deploy_cannot_silently_switch_it_off(self):
+        # Same preserve-on-silence rule platform serving already has: re-reads the stack when unexported.
+        deploy = (pathlib.Path(__file__).resolve().parents[1] / "deploy" / "deploy.sh").read_text(encoding="utf-8")
+        block = deploy.split("CREATOR_SERVING_ENABLED:-", 1)[1].split("PARAMETER_OVERRIDES+=", 1)[0]
+        self.assertIn("describe-stacks", block)
+
+    def test_the_worker_apex_guard_is_templated_per_environment(self):
+        """A dev worker must not treat the prod apex as its own front door."""
+        root = pathlib.Path(__file__).resolve().parents[1]
+        worker = (root / "deploy" / "cloudflare-custom-domain-worker.js").read_text(encoding="utf-8")
+        setup = (root / "deploy" / "setup-cloudflare-custom-domain-worker.sh").read_text(encoding="utf-8")
+        self.assertIn("REPLACE_WITH_CREATOR_HOST", worker)
+        self.assertIn("REPLACE_WITH_CREATOR_HOST", setup)
+        self.assertNotIn('CREATOR_HOST = "jbay.page"', worker)
 
 
 if __name__ == "__main__":

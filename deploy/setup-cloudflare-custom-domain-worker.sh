@@ -74,7 +74,11 @@ fi
 
 worker_tmp="$(mktemp)"
 trap 'rm -f "$worker_tmp"' EXIT
-sed "s#https://REPLACE_WITH_PUBLIC_API_BASE_URL#${api_base_url}#" "$SCRIPT_FILE" > "$worker_tmp"
+# The creator apex differs per environment (jbay.page vs test.jbay.page), so the apex guard is templated
+# like the API base rather than hardcoded — a dev worker must not treat the prod apex as its own front door.
+creator_host="${CREATOR_HOST:-$([[ "$ENVIRONMENT" == "prod" ]] && echo "jbay.page" || echo "test.jbay.page")}"
+sed -e "s#https://REPLACE_WITH_PUBLIC_API_BASE_URL#${api_base_url}#" \
+    -e "s#REPLACE_WITH_CREATOR_HOST#${creator_host}#" "$SCRIPT_FILE" > "$worker_tmp"
 
 echo "Uploading Cloudflare Worker $SCRIPT_NAME..."
 upload_response="$(curl -sS -X PUT \

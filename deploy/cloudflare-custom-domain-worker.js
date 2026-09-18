@@ -31,7 +31,7 @@ const SHORT_URL_HOST = "go.jbay.uk";
 // The creator apex. NOT in RESERVED_HOSTS, and it must never be added there: that set is keyed on hostname
 // alone, and every creator URL shares this one hostname — reserving it would pass every creator page through
 // to the origin instead of resolving it. The bare apex (no username) is guarded in handleSiteHost instead.
-const CREATOR_HOST = "jbay.page";
+const CREATOR_HOST = "REPLACE_WITH_CREATOR_HOST";
 const RESERVED_HOSTS = new Set([
   "domains.jbay.uk",
   "jbay.uk",

@@ -46,6 +46,31 @@ else
   PARAMETER_OVERRIDES+=("PlatformHostingDomain=jbay.be")
 fi
 
+# Link-in-bio apex (plans/CREATOR_DOMAIN_SERVING.md): prod serves creators on jbay.page, dev on
+# test.jbay.page. ONE zone, two Worker routes pointing at the two environments' APIs -- the same live/test
+# split the platform host makes with jbay.uk/jbay.be, without buying a second domain for it. Never a shared
+# value: a dev stack must not write records on the apex prod serves live pages from.
+if [[ "${ENVIRONMENT}" == "prod" ]]; then
+  PARAMETER_OVERRIDES+=("CreatorHostingDomain=jbay.page")
+else
+  PARAMETER_OVERRIDES+=("CreatorHostingDomain=test.jbay.page")
+fi
+
+# Master switch for link-in-bio serving. Same preserve-on-silence rule as PLATFORM_SERVING below: an
+# ordinary deploy must never turn a live feature off just because the operator did not re-export the flag.
+if [[ -n "${CREATOR_SERVING_ENABLED:-}" ]]; then
+  CREATOR_SERVING="${CREATOR_SERVING_ENABLED}"
+else
+  CREATOR_SERVING="$(aws cloudformation describe-stacks \
+    --region "${REGION}" --stack-name "${STACK_NAME}" \
+    --query "Stacks[0].Parameters[?ParameterKey=='CreatorServingEnabled'].ParameterValue | [0]" \
+    --output text 2>/dev/null)"
+  if [[ -z "${CREATOR_SERVING}" || "${CREATOR_SERVING}" == "None" ]]; then
+    CREATOR_SERVING="false"
+  fi
+fi
+PARAMETER_OVERRIDES+=("CreatorServingEnabled=${CREATOR_SERVING}")
+
 # Master switch for serving Sites on the free platform host (plans/PLATFORM_HOSTNAME_SERVING.md). Flip it by
 # exporting PLATFORM_SERVING_ENABLED=true before the deploy. When the env var is NOT set, PRESERVE the value
 # already on the stack instead of resetting it — otherwise a plain `./deploy/deploy.sh <env>` would silently

@@ -22,12 +22,15 @@ Parameters:
     Description: Registrable domain for tenant free-tier Sites (Zone B, always noindex). A tenant's platform_hostname is <name>.<this>. Must differ from the platform's own domain (juniorbay.com). See plans/SITE_OBJECT.md.
   CreatorHostingDomain:
     Type: String
-    Default: jbay.page
+    Default: ""
     Description: >-
-      Registrable domain for link-in-bio pages, served path-on-apex as <this>/<username>. A SEPARATE domain
-      from PlatformHostingDomain on purpose: it is the only surface carrying user-authored outbound links, so
-      a reputation hit there must not touch commerce, dashboard, signup or billing. See
-      plans/SOCIAL_MEDIA_PAGES.md #4 and plans/CREATOR_LINK_POLICY.md.
+      Apex for link-in-bio pages, served path-on-apex as <this>/<username>: jbay.page on prod, test.jbay.page
+      on dev (deploy.sh sets it, mirroring the jbay.uk/jbay.be split). EMPTY disables creator serving
+      entirely, which is what an unconfigured environment should get -- a shared default would let a test
+      stack write records on the apex prod serves live pages from. A SEPARATE domain from
+      PlatformHostingDomain on purpose: it is the only surface carrying user-authored outbound links, so a
+      reputation hit there must not touch commerce, dashboard, signup or billing. See
+      plans/CREATOR_DOMAIN_SERVING.md.
   CreatorServingEnabled:
     Type: String
     Default: "false"

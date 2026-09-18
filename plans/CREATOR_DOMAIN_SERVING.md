@@ -67,14 +67,49 @@ shared UGC apex must never couple one creator's reputation to another's, and a l
 rank with anyway — for a creator's own name their real Instagram and TikTok profiles already outrank it, and
 the traffic is definitionally referral from the bio link.
 
+## 4b. dev vs prod: one zone, two apexes
+
+Raised by the author 2026-09-17 — *"jbay.page should work on prod in LIVE environment. Or does it also work
+in dev as well?"* — and it caught a real defect: `CreatorHostingDomain` had a single default of `jbay.page`,
+so a dev stack would have written `jbay.page/{username}` records for TEST pages on the apex prod serves live
+ones from. The index tables are per-environment so nothing would have collided, but the intent was wrong.
+
+Split the way the platform host already splits:
+
+| | Platform host | Creator apex |
+|---|---|---|
+| prod | `{label}.jbay.uk` | `jbay.page/{username}` |
+| dev | `{label}.jbay.be` | `test.jbay.page/{username}` |
+
+**One zone, two Worker routes.** `jbay.page/*` → the prod worker, `test.jbay.page/*` → the dev worker. Each
+worker has its own environment's API base baked in by the setup script, which is what actually separates
+them. That gives dev a real serving surface without buying a second domain — unlike the platform host, which
+needed a whole second zone because its tenant label is a *subdomain* and a test wildcard would otherwise have
+overlapped prod's.
+
+`CreatorHostingDomain` has **no built-in default**: empty means the feature is off, which is what an
+unconfigured environment should get. `deploy.sh` sets it per environment, and preserves `CreatorServingEnabled`
+across an ordinary deploy rather than resetting it — the same rule platform serving already follows.
+
+The Worker's bare-apex guard is templated (`REPLACE_WITH_CREATOR_HOST`) for the same reason: a dev worker
+must not treat the prod apex as its own front door.
+
 ## 5. Before it can be flipped on
 
 1. **plans/CREATOR_LINK_POLICY.md must ship.** Allowlist, host-derived adult warning, takedown path. These
    pages carry no payment, so the outbound link is the only lever an abuser has on the shared apex. This is
    the gate, not a nice-to-have.
 2. **Buy `jbay.page`; add the zone to the same Cloudflare account.** The API token is already all-zones.
-3. **Run the Worker setup once more for the new zone** — it is already zone-parameterised:
-   `CLOUDFLARE_ZONE_ID=<jbay.page zone id> STACK_NAME=jb-stripe-link-stack-prod ENVIRONMENT=prod ./deploy/setup-cloudflare-custom-domain-worker.sh`
+3. **Run the Worker setup for the new zone, once per environment** — it is already zone-parameterised, and
+   the route pattern is what separates them:
+   ```
+   CLOUDFLARE_ZONE_ID=<jbay.page zone id> STACK_NAME=jb-stripe-link-stack-prod ENVIRONMENT=prod \
+     CLOUDFLARE_WORKER_ROUTE_PATTERN='jbay.page/*' ./deploy/setup-cloudflare-custom-domain-worker.sh
+   CLOUDFLARE_ZONE_ID=<jbay.page zone id> STACK_NAME=jb-stripe-link-stack-dev  ENVIRONMENT=dev \
+     CLOUDFLARE_WORKER_ROUTE_PATTERN='test.jbay.page/*' ./deploy/setup-cloudflare-custom-domain-worker.sh
+   ```
+   The script's zone-wide `*/*` default must NOT be used here: both environments live on this one zone, and
+   a wildcard route would make them fight over it.
 4. **Flip `CreatorServingEnabled=true`** for that environment and republish existing link hubs (the record is
    written on publish).
 5. **Submit `jbay.page` to the Public Suffix List** (plans/SOCIAL_MEDIA_PAGES.md #6) — cookie/storage

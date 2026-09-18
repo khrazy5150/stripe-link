@@ -112,13 +112,17 @@ def platform_serving_enabled() -> bool:
     return str(os.environ.get("PLATFORM_SERVING_ENABLED") or "").strip().lower() in ("1", "true", "yes", "on")
 
 
-DEFAULT_CREATOR_DOMAIN = "jbay.page"
-
-
 def creator_hosting_domain() -> str:
-    """The apex link-in-bio pages serve under. Deliberately NOT the platform hosting domain: it is the only
-    surface carrying tenant-authored outbound links, and a reputation hit there must not reach commerce."""
-    return str(os.environ.get("CREATOR_HOSTING_DOMAIN") or DEFAULT_CREATOR_DOMAIN).strip() or DEFAULT_CREATOR_DOMAIN
+    """The apex link-in-bio pages serve under, per environment: `jbay.page` on prod, `test.jbay.page` on dev.
+
+    Deliberately NOT the platform hosting domain -- it is the only surface carrying tenant-authored outbound
+    links, and a reputation hit there must not reach commerce.
+
+    NO built-in default, and that is the point. A hardcoded fallback would have made a dev stack with an unset
+    variable write `jbay.page/{username}` records for TEST pages, on the apex prod serves live ones from. The
+    per-environment split is the same one the platform host already makes (jbay.uk vs jbay.be); empty means
+    the feature is off, which is what an unconfigured environment should get."""
+    return str(os.environ.get("CREATOR_HOSTING_DOMAIN") or "").strip()
 
 
 def creator_serving_enabled() -> bool:
