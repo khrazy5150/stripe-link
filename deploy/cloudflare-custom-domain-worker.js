@@ -1,4 +1,4 @@
-// Cloudflare Worker for the jbay.uk AND jbay.be zones. Handles three things on the platform edge:
+// Cloudflare Worker for the jbay.uk, jbay.be AND jbay.page zones. Handles four things on the platform edge:
 //
 //  1. Short URLs on the short-URL host (go.jbay.uk/{code}): resolve the code to a
 //     destination via the routes resolve endpoint and 302-redirect the visitor. For A/B
@@ -11,8 +11,14 @@
 //     by the domain-index record), except the resolver flags the route `noindex: true`, so we
 //     stamp `X-Robots-Tag: noindex, nofollow` on the response. A platform host is a navigable
 //     but NEVER-indexed store surface — the reputation-isolation floor
-//     (plans/PLATFORM_HOSTNAME_SERVING.md). Deploy this one script to both zones with the
-//     zone-wide `*/*` route (see deploy/setup-cloudflare-custom-domain-worker.sh).
+//     (plans/PLATFORM_HOSTNAME_SERVING.md).
+//  4. Link-in-bio pages on the creator apex (jbay.page/{username}): the same resolve + proxy path again.
+//     The difference is WHERE the tenant is named — every creator shares one hostname, so the resolver
+//     keys off host + first path segment instead of host alone. That split lives server-side; this script
+//     already forwards both, so the only edge work is the apex guard below. Also noindex-stamped: a shared
+//     UGC apex must never couple one creator's reputation to another's.
+//     Deploy this one script to every zone with the zone-wide `*/*` route
+//     (see deploy/setup-cloudflare-custom-domain-worker.sh).
 
 const API_BASE = "https://REPLACE_WITH_PUBLIC_API_BASE_URL";
 const CUSTOM_DOMAIN_RESOLVE = `${API_BASE}/custom-domains/resolve`;
@@ -22,12 +28,17 @@ const SHORT_URL_HOST = "go.jbay.uk";
 // Infrastructure hostnames on the jbay.uk / jbay.be zones that must pass straight through to
 // their normal origin rather than being resolved as a Site store. Add any leftover stripe-cart
 // subdomains on jbay.be here so they don't collide with the `*.jbay.be` store route.
+// The creator apex. NOT in RESERVED_HOSTS, and it must never be added there: that set is keyed on hostname
+// alone, and every creator URL shares this one hostname — reserving it would pass every creator page through
+// to the origin instead of resolving it. The bare apex (no username) is guarded in handleSiteHost instead.
+const CREATOR_HOST = "jbay.page";
 const RESERVED_HOSTS = new Set([
   "domains.jbay.uk",
   "jbay.uk",
   "www.jbay.uk",
   "jbay.be",
   "www.jbay.be",
+  "www.jbay.page",
 ]);
 
 async function resolveJson(cacheNamespace, cacheValue, url) {
@@ -71,6 +82,11 @@ async function handleSiteHost(request, hostname) {
   // Resolution is path-dependent — the Site homepage at "/", funnel/collection pages at their slugs, and
   // well-known crawl files (robots.txt/sitemap.xml/{key}.txt) — so forward the path and key the cache by it.
   const path = new URL(request.url).pathname;
+  // The bare creator apex belongs to the platform, not to whoever claims it first. Without this, `jbay.page/`
+  // resolves as a Site host and answers "This store is not active." on the domain's own front door.
+  if (hostname === CREATOR_HOST && path.replace(/\/+$/, "") === "") {
+    return Response.redirect("https://juniorbay.com/", 302);
+  }
   const resolveUrl = `${CUSTOM_DOMAIN_RESOLVE}?host=${encodeURIComponent(hostname)}&path=${encodeURIComponent(path)}`;
   const resolved = await resolveJson("custom-domain-router", `${hostname}${path}`, resolveUrl);
   const route = resolved && resolved.route;

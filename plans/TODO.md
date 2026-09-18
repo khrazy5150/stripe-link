@@ -820,6 +820,25 @@ meet for the first time:
 
 Stripe test clocks are the practical way to do 5 without waiting a month.
 
+### ⭐ HIGH — turn on `jbay.page` link-in-bio serving (infrastructure BUILT dark 2026-09-17)
+
+Application side is done and shipped behind `CreatorServingEnabled="false"` — plans/CREATOR_DOMAIN_SERVING.md.
+A Site now emits a THIRD domain-index record (`jbay.page/{username}`) alongside its custom-domain and
+platform-host records; no second Site, no duplicated infrastructure.
+
+What remains is ops and policy, in this order:
+
+1. **plans/CREATOR_LINK_POLICY.md ships first.** The gate, not a nice-to-have: these pages carry no payment,
+   so the outbound link is the only lever an abuser has on a shared apex.
+2. Buy `jbay.page`, add the zone (token is already all-zones).
+3. Re-run `deploy/setup-cloudflare-custom-domain-worker.sh` with the new zone id — already parameterised.
+4. Flip `CreatorServingEnabled=true` and republish existing hubs (the record is written on publish).
+5. Submit `jbay.page` to the Public Suffix List — slow, so start it early.
+
+Then the dashboard surface: show a tenant their creator URL, and decide whether a username may differ from
+the store label (today it IS the platform subdomain label, which buys one namespace, one registry and the
+reserved wordlist for free — see the doc §3 before adding a second field).
+
 ### MEDIUM — the "Search-friendly" goal does not mean what a tenant reads it to mean (raised 2026-09-17)
 
 Author, 2026-09-17: *"if I want to create a page that can rank on Google, that's the choice I want to make.

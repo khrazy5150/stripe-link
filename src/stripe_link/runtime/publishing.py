@@ -29,7 +29,8 @@ from stripe_link.domain.sites import find_site_for_page
 from stripe_link.domain.social_links import section_own_links
 from stripe_link.domain.tips import stamp_tip_jar
 from stripe_link.domain.connect_sync import site_domain_verified, site_seo_enabled
-from stripe_link.domain.custom_domains import domain_index_record, platform_domain_index_record
+from stripe_link.domain.custom_domains import (
+    creator_domain_index_record, domain_index_record, platform_domain_index_record)
 from stripe_link.domain.funnels import funnel_slug_entries, post_purchase_plan
 from stripe_link.domain.opportunities import STAGE_LANDING, STAGE_POST_PURCHASE, stage_opportunities
 from stripe_link.runtime.upsell_pages import (
@@ -109,6 +110,24 @@ def platform_serving_enabled() -> bool:
     relative internal links that dead-end before the *.jbay.uk/*.jbay.be edge Worker is wired. Default off;
     flip PLATFORM_SERVING_ENABLED on per environment once the edge route is live (the ops slice)."""
     return str(os.environ.get("PLATFORM_SERVING_ENABLED") or "").strip().lower() in ("1", "true", "yes", "on")
+
+
+DEFAULT_CREATOR_DOMAIN = "jbay.page"
+
+
+def creator_hosting_domain() -> str:
+    """The apex link-in-bio pages serve under. Deliberately NOT the platform hosting domain: it is the only
+    surface carrying tenant-authored outbound links, and a reputation hit there must not reach commerce."""
+    return str(os.environ.get("CREATOR_HOSTING_DOMAIN") or DEFAULT_CREATOR_DOMAIN).strip() or DEFAULT_CREATOR_DOMAIN
+
+
+def creator_serving_enabled() -> bool:
+    """Whether link hubs serve on {creator domain}/{username}. Default OFF, and it stays off until three
+    things are true, not one: the zone exists, the Worker route is live, and plans/CREATOR_LINK_POLICY.md has
+    shipped. That policy is the admission ticket for a shared apex carrying outbound links -- the pages carry
+    no payment, so the link is the only lever an abuser has, and the allowlist/warning/takedown path is what
+    keeps the domain alive."""
+    return str(os.environ.get("CREATOR_SERVING_ENABLED") or "").strip().lower() in ("1", "true", "yes", "on")
 
 
 def site_is_served(site: dict[str, Any] | None) -> bool:
@@ -461,9 +480,16 @@ def _enable_site_route(site: dict[str, Any], page_id: str) -> bool:
     return changed
 
 
-def _denormalize_page_catalog(site: dict[str, Any], page_id: str, offer_id: str, category: str) -> bool:
+def _denormalize_page_catalog(site: dict[str, Any], page_id: str, offer_id: str, category: str,
+                              composition: str = "") -> bool:
     """Record a landing page's offer_id + product category on its Site route-map entry so category pages can
-    resolve grids off the map. Returns whether anything changed."""
+    resolve grids off the map. Returns whether anything changed.
+
+    Also records the page's COMPOSITION, which is what lets the creator-domain record find the Site's link hub
+    without a second read. The composition is a property of the OFFER, which the edge resolver never loads and
+    the Site document does not otherwise carry -- so the publisher, which has both in hand, writes it down at
+    the one moment it is known for certain.
+    """
     changed = False
     for entry in (site.get("pages") or {}).values():
         if isinstance(entry, dict) and entry.get("page_id") == page_id:
@@ -472,6 +498,9 @@ def _denormalize_page_catalog(site: dict[str, Any], page_id: str, offer_id: str,
                 changed = True
             if category and entry.get("category") != category:
                 entry["category"] = category
+                changed = True
+            if composition and entry.get("composition") != composition:
+                entry["composition"] = composition
                 changed = True
     return changed
 
@@ -609,6 +638,13 @@ def _sync_domain_index(site: dict[str, Any], domains_index_repository: Any | Non
     platform = platform_domain_index_record(site)
     if platform:
         repo.put(platform)
+    # ...and the link-in-bio record, when this Site has a published link hub. A THIRD record off the SAME
+    # Site -- not a second Site. Every surface a Site is reachable on is one row here; that is what makes
+    # adding a surface cheap and why a dedicated creator Site would have been duplicated infrastructure.
+    if creator_serving_enabled():
+        creator = creator_domain_index_record(site, creator_hosting_domain())
+        if creator:
+            repo.put(creator)
 
 
 def artifact_targets(
@@ -1106,7 +1142,8 @@ def publish_page_document(
     if site and page.get("offer_id"):
         try:
             category = str(first_offer_product(offer, products_by_id).get("product_category") or "")
-            if sites_repository is not None and _denormalize_page_catalog(site, page_id, str(page.get("offer_id") or ""), category):
+            if sites_repository is not None and _denormalize_page_catalog(
+                    site, page_id, str(page.get("offer_id") or ""), category, composition_key(offer)):
                 validate_site(site)
                 site = sites_repository.put(site)
                 _sync_domain_index(site, domains_index_repository)

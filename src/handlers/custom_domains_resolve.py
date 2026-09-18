@@ -2,7 +2,8 @@ import os
 import re
 
 from stripe_link.common import error_response, header_value, json_response, query_params
-from stripe_link.domain.custom_domains import normalize_domain, normalize_route_path, route_target
+from stripe_link.domain.custom_domains import (
+    creator_host_key, normalize_domain, normalize_route_path, route_target)
 from stripe_link.repositories.documents import RepositoryError, custom_domains_index_repository
 from stripe_link.runtime.artifacts import artifact_paths
 from stripe_link.runtime.publishing import public_url
@@ -58,6 +59,27 @@ def _resolve_slug(slug, routes, homepage_page_id, funnel_step=""):
     return None, ""
 
 
+def _creator_lookup(host, path):
+    """On the shared creator apex, the index key is `{host}/{username}` and the username is eaten from the path.
+
+    Every creator shares one hostname there, so the host alone identifies nobody -- the first path segment is
+    the only thing that says whose page this is. Returns (index_key, remaining_path); the remaining path is
+    what the normal slug machinery then resolves, so `jbay.page/maria` is that hub's root exactly the way
+    `maria.jbay.uk/` is.
+
+    ("", path) when this is not the creator apex, or when the apex was hit with no username at all -- the bare
+    domain belongs to the platform, not to whoever claims it first.
+    """
+    domain = normalize_domain(os.environ.get("CREATOR_HOSTING_DOMAIN") or "")
+    if not domain or normalize_domain(host) != domain:
+        return "", path
+    segments = str(path or "").strip("/").split("/", 1)
+    username = segments[0].strip().lower()
+    if not username:
+        return "", path
+    return creator_host_key(domain, username), "/" + (segments[1] if len(segments) > 1 else "")
+
+
 def handler(event, context, *, index_repo=None, pages_domain=None):
     """Public endpoint: given a custom domain hostname, resolve where to reverse-proxy it.
 
@@ -79,8 +101,13 @@ def handler(event, context, *, index_repo=None, pages_domain=None):
     if not host:
         return error_response("host is required.", code="missing_host")
 
+    # Read the path up front: on the creator apex it carries the username, which is part of the lookup key.
+    qp = query_params(event)
+    path = str(qp.get("path") or "")
+    creator_key, path = _creator_lookup(host, path)
+
     try:
-        record = index_repo.find_by_id(normalize_domain(host))
+        record = index_repo.find_by_id(creator_key or normalize_domain(host))
     except RepositoryError as exc:
         return error_response(str(exc), code="repository_error")
 
@@ -103,8 +130,6 @@ def handler(event, context, *, index_repo=None, pages_domain=None):
     # A well-known crawl file (/robots.txt, /sitemap.xml, /{key}.txt) is served from the sibling artifact the
     # publisher wrote under the homepage page_id. Every other path routes through the Site's slug map: the
     # homepage at "/", funnel/collection pages at their slugs, an unknown slug is a 404.
-    qp = query_params(event)
-    path = str(qp.get("path") or "")
     if path and _WELL_KNOWN_PATH.match(path):
         artifact_key = f"{key_prefix}{homepage_page_id}{path}"
     else:
@@ -137,6 +162,6 @@ def handler(event, context, *, index_repo=None, pages_domain=None):
     # The free platform hostname ({label}.<hosting-domain>) is a navigable but NEVER-indexed store surface
     # (reputation-isolation floor). Tell the Worker to stamp X-Robots-Tag so the same artifact is noindex here
     # even when its HTML says index,follow on the custom domain (plans/PLATFORM_HOSTNAME_SERVING.md).
-    if record.get("host_kind") == "platform":
+    if record.get("host_kind") in ("platform", "creator"):
         route["noindex"] = True
     return json_response({"route": route})

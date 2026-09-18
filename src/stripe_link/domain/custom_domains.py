@@ -139,6 +139,75 @@ def platform_domain_index_record(site: dict[str, Any]) -> dict[str, Any] | None:
     }
 
 
+# Link-in-bio serving, path-on-apex: `jbay.page/{username}` (plans/SOCIAL_MEDIA_PAGES.md #4). Every creator
+# shares ONE hostname, so the hostname alone cannot identify a tenant the way a custom domain or a platform
+# subdomain does -- the index key has to carry the username too.
+#
+# Keyed per USERNAME (`jbay.page/maria`), never one `jbay.page` record holding a routes map of every creator.
+# That alternative reads cheaper and is a single hot item, unbounded in size, where one tenant's publish
+# rewrites every other tenant's routes and one bad write takes the whole domain down. Per-username records are
+# the same shape the resolver already reads: one tenant, one page.
+def creator_host_key(creator_domain: str, username: str) -> str:
+    """The domain-index key for a creator page: `{domain}/{username}`, both normalized."""
+    domain = normalize_domain(creator_domain)
+    label = str(username or "").strip().lower().strip("/")
+    return f"{domain}/{label}" if domain and label else ""
+
+
+def creator_username(site: dict[str, Any]) -> str:
+    """The username a Site's link hub serves under -- its PLATFORM SUBDOMAIN LABEL, not a new field.
+
+    Reusing the label means one namespace platform-wide: `maria.jbay.uk` and `jbay.page/maria` are the same
+    tenant by construction, so neither can impersonate the other. It also inherits, for free, the three things
+    a username namespace needs and would otherwise have to grow its own copy of -- the syntax rule, the
+    first-claim-wins reservation registry, and RESERVED_SUBDOMAINS (which already holds `about`, `login`,
+    `api`, `admin`, ... the path wordlist plans/SOCIAL_MEDIA_PAGES.md #4 says must exist before the first
+    username is claimed).
+    """
+    hosting = site.get("hosting") or {}
+    hostname = str(hosting.get("platform_hostname") or "").strip().lower()
+    return hostname.split(".")[0] if hostname else ""
+
+
+def creator_page_entry(site: dict[str, Any]) -> tuple[str, dict[str, Any]] | None:
+    """The Site's link hub: its route entry stamped `composition: "lead_social"` at publish time.
+
+    Deterministic by slug when a Site somehow has more than one, so republishing cannot silently move which
+    page a creator URL serves.
+    """
+    entries = [(slug, entry) for slug, entry in (site.get("pages") or {}).items()
+               if isinstance(entry, dict) and entry.get("composition") == "lead_social"
+               and str(entry.get("page_id") or "")]
+    return sorted(entries)[0] if entries else None
+
+
+def creator_domain_index_record(site: dict[str, Any], creator_domain: str) -> dict[str, Any] | None:
+    """The domain-index record serving this Site's link hub at `{creator_domain}/{username}`.
+
+    Serves ONE page, with an EMPTY route table -- deliberately, and this is the reputation isolation the
+    separate domain exists for. The Site's own table would expose its checkout, funnel and thank-you pages at
+    `jbay.page/maria/...`, putting commerce on the one domain whose entire premise is that it carries no
+    payment and can therefore be judged on its outbound links alone.
+
+    None when the Site has no username or no published link hub -- there is nothing to serve.
+    """
+    username = creator_username(site)
+    found = creator_page_entry(site)
+    if not username or not found:
+        return None
+    _, entry = found
+    return {
+        "tenant_id": str(site.get("tenant_id") or ""),
+        "domain": creator_host_key(creator_domain, username),
+        "target_page_id": str(entry.get("page_id") or ""),
+        "routes": {},
+        "status": "active",
+        "site_id": str(site.get("site_id") or ""),
+        "host_kind": "creator",
+        "stripe_mode": "live" if str(site.get("environment") or "").strip().lower() == "live" else "test",
+    }
+
+
 def build_domain(apex_domain: str, subdomain_label: str) -> str:
     apex = normalize_domain(apex_domain)
     label = str(subdomain_label or "").strip().lower()

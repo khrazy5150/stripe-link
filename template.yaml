@@ -20,6 +20,24 @@ Parameters:
     Type: String
     Default: jbay.uk
     Description: Registrable domain for tenant free-tier Sites (Zone B, always noindex). A tenant's platform_hostname is <name>.<this>. Must differ from the platform's own domain (juniorbay.com). See plans/SITE_OBJECT.md.
+  CreatorHostingDomain:
+    Type: String
+    Default: jbay.page
+    Description: >-
+      Registrable domain for link-in-bio pages, served path-on-apex as <this>/<username>. A SEPARATE domain
+      from PlatformHostingDomain on purpose: it is the only surface carrying user-authored outbound links, so
+      a reputation hit there must not touch commerce, dashboard, signup or billing. See
+      plans/SOCIAL_MEDIA_PAGES.md #4 and plans/CREATOR_LINK_POLICY.md.
+  CreatorServingEnabled:
+    Type: String
+    Default: "false"
+    AllowedValues:
+      - "true"
+      - "false"
+    Description: >-
+      Whether link-in-bio pages are served on <CreatorHostingDomain>/<username>. Keep "false" until the zone
+      exists, the Worker route is live, AND plans/CREATOR_LINK_POLICY.md has shipped -- that policy is the
+      admission ticket for a shared apex carrying outbound links, not a nice-to-have.
   PlatformServingEnabled:
     Type: String
     Default: "false"
@@ -232,6 +250,10 @@ Globals:
         # Registrable domain for tenant free-tier Sites (Zone B, always noindex). Read from config, never
         # hardcoded, so it can change without a code change. See plans/SITE_OBJECT.md §6.
         PLATFORM_HOSTING_DOMAIN: !Ref PlatformHostingDomain
+        # Link-in-bio serving on a shared apex ({domain}/{username}). Separate domain and separate
+        # switch from the platform host: the two surfaces are isolated deliberately.
+        CREATOR_HOSTING_DOMAIN: !Ref CreatorHostingDomain
+        CREATOR_SERVING_ENABLED: !Ref CreatorServingEnabled
         # Master switch for serving Sites on their free platform host. Off until the *.<PlatformHostingDomain>
         # Cloudflare Worker route is live; then flip per environment. See plans/PLATFORM_HOSTNAME_SERVING.md.
         PLATFORM_SERVING_ENABLED: !Ref PlatformServingEnabled

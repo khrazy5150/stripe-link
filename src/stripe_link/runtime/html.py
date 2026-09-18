@@ -6731,12 +6731,20 @@ def render_view_beacon(page: dict[str, Any], kind: str, api_base_url: str | None
     unavailable the endpoint falls back to a salted hash of IP + user-agent, which dedupes for the day and
     cannot be correlated beyond it. Anything richer than "how many people looked at this" is what the GA4
     and Meta adapters above are for.
+
+    The key is namespaced PER TENANT. It was a bare `sl_vid`, which is correct exactly as long as every Site
+    has its own hostname -- localStorage is per-origin, so the tenant boundary was doing the work for free.
+    Link-in-bio serving breaks that assumption: `jbay.page/alice` and `jbay.page/bob` are ONE origin, and a
+    bare key would have handed unrelated tenants the same visitor identifier, turning a deliberately
+    first-party token into a cross-tenant one. Namespacing costs nothing on the hostname-per-Site pages and
+    is the difference between first-party and third-party tracking on the shared apex.
     """
     if kind != "published":
         return ""
     page_id = str((page or {}).get("page_id") or "")
     if not page_id:
         return ""
+    tenant_id = str(page.get("tenant_id") or "")
     base = str(api_base_url or "").rstrip("/")
     if not base:
         return ""
@@ -6744,7 +6752,7 @@ def render_view_beacon(page: dict[str, Any], kind: str, api_base_url: str | None
         "  <script>\n"
         "    (function () {\n"
         "      try {\n"
-        "        var k = 'sl_vid', v = '';\n"
+        f"        var k = 'sl_vid_' + {json.dumps(tenant_id)}, v = '';\n"
         "        try { v = localStorage.getItem(k) || ''; if (!v) { v = (Math.random().toString(36).slice(2) + Date.now().toString(36)); localStorage.setItem(k, v); } } catch (e) { v = ''; }\n"
         f"        var u = {json.dumps(base)} + '/t/view?p=' + encodeURIComponent({json.dumps(page_id)}) + (v ? '&v=' + encodeURIComponent(v) : '');\n"
         "        if (navigator.sendBeacon) { navigator.sendBeacon(u); }\n"
