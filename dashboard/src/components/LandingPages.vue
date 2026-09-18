@@ -3740,6 +3740,10 @@ const builderSiteProfiles = computed(() => {
 const previewNeedsSite = computed(() =>
   builderOfferType.value === "lead_social"
   && !siteByPageId.value[builder.page_id]
+  // ...and not while an attach is already pending from the wizard's step 1. The tenant answered this
+  // question before the builder opened; until the first save there is no page to attach and nothing they
+  // could do about it, so the notice had no action behind it -- it just taught them to distrust the panel.
+  && !pendingSiteAttach.value
   && !!builderSiteId.value
   && !builder.elements.some((el) => el.type === "social_links" && (el.items || []).some((i) => (i.url || "").trim())));
 // Per-link clicks for the page in the builder, keyed by URL (plans/SOCIAL_MEDIA_PAGES.md §11). Fetched
@@ -4020,13 +4024,13 @@ function attachPageToSiteCore(page, siteId, kind, category) {
 
 // Bind a freshly-created page to the chosen Site (the wizard's step 1). Non-fatal: the page is already
 // created, so a failed attach only degrades to "attach it on the Sites screen".
-async function attachCreatedPageToSite(saved, siteId, kind, category) {
+async function attachCreatedPageToSite(saved, siteId, kind, category, errorRef = wizardError) {
   if (!siteId || !saved?.page_id) return true;
   try {
     await attachPageToSiteCore(saved, siteId, kind, category);
     return true;
   } catch (err) {
-    wizardError.value = `Page created, but attaching it to the Site failed: ${err.message || err}. Attach it on the Sites screen.`;
+    errorRef.value = `Page created, but attaching it to the Site failed: ${err.message || err}. Attach it on the Sites screen.`;
     return false;
   }
 }
@@ -4270,35 +4274,6 @@ function seedShapeElements() {
   for (const type of SHAPE_SEEDS[builderOfferType.value] || []) {
     if (builder.elements.some((element) => element.type === type)) continue;
     builder.elements.push(newElement(type));
-  }
-}
-
-async function savePage() {
-  wizardError.value = "";
-  if (!draftPage.value) {
-    wizardError.value = "Page could not be generated.";
-    return;
-  }
-  saving.value = true;
-  try {
-    const body = await apiRequest("/pages", { method: "POST", body: draftPage.value });
-    const saved = body.page || draftPage.value;
-    pages.value = [saved, ...pages.value.filter((page) => page.page_id !== saved.page_id)];
-    pagesLoaded.value = true;
-    // A page created via the wizard→builder flow attaches to the Site chosen in step 1 (once, on first save).
-    if (pendingSiteAttach.value && !builderExistingPageId.value) {
-      await attachCreatedPageToSite(saved, pendingSiteAttach.value, "offer");
-      const siteName = sitesStore.sites.find((s) => s.site_id === pendingSiteAttach.value)?.name;
-      pendingSiteAttach.value = "";
-      message.value = `${saved.name} was saved and attached to ${siteName || "your Site"}.`;
-    } else {
-      message.value = `${saved.name} was saved.`;
-    }
-    wizardOpen.value = false;
-  } catch (err) {
-    wizardError.value = err.message || "Failed to save landing page.";
-  } finally {
-    saving.value = false;
   }
 }
 
@@ -4821,12 +4796,30 @@ async function saveBuilderPageWithStatus(statusOverride = "", { silent = false }
   saving.value = true;
   try {
     const document = applyPageStatus(builderPageDocument.value, statusOverride);
+    // Asked BEFORE the save, because the save is what stops it being the first one.
+    const firstSave = !builderExistingPageId.value;
     const body = await apiRequest("/pages", { method: "POST", body: document });
     const saved = body.page || document;
     pages.value = [saved, ...pages.value.filter((page) => page.page_id !== saved.page_id)];
     pagesLoaded.value = true;
+    // Step 1 of the wizard asked which Site this page belongs to, and a page can only be attached once it
+    // EXISTS -- there is no page_id to attach before the first save. So the choice is carried and honoured
+    // here. It used to live in savePage() -- the wizard's own save, which nothing has called since auto-save
+    // moved the builder onto this function. That orphaned copy is why the feature "existed" and never ran:
+    // the tenant's answer was dropped, and they were told to go and give it again from the page menu.
+    let attachedName = "";
+    if (firstSave && pendingSiteAttach.value) {
+      const site = sitesStore.sites.find((entry) => entry.site_id === pendingSiteAttach.value);
+      if (await attachCreatedPageToSite(saved, pendingSiteAttach.value, "offer", undefined, error)) {
+        attachedName = site?.name || "your Site";
+      }
+      pendingSiteAttach.value = "";
+    }
     if (!silent) {
-      message.value = statusOverride === "published" ? `${saved.name} was published.` : `${saved.name} was saved.`;
+      const verb = statusOverride === "published" ? "published" : "saved";
+      message.value = attachedName
+        ? `${saved.name} was ${verb} and attached to ${attachedName}.`
+        : `${saved.name} was ${verb}.`;
     }
     builderExistingPageId.value = saved.page_id;
     builder.status = saved.status || builder.status;
@@ -5487,7 +5480,7 @@ async function closeSectionEditor() {
   await autoSavePage();
 }
 
-// Auto-save uses the BUILDER's save, not the wizard's. savePage() builds its document from `draftPage`,
+// Auto-save uses the BUILDER's save. The wizard's own savePage() built its document from `draftPage`,
 // which only exists inside the create-a-page wizard — calling it from the builder produced "Page could not
 // be generated." on every Done. saveBuilderPageWithStatus() with no override saves as a DRAFT and reports
 // into the builder's own error banner, which is what the tenant is looking at.
