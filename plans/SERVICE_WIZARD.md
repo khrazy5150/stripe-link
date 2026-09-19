@@ -188,6 +188,51 @@ Services keeps **+ Create Service** as a second door into the same wizard. One w
 **This settles §3 by construction:** picking "Service" runs the service flow and writes a **Service**
 document, so `product_type="service"` is a router in the picker and never a stored product type.
 
+## 4.5 Editing: where a service goes after it is created
+
+The author's constraint: *"the services screen remains intact as a way to edit services."* Agreed — it is a
+good console and this plan never touches it. The open question is what happens when a tenant goes looking.
+
+**The problem is created by the fix.** If picking "Service" in the Products wizard writes a `Service`
+document (§4.4), then the thing the tenant just made **does not appear in the Products list at all** — and
+they made it on the Products screen. That is the same discontinuity we just removed from creation, moved to
+the day after.
+
+There is precedent for the answer. `Offers.vue` already merges the two: *"Products and services are both
+'items'; the visual selector treats them as one list"*, via `serviceSelectorCard()` (Offers.vue:818), which
+shapes a Service into a product-compatible card so every existing helper works unchanged.
+
+### Three options
+
+**A — Services appear in the Products list; Edit deep-links to the Services editor.** *Recommended.*
+Reuse `serviceSelectorCard()`'s trick for the list rows, mark them with a type badge, and make Edit call
+`navigateTo("services", { edit: service_id })` so the Services screen opens with that service's modal
+already up. The tenant finds what they made where they made it, and edits in the console built for it.
+
+Cost: a merged `filteredProducts`-style computed, a badge, and `navigateTo` gaining a payload argument
+(it takes only a view name today — it was added this session, so widening it is cheap).
+
+Risks to handle, not hand-wave: the Products list's own filters, search and bulk actions must either work on
+service rows or visibly not apply to them. A row that looks like the others and silently ignores "Archive"
+is worse than a row that is obviously different.
+
+**B — A pointer, no merged list.** The wizard's final step says where the service now lives, with a button;
+the Products list never shows services. Cheapest, and honest, but it re-teaches the tenant that services are
+Somewhere Else — exactly the lesson §4.4 exists to unteach.
+
+**C — Merged list, Edit opens the WIZARD again in edit mode.** Rejected. It would mean maintaining a second
+editor for the same document, and the wizard is deliberately a create-time narrowing: a tenant editing a
+service usually wants one field, not thirteen steps.
+
+### Recommendation
+
+**A**, with **B as the fallback if the list merge proves messy.** The deep-link is the only genuinely new
+mechanism, and it is small: `navigateTo` already exists and needs one payload argument, while the Services
+screen already has `openEditModal(row)` to call on arrival.
+
+Worth deciding at the same time: whether the Products list **filters** (`type: physical / digital`) gain a
+`service` value. If services show in the list they should be filterable like everything else.
+
 ## 5. The editor
 
 Unchanged by all of this: the existing screen stays the console for someone who already has a service. It is
@@ -198,7 +243,7 @@ groupings as §4.1. No fields removed.
 
 ## 6. Phasing
 
-1. **Agree §4.2's step list and the §4.4 placement.** Both are author calls.
+1. **Agree §4.2's step list, §4.4's placement, and §4.5's edit route.** All three are author calls.
 2. Build the wizard in Products, with the Services door pointing at the same flow.
 3. Review step + skip affordances (§4.3) — these are the feature, not polish.
 4. **Exercise the selling path end to end.** 59 tests pass but zero real services exist: create one through
