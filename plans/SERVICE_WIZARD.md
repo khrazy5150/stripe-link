@@ -76,57 +76,100 @@ Consequences to accept if we go that way:
 The alternative — keep both, and ask a fourth question ("does this need appointments?") — is more honest to
 today's data model and worse to use: the tenant is made to understand our schema in order to sell a haircut.
 
-## 4. The wizard (the actual ask) — **BUILT 2026-09-18**
+## 4. The wizard — REVISED 2026-09-18 after the first attempt was wrong
 
-Shipped as described below, with one change the author's framing forced: *"a service tenant has NO IDEA about
-the physical products screen and vice-versa"*. So the wizard is the front door on **Services**, not a branch
-inside the Products wizard — a service tenant never has to find the product screen to use it. The Products
-wizard's "Service" option now hands off to it (via a new `navigateTo` provided by the shell) instead of
-running the physical path, which is what it used to do.
+The first build (dev only, commit 796d99d) got two things wrong, and the author named both:
 
-Built as a presentation over ONE form and ONE save, not a second of either. `savePage()` in LandingPages.vue
-was the other approach and quietly stopped being called, taking its behaviour with it for weeks.
+1. **It handed off to the Services screen.** Wrong, because *"when people think of 'product' they think of
+   product or service — the labor of one's hands is also a product"*. A tenant looking for where to create the
+   thing they sell looks in one place. Sending them somewhere else is our data model leaking into their day.
+2. **It hid the console instead of pacing it.** *"If we simply say: here you go… create your service in this
+   huge screen, our software loses value."* Hiding fields makes a shallow wizard and leaves the overwhelming
+   screen intact for anyone who needs those fields. The value is in **breaking the screen into logical
+   pieces**, not in asking less.
 
-Mirror the Products wizard exactly, because tenants have learned it. Four steps, not five — a service has no
-SKU/identifier step worth asking about at creation.
+So the wizard **covers everything the service screen covers**, one coherent question per step, and it lives
+where products are created. It will be well over four steps, and that is correct — a long wizard of easy
+steps beats a short one that dumps you into a console.
 
-| Step | Asks | Notes |
-|---|---|---|
-| 1. Purpose | already exists | "Sell something" → type "Service" routes here |
-| 2. Details | name, description | "What do you offer?" |
-| 3. Pricing | reuse `PricingCard` | services already use the shared Price primitive |
-| 4. Scheduling | *"Customers book an appointment for this"* → duration | writes `fulfillment_mode`; duration only when it is scheduled |
-| 5. Photo | hero image | optional |
+### 4.1 Everything a Service holds
 
-Deferred to the editor because each has a default that suits a first service: `location_mode`,
-`booking_flow`, and the whole fulfiller/compensation/check-in console.
+| Group | Fields | Required | Default |
+|---|---|---|---|
+| Identity | `name`, `description` | name | — |
+| Delivery | `location_mode` (onsite / mobile / virtual / hybrid) | no | `onsite` |
+| Booking | `fulfillment_mode` (scheduled / no_booking) | no | `scheduled` |
+| Timing | `duration_minutes` | **yes if scheduled** | 60 |
+| Price | `prices[]`, `default_price_index` | price | — |
+| Payment timing | `booking_flow` (pay_then_book / book_then_pay) | no | `pay_then_book` |
+| Team | `allowed_fulfillers[]` — fulfiller, override type/amount, tips_to_fulfiller | no | `[]` |
+| New fulfiller | first name, last name, email, `compensation_type` (flat_fee/percent/hourly), amount | email | — |
+| Assignment | `default_fulfiller_id`, `calendar_connection_id` | no | — |
+| On the day | `check_in_required`, window start (15) / end (5), `check_in_label`, `completion_required` (true), `completion_label` | no | sensible |
+| Presentation | `hero_image_url`, `image_dims`, `active` | no | active |
 
-Everything else — fulfillers beyond oneself, compensation, overrides, check-in/completion labels and windows,
-location mode, tips-to-fulfiller — **moves to the editor**, exactly as the product wizard defers identifiers
-and tags. A solo tenant should never meet the word "fulfiller".
+### 4.2 The steps
 
-Step 4's defaults matter more than its fields: a one-person business should be able to press Next through it.
+Conditional, so the path adapts to the business rather than the schema. **[c]** = conditional.
+
+| # | Step | Asks | Shown when |
+|---|---|---|---|
+| 1 | What you offer | name, description | always |
+| 2 | Where it happens | `location_mode`, as four choices | always |
+| 3 | Appointments | "do customers book a time?" → `duration_minutes` | always (duration **[c]** on scheduled) |
+| 4 | Price | `PricingCard` | always |
+| 5 | When they pay | pay first / book first | **[c]** scheduled only |
+| 6 | Who performs it | just me / me and my team / my team | always |
+| 7 | Your team | assign or create fulfillers, compensation | **[c]** team answers |
+| 8 | Calendar | which calendar; default fulfiller | **[c]** scheduled; fulfiller part on team |
+| 9 | On the day | check-in / completion labels, windows, required | **[c]** team, and skippable |
+| 10 | Photo | hero image | always |
+| 11 | Review | what you set, with links back; `active` | always |
+
+Rough shapes: **solo, no appointments → 6 steps**; **solo, scheduled → 8**; **team, scheduled → 11.**
+
+### 4.3 What makes a long wizard bearable
+
+These are not decoration; without them eleven steps is worse than one screen.
+
+- **Every step past the required ones is skippable**, with the default stated on screen ("Most people leave
+  this as *Ready on Site*"). A tenant should be able to get to Review in under a minute.
+- **A real Review step** listing what was set, each line linking back to its step. This is what lets someone
+  move fast without fear — and it is where `active` belongs, because it is the last decision.
+- **The rail must not lie about conditional steps.** `LandingPages.vue` already has the scar: `displayTotal`
+  and `displayStep` and the label list have to agree, and when they did not the rail misreported how much was
+  left. One predicate derives all three, and the rail shows only the steps THIS tenant will see.
+- **No word a solo tenant has to look up.** "Fulfiller" is our word. Step 6 asks who does the work; only a
+  tenant who answers "my team" ever meets the vocabulary.
+
+### 4.4 Where it lives, and what it creates
+
+In the **Products wizard**, because that is where a tenant looks for the thing they sell.
+`WIZARD_FLOWS` is keyed on intent today; it gains a service path chosen by `product_type`, which is the
+branch that never existed and caused the original bug.
+
+Services keeps its own **+ Create Service** entry into the same wizard, for the service-led tenant who lives
+on that screen. One wizard, two doors — not two wizards.
+
+**This also settles §3 by construction.** If picking "Service" runs the service flow and writes a **Service**
+document, then `product_type="service"` is a router in the picker and never a stored product type. One
+concept, two fulfilment modes, arrived at through what the tenant does rather than by decree.
 
 ## 5. The editor
 
-The existing 693-line form becomes the *advanced* surface rather than the front door, reorganised the way
-Page Settings already is — `SettingsAccordion` sections, collapsed by default:
+Unchanged by all of this: the existing screen stays the console for someone who already has a service. It is
+a fine tool; it was only ever a bad front door.
 
-- **Scheduling** — duration, booking flow, booking rules
-- **Who performs it** — fulfillers, compensation, overrides, tips
-- **On the day** — check-in/completion labels, windows, required flags
-- **Appearance** — hero image
-
-No fields are removed. They stop being the first thing a new tenant sees.
+Optional later, not required: group it behind `SettingsAccordion` the way Page Settings is, using the same
+groupings as §4.1. No fields removed.
 
 ## 6. Phasing
 
-1. **Decide §3.** Nothing else is safe to build first.
-2. **Wizard (§4)** — the tenant-visible fix, and the one that was asked for.
-3. **Editor reorganisation (§5)** — mechanical once §4 lands.
-4. **Exercise the selling path end to end.** 59 tests pass, but zero real services exist: create one through
-   the new wizard, attach it to an offer, publish, book it, take the payment. Everything in §2 is *built*;
-   none of it is *proven* against a service a tenant made.
+1. **Agree §4.2's step list and the §4.4 placement.** Both are author calls.
+2. Build the wizard in Products, with the Services door pointing at the same flow.
+3. Review step + skip affordances (§4.3) — these are the feature, not polish.
+4. **Exercise the selling path end to end.** 59 tests pass but zero real services exist: create one through
+   the wizard, attach it to an offer, publish, book it, take payment.
 
 Not in scope: plans/SERVICES_IN_OFFERS.md's remaining items and plans/BOOKING_AS_PRIMITIVE.md's Booking
 decoupling. Both are design-only, both are larger, and neither blocks a tenant creating a service.
