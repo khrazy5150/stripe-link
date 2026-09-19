@@ -108,52 +108,85 @@ steps beats a short one that dumps you into a console.
 | On the day | `check_in_required`, window start (15) / end (5), `check_in_label`, `completion_required` (true), `completion_label` | no | sensible |
 | Presentation | `hero_image_url`, `image_dims`, `active` | no | active |
 
-### 4.2 The steps
+### 4.1b Personal vs tenant availability — the author asked, so it is written down
 
-Conditional, so the path adapts to the business rather than the schema. **[c]** = conditional.
+Three documents, and the distinction is real:
+
+| | What it is | Scope |
+|---|---|---|
+| `tenant_availability` | the BUSINESS's hours, plus the booking mechanics nobody else carries: `timezone`, `slot_interval_minutes`, `lead_time_minutes`, `weekly_hours` (7 days) | one per tenant |
+| `fulfiller.availability.weekly_hours` | when a PERSON works. Hours only — timezone, slot size and lead time still come from the tenant | one per staff member |
+| `availability_exception` | a dated override, `type: block` or `open`, with `fulfiller_scope` all-or-specific | holidays, one-off closures, extra open days |
+
+So a **solo tenant only ever needs tenant availability** — they are the business. Per-person hours exist to
+NARROW the business's hours for one staff member, and exceptions override either.
+
+### 4.1c The panels already exist, and that is the whole problem
+
+`Services.vue` stacks five self-contained components on one page: `FulfillersPanel`,
+`TenantAvailabilityPanel`, `AvailabilityExceptionsPanel`, `CalendarPanel`, `AppointmentsPanel`. None takes a
+prop; each owns its store.
+
+Two consequences:
+
+1. **The wizard embeds them, it does not rebuild them.** A step is `<TenantAvailabilityPanel />` with a
+   heading over it. This is much cheaper than it looked.
+2. **The overwhelm is the page, not just the modal.** Five consoles stacked with no order is the thing that
+   made this feel unusable, and the modal was only the last straw.
+
+**They are TENANT-scoped, not service-scoped** — availability, exceptions, staff and calendar are shared by
+every service. So the wizard must ask them **once**: on the first service they are steps; on the second they
+collapse to a confirmed line ("Your hours: Mon–Fri, 9–5 · Change") that a tenant passes without stopping. A
+wizard that re-asks the business's opening hours for every haircut is worse than the console.
+
+### 4.2 The steps (author's list, 2026-09-18)
 
 | # | Step | Asks | Shown when |
 |---|---|---|---|
 | 1 | What you offer | name, description | always |
-| 2 | Where it happens | `location_mode`, as four choices | always |
-| 3 | Appointments | "do customers book a time?" → `duration_minutes` | always (duration **[c]** on scheduled) |
+| 2 | Details | `product_category`, `location_mode` | always |
+| 3 | **Do customers book an appointment?** | `fulfillment_mode` | **always — this is the branch** |
 | 4 | Price | `PricingCard` | always |
-| 5 | When they pay | pay first / book first | **[c]** scheduled only |
-| 6 | Who performs it | just me / me and my team / my team | always |
-| 7 | Your team | assign or create fulfillers, compensation | **[c]** team answers |
-| 8 | Calendar | which calendar; default fulfiller | **[c]** scheduled; fulfiller part on team |
-| 9 | On the day | check-in / completion labels, windows, required | **[c]** team, and skippable |
-| 10 | Photo | hero image | always |
-| 11 | Review | what you set, with links back; `active` | always |
+| 5 | How long does it take? | `duration_minutes` | booked only |
+| 6 | When do they pay? | `booking_flow` | booked only |
+| 7 | Who will fulfill this? | myself / add a staff member → `FulfillersPanel` | always; panel on "staff" |
+| 8 | What is the availability? | `TenantAvailabilityPanel`, + per-fulfiller hours on staff | booked only; **once per tenant** |
+| 9 | Are there exceptions? | `AvailabilityExceptionsPanel` | booked only; **once per tenant**; skippable |
+| 10 | Who gets the tips? | none / the fulfiller (`tips_to_fulfiller`) | staff only |
+| 11 | Calendar & sync | `CalendarPanel`, `calendar_connection_id` | booked only; **once per tenant** |
+| 12 | Photo | hero image | always |
+| 13 | Review | what was set, links back, `active` | always |
 
-Rough shapes: **solo, no appointments → 6 steps**; **solo, scheduled → 8**; **team, scheduled → 11.**
+Step 3 is the pivot the author named, and it does most of the work: **not booked collapses to 7 steps**
+(1,2,3,4,7,12,13) because availability, exceptions and calendar all fall away with it.
+
+Rough shapes: **solo, not booked → 7** · **solo, booked → 10** · **staff, booked → 13** · and a tenant's
+SECOND service is 3–4 shorter again, because the tenant-scoped steps are already answered.
 
 ### 4.3 What makes a long wizard bearable
 
-These are not decoration; without them eleven steps is worse than one screen.
+Not polish — without these, thirteen steps is worse than one screen.
 
-- **Every step past the required ones is skippable**, with the default stated on screen ("Most people leave
-  this as *Ready on Site*"). A tenant should be able to get to Review in under a minute.
-- **A real Review step** listing what was set, each line linking back to its step. This is what lets someone
-  move fast without fear — and it is where `active` belongs, because it is the last decision.
-- **The rail must not lie about conditional steps.** `LandingPages.vue` already has the scar: `displayTotal`
-  and `displayStep` and the label list have to agree, and when they did not the rail misreported how much was
-  left. One predicate derives all three, and the rail shows only the steps THIS tenant will see.
-- **No word a solo tenant has to look up.** "Fulfiller" is our word. Step 6 asks who does the work; only a
-  tenant who answers "my team" ever meets the vocabulary.
+- **Tenant-scoped steps are asked once** (§4.1c). This is the single biggest lever on perceived length.
+- **Every optional step is skippable with its default stated** — "Most people leave this as *Ready on Site*".
+- **A real Review step** listing what was set, each line linking back. It is what lets someone move fast
+  without fear, and where `active` belongs, being the last decision.
+- **The rail must not lie about conditional steps.** `LandingPages.vue` has the scar: `displayTotal`,
+  `displayStep` and the label list must agree, and when they did not the rail misreported how much was left.
+  One predicate derives all three, and the rail shows only the steps THIS tenant will see.
+- **No word a solo tenant must look up.** "Fulfiller" is our word; only step 7's "staff" answer reveals it.
 
-### 4.4 Where it lives, and what it creates
+### 4.4 Where it lives
 
-In the **Products wizard**, because that is where a tenant looks for the thing they sell.
-`WIZARD_FLOWS` is keyed on intent today; it gains a service path chosen by `product_type`, which is the
-branch that never existed and caused the original bug.
+In the **Products wizard** — *"when people think of 'product' they think of product or service"*. `WIZARD_FLOWS`
+is keyed on intent today and gains a service path chosen by `product_type`: the branch that never existed and
+caused the original bug. The "Create a service instead" hand-off button is removed; step 2 takes its place
+with `product_category`.
 
-Services keeps its own **+ Create Service** entry into the same wizard, for the service-led tenant who lives
-on that screen. One wizard, two doors — not two wizards.
+Services keeps **+ Create Service** as a second door into the same wizard. One wizard, two doors.
 
-**This also settles §3 by construction.** If picking "Service" runs the service flow and writes a **Service**
-document, then `product_type="service"` is a router in the picker and never a stored product type. One
-concept, two fulfilment modes, arrived at through what the tenant does rather than by decree.
+**This settles §3 by construction:** picking "Service" runs the service flow and writes a **Service**
+document, so `product_type="service"` is a router in the picker and never a stored product type.
 
 ## 5. The editor
 
