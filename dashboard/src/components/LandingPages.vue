@@ -2332,7 +2332,7 @@ import { TIP_DESTINATIONS, tipDestinationUrl } from "../config/tips";
 import { isSectionVisible, defaultCtaLabel, defaultVisible, excludedSections, recommendedSectionKeys, optionalSectionKeys, governedKeys, elementLabel, elementChannel, addableElements, tokenGroups, previewVar, supportedGoals, goalLabel, packSeeds, orderSections, sectionOrderKey, isMovable, elementPlacement, orderSectionKeys, isRepeatableSection } from "../composables/pageComposer";
 import { apiRequest, assetUrl, getApiBase, getAuthSession, getStripeMode, getOtherEnvironment, getPagesBaseUrl, getPreviewPagesBaseUrl, getTestPagesHost, getTenantId } from "../api/client";
 import { useToastsStore } from "../stores/toasts";
-import { formatMoney } from "../stores/products";
+import { formatMoney, serviceFlowCard } from "../stores/products";
 import PurchaseFlowDiagram from "./PurchaseFlowDiagram.vue";
 import { useProfileStore } from "../stores/profile";
 import { useSitesStore } from "../stores/sites";
@@ -2632,7 +2632,16 @@ const funnelFlowStages = computed(() => {
   const offer = builderOffer.value;
   if (!offer) return [];
   return stagesFromSavedOffer(offer, {
-    resolveProduct: (id) => productsById.value.get(id) || null,
+    // ...falling back to SERVICES, or a service entry renders as its raw `svc_...` id: the diagram's
+    // lookup only ever knew products, so every service card showed an id where a name belongs.
+    // ...falling back to this screen's own `services` (ensureServicesLoaded), or a service entry renders as
+    // its raw `svc_...` id: the diagram's lookup only ever knew products.
+    resolveProduct: (id) => {
+      const product = productsById.value.get(id);
+      if (product) return product;
+      const service = services.value.find((entry) => entry.service_id === id);
+      return service ? serviceFlowCard(service) : null;
+    },
     formatAmount: (amount, currency) => formatMoney(amount, currency),
   });
 });

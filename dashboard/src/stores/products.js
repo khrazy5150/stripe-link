@@ -149,6 +149,20 @@ export function serviceListRow(service) {
   };
 }
 
+// A Service shaped enough for the purchase-flow diagram: it wants a name and prices, nothing more. Kept
+// beside serviceListRow rather than inlined at the call sites -- Offers.vue and LandingPages.vue both need
+// it, and this codebase's recurring bug is two copies of one adaptation drifting apart.
+export function serviceFlowCard(service) {
+  return {
+    product_id: service.service_id,
+    service_id: service.service_id,
+    name: service.name || "Untitled Service",
+    product_type: "service",
+    prices: Array.isArray(service.prices) ? service.prices : [],
+    default_price_id: service.default_price_id || "",
+  };
+}
+
 export const useProductsStore = defineStore("products", {
   state: () => ({
     products: [],

@@ -562,7 +562,7 @@ import SelectorCard from "./SelectorCard.vue";
 import { leadActionIcon } from "../utils/leadActionIcon";
 import { apiRequest, getStripeMode, getTenantId, toAssetCdnUrl } from "../api/client";
 import { formatCouponDiscount, useCouponsStore } from "../stores/coupons";
-import { defaultProductPrice, formatMoney, priceSummary, useProductsStore } from "../stores/products";
+import { defaultProductPrice, formatMoney, priceSummary, serviceFlowCard, useProductsStore } from "../stores/products";
 import { defaultCtaLabel } from "../composables/pageComposer";
 import { useServicesStore } from "../stores/services";
 import { useProfileStore } from "../stores/profile";
@@ -719,9 +719,20 @@ function landingPricingChips(product) {
 // The offer's purchase flow as staged nodes — a visual funnel over the SAME inferred data (§6). Read-only.
 const offerFunnelStages = computed(() => {
   const stages = [];
-  const landing = landingProducts.value.map((product) => ({
-    key: productId(product), intent: "primary", product, chips: landingPricingChips(product),
-  }));
+  // Services sit in `form.services`, not in the product list, so a service-only offer had an EMPTY landing
+  // stage and the diagram did not render at all (reported 2026-09-20). They are bought on the landing page
+  // exactly like a product is; only where the tenant picked them differs.
+  const landing = [
+    ...landingProducts.value.map((product) => ({
+      key: productId(product), intent: "primary", product, chips: landingPricingChips(product),
+    })),
+    ...(form.services || [])
+      .filter((entry) => entry && entry.service_id && serviceObjFor(entry.service_id))
+      .map((entry) => ({
+        key: entry.service_id, intent: "primary",
+        product: serviceFlowCard(serviceObjFor(entry.service_id)),
+      })),
+  ];
   if (landing.length) stages.push({ key: "landing", label: "Landing page", hint: "what the customer buys", items: landing });
 
   const bumps = inferredOrderBumps.value.map((product) => ({
@@ -757,7 +768,12 @@ const detailsFunnelStages = computed(() => {
   const offer = selectedOfferDetails.value;
   if (!offer) return [];
   return stagesFromSavedOffer(offer, {
-    resolveProduct: (id) => productsById.value.get(id) || null,
+    // ...falling back to SERVICES, or a service entry renders as its raw `svc_...` id: the diagram's
+    // lookup only ever knew products, so every service card showed an id where a name belongs.
+    resolveProduct: (id) => productsById.value.get(id)
+      || (servicesStore.services.find((service) => service.service_id === id)
+          ? serviceFlowCard(servicesStore.services.find((service) => service.service_id === id))
+          : null),
     formatAmount: (amount, currency) => formatMoney(amount, currency),
   });
 });

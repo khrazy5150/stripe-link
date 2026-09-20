@@ -209,6 +209,13 @@ def apply_tip_amount(resolved, products_by_id, *, amount, source, tenant_id, rec
     page's live estimate call, so the figure on the card and the figure on the statement come from one place.
     """
     for line in resolved.get("items") or []:
+        # A SERVICE line has no product document to look a price up in -- its price lives on the service, and
+        # `find_price` on an empty product raises rather than returning nothing. A service is also never a tip
+        # jar (customer_chooses is a product pricing model), so there is nothing here for it either way.
+        # Without this, every service checkout died on this line: "Price 'X' was not found on product ''"
+        # (reported 2026-09-20, the first real purchase attempt of a service).
+        if line.get("kind") == "service" or line.get("service_id"):
+            continue
         product = products_by_id.get(line.get("product_id")) or {}
         price = find_price(product, line.get("price_id") or "")
         if not tips.is_tip_price(price):
