@@ -737,12 +737,17 @@ class LedgerRepository:
     effect (e.g. le_sale_<payment_intent>), so a duplicate append overwrites the same row —
     idempotent by primary key."""
 
-    def __init__(self, table_name: str, *, table: Any | None = None):
+    def __init__(self, table_name: str, *, table: Any | None = None, mode: str | None = None):
         if not table_name:
             raise RepositoryError("Table name is required.")
         assert_jb_resource_name(table_name)
         self.table_name = table_name
         self._table = table
+        # Ledger entries already CARRY their mode (domain/ledger.py stamps "test"/"live" from the event's
+        # livemode). Nothing filtered on it, so a tenant's financial summary added test money to real money
+        # -- one prod endpoint serves both modes by design (plans/STRIPE_MODE_DECOUPLING.md P3), and the
+        # isolation that design depends on has to be enforced on the READ.
+        self.mode = normalize_stripe_mode(mode) if mode is not None else None
 
     @property
     def table(self):
@@ -751,6 +756,13 @@ class LedgerRepository:
 
             self._table = boto3.resource("dynamodb").Table(self.table_name)
         return self._table
+
+    def _in_mode(self, items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        if self.mode is None:
+            return items
+        # An entry with no mode at all predates the stamp; treat it as test rather than let it into live
+        # money. Under-reporting real revenue is recoverable; reporting test money as real is not.
+        return [item for item in items if str(item.get("mode") or "test") == self.mode]
 
     def append(self, document: dict[str, Any]) -> dict[str, Any]:
         if not str(document.get("tenant_id") or "").strip():
@@ -767,20 +779,21 @@ class LedgerRepository:
     def list_for_tenant(self, tenant_id: str) -> list[dict[str, Any]]:
         from boto3.dynamodb.conditions import Key
 
-        items = _query_all_pages(self.table, KeyConditionExpression=Key("tenant_id").eq(tenant_id))
+        items = self._in_mode(_query_all_pages(self.table, KeyConditionExpression=Key("tenant_id").eq(tenant_id)))
         items.sort(key=lambda item: int(item.get("occurred_at") or item.get("created_at") or 0))
         return items
 
     def list_for_order(self, order_id: str) -> list[dict[str, Any]]:
         from boto3.dynamodb.conditions import Key
 
-        items = _query_all_pages(self.table, IndexName="OrderIndex", KeyConditionExpression=Key("order_id").eq(order_id))
+        items = self._in_mode(_query_all_pages(
+            self.table, IndexName="OrderIndex", KeyConditionExpression=Key("order_id").eq(order_id)))
         items.sort(key=lambda item: int(item.get("occurred_at") or item.get("created_at") or 0))
         return items
 
 
-def ledger_repository(table: Any | None = None) -> LedgerRepository:
-    return LedgerRepository(os.environ.get("LEDGER_TABLE", ""), table=table)
+def ledger_repository(table: Any | None = None, *, mode: str | None = None) -> LedgerRepository:
+    return LedgerRepository(os.environ.get("LEDGER_TABLE", ""), table=table, mode=mode)
 
 
 class SlotLockRepository:

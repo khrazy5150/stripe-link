@@ -1,10 +1,14 @@
-from stripe_link.common import error_response, json_response, query_params, tenant_id_from_event
+from stripe_link.common import (
+    error_response, json_response, query_params, resolve_stripe_mode, tenant_id_from_event,
+)
 from stripe_link.domain.ledger import summarize
 from stripe_link.repositories.documents import RepositoryError, ledger_repository
 
 
 def handler(event, context, repository=None):
-    repository = repository or ledger_repository()
+    # Mode-scoped: one prod endpoint serves both test and live (STRIPE_MODE_DECOUPLING P3), so a summary
+    # that did not filter added sandbox money to real money.
+    repository = repository or ledger_repository(mode=resolve_stripe_mode(event))
     method = (event or {}).get("httpMethod", "").upper()
     if method == "OPTIONS":
         return json_response({})

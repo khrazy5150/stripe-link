@@ -1,10 +1,15 @@
-from stripe_link.common import error_response, json_response, parse_json_body, path_params, query_params, tenant_id_from_event
+from stripe_link.common import (
+    error_response, json_response, parse_json_body, path_params, query_params, resolve_stripe_mode,
+    tenant_id_from_event,
+)
 from stripe_link.domain.documents import DocumentValidationError, validate_customer
 from stripe_link.repositories.documents import RepositoryError, customers_repository
 
 
 def handler(event, context, repository=None):
-    repository = repository or customers_repository()
+    # The repository has always supported mode; this caller dropped it, so a tenant in LIVE saw the people
+    # who bought in their sandbox (STRIPE_MODE_DECOUPLING P3 -- one prod endpoint, both modes).
+    repository = repository or customers_repository(mode=resolve_stripe_mode(event))
     method = (event or {}).get("httpMethod", "").upper()
     if method == "OPTIONS":
         return json_response({})
