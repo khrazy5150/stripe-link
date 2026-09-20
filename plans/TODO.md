@@ -904,7 +904,7 @@ latter -- one concept, two modes -- which dissolves the confusion instead of doc
 
 Zero service products and zero prod Services exist, so there is nothing to migrate. Cheapest possible moment.
 
-### ⭐⭐ HIGH — one domain-index row serves TWO mode-partitioned Sites (found 2026-09-20)
+### ⭐⭐ FIXED 2026-09-20 (code; migration pending) — one domain-index row served TWO mode-partitioned Sites
 
 Found on prod while baselining a deploy: `poliaxis-nutrition.jbay.uk/link-bio` 404s, and so does
 `jbay.page/poliaxis-nutrition`.
@@ -921,17 +921,25 @@ stripe_mode=live`, so the hostname serves nothing in either mode.
 records were always `status: "active"`, so mode-fighting only swapped `routes`/`target_page_id` and the
 damage was invisible. Now one mode's archive is a kill switch for the other.
 
-Decide which is true, because they lead to different fixes:
+**DECIDED (author): a hostname per mode**, "that's how it was set up in stripe-cart" — where test pages
+served on their own `test.juniorbay.com` (`src/test_page_serve.py`), separate from live.
 
-1. **One hostname per Site, both modes** (today's shape). Then status must not be taken from whichever mode
-   wrote last -- most likely the LIVE Site governs serving and the test Site never writes this row at all.
-2. **A hostname per mode**, matching how pages already partition (`test/` artifact prefix,
-   jbay.uk vs jbay.be). Then the index key needs the mode in it, and the two stop fighting entirely.
+Shape: **`{label}-test.{domain}`**. One label level, so the existing `*.jbay.uk` certificate and the
+zone-wide Worker route cover it with no new infrastructure. `{label}.test.{domain}` would be collision-proof
+but sits two levels deep, which Universal SSL does not cover and Advanced Certificate Manager charges for.
 
-(2) is closer to plans/STRIPE_MODE_DECOUPLING.md's direction. (1) is much smaller. Either way the rule
-should be written down: **a Site's mode row must not silently govern the other's public serving.**
+Because `maria-test` is itself a legal label, claiming `maria` now claims **both** names in the registry —
+otherwise a second tenant could register `maria-test` and take over the first tenant's sandbox host.
 
-Immediate effect for the author: re-activating the live Site restores both URLs.
+`jbay.page/{username}` is **live-mode only** for the same reason: one public name per creator, and the apex
+is an identity rather than a sandbox.
+
+**STILL TO DO:** run `deploy/migrate_mode_hostnames.py` (dry-run clean: 1 Site on prod, 6 on dev), then
+re-publish the affected Sites. Note the code self-heals lazily too — any test-mode Site that is SAVED gets
+its hostname corrected — so a Site edited before the migration runs will move on its own.
+
+On prod this frees `poliaxis-nutrition.jbay.uk` for the live Site, but that Site is archived, so the URL
+stays 404 until it is reactivated.
 
 ### LOW — a draft page's Site URL serves a raw CloudFront 403 (found 2026-09-18)
 

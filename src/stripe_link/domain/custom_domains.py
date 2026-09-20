@@ -237,6 +237,12 @@ def creator_domain_index_record(site: dict[str, Any], creator_domain: str) -> di
     None when this environment has no creator domain configured, or the Site has no username, or it has no
     published link hub -- in each case there is nothing to serve.
     """
+    # LIVE MODE ONLY. `jbay.page/{username}` is one public name per creator, and a Site's test twin would
+    # otherwise write the same row -- the same collision that took the platform host down (found on prod
+    # 2026-09-20). A test-mode Site has nowhere to serve here and should not: the apex is the creator's real
+    # identity, not a sandbox.
+    if str(site.get("environment") or "").strip().lower() != "live":
+        return None
     username = creator_username(site)
     found = creator_page_entry(site)
     host_key = creator_host_key(creator_domain, username)

@@ -128,7 +128,27 @@ def suggest_subdomains(seed, registry, *, limit: int = 4) -> list:
     return out
 
 
-def _ensure_platform_hostname(document: dict) -> None:
+# A test-mode Site serves on a DIFFERENT hostname from its live twin. They are two rows of one Site
+# (SITE#live#… / SITE#test#…) but the edge keeps one index row per hostname, so sharing a hostname meant the
+# last publish won -- and once archiving stopped serving (2026-09-18), archiving one mode silently took the
+# other off the air. Found on prod 2026-09-20.
+#
+# `{label}-test` rather than `{label}.test.…`: one label level, so the existing `*.jbay.uk` certificate and
+# the zone-wide Worker route both cover it with no new infrastructure. The cost is that `maria-test` is
+# itself a legal label someone else could claim, which `_reserve_subdomain` closes by claiming BOTH names.
+TEST_HOST_SUFFIX = "-test"
+
+
+def platform_hostname_for(label: str, domain: str, mode: str) -> str:
+    """The hostname a Site of this mode serves on. NOT named `test_*`: pytest collects any importable
+    function with that prefix, so a production helper called `test_mode_hostname` became a failing test in
+    every module that imported it."""
+    if not label or not domain:
+        return ""
+    return f"{label}{TEST_HOST_SUFFIX}.{domain}" if mode == "test" else f"{label}.{domain}"
+
+
+def _ensure_platform_hostname(document: dict, mode: str = "live") -> None:
     """Build the platform hostname from the configured hosting domain when the client didn't send a full one.
     Keeps the tenant-free-hosting domain server-side/config-driven. The client may pass hosting.platform_subdomain
     (a desired name); otherwise we slugify the Site name."""
@@ -141,14 +161,32 @@ def _ensure_platform_hostname(document: dict) -> None:
     # return early having thrown the subdomain away. Renaming a store address from the editor therefore did
     # nothing at all, silently (reported 2026-09-18) -- which is also why the retired-hostname redirect had
     # never once fired in practice. The field means "this is the name I want"; nothing else can mean that.
+    def host_for(label: str) -> str:
+        return platform_hostname_for(label, hosting_domain(), mode)
+
     desired = normalize_subdomain(hosting.pop("platform_subdomain", "") or "")
     if desired:
-        hosting["platform_hostname"] = f"{desired}.{hosting_domain()}"
+        hosting["platform_hostname"] = host_for(desired)
         return
-    if _HOSTNAME_RE.match(str(hosting.get("platform_hostname") or "")):
+    current = str(hosting.get("platform_hostname") or "")
+    if _HOSTNAME_RE.match(current):
+        # An existing hostname is kept -- unless it belongs to the OTHER mode, which is the migration case:
+        # every test-mode Site created before 2026-09-20 carries its live twin's hostname.
+        if host_for(platform_label(current)) != current:
+            hosting["platform_hostname"] = host_for(platform_label(current))
         return
     subdomain = normalize_subdomain(document.get("name") or document.get("site_id")) or "site"
-    hosting["platform_hostname"] = f"{subdomain}.{hosting_domain()}"
+    hosting["platform_hostname"] = host_for(subdomain)
+
+
+def platform_label(hostname: str) -> str:
+    """The tenant's CLAIMED label, with any mode suffix stripped -- `maria-test.jbay.uk` -> `maria`.
+
+    One label is reserved per tenant and both hostnames are derived from it, so this is how any hostname is
+    traced back to the reservation that owns it.
+    """
+    first = str(hostname or "").split(".")[0]
+    return first[: -len(TEST_HOST_SUFFIX)] if first.endswith(TEST_HOST_SUFFIX) else first
 
 
 def handler(event, context, repository=None, registry=None, tenant_repo=None):
@@ -413,7 +451,7 @@ def create_site(event, repository, registry=None, mode="test"):
         now = int(time.time())
         document.setdefault("created_at", now)
         document["updated_at"] = now
-        _ensure_platform_hostname(document)
+        _ensure_platform_hostname(document, mode)
         # Read the stored Site BEFORE validating: same_as verification state is server-owned and has to be
         # restored from what we stored, not taken from the payload. A client that could send
         # verification.state="verified" could assert any brand's real profile as its own identity in our
@@ -445,19 +483,23 @@ def _reserve_subdomain(registry, document: dict) -> None:
     if hosting.get("type") == "custom":
         return
     hostname = str(hosting.get("platform_hostname") or "")
-    label = hostname.split(".")[0] if hostname else ""
+    # The LABEL, not the hostname's first part: a test-mode Site's host is `{label}-test`, and both modes
+    # must trace back to the one reservation the tenant owns.
+    label = platform_label(hostname)
     if not label:
         return
     rule = subdomain_rule_error(label)
     if rule:
         raise DocumentValidationError(rule)
-    claimed = registry.reserve(
-        label,
-        site_id=str(document.get("site_id") or ""),
-        tenant_id=str(document.get("tenant_id") or ""),
-        now=int(time.time()),
-    )
-    if not claimed:
+    now = int(time.time())
+    site_id = str(document.get("site_id") or "")
+    tenant_id = str(document.get("tenant_id") or "")
+    # BOTH names are claimed together. `{label}-test` is itself a legal label, so without this a second
+    # tenant could claim `maria-test` and take over the first tenant's test-mode host -- the one hole in
+    # choosing a suffix over a whole extra subdomain level.
+    for name in (label, f"{label}{TEST_HOST_SUFFIX}"):
+        if registry.reserve(name, site_id=site_id, tenant_id=tenant_id, now=now):
+            continue
         suggestions = suggest_subdomains(label, registry)
         hint = f" Try: {', '.join(suggestions)}." if suggestions else ""
         raise DocumentValidationError(f"The address '{hostname}' is already taken.{hint}")

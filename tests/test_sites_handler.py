@@ -27,8 +27,11 @@ class SitesHandlerTests(unittest.TestCase):
         self.repo = FakeDocumentRepository("site_id")
         self.registry = FakeSubdomainRegistry()
 
-    def _post(self, site):
-        return handler({"httpMethod": "POST", "body": json.dumps(site)}, None,
+    def _post(self, site, mode=None):
+        # No mode = whatever resolve_stripe_mode defaults to (test, fail-safe), which is what the old tests
+        # were implicitly exercising.
+        body = {**site, **({"mode": mode} if mode else {})}
+        return handler({"httpMethod": "POST", "body": json.dumps(body)}, None,
                        repository=self.repo, registry=self.registry)
 
     def _check(self, name, site_id=None, tenant_id=None):
@@ -91,13 +94,29 @@ class SitesHandlerTests(unittest.TestCase):
         self.assertEqual(site["hosting"]["type"], "platform")
 
     def test_platform_hostname_built_from_subdomain_and_config_domain(self):
+        """Mode-aware since 2026-09-20: a test Site serves on `{label}-test`, not on its live twin's host.
+
+        This test always ran in TEST mode -- `resolve_stripe_mode` defaults to test, fail-safe -- and asserted
+        the live shape, which is what let the two modes share one hostname unnoticed.
+        """
         import os
         from unittest.mock import patch
         site = base_site(hosting={"type": "platform", "platform_subdomain": "Axel Mart!"})
         with patch.dict(os.environ, {"PLATFORM_HOSTING_DOMAIN": "jbay.uk"}):
             resp = self._post(site)
         self.assertEqual(resp["statusCode"], 201)
-        self.assertEqual(json.loads(resp["body"])["site"]["hosting"]["platform_hostname"], "axel-mart.jbay.uk")
+        self.assertEqual(json.loads(resp["body"])["site"]["hosting"]["platform_hostname"],
+                         "axel-mart-test.jbay.uk")
+
+    def test_the_live_mode_site_keeps_the_bare_hostname(self):
+        import os
+        from unittest.mock import patch
+        site = base_site(hosting={"type": "platform", "platform_subdomain": "Axel Mart!"})
+        with patch.dict(os.environ, {"PLATFORM_HOSTING_DOMAIN": "jbay.uk"}):
+            resp = self._post(site, mode="live")
+        self.assertEqual(resp["statusCode"], 201)
+        self.assertEqual(json.loads(resp["body"])["site"]["hosting"]["platform_hostname"],
+                         "axel-mart.jbay.uk")
 
     def test_create_rejects_invalid_site(self):
         resp = self._post(base_site(status="live"))       # bad status
