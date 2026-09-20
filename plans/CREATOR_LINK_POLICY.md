@@ -273,6 +273,9 @@ Notes on the three that are done:
 reads is worse than none: it implies a process that does not exist. Needed before this domain carries
 third-party traffic: a monitored address, a named owner, and a written target response time.
 
+Where the reading-and-acting half lives: **plans/ADMIN_SITE.md §1**, recorded there so it does not depend on
+anyone remembering it.
+
 A registrar does not ask whether you have an interstitial. It asks what you do when someone abuses the domain.
 
 ## 7. Staleness is the failure mode

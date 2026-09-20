@@ -837,7 +837,9 @@ it; the apex is `X-Robots-Tag: noindex`. Sequence recorded in plans/CREATOR_DOMA
    test shipped 2026-09-20; fast suspension was already true via Site archive. **Still needed before the
    domain carries third-party traffic: a monitored abuse address, a named owner, and a written target
    response time.** An endpoint recording reports nobody reads is worse than none — it implies a process
-   that does not exist.
+   that does not exist. The queue that makes it actionable is recorded in **plans/ADMIN_SITE.md §1**, whose
+   §3 notes the prerequisite: an admin surface needs an admin ROLE, and this repo has none — it lands on the
+   ⭐⭐ authorization gap below.
 2. Public Suffix List submission — slow, start early.
 3. Dev serving (`test.jbay.page`) has no DNS or route; dev stays dark until someone needs it.
 
