@@ -7,9 +7,11 @@ def _offer(mode="payment"):
     return {"offer_id": "o1", "stripe_mode": "test", "checkout": {"mode": mode}}
 
 
-def _resolved(currency="usd"):
-    return {"items": [{"product_id": "p1", "price_id": "pr1", "quantity": 1, "unit_amount": 2000, "currency": currency}],
-            "subtotal": 2000, "currency": currency}
+def _resolved(currency="usd", recurring=None):
+    item = {"product_id": "p1", "price_id": "pr1", "quantity": 1, "unit_amount": 2000, "currency": currency}
+    if recurring:
+        item["recurring"] = recurring
+    return {"items": [item], "subtotal": 2000, "currency": currency}
 
 
 def _products():
@@ -17,9 +19,12 @@ def _products():
                    "prices": [{"price_id": "pr1", "unit_amount": 2000, "currency": "usd"}]}}
 
 
-def _payload(bnpl, mode="payment"):
+def _payload(bnpl, mode="payment", recurring=None):
+    # The session's mode is derived from the RESOLVED lines, not the offer's stored checkout.mode, so a
+    # subscription session is produced by giving the line a `recurring` block -- which is what actually
+    # makes it one.
     return build_checkout_payload(
-        tenant_id="t1", offer=_offer(mode), products_by_id=_products(), resolved=_resolved(),
+        tenant_id="t1", offer=_offer(mode), products_by_id=_products(), resolved=_resolved(recurring=recurring),
         success_url="https://x/s", cancel_url="https://x/c", bnpl_payment_method_types=bnpl,
     )
 
@@ -44,7 +49,8 @@ class CheckoutBnplPayloadTests(unittest.TestCase):
         self.assertNotIn("payment_method_types[0]", payload)           # don't override when nothing to add
 
     def test_subscription_mode_never_sets_bnpl(self):
-        payload = _payload(["klarna"], mode="subscription")
+        payload = _payload(["klarna"], recurring={"interval": "month", "interval_count": 1})
+        self.assertEqual(payload["mode"], "subscription")
         self.assertNotIn("payment_method_types[0]", payload)           # BNPL is one-time only
 
     def test_card_and_link_not_duplicated_if_passed(self):

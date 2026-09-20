@@ -370,3 +370,98 @@ class SelectablePriceLabelTests(unittest.TestCase):
     def test_a_one_time_option_still_reads_as_a_quantity(self):
         block = self.OFFERS.read_text(encoding="utf-8").split("function selectablePriceDefaultLabel", 1)[1][:900]
         self.assertIn('"Item" : "Items"', block)
+
+
+class SessionModeFollowsTheLinesTests(unittest.TestCase):
+    """The session's mode must follow what the buyer actually selected, in BOTH directions.
+
+    build_checkout_payload started from the offer's stored checkout.mode and only ever UPGRADED it to
+    subscription. That holds while an offer sells one kind of price. The moment an offer OFFERS a choice --
+    a one-time price beside a subscription, which is the whole point of "Buyer chooses" -- an offer stored
+    as "subscription" whose buyer picks the one-time card would send Stripe a subscription session carrying
+    no recurring line, and Stripe refuses that outright.
+    """
+
+    OFFER = {"offer_id": "o1", "stripe_mode": "test", "checkout": {"mode": "subscription"}}
+    PRODUCTS = {"p1": {"product_id": "p1", "name": "Creatine Gummies", "stripe_mode": "test",
+                       "prices": [{"price_id": "one", "unit_amount": 3900, "currency": "usd"},
+                                  {"price_id": "sub", "unit_amount": 3291, "currency": "usd"}]}}
+
+    @staticmethod
+    def _build(**kwargs):
+        from handlers.checkout import build_checkout_payload
+        return build_checkout_payload(**kwargs)
+
+    def _payload(self, item):
+        return self._build(
+            tenant_id="t1", offer=self.OFFER, products_by_id=self.PRODUCTS,
+            resolved={"items": [item], "subtotal": item["unit_amount"], "currency": "usd"},
+            success_url="https://x/s", cancel_url="https://x/c",
+        )
+
+    def test_picking_the_one_time_price_downgrades_a_subscription_offer(self):
+        payload = self._payload({"product_id": "p1", "price_id": "one", "quantity": 1,
+                                 "unit_amount": 3900, "currency": "usd"})
+        self.assertEqual(payload["mode"], "payment")
+
+    def test_picking_the_recurring_price_still_subscribes(self):
+        payload = self._payload({"product_id": "p1", "price_id": "sub", "quantity": 1,
+                                 "unit_amount": 3291, "currency": "usd",
+                                 "recurring": {"interval": "day", "interval_count": 1}})
+        self.assertEqual(payload["mode"], "subscription")
+
+    def test_a_payment_offer_whose_line_repeats_is_still_upgraded(self):
+        # The direction that already worked must keep working: a repeating TIP is chosen by the buyer, and
+        # the offer that carries it is stored as "payment".
+        payload = self._build(
+            tenant_id="t1", offer={"offer_id": "o1", "stripe_mode": "test", "checkout": {"mode": "payment"}},
+            products_by_id=self.PRODUCTS,
+            resolved={"items": [{"product_id": "p1", "price_id": "sub", "quantity": 1, "unit_amount": 3291,
+                                 "currency": "usd", "recurring": {"interval": "month", "interval_count": 1}}],
+                      "subtotal": 3291, "currency": "usd"},
+            success_url="https://x/s", cancel_url="https://x/c",
+        )
+        self.assertEqual(payload["mode"], "subscription")
+
+
+class MixedOfferGuardTests(unittest.TestCase):
+    """The guard refused the offer's PRICE LIST; what matters is the session's LINE LIST.
+
+    "An offer cannot mix one-time and recurring prices" fired whenever the prices an offer displayed spanned
+    both models -- including "Buyer chooses", where the buyer picks exactly one and only one line ever
+    reaches Stripe. It is kept for offers whose items are bought together: a listicle's cart checks its lines
+    out in one session, and a one-time line priced inline (no synced stripe_price_id, and every service line)
+    is something Stripe refuses in subscription mode.
+    """
+
+    OFFERS = pathlib.Path(__file__).resolve().parents[1] / "dashboard/src/components/Offers.vue"
+
+    def setUp(self):
+        self.src = self.OFFERS.read_text(encoding="utf-8")
+
+    def test_a_single_item_offer_may_offer_both(self):
+        block = self.src.split('if (checkoutMode === "mixed")', 1)[1][:600]
+        self.assertIn("sessionLineCount() > 1", block)
+
+    def test_an_offer_bought_together_still_refuses_a_mix(self):
+        self.assertIn("cannot mix one-time and recurring prices", self.src)
+
+    def test_a_single_item_offer_stores_the_mode_of_its_default_option(self):
+        # "mixed" is not a value the backend accepts (checkout.mode is payment|subscription), so allowing
+        # the offer means choosing which of the two to store.
+        block = self.src.split('if (checkoutMode === "mixed")', 1)[1][:600]
+        self.assertIn("defaultSelectionIsRecurring()", block)
+
+    def test_services_count_toward_the_session(self):
+        """A service is in the same offer and becomes a line in the SAME session.
+
+        selectedOfferPrices() is product-only, so a recurring product beside a one-time service was never
+        seen as a mix at all -- and a service line is ALWAYS inline price_data, the exact shape Stripe
+        refuses in subscription mode.
+        """
+        block = self.src.split("function sessionLineCount()", 1)[1][:300]
+        self.assertIn("serviceRows.value.length", block)
+        candidates = self.src.split("function sessionCandidatePrices()", 1)[1][:500]
+        self.assertIn("servicePricesFor(row.service_id)", candidates)
+        inferred = self.src.split("function inferredCheckoutMode()", 1)[1][:400]
+        self.assertIn("sessionCandidatePrices()", inferred)

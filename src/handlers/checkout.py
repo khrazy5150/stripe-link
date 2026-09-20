@@ -308,11 +308,17 @@ def build_checkout_payload(
     bnpl_payment_method_types=None,
 ):
     checkout = offer.get("checkout") or {}
-    mode = checkout.get("mode") or "payment"
-    # A repeating TIP is chosen by the buyer, not configured on the offer, so the session's mode follows the
-    # resolved line. Everything else keeps reading the offer's own checkout.mode.
-    if any((item or {}).get("recurring") for item in resolved.get("items") or []):
-        mode = "subscription"
+    # The session's mode follows the lines it actually carries, in BOTH directions.
+    #
+    # It used to start from the offer's stored checkout.mode and only ever UPGRADE to subscription. That is
+    # fine while an offer sells one kind of price, and wrong the moment it offers a choice: an offer stored
+    # as "subscription" whose buyer picks the one-time option would send Stripe a subscription session with
+    # no recurring line, which Stripe refuses outright.
+    #
+    # resolve_offer_item and resolve_service_offer_item both stamp the line through recurring_terms(), which
+    # is gated on the price's own pricing_model -- so the resolved lines are the authority on what is being
+    # charged, and the stored mode is only ever a stale copy of it.
+    mode = "subscription" if any((item or {}).get("recurring") for item in resolved.get("items") or []) else "payment"
     # The Stripe key was chosen from the offer's stripe_mode, so that IS the active key's mode. A stored
     # stripe_price_id only belongs to the account of the same mode — if a product's own stripe_mode disagrees
     # (a wrong-environment id from a bad copy or manual tinkering), we must NOT send it (it 500s at Stripe).

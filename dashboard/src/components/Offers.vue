@@ -1379,8 +1379,23 @@ function buildOfferDocument() {
   }
   if (!form.name || !form.slug) return { error: "Offer label and slug are required." };
   if (selectedProducts.value.length && productIntent.value === "mixed") return { error: "An offer cannot mix transaction and lead generation products." };
-  const checkoutMode = landingProducts.value.length ? inferredCheckoutMode() : "payment";
-  if (checkoutMode === "mixed") return { error: "An offer cannot mix one-time and recurring prices." };
+  // A mix only matters when ONE Checkout Session could carry both kinds of price.
+  //
+  // With a single landing item the buyer picks exactly one of its prices, so a one-time price beside a
+  // subscription is a CHOICE, not a mix -- one line reaches Stripe and the session's mode follows it.
+  // With several items they are charged together (a listicle's cart checks its lines out in one session),
+  // and there a one-time line priced inline -- any product without a synced stripe_price_id, and every
+  // service line -- is something Stripe refuses in subscription mode.
+  let checkoutMode = sessionLineCount() ? inferredCheckoutMode() : "payment";
+  if (checkoutMode === "mixed") {
+    if (sessionLineCount() > 1) {
+      return { error: "An offer whose items are bought together cannot mix one-time and recurring prices. "
+                      + "Split them into separate offers, or price them the same way." };
+    }
+    // One line, so the stored mode is simply the mode of the option the page shows checked. The session's
+    // real mode is derived from the resolved line at checkout either way.
+    checkoutMode = defaultSelectionIsRecurring() ? "subscription" : "payment";
+  }
   if (form.discount.mode === "coupon_code" && !form.discount.coupon_id) return { error: "Select a coupon or choose No Discount." };
   if (form.checkout.allow_promotion_codes && !form.checkout.promotion_code) return { error: "Promotion code is required when promotion codes are enabled." };
 
@@ -1825,9 +1840,41 @@ function inferredCurrency() {
   return [...new Set(currencies)][0] || "usd";
 }
 
+// How many lines one Checkout Session could carry. Services live in form.services rather than in the
+// product list, and become line items in the SAME session, so they count here too.
+function sessionLineCount() {
+  return landingProducts.value.length + serviceRows.value.length;
+}
+
+// Every price one session could charge. selectedOfferPrices() is product-only and is shared with the
+// currency/context helpers, so services are added here rather than widening it underneath them.
+function sessionCandidatePrices() {
+  const prices = [...selectedOfferPrices()];
+  for (const row of serviceRows.value) {
+    const price = servicePricesFor(row.service_id).find((item) => item.price_id === row.price_id);
+    if (price) prices.push(price);
+  }
+  return prices;
+}
+
+// The option the page shows CHECKED for a single-item offer — what the stored mode should describe.
+function defaultSelectionIsRecurring() {
+  const product = landingProducts.value[0];
+  if (product) {
+    const config = itemConfig(product);
+    const prices = landingPrices(product);
+    const chosenId = config.mode === "fixed" ? config.price_id : config.default_price_id;
+    const price = prices.find((item) => item.price_id === chosenId) || prices[0];
+    return (price?.pricing_model || "one_time") === "recurring";
+  }
+  const row = serviceRows.value[0];
+  const price = row && servicePricesFor(row.service_id).find((item) => item.price_id === row.price_id);
+  return (price?.pricing_model || "one_time") === "recurring";
+}
+
 function inferredCheckoutMode() {
   if (productIntent.value !== "transaction") return undefined;
-  const models = new Set(selectedOfferPrices().map((price) => price.pricing_model || "one_time"));
+  const models = new Set(sessionCandidatePrices().map((price) => price.pricing_model || "one_time"));
   const hasRecurring = models.has("recurring") || models.has("subscription");
   const hasOneTime = [...models].some((model) => !["recurring", "subscription"].includes(model));
   if (hasRecurring && hasOneTime) return "mixed";
