@@ -904,6 +904,35 @@ latter -- one concept, two modes -- which dissolves the confusion instead of doc
 
 Zero service products and zero prod Services exist, so there is nothing to migrate. Cheapest possible moment.
 
+### ⭐⭐ HIGH — one domain-index row serves TWO mode-partitioned Sites (found 2026-09-20)
+
+Found on prod while baselining a deploy: `poliaxis-nutrition.jbay.uk/link-bio` 404s, and so does
+`jbay.page/poliaxis-nutrition`.
+
+Not a bug in the creator domain. The Sites table holds **two rows for one Site** -- `SITE#live#site_GCT...`
+and `SITE#test#site_GCT...` -- because Sites are partitioned by Stripe mode. The domain index holds **ONE**
+row per hostname (`CUSTOM_DOMAIN#poliaxis-nutrition.jbay.uk`), carrying a single `stripe_mode` field to pick
+the artifact partition. So both mode copies project onto the same row and the last publish wins.
+
+Today the LIVE Site is archived and the TEST Site is active. The shared row says `status=archived,
+stripe_mode=live`, so the hostname serves nothing in either mode.
+
+**The collision is pre-existing; the 2026-09-18 archive change made it consequential.** Before it, platform
+records were always `status: "active"`, so mode-fighting only swapped `routes`/`target_page_id` and the
+damage was invisible. Now one mode's archive is a kill switch for the other.
+
+Decide which is true, because they lead to different fixes:
+
+1. **One hostname per Site, both modes** (today's shape). Then status must not be taken from whichever mode
+   wrote last -- most likely the LIVE Site governs serving and the test Site never writes this row at all.
+2. **A hostname per mode**, matching how pages already partition (`test/` artifact prefix,
+   jbay.uk vs jbay.be). Then the index key needs the mode in it, and the two stop fighting entirely.
+
+(2) is closer to plans/STRIPE_MODE_DECOUPLING.md's direction. (1) is much smaller. Either way the rule
+should be written down: **a Site's mode row must not silently govern the other's public serving.**
+
+Immediate effect for the author: re-activating the live Site restores both URLs.
+
 ### LOW — a draft page's Site URL serves a raw CloudFront 403 (found 2026-09-18)
 
 Noticed while verifying the new edge error page. A page attached to a Site but still a DRAFT has no published
