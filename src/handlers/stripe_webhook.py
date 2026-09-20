@@ -33,6 +33,7 @@ from stripe_link.delegation import apply_delegation
 from stripe_link.domain.ledger import refund_entry as build_ledger_refund_entry, sale_entry, sale_entry_from_order
 from stripe_link.domain.purchase_lookup import order_contact_keys as _order_contact_keys
 from stripe_link.domain.receipts import receipt_content, tip_renewal_content
+from stripe_link.domain.shipping import destination_address_from_session
 from stripe_link.domain.tips import manage_token_doc
 from stripe_link.domain.reminders import plan_reminders
 from stripe_link.domain.review_invites import plan_invite
@@ -1536,6 +1537,7 @@ def order_record_from_session(session: dict[str, Any], tenant_id: str, now: int,
     session_id = session.get("id", "")
     bump_price_ids = {pid for pid in str(metadata.get("order_bump_ids") or "").split(",") if pid}
     resolved_line_items = order_line_items_from_stripe(line_items, bump_price_ids, session.get("currency") or "usd")
+    shipping_address = destination_address_from_session(session)
     return {
         "tenant_id": tenant_id,
         "order_id": f"order_{session_id}",
@@ -1565,6 +1567,11 @@ def order_record_from_session(session: dict[str, Any], tenant_id: str, now: int,
         }),
         # The subscription this order started, so "stop future charges" can act without a second lookup.
         "subscription_id": str(session.get("subscription") or ""),
+        # WHERE it goes. Checkout has collected this from buyers of physical goods all along and the order
+        # record dropped it, so no order ever written here could be shipped: a label needs a destination,
+        # and nothing knew one (plans/SHIPPING_PROVIDERS.md P0). Absent for digital orders, which is why
+        # it is only written when there is one -- an empty address block on every download is noise.
+        **({"shipping_address": shipping_address} if shipping_address else {}),
         "product": {
             "product_id": metadata.get("product_id", ""),
             "price_id": metadata.get("price_id", ""),
