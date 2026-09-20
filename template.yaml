@@ -1279,6 +1279,8 @@ Resources:
             TableName: !Ref OffersTable
         - DynamoDBReadPolicy:
             TableName: !Ref ProductsTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref ServicesTable
       Events:
         OffersList:
           Type: Api
@@ -2407,6 +2409,8 @@ Resources:
             Resource: !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:jb/google-oauth/*"
         - DynamoDBCrudPolicy:
             TableName: !Ref WebhookEventsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref BookingCreditsTable
         - S3ReadPolicy:
             BucketName: !Ref ConfigBucket
         - Version: "2012-10-17"
@@ -3426,6 +3430,8 @@ Resources:
             BucketName: !Ref ConfigBucket
         - DynamoDBReadPolicy:
             TableName: !Ref CalendarConnectionsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref BookingCreditsTable
         - Statement:
             Effect: Allow
             Action:
