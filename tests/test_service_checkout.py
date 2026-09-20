@@ -138,3 +138,33 @@ class FunnelDiagramTests(unittest.TestCase):
         block = self.OFFERS.split("const offerFunnelStages = computed(", 1)[1].split("if (landing.length)", 1)[0]
         self.assertIn("form.services", block)
         self.assertIn("serviceFlowCard", block)
+
+
+class ServicePricePickerTests(unittest.TestCase):
+    """A service with two prices had one picked FOR it, silently.
+
+    Products carry an Item Mode + Price picker in the offer form. Services carried neither: selecting a
+    service assigned `default_price_id || prices[0]` and no control anywhere let the tenant change it. A
+    service priced both one-time and recurring therefore sold whichever price happened to sort first, and
+    the offer form showed no sign that a choice existed.
+    """
+
+    import pathlib as _pathlib
+
+    ROOT = _pathlib.Path(__file__).resolve().parents[1]
+    OFFERS = (ROOT / "dashboard" / "src" / "components" / "Offers.vue").read_text(encoding="utf-8")
+
+    def test_the_tenant_can_choose_which_service_price_the_offer_sells(self):
+        self.assertIn('<select v-model="row.price_id">', self.OFFERS)
+        self.assertIn("servicePricesFor(row.service_id)", self.OFFERS)
+
+    def test_the_picker_renders_a_service_with_no_price_chosen_yet(self):
+        # serviceRows gates on a COMPLETE row (service_id AND price_id); driving the picker off it would
+        # hide the picker in exactly the case where it is needed.
+        self.assertIn("const serviceEditRows = computed(", self.OFFERS)
+        self.assertIn('v-for="row in serviceEditRows"', self.OFFERS)
+
+    def test_the_option_says_when_a_service_price_repeats(self):
+        # "$197.92" and "$274.76" side by side say nothing about which one subscribes the customer.
+        block = self.OFFERS.split("function servicePriceOptionLabel(price)", 1)[1][:400]
+        self.assertIn("recurringSuffix(price)", block)

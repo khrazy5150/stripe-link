@@ -156,6 +156,28 @@
                 </select>
               </label>
             </div>
+
+            <div v-if="serviceEditRows.length" class="offer-items-list">
+              <article v-for="row in serviceEditRows" :key="row.service_id" class="offer-item-editor">
+                <header>
+                  <div>
+                    <h4>{{ serviceObjFor(row.service_id)?.name || "Untitled Service" }}</h4>
+                    <p>{{ row.service_id }}</p>
+                  </div>
+                </header>
+                <label class="offer-field">
+                  <span>Price</span>
+                  <select v-model="row.price_id">
+                    <option v-for="price in servicePricesFor(row.service_id)" :key="price.price_id" :value="price.price_id">
+                      {{ servicePriceOptionLabel(price) }}
+                    </option>
+                  </select>
+                  <small v-if="servicePricesFor(row.service_id).length > 1">
+                    This service has more than one price. The landing page sells the one chosen here.
+                  </small>
+                </label>
+              </article>
+            </div>
           </section>
 
           <section v-if="selectedProducts.length || hasService" class="offer-form-section">
@@ -594,6 +616,9 @@ function servicePricesFor(serviceId) {
   return [];
 }
 const serviceRows = computed(() => (form.services || []).filter((r) => r.service_id && r.price_id));
+// Rows to EDIT: a service with no price chosen yet still needs its picker rendered, which serviceRows
+// (which gates the rest of the form on a complete row) deliberately excludes.
+const serviceEditRows = computed(() => (form.services || []).filter((r) => r.service_id));
 const hasService = computed(() => serviceRows.value.length > 0);
 // no_booking services never book; only scheduled ones need a single/separate-visit choice.
 const scheduledServiceCount = computed(() =>
@@ -1820,6 +1845,13 @@ function priceOptionLabel(price) {
   // The suffix is what separates a subscription from a one-off in this list; without it both read as a
   // bare amount and the tenant picks the wrong one without ever knowing there was a choice.
   return `${quantity} ${quantity === 1 ? "item" : "items"} - ${formatMoney(price?.unit_amount, price?.currency)}${recurringSuffix(price)}${context}`;
+}
+
+// A service sells one booking, so the "N items" count products carry would only be noise here. The
+// recurring suffix is the part that matters: it is what separates a plan from a single appointment.
+function servicePriceOptionLabel(price) {
+  const context = price?.context && price.context !== "standard" ? ` - ${contextLabel(price.context)}` : "";
+  return `${formatMoney(price?.unit_amount, price?.currency)}${recurringSuffix(price)}${context}`;
 }
 
 function selectablePriceDefaultLabel(price) {
