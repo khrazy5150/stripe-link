@@ -218,3 +218,65 @@ class ServiceSelectablePricesTests(unittest.TestCase):
         offers = (ROOT / "dashboard/src/components/Offers.vue").read_text(encoding="utf-8")
         block = offers.split("service_id: row.service_id,", 1)[1][:600]
         self.assertIn("price_id: selectable.length ? undefined : row.price_id", block)
+
+
+class CardTitleTests(unittest.TestCase):
+    """A service card headed by its own price says the amount twice.
+
+    The offer form seeded each option's label from servicePriceOptionLabel() -- the MONEY string, which is
+    right in the tenant's dropdown and wrong as the buyer-facing title, because the card shows the amount
+    again in the price row directly below. Published offers carry those labels, so the page has to cope
+    rather than wait for every tenant to retype them.
+    """
+
+    SERVICE = {"service_id": "svc_m", "name": "120 Minute Massage", "duration_minutes": 120,
+               "fulfillment_mode": "scheduled",
+               "prices": [{"price_id": "p1", "unit_amount": 27476, "currency": "usd",
+                           "pricing_model": "one_time"},
+                          {"price_id": "p2", "unit_amount": 19792, "currency": "usd",
+                           "pricing_model": "recurring",
+                           "recurring": {"interval": "day", "interval_count": 1}}]}
+
+    def _titles(self, item):
+        offer = {"offer_id": "o1", "status": "active", "stripe_mode": "test",
+                 "checkout": {"mode": "payment"}, "items": [item]}
+        html = render_offer_price_selector(offer, {}, {"svc_m": self.SERVICE})
+        return re.findall(r'<strong title="([^"]+)"', html)
+
+    def _options(self, *labels):
+        return {"service_id": "svc_m", "quantity": 1, "default_price_id": "p2",
+                "selectable_prices": [{"price_id": pid, "label": label}
+                                      for pid, label in zip(("p1", "p2"), labels)]}
+
+    def test_a_money_title_is_replaced_by_how_often_it_charges(self):
+        # The service name is the same on every card and is already the page's H1, so it cannot tell the
+        # options apart -- the frequency is the difference between them.
+        self.assertEqual(self._titles(self._options("$274.76", "$197.92")), ["One time", "Every day"])
+
+    def test_the_amount_is_still_shown_once(self):
+        offer = {"offer_id": "o1", "status": "active", "stripe_mode": "test",
+                 "checkout": {"mode": "payment"}, "items": [self._options("$274.76", "$197.92")]}
+        html = render_offer_price_selector(offer, {}, {"svc_m": self.SERVICE})
+        self.assertEqual(re.findall(r"data-price-amount>([^<]+)<", html), ["$274.76", "$197.92"])
+
+    def test_a_money_title_with_its_suffix_is_caught_too(self):
+        self.assertEqual(self._titles(self._options("$274.76", "$197.92/day"))[1], "Every day")
+
+    def test_a_real_label_is_left_alone(self):
+        self.assertEqual(self._titles(self._options("Single session", "Daily plan")),
+                         ["Single session", "Daily plan"])
+
+    def test_a_single_card_keeps_the_service_name(self):
+        # Nothing to tell apart, so "One time" would be a downgrade from the service's own name.
+        self.assertEqual(self._titles({"service_id": "svc_m", "price_id": "p1", "quantity": 1}),
+                         ["120 Minute Massage"])
+
+    def test_the_form_seeds_words_not_money(self):
+        offers = (ROOT / "dashboard/src/components/Offers.vue").read_text(encoding="utf-8")
+        block = offers.split("selectable_prices: selectable.length", 1)[1][:600]
+        self.assertIn("serviceOptionDefaultLabel(", block)
+        self.assertNotIn("label: row.labels?.[priceId] || servicePriceOptionLabel(", block)
+
+    def test_a_stored_money_label_does_not_survive_a_re_save(self):
+        offers = (ROOT / "dashboard/src/components/Offers.vue").read_text(encoding="utf-8")
+        self.assertIn("isMoneyLabel(option.label,", offers)

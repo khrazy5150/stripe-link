@@ -3068,6 +3068,34 @@ def render_hero(
     ])
 
 
+def _frequency_label(price: dict[str, Any]) -> str:
+    """"One time", "Every day", "Every 3 weeks" -- what a price option is called when nothing named it.
+
+    The counterpart of the quantity label a product option falls back to; a service has no quantity to
+    count, so how often it charges is the thing that distinguishes one option from another.
+    """
+    if str(price.get("pricing_model") or "") != "recurring":
+        return "One time"
+    recurring = price.get("recurring")
+    if not isinstance(recurring, dict) or not recurring.get("interval"):
+        return "One time"
+    interval = str(recurring["interval"])
+    try:
+        count = int(recurring.get("interval_count") or 1)
+    except (TypeError, ValueError):
+        count = 1
+    return f"Every {interval}" if count <= 1 else f"Every {count} {interval}s"
+
+
+def _is_just_the_price(label: str, amount: int, currency: str, price: dict[str, Any]) -> bool:
+    """Whether a card's title is nothing but the amount the card already shows underneath."""
+    def squash(value: str) -> str:
+        return "".join(str(value).split()).casefold()
+
+    money = format_money(amount, currency)
+    return squash(label) in {squash(money), squash(f"{money}{recurring_suffix(price)}")}
+
+
 def render_service_price_card(item, service_id, services_by_id, offer, display_index,
                               *, group_name="", is_default=True, option=None):
     """One landing-page price card for a service offer item, sourced from the service's own prices[].
@@ -3088,10 +3116,19 @@ def render_service_price_card(item, service_id, services_by_id, offer, display_i
     price = resolve_service_price(service, option.get("price_id") or item.get("price_id")) or {}
     if not is_landing_page_price(price):
         return None
-    label = escape(str(item.get("display_label") or option.get("label")
-                       or price.get("label") or service.get("name") or "Option"))
     amount = int(price.get("unit_amount", 0))
     currency = str(price.get("currency") or "usd")
+    raw_label = str(item.get("display_label") or option.get("label")
+                    or price.get("label") or service.get("name") or "Option")
+    # A card headed by its own price says the amount twice -- once as the title, again in the price row
+    # right below it. The offer form seeded a service option's label from the money string, so published
+    # offers carry it; fall back to what the card is actually FOR rather than repeating the number.
+    if _is_just_the_price(raw_label, amount, currency, price):
+        # When the item offers a CHOICE, the title has to tell the options apart, and the service name is
+        # the same on every one of them (and already the page's H1). The frequency is the difference.
+        raw_label = (_frequency_label(price) if len(item.get("selectable_prices") or []) > 1
+                     else str(service.get("name") or "Option"))
+    label = escape(raw_label)
     checkout_quantity = int(item.get("quantity") or 1)
     price_id = str(price.get("price_id") or "")
     image_url = (service.get("presentation") or {}).get("hero_image_url") or ""

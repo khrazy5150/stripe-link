@@ -657,6 +657,13 @@ function serviceObjFor(serviceId) {
 }
 // One shape for a service row, built in three places (selector, load, reset). A row missing `labels` or
 // `selectable_price_ids` throws the moment the template renders a checkbox against it.
+function isMoneyLabel(label, price) {
+  if (!label || !price) return false;
+  const squash = (value) => String(value).replace(/\s+/g, "").toLowerCase();
+  const money = formatMoney(price.unit_amount, price.currency);
+  return [money, `${money}${recurringSuffix(price)}`].map(squash).includes(squash(label));
+}
+
 function serviceRow(serviceId, saved = {}) {
   const prices = servicePricesFor(serviceId);
   const selectable = (saved.selectable_prices || []).map((option) => option.price_id).filter(Boolean);
@@ -667,7 +674,12 @@ function serviceRow(serviceId, saved = {}) {
     mode: selectable.length ? "selectable" : "fixed",
     selectable_price_ids: selectable.length ? selectable : prices.map((price) => price.price_id).filter(Boolean),
     default_price_id: saved.default_price_id || saved.price_id || fallback,
-    labels: Object.fromEntries((saved.selectable_prices || []).map((option) => [option.price_id, option.label || ""])),
+    // Drop a label that is just the price: offers saved before this carried the money string, and keeping
+    // it would put the amount in the card title AND the price row on every re-save.
+    labels: Object.fromEntries((saved.selectable_prices || []).map((option) => [
+      option.price_id,
+      isMoneyLabel(option.label, prices.find((price) => price.price_id === option.price_id)) ? "" : (option.label || ""),
+    ])),
   };
 }
 
@@ -1538,7 +1550,10 @@ function buildOfferDocument() {
       selectable_prices: selectable.length
         ? selectable.map((priceId) => cleanObject({
             price_id: priceId,
-            label: row.labels?.[priceId] || servicePriceOptionLabel(servicePricesFor(row.service_id).find((p) => p.price_id === priceId)),
+            // NOT servicePriceOptionLabel: that is the money string, which is right in the tenant's
+            // dropdown and wrong as the buyer-facing card title -- the card shows the amount again
+            // directly below it. How often it charges is what tells the options apart.
+            label: row.labels?.[priceId] || serviceOptionDefaultLabel(servicePricesFor(row.service_id).find((p) => p.price_id === priceId)),
           }))
         : undefined,
       default_price_id: selectable.length ? (selectable.includes(row.default_price_id) ? row.default_price_id : selectable[0]) : undefined,
@@ -2007,6 +2022,16 @@ function priceOptionLabel(price) {
 function servicePriceOptionLabel(price) {
   const context = price?.context && price.context !== "standard" ? ` - ${contextLabel(price.context)}` : "";
   return `${formatMoney(price?.unit_amount, price?.currency)}${recurringSuffix(price)}${context}`;
+}
+
+// The counterpart of selectablePriceDefaultLabel for services: a booking has no quantity to count, so
+// how often it charges is the thing that distinguishes one option from another. Mirrors _frequency_label
+// in runtime/html.py, which is what an option with no label falls back to on the page.
+function serviceOptionDefaultLabel(price) {
+  const recurring = price?.pricing_model === "recurring" ? price.recurring : null;
+  if (!recurring?.interval) return "One time";
+  const count = Number(recurring.interval_count || 1);
+  return count > 1 ? `Every ${count} ${recurring.interval}s` : `Every ${recurring.interval}`;
 }
 
 function selectablePriceDefaultLabel(price) {
