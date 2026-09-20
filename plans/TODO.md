@@ -28,6 +28,11 @@ Deferred, non-blocking follow-ups. Each item notes what, why it was deferred, an
   needs zone sampling because there is no destination at pricing time -- an estimate is a distribution, not
   a number. Treated as a HYPOTHESIS: record estimate vs actual from the first label onward (it cannot be
   backfilled) and expect to replace the strategy after measuring.
+- **Tracking emails reuse the existing mail path**, not a new one: a pure content builder in
+  `domain/receipts.py` beside `receipt_content`/`tip_renewal_content`, branded from
+  `load_tenant_email_context` so it comes from the TENANT's business, sent via `mailer.send_email`
+  (injectable), and wrapped so it can never fail the label purchase that triggered it. The in-app bell
+  (`docs/NOTIFICATION_EMITTERS.md`) is a separate channel and optional.
 - **Two tenants, opposite needs.** The beginner has no carrier account and today drives to the post
   office -- a plain buy-and-print-a-label screen is transformative for them, and it does not matter that it
   is less capable than ShipStation because they were never going to use ShipStation. The experienced

@@ -157,7 +157,38 @@ from different places would need several parcels by definition; defer until a pr
 
 ### P3 — tracking and the buyer
 
-- Tracking number into the order-status email; tracking webhook or poll.
+The buyer is told their parcel is on its way **the same way this codebase tells them everything else** —
+the receipt, the tip renewal, a download link. Reuse that path exactly; do not invent a shipping mailer.
+
+The existing pattern, followed end to end:
+
+1. **A pure content builder in `domain/receipts.py`** — `shipment_tracking_content(...) -> {subject, html,
+   text}`, alongside `receipt_content` and `tip_renewal_content`. No I/O, so it is testable without a
+   network or a mock, which is why those two are.
+2. **Branding from `load_tenant_email_context(tenant_id)`** — `{business_name, support_email}`. The email
+   comes from the TENANT's business, not from Junior Bay: `from_name=business_name`,
+   `reply_to=support_email`. A buyer who replies asking where their parcel is must reach the person who
+   sold it to them.
+3. **Sent through `send_email` from `stripe_link/mailer.py`** (SES), injected as `mailer_send` so tests
+   pass a fake and never send anything.
+4. **It must never break the thing that triggered it.** `notify_tip_renewal` wraps its whole send in
+   `except Exception` with the comment "a renewal notice must never fail the webhook". A tracking email is
+   the same: a label is already bought and paid for by the time we try to send, so a bounced address or an
+   SES hiccup cannot be allowed to fail the label purchase or the provider webhook.
+
+**Two channels, do not conflate them.** `send_email` reaches the BUYER. The `Notification` documents in
+`docs/NOTIFICATION_EMITTERS.md` drive the tenant's in-app bell (`order`, `lead`, `paid_invoice` emitters
+exist today). A shipment is plausibly worth both — the buyer gets the tracking email, the tenant gets a
+bell item — but they are separate mechanisms and the bell is optional.
+
+**When it fires** differs by path and is the thing that makes PI harder than P2:
+
+- **P2 (we buy the label):** immediately, because we have the tracking number in the purchase response.
+- **P3/PI (tracking from the provider):** only when the provider tells us — webhook or poll. If a tenant
+  buys labels in their own tool, nothing here knows a parcel shipped until that arrives.
+- **Delivery updates** (out for delivery, delivered) are a second, noisier decision: a tracking webhook
+  fires several times per parcel, and emailing on each one is how a helpful notice becomes spam. Ship the
+  first "it's on its way" email; decide the rest deliberately.
 
 ### P4 — the other providers, in the order we can prove them
 
