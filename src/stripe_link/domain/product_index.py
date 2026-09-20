@@ -28,6 +28,10 @@ _PRICE_FIELDS = (
     "price_id", "context", "unit_amount", "currency", "pricing_model", "quantity",
     "stripe_price_id", "compare_at_unit_amount", "fee_handling", "suggested_amount",
     "tenant_keyed_amount", "label",
+    # How often a recurring price charges. `pricing_model` alone says THAT it repeats and never how
+    # often, so every screen reading this projection could only show a bare amount -- a subscription
+    # and a one-off were indistinguishable in the offer form's own price picker.
+    "recurring",
     # A TIP JAR carries no unit_amount, so the list row has nothing to show without these. Dropping them
     # made a saved tip jar read "Any amount" after a reload while the amounts were right on screen the
     # moment it was saved -- the default was wrong rather than absent, which is this projection's

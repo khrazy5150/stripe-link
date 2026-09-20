@@ -280,3 +280,42 @@ class CardTitleTests(unittest.TestCase):
     def test_a_stored_money_label_does_not_survive_a_re_save(self):
         offers = (ROOT / "dashboard/src/components/Offers.vue").read_text(encoding="utf-8")
         self.assertIn("isMoneyLabel(option.label,", offers)
+
+
+class IndexCarriesTheIntervalTests(unittest.TestCase):
+    """`pricing_model` says THAT a price repeats; only `recurring` says how often.
+
+    The list projections dropped `recurring`, so every dashboard screen reading them could show a bare
+    amount and nothing else -- a $197.92/day subscription and a $197.92 one-off were indistinguishable in
+    the offer form's own price picker, which is exactly the choice the picker exists to present.
+
+    This is the failure mode product_index's own comment already names: the default is WRONG rather than
+    absent. A missing field here does not look missing on screen, it looks like a different price.
+    """
+
+    RECURRING = {"price_id": "p2", "unit_amount": 19792, "currency": "usd", "pricing_model": "recurring",
+                 "recurring": {"interval": "day", "interval_count": 1}}
+
+    def test_a_service_row_keeps_the_interval(self):
+        from stripe_link.domain.service_index import service_index_entry
+        entry = service_index_entry({"service_id": "s1", "name": "Massage", "prices": [self.RECURRING]})
+        self.assertEqual(entry["prices"][0]["recurring"], {"interval": "day", "interval_count": 1})
+
+    def test_a_product_row_keeps_the_interval(self):
+        from stripe_link.domain.product_index import product_index_entry
+        entry = product_index_entry({"product_id": "pr1", "name": "Gummies", "prices": [self.RECURRING]})
+        self.assertEqual(entry["prices"][0]["recurring"], {"interval": "day", "interval_count": 1})
+
+    def test_a_one_time_price_carries_no_empty_interval(self):
+        from stripe_link.domain.service_index import service_index_entry
+        entry = service_index_entry({"service_id": "s1", "name": "Massage",
+                                     "prices": [{"price_id": "p1", "unit_amount": 27476,
+                                                 "currency": "usd", "pricing_model": "one_time"}]})
+        self.assertNotIn("recurring", entry["prices"][0])
+
+    def test_both_pickers_append_the_suffix_they_now_have_the_data_for(self):
+        offers = (ROOT / "dashboard/src/components/Offers.vue").read_text(encoding="utf-8")
+        for fn in ("priceOptionLabel", "servicePriceOptionLabel"):
+            with self.subTest(fn=fn):
+                block = offers.split(f"function {fn}(price)", 1)[1][:700]
+                self.assertIn("recurringSuffix(price)", block)
