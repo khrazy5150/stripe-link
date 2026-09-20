@@ -134,13 +134,29 @@ def appointment_duration_minutes(appointment: dict[str, Any]) -> int:
     return sum(int(line.get("duration_minutes") or 0) for line in service_lines(appointment))
 
 
+def recurring_purchased_lines(purchased_lines: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The lines that grant BOOKING CREDITS rather than an appointment (plans/RECURRING_SERVICES.md §4b).
+
+    A recurring service sells entitlement, not a slot: the customer books each visit later, through the same
+    flow a one-off booking uses. Creating an appointment at purchase would pick a time nobody chose, and
+    would create exactly one for a subscription meant to produce many.
+    """
+    return [line for line in purchased_lines or [] if line.get("recurring")]
+
+
 def group_purchased_service_lines(
     purchased_lines: list[dict[str, Any]], service_booking_mode: str
 ) -> tuple[list[list[dict[str, Any]]], list[dict[str, Any]]]:
     """Split a purchase's service lines into (scheduled_groups, no_booking_lines). single_visit puts
-    all scheduled lines in one group (one appointment); separate_visits gives each its own group."""
+    all scheduled lines in one group (one appointment); separate_visits gives each its own group.
+
+    RECURRING lines are in neither: they grant credits (see `recurring_purchased_lines`) and must not
+    produce an appointment here, or a subscriber would get one visit booked at a time they never picked.
+    """
     scheduled, no_booking = [], []
     for line in purchased_lines or []:
+        if line.get("recurring"):
+            continue
         if str(line.get("fulfillment_mode") or "scheduled") == "no_booking":
             no_booking.append(line)
         else:

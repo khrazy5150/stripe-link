@@ -403,6 +403,11 @@ def build_checkout_payload(
                 "fulfillment_mode": s.get("fulfillment_mode") or "scheduled",
                 "duration_minutes": int(s.get("duration_minutes") or 0),
                 "default_fulfiller_id": s.get("default_fulfiller_id") or "",
+                # A RECURRING service grants booking credits per cycle instead of an appointment at
+                # purchase (plans/RECURRING_SERVICES.md §4b). The webhook cannot re-derive this -- it sees a
+                # Stripe session, not the offer -- so it travels with the line, like everything else here.
+                "recurring": bool(s.get("recurring")),
+                "bookings_per_cycle": int(s.get("bookings_per_cycle") or 0),
             }
             for s in service_items
         ], separators=(",", ":"))

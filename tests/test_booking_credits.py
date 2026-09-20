@@ -106,3 +106,132 @@ class ServiceValidationTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PurchaseGrantsCreditsTests(unittest.TestCase):
+    """A recurring service line must not create an appointment.
+
+    plans/RECURRING_SERVICES.md §4b: it sells ENTITLEMENT, not a slot. Creating one appointment at purchase
+    would pick a time nobody chose, and would create exactly one for a subscription meant to produce many.
+    """
+
+    LINES = [
+        {"service_id": "a", "fulfillment_mode": "scheduled"},
+        {"service_id": "b", "fulfillment_mode": "no_booking"},
+        {"service_id": "c", "fulfillment_mode": "scheduled", "recurring": True, "bookings_per_cycle": 4},
+    ]
+
+    def test_the_recurring_line_is_excluded_from_the_appointment_fan_out(self):
+        from stripe_link.domain.booking import group_purchased_service_lines
+
+        groups, no_booking = group_purchased_service_lines(self.LINES, "single_visit")
+        self.assertEqual([[l["service_id"] for l in g] for g in groups], [["a"]])
+        self.assertEqual([l["service_id"] for l in no_booking], ["b"])
+
+    def test_and_is_picked_out_for_granting_instead(self):
+        from stripe_link.domain.booking import recurring_purchased_lines
+
+        self.assertEqual([l["service_id"] for l in recurring_purchased_lines(self.LINES)], ["c"])
+
+    def test_the_checkout_metadata_carries_what_the_webhook_needs(self):
+        """The webhook sees a Stripe session, not the offer -- it cannot re-derive either of these."""
+        import json
+
+        from handlers.checkout import build_checkout_payload
+        from stripe_link.domain.pricing import resolve_offer
+
+        service = {"service_id": "svc_1", "name": "Haircut", "active": True, "duration_minutes": 45,
+                   "fulfillment_mode": "scheduled", "default_price_id": "p1", "bookings_per_cycle": 4,
+                   "prices": [{"price_id": "p1", "currency": "usd", "unit_amount": 12000,
+                               "pricing_model": "recurring",
+                               "recurring": {"interval": "month", "interval_count": 1}}]}
+        offer = {"offer_id": "o1", "tenant_id": "t1", "status": "active", "checkout": {},
+                 "items": [{"service_id": "svc_1", "price_id": "p1", "quantity": 1}]}
+        resolved = resolve_offer(offer, {}, {}, services_by_id={"svc_1": service})
+        payload = build_checkout_payload(offer=offer, resolved=resolved, products_by_id={}, tenant_id="t1",
+                                         success_url="https://e/ok", cancel_url="https://e/no")
+        line = json.loads(payload["metadata[service_lines]"])[0]
+        self.assertTrue(line["recurring"])
+        self.assertEqual(line["bookings_per_cycle"], 4)
+        # ...and the session must actually be a subscription, with its interval, or Stripe rejects it.
+        self.assertEqual(payload["mode"], "subscription")
+        self.assertEqual(payload["line_items[0][price_data][recurring][interval]"], "month")
+
+
+class ResolvedItemSerialisationTests(unittest.TestCase):
+    def test_every_field_of_the_resolved_item_reaches_the_dict(self):
+        """`resolve_offer` serialises ResolvedOfferItem through an explicit field list.
+
+        Add a field to the dataclass, forget the list, and it silently vanishes between the resolver and
+        checkout -- which is exactly what happened to `bookings_per_cycle` on its first attempt.
+        """
+        import dataclasses
+
+        from stripe_link.domain.pricing import ResolvedOfferItem, resolve_offer
+
+        service = {"service_id": "s", "name": "x", "active": True, "duration_minutes": 30,
+                   "default_price_id": "p", "prices": [{"price_id": "p", "currency": "usd", "unit_amount": 1}]}
+        offer = {"offer_id": "o", "tenant_id": "t", "status": "active", "checkout": {},
+                 "items": [{"service_id": "s", "price_id": "p", "quantity": 1}]}
+        serialised = set(resolve_offer(offer, {}, {}, services_by_id={"s": service})["items"][0])
+        declared = {f.name for f in dataclasses.fields(ResolvedOfferItem)}
+        self.assertEqual(declared - serialised, set())
+
+
+class PlanBookingTests(unittest.TestCase):
+    """Spending a credit at the moment the customer books."""
+
+    def setUp(self):
+        from handlers.booking import _spend_plan_credit
+
+        self.spend_credit = _spend_plan_credit
+        self.entitlement = build_entitlement(tenant_id="t1", service=SERVICE, subscription_id="sub_1",
+                                             customer={"email": "buyer@example.com"}, now=100)
+
+    class Repo:
+        def __init__(self, doc=None):
+            self.doc, self.written = doc, []
+
+        def get(self, _tenant, _id):
+            return self.doc
+
+        def put(self, doc):
+            self.written.append(doc)
+            self.doc = doc
+            return doc
+
+    def _spend(self, **over):
+        args = {"tenant_id": "t1", "entitlement_id": self.entitlement["entitlement_id"],
+                "service_id": "svc_1", "customer": {"email": "buyer@example.com"}, "now": 200}
+        args.update(over)
+        return self.spend_credit(self.Repo(self.entitlement), **args)
+
+    def test_an_ordinary_booking_is_untouched(self):
+        # No entitlement claimed: not a plan booking, and nothing is looked up.
+        self.assertEqual(self._spend(entitlement_id=""), {})
+
+    def test_a_valid_plan_spends_one(self):
+        result = self._spend()
+        self.assertTrue(result["spent"])
+        self.assertEqual(result["credits_remaining"], 3)
+
+    def test_a_plan_for_a_DIFFERENT_service_is_refused(self):
+        self.assertIn("does not cover", self._spend(service_id="svc_other")["error"])
+
+    def test_someone_else_cannot_spend_your_visits(self):
+        """The id is derived from a Stripe subscription id, so it is hard to guess -- but hard to guess is
+        not authorised. The booking email must match the one the plan was bought with."""
+        self.assertIn("different customer", self._spend(customer={"email": "thief@example.com"})["error"])
+
+    def test_an_exhausted_plan_is_refused_rather_than_going_negative(self):
+        self.entitlement = {**self.entitlement, "credits_remaining": 0}
+        self.assertIn("used all", self._spend()["error"])
+
+    def test_the_credit_is_taken_AFTER_the_slot_is_held(self):
+        """Taking a credit for a slot we then fail to claim would charge someone a visit they did not get."""
+        import inspect
+
+        from handlers import booking
+
+        source = inspect.getsource(booking.reserve_route)
+        self.assertLess(source.index("slot_locks_repo.claim("), source.index("_spend_plan_credit("))

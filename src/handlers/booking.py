@@ -21,6 +21,7 @@ from stripe_link.domain.booking import (
     service_lines,
     slot_end_iso,
 )
+from stripe_link.domain.booking_credits import EntitlementError, restore, spend
 from stripe_link.domain.documents import DocumentValidationError, validate_appointment
 from stripe_link.domain.fees import cached_billing_config, calculate_price, normalize_tier_id
 from stripe_link.domain.calendar_routing import candidate_fulfiller_ids, fulfiller_busy_connection, service_busy_connection
@@ -39,6 +40,7 @@ from stripe_link.repositories.documents import (
     notifications_repository,
     services_repository,
     slot_locks_repository,
+    booking_credits_repository,
     stripe_keys_repository,
     tenant_availability_repository,
     tenant_profiles_repository,
@@ -59,6 +61,7 @@ def handler(
     exceptions_repo=None,
     appointments_repo=None,
     slot_locks_repo=None,
+    credits_repo=None,
     stripe_repo=None,
     tenant_repo=None,
     notifications_repo=None,
@@ -91,7 +94,10 @@ def handler(
     if path.startswith("/book/") and method == "GET":
         return booking_page_route(event, services_repo)
     if "/appointments/reserve" in path and method == "POST":
-        return reserve_route(event, repos, slot_locks_repo or slot_locks_repository())
+        # Booking credits are looked up only when the request claims a plan; a tenant with no recurring
+        # services never touches the table.
+        return reserve_route(event, repos, slot_locks_repo or slot_locks_repository(),
+                             credits_repo=credits_repo or _credits_repo(mode))
     if "/appointments/checkout" in path and method == "POST":
         return checkout_route(
             event, appointments_repo,
@@ -102,7 +108,7 @@ def handler(
     if "/appointments/manage/schedule" in path and method == "POST":
         return manage_schedule_route(event, repos, slot_locks_repo or slot_locks_repository(), delegation=delegation)
     if "/appointments/manage/cancel" in path and method == "POST":
-        return manage_cancel_route(event, appointments_repo, slot_locks_repo or slot_locks_repository(), delegation=delegation)
+        return manage_cancel_route(event, appointments_repo, slot_locks_repo or slot_locks_repository(), credits_repo=credits_repo or _credits_repo(mode), delegation=delegation)
     if "/appointments/manage/reschedule" in path and method == "POST":
         return manage_reschedule_route(event, repos, slot_locks_repo or slot_locks_repository(), delegation=delegation)
     if "/appointments/manage" in path and method == "GET":
@@ -112,7 +118,7 @@ def handler(
     return error_response("Unsupported booking route.", status_code=404, code="not_found")
 
 
-def reserve_route(event, repos, slot_locks_repo):
+def reserve_route(event, repos, slot_locks_repo, credits_repo=None):
     services_repo, availability_repo, fulfillers_repo, exceptions_repo, appointments_repo = repos
     try:
         body = parse_json_body(event)
@@ -185,12 +191,86 @@ def reserve_route(event, repos, slot_locks_repo):
         slot_locks_repo.release(tenant_id, fulfiller_id, slot_start)
         return error_response(str(exc), code="reserve_failed")
 
+    # A booking covered by the customer's PLAN (plans/RECURRING_SERVICES.md §4b). Spending happens after
+    # the slot is safely held: taking a credit for a slot we then fail to claim would charge someone a visit
+    # they did not get. If the spend fails the appointment stands as an ordinary unpaid reservation, so the
+    # customer can still pay for it rather than losing the slot.
+    plan = _spend_plan_credit(
+        credits_repo, tenant_id=tenant_id, entitlement_id=str(body.get("entitlement_id") or "").strip(),
+        service_id=service_id, customer=customer, now=now,
+    )
+    if plan.get("error"):
+        slot_locks_repo.release(tenant_id, fulfiller_id, slot_start)
+        appointments_repo.delete(tenant_id, appointment_id)
+        return error_response(plan["error"], status_code=409, code="plan_unavailable")
+    if plan.get("spent"):
+        appointment["payment_status"] = "paid"
+        appointment["status"] = "booked"
+        appointment["entitlement_id"] = plan["entitlement_id"]
+        appointments_repo.put(appointment)
+
     return json_response({
         "appointment": _public_appointment(appointment),
         "manage_token": manage_token,
         "hold_expires_at": hold_expires_at,
-        "requires_payment": requires_payment(appointment),
+        "requires_payment": False if plan.get("spent") else requires_payment(appointment),
+        "credits_remaining": plan.get("credits_remaining"),
     }, status_code=201)
+
+
+def _credits_repo(mode):
+    """The booking-credit store, or None where it is not configured.
+
+    Optional on purpose, like the services table before it: a deployment without recurring services should
+    not fail to take an ordinary booking because a table it never uses is absent. The spend path already
+    treats a missing repo as "this is not a plan booking".
+    """
+    if not os.environ.get("BOOKING_CREDITS_TABLE"):
+        return None
+    return booking_credits_repository(mode=mode)
+
+
+def _restore_plan_credit(credits_repo, appointment):
+    """Give back the credit a cancelled booking spent. Best-effort: the cancellation itself has already
+    happened, and failing it now would leave the slot released but the appointment still standing."""
+    entitlement_id = str((appointment or {}).get("entitlement_id") or "")
+    if not entitlement_id or credits_repo is None:
+        return
+    try:
+        entitlement = credits_repo.get(str(appointment.get("tenant_id") or ""), entitlement_id)
+        if entitlement:
+            credits_repo.put(restore(entitlement))
+    except Exception as exc:  # noqa: BLE001
+        print(f"[booking] credit not restored for {entitlement_id}: {type(exc).__name__}: {exc}")
+
+
+def _spend_plan_credit(credits_repo, *, tenant_id, entitlement_id, service_id, customer, now):
+    """Take one booking credit, or explain why not.
+
+    Returns {} when the request is not a plan booking at all, so an ordinary paid booking is untouched.
+
+    The entitlement id alone is not treated as sufficient: it is derived from the Stripe subscription id, so
+    it is hard to guess, but "hard to guess" is not "authorised". The booking's email must match the one the
+    subscription was bought with, or anyone holding the id could spend someone else's visits.
+    """
+    if not entitlement_id or credits_repo is None:
+        return {}
+    entitlement = credits_repo.get(tenant_id, entitlement_id)
+    if not entitlement:
+        return {"error": "That plan was not found."}
+    if str(entitlement.get("service_id") or "") != service_id:
+        return {"error": "That plan does not cover this service."}
+    plan_email = str((entitlement.get("customer") or {}).get("email") or "").strip().lower()
+    booking_email = str((customer or {}).get("email") or "").strip().lower()
+    if plan_email and plan_email != booking_email:
+        return {"error": "That plan belongs to a different customer."}
+    try:
+        spent = spend(entitlement, now=now)
+    except EntitlementError as exc:
+        return {"error": str(exc)}
+    credits_repo.put(spent)
+    return {"spent": True, "entitlement_id": entitlement_id,
+            "credits_remaining": int(spent.get("credits_remaining") or 0)}
 
 
 def checkout_route(event, appointments_repo, *, stripe_repo, tenant_repo, notifications_repo, secret_cipher, opener, billing_config_loader, delegation=None):
@@ -304,7 +384,7 @@ def manage_view_route(event, appointments_repo):
     })
 
 
-def manage_cancel_route(event, appointments_repo, slot_locks_repo, delegation=None):
+def manage_cancel_route(event, appointments_repo, slot_locks_repo, delegation=None, credits_repo=None):
     try:
         body = parse_json_body(event)
     except ValueError as exc:
@@ -319,6 +399,10 @@ def manage_cancel_route(event, appointments_repo, slot_locks_repo, delegation=No
     canceled["reminders"] = cancel_reminders(canceled)
     appointments_repo.put(canceled)
     _release_lock(slot_locks_repo, canceled)
+    # A cancelled PLAN booking returns its credit. Not doing so makes cancelling cost the customer a visit,
+    # which penalises the considerate and pushes people towards no-shows instead. Capped at the cycle's
+    # grant, so a cancellation can never leave someone holding more than they bought.
+    _restore_plan_credit(credits_repo, canceled)
     _delegate(appointments_repo, canceled, action="delete", change="canceled", delegation=delegation)
     return json_response({"appointment": _public_appointment(canceled), "status": "canceled"})
 

@@ -4,6 +4,7 @@ from typing import Any
 
 from stripe_link.domain import tips
 from stripe_link.domain.opportunities import STAGE_LANDING, stage_opportunities
+from stripe_link.domain.booking_credits import bookings_per_cycle
 from stripe_link.domain.service_pricing import resolve_service_price, service_booking_flow
 
 
@@ -207,6 +208,9 @@ class ResolvedOfferItem:
     trial_period_days: int = 0
     trial_price: int = 0
     service_id: str = ""
+    # How many bookings one paid cycle of a RECURRING service grants. Zero on everything else. Carried on
+    # the resolved line so the checkout metadata can hand it to the webhook, which never sees the service.
+    bookings_per_cycle: int = 0
     booking_flow: str = ""
     fulfillment_mode: str = "scheduled"
     duration_minutes: int = 0
@@ -304,6 +308,7 @@ def resolve_service_offer_item(item: dict[str, Any], service: dict[str, Any], of
         fulfillment_mode=service_fulfillment_mode(service),
         duration_minutes=int(service.get("duration_minutes") or 0),
         default_fulfiller_id=str(service.get("default_fulfiller_id") or ""),
+        bookings_per_cycle=(bookings_per_cycle(service) if pricing_model == "recurring" else 0),
         # The SAME helper the product resolver uses. Omitting it is exactly how a recurring service price
         # came to resolve as a one-off charge: `recurring` stayed None, and checkout picks its Stripe mode
         # from whether ANY resolved line carries one.
@@ -471,6 +476,7 @@ def resolve_offer(
                 "trial_price": item.trial_price,
                 "booking_flow": item.booking_flow,
                 "fulfillment_mode": item.fulfillment_mode,
+                "bookings_per_cycle": item.bookings_per_cycle,
                 "duration_minutes": item.duration_minutes,
                 "default_fulfiller_id": item.default_fulfiller_id,
             }

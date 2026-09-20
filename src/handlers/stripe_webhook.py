@@ -20,7 +20,11 @@ from stripe_link.domain.booking import (
     appointment_total_amount,
     compensation_snapshot,
     group_purchased_service_lines,
+    recurring_purchased_lines,
     no_booking_invoice_line,
+)
+from stripe_link.domain.booking_credits import (
+    EntitlementError, build_entitlement, entitlement_id_for, refill,
 )
 from stripe_link.domain.documents import validate_appointment
 from stripe_link.domain.downloads import digital_download_links
@@ -37,6 +41,7 @@ from stripe_link.mailer import send_email
 from stripe_link.repositories.documents import (
     RepositoryError,
     appointments_repository,
+    booking_credits_repository,
     calendar_connections_repository,
     carts_repository,
     customers_repository,
@@ -278,6 +283,14 @@ def handler(
             invoices_repo=invoices_repo, notifications_repo=notifications_repo,
             now_fn=now_fn, billing_config_loader=billing_config_loader,
         )
+        # A recurring SERVICE renews here too, and this is the moment its booking credits come back
+        # (plans/RECURRING_SERVICES.md §4b). Gated on `invoice.paid` specifically: an invoice that merely
+        # EXISTS has not been paid for, and granting visits against an unpaid renewal is giving them away.
+        if event_type == "invoice.paid":
+            try:
+                refresh_booking_credits(stripe_event, tenant_id=tenant_id, mode=mode, now_fn=now_fn)
+            except Exception as exc:  # noqa: BLE001 - never fail the webhook over credits
+                print(f"[webhook] booking credits not refreshed: {type(exc).__name__}: {exc}")
         # A REPEATING TIP renews here, and this is the only moment the supporter hears from us about it.
         if tip_tokens_repo is None and os.environ.get("CARTS_TABLE"):
             tip_tokens_repo = tip_tokens_repository(mode=mode)
@@ -640,6 +653,91 @@ def _emit_awaiting_schedule_notification(notifications_repo, appointment: dict[s
         pass
 
 
+def _grant_booking_credits(lines, *, session, tenant_id, mode, customer, services_repo, credits_repo, now):
+    """Open a booking-credit balance for each recurring service line in a purchase.
+
+    Idempotent through the entitlement id, which is DERIVED from (subscription, service) rather than random:
+    Stripe re-delivers webhooks, and the renewal event that refills this row arrives later with nothing but
+    those two ids in common.
+    """
+    if not lines:
+        return []
+    subscription_id = str(session.get("subscription") or "")
+    if not subscription_id:
+        # Subscription mode is chosen by the resolved line, so this should not happen -- but granting
+        # credits nobody can refill would strand the customer after one cycle.
+        print("[webhook] recurring service purchase with no subscription id; no credits granted")
+        return []
+    credits_repo = credits_repo or (booking_credits_repository(mode=mode) if os.environ.get("BOOKING_CREDITS_TABLE") else None)
+    services_repo = services_repo or (services_repository(mode=mode) if os.environ.get("SERVICES_TABLE") else None)
+    if not credits_repo or not services_repo:
+        print("[webhook] booking credits not granted: repository unavailable")
+        return []
+
+    granted = []
+    for line in lines:
+        service_id = str(line.get("service_id") or "")
+        service = services_repo.get(tenant_id, service_id) if service_id else None
+        if not service:
+            print(f"[webhook] booking credits not granted: service '{service_id}' not found")
+            continue
+        entitlement_id = entitlement_id_for(subscription_id, service_id)
+        if credits_repo.get(tenant_id, entitlement_id):
+            continue                      # replayed webhook, or a second line for the same service
+        try:
+            credits_repo.put(build_entitlement(
+                tenant_id=tenant_id, service=service, subscription_id=subscription_id,
+                customer=customer, cycle_start=now, now=now,
+            ))
+            granted.append(entitlement_id)
+        except EntitlementError as exc:
+            print(f"[webhook] booking credits not granted for '{service_id}': {exc}")
+    return granted
+
+
+def refresh_booking_credits(
+    stripe_event: dict[str, Any], *, tenant_id: str, mode: str,
+    credits_repo=None, services_repo=None, now_fn: Callable[[], int] = lambda: int(time.time()),
+) -> dict[str, Any]:
+    """A paid renewal refills the cycle's credits (plans/RECURRING_SERVICES.md §4b).
+
+    The balance RESETS rather than accumulating: unused visits do not roll over, which the plan settles
+    deliberately -- rollover turns a balance into an account with a history.
+
+    Re-reads the grant size from the service, so a tenant who changes "four cuts" to "six" sees it take
+    effect on the next cycle rather than never.
+    """
+    invoice = _event_data_object(stripe_event)
+    subscription_id = str(invoice.get("subscription") or "")
+    if not subscription_id:
+        return {"status": "skipped", "reason": "not_a_subscription_invoice"}
+    credits_repo = credits_repo or (booking_credits_repository(mode=mode) if os.environ.get("BOOKING_CREDITS_TABLE") else None)
+    if not credits_repo:
+        return {"status": "skipped", "reason": "credits_repo_unavailable"}
+    services_repo = services_repo or (services_repository(mode=mode) if os.environ.get("SERVICES_TABLE") else None)
+
+    now = int(now_fn())
+    period = (invoice.get("lines") or {}).get("data") or [{}]
+    period_start = int((period[0].get("period") or {}).get("start") or now)
+    period_end = int((period[0].get("period") or {}).get("end") or 0)
+
+    refreshed = []
+    for entitlement in credits_repo.list_for_tenant(tenant_id) or []:
+        if str(entitlement.get("subscription_id") or "") != subscription_id:
+            continue
+        service = (services_repo.get(tenant_id, str(entitlement.get("service_id") or ""))
+                   if services_repo else None)
+        # The FIRST invoice of a subscription arrives alongside the checkout that already granted this
+        # cycle. Refilling it again would be harmless (a reset to the same number) but would also mask a
+        # genuine double-grant, so it is skipped explicitly.
+        if int(entitlement.get("cycle_start") or 0) >= period_start:
+            continue
+        credits_repo.put(refill(entitlement, service=service, cycle_start=period_start,
+                                cycle_end=period_end, now=now))
+        refreshed.append(entitlement.get("entitlement_id"))
+    return {"status": "ok", "refreshed": refreshed}
+
+
 def persist_service_purchase(
     stripe_event: dict[str, Any],
     *,
@@ -647,6 +745,7 @@ def persist_service_purchase(
     mode: str,
     order_id: str = "",
     appointments_repo=None,
+    credits_repo=None,
     invoices_repo=None,
     services_repo=None,
     fulfillers_repo=None,
@@ -673,6 +772,15 @@ def persist_service_purchase(
     customer = {k: v for k, v in {"name": details.get("name"), "email": details.get("email"), "phone": details.get("phone")}.items() if v}
     currency = str(session.get("currency") or "usd").lower()
     payment_intent = str(session.get("payment_intent") or "")
+
+    # A RECURRING service line grants booking credits instead of an appointment: the customer books each
+    # visit later through the ordinary flow (plans/RECURRING_SERVICES.md §4b). Done before the fan-out
+    # because `group_purchased_service_lines` deliberately excludes these -- booking a slot nobody chose,
+    # once, for a subscription meant to produce many, is the wrong shape entirely.
+    granted = _grant_booking_credits(
+        recurring_purchased_lines(purchased_lines), session=session, tenant_id=tenant_id, mode=mode,
+        customer=customer, services_repo=services_repo, credits_repo=credits_repo, now=now,
+    )
 
     groups, no_booking_lines = group_purchased_service_lines(purchased_lines, metadata.get("service_booking_mode"))
 
