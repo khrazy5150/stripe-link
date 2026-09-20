@@ -904,7 +904,7 @@ latter -- one concept, two modes -- which dissolves the confusion instead of doc
 
 Zero service products and zero prod Services exist, so there is nothing to migrate. Cheapest possible moment.
 
-### ⭐⭐ FIXED 2026-09-20 (code; migration pending) — one domain-index row served TWO mode-partitioned Sites
+### ✅ FIXED + MIGRATED 2026-09-20 — one domain-index row served TWO mode-partitioned Sites
 
 Found on prod while baselining a deploy: `poliaxis-nutrition.jbay.uk/link-bio` 404s, and so does
 `jbay.page/poliaxis-nutrition`.
@@ -934,12 +934,18 @@ otherwise a second tenant could register `maria-test` and take over the first te
 `jbay.page/{username}` is **live-mode only** for the same reason: one public name per creator, and the apex
 is an identity rather than a sandbox.
 
-**STILL TO DO:** run `deploy/migrate_mode_hostnames.py` (dry-run clean: 1 Site on prod, 6 on dev), then
-re-publish the affected Sites. Note the code self-heals lazily too — any test-mode Site that is SAVED gets
-its hostname corrected — so a Site edited before the migration runs will move on its own.
+**DONE.** Code shipped dev+prod and `deploy/migrate_mode_hostnames.py --apply` run on both (1 Site on
+prod, 6 on dev). Verified after: **zero hostnames shared by two modes** in either environment — prod went
+from 1 shared hostname to 2 distinct, dev from 7 to 8. The script is idempotent; a second dry run finds
+nothing. The code also self-heals on save, so a Site created before this corrects itself when next edited.
 
-On prod this frees `poliaxis-nutrition.jbay.uk` for the live Site, but that Site is archived, so the URL
-stays 404 until it is reactivated.
+**Left for the author, and neither is a defect:**
+
+- Re-publish an affected Site's pages to push its new hostname into the edge index. Until then the new host
+  has no row and 404s; the old host keeps whatever the surviving mode last wrote, which is now correct.
+- `poliaxis-nutrition.jbay.uk` is free for the LIVE Site again, but that Site is archived — so `/link-bio`
+  and `jbay.page/poliaxis-nutrition` stay 404 until it is reactivated. That is the sunset feature working,
+  not the collision.
 
 ### LOW — a draft page's Site URL serves a raw CloudFront 403 (found 2026-09-18)
 
