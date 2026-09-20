@@ -224,14 +224,27 @@ Somewhere Else — exactly the lesson §4.4 exists to unteach.
 editor for the same document, and the wizard is deliberately a create-time narrowing: a tenant editing a
 service usually wants one field, not thirteen steps.
 
-### Recommendation
+### DECIDED: A, with the service filter (author, 2026-09-19)
 
-**A**, with **B as the fallback if the list merge proves messy.** The deep-link is the only genuinely new
-mechanism, and it is small: `navigateTo` already exists and needs one payload argument, while the Services
-screen already has `openEditModal(row)` to call on arrival.
+**The filter already exists.** `Products.vue:32` offers a "Service" option, and
+`stores/products.js:148` applies it as `product.product_type === "service"` over the products array — which
+matches **nothing**, because no service product exists or ever will under §4.4. A dropdown that promises
+services and returns an empty list, in the same family as the wizard that promised a booking flow. Wiring it
+is finishing something already half-built, not adding a feature.
 
-Worth deciding at the same time: whether the Products list **filters** (`type: physical / digital`) gain a
-`service` value. If services show in the list they should be filterable like everything else.
+Where each piece goes:
+
+| Piece | Where | Note |
+|---|---|---|
+| Merged rows | `stores/products.js` `filteredProducts` | services adapted in, so search/status/type flow through the shared `filterRows` unchanged |
+| The adapter | reuse the shape of `serviceSelectorCard()` (Offers.vue:818) | one shared helper, not a second copy — the Offers one already works |
+| Type predicate | same getter, line 148 | must read the adapted row's type, not only `product_type` |
+| Badge on the row | `Products.vue` list | a service row must be visibly a service |
+| Edit | `navigateTo("services", { edit: service_id })` | `navigateTo` gains a payload; Services already has `openEditModal(row)` |
+
+Non-negotiable risk, carried over: the list's **bulk actions and status changes** must either work on a
+service row or visibly not apply. A row that looks like the others and silently ignores Archive is worse than
+a row that is obviously different.
 
 ## 5. The editor
 
@@ -243,7 +256,9 @@ groupings as §4.1. No fields removed.
 
 ## 6. Phasing
 
-1. **Agree §4.2's step list, §4.4's placement, and §4.5's edit route.** All three are author calls.
+1. ~~Agree the step list, the placement, and the edit route.~~ **ALL DECIDED** (author, 2026-09-18/19):
+   §4.2's thirteen conditional steps, the Products wizard as the home (§4.4), and §4.5 option A plus the
+   service filter.
 2. Build the wizard in Products, with the Services door pointing at the same flow.
 3. Review step + skip affordances (§4.3) — these are the feature, not polish.
 4. **Exercise the selling path end to end.** 59 tests pass but zero real services exist: create one through
