@@ -465,3 +465,44 @@ class MixedOfferGuardTests(unittest.TestCase):
         self.assertIn("servicePricesFor(row.service_id)", candidates)
         inferred = self.src.split("function inferredCheckoutMode()", 1)[1][:400]
         self.assertIn("sessionCandidatePrices()", inferred)
+
+
+class ApplicationFeePrecisionTests(unittest.TestCase):
+    """Stripe rejects application_fee_percent with more than two decimal places.
+
+    The fee is derived as (platform_fee / subtotal) * 100, which almost never lands on two decimals: a 5%
+    fee on $32.91 came out as 5.0137. Stripe answered "Invalid decimal: 5.0137; must contain at maximum two
+    decimal places" and refused the session, so EVERY subscription checkout for a Connect tenant failed --
+    the one-time price on the same product checked out fine, because the payment branch sends an integer
+    amount instead of a percent.
+    """
+
+    @staticmethod
+    def _percent(platform_fee, subtotal, unit_amount):
+        from handlers.checkout import build_checkout_payload
+        payload = build_checkout_payload(
+            tenant_id="t1",
+            offer={"offer_id": "o1", "stripe_mode": "test", "checkout": {"mode": "subscription"}},
+            products_by_id={"p1": {"product_id": "p1", "name": "P", "stripe_mode": "test",
+                                   "prices": [{"price_id": "pr1", "unit_amount": unit_amount, "currency": "usd"}]}},
+            resolved={"items": [{"product_id": "p1", "price_id": "pr1", "quantity": 1,
+                                 "unit_amount": unit_amount, "currency": "usd",
+                                 "recurring": {"interval": "day", "interval_count": 1}}],
+                      "subtotal": subtotal, "currency": "usd"},
+            success_url="https://x/s", cancel_url="https://x/c",
+            fee_context={"platform_fee": platform_fee, "subtotal": subtotal,
+                         "product_type": "digital", "tenant_plan": "basic"},
+            apply_application_fee=True,
+        )
+        return payload["subscription_data[application_fee_percent]"]
+
+    def test_the_exact_fee_that_broke_checkout(self):
+        # $32.91 with a $1.65 platform fee -> 5.0136...%, which Stripe refused outright.
+        self.assertEqual(self._percent(165, 3291, 3291), "5.01")
+
+    def test_every_percent_stripe_could_be_sent_has_at_most_two_decimals(self):
+        for subtotal in range(500, 20000, 337):
+            for rate in (0.02, 0.05, 0.06, 0.07):
+                percent = self._percent(round(subtotal * rate), subtotal, subtotal)
+                with self.subTest(subtotal=subtotal, rate=rate):
+                    self.assertLessEqual(len(percent.split(".")[1]), 2, percent)

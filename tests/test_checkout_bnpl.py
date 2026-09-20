@@ -160,3 +160,37 @@ class BnplCheckoutFallbackTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class StripeErrorDetailTests(unittest.TestCase):
+    """A rejected Checkout Session must say WHY in the logs.
+
+    urllib's str(HTTPError) is only "HTTP Error 400: Bad Request". Stripe always explains the rejection in
+    the response body, and we were throwing it away -- so a failed checkout left nothing to diagnose and the
+    reason had to be rediscovered by replaying the payload against Stripe by hand.
+    """
+
+    def test_stripes_message_survives_the_error(self):
+        import io
+        from urllib.error import HTTPError
+        from handlers.checkout import StripeCheckoutError, create_stripe_checkout_session
+
+        body = b'{"error": {"message": "You can not pass `payment_intent_data` in `subscription` mode."}}'
+
+        def opener(request, timeout=None):
+            raise HTTPError("https://api.stripe.com", 400, "Bad Request", {}, io.BytesIO(body))
+
+        with self.assertRaises(StripeCheckoutError) as caught:
+            create_stripe_checkout_session({"mode": "subscription"}, api_key="sk_test_x", opener=opener)
+        self.assertIn("payment_intent_data", str(caught.exception))
+
+    def test_an_unreadable_body_keeps_the_original_error(self):
+        import io
+        from urllib.error import HTTPError
+        from handlers.checkout import create_stripe_checkout_session
+
+        def opener(request, timeout=None):
+            raise HTTPError("https://api.stripe.com", 502, "Bad Gateway", {}, io.BytesIO(b"<html>nope"))
+
+        with self.assertRaises(HTTPError):
+            create_stripe_checkout_session({}, api_key="sk_test_x", opener=opener)

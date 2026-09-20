@@ -2,7 +2,12 @@ import json
 import logging
 from base64 import b64encode
 from urllib.parse import urlencode
+from urllib.error import HTTPError
 from urllib.request import Request, urlopen
+
+class StripeCheckoutError(RuntimeError):
+    """Stripe rejected the Checkout Session and said why. Carries Stripe's own message."""
+
 
 logger = logging.getLogger(__name__)
 
@@ -511,8 +516,12 @@ def build_checkout_payload(
         subtotal = int(fee_context.get("subtotal") or 0)
         if apply_application_fee and platform_fee > 0 and subtotal > 0:
             if payload["mode"] == "subscription":
-                percent = (platform_fee / subtotal) * 100
-                payload["subscription_data[application_fee_percent]"] = f"{percent:.4f}"
+                # Stripe accepts application_fee_percent to TWO decimal places and rejects the whole session
+                # otherwise ("Invalid decimal: 5.0137; must contain at maximum two decimal places"), taking
+                # every subscription checkout down with it. The rounding costs a fraction of a cent per
+                # cycle; a four-decimal fee that Stripe refuses costs the entire sale.
+                percent = round((platform_fee / subtotal) * 100, 2)
+                payload["subscription_data[application_fee_percent]"] = f"{percent:.2f}"
             else:
                 payload["payment_intent_data[application_fee_amount]"] = str(platform_fee)
 
@@ -595,10 +604,25 @@ def create_stripe_checkout_session(payload, *, api_key, stripe_account="", opene
         headers=headers,
         method="POST",
     )
-    with opener(request, timeout=20) as response:
-        import json
-
-        return json.loads(response.read().decode("utf-8"))
+    try:
+        # `json` is imported at module scope. A function-local `import json` here would make the name local
+        # to this WHOLE function, leaving it unbound in the except clause below -- which silently swallowed
+        # Stripe's explanation the first time this was written.
+        with opener(request, timeout=20) as response:
+            return json.loads(response.read().decode("utf-8"))
+    except HTTPError as exc:
+        # Stripe ALWAYS explains a 400 in the response body; urllib's str() is only "HTTP Error 400: Bad
+        # Request". Losing the body meant a failed checkout said nothing at all in the logs -- the reason
+        # had to be rediscovered by replaying the payload against Stripe by hand.
+        detail = ""
+        try:
+            detail = json.loads(exc.read().decode("utf-8")).get("error", {}).get("message") or ""
+        except Exception:  # noqa: BLE001 - a body we cannot parse must not replace the original error
+            pass
+        if detail:
+            logger.error("stripe: checkout session rejected: %s", detail)
+            raise StripeCheckoutError(detail) from exc
+        raise
 
 
 def redirect_response(url):

@@ -168,3 +168,40 @@ class ServicePricePickerTests(unittest.TestCase):
         # "$197.92" and "$274.76" side by side say nothing about which one subscribes the customer.
         block = self.OFFERS.split("function servicePriceOptionLabel(price)", 1)[1][:400]
         self.assertIn("recurringSuffix(price)", block)
+
+
+class ServiceOfferCheckoutModeTests(unittest.TestCase):
+    """A service-only offer must still carry a checkout.mode.
+
+    productIntent is derived from the selected PRODUCTS, so with none it reads "mixed" -- and
+    inferredCheckoutMode() returns undefined for anything that is not "transaction". The document meanwhile
+    stores product_intent "transaction" for a service-only offer, and validate_offer_document requires
+    checkout.mode whenever product_intent is "transaction". Two definitions of one question, so the offer
+    was built claiming to be a transaction with no mode at all and the save was refused.
+    """
+
+    import pathlib as _pathlib
+
+    ROOT = _pathlib.Path(__file__).resolve().parents[1]
+    OFFERS = (ROOT / "dashboard" / "src" / "components" / "Offers.vue").read_text(encoding="utf-8")
+
+    def test_the_intent_has_one_definition(self):
+        self.assertEqual(
+            self.OFFERS.count('landingProducts.value.length ? productIntent.value : "transaction"'), 1,
+            "the service-only intent rule is written more than once; they will drift",
+        )
+
+    def test_the_checkout_mode_guard_reads_that_definition(self):
+        block = self.OFFERS.split("function inferredCheckoutMode()", 1)[1][:200]
+        self.assertIn("effectiveProductIntent.value", block)
+        self.assertNotIn("productIntent.value !== ", block)
+
+    def test_the_document_reads_that_definition_too(self):
+        self.assertIn("const effectiveIntent = effectiveProductIntent.value;", self.OFFERS)
+
+    def test_the_backend_requires_the_mode_this_is_about(self):
+        # Guards the premise: if checkout.mode stops being required for a transaction, this test is
+        # measuring a constraint that no longer exists.
+        docs = (self.ROOT / "src" / "stripe_link" / "domain" / "documents.py").read_text(encoding="utf-8")
+        block = docs.split('if document.get("product_intent") == "transaction":', 1)[1][:400]
+        self.assertIn('require_enum(checkout, "mode", {"payment", "subscription"}', block)

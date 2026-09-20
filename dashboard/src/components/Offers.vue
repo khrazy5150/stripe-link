@@ -912,6 +912,12 @@ const productIntent = computed(() => {
   const intents = new Set(selectedProducts.value.map(productIntentFor));
   return intents.size === 1 ? [...intents][0] : "mixed";
 });
+// A service-only offer has no products, so productIntent -- derived from the selected PRODUCTS -- reads
+// "mixed" (an empty Set is not size 1). The document calls such an offer a transaction regardless, and
+// checkout.mode is required whenever product_intent is "transaction". Two definitions of the same question
+// is how the offer came to be saved claiming to be a transaction with no mode at all, which the backend
+// refuses. One definition, read by both.
+const effectiveProductIntent = computed(() => (landingProducts.value.length ? productIntent.value : "transaction"));
 const draftSelectedIntent = computed(() => {
   const selectedDraftItems = selectorItems.value.filter((item) => draftSelectedProductIds.value.has(productId(item)));
   const intents = new Set(selectedDraftItems.map(productIntentFor));
@@ -1451,7 +1457,7 @@ function buildOfferDocument() {
   }
 
   const priceContexts = landingProducts.value.length ? selectedPriceContexts() : (serviceContexts.length ? [...new Set(serviceContexts)] : ["standard"]);
-  const effectiveIntent = landingProducts.value.length ? productIntent.value : "transaction";
+  const effectiveIntent = effectiveProductIntent.value;
   // Snapshot the primary item's copy/image onto the offer so it is a self-contained contract for the
   // landing page (suggestions the tenant/AI can override later). Only price stays resolved-live.
   const primary = primaryOfferItemDisplay();
@@ -1873,7 +1879,7 @@ function defaultSelectionIsRecurring() {
 }
 
 function inferredCheckoutMode() {
-  if (productIntent.value !== "transaction") return undefined;
+  if (effectiveProductIntent.value !== "transaction") return undefined;
   const models = new Set(sessionCandidatePrices().map((price) => price.pricing_model || "one_time"));
   const hasRecurring = models.has("recurring") || models.has("subscription");
   const hasOneTime = [...models].some((model) => !["recurring", "subscription"].includes(model));
