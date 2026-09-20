@@ -214,11 +214,18 @@
             <p>Optional. It's the image customers see when this is on a page.</p>
           </div>
         </header>
+        <!-- Wired exactly as the service editor wires it. My first pass invented the API: no `uploader`
+             (which the component REQUIRES, so nothing could upload), an `@uploaded` event it does not emit,
+             and `asset.service` for a ratio key that is called `asset.service_hero`. -->
         <ImageUploadField
           v-model="form.hero_image_url"
-          label="Hero image"
-          :ratios="imageRatios.asset.service || null"
-          @uploaded="onHeroUploaded"
+          :crop="form.hero_image_crop"
+          :ratios="imageRatios.asset.service_hero"
+          :uploader="uploadServiceHero"
+          bake
+          label="Upload hero image"
+          alt="Hero image preview"
+          @update:crop="(rect) => (form.hero_image_crop = rect)"
         />
       </section>
 
@@ -288,6 +295,7 @@ import CalendarPanel from "./CalendarPanel.vue";
 import imageRatios from "../../../../src/stripe_link/image_ratios.json";
 import { applyTitleCaseInput } from "../../utils/titleCase.js";
 import { recordImageDims } from "../../utils/imageDims";
+import { uploadImage } from "../../api/uploads";
 import {
   LOCATION_MODES, SERVICE_PRICE_CONTEXTS, SERVICE_PRICING_MODELS,
   defaultServiceForm, locationLabel, useServicesStore,
@@ -382,8 +390,10 @@ function onSubmit() {
   save();
 }
 
-async function onHeroUploaded(asset) {
-  recordImageDims(form.value, form.value.hero_image_url, asset);
+async function uploadServiceHero(file) {
+  const result = await uploadImage(file, { basePrefix: "services" });
+  recordImageDims(form.value.image_dims, result.url, result.dims);
+  return result;
 }
 
 const reviewRows = computed(() => {

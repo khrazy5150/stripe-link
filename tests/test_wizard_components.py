@@ -146,8 +146,11 @@ class StepRailTests(unittest.TestCase):
         no padding of its own (the product wizard's sits inside an already-padded body), so swapping them ran
         the rail edge to edge -- the labels touched both sides of the modal.
         """
-        block = CSS.split("\n.landing-wizard-modal .wizard-steps {", 1)[1].split("}", 1)[0]
-        self.assertRegex(block, r"padding:[^;]*2\.4rem")
+        # Found by SELECTOR, not by an exact line: the rule is now shared with the service wizard's rail,
+        # which needs the same gutter for the same reason, and a literal split broke on the comma.
+        rule = next(chunk for chunk in CSS.split("}")
+                    if ".landing-wizard-modal .wizard-steps" in chunk.split("{")[0])
+        self.assertRegex(rule.split("{", 1)[1], r"padding:[^;]*2\.4rem")
         # The gutter it borrows is the modal's own, so the rail lines up with the title and the step body.
         body = CSS.split("\n.landing-wizard-body {", 1)[1].split("}", 1)[0]
         self.assertIn("2.4rem", body)

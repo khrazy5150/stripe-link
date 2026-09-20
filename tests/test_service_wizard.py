@@ -26,8 +26,15 @@ STORE = (DASH / "stores" / "products.js").read_text(encoding="utf-8")
 APP = (DASH / "App.vue").read_text(encoding="utf-8")
 
 
-def _template(src):
-    return src.rsplit("</template>", 1)[0]
+def _template(src, *, with_comments=True):
+    """The markup. `with_comments=False` strips HTML comments first.
+
+    Asserting that a string is ABSENT from a template is otherwise defeated by a comment explaining why it
+    is absent -- which is how this file first failed: the note recording that `@uploaded` is not a real
+    event contained the words `@uploaded`.
+    """
+    markup = src.rsplit("</template>", 1)[0]
+    return markup if with_comments else re.sub(r"<!--.*?-->", "", markup, flags=re.S)
 
 
 def _setup(src):
@@ -119,6 +126,47 @@ class EmbedsRatherThanRebuildsTests(unittest.TestCase):
             src = (DASH / "components" / "services" / f"{panel}.vue").read_text(encoding="utf-8")
             self.assertIn("embedded: { type: Boolean", src, panel)
             self.assertIn('v-if="!embedded"', src, panel)
+
+
+class HeroUploadTests(unittest.TestCase):
+    """The upload did nothing because I invented the component's API instead of reading it.
+
+    ImageUploadField REQUIRES an `uploader` function, emits `update:crop` (never `uploaded`), and the ratio
+    key is `asset.service_hero`. Three guesses, three wrong, and the build reported none of them.
+    """
+
+    def test_it_is_given_an_uploader(self):
+        self.assertIn(':uploader="uploadServiceHero"', _template(WIZARD))
+        self.assertIn("async function uploadServiceHero(file)", WIZARD)
+
+    def test_it_listens_for_the_event_that_is_actually_emitted(self):
+        emitted = (DASH / "components" / "shared" / "ImageUploadField.vue").read_text(encoding="utf-8")
+        self.assertIn("update:crop", emitted)
+        self.assertNotIn("@uploaded", _template(WIZARD, with_comments=False))
+
+    def test_it_uses_a_ratio_key_that_exists(self):
+        import json
+
+        ratios = json.loads((ROOT / "src" / "stripe_link" / "image_ratios.json").read_text(encoding="utf-8"))
+        self.assertIn("service_hero", ratios["asset"])
+        self.assertIn("imageRatios.asset.service_hero", _template(WIZARD))
+
+    def test_it_uploads_the_same_way_the_editor_does(self):
+        # One behaviour, two surfaces -- not a second uploader that drifts from the first.
+        body = WIZARD.split("async function uploadServiceHero(file)", 1)[1].split("\n}", 1)[0]
+        editor = SERVICES.split("async function uploadServiceHero(file)", 1)[1].split("\n}", 1)[0]
+        self.assertIn('basePrefix: "services"', body)
+        self.assertIn('basePrefix: "services"', editor)
+
+
+class RailTests(unittest.TestCase):
+    def test_the_rail_is_inset_like_the_body_beneath_it(self):
+        """It sits OUTSIDE .coupon-form, which carries the 2.4rem everything else is inset by, so without
+        its own rule the steps ran flush to the modal edge."""
+        css = (DASH / "styles.css").read_text(encoding="utf-8")
+        rule = next(chunk for chunk in css.split("}")
+                    if ".service-wizard .wizard-steps" in chunk.split("{")[0])
+        self.assertRegex(rule.split("{", 1)[1], r"padding:[^;]*2\.4rem")
 
 
 class ServicesInTheProductListTests(unittest.TestCase):

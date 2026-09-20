@@ -3780,7 +3780,10 @@ button:disabled {
    wizard's -- so it carries the modal's own 2.4rem gutter or it runs edge to edge. The dots it replaced
    had that padding built into `.wizard-progress`; the shared rail doesn't, and losing it was the whole
    regression. Aligns the rail with the title above it and the step body below it. */
-.landing-wizard-modal .wizard-steps {
+.landing-wizard-modal .wizard-steps,
+/* The service wizard's rail sits OUTSIDE its .coupon-form, which carries the 2.4rem the body is inset by --
+   so without this the steps run flush to the modal edge while everything under them is padded. */
+.service-wizard .wizard-steps {
   padding: 0 2.4rem;
 }
 
