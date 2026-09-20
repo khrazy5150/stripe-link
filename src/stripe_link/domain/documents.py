@@ -709,7 +709,10 @@ def validate_recurring_price(price: dict[str, Any]) -> None:
     require_enum(recurring, "interval", set(RECURRING_INTERVALS), "price.recurring.interval")
     interval = str(recurring["interval"])
     count = recurring.setdefault("interval_count", 1)
-    if not isinstance(count, bool) and isinstance(count, (int, float)) and float(count).is_integer():
+    # Decimal, because a price READ BACK from DynamoDB has Decimal("1") here, not 1. Fixtures pass either
+    # way, which is how this shipped: a recurring price validated on the way in and then failed validation
+    # on the publish path, so the page never rendered and never got its route.
+    if not isinstance(count, bool) and isinstance(count, (int, float, Decimal)) and float(count).is_integer():
         count = int(count)
     else:
         raise DocumentValidationError("price.recurring.interval_count must be a whole number.")

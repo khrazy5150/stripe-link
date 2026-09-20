@@ -11,6 +11,7 @@ gap only existed BETWEEN them.
 import json
 import pathlib
 import unittest
+from decimal import Decimal
 
 from stripe_link.domain.documents import (
     DocumentValidationError,
@@ -87,6 +88,22 @@ class TheGuardTests(unittest.TestCase):
         with self.assertRaises(DocumentValidationError):
             validate_product_document(_product(_price(recurring={"interval": "year", "interval_count": 2})))
         validate_product_document(_product(_price(recurring={"interval": "month", "interval_count": 12})))
+
+    def test_a_price_read_back_from_dynamodb_still_validates(self):
+        """DynamoDB hands numbers back as Decimal, and the publish path re-validates what it reads.
+
+        The form wrote interval_count as 1 and it validated; the publisher read Decimal("1") for the same
+        field and refused it, so a page with a recurring price never rendered and never got its short-code
+        route -- it just answered 404. Fixtures use int and pass either way, which is why nothing caught it.
+        """
+        product = _product(_price(recurring={"interval": "month", "interval_count": Decimal("1")}))
+        validate_product_document(product)
+        self.assertEqual(product["prices"][0]["recurring"]["interval_count"], 1)
+        self.assertIsInstance(product["prices"][0]["recurring"]["interval_count"], int)
+
+    def test_a_decimal_that_is_not_whole_is_still_refused(self):
+        with self.assertRaises(DocumentValidationError):
+            validate_product_document(_product(_price(recurring={"interval": "month", "interval_count": Decimal("1.5")})))
 
     def test_interval_count_defaults_to_one(self):
         product = _product(_price(recurring={"interval": "month"}))
