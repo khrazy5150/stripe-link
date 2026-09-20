@@ -28,6 +28,13 @@ Deferred, non-blocking follow-ups. Each item notes what, why it was deferred, an
   needs zone sampling because there is no destination at pricing time -- an estimate is a distribution, not
   a number. Treated as a HYPOTHESIS: record estimate vs actual from the first label onward (it cannot be
   backfilled) and expect to replace the strategy after measuring.
+- **Smart notifications** (`plans/SMART_NOTIFICATIONS.md`): a carrier fires a dozen tracking scans per
+  parcel and eleven of them mean "still coming". The event-id dedupe we already have cannot suppress them
+  -- they are a dozen legitimately distinct events -- so dedupe has to move onto the MEANING: map events to
+  a small set of milestones (shipped / out_for_delivery / delivered / exception / returned), record which
+  milestones a shipment has already reported, never regress rank when webhooks arrive out of order, always
+  notify on exception, and cap the total per shipment. Prove it on shipping before generalising it to the
+  Stripe branches that are inline `if event_type` today.
 - **Tracking emails reuse the existing mail path**, not a new one: a pure content builder in
   `domain/receipts.py` beside `receipt_content`/`tip_renewal_content`, branded from
   `load_tenant_email_context` so it comes from the TENANT's business, sent via `mailer.send_email`

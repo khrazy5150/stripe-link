@@ -187,8 +187,10 @@ bell item — but they are separate mechanisms and the bell is optional.
 - **P3/PI (tracking from the provider):** only when the provider tells us — webhook or poll. If a tenant
   buys labels in their own tool, nothing here knows a parcel shipped until that arrives.
 - **Delivery updates** (out for delivery, delivered) are a second, noisier decision: a tracking webhook
-  fires several times per parcel, and emailing on each one is how a helpful notice becomes spam. Ship the
-  first "it's on its way" email; decide the rest deliberately.
+  fires several times per parcel, and emailing on each one is how a helpful notice becomes spam. Designed
+  separately in **`plans/SMART_NOTIFICATIONS.md`** — the short version is that the existing event-id dedupe
+  cannot help, because a dozen scans are a dozen legitimately distinct events that happen to mean one
+  thing. Dedupe belongs on the MEANING (a milestone recorded on the shipment), not on the event.
 
 ### P4 — the other providers, in the order we can prove them
 
