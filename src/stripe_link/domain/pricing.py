@@ -273,6 +273,17 @@ def resolve_service_offer_item(item: dict[str, Any], service: dict[str, Any], of
     price = resolve_service_price(service, str(item.get("price_id") or ""))
     if not price:
         raise PricingError(f"Price '{item.get('price_id', '')}' was not found on service '{service_id}'.")
+    # Belt and braces with validate_service, which refuses to STORE one. This resolver does not apply
+    # `recurring_terms` -- the product one does -- so a recurring service price that reached here would
+    # resolve as a single charge and Stripe would be asked for a one-off payment. Refusing the checkout is
+    # bad; charging a subscriber once and never again is worse, and silent. A hand-edited or imported
+    # document is the only way to get here. See plans/RECURRING_SERVICES.md §2.
+    pricing_model = str(price.get("pricing_model") or "one_time")
+    if pricing_model != "one_time":
+        raise PricingError(
+            f"Service '{service_id}' has a '{pricing_model}' price, which is not supported. "
+            "Services are one-time only."
+        )
     price_context = str(price.get("context") or "standard")
     quantity = int(item.get("quantity", 1))
     unit_amount = int(price.get("unit_amount", 0))

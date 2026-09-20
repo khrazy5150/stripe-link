@@ -16,7 +16,7 @@ services (later)"*, and Phase 4 lists *"recurring (subscription) services"* alon
 So this is a deferral, not an oversight. What has changed since is that **product** recurring shipped
 (2026-09-15), so the billing half now exists and has been exercised.
 
-## 2. A live hazard, independent of whether this is ever built
+## 2. A live hazard, independent of whether this is ever built  ✅ CLOSED 2026-09-20
 
 `resolve_service_offer_item` never applies `recurring_terms(price)` — the product resolver does — and
 `validate_service` **accepts** a recurring service price. Proven 2026-09-20:
@@ -32,8 +32,12 @@ The only thing preventing a silent mis-charge is a dropdown offering one option.
 codebase keeps reproducing — two things that must agree with nothing forcing them to — and it is the same
 failure the product recurring bug had on 2026-09-15.
 
-**Close this regardless of the feature**: either the validator refuses `recurring` on a service price, or the
-resolver honours it. Doing neither is the one outcome that can charge someone wrongly.
+**Closed by refusing.** `validate_service` rejects any `pricing_model` but `one_time` (both `prices[]` and
+the legacy `price`), `resolve_service_offer_item` refuses one as defence in depth, and a test binds the
+form's offered models to what the validator accepts. Honouring it instead would have shipped half a feature.
+
+This changes nothing about §4–§7: when recurring services ARE built, the narrowing is one constant to widen,
+and the tests around it say exactly what has to become true first.
 
 ## 3. What already exists (checked, not remembered)
 

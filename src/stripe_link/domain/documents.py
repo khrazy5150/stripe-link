@@ -2437,6 +2437,27 @@ def validate_customer(document: dict[str, Any]) -> None:
         require_fields(transaction, ["transaction_id", "type", "created_at"])
 
 
+# What a SERVICE price may be, which is narrower than what a product price may be. Recurring and
+# customer-chooses services are Phase 4 of plans/SERVICES_IN_OFFERS.md and nothing downstream implements
+# them: `resolve_service_offer_item` does not apply `recurring_terms`, so a recurring service price resolved
+# to a ONE-OFF charge and Stripe was asked for a single payment (proven 2026-09-20). The only thing standing
+# between a tenant and a mis-charge was a dropdown offering one option.
+#
+# Refused here rather than honoured, deliberately. Honouring it would ship half a feature -- Stripe would
+# bill monthly while nothing created the appointments each cycle pays for. The narrowing has precedent: the
+# same plan already limits a service price's `context` to standard/sale/flash_sale.
+SERVICE_PRICING_MODELS = {"one_time"}
+
+
+def _validate_service_price(price: dict[str, Any], *, where: str) -> None:
+    model = price.get("pricing_model")
+    if model is not None and model not in SERVICE_PRICING_MODELS:
+        raise DocumentValidationError(
+            f"{where} pricing_model must be one_time. Recurring and customer-chooses services are not "
+            "supported yet (plans/RECURRING_SERVICES.md)."
+        )
+
+
 def validate_service(document: dict[str, Any]) -> None:
     fulfillment_mode = document.get("fulfillment_mode")
     if fulfillment_mode is not None and fulfillment_mode not in {"scheduled", "no_booking"}:
@@ -2457,6 +2478,7 @@ def validate_service(document: dict[str, Any]) -> None:
     if not isinstance(price, dict):
         raise DocumentValidationError("Service price must be an object.")
     require_fields(price, ["currency", "unit_amount"])
+    _validate_service_price(price, where="Service price")
     prices = document.get("prices")
     if prices is not None:
         if not isinstance(prices, list):
@@ -2470,6 +2492,7 @@ def validate_service(document: dict[str, Any]) -> None:
                 raise DocumentValidationError("Service price context must be standard, sale, or flash_sale.")
             if entry.get("fee_handling") is not None and entry.get("fee_handling") not in {"standard", "split", "net_guaranteed"}:
                 raise DocumentValidationError("Service price fee_handling must be standard, split, or net_guaranteed.")
+            _validate_service_price(entry, where="Each service price")
     if document.get("booking_flow") is not None and document.get("booking_flow") not in {"book_then_pay", "pay_then_book"}:
         raise DocumentValidationError("Service booking_flow must be book_then_pay or pay_then_book.")
     booking_rules = document.get("booking_rules") or {}

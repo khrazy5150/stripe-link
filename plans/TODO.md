@@ -952,7 +952,7 @@ nothing. The code also self-heals on save, so a Site created before this correct
   and `jbay.page/poliaxis-nutrition` stay 404 until it is reactivated. That is the sunset feature working,
   not the collision.
 
-### ⭐ HIGH — a recurring SERVICE price silently charges once (found 2026-09-20)
+### ✅ FIXED 2026-09-20 — a recurring SERVICE price silently charged once
 
 Plan: **plans/RECURRING_SERVICES.md**. Proven, not suspected:
 
@@ -967,8 +967,17 @@ Stripe session mode:  payment  ->  charged ONCE
 dropdown offering one option — the same "two things that must agree with nothing forcing them to" shape as
 the product recurring bug of 2026-09-15.
 
-**Fix this whether or not recurring services are ever built:** either the validator refuses `recurring` on a
-service price, or the resolver honours it. Doing neither is the one outcome that can charge someone wrongly.
+**FIXED by refusing, not honouring** — honouring would ship half a feature: Stripe billing monthly while
+nothing creates the appointments each cycle pays for.
+
+- `validate_service` refuses any `pricing_model` but `one_time`, in BOTH the `prices[]` entries and the
+  legacy single `price` every service still carries. The message names the plan.
+- `resolve_service_offer_item` refuses one too, as defence in depth. Refusing a checkout is bad; charging a
+  subscriber once and never again is worse, and silent. Only a hand-edited or imported document can reach it.
+- A test binds the services form's offered models to what the validator accepts — the two things that must
+  agree, with something now forcing them to. Verified by making the dropdown drift and watching it fail.
+
+Zero services in dev or prod carried a non-`one_time` price, so nothing needed migrating.
 
 Also corrects a stale note: plans/BOOKING_AS_PRIMITIVE.md says "no code yet". Appointments already use the
 canonical `services[]` shape, with slot locks, manage/cancel/reschedule tokens and real Google Calendar sync.
