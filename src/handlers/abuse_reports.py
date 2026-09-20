@@ -46,9 +46,16 @@ def handler(event, context, repository=None, pages_repo=None, now=None):
         return error_response("page_id is required.", code="missing_page")
 
     # Resolve the page to learn WHOSE it is. Never trust a reported tenant_id.
-    pages_repo = pages_repo or pages_repository()
+    #
+    # BOTH mode partitions. Pages are stored per Stripe mode and `find_by_id` keys on a mode-scoped GSI1PK,
+    # so an unscoped repository matches NEITHER -- which made this endpoint accept everything and record
+    # nothing, silently, because an unresolvable page is deliberately answered like a real one. Found by
+    # checking the table after a live POST rather than by trusting the 200 (2026-09-20).
+    #
+    # Trying both is safe: the mode only says where to look, and the tenant still comes from the page we
+    # find. A reporter has no way to know or influence which partition their page lives in.
     try:
-        page = pages_repo.find_by_id(page_id)
+        page = _find_page(page_id, pages_repo)
     except RepositoryError:
         page = None
     if not page:
@@ -80,6 +87,17 @@ def handler(event, context, repository=None, pages_repo=None, now=None):
     # No report_id in the response: the reporter has nothing to do with it, and handing out ids invites
     # probing for other people's.
     return json_response({"received": True})
+
+
+def _find_page(page_id, pages_repo=None):
+    """The page, from whichever mode partition holds it."""
+    if pages_repo is not None:
+        return pages_repo.find_by_id(page_id)
+    for mode in ("live", "test"):
+        found = pages_repository(mode=mode).find_by_id(page_id)
+        if found:
+            return found
+    return None
 
 
 def _source_ip(event):

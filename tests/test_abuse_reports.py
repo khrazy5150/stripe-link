@@ -112,6 +112,32 @@ class AbuseSurfaceTests(unittest.TestCase):
         self.assertNotIn("DynamoDBCrudPolicy:\n            TableName: !Ref PagesTable", block)
 
 
+class PageResolutionTests(unittest.TestCase):
+    """The endpoint accepted everything and recorded NOTHING, silently, for its first hour on dev.
+
+    Pages are stored per Stripe mode and `find_by_id` keys on a mode-scoped GSI1PK, so an UNSCOPED
+    repository matches neither partition. Every lookup missed; an unresolvable page is deliberately answered
+    exactly like a real one (anti-enumeration), so a 200 came back every time and the table stayed empty.
+
+    Found by scanning the table after a live POST rather than trusting the 200 -- the anti-enumeration
+    design is precisely what makes "it returned success" worthless as evidence here.
+    """
+
+    def test_it_looks_in_both_mode_partitions(self):
+        import inspect
+
+        from handlers import abuse_reports
+
+        source = inspect.getsource(abuse_reports._find_page)
+        self.assertIn('for mode in ("live", "test")', source)
+
+    def test_the_tenant_still_comes_from_the_page_that_was_found(self):
+        # Trying both partitions must not become a way to influence WHOSE report this is.
+        repo = FakeRepo()
+        _post({"page_id": "page_1", "reason": "spam", "tenant_id": "attacker"}, repo=repo)
+        self.assertEqual(repo.written[0]["tenant_id"], "t1")
+
+
 class FooterLinkTests(unittest.TestCase):
     def setUp(self):
         from stripe_link.runtime import html as html_module
