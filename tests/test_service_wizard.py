@@ -54,6 +54,21 @@ class OneWizardTwoDoorsTests(unittest.TestCase):
             self.assertIn(field, body, field)
         self.assertIn('seed: { type: Object', WIZARD)
 
+    def test_the_service_modal_stacks_ABOVE_the_product_one(self):
+        """Reported as "when I click Continue nothing happens".
+
+        The product wizard stays open behind the hand-off so Cancel returns the tenant to where they were --
+        and two `position: fixed` backdrops at the same z-index stack in DOM ORDER. Declared before the
+        product modal, the service wizard opened underneath it: present, mounted, invisible.
+        """
+        template = _template(PRODUCTS)
+        backdrops = [i for i, line in enumerate(template.splitlines()) if "modal-backdrop" in line]
+        service = next(i for i, line in enumerate(template.splitlines()) if 'v-if="serviceWizardOpen"' in line)
+        create = next(i for i, line in enumerate(template.splitlines()) if 'v-if="showCreateModal"' in line)
+        self.assertGreater(service, create,
+                           "the service wizard must be declared after the product wizard or it opens behind it")
+        self.assertEqual(max(backdrops), service, "it must be the last backdrop in the template")
+
     def test_the_hand_off_button_is_gone(self):
         self.assertNotIn("Create a service instead", PRODUCTS)
         self.assertNotIn("Service — opens booking flow", PRODUCTS)

@@ -94,17 +94,6 @@
       </div>
     </section>
 
-    <div v-if="serviceWizardOpen" class="modal-backdrop" @click.self="serviceWizardOpen = false">
-      <section class="modal-card" role="dialog" aria-modal="true" aria-labelledby="serviceFromProductTitle">
-        <header class="modal-card-header">
-          <h2 id="serviceFromProductTitle">Create a service</h2>
-          <button type="button" class="modal-close" aria-label="Close" @click="serviceWizardOpen = false">×</button>
-        </header>
-        <ServiceWizard :seed="serviceSeed" @created="onServiceCreatedFromProducts"
-                       @cancel="serviceWizardOpen = false" />
-      </section>
-    </div>
-
     <div v-if="selectedProduct" class="modal-backdrop" @click.self="selectedProduct = null">
       <section class="modal-card product-details-modal" role="dialog" aria-modal="true" aria-labelledby="productDetailsTitle">
         <header class="modal-card-header">
@@ -532,6 +521,20 @@
       </section>
     </div>
   </section>
+    <!-- Declared LAST on purpose. The product wizard stays open behind this so Cancel returns the tenant
+         to where they were, and two fixed backdrops at the same z-index stack in DOM order -- declared
+         earlier, this opened underneath it and read as "Continue does nothing". -->
+    <div v-if="serviceWizardOpen" class="modal-backdrop" @click.self="serviceWizardOpen = false">
+      <section class="modal-card" role="dialog" aria-modal="true" aria-labelledby="serviceFromProductTitle">
+        <header class="modal-card-header">
+          <h2 id="serviceFromProductTitle">Create a service</h2>
+          <button type="button" class="modal-close" aria-label="Close" @click="serviceWizardOpen = false">×</button>
+        </header>
+        <ServiceWizard :seed="serviceSeed" @created="onServiceCreatedFromProducts"
+                       @cancel="serviceWizardOpen = false" />
+      </section>
+    </div>
+
 </template>
 
 <script setup>
