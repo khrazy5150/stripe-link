@@ -196,6 +196,29 @@ class DeclaredWhereReadTests(unittest.TestCase):
                         missing.append(f"{f.relative_to(DASH)} imports '{name}' from {mod}")
         self.assertEqual(missing, [])
 
+    def test_every_store_and_component_used_is_actually_imported(self):
+        """The gap that shipped a blank Products page.
+
+        The previous test checked that imports RESOLVE. It could not catch a name that is used and never
+        imported at all -- `useServicesStore()` was called in Products.vue with no import line, which builds
+        clean and throws `ReferenceError` the moment the component mounts.
+
+        Scoped to the two shapes that are always either imported or broken: pinia stores (`useXStore()`) and
+        PascalCase components in the template. Both fail at runtime, never at build time.
+        """
+        problems = []
+        for f in sorted(DASH.rglob("*.vue")):
+            src = f.read_text(encoding="utf-8")
+            template, setup = _template(src), _setup(src)
+            used = set(re.findall(r"\b(use[A-Z][A-Za-z0-9_]*)\s*\(", setup))
+            used |= {n for n in re.findall(r"<([A-Z][A-Za-z0-9_]*)[\s/>]", template)}
+            for name in sorted(used):
+                declared = re.search(r"\b(?:const|let|function|async function|class)\s+" + name + r"\b", setup)
+                imported = re.search(r"import\s+(?:\{[^}]*\b" + name + r"\b[^}]*\}|" + name + r")\s+from", src)
+                if not declared and not imported:
+                    problems.append(f"{f.relative_to(DASH)}: '{name}' used but never imported")
+        self.assertEqual(problems, [])
+
     def test_the_wizards_own_names_exist(self):
         template, setup = _template(WIZARD), _setup(WIZARD)
         for name in ("stepKey", "stepLabels", "displayStep", "onLastStep", "skippable", "goToStep",

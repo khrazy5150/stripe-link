@@ -538,6 +538,7 @@
 import { computed, h, inject, nextTick, ref, watch } from "vue";
 import { apiRequest, toAssetCdnUrl } from "../api/client";
 import { defaultProductPrice, formatMoney, generateSku, normalizeTag, priceSummary, useProductsStore } from "../stores/products";
+import { useServicesStore } from "../stores/services";
 // The lead-action glyph is shared with the Offers selector, so the same product looks the same on both.
 import { leadActionIcon as leadIcon } from "../utils/leadActionIcon";
 import PhoneInput from "./PhoneInput.vue";
