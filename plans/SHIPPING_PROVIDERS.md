@@ -150,15 +150,18 @@ from different places would need several parcels by definition; defer until a pr
 None of the four has a separate sandbox host — all four use production URLs, and test mode is a property
 of the key or the request.
 
-**Shipped as a gate, not a promise** (`domain/shipping.py`): `GA_PROVIDERS` is the only list a tenant can
-choose from, `mock` is added off-prod so the whole flow can be walked with no account and no spend, and
-the dashboard builds its menu from what the API reports rather than a hardcoded list. Availability lives
-in CODE, not platform config, on purpose: "available" means "the adapter exists and has been exercised",
-and a config flag could switch on a provider whose adapter has never run — the exact failure this
-prevents, wearing the costume of a feature toggle.
+**The dropdown lists only what can be exercised** (`Shipping.vue`): Shippo, plus `mock` so the whole flow
+can be walked with no provider account and no spend. The withdrawn options stay in the file as
+commented-out lines with the reason attached — deleting them would lose why, and the next person would
+restore them without knowing they had never been exercised.
+
+Deliberately **UI only**. The schema still accepts every name, so nothing already stored is stranded and
+restoring a provider when its turn comes is one template edit.
 
 ShipStation and Easyship stay off until someone holds a working key. Building them behind a mock would
-produce code that looks finished and has never been true — twice this codebase's cost already.
+produce code that looks finished and has never been true — twice this codebase's cost in a single day (the
+four-decimal `application_fee_percent`, the Decimal-vs-int validator): every layer green against fakes,
+and the real API refusing the result.
 
 ### PE — estimated shipping at pricing time ("Calculate Price")
 
