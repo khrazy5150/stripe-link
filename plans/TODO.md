@@ -4,6 +4,38 @@ Deferred, non-blocking follow-ups. Each item notes what, why it was deferred, an
 
 ## Services / Booking
 
+### Tomorrow (2026-09-21): first booking ever made in stripe-link, + the plan link
+- **Status:** planned in full, **tabled until 2026-09-21**. Design: **`plans/BOOKING_WITH_STAFF_AND_PLAN_LINK.md`**.
+- **The fact that shaped it:** dev AND prod both hold zero fulfillers, zero appointments, zero availability
+  and zero calendar connections. **No booking has ever been made in stripe-link on either environment** —
+  the working booking remembered from before was stripe-cart. Part A is a first run, not a regression check.
+- **Part A — first booking with staff (QA walk, no new code).** Create a fulfiller + availability, buy the
+  ONE-TIME service (not the plan; see Part B), book it. Try it BEFORE connecting Google Calendar: "does
+  booking survive a tenant who never connected a calendar" is a real tenant state, cheapest to answer now.
+- **Part B — the customer's plan link (build).** A recurring service grants credits and NO appointment, and
+  spending one needs an `entitlement_id` that nothing ever hands the customer — `grep entitlement
+  runtime/html.py` is empty, so the booking widget cannot send one. They paid, they hold credits, and the
+  page offers no way to use them. It is also why the plan → booking → staff path cannot be tested by
+  anyone, us included. Copy `handlers/tip_manage.py` (opaque token minted in the webhook, emailed, no buyer
+  account) rather than inventing a second mechanism.
+- **Four decisions needed before Part B is built** (listed in the plan §B5): token on the entitlement vs a
+  separate doc; whether the link also cancels the plan; refill email every cycle or only on change (a
+  daily-interval plan would otherwise email daily); what the page shows once credits run out.
+- **Also pending tomorrow:** the day-two renewal on dev — the **refill path has still never executed
+  anywhere**, prod included. It fires only on a second `invoice.paid`. Watch the product subscription renew
+  at the 5.01% application fee, and `jb-booking-credits-dev` RESET rather than accumulate (no rollover).
+
+### Booking credits and staff routing have never met
+- **What:** `test_booking_credits.py` mentions a fulfiller **zero times**; the spend tests call
+  `_spend_plan_credit` directly with a fake repo and never go through `reserve_route`, which is where
+  fulfiller resolution, availability and calendar delegation actually happen. `test_delegation.py` (31
+  fulfiller references), `test_scheduling.py` and `test_booking.py` cover staff routing — separately.
+- **Why it matters:** both halves are well covered and their COMBINATION is not, which is the same shape as
+  the subscription bug found 2026-09-20 (every layer tested with fakes, and Stripe rejected the result).
+- **Where to fix:** a test that reserves through `reserve_route` with both a plan credit and a fulfiller.
+  Blocked on Part B only for the end-to-end version; the unit-level one can be written now.
+
+
 ### Decouple Booking from Service (Booking = its own primitive)
 - **What:** `Appointment` is 1:1 with a service today. Make a **Booking** its own primitive — a scheduled
   visit covering **one or more** service line items — and let a Service declare `fulfillment_mode`
