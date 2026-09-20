@@ -28,6 +28,12 @@ Deferred, non-blocking follow-ups. Each item notes what, why it was deferred, an
   needs zone sampling because there is no destination at pricing time -- an estimate is a distribution, not
   a number. Treated as a HYPOTHESIS: record estimate vs actual from the first label onward (it cannot be
   backfilled) and expect to replace the strategy after measuring.
+- **Two tenants, opposite needs.** The beginner has no carrier account and today drives to the post
+  office -- a plain buy-and-print-a-label screen is transformative for them, and it does not matter that it
+  is less capable than ShipStation because they were never going to use ShipStation. The experienced
+  merchant already runs ShipStation daily and wants their orders to arrive in the tooling they have.
+  Beginner first (they arrive first); integration is the LAST phase (PI), because it serves the later
+  tenant, depends on the providers we cannot test for free, and reuses everything the beginner path builds.
 - **Bundles are a packing problem, not a shipping one.** Weight is additive, dimensions are not. Decided:
   volume-fit into a box catalog, falling back to one parcel per item. The packer is shared by label buying
   and estimation, so it is built once in P1.

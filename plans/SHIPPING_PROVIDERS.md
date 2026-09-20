@@ -59,6 +59,29 @@ and cheap to re-read.
 
 Treat it as behavioural reference, exactly as CLAUDE.md prescribes: functional equivalence, not structural.
 
+## Who this serves — two tenants, opposite needs
+
+The build-vs-integrate question has different answers depending on who is asking, and getting this wrong
+means building the right thing for the wrong person.
+
+**The beginner.** Sells a few physical things. Has no carrier account, no label printer workflow, no idea
+what a zone is. Today their shipping process is *driving to the post office*. For them, a plain
+buy-a-label-and-print-it screen is transformative — and it does not matter at all that it is less capable
+than ShipStation, because they were never going to use ShipStation. **This is the platform's core tenant**,
+and they are served by us building it.
+
+**The experienced merchant.** Already runs ShipStation or Shippo daily, with carrier accounts, negotiated
+rates, batch printing and scan forms. They do not want our label screen and will not switch to it. What is
+valuable to them is that their orders from us arrive in the tooling they already have. **They are served by
+us integrating, not building.**
+
+Both are real, and the phases below serve the beginner first because that is who arrives first. Integration
+is the last phase, not the first — see PI.
+
+The two paths share almost everything: destination address, shipment document, provider auth, the packer,
+rates. They diverge only at the last mile — we buy the label, or we hand the order over. So building the
+beginner's path first costs the integration path nothing.
+
 ## The fork to settle before any code
 
 **Where does the shipping COST live?** Three answers, and they are not compatible:
@@ -123,7 +146,7 @@ a box is not weightless and the carrier bills the whole parcel.
 writes `ship_from: null` unconditionally, so no product has ever carried one. A bundle whose items ship
 from different places would need several parcels by definition; defer until a product can express it.
 
-### P2 — rates and label purchase from an order
+### P2 — rates and label purchase from an order (the beginner's whole reason to be here)
 
 - `POST /shipping/rates` (order → parcel → rates) and `POST /shipping/labels` (rate → transaction).
 - Parcel resolution comes from `pack()` in P1 — never re-derived here.
@@ -235,6 +258,30 @@ What makes that survivable:
   real postcodes can be run repeatedly without spending anything.
 
 No part of this should be treated as settled until that comparison has data in it.
+
+### PI — integrating with the shipping stack a tenant already has (last)
+
+For the experienced merchant, who has carrier accounts and a daily workflow and is not going to abandon
+either. The goal is not to give them our tools; it is to make their orders show up in theirs.
+
+Last, deliberately: it serves the tenant who arrives later, it depends on the providers we cannot test for
+free (an experienced merchant is most likely on ShipStation), and it reuses the address, shipment document
+and adapter built in P0-P2. Nothing about doing it last makes it more expensive.
+
+Three shapes, cheapest first:
+
+1. **A generic order webhook / export.** Provider-agnostic, testable for free, and serves any external
+   tool — not only shipping. The cheapest integration that exists and probably the first to build. A
+   merchant with an existing stack can usually wire an order feed themselves.
+2. **Pull — the tenant configures us as a store in their tool.** ShipStation's *Custom Store* is an
+   endpoint spec: they point it at a URL we expose, it polls for orders and posts shipment/tracking back.
+   Often less work for us than pushing, and it is the canonical path for that product.
+3. **Push — we create the order in their provider account.** Most control, most provider-specific code,
+   and it needs the tracking number to come back to us afterwards or our order status goes stale.
+
+Whichever shape, **tracking has to return**. If labels are bought in the tenant's own tool, our dashboard
+and our order emails know nothing until the provider tells us — webhook or poll. That is real work in every
+variant and must not be assumed free.
 
 ### Later — return labels and refunds
 
