@@ -1130,6 +1130,20 @@ def legal_pages_repository(table: Any | None = None) -> DynamoDocumentRepository
     )
 
 
+def abuse_reports_repository(table: Any | None = None) -> DynamoDocumentRepository:
+    """Visitor reports about a platform-hosted page (plans/CREATOR_LINK_POLICY.md §6).
+
+    Its own table, like every other entity here. Reports are written by ANONYMOUS traffic and read by us, so
+    mixing them into a tenant-owned table would put untrusted writes next to the tenant's own records.
+    """
+    return DynamoDocumentRepository(
+        os.environ.get("ABUSE_REPORTS_TABLE", ""),
+        document_type="abuse_report",
+        id_field="report_id",
+        table=table,
+    )
+
+
 def custom_domains_index_repository(table: Any | None = None) -> DynamoDocumentRepository:
     """Denormalized domain -> tenant/page lookup index, kept in sync with TenantConfig.custom_domains.
 

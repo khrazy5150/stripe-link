@@ -1654,7 +1654,10 @@ def trim_meta(text: str, limit: int = 155) -> str:
 # robots directive, needed by the head (canonical, og:url, robots) AND the Product JSON-LD (offers.url,
 # seller) AND the checkout CTA (real success/cancel URLs). Threaded via a render-scoped holder — like
 # _RENDER_DIMS_INDEX — so head-channel elements don't each need it in their signature.
-_RENDER_STATE: dict[str, str] = {"canonical": "", "robots": "noindex,nofollow", "home_url": "", "page_type": ""}
+# `report_page_id` is set ONLY for a link hub on a platform host -- the page shape the abuse policy is about.
+# Empty everywhere else, which is what keeps the Report link off a tenant's own storefront.
+_RENDER_STATE: dict[str, str] = {"canonical": "", "robots": "noindex,nofollow", "home_url": "", "page_type": "",
+                                 "report_page_id": ""}
 # The Site's Organization identity for this render (plans/SITE_OBJECT.md §2.2) — the single source every
 # page's entity graph derives from: the Organization/WebSite JSON-LD nodes, the Offer.seller reference, and
 # the brand shown in the title suffix / og:site_name when the offer names no brand. Render-scoped like
@@ -1870,6 +1873,15 @@ def render_page(
     )
     _RENDER_STATE["breadcrumb"] = shows_breadcrumb(offer or {}, page)
     _RENDER_STATE["page_type"] = str(page_type or "")
+    # A LINK HUB on a domain WE own gets a "Report this page" link (plans/CREATOR_LINK_POLICY.md §6). Both
+    # halves matter: a hub is the tenant-authored, outbound-link page the policy exists for, and a shared
+    # apex is what makes one bad actor everyone's problem. On the tenant's own verified domain it is their
+    # page on their reputation, and a Report link of ours would be interference.
+    _RENDER_STATE["report_page_id"] = (
+        str(page.get("page_id") or "")
+        if composition_key(offer or {}) == "lead_social" and not _RENDER_STATE["own_domain"]
+        else ""
+    )
     # SEO opt-out (Site-level "discover in search" switch): when off, the storefront chrome renders in its plain
     # no-SEO form (breadcrumb hidden, brand centered) via a body marker CSS keys off. Robots noindex is applied
     # separately at publish. Default on, so nothing changes for a Site that hasn't toggled it.
@@ -6648,12 +6660,30 @@ def _legal_href(stored_url: Any, page_id: str, api_base_url: str) -> str:
     return f"{base}/legal/{page_id}{suffix}"
 
 
+def report_link(api_base_url: str = "") -> str:
+    """"Report this page", for pages WE host on a shared domain (plans/CREATOR_LINK_POLICY.md §6).
+
+    link.me carries one beside Privacy and Terms, and it is the half of the abuse story that answers for what
+    gets through the allowlist. Shown only on a LINK HUB: those are the tenant-authored, outbound-link pages
+    that share an apex with every other creator, so one bad actor's page is everyone's problem. A tenant's own
+    storefront on their own domain is their business, and a Report link there would be ours interfering.
+    """
+    base = str(api_base_url or "").rstrip("/")
+    page_id = str(_RENDER_STATE.get("report_page_id") or "")
+    if not base or not page_id:
+        return ""
+    return (f"      <a class=\"sl-legal-report\" href=\"{escape(base)}/report?page={escape(page_id)}\""
+            f" rel=\"nofollow noopener\">Report this page</a>")
+
+
 def render_legal_footer(legal: dict[str, Any], section: dict[str, Any] | None = None, api_base_url: str = "") -> str:
     rendered_links = [
         f"      <a href=\"{escape(href)}\" target=\"_blank\" rel=\"noopener\">{label}</a>"
         for page_id, label, field in LEGAL_FOOTER_LINKS
         if (href := _legal_href(legal.get(field), page_id, api_base_url))
     ]
+    if (reporting := report_link(api_base_url)):
+        rendered_links.append(reporting)
     copyright_text = (section or {}).get("copyright")
     if not rendered_links and not copyright_text:
         return ""

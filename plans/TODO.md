@@ -832,9 +832,12 @@ it; the apex is `X-Robots-Tag: noindex`. Sequence recorded in plans/CREATOR_DOMA
 
 **STILL OPEN, and it is the one that matters:**
 
-1. ⭐ **plans/CREATOR_LINK_POLICY.md has not shipped.** It was named the admission ticket for this domain and
-   the domain went live without it. No third-party exposure yet — the only hub on it is ours — but that ends
-   with the first tenant who publishes one. Allowlist, host-derived adult warning, takedown path.
+1. ⭐ **plans/CREATOR_LINK_POLICY.md — code complete 2026-09-20, ops half outstanding.** Allowlist and adult
+   interstitial shipped 2026-09-11; reporting (`POST /report`, footer link, throttle) and the §7 staleness
+   test shipped 2026-09-20; fast suspension was already true via Site archive. **Still needed before the
+   domain carries third-party traffic: a monitored abuse address, a named owner, and a written target
+   response time.** An endpoint recording reports nobody reads is worse than none — it implies a process
+   that does not exist.
 2. Public Suffix List submission — slow, start early.
 3. Dev serving (`test.jbay.page`) has no DNS or route; dev stays dark until someone needs it.
 

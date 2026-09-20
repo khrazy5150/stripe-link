@@ -240,16 +240,38 @@ earned. Ordinary links count on `pointerdown`; an adult link counts from its Con
 **Still to do from this section:** §6 reporting/takedown, and §4's creator allowlist — which is now the
 visible gap, since a flagged Snapchat/OnlyFans/Fansly link renders as an inert tile on a free platform host.
 
-## 6. Reporting and takedown
+## 6. Reporting and takedown  ✅ CODE BUILT 2026-09-20 (the ops half is not)
 
 **The substantive half of the abuse story, and the part with no UI today.** link.me carries a `Report` link in
 its page footer beside Privacy Policy and Terms.
 
-- A `Report` link in the footer of every platform-hosted creator page.
-- A report endpoint (public, unauthenticated, rate-limited — the same abuse-story requirement the click-ingest
-  endpoint has, `SOCIAL_MEDIA_PAGES.md` §11).
-- A real abuse address, monitored, and a written takedown process with a target response time.
-- The ability to unpublish a page and suspend a username fast, without a deploy.
+| Requirement | State |
+|---|---|
+| A `Report` link in the footer of every platform-hosted creator page | ✅ `report_link()`, on a **link hub not on the tenant's own verified domain** |
+| A report endpoint, public, unauthenticated, rate-limited | ✅ `POST /report` — honeypot + payload caps, API-Gateway throttle 2/s burst 5 |
+| A real abuse address, monitored, and a written takedown process with a target response time | ❌ **ops, not code — still outstanding** |
+| The ability to unpublish a page and suspend a username fast, without a deploy | ✅ already true: `PATCH /sites/{id}/status` → `archived` |
+
+Notes on the three that are done:
+
+- **Scoped to link hubs**, not to every platform-hosted page. A hub is the tenant-authored, outbound-link
+  page this policy exists for, and a shared apex is what makes one bad actor everyone's problem. On a
+  tenant's own verified domain it is their page on their reputation, and a Report link of ours is
+  interference.
+- **The endpoint is itself an abuse surface**, being public by necessity, so it is guarded the way
+  `POST /leads` is: a honeypot answered *normally* (telling a bot it was caught teaches the bot), hard
+  payload caps, and the reported page resolved SERVER-SIDE — a reporter who could name the tenant could file
+  against anyone. An unknown page id is answered identically to a known one, so the endpoint cannot be used
+  to enumerate pages.
+- **Throttled at the API, not in the handler.** Handler-side limiting still pays for the invocation it
+  rejects.
+- **Suspension already worked** via the 2026-09-18 sunset change: archiving a Site sets every one of its
+  index rows — platform host AND `jbay.page/{username}` — to `archived`, and the username stays reserved so
+  nobody can claim it. One PATCH, no deploy.
+
+**The outstanding row is the one a registrar actually asks about.** An endpoint that records reports nobody
+reads is worse than none: it implies a process that does not exist. Needed before this domain carries
+third-party traffic: a monitored address, a named owner, and a written target response time.
 
 A registrar does not ask whether you have an interstitial. It asks what you do when someone abuses the domain.
 
@@ -259,10 +281,13 @@ X's policy **changed** — it did not always permit this. A host table that enco
 wrong, which is the drift shape that has caught this codebase repeatedly (`same_as[].verified` read but never
 written; two index projections missing a field; `PLATFORM_LINKABLE_HOSTS` itself).
 
-- Stamp the table with a `reviewed` date.
+- Stamp the table with a `reviewed` date. ✅ `ADULT_HOSTS_REVIEWED`, `PLATFORM_LINKABLE_REVIEWED`
 - A test that FAILS when that date is older than a year. Surfacing beats remembering.
+  ✅ `tests/test_host_table_staleness.py` (2026-09-20) — and it says, in the failure message, to re-verify the
+  claims rather than bump the date, because bumping it without reading the reasons turns the test into a
+  reminder to lie.
 - Every host entry carries its reason in the table, so a reviewer can re-check the claim rather than re-derive
-  the decision.
+  the decision. ✅ asserted by the same file.
 
 ## 8. Order
 
@@ -271,6 +296,10 @@ written; two index projections missing a field; `PLATFORM_LINKABLE_HOSTS` itself
 2. **The adult warn-list + interstitial.** Ships with OnlyFans/Fansly added to the allowlist in the same change,
    because the warning is what makes their inclusion defensible.
 3. **Report + takedown.** Before `jbay.page` serves anything, not after.
+   — **This did not happen in that order.** `jbay.page` went live 2026-09-19; the reporting code shipped
+   2026-09-20, and the ops half (§6, monitored address + written process) is still outstanding. The domain
+   carries only our own hub today, so there is no third-party exposure yet — but the sequencing this plan
+   specified was not followed, and that is worth remembering the next time a launch looks ready.
 4. **`jbay.page` launch** — routing, username claiming, the reserved path wordlist, PSL registration, and the
    `tenant_id`-namespaced localStorage keys (`SOCIAL_MEDIA_PAGES.md` §6/§7). Its own plan; this one is its
    admission ticket. **It also has to carry §4a**: the link boundary grows a third tier there, which means an

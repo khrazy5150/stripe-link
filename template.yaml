@@ -275,6 +275,7 @@ Globals:
         MEDIA_TABLE: !Ref MediaTable
         THEMES_TABLE: !Ref ThemesTable
         LEGAL_PAGES_TABLE: !Ref LegalPagesTable
+        ABUSE_REPORTS_TABLE: !Ref AbuseReportsTable
         PRODUCT_CATEGORIES_TABLE: !Ref ProductCategoriesTable
         CUSTOM_DOMAINS_TABLE: !Ref CustomDomainsTable
         CALENDAR_CONNECTIONS_TABLE: !Ref CalendarConnectionsTable
@@ -358,6 +359,15 @@ Resources:
         AllowMethods: "'OPTIONS,GET,POST,PUT,PATCH,DELETE'"
         AllowHeaders: "'Content-Type,Authorization,X-Tenant-Id,X-Client-Id,X-Environment,X-Stripe-Mode'"
         AllowOrigin: "'*'"
+      MethodSettings:
+        # plans/CREATOR_LINK_POLICY.md §6 asks the report endpoint to be rate-limited. Doing it at the API
+        # rather than in the handler means a flood is refused before it reaches a Lambda or the table --
+        # handler-side limiting still pays for the invocation it rejects. A genuine reporter files one
+        # report; these numbers are generous for a person and useless for a script.
+        - ResourcePath: /report
+          HttpMethod: POST
+          ThrottlingRateLimit: 2
+          ThrottlingBurstLimit: 5
 
   ApiCustomDomain:
     Type: AWS::ApiGateway::DomainName
@@ -1523,6 +1533,37 @@ Resources:
           Properties:
             RestApiId: !Ref RestApi
             Path: /t/view
+            Method: GET
+
+  # plans/CREATOR_LINK_POLICY.md §6. Public and unauthenticated by necessity -- the person best placed to
+  # report a page is a stranger who landed on it -- which makes it an abuse surface itself. Guarded by a
+  # honeypot and payload caps in domain/abuse_reports.py, and by the API's own throttle below.
+  AbuseReportsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${ProjectPrefix}-abuse-reports-${Environment}"
+      CodeUri: src/
+      Handler: handlers.abuse_reports.handler
+      Description: Public abuse reports for platform-hosted pages.
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref AbuseReportsTable
+        # Read-only on Pages: the handler resolves the reported page to learn whose it is, and must never
+        # be able to change it.
+        - DynamoDBReadPolicy:
+            TableName: !Ref PagesTable
+      Events:
+        SubmitReport:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /report
+            Method: POST
+        ReportReasons:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /report
             Method: GET
 
   PagesFunction:
@@ -4377,6 +4418,19 @@ Resources:
     Type: AWS::DynamoDB::Table
     Properties:
       TableName: !Sub "${ProjectPrefix}-legal-pages-${Environment}"
+      BillingMode: PAY_PER_REQUEST
+      SSESpecification:
+        SSEEnabled: true
+      AttributeDefinitions: *DocumentAttributeDefinitions
+      KeySchema: *DocumentKeySchema
+      GlobalSecondaryIndexes: *DocumentGlobalSecondaryIndexes
+
+  # Visitor abuse reports about platform-hosted pages (plans/CREATOR_LINK_POLICY.md §6). Written by
+  # ANONYMOUS traffic, so it is its own table rather than sharing one with tenant-owned records.
+  AbuseReportsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "${ProjectPrefix}-abuse-reports-${Environment}"
       BillingMode: PAY_PER_REQUEST
       SSESpecification:
         SSEEnabled: true
