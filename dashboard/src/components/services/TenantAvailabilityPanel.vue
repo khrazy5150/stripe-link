@@ -1,13 +1,13 @@
 <template>
-  <section class="dashboard-card">
-    <header class="dashboard-card-header">
+  <section :class="embedded ? 'wizard-embedded-panel' : 'dashboard-card'">
+    <header v-if="!embedded" class="dashboard-card-header">
       <div>
         <h2>Tenant Availability</h2>
         <p>Default bookable hours, slot interval, and buffers.</p>
       </div>
     </header>
 
-    <div class="dashboard-card-body">
+    <div :class="embedded ? '' : 'dashboard-card-body'">
       <div v-if="store.error" class="keys-status-banner error">{{ store.error }}</div>
       <div v-else-if="store.message" class="keys-status-banner">{{ store.message }}</div>
 
@@ -41,6 +41,11 @@
 
 <script setup>
 import { computed, onMounted, ref, watch } from "vue";
+
+// Rendered inside the create wizard, which supplies its own step heading and chrome. A prop rather than the
+// wizard reaching in with :deep() -- that would break silently the next time this panel's markup moved, and
+// a shared component should say what it supports rather than have it discovered.
+const props = defineProps({ embedded: { type: Boolean, default: false } });
 import WeeklyHours from "./WeeklyHours.vue";
 import { defaultWeeklyHours } from "../../utils/weeklyHours";
 import { timeZoneOptions } from "../../utils/timezones";

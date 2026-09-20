@@ -121,9 +121,34 @@ export function formatMoney(cents, currency = "usd") {
   }).format(Number(cents || 0) / 100);
 }
 
+// A Service wearing the shape the product list already knows how to draw. Same idea as Offers.vue's
+// serviceSelectorCard(): adapt once, and every helper -- search fields, status, the type filter, the row
+// template -- works unchanged instead of growing a parallel branch for services.
+//
+// `__service` is what the row is FOR: the list uses it to badge the row and to send Edit to the Services
+// console rather than the product editor.
+export function serviceListRow(service) {
+  return {
+    __service: true,
+    product_id: service.service_id,
+    service_id: service.service_id,
+    name: service.name || "Untitled Service",
+    description: service.description || "",
+    product_type: "service",
+    product_category: service.product_category || "",
+    status: service.active === false ? "archived" : "active",
+    images: service.hero_image_url ? [service.hero_image_url] : [],
+    prices: Array.isArray(service.prices) ? service.prices : [],
+    default_price_id: service.default_price_id || "",
+    created_at: service.created_at || null,
+    updated_at: service.updated_at || null,
+  };
+}
+
 export const useProductsStore = defineStore("products", {
   state: () => ({
     products: [],
+    services: [],
     loading: false,
     loaded: false,
     savingStatus: false,
@@ -140,13 +165,22 @@ export const useProductsStore = defineStore("products", {
     filteredProducts(state) {
       // Status + type + search through the shared machinery (composables/indexedList.js). Only the FIELD
       // LIST and the type predicate are product-specific.
-      return filterRows(state.products, {
+      //
+      // SERVICES ARE IN THIS LIST. A tenant creates one on the Products screen (the wizard's "Service" type),
+      // so it has to be findable there afterwards -- otherwise the fix to creation just moves the
+      // discontinuity to the day after. The list's own "Service" type filter has existed all along and
+      // matched nothing, because no product is ever stored with product_type "service".
+      //
+      // Adapted, not merged raw: `serviceListRow` gives each one the product shape every helper already
+      // expects, the same trick Offers.vue uses to put both in one selector.
+      const rows = [...state.products, ...(state.services || []).map(serviceListRow)];
+      return filterRows(rows, {
         term: state.filters.search,
         fields: PRODUCT_SEARCH_FIELDS,
         statusOf: productLifecycleStatus,
         status: state.filters.status,
         where: state.filters.productType
-          ? (product) => product.product_type === state.filters.productType
+          ? (row) => row.product_type === state.filters.productType
           : null,
       });
     },
@@ -157,8 +191,15 @@ export const useProductsStore = defineStore("products", {
   },
 
   actions: {
+    // Services shown alongside products in the list. Held here rather than reached for through the services
+    // store so `filteredProducts` stays a pure getter over state.
+    setServices(services) {
+      this.services = Array.isArray(services) ? services : [];
+    },
+
     reset() {
       this.products = [];
+      this.services = [];
       this.loading = false;
       this.loaded = false;
       this.savingStatus = false;

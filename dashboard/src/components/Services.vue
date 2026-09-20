@@ -90,42 +90,41 @@
     <CalendarPanel />
     <AppointmentsPanel />
 
+    <div v-if="wizardOpen" class="modal-backdrop" @click.self="wizardOpen = false">
+      <section class="modal-card" role="dialog" aria-modal="true" aria-labelledby="serviceWizardTitle">
+        <header class="modal-card-header">
+          <h2 id="serviceWizardTitle">Create a service</h2>
+          <button type="button" class="modal-close" aria-label="Close" @click="wizardOpen = false">×</button>
+        </header>
+        <ServiceWizard @created="onServiceCreated" @cancel="wizardOpen = false" />
+      </section>
+    </div>
+
     <div v-if="showServiceModal" class="modal-backdrop" @click.self="closeServiceModal">
       <section class="modal-card" role="dialog" aria-modal="true" aria-labelledby="serviceModalTitle">
         <header class="modal-card-header">
-          <h2 id="serviceModalTitle">{{ editingService ? "Edit Service" : "Create a service" }}</h2>
+          <h2 id="serviceModalTitle">{{ editingService ? "Edit Service" : "Create Service" }}</h2>
           <button type="button" class="modal-close" aria-label="Close service modal" @click="closeServiceModal">×</button>
         </header>
 
-        <WizardSteps v-if="wizardMode" :steps="wizardLabels" :current="wizardStep" />
-
-        <form class="coupon-form" @submit.prevent="onServiceFormSubmit">
+        <form class="coupon-form" @submit.prevent="saveService">
           <div v-if="formError" class="keys-status-banner error">{{ formError }}</div>
 
-          <section v-if="showsBlock('details')" class="offer-form-section">
-            <header v-if="wizardMode" class="offer-section-header">
-              <div>
-                <h3>What do you offer?</h3>
-                <p>Name it the way a customer would ask for it.</p>
-              </div>
-            </header>
+          <section class="offer-form-section">
             <div class="offer-two-column">
               <label class="offer-field">
                 <span>Service Name <strong>*</strong></span>
                 <input :value="form.name" type="text" placeholder="60-Minute Consultation" required
                        @input="applyTitleCaseInput((value) => { form.name = value; }, $event)" />
               </label>
-              <!-- Where it happens is a real question, but not the FIRST one: it has a working default and a
-                   tenant creating their first service is thinking about what they sell, not logistics. -->
-              <label v-if="!wizardMode" class="offer-field">
+              <label class="offer-field">
                 <span>Location Mode</span>
                 <select v-model="form.location_mode">
                   <option v-for="mode in LOCATION_MODES" :key="mode" :value="mode">{{ locationLabel(mode) }}</option>
                 </select>
               </label>
             </div>
-            <!-- Asked as "does this need an appointment?" on the Scheduling step instead, where it belongs. -->
-            <label v-if="!wizardMode" class="offer-field">
+            <label class="offer-field">
               <span>Fulfillment</span>
               <select v-model="form.fulfillment_mode">
                 <option value="scheduled">Scheduled — customer books a time</option>
@@ -141,19 +140,14 @@
             </label>
           </section>
 
-          <section v-if="showsBlock('pricing') || showsBlock('scheduling')" class="offer-form-section">
+          <section class="offer-form-section">
             <header class="offer-section-header">
               <div>
-                <h3 v-if="!wizardMode">Pricing &amp; Duration</h3>
-                <h3 v-else-if="wizardStepKey === 'pricing'">What does it cost?</h3>
-                <h3 v-else>How is it scheduled?</h3>
-                <p v-if="!wizardMode">The price a customer pays and how long the service takes.</p>
-                <p v-else-if="wizardStepKey === 'pricing'">What a customer pays to book it.</p>
-                <p v-else>Most services take an appointment. You can change any of this later.</p>
+                <h3>Pricing &amp; Duration</h3>
+                <p>The price a customer pays and how long the service takes.</p>
               </div>
             </header>
             <PricingCard
-              v-if="showsBlock('pricing')"
               :prices="form.prices"
               v-model:default-index="form.default_price_index"
               product-type="service"
@@ -162,25 +156,12 @@
               :contexts="SERVICE_PRICE_CONTEXTS"
               :pricing-models="SERVICE_PRICING_MODELS"
             />
-            <!-- The wizard asks the schema's `fulfillment_mode` as the question a tenant actually has. Both
-                 answers are one click, and the default is the common one. -->
-            <label v-if="showsBlock('scheduling') && wizardMode" class="checkbox-row offer-checkbox-inline">
-              <input :checked="form.fulfillment_mode !== 'no_booking'" type="checkbox"
-                     @change="form.fulfillment_mode = $event.target.checked ? 'scheduled' : 'no_booking'" />
-              <span>Customers book an appointment for this</span>
-            </label>
-            <small v-if="showsBlock('scheduling') && wizardMode && form.fulfillment_mode === 'no_booking'"
-                   class="services-hint">
-              They will pay for it without picking a time — an add-on or a standalone charge.
-            </small>
-            <div v-if="showsBlock('scheduling') && form.fulfillment_mode !== 'no_booking'" class="offer-two-column">
+            <div v-if="form.fulfillment_mode !== 'no_booking'" class="offer-two-column">
               <label class="offer-field">
                 <span>Duration (minutes) <strong>*</strong></span>
                 <input v-model.number="form.duration_minutes" min="1" step="5" type="number" required />
               </label>
-              <!-- Pay-then-book is the default and the safer one; a tenant who wants to invoice afterwards
-                   is describing a business model they already know they have, and can say so in the editor. -->
-              <label v-if="!wizardMode" class="offer-field">
+              <label class="offer-field">
                 <span>Booking flow</span>
                 <select v-model="form.booking_flow">
                   <option value="pay_then_book">Pay first, then book a time</option>
@@ -190,10 +171,7 @@
             </div>
           </section>
 
-          <!-- The operations console: staff, compensation, overrides, check-in windows. Hidden while creating,
-               shown in full when editing. The defaults it would have asked for are already correct for the
-               tenant who is doing the work themselves, which is who is creating their first service. -->
-          <section v-if="showsAdvanced" class="offer-form-section">
+          <section class="offer-form-section">
             <header class="offer-section-header">
               <div>
                 <h3>Allowed Fulfillers</h3>
@@ -274,9 +252,7 @@
             </table>
           </section>
 
-          <!-- Already unreachable while creating (a new service has no fulfillers), but said out loud so a
-               future default cannot quietly put a compensation override in front of a first-time tenant. -->
-          <template v-if="showsAdvanced && form.allowed_fulfillers.length">
+          <template v-if="form.allowed_fulfillers.length">
             <section class="offer-form-section">
               <header class="offer-section-header">
                 <div>
@@ -329,11 +305,10 @@
             </section>
           </template>
 
-          <section v-if="showsBlock('photo')" class="offer-form-section">
+          <section class="offer-form-section">
             <header class="offer-section-header">
               <div>
-                <h3 v-if="wizardMode">Add a photo</h3>
-                <h3 v-else>Presentation</h3>
+                <h3>Presentation</h3>
                 <p>Optional hero image for the service.</p>
               </div>
             </header>
@@ -366,13 +341,9 @@
           </section>
 
           <footer class="modal-footer">
-            <button v-if="wizardMode && wizardStep > 1" class="secondary-action" type="button"
-                    @click="previousWizardStep">Back</button>
-            <button v-else class="secondary-action" type="button" @click="closeServiceModal">Cancel</button>
-            <button v-if="wizardMode && !onLastWizardStep" class="primary-action" type="button"
-                    @click="nextWizardStep">Next</button>
-            <button v-else class="primary-action" type="submit" :disabled="store.saving">
-              {{ store.saving ? "Saving..." : (wizardMode ? "Create service" : "Save Service") }}
+            <button class="secondary-action" type="button" @click="closeServiceModal">Cancel</button>
+            <button class="primary-action" type="submit" :disabled="store.saving">
+              {{ store.saving ? "Saving..." : "Save Service" }}
             </button>
           </footer>
         </form>
@@ -418,15 +389,19 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from "vue";
+import { computed, inject, onMounted, ref } from "vue";
 import {
   LOCATION_MODES,
+  SERVICE_PRICE_CONTEXTS,
+  SERVICE_PRICING_MODELS,
   defaultBookingRules,
+  defaultServiceForm,
+  fetchFullService,
   formatServiceDuration,
   formatServicePrice,
+  locationLabel,
   serviceIsActive,
   useServicesStore,
-  fetchFullService,
 } from "../stores/services";
 import { uploadImage } from "../api/uploads";
 import { recordImageDims } from "../utils/imageDims";
@@ -438,7 +413,7 @@ import { useCalendarStore } from "../stores/calendar";
 import { applyTitleCaseInput } from "../utils/titleCase.js";
 import { defaultPriceForm, priceFormFromDocument } from "../utils/priceForm";
 import PricingCard from "./shared/PricingCard.vue";
-import WizardSteps from "./shared/WizardSteps.vue";
+import ServiceWizard from "./services/ServiceWizard.vue";
 import ConfirmDialog from "./shared/ConfirmDialog.vue";
 import ListCard from "./shared/ListCard.vue";
 import FulfillersPanel from "./services/FulfillersPanel.vue";
@@ -448,8 +423,6 @@ import CalendarPanel from "./services/CalendarPanel.vue";
 import AppointmentsPanel from "./services/AppointmentsPanel.vue";
 
 // Services support only these price contexts and one-time pricing (PRD Phase 1 scope).
-const SERVICE_PRICE_CONTEXTS = [["standard", "Standard"], ["sale", "Sale"], ["flash_sale", "Flash sale"]];
-const SERVICE_PRICING_MODELS = [["one_time", "One-time"]];
 
 const store = useServicesStore();
 const fulfillers = useFulfillersStore();
@@ -494,58 +467,27 @@ const pendingDeleteService = ref(null);
 const deletingService = ref(false);
 const formError = ref("");
 const form = ref(defaultServiceForm());
-
-// A CREATE wizard over the same form state and the same save. Editing keeps the full screen (author,
-// 2026-09-18) -- the big form is a fine console for someone who already has a service and knows what a
-// fulfiller is; it is a terrible front door for someone who wants to say "I cut hair, 45 minutes, £40".
-//
-// Deliberately NOT a second form model or a second save path. `savePage()` in LandingPages.vue was exactly
-// that and quietly stopped being called, taking its behaviour with it. The wizard shows and hides parts of
-// one form; there is nothing to drift.
-const SERVICE_WIZARD_STEPS = ["details", "pricing", "scheduling", "photo"];
-const SERVICE_WIZARD_LABELS = { details: "Details", pricing: "Price", scheduling: "Scheduling", photo: "Photo" };
-const wizardMode = ref(false);
-const wizardStep = ref(1);
-const wizardStepKey = computed(() => SERVICE_WIZARD_STEPS[wizardStep.value - 1] || "details");
-const wizardLabels = computed(() => SERVICE_WIZARD_STEPS.map((key) => SERVICE_WIZARD_LABELS[key]));
-const onLastWizardStep = computed(() => wizardStep.value >= SERVICE_WIZARD_STEPS.length);
-// Which block a section belongs to. In edit mode every block shows, as it always has.
-function showsBlock(key) {
-  return !wizardMode.value || wizardStepKey.value === key;
-}
-// The advanced console -- fulfillers, compensation, overrides, check-in windows. A solo tenant creating their
-// first service should never meet the word "fulfiller"; they are one, and the defaults already say so.
-const showsAdvanced = computed(() => !wizardMode.value);
-
-function nextWizardStep() {
-  formError.value = "";
-  if (wizardStepKey.value === "details" && !String(form.value.name || "").trim()) {
-    formError.value = "Give the service a name.";
-    return;
-  }
-  if (wizardStepKey.value === "scheduling" && form.value.fulfillment_mode !== "no_booking"
-      && Number(form.value.duration_minutes || 0) < 1) {
-    formError.value = "How long does it take? Enter at least 1 minute.";
-    return;
-  }
-  wizardStep.value += 1;
-}
-
-function previousWizardStep() {
-  formError.value = "";
-  if (wizardStep.value > 1) wizardStep.value -= 1;
-}
+const wizardOpen = ref(false);
 const allowedForm = ref(defaultAllowedForm());
 const showAddFulfiller = ref(false);
 const newFulfiller = ref(defaultNewFulfiller());
 const addFulfillerError = ref("");
-const heroFileInput = ref(null);
 const heroUploading = ref(false);
 const heroUploadError = ref("");
 
-onMounted(() => {
+const takeViewIntent = inject("takeViewIntent", null);
+
+onMounted(async () => {
   if (!fulfillers.loaded) fulfillers.load();
   if (!calendar.loaded) calendar.load();
+  // Opened by "Edit in Services" on a product-list row: land on that service's editor rather than on a list
+  // to search. Read once and cleared, so coming back later does not reopen it.
+  const intent = takeViewIntent?.();
+  if (intent?.edit) {
+    if (!store.loaded) await store.load();
+    const row = (store.services || []).find((service) => service.service_id === intent.edit);
+    if (row) await openEditModal(row);
+  }
 });
 
 // Warn when the service's default fulfiller has no calendar of their own — their bookings
@@ -636,22 +578,6 @@ function addAllowedFulfiller() {
   allowedForm.value = defaultAllowedForm();
 }
 
-async function handleHeroPicked(event) {
-  const file = event.target.files?.[0];
-  event.target.value = "";
-  if (!file) return;
-  heroUploadError.value = "";
-  heroUploading.value = true;
-  try {
-    const { url, dims } = await uploadImage(file, { basePrefix: "services" });
-    form.value.hero_image_url = url;
-    recordImageDims(form.value.image_dims, url, dims);
-  } catch (error) {
-    heroUploadError.value = error.message || "Hero image upload failed.";
-  } finally {
-    heroUploading.value = false;
-  }
-}
 
 // Returns the whole upload result, not just the URL: baking a crop needs the asset id so a re-crop reads
 // the ORIGINAL rather than compounding the previous crop.
@@ -661,27 +587,6 @@ async function uploadServiceHero(file) {
   return result;
 }
 
-function defaultServiceForm() {
-  return {
-    service_id: "",
-    name: "",
-    description: "",
-    prices: [defaultPriceForm()],
-    default_price_index: 0,
-    fulfillment_mode: "scheduled",
-    booking_flow: "pay_then_book",
-    duration_minutes: 60,
-    location_mode: "onsite",
-    hero_image_url: "",
-    image_dims: {},
-    active: true,
-    default_fulfiller_id: "",
-    calendar_connection_id: "",
-    booking_rules: defaultBookingRules(),
-    allowed_fulfillers: [],
-    created_at: null,
-  };
-}
 
 function resetFulfillerForms() {
   allowedForm.value = defaultAllowedForm();
@@ -690,15 +595,17 @@ function resetFulfillerForms() {
   addFulfillerError.value = "";
 }
 
+// Creating goes through the wizard; this modal is the EDITOR. Two surfaces over one document -- "keep the
+// big screen for edits, but use the wizard to create a new service" (author, 2026-09-18).
 function openCreateModal() {
-  editingService.value = null;
-  form.value = defaultServiceForm();
-  wizardMode.value = true;
-  wizardStep.value = 1;
-  formError.value = "";
-  resetFulfillerForms();
-  showServiceModal.value = true;
+  wizardOpen.value = true;
 }
+
+function onServiceCreated() {
+  wizardOpen.value = false;
+  store.load();
+}
+
 
 async function openEditModal(row) {
   // The list holds index ROWS; the editor needs the whole document (booking_rules, image_dims and the
@@ -706,7 +613,6 @@ async function openEditModal(row) {
   const service = await fetchFullService(row);
   editingService.value = service;
   form.value = formFromService(service);
-  wizardMode.value = false;     // editing gets the whole console, as it always has
   formError.value = "";
   resetFulfillerForms();
   showServiceModal.value = true;
@@ -715,18 +621,6 @@ async function openEditModal(row) {
 function closeServiceModal() {
   showServiceModal.value = false;
   editingService.value = null;
-  wizardMode.value = false;
-  wizardStep.value = 1;
-}
-
-// One submit handler so the Enter key cannot skip the remaining steps: in the wizard it advances, and only
-// the final step actually saves.
-function onServiceFormSubmit() {
-  if (wizardMode.value && !onLastWizardStep.value) {
-    nextWizardStep();
-    return;
-  }
-  saveService();
 }
 
 async function saveService() {
@@ -783,7 +677,4 @@ function formFromService(service) {
   };
 }
 
-function locationLabel(mode) {
-  return String(mode || "onsite").replace(/\b\w/g, (char) => char.toUpperCase());
-}
 </script>

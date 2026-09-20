@@ -267,6 +267,39 @@ export async function buildServiceDocument(form, base = {}) {
   return document;
 }
 
+// Lifted out of Services.vue 2026-09-19 so the create wizard and the edit screen share ONE definition. They
+// were component-local, which meant the wizard importing them from here built cleanly and would have
+// rendered nothing -- Vite does not fail on a missing named export from a local module.
+export const SERVICE_PRICE_CONTEXTS = [["standard", "Standard"], ["sale", "Sale"], ["flash_sale", "Flash sale"]];
+export const SERVICE_PRICING_MODELS = [["one_time", "One-time"]];
+
+export function locationLabel(mode) {
+  return String(mode || "onsite").replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+export function defaultServiceForm() {
+  return {
+    service_id: "",
+    name: "",
+    description: "",
+    prices: [defaultPriceForm()],
+    default_price_index: 0,
+    fulfillment_mode: "scheduled",
+    booking_flow: "pay_then_book",
+    duration_minutes: 60,
+    location_mode: "onsite",
+    hero_image_url: "",
+    image_dims: {},
+    active: true,
+    default_fulfiller_id: "",
+    calendar_connection_id: "",
+    booking_rules: defaultBookingRules(),
+    allowed_fulfillers: [],
+    created_at: null,
+  };
+}
+
+
 export function defaultBookingRules() {
   return {
     check_in_required: false,

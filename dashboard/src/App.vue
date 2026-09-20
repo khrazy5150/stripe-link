@@ -260,7 +260,11 @@ const activeView = ref("dashboard");
 // One screen handing off to another. Added 2026-09-18 so the product wizard can send a tenant to Services
 // instead of offering a "Service" type it does not build. Provided rather than emitted because the shell
 // owns which view is showing and nothing between it and a wizard step needs to know.
-provide("navigateTo", (view) => { activeView.value = view; });
+const viewIntent = ref(null);   // why the view was opened, for the destination to act on once
+provide("navigateTo", (view, intent = null) => { activeView.value = view; viewIntent.value = intent; });
+// Read ONCE and cleared, so returning to the screen later does not reopen whatever was asked for the first
+// time. A destination asks "was I opened for something?", not "is something still set?".
+provide("takeViewIntent", () => { const intent = viewIntent.value; viewIntent.value = null; return intent; });
 
 // The active Stripe MODE (test/live) — the dashboard toggle. Drives view remounts + data reloads and the theme
 // class; the backend base is hostname-derived, not this value (plans/STRIPE_MODE_DECOUPLING.md).

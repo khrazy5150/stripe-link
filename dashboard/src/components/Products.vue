@@ -11,7 +11,7 @@
       <header class="dashboard-card-header">
         <h2>Product Management</h2>
         <div class="button-row">
-          <button class="secondary-action" type="button" :disabled="store.loading" @click="store.load">
+          <button class="secondary-action" type="button" :disabled="store.loading" @click="loadAll(true)">
             {{ store.loading ? "Loading..." : "Load Products" }}
           </button>
           <button class="primary-action" type="button" @click="openCreateModal">+ Create New Product</button>
@@ -21,11 +21,11 @@
       <div class="product-filter-bar">
         <label>
           Search
-          <input v-model.trim="store.filters.search" type="search" placeholder="Name, tag, category, keyword..." @focus="store.ensureLoaded()" />
+          <input v-model.trim="store.filters.search" type="search" placeholder="Name, tag, category, keyword..." @focus="loadAll()" />
         </label>
         <label>
           Product Type
-          <select v-model="store.filters.productType" @focus="store.ensureLoaded()">
+          <select v-model="store.filters.productType" @focus="loadAll()">
             <option value="">All Types</option>
             <option value="physical">Physical</option>
             <option value="digital">Digital</option>
@@ -34,7 +34,7 @@
         </label>
         <label>
           Status
-          <select v-model="store.filters.status" @focus="store.ensureLoaded()">
+          <select v-model="store.filters.status" @focus="loadAll()">
             <option value="active">Active</option>
             <option value="archived">Archived</option>
             <option value="all">All</option>
@@ -60,7 +60,7 @@
           :icon-color-key="product.product_id"
           :title="product.name || 'Untitled Product'"
           :description="product.description"
-          :status-label="lifecycleStatus(product) === 'archived' ? 'Archived' : 'Active'"
+          :status-label="product.__service ? 'Service' : (lifecycleStatus(product) === 'archived' ? 'Archived' : 'Active')"
           :status-tone="lifecycleStatus(product)"
           :archived="lifecycleStatus(product) === 'archived'"
         >
@@ -73,11 +73,19 @@
             <span v-if="compareAtText(product)" class="product-card-compare">Regular {{ compareAtText(product) }}</span>
           </template>
           <template #actions>
-            <button type="button" class="secondary-action" @click="openEditModal(product)">Edit</button>
-            <button type="button" class="secondary-action" @click="selectedProduct = product">Details</button>
-            <button type="button" class="secondary-action" :disabled="store.savingStatus" @click="confirmStatusChange(product)">
-              {{ lifecycleStatus(product) === "archived" ? "Restore" : "Archive" }}
-            </button>
+            <!-- A service row is edited in the Services console, which is the tool built for it. Details and
+                 Archive are product-shaped operations and are NOT offered here rather than offered and
+                 silently ignored: a row that looks like the others and does nothing is worse than a row that
+                 is plainly different. -->
+            <button v-if="product.__service" type="button" class="secondary-action"
+                    @click="editService(product)">Edit in Services →</button>
+            <template v-else>
+              <button type="button" class="secondary-action" @click="openEditModal(product)">Edit</button>
+              <button type="button" class="secondary-action" @click="selectedProduct = product">Details</button>
+              <button type="button" class="secondary-action" :disabled="store.savingStatus" @click="confirmStatusChange(product)">
+                {{ lifecycleStatus(product) === "archived" ? "Restore" : "Archive" }}
+              </button>
+            </template>
           </template>
           <template #footer>
             <div v-if="lifecycleStatus(product) === 'archived'" class="product-archived-label">Archived</div>
@@ -85,6 +93,17 @@
         </ListCard>
       </div>
     </section>
+
+    <div v-if="serviceWizardOpen" class="modal-backdrop" @click.self="serviceWizardOpen = false">
+      <section class="modal-card" role="dialog" aria-modal="true" aria-labelledby="serviceFromProductTitle">
+        <header class="modal-card-header">
+          <h2 id="serviceFromProductTitle">Create a service</h2>
+          <button type="button" class="modal-close" aria-label="Close" @click="serviceWizardOpen = false">×</button>
+        </header>
+        <ServiceWizard :seed="serviceSeed" @created="onServiceCreatedFromProducts"
+                       @cancel="serviceWizardOpen = false" />
+      </section>
+    </div>
 
     <div v-if="selectedProduct" class="modal-backdrop" @click.self="selectedProduct = null">
       <section class="modal-card product-details-modal" role="dialog" aria-modal="true" aria-labelledby="productDetailsTitle">
@@ -224,20 +243,7 @@
                   </select>
                   <span class="field-note">Determines fulfillment behavior and address collection at checkout.</span>
                 </label>
-                <!-- A service is not built here. This wizard collects SKUs, package dimensions and shipping;
-                     a service needs a duration, a calendar and who performs it, and has its own wizard. The
-                     option stays in the list because that is where a tenant looks for it -- it now hands off
-                     instead of quietly running the physical-product path, which is what it used to do
-                     (author, 2026-09-18: "the wizard incorrectly treats it like a physical product"). -->
-                <div v-if="form.product_type === 'service'" class="wizard-subsection">
-                  <p class="field-note">
-                    Services are set up in <strong>Services</strong>, where you can give them a duration and a
-                    calendar. It only takes a minute.
-                  </p>
-                  <button type="button" class="secondary-action compact" @click="goCreateService">
-                    Create a service instead →
-                  </button>
-                </div>
+
                 <ProductCategoryField v-model="form.product_category" :product-type="form.product_type" />
               </div>
 
@@ -550,6 +556,7 @@ import ConfirmDialog from "./shared/ConfirmDialog.vue";
 // The product form's blocks, shared by the create WIZARD and the full EDIT form. Two copies of a field that
 // talks to the shared taxonomy, or to Stripe's image limit, is how the two quietly stop agreeing.
 import ProductCategoryField from "./products/ProductCategoryField.vue";
+import ServiceWizard from "./services/ServiceWizard.vue";
 import ProductIdentifiersField from "./products/ProductIdentifiersField.vue";
 import ProductImagesField from "./products/ProductImagesField.vue";
 import ProductTagsField from "./products/ProductTagsField.vue";
@@ -603,8 +610,22 @@ const PRODUCT_INTENTS = [
 ];
 // Provided by the shell (App.vue). Absent in a test harness or a stray mount, hence the fallback.
 const navigateTo = inject("navigateTo", null);
-function goCreateService() {
-  if (navigateTo) navigateTo("services");
+// Services appear in this list (stores/products.js filteredProducts adapts them), so this screen fetches
+// them. Held on the products store rather than reached for inside the getter, which stays pure over state.
+const servicesStore = useServicesStore();
+const serviceWizardOpen = ref(false);
+const serviceSeed = ref({});
+watch(() => servicesStore.services, (rows) => store.setServices(rows), { immediate: true });
+// Editing a service from the product list: the Services console opens with that service already up. The
+// shell's navigateTo carries the payload, so the destination does not have to guess why it was opened.
+// One call for both documents, since one list now shows both.
+function loadAll(force = false) {
+  if (force) store.load(); else store.ensureLoaded();
+  if (force || (!servicesStore.loaded && !servicesStore.loading)) servicesStore.load();
+}
+
+function editService(row) {
+  if (navigateTo) navigateTo("services", { edit: row.service_id });
 }
 
 const wizardMode = ref(false);
@@ -659,7 +680,25 @@ function wizardNext() {
   if (!wizardCanAdvance.value) return;
   // Apply the intent as soon as it is chosen, so the next step edits a form that already matches it.
   if (wizardStepKey.value === "purpose") applyWizardIntent();
+  // A service is not a product with a duration bolted on: it needs hours, a calendar and who performs it,
+  // and it is stored as its own document. So leaving Details with type "service" hands over to the service
+  // wizard, carrying what has already been answered rather than asking for it twice.
+  if (wizardStepKey.value === "details" && form.value.product_type === "service") {
+    serviceSeed.value = {
+      name: form.value.name || "",
+      description: form.value.description || "",
+      product_category: form.value.product_category || "",
+    };
+    serviceWizardOpen.value = true;
+    return;
+  }
   wizardStep.value = Math.min(wizardFlow.value.length, wizardStep.value + 1);
+}
+
+function onServiceCreatedFromProducts() {
+  serviceWizardOpen.value = false;
+  closeCreateModal();
+  servicesStore.load();
 }
 
 function wizardBack() {

@@ -1,6 +1,6 @@
 <template>
-  <section class="dashboard-card">
-    <header class="dashboard-card-header">
+  <section :class="embedded ? 'wizard-embedded-panel' : 'dashboard-card'">
+    <header v-if="!embedded" class="dashboard-card-header">
       <div>
         <h2>Fulfillers</h2>
         <p>Staff or delegates who fulfill appointments and receive compensation.</p>
@@ -10,7 +10,7 @@
       </button>
     </header>
 
-    <div class="dashboard-card-body">
+    <div :class="embedded ? '' : 'dashboard-card-body'">
       <div v-if="store.error" class="keys-status-banner error">{{ store.error }}</div>
 
       <form class="offer-form-section" @submit.prevent="save">
@@ -107,6 +107,11 @@
 
 <script setup>
 import { onMounted, ref } from "vue";
+
+// Rendered inside the create wizard, which supplies its own step heading and chrome. A prop rather than the
+// wizard reaching in with :deep() -- that would break silently the next time this panel's markup moved, and
+// a shared component should say what it supports rather than have it discovered.
+const props = defineProps({ embedded: { type: Boolean, default: false } });
 import WeeklyHours from "./WeeklyHours.vue";
 import PhoneInput from "../PhoneInput.vue";
 import ConfirmDialog from "../shared/ConfirmDialog.vue";

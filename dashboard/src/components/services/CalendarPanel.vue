@@ -1,6 +1,6 @@
 <template>
-  <section class="dashboard-card">
-    <header class="dashboard-card-header">
+  <section :class="embedded ? 'wizard-embedded-panel' : 'dashboard-card'">
+    <header v-if="!embedded" class="dashboard-card-header">
       <div>
         <h2>Calendar Sync</h2>
         <p>Connect one or more Google Calendars. The default calendar receives bookings and its busy
@@ -11,7 +11,7 @@
       </button>
     </header>
 
-    <div class="dashboard-card-body">
+    <div :class="embedded ? '' : 'dashboard-card-body'">
       <div v-if="store.error" class="keys-status-banner error">{{ store.error }}</div>
 
       <div v-if="!store.connections.length" class="keys-status-banner">
@@ -72,6 +72,11 @@
 
 <script setup>
 import { nextTick, onBeforeUnmount, onMounted, ref } from "vue";
+
+// Rendered inside the create wizard, which supplies its own step heading and chrome. A prop rather than the
+// wizard reaching in with :deep() -- that would break silently the next time this panel's markup moved, and
+// a shared component should say what it supports rather than have it discovered.
+const props = defineProps({ embedded: { type: Boolean, default: false } });
 import { useCalendarStore } from "../../stores/calendar";
 import ConfirmDialog from "../shared/ConfirmDialog.vue";
 import PromptDialog from "../shared/PromptDialog.vue";
