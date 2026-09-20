@@ -137,7 +137,11 @@ export function serviceListRow(service) {
     product_type: "service",
     product_category: service.product_category || "",
     status: service.active === false ? "archived" : "active",
-    images: service.hero_image_url ? [service.hero_image_url] : [],
+    // presentation.hero_image_url, which is where buildServiceDocument() PUTS it. `hero_image_url` is the
+    // FORM's field name and exists on no stored service, so reading it gave every service the "no image"
+    // placeholder -- the generic art is meant for services that genuinely have none. Offers.vue's adapter
+    // had this right; mine was written from the form rather than from the document.
+    images: service.presentation?.hero_image_url ? [service.presentation.hero_image_url] : [],
     prices: Array.isArray(service.prices) ? service.prices : [],
     default_price_id: service.default_price_id || "",
     created_at: service.created_at || null,

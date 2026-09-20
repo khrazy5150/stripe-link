@@ -181,6 +181,24 @@ class ServicesInTheProductListTests(unittest.TestCase):
         self.assertIn('<option value="service">Service</option>', PRODUCTS)
         self.assertIn('product_type: "service"', STORE)
 
+    def test_the_row_shows_the_service_own_photo(self):
+        """Reported 2026-09-19: every service wore the generic placeholder.
+
+        The adapter read `hero_image_url` -- the FORM's field name. buildServiceDocument() stores it at
+        `presentation.hero_image_url`, so the read found nothing on every service ever saved, and the art
+        reserved for services WITHOUT a photo was shown for all of them.
+        """
+        self.assertIn("service.presentation?.hero_image_url", STORE)
+        # The path the document actually uses, asserted against the builder rather than from memory.
+        builder = (DASH / "stores" / "services.js").read_text(encoding="utf-8")
+        self.assertIn("hero_image_url: heroImage", builder)
+        self.assertIn("document.presentation", builder)
+
+    def test_the_index_projection_carries_it(self):
+        """A row adapted from the LIST, not the full document -- so the field has to survive the projection."""
+        projection = (ROOT / "src" / "stripe_link" / "domain" / "service_index.py").read_text(encoding="utf-8")
+        self.assertIn('"presentation"', projection)
+
     def test_a_service_row_is_visibly_a_service(self):
         self.assertIn("product.__service ? 'Service'", _template(PRODUCTS))
 
