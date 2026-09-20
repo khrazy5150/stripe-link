@@ -1025,10 +1025,7 @@ class AccountHandlerTests(unittest.TestCase):
         shipping_handler({"httpMethod": "PUT", "body": json.dumps(config)}, None, repository=repository, secret_cipher=FakeCipher())
 
         switched = load_fixture("shipping-config-demo.json")
-        # `mock`, not `easypost`: a provider must be SELECTABLE to be saved at all now, and only proven
-        # adapters are (domain/shipping.py). The behaviour under test -- changing provider clears the key
-        # so it cannot linger on the wrong one -- is unchanged and is what this asserts.
-        switched["provider"]["name"] = "mock"
+        switched["provider"]["name"] = "easypost"
         switched["provider"]["api_key_ref"] = "********"
         shipping_handler({"httpMethod": "PUT", "body": json.dumps(switched)}, None, repository=repository, secret_cipher=FakeCipher())
 

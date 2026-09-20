@@ -44,12 +44,24 @@
             <span>Provider <strong>*</strong></span>
             <select v-model="form.provider.name">
               <option value="">Select a provider…</option>
-              <option v-for="name in availableProviders" :key="name" :value="name">{{ providerLabel(name) }}</option>
+              <!--
+                Only providers whose integration can actually be exercised are listed.
+
+                Shippo and EasyPost put test mode in the API KEY, so a test token buys free labels against
+                the production host -- they can be proven end to end without spending anything. ShipStation
+                needs a real paid account before its `testLabel` flag can even be sent, and Easyship's
+                sandbox story is unknown (the legacy adapter reads test_mode and never applies it to a
+                request). Both are restored here when it is their turn to be tested:
+
+                  <option value="easypost">EasyPost</option>
+                  <option value="shipstation">ShipStation</option>
+                  <option value="easyship">Easyship</option>
+
+                The SCHEMA still accepts all five names, so restoring one is only this edit.
+              -->
+              <option value="shippo">Shippo</option>
+              <option value="mock">Mock (testing)</option>
             </select>
-            <small>
-              More providers are on the way. A provider appears here once its integration has been proven
-              against the real carrier API — not before.
-            </small>
           </label>
           <label class="offer-field">
             <span>Base URL</span>
@@ -198,27 +210,6 @@ const saving = ref(false);
 const error = ref("");
 const message = ref("");
 const rawDoc = ref({});
-// What the BACKEND says a tenant may pick, never a list hardcoded here. A provider appears once its
-// adapter exists and has been exercised against the real API; a menu maintained separately would offer
-// carriers the server refuses, which is how this screen came to advertise four integrations that were
-// never wired. Falls back to the one provider that is certainly available if the server says nothing.
-const availableProviders = ref(["shippo"]);
-const PROVIDER_LABELS = {
-  shippo: "Shippo",
-  easypost: "EasyPost",
-  shipstation: "ShipStation",
-  easyship: "Easyship",
-  mock: "Mock (testing)",
-};
-
-function providerLabel(name) {
-  return PROVIDER_LABELS[name] || name;
-}
-
-function applyAvailableProviders(body) {
-  const names = Array.isArray(body?.available_providers) ? body.available_providers.filter(Boolean) : [];
-  if (names.length) availableProviders.value = names;
-}
 const form = reactive(defaultForm());
 
 // A saved key comes back redacted (api_key_ref === "********"), so a truthy value means configured.
@@ -333,12 +324,9 @@ async function load() {
   message.value = "";
   try {
     const body = await apiRequest("/shipping");
-    applyAvailableProviders(body);
     applyConfig(body.shipping_config || {});
   } catch (err) {
     if (/not found/i.test(err.message)) {
-      // A tenant with no config yet is exactly who needs the provider list, so the 404 carries it too.
-      applyAvailableProviders(err.body || {});
       applyConfig({});
       message.value = "No shipping config saved yet. Complete the required fields and save.";
     } else {
