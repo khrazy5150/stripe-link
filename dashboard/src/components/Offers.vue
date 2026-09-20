@@ -560,6 +560,7 @@
 import { computed, onMounted, reactive, ref, watch } from "vue";
 import SelectorCard from "./SelectorCard.vue";
 import { leadActionIcon } from "../utils/leadActionIcon";
+import { recurringSuffix } from "../utils/priceForm";
 import { apiRequest, getStripeMode, getTenantId, toAssetCdnUrl } from "../api/client";
 import { formatCouponDiscount, useCouponsStore } from "../stores/coupons";
 import { defaultProductPrice, formatMoney, priceSummary, serviceFlowCard, useProductsStore } from "../stores/products";
@@ -1816,7 +1817,9 @@ function priceText(product) {
 function priceOptionLabel(price) {
   const quantity = Number(price?.quantity || 1);
   const context = price?.context && price.context !== "standard" ? ` - ${contextLabel(price.context)}` : "";
-  return `${quantity} ${quantity === 1 ? "item" : "items"} - ${formatMoney(price?.unit_amount, price?.currency)}${context}`;
+  // The suffix is what separates a subscription from a one-off in this list; without it both read as a
+  // bare amount and the tenant picks the wrong one without ever knowing there was a choice.
+  return `${quantity} ${quantity === 1 ? "item" : "items"} - ${formatMoney(price?.unit_amount, price?.currency)}${recurringSuffix(price)}${context}`;
 }
 
 function selectablePriceDefaultLabel(price) {

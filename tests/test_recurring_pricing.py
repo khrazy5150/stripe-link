@@ -328,6 +328,19 @@ class PublishedPageTests(unittest.TestCase):
         self.assertEqual(recurring_suffix({"pricing_model": "customer_chooses",
                                            "recurring_interval": "month"}), "")
 
+    def test_a_screen_reader_is_told_it_repeats_too(self):
+        """The radio's aria-label is the whole card for a screen-reader user.
+
+        It read "<name>, $32.91" while the sighted card read "$32.91/day", so the one user who cannot see the
+        suffix was the one not told they were subscribing.
+        """
+        import re
+        src = pathlib.Path(__file__).resolve().parents[1] / "src/stripe_link/runtime/html.py"
+        labels = re.findall(r'aria-label=\\"\{label\}, \{escape\(format_money\(amount, currency\)\)\}([^\\]*)', src.read_text())
+        self.assertEqual(len(labels), 2, "expected the product and service price-card radios")
+        for tail in labels:
+            self.assertIn("recurring_suffix", tail)
+
     def test_the_suffix_is_styled_quieter_than_the_amount(self):
         from stripe_link.runtime import html as html_module
         css = "\n".join(html_module.UNIVERSAL_BUNDLE_TEMPLATE_STYLES)

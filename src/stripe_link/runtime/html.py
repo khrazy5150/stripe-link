@@ -3092,7 +3092,7 @@ def render_service_price_card(item, service_id, services_by_id, offer, display_i
         f"            <span class=\"sl-savings\">Save {int(savings_pct)}%</span>" if savings_pct else "",
         "          </div>",
         "        </div>",
-        f"        <input type=\"radio\" name=\"sl-price-{escape(service_id)}\" value=\"{escape(price_id)}\" aria-label=\"{label}, {escape(format_money(amount, currency))}\" checked>",
+        f"        <input type=\"radio\" name=\"sl-price-{escape(service_id)}\" value=\"{escape(price_id)}\" aria-label=\"{label}, {escape(format_money(amount, currency))}{escape(recurring_suffix(price))}\" checked>",
         "      </article>",
     ])
     return (landing_page_price_sort_key(price, item, display_index), card_markup)
@@ -3411,7 +3411,7 @@ def _item_price_option_cards(
             f"            <span class=\"sl-savings\">Save {int(savings_pct)}%</span>" if savings_pct else "",
             "          </div>",
             "        </div>",
-            f"        <input type=\"radio\" name=\"sl-price-{escape(product_id)}\" value=\"{escape(str(display_price.get('price_id', '')))}\" aria-label=\"{label}, {escape(format_money(amount, currency))}\" {'checked' if default_attr == 'true' else ''}>",
+            f"        <input type=\"radio\" name=\"sl-price-{escape(product_id)}\" value=\"{escape(str(display_price.get('price_id', '')))}\" aria-label=\"{label}, {escape(format_money(amount, currency))}{escape(recurring_suffix(display_price))}\" {'checked' if default_attr == 'true' else ''}>",
             "      </article>",
         ])
         cards.append((landing_page_price_sort_key(price, option, display_index), card_markup))

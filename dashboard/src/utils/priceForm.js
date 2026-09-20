@@ -142,3 +142,21 @@ export function pricePreviewFor(price, productType = "physical") {
     youKeep: price.fee_handling !== "net_guaranteed" && tenantAmount ? formatMoney(netPayout, price.currency) : "",
   };
 }
+
+// "/month", " every 3 weeks" — what a SAVED price's amount reads as when it repeats.
+//
+// Mirrors recurring_suffix() in runtime/html.py, which puts the same words on the published page. The tenant
+// half matters on its own: a product can carry both a one-time and a recurring price, and a picker that
+// labels them "1 item - $39.00" and "1 item - $32.91" gives no way to tell which one is the subscription.
+//
+// Tips are excluded for the same reason as the renderer: a repeating tip's frequency is the supporter's
+// choice at checkout, not a property of the price.
+export function recurringSuffix(price) {
+  if (!price || price.pricing_model !== "recurring") return "";
+  const recurring = price.recurring;
+  if (!recurring || !recurring.interval) return "";
+  const interval = String(recurring.interval);
+  const count = Number(recurring.interval_count || 1);
+  if (!Number.isFinite(count) || count <= 1) return `/${interval}`;
+  return ` every ${count} ${interval}s`;
+}
