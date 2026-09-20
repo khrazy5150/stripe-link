@@ -273,13 +273,18 @@ def booking_groups_for(offer: dict[str, Any], services_by_id: dict[str, dict[str
     return [scheduled]
 
 
-def resolve_service_offer_item(item: dict[str, Any], service: dict[str, Any], offer_context: str) -> ResolvedOfferItem:
+def resolve_service_offer_item(
+    item: dict[str, Any],
+    service: dict[str, Any],
+    offer_context: str,
+    selected_prices: dict[str, str] | None = None,
+) -> ResolvedOfferItem:
     service_id = str(item.get("service_id") or "")
     if service.get("service_id") != service_id:
         raise PricingError(f"Offer item service '{service_id}' does not match service '{service.get('service_id', '')}'.")
     if service.get("active") is False:
         raise PricingError(f"Service '{service_id}' is not active.")
-    price = resolve_service_price(service, str(item.get("price_id") or ""))
+    price = resolve_service_price(service, selected_service_price_id(item, selected_prices))
     if not price:
         raise PricingError(f"Price '{item.get('price_id', '')}' was not found on service '{service_id}'.")
     # A service price may be one_time or recurring; anything else (a pay-what-you-want service) has no
@@ -303,7 +308,8 @@ def resolve_service_offer_item(item: dict[str, Any], service: dict[str, Any], of
         unit_amount=unit_amount,
         quantity=quantity,
         price_quantity=int(price.get("quantity") or 1),
-        label=str(item.get("display_label") or price.get("label") or service.get("name") or ""),
+        label=str(item.get("display_label") or selectable_price_override(item, str(price.get("price_id") or "")).get("label")
+                  or price.get("label") or service.get("name") or ""),
         context=price_context,
         line_amount=unit_amount * quantity,
         selectable=False,
@@ -338,6 +344,44 @@ def selected_price_id_for_item(item: dict[str, Any], selected_prices: dict[str, 
             raise PricingError(f"Selected price '{selected_price_id}' is not selectable for product '{product_id}'.")
         return selected_price_id
     return item.get("price_id", "")
+
+
+def service_price_options(item: dict[str, Any]) -> list[dict[str, Any]]:
+    """The price options a SERVICE offer item exposes on the page.
+
+    A 'selectable' service item lists them explicitly -- one service, several ways to buy it (a single
+    session, or a plan drawn down on). A fixed item carries one `price_id`; normalise it to a one-entry list
+    so the renderer and the resolver walk the same shape either way (plans/SERVICE_CHOICE.md).
+    """
+    options = item.get("selectable_prices") or []
+    if options:
+        return [dict(option) for option in options if option.get("price_id")]
+    price_id = str(item.get("price_id") or "")
+    return [{"price_id": price_id}] if price_id else []
+
+
+def selected_service_price_id(item: dict[str, Any], selected_prices: dict[str, str] | None = None) -> str:
+    """Which price of a service item the buyer is being charged.
+
+    Their pick wins when it is one the item actually offers; otherwise the item's default, otherwise the
+    first option. A price that is NOT offered is refused rather than silently swapped -- the same rule
+    products get in selected_price_id_for_item, for the same reason: quietly charging an amount the page
+    never showed is worse than an error.
+    """
+    options = service_price_options(item)
+    if not options:
+        return str(item.get("price_id") or "")
+    allowed = [str(option.get("price_id")) for option in options]
+    if not item.get("selectable_prices"):
+        return allowed[0]
+    wanted = str((selected_prices or {}).get(str(item.get("service_id") or "")) or "")
+    if wanted:
+        if wanted not in allowed:
+            raise PricingError(
+                f"Selected price '{wanted}' is not selectable for service '{item.get('service_id', '')}'.")
+        return wanted
+    fallback = str(item.get("default_price_id") or "")
+    return fallback if fallback in allowed else allowed[0]
 
 
 def selectable_price_override(item: dict[str, Any], price_id: str) -> dict[str, Any]:
@@ -484,7 +528,7 @@ def resolve_offer(
             service = services_by_id.get(service_id)
             if not service:
                 raise PricingError(f"Service '{service_id}' was not provided for offer resolution.")
-            resolved_items.append(resolve_service_offer_item(item, service, offer_context))
+            resolved_items.append(resolve_service_offer_item(item, service, offer_context, selected_prices))
             continue
         product_id = item.get("product_id", "")
         product = products_by_id.get(product_id)

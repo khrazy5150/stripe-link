@@ -29,7 +29,8 @@ from stripe_link.domain.opportunities import (
     stage_opportunities,
 )
 from stripe_link.domain.pricing import (
-    PricingError, chosen_service_item, expand_offer, find_price, resolve_offer, single_unit_price,
+    PricingError, chosen_service_item, expand_offer, find_price, resolve_offer,
+    selected_service_price_id, service_price_options, single_unit_price,
 )
 from stripe_link.domain.semantic import is_bundle, resolve_semantic_model, subject_from_model
 from stripe_link.domain.reviews import aggregate_reviews, markup_eligible
@@ -3068,21 +3069,27 @@ def render_hero(
 
 
 def render_service_price_card(item, service_id, services_by_id, offer, display_index,
-                              *, group_name="", is_default=True):
-    """A single landing-page price card for a service offer item, sourced from the service's own
-    prices[] (the fixed price_id path). Carries data-service-id so checkout resolves the service.
+                              *, group_name="", is_default=True, option=None):
+    """One landing-page price card for a service offer item, sourced from the service's own prices[].
+    Carries data-service-id so checkout resolves the service.
 
-    `group_name` and `is_default` exist for CHOICE offers, where the services are alternatives: every card
+    `option` is the price being rendered, so one service item can produce several cards -- a single session
+    beside a plan. Without it the card was always the item's one `price_id`, which is why a service with two
+    prices could only ever show one of them.
+
+    `group_name` and `is_default` exist for CHOICE offers, where the SERVICES are alternatives: every card
     shares one radio group and exactly one is checked. A BUNDLE keeps a group per service and every card
     checked, because there every service is charged and the radio is decorative (plans/SERVICE_CHOICE.md).
     """
     service = services_by_id.get(service_id)
     if service is None:
         raise RenderError(f"Service '{service_id}' was not provided for offer '{offer.get('offer_id', '')}'.")
-    price = resolve_service_price(service, item.get("price_id")) or {}
+    option = option or {}
+    price = resolve_service_price(service, option.get("price_id") or item.get("price_id")) or {}
     if not is_landing_page_price(price):
         return None
-    label = escape(str(item.get("display_label") or price.get("label") or service.get("name") or "Option"))
+    label = escape(str(item.get("display_label") or option.get("label")
+                       or price.get("label") or service.get("name") or "Option"))
     amount = int(price.get("unit_amount", 0))
     currency = str(price.get("currency") or "usd")
     checkout_quantity = int(item.get("quantity") or 1)
@@ -3453,14 +3460,22 @@ def render_offer_price_selector(
     for item in landing_items:
         service_id = item.get("service_id", "")
         if service_id:
-            card = render_service_price_card(
-                item, service_id, services_by_id, offer, display_index,
-                group_name="sl-service-choice" if choosing else "",
-                is_default=(item is default_service_item) if choosing else True,
-            )
-            if card is not None:
-                cards.append(card)
-                display_index += 1
+            # One card per price the item offers: a service can be sold as a single session AND as a plan.
+            options = service_price_options(item)
+            default_option_id = selected_service_price_id(item)
+            for option in options:
+                on_default_item = (item is default_service_item) if choosing else True
+                card = render_service_price_card(
+                    item, service_id, services_by_id, offer, display_index,
+                    group_name="sl-service-choice" if choosing else "",
+                    # Exactly one card is checked per radio group: the item's default price, and -- when the
+                    # SERVICES are alternatives too -- only on the default service.
+                    is_default=on_default_item and str(option.get("price_id")) == default_option_id,
+                    option=option,
+                )
+                if card is not None:
+                    cards.append(card)
+                    display_index += 1
             continue
         product_id = item.get("product_id", "")
         product = products_by_id.get(product_id)

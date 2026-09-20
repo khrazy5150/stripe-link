@@ -148,6 +148,10 @@ def handler(
                     products_by_id[bump_product_id] = bump_product
         services_by_id = load_offer_services(tenant_id, offer, services_repo)
         selected_prices = {product_id: price_id} if product_id and price_id else {}
+        # A service card sends service_id + price_id (its product_id is empty), so the buyer's chosen price
+        # is keyed by the SERVICE. Ids never collide across the two, so one map serves both.
+        if service_id and price_id:
+            selected_prices[service_id] = price_id
         resolved = resolve_offer(
             offer, products_by_id, selected_prices,
             services_by_id=services_by_id, selected_service_id=service_id,

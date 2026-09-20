@@ -149,3 +149,72 @@ class WiringTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ServiceSelectablePricesTests(unittest.TestCase):
+    """One service, several ways to buy it: a single session beside a plan.
+
+    The offer form showed a Price DROPDOWN -- the tenant picked one and the buyer got no say -- and
+    validate_offer_document refused the alternative outright: "Service offer items must use price_id, not
+    selectable_prices". A service now takes the same either/or a product does.
+    """
+
+    SERVICE = {"service_id": "svc_m", "name": "120 minute massage", "duration_minutes": 120,
+               "fulfillment_mode": "scheduled", "booking_flow": "pay_then_book",
+               "prices": [{"price_id": "p_once", "unit_amount": 27476, "currency": "usd",
+                           "pricing_model": "one_time"},
+                          {"price_id": "p_plan", "unit_amount": 19792, "currency": "usd",
+                           "pricing_model": "recurring",
+                           "recurring": {"interval": "day", "interval_count": 1}}]}
+
+    def _offer(self):
+        return {"offer_id": "o1", "status": "active", "stripe_mode": "test", "checkout": {"mode": "payment"},
+                "items": [{"service_id": "svc_m", "quantity": 1, "booking_flow": "pay_then_book",
+                           "selectable_prices": [{"price_id": "p_once", "label": "Single session"},
+                                                 {"price_id": "p_plan", "label": "Every day"}],
+                           "default_price_id": "p_once"}]}
+
+    def test_both_prices_get_a_card(self):
+        html = render_offer_price_selector(self._offer(), {}, {"svc_m": self.SERVICE})
+        self.assertEqual(re.findall(r'data-price-id="(p_[a-z]+)"', html), ["p_once", "p_plan"])
+        self.assertEqual(re.findall(r'<strong title="([^"]+)"', html), ["Single session", "Every day"])
+
+    def test_they_are_one_radio_group_with_one_checked(self):
+        html = render_offer_price_selector(self._offer(), {}, {"svc_m": self.SERVICE})
+        self.assertEqual(set(re.findall(r'<input type="radio" name="([^"]+)"', html)), {"sl-price-svc_m"})
+        self.assertEqual(len(re.findall(r"<input type=\"radio\"[^>]*\schecked", html)), 1)
+
+    def test_the_buyers_pick_is_what_is_charged(self):
+        for picked, amount, repeats in (("p_once", 27476, False), ("p_plan", 19792, True)):
+            with self.subTest(picked=picked):
+                resolved = resolve_offer(self._offer(), {}, {"svc_m": picked},
+                                         services_by_id={"svc_m": self.SERVICE})
+                line = resolved["items"][0]
+                self.assertEqual(line["price_id"], picked)
+                self.assertEqual(line["unit_amount"], amount)
+                self.assertEqual(bool(line.get("recurring")), repeats)
+
+    def test_no_pick_charges_the_card_shown_checked(self):
+        resolved = resolve_offer(self._offer(), {}, {}, services_by_id={"svc_m": self.SERVICE})
+        self.assertEqual(resolved["items"][0]["price_id"], "p_once")
+
+    def test_a_price_the_offer_does_not_sell_is_refused_not_swapped(self):
+        # Quietly charging an amount the page never showed is worse than an error.
+        from stripe_link.domain.pricing import PricingError
+        with self.assertRaises(PricingError):
+            resolve_offer(self._offer(), {}, {"svc_m": "p_secret"}, services_by_id={"svc_m": self.SERVICE})
+
+    def test_the_document_accepts_the_shape(self):
+        from stripe_link.domain.documents import _validate_offer_item
+        _validate_offer_item({"product_intent": "transaction"}, self._offer()["items"][0])
+
+    def test_both_shapes_at_once_is_still_refused(self):
+        from stripe_link.domain.documents import _validate_offer_item
+        item = {**self._offer()["items"][0], "price_id": "p_once"}
+        with self.assertRaises(DocumentValidationError):
+            _validate_offer_item({"product_intent": "transaction"}, item)
+
+    def test_the_form_never_writes_both(self):
+        offers = (ROOT / "dashboard/src/components/Offers.vue").read_text(encoding="utf-8")
+        block = offers.split("service_id: row.service_id,", 1)[1][:600]
+        self.assertIn("price_id: selectable.length ? undefined : row.price_id", block)

@@ -69,8 +69,23 @@ nothing is rewritten. The tenant opts in per offer. Same approach as the goal/co
 5. **Checkout** -- `service_id` query param feeds the selection.
 6. **Dashboard** -- Service Options grows a mode select and, in choice mode, a Default radio per service.
 
+## Both axes, shipped
+
+Two questions, not one, and the second was the one actually asked first:
+
+- **Which SERVICE** -- 60 / 90 / 120 minute massage. Offer-level `service_selection`, above.
+- **Which PRICE of one service** -- a single session ($274.76) beside a plan ($197.92/day). Item-level
+  `selectable_prices` + `default_price_id`, exactly the shape a product uses.
+
+The second needed `_validate_offer_item` to stop refusing it outright ("Service offer items must use
+price_id, not selectable_prices"). A service now takes the same either/or a product does; both at once is
+still refused, because then two fields answer "what does this sell" with nothing making them agree. The
+selectable-price rules are shared by both branches; a service option carries no quantity (one booking is
+one booking), which is the only difference.
+
+Gating matters: the service-axis control only appears with 2+ services, which is why it was invisible on a
+one-service offer. The price-axis control appears whenever that service has more than one price.
+
 ## Not in scope
 
 - Mixed one-time/recurring inside a listicle CART (still refused; needs a Stripe sandbox test first).
-- Per-service `selectable_prices` UI. The model, renderer and checkout accept it; the form emits one card
-  per service for now.

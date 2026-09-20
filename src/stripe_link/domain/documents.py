@@ -964,6 +964,36 @@ def validate_offer_funnel(document: dict[str, Any]) -> None:
             require_string(entry, "price_id", f"offer funnel {key} price_id")
 
 
+def _validate_selectable_prices(item: dict[str, Any], *, require_quantity: bool) -> None:
+    """The options an item offers the buyer, and the one shown checked.
+
+    Shared by products and services. A service option carries no quantity -- one booking is one booking --
+    which is the only difference between the two.
+    """
+    selectable_prices = item.get("selectable_prices")
+    if not isinstance(selectable_prices, list) or not selectable_prices:
+        raise DocumentValidationError("selectable_prices must be a non-empty array.")
+    selectable_price_ids = set()
+    for price in selectable_prices:
+        if not isinstance(price, dict):
+            raise DocumentValidationError("Each selectable price must be an object.")
+        require_string(price, "price_id", "selectable price price_id")
+        if require_quantity:
+            require_positive_int(price, "quantity", "selectable price quantity")
+        optional_string(price, "label", "selectable price label")
+        optional_string(price, "badge", "selectable price badge")
+        optional_string(price, "description", "selectable price description")
+        optional_string(price, "image_url", "selectable price image_url")
+        optional_non_negative_int(price, "display_discount_pct", "selectable price display_discount_pct")
+        if price.get("price_id") in selectable_price_ids:
+            raise DocumentValidationError(f"Duplicate selectable price_id '{price.get('price_id')}'.")
+        selectable_price_ids.add(price.get("price_id"))
+    if not selectable_price_ids:
+        raise DocumentValidationError("selectable_prices must include at least one price_id.")
+    if item.get("default_price_id") not in selectable_price_ids:
+        raise DocumentValidationError("default_price_id must reference one of selectable_prices.")
+
+
 def _validate_offer_item(document: dict[str, Any], item: dict[str, Any]) -> None:
     """Validate one product/service line — the price/product rules shared by a legacy item and a purchase
     opportunity (they carry the same product_id/service_id + price_id or selectable_prices shape)."""
@@ -976,9 +1006,19 @@ def _validate_offer_item(document: dict[str, Any], item: dict[str, Any]) -> None
         raise DocumentValidationError("Offer item must reference exactly one of product_id or service_id.")
     if has_service:
         require_string(item, "service_id", "offer item service_id")
-        if item.get("selectable_prices"):
-            raise DocumentValidationError("Service offer items must use price_id, not selectable_prices.")
-        require_string(item, "price_id", "offer item price_id")
+        # A service used to be refused selectable_prices outright. It now takes the SAME either/or a product
+        # does: one fixed price, or the options the buyer picks between -- a single session beside a plan.
+        # Both at once is still refused, because then two fields answer "what does this sell" and nothing
+        # makes them agree (plans/SERVICE_CHOICE.md).
+        service_has_fixed_price = bool(item.get("price_id"))
+        service_has_options = bool(item.get("selectable_prices"))
+        if service_has_fixed_price == service_has_options:
+            raise DocumentValidationError(
+                "Service offer item must use either price_id or selectable_prices, but not both.")
+        if service_has_options:
+            _validate_selectable_prices(item, require_quantity=False)
+        else:
+            require_string(item, "price_id", "offer item price_id")
         require_positive_int(item, "quantity", "offer item quantity")
         if item.get("booking_flow") is not None:
             require_enum(item, "booking_flow", {"book_then_pay", "pay_then_book"}, "offer item booking_flow")
@@ -996,27 +1036,7 @@ def _validate_offer_item(document: dict[str, Any], item: dict[str, Any]) -> None
         require_string(item, "price_id", "offer item price_id")
         require_positive_int(item, "quantity", "offer item quantity")
     if has_selectable_prices:
-        selectable_prices = item.get("selectable_prices")
-        if not isinstance(selectable_prices, list) or not selectable_prices:
-            raise DocumentValidationError("selectable_prices must be a non-empty array.")
-        selectable_price_ids = set()
-        for price in selectable_prices:
-            if not isinstance(price, dict):
-                raise DocumentValidationError("Each selectable price must be an object.")
-            require_string(price, "price_id", "selectable price price_id")
-            require_positive_int(price, "quantity", "selectable price quantity")
-            optional_string(price, "label", "selectable price label")
-            optional_string(price, "badge", "selectable price badge")
-            optional_string(price, "description", "selectable price description")
-            optional_string(price, "image_url", "selectable price image_url")
-            optional_non_negative_int(price, "display_discount_pct", "selectable price display_discount_pct")
-            if price.get("price_id") in selectable_price_ids:
-                raise DocumentValidationError(f"Duplicate selectable price_id '{price.get('price_id')}'.")
-            selectable_price_ids.add(price.get("price_id"))
-        if not selectable_price_ids:
-            raise DocumentValidationError("selectable_prices must include at least one price_id.")
-        if item.get("default_price_id") not in selectable_price_ids:
-            raise DocumentValidationError("default_price_id must reference one of selectable_prices.")
+        _validate_selectable_prices(item, require_quantity=True)
 
 
 def validate_purchase_opportunities(document: dict[str, Any], opportunities: list[Any]) -> None:

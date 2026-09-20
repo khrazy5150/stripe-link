@@ -177,7 +177,15 @@
                     <p>{{ row.service_id }}</p>
                   </div>
                 </header>
-                <label class="offer-field">
+                <label v-if="servicePricesFor(row.service_id).length > 1" class="offer-field">
+                  <span>Item Mode</span>
+                  <select v-model="row.mode">
+                    <option value="fixed">Fixed price</option>
+                    <option value="selectable">Buyer chooses</option>
+                  </select>
+                </label>
+
+                <label v-if="row.mode !== 'selectable'" class="offer-field">
                   <span>Price</span>
                   <select v-model="row.price_id">
                     <option v-for="price in servicePricesFor(row.service_id)" :key="price.price_id" :value="price.price_id">
@@ -188,6 +196,31 @@
                     This service has more than one price. The landing page sells the one chosen here.
                   </small>
                 </label>
+
+                <div v-if="row.mode === 'selectable'" class="selectable-price-list">
+                  <div class="selectable-price-heading">
+                    <span>Selectable Prices</span>
+                    <small>Default price must be one of the selected options.</small>
+                  </div>
+                  <label v-for="price in servicePricesFor(row.service_id)" :key="price.price_id" class="selectable-price-row">
+                    <input
+                      type="checkbox"
+                      :checked="row.selectable_price_ids.includes(price.price_id)"
+                      @change="toggleServicePrice(row, price.price_id)"
+                    />
+                    <span>{{ servicePriceOptionLabel(price) }}</span>
+                    <input
+                      v-model.trim="row.labels[price.price_id]"
+                      type="text"
+                      placeholder="Label"
+                      aria-label="Selectable price label"
+                    />
+                    <label class="default-price-choice">
+                      <input v-model="row.default_price_id" type="radio" :value="price.price_id" />
+                      <span>Default</span>
+                    </label>
+                  </label>
+                </div>
                 <label v-if="form.service_selection === 'choice' && serviceEditRows.length > 1" class="default-price-choice">
                   <input v-model="form.default_service_id" type="radio" :value="row.service_id" />
                   <span>Default</span>
@@ -622,6 +655,32 @@ const profileBrands = computed(() => profileStore.brands);
 function serviceObjFor(serviceId) {
   return servicesStore.services.find((s) => s.service_id === serviceId) || null;
 }
+// One shape for a service row, built in three places (selector, load, reset). A row missing `labels` or
+// `selectable_price_ids` throws the moment the template renders a checkbox against it.
+function serviceRow(serviceId, saved = {}) {
+  const prices = servicePricesFor(serviceId);
+  const selectable = (saved.selectable_prices || []).map((option) => option.price_id).filter(Boolean);
+  const fallback = serviceObjFor(serviceId)?.default_price_id || prices[0]?.price_id || "";
+  return {
+    service_id: serviceId,
+    price_id: saved.price_id || fallback,
+    mode: selectable.length ? "selectable" : "fixed",
+    selectable_price_ids: selectable.length ? selectable : prices.map((price) => price.price_id).filter(Boolean),
+    default_price_id: saved.default_price_id || saved.price_id || fallback,
+    labels: Object.fromEntries((saved.selectable_prices || []).map((option) => [option.price_id, option.label || ""])),
+  };
+}
+
+function toggleServicePrice(row, priceId) {
+  if (row.selectable_price_ids.includes(priceId)) {
+    row.selectable_price_ids = row.selectable_price_ids.filter((id) => id !== priceId);
+    if (row.default_price_id === priceId) row.default_price_id = row.selectable_price_ids[0] || "";
+  } else {
+    row.selectable_price_ids.push(priceId);
+    if (!row.default_price_id) row.default_price_id = priceId;
+  }
+}
+
 function servicePricesFor(serviceId) {
   const s = serviceObjFor(serviceId);
   if (!s) return [];
@@ -1133,10 +1192,10 @@ function applyProductSelection() {
   selectedProductIds.value = selectedIds.filter((id) => productIdSet.has(id));
   const serviceIds = selectedIds.filter((id) => !productIdSet.has(id));
   form.services = serviceIds.length
-    ? serviceIds.map((serviceId) => ({
-        service_id: serviceId,
-        price_id: serviceObjFor(serviceId)?.default_price_id || servicePricesFor(serviceId)[0]?.price_id || "",
-      }))
+    ? serviceIds.map((serviceId) => {
+        const existing = (form.services || []).find((row) => row.service_id === serviceId);
+        return existing || serviceRow(serviceId);
+      })
     : [{ service_id: "", price_id: "" }];
   // Booking flow is offer-level (one payment posture); seed it from the first service chosen.
   if (serviceIds.length) form.service_booking_flow = serviceObjFor(serviceIds[0])?.booking_flow || "pay_then_book";
@@ -1468,9 +1527,21 @@ function buildOfferDocument() {
   for (const row of serviceRows.value) {
     const servicePrice = servicePricesFor(row.service_id).find((p) => p.price_id === row.price_id);
     serviceContexts.push(servicePrice?.context || "standard");
+    const selectable = row.mode === "selectable"
+      ? (row.selectable_price_ids || []).filter((id) => servicePricesFor(row.service_id).some((p) => p.price_id === id))
+      : [];
     items.push(cleanObject({
       service_id: row.service_id,
-      price_id: row.price_id,
+      // A selectable item is addressed by its options, not by one price_id; keeping both would leave two
+      // answers to "what does this sell" with nothing forcing them to agree.
+      price_id: selectable.length ? undefined : row.price_id,
+      selectable_prices: selectable.length
+        ? selectable.map((priceId) => cleanObject({
+            price_id: priceId,
+            label: row.labels?.[priceId] || servicePriceOptionLabel(servicePricesFor(row.service_id).find((p) => p.price_id === priceId)),
+          }))
+        : undefined,
+      default_price_id: selectable.length ? (selectable.includes(row.default_price_id) ? row.default_price_id : selectable[0]) : undefined,
       quantity: 1,
       booking_flow: form.service_booking_flow || "pay_then_book",
     }));
@@ -1594,7 +1665,7 @@ function loadOfferIntoForm(offer) {
   selectedProductIds.value = [...new Set([...items.map((item) => item.product_id), ...funnelProductIds].filter(Boolean))];
   const serviceItems = items.filter((item) => item.service_id);
   if (serviceItems.length) {
-    form.services = serviceItems.map((item) => ({ service_id: item.service_id, price_id: item.price_id || "" }));
+    form.services = serviceItems.map((item) => serviceRow(item.service_id, item));
     form.service_booking_flow = serviceItems[0].booking_flow || "pay_then_book";
     form.service_booking_mode = offer.service_booking_mode || "single_visit";
     // Absent means bundle, exactly as the renderer and resolver read it -- so loading an offer written
