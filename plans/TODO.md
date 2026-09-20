@@ -952,6 +952,28 @@ nothing. The code also self-heals on save, so a Site created before this correct
   and `jbay.page/poliaxis-nutrition` stay 404 until it is reactivated. That is the sunset feature working,
   not the collision.
 
+### ⭐ HIGH — a recurring SERVICE price silently charges once (found 2026-09-20)
+
+Plan: **plans/RECURRING_SERVICES.md**. Proven, not suspected:
+
+```
+service price says:   pricing_model=recurring, monthly
+resolved line says:   recurring = None
+Stripe session mode:  payment  ->  charged ONCE
+```
+
+`resolve_service_offer_item` never applies `recurring_terms(price)` (the PRODUCT resolver does), and
+`validate_service` accepts a recurring service price. The only thing preventing a mis-charge is the pricing
+dropdown offering one option — the same "two things that must agree with nothing forcing them to" shape as
+the product recurring bug of 2026-09-15.
+
+**Fix this whether or not recurring services are ever built:** either the validator refuses `recurring` on a
+service price, or the resolver honours it. Doing neither is the one outcome that can charge someone wrongly.
+
+Also corrects a stale note: plans/BOOKING_AS_PRIMITIVE.md says "no code yet". Appointments already use the
+canonical `services[]` shape, with slot locks, manage/cancel/reschedule tokens and real Google Calendar sync.
+What does not exist is anything producing appointments OVER TIME.
+
 ### LOW — a draft page's Site URL serves a raw CloudFront 403 (found 2026-09-18)
 
 Noticed while verifying the new edge error page. A page attached to a Site but still a DRAFT has no published
