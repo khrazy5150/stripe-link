@@ -350,3 +350,23 @@ class PublishedPageTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SelectablePriceLabelTests(unittest.TestCase):
+    """Two cards both titled "1 Item" hide the only difference that matters.
+
+    Offering a one-time price alongside a subscription is the main reason to turn on "Buyer chooses", and the
+    seeded label for every option was the quantity -- so the buyer saw "1 Item $39.00" next to "1 Item
+    $32.91/day" and had to read the suffix to find the difference the cards existed to present.
+    """
+
+    OFFERS = pathlib.Path(__file__).resolve().parents[1] / "dashboard/src/components/Offers.vue"
+
+    def test_a_repeating_option_is_named_by_its_frequency(self):
+        block = self.OFFERS.read_text(encoding="utf-8").split("function selectablePriceDefaultLabel", 1)[1][:900]
+        self.assertIn("Every ${recurring.interval}", block)
+        self.assertIn("Every ${count} ${recurring.interval}s", block)
+
+    def test_a_one_time_option_still_reads_as_a_quantity(self):
+        block = self.OFFERS.read_text(encoding="utf-8").split("function selectablePriceDefaultLabel", 1)[1][:900]
+        self.assertIn('"Item" : "Items"', block)

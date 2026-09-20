@@ -1855,6 +1855,14 @@ function servicePriceOptionLabel(price) {
 }
 
 function selectablePriceDefaultLabel(price) {
+  // A repeating option is named by its FREQUENCY, not by a quantity. Pairing a one-time price with a
+  // subscription is the main reason to offer a choice at all, and defaulting both cards to "1 Item" hides
+  // the very difference the buyer is being asked to choose between. Still editable; this is just the seed.
+  const recurring = price?.pricing_model === "recurring" ? price.recurring : null;
+  if (recurring?.interval) {
+    const count = Number(recurring.interval_count || 1);
+    return count > 1 ? `Every ${count} ${recurring.interval}s` : `Every ${recurring.interval}`;
+  }
   const quantity = Number(price?.quantity || 1);
   return `${quantity} ${quantity === 1 ? "Item" : "Items"}`;
 }
