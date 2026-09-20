@@ -136,10 +136,29 @@ from different places would need several parcels by definition; defer until a pr
 
 - Tracking number into the order-status email; tracking webhook or poll.
 
-### P4 — the other three providers
+### P4 — the other providers, in the order we can prove them
 
-Behind the same interface. EasyPost is closest to Shippo; ShipStation needs basic-auth and has a different
-label flow; Easyship is the least similar. The legacy file has working call shapes for all three.
+**Gated on being testable without spending money.** Only two of the four can be:
+
+| Provider | Test mode | Verifiable free? |
+|---|---|---|
+| Shippo | the API KEY carries it; test token, free test labels, production host | yes — P1 |
+| EasyPost | same shape; free test key on signup | yes — P4a |
+| ShipStation | `"testLabel": true` in the request, but the API needs a real (paid) account first | no |
+| Easyship | unknown. The legacy adapter reads `test_mode` and never applies it to any request | no |
+
+None of the four has a separate sandbox host — all four use production URLs, and test mode is a property
+of the key or the request.
+
+**Shipped as a gate, not a promise** (`domain/shipping.py`): `GA_PROVIDERS` is the only list a tenant can
+choose from, `mock` is added off-prod so the whole flow can be walked with no account and no spend, and
+the dashboard builds its menu from what the API reports rather than a hardcoded list. Availability lives
+in CODE, not platform config, on purpose: "available" means "the adapter exists and has been exercised",
+and a config flag could switch on a provider whose adapter has never run — the exact failure this
+prevents, wearing the costume of a feature toggle.
+
+ShipStation and Easyship stay off until someone holds a working key. Building them behind a mock would
+produce code that looks finished and has never been true — twice this codebase's cost already.
 
 ### PE — estimated shipping at pricing time ("Calculate Price")
 

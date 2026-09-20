@@ -1,5 +1,8 @@
+import os
+
 from stripe_link.common import error_response, json_response, parse_json_body, tenant_id_from_event
 from stripe_link.domain.documents import DocumentValidationError, validate_shipping_config
+from stripe_link.domain.shipping import ProviderNotAvailable, assert_provider_available, selectable_providers
 from stripe_link.kms_secrets import KmsSecretCipher, is_encrypted_secret_ref
 from stripe_link.repositories.documents import RepositoryError, shipping_config_repository
 
@@ -24,10 +27,20 @@ def handler(event, context, repository=None, secret_cipher=None):
         tenant_id = tenant_id_from_event(event)
         if not tenant_id:
             return error_response("tenant_id is required.", code="missing_tenant")
+        available = list(selectable_providers(os.environ.get("ENVIRONMENT", "")))
         config = repository.get(tenant_id)
         if not config:
-            return error_response("Shipping config not found.", status_code=404, code="not_found")
-        return json_response({"shipping_config": redact_shipping_config(config)})
+            # Still hand back the provider list: a tenant with no config yet is exactly who needs to know
+            # which providers they may choose.
+            return json_response({
+                "error": "not_found",
+                "message": "Shipping config not found.",
+                "available_providers": available,
+            }, status_code=404)
+        return json_response({
+            "shipping_config": redact_shipping_config(config),
+            "available_providers": available,
+        })
     return error_response(f"Unsupported method '{method}'.", status_code=405, code="method_not_allowed")
 
 
@@ -38,8 +51,14 @@ def save_shipping_config(event, repository, secret_cipher):
         existing = repository.get(tenant_id) if tenant_id else None
         document = prepare_provider_secret(document, existing, secret_cipher)
         validate_shipping_config(document)
+        # Availability is a rollout question, not a document-shape one: the schema still ALLOWS every
+        # provider name, so a document written before a provider was withdrawn still validates. What is
+        # refused is a tenant selecting one whose adapter does not exist yet.
+        assert_provider_available((document.get("provider") or {}).get("name"), os.environ.get("ENVIRONMENT", ""))
         saved = repository.put(document)
         return json_response({"shipping_config": redact_shipping_config(saved)}, status_code=201)
+    except ProviderNotAvailable as exc:
+        return error_response(str(exc), code="provider_not_available")
     except (DocumentValidationError, ValueError, RepositoryError) as exc:
         return error_response(str(exc), code="invalid_shipping_config")
 

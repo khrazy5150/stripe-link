@@ -226,7 +226,13 @@ export async function apiRequest(path, { method = "GET", body, params = {}, mode
   const text = await response.text();
   const payload = text ? JSON.parse(text) : {};
   if (!response.ok) {
-    throw new Error(payload.message || payload.error || `Request failed with ${response.status}`);
+    const failure = new Error(payload.message || payload.error || `Request failed with ${response.status}`);
+    // Carry the parsed body and status with the error. Some failures are informative rather than fatal --
+    // a 404 from GET /shipping still tells a tenant which providers they may choose -- and a caller that
+    // only gets a message string has to re-request to find out.
+    failure.status = response.status;
+    failure.body = payload;
+    throw failure;
   }
   return payload;
 }
