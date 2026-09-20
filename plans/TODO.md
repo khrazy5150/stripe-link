@@ -2,6 +2,30 @@
 
 Deferred, non-blocking follow-ups. Each item notes what, why it was deferred, and where to fix it.
 
+## Shipping
+
+### Wire the shipping providers (Shippo first)
+- **What:** the module supports four providers in its schema and its `<select>` -- shippo, easypost,
+  shipstation, easyship -- and **none of them is wired**. There is no provider code at all: not one HTTP
+  call to any of them. Design: **`plans/SHIPPING_PROVIDERS.md`** (written 2026-09-20).
+- **Built and good, do not rewrite:** `ShippingConfig.schema.json` is complete; `handlers/shipping.py` does
+  KMS key encryption, preserve-on-unchanged, drop-on-provider-change and redact-on-read -- better than the
+  legacy implementation; `Shipping.vue` is a full settings form.
+- **The blocking gap, and it is not in the shipping module:** `order_record_from_session` never reads
+  `shipping_details` off the Stripe session, so **no order in either environment has a destination
+  address** and no label can be bought for any of them. Checkout does collect one (US + CA, payment mode).
+- **Also missing:** `connection_status` can never say `connected` (nothing tests it, and there is no test
+  endpoint); no rates/labels/tracking routes; no shipment/label document, so no idempotency to stop a
+  double-click buying two labels; and no Stripe `shipping_options` anywhere, so shipping is silently free
+  on every order ever placed.
+- **Legacy:** `../stripe-cart` has real Shippo REST call shapes worth reading
+  (`layers/shipping/python/shipping_providers.py`) but the code cannot be copied -- it is built on
+  `requests` in a Lambda layer, and `src/requirements.txt` here is deliberately empty. Its own plan's
+  "Known gaps" says it was never finished, and it stores API keys unencrypted.
+- **Four decisions before any code** (plan ??Decisions needed??): post-purchase labels only for P1; one
+  shipment doc per order vs a list; tenant picks a rate vs auto-pick; whether `test_mode` is independent of
+  the platform env (mirrors `plans/STRIPE_MODE_DECOUPLING.md`).
+
 ## Services / Booking
 
 ### Tomorrow (2026-09-21): first booking ever made in stripe-link, + the plan link
