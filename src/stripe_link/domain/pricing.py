@@ -3,7 +3,12 @@ from dataclasses import dataclass
 from typing import Any
 
 from stripe_link.domain import tips
-from stripe_link.domain.opportunities import STAGE_LANDING, stage_opportunities
+from stripe_link.domain.opportunities import (
+    SERVICE_SELECTION_CHOICE,
+    STAGE_LANDING,
+    service_selection,
+    stage_opportunities,
+)
 from stripe_link.domain.booking_credits import bookings_per_cycle
 from stripe_link.domain.service_pricing import resolve_service_price, service_booking_flow
 
@@ -419,11 +424,36 @@ def recurring_terms(price: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def chosen_service_item(
+    items: list[dict[str, Any]],
+    selected_service_id: str = "",
+    default_service_id: str = "",
+) -> dict[str, Any] | None:
+    """The ONE service item a choice-mode offer sells.
+
+    The buyer's pick wins; then the offer's default; then the first service listed. Never nothing when
+    services exist -- a page whose CTA arrives without a selection (clicked before the JS ran, or a link
+    shared without one) must still charge the option the page shows checked, which is the same order the
+    renderer uses to decide which card is checked.
+    """
+    services = [item for item in items if item.get("service_id")]
+    if not services:
+        return None
+    for wanted in (selected_service_id, default_service_id):
+        if not wanted:
+            continue
+        for item in services:
+            if str(item.get("service_id")) == str(wanted):
+                return item
+    return services[0]
+
+
 def resolve_offer(
     offer: dict[str, Any],
     products_by_id: dict[str, dict[str, Any]],
     selected_prices: dict[str, str] | None = None,
     services_by_id: dict[str, dict[str, Any]] | None = None,
+    selected_service_id: str = "",
 ) -> dict[str, Any]:
     offer_status = offer.get("status") or ("active" if offer.get("active") is True else "archived")
     if offer_status != "active":
@@ -434,8 +464,21 @@ def resolve_offer(
     allowed_price_contexts = eligibility.get("allowed_price_contexts") or [offer_context]
     services_by_id = services_by_id or {}
 
+    landing_items = list(stage_opportunities(offer, STAGE_LANDING))
+    # CHOICE: the offer's services are alternatives, so exactly one is charged. BUNDLE (the default, and
+    # what every offer written before service_selection existed means) charges all of them -- "massage +
+    # facial in one visit" (plans/SERVICE_CHOICE.md).
+    if service_selection(offer) == SERVICE_SELECTION_CHOICE:
+        keep = chosen_service_item(
+            landing_items, selected_service_id, str(offer.get("default_service_id") or ""),
+        )
+        landing_items = [
+            item for item in landing_items
+            if not item.get("service_id") or item is keep
+        ]
+
     resolved_items: list[ResolvedOfferItem] = []
-    for item in stage_opportunities(offer, STAGE_LANDING):
+    for item in landing_items:
         service_id = str(item.get("service_id") or "")
         if service_id:
             service = services_by_id.get(service_id)

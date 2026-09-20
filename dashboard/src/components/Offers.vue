@@ -148,14 +148,26 @@
                   <option value="book_then_pay">Book first, pay later</option>
                 </select>
               </label>
-              <label v-if="scheduledServiceCount > 1" class="offer-field">
+              <label v-if="scheduledServiceCount > 1 && form.service_selection !== 'choice'" class="offer-field">
                 <span>Scheduling</span>
                 <select v-model="form.service_booking_mode">
                   <option value="single_visit">One combined visit</option>
                   <option value="separate_visits">Separate visits</option>
                 </select>
               </label>
+              <label v-if="serviceEditRows.length > 1" class="offer-field">
+                <span>Item Mode</span>
+                <select v-model="form.service_selection">
+                  <option value="bundle">All of them (bundle)</option>
+                  <option value="choice">Buyer chooses one</option>
+                </select>
+              </label>
             </div>
+            <p v-if="serviceEditRows.length > 1" class="offer-hint">
+              {{ form.service_selection === "choice"
+                ? "The landing page shows these as alternatives and charges only the one the buyer picks — a 60, 90 or 120 minute massage."
+                : "All of these are sold together in one purchase — a massage AND a facial." }}
+            </p>
 
             <div v-if="serviceEditRows.length" class="offer-items-list">
               <article v-for="row in serviceEditRows" :key="row.service_id" class="offer-item-editor">
@@ -175,6 +187,10 @@
                   <small v-if="servicePricesFor(row.service_id).length > 1">
                     This service has more than one price. The landing page sells the one chosen here.
                   </small>
+                </label>
+                <label v-if="form.service_selection === 'choice' && serviceEditRows.length > 1" class="default-price-choice">
+                  <input v-model="form.default_service_id" type="radio" :value="row.service_id" />
+                  <span>Default</span>
                 </label>
               </article>
             </div>
@@ -1030,6 +1046,10 @@ function defaultOfferForm() {
     services: [{ service_id: "", price_id: "" }],
     service_booking_flow: "pay_then_book",
     service_booking_mode: "single_visit",
+    // "bundle" is the default for the same reason the document's absent field means bundle: it is what
+    // every offer already means, and a new offer must not quietly behave differently from an old one.
+    service_selection: "bundle",
+    default_service_id: "",
     discount: {
       mode: "none",
       coupon_id: "",
@@ -1493,8 +1513,15 @@ function buildOfferDocument() {
     stripe_mode: getStripeMode(),
     items,
     purchase_opportunities: purchaseOpportunities,
-    // Only meaningful with 2+ scheduled services; omit otherwise to keep the document clean.
-    service_booking_mode: scheduledServiceCount.value > 1 ? form.service_booking_mode : undefined,
+    // Only meaningful with 2+ scheduled services; omit otherwise to keep the document clean. A CHOICE
+    // offer charges exactly one service, so there is never more than one visit to coordinate.
+    service_booking_mode: (scheduledServiceCount.value > 1 && form.service_selection !== "choice")
+      ? form.service_booking_mode : undefined,
+    // Absent means bundle. Only written when the tenant actually picked "buyer chooses" AND there is more
+    // than one service to choose between, so a single-service offer never carries a meaningless field.
+    service_selection: (serviceRows.value.length > 1 && form.service_selection === "choice") ? "choice" : undefined,
+    default_service_id: (serviceRows.value.length > 1 && form.service_selection === "choice")
+      ? (form.default_service_id || serviceRows.value[0]?.service_id || "") : undefined,
     discount: buildDiscountBlock(),
     eligibility: {
       // order_bump is PRE-purchase (it rides the initial checkout as a Stripe optional_item), so it does NOT
@@ -1570,6 +1597,10 @@ function loadOfferIntoForm(offer) {
     form.services = serviceItems.map((item) => ({ service_id: item.service_id, price_id: item.price_id || "" }));
     form.service_booking_flow = serviceItems[0].booking_flow || "pay_then_book";
     form.service_booking_mode = offer.service_booking_mode || "single_visit";
+    // Absent means bundle, exactly as the renderer and resolver read it -- so loading an offer written
+    // before this field existed cannot flip it into a choice.
+    form.service_selection = offer.service_selection === "choice" ? "choice" : "bundle";
+    form.default_service_id = offer.default_service_id || "";
     if (!servicesStore.loaded && !servicesStore.loading) servicesStore.load();
   }
   Object.keys(itemConfigs).forEach((key) => delete itemConfigs[key]);

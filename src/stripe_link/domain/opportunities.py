@@ -120,3 +120,19 @@ def derived_offer_type(offer: dict[str, Any]) -> str:
     if kind == "carousel":
         return "listicle"
     return "single"
+
+
+SERVICE_SELECTION_BUNDLE = "bundle"
+SERVICE_SELECTION_CHOICE = "choice"
+
+
+def service_selection(offer: dict[str, Any]) -> str:
+    """Whether an offer's services are all bought together, or the buyer picks one.
+
+    Absent means BUNDLE, which is what every offer written before this field meant: several services in one
+    offer are charged together and coordinated by service_booking_mode. Never infer "choice" from the shape
+    of the items -- two services in one visit is a real offer, and guessing would silently change what a
+    published page charges (plans/SERVICE_CHOICE.md).
+    """
+    value = str((offer or {}).get("service_selection") or "").strip().lower()
+    return SERVICE_SELECTION_CHOICE if value == SERVICE_SELECTION_CHOICE else SERVICE_SELECTION_BUNDLE

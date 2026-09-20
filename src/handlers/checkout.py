@@ -70,6 +70,10 @@ def handler(
     offer_id = str(params.get("offer") or params.get("offer_id") or "").strip()
     product_id = str(params.get("product_id") or "").strip()
     price_id = str(params.get("price_id") or "").strip()
+    # Which SERVICE the buyer picked on a choice offer. Service cards carry an EMPTY product_id, so without
+    # this the selection was invisible here and every service in the offer was charged
+    # (plans/SERVICE_CHOICE.md).
+    service_id = str(params.get("service_id") or "").strip()
     page_id = str(params.get("page_id") or "").strip()
     success_url = str(params.get("success_url") or "").strip()
     cancel_url = str(params.get("cancel_url") or "").strip()
@@ -144,7 +148,10 @@ def handler(
                     products_by_id[bump_product_id] = bump_product
         services_by_id = load_offer_services(tenant_id, offer, services_repo)
         selected_prices = {product_id: price_id} if product_id and price_id else {}
-        resolved = resolve_offer(offer, products_by_id, selected_prices, services_by_id=services_by_id)
+        resolved = resolve_offer(
+            offer, products_by_id, selected_prices,
+            services_by_id=services_by_id, selected_service_id=service_id,
+        )
         apply_tip_amount(
             resolved, products_by_id,
             amount=tip_amount, source=tip_source, recurring=tip_recurring, tenant_id=tenant_id,

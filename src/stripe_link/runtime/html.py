@@ -20,8 +20,17 @@ from stripe_link.domain.social_links import section_link_entries as social_secti
 from stripe_link.domain.social_links import linkable_on_platform_host
 from stripe_link.domain.social_links import is_adult_host, network_glyph, network_label
 from stripe_link.domain.social_links import verified_urls as verified_same_as_urls
-from stripe_link.domain.opportunities import STAGE_LANDING, STAGE_POST_PURCHASE, derived_offer_type, stage_opportunities
-from stripe_link.domain.pricing import PricingError, expand_offer, find_price, resolve_offer, single_unit_price
+from stripe_link.domain.opportunities import (
+    SERVICE_SELECTION_CHOICE,
+    STAGE_LANDING,
+    STAGE_POST_PURCHASE,
+    derived_offer_type,
+    service_selection,
+    stage_opportunities,
+)
+from stripe_link.domain.pricing import (
+    PricingError, chosen_service_item, expand_offer, find_price, resolve_offer, single_unit_price,
+)
 from stripe_link.domain.semantic import is_bundle, resolve_semantic_model, subject_from_model
 from stripe_link.domain.reviews import aggregate_reviews, markup_eligible
 from stripe_link.domain.image_crop import crop_style_vars
@@ -3058,9 +3067,15 @@ def render_hero(
     ])
 
 
-def render_service_price_card(item, service_id, services_by_id, offer, display_index):
+def render_service_price_card(item, service_id, services_by_id, offer, display_index,
+                              *, group_name="", is_default=True):
     """A single landing-page price card for a service offer item, sourced from the service's own
-    prices[] (the fixed price_id path). Carries data-service-id so checkout resolves the service."""
+    prices[] (the fixed price_id path). Carries data-service-id so checkout resolves the service.
+
+    `group_name` and `is_default` exist for CHOICE offers, where the services are alternatives: every card
+    shares one radio group and exactly one is checked. A BUNDLE keeps a group per service and every card
+    checked, because there every service is charged and the radio is decorative (plans/SERVICE_CHOICE.md).
+    """
     service = services_by_id.get(service_id)
     if service is None:
         raise RenderError(f"Service '{service_id}' was not provided for offer '{offer.get('offer_id', '')}'.")
@@ -3079,7 +3094,7 @@ def render_service_price_card(item, service_id, services_by_id, offer, display_i
     if not savings_pct and compare_at_unit_amount:
         savings_pct = discount_pct(amount, int(compare_at_unit_amount))
     card_markup = "\n".join([
-        f"      <article class=\"sl-price-option\" data-service-id=\"{escape(service_id)}\" data-product-id=\"\" data-price-id=\"{escape(price_id)}\" data-quantity=\"{checkout_quantity}\" data-default=\"true\" data-sale-amount=\"{amount}\" data-regular-amount=\"{int(compare_at_unit_amount) if compare_at_unit_amount else ''}\" data-currency=\"{escape(currency)}\" data-label=\"{label}\">",
+        f"      <article class=\"sl-price-option\" data-service-id=\"{escape(service_id)}\" data-product-id=\"\" data-price-id=\"{escape(price_id)}\" data-quantity=\"{checkout_quantity}\" data-default=\"{'true' if is_default else 'false'}\" data-sale-amount=\"{amount}\" data-regular-amount=\"{int(compare_at_unit_amount) if compare_at_unit_amount else ''}\" data-currency=\"{escape(currency)}\" data-label=\"{label}\">",
         "        " + responsive_img(image_url, str(service.get("name") or label), sizes=PRICE_OPTION_SIZES) if image_url else "",
         "        <div class=\"sl-price-copy\">",
         f"          <strong title=\"{label}\">{label}</strong>",
@@ -3092,7 +3107,7 @@ def render_service_price_card(item, service_id, services_by_id, offer, display_i
         f"            <span class=\"sl-savings\">Save {int(savings_pct)}%</span>" if savings_pct else "",
         "          </div>",
         "        </div>",
-        f"        <input type=\"radio\" name=\"sl-price-{escape(service_id)}\" value=\"{escape(price_id)}\" aria-label=\"{label}, {escape(format_money(amount, currency))}{escape(recurring_suffix(price))}\" checked>",
+        f"        <input type=\"radio\" name=\"{escape(group_name or f'sl-price-{service_id}')}\" value=\"{escape(price_id)}\" aria-label=\"{label}, {escape(format_money(amount, currency))}{escape(recurring_suffix(price))}\" {'checked' if is_default else ''}>",
         "      </article>",
     ])
     return (landing_page_price_sort_key(price, item, display_index), card_markup)
@@ -3427,10 +3442,22 @@ def render_offer_price_selector(
     services_by_id = services_by_id or {}
     cards: list[tuple[tuple[int, int, int], str]] = []
     display_index = 0
-    for item in stage_opportunities(offer, STAGE_LANDING):
+    landing_items = list(stage_opportunities(offer, STAGE_LANDING))
+    # In a CHOICE offer the services are alternatives, so they share one radio group and exactly one card is
+    # checked -- the same item resolve_offer() would charge for a CTA that arrives with no selection, so the
+    # page and the checkout agree on the default (plans/SERVICE_CHOICE.md).
+    choosing = service_selection(offer) == SERVICE_SELECTION_CHOICE
+    default_service_item = chosen_service_item(
+        landing_items, "", str(offer.get("default_service_id") or ""),
+    ) if choosing else None
+    for item in landing_items:
         service_id = item.get("service_id", "")
         if service_id:
-            card = render_service_price_card(item, service_id, services_by_id, offer, display_index)
+            card = render_service_price_card(
+                item, service_id, services_by_id, offer, display_index,
+                group_name="sl-service-choice" if choosing else "",
+                is_default=(item is default_service_item) if choosing else True,
+            )
             if card is not None:
                 cards.append(card)
                 display_index += 1
@@ -7549,12 +7576,17 @@ def render_page_interactions_script(page: dict[str, Any]) -> str:
         "        const params = new URLSearchParams();",
         "        const productId = card?.dataset.productId || cta.dataset.checkoutProductId || '';",
         "        const priceId = card?.dataset.priceId || cta.dataset.checkoutPriceId || '';",
+        # Which SERVICE the buyer picked. A choice offer's cards are alternatives, and without this the
+        # checkout could not tell them apart: the service cards carry data-service-id with an EMPTY
+        # data-product-id, so product_id/price_id alone said nothing about which one was selected.
+        "        const serviceId = card?.dataset.serviceId || '';",
         "        const quantity = card?.dataset.quantity || cta.dataset.checkoutQuantity || '1';",
         "        if (cta.dataset.checkoutTenantId) params.set('clientID', cta.dataset.checkoutTenantId);",
         "        if (cta.dataset.checkoutOfferId) params.set('offer', cta.dataset.checkoutOfferId);",
         "        if (cta.dataset.checkoutPageId) params.set('page_id', cta.dataset.checkoutPageId);",
         "        params.set('mode', cta.dataset.checkoutMode || 'test');",
         "        if (productId) params.set('product_id', productId);",
+        "        if (serviceId) params.set('service_id', serviceId);",
         "        if (priceId) params.set('price_id', priceId);",
         "        if (quantity) params.set('quantity', quantity);",
         # A TIP JAR line has no per-amount Stripe price: the buyer's choice travels as tip_amount and the

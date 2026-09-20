@@ -1061,6 +1061,14 @@ def validate_offer_document(document: dict[str, Any]) -> None:
     # into one appointment; separate_visits gives each its own). Optional; defaults to single_visit.
     if document.get("service_booking_mode") is not None:
         require_enum(document, "service_booking_mode", {"single_visit", "separate_visits"}, "Offer service_booking_mode")
+    # Several services in one offer has always meant a BUNDLE -- all of them charged, the visit(s)
+    # coordinated by service_booking_mode above. "choice" is the other reading: the buyer picks ONE.
+    # Absent means bundle, so every offer written before this existed keeps its meaning untouched
+    # (plans/SERVICE_CHOICE.md).
+    if document.get("service_selection") is not None:
+        require_enum(document, "service_selection", {"bundle", "choice"}, "Offer service_selection")
+    if document.get("default_service_id") is not None:
+        require_string(document, "default_service_id", "Offer default_service_id")
     validate_offer_funnel(document)
     # New model (purchase_opportunities) is the source of truth when present; otherwise validate legacy items.
     # An offer must carry one or the other (plans/OFFER_MODEL_REDESIGN.md).
