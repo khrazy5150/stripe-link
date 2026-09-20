@@ -22,9 +22,20 @@ Deferred, non-blocking follow-ups. Each item notes what, why it was deferred, an
   (`layers/shipping/python/shipping_providers.py`) but the code cannot be copied -- it is built on
   `requests` in a Lambda layer, and `src/requirements.txt` here is deliberately empty. Its own plan's
   "Known gaps" says it was never finished, and it stores API keys unencrypted.
-- **Four decisions before any code** (plan ??Decisions needed??): post-purchase labels only for P1; one
+- **Also planned: "Calculate Price"** -- estimated shipping folded into the price at pricing time, feeding
+  the EXISTING `calculate_price()` gross-up in `domain/fees.py` as one more component of
+  `tenant_keyed_amount`. Same mechanism as Net-Guaranteed, not an analogy to it. Needs the packer, and
+  needs zone sampling because there is no destination at pricing time -- an estimate is a distribution, not
+  a number. Treated as a HYPOTHESIS: record estimate vs actual from the first label onward (it cannot be
+  backfilled) and expect to replace the strategy after measuring.
+- **Bundles are a packing problem, not a shipping one.** Weight is additive, dimensions are not. Decided:
+  volume-fit into a box catalog, falling back to one parcel per item. The packer is shared by label buying
+  and estimation, so it is built once in P1.
+- **Eight decisions before any code** (plan ??Decisions needed??): post-purchase labels only for P1; one
   shipment doc per order vs a list; tenant picks a rate vs auto-pick; whether `test_mode` is independent of
-  the platform env (mirrors `plans/STRIPE_MODE_DECOUPLING.md`).
+  the platform env (mirrors `plans/STRIPE_MODE_DECOUPLING.md`); default percentile for Calculate Price;
+  the `free_shipping_threshold` double-count rule; who owns the box catalog; whether the buyer ever sees a
+  shipping line.
 
 ## Services / Booking
 
