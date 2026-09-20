@@ -231,6 +231,11 @@ export async function buildServiceDocument(form, base = {}) {
     // Legacy mirror of the default price (the backend keeps this in sync too).
     price: { currency: defaultPrice.currency, unit_amount: defaultPrice.unit_amount },
     booking_flow: SERVICE_BOOKING_FLOWS.includes(form.booking_flow) ? form.booking_flow : "pay_then_book",
+    // Stored only when it means something. Writing it on a one-time service would put a number on the
+    // document that nothing reads and that a later reader would reasonably believe.
+    bookings_per_cycle: prices.some((price) => price.pricing_model === "recurring")
+      ? Math.max(1, Math.round(Number(form.bookings_per_cycle || 1)))
+      : undefined,
     location_mode: LOCATION_MODES.includes(form.location_mode) ? form.location_mode : "onsite",
     active: form.active !== false,
     booking_rules: buildBookingRules(form),
@@ -271,7 +276,11 @@ export async function buildServiceDocument(form, base = {}) {
 // were component-local, which meant the wizard importing them from here built cleanly and would have
 // rendered nothing -- Vite does not fail on a missing named export from a local module.
 export const SERVICE_PRICE_CONTEXTS = [["standard", "Standard"], ["sale", "Sale"], ["flash_sale", "Flash sale"]];
-export const SERVICE_PRICING_MODELS = [["one_time", "One-time"]];
+// Recurring sells a PLAN, not a standing appointment: each paid cycle grants booking credits the customer
+// spends through the ordinary booking flow (plans/RECURRING_SERVICES.md §4b). `customer_chooses` is absent
+// deliberately -- a pay-what-you-want booked service has no implementation, and validate_service refuses it.
+// PricingCard shows the model radio only when there is more than one, so adding this is what reveals it.
+export const SERVICE_PRICING_MODELS = [["one_time", "One-time"], ["recurring", "Recurring"]];
 
 export function locationLabel(mode) {
   return String(mode || "onsite").replace(/\b\w/g, (char) => char.toUpperCase());
@@ -286,6 +295,9 @@ export function defaultServiceForm() {
     default_price_index: 0,
     fulfillment_mode: "scheduled",
     booking_flow: "pay_then_book",
+    // Only meaningful on a recurring service. One is the floor: a subscription granting no bookings is a
+    // product subscription wearing a service's name.
+    bookings_per_cycle: 1,
     duration_minutes: 60,
     location_mode: "onsite",
     hero_image_url: "",

@@ -156,6 +156,19 @@
               :contexts="SERVICE_PRICE_CONTEXTS"
               :pricing-models="SERVICE_PRICING_MODELS"
             />
+
+            <!-- Only when a price actually recurs: on a one-time service this is a number that means
+                 nothing, and a field that means nothing still gets answered. A recurring service sells a
+                 PLAN -- this is how much of it one paid cycle buys. -->
+            <label v-if="hasRecurringPrice" class="offer-field">
+              <span>Bookings included per cycle <strong>*</strong></span>
+              <input v-model.number="form.bookings_per_cycle" type="number" min="1" max="60" step="1" />
+              <small class="services-hint">
+                How many appointments each paid period includes. Unused ones do not carry over, and
+                cancelling a booking gives it back.
+              </small>
+            </label>
+
             <div v-if="form.fulfillment_mode !== 'no_booking'" class="offer-two-column">
               <label class="offer-field">
                 <span>Duration (minutes) <strong>*</strong></span>
@@ -468,6 +481,9 @@ const deletingService = ref(false);
 const formError = ref("");
 const form = ref(defaultServiceForm());
 const wizardOpen = ref(false);
+// Any price recurring makes this a PLAN, which is what gives "bookings per cycle" a meaning.
+const hasRecurringPrice = computed(() =>
+  (form.value.prices || []).some((price) => price.pricing_model === "recurring"));
 const allowedForm = ref(defaultAllowedForm());
 const showAddFulfiller = ref(false);
 const newFulfiller = ref(defaultNewFulfiller());
@@ -661,6 +677,7 @@ function formFromService(service) {
     prices,
     default_price_index: defaultIndex >= 0 ? defaultIndex : 0,
     fulfillment_mode: service.fulfillment_mode === "no_booking" ? "no_booking" : "scheduled",
+    bookings_per_cycle: Number(service.bookings_per_cycle || 1),
     booking_flow: ["book_then_pay", "pay_then_book"].includes(service.booking_flow) ? service.booking_flow : "pay_then_book",
     duration_minutes: Number(service.duration_minutes || 60),
     location_mode: service.location_mode || "onsite",

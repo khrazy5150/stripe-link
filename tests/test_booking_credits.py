@@ -235,3 +235,55 @@ class PlanBookingTests(unittest.TestCase):
 
         source = inspect.getsource(booking.reserve_route)
         self.assertLess(source.index("slot_locks_repo.claim("), source.index("_spend_plan_credit("))
+
+
+class FormTests(unittest.TestCase):
+    """The tenant-facing half: a service can be made recurring, and asked how much a cycle buys."""
+
+    import pathlib as _pathlib
+
+    DASH = _pathlib.Path(__file__).resolve().parents[1] / "dashboard" / "src"
+    STORE = (DASH / "stores" / "services.js").read_text(encoding="utf-8")
+    WIZARD = (DASH / "components" / "services" / "ServiceWizard.vue").read_text(encoding="utf-8")
+    EDITOR = (DASH / "components" / "Services.vue").read_text(encoding="utf-8")
+
+    def test_the_form_offers_recurring(self):
+        """PricingCard renders the model radio only when there is more than one model, so this single line
+        is what reveals both the radio and the billing-interval block products already had."""
+        self.assertIn('["recurring", "Recurring"]', self.STORE)
+
+    def test_it_does_not_offer_what_the_validator_refuses(self):
+        from stripe_link.domain.documents import SERVICE_PRICING_MODELS
+        import re
+
+        line = [l for l in self.STORE.splitlines() if "export const SERVICE_PRICING_MODELS" in l][0]
+        self.assertTrue(set(re.findall(r'\["(\w+)",', line)) <= SERVICE_PRICING_MODELS)
+
+    def test_bookings_per_cycle_is_asked_in_both_surfaces(self):
+        for name, src in (("wizard", self.WIZARD), ("editor", self.EDITOR)):
+            self.assertIn("form.bookings_per_cycle", src, name)
+            self.assertIn('v-if="hasRecurringPrice"', src, name)
+
+    def test_it_is_only_asked_when_a_price_recurs(self):
+        """On a one-time service the number means nothing -- and a field that means nothing still gets
+        answered, then stored, then believed by whoever reads the document next."""
+        for name, src in (("wizard", self.WIZARD), ("editor", self.EDITOR)):
+            block = src.split("const hasRecurringPrice", 1)[1].split(";", 1)[0]
+            self.assertIn('pricing_model === "recurring"', block, name)
+
+    def test_it_is_only_STORED_when_a_price_recurs(self):
+        build = self.STORE.split("bookings_per_cycle: prices.some", 1)[1].split(",\n", 1)[0]
+        self.assertIn("undefined", build)
+
+    def test_the_saved_shape_passes_the_validator(self):
+        """The whole round trip: what the form builds is what validate_service accepts."""
+        from stripe_link.domain.documents import validate_service
+
+        validate_service({
+            "schema_version": "2026-05-29", "document_type": "service", "tenant_id": "t",
+            "service_id": "svc_1", "name": "Haircut club", "duration_minutes": 45,
+            "bookings_per_cycle": 4, "price": {"currency": "usd", "unit_amount": 12000},
+            "prices": [{"price_id": "p1", "currency": "usd", "unit_amount": 12000,
+                        "pricing_model": "recurring", "recurring": {"interval": "month", "interval_count": 1}}],
+            "default_price_id": "p1", "booking_flow": "pay_then_book", "active": True,
+        })

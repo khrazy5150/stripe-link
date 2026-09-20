@@ -82,6 +82,18 @@
           :contexts="SERVICE_PRICE_CONTEXTS"
           :pricing-models="SERVICE_PRICING_MODELS"
         />
+
+            <!-- Only when a price actually recurs: on a one-time service this is a number that means
+                 nothing, and a field that means nothing still gets answered. A recurring service sells a
+                 PLAN -- this is how much of it one paid cycle buys. -->
+            <label v-if="hasRecurringPrice" class="offer-field">
+              <span>Bookings included per cycle <strong>*</strong></span>
+              <input v-model.number="form.bookings_per_cycle" type="number" min="1" max="60" step="1" />
+              <small class="services-hint">
+                How many appointments each paid period includes. Unused ones do not carry over, and
+                cancelling a booking gives it back.
+              </small>
+            </label>
       </section>
 
       <!-- 5. Duration -->
@@ -325,6 +337,9 @@ onMounted(() => {
 });
 
 const booked = computed(() => form.value.fulfillment_mode !== "no_booking");
+// Any price recurring makes this a PLAN, which is what gives "bookings per cycle" a meaning.
+const hasRecurringPrice = computed(() =>
+  (form.value.prices || []).some((price) => price.pricing_model === "recurring"));
 // Tenant-scoped setup only has to happen ONCE. A second service skips straight past it.
 const availabilityAlreadySet = computed(() => !!tenantAvailability.availability);
 const hasFulfillers = computed(() => (fulfillers.fulfillers || []).length > 0);

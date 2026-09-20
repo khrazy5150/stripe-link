@@ -103,7 +103,7 @@ Each needs an answer before any of 4a is written.
    means the same person, which the current per-appointment assignment does not express.
 6. **Proration and mid-cycle changes.** Stripe handles the money; nothing decides what happens to the visits.
 
-## 6. What 4b actually needs
+## 6. What 4b actually needs  ✅ BUILT 2026-09-20 (dev)
 
 Much shorter, which is the argument for doing it first.
 
@@ -119,6 +119,23 @@ Much shorter, which is the argument for doing it first.
 6. The webhook's `invoice.paid` path refreshes the cycle's credits.
 
 Deliberately **not** in 4b: rollover, proration, standing slots, calendar recurrence.
+
+**All six shipped to dev.** Notes worth carrying into 4a:
+
+- The model radio and the billing-interval block came free — `PricingCard` renders the radio whenever more
+  than one model is offered, and the recurring block whenever one is chosen. Services were passing it a
+  one-item list, so adding `["recurring", "Recurring"]` revealed UI products have had all along.
+- `bookings_per_cycle` is asked and stored **only when a price recurs**. On a one-time service it is a
+  number that means nothing — and a field that means nothing still gets answered, then stored, then believed
+  by whoever reads the document next.
+- The credit is spent **after** the slot lock is claimed, and a failed spend rolls the reservation back, so
+  nobody is charged a visit they did not get or loses a slot they could still pay for.
+- Cancelling returns the credit, capped at the cycle's grant. Not returning it makes cancelling cost a
+  visit, which penalises the considerate and pushes people toward no-shows.
+
+**Not yet exercised against real Stripe.** Nothing here has seen a live subscription renew, which is the same
+gap the author already has open for product subscriptions — and §4b's refill path only runs on a SECOND
+cycle, which no test clock has produced.
 
 ## 7. Order
 
