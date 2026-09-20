@@ -276,6 +276,7 @@ Globals:
         THEMES_TABLE: !Ref ThemesTable
         LEGAL_PAGES_TABLE: !Ref LegalPagesTable
         ABUSE_REPORTS_TABLE: !Ref AbuseReportsTable
+        BOOKING_CREDITS_TABLE: !Ref BookingCreditsTable
         PRODUCT_CATEGORIES_TABLE: !Ref ProductCategoriesTable
         CUSTOM_DOMAINS_TABLE: !Ref CustomDomainsTable
         CALENDAR_CONNECTIONS_TABLE: !Ref CalendarConnectionsTable
@@ -4418,6 +4419,19 @@ Resources:
     Type: AWS::DynamoDB::Table
     Properties:
       TableName: !Sub "${ProjectPrefix}-legal-pages-${Environment}"
+      BillingMode: PAY_PER_REQUEST
+      SSESpecification:
+        SSEEnabled: true
+      AttributeDefinitions: *DocumentAttributeDefinitions
+      KeySchema: *DocumentKeySchema
+      GlobalSecondaryIndexes: *DocumentGlobalSecondaryIndexes
+
+  # What a recurring service subscription grants (plans/RECURRING_SERVICES.md §4b). Its own table: credits
+  # are spent by the booking flow and refilled by the billing webhook, two paths that share nothing else.
+  BookingCreditsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "${ProjectPrefix}-booking-credits-${Environment}"
       BillingMode: PAY_PER_REQUEST
       SSESpecification:
         SSEEnabled: true

@@ -2437,25 +2437,29 @@ def validate_customer(document: dict[str, Any]) -> None:
         require_fields(transaction, ["transaction_id", "type", "created_at"])
 
 
-# What a SERVICE price may be, which is narrower than what a product price may be. Recurring and
-# customer-chooses services are Phase 4 of plans/SERVICES_IN_OFFERS.md and nothing downstream implements
-# them: `resolve_service_offer_item` does not apply `recurring_terms`, so a recurring service price resolved
-# to a ONE-OFF charge and Stripe was asked for a single payment (proven 2026-09-20). The only thing standing
-# between a tenant and a mis-charge was a dropdown offering one option.
+# What a SERVICE price may be, which is narrower than what a product price may be. `customer_chooses` stays
+# out: a pay-what-you-want booked service is Phase 4 of plans/SERVICES_IN_OFFERS.md and nothing implements it.
 #
-# Refused here rather than honoured, deliberately. Honouring it would ship half a feature -- Stripe would
-# bill monthly while nothing created the appointments each cycle pays for. The narrowing has precedent: the
-# same plan already limits a service price's `context` to standard/sale/flash_sale.
-SERVICE_PRICING_MODELS = {"one_time"}
+# `recurring` was refused here too until 2026-09-20, for a good reason -- the resolver did not apply
+# `recurring_terms`, so such a price resolved to a ONE-OFF charge and the customer paid once for something
+# sold monthly. It is admitted now because the rest of the feature exists: the resolver honours it, checkout
+# flips to subscription mode, and each paid cycle grants BOOKING CREDITS the customer spends through the
+# booking flow (plans/RECURRING_SERVICES.md §4b). Widening this constant without those is how the mis-charge
+# comes back.
+SERVICE_PRICING_MODELS = {"one_time", "recurring"}
 
 
 def _validate_service_price(price: dict[str, Any], *, where: str) -> None:
     model = price.get("pricing_model")
     if model is not None and model not in SERVICE_PRICING_MODELS:
         raise DocumentValidationError(
-            f"{where} pricing_model must be one_time. Recurring and customer-chooses services are not "
-            "supported yet (plans/RECURRING_SERVICES.md)."
+            f"{where} pricing_model must be one of: {', '.join(sorted(SERVICE_PRICING_MODELS))}. "
+            "Pay-what-you-want services are not supported (plans/RECURRING_SERVICES.md)."
         )
+    if model == "recurring":
+        # The SAME rule the product path uses, not a parallel one -- the interval is required rather than
+        # defaulted, because defaulting it would silently choose a billing frequency for the tenant.
+        validate_recurring_price(price)
 
 
 def validate_service(document: dict[str, Any]) -> None:
@@ -2493,6 +2497,16 @@ def validate_service(document: dict[str, Any]) -> None:
             if entry.get("fee_handling") is not None and entry.get("fee_handling") not in {"standard", "split", "net_guaranteed"}:
                 raise DocumentValidationError("Service price fee_handling must be standard, split, or net_guaranteed.")
             _validate_service_price(entry, where="Each service price")
+    # How many visits one paid cycle grants (plans/RECURRING_SERVICES.md §4b). Only meaningful on a service
+    # whose price recurs, and validated through the same helper the grant uses -- so the form, the webhook
+    # and the validator cannot disagree about what a legal number is.
+    if document.get("bookings_per_cycle") is not None:
+        from stripe_link.domain.booking_credits import EntitlementError, bookings_per_cycle
+
+        try:
+            bookings_per_cycle(document)
+        except EntitlementError as exc:
+            raise DocumentValidationError(f"Service {exc}") from None
     if document.get("booking_flow") is not None and document.get("booking_flow") not in {"book_then_pay", "pay_then_book"}:
         raise DocumentValidationError("Service booking_flow must be book_then_pay or pay_then_book.")
     booking_rules = document.get("booking_rules") or {}

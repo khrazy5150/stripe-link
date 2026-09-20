@@ -273,16 +273,14 @@ def resolve_service_offer_item(item: dict[str, Any], service: dict[str, Any], of
     price = resolve_service_price(service, str(item.get("price_id") or ""))
     if not price:
         raise PricingError(f"Price '{item.get('price_id', '')}' was not found on service '{service_id}'.")
-    # Belt and braces with validate_service, which refuses to STORE one. This resolver does not apply
-    # `recurring_terms` -- the product one does -- so a recurring service price that reached here would
-    # resolve as a single charge and Stripe would be asked for a one-off payment. Refusing the checkout is
-    # bad; charging a subscriber once and never again is worse, and silent. A hand-edited or imported
-    # document is the only way to get here. See plans/RECURRING_SERVICES.md §2.
+    # A service price may be one_time or recurring; anything else (a pay-what-you-want service) has no
+    # implementation and must fail loudly rather than resolve to a plausible wrong number. The guard stays
+    # even though validate_service refuses to STORE one: a hand-edited or imported document reaches here
+    # without ever passing the validator, and charging someone the wrong way is worse than refusing them.
     pricing_model = str(price.get("pricing_model") or "one_time")
-    if pricing_model != "one_time":
+    if pricing_model not in {"one_time", "recurring"}:
         raise PricingError(
-            f"Service '{service_id}' has a '{pricing_model}' price, which is not supported. "
-            "Services are one-time only."
+            f"Service '{service_id}' has a '{pricing_model}' price, which is not supported."
         )
     price_context = str(price.get("context") or "standard")
     quantity = int(item.get("quantity", 1))
@@ -306,6 +304,10 @@ def resolve_service_offer_item(item: dict[str, Any], service: dict[str, Any], of
         fulfillment_mode=service_fulfillment_mode(service),
         duration_minutes=int(service.get("duration_minutes") or 0),
         default_fulfiller_id=str(service.get("default_fulfiller_id") or ""),
+        # The SAME helper the product resolver uses. Omitting it is exactly how a recurring service price
+        # came to resolve as a one-off charge: `recurring` stayed None, and checkout picks its Stripe mode
+        # from whether ANY resolved line carries one.
+        **recurring_terms(price),
     )
 
 

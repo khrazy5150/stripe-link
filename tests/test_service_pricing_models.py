@@ -1,15 +1,16 @@
-"""A service is one-time only, and the code says so rather than the dropdown.
+"""What pricing models a service may carry, enforced by the code rather than by a dropdown.
 
-Found 2026-09-20 while answering "why don't services offer recurring pricing?". The answer was a deliberate
-deferral (Phase 4 of plans/SERVICES_IN_OFFERS.md) -- but the deferral was enforced ONLY by a pricing dropdown
-with one option. Everything underneath accepted a recurring service price and then mis-charged for it:
+Written 2026-09-20 when a recurring service price was REFUSED, because everything underneath would have
+mis-charged for it:
 
     service price says:   pricing_model=recurring, monthly
-    resolved line says:   recurring = None          <- resolve_service_offer_item omits recurring_terms
-    Stripe session mode:  payment                   <- so the customer is charged ONCE
+    resolved line says:   recurring = None          <- resolve_service_offer_item omitted recurring_terms
+    Stripe session mode:  payment                   <- so the customer was charged ONCE
 
-Refused rather than honoured, deliberately. Honouring it would ship half a feature: Stripe would bill monthly
-while nothing created the appointments each cycle pays for. plans/RECURRING_SERVICES.md plans the real thing.
+Recurring is now SUPPORTED (plans/RECURRING_SERVICES.md §4b): the resolver applies the terms, checkout flips
+to subscription mode and sends the interval, and each paid cycle grants booking credits. These tests moved
+with it -- what they still guard is that the narrowing is only ever widened alongside the machinery, and that
+`customer_chooses`, which has no implementation, stays out.
 """
 import unittest
 
@@ -34,24 +35,35 @@ def _with_price(model=None, legacy=False):
 
 
 class ValidatorTests(unittest.TestCase):
-    def test_one_time_is_the_only_model_a_service_may_carry(self):
-        self.assertEqual(SERVICE_PRICING_MODELS, {"one_time"})
+    def test_a_service_may_be_one_time_or_recurring_and_nothing_else(self):
+        """`customer_chooses` stays out: a pay-what-you-want booked service has no implementation, and a
+        price with no amount resolving through the booking flow is the mis-charge in another costume."""
+        self.assertEqual(SERVICE_PRICING_MODELS, {"one_time", "recurring"})
 
     def test_a_one_time_price_is_accepted(self):
         validate_service(_with_price("one_time"))
         validate_service(_with_price())          # absent means one_time
 
-    def test_recurring_is_refused_in_prices(self):
+    def test_recurring_needs_an_interval(self):
+        """The same rule the product path enforces, through the same helper.
+
+        A recurring price with no interval is the original bug: it syncs as a one-time price and charges
+        once. Defaulting to "month" would be that bug wearing a hat -- it picks a billing frequency on the
+        tenant's behalf and charges their customers on it.
+        """
         with self.assertRaises(DocumentValidationError) as caught:
             validate_service(_with_price("recurring"))
-        # The message has to say what to do, not just that something is wrong.
-        self.assertIn("one_time", str(caught.exception))
-        self.assertIn("RECURRING_SERVICES", str(caught.exception))
+        self.assertIn("recurring.interval", str(caught.exception))
 
-    def test_and_in_the_legacy_single_price(self):
+    def test_recurring_with_an_interval_is_accepted(self):
+        doc = _with_price("recurring")
+        doc["prices"][0]["recurring"] = {"interval": "month", "interval_count": 1}
+        validate_service(doc)
+
+    def test_the_legacy_single_price_is_checked_too(self):
         """Both shapes, or the guard is bypassed by the older one every service still carries."""
         with self.assertRaises(DocumentValidationError):
-            validate_service(_with_price("recurring", legacy=True))
+            validate_service(_with_price("recurring", legacy=True))   # no interval
 
     def test_customer_chooses_is_refused_too(self):
         # Also Phase 4, and a tip-jar pricing model has no meaning on a booked service.
@@ -73,10 +85,22 @@ class ResolverGuardTests(unittest.TestCase):
         "items": [{"service_id": "svc_1", "price_id": "p1", "quantity": 1}],
     }
 
-    def test_a_recurring_service_line_fails_loudly(self):
-        """Refusing the checkout is bad. Charging a subscriber once and never again is worse, and silent."""
+    def test_a_recurring_service_line_now_carries_its_terms(self):
+        """The line the mis-charge came from. `recurring` reaching the resolved item is what makes checkout
+        choose subscription mode."""
+        resolved = resolve_offer(self.OFFER, {}, {}, services_by_id={"svc_1": self.SERVICE})
+        self.assertEqual(resolved["items"][0]["recurring"], {"interval": "month", "interval_count": 1})
+
+    def test_an_unimplemented_model_still_fails_loudly(self):
+        """Refusing a checkout is bad. Charging someone the wrong way is worse, and silent.
+
+        Only a hand-edited or imported document reaches this -- validate_service refuses to store one.
+        """
+        service = {**self.SERVICE,
+                   "prices": [{"price_id": "p1", "currency": "usd", "unit_amount": 12000,
+                               "pricing_model": "customer_chooses"}]}
         with self.assertRaises(PricingError) as caught:
-            resolve_offer(self.OFFER, {}, {}, services_by_id={"svc_1": self.SERVICE})
+            resolve_offer(self.OFFER, {}, {}, services_by_id={"svc_1": service})
         self.assertIn("not supported", str(caught.exception))
 
     def test_a_one_time_service_still_resolves(self):

@@ -1130,6 +1130,21 @@ def legal_pages_repository(table: Any | None = None) -> DynamoDocumentRepository
     )
 
 
+def booking_credits_repository(table: Any | None = None, *, mode: str | None = None) -> DynamoDocumentRepository:
+    """What a recurring service subscription grants its customer (plans/RECURRING_SERVICES.md §4b).
+
+    Mode-scoped like the documents it is derived from: a test-mode subscription must not grant credits a
+    live-mode booking can spend.
+    """
+    return DynamoDocumentRepository(
+        os.environ.get("BOOKING_CREDITS_TABLE", ""),
+        document_type="service_entitlement",
+        id_field="entitlement_id",
+        table=table,
+        mode=mode,
+    )
+
+
 def abuse_reports_repository(table: Any | None = None) -> DynamoDocumentRepository:
     """Visitor reports about a platform-hosted page (plans/CREATOR_LINK_POLICY.md §6).
 

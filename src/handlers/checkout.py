@@ -341,6 +341,15 @@ def build_checkout_payload(
             payload[f"{prefix}[price_data][currency]"] = item.get("currency") or "usd"
             payload[f"{prefix}[price_data][unit_amount]"] = str(int(item.get("unit_amount") or 0))
             payload[f"{prefix}[price_data][product_data][name]"] = item.get("label") or item.get("product_name") or "Service"
+            # A recurring service line MUST carry its interval: the session is in subscription mode because
+            # this line is recurring, and Stripe rejects a subscription line whose price_data has no
+            # `recurring` block. The product branch below has always done this; the service branch did not,
+            # so flipping the mode without it would have produced a 400 from Stripe rather than a charge.
+            service_recurring = item.get("recurring") or {}
+            if service_recurring:
+                payload[f"{prefix}[price_data][recurring][interval]"] = service_recurring.get("interval") or "month"
+                payload[f"{prefix}[price_data][recurring][interval_count]"] = str(
+                    int(service_recurring.get("interval_count") or 1))
             payload[f"{prefix}[quantity]"] = str(int(item.get("quantity") or 1))
             if index == 0:
                 first_product_name = item.get("product_name") or "Service"
