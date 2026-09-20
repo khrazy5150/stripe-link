@@ -55,7 +55,20 @@ from stripe_link.runtime.html import (
 
 
 class PublishError(RuntimeError):
-    pass
+    """A page could not be published.
+
+    Raised for PERMANENT data conditions: the offer/product/service the page points at is gone, or a
+    tenant_id does not match. Retrying never turns one of these into a success, so the stream handler drops
+    the record rather than reporting a batch item failure (see handlers/page_publish.py).
+    """
+
+
+class PublishConfigError(PublishError):
+    """The environment is wrong, not the data -- a bucket name is unset.
+
+    Separated from PublishError because this one IS worth retrying: a fix-forward deploy repairs it, and the
+    buffered stream records then render instead of being dropped on the floor.
+    """
 
 
 def page_slug(page: dict[str, Any]) -> str:
@@ -660,7 +673,7 @@ def artifact_targets(
 
     missing_bucket = [target["kind"] for target in targets if not target.get("bucket")]
     if missing_bucket:
-        raise PublishError(f"Missing bucket configuration for: {', '.join(missing_bucket)}.")
+        raise PublishConfigError(f"Missing bucket configuration for: {', '.join(missing_bucket)}.")
     return targets
 
 

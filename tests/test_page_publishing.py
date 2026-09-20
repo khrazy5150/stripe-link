@@ -859,6 +859,113 @@ class PagePublishingTests(unittest.TestCase):
         self.assertEqual(len(self.s3.puts), 1)
         self.assertEqual(self.s3.puts[0]["Key"], "preview/tenant_demo/page_simple_coffee/index.html")
 
+    def test_a_page_whose_offer_is_gone_is_dropped_not_retried(self):
+        """A missing offer is permanent; retrying it blocks the shard behind it.
+
+        DynamoDB Streams retries a reported batch item failure IN ORDER, forever by default. A page whose
+        offer had been deleted was reported as a failure on every attempt, so the shard never advanced and
+        every page saved afterwards -- any tenant -- stopped rendering and never got its short-code route.
+        """
+        event = {
+            "Records": [
+                {
+                    "eventID": "poison",
+                    "eventName": "MODIFY",
+                    "dynamodb": {"NewImage": stream_image(self.page)},
+                }
+            ]
+        }
+
+        with patch.dict(os.environ, {
+            "ENVIRONMENT": "dev",
+            "PAGES_BUCKET": "pages",
+            "PAGES_PREVIEW_BUCKET": "preview",
+            "PAGES_DISTRIBUTION_DOMAIN": "pages.example.com",
+            "PREVIEW_DISTRIBUTION_DOMAIN": "preview.example.com",
+        }, clear=False):
+            result = handler(
+                event,
+                None,
+                offers_repo=FakeRepository("offer_id", []),
+                products_repo=self.products_repo,
+                s3_client=self.s3,
+                cloudfront_client=self.cloudfront,
+            )
+
+        self.assertEqual(result, {"batchItemFailures": []}, "a permanent failure must not ask for a retry")
+
+    def test_one_bad_record_does_not_stop_the_good_records_behind_it(self):
+        event = {
+            "Records": [
+                {"eventID": "poison", "eventName": "MODIFY", "dynamodb": {"NewImage": stream_image(self.page)}},
+                {"eventID": "good", "eventName": "MODIFY", "dynamodb": {"NewImage": stream_image(self.page)}},
+            ]
+        }
+
+        class MissesOnce:
+            """The offer is gone for the first record and present for the second."""
+
+            def __init__(self, inner):
+                self.inner, self.calls = inner, 0
+
+            def get(self, tenant_id, offer_id):
+                self.calls += 1
+                return None if self.calls == 1 else self.inner.get(tenant_id, offer_id)
+
+        with patch.dict(os.environ, {
+            "ENVIRONMENT": "dev",
+            "PAGES_BUCKET": "pages",
+            "PAGES_PREVIEW_BUCKET": "preview",
+            "PAGES_DISTRIBUTION_DOMAIN": "pages.example.com",
+            "PREVIEW_DISTRIBUTION_DOMAIN": "preview.example.com",
+        }, clear=False):
+            result = handler(
+                event,
+                None,
+                offers_repo=MissesOnce(self.offers_repo),
+                products_repo=self.products_repo,
+                s3_client=self.s3,
+                cloudfront_client=self.cloudfront,
+            )
+
+        self.assertEqual(result, {"batchItemFailures": []})
+        self.assertEqual(
+            [put["Key"] for put in self.s3.puts],
+            ["preview/tenant_demo/page_simple_coffee/index.html"],
+            "the page behind the poison record must still render",
+        )
+
+    def test_a_transient_failure_is_still_retried(self):
+        """The drop is scoped to PublishError. A throttle or an S3 5xx must still come back."""
+        class Throttled:
+            def get(self, *a, **k):
+                raise RuntimeError("throttled")
+
+        boom = Throttled()
+        event = {
+            "Records": [
+                {"eventID": "transient", "eventName": "MODIFY", "dynamodb": {"NewImage": stream_image(self.page)}},
+            ]
+        }
+
+        with patch.dict(os.environ, {
+            "ENVIRONMENT": "dev",
+            "PAGES_BUCKET": "pages",
+            "PAGES_PREVIEW_BUCKET": "preview",
+            "PAGES_DISTRIBUTION_DOMAIN": "pages.example.com",
+            "PREVIEW_DISTRIBUTION_DOMAIN": "preview.example.com",
+        }, clear=False):
+            result = handler(
+                event,
+                None,
+                offers_repo=boom,
+                products_repo=self.products_repo,
+                s3_client=self.s3,
+                cloudfront_client=self.cloudfront,
+            )
+
+        self.assertEqual(result, {"batchItemFailures": [{"itemIdentifier": "transient"}]})
+
     def test_stream_handler_unpublish_deletes_public_artifact_and_writes_preview(self):
         old_page = copy.deepcopy(self.page)
         old_page["status"] = "published"

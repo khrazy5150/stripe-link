@@ -2141,6 +2141,12 @@ Resources:
             MaximumBatchingWindowInSeconds: 5
             FunctionResponseTypes:
               - ReportBatchItemFailures
+            # A stream retries a failed record IN ORDER, so without a cap one bad record stops the shard and
+            # every page saved after it -- any tenant -- stops rendering. The default is infinite retries.
+            # The handler already drops permanent failures; these bound the damage from an unforeseen one.
+            MaximumRetryAttempts: 10
+            MaximumRecordAgeInSeconds: 21600
+            BisectBatchOnFunctionError: true
 
   RegistrationFunction:
     Type: AWS::Serverless::Function

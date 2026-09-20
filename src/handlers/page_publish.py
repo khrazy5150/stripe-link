@@ -19,6 +19,8 @@ from stripe_link.repositories.documents import (
     tenant_profiles_repository,
 )
 from stripe_link.runtime.publishing import (
+    PublishConfigError,
+    PublishError,
     delete_page_artifacts,
     deregister_page_route,
     detach_page_from_sites,
@@ -97,6 +99,7 @@ def handler(event, context, *, tenant_profiles_repo=None, offers_repo=None, prod
         if not should_publish_record(record):
             continue
 
+        page: dict = {}  # bound before the try so the permanent-failure log can name the page
         try:
             dynamodb_record = record.get("dynamodb") or {}
             image = dynamodb_record.get("NewImage") or dynamodb_record.get("OldImage")
@@ -174,7 +177,25 @@ def handler(event, context, *, tenant_profiles_repo=None, offers_repo=None, prod
             # {stage}-test.juniorbay.com/preview/{code} and /published/{code} resolve. Idempotent; no-op without a code.
             register_page_route(routes_repo, page)
             logger.info("Published page artifacts: %s", result)
+        except PublishConfigError as exc:
+            # The environment is wrong, not the data (an unset bucket name). A fix-forward deploy repairs it
+            # and the retry then succeeds, so this one keeps the retry.
+            logger.exception("Page publish is misconfigured, will retry: %s", exc)
+            if item_identifier:
+                failures.append({"itemIdentifier": item_identifier})
+        except PublishError as exc:
+            # PERMANENT. Every PublishError is a data condition -- an offer/product/service the page points at
+            # is gone, a tenant_id mismatch, a missing bucket -- and no number of retries turns it into a
+            # success. Reporting it as a batch item failure asks DynamoDB Streams to retry the record, and the
+            # stream retries a failed record IN ORDER: the shard stops dead behind it, so every page saved
+            # afterwards -- by any tenant -- silently stops rendering and never gets its route. One page whose
+            # offer had been deleted blocked the shard for hours exactly this way. Drop it loudly instead.
+            logger.error(
+                "Dropping page stream record permanently (page=%s tenant=%s): %s",
+                (page or {}).get("page_id"), (page or {}).get("tenant_id"), exc,
+            )
         except Exception as exc:
+            # Transient (throttling, S3/CloudFront 5xx, a bug). Worth a retry; the event source caps how many.
             logger.exception("Failed to publish page stream record: %s", exc)
             if item_identifier:
                 failures.append({"itemIdentifier": item_identifier})
