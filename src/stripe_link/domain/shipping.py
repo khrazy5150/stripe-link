@@ -195,3 +195,34 @@ def mark_failed(shipment: dict[str, Any], message: str, *, now: int = 0) -> dict
         "updated_at": int(now),
         "error": {"message": str(message or "")[:500], "at": int(now)},
     }
+
+
+# --- the box catalog -------------------------------------------------------------------------------
+
+# A convenience seed of ordinary corrugated sizes, so a tenant is not staring at an empty table. NOT a
+# source of truth, and deliberately NOT carrier packaging: USPS Flat Rate, UPS Express and FedEx Box
+# dimensions belong to the carriers and are fetched from the provider as parcel templates. Hand-copying
+# them here would go stale the moment a size is retired, and a stale box is a label at the wrong postage.
+STARTER_BOXES = (
+    {"name": "Small box (6x4x4)", "length": 6, "width": 4, "height": 4, "empty_weight": 0.15},
+    {"name": "Medium box (10x8x6)", "length": 10, "width": 8, "height": 6, "empty_weight": 0.35},
+    {"name": "Large box (14x11x8)", "length": 14, "width": 11, "height": 8, "empty_weight": 0.6},
+    {"name": "Extra large box (18x14x12)", "length": 18, "width": 14, "height": 12, "empty_weight": 1.0},
+    {"name": "Padded mailer (9x6x1)", "length": 9, "width": 6, "height": 1, "empty_weight": 0.05},
+)
+
+BOX_FIELDS = ("name", "length", "width", "height", "distance_unit", "empty_weight", "max_weight", "mass_unit")
+
+
+def starter_boxes() -> list[dict[str, Any]]:
+    """A fresh copy, so a caller editing one cannot edit the seed for everybody."""
+    return [dict(box) for box in STARTER_BOXES]
+
+
+def tenant_boxes(config: dict[str, Any] | None) -> list[dict[str, Any]]:
+    """The boxes a tenant packs into. Empty is a real answer -- it means the packer falls back to one
+    parcel per item, which over-estimates rather than inventing a box that does not exist."""
+    boxes = (config or {}).get("boxes")
+    if not isinstance(boxes, list):
+        return []
+    return [dict(box) for box in boxes if isinstance(box, dict) and box.get("name")]

@@ -278,6 +278,21 @@ for; the tenant simply owes more than the label said, and finds out long after t
 - `settled_cost` — the number calibration should compare against. `cost` is what we were quoted;
   `settled_cost` is what it really cost once the carrier had its say.
 
+#### The tenant must be TOLD this, in the app
+
+These consequences are accepted, which makes disclosing them part of the feature rather than a caveat in a
+plan document. A tenant who learns about carrier adjustments from a surcharge weeks later will reasonably
+think the software lied to them.
+
+- At the point of buying: the quoted price is what the carrier quoted, **and a carrier that re-measures the
+  parcel bills the difference**. Say it where the money is spent, not in a help page.
+- Wherever a parcel used DEFAULT dimensions rather than values the tenant entered — the packer knows which
+  — say so plainly. That is the single biggest cause of an adjustment.
+- When an adjustment lands, show it against the order it came from with the original quote beside it, so
+  the tenant can see WHICH box was wrong rather than only that they were billed.
+- On a void: a refund is **requested**, not granted — asynchronous, deadlined, and refused if the label was
+  scanned. The UI must say "requested" until the provider says otherwise.
+
 #### Not in scope for P2
 
 P2 buys labels. Voiding, refund polling and adjustment reconciliation are their own slice, and adjustment

@@ -2444,6 +2444,35 @@ def validate_shipping_config(document: dict[str, Any]) -> None:
     if not isinstance(parcel, dict):
         raise DocumentValidationError("Shipping config default_parcel must be an object.")
     require_fields(parcel, ["length", "width", "height", "weight", "distance_unit", "mass_unit"])
+    boxes = document.get("boxes")
+    if boxes is not None:
+        if not isinstance(boxes, list):
+            raise DocumentValidationError("Shipping config boxes must be an array.")
+        seen = set()
+        for box in boxes:
+            if not isinstance(box, dict):
+                raise DocumentValidationError("Each shipping box must be an object.")
+            require_fields(box, ["name", "length", "width", "height"])
+            name = str(box.get("name") or "").strip()
+            if name.casefold() in seen:
+                # Two boxes with one name is a table a tenant cannot edit with any confidence.
+                raise DocumentValidationError(f"Shipping box '{name}' is listed more than once.")
+            seen.add(name.casefold())
+            for field in ("length", "width", "height"):
+                try:
+                    if float(box[field]) <= 0:
+                        raise ValueError
+                except (TypeError, ValueError):
+                    raise DocumentValidationError(
+                        f"Shipping box '{name}' {field} must be a positive number.") from None
+            # Absent max_weight means no stated limit, which is the common case for a tenant's own carton.
+            if box.get("max_weight") is not None:
+                try:
+                    if float(box["max_weight"]) <= 0:
+                        raise ValueError
+                except (TypeError, ValueError):
+                    raise DocumentValidationError(
+                        f"Shipping box '{name}' max_weight must be a positive number when set.") from None
 
 
 def validate_customer(document: dict[str, Any]) -> None:
