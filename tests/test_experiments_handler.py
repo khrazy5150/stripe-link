@@ -34,6 +34,37 @@ def variant(page_id, weight, label=None):
     return payload
 
 
+class ExperimentsFixture:
+    """Repos + a create() helper, shared by the suites below.
+
+    Deliberately not a TestCase and deliberately not inherited FROM the CRUD suite: subclassing that would
+    re-run every CRUD test against each suite's own setUp, which is both wasteful and misleading when one
+    of them fails.
+    """
+
+    def setUp(self):
+        self.experiments = FakeDocumentRepository("experiment_id")
+        self.routes = FakeDocumentRepository("short_code")
+        self.pages = FakeDocumentRepository("page_id")
+        self.orders = FakeDocumentRepository("order_id")
+
+    def create(self, body=None, exp_id="exp_1", code="code123ABCd"):
+        body = body or {
+            "name": "Hero CTA Test",
+            "control_page_id": "page_control",
+            "variants": [variant("page_control", 50, "Control"), variant("page_b", 50, "Variant A")],
+        }
+        return experiments_handler(
+            event("POST", tenant_id="tenant_demo", body=body),
+            None,
+            repository=self.experiments,
+            routes=self.routes,
+            now_fn=lambda: 1781230000,
+            id_fn=lambda: exp_id,
+            code_fn=lambda: code,
+        )
+
+
 class ExperimentsCrudTests(unittest.TestCase):
     def setUp(self):
         self.experiments = FakeDocumentRepository("experiment_id")
@@ -183,7 +214,7 @@ class ExperimentsCrudTests(unittest.TestCase):
         self.assertIsNone(self.routes.find_by_id("code123ABCd"))
 
 
-class ExperimentShapeIsFrozenOnceStartedTests(ExperimentsCrudTests):
+class ExperimentShapeIsFrozenOnceStartedTests(ExperimentsFixture, unittest.TestCase):
     """Changing the control mid-flight is not an edit; it is a different experiment.
 
     Assignment is matched on `control_page_id`, so swapping it moves the entry point to another URL, while
@@ -272,7 +303,7 @@ class ExperimentShapeIsFrozenOnceStartedTests(ExperimentsCrudTests):
         self.assertEqual(self.experiments.get("tenant_demo", "exp_1")["stats"]["views_by_page"], {})
 
 
-class VariantsMayNotHaveTheirOwnUrlTests(ExperimentsCrudTests):
+class VariantsMayNotHaveTheirOwnUrlTests(ExperimentsFixture, unittest.TestCase):
     """Option A: a variant is an alternative rendering of the page under test, not a second public page."""
 
     def setUp(self):
@@ -317,6 +348,84 @@ class VariantsMayNotHaveTheirOwnUrlTests(ExperimentsCrudTests):
         self.create()
         self.sites = Exploding()
         self.assertEqual(self._start()["statusCode"], 200)
+
+
+class PromotionMovesTheRouteTests(ExperimentsFixture, unittest.TestCase):
+    """A5: the route is the durable identity; the page behind it is swappable."""
+
+    def setUp(self):
+        super().setUp()
+        self.sites = FakeDocumentRepository("site_id")
+        self.pages.put({"tenant_id": "tenant_demo", "page_id": "page_control", "status": "published"})
+        self.pages.put({"tenant_id": "tenant_demo", "page_id": "page_b", "status": "published"})
+        self.sites.put({
+            "tenant_id": "tenant_demo", "site_id": "site_1",
+            "pages": {"/offer": {"page_id": "page_control", "page_type": "landing",
+                                 "label": "Offer", "enabled": True, "offer_id": "offer_old"}},
+        })
+        self.create()
+        experiments_handler(
+            event("POST", tenant_id="tenant_demo", experiment_id="exp_1", action="start"),
+            None, repository=self.experiments, pages=self.pages, sites=self.sites,
+            now_fn=lambda: 1781240000,
+        )
+
+    def _complete(self, winner, sites=None):
+        return experiments_handler(
+            event("POST", tenant_id="tenant_demo", experiment_id="exp_1", action="complete",
+                  body={"winner_page_id": winner}),
+            None, repository=self.experiments, sites=self.sites if sites is None else sites,
+            now_fn=lambda: 1781250000,
+        )
+
+    def _pages(self):
+        return self.sites.get("tenant_demo", "site_1")["pages"]
+
+    def test_the_winning_variant_takes_the_tested_slug(self):
+        self.assertEqual(self._complete("page_b")["statusCode"], 200)
+        self.assertEqual(self._pages()["/offer"]["page_id"], "page_b")
+
+    def test_THE_LOSER_IS_NOT_GIVEN_A_URL_OF_ITS_OWN(self):
+        # The distinction from _attach_page_to_site, whose contract is to displace the previous occupant to
+        # its own slug so it stays reachable. Here that would hand the loser a public URL as it lost.
+        self._complete("page_b")
+        routed = {entry.get("page_id") for entry in self._pages().values() if isinstance(entry, dict)}
+        self.assertNotIn("page_control", routed)
+        self.assertEqual(len(self._pages()), 1)
+
+    def test_slug_level_fields_survive_and_page_level_ones_do_not(self):
+        self._complete("page_b")
+        entry = self._pages()["/offer"]
+        self.assertEqual(entry["page_type"], "landing")   # describes the address
+        self.assertEqual(entry["label"], "Offer")
+        self.assertTrue(entry["enabled"])
+        self.assertNotIn("offer_id", entry)               # described the loser
+
+    def test_the_control_winning_moves_nothing(self):
+        self._complete("page_control")
+        self.assertEqual(self._pages()["/offer"]["page_id"], "page_control")
+        stored = self.experiments.get("tenant_demo", "exp_1")
+        self.assertEqual(stored["promotion"]["status"], "not_needed")
+
+    def test_the_outcome_is_recorded_on_the_experiment(self):
+        self._complete("page_b")
+        promotion = self.experiments.get("tenant_demo", "exp_1")["promotion"]
+        self.assertEqual(promotion, {"status": "moved", "slug": "/offer"})
+
+    def test_a_failed_move_does_not_complete_the_experiment(self):
+        # Completing is what stops assignment. Recording it after a failed move would revert the tested URL
+        # to the LOSER while telling the tenant the winner is live.
+        class Exploding:
+            def list_for_tenant(self, tenant_id):
+                raise RuntimeError("sites table is unavailable")
+        response = self._complete("page_b", sites=Exploding())
+        self.assertEqual(json.loads(response["body"])["error"], "promotion_failed")
+        self.assertEqual(self.experiments.get("tenant_demo", "exp_1")["status"], "running")
+
+    def test_an_unrouted_control_is_not_an_error(self):
+        self.sites.put({"tenant_id": "tenant_demo", "site_id": "site_1", "pages": {}})
+        self.assertEqual(self._complete("page_b")["statusCode"], 200)
+        self.assertEqual(self.experiments.get("tenant_demo", "exp_1")["promotion"]["status"], "no_route")
 
 
 class ExperimentsResolveTests(unittest.TestCase):

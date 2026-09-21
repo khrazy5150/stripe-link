@@ -270,12 +270,22 @@ disagrees with their analytics.
 - **A3 — significance.** A verdict in words, a "how much longer" estimate, and honest labels. No gate,
   no auto-pause — the tenant still decides.
 - **A4 — prove it.** Two real pages, a real split, a real conversion. Nothing here has ever run.
-- **A5 — promotion actually promotes.** `complete_experiment` records `winner_page_id` and stops there.
-  The only path where that value reaches serving is `experiments_resolve.py`, the short-code resolver A1c
-  disabled — so on the live path a completed experiment reverts to the CONTROL, and a tenant who picks a
-  winning variant keeps the loser. The UI said "all traffic routes to the winner"; corrected 2026-09-21 to
-  state what actually happens. Still to build: re-point the tested slug at the winner (see "Promoting a
-  winner" above), which is the one operation that touches the tested page.
+- **A5 — promotion actually promotes: DONE 2026-09-21.** Completing now moves the tested slug to the
+  winner (`repoint_to_winner`), so the improvement a tenant measured is the one they get. Before this,
+  `winner_page_id` reached serving only through the short-code resolver A1c disabled — a completed
+  experiment reverted to the CONTROL and the tenant kept the loser while the screen said all traffic had
+  moved to the winner.
+  Three things it is careful about:
+  - **The loser is not displaced.** `_attach_page_to_site`'s contract is to move a slug's previous occupant
+    to a slug of its own so it stays reachable — right for attaching, wrong here, where it would hand the
+    loser a public URL at the moment it lost. Promotion drops it instead: unrouted, artifact intact, a
+    record of what lost.
+  - **Promote before recording.** Completing is what stops assignment, so a route move that failed after it
+    would revert the tested URL to the loser while the tenant was told the winner was live. A failure
+    refuses the completion and leaves the test running and retryable.
+  - **The outcome is stored, not asserted.** `experiment.promotion` is `moved` / `not_needed` / `no_route`,
+    and the screen reads it. `no_route` is not an error: a tested page with no Site slug has no address to
+    move, which is unusual but legitimate.
 
 ## Risks
 

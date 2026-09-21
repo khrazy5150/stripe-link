@@ -217,16 +217,19 @@
               type="button" class="primary-action"
               :disabled="!winnerPageId || store.saving"
               @click="completeExperiment"
-            >Complete &amp; record winner</button>
+            >Complete &amp; switch to winner</button>
           </section>
           <p v-else class="keys-status-banner">
             <template v-if="winnerIsControl">
               Completed — {{ store.pageName(resultsFor.winner_page_id) }} (the control) won, and is serving.
             </template>
+            <template v-else-if="promotion.status === 'moved'">
+              Completed — {{ store.pageName(resultsFor.winner_page_id) }} now serves at
+              <strong>{{ promotion.slug }}</strong>.
+            </template>
             <template v-else>
-              Completed — winner recorded: {{ store.pageName(resultsFor.winner_page_id) }}. The tested URL is
-              serving the control again. To make the winner live, apply its changes to the tested page and
-              republish.
+              Completed — {{ store.pageName(resultsFor.winner_page_id) }} won, but the tested page had no
+              address on a site, so there was nothing to switch over.
             </template>
           </p>
         </div>
@@ -289,6 +292,9 @@ const currentResults = computed(() => (resultsFor.value ? store.results[resultsF
 // serving path only through the short-code resolver, which A1c disabled -- so once status is `completed`,
 // `running_experiment_for` stops matching and the tested URL serves the CONTROL again. Saying "all traffic
 // routes to the winner" was telling tenants they had received an improvement they had not (plans/AB_TESTING.md A5).
+// What completing actually DID, read from the experiment rather than asserted by the screen: the route move
+// can legitimately be a no-op when the tested page was never attached to a Site.
+const promotion = computed(() => (resultsFor.value && resultsFor.value.promotion) || { status: "", slug: "" });
 const winnerIsControl = computed(
   () => !!resultsFor.value && resultsFor.value.winner_page_id === resultsFor.value.control_page_id,
 );

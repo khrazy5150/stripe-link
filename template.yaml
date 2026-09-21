@@ -2758,9 +2758,10 @@ Resources:
             TableName: !Ref RoutesTable
         - DynamoDBReadPolicy:
             TableName: !Ref PagesTable
-        # Starting a test checks that no variant has a public address of its own, which would compete
-        # in search with the page being tested (plans/AB_TESTING.md, Option A). Read-only.
-        - DynamoDBReadPolicy:
+        # Starting a test checks that no variant has a public address of its own, which would compete in
+        # search with the page being tested (Option A); completing one MOVES the tested slug to the winner
+        # (A5) -- the route is the durable identity and the page behind it is swappable. Hence Crud.
+        - DynamoDBCrudPolicy:
             TableName: !Ref SitesTable
         - DynamoDBReadPolicy:
             TableName: !Ref OrdersTable

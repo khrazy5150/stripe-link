@@ -3,7 +3,7 @@ import time
 
 from stripe_link.common import error_response, json_response, parse_json_body, path_params, resolve_stripe_mode, tenant_id_from_event
 from handlers.routes import short_url_for_code
-from stripe_link.domain.experiments import SHORT_CODE_ENTRY_ENABLED
+from stripe_link.domain.experiments import SHORT_CODE_ENTRY_ENABLED, repoint_to_winner
 from stripe_link.domain.documents import DocumentValidationError, validate_experiment, validate_route
 from stripe_link.entitlement_gate import require_capability
 from stripe_link.ids import generate_id
@@ -63,7 +63,7 @@ def handler(
         if method == "POST" and experiment_id and action == "pause":
             return set_status(event, repository, experiment_id, "paused", now_fn)
         if method == "POST" and experiment_id and action == "complete":
-            return complete_experiment(event, repository, experiment_id, now_fn)
+            return complete_experiment(event, repository, experiment_id, now_fn, sites=sites, mode=mode)
     except RepositoryError as exc:
         return error_response(str(exc), code="repository_error")
     return error_response(f"Unsupported method '{method}'.", status_code=405, code="method_not_allowed")
@@ -367,7 +367,7 @@ def set_status(event, repository, experiment_id, status, now_fn):
     return json_response({"experiment": with_short_url(saved)})
 
 
-def complete_experiment(event, repository, experiment_id, now_fn):
+def complete_experiment(event, repository, experiment_id, now_fn, sites=None, mode="test"):
     tenant_id = tenant_id_from_event(event)
     if not tenant_id:
         return error_response("tenant_id is required.", code="missing_tenant")
@@ -381,13 +381,55 @@ def complete_experiment(event, repository, experiment_id, now_fn):
     if not winner_page_id or winner_page_id not in variant_page_ids:
         return error_response("winner_page_id must be one of the experiment variants.", code="invalid_winner")
 
+    # Promote BEFORE recording the result. Completing is what stops assignment, so if the route move fails
+    # after it, the tested URL quietly reverts to the LOSER while the tenant is told the winner is live.
+    # Refusing here leaves the experiment running and retryable, which is the recoverable order.
+    promotion, failure = _promote_winner(tenant_id, experiment, winner_page_id, sites, mode=mode)
+    if failure:
+        return failure
+
     now = int(now_fn())
     experiment["status"] = "completed"
     experiment["winner_page_id"] = winner_page_id
     experiment["completed_at"] = now
     experiment["updated_at"] = now
+    # Durable, so the screen can say what actually happened instead of asserting it.
+    experiment["promotion"] = promotion
     saved = repository.put(experiment)
     return json_response({"experiment": with_short_url(saved)})
+
+
+def _promote_winner(tenant_id, experiment, winner_page_id, sites, mode="test"):
+    """Re-point the tested slug at the winner. Returns `(promotion, failure_response)`.
+
+    `promotion.status` is one of:
+      not_needed — the control won; it already holds the slug
+      moved      — the slug now serves the winner
+      no_route   — the control held no slug on any Site, so there was nothing to move. Not an error: a Site
+                   is optional, and an experiment on an unrouted page is a legitimate (if odd) thing to run.
+    """
+    control_page_id = str(experiment.get("control_page_id") or "")
+    if not control_page_id or control_page_id == winner_page_id:
+        return {"status": "not_needed", "slug": ""}, None
+
+    sites = sites or (sites_repository(mode=mode) if os.environ.get("SITES_TABLE") else None)
+    if sites is None:
+        return {"status": "no_route", "slug": ""}, None
+    try:
+        for site in sites.list_for_tenant(tenant_id) or []:
+            pages, slug = repoint_to_winner(site, control_page_id, winner_page_id)
+            if not slug:
+                continue
+            site["pages"] = pages
+            sites.put(site)
+            return {"status": "moved", "slug": slug}, None
+        return {"status": "no_route", "slug": ""}, None
+    except Exception:  # noqa: BLE001 - reported, never swallowed: the tenant is about to be told it is live
+        return None, error_response(
+            "The winner was chosen, but the site address could not be moved to it, so nothing has changed. "
+            "The test is still running — try completing it again.",
+            code="promotion_failed",
+        )
 
 
 def delete_experiment(event, repository, routes, experiment_id):

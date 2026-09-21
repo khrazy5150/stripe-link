@@ -74,6 +74,55 @@ def variant_of_running_experiment(page_id: str, experiments: list[dict[str, Any]
     return None
 
 
+def repoint_to_winner(site: dict[str, Any] | None, control_page_id: str, winner_page_id: str):
+    """Move the tested slug from the control to the winner. Returns `(pages, slug)`; slug is "" when there
+    was nothing to move.
+
+    The ROUTE is the durable identity and the page behind it is swappable (plans/AB_TESTING.md). Promotion
+    is therefore one field, not a content copy: copying the winner's sections into the tested page would
+    attach the winner's measured performance to the loser's page_id and falsify the record, and past orders
+    legitimately carry the old page_id because the page genuinely changed.
+
+    Deliberately NOT `_attach_page_to_site`, whose contract is to displace the slug's previous occupant to a
+    slug of its own so it stays reachable. That is right for attaching and wrong here: it would hand the
+    LOSER a public URL at the moment it lost. The loser becomes unrouted, which is the point — its artifact
+    keeps a canonical pointing at a URL that now serves the winner, harmless because nothing serves it, and
+    a useful record of what lost.
+
+    Slug-level fields (page_type, label, enabled, funnel_role) describe the ADDRESS and stay. Page-derived
+    ones (offer_id, category, composition) describe whatever page is behind it and are dropped rather than
+    carried over from the loser; publishing re-denormalizes them.
+    """
+    pages = dict((site or {}).get("pages") or {})
+    control_page_id = str(control_page_id or "")
+    winner_page_id = str(winner_page_id or "")
+    if not control_page_id or not winner_page_id or control_page_id == winner_page_id:
+        return pages, ""
+
+    slug = ""
+    for candidate, entry in pages.items():
+        if isinstance(entry, dict) and str(entry.get("page_id") or "") == control_page_id:
+            slug = candidate
+            break
+    if not slug:
+        return pages, ""
+
+    # A variant should hold no slug of its own while it is being tested (Option A), but if one exists, drop
+    # it rather than leave the same page routable at two addresses.
+    for candidate in [
+        c for c, e in list(pages.items())
+        if isinstance(e, dict) and str(e.get("page_id") or "") == winner_page_id and c != slug
+    ]:
+        pages.pop(candidate)
+
+    entry = dict(pages[slug])
+    entry["page_id"] = winner_page_id
+    for page_derived in ("offer_id", "category", "composition"):
+        entry.pop(page_derived, None)
+    pages[slug] = entry
+    return pages, slug
+
+
 def experiment_route_block(
     experiment: dict[str, Any],
     artifact_url_for: Any,
