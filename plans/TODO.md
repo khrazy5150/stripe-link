@@ -168,6 +168,11 @@ Deferred, non-blocking follow-ups. Each item notes what, why it was deferred, an
 - **Significance is missing and that makes results harmful:** compute_results returns a conversion rate and
   nothing else, and complete_experiment accepts whatever winner the tenant posts. "B 12% vs A 8%" on 25
   visits is noise, and acting on it is worse than not testing.
+- **Promotion re-points the slug at the winner**, not a content copy: `Site.pages` is a slug-keyed route
+  map, so the ROUTE is the durable identity and the page behind it is swappable -- the same architecture
+  stripe-cart had, where the durable address was a short code. Attribution splitting across page_ids is the
+  TRUTH (the page changed), and a variant's canonical already points at the tested url, so promotion needs
+  no republish at all.
 - **Highest blast radius yet:** the Worker serves every published page for every tenant and does NOT deploy
   with deploy.sh.
 
