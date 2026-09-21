@@ -1932,7 +1932,10 @@ def validate_business_identity(business: Any) -> None:
         if not isinstance(address, dict):
             raise DocumentValidationError("business.address must be an object.")
         # PostalAddress-shaped so it maps straight to LocalBusiness JSON-LD when the local-SEO work lands.
-        for field in ("street", "locality", "region", "postal_code", "country"):
+        # street2 carries the suite/unit. Added when the business address form became the same one the
+        # Shipping screen uses -- a business with a unit number had nowhere to put it, and appending it to
+        # `street` would corrupt the streetAddress that goes into LocalBusiness JSON-LD.
+        for field in ("street", "street2", "locality", "region", "postal_code", "country"):
             optional_string(address, field, f"business.address.{field}")
         _normalize_address_country(address)
 

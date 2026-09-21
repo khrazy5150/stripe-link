@@ -118,18 +118,13 @@
         <fieldset class="offer-field business-address">
           <span>Business Address</span>
           <small>For NAP consistency and local-SEO structured data. Manual entry; overridable by Google Business Profile once connected.</small>
-          <input v-model.trim="form.business.address.street" type="text" placeholder="Street address" />
-          <div class="offer-two-column">
-            <input v-model.trim="form.business.address.locality" type="text" placeholder="City" />
-            <input v-model.trim="form.business.address.region" type="text" placeholder="State / Region" />
-          </div>
-          <div class="offer-two-column">
-            <input v-model.trim="form.business.address.postal_code" type="text" placeholder="Postal code" />
-            <select v-model="form.business.address.country" class="country-select">
-              <option value="">Country…</option>
-              <option v-for="c in countries" :key="c.code" :value="c.code">{{ c.name }} ({{ c.code }})</option>
-            </select>
-          </div>
+          <!--
+            The SAME component the Shipping screen uses, so one address looks and behaves like another
+            wherever a tenant meets one. `contact` is off because a business address is a PLACE: the
+            business's own name and phone are fields above this, and "residential" is a carrier's pricing
+            question rather than something true of a business.
+          -->
+          <AddressFields :address="form.business.address" :contact="false" />
         </fieldset>
       </div>
     </section>
@@ -159,9 +154,9 @@ import { apiRequest, getAuthSession, getTenantId } from "../api/client";
 import { formatEpochDate, statusLabel } from "../utils/format";
 import { normalizeE164, phoneError } from "../utils/phone";
 import PhoneInput from "./PhoneInput.vue";
-import { COUNTRIES, normalizeCountry } from "../utils/countries";
+import { normalizeCountry } from "../utils/countries";
+import AddressFields from "./AddressFields.vue";
 
-const countries = COUNTRIES;
 
 const session = getAuthSession() || {};
 const userId = session.user_id || "";
@@ -237,8 +232,38 @@ const hasStripeSourcedFields = computed(() =>
   Object.values((rawDoc.value.business || {}).sources || {}).includes("stripe"),
 );
 
+// The form holds the shape AddressFields edits; the DOCUMENT keeps its PostalAddress shape, because that
+// is what feeds LocalBusiness JSON-LD, the localized image alt text and the figcaption NAP
+// (`_postal_address_ld` maps street/locality/region straight to schema.org). Translating at the two edges
+// keeps one vocabulary on screen and the other in storage, rather than changing what search engines read.
+function emptyPlace() {
+  return { street1: "", street2: "", city: "", state: "", postal_code: "", country: "" };
+}
+
+function placeFromDocument(address = {}) {
+  return {
+    street1: address.street || "",
+    street2: address.street2 || "",
+    city: address.locality || "",
+    state: address.region || "",
+    postal_code: address.postal_code || "",
+    country: normalizeCountry(address.country),
+  };
+}
+
+function placeToDocument(place = {}) {
+  return {
+    street: place.street1 || "",
+    street2: place.street2 || "",
+    locality: place.city || "",
+    region: place.state || "",
+    postal_code: place.postal_code || "",
+    country: place.country || "",
+  };
+}
+
 function emptyBusiness() {
-  return { name: "", email: "", phone: "", brands: [], address: { street: "", locality: "", region: "", postal_code: "", country: "" } };
+  return { name: "", email: "", phone: "", brands: [], address: emptyPlace() };
 }
 
 function addBrand() {
@@ -255,7 +280,7 @@ function removeBrand(index) {
 function cleanBusiness(business, original = {}) {
   const brands = (business.brands || []).map((brand) => String(brand || "").trim()).filter(Boolean);
   const address = Object.fromEntries(
-    Object.entries(business.address || {}).filter(([, value]) => String(value || "").trim()),
+    Object.entries(placeToDocument(business.address)).filter(([, value]) => String(value || "").trim()),
   );
   const result = {};
   if (business.name) result.name = business.name;
@@ -295,10 +320,7 @@ function applyProfile(profile) {
     email: business.email || "",
     phone: business.phone || "",
     brands: Array.isArray(business.brands) ? [...business.brands] : [],
-    address: {
-      street: address.street || "", locality: address.locality || "", region: address.region || "",
-      postal_code: address.postal_code || "", country: normalizeCountry(address.country),
-    },
+    address: placeFromDocument(address),
   };
 }
 

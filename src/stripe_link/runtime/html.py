@@ -4338,8 +4338,14 @@ def _postal_address_ld(address: Any) -> dict[str, Any]:
     if not isinstance(address, dict):
         return {}
     node: dict[str, Any] = {"@type": "PostalAddress"}
+    # schema.org has ONE streetAddress, so a suite/unit joins the street line rather than being dropped.
+    # Losing it would send a crawler an address a courier could not deliver to.
+    street = ", ".join(part for part in (str(address.get("street") or "").strip(),
+                                         str(address.get("street2") or "").strip()) if part)
+    if street:
+        node["streetAddress"] = street
     for source, target in (
-        ("street", "streetAddress"), ("locality", "addressLocality"), ("region", "addressRegion"),
+        ("locality", "addressLocality"), ("region", "addressRegion"),
         ("postal_code", "postalCode"), ("country", "addressCountry"),
     ):
         value = str(address.get(source) or "").strip()
