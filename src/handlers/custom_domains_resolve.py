@@ -2,7 +2,11 @@ import os
 import re
 
 from stripe_link.common import error_response, header_value, json_response, query_params
-from stripe_link.domain.experiments import experiment_route_block, running_experiment_for
+from stripe_link.domain.experiments import (
+    experiment_route_block,
+    running_experiment_for,
+    variant_of_running_experiment,
+)
 from stripe_link.repositories.documents import experiments_repository
 from stripe_link.domain.custom_domains import (
     creator_host_key, normalize_domain, normalize_route_path, route_target)
@@ -83,20 +87,35 @@ def _creator_lookup(host, path):
 
 
 def _experiment_for_page(tenant_id, page_id, mode, price_context, experiments_repo, pages_domain):
-    """The running experiment on this page, shaped for the edge. {} when there is none.
+    """What this page's experiments mean for serving it: `(edge block, serves_as_variant)`.
+
+    Two different questions about the same page, answered from ONE read of the table, and kept apart on
+    purpose (plans/AB_TESTING.md A2):
+
+    * Is this page the CONTROL of a running experiment? Then the edge gets the experiment definition and
+      swaps the origin artifact behind this same URL. That URL is the tested page's own address and keeps
+      its SEO identity untouched -- it is the ranking page the test exists to improve.
+    * Is this page a non-control VARIANT, asked for here AS ITS OWN RESOURCE at a slug someone attached?
+      Then it is a second public URL showing near-identical content, and that is the one to keep out of
+      the index.
+
+    Answered independently rather than as an if/else: a page could be the control of one experiment and a
+    variant of another, and each answer should still be correct.
 
     Never fails the request: an experiment is an enhancement, and a page that cannot look one up must still
     serve. A resolve that 500s here would take a tenant's whole site down over an A/B test.
     """
     if not page_id or not tenant_id:
-        return {}
+        return {}, False
     try:
         repo = experiments_repo or (experiments_repository(mode=mode) if os.environ.get("EXPERIMENTS_TABLE") else None)
         if repo is None:
-            return {}
-        experiment = running_experiment_for(page_id, repo.list_for_tenant(tenant_id))
+            return {}, False
+        experiments = repo.list_for_tenant(tenant_id)
+        serves_as_variant = variant_of_running_experiment(page_id, experiments) is not None
+        experiment = running_experiment_for(page_id, experiments)
         if not experiment:
-            return {}
+            return {}, serves_as_variant
         return experiment_route_block(
             experiment,
             lambda variant_page_id: public_url(
@@ -104,9 +123,9 @@ def _experiment_for_page(tenant_id, page_id, mode, price_context, experiments_re
                 artifact_paths(tenant_id, variant_page_id, context=price_context, mode=mode)["published"],
             ),
             api_base=os.environ.get("PUBLIC_API_BASE_URL", ""),
-        )
+        ), serves_as_variant
     except Exception:  # noqa: BLE001 - serving the page matters more than running the experiment
-        return {}
+        return {}, False
 
 
 def handler(event, context, *, index_repo=None, pages_domain=None, experiments_repo=None):
@@ -200,7 +219,7 @@ def handler(event, context, *, index_repo=None, pages_domain=None, experiments_r
     # above stays the CONTROL's, so a Worker that does not understand `experiment` still serves the control
     # -- the backend can ship before the edge does, and a Worker rollback degrades to no experiment rather
     # than to a broken page.
-    experiment_block = _experiment_for_page(
+    experiment_block, serves_as_variant = _experiment_for_page(
         tenant_id, page_id_under_test, record_mode, price_context_under_test, experiments_repo,
         pages_domain,
     )
@@ -210,5 +229,12 @@ def handler(event, context, *, index_repo=None, pages_domain=None, experiments_r
     # (reputation-isolation floor). Tell the Worker to stamp X-Robots-Tag so the same artifact is noindex here
     # even when its HTML says index,follow on the custom domain (plans/PLATFORM_HOSTNAME_SERVING.md).
     if record.get("host_kind") in ("platform", "creator"):
+        route["noindex"] = True
+    # The OTHER reason to refuse indexing, and the only one an experiment may ever cause: this page is a
+    # variant of a running experiment AND has been attached to a public slug of its own, so it competes with
+    # the page under test on the tenant's own domain. Note what is NOT here -- the control's URL is left
+    # exactly as it was. An experiment must never make the tested URL non-indexable; swapping the artifact
+    # behind that URL is invisible to a crawler, which sees one address serving one page, as it always did.
+    if serves_as_variant:
         route["noindex"] = True
     return json_response({"route": route})

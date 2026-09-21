@@ -212,10 +212,17 @@
               type="button" class="primary-action"
               :disabled="!winnerPageId || store.saving"
               @click="completeExperiment"
-            >Complete &amp; route all traffic to winner</button>
+            >Complete &amp; record winner</button>
           </section>
           <p v-else class="keys-status-banner">
-            Completed — all traffic routes to {{ store.pageName(resultsFor.winner_page_id) }}.
+            <template v-if="winnerIsControl">
+              Completed — {{ store.pageName(resultsFor.winner_page_id) }} (the control) won, and is serving.
+            </template>
+            <template v-else>
+              Completed — winner recorded: {{ store.pageName(resultsFor.winner_page_id) }}. The tested URL is
+              serving the control again. To make the winner live, apply its changes to the tested page and
+              republish.
+            </template>
           </p>
         </div>
       </section>
@@ -269,6 +276,13 @@ const assembledVariants = computed(() => {
 });
 const assembledTotalWeight = computed(() => totalWeight(assembledVariants.value));
 const currentResults = computed(() => (resultsFor.value ? store.results[resultsFor.value.experiment_id] || [] : []));
+// Completing an experiment RECORDS a winner; it does not re-point anything. `winner_page_id` reaches the
+// serving path only through the short-code resolver, which A1c disabled -- so once status is `completed`,
+// `running_experiment_for` stops matching and the tested URL serves the CONTROL again. Saying "all traffic
+// routes to the winner" was telling tenants they had received an improvement they had not (plans/AB_TESTING.md A5).
+const winnerIsControl = computed(
+  () => !!resultsFor.value && resultsFor.value.winner_page_id === resultsFor.value.control_page_id,
+);
 
 function resetForm(next) {
   Object.assign(form, next);

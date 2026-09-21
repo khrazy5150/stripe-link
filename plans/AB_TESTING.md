@@ -96,6 +96,49 @@ This is simpler than stamping robots at the edge, and it takes a moving part OUT
 highest-blast-radius component in the system. Whichever variant is served, the response identifies itself
 as the tested URL and carries the tested URL's indexing rules.
 
+### Two representations of a variant, and the invariant that follows
+
+The section above is right that a variant artifact inherits the tested page's identity, but it treats "a
+variant" as one thing. It is two, and conflating them produced a real bug (below):
+
+1. **Variant as an experiment artifact.** The worker swaps `origin_url` while the request stays on the
+   control's URL. Nothing about the web resource changes — no redirect, no `?variant=`, no `/offer-b`.
+   Googlebot sees one address serving one page, exactly as before.
+2. **Variant as an independently addressable page.** A variant that someone explicitly attaches to a slug
+   gets a tenant-domain URL of its own. *That* is a second indexable URL with near-identical content.
+
+They get opposite SEO treatment, and the rule is:
+
+> **An experiment must never cause the control/tested URL to become non-indexable** — and separately, an
+> independently addressable variant must not become a competing indexable URL.
+
+Stamping noindex on an assigned response violates the first half: it tells Google the URL it has been
+ranking should be dropped, which is precisely backwards for this architecture. **This was shipped to all
+three zones on 2026-09-21 and reverted the same day.** The inversion worth remembering: the check was
+`running_experiment_for(page)` — which matches on `control_page_id` — so the header landed on the control
+and never on the variant. The ranking page was deindexed while the actual duplicate stayed indexable.
+
+The enforcement layer is the **resolver, not the worker**. The worker's job is `resolve → assign →
+substitute origin_url`; it has no idea which page it is serving or what URL corresponds to it. The resolver
+already knows the page_id, whether the page is the control, whether it is a variant, whether the experiment
+is running, and what public URL the page is attached to. So the rule is checked against *the page being
+served as its own resource*:
+
+```python
+if variant_of_running_experiment(page_id, experiments):   # NOT running_experiment_for(page_id, ...)
+    route["noindex"] = True
+```
+
+- control URL → untouched, indexable, keeps its accumulated signals
+- control URL with an artifact swapped behind it → untouched, identical to a crawler
+- unattached variant → no public URL at all; nothing to crawl (the strongest case, and the default today:
+  publishing does not attach, `POST /sites/{id}/attach` is a separate deliberate action)
+- attached variant → `noindex` on *its own* URL
+
+Blocking attachment outright while a page is an active variant is the stronger form of the same rule and
+remains open; the noindex above is the backstop that also covers a page attached before the experiment
+started.
+
 ### Lifecycle: republish in place, never unpublish
 
 Unpublishing DELETES the published artifact (`delete_page_artifacts` on the unpublish path), so the page
@@ -204,10 +247,18 @@ disagrees with their analytics.
     tenant an address that no longer assigns anyone; `/experiments/{id}/resolve` answers **410**; the
     screen shows no short link. The assignment LOGIC is kept and still tested directly, because the edge
     implements the same rules and those tests are the record of what they are.
-- **A2 — indexing.** Canonical to the tested URL; edge-stamped noindex by route; never bake it.
+- **A2 — indexing. The variant half: DONE 2026-09-21.** The invariant and the two representations are
+  below; `variant_of_running_experiment` + the resolver now keep an ATTACHED variant out of the index and
+  leave the tested URL alone. Still to do: canonical on a variant artifact → the tested URL.
 - **A3 — significance.** A verdict in words, a "how much longer" estimate, and honest labels. No gate,
   no auto-pause — the tenant still decides.
 - **A4 — prove it.** Two real pages, a real split, a real conversion. Nothing here has ever run.
+- **A5 — promotion actually promotes.** `complete_experiment` records `winner_page_id` and stops there.
+  The only path where that value reaches serving is `experiments_resolve.py`, the short-code resolver A1c
+  disabled — so on the live path a completed experiment reverts to the CONTROL, and a tenant who picks a
+  winning variant keeps the loser. The UI said "all traffic routes to the winner"; corrected 2026-09-21 to
+  state what actually happens. Still to build: re-point the tested slug at the winner (see "Promoting a
+  winner" above), which is the one operation that touches the tested page.
 
 ## Risks
 

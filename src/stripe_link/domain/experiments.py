@@ -44,6 +44,36 @@ def running_experiment_for(page_id: str, experiments: list[dict[str, Any]] | Non
     return None
 
 
+def variant_of_running_experiment(page_id: str, experiments: list[dict[str, Any]] | None) -> dict[str, Any] | None:
+    """The running experiment this page is a NON-CONTROL variant of, or None.
+
+    The mirror image of `running_experiment_for`, and deliberately a DIFFERENT question. That one asks "is
+    this page the one under test?" and is matched on `control_page_id`; the answer drives artifact swapping
+    at the edge. This one asks "is this page an alternative rendering that has ALSO been given a public URL
+    of its own?" and the answer drives indexing.
+
+    Conflating the two is what a noindex bug looks like. An experiment runs at the CONTROL's URL -- same
+    address, no redirect, only the origin artifact varies -- so that URL keeps the ranking signals the test
+    exists to improve, and must never be made noindex. The risk is at the other end: a variant that someone
+    attached to its own slug is a second public URL serving near-identical content. That is the URL to keep
+    out of the index, and the control is excluded here for exactly that reason.
+
+    The control appears in `variants` too (with key "control"), so excluding it is not incidental.
+    """
+    page_id = str(page_id or "")
+    if not page_id:
+        return None
+    for experiment in experiments or []:
+        if str(experiment.get("status") or "") != RUNNING:
+            continue
+        if str(experiment.get("control_page_id") or "") == page_id:
+            continue
+        for variant in experiment.get("variants") or []:
+            if str(variant.get("page_id") or "") == page_id:
+                return experiment
+    return None
+
+
 def experiment_route_block(
     experiment: dict[str, Any],
     artifact_url_for: Any,

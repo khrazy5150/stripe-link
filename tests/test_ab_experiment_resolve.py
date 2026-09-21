@@ -13,7 +13,13 @@ rather than to a broken page.
 import json
 import unittest
 
-from stripe_link.domain.experiments import experiment_route_block, running_experiment_for
+from stripe_link.domain.experiments import (
+    experiment_route_block,
+    running_experiment_for,
+    variant_of_running_experiment,
+)
+from handlers.custom_domains_resolve import handler as resolve_handler
+from tests.fakes import FakeDocumentRepository
 
 
 def _experiment(**over):
@@ -110,10 +116,30 @@ class ResolverWiringTests(unittest.TestCase):
         self.assertNotIn('route["origin_url"] =', block)
 
     def test_an_experiment_lookup_can_never_break_serving(self):
-        """A resolve that 500s would take a tenant's whole site down over an A/B test."""
-        helper = self.RESOLVE.split("def _experiment_for_page", 1)[1][:1200]
-        self.assertIn("except Exception", helper)
-        self.assertIn("return {}", helper)
+        """A resolve that 500s would take a tenant's whole site down over an A/B test.
+
+        Exercised rather than grepped: the guarantee is "the page still serves when the experiments table
+        does not", and only running it can show that.
+        """
+        class ExplodingExperiments:
+            def list_for_tenant(self, tenant_id):
+                raise RuntimeError("experiments table is unavailable")
+
+        index = FakeDocumentRepository("domain")
+        index.put({"tenant_id": "t1", "domain": "shop.example.com", "status": "active",
+                   "target_page_id": "page_A"})
+        response = resolve_handler(
+            {"httpMethod": "GET", "queryStringParameters": {"host": "shop.example.com"}},
+            None, index_repo=index, pages_domain="pages.example.com",
+            experiments_repo=ExplodingExperiments(),
+        )
+
+        self.assertEqual(response["statusCode"], 200)
+        route = json.loads(response["body"])["route"]
+        self.assertEqual(route["origin_url"], "https://pages.example.com/page_A/index.html")
+        self.assertNotIn("experiment", route)
+        # and it must not guess "noindex" out of an error, either
+        self.assertNotIn("noindex", route)
 
     def test_crawl_files_are_never_experimented_on(self):
         # robots.txt and sitemap.xml belong to the site, not a page; varying them per visitor is incoherent.
@@ -130,3 +156,87 @@ class ResolverWiringTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class VariantAsItsOwnResourceTests(unittest.TestCase):
+    """The indexing question, which is NOT the assignment question.
+
+    An experiment runs at the control's URL: same address, no redirect, only the origin artifact varies. So
+    that URL keeps the ranking signals the test exists to improve. The risk is a variant someone attached to
+    a public slug of its own -- a second URL serving near-identical content.
+    """
+
+    def test_a_variant_attached_to_its_own_slug_is_found(self):
+        self.assertEqual(
+            variant_of_running_experiment("page_B", [_experiment()])["experiment_id"], "exp_1")
+
+    def test_THE_CONTROL_IS_NOT_A_VARIANT(self):
+        # The control is listed in `variants` too (key "control"), so excluding it is not incidental: this is
+        # the single assertion standing between an A/B test and deindexing the page it was meant to improve.
+        self.assertIsNone(variant_of_running_experiment("page_A", [_experiment()]))
+
+    def test_only_a_running_experiment_counts(self):
+        for status in ("draft", "paused", "completed", ""):
+            with self.subTest(status=status):
+                self.assertIsNone(variant_of_running_experiment("page_B", [_experiment(status=status)]))
+
+    def test_an_unrelated_page_is_unaffected(self):
+        self.assertIsNone(variant_of_running_experiment("page_Z", [_experiment()]))
+
+    def test_empty_inputs(self):
+        self.assertIsNone(variant_of_running_experiment("page_B", []))
+        self.assertIsNone(variant_of_running_experiment("page_B", None))
+        self.assertIsNone(variant_of_running_experiment("", [_experiment()]))
+
+
+class IndexingThroughTheResolverTests(unittest.TestCase):
+    """End-to-end: what the edge is actually told, on a CUSTOM domain (where indexing is real)."""
+
+    def setUp(self):
+        self.index = FakeDocumentRepository("domain")
+        self.experiments = FakeDocumentRepository("experiment_id")
+        self.experiments.put({
+            "tenant_id": "t1", "experiment_id": "exp_1", "status": "running",
+            "control_page_id": "page_A", "cookie_name": "jb_ab_exp_1",
+            "variants": [{"page_id": "page_A", "weight": 50}, {"page_id": "page_B", "weight": 50}],
+        })
+        self.index.put({
+            "tenant_id": "t1", "domain": "shop.example.com", "status": "active",
+            "target_page_id": "page_A",
+            "routes": {
+                "/offer": {"page_id": "page_A", "page_type": "landing", "enabled": True},
+                "/offer-b": {"page_id": "page_B", "page_type": "landing", "enabled": True},
+            },
+        })
+
+    def _route(self, path):
+        response = resolve_handler(
+            {"httpMethod": "GET", "queryStringParameters": {"host": "shop.example.com", "path": path}},
+            None, index_repo=self.index, pages_domain="pages.example.com",
+            experiments_repo=self.experiments,
+        )
+        self.assertEqual(response["statusCode"], 200)
+        return json.loads(response["body"])["route"]
+
+    def test_the_tested_url_is_never_made_noindex(self):
+        # The whole point of the cookie/same-URL design. If this ever flips, an experiment silently drops the
+        # tenant's ranking page out of Google for as long as it runs.
+        route = self._route("/offer")
+        self.assertNotIn("noindex", route)
+
+    def test_the_tested_url_still_gets_its_experiment(self):
+        self.assertEqual(self._route("/offer")["experiment"]["experiment_id"], "exp_1")
+
+    def test_a_variant_at_its_OWN_url_is_noindex(self):
+        self.assertTrue(self._route("/offer-b")["noindex"])
+
+    def test_a_variant_at_its_own_url_is_not_itself_an_experiment_entry(self):
+        # Assignment happens on the control's URL only; two entry points would roll and pin separately.
+        self.assertNotIn("experiment", self._route("/offer-b"))
+
+    def test_nothing_is_noindex_once_the_experiment_stops(self):
+        stopped = self.experiments.get("t1", "exp_1")
+        stopped["status"] = "completed"
+        self.experiments.put(stopped)
+        self.assertNotIn("noindex", self._route("/offer-b"))
+        self.assertNotIn("noindex", self._route("/offer"))
