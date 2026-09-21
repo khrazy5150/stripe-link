@@ -2,6 +2,7 @@ import os
 import random
 
 from stripe_link.common import error_response, header_value, json_response, path_params
+from stripe_link.domain.experiments import SHORT_CODE_ENTRY_ENABLED
 from stripe_link.repositories.documents import RepositoryError, experiments_repository
 from stripe_link.runtime.artifacts import artifact_paths
 from stripe_link.runtime.publishing import public_url
@@ -18,6 +19,12 @@ def handler(event, context, *, repository=None, pages_domain=None, choose_fn=Non
     method = (event or {}).get("httpMethod", "GET").upper()
     if method == "OPTIONS":
         return json_response({})
+    if not SHORT_CODE_ENTRY_ENABLED:
+        # Disabled, not dismantled: assignment moved to the edge, on the page's own URL. Answering here as
+        # well would be a SECOND assignment path with its own roll and its own cookie.
+        return error_response(
+            "Short-code experiment entry is disabled; experiments run on the page's own URL.",
+            status_code=410, code="short_code_entry_disabled")
     if method != "GET":
         return error_response(f"Unsupported method '{method}'.", status_code=405, code="method_not_allowed")
 

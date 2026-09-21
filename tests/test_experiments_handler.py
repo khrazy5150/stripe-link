@@ -1,4 +1,5 @@
 import json
+import pathlib
 import os
 import unittest
 from unittest.mock import patch
@@ -56,20 +57,22 @@ class ExperimentsCrudTests(unittest.TestCase):
             code_fn=lambda: code,
         )
 
-    def test_create_allocates_short_url_and_route(self):
+    def test_create_no_longer_allocates_a_short_url_or_route(self):
+        """A short code would be a second way into the experiment, entered by different traffic than the
+        page's own URL -- and a link a tenant could copy that no longer assigns anyone
+        (plans/AB_TESTING.md A1c)."""
         with patch.dict(os.environ, {"SHORT_URL_HOST": "go.jbay.uk"}, clear=False):
             response = self.create()
         self.assertEqual(response["statusCode"], 201)
         experiment = json.loads(response["body"])["experiment"]
         self.assertEqual(experiment["status"], "draft")
-        self.assertEqual(experiment["short_url"], "https://go.jbay.uk/code123ABCd")
+        self.assertNotIn("short_url", experiment)
+        self.assertNotIn("short_code", experiment)
         self.assertEqual(experiment["cookie_name"], "jb_ab_exp_1")
         keys = sorted(v["key"] for v in experiment["variants"])
         self.assertEqual(keys, ["control", "variant_a"])
-        # a matching experiment route was created
-        route = self.routes.find_by_id("code123ABCd")
-        self.assertEqual(route["target_type"], "experiment")
-        self.assertEqual(route["target_experiment_id"], "exp_1")
+        # and nothing was written to the routes table
+        self.assertIsNone(self.routes.find_by_id("code123ABCd"))
 
     def test_create_requires_control_among_variants(self):
         response = self.create(body={
@@ -181,70 +184,66 @@ class ExperimentsCrudTests(unittest.TestCase):
 
 
 class ExperimentsResolveTests(unittest.TestCase):
-    def setUp(self):
-        self.experiments = FakeDocumentRepository("experiment_id")
+    """The short-code resolver is DISABLED, not dismantled (plans/AB_TESTING.md A1c).
 
-    def seed(self, status="running", winner=None):
-        self.experiments.put({
-            "tenant_id": "tenant_demo",
-            "experiment_id": "exp_1",
-            "document_type": "experiment",
-            "status": status,
-            "control_page_id": "page_control",
-            "winner_page_id": winner,
-            "cookie_name": "jb_ab_exp_1",
-            "variants": [
-                {"key": "control", "page_id": "page_control", "weight": 50},
-                {"key": "variant_a", "page_id": "page_b", "weight": 50},
-            ],
-            "stats": {"views_by_page": {}},
-        })
+    Assignment moved to the edge, on the page's own URL, because entering only through go.jbay.uk/{code}
+    biases the experiment: organic traffic to the real URL never enters it. Answering here as well would be
+    a SECOND assignment path with its own roll and its own cookie, and that drift is invisible until the
+    numbers look wrong.
 
-    def resolve(self, headers=None, choose_fn=None):
-        return resolve_handler(
-            event("GET", experiment_id="exp_1", headers=headers),
-            None,
-            repository=self.experiments,
-            pages_domain="pages.example.com",
-            choose_fn=choose_fn or (lambda upper: 0),
-        )
+    The endpoint answers 410. Its assignment LOGIC is kept and still exercised directly below, because the
+    edge implements the same rules and these cases are the record of what those rules are.
+    """
 
-    def test_running_assigns_by_weight_and_sets_cookie(self):
-        self.seed()
-        response = self.resolve(choose_fn=lambda upper: 0)  # first bucket -> control
-        self.assertEqual(response["statusCode"], 302)
-        self.assertEqual(response["headers"]["Location"], "https://pages.example.com/page_control/index.html")
-        self.assertIn("jb_ab_exp_1=page_control", response["headers"]["Set-Cookie"])
-        self.assertEqual(self.experiments.get("tenant_demo", "exp_1")["stats"]["views_by_page"]["page_control"], 1)
+    def _resolve(self, **params):
+        from handlers import experiments_resolve
+        return experiments_resolve.handler(
+            {"httpMethod": "GET", "pathParameters": {"experiment_id": "exp_1"}, "headers": {}},
+            None, repository=None, **params)
 
-    def test_weighted_choice_second_bucket(self):
-        self.seed()
-        response = self.resolve(choose_fn=lambda upper: 75)  # past control's 50 -> variant
-        self.assertEqual(response["headers"]["Location"], "https://pages.example.com/page_b/index.html")
+    def test_the_endpoint_is_gone_not_broken(self):
+        response = self._resolve()
+        self.assertEqual(response["statusCode"], 410)
+        self.assertIn("page's own URL", json.loads(response["body"])["message"])
 
-    def test_sticky_cookie_pins_variant(self):
-        self.seed()
-        response = self.resolve(headers={"Cookie": "jb_ab_exp_1=page_b"}, choose_fn=lambda upper: 0)
-        self.assertEqual(response["headers"]["Location"], "https://pages.example.com/page_b/index.html")
-
-    def test_paused_falls_back_to_control_without_counting(self):
-        self.seed(status="paused")
-        response = self.resolve()
-        self.assertEqual(response["headers"]["Location"], "https://pages.example.com/page_control/index.html")
-        self.assertEqual(self.experiments.get("tenant_demo", "exp_1")["stats"]["views_by_page"], {})
-
-    def test_completed_routes_to_winner(self):
-        self.seed(status="completed", winner="page_b")
-        response = self.resolve()
-        self.assertEqual(response["headers"]["Location"], "https://pages.example.com/page_b/index.html")
-
-    def test_unknown_experiment_404(self):
-        response = resolve_handler(
-            event("GET", experiment_id="missing"),
-            None, repository=self.experiments, pages_domain="pages.example.com",
-        )
-        self.assertEqual(response["statusCode"], 404)
+    def test_the_flag_is_off_and_says_why(self):
+        from stripe_link.domain import experiments
+        self.assertFalse(experiments.SHORT_CODE_ENTRY_ENABLED)
+        source = (pathlib.Path(__file__).resolve().parents[1]
+                  / "src/stripe_link/domain/experiments.py").read_text(encoding="utf-8")
+        self.assertIn("two live assignment paths", source)
 
 
-if __name__ == "__main__":
-    unittest.main()
+class ExperimentAssignmentRulesTests(unittest.TestCase):
+    """The rules themselves, still true and still tested -- the edge implements the same ones."""
+
+    VARIANTS = [{"page_id": "page_control", "weight": 50}, {"page_id": "page_b", "weight": 50}]
+
+    def _experiment(self, status="running", winner=None):
+        return {"status": status, "control_page_id": "page_control", "winner_page_id": winner,
+                "variants": self.VARIANTS}
+
+    def test_first_bucket_is_the_control(self):
+        from handlers.experiments_resolve import choose_page
+        page_id, counted = choose_page(self._experiment(), "", lambda upper: 0)
+        self.assertEqual((page_id, counted), ("page_control", True))
+
+    def test_past_the_first_weight_is_the_variant(self):
+        from handlers.experiments_resolve import choose_page
+        self.assertEqual(choose_page(self._experiment(), "", lambda upper: 75)[0], "page_b")
+
+    def test_a_pin_wins_over_a_fresh_roll(self):
+        from handlers.experiments_resolve import choose_page
+        self.assertEqual(choose_page(self._experiment(), "page_b", lambda upper: 0)[0], "page_b")
+
+    def test_paused_serves_the_control_and_counts_nothing(self):
+        from handlers.experiments_resolve import choose_page
+        self.assertEqual(choose_page(self._experiment(status="paused"), "", lambda upper: 75),
+                         ("page_control", False))
+
+    def test_completed_sends_everyone_to_the_winner(self):
+        from handlers.experiments_resolve import choose_page
+        self.assertEqual(choose_page(self._experiment(status="completed", winner="page_b"), "",
+                                     lambda upper: 0), ("page_b", False))
+
+

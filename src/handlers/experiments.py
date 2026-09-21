@@ -2,6 +2,7 @@ import time
 
 from stripe_link.common import error_response, json_response, parse_json_body, path_params, resolve_stripe_mode, tenant_id_from_event
 from handlers.routes import short_url_for_code
+from stripe_link.domain.experiments import SHORT_CODE_ENTRY_ENABLED
 from stripe_link.domain.documents import DocumentValidationError, validate_experiment, validate_route
 from stripe_link.entitlement_gate import require_capability
 from stripe_link.ids import generate_id
@@ -72,6 +73,10 @@ def _action_from_event(event):
 
 
 def with_short_url(experiment):
+    # Omitted while the short-code entry point is disabled, so nothing downstream can show a tenant a link
+    # that no longer enters the experiment.
+    if not SHORT_CODE_ENTRY_ENABLED:
+        return dict(experiment)
     return {**experiment, "short_url": short_url_for_code(experiment.get("short_code", ""))}
 
 
@@ -158,16 +163,19 @@ def create_experiment(event, repository, routes, now_fn, id_fn, code_fn):
     }
 
     routes = routes or routes_repository()
-    short_code = _allocate_experiment_route(routes, tenant_id, experiment_id, code_fn)
-    if not short_code:
-        return error_response("Could not allocate a unique short code.", status_code=500, code="code_generation_failed")
-    experiment["short_code"] = short_code
+    short_code = ""
+    if SHORT_CODE_ENTRY_ENABLED:
+        short_code = _allocate_experiment_route(routes, tenant_id, experiment_id, code_fn)
+        if not short_code:
+            return error_response("Could not allocate a unique short code.", status_code=500, code="code_generation_failed")
+        experiment["short_code"] = short_code
 
     try:
         validate_experiment(experiment)
         saved = repository.put(experiment)
     except (DocumentValidationError, ValueError) as exc:
-        routes.delete(tenant_id, short_code)
+        if short_code:
+            routes.delete(tenant_id, short_code)
         return error_response(str(exc), code="invalid_experiment")
     return json_response({"experiment": with_short_url(saved)}, status_code=201)
 

@@ -10,6 +10,18 @@ from typing import Any
 
 RUNNING = "running"
 
+# The short-code entry point is DISABLED, not dismantled (plans/AB_TESTING.md A1c).
+#
+# It was right in stripe-cart, where the short URL WAS the published page. Here a page lives on the
+# tenant's own domain, so entering an experiment only through go.jbay.uk/{code} BIASES it: organic traffic
+# to the real URL never enters the test, and what gets measured is the slice deliberately routed through
+# the link. Assignment now happens at the edge, on the page's own URL.
+#
+# The code stays because there is no cost to keeping it and a real cost to a half-removal, but nothing may
+# route to it: two live assignment paths would roll separately and set separate cookies, and that drift is
+# invisible until the numbers look wrong. Flip this to re-enable, and re-read that sentence first.
+SHORT_CODE_ENTRY_ENABLED = False
+
 
 def running_experiment_for(page_id: str, experiments: list[dict[str, Any]] | None) -> dict[str, Any] | None:
     """The running experiment whose CONTROL is this page, or None.

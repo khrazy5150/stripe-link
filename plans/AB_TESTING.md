@@ -198,7 +198,12 @@ disagrees with their analytics.
     and validates page_id against the experiment's own variants, because that value becomes a DynamoDB
     attribute NAME in `increment_view`. **Still to deploy: the Worker itself** --
     `deploy/setup-cloudflare-custom-domain-worker.sh`, per zone, not `deploy.sh`.
-  - **A1c — disable the short-code path.**
+  - **A1c — disable the short-code path: DONE 2026-09-21.** One flag,
+    `SHORT_CODE_ENTRY_ENABLED = False` in `domain/experiments.py`, carrying the reasoning. Creating an
+    experiment no longer allocates a code or a route; `with_short_url` omits the link so nothing can show a
+    tenant an address that no longer assigns anyone; `/experiments/{id}/resolve` answers **410**; the
+    screen shows no short link. The assignment LOGIC is kept and still tested directly, because the edge
+    implements the same rules and those tests are the record of what they are.
 - **A2 — indexing.** Canonical to the tested URL; edge-stamped noindex by route; never bake it.
 - **A3 — significance.** A verdict in words, a "how much longer" estimate, and honest labels. No gate,
   no auto-pause — the tenant still decides.

@@ -36,7 +36,8 @@
           <header>
             <div>
               <h3>{{ experiment.name || "Untitled experiment" }}</h3>
-              <p class="font-mono">{{ experiment.short_url }}</p>
+              <!-- No short link: an experiment runs on the page's OWN url now, so there is no separate
+                   address to copy and nothing here that a tenant could share by mistake. -->
             </div>
             <span class="product-status" :class="experiment.status">{{ statusLabel(experiment.status) }}</span>
           </header>
@@ -170,7 +171,6 @@
         <header class="modal-card-header">
           <div>
             <h2 id="abResultsTitle">{{ resultsFor.name }} — Results</h2>
-            <p class="font-mono">{{ resultsFor.short_url }}</p>
           </div>
           <button type="button" class="modal-close" aria-label="Close" @click="resultsFor = null">×</button>
         </header>
