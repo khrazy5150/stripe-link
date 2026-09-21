@@ -128,6 +128,59 @@ Deferred, non-blocking follow-ups. Each item notes what, why it was deferred, an
 - **Why deferred:** manual reassignment is an edge case; the primary booking path is correct. Introduced
   in Phase B.5.
 
+## Data isolation
+
+### ⭐⭐ HIGH — webhook data lands in the wrong deployment; stamp origin on the session (found 2026-09-20)
+
+**What happens today.** Stripe delivers connected-account events to the endpoints registered on the
+PLATFORM account, and dev + prod share one platform account (`sk_test`/`sk_live` are byte-identical in
+`stripe-cart/dev/platform/stripe` and `.../prod/...`). The same connected account is registered in both
+deployments (`acct_1TA08M21lLbLd4Y5` in `jb-stripe-keys-v2-dev` AND `-prod`), so an arriving event cannot
+be attributed from the account -- both deployments legitimately know it.
+
+With no discriminator, both once processed everything and produced duplicate orders. The fix at the time
+(`plans/STRIPE_MODE_DECOUPLING.md` P3, commit 244328c) was route-by-livemode with only ONE endpoint
+registered, which stopped the duplicates by starving dev of traffic entirely. Consequence: **every order,
+customer, invoice and ledger entry lands in the PROD tables regardless of which dashboard created it.**
+`jb-orders-dev` has never held a row; `jb-ledger-prod` holds test money.
+
+**Likely origin:** stripe-cart had ONE server with two Stripe environments, so "environment" and "Stripe
+mode" were the same axis there. Porting that webhook shape into stripe-link -- which has several
+deployments -- crossed the wires. Predates the plan-document habit, so nothing recorded the decision.
+
+**The fix (agreed 2026-09-20): stamp the origin on the session, do not split the Stripe account.**
+
+- `metadata[mode]` = sandbox | staging | production (the DEPLOYMENT)
+- `metadata[environment]` = test | live (STRIPE's)
+- Both onto `subscription_data[metadata]` too, so renewal invoices carry them (the mechanism already works
+  -- tips use it).
+- Register the webhook endpoint on every deployment; each DROPS events that are not its own before any
+  write. Unmarked events (legacy sessions, `account.updated`) default to production so nothing is lost.
+- A transaction then states its own origin -- "Sandbox Live", "Production Test" -- which says both where
+  the data should live in DynamoDB and where to find it in Stripe.
+
+**⚠ The two words are currently used the OPPOSITE way round in code.** `ENVIRONMENT` is the deployment
+(dev/prod) and `stripe_mode` is test/live -- the inverse of the vocabulary above. Pick one vocabulary and
+write it down BEFORE implementing, or the guard gets written backwards and silently drops the traffic it
+was meant to keep.
+
+**Sequencing.** Both databases get wiped so the webhooks can be watched cleanly -- but NOT until the
+subscription renewal test has been confirmed (see the HIGH QA item). Do not wipe before that data has
+served its purpose.
+
+**Not required:** a separate Stripe platform account per deployment. That buys perfect silos -- separate
+tenants, separate connected accounts -- which is not what is wanted: real tenants live in production and
+their test mode belongs in the production silo. What is wanted is DATA isolation, and that needs a
+discriminator on the event, not a second account.
+
+**Already fixed separately (2026-09-20):** the ledger and customers reads now filter by mode, so sandbox
+money is no longer summed into real revenue. That closed the money leak; this item closes the routing.
+
+**Also outstanding:** `stripe-cart/dev/platform/stripe` holds the LIVE platform key, identical to prod's.
+`get_platform_secret_key("live")` returns it, so a single live event reaching dev would be processed
+against the real platform account. Latent only because dev receives no traffic -- a thin thing to rely on.
+Dev has no business holding a live key under any topology. Small, independent, do it sooner.
+
 ## Security
 
 ### ⭐⭐ HIGH — the API never verifies who is calling; tenant_id is taken from the request (found 2026-09-15)
