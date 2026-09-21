@@ -156,6 +156,7 @@ import { normalizeE164, phoneError } from "../utils/phone";
 import PhoneInput from "./PhoneInput.vue";
 import { normalizeCountry } from "../utils/countries";
 import AddressFields from "./AddressFields.vue";
+import { useProfileStore } from "../stores/profile";
 
 
 const session = getAuthSession() || {};
@@ -165,6 +166,7 @@ const saving = ref(false);
 const error = ref("");
 const message = ref("");
 const rawDoc = ref({});
+const profileStore = useProfileStore();
 const email = ref(session.email || "");
 const form = reactive({
   first_name: session.first_name || "", last_name: session.last_name || "", display_name: "",
@@ -375,6 +377,11 @@ async function save() {
     doc.updated_at = Math.floor(Date.now() / 1000);
     const body = await apiRequest("/profile", { method: "PUT", body: doc });
     applyProfile(body.profile || doc);
+    // The SHARED store caches this profile for six other screens -- the brand picker, landing-page
+    // defaults, the Sites header, Shipping's "Copy from business address" -- and nothing invalidated it.
+    // Without this, a tenant edits their business here and every one of those keeps the old values until
+    // a full page reload. Failing to refresh must not fail the save, which has already succeeded.
+    profileStore.refresh().catch(() => {});
     message.value = "Profile saved.";
   } catch (err) {
     error.value = err.message || "Failed to save profile.";

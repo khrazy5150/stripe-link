@@ -319,7 +319,10 @@ async function copyBusinessAddress() {
   message.value = "";
   copyingBusiness.value = true;
   try {
-    await profileStore.ensureLoaded();
+    // refresh(), not ensureLoaded(): the tenant explicitly asked for their CURRENT business address, and
+    // the cached copy may predate an edit made on the Profile screen a moment ago. One request on a
+    // deliberate click is cheaper than copying an address they have already changed.
+    await profileStore.refresh();
     const mapped = businessAddressToShipFrom(profileStore.business);
     // Nothing to copy is a CONFIGURATION answer, not a failure: say where to fix it rather than leaving
     // the tenant to wonder whether the button is broken.
