@@ -3075,6 +3075,12 @@ Resources:
             RestApiId: !Ref RestApi
             Path: /shipping
             Method: PUT
+        TestShipping:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /shipping/test
+            Method: POST
 
   CustomersFunction:
     Type: AWS::Serverless::Function

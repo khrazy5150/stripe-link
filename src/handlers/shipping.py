@@ -1,5 +1,8 @@
+import time
+
 from stripe_link.common import error_response, json_response, parse_json_body, tenant_id_from_event
 from stripe_link.domain.documents import DocumentValidationError, validate_shipping_config
+from stripe_link.domain.shipping_providers import ProviderError, provider_for
 from stripe_link.kms_secrets import KmsSecretCipher, is_encrypted_secret_ref
 from stripe_link.repositories.documents import RepositoryError, shipping_config_repository
 
@@ -18,6 +21,11 @@ def handler(event, context, repository=None, secret_cipher=None):
     method = (event or {}).get("httpMethod", "").upper()
     if method == "OPTIONS":
         return json_response({})
+    # /shipping/test BEFORE the save branch: it is a POST too, and a save would try to validate a body
+    # that a connection test does not send.
+    path = str((event or {}).get("path") or (event or {}).get("resource") or "")
+    if method == "POST" and path.rstrip("/").endswith("/test"):
+        return test_shipping_connection(event, repository, secret_cipher)
     if method in {"POST", "PUT"}:
         return save_shipping_config(event, repository, secret_cipher)
     if method == "GET":
@@ -99,3 +107,48 @@ def redact_shipping_config(config):
         provider["api_key_ref"] = REDACTED_SECRET
     redacted["provider"] = provider
     return redacted
+
+
+def test_shipping_connection(event, repository, secret_cipher, now_fn=lambda: int(time.time())):
+    """Prove the saved key actually works, and record the answer on the config.
+
+    `connection_status` has existed since the schema was written and could only ever say "untested": nothing
+    tested it, and there was no endpoint to. The dashboard has been displaying a field that nothing could
+    advance.
+
+    The key is decrypted here and never leaves: it is not returned, not logged, and not put in an error.
+    A provider's own error text is passed through because it is how a tenant learns what is wrong -- and
+    the adapters build those messages from the response BODY, never from the request, whose headers carry
+    the key.
+    """
+    tenant_id = tenant_id_from_event(event)
+    if not tenant_id:
+        return error_response("tenant_id is required.", code="missing_tenant")
+    config = repository.get(tenant_id)
+    if not config:
+        return error_response("Shipping config not found.", status_code=404, code="not_found")
+
+    provider_config = dict(config.get("provider") or {})
+    name = str(provider_config.get("name") or "")
+    secret_ref = str(provider_config.get("api_key_ref") or "")
+    if not secret_ref and name != "mock":
+        return error_response("Save a provider API key before testing the connection.",
+                              code="missing_api_key")
+    try:
+        api_key = secret_cipher.decrypt(
+            secret_ref, tenant_id=tenant_id, mode=SECRET_MODE, field=SECRET_FIELD,
+        ) if secret_ref else ""
+        result = provider_for(name, api_key).test_connection()
+        status, message, carriers = "connected", str(result.get("message") or "Connected."), result.get("carriers") or []
+    except ProviderError as exc:
+        status, message, carriers = "failed", str(exc), []
+    except Exception as exc:  # noqa: BLE001 - a failed test is an ANSWER, never a 500
+        status, message, carriers = "failed", f"Could not test the connection: {type(exc).__name__}", []
+
+    provider_config["connection_status"] = status
+    provider_config["last_tested_at"] = now_fn()
+    saved = repository.put({**config, "provider": provider_config})
+    return json_response({
+        "shipping_config": redact_shipping_config(saved),
+        "connection": {"status": status, "message": message, "carriers": carriers},
+    }, status_code=200 if status == "connected" else 502)
