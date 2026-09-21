@@ -141,6 +141,33 @@ Deferred, non-blocking follow-ups. Each item notes what, why it was deferred, an
 - **Why deferred:** manual reassignment is an edge case; the primary booking path is correct. Introduced
   in Phase B.5.
 
+## A/B testing
+
+### Move the experiment onto the PAGE, not a short URL (plan plans/AB_TESTING.md, 2026-09-21)
+- **More built than expected:** CRUD, lifecycle, weighted assignment, sticky cookie, atomic view counts
+  (a DynamoDB `ADD`, not read-modify-write) and conversion attribution through
+  `order.attribution.page_id`, which checkout already carries. **Zero experiments have ever been created
+  in either environment** -- complete on paper, never run, same shape as booking.
+- **The model is wrong for this codebase.** Entry is a short code, which was right in stripe-cart where the
+  short URL WAS the page. Here the page lives on the tenant's own domain, so a short-code experiment BIASES
+  the sample: organic traffic to the real URL never enters the test.
+- **Fix:** attach the experiment to the page and let the Worker serve a variant at the SAME URL -- it
+  already reverse-proxies published pages, so no redirect and no URL change.
+- **The Worker caches resolve for 60s**, so assignment must NOT live in the resolve response or every
+  visitor in a window gets the same variant. Server says WHAT the experiment is (cacheable); the edge says
+  WHO gets which (per-request, from the cookie), and pings the view via waitUntil.
+- **Short-code path: disabled, not dismantled.** Two live assignment paths would roll separately and set
+  separate cookies.
+- **⚠ The indexing requirement has a trap.** `robots` is baked into the ARTIFACT at publish, so a variant
+  whose artifact says noindex, served at the control's URL, tells Googlebot to DEINDEX THE PAGE BEING
+  TESTED. Noindex must be stamped at the EDGE by route (the mechanism free platform hosts already use),
+  never baked; and every variant artifact's canonical must point at the TESTED url rather than its own.
+- **Significance is missing and that makes results harmful:** compute_results returns a conversion rate and
+  nothing else, and complete_experiment accepts whatever winner the tenant posts. "B 12% vs A 8%" on 25
+  visits is noise, and acting on it is worse than not testing.
+- **Highest blast radius yet:** the Worker serves every published page for every tenant and does NOT deploy
+  with deploy.sh.
+
 ## Data isolation
 
 ### ⭐⭐ HIGH — webhook data lands in the wrong deployment; stamp origin on the session (found 2026-09-20)
