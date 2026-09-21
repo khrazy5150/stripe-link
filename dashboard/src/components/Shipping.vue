@@ -83,6 +83,58 @@
         <p v-if="providerChangedNeedsKey" class="keys-status-banner error">
           You changed providers — enter the new provider's API key. The previous key will not carry over.
         </p>
+
+        <div class="offer-two-column">
+          <div>
+            <button class="secondary-action" type="button" :disabled="testing || !form.provider.name" @click="testConnection">
+              {{ testing ? "Testing…" : "Test connection" }}
+            </button>
+            <small class="field-hint">Save first — the test uses the key that is stored, not the one typed above.</small>
+          </div>
+        </div>
+        <p v-if="connectionResult" class="keys-status-banner" :class="connectionResult.status === 'connected' ? 'success' : 'error'">
+          {{ connectionResult.message }}
+          <span v-if="connectionResult.carriers?.length">
+            Carriers available: {{ connectionResult.carriers.join(", ") }}.
+          </span>
+        </p>
+      </div>
+    </section>
+
+    <section class="dashboard-card">
+      <header class="dashboard-card-header">
+        <h2>Boxes</h2>
+        <p>The boxes you pack into. Several items in one order share the smallest box they all fit in;
+          with no boxes listed, every item ships in its own parcel, which usually costs more.</p>
+      </header>
+      <div class="dashboard-card-body">
+        <p v-if="!form.boxes.length" class="field-hint">
+          No boxes yet.
+          <button class="link-action" type="button" @click="useStarterBoxes">Start with common sizes</button>
+          — then edit them to match what you actually use.
+        </p>
+        <div v-for="(box, index) in form.boxes" :key="index" class="offer-item-editor">
+          <header>
+            <div><h4>{{ box.name || "Untitled box" }}</h4></div>
+            <button class="secondary-action compact" type="button" @click="removeBox(index)">Remove</button>
+          </header>
+          <label class="offer-field">
+            <span>Name</span>
+            <input v-model.trim="box.name" type="text" placeholder="e.g. Medium box" />
+          </label>
+          <div class="modal-dimensions-grid">
+            <label>Length (in)<input v-model.number="box.length" type="number" min="0" step="0.1" /></label>
+            <label>Width (in)<input v-model.number="box.width" type="number" min="0" step="0.1" /></label>
+            <label>Height (in)<input v-model.number="box.height" type="number" min="0" step="0.1" /></label>
+            <label>Box weight (lb)<input v-model.number="box.empty_weight" type="number" min="0" step="0.01" /></label>
+            <label>Max weight (lb)<input v-model.number="box.max_weight" type="number" min="0" step="0.1" placeholder="—" /></label>
+          </div>
+          <small class="field-hint">
+            Inside measurements. Box weight counts — the carrier bills the cardboard too. Max weight is
+            optional; leave it blank unless the box has a stated limit.
+          </small>
+        </div>
+        <button class="secondary-action" type="button" @click="addBox">+ Add box</button>
       </div>
     </section>
 
@@ -210,6 +262,8 @@ const saving = ref(false);
 const error = ref("");
 const message = ref("");
 const rawDoc = ref({});
+const testing = ref(false);
+const connectionResult = ref(null);
 const form = reactive(defaultForm());
 
 // A saved key comes back redacted (api_key_ref === "********"), so a truthy value means configured.
@@ -240,7 +294,35 @@ function defaultForm() {
     default_parcel: { length: "", width: "", height: "", weight: "", distance_unit: "in", mass_unit: "oz" },
     rate_options: { default_service_level: "", allowed_carriers: "", markup_amount: "", free_shipping_threshold: "" },
     label_options: { format: "pdf", size: "4x6" },
+    boxes: [],
   };
+}
+
+// Ordinary corrugated sizes, mirroring STARTER_BOXES in domain/shipping.py. A convenience seed so a tenant
+// is not staring at an empty table -- NOT carrier packaging, which is fetched from the provider as parcel
+// templates because hand-copied carrier dimensions go stale the moment a size is retired.
+const STARTER_BOXES = [
+  { name: "Small box (6x4x4)", length: 6, width: 4, height: 4, empty_weight: 0.15, max_weight: "" },
+  { name: "Medium box (10x8x6)", length: 10, width: 8, height: 6, empty_weight: 0.35, max_weight: "" },
+  { name: "Large box (14x11x8)", length: 14, width: 11, height: 8, empty_weight: 0.6, max_weight: "" },
+  { name: "Extra large box (18x14x12)", length: 18, width: 14, height: 12, empty_weight: 1.0, max_weight: "" },
+  { name: "Padded mailer (9x6x1)", length: 9, width: 6, height: 1, empty_weight: 0.05, max_weight: "" },
+];
+
+function emptyBox() {
+  return { name: "", length: "", width: "", height: "", empty_weight: "", max_weight: "" };
+}
+
+function addBox() {
+  form.boxes.push(emptyBox());
+}
+
+function removeBox(index) {
+  form.boxes.splice(index, 1);
+}
+
+function useStarterBoxes() {
+  form.boxes = STARTER_BOXES.map((box) => ({ ...box }));
 }
 
 function fillAddress(target, source) {
@@ -270,6 +352,9 @@ function applyConfig(config) {
     distance_unit: parcel.distance_unit || "in",
     mass_unit: parcel.mass_unit || "oz",
   };
+  form.boxes = Array.isArray(config.boxes)
+    ? config.boxes.map((box) => ({ ...emptyBox(), ...box, max_weight: box.max_weight ?? "" }))
+    : [];
   const rate = config.rate_options || {};
   form.rate_options = {
     default_service_level: rate.default_service_level || "",
@@ -359,6 +444,21 @@ function buildPayload() {
   }
   doc.provider = provider;
 
+  // Boxes: drop blank rows rather than saving half a box, and omit max_weight when it is blank -- absent
+  // means "no stated limit", which is the common case for a tenant's own carton.
+  doc.boxes = form.boxes
+    .filter((box) => String(box.name || "").trim() && Number(box.length) > 0
+      && Number(box.width) > 0 && Number(box.height) > 0)
+    .map((box) => {
+      const entry = {
+        name: String(box.name).trim(),
+        length: Number(box.length), width: Number(box.width), height: Number(box.height),
+      };
+      if (Number(box.empty_weight) > 0) entry.empty_weight = Number(box.empty_weight);
+      if (Number(box.max_weight) > 0) entry.max_weight = Number(box.max_weight);
+      return entry;
+    });
+
   doc.ship_from_address = cleanAddress(form.ship_from_address);
   doc.return_address = cleanAddress(form.return_address);
   doc.default_parcel = {
@@ -382,6 +482,25 @@ function buildPayload() {
   doc.label_options = { format: form.label_options.format, size: form.label_options.size };
   doc.updated_at = Math.floor(Date.now() / 1000);
   return doc;
+}
+
+async function testConnection() {
+  error.value = "";
+  message.value = "";
+  connectionResult.value = null;
+  testing.value = true;
+  try {
+    const body = await apiRequest("/shipping/test", { method: "POST" });
+    connectionResult.value = body.connection || null;
+    if (body.shipping_config) rawDoc.value = body.shipping_config;
+  } catch (err) {
+    // A failed test is an ANSWER, not an error: the backend returns 502 with the provider's own words,
+    // and those words are how a tenant learns what is actually wrong with their key.
+    connectionResult.value = { status: "failed", message: err.body?.connection?.message || err.message };
+    if (err.body?.shipping_config) rawDoc.value = err.body.shipping_config;
+  } finally {
+    testing.value = false;
+  }
 }
 
 async function save() {
