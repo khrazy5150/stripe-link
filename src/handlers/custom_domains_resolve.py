@@ -2,6 +2,8 @@ import os
 import re
 
 from stripe_link.common import error_response, header_value, json_response, query_params
+from stripe_link.domain.experiments import experiment_route_block, running_experiment_for
+from stripe_link.repositories.documents import experiments_repository
 from stripe_link.domain.custom_domains import (
     creator_host_key, normalize_domain, normalize_route_path, route_target)
 from stripe_link.repositories.documents import RepositoryError, custom_domains_index_repository
@@ -80,7 +82,33 @@ def _creator_lookup(host, path):
     return creator_host_key(domain, username), "/" + (segments[1] if len(segments) > 1 else "")
 
 
-def handler(event, context, *, index_repo=None, pages_domain=None):
+def _experiment_for_page(tenant_id, page_id, mode, price_context, experiments_repo, pages_domain):
+    """The running experiment on this page, shaped for the edge. {} when there is none.
+
+    Never fails the request: an experiment is an enhancement, and a page that cannot look one up must still
+    serve. A resolve that 500s here would take a tenant's whole site down over an A/B test.
+    """
+    if not page_id or not tenant_id:
+        return {}
+    try:
+        repo = experiments_repo or (experiments_repository(mode=mode) if os.environ.get("EXPERIMENTS_TABLE") else None)
+        if repo is None:
+            return {}
+        experiment = running_experiment_for(page_id, repo.list_for_tenant(tenant_id))
+        if not experiment:
+            return {}
+        return experiment_route_block(
+            experiment,
+            lambda variant_page_id: public_url(
+                pages_domain,
+                artifact_paths(tenant_id, variant_page_id, context=price_context, mode=mode)["published"],
+            ),
+        )
+    except Exception:  # noqa: BLE001 - serving the page matters more than running the experiment
+        return {}
+
+
+def handler(event, context, *, index_repo=None, pages_domain=None, experiments_repo=None):
     """Public endpoint: given a custom domain hostname, resolve where to reverse-proxy it.
 
     Called by the Cloudflare Worker on every request to a custom hostname. Deliberately
@@ -134,6 +162,9 @@ def handler(event, context, *, index_repo=None, pages_domain=None):
     # A well-known crawl file (/robots.txt, /sitemap.xml, /{key}.txt) is served from the sibling artifact the
     # publisher wrote under the homepage page_id. Every other path routes through the Site's slug map: the
     # homepage at "/", funnel/collection pages at their slugs, an unknown slug is a 404.
+    # A crawl file is never part of an experiment: robots.txt and sitemap.xml belong to the site, not to a
+    # page, and varying them per visitor would be incoherent.
+    page_id_under_test, price_context_under_test = "", ""
     if path and _WELL_KNOWN_PATH.match(path):
         artifact_key = f"{key_prefix}{homepage_page_id}{path}"
     else:
@@ -157,12 +188,23 @@ def handler(event, context, *, index_repo=None, pages_domain=None):
         if not page_id:
             return error_response("No page is published at this path.", status_code=404, code="no_route")
         artifact_key = artifact_paths(tenant_id, page_id, context=price_context, mode=record_mode)["published"]
+        page_id_under_test, price_context_under_test = page_id, price_context
 
     origin_url = public_url(pages_domain, artifact_key)
     if not origin_url:
         return error_response("Pages distribution domain is not configured.", status_code=500, code="pages_domain_not_configured")
 
     route = {"type": "origin_url", "origin_url": origin_url}
+    # A/B: hand the edge the experiment DEFINITION and let it assign (plans/AB_TESTING.md A1). `origin_url`
+    # above stays the CONTROL's, so a Worker that does not understand `experiment` still serves the control
+    # -- the backend can ship before the edge does, and a Worker rollback degrades to no experiment rather
+    # than to a broken page.
+    experiment_block = _experiment_for_page(
+        tenant_id, page_id_under_test, record_mode, price_context_under_test, experiments_repo,
+        pages_domain,
+    )
+    if experiment_block:
+        route["experiment"] = experiment_block
     # The free platform hostname ({label}.<hosting-domain>) is a navigable but NEVER-indexed store surface
     # (reputation-isolation floor). Tell the Worker to stamp X-Robots-Tag so the same artifact is noindex here
     # even when its HTML says index,follow on the custom domain (plans/PLATFORM_HOSTNAME_SERVING.md).

@@ -186,6 +186,14 @@ disagrees with their analytics.
 
 - **A1 — the model.** Attach experiments to a page; resolve returns the experiment definition; the Worker
   assigns, pins, proxies and pings. Disable the short-code path.
+  - **A1a — the server half: DONE 2026-09-21.** `domain/experiments.py` (pure) +
+    `custom_domains_resolve` returns `route.experiment` = `{experiment_id, cookie_name, variants[]}` with
+    each variant's own artifact URL. `origin_url` stays the CONTROL's, so an edge that does not understand
+    the block still serves the control -- which is what lets the backend ship first and makes a Worker
+    rollback degrade to "no experiment" rather than to a broken page.
+  - **A1b — the edge half:** the Worker reads the cookie, pins or rolls, proxies that variant's
+    origin_url, sets the cookie, and pings a view via `waitUntil`.
+  - **A1c — disable the short-code path.**
 - **A2 — indexing.** Canonical to the tested URL; edge-stamped noindex by route; never bake it.
 - **A3 — significance.** A verdict in words, a "how much longer" estimate, and honest labels. No gate,
   no auto-pause — the tenant still decides.

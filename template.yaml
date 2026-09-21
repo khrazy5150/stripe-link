@@ -2599,6 +2599,10 @@ Resources:
             TableName: !Ref AppConfigTable
         - DynamoDBReadPolicy:
             TableName: !Ref CustomDomainsTable
+        # Read-only: the resolver reports which experiment is RUNNING on a page so the edge can assign a
+        # variant. It never writes -- view counts are pinged separately by the Worker.
+        - DynamoDBReadPolicy:
+            TableName: !Ref ExperimentsTable
       Events:
         CustomDomainsResolve:
           Type: Api
