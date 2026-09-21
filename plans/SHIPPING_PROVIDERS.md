@@ -131,7 +131,7 @@ estimate-vs-actual is measurable — it cannot be backfilled.
 **Not built here:** the shipments TABLE and repository. They belong with the code that writes them (P2), and
 an unused table is infrastructure without a caller.
 
-### P1 — Shippo connected, and the packer
+### P1 — Shippo connected, and the packer — adapter + connection test + packer BUILT 2026-09-20
 
 - `domain/shipping/providers/shippo.py` over `urllib`, behind a provider-neutral interface
   (`test_connection`, `rates`, `buy_label`, `track`) so P4 is additive.
