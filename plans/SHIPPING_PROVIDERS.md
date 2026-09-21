@@ -160,7 +160,43 @@ wrong sometimes; see **Calibration** below, which is the part that makes being w
 
 A **box catalog** is new: a short list of the boxes a tenant actually uses (name, inner L/W/H, empty
 weight). Without it there is nothing to pack into and everything falls to (2). The empty weight matters —
-a box is not weightless and the carrier bills the whole parcel.
+a box is not weightless and the carrier bills the whole parcel. Seed it with a platform starter list of
+standard sizes; a tenant edits it to match their own shelf.
+
+#### The product stores the BOX, not the ITEM — and that is the root cause
+
+`ProductVariantsField.vue` heads these fields "Package Dimensions" and its own docstring calls them "the
+box the thing ships in". The default is 10x8x4, which is box-shaped, not gummies-jar-shaped.
+
+That works for a single-item order — ship it in what the tenant said — and it is exactly why a bundle
+cannot be packed: **three products each declaring a box do not compose.** There is nothing to pack, only
+boxes to add up, and boxes do not add.
+
+Picking the smallest box that fits therefore needs an input that does not exist yet: the item's own size.
+Do NOT reinterpret the existing field to mean that — every stored value is a box, so we would choose a box
+big enough to hold a box and oversize every parcel.
+
+**Add item dimensions; keep package dimensions as an explicit override.** A seller who knows "everything
+goes in a 10x8x4" keeps saying so and is never second-guessed; a seller who describes the item gets
+packing. Precedence:
+
+1. One item AND the tenant declared a package → use it. They know their own operation.
+2. Several items, or no declared package → pack the item dimensions into the smallest catalog box that
+   fits.
+3. No item dimensions → one parcel per item at its declared package size (today's behaviour, unchanged).
+
+#### "Smallest that fits" is the packing rule, not the pricing rule
+
+- Fit is 3D, not volume: every dimension must fit, with rotation allowed.
+- The smallest box is not always the cheapest. Dimensional weight means a larger, lighter-dim box can win.
+- **Carrier flat-rate boxes change the shape of the problem.** USPS Priority Flat Rate costs the same
+  regardless of weight and zone. If the items fit one, it is often the cheapest option AND — this matters
+  more than the saving — it turns the estimate from a distribution over zones into a KNOWN NUMBER. A
+  flat-rate fit is the one case where "Calculate Price" can be exact rather than a percentile.
+
+So: pack to the smallest fitting box, then rate the candidates (fitting cartons + any fitting flat-rate
+box) and let the cheapest win. The rate call is needed anyway; asking it about two or three candidates
+instead of one is the same round trip.
 
 **Multi-origin is out of scope.** `Product.fulfillment.ship_from` exists in the schema, but `products.js`
 writes `ship_from: null` unconditionally, so no product has ever carried one. A bundle whose items ship
