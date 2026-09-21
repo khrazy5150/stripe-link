@@ -428,6 +428,54 @@ class PromotionMovesTheRouteTests(ExperimentsFixture, unittest.TestCase):
         self.assertEqual(self.experiments.get("tenant_demo", "exp_1")["promotion"]["status"], "no_route")
 
 
+class ResultsCarryAComparisonTests(ExperimentsFixture, unittest.TestCase):
+    """A3 through the handler: the numbers alone invite reading a big lift on tiny traffic as a result."""
+
+    def _get(self, now=1781326400):
+        return json.loads(experiments_handler(
+            event("GET", tenant_id="tenant_demo", experiment_id="exp_1"),
+            None, repository=self.experiments, orders=self.orders, now_fn=lambda: now,
+        )["body"])
+
+    def _running_with(self, control_views, control_conv, variant_views, variant_conv):
+        self.create()
+        exp = self.experiments.get("tenant_demo", "exp_1")
+        exp["status"] = "running"
+        exp["started_at"] = 1781240000  # 1 day before the default `now`
+        exp["stats"] = {"views_by_page": {"page_control": control_views, "page_b": variant_views}}
+        self.experiments.put(exp)
+        for index in range(control_conv):
+            self.orders.put({"tenant_id": "tenant_demo", "order_id": f"c{index}", "status": "paid",
+                             "amount_total": 1000, "attribution": {"page_id": "page_control"}})
+        for index in range(variant_conv):
+            self.orders.put({"tenant_id": "tenant_demo", "order_id": f"v{index}", "status": "paid",
+                             "amount_total": 1000, "attribution": {"page_id": "page_b"}})
+
+    def test_a_real_difference_on_real_traffic_reads_as_clear(self):
+        self._running_with(5000, 250, 5000, 400)
+        row = self._get()["comparisons"][0]
+        self.assertEqual(row["verdict"], "clear")
+        self.assertGreater(row["lift"], 0)
+
+    def test_the_same_lift_on_tiny_traffic_does_not(self):
+        self._running_with(50, 2, 50, 4)
+        self.assertIn(self._get()["comparisons"][0]["verdict"], ("too_close", "insufficient"))
+
+    def test_a_test_that_never_started_has_no_time_estimate(self):
+        self.create()
+        self.assertEqual(self._get()["comparisons"][0]["days_remaining"], None)
+
+    def test_elapsed_time_stops_at_completion(self):
+        # Otherwise a result opened weeks later claims the test ran for weeks and dilutes the observed rate.
+        self._running_with(1000, 50, 1000, 80)
+        exp = self.experiments.get("tenant_demo", "exp_1")
+        exp["completed_at"] = exp["started_at"] + 86400
+        self.experiments.put(exp)
+        far_future = self._get(now=1781240000 + 86400 * 90)["comparisons"][0]
+        one_day = self._get(now=1781240000 + 86400)["comparisons"][0]
+        self.assertEqual(far_future["days_remaining"], one_day["days_remaining"])
+
+
 class ExperimentsResolveTests(unittest.TestCase):
     """The short-code resolver is DISABLED, not dismantled (plans/AB_TESTING.md A1c).
 

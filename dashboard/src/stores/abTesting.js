@@ -49,6 +49,7 @@ export const useAbTestingStore = defineStore("abTesting", {
     error: "",
     message: "Loading experiments…",
     results: {},
+    comparisons: {},
   }),
 
   getters: {
@@ -146,6 +147,7 @@ export const useAbTestingStore = defineStore("abTesting", {
         await apiRequest(`/experiments/${encodeURIComponent(experimentId)}`, { method: "DELETE" });
         this.experiments = this.experiments.filter((item) => item.experiment_id !== experimentId);
         delete this.results[experimentId];
+        delete this.comparisons[experimentId];
       }, "Experiment deleted.");
     },
 
@@ -155,6 +157,12 @@ export const useAbTestingStore = defineStore("abTesting", {
         const body = await apiRequest(`/experiments/${encodeURIComponent(experimentId)}`);
         if (body.experiment) this._replace(body.experiment);
         this.results = { ...this.results, [experimentId]: Array.isArray(body.results) ? body.results : [] };
+        // Whether each gap is bigger than the noise, and what is left to run. Kept beside the raw numbers
+        // rather than merged into them: the rows are counts, these are readings OF the counts.
+        this.comparisons = {
+          ...this.comparisons,
+          [experimentId]: Array.isArray(body.comparisons) ? body.comparisons : [],
+        };
         return body.results;
       } catch (error) {
         this.error = error.message;

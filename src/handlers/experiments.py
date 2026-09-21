@@ -4,6 +4,7 @@ import time
 from stripe_link.common import error_response, json_response, parse_json_body, path_params, resolve_stripe_mode, tenant_id_from_event
 from handlers.routes import short_url_for_code
 from stripe_link.domain.experiments import SHORT_CODE_ENTRY_ENABLED, repoint_to_winner
+from stripe_link.domain.experiment_stats import summarize
 from stripe_link.domain.documents import DocumentValidationError, validate_experiment, validate_route
 from stripe_link.entitlement_gate import require_capability
 from stripe_link.ids import generate_id
@@ -48,7 +49,7 @@ def handler(
         if method == "GET" and not experiment_id:
             return list_experiments(event, repository)
         if method == "GET" and experiment_id:
-            return get_experiment(event, repository, experiment_id, orders, mode=mode)
+            return get_experiment(event, repository, experiment_id, orders, mode=mode, now_fn=now_fn)
         if method == "POST" and not experiment_id:
             gate = require_capability(event, "ab_testing", tenant_repo)
             if gate is not None:
@@ -99,7 +100,7 @@ def list_experiments(event, repository):
     return json_response({"experiments": experiments, "count": len(experiments)})
 
 
-def get_experiment(event, repository, experiment_id, orders, mode="test"):
+def get_experiment(event, repository, experiment_id, orders, mode="test", now_fn=None):
     tenant_id = tenant_id_from_event(event)
     if not tenant_id:
         return error_response("tenant_id is required.", code="missing_tenant")
@@ -109,7 +110,28 @@ def get_experiment(event, repository, experiment_id, orders, mode="test"):
     orders = orders or orders_repository(mode=mode)
     tenant_orders = orders.list_for_tenant(tenant_id)
     results = compute_results(experiment, tenant_orders)
-    return json_response({"experiment": with_short_url(experiment), "results": results})
+    # A3: the numbers alone invite the classic mistake -- reading a big lift on 50 views as a result. The
+    # comparison says whether the gap is bigger than the noise and what is left to run. It gates nothing:
+    # when to stop is the tenant's call.
+    comparisons = summarize(
+        results, experiment.get("control_page_id"), days_elapsed=_days_elapsed(experiment, now_fn),
+    )
+    return json_response({
+        "experiment": with_short_url(experiment), "results": results, "comparisons": comparisons,
+    })
+
+
+def _days_elapsed(experiment, now_fn):
+    """Days the test has been collecting, 0.0 when it has not started.
+
+    Measured to `completed_at` once finished, so a result read weeks later does not claim the test ran for
+    weeks and dilute the rate it was actually collecting at.
+    """
+    started_at = int(experiment.get("started_at") or 0)
+    if started_at <= 0:
+        return 0.0
+    end = int(experiment.get("completed_at") or 0) or int((now_fn or time.time)())
+    return max(0.0, (end - started_at) / 86400.0)
 
 
 def normalize_variants(raw_variants, control_page_id):

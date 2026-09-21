@@ -267,8 +267,20 @@ disagrees with their analytics.
   merely skewed. Keyed on `started_at` rather than `running`, because pausing does not make the collected
   data compatible; a draft stays fully editable. Clearing the counters also closes "stop, edit, restart" as
   a way around the freeze. The editor mirrors the freeze so it never offers an edit the API will refuse.
-- **A3 — significance.** A verdict in words, a "how much longer" estimate, and honest labels. No gate,
-  no auto-pause — the tenant still decides.
+- **A3 — significance: DONE 2026-09-21.** `domain/experiment_stats.py` (pure, stdlib): a two-proportion
+  z-test per arm against the control, a verdict in WORDS (`clear` / `likely` / `too_close` /
+  `insufficient`), relative lift, and "how much longer at the current rate" from a rule-of-thumb sample
+  target. No gate and no auto-pause — when there is enough evidence is the tenant's call, and the screen
+  says so in as many words.
+  What it refuses to do is the substance:
+  - **`None`, never a reassuring zero.** No views, nobody converted yet, or no difference to detect return
+    `None`. "No evidence either way" and "measured no difference" are different statements, and a caller
+    that cannot tell them apart reports the first as the second.
+  - **No verdict on revenue.** These are proportion tests; revenue per view has a much wider distribution.
+    Claiming significance on it with this machinery would be inventing a result.
+  - **No infinite lift.** A control with a zero rate yields `lift: None` rather than a number.
+  - **Elapsed time stops at completion**, so a result opened weeks later does not claim the test ran for
+    weeks and dilute the rate it was actually collecting at.
 - **A4 — prove it.** Two real pages, a real split, a real conversion. Nothing here has ever run.
 - **A5 — promotion actually promotes: DONE 2026-09-21.** Completing now moves the tested slug to the
   winner (`repoint_to_winner`), so the improvement a tenant measured is the one they get. Before this,

@@ -6449,6 +6449,37 @@ button:disabled {
   color: #166534;
 }
 
+/* A verdict is a reading of the counts, so it is coloured by CONFIDENCE, not by which arm is ahead --
+   a clear loss is as useful a result as a clear win and gets the same weight. */
+.ab-tag.verdict-clear {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.ab-tag.verdict-likely {
+  background: #fef9c3;
+  color: #854d0e;
+}
+
+.ab-tag.verdict-too_close,
+.ab-tag.verdict-insufficient {
+  background: var(--surface-muted, #f1f5f9);
+  color: var(--text-muted, #64748b);
+}
+
+.ab-lift {
+  margin-left: 0.5rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted, #64748b);
+}
+
+.ab-results-note {
+  margin-top: 1rem;
+  color: var(--text-muted, #64748b);
+  font-size: 1.25rem;
+  line-height: 1.5;
+}
+
 .ab-winner-picker {
   display: flex;
   align-items: end;

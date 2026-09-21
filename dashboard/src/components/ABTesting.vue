@@ -184,7 +184,7 @@
           <table class="ab-results-table">
             <thead>
               <tr>
-                <th>Variant</th><th>Weight</th><th>Views</th><th>Conversions</th><th>Revenue</th><th>Rate</th>
+                <th>Variant</th><th>Weight</th><th>Views</th><th>Conversions</th><th>Revenue</th><th>Rate</th><th>vs control</th>
               </tr>
             </thead>
             <tbody>
@@ -199,9 +199,19 @@
                 <td>{{ row.conversions }}</td>
                 <td>{{ formatCurrencyCents(row.revenue) }}</td>
                 <td>{{ formatConversionRate(row.conversion_rate) }}</td>
+                <td>
+                  <template v-if="row.key === 'control'">—</template>
+                  <template v-else>
+                    <span class="ab-tag" :class="verdictClass(row.page_id)">{{ verdictLabel(row.page_id) }}</span>
+                    <span v-if="liftOf(row.page_id) !== null" class="ab-lift">{{ formatLift(liftOf(row.page_id)) }}</span>
+                  </template>
+                </td>
               </tr>
             </tbody>
           </table>
+          <!-- Stated as an estimate at the CURRENT rate, never as a deadline: the tenant decides when there
+               is enough evidence, and nothing here pauses or gates the test. -->
+          <p v-if="stillToRun" class="ab-results-note">{{ stillToRun }}</p>
 
           <section v-if="resultsFor.status !== 'completed'" class="ab-winner-picker">
             <label class="offer-field">
@@ -294,6 +304,45 @@ const currentResults = computed(() => (resultsFor.value ? store.results[resultsF
 // routes to the winner" was telling tenants they had received an improvement they had not (plans/AB_TESTING.md A5).
 // What completing actually DID, read from the experiment rather than asserted by the screen: the route move
 // can legitimately be a no-op when the tested page was never attached to a Site.
+const currentComparisons = computed(
+  () => (resultsFor.value ? store.comparisons[resultsFor.value.experiment_id] || [] : []),
+);
+function comparisonFor(pageId) {
+  return currentComparisons.value.find((row) => row.page_id === pageId) || null;
+}
+function liftOf(pageId) {
+  const row = comparisonFor(pageId);
+  return row && row.lift !== null && row.lift !== undefined ? row.lift : null;
+}
+// Words, not a p-value. "Not enough data yet" is a real answer and says so rather than showing a number
+// that invites reading a big lift on 50 views as a result.
+const VERDICTS = {
+  clear: "clear difference",
+  likely: "likely difference",
+  too_close: "too close to call",
+  insufficient: "not enough data yet",
+};
+function verdictLabel(pageId) {
+  const row = comparisonFor(pageId);
+  return (row && VERDICTS[row.verdict]) || VERDICTS.insufficient;
+}
+function verdictClass(pageId) {
+  const row = comparisonFor(pageId);
+  return row ? `verdict-${row.verdict}` : "verdict-insufficient";
+}
+function formatLift(lift) {
+  const pct = lift * 100;
+  return `${pct >= 0 ? "+" : ""}${pct.toFixed(1)}%`;
+}
+const stillToRun = computed(() => {
+  const days = currentComparisons.value
+    .map((row) => row.days_remaining)
+    .filter((value) => typeof value === "number" && value > 0);
+  if (!days.length) return "";
+  const longest = Math.max(...days);
+  const rounded = longest < 1 ? "less than a day" : `about ${Math.ceil(longest)} more day${Math.ceil(longest) === 1 ? "" : "s"}`;
+  return `At the current rate of traffic, telling these apart would take ${rounded}. It is your call when there is enough evidence — nothing stops the test on its own.`;
+});
 const promotion = computed(() => (resultsFor.value && resultsFor.value.promotion) || { status: "", slug: "" });
 const winnerIsControl = computed(
   () => !!resultsFor.value && resultsFor.value.winner_page_id === resultsFor.value.control_page_id,
