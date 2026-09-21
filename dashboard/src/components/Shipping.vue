@@ -412,21 +412,14 @@ function validationErrors() {
   return errors;
 }
 
-// Mirrors label_readiness() in domain/shipping.py. Only actionable items, each naming the thing to do.
-const readiness = computed(() => {
-  const items = [];
-  if (!form.provider.name) items.push("Choose a shipping provider.");
-  else if (form.provider.name !== "mock" && !keyConfigured.value) items.push("Add your provider's API key.");
-  else if (rawDoc.value.provider?.connection_status !== "connected") items.push("Test the connection to confirm the key works.");
-  const shipFrom = form.ship_from_address;
-  if (!["name", "street1", "city", "state", "postal_code", "country"].every((f) => String(shipFrom[f] || "").trim())) {
-    items.push("Add a complete ship-from address.");
-  }
-  if (!form.boxes.some((box) => String(box.name || "").trim() && Number(box.length) > 0)) {
-    items.push("Add at least one box, or set Package Dimensions on each product you ship.");
-  }
-  return items;
-});
+// What the SERVER says is still missing, never computed from the form. Computing it here meant the banner
+// turned green the moment boxes were added on screen -- before any save -- so a save that failed still
+// read "Ready to buy labels". One implementation, in domain/shipping.py, carried on every response.
+const readiness = ref([]);
+
+function applyReadiness(body) {
+  if (Array.isArray(body?.readiness)) readiness.value = body.readiness;
+}
 
 async function load() {
   loading.value = true;
@@ -512,11 +505,13 @@ async function testConnection() {
   try {
     const body = await apiRequest("/shipping/test", { method: "POST" });
     connectionResult.value = body.connection || null;
+    applyReadiness(body);
     if (body.shipping_config) rawDoc.value = body.shipping_config;
   } catch (err) {
     // A failed test is an ANSWER, not an error: the backend returns 502 with the provider's own words,
     // and those words are how a tenant learns what is actually wrong with their key.
     connectionResult.value = { status: "failed", message: err.body?.connection?.message || err.message };
+    applyReadiness(err.body);
     if (err.body?.shipping_config) rawDoc.value = err.body.shipping_config;
   } finally {
     testing.value = false;
@@ -534,6 +529,7 @@ async function save() {
   saving.value = true;
   try {
     const body = await apiRequest("/shipping", { method: "PUT", body: buildPayload() });
+    applyReadiness(body);
     applyConfig(body.shipping_config || buildPayload());
     message.value = "Shipping config saved.";
   } catch (err) {

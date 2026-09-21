@@ -475,7 +475,11 @@ class SimpleKeyRepository:
         key_value = str(document.get(self.key_field) or "").strip()
         if not key_value:
             raise RepositoryError(f"Document {self.key_field} is required.")
-        self.table.put_item(Item=document)
+        # Floats must become Decimal or boto3 raises "Float types are not supported" and the whole save
+        # 500s. Every other repository here already does this; this one did not, and nothing noticed
+        # because a shipping config only ever held strings and WHOLE numbers -- JSON `10` arrives as a
+        # Python int. A box's empty_weight of 0.35 was the first fractional value one had ever carried.
+        self.table.put_item(Item=dynamodb_safe_document(document))
         return document
 
     def get(self, key_value: str) -> dict[str, Any] | None:

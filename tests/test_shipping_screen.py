@@ -194,16 +194,17 @@ class MinimumRequiredTests(unittest.TestCase):
 
     def test_the_screen_says_what_is_still_needed_instead_of_refusing(self):
         self.assertIn("Before you can buy labels:", SCREEN)
-        self.assertIn("const readiness = computed", SCREEN)
+        self.assertIn("const readiness = ref([])", SCREEN)
 
-    def test_the_two_readiness_lists_agree(self):
-        """The screen's list and label_readiness() are the same advice in two languages; if they drift, one
-        of them tells a tenant to do something the other does not require."""
+    def test_the_advice_has_exactly_one_implementation(self):
+        """It used to be written twice -- once in Python, once in the component -- and kept in step by a
+        test comparing strings. Worse, the component's copy read the FORM, so the banner went green before
+        any save and stayed green when the save failed. The server now sends the list."""
         from stripe_link.domain.shipping import label_readiness
-        backend = set(label_readiness({}))
-        for item in backend:
+        for item in label_readiness({}):
             with self.subTest(item=item):
-                self.assertIn(item, SCREEN)
+                self.assertNotIn(item, SCREEN, "the screen is hardcoding advice the server already sends")
+        self.assertIn("applyReadiness(body)", SCREEN)
 
 
 class DeprecatedDefaultParcelTests(unittest.TestCase):
