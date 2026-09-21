@@ -24,17 +24,9 @@ export const useProfileStore = defineStore("profile", {
       await this.load();
     },
 
-    // Re-read from the server, ignoring the cache. `ensureLoaded` returns early once loaded and nothing
-    // ever invalidated it, so editing the business in Profile left SIX screens showing the old values
-    // until a full page reload -- the brand picker in Offers, the landing-page defaults, the Sites header,
-    // and the Shipping screen's "Copy from business address", which is where it was noticed.
-    //
-    // Refetching rather than patching locally is deliberate: the server normalises what it stores (E.164
-    // phone, upper-cased country), so a local copy of what was typed would disagree with what was saved.
-    async refresh() {
-      this.loaded = false;
-      await this.load();
-    },
+    // NOTE: `load()` always refetches -- the cache guard lives only in ensureLoaded() above. Call load()
+    // directly wherever freshness matters: after an edit, or when a tenant explicitly asks for their
+    // current details. A separate refresh() would only be load() with an extra line.
     async load() {
       const userId = (getAuthSession() || {}).user_id || "";
       if (!userId) {

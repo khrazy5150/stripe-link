@@ -381,7 +381,7 @@ async function save() {
     // defaults, the Sites header, Shipping's "Copy from business address" -- and nothing invalidated it.
     // Without this, a tenant edits their business here and every one of those keeps the old values until
     // a full page reload. Failing to refresh must not fail the save, which has already succeeded.
-    profileStore.refresh().catch(() => {});
+    profileStore.load().catch(() => {});
     message.value = "Profile saved.";
   } catch (err) {
     error.value = err.message || "Failed to save profile.";

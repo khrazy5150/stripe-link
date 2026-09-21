@@ -95,17 +95,17 @@ class CopyBusinessAddressTests(unittest.TestCase):
     def test_an_unset_profile_says_where_to_fix_it(self):
         """Nothing to copy is a CONFIGURATION answer, not a failure. Without this the tenant cannot tell
         an empty profile from a broken button."""
-        handler = SCREEN.split("async function copyBusinessAddress", 1)[1][:1200]
+        handler = SCREEN.split("async function copyBusinessAddress", 1)[1][:1600]
         self.assertIn("No business address is configured in your profile", handler)
         self.assertIn("Profile → Business", handler)
 
     def test_a_partial_address_is_copied_and_the_gap_named(self):
         # Half a business address is still worth having; the tenant just needs to know what is left.
-        handler = SCREEN.split("async function copyBusinessAddress", 1)[1][:1200]
+        handler = SCREEN.split("async function copyBusinessAddress", 1)[1][:1600]
         self.assertIn("Still needed:", handler)
 
     def test_blank_profile_fields_do_not_wipe_what_is_already_typed(self):
-        handler = SCREEN.split("async function copyBusinessAddress", 1)[1][:1200]
+        handler = SCREEN.split("async function copyBusinessAddress", 1)[1][:1600]
         self.assertIn("if (value) form.ship_from_address[key] = value", handler)
 
     def test_the_country_is_upper_cased_for_the_carrier(self):

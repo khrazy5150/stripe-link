@@ -23,36 +23,34 @@ CONSUMERS = ["App.vue", "components/Shipping.vue", "components/Sites.vue",
              "components/LandingPages.vue", "components/Preferences.vue", "components/Offers.vue"]
 
 
-class CacheCanBeInvalidatedTests(unittest.TestCase):
-    def test_the_store_offers_a_refresh(self):
-        self.assertIn("async refresh()", STORE)
+class CacheCanBeBypassedTests(unittest.TestCase):
+    def test_the_cache_guard_lives_only_in_ensure_loaded(self):
+        """load() always refetches; only ensureLoaded() short-circuits. That is what makes a separate
+        refresh() unnecessary -- it would be load() with an extra line."""
+        ensure = STORE.split("async ensureLoaded()", 1)[1][:200]
+        self.assertIn("if (this.loaded || this.loading) return;", ensure)
+        load = STORE.split("async load()", 1)[1][:300]
+        self.assertNotIn("if (this.loaded", load)
 
-    def test_refresh_actually_clears_the_cache_flag(self):
-        """`ensureLoaded` short-circuits on `loaded`, so a refresh that forgot to clear it would be a
-        no-op that looks like a fix."""
-        body = STORE.split("async refresh()", 1)[1][:200]
-        self.assertIn("this.loaded = false", body)
-        self.assertIn("await this.load()", body)
-
-    def test_refresh_refetches_rather_than_patching_locally(self):
+    def test_a_reload_refetches_rather_than_patching_locally(self):
         """The server normalises what it stores — E.164 phone, upper-cased country — so a local copy of
         what was TYPED would disagree with what was SAVED."""
-        self.assertNotIn("this.business = ", STORE.split("async refresh()", 1)[1][:200])
+        self.assertIn('apiRequest("/profile"', STORE)
 
 
 class TheEditorTellsTheCacheTests(unittest.TestCase):
     def test_saving_the_profile_refreshes_the_shared_store(self):
-        self.assertIn("profileStore.refresh()", PROFILE)
+        self.assertIn("profileStore.load()", PROFILE)
 
     def test_it_happens_after_a_SUCCESSFUL_save(self):
         # Refreshing before the PUT would re-cache what is already there.
         block = PROFILE.split('apiRequest("/profile", { method: "PUT"', 1)[1][:600]
-        self.assertIn("profileStore.refresh()", block)
+        self.assertIn("profileStore.load()", block)
 
     def test_a_failed_refresh_does_not_fail_the_save(self):
         """The save already succeeded; a refresh that throws must not turn it into an error the tenant
         sees, or they will save again and wonder why."""
-        block = PROFILE.split("profileStore.refresh()", 1)[1][:60]
+        block = PROFILE.split("profileStore.load()", 1)[1][:60]
         self.assertIn(".catch(", block)
 
 
@@ -60,8 +58,8 @@ class TheCopyButtonIsAuthoritativeTests(unittest.TestCase):
     def test_copying_reads_fresh_rather_than_cached(self):
         """An explicit "copy my current business address" must not hand back a version from before the
         edit the tenant just made."""
-        handler = SHIPPING.split("async function copyBusinessAddress", 1)[1][:600]
-        self.assertIn("await profileStore.refresh()", handler)
+        handler = SHIPPING.split("async function copyBusinessAddress", 1)[1][:700]
+        self.assertIn("await profileStore.load()", handler)
         self.assertNotIn("await profileStore.ensureLoaded()", handler)
 
 
@@ -80,7 +78,7 @@ class EveryConsumerIsCoveredTests(unittest.TestCase):
         # ensureLoaded is still correct for a screen that only READS on mount; what mattered was that a
         # refresh path exists at all, and that the editor uses it.
         self.assertIn("ensureLoaded", STORE)
-        self.assertIn("refresh", STORE)
+        self.assertIn("async load()", STORE)
 
 
 if __name__ == "__main__":
