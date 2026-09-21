@@ -156,3 +156,106 @@ class SchemaAgreementTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class MinimumRequiredTests(unittest.TestCase):
+    """Only the provider is required to SAVE.
+
+    The config used to require a provider AND two addresses AND a parcel before it would store anything, so
+    testing a key -- the first thing anyone wants to do -- was gated behind the most tedious part of the
+    form. Whether a config is WELL-FORMED and whether it is COMPLETE enough to buy a label are different
+    questions; answering the second by refusing the save is what made the screen hostile.
+    """
+
+    SCHEMA = json.loads((ROOT / "schemas/ShippingConfig.schema.json").read_text(encoding="utf-8"))
+
+    def test_the_schema_requires_only_the_provider(self):
+        self.assertEqual(self.SCHEMA["required"],
+                         ["schema_version", "document_type", "tenant_id", "provider"])
+
+    def test_a_provider_only_config_validates(self):
+        from stripe_link.domain.documents import validate_shipping_config
+        validate_shipping_config({"schema_version": "2026-05-29", "document_type": "shipping_config",
+                                  "tenant_id": "t1", "provider": {"name": "shippo"}})
+
+    def test_a_STARTED_address_must_still_be_finished(self):
+        """Half an address buys a label that cannot be delivered. Untouched is "not set yet"; partial is
+        broken, and the two must not be confused."""
+        from stripe_link.domain.documents import DocumentValidationError, validate_shipping_config
+        with self.assertRaises(DocumentValidationError):
+            validate_shipping_config({"schema_version": "2026-05-29", "document_type": "shipping_config",
+                                      "tenant_id": "t1", "provider": {"name": "shippo"},
+                                      "ship_from_address": {"name": "A", "street1": "1 Main"}})
+
+    def test_the_form_only_blocks_a_save_on_the_provider(self):
+        block = SCREEN.split("function validationErrors()", 1)[1][:900]
+        self.assertIn('if (!form.provider.name) errors.push("Provider")', block)
+        self.assertIn("if (!started) return;", block)
+
+    def test_the_screen_says_what_is_still_needed_instead_of_refusing(self):
+        self.assertIn("Before you can buy labels:", SCREEN)
+        self.assertIn("const readiness = computed", SCREEN)
+
+    def test_the_two_readiness_lists_agree(self):
+        """The screen's list and label_readiness() are the same advice in two languages; if they drift, one
+        of them tells a tenant to do something the other does not require."""
+        from stripe_link.domain.shipping import label_readiness
+        backend = set(label_readiness({}))
+        for item in backend:
+            with self.subTest(item=item):
+                self.assertIn(item, SCREEN)
+
+
+class DeprecatedDefaultParcelTests(unittest.TestCase):
+    """`default_parcel` was required and read by NOTHING.
+
+    It predates the box catalog and per-product dimensions, which is how a parcel is actually decided now.
+    The convenience case for it -- a tenant with a single product -- is already served by that product's own
+    Package Dimensions; duplicating it at config level only creates a second answer that can drift.
+    """
+
+    def test_the_form_no_longer_asks_for_it(self):
+        self.assertNotIn("Default Parcel", SCREEN)
+        self.assertNotIn("form.default_parcel", SCREEN)
+
+    def test_it_is_not_sent_on_save(self):
+        self.assertIn("default_parcel is deliberately NOT sent", SCREEN)
+
+    def test_the_property_survives_so_saved_documents_still_validate(self):
+        # additionalProperties is false, so REMOVING it would strand every config saved before today.
+        schema = json.loads((ROOT / "schemas/ShippingConfig.schema.json").read_text(encoding="utf-8"))
+        self.assertIn("default_parcel", schema["properties"])
+        self.assertIn("DEPRECATED", schema["properties"]["default_parcel"]["description"])
+
+    def test_nothing_in_the_codebase_reads_it(self):
+        """If this ever fails, something started depending on a field the form no longer collects."""
+        readers = []
+        for path in list((ROOT / "src").rglob("*.py")) + list((ROOT / "dashboard/src").rglob("*.vue")):
+            text = path.read_text(encoding="utf-8")
+            for line in text.splitlines():
+                if "default_parcel" in line and "DEPRECATED" not in line and "deliberately NOT sent" not in line:
+                    if "documents.py" in str(path):
+                        continue  # the validator still accepts it for back-compat
+                    readers.append(f"{path.name}: {line.strip()[:70]}")
+        self.assertEqual(readers, [])
+
+
+class DerivedReturnAddressTests(unittest.TestCase):
+    ADDRESS = {"name": "Shop", "street1": "1 Main", "city": "LA", "state": "CA",
+               "postal_code": "90001", "country": "US"}
+
+    def test_returns_go_to_the_ship_from_address_by_default(self):
+        """Most sellers take returns where they ship from. Asking twice is typing that exists only to
+        satisfy a validator, and a duplicate that can drift."""
+        from stripe_link.domain.shipping import return_address
+        self.assertEqual(return_address({"ship_from_address": self.ADDRESS})["street1"], "1 Main")
+
+    def test_an_explicit_return_address_wins(self):
+        from stripe_link.domain.shipping import return_address
+        config = {"ship_from_address": self.ADDRESS,
+                  "return_address": {**self.ADDRESS, "street1": "9 Returns Rd"}}
+        self.assertEqual(return_address(config)["street1"], "9 Returns Rd")
+
+    def test_nothing_configured_is_empty_rather_than_invented(self):
+        from stripe_link.domain.shipping import return_address
+        self.assertEqual(return_address({}), {})

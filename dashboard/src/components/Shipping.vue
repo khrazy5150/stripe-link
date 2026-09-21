@@ -92,6 +92,11 @@
             <small class="field-hint">Save first — the test uses the key that is stored, not the one typed above.</small>
           </div>
         </div>
+        <div v-if="readiness.length" class="keys-status-banner">
+          <strong>Before you can buy labels:</strong>
+          <ul><li v-for="item in readiness" :key="item">{{ item }}</li></ul>
+        </div>
+        <p v-else class="keys-status-banner success">Ready to buy labels.</p>
         <p v-if="connectionResult" class="keys-status-banner" :class="connectionResult.status === 'connected' ? 'success' : 'error'">
           {{ connectionResult.message }}
           <span v-if="connectionResult.carriers?.length">
@@ -164,47 +169,6 @@
       </div>
     </section>
 
-    <section class="dashboard-card">
-      <header class="dashboard-card-header"><h2>Default Parcel</h2></header>
-      <div class="dashboard-card-body">
-        <div class="offer-three-column">
-          <label class="offer-field">
-            <span>Length <strong>*</strong></span>
-            <input v-model.number="form.default_parcel.length" type="number" min="0" step="0.01" />
-          </label>
-          <label class="offer-field">
-            <span>Width <strong>*</strong></span>
-            <input v-model.number="form.default_parcel.width" type="number" min="0" step="0.01" />
-          </label>
-          <label class="offer-field">
-            <span>Height <strong>*</strong></span>
-            <input v-model.number="form.default_parcel.height" type="number" min="0" step="0.01" />
-          </label>
-        </div>
-        <div class="offer-three-column">
-          <label class="offer-field">
-            <span>Weight <strong>*</strong></span>
-            <input v-model.number="form.default_parcel.weight" type="number" min="0" step="0.01" />
-          </label>
-          <label class="offer-field">
-            <span>Distance Unit</span>
-            <select v-model="form.default_parcel.distance_unit">
-              <option value="in">in</option>
-              <option value="cm">cm</option>
-            </select>
-          </label>
-          <label class="offer-field">
-            <span>Mass Unit</span>
-            <select v-model="form.default_parcel.mass_unit">
-              <option value="oz">oz</option>
-              <option value="lb">lb</option>
-              <option value="g">g</option>
-              <option value="kg">kg</option>
-            </select>
-          </label>
-        </div>
-      </div>
-    </section>
 
     <section class="dashboard-card">
       <header class="dashboard-card-header"><h2>Rate &amp; Label Options</h2></header>
@@ -301,7 +265,6 @@ function defaultForm() {
     provider: { name: "", base_url: "", api_key: "" },
     ship_from_address: emptyAddress(),
     return_address: emptyAddress(),
-    default_parcel: { length: "", width: "", height: "", weight: "", distance_unit: "in", mass_unit: "oz" },
     rate_options: { default_service_level: "", allowed_carriers: "", markup_amount: "", free_shipping_threshold: "" },
     label_options: { format: "pdf", size: "4x6" },
     boxes: [],
@@ -395,15 +358,6 @@ function applyConfig(config) {
   form.provider.api_key = ""; // never populate the actual key; it's redacted on read
   fillAddress(form.ship_from_address, config.ship_from_address);
   fillAddress(form.return_address, config.return_address);
-  const parcel = config.default_parcel || {};
-  form.default_parcel = {
-    length: parcel.length ?? "",
-    width: parcel.width ?? "",
-    height: parcel.height ?? "",
-    weight: parcel.weight ?? "",
-    distance_unit: parcel.distance_unit || "in",
-    mass_unit: parcel.mass_unit || "oz",
-  };
   form.boxes = Array.isArray(config.boxes)
     ? config.boxes.map((box) => ({ ...emptyBox(), ...box, max_weight: box.max_weight ?? "" }))
     : [];
@@ -439,21 +393,40 @@ function cleanAddress(address) {
   return result;
 }
 
+// What stops a SAVE, which is almost nothing: a tenant must be able to store a key and test it before
+// they have an address to type. What stops a LABEL is a different question, answered by `readiness`.
 function validationErrors() {
   const errors = [];
   if (!form.provider.name) errors.push("Provider");
+  // A STARTED address must be finished -- half an address buys a label that cannot be delivered -- but an
+  // untouched one is simply not set yet, which is a state the readiness list explains.
   [["Ship-from", form.ship_from_address], ["Return", form.return_address]].forEach(([label, addr]) => {
+    const started = ["name", "street1", "city", "state", "postal_code"].some((f) => String(addr[f] || "").trim());
+    if (!started) return;
     ["name", "street1", "city", "state", "postal_code", "country"].forEach((field) => {
       if (!String(addr[field] || "").trim()) errors.push(`${label} ${field.replace(/_/g, " ")}`);
     });
     const country = String(addr.country || "").trim();
     if (country && country.length !== 2) errors.push(`${label} country must be a 2-letter code`);
   });
-  ["length", "width", "height", "weight"].forEach((field) => {
-    if (!(Number(form.default_parcel[field]) > 0)) errors.push(`Parcel ${field} must be greater than 0`);
-  });
   return errors;
 }
+
+// Mirrors label_readiness() in domain/shipping.py. Only actionable items, each naming the thing to do.
+const readiness = computed(() => {
+  const items = [];
+  if (!form.provider.name) items.push("Choose a shipping provider.");
+  else if (form.provider.name !== "mock" && !keyConfigured.value) items.push("Add your provider's API key.");
+  else if (rawDoc.value.provider?.connection_status !== "connected") items.push("Test the connection to confirm the key works.");
+  const shipFrom = form.ship_from_address;
+  if (!["name", "street1", "city", "state", "postal_code", "country"].every((f) => String(shipFrom[f] || "").trim())) {
+    items.push("Add a complete ship-from address.");
+  }
+  if (!form.boxes.some((box) => String(box.name || "").trim() && Number(box.length) > 0)) {
+    items.push("Add at least one box, or set Package Dimensions on each product you ship.");
+  }
+  return items;
+});
 
 async function load() {
   loading.value = true;
@@ -513,14 +486,9 @@ function buildPayload() {
 
   doc.ship_from_address = cleanAddress(form.ship_from_address);
   doc.return_address = cleanAddress(form.return_address);
-  doc.default_parcel = {
-    length: Number(form.default_parcel.length),
-    width: Number(form.default_parcel.width),
-    height: Number(form.default_parcel.height),
-    weight: Number(form.default_parcel.weight),
-    distance_unit: form.default_parcel.distance_unit,
-    mass_unit: form.default_parcel.mass_unit,
-  };
+  // default_parcel is deliberately NOT sent: it is read by nothing. A parcel comes from a box the items
+  // are packed into, or from a product's own Package Dimensions. Any value saved before this stays on the
+  // document untouched (doc starts as a copy of rawDoc).
 
   const rate = {};
   if (form.rate_options.default_service_level.trim()) rate.default_service_level = form.rate_options.default_service_level.trim();

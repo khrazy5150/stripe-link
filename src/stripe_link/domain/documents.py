@@ -2444,7 +2444,11 @@ def validate_legal_page(document: dict[str, Any]) -> None:
 
 
 def validate_shipping_config(document: dict[str, Any]) -> None:
-    require_fields(document, ["schema_version", "document_type", "tenant_id", "provider", "ship_from_address", "return_address", "default_parcel"])
+    # Only the provider is required. A tenant must be able to save a key and TEST it before filling in
+    # addresses -- testing is the first thing anyone wants to do, and gating it behind the most tedious
+    # part of the form is backwards. Whether the config is COMPLETE enough to buy a label is a different
+    # question, answered by label_readiness() rather than by refusing the save.
+    require_fields(document, ["schema_version", "document_type", "tenant_id", "provider"])
     if document.get("document_type") != "shipping_config":
         raise DocumentValidationError("Shipping config document_type must be 'shipping_config'.")
     provider = document.get("provider")
@@ -2455,13 +2459,20 @@ def validate_shipping_config(document: dict[str, Any]) -> None:
         raise DocumentValidationError("Shipping provider is invalid.")
     for field in ["ship_from_address", "return_address"]:
         address = document.get(field)
+        if address is None:
+            continue  # absent is allowed; return_address absent MEANS the ship-from address
         if not isinstance(address, dict):
             raise DocumentValidationError(f"Shipping config {field} must be an object.")
+        # A PARTIAL address is still refused: half an address buys a label that cannot be delivered, and
+        # "not set yet" is a state the screen can explain while "missing its postcode" is not.
         require_fields(address, ["name", "street1", "city", "state", "postal_code", "country"])
     parcel = document.get("default_parcel")
-    if not isinstance(parcel, dict):
-        raise DocumentValidationError("Shipping config default_parcel must be an object.")
-    require_fields(parcel, ["length", "width", "height", "weight", "distance_unit", "mass_unit"])
+    if parcel is not None:
+        # Deprecated and read by nothing -- kept only so documents saved before the box catalog existed
+        # still validate.
+        if not isinstance(parcel, dict):
+            raise DocumentValidationError("Shipping config default_parcel must be an object.")
+        require_fields(parcel, ["length", "width", "height", "weight", "distance_unit", "mass_unit"])
     boxes = document.get("boxes")
     if boxes is not None:
         if not isinstance(boxes, list):

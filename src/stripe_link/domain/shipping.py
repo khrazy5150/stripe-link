@@ -261,3 +261,45 @@ def packable_items(lines: list[dict[str, Any]], products_by_id: dict[str, dict[s
             }
         items.append(item)
     return items
+
+
+def return_address(config: dict[str, Any] | None) -> dict[str, Any]:
+    """Where returns go: the one configured, or the ship-from address.
+
+    Derived rather than required. Most sellers take returns where they ship from, so asking for it twice
+    is typing that exists only to satisfy a validator -- and a duplicate that can drift from the original.
+    """
+    config = config or {}
+    configured = config.get("return_address")
+    if isinstance(configured, dict) and configured.get("street1"):
+        return dict(configured)
+    ship_from = config.get("ship_from_address")
+    return dict(ship_from) if isinstance(ship_from, dict) else {}
+
+
+def label_readiness(config: dict[str, Any] | None) -> list[str]:
+    """What is still missing before this tenant can buy a label. Empty means ready.
+
+    Separate from validation on purpose. "Is this document well-formed" and "is this setup complete enough
+    to do X" are different questions, and answering the second by refusing to SAVE is how a tenant ends up
+    unable to test a key until they have typed two addresses they do not have yet.
+
+    Only actionable items, each naming the thing to go and do.
+    """
+    config = config or {}
+    missing = []
+    provider = config.get("provider") or {}
+    if not provider.get("name"):
+        missing.append("Choose a shipping provider.")
+    elif provider.get("name") != "mock" and not provider.get("api_key_ref"):
+        missing.append("Add your provider's API key.")
+    elif provider.get("connection_status") != "connected":
+        missing.append("Test the connection to confirm the key works.")
+    ship_from = config.get("ship_from_address") or {}
+    if not all(ship_from.get(field) for field in REQUIRED_ADDRESS_FIELDS):
+        missing.append("Add a complete ship-from address.")
+    # A parcel can come from a box the items are packed into, or from a product's own declared package.
+    # Neither is configured HERE, so an empty box catalog is a hint rather than a blocker.
+    if not tenant_boxes(config):
+        missing.append("Add at least one box, or set Package Dimensions on each product you ship.")
+    return missing

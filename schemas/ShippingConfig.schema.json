@@ -4,113 +4,303 @@
   "title": "ShippingConfig",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_version", "document_type", "tenant_id", "provider", "ship_from_address", "return_address", "default_parcel"],
+  "required": [
+    "schema_version",
+    "document_type",
+    "tenant_id",
+    "provider"
+  ],
   "properties": {
-    "schema_version": { "type": "string", "const": "2026-05-29" },
-    "document_type": { "type": "string", "const": "shipping_config" },
-    "tenant_id": { "type": "string", "minLength": 1 },
-    "enabled": { "type": "boolean", "default": false },
-    "test_mode": { "type": "boolean", "default": true },
-    "auto_fulfill_after_label_purchase": { "type": "boolean", "default": false },
+    "schema_version": {
+      "type": "string",
+      "const": "2026-05-29"
+    },
+    "document_type": {
+      "type": "string",
+      "const": "shipping_config"
+    },
+    "tenant_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "enabled": {
+      "type": "boolean",
+      "default": false
+    },
+    "test_mode": {
+      "type": "boolean",
+      "default": true
+    },
+    "auto_fulfill_after_label_purchase": {
+      "type": "boolean",
+      "default": false
+    },
     "provider": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["name"],
+      "required": [
+        "name"
+      ],
       "properties": {
         "name": {
           "type": "string",
-          "enum": ["shippo", "easypost", "shipstation", "easyship", "mock"]
+          "enum": [
+            "shippo",
+            "easypost",
+            "shipstation",
+            "easyship",
+            "mock"
+          ]
         },
         "api_key_ref": {
           "type": "string",
           "description": "Reference to the encrypted provider API key; never store raw API keys in this document."
         },
-        "base_url": { "type": "string" },
+        "base_url": {
+          "type": "string"
+        },
         "connection_status": {
           "type": "string",
-          "enum": ["not_configured", "untested", "connected", "failed"],
+          "enum": [
+            "not_configured",
+            "untested",
+            "connected",
+            "failed"
+          ],
           "default": "not_configured"
         },
-        "last_tested_at": { "type": "integer", "minimum": 0 }
+        "last_tested_at": {
+          "type": "integer",
+          "minimum": 0
+        }
       }
     },
-    "ship_from_address": { "$ref": "#/$defs/address" },
-    "return_address": { "$ref": "#/$defs/address" },
-    "default_parcel": { "$ref": "#/$defs/parcel" },
+    "ship_from_address": {
+      "$ref": "#/$defs/address"
+    },
+    "return_address": {
+      "$ref": "#/$defs/address",
+      "description": "Where returns go. Absent means the ship-from address, which is where most sellers want them; only fill this in when it genuinely differs."
+    },
+    "default_parcel": {
+      "$ref": "#/$defs/parcel",
+      "description": "DEPRECATED and read by nothing. It predates the box catalog and per-product dimensions, which is how a parcel is now decided. A single-product tenant is already served by that product's own Package Dimensions; duplicating it here only creates a second answer that can drift from the first. Kept so documents saved before this still validate."
+    },
     "boxes": {
       "type": "array",
       "description": "The boxes this tenant actually packs into. Carrier packaging (USPS Flat Rate, UPS Express, FedEx Box) is NOT listed here -- it is fetched from the provider as parcel templates, because hand-copied carrier dimensions go stale the moment a size is retired. The packer works against the union of the two.",
-      "items": { "$ref": "#/$defs/box" }
+      "items": {
+        "$ref": "#/$defs/box"
+      }
     },
     "rate_options": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "default_service_level": { "type": "string" },
+        "default_service_level": {
+          "type": "string"
+        },
         "allowed_carriers": {
           "type": "array",
-          "items": { "type": "string" }
+          "items": {
+            "type": "string"
+          }
         },
-        "markup_amount": { "type": "integer", "minimum": 0 },
-        "free_shipping_threshold": { "type": "integer", "minimum": 0 }
+        "markup_amount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "free_shipping_threshold": {
+          "type": "integer",
+          "minimum": 0
+        }
       }
     },
     "label_options": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "format": { "type": "string", "enum": ["pdf", "png", "zpl"], "default": "pdf" },
-        "size": { "type": "string", "enum": ["4x6", "8.5x11"], "default": "4x6" }
+        "format": {
+          "type": "string",
+          "enum": [
+            "pdf",
+            "png",
+            "zpl"
+          ],
+          "default": "pdf"
+        },
+        "size": {
+          "type": "string",
+          "enum": [
+            "4x6",
+            "8.5x11"
+          ],
+          "default": "4x6"
+        }
       }
     },
-    "updated_at": { "type": "integer", "minimum": 0 }
+    "updated_at": {
+      "type": "integer",
+      "minimum": 0
+    }
   },
   "$defs": {
     "box": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["name", "length", "width", "height"],
+      "required": [
+        "name",
+        "length",
+        "width",
+        "height"
+      ],
       "properties": {
-        "name": { "type": "string", "minLength": 1 },
-        "length": { "type": "number", "exclusiveMinimum": 0, "description": "INNER dimensions -- what fits inside, not the carton's outside." },
-        "width": { "type": "number", "exclusiveMinimum": 0 },
-        "height": { "type": "number", "exclusiveMinimum": 0 },
-        "distance_unit": { "type": "string", "enum": ["in", "cm"], "default": "in" },
-        "empty_weight": { "type": "number", "minimum": 0, "description": "The box's own weight. A carrier bills the whole parcel, cardboard included." },
-        "max_weight": { "type": ["number", "null"], "exclusiveMinimum": 0, "description": "What the box may carry. Absent means no stated limit, which is the common case for a tenant's own carton -- refusing those would be worse than trusting them. A carrier refuses an over-weight parcel AFTER the label is paid for." },
-        "mass_unit": { "type": "string", "enum": ["oz", "lb", "g", "kg"], "default": "lb" }
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "length": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "description": "INNER dimensions -- what fits inside, not the carton's outside."
+        },
+        "width": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "height": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "distance_unit": {
+          "type": "string",
+          "enum": [
+            "in",
+            "cm"
+          ],
+          "default": "in"
+        },
+        "empty_weight": {
+          "type": "number",
+          "minimum": 0,
+          "description": "The box's own weight. A carrier bills the whole parcel, cardboard included."
+        },
+        "max_weight": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "exclusiveMinimum": 0,
+          "description": "What the box may carry. Absent means no stated limit, which is the common case for a tenant's own carton -- refusing those would be worse than trusting them. A carrier refuses an over-weight parcel AFTER the label is paid for."
+        },
+        "mass_unit": {
+          "type": "string",
+          "enum": [
+            "oz",
+            "lb",
+            "g",
+            "kg"
+          ],
+          "default": "lb"
+        }
       }
     },
     "address": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["name", "street1", "city", "state", "postal_code", "country"],
+      "required": [
+        "name",
+        "street1",
+        "city",
+        "state",
+        "postal_code",
+        "country"
+      ],
       "properties": {
-        "name": { "type": "string" },
-        "company": { "type": "string" },
-        "street1": { "type": "string" },
-        "street2": { "type": "string" },
-        "city": { "type": "string" },
-        "state": { "type": "string" },
-        "postal_code": { "type": "string" },
-        "country": { "type": "string", "minLength": 2, "maxLength": 2 },
-        "phone": { "type": "string" },
-        "email": { "type": "string" },
-        "residential": { "type": "boolean", "default": false }
+        "name": {
+          "type": "string"
+        },
+        "company": {
+          "type": "string"
+        },
+        "street1": {
+          "type": "string"
+        },
+        "street2": {
+          "type": "string"
+        },
+        "city": {
+          "type": "string"
+        },
+        "state": {
+          "type": "string"
+        },
+        "postal_code": {
+          "type": "string"
+        },
+        "country": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 2
+        },
+        "phone": {
+          "type": "string"
+        },
+        "email": {
+          "type": "string"
+        },
+        "residential": {
+          "type": "boolean",
+          "default": false
+        }
       }
     },
     "parcel": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["length", "width", "height", "weight", "distance_unit", "mass_unit"],
+      "required": [
+        "length",
+        "width",
+        "height",
+        "weight",
+        "distance_unit",
+        "mass_unit"
+      ],
       "properties": {
-        "length": { "type": "number", "exclusiveMinimum": 0 },
-        "width": { "type": "number", "exclusiveMinimum": 0 },
-        "height": { "type": "number", "exclusiveMinimum": 0 },
-        "weight": { "type": "number", "exclusiveMinimum": 0 },
-        "distance_unit": { "type": "string", "enum": ["in", "cm"] },
-        "mass_unit": { "type": "string", "enum": ["oz", "lb", "g", "kg"] }
+        "length": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "width": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "height": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "weight": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "distance_unit": {
+          "type": "string",
+          "enum": [
+            "in",
+            "cm"
+          ]
+        },
+        "mass_unit": {
+          "type": "string",
+          "enum": [
+            "oz",
+            "lb",
+            "g",
+            "kg"
+          ]
+        }
       }
     }
-  }
+  },
+  "description": "A tenant's shipping setup. Only the provider is required: a tenant must be able to save a key and TEST it before filling in addresses, which is the first thing anyone wants to do. Everything else is completeness for a particular action, not well-formedness of the document -- see label_readiness() in domain/shipping.py."
 }
