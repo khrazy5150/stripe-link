@@ -71,19 +71,44 @@ deindexes the page being tested.**
 publish"). So if a variant's artifact says `noindex`, and the Worker serves that artifact at the control's
 URL, Googlebot crawling the tenant's real URL reads `noindex` — and drops the page it was meant to improve.
 
-The rule that avoids it:
+### Why "republish everything as noindex" is the wrong fix
 
-1. **Never bake noindex into a variant's artifact.** The artifact served at the tested URL must carry the
-   robots value the TESTED page is entitled to.
-2. **Apply noindex at the EDGE, by route**, when a variant is requested at its own URL. The mechanism
-   already exists — the Worker stamps `X-Robots-Tag: noindex, nofollow` when `route.noindex` is set, which
-   is how free platform hosts are kept out of the index.
-3. **Point every variant artifact's canonical at the TESTED URL**, not at its own. Canonical is baked at
-   publish from the page's own published URL today, so this is a real change and not a default.
+The obvious answer is to republish the pages in the test as `noindex,nofollow` and restore the winner
+afterwards. It fails for the same reason as the trap: **the tested URL IS the tenant's live page**, the one
+with the rankings. Republishing it noindex drops it from Google for the length of the experiment, and
+recovery after re-indexing takes longer than the test did. The page being tested is exactly the one that
+must stay indexable.
 
-Cleaner still, and worth considering: **do not give variants a public route at all.** A variant that exists
-only to be served at the tested URL has no second URL to index, which removes the question rather than
-answering it. Previews already run on noindex hosts.
+### The rule: bake the TESTED page's identity into the variant
+
+Solve it at publish, not at the edge — just bake the right value rather than noindex. A variant artifact is
+not "a page"; it is **an alternative rendering of the tested page**, so it inherits that page's SEO
+identity:
+
+1. `canonical` → the **TESTED** URL, not the variant's own. Canonical is baked at publish from the page's
+   own published URL today, so this is a real change.
+2. `robots` → whatever the **TESTED** page is entitled to, normally `index,follow`. Never noindex, because
+   this artifact is served at the tested URL.
+3. **Do not give variants a public route.** A variant exists to be served at the tested URL; without a
+   second URL there is nothing to index, nothing to noindex, and no duplicate-content question to answer.
+
+This is simpler than stamping robots at the edge, and it takes a moving part OUT of the Worker — the
+highest-blast-radius component in the system. Whichever variant is served, the response identifies itself
+as the tested URL and carries the tested URL's indexing rules.
+
+### Lifecycle: republish in place, never unpublish
+
+Unpublishing DELETES the published artifact (`delete_page_artifacts` on the unpublish path), so the page
+404s until it is republished — an outage on the tenant's live URL, twice per experiment. Republishing in
+place is enough: a save re-renders the artifact.
+
+- Experiment starts → variants are (re)published carrying the tested page's canonical and robots.
+- Experiment completes → the winner is republished with its own identity, or the tested page simply keeps
+  serving and the losing variants are left unrouted.
+
+Drafts are not an option, and the reason is worth recording: `handlers/checkout.py:118` refuses a checkout
+whose page is not `published` (403 `page_not_published`), so a draft variant could never convert and the
+experiment would measure nothing.
 
 Do NOT special-case crawlers by serving them the control — that is cloaking. Google's own A/B guidance is
 canonical to the original, 302 rather than 301 if redirecting, and run the test no longer than needed.

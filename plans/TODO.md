@@ -160,8 +160,11 @@ Deferred, non-blocking follow-ups. Each item notes what, why it was deferred, an
   separate cookies.
 - **⚠ The indexing requirement has a trap.** `robots` is baked into the ARTIFACT at publish, so a variant
   whose artifact says noindex, served at the control's URL, tells Googlebot to DEINDEX THE PAGE BEING
-  TESTED. Noindex must be stamped at the EDGE by route (the mechanism free platform hosts already use),
-  never baked; and every variant artifact's canonical must point at the TESTED url rather than its own.
+  TESTED. Republishing the pages as noindex for the duration fails the same way: the tested URL IS the
+  tenant's live page. Instead a variant inherits the TESTED page's identity at publish -- canonical to the
+  tested url, robots as the tested page is entitled to -- and variants get NO public route, so there is
+  nothing to index and no edge robots logic at all. Republish in place; never unpublish (that deletes the
+  artifact and 404s the live URL). Drafts are not an option: checkout.py:118 refuses a non-published page.
 - **Significance is missing and that makes results harmful:** compute_results returns a conversion rate and
   nothing else, and complete_experiment accepts whatever winner the tenant posts. "B 12% vs A 8%" on 25
   visits is noise, and acting on it is worse than not testing.
