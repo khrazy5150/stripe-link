@@ -233,6 +233,41 @@ Dev has no business holding a live key under any topology. Small, independent, d
 
 ## Security
 
+### ⭐⭐ HIGH — a detached page still takes money; reachable is conflated with authorized (found 2026-09-21)
+
+Plan: `plans/COMMERCE_ELIGIBILITY.md`. Found while tracing A/B indexing, not introduced by it.
+
+**Verified:** the published artifact is publicly readable at the pages-distribution URL (200, full HTML) and
+carries an absolute, self-contained checkout href — `clientID`, `offer`, `page_id`, `price_id`, `mode` all
+baked in, nothing depending on the host it loaded from. `checkout.py:118` and `cart_checkout.py:89` gate on
+`status == "published"` and nothing else: no Site, Host, Origin or Referer check anywhere in either handler.
+`upsell.py` has no page gate at all — the word `published` does not appear in it.
+
+**So:** a tenant can detach a page from their Site, which removes it from every hostname the platform
+governs, and keep running a fully transacting storefront on platform infrastructure. Every takedown lever
+today operates on hostnames; none of them reach the artifact URL.
+
+**What still holds:** `assert_billing_in_good_standing` runs BEFORE the page check on every transacting path,
+so a suspended tenant cannot take money on any surface — that is a real kill switch for the money, though not
+for the serving. A detached page also bakes `noindex`, so this is a direct-link vector, not a search-
+discoverable one. And `delete_page_artifacts` does remove the object on archive, so removal is possible; it
+just has to act on the page rather than a hostname. Threat model is a malicious TENANT, not an outside
+attacker — ids and the distribution host are not guessable, but the tenant knows their own.
+
+**Do NOT fix it by making detached pages 404.** Preview, staging, platform administration and A/B variants
+all legitimately live outside a tenant Site. In particular an A/B variant MUST transact while detached: the
+CTA a visitor clicks comes from the variant's artifact and carries the variant's own `page_id`, which is what
+`order.attribution.page_id` reads for conversion attribution.
+
+The rule instead reuses A2's `identity_page_id` — a page is eligible when the identity it carries (itself, or
+the control it is a variant of) is attached to a Site. Phase 1 is observe-only: log where a checkout WOULD be
+refused without refusing it. Refusing a legitimate checkout is worse than the hole, and nobody has measured
+what real traffic on these paths looks like.
+
+**Separate, do not conflate:** the same URL is also an unguarded SEO surface. That fix is an origin
+`X-Robots-Tag` over the whole artifact namespace plus the Worker stripping the inherited header and setting
+its own from `route.noindex`. It does nothing about commerce, and this item does nothing about indexing.
+
 ### ⭐⭐ HIGH — the API never verifies who is calling; tenant_id is taken from the request (found 2026-09-15)
 
 Noticed while smoke-testing a newly deployed endpoint on prod, NOT introduced by it. This is repo-wide and
