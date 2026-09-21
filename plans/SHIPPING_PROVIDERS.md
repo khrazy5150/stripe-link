@@ -234,6 +234,56 @@ from different places would need several parcels by definition; defer until a pr
 - `auto_fulfill_after_label_purchase` (already in the schema) marks the order fulfilled.
 - Dashboard: a Buy label action on `Orders.vue`.
 
+### PA — what happens when a label is wrong (refunds, voids, and adjustments)
+
+A label is money spent at a carrier the instant it is bought. Three things can go wrong with one, and they
+have different recourse — conflating them is how a tenant is told "you'll get it back" about the one case
+where they will not.
+
+**1. Unused label → refundable.** The parcel was never handed over. Aggregators expose a refund/void
+request against the transaction id; the carrier credits the postage back to the account. It is
+**asynchronous and not guaranteed** — the request is queued, can take days to weeks, and fails if the label
+was in fact scanned. There is also a deadline (USPS is commonly cited as ~30 days). **Verify the current
+window and API shape before building any UI that promises it.**
+
+**2. Rejected at the counter → the label is unused, so case 1.** This is the case the weight-limit bug
+would have caused, and it is the *recoverable* one.
+
+**3. Adjusted in the network → NOT refundable, and this is the common one.** An over-weight or over-size
+parcel is usually accepted, not refused. The carrier weighs and measures it in their own facility and bills
+the DIFFERENCE back to the account holder, days or weeks later, as a surcharge. There is no refund to ask
+for; the tenant simply owes more than the label said, and finds out long after the order shipped.
+
+#### Why this matters more than it looks
+
+- **The hazard is silent and late.** A wrong box does not fail loudly at purchase; it arrives as a line on
+  an invoice weeks later. Which is exactly why the default 1 lb / 10x10x10 product dimensions are dangerous
+  and why the packer refuses to invent a parcel.
+- **It corrupts the calibration data.** `estimated_cost` vs the label's purchase price is NOT
+  estimate-vs-actual if the carrier later adjusted the charge. The honest comparison needs the settled
+  cost, so the shipment document must be able to record an adjustment, not just a purchase.
+- **It is an argument against a platform-owned carrier account.** With BYO, an adjustment lands on the
+  tenant's own account: they see it, they own it, they fix their box sizes. On a platform-owned account it
+  lands on OURS, weeks later, with no automatic way to attribute it back to whoever shipped the parcel —
+  and no rail to bill them for it (see the collection problem already recorded).
+
+#### What the document needs
+
+`schemas/Shipment.schema.json` has `voided` / `voided_at` and stops there. It also needs:
+
+- `refund`: `{status: requested|refunded|denied, requested_at, settled_at, amount}` — asynchronous, so a
+  request is a state and not an outcome.
+- `adjustment`: `{amount, reason, settled_at}` — what the carrier actually billed, when it differs from
+  what the label said.
+- `settled_cost` — the number calibration should compare against. `cost` is what we were quoted;
+  `settled_cost` is what it really cost once the carrier had its say.
+
+#### Not in scope for P2
+
+P2 buys labels. Voiding, refund polling and adjustment reconciliation are their own slice, and adjustment
+reconciliation in particular depends on how the provider reports it — which needs verifying against a live
+account before designing around it.
+
 ### P3 — tracking and the buyer
 
 The buyer is told their parcel is on its way **the same way this codebase tells them everything else** —

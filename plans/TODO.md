@@ -40,6 +40,13 @@ Deferred, non-blocking follow-ups. Each item notes what, why it was deferred, an
   `load_tenant_email_context` so it comes from the TENANT's business, sent via `mailer.send_email`
   (injectable), and wrapped so it can never fail the label purchase that triggered it. The in-app bell
   (`docs/NOTIFICATION_EMITTERS.md`) is a separate channel and optional.
+- **A wrong box is billed LATE, not refused** (plan PA): an over-weight parcel is usually accepted and
+  ADJUSTED -- the carrier re-weighs it and bills the difference weeks later -- so there is nothing to
+  refund, the tenant simply owes more than the label said. Only an UNUSED label is refundable, and that is
+  asynchronous, deadlined and not guaranteed. Consequences: the shipment document needs
+  refund/adjustment/settled_cost (it has only `voided` today), estimate-vs-actual must compare against the
+  SETTLED cost, and an adjustment on a platform-owned carrier account would land on us weeks later with no
+  way to attribute it to whoever shipped the parcel.
 - **Three callers, one rate primitive**: labels for an order (P2), the price estimator (PE), and a
   standalone carrier calculator (PC) all make the same rates() call. Build it carefully in P1 rather than
   inside whichever feature reaches it first. The calculator compares carrier AND transit time -- no carrier
