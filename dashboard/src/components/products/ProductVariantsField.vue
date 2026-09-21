@@ -32,11 +32,23 @@
     </div>
 
     <h3>Package Dimensions</h3>
+    <p class="field-hint">The box this ships in on its own, and what it weighs packed. Used as-is when
+      someone buys just this.</p>
     <div class="modal-dimensions-grid">
       <label>Length (inches)<input v-model.number="form.length_in" type="number" min="0" step="0.1" /></label>
       <label>Width (inches)<input v-model.number="form.width_in" type="number" min="0" step="0.1" /></label>
       <label>Height (inches)<input v-model.number="form.height_in" type="number" min="0" step="0.1" /></label>
       <label>Weight (pounds)<input v-model.number="form.weight_lb" type="number" min="0" step="0.1" /></label>
+    </div>
+
+    <h3>Item Size <span class="field-optional">optional</span></h3>
+    <p class="field-hint">The product's own size, out of its box. Only needed if it might be bought
+      alongside something else — then it can share a box instead of shipping in its own, which is usually
+      cheaper. Leave blank and multi-item orders just ship separately.</p>
+    <div class="modal-dimensions-grid">
+      <label>Length (inches)<input v-model.number="form.item_length_in" type="number" min="0" step="0.1" placeholder="—" /></label>
+      <label>Width (inches)<input v-model.number="form.item_width_in" type="number" min="0" step="0.1" placeholder="—" /></label>
+      <label>Height (inches)<input v-model.number="form.item_height_in" type="number" min="0" step="0.1" placeholder="—" /></label>
     </div>
   </div>
 </template>

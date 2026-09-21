@@ -794,6 +794,24 @@ def validate_product_document(document: dict[str, Any]) -> None:
         if field not in dimensions:
             raise DocumentValidationError(f"Product fulfillment.dimensions.{field} must be provided.")
         optional_non_negative_number(dimensions, field, f"Product fulfillment.dimensions.{field}")
+    # The product's OWN size, distinct from the box above. Optional: a tenant who only ever ships one
+    # thing at a time never needs it, and a multi-item order simply falls back to one parcel per item.
+    item_dimensions = fulfillment.get("item_dimensions")
+    if item_dimensions is not None:
+        if not isinstance(item_dimensions, dict):
+            raise DocumentValidationError("Product fulfillment.item_dimensions must be an object when provided.")
+        for field in ["length_in", "width_in", "height_in"]:
+            value = item_dimensions.get(field)
+            if value is None:
+                continue
+            # Zero is refused rather than treated as unknown: a zero-sized item packs into anything and
+            # would quietly choose a box far too small for what is actually in it.
+            try:
+                if float(value) <= 0:
+                    raise ValueError
+            except (TypeError, ValueError):
+                raise DocumentValidationError(
+                    f"Product fulfillment.item_dimensions.{field} must be a positive number.") from None
 
     refund_policy = document.get("refund_policy")
     if refund_policy is not None:

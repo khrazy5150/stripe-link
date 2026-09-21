@@ -226,3 +226,38 @@ def tenant_boxes(config: dict[str, Any] | None) -> list[dict[str, Any]]:
     if not isinstance(boxes, list):
         return []
     return [dict(box) for box in boxes if isinstance(box, dict) and box.get("name")]
+
+
+def packable_items(lines: list[dict[str, Any]], products_by_id: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
+    """Order lines + product documents -> what `pack()` takes.
+
+    One place that knows the difference between a product's OWN size and the BOX a tenant declared for it,
+    so the label buyer, the price estimator and the carrier calculator cannot each read it differently and
+    quote three different parcels for the same order.
+
+    A line with no shipping requirement is skipped entirely: a download has no parcel, and including it
+    would add a zero-sized nothing to the packing maths.
+    """
+    items = []
+    for line in lines or []:
+        product = products_by_id.get(str(line.get("product_id") or "")) or {}
+        fulfillment = product.get("fulfillment") or {}
+        if fulfillment.get("requires_shipping") is False:
+            continue
+        item: dict[str, Any] = {
+            "product_id": str(line.get("product_id") or ""),
+            "quantity": max(1, int(line.get("quantity") or 1)),
+            "weight": fulfillment.get("weight_lb"),
+        }
+        own = fulfillment.get("item_dimensions") or {}
+        for source, target in (("length_in", "length"), ("width_in", "width"), ("height_in", "height")):
+            if own.get(source):
+                item[target] = own[source]
+        declared = fulfillment.get("dimensions") or {}
+        if all(declared.get(field) for field in ("length_in", "width_in", "height_in")):
+            item["package"] = {
+                "length": declared["length_in"], "width": declared["width_in"], "height": declared["height_in"],
+                "weight": fulfillment.get("weight_lb"),
+            }
+        items.append(item)
+    return items

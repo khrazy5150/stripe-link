@@ -95,6 +95,16 @@ function uniqueTags(tags) {
 }
 
 
+// All three or nothing. A half-measured item would be packed against a box chosen from an incomplete
+// shape, and unlike the package dimensions there is no defensible default to fall back on -- 10x8x4 is a
+// reasonable guess at a box and a meaningless guess at a product.
+function itemDimensions(form, isShippable) {
+  if (!isShippable) return null;
+  const sides = [form.item_length_in, form.item_width_in, form.item_height_in].map((value) => Number(value));
+  if (!sides.every((value) => Number.isFinite(value) && value > 0)) return null;
+  return { length_in: sides[0], width_in: sides[1], height_in: sides[2] };
+}
+
 export function defaultProductPrice(product) {
   const prices = Array.isArray(product?.prices) ? product.prices : [];
   return prices.find((price) => price.price_id === product.default_price_id)
@@ -462,6 +472,10 @@ export async function buildProductDocument(form) {
         width_in: isPhysical && !isLeadGen ? Number(form.width_in || 8) : null,
         height_in: isPhysical && !isLeadGen ? Number(form.height_in || 4) : null,
       },
+      // The product's OWN size, distinct from the box above. Written only when the tenant actually
+      // entered all three: a partial item size packs into a box chosen from nonsense, and there is no
+      // sensible default for "how big is this thing" the way there is for "what box do you use".
+      item_dimensions: itemDimensions(form, isPhysical && !isLeadGen),
     },
     sync: {
       status: "pending",

@@ -881,6 +881,11 @@ function defaultProductForm() {
     width_in: 8,
     height_in: 4,
     weight_lb: 1,
+    // No default: 10x8x4 is a reasonable guess at a BOX and a meaningless guess at a product's own size,
+    // and a guessed item size would pick a box for contents nobody measured.
+    item_length_in: null,
+    item_width_in: null,
+    item_height_in: null,
     lead_capture: { ...defaultLeadAction },
   };
 }
@@ -943,6 +948,7 @@ function productFormFromDocument(product) {
   const refundPolicy = product.refund_policy || {};
   const fulfillment = product.fulfillment || {};
   const dimensions = fulfillment.dimensions || {};
+  const itemDimensions = fulfillment.item_dimensions || {};
   const images = Array.isArray(product.images) ? product.images : [];
   const variants = product.variants || {};
   const leadCapture = leadActionFromDocument(product.lead_capture);
@@ -985,6 +991,11 @@ function productFormFromDocument(product) {
     width_in: dimensions.width_in ?? base.width_in,
     height_in: dimensions.height_in ?? base.height_in,
     weight_lb: fulfillment.weight_lb ?? base.weight_lb,
+    // Left blank when the product has none, NOT defaulted: an empty field reads as "not measured", and
+    // a number there would claim a size nobody entered.
+    item_length_in: itemDimensions.length_in ?? null,
+    item_width_in: itemDimensions.width_in ?? null,
+    item_height_in: itemDimensions.height_in ?? null,
     lead_capture: leadCapture,
   };
 }

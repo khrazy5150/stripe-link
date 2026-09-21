@@ -99,7 +99,12 @@
     },
     "condition": {
       "type": "string",
-      "enum": ["new", "refurbished", "used", "damaged"],
+      "enum": [
+        "new",
+        "refurbished",
+        "used",
+        "damaged"
+      ],
       "default": "new",
       "description": "Drives schema.org itemCondition. Stated rather than assumed: markup may only claim a condition the tenant chose."
     },
@@ -400,7 +405,48 @@
               ],
               "minimum": 0
             }
-          }
+          },
+          "description": "The BOX this product ships in, when the tenant declares one. An override, not a measurement: it wins for a single-item order because the seller knows their own operation. It cannot be summed across a bundle -- boxes do not add -- which is what item_dimensions is for."
+        },
+        "item_dimensions": {
+          "description": "The PRODUCT's own size, so several items can be packed into one box. Without it a multi-item order falls back to one parcel per item, which over-estimates. Absent is normal: a tenant who only ever ships one thing at a time never needs it.",
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "length_in",
+                "width_in",
+                "height_in"
+              ],
+              "properties": {
+                "length_in": {
+                  "type": [
+                    "number",
+                    "null"
+                  ],
+                  "exclusiveMinimum": 0
+                },
+                "width_in": {
+                  "type": [
+                    "number",
+                    "null"
+                  ],
+                  "exclusiveMinimum": 0
+                },
+                "height_in": {
+                  "type": [
+                    "number",
+                    "null"
+                  ],
+                  "exclusiveMinimum": 0
+                }
+              }
+            }
+          ]
         }
       }
     },
