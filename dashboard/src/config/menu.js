@@ -86,7 +86,9 @@ export const menuSchema = {
       icon: "testTube",
       view: "abTesting",
       enabled: true,
-      environments: ["live"],
+      // Test mode too: an experiment can now be proved end to end without live money (test-mode Stripe
+      // transactions), and test-mode pages are noindex regardless, so a sandbox test carries no SEO risk.
+      environments: ["test", "live"],
     },
     reviews: {
       key: "reviews",

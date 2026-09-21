@@ -1,7 +1,7 @@
 import os
 import time
 
-from stripe_link.common import error_response, json_response, parse_json_body, path_params, resolve_stripe_mode, tenant_id_from_event
+from stripe_link.common import error_response, json_response, normalize_stripe_mode, parse_json_body, path_params, resolve_stripe_mode, tenant_id_from_event
 from handlers.routes import short_url_for_code
 from stripe_link.domain.experiments import SHORT_CODE_ENTRY_ENABLED, repoint_to_winner
 from stripe_link.domain.experiment_stats import summarize
@@ -54,7 +54,7 @@ def handler(
             gate = require_capability(event, "ab_testing", tenant_repo)
             if gate is not None:
                 return gate
-            return create_experiment(event, repository, routes, now_fn, id_fn, code_fn)
+            return create_experiment(event, repository, routes, now_fn, id_fn, code_fn, mode=mode)
         if method == "PUT" and experiment_id and not action:
             return update_experiment(event, repository, experiment_id, now_fn)
         if method == "DELETE" and experiment_id and not action:
@@ -206,7 +206,7 @@ def _variant_fingerprint(variants):
     ]
 
 
-def create_experiment(event, repository, routes, now_fn, id_fn, code_fn):
+def create_experiment(event, repository, routes, now_fn, id_fn, code_fn, mode="test"):
     tenant_id = tenant_id_from_event(event)
     if not tenant_id:
         return error_response("tenant_id is required.", code="missing_tenant")
@@ -220,6 +220,11 @@ def create_experiment(event, repository, routes, now_fn, id_fn, code_fn):
         "schema_version": SCHEMA_VERSION,
         "document_type": "experiment",
         "tenant_id": tenant_id,
+        # Isolation is already structural -- DynamoDocumentRepository bakes the mode into the SK and GSI1PK,
+        # so a test experiment and a live one cannot see each other. This stamp is for READING: without it a
+        # dumped experiment document cannot say which mode it belongs to, which is exactly the question
+        # asked when something looks wrong.
+        "stripe_mode": normalize_stripe_mode(mode),
         "experiment_id": experiment_id,
         "name": str(body.get("name") or "").strip(),
         "status": "draft",

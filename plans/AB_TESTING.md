@@ -282,6 +282,13 @@ disagrees with their analytics.
   - **Elapsed time stops at completion**, so a result opened weeks later does not claim the test ran for
     weeks and dilute the rate it was actually collecting at.
 - **A4 — prove it.** Two real pages, a real split, a real conversion. Nothing here has ever run.
+  **Unblocked 2026-09-21:** the screen was live-mode only (`menu.js`, `environments: ["live"]`), which made
+  proving it require real money. It is now offered in TEST mode too. Safe because isolation is structural —
+  `DynamoDocumentRepository` bakes the mode into the SK and GSI1PK, so a test experiment and a live one
+  cannot see each other, and both the resolver and publishing build the repo from the record's own mode —
+  and because test-mode pages are forced to NOINDEX_ROBOTS at publish regardless, so a sandbox experiment
+  carries no SEO risk. Experiment documents now also carry `stripe_mode`; isolation never needed it, but a
+  dumped document could not otherwise say which mode it belonged to.
 - **A5 — promotion actually promotes: DONE 2026-09-21.** Completing now moves the tested slug to the
   winner (`repoint_to_winner`), so the improvement a tenant measured is the one they get. Before this,
   `winner_page_id` reached serving only through the short-code resolver A1c disabled — a completed
