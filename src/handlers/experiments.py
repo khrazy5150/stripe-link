@@ -1,3 +1,4 @@
+import os
 import time
 
 from stripe_link.common import error_response, json_response, parse_json_body, path_params, resolve_stripe_mode, tenant_id_from_event
@@ -12,6 +13,7 @@ from stripe_link.repositories.documents import (
     orders_repository,
     pages_repository,
     routes_repository,
+    sites_repository,
 )
 
 SCHEMA_VERSION = "2026-05-29"
@@ -28,6 +30,7 @@ def handler(
     routes=None,
     orders=None,
     pages=None,
+    sites=None,
     now_fn=lambda: int(time.time()),
     id_fn=lambda: f"exp_{generate_id()}",
     code_fn=None,
@@ -56,7 +59,7 @@ def handler(
         if method == "DELETE" and experiment_id and not action:
             return delete_experiment(event, repository, routes, experiment_id)
         if method == "POST" and experiment_id and action == "start":
-            return start_experiment(event, repository, pages, now_fn, mode=mode)
+            return start_experiment(event, repository, pages, now_fn, mode=mode, sites=sites)
         if method == "POST" and experiment_id and action == "pause":
             return set_status(event, repository, experiment_id, "paused", now_fn)
         if method == "POST" and experiment_id and action == "complete":
@@ -132,6 +135,53 @@ def normalize_variants(raw_variants, control_page_id):
             variant["key"] = f"variant_{next(letters)}"
         variants.append(variant)
     return variants
+
+
+def attached_variant_slugs(tenant_id, variants, control_page_id, sites_repo):
+    """Where non-control variants are publicly routable: {page_id: slug}. Empty when none are.
+
+    A variant is an alternative rendering of the page under test, served behind THAT page's URL. Give it a
+    slug of its own and it becomes a second public URL showing near-identical content, competing with the
+    very page being tested (plans/AB_TESTING.md, Option A).
+
+    Fails OPEN: if the Sites table cannot be read the check is skipped rather than blocking a start. The
+    resolver already stamps noindex on an attached variant's own URL and publishing gives its artifact the
+    tested page's canonical, so this is the third layer, not the only one.
+    """
+    if sites_repo is None:
+        return {}
+    wanted = {str(variant.get("page_id") or "") for variant in variants or []}
+    wanted.discard(str(control_page_id or ""))
+    wanted.discard("")
+    if not wanted:
+        return {}
+    try:
+        found = {}
+        for site in sites_repo.list_for_tenant(tenant_id) or []:
+            for slug, entry in ((site or {}).get("pages") or {}).items():
+                if isinstance(entry, dict) and str(entry.get("page_id") or "") in wanted:
+                    found[str(entry.get("page_id"))] = str(slug)
+        return found
+    except Exception:  # noqa: BLE001 - a check that cannot run must not block starting a test
+        return {}
+
+
+def _variant_fingerprint(variants):
+    """Variants reduced to comparable scalars.
+
+    Weights come back from DynamoDB as Decimal and from a request body as int, so comparing the raw lists
+    reports "changed" for a save that changed nothing -- and this comparison GATES an error, so a false
+    positive would block a legitimate rename.
+    """
+    return [
+        (
+            str(variant.get("page_id") or ""),
+            int(variant.get("weight") or 0),
+            str(variant.get("label") or ""),
+            str(variant.get("key") or ""),
+        )
+        for variant in variants or []
+    ]
 
 
 def create_experiment(event, repository, routes, now_fn, id_fn, code_fn):
@@ -219,12 +269,37 @@ def update_experiment(event, repository, experiment_id, now_fn):
         return error_response("A completed experiment cannot be edited.", code="experiment_completed")
 
     body = parse_json_body(event)
+    # An experiment's SHAPE is frozen once it has ever started. Changing which arm is the control moves the
+    # entry point to a different URL mid-flight (assignment is matched on control_page_id), while
+    # `stats.views_by_page` is one cumulative, untimestamped map -- so counts gathered from two different
+    # entry points merge into the same counters with nothing recording which regime they came from. That is
+    # unrecoverable rather than merely skewed, and it silently redefines the baseline the results are
+    # measured against. Changing the control is not an edit to an experiment; it is a different experiment.
+    #
+    # Keyed on `started_at`, not on status == running: pausing does not make the data already collected
+    # compatible with a different control. A draft that has never started stays fully editable -- there are
+    # no results to invalidate.
+    started = bool(experiment.get("started_at"))
     if "name" in body:
         experiment["name"] = str(body.get("name") or "").strip()
     if "control_page_id" in body:
-        experiment["control_page_id"] = str(body.get("control_page_id") or "").strip()
+        requested_control = str(body.get("control_page_id") or "").strip()
+        if started and requested_control != str(experiment.get("control_page_id") or ""):
+            return error_response(
+                "The control page can't be changed once a test has started, because the results collected "
+                "so far were measured against it. Stop this test and start a new one with the right control.",
+                code="experiment_started",
+            )
+        experiment["control_page_id"] = requested_control
     if "variants" in body:
-        experiment["variants"] = normalize_variants(body.get("variants"), experiment.get("control_page_id"))
+        requested_variants = normalize_variants(body.get("variants"), experiment.get("control_page_id"))
+        if started and _variant_fingerprint(requested_variants) != _variant_fingerprint(experiment.get("variants")):
+            return error_response(
+                "Variants can't be changed once a test has started: the views and conversions already "
+                "recorded belong to the arms as they were. Stop this test and start a new one.",
+                code="experiment_started",
+            )
+        experiment["variants"] = requested_variants
     experiment["updated_at"] = int(now_fn())
 
     try:
@@ -235,7 +310,7 @@ def update_experiment(event, repository, experiment_id, now_fn):
     return json_response({"experiment": with_short_url(saved)})
 
 
-def start_experiment(event, repository, pages, now_fn, mode="test"):
+def start_experiment(event, repository, pages, now_fn, mode="test", sites=None):
     tenant_id = tenant_id_from_event(event)
     if not tenant_id:
         return error_response("tenant_id is required.", code="missing_tenant")
@@ -256,10 +331,25 @@ def start_experiment(event, repository, pages, now_fn, mode="test"):
         if page.get("status") != "published":
             return error_response("All variant pages must be published before starting.", code="variant_not_published")
 
+    sites = sites or (sites_repository(mode=mode) if os.environ.get("SITES_TABLE") else None)
+    attached = attached_variant_slugs(tenant_id, variants, experiment.get("control_page_id"), sites)
+    if attached:
+        where = ", ".join(sorted(attached.values()))
+        return error_response(
+            "A variant can't have a public address of its own while it's being tested — it would compete "
+            f"in search with the page you're testing. Remove {where} from the site's pages, then start the "
+            "test. The variant is still served during the test, behind the tested page's own URL.",
+            code="variant_attached",
+        )
+
     now = int(now_fn())
     experiment["status"] = "running"
     experiment["started_at"] = now
     experiment["updated_at"] = now
+    # A run starts from zero. Nothing else ever clears these counters, so without this a tenant who stops a
+    # test, fixes something and starts it again gets results contaminated by the previous run -- and
+    # "stop, edit, restart" would be the way around the shape freeze above.
+    experiment["stats"] = {"views_by_page": {}}
     saved = repository.put(experiment)
     return json_response({"experiment": with_short_url(saved)})
 

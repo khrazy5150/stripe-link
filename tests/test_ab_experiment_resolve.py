@@ -240,3 +240,52 @@ class IndexingThroughTheResolverTests(unittest.TestCase):
         self.experiments.put(stopped)
         self.assertNotIn("noindex", self._route("/offer-b"))
         self.assertNotIn("noindex", self._route("/offer"))
+
+
+class VariantArtifactIdentityTests(unittest.TestCase):
+    """A2: a variant artifact carries the TESTED page's identity, because the edge serves it behind that
+    page's URL. Both alternatives break something (plans/AB_TESTING.md):
+
+    * its OWN identity while attached  -> canonical points at its own slug, so serving it at the control's
+      URL asks Google to move the tested page's ranking signals to the variant's URL.
+    * its OWN identity while unattached -> on_custom_domain false -> bakes noindex, so serving it at the
+      control's URL de-indexes the page the test exists to improve.
+    """
+
+    def setUp(self):
+        self.experiments = FakeDocumentRepository("experiment_id")
+        self.experiments.put({
+            "tenant_id": "t1", "experiment_id": "exp_1", "status": "running",
+            "control_page_id": "page_A",
+            "variants": [{"page_id": "page_A", "weight": 50}, {"page_id": "page_B", "weight": 50}],
+        })
+
+    def _identity(self, page_id, repo=None):
+        from stripe_link.runtime.publishing import identity_page_id
+        return identity_page_id("t1", page_id, self.experiments if repo is None else repo)
+
+    def test_a_variant_takes_the_control_pages_identity(self):
+        self.assertEqual(self._identity("page_B"), "page_A")
+
+    def test_the_control_keeps_its_own(self):
+        self.assertEqual(self._identity("page_A"), "page_A")
+
+    def test_an_unrelated_page_keeps_its_own(self):
+        self.assertEqual(self._identity("page_Z"), "page_Z")
+
+    def test_a_stopped_experiment_releases_the_variant(self):
+        stopped = self.experiments.get("t1", "exp_1")
+        stopped["status"] = "completed"
+        self.experiments.put(stopped)
+        self.assertEqual(self._identity("page_B"), "page_B")
+
+    def test_no_repository_is_the_old_behaviour(self):
+        # Environments without the table (or a test that injects nothing) publish exactly as they did before.
+        from stripe_link.runtime.publishing import identity_page_id
+        self.assertEqual(identity_page_id("t1", "page_B", None), "page_B")
+
+    def test_publishing_never_fails_over_an_ab_lookup(self):
+        class Exploding:
+            def list_for_tenant(self, tenant_id):
+                raise RuntimeError("experiments table is unavailable")
+        self.assertEqual(self._identity("page_B", repo=Exploding()), "page_B")

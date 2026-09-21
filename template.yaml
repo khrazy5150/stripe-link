@@ -2109,6 +2109,12 @@ Resources:
         # publish, so it costs nothing at view time. Read-only: publishing never writes a profile.
         - DynamoDBReadPolicy:
             TableName: !Ref TenantProfilesTable
+        # A/B: a variant artifact must carry the TESTED page's canonical and robots, so publishing asks
+        # which experiment a page belongs to (plans/AB_TESTING.md A2). Read-only -- publishing never
+        # writes an experiment. Without this grant the lookup AccessDenies and is swallowed, and the
+        # variant silently bakes its own identity again.
+        - DynamoDBReadPolicy:
+            TableName: !Ref ExperimentsTable
         # Publishing a page that embeds a manual collection auto-publishes its selected draft members
         # (plans/SITE_COLLECTIONS.md) — needs to READ the members and WRITE their published status back. The
         # handler otherwise gets pages only from the stream, so this is the only direct PagesTable access.
@@ -2752,6 +2758,10 @@ Resources:
             TableName: !Ref RoutesTable
         - DynamoDBReadPolicy:
             TableName: !Ref PagesTable
+        # Starting a test checks that no variant has a public address of its own, which would compete
+        # in search with the page being tested (plans/AB_TESTING.md, Option A). Read-only.
+        - DynamoDBReadPolicy:
+            TableName: !Ref SitesTable
         - DynamoDBReadPolicy:
             TableName: !Ref OrdersTable
       Events:

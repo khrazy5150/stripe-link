@@ -8,6 +8,7 @@ from boto3.dynamodb.types import TypeDeserializer
 from stripe_link.repositories.documents import (
     custom_domains_index_repository,
     collections_repository,
+    experiments_repository,
     reviews_repository,
     offers_repository,
     pages_repository,
@@ -68,13 +69,14 @@ def should_publish_record(record: dict[str, Any]) -> bool:
     return bool(image)
 
 
-def handler(event, context, *, tenant_profiles_repo=None, offers_repo=None, products_repo=None, services_repo=None, sites_repo=None, pages_repo=None, domains_index_repo=None, reviews_repo=None, collections_repo=None, routes_repo=None, stripe_keys_repo=None, s3_client=None, cloudfront_client=None):
+def handler(event, context, *, tenant_profiles_repo=None, offers_repo=None, products_repo=None, services_repo=None, sites_repo=None, pages_repo=None, domains_index_repo=None, reviews_repo=None, collections_repo=None, routes_repo=None, stripe_keys_repo=None, experiments_repo=None, s3_client=None, cloudfront_client=None):
     # Mode-scoped repos (offers/products/services/sites/pages/collections) are built PER RECORD from each page's
     # own stripe_mode below — a single stream batch can mix modes (plans/STRIPE_MODE_DECOUPLING.md P4). Capture any
     # injected repos (tests) so the per-record build honours them. The rest are Stripe-mode-agnostic.
     _injected = {
         "offers": offers_repo, "products": products_repo, "services": services_repo,
         "sites": sites_repo, "pages": pages_repo, "collections": collections_repo,
+        "experiments": experiments_repo,
     }
     stripe_keys_repo = stripe_keys_repo or (stripe_keys_repository() if os.environ.get("STRIPE_KEYS_TABLE") else None)
     domains_index_repo = domains_index_repo or (custom_domains_index_repository() if os.environ.get("CUSTOM_DOMAINS_TABLE") else None)
@@ -116,6 +118,9 @@ def handler(event, context, *, tenant_profiles_repo=None, offers_repo=None, prod
             sites_repo = _injected["sites"] or (sites_repository(mode=page_mode) if os.environ.get("SITES_TABLE") else None)
             pages_repo = _injected["pages"] or (pages_repository(mode=page_mode) if os.environ.get("PAGES_TABLE") else None)
             collections_repo = _injected["collections"] or (collections_repository(mode=page_mode) if os.environ.get("COLLECTIONS_TABLE") else None)
+            # A/B: a variant artifact must carry the TESTED page's canonical and robots, because the edge
+            # serves it behind that page's URL (plans/AB_TESTING.md A2). Mode-scoped like the rest.
+            experiments_repo = _injected["experiments"] or (experiments_repository(mode=page_mode) if os.environ.get("EXPERIMENTS_TABLE") else None)
             if record.get("eventName") == "REMOVE" or page.get("status") == "archived":
                 result = delete_page_artifacts(
                     page,
@@ -160,6 +165,7 @@ def handler(event, context, *, tenant_profiles_repo=None, offers_repo=None, prod
                 collections_repository=collections_repo,
                 stripe_keys_repository=stripe_keys_repo,
                 tenant_profiles_repository=tenant_profiles_repo,
+                experiments_repository=experiments_repo,
                 domains_index_repository=domains_index_repo,
                 reviews_repository=reviews_repo,
                 s3_client=s3_client,

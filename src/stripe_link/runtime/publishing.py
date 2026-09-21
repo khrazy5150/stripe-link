@@ -83,6 +83,36 @@ def _page_mode(page: dict[str, Any]) -> str:
     return "live" if str(page.get("stripe_mode") or "").strip().lower() == "live" else "test"
 
 
+def identity_page_id(tenant_id: str, page_id: str, experiments_repository: Any | None) -> str:
+    """The page whose PUBLIC IDENTITY this artifact should carry — normally itself.
+
+    A non-control variant of a running experiment is not "a page": it is an alternative rendering of the
+    page under test, which the edge serves behind THAT page's URL (plans/AB_TESTING.md A2). So its artifact
+    must claim the tested page's identity — canonical, robots and home_url all derive from the slug this
+    returns.
+
+    Both alternatives are wrong, in opposite directions. Carrying its OWN identity while attached bakes a
+    canonical pointing at its own slug; served at the control's URL that asks Google to move the tested
+    page's ranking signals onto the variant's. Carrying its own identity while UNATTACHED makes
+    `on_custom_domain` false and bakes noindex; served at the control's URL that de-indexes the very page
+    the test exists to improve.
+
+    Best-effort: an experiment that cannot be read leaves the page with its own identity, which is what it
+    had before this existed. Publishing must never fail over an A/B lookup.
+    """
+    if experiments_repository is None or not tenant_id or not page_id:
+        return page_id
+    try:
+        from stripe_link.domain.experiments import variant_of_running_experiment
+
+        experiment = variant_of_running_experiment(page_id, experiments_repository.list_for_tenant(tenant_id))
+        if not experiment:
+            return page_id
+        return str(experiment.get("control_page_id") or "") or page_id
+    except Exception:  # noqa: BLE001 - publishing matters more than experiment-aware SEO
+        return page_id
+
+
 def site_page_type(site: dict[str, Any] | None, page_id: str) -> str:
     """The page_type the Site records for this page (drives robots/sitemap eligibility). Defaults to 'landing'
     when the page has no Site entry (legacy pages)."""
@@ -1056,6 +1086,7 @@ def publish_page_document(
     collections_repository: Any | None = None,
     stripe_keys_repository: Any | None = None,
     tenant_profiles_repository: Any | None = None,
+    experiments_repository: Any | None = None,
     s3_client: Any,
     pages_bucket: str,
     preview_bucket: str,
@@ -1182,12 +1213,15 @@ def publish_page_document(
     # gets index,follow; everything on platform infrastructure stays noindex (plans/SITE_OBJECT.md §2.2,
     # TP-08, SEO-02). Eligibility is recomputed on the account.updated webhook and stored on the Site.
     page_id = str(page.get("page_id") or "")
-    page_type = site_page_type(site, page_id)
+    # A2: a variant borrows the tested page's identity. One substitution — page_type, slug, canonical,
+    # robots and home_url all flow from it.
+    seo_identity_page_id = identity_page_id(tenant_id, page_id, experiments_repository)
+    page_type = site_page_type(site, seo_identity_page_id)
     # Canonical + indexing switch to the Site's verified custom domain for any page actually served there —
     # every page with a slug in the Site's route map, at its own slug (homepage at "/", funnel/collection
     # pages at their slugs). Pages not attached to a verified Site keep the interim artifact canonical and
     # stay noindex (plans/SITE_OBJECT.md §2.6).
-    page_site_slug = site_page_slug(site, page_id)
+    page_site_slug = site_page_slug(site, seo_identity_page_id)
     on_custom_domain = bool(site_domain_verified(site) and page_site_slug)
     custom_domain = ((site or {}).get("hosting") or {}).get("custom_domain")
     # The Site's serving origin — a verified custom domain (indexed) or, once wired, the free platform host

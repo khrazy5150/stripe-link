@@ -93,13 +93,18 @@
             <header class="offer-section-header">
               <div>
                 <h3>Control</h3>
-                <p>The baseline page. Its weight is the share of traffic it keeps.</p>
+                <p v-if="!shapeFrozen">The baseline page. Its weight is the share of traffic it keeps.</p>
+                <p v-else>
+                  This test has already run, so its pages and weights are fixed — the views and conversions
+                  recorded so far were measured against them. To test a different control, start a new
+                  experiment. You can still rename this one.
+                </p>
               </div>
             </header>
             <div class="offer-three-column">
               <label class="offer-field">
                 <span>Control Page <strong>*</strong></span>
-                <select v-model="form.control_page_id" required>
+                <select v-model="form.control_page_id" required :disabled="shapeFrozen">
                   <option value="" disabled>Select a published page…</option>
                   <option v-for="page in store.publishedPages" :key="page.page_id" :value="page.page_id">
                     {{ page.name || page.page_id }}
@@ -108,11 +113,11 @@
               </label>
               <label class="offer-field">
                 <span>Label</span>
-                <input v-model.trim="form.control_label" type="text" placeholder="Control" />
+                <input v-model.trim="form.control_label" type="text" placeholder="Control" :disabled="shapeFrozen" />
               </label>
               <label class="offer-field">
                 <span>Weight</span>
-                <input v-model.number="form.control_weight" type="number" min="0" step="1" />
+                <input v-model.number="form.control_weight" type="number" min="0" step="1" :disabled="shapeFrozen" />
               </label>
             </div>
           </section>
@@ -123,13 +128,13 @@
                 <h3>Variants</h3>
                 <p>Each variant is a published page that receives its share of traffic.</p>
               </div>
-              <button type="button" class="secondary-action" @click="addVariant">+ Add variant</button>
+              <button type="button" class="secondary-action" @click="addVariant" :disabled="shapeFrozen">+ Add variant</button>
             </header>
 
             <div v-for="(variant, index) in form.variants" :key="index" class="offer-three-column ab-variant-row">
               <label class="offer-field">
                 <span>Variant Page <strong>*</strong></span>
-                <select v-model="variant.page_id" required>
+                <select v-model="variant.page_id" required :disabled="shapeFrozen">
                   <option value="" disabled>Select a published page…</option>
                   <option v-for="page in store.publishedPages" :key="page.page_id" :value="page.page_id">
                     {{ page.name || page.page_id }}
@@ -138,14 +143,14 @@
               </label>
               <label class="offer-field">
                 <span>Label</span>
-                <input v-model.trim="variant.label" type="text" :placeholder="`Variant ${index + 1}`" />
+                <input v-model.trim="variant.label" type="text" :placeholder="`Variant ${index + 1}`" :disabled="shapeFrozen" />
               </label>
               <div class="ab-variant-weight">
                 <label class="offer-field">
                   <span>Weight</span>
-                  <input v-model.number="variant.weight" type="number" min="0" step="1" />
+                  <input v-model.number="variant.weight" type="number" min="0" step="1" :disabled="shapeFrozen" />
                 </label>
-                <button type="button" class="danger-action" aria-label="Remove variant" @click="form.variants.splice(index, 1)">×</button>
+                <button type="button" class="danger-action" aria-label="Remove variant" :disabled="shapeFrozen" @click="form.variants.splice(index, 1)">×</button>
               </div>
             </div>
           </section>
@@ -264,6 +269,10 @@ const store = useAbTestingStore();
 store.load();
 
 const showEditor = ref(false);
+// An experiment that has ever started is frozen server-side (control + variants), because its
+// counters were gathered against that exact shape. Mirrored here so the form does not offer an
+// edit the API will refuse.
+const shapeFrozen = ref(false);
 const form = reactive(blankForm());
 const formError = ref("");
 const resultsFor = ref(null);
@@ -293,6 +302,7 @@ function weightsSummary(experiment) {
 }
 
 function openCreate() {
+  shapeFrozen.value = false;
   resetForm(blankForm());
   formError.value = "";
   showEditor.value = true;
@@ -312,6 +322,7 @@ function openEdit(experiment) {
     control_weight: Number(control.weight || 0),
     variants: additional.length ? additional : [{ page_id: "", label: "", weight: 0 }],
   });
+  shapeFrozen.value = !!experiment.started_at;
   formError.value = "";
   showEditor.value = true;
 }

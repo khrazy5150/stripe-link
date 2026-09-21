@@ -183,6 +183,142 @@ class ExperimentsCrudTests(unittest.TestCase):
         self.assertIsNone(self.routes.find_by_id("code123ABCd"))
 
 
+class ExperimentShapeIsFrozenOnceStartedTests(ExperimentsCrudTests):
+    """Changing the control mid-flight is not an edit; it is a different experiment.
+
+    Assignment is matched on `control_page_id`, so swapping it moves the entry point to another URL, while
+    `stats.views_by_page` is one cumulative untimestamped map -- counts from both regimes land in the same
+    counters with nothing recording which is which.
+    """
+
+    def _start(self):
+        self.pages.put({"tenant_id": "tenant_demo", "page_id": "page_control", "status": "published"})
+        self.pages.put({"tenant_id": "tenant_demo", "page_id": "page_b", "status": "published"})
+        return experiments_handler(
+            event("POST", tenant_id="tenant_demo", experiment_id="exp_1", action="start"),
+            None, repository=self.experiments, pages=self.pages, now_fn=lambda: 1781240000,
+        )
+
+    def _update(self, body):
+        return experiments_handler(
+            event("PUT", tenant_id="tenant_demo", experiment_id="exp_1", body=body),
+            None, repository=self.experiments, now_fn=lambda: 1781250000,
+        )
+
+    def test_a_draft_that_never_started_stays_editable(self):
+        self.create()
+        response = self._update({"control_page_id": "page_b"})
+        self.assertEqual(response["statusCode"], 200)
+        self.assertEqual(json.loads(response["body"])["experiment"]["control_page_id"], "page_b")
+
+    def test_the_control_cannot_change_once_started(self):
+        self.create()
+        self._start()
+        response = self._update({"control_page_id": "page_b"})
+        self.assertEqual(json.loads(response["body"])["error"], "experiment_started")
+        self.assertEqual(self.experiments.get("tenant_demo", "exp_1")["control_page_id"], "page_control")
+
+    def test_it_stays_frozen_while_paused(self):
+        # Pausing does not make data already collected compatible with a different control.
+        self.create()
+        self._start()
+        experiments_handler(
+            event("POST", tenant_id="tenant_demo", experiment_id="exp_1", action="pause"),
+            None, repository=self.experiments, now_fn=lambda: 1781245000,
+        )
+        self.assertEqual(json.loads(self._update({"control_page_id": "page_b"})["body"])["error"],
+                         "experiment_started")
+
+    def test_variants_cannot_change_once_started(self):
+        self.create()
+        self._start()
+        response = self._update({"variants": [variant("page_control", 80), variant("page_b", 20)]})
+        self.assertEqual(json.loads(response["body"])["error"], "experiment_started")
+
+    def test_renaming_is_still_allowed_once_started(self):
+        self.create()
+        self._start()
+        response = self._update({"name": "Hero CTA Test v2"})
+        self.assertEqual(response["statusCode"], 200)
+        self.assertEqual(json.loads(response["body"])["experiment"]["name"], "Hero CTA Test v2")
+
+    def test_resending_the_same_shape_is_not_an_error(self):
+        # Weights arrive as Decimal from storage and int from a request body; a naive comparison would
+        # report "changed" and block a plain rename that happens to echo the variants back.
+        self.create()
+        self._start()
+        stored = self.experiments.get("tenant_demo", "exp_1")
+        from decimal import Decimal
+        stored["variants"] = [dict(v, weight=Decimal(str(v["weight"]))) for v in stored["variants"]]
+        self.experiments.put(stored)
+        response = self._update({
+            "name": "Renamed",
+            "variants": [variant("page_control", 50, "Control"), variant("page_b", 50, "Variant A")],
+        })
+        self.assertEqual(response["statusCode"], 200)
+
+    def test_starting_clears_counters_from_a_previous_run(self):
+        # Otherwise "stop, edit, restart" both contaminates results and routes around the freeze above.
+        self.create()
+        self._start()
+        stale = self.experiments.get("tenant_demo", "exp_1")
+        stale["stats"] = {"views_by_page": {"page_control": 400, "page_b": 380}}
+        self.experiments.put(stale)
+        experiments_handler(
+            event("POST", tenant_id="tenant_demo", experiment_id="exp_1", action="pause"),
+            None, repository=self.experiments, now_fn=lambda: 1781246000,
+        )
+        self._start()
+        self.assertEqual(self.experiments.get("tenant_demo", "exp_1")["stats"]["views_by_page"], {})
+
+
+class VariantsMayNotHaveTheirOwnUrlTests(ExperimentsCrudTests):
+    """Option A: a variant is an alternative rendering of the page under test, not a second public page."""
+
+    def setUp(self):
+        super().setUp()
+        self.sites = FakeDocumentRepository("site_id")
+        self.pages.put({"tenant_id": "tenant_demo", "page_id": "page_control", "status": "published"})
+        self.pages.put({"tenant_id": "tenant_demo", "page_id": "page_b", "status": "published"})
+
+    def _start(self):
+        return experiments_handler(
+            event("POST", tenant_id="tenant_demo", experiment_id="exp_1", action="start"),
+            None, repository=self.experiments, pages=self.pages, sites=self.sites,
+            now_fn=lambda: 1781240000,
+        )
+
+    def _site_with(self, pages):
+        self.sites.put({"tenant_id": "tenant_demo", "site_id": "site_1", "pages": pages})
+
+    def test_a_start_is_refused_when_a_variant_is_attached(self):
+        self.create()
+        self._site_with({"/offer": {"page_id": "page_control"}, "/offer-b": {"page_id": "page_b"}})
+        response = self._start()
+        self.assertEqual(json.loads(response["body"])["error"], "variant_attached")
+        self.assertIn("/offer-b", json.loads(response["body"])["message"])
+        self.assertNotEqual(self.experiments.get("tenant_demo", "exp_1").get("status"), "running")
+
+    def test_the_control_being_attached_is_normal_and_required(self):
+        self.create()
+        self._site_with({"/offer": {"page_id": "page_control"}})
+        self.assertEqual(self._start()["statusCode"], 200)
+
+    def test_an_unattached_variant_starts_fine(self):
+        self.create()
+        self._site_with({"/offer": {"page_id": "page_control"}})
+        self.assertEqual(self._start()["statusCode"], 200)
+
+    def test_the_check_fails_open_when_sites_cannot_be_read(self):
+        # Two other layers already cover this; refusing to start over an unreadable table would be worse.
+        class Exploding:
+            def list_for_tenant(self, tenant_id):
+                raise RuntimeError("sites table is unavailable")
+        self.create()
+        self.sites = Exploding()
+        self.assertEqual(self._start()["statusCode"], 200)
+
+
 class ExperimentsResolveTests(unittest.TestCase):
     """The short-code resolver is DISABLED, not dismantled (plans/AB_TESTING.md A1c).
 

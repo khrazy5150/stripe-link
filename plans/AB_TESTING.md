@@ -247,9 +247,26 @@ disagrees with their analytics.
     tenant an address that no longer assigns anyone; `/experiments/{id}/resolve` answers **410**; the
     screen shows no short link. The assignment LOGIC is kept and still tested directly, because the edge
     implements the same rules and those tests are the record of what they are.
-- **A2 — indexing. The variant half: DONE 2026-09-21.** The invariant and the two representations are
-  below; `variant_of_running_experiment` + the resolver now keep an ATTACHED variant out of the index and
-  leave the tested URL alone. Still to do: canonical on a variant artifact → the tested URL.
+- **A2 — indexing: DONE 2026-09-21.** Three layers, because the tenant flow that breaks it is the common
+  one — build a variant page, publish it (attached, so it bakes `index,follow` and its own canonical), THEN
+  start the test:
+  1. *Publishing* (`identity_page_id`): a non-control variant of a running experiment takes the TESTED
+     page's identity — one substitution, from which page_type, slug, canonical, robots and home_url all
+     follow. This is what makes a variant safe to serve behind the control's URL, and it is why detaching
+     one is now safe too (detach republishes, and the artifact keeps the tested page's identity instead of
+     collapsing to noindex). Needs a read grant on ExperimentsTable, or the lookup AccessDenies, is
+     swallowed, and the variant silently bakes its own identity again.
+  2. *Resolving* (`variant_of_running_experiment`): an attached variant's OWN URL is stamped noindex. The
+     control's URL is deliberately untouched.
+  3. *Starting* (Option A, `attached_variant_slugs`): a test refuses to start while a variant has a public
+     address of its own. Fails open — the two layers above already cover it.
+- **Experiment shape is immutable once started — DONE 2026-09-21.** `control_page_id` and `variants` freeze
+  on `started_at`, and starting clears `stats.views_by_page`. Assignment is matched on `control_page_id`, so
+  swapping it mid-flight moves the entry point to another URL while the counters — one cumulative,
+  untimestamped map — merge both regimes with nothing recording which is which. That is unrecoverable, not
+  merely skewed. Keyed on `started_at` rather than `running`, because pausing does not make the collected
+  data compatible; a draft stays fully editable. Clearing the counters also closes "stop, edit, restart" as
+  a way around the freeze. The editor mirrors the freeze so it never offers an edit the API will refuse.
 - **A3 — significance.** A verdict in words, a "how much longer" estimate, and honest labels. No gate,
   no auto-pause — the tenant still decides.
 - **A4 — prove it.** Two real pages, a real split, a real conversion. Nothing here has ever run.
