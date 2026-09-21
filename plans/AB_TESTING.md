@@ -147,26 +147,48 @@ experiment would measure nothing.
 Do NOT special-case crawlers by serving them the control — that is cloaking. Google's own A/B guidance is
 canonical to the original, 302 rather than 301 if redirecting, and run the test no longer than needed.
 
-## Significance: the gap that makes results actively harmful
+## Significance: interpret the numbers, do not gate the tenant
 
 `compute_results` returns `conversion_rate` and nothing else, and `complete_experiment` takes whatever
-`winner_page_id` the tenant posts. So a tenant sees "B 12% vs A 8%" on 25 visits, crowns B, and changes
-their page based on noise. That is worse than not testing, because it is confidently wrong.
+`winner_page_id` the tenant posts. stripe-cart was the same — checked 2026-09-21: no significance test, no
+minimum sample, no auto-pause anywhere in it (the only `confidence` in that codebase is invoice matching).
 
-Needed:
+**Keep that freedom.** The tenant decides who won. Refusing to let them is paternalistic and they may have
+reasons the data cannot see — a variant that is off-brand, a seasonal deadline, a stakeholder who already
+decided. No gate, and no auto-pause.
 
-- A confidence signal per variant, and a plain-language verdict — "not enough data yet" is the honest and
-  most common answer.
-- A minimum before a winner can be declared, and a UI that refuses rather than warns.
-- Say what is being measured: conversion rate on VIEWS counted at assignment, which is not the same as
-  sessions or unique visitors, and the difference should not be discovered later.
+**But stop presenting noise as a result.** "B 12% vs A 8%" is not a neutral display: a bare pair of
+percentages READS as an outcome. On 25 visits it is within normal variation, and a UI that shows only the
+percentages has implicitly told the tenant otherwise. That is the actual defect — not the tenant's
+judgement, but what the screen led them to believe.
+
+So the results screen says what the numbers support, and the button stays:
+
+> **Too early to tell.** B is ahead (12% vs 8%), but with 25 visits that is within normal variation.
+> Around 300 visits per variant would separate a difference this size.
+>
+> *Declare a winner anyway →*
+
+### The cheap version is most of the value
+
+No statistics library and no p-value ceremony. Two honest numbers stripe-cart never showed:
+
+1. **How far apart the variants are relative to the noise.** One formula. This is what turns "12% vs 8%"
+   from a result into a question.
+2. **How much longer at the current rate.** Arithmetic, and the most actionable thing a tenant can be
+   told — it converts "not yet" into a decision about whether to wait.
+
+Also state plainly what is being measured: conversion rate over VIEWS counted at assignment, which is not
+sessions and not unique visitors. A tenant should not discover that difference later when the number
+disagrees with their analytics.
 
 ## Phases
 
 - **A1 — the model.** Attach experiments to a page; resolve returns the experiment definition; the Worker
   assigns, pins, proxies and pings. Disable the short-code path.
 - **A2 — indexing.** Canonical to the tested URL; edge-stamped noindex by route; never bake it.
-- **A3 — significance.** Confidence, a refusal to crown a winner early, and honest labels.
+- **A3 — significance.** A verdict in words, a "how much longer" estimate, and honest labels. No gate,
+  no auto-pause — the tenant still decides.
 - **A4 — prove it.** Two real pages, a real split, a real conversion. Nothing here has ever run.
 
 ## Risks
@@ -182,9 +204,8 @@ Needed:
 
 1. **Do variants get their own public URL at all?** Not routing them removes the indexing question
    entirely, at the cost of a bigger change to how a variant page is created.
-2. **What is the minimum before a winner may be declared** — visits, conversions, or a confidence
-   threshold? A number has to be chosen, and it will be wrong for someone.
-3. **Does an experiment pause automatically** when it reaches significance, or keep running until the
-   tenant stops it?
+2. ~~What is the minimum before a winner may be declared?~~ **Settled**: there is none. The tenant decides,
+   as in stripe-cart; the screen tells them what the data supports rather than refusing.
+3. ~~Does an experiment pause automatically?~~ **Settled**: no. It runs until the tenant stops it.
 4. ~~How is a winner promoted?~~ **Settled**: re-point the slug at the winner. The route is the durable
    identity, exactly as the short code was in stripe-cart.

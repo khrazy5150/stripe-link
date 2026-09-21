@@ -165,9 +165,11 @@ Deferred, non-blocking follow-ups. Each item notes what, why it was deferred, an
   tested url, robots as the tested page is entitled to -- and variants get NO public route, so there is
   nothing to index and no edge robots logic at all. Republish in place; never unpublish (that deletes the
   artifact and 404s the live URL). Drafts are not an option: checkout.py:118 refuses a non-published page.
-- **Significance is missing and that makes results harmful:** compute_results returns a conversion rate and
-  nothing else, and complete_experiment accepts whatever winner the tenant posts. "B 12% vs A 8%" on 25
-  visits is noise, and acting on it is worse than not testing.
+- **Significance: interpret, do not gate.** The tenant decides who won (stripe-cart had no significance
+  test, no minimum sample and no auto-pause -- verified). The defect is not their judgement but the
+  DISPLAY: a bare "B 12% vs A 8%" reads as an outcome when on 25 visits it is noise. So the screen says
+  what the data supports -- how far apart relative to the noise, and how much longer at the current rate --
+  and the Declare a winner button stays.
 - **Promotion re-points the slug at the winner**, not a content copy: `Site.pages` is a slug-keyed route
   map, so the ROUTE is the durable identity and the page behind it is swappable -- the same architecture
   stripe-cart had, where the durable address was a short code. Attribution splitting across page_ids is the
