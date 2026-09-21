@@ -1,0 +1,120 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.juniorbay.com/stripe-link/Shipment.schema.json",
+  "title": "Shipment",
+  "description": "One parcel going out (or coming back), and the label bought for it. Addresses and the parcel are SNAPSHOTS: a label is a historical fact, and an order whose address is edited afterwards must not rewrite what was printed.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "document_type", "tenant_id", "shipment_id", "order_id", "kind", "status", "stripe_mode"],
+  "properties": {
+    "schema_version": { "type": "string", "const": "2026-05-29" },
+    "document_type": { "type": "string", "const": "shipment" },
+    "tenant_id": { "type": "string", "minLength": 1 },
+    "shipment_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "DETERMINISTIC, derived from order + kind + sequence. It is the idempotency key: the first outbound label for an order is always shp_<order_id>_outbound_1, so a double-clicked Buy Label cannot buy twice — the second claim fails the conditional write and returns the first shipment."
+    },
+    "order_id": { "type": "string", "minLength": 1 },
+    "sequence": {
+      "type": "integer",
+      "minimum": 1,
+      "default": 1,
+      "description": "Which parcel of this order this is. A deliberate split shipment asks for 2; an accidental double-click cannot produce one, because it would have to ask."
+    },
+    "kind": { "type": "string", "enum": ["outbound", "return"] },
+    "status": {
+      "type": "string",
+      "enum": ["draft", "purchasing", "purchased", "failed", "voided"],
+      "description": "`purchasing` is claimed BEFORE the provider is called, so a crash between spending money and saving the result leaves evidence rather than silence."
+    },
+    "stripe_mode": {
+      "type": "string",
+      "enum": ["test", "live"],
+      "description": "One prod endpoint serves both modes, so every read must be able to scope itself. A sandbox label is not a real one."
+    },
+    "provider": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string", "enum": ["shippo", "easypost", "shipstation", "easyship", "mock"] },
+        "rate_id": { "type": "string" },
+        "transaction_id": { "type": "string", "description": "The provider's own id for the purchase. The only way to reconcile a label that was bought but not saved." },
+        "idempotency_key": { "type": "string", "description": "Sent to the provider when it supports one, derived from shipment_id, so a retry cannot buy a second label at their end either." }
+      }
+    },
+    "carrier": { "type": "string" },
+    "service": { "type": "string" },
+    "tracking_number": { "type": "string" },
+    "tracking_url": { "type": "string" },
+    "label_url": { "type": "string" },
+    "label_format": { "type": "string", "enum": ["pdf", "png", "zpl"] },
+    "cost": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["amount", "currency"],
+      "properties": {
+        "amount": { "type": "integer", "minimum": 0, "description": "What the label ACTUALLY cost, in the smallest currency unit." },
+        "currency": { "type": "string", "minLength": 3, "maxLength": 3 }
+      }
+    },
+    "estimated_cost": {
+      "type": ["integer", "null"],
+      "minimum": 0,
+      "description": "The shipping estimate that set the product's price, if one did. Recorded from the FIRST label so estimate-vs-actual can be measured — the comparison cannot be backfilled, and it is the only honest answer to whether the estimator works (plans/SHIPPING_PROVIDERS.md, Calibration)."
+    },
+    "to_address": { "$ref": "#/$defs/address" },
+    "from_address": { "$ref": "#/$defs/address" },
+    "parcel": { "$ref": "#/$defs/parcel" },
+    "packed_from": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "The product ids packed into this parcel. A bundle is packed, not summed, so the label has to record what went in it."
+    },
+    "error": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "message": { "type": "string" },
+        "at": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "created_at": { "type": "integer", "minimum": 0 },
+    "updated_at": { "type": "integer", "minimum": 0 },
+    "purchased_at": { "type": "integer", "minimum": 0 },
+    "voided_at": { "type": "integer", "minimum": 0 }
+  },
+  "$defs": {
+    "address": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "street1", "city", "state", "postal_code", "country"],
+      "properties": {
+        "name": { "type": "string" },
+        "company": { "type": "string" },
+        "street1": { "type": "string" },
+        "street2": { "type": "string" },
+        "city": { "type": "string" },
+        "state": { "type": "string" },
+        "postal_code": { "type": "string" },
+        "country": { "type": "string", "minLength": 2, "maxLength": 2 },
+        "phone": { "type": "string" },
+        "email": { "type": "string" },
+        "residential": { "type": "boolean", "default": false }
+      }
+    },
+    "parcel": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["length", "width", "height", "weight", "distance_unit", "mass_unit"],
+      "properties": {
+        "length": { "type": "number", "exclusiveMinimum": 0 },
+        "width": { "type": "number", "exclusiveMinimum": 0 },
+        "height": { "type": "number", "exclusiveMinimum": 0 },
+        "weight": { "type": "number", "exclusiveMinimum": 0 },
+        "distance_unit": { "type": "string", "enum": ["in", "cm"] },
+        "mass_unit": { "type": "string", "enum": ["oz", "lb", "g", "kg"] }
+      }
+    }
+  }
+}

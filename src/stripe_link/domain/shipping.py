@@ -66,3 +66,132 @@ def destination_address_from_session(session: dict[str, Any]) -> dict[str, Any]:
     if not all(destination.get(field) for field in REQUIRED_ADDRESS_FIELDS):
         return {}
     return {key: value for key, value in destination.items() if value}
+
+
+# --- shipments -------------------------------------------------------------------------------------
+
+SHIPMENT_KINDS = ("outbound", "return")
+SHIPMENT_STATUSES = ("draft", "purchasing", "purchased", "failed", "voided")
+
+
+class ShipmentError(ValueError):
+    """A shipment that cannot be built, or a transition that must not happen."""
+
+
+def shipment_id_for(order_id: str, kind: str = "outbound", sequence: int = 1) -> str:
+    """The id IS the idempotency key, and it is derived rather than random.
+
+    The first outbound label for an order is always `shp_<order_id>_outbound_1`. A double-clicked Buy Label
+    therefore tries to claim a row that already exists and loses the conditional write, so it returns the
+    first shipment instead of buying a second label. A random id would have made the two clicks two labels,
+    and a label is money that cannot be un-spent by refreshing the page.
+
+    A deliberate split shipment asks for sequence=2. An accident cannot produce one, because it would have
+    to ask.
+    """
+    order = str(order_id or "").strip()
+    if not order:
+        raise ShipmentError("A shipment needs the order it ships.")
+    if kind not in SHIPMENT_KINDS:
+        raise ShipmentError(f"Shipment kind must be one of: {', '.join(SHIPMENT_KINDS)}.")
+    try:
+        index = int(sequence)
+    except (TypeError, ValueError):
+        raise ShipmentError("Shipment sequence must be a whole number.") from None
+    if index < 1:
+        raise ShipmentError("Shipment sequence starts at 1.")
+    return f"shp_{order}_{kind}_{index}"
+
+
+def build_shipment(
+    *,
+    order: dict[str, Any],
+    from_address: dict[str, Any],
+    parcel: dict[str, Any],
+    kind: str = "outbound",
+    sequence: int = 1,
+    packed_from: list[str] | None = None,
+    estimated_cost: int | None = None,
+    now: int = 0,
+) -> dict[str, Any]:
+    """A shipment claimed BEFORE any provider is called.
+
+    Status starts at `purchasing`, not `purchased`: the row is written first, then the money is spent. A
+    crash between the two leaves a row saying "we were buying this" with the provider idempotency key
+    needed to find out whether it happened -- which is recoverable. The other order (spend, then record)
+    loses the label silently and bills the tenant for it.
+
+    Addresses and parcel are SNAPSHOTS. An order whose address is corrected next week must not change what
+    was printed on a label last week.
+    """
+    order = order or {}
+    order_id = str(order.get("order_id") or "").strip()
+    to_address = order.get("shipping_address") if isinstance(order.get("shipping_address"), dict) else {}
+    if not to_address:
+        # The gap P0 exists to close: for most of this codebase's life the order had nowhere to ship to.
+        raise ShipmentError(f"Order '{order_id or '?'}' has no shipping address to ship to.")
+    for field in REQUIRED_ADDRESS_FIELDS:
+        if not str(to_address.get(field) or "").strip():
+            raise ShipmentError(f"Destination address is missing {field}.")
+        if not str((from_address or {}).get(field) or "").strip():
+            raise ShipmentError(f"Ship-from address is missing {field}.")
+    if not parcel:
+        raise ShipmentError("A shipment needs a parcel.")
+
+    shipment = {
+        "schema_version": "2026-05-29",
+        "document_type": "shipment",
+        "tenant_id": str(order.get("tenant_id") or ""),
+        "shipment_id": shipment_id_for(order_id, kind, sequence),
+        "order_id": order_id,
+        "sequence": int(sequence),
+        "kind": kind,
+        "status": "purchasing",
+        # One prod endpoint serves both modes, so a shipment has to say which one it belongs to or a
+        # sandbox label shows up in a live list (see the mode-isolation work of 2026-09-20).
+        "stripe_mode": "live" if str(order.get("stripe_mode") or "test") == "live" else "test",
+        "to_address": {key: value for key, value in to_address.items() if key in ADDRESS_FIELDS and value},
+        "from_address": {key: value for key, value in (from_address or {}).items()
+                         if key in ADDRESS_FIELDS and value},
+        "parcel": dict(parcel),
+        "created_at": int(now),
+        "updated_at": int(now),
+    }
+    if packed_from:
+        shipment["packed_from"] = [str(item) for item in packed_from if item]
+    if estimated_cost is not None:
+        # Recorded from the FIRST label so estimate-vs-actual can be measured later. It cannot be
+        # backfilled, which is why it is written before anything reads it.
+        shipment["estimated_cost"] = int(estimated_cost)
+    return shipment
+
+
+def mark_purchased(shipment: dict[str, Any], *, purchase: dict[str, Any], now: int = 0) -> dict[str, Any]:
+    """Record what the provider actually sold us. Only a shipment we claimed can become purchased."""
+    if str((shipment or {}).get("status") or "") != "purchasing":
+        raise ShipmentError("Only a shipment that was claimed for purchase can be marked purchased.")
+    cost = purchase.get("cost") or {}
+    updated = {
+        **shipment,
+        "status": "purchased",
+        "purchased_at": int(now),
+        "updated_at": int(now),
+        "provider": {**(shipment.get("provider") or {}), **(purchase.get("provider") or {})},
+    }
+    for field in ("carrier", "service", "tracking_number", "tracking_url", "label_url", "label_format"):
+        if purchase.get(field):
+            updated[field] = str(purchase[field])
+    if cost.get("amount") is not None:
+        updated["cost"] = {"amount": int(cost["amount"]), "currency": str(cost.get("currency") or "usd").lower()}
+    return updated
+
+
+def mark_failed(shipment: dict[str, Any], message: str, *, now: int = 0) -> dict[str, Any]:
+    """A purchase that did not happen. Kept rather than deleted: the row is the evidence that the attempt
+    was made, and the provider's idempotency key lives on it."""
+    return {
+        **(shipment or {}),
+        "status": "failed",
+        "updated_at": int(now),
+        "error": {"message": str(message or "")[:500], "at": int(now)},
+    }

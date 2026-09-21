@@ -102,7 +102,7 @@ attempted until someone asks for it.
 
 ## Phases
 
-### P0 — make a label possible at all (blocking, ~small)
+### P0 — make a label possible at all — BUILT 2026-09-20
 
 - Persist the destination address on the order: read `shipping_details` (and the newer
   `collected_information.shipping_details`) off the Stripe session in `order_record_from_session`.
@@ -110,6 +110,26 @@ attempted until someone asks for it.
   and (later) one return label. Idempotency belongs here, not in the handler.
 - Note: historic orders have no address. They can be re-fetched from Stripe by session id if it ever
   matters; assume not, and let old orders be unlabelable.
+
+**Built:** `destination_address_from_session()` (reads both Stripe shapes, refuses a partial address rather
+than half-filling one) wired into `order_record_from_session`; `schemas/Shipment.schema.json`; and
+`build_shipment` / `mark_purchased` / `mark_failed` in `domain/shipping.py`.
+
+Two decisions live in the document rather than in a handler, because both are ways to lose money:
+
+- **The shipment id is DERIVED** — `shp_<order_id>_<kind>_<sequence>`. It IS the idempotency key, so a
+  double-clicked Buy Label claims a row that already exists and returns the first shipment instead of
+  buying a second label. A random id would have made two clicks two labels.
+- **The row is claimed BEFORE the provider is called** (`status: "purchasing"`). A crash between spending
+  and recording then leaves a row saying "we were buying this", carrying the provider idempotency key
+  needed to find out whether it happened. Spend-then-record loses the label silently and bills the tenant.
+
+Addresses and the parcel are snapshots: a label is a historical fact and an order corrected next week must
+not change what was printed last week. `estimated_cost` is recorded from the first label so
+estimate-vs-actual is measurable — it cannot be backfilled.
+
+**Not built here:** the shipments TABLE and repository. They belong with the code that writes them (P2), and
+an unused table is infrastructure without a caller.
 
 ### P1 — Shippo connected, and the packer
 
