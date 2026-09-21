@@ -129,6 +129,36 @@ class FallbackTests(unittest.TestCase):
         self.assertEqual(parcel["box"], "medium")
 
 
+class WeightLimitTests(unittest.TestCase):
+    """A box has a weight limit as well as a size.
+
+    USPS flat rate caps at 70 lb. A carrier refuses an over-weight parcel at the counter -- AFTER the label
+    is bought and paid for -- so the limit has to be honoured when the box is chosen, not discovered later.
+    """
+
+    FLAT = {"name": "USPS Small Flat Rate", "length": 8.6, "width": 5.4, "height": 1.6,
+            "empty_weight": 0.1, "max_weight": 70}
+    CARTON = {"name": "heavy carton", "length": 12, "width": 10, "height": 6,
+              "empty_weight": 0.5, "max_weight": 150}
+    BAR = {"product_id": "bar", "quantity": 1, "weight": 80, "length": 6, "width": 4, "height": 1}
+
+    def test_a_box_it_fits_but_cannot_carry_is_refused(self):
+        self.assertEqual(pack([self.BAR], [self.FLAT])[0]["strategy"], "per_item")
+
+    def test_a_box_that_can_carry_it_is_chosen_instead(self):
+        self.assertEqual(pack([self.BAR], [self.FLAT, self.CARTON])[0]["box"], "heavy carton")
+
+    def test_the_boxs_own_weight_counts_toward_its_limit(self):
+        # 69.95 of contents plus 0.1 of cardboard is over 70.
+        heavy = {**self.BAR, "weight": 69.95}
+        self.assertEqual(pack([heavy], [self.FLAT])[0]["strategy"], "per_item")
+
+    def test_a_box_with_no_stated_limit_is_not_assumed_to_have_one(self):
+        # Most tenant-supplied cartons will not state one; refusing them would be worse than trusting them.
+        unlimited = {k: v for k, v in self.CARTON.items() if k != "max_weight"}
+        self.assertEqual(pack([self.BAR], [unlimited])[0]["box"], "heavy carton")
+
+
 class KnownLimitTests(unittest.TestCase):
     def test_two_items_that_each_fit_may_not_fit_together(self):
         """The approximation's known limit, pinned so it is not mistaken for a bug later.

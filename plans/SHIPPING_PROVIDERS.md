@@ -158,10 +158,32 @@ Decided approach, in order:
 This is deliberately an approximation, and it is the same one the big carriers' own tools make. It will be
 wrong sometimes; see **Calibration** below, which is the part that makes being wrong survivable.
 
-A **box catalog** is new: a short list of the boxes a tenant actually uses (name, inner L/W/H, empty
-weight). Without it there is nothing to pack into and everything falls to (2). The empty weight matters —
-a box is not weightless and the carrier bills the whole parcel. Seed it with a platform starter list of
-standard sizes; a tenant edits it to match their own shelf.
+#### The box catalog is TWO catalogs, from two sources
+
+- **Carrier packaging — fetched, never hand-maintained.** USPS Flat Rate, UPS Express boxes, FedEx Boxes
+  and Paks have fixed dimensions and, for flat rate, fixed prices. Aggregators expose them as parcel
+  templates with a TOKEN, and passing the token at rate time instead of dimensions is what actually
+  unlocks flat-rate pricing. Copying those dimensions into our code would go stale the moment a carrier
+  retires a size — the same silent-staleness failure as the fee table that sat three weeks out of date.
+  `test_connection` already lists the account's carriers; templates belong on the same trip.
+  **Needs verifying against the live API before it is relied on** — that these are exposed, and under what
+  shape.
+- **The tenant's own boxes — irreducibly theirs.** The 12x9x4 bought in bulk, the branded mailer. Nobody
+  else knows what is on their shelf. A small platform starter list of generic sizes is a convenience seed,
+  not a source of truth.
+
+Pack against the union of both.
+
+A catalog entry is `{name, length, width, height, empty_weight, max_weight, source, carrier,
+template_token}`:
+
+- **empty_weight** — a box is not weightless and the carrier bills the whole parcel.
+- **max_weight** — a box has a weight limit as well as a size. USPS flat rate caps at 70 lb, and a carrier
+  refuses an over-weight parcel at the counter, AFTER the label is bought and paid for. Absent means no
+  stated limit, which is the common case for a tenant's own carton; refusing those would be worse than
+  trusting them.
+- **template_token** — sent instead of dimensions when the parcel used carrier packaging, so the rate comes
+  back as the flat rate rather than a computed one.
 
 #### The product stores the BOX, not the ITEM — and that is the root cause
 

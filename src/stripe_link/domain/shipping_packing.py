@@ -143,6 +143,11 @@ def pack(
         candidates = []
         for box in catalog:
             box_dims = _dims(box)
+            # A box has a weight limit as well as a size. USPS flat rate caps at 70 lb, and a carrier
+            # refuses an over-weight parcel at the counter -- after the label is bought and paid for.
+            limit = box.get("max_weight")
+            if limit and total_weight + float(box.get("empty_weight") or 0) > float(limit):
+                continue
             # Necessary, not sufficient: every item must physically fit this box, and the volumes must
             # clear. Two items that each fit can still fail to fit TOGETHER (two long rods in a flat box),
             # which is the approximation's known limit -- see Calibration in the plan.
