@@ -35,6 +35,7 @@ def running_experiment_for(page_id: str, experiments: list[dict[str, Any]] | Non
 def experiment_route_block(
     experiment: dict[str, Any],
     artifact_url_for: Any,
+    api_base: str = "",
 ) -> dict[str, Any]:
     """What the edge needs to assign a visitor, and nothing more.
 
@@ -66,10 +67,16 @@ def experiment_route_block(
     if not variants or not any(variant["weight"] for variant in variants):
         return {}
     experiment_id = str(experiment.get("experiment_id") or "")
-    return {
+    block = {
         "experiment_id": experiment_id,
         # The cookie pins a visitor to one variant across refreshes. Named per experiment so two running at
         # once on different pages cannot overwrite each other's assignment.
         "cookie_name": str(experiment.get("cookie_name") or f"jb_ab_{experiment_id}"),
         "variants": variants,
     }
+    # A fully-formed URL, so the edge never has to know an API base, a mode, or how an id is shaped. It
+    # pings what it was given. Omitted when there is no base configured, and the edge simply does not count
+    # -- a missing metric must never stop a page being served.
+    if api_base:
+        block["view_url"] = f"{api_base.rstrip('/')}/experiments/{experiment_id}/view"
+    return block

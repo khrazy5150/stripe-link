@@ -116,7 +116,7 @@ function notFound() {
 // Serve a Site host — a tenant custom domain OR a free platform host. The resolve endpoint keys off the
 // incoming hostname and returns the same shape for both; a platform host additionally carries
 // `route.noindex`, which we translate into an X-Robots-Tag header on the proxied response.
-async function handleSiteHost(request, hostname) {
+async function handleSiteHost(request, hostname, waitUntil) {
   // Resolution is path-dependent — the Site homepage at "/", funnel/collection pages at their slugs, and
   // well-known crawl files (robots.txt/sitemap.xml/{key}.txt) — so forward the path and key the cache by it.
   const path = new URL(request.url).pathname;
@@ -142,20 +142,92 @@ async function handleSiteHost(request, hostname) {
   if (!route || route.type !== "origin_url" || !route.origin_url) {
     return notFound();
   }
-  const proxied = new Request(route.origin_url, request);
+
+  // A/B: the resolver says WHAT the experiment is; the edge decides WHO gets which. Assignment cannot live
+  // in the resolve response because that response is cached for 60s -- every visitor in the window would
+  // get the same variant, a time-bucketed split rather than a random one. `route.origin_url` is always the
+  // CONTROL, so an experiment that cannot be read here degrades to serving the control.
+  const assignment = assignVariant(route.experiment, request);
+  const originUrl = assignment.origin_url || route.origin_url;
+
+  const proxied = new Request(originUrl, request);
   proxied.headers.set("X-Junior-Bay-Custom-Host", hostname);
   const response = await fetch(proxied);
+  countView(route.experiment, assignment, waitUntil);
   // Free platform host: force noindex at the edge so the same artifact that says index,follow on a verified
   // custom domain is never indexed here (more-restrictive wins). Re-wrap so the header is mutable.
-  if (route.noindex) {
+  if (route.noindex || assignment.page_id) {
     const stamped = new Response(response.body, response);
-    stamped.headers.set("X-Robots-Tag", "noindex, nofollow");
+    if (route.noindex) {
+      stamped.headers.set("X-Robots-Tag", "noindex, nofollow");
+    }
+    if (assignment.page_id) {
+      // Pin the visitor so a refresh does not reroll them into the other variant, which would make one
+      // person look like two and smear their behaviour across both arms.
+      stamped.headers.append(
+        "Set-Cookie",
+        `${assignment.cookie_name}=${assignment.page_id}; Path=/; Max-Age=2592000; Secure; SameSite=Lax`,
+      );
+      // A variant response must never be shared between visitors by any cache in front of us.
+      stamped.headers.set("Cache-Control", "private, no-store");
+    }
     return stamped;
   }
   return response;
 }
 
-async function handleRequest(request) {
+// --- A/B assignment -------------------------------------------------------------------------------------
+
+function readCookie(request, name) {
+  const raw = request.headers.get("Cookie") || "";
+  for (const part of raw.split(";")) {
+    const [key, ...rest] = part.trim().split("=");
+    if (key === name) return rest.join("=");
+  }
+  return "";
+}
+
+// Returns {} when there is nothing to assign, so every caller can treat "no experiment" as the normal case.
+function assignVariant(experiment, request) {
+  const variants = (experiment && experiment.variants) || [];
+  if (!variants.length) return {};
+  const cookieName = experiment.cookie_name || `jb_ab_${experiment.experiment_id}`;
+
+  // An existing pin wins, but only if it still names a variant of THIS experiment -- a variant removed
+  // mid-flight would otherwise strand those visitors on a page that is no longer being tested.
+  const pinned = readCookie(request, cookieName);
+  const held = variants.find((variant) => variant.page_id === pinned);
+  if (held) {
+    return { page_id: held.page_id, origin_url: held.origin_url, cookie_name: cookieName, counted: false };
+  }
+
+  const total = variants.reduce((sum, variant) => sum + Math.max(0, variant.weight || 0), 0);
+  if (total <= 0) return {};
+  let roll = Math.floor(Math.random() * total);
+  for (const variant of variants) {
+    roll -= Math.max(0, variant.weight || 0);
+    if (roll < 0) {
+      return { page_id: variant.page_id, origin_url: variant.origin_url, cookie_name: cookieName, counted: true };
+    }
+  }
+  const last = variants[variants.length - 1];
+  return { page_id: last.page_id, origin_url: last.origin_url, cookie_name: cookieName, counted: true };
+}
+
+// Fire-and-forget: a view is counted only on a NEW assignment, never on a refresh by an already-pinned
+// visitor, or one person reloading would look like many.
+function countView(experiment, assignment, waitUntil) {
+  if (!assignment.counted || !experiment || !experiment.view_url || !waitUntil) return;
+  waitUntil(
+    fetch(experiment.view_url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ page_id: assignment.page_id }),
+    }).catch(() => {}),
+  );
+}
+
+async function handleRequest(request, waitUntil) {
   const sourceUrl = new URL(request.url);
   const hostname = sourceUrl.hostname.toLowerCase();
 
@@ -165,9 +237,11 @@ async function handleRequest(request) {
   if (RESERVED_HOSTS.has(hostname)) {
     return fetch(request);
   }
-  return handleSiteHost(request, hostname);
+  return handleSiteHost(request, hostname, waitUntil);
 }
 
 addEventListener("fetch", (event) => {
-  event.respondWith(handleRequest(event.request));
+  // waitUntil is threaded through so an A/B view can be counted AFTER the visitor's response is sent --
+  // a metric must never be in the critical path of serving a page.
+  event.respondWith(handleRequest(event.request, (promise) => event.waitUntil(promise)));
 });

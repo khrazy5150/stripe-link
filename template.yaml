@@ -2895,6 +2895,31 @@ Resources:
             Path: /legal/{page_id}
             Method: OPTIONS
 
+  ExperimentsViewFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${ProjectPrefix}-experiments-view-${Environment}"
+      CodeUri: src/
+      Handler: handlers.experiments_view.handler
+      Description: Counts one A/B assignment. Pinged by the edge Worker; public and unauthenticated.
+      Policies:
+        # Crud, not Read: this is the ONLY writer of view counts, and it writes through an atomic ADD.
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ExperimentsTable
+      Events:
+        CountView:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /experiments/{experiment_id}/view
+            Method: POST
+        CountViewOptions:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /experiments/{experiment_id}/view
+            Method: OPTIONS
+
   ExperimentsResolveFunction:
     Type: AWS::Serverless::Function
     Properties:

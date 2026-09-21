@@ -191,8 +191,13 @@ disagrees with their analytics.
     each variant's own artifact URL. `origin_url` stays the CONTROL's, so an edge that does not understand
     the block still serves the control -- which is what lets the backend ship first and makes a Worker
     rollback degrade to "no experiment" rather than to a broken page.
-  - **A1b — the edge half:** the Worker reads the cookie, pins or rolls, proxies that variant's
-    origin_url, sets the cookie, and pings a view via `waitUntil`.
+  - **A1b — the edge half: DONE 2026-09-21.** The Worker reads the cookie, pins or rolls, proxies that
+    variant's origin_url, sets the cookie, marks the response `private, no-store` (a variant must never be
+    shared between visitors by any cache) and pings `POST /experiments/{id}/view` inside `waitUntil`. A
+    view counts only on a NEW assignment, never on a pinned visitor's refresh. The view endpoint is public
+    and validates page_id against the experiment's own variants, because that value becomes a DynamoDB
+    attribute NAME in `increment_view`. **Still to deploy: the Worker itself** --
+    `deploy/setup-cloudflare-custom-domain-worker.sh`, per zone, not `deploy.sh`.
   - **A1c — disable the short-code path.**
 - **A2 — indexing.** Canonical to the tested URL; edge-stamped noindex by route; never bake it.
 - **A3 — significance.** A verdict in words, a "how much longer" estimate, and honest labels. No gate,
