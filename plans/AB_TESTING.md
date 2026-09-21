@@ -102,9 +102,27 @@ Unpublishing DELETES the published artifact (`delete_page_artifacts` on the unpu
 404s until it is republished — an outage on the tenant's live URL, twice per experiment. Republishing in
 place is enough: a save re-renders the artifact.
 
-- Experiment starts → variants are (re)published carrying the tested page's canonical and robots.
-- Experiment completes → the winner is republished with its own identity, or the tested page simply keeps
-  serving and the losing variants are left unrouted.
+**The tested page is never touched when an experiment starts.** It already has what a tested page needs:
+its canonical IS the tested URL, and its robots are whatever it earned. A page that has been ranking for
+two months keeps serving continuously — the risky operation simply never happens. Only the NEW variant is
+published, for the first time, carrying the tested page's canonical and robots and no route of its own.
+
+- **Starts** → publish the variant(s). The tested page is untouched.
+- **Control wins** → nothing to do. Stop assigning; the tested page has been serving all along.
+- **Variant wins** → the one point where the tested page changes. See below.
+
+#### Promoting a winner (undecided)
+
+Two shapes, and they differ in what happens to the URL's identity:
+
+- **Copy the winner's content into the tested page and republish in place.** An overwrite, so no gap. The
+  URL keeps its page_id, its history, its canonical and its order attribution. Preferred.
+- **Re-point the route at the winning page.** Faster, but the tenant's URL now serves a page whose identity
+  was built as a variant — a different page_id, so historical order attribution splits across two pages —
+  and the old page lingers unreferenced.
+
+Either way there is no unpublish, and either way the answer has to be picked before A1 ships, because it
+decides whether a variant needs to be a full page or only an artifact.
 
 Drafts are not an option, and the reason is worth recording: `handlers/checkout.py:118` refuses a checkout
 whose page is not `published` (403 `page_not_published`), so a draft variant could never convert and the
@@ -152,3 +170,6 @@ Needed:
    threshold? A number has to be chosen, and it will be wrong for someone.
 3. **Does an experiment pause automatically** when it reaches significance, or keep running until the
    tenant stops it?
+4. **How is a winner promoted** — copy its content into the tested page and republish in place (keeps the
+   URL's page_id, history and attribution), or re-point the route at the winning page (faster, but splits
+   attribution across two page_ids and leaves the old page unreferenced)?
