@@ -139,7 +139,14 @@
     </section>
 
     <section class="dashboard-card">
-      <header class="dashboard-card-header"><h2>Ship-From Address</h2></header>
+      <header class="dashboard-card-header">
+        <h2>Ship-From Address</h2>
+        <div class="button-row">
+          <button class="secondary-action" type="button" :disabled="copyingBusiness" @click="copyBusinessAddress">
+            {{ copyingBusiness ? "Copying…" : "Copy from business address" }}
+          </button>
+        </div>
+      </header>
       <div class="dashboard-card-body">
         <AddressFields :address="form.ship_from_address" />
       </div>
@@ -256,6 +263,7 @@ import { computed, reactive, ref } from "vue";
 import { apiRequest, getTenantId } from "../api/client";
 import { statusLabel } from "../utils/format";
 import AddressFields from "./AddressFields.vue";
+import { useProfileStore } from "../stores/profile";
 
 const loading = ref(false);
 const saving = ref(false);
@@ -264,6 +272,8 @@ const message = ref("");
 const rawDoc = ref({});
 const testing = ref(false);
 const connectionResult = ref(null);
+const profileStore = useProfileStore();
+const copyingBusiness = ref(false);
 const form = reactive(defaultForm());
 
 // A saved key comes back redacted (api_key_ref === "********"), so a truthy value means configured.
@@ -323,6 +333,48 @@ function removeBox(index) {
 
 function useStarterBoxes() {
   form.boxes = STARTER_BOXES.map((box) => ({ ...box }));
+}
+
+// The profile stores a PostalAddress (street / locality / region) because it maps straight to
+// LocalBusiness JSON-LD. A carrier wants street1 / city / state. Same place, two vocabularies -- so this
+// is a translation, and spreading one into the other would silently fill nothing.
+function businessAddressToShipFrom(business) {
+  const address = business?.address || {};
+  return {
+    name: business?.name || "",
+    street1: address.street || "",
+    city: address.locality || "",
+    state: address.region || "",
+    postal_code: address.postal_code || "",
+    country: (address.country || "US").toUpperCase(),
+    phone: business?.phone || "",
+  };
+}
+
+async function copyBusinessAddress() {
+  error.value = "";
+  message.value = "";
+  copyingBusiness.value = true;
+  try {
+    await profileStore.ensureLoaded();
+    const mapped = businessAddressToShipFrom(profileStore.business);
+    // Nothing to copy is a CONFIGURATION answer, not a failure: say where to fix it rather than leaving
+    // the tenant to wonder whether the button is broken.
+    if (!mapped.street1 && !mapped.city && !mapped.postal_code) {
+      error.value = "No business address is configured in your profile. Add one in Profile → Business, "
+        + "then copy it here.";
+      return;
+    }
+    Object.entries(mapped).forEach(([key, value]) => {
+      if (value) form.ship_from_address[key] = value;
+    });
+    const missing = ["street1", "city", "state", "postal_code"].filter((key) => !form.ship_from_address[key]);
+    message.value = missing.length
+      ? `Copied what your profile has. Still needed: ${missing.join(", ")}.`
+      : "Copied your business address.";
+  } finally {
+    copyingBusiness.value = false;
+  }
 }
 
 function fillAddress(target, source) {

@@ -71,6 +71,47 @@ class BoxCatalogTests(unittest.TestCase):
         self.assertIn("leave it blank unless the box has a stated limit", SCREEN)
 
 
+class CopyBusinessAddressTests(unittest.TestCase):
+    """Copy the ship-from address from the tenant's business profile.
+
+    The two are the same place in two vocabularies: the profile stores a PostalAddress
+    (street / locality / region) because it maps straight to LocalBusiness JSON-LD, and a carrier wants
+    street1 / city / state. Spreading one into the other fills NOTHING, silently, and the tenant sees a
+    button that appears to do nothing at all.
+    """
+
+    BLOCK = SCREEN.split("function businessAddressToShipFrom", 1)[1][:800]
+
+    def test_the_vocabularies_are_translated_not_spread(self):
+        for profile_field, carrier_field in (("street", "street1"), ("locality", "city"), ("region", "state")):
+            with self.subTest(field=profile_field):
+                self.assertIn(f"{carrier_field}: address.{profile_field}", self.BLOCK)
+
+    def test_the_business_name_and_phone_come_from_the_business_not_the_address(self):
+        # A carrier needs a contact name on the parcel; the PostalAddress has none.
+        self.assertIn("name: business?.name", self.BLOCK)
+        self.assertIn("phone: business?.phone", self.BLOCK)
+
+    def test_an_unset_profile_says_where_to_fix_it(self):
+        """Nothing to copy is a CONFIGURATION answer, not a failure. Without this the tenant cannot tell
+        an empty profile from a broken button."""
+        handler = SCREEN.split("async function copyBusinessAddress", 1)[1][:1200]
+        self.assertIn("No business address is configured in your profile", handler)
+        self.assertIn("Profile → Business", handler)
+
+    def test_a_partial_address_is_copied_and_the_gap_named(self):
+        # Half a business address is still worth having; the tenant just needs to know what is left.
+        handler = SCREEN.split("async function copyBusinessAddress", 1)[1][:1200]
+        self.assertIn("Still needed:", handler)
+
+    def test_blank_profile_fields_do_not_wipe_what_is_already_typed(self):
+        handler = SCREEN.split("async function copyBusinessAddress", 1)[1][:1200]
+        self.assertIn("if (value) form.ship_from_address[key] = value", handler)
+
+    def test_the_country_is_upper_cased_for_the_carrier(self):
+        self.assertIn('(address.country || "US").toUpperCase()', self.BLOCK)
+
+
 class SavedShapeTests(unittest.TestCase):
     BLOCK = SCREEN.split("doc.boxes = form.boxes", 1)[1][:900]
 
