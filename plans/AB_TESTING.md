@@ -200,10 +200,11 @@ disagrees with their analytics.
   Acceptable, but it must be stated in the UI or it reads as a bug.
 - Experiments on the test/preview hosts: out of scope, and they should stay out.
 
-## Decisions needed
+## Decisions — all settled 2026-09-21
 
-1. **Do variants get their own public URL at all?** Not routing them removes the indexing question
-   entirely, at the cost of a bigger change to how a variant page is created.
+1. ~~Do variants get their own public URL?~~ **Settled**: no. A variant is a full page with NO route while
+   the experiment runs, which removes the indexing question rather than answering it — and the route is
+   what a winner is promoted by (4).
 2. ~~What is the minimum before a winner may be declared?~~ **Settled**: there is none. The tenant decides,
    as in stripe-cart; the screen tells them what the data supports rather than refusing.
 3. ~~Does an experiment pause automatically?~~ **Settled**: no. It runs until the tenant stops it.
