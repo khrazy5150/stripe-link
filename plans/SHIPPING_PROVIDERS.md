@@ -189,10 +189,11 @@ packing. Precedence:
 
 - Fit is 3D, not volume: every dimension must fit, with rotation allowed.
 - The smallest box is not always the cheapest. Dimensional weight means a larger, lighter-dim box can win.
-- **Carrier flat-rate boxes change the shape of the problem.** USPS Priority Flat Rate costs the same
-  regardless of weight and zone. If the items fit one, it is often the cheapest option AND — this matters
-  more than the saving — it turns the estimate from a distribution over zones into a KNOWN NUMBER. A
-  flat-rate fit is the one case where "Calculate Price" can be exact rather than a percentile.
+- **Carrier flat-rate boxes are a candidate, not a shortcut.** USPS Priority Flat Rate costs the same
+  regardless of weight and zone, which makes the estimate an exact number instead of a percentile — but it
+  wins on DENSITY, not on smallness. A small, light parcel (the beginner's typical package) is usually
+  cheaper on computed rates; flat rate wins when something is heavy, compact and going far. Rate it
+  alongside the fitting cartons and let the result decide.
 
 So: pack to the smallest fitting box, then rate the candidates (fitting cartons + any fitting flat-rate
 box) and let the cheapest win. The rate call is needed anyway; asking it about two or three candidates
@@ -347,6 +348,39 @@ What makes that survivable:
   real postcodes can be run repeatedly without spending anything.
 
 No part of this should be treated as settled until that comparison has data in it.
+
+### PC — the carrier calculator (a third caller of the same rate primitive)
+
+A standalone "what would this cost, by whom, and how fast" tool. No order required: the tenant describes a
+parcel and a destination and sees every carrier and service side by side.
+
+**Why it is not a fourth integration.** It is the SAME `rates(parcel, origin, destination, options)` call
+that P2 makes for an order and PE makes against sampled zones. Three callers, one primitive — which is the
+argument for building that primitive carefully in P1 rather than inside whichever feature needs it first.
+
+**Why a tenant needs it.** No carrier wins everywhere. USPS beats UPS on light parcels; UPS and FedEx take
+weight and distance better; FedEx is usually the answer for overnight. A flat-rate box beats both when the
+thing is heavy, compact and going far, and loses to Ground Advantage when it is light. A tenant choosing a
+carrier without seeing the comparison is guessing, and they will be wrong in a direction that costs them
+on every order they ever ship.
+
+**Compare on two axes, not one.** Price AND transit time. "Cheapest" is the wrong default for a seller who
+promises two-day delivery; the rate response carries estimated days and the table has to show it.
+
+**Where the answer goes.** `rate_options.allowed_carriers` and `rate_options.default_service_level` already
+exist in `ShippingConfig` and nothing writes them. The calculator is what fills them in: explore, decide,
+save. That closes a loop that is currently open at both ends.
+
+**Notes.**
+
+- Which carriers are even available depends on the account: an aggregator supplies its own negotiated
+  USPS/UPS/FedEx rates, and some carriers require the merchant to connect their own account for their own
+  negotiated rates. The table must say which rates these ARE, or a tenant plans against numbers they
+  cannot get.
+- Rating is free but a comparison tool invites repeated querying. Cache on
+  `(origin, parcel, destination, carrier set)`.
+- It is also the cheapest honest calibration instrument we get: run a fixture set of real parcels to real
+  postcodes and compare what it says against what a label actually costs.
 
 ### PI — integrating with the shipping stack a tenant already has (last)
 

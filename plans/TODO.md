@@ -40,6 +40,12 @@ Deferred, non-blocking follow-ups. Each item notes what, why it was deferred, an
   `load_tenant_email_context` so it comes from the TENANT's business, sent via `mailer.send_email`
   (injectable), and wrapped so it can never fail the label purchase that triggered it. The in-app bell
   (`docs/NOTIFICATION_EMITTERS.md`) is a separate channel and optional.
+- **Three callers, one rate primitive**: labels for an order (P2), the price estimator (PE), and a
+  standalone carrier calculator (PC) all make the same rates() call. Build it carefully in P1 rather than
+  inside whichever feature reaches it first. The calculator compares carrier AND transit time -- no carrier
+  wins everywhere, and "cheapest" is the wrong default for a seller promising two-day delivery -- and its
+  output is what finally fills `rate_options.allowed_carriers` / `default_service_level`, which exist in
+  ShippingConfig today and are written by nothing.
 - **Two tenants, opposite needs.** The beginner has no carrier account and today drives to the post
   office -- a plain buy-and-print-a-label screen is transformative for them, and it does not matter that it
   is less capable than ShipStation because they were never going to use ShipStation. The experienced
