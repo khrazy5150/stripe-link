@@ -233,6 +233,43 @@ Dev has no business holding a live key under any topology. Small, independent, d
 
 ## Security
 
+### ⭐⭐ HIGH — the raw CloudFront artifact URL is a public page; it should be an origin (agreed 2026-09-21)
+
+Plan: `plans/ARTIFACT_ACCESS_BOUNDARY.md`. Sibling of the commerce item below; agreed architecture, not built.
+
+**The invariant:** an artifact being published does not make its raw CloudFront URL a publicly accessible
+page. That URL exists so CloudFront has somewhere to fetch from, not so a visitor can navigate there. SEO
+identity belongs to Sites, not artifacts — which makes the SEO rule boring, and boring is the goal.
+
+**Not fixable with noindex.** noindex asks a well-behaved crawler not to list a URL; it does not stop anyone
+retrieving the page. For illicit content that is no control at all. This supersedes the earlier idea of
+stamping `X-Robots-Tag` across the artifact namespace with the Worker stripping the inherited header — if
+the route denies, none of that is needed.
+
+**This does NOT close the commerce hole** (item below). The checkout href is absolute and self-contained and
+checkout has no Origin/Referer check, so an abuser can host the HTML anywhere and point it at the Junior Bay
+checkout endpoint; they can also attach to a free platform host, which is an authorized, self-service route.
+Routing hygiene removes a channel, it creates no enforcement. Build this for correctness, not as the abuse
+fix.
+
+**Blocked on the P0 below.** Highest blast radius in the system — this distribution fronts every published
+page for every tenant — so P1 logs-and-allows before it denies, and the Worker's secret header must deploy
+BEFORE the CloudFront Function enforces it. Reversed, every published page 404s.
+
+### ⭐⭐ HIGH (P0 prerequisite) — post-checkout redirects a paying buyer to the raw artifact URL
+
+`post_checkout._next_page_url` (`src/handlers/post_checkout.py:81`) falls through to
+`public_url(pages_domain, …)` in two cases: no legitimate redirect base (no verified custom domain, no
+allowed origin), and — less obviously — a base exists but the funnel's next page has no slug, which happens
+because funnel attachment is best-effort by design ("a failure here must never block publishing the artifact
+itself"). `routes_resolve.py:52` is the other producer, but that one is vestigial; this one is live and
+buyer-facing.
+
+Close the artifact route before re-pointing this and post-purchase upsell/downsell/thank-you breaks **after
+payment**, for exactly the newest tenants who have not set up a domain yet. Recorded as its own line so it
+cannot be lost inside the boundary work: it is a prerequisite, and on its own it is invisible — no behaviour
+change for anyone.
+
 ### ⭐⭐ HIGH — a detached page still takes money; reachable is conflated with authorized (found 2026-09-21)
 
 Plan: `plans/COMMERCE_ELIGIBILITY.md`. Found while tracing A/B indexing, not introduced by it.

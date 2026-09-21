@@ -101,7 +101,9 @@ is exactly the case with no legitimate claim to take money.
 
 ## Related
 
-- The same artifact URL is also an SEO surface. That is a SEPARATE fix (origin `X-Robots-Tag` on the whole
-  namespace + the Worker stripping the inherited header and setting its own from `route.noindex`). SEO
-  containment does nothing about commerce, and this plan does nothing about indexing. Do not conflate them.
+- `plans/ARTIFACT_ACCESS_BOUNDARY.md` — closing the raw artifact URL. It removes one distribution channel
+  but creates NO enforcement: the checkout href is absolute and self-contained, so re-hosted HTML still
+  transacts, and attaching to a free platform host is an authorized, self-service route. The two plans are
+  siblings, not substitutes; this one is the enforcement half. (That plan also supersedes the earlier idea
+  of solving the artifact URL with `X-Robots-Tag` — noindex does not protect content from being fetched.)
 - `plans/AB_TESTING.md` A2 — `identity_page_id`, which this rule reuses.
