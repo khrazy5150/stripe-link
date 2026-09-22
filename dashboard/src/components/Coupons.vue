@@ -98,7 +98,13 @@
             <header class="offer-section-header">
               <div>
                 <h3>Discount</h3>
-                <p>Coupon documents represent Stripe coupon and promotion-code state.</p>
+                <p>
+                    The coupon and its code are created at Stripe when you save.
+                    <strong>The discount, the code and how long it lasts can't be changed afterwards</strong> —
+                    customers may already be holding this one, and a discount you promised has to keep
+                    working until it expires. You can rename it, or turn it off. To offer something
+                    different, turn this one off and create another.
+                  </p>
               </div>
             </header>
             <div class="offer-three-column">
@@ -154,7 +160,12 @@
               </label>
               <label class="offer-field">
                 <span>Max Per Customer</span>
-                <input v-model.number="form.max_redemptions_per_customer" min="1" type="number" />
+                <input v-model.number="form.max_redemptions_per_customer" min="1" type="number" disabled />
+                  <span class="field-note">
+                    Not available on a shared code — everyone holding it looks like the same
+                    anonymous buyer to Stripe. It needs a per-customer coupon, which is coming with
+                    targeted campaigns.
+                  </span>
               </label>
             </div>
             <div class="offer-three-column">

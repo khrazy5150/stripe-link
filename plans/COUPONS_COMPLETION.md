@@ -129,7 +129,44 @@ Recorded because silently dropping them would be worse than not offering them:
   a code was asked for and cannot be honoured it raises `CouponUnavailable`, and a browser gets the branded
   "this offer is no longer available — you can still buy at the regular price" page with a 410. Seven ways
   to be unhonourable are covered, every one of which previously fell through to full price.
-- **C4 — the three unenforceable fields: NOT DONE.** Still collected, still unenforced. See below.
+- **C4 — the unenforceable fields: PARTLY DONE 2026-09-22.** `max_redemptions_per_customer` is disabled in
+  the editor with the reason shown, rather than collected and ignored. `applies_to_offer_ids` is still
+  stored and unread — decide it next. The real answer to the per-customer cap is C5.
+
+## C5 — targeted coupons (the win-back case)
+
+**The idea `max_redemptions_per_customer` was reaching for** (author, 2026-09-22): a tenant with 100
+customers notices some who used to buy a product and stopped. She sends each a coupon with a discount good
+enough to win them back — possibly a loss leader — and needs a cap on how many times **that customer** can
+use it, or the giveaway is unbounded.
+
+**Stripe cannot cap a shared code per customer.** A promotion code has one `max_redemptions` counter and no
+idea who is holding it. That is why the field has never worked.
+
+**But Stripe does exactly this from the other direction:** a Promotion Code can be scoped to one customer
+with `customer: cus_…`, and `max_redemptions` then means "how many times THAT customer may use it". So the
+feature is one code per recipient, not one code for the list.
+
+That is strictly stronger than a counter, and worth stating plainly: a customer-scoped code **cannot be
+used by anyone else**, so a recipient who forwards it to a friend or posts it publicly gives away nothing.
+A per-customer cap on a shared code would have capped each abuser individually while leaving the code open
+to everyone.
+
+**What it needs:**
+
+- A Stripe customer id per recipient. The win-back audience is by definition people who have already
+  bought, and orders already carry `customer.stripe_customer_id` — so the audience and the prerequisite are
+  the same set.
+- One promotion code created per recipient, all pointing at ONE Stripe Coupon (which is what Stripe's
+  two-object split is for). 100 recipients = 1 coupon + 100 codes.
+- A personalised code in each email, which means campaign tooling — `plans/ATTENTION_PRIMITIVE.md`, not
+  built. **C5 is blocked on that**, and should not be started before it.
+- A redemption view: which recipients used theirs, which did not. That is the point of the campaign.
+
+**Unresolved:** whether a targeted coupon is a different document type or the same one with a recipient
+list. The coupon element renders a code; a targeted campaign renders a DIFFERENT code per visitor, which
+a baked artifact cannot do — so the ticket would have to carry the code in its link, or the page resolves
+it per visitor. Decide when C5 is picked up, not before.
 
 ## Phases
 

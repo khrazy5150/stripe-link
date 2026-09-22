@@ -59,9 +59,13 @@ def create_coupon(event, repository, stripe_repo=None, secret_cipher=None, opene
         return error_response("tenant_id is required.", code="missing_tenant")
     mode = resolve_stripe_mode(event, document)
 
-    # Validate BEFORE calling Stripe. The document already carries the client's proposed ids, so it can be
-    # checked as-is -- and a malformed coupon that reached Stripe would either be rejected there with a
-    # worse message or, worse, created and then refused by us, leaving an orphan behind.
+    # Validate BEFORE calling Stripe: a coupon we would refuse must not be created there first and left
+    # orphaned. The Stripe ids do not exist yet, so stand them up as "pending" purely to satisfy the
+    # validator -- they are overwritten with the real ones below and never reach storage. The CLIENT no
+    # longer invents them, which is what made sync.status a fiction for so long.
+    document["stripe_coupon_id"] = "pending"
+    document["stripe_promo_code_id"] = "pending"
+    document["sync"] = {"status": "synced", "last_synced_at": int(time.time()), "error": None}
     try:
         validate_coupon_document(document)
     except (DocumentValidationError, ValueError) as exc:

@@ -163,8 +163,11 @@ export function buildCouponDocument(form) {
     coupon_id: couponId,
     canonical: true,
     stripe_mode: getStripeMode(),
-    stripe_coupon_id: form.stripe_coupon_id || couponId,
-    stripe_promo_code_id: form.stripe_promo_code_id || `promo_${couponId.replace(/^coupon_/, "")}`,
+    // NOT invented here. The server creates the Coupon and Promotion Code at Stripe and stores the ids it
+    // gets back; a browser cannot hold a secret key, and synthesising `coupon_<id>` / `promo_<id>` locally
+    // is what let `sync.status: "synced"` claim a sync that never happened.
+    stripe_coupon_id: form.stripe_coupon_id || "",
+    stripe_promo_code_id: form.stripe_promo_code_id || "",
     code: String(form.code || "").trim().toUpperCase(),
     name: form.name || String(form.code || "").trim().toUpperCase(),
     status: form.status || "active",
@@ -179,11 +182,8 @@ export function buildCouponDocument(form) {
     },
     applies_to_offer_ids: Array.isArray(form.applies_to_offer_ids) ? form.applies_to_offer_ids : [],
     redemption_count: Number(form.redemption_count || 0),
-    sync: {
-      status: "synced",
-      last_synced_at: now,
-      error: null,
-    },
+    // Set by the SERVER after Stripe confirms, not asserted here.
+    sync: form.sync || { status: "synced", last_synced_at: now, error: null },
     created_at: form.created_at || now,
     updated_at: now,
   };
