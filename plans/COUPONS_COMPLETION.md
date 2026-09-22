@@ -151,14 +151,58 @@ were **accepted without error and then ignored** — `applies_to: null` on the c
 subsequent retrieve. Silently doing nothing is the worst available failure: the coupon would look scoped
 and discount everything.
 
-So product-level scoping is deliberately **not built**. The options, when it is wanted:
+So product-level scoping is deliberately **not built**. This has come up before and never reached a
+conclusion, so the options are recorded concretely here rather than re-derived each time. **The author's
+lean (2026-09-22) is toward expanding the coupon's scope** — option B or C — but it is not decided.
 
-1. Re-test `applies_to` on a newer API version or a differently-configured account; adopt only if it echoes
-   back what was sent.
-2. Compute it ourselves: sum the qualifying line items and express the discount as a per-session
-   `amount_off`. This works with no Stripe scoping at all, but it means a coupon object per checkout rather
-   than per tenant — which collides with the immutability model in C2, so it is a real design change and
-   not a patch.
+### Option A — make Stripe do it
+
+Set `applies_to[products][]` on the Coupon at creation, translating `applies_to_offer_ids` → our product
+ids → `stripe_product_id`. Stripe then discounts only the matching line items.
+
+- **Mechanics:** one extra field at creation. Nothing at checkout. Products must already be synced
+  (`product_sync.py` sets `stripe_product_id`), so a never-synced product cannot be named.
+- **Blocker:** it did not work when probed (2026-09-22) — accepted, then ignored, `applies_to: null` on
+  create and retrieve. **Do not adopt without re-probing and confirming Stripe echoes back what was sent.**
+- **Also:** `applies_to` is frozen at creation like the rest of the Coupon, so changing which products
+  qualify means a new coupon. That fits C2's immutability rather than fighting it.
+- **Cost if it works:** cheapest of the three by a wide margin, and the buyer sees a normal Stripe discount
+  line.
+
+### Option B — compute the amount ourselves, per session
+
+At checkout, sum the qualifying line items, work out the discount they earn, and express it as a
+session-level `amount_off` coupon created for that checkout.
+
+- **Mechanics:** the grocery-store behaviour exactly, and entirely under our control — any rule we can
+  express (per-product, per-category, "cheapest item free", tiered) becomes possible.
+- **Cost:** a Stripe Coupon object **per checkout**, not per tenant. That collides with C2: a coupon stops
+  being one durable object the tenant owns and made a promise with. The tenant's coupon becomes a RULE, and
+  the Stripe object becomes an implementation detail of one session.
+- **Knock-ons:** redemption counting moves to us (the per-session coupons are each redeemed once);
+  `max_redemptions` has to be enforced by us; the promise the tenant made is now computed at redemption
+  time rather than fixed at creation, so "immutable until it expires" needs restating in terms of the rule
+  rather than the object.
+- **This is the option that "expands the coupon's scope"** — it turns a coupon from a Stripe object we
+  mirror into a pricing rule we own.
+
+### Option C — discount the line items directly, no coupon at all
+
+Build the qualifying line items with `price_data` at a reduced `unit_amount`.
+
+- **Mechanics:** simplest to implement; exact to the cent; no coupon object anywhere.
+- **Cost:** the buyer never sees a discount. They see a lower price with no "you saved $X" line, no coupon
+  on the receipt, and no evidence the code did anything — which for a campaign whose whole point was the
+  coupon undoes the psychology it was sent for.
+- **Also:** Stripe records no redemption, so redemption counting and reporting are entirely ours, and
+  `allow_promotion_codes` cannot coexist with it meaningfully.
+- **Recommended only if** the discount never needs to be visible as a discount.
+
+### What to decide first
+
+Whether a coupon is **an object the tenant owns** (A: keep C2 as written) or **a rule the tenant writes**
+(B: restate C2 around the rule). C is a different feature wearing a coupon's clothes and should be chosen
+only deliberately. That question, not the API mechanics, is what has stalled this twice.
 
 ## C5 — targeted coupons (the win-back case)
 
