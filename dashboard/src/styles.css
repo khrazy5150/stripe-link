@@ -6517,6 +6517,9 @@ button:disabled {
 
 .ab-results-note {
   margin-top: 1rem;
+  /* Aligned with the table's first column, for the same reason as .ab-winner-picker. */
+  padding-left: 1rem;
+  padding-right: 1rem;
   color: var(--text-muted, #64748b);
   font-size: 1.25rem;
   line-height: 1.5;
@@ -6530,6 +6533,10 @@ button:disabled {
   border-top: 1px solid var(--line);
   padding-top: 1.25rem;
   padding-bottom: 0.75rem;
+  /* Match the table cells' 1rem inset. The table is full-bleed in this container and gets its indent from
+     cell padding, so anything alongside it starts 1rem further left and reads as out-dented. */
+  padding-left: 1rem;
+  padding-right: 1rem;
 }
 
 /* Product Stripe sync + digital asset */
