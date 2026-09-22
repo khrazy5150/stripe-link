@@ -172,3 +172,44 @@ class LayoutTests(unittest.TestCase):
         source = __import__("pathlib").Path(__file__).resolve().parents[1] / "src/stripe_link/runtime/html.py"
         css = source.read_text(encoding="utf-8")
         self.assertIn(".sl-coupon,.sl-coupon *{text-decoration:none}", css)
+
+
+class BuilderEditorTests(unittest.TestCase):
+    """Two ways to attach a coupon, mirroring how a Site can come from its own screen OR this builder.
+
+    Source-level, like the other builder guards in this suite: the registration test already proves the
+    element round-trips, and this proves the tenant has a way to fill it in at all.
+    """
+
+    import pathlib as _pathlib
+    BUILDER = (_pathlib.Path(__file__).resolve().parents[1]
+               / "dashboard/src/components/LandingPages.vue").read_text(encoding="utf-8")
+
+    def test_an_existing_coupon_can_be_picked(self):
+        self.assertIn("couponsStore.usableCoupons", self.BUILDER)
+
+    def test_a_coupon_can_be_created_without_leaving_the_builder(self):
+        self.assertIn("createInlineCoupon", self.BUILDER)
+        self.assertIn('value="__new__"', self.BUILDER)
+
+    def test_creating_one_goes_through_the_SAME_path_as_the_coupons_screen(self):
+        # Not a second way to write a coupon document: one shape, one validator, one place to change.
+        self.assertIn("couponsStore.saveCoupon", self.BUILDER)
+
+    def test_the_values_are_copied_onto_the_section(self):
+        # Referencing the coupon would let an edit change what a published page already promised.
+        block = self.BUILDER.split("function fillCouponElement", 1)[1][:600]
+        for field in ("element.code", "element.expires_at", "element.value_text"):
+            self.assertIn(field, block, field)
+
+    def test_a_tenants_own_wording_is_not_overwritten(self):
+        block = self.BUILDER.split("function fillCouponElement", 1)[1][:600]
+        self.assertIn("if (!element.value_text)", block)
+
+    def test_the_destination_field_appears_only_for_a_lead_offer(self):
+        # A transacting offer goes to checkout; asking for a URL there would invite a wrong answer.
+        self.assertIn("couponNeedsDestination", self.BUILDER)
+        self.assertIn("offerIntent(selectedOffer.value)", self.BUILDER)
+
+    def test_coupons_load_lazily(self):
+        self.assertIn("ensureCouponsLoaded", self.BUILDER)

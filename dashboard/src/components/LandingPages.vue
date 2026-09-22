@@ -1157,6 +1157,79 @@
                       </label>
                     </template>
 
+                    <template v-else-if="element.type === 'coupon'">
+                      <p class="field-note">
+                        Pick a coupon you already created, or make one here — the same way a Site can come
+                        from the Sites screen or from this builder. The code, value and expiry are copied
+                        onto the page when you pick it, so the published coupon keeps working even if the
+                        coupon is edited later.
+                      </p>
+                      <label class="offer-field">
+                        <span>Coupon</span>
+                        <select :value="element.coupon_id" @focus="ensureCouponsLoaded()"
+                                @change="applyCouponToElement(element, $event.target.value)">
+                          <option value="">Select a coupon…</option>
+                          <option v-for="c in couponsStore.usableCoupons" :key="c.coupon_id" :value="c.coupon_id">
+                            {{ c.code }} — {{ couponValueText(c) }}
+                          </option>
+                          <option value="__new__">+ Create a new coupon…</option>
+                        </select>
+                      </label>
+
+                      <div v-if="couponCreateFor === element.id" class="wizard-inline-site-create">
+                        <div class="offer-three-column">
+                          <label class="offer-field">
+                            <span>Code <strong>*</strong></span>
+                            <input v-model.trim="newCoupon.code" type="text" placeholder="MASSAGE20"
+                                   @input="newCoupon.code = newCoupon.code.toUpperCase()" />
+                          </label>
+                          <label class="offer-field">
+                            <span>Discount</span>
+                            <select v-model="newCoupon.discount_type">
+                              <option value="percent">Percent off</option>
+                              <option value="fixed">Amount off</option>
+                            </select>
+                          </label>
+                          <label class="offer-field">
+                            <span>{{ newCoupon.discount_type === "percent" ? "Percent" : "Amount" }}</span>
+                            <input v-model="newCoupon.value" type="number" min="0" step="1" />
+                          </label>
+                        </div>
+                        <label class="offer-field">
+                          <span>Expires on</span>
+                          <input v-model="newCoupon.expires_on" type="date" />
+                        </label>
+                        <button type="button" class="secondary-action"
+                                :disabled="!newCoupon.code || couponsStore.saving"
+                                @click="createInlineCoupon(element)">
+                          {{ couponsStore.saving ? "Creating…" : "Create coupon" }}
+                        </button>
+                        <p v-if="couponError" class="field-error">{{ couponError }}</p>
+                      </div>
+
+                      <label class="offer-field">
+                        <span>Headline</span>
+                        <input v-model.trim="element.headline" type="text" placeholder="Your first 60-minute massage" />
+                      </label>
+                      <label class="offer-field">
+                        <span>Value shown on the ticket</span>
+                        <input v-model.trim="element.value_text" type="text" placeholder="$20 OFF" />
+                      </label>
+                      <label class="offer-field">
+                        <span>Picture (optional)</span>
+                        <input v-model.trim="element.image_url" type="url" placeholder="Leave empty to use the product photo" />
+                      </label>
+                      <label class="offer-field">
+                        <span>Terms (optional)</span>
+                        <input v-model.trim="element.terms" type="text" placeholder="New clients only." />
+                      </label>
+                      <label v-if="couponNeedsDestination" class="offer-field">
+                        <span>Destination link</span>
+                        <input v-model.trim="element.destination_url" type="url" placeholder="https://…" />
+                        <span class="field-note">This offer has no checkout, so the ticket links here instead.</span>
+                      </label>
+                    </template>
+
                     <template v-else-if="element.type === 'client_marquee'">
                       <input v-model.trim="element.heading" type="text" placeholder="Section heading (optional)" />
                       <div v-for="(logo, i) in element.logos" :key="i" class="element-subrow">
@@ -2336,6 +2409,7 @@ import { formatMoney, serviceFlowCard } from "../stores/products";
 import PurchaseFlowDiagram from "./PurchaseFlowDiagram.vue";
 import { useProfileStore } from "../stores/profile";
 import { useSitesStore } from "../stores/sites";
+import { useCouponsStore } from "../stores/coupons";
 import { searchableItemText } from "../composables/offerItems";
 import { filterRows } from "../composables/indexedList";
 import { stagesFromSavedOffer } from "../composables/purchaseFlow";
@@ -2357,6 +2431,7 @@ const pages = ref([]);
 const offers = ref([]);
 const profileStore = useProfileStore();
 const sitesStore = useSitesStore();
+const couponsStore = useCouponsStore();
 const collectionsStore = useCollectionsStore();
 const toasts = useToastsStore();
 
@@ -3625,6 +3700,71 @@ function openInlineSiteCreate() {
   siteCreateOpen.value = true;
   selectedSiteId.value = "";
   seedInlineSiteFields();
+}
+
+// Coupon element: pick an existing coupon or make one here, the same two ways a Site can be created
+// (Sites screen, or this builder). Values are COPIED onto the section rather than referenced, so a
+// published page keeps the coupon it was published with even if the coupon is edited afterwards.
+const couponCreateFor = ref("");
+const couponError = ref("");
+const newCoupon = reactive({ code: "", discount_type: "percent", value: 10, expires_on: "" });
+
+// Lazily, like the page list: a tenant who never touches a coupon element never pays for the request.
+async function ensureCouponsLoaded() {
+  if (couponsStore.loaded || couponsStore.loading) return;
+  try {
+    await couponsStore.load({ status: "usable" });
+  } catch {
+    couponError.value = "Could not load your coupons.";
+  }
+}
+
+function couponValueText(coupon) {
+  const discount = coupon?.discount || {};
+  if (discount.type === "percent") return `${Number(discount.value || 0)}% OFF`;
+  const amount = Number(discount.value || 0) / 100;
+  return `$${amount.toFixed(amount % 1 ? 2 : 0)} OFF`;
+}
+
+// A lead offer has no checkout of its own, so its ticket needs somewhere to point. Uses offerIntent --
+// the single answer to "is this offer lead-gen?" -- rather than reading product_intent directly, which is
+// the divergence that once gave a page a lead-gen CTA and transactional sections at the same time.
+const couponNeedsDestination = computed(() => offerIntent(selectedOffer.value) === "lead_gen");
+
+function fillCouponElement(element, coupon) {
+  element.coupon_id = coupon.coupon_id;
+  element.code = coupon.code || "";
+  element.expires_at = coupon.restrictions?.expires_at ?? null;
+  // Only fill the value when the tenant has not written their own -- their words outrank ours.
+  if (!element.value_text) element.value_text = couponValueText(coupon);
+}
+
+function applyCouponToElement(element, couponId) {
+  couponError.value = "";
+  if (couponId === "__new__") {
+    couponCreateFor.value = element.id;
+    if (!newCoupon.code) newCoupon.code = "";
+    return;
+  }
+  couponCreateFor.value = "";
+  const coupon = couponsStore.coupons.find((c) => c.coupon_id === couponId);
+  if (!coupon) {
+    element.coupon_id = "";
+    return;
+  }
+  fillCouponElement(element, coupon);
+}
+
+async function createInlineCoupon(element) {
+  couponError.value = "";
+  try {
+    const coupon = await couponsStore.saveCoupon({ ...newCoupon });
+    fillCouponElement(element, coupon);
+    couponCreateFor.value = "";
+    newCoupon.code = "";
+  } catch (err) {
+    couponError.value = err.message || "Could not create the coupon.";
+  }
 }
 
 async function createInlineSite() {
