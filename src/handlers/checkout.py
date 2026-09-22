@@ -1,5 +1,7 @@
 import json
 import logging
+import os
+import time
 from base64 import b64encode
 from urllib.parse import urlencode
 from urllib.error import HTTPError
@@ -27,6 +29,7 @@ from stripe_link.domain import tips
 from stripe_link.kms_secrets import KmsSecretCipher
 from stripe_link.runtime.error_pages import render_error_page
 from stripe_link.repositories.documents import (
+    coupons_repository,
     offers_repository,
     pages_repository,
     products_repository,
@@ -45,6 +48,37 @@ STRIPE_CHECKOUT_SESSIONS_URL = "https://api.stripe.com/v1/checkout/sessions"
 LINK_CURRENCIES = {"usd", "eur", "gbp", "cad", "aud", "nzd"}
 
 
+def resolve_campaign_promotion_code(code, tenant_id, mode, coupons_repo=None):
+    """The Stripe promotion-code id for a campaign coupon, or "" when it may not be applied.
+
+    Resolved from the CODE rather than trusting an id on the URL: the tenant's own coupon record is what
+    says whether it is still usable, and `coupon_is_usable` already encodes expiry, status and redemption
+    limits. A link that outlived its campaign therefore checks out at full price instead of erroring --
+    the page tells the visitor the offer ended; checkout must not be where they find out.
+
+    Never raises: a coupon that cannot be looked up must not stop someone buying.
+    """
+    code = str(code or "").strip().upper()
+    if not code or not tenant_id:
+        return ""
+    try:
+        from handlers.coupons import coupon_is_usable
+
+        repo = coupons_repo or (coupons_repository(mode=mode) if os.environ.get("COUPONS_TABLE") else None)
+        if repo is None:
+            return ""
+        now = int(time.time())
+        for coupon in repo.list_for_tenant(tenant_id) or []:
+            if str(coupon.get("code") or "").strip().upper() != code:
+                continue
+            if not coupon_is_usable(coupon, now):
+                return ""
+            return str(coupon.get("stripe_promo_code_id") or "")
+        return ""
+    except Exception:  # noqa: BLE001 - a discount that cannot be resolved must never block a purchase
+        return ""
+
+
 def handler(
     event,
     context,
@@ -54,6 +88,7 @@ def handler(
     services_repo=None,
     stripe_repo=None,
     tenant_repo=None,
+    coupons_repo=None,
     pages_repo=None,
     secret_cipher=None,
     opener=None,
@@ -191,6 +226,9 @@ def handler(
             fee_context=fee_context,
             apply_application_fee=bool(stripe_account),
             bnpl_payment_method_types=bnpl_types,
+            coupon_code=str(params.get("coupon") or ""),
+            mode=mode,
+            coupons_repo=coupons_repo,
         )
         stripe_response = create_checkout_session_with_bnpl_fallback(
             checkout_payload,
@@ -322,6 +360,9 @@ def build_checkout_payload(
     fee_context=None,
     apply_application_fee=False,
     bnpl_payment_method_types=None,
+    coupon_code="",
+    mode="test",
+    coupons_repo=None,
 ):
     checkout = offer.get("checkout") or {}
     # The session's mode follows the lines it actually carries, in BOTH directions.
@@ -347,7 +388,17 @@ def build_checkout_payload(
         "metadata[tenant_id]": tenant_id,
         "metadata[offer_id]": offer.get("offer_id") or "",
     }
-    if checkout.get("allow_promotion_codes") is True:
+    # A coupon carried in from a campaign page: the visitor tapped a ticket that already named the code, so
+    # applying it here means the discount is on the page they land on instead of behind a field they have to
+    # find and retype (plans/COUPON_ELEMENT.md).
+    #
+    # Stripe REFUSES `discounts` and `allow_promotion_codes` together, so a pre-applied coupon wins and the
+    # manual field is dropped for that one checkout. That is the right way round: the buyer already has a
+    # better code than anything they would type.
+    applied_promotion_code = resolve_campaign_promotion_code(coupon_code, tenant_id, mode, coupons_repo)
+    if applied_promotion_code:
+        payload["discounts[0][promotion_code]"] = applied_promotion_code
+    elif checkout.get("allow_promotion_codes") is True:
         payload["allow_promotion_codes"] = "true"
 
     collect_shipping = False

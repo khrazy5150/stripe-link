@@ -9,6 +9,7 @@
     "hero",
     "headline",
     "subheadline",
+    "coupon",
     "brand_hero",
     "seller_profile",
     "social_links",
@@ -518,6 +519,21 @@
         "cta_from",
         "cta_to",
         "cta_text"
+      ]
+    },
+    "coupon": {
+      "placement": "free",
+      "label": "Coupon",
+      "ui": "add",
+      "kind": "capability",
+      "channel": "body",
+      "heading_role": "none",
+      "repeatable": false,
+      "tokens": [
+        "coupon_bg",
+        "coupon_accent",
+        "coupon_text",
+        "coupon_code_bg"
       ]
     }
   },

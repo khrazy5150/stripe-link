@@ -229,7 +229,12 @@ class TopCentreAndPulseTests(unittest.TestCase):
                   / "src" / "stripe_link" / "runtime" / "html.py").read_text(encoding="utf-8")
         reduced = [line for line in source.split("\n") if "prefers-reduced-motion" in line]
         self.assertTrue(reduced)
-        self.assertIn(".sl-hero-brand-dot.is-pulsing{animation:none}", reduced[0])
+        # ANY of them, not reduced[0]: this pinned whichever reduced-motion rule happened to come first in
+        # the file, so adding an unrelated element that also honours the preference broke it.
+        self.assertTrue(
+            any(".sl-hero-brand-dot.is-pulsing{animation:none}" in line for line in reduced),
+            "the pulsing dot must stop under prefers-reduced-motion",
+        )
 
 
 class PlacementControlTests(unittest.TestCase):

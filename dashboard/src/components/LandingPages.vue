@@ -5302,6 +5302,10 @@ function newElement(type) {
            asset: null, collect_email: false, collect_phone: false }, theme: {} };
   // The NUMBERS are derived from the offer; only these two lines are the tenant's.
   if (type === "price_highlight") return { ...base, main_text: "Today Only", subtext: "" };
+  // The coupon is denormalized from the Coupons module when the tenant picks one, so the fields the
+  // renderer needs live ON the section: a published artifact must not have to query the coupon table.
+  if (type === "coupon") return { ...base, coupon_id: "", code: "", value_text: "", headline: "",
+    terms: "", cta_label: "", destination_url: "", expires_at: null };
   if (type === "author_bio") return { ...base, photo_url: "", name: "", headline: "", body: "", theme: {} };
   // product_details is fully offer-driven (current target's gallery/badges/description) — no config.
   return base;
@@ -6159,6 +6163,16 @@ function elementSection(element) {
     return { id: element.id, type: "price_highlight",
       main_text: element.main_text || undefined, subtext: element.subtext || undefined };
   }
+  if (element.type === "coupon") {
+    // Dropped only when there is no CODE: a coupon without one cannot be redeemed, and the renderer
+    // returns "" for it anyway, so persisting it would leave an invisible section in the document.
+    if (!element.code) return null;
+    return { id: element.id, type: "coupon", coupon_id: element.coupon_id || undefined,
+      code: element.code, value_text: element.value_text || undefined,
+      headline: element.headline || undefined, terms: element.terms || undefined,
+      cta_label: element.cta_label || undefined, destination_url: element.destination_url || undefined,
+      expires_at: element.expires_at || undefined };
+  }
   if (element.type === "related_products") {
     return { id: element.id, type: "related_products", heading: element.heading || undefined };  // cards resolved at publish
   }
@@ -6217,6 +6231,11 @@ function elementsFromPage(sections) {
     } else if (section.type === "price_highlight") {
       elements.push({ id: localId("el"), type: "price_highlight",
         main_text: section.main_text || "", subtext: section.subtext || "" });
+    } else if (section.type === "coupon") {
+      elements.push({ id: localId("el"), type: "coupon", coupon_id: section.coupon_id || "",
+        code: section.code || "", value_text: section.value_text || "", headline: section.headline || "",
+        terms: section.terms || "", cta_label: section.cta_label || "",
+        destination_url: section.destination_url || "", expires_at: section.expires_at ?? null });
     } else if (section.type === "rating") {
       elements.push({ id: localId("el"), type: "rating", value: section.value ?? 5, count: section.count ?? 0, label: section.label || "" });
     } else if (section.type === "client_marquee") {

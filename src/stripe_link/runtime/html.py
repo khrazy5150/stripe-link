@@ -1,9 +1,11 @@
 from html import escape, unescape
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from decimal import Decimal
 import base64
 import json
 import re
+import time
 from typing import Any
 from urllib.parse import quote, urlencode, urlparse
 
@@ -914,6 +916,53 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     "    .sl-bargain-prefix{display:block;font-size:1.6rem;font-weight:600;letter-spacing:0.02em;opacity:0.8}",
     "    .sl-bargain-main{margin:0;font-family:var(--sl-font-heading);font-size:2.2rem;font-weight:700;color:var(--sl-section-ink,var(--sl-price-title))}",
     "    .sl-bargain-sub{margin:0;font-size:1.5rem;color:var(--sl-section-ink,var(--sl-price-description));opacity:0.85}",
+    # --- Coupon -------------------------------------------------------------------------------------
+    # A paper coupon, in the order those actually read: the picture of what you get, then the business whose
+    # offer it is, then the value in the largest type on the ticket. Dashed edge because that is the whole
+    # visual idiom -- it says "cut here" to anyone who has ever held one.
+    #
+    # The whole ticket is the link, so it gets the pointer and the lift, and every child inherits its colour
+    # rather than turning into blue underlined text.
+    "    .sl-coupon{display:grid;grid-template-columns:minmax(10rem,34%) minmax(0,1fr);align-items:stretch;"
+    "max-width:56rem;margin:0 auto;text-decoration:none;color:var(--sl-coupon-text,var(--sl-text));"
+    "background:var(--sl-coupon-bg,#fff);border:2px dashed color-mix(in srgb,var(--sl-coupon-accent,#e0402c) 55%,transparent);"
+    "border-radius:1.4rem;overflow:hidden;box-shadow:0 1.2rem 3.2rem rgba(0,0,0,0.13);"
+    "transition:transform .16s ease,box-shadow .16s ease}",
+    "    .sl-coupon,.sl-coupon *{text-decoration:none}",
+    "    .sl-coupon-noimage{grid-template-columns:minmax(0,1fr)}",
+    "    a.sl-coupon:hover{transform:translateY(-2px);box-shadow:0 1.8rem 4rem rgba(0,0,0,0.18)}",
+    "    a.sl-coupon:focus-visible{outline:3px solid var(--sl-coupon-accent,#e0402c);outline-offset:3px}",
+    # The picture panel. Perforated divider on its inner edge, so the two halves read as one torn ticket.
+    "    .sl-coupon-media{position:relative;background:color-mix(in srgb,var(--sl-coupon-accent,#e0402c) 12%,transparent);"
+    "border-right:2px dashed color-mix(in srgb,var(--sl-coupon-accent,#e0402c) 45%,transparent)}",
+    "    .sl-coupon-media img{width:100%;height:100%;min-height:15rem;object-fit:cover;display:block}",
+    "    .sl-coupon-media-logo{display:grid;place-items:center;padding:2.2rem}",
+    "    .sl-coupon-media-logo img{width:auto;height:auto;max-width:8rem;max-height:8rem;min-height:0;object-fit:contain}",
+    "    .sl-coupon-body{display:grid;gap:0.45rem;justify-items:start;text-align:left;padding:1.8rem 1.9rem;align-content:center}",
+    # The business owns the ticket, so it is named first and quietly -- a coupon that names no business is a
+    # voucher for nowhere, and it is the first thing a recipient checks.
+    "    .sl-coupon-brand{margin:0;font-size:1.2rem;font-weight:700;letter-spacing:0.12em;text-transform:uppercase;"
+    "color:var(--sl-coupon-accent,#e0402c)}",
+    "    .sl-coupon-headline{margin:0;font-family:var(--sl-font-heading);font-size:1.6rem;line-height:1.25;"
+    "font-weight:700;opacity:0.85}",
+    # The value is the largest thing on the ticket. It is what the recipient is deciding on.
+    "    .sl-coupon-value{margin:0.2rem 0 0.4rem;font-family:var(--sl-font-heading);"
+    "font-size:clamp(3.2rem,9vw,4.8rem);line-height:0.95;font-weight:900;letter-spacing:-0.03em}",
+    "    .sl-coupon-code-row{margin:0;display:flex;align-items:center;gap:0.7rem;flex-wrap:wrap}",
+    "    .sl-coupon-code-label{font-size:1.1rem;font-weight:700;letter-spacing:0.14em;text-transform:uppercase;opacity:0.5}",
+    "    .sl-coupon-code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:1.6rem;font-weight:700;"
+    "letter-spacing:0.12em;padding:0.35rem 0.85rem;border-radius:0.5rem;"
+    "background:var(--sl-coupon-code-bg,rgba(0,0,0,0.07))}",
+    "    .sl-coupon-expiry{margin:0;font-size:1.25rem;font-weight:600;color:var(--sl-coupon-accent,#e0402c)}",
+    "    .sl-coupon-terms{margin:0;font-size:1.15rem;line-height:1.45;opacity:0.65}",
+    "    .sl-coupon-cta{margin-top:0.6rem;font-size:1.4rem;font-weight:800;color:var(--sl-coupon-accent,#e0402c)}",
+    # Expired: still shown, visibly spent. Desaturated rather than hidden, because an email outlives its
+    # deadline and "nothing here" reads as a broken page.
+    "    .sl-coupon-expired{filter:grayscale(1);opacity:0.7;box-shadow:none}",
+    "    @media (max-width:34rem){.sl-coupon{grid-template-columns:minmax(0,1fr)}"
+    ".sl-coupon-media{border-right:0;border-bottom:2px dashed color-mix(in srgb,var(--sl-coupon-accent,#e0402c) 45%,transparent)}"
+    ".sl-coupon-media img{min-height:11rem}}",
+    "    @media (prefers-reduced-motion:reduce){a.sl-coupon{transition:none}a.sl-coupon:hover{transform:none}}",
     "    .sl-marquee-row{display:flex;align-items:center;gap:1.6rem;padding-right:1.6rem}",
     # Few logos -> centered + static; many (>=5) -> the rolling track above.
     "    .sl-marquee-static{display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:1.6rem}",
@@ -2355,6 +2404,7 @@ SECTION_REGISTRY: dict[str, dict[str, Any]] = {
     "rating": {"render": lambda c: render_rating(c.section), "version": 1},
     "client_marquee": {"render": lambda c: render_client_marquee(c.section), "version": 1},
     "price_highlight": {"render": lambda c: render_price_highlight(c.section, c.offer, c.products_by_id, c.services_by_id), "version": 1},
+    "coupon": {"render": lambda c: render_coupon(c.section, c.offer, c.products_by_id, c.checkout_url), "version": 1},
     "author_bio": {"render": lambda c: render_author_bio(c.section), "version": 1},
     "product_details": {"render": lambda c: render_product_details(c.offer, c.products_by_id, c.services_by_id), "version": 1},
     "product_carousel": {"render": lambda c: render_product_carousel(c.section, c.page, c.offers_by_id, c.products_by_id, c.services_by_id, c.checkout_url, c.api_base_url), "version": 1},
@@ -2537,6 +2587,19 @@ def render_seo_title(
 H1_SECTION_TYPES = frozenset({"hero", "headline", "brand_hero"})
 
 
+def resolve_business_name() -> str:
+    """What this business is CALLED, resolved from the Site down to the owner's own name.
+
+    One definition, because two places now need it — the brand label and the coupon — and a coupon that
+    named the business differently from the header on the same page would look like someone else's.
+    """
+    return (
+        str(_RENDER_ORG.get("name") or "").strip()
+        or str(_RENDER_PREFERENCES.get("business_name") or "").strip()
+        or str(_RENDER_PREFERENCES.get("display_name") or "").strip()
+    )
+
+
 def render_brand_label(section: dict[str, Any], page: dict[str, Any]) -> str:
     if section.get("enabled") is False:
         return ""
@@ -2549,12 +2612,7 @@ def render_brand_label(section: dict[str, Any], page: dict[str, Any]) -> str:
     # (author, 2026-09-16). The Site is the best answer when the page has one; the tenant's own business name
     # covers a page not yet attached to one; the owner's name is the last resort, and is what a solo creator
     # would have put there anyway. page.name is deliberately NOT in the chain any more.
-    label = render_headline_markup(
-        section.get("label")
-        or str(_RENDER_ORG.get("name") or "").strip()
-        or str(_RENDER_PREFERENCES.get("business_name") or "").strip()
-        or str(_RENDER_PREFERENCES.get("display_name") or "").strip()
-        or "")
+    label = render_headline_markup(section.get("label") or resolve_business_name())
     if not label:
         return ""
     # heading_role: none in the element catalog — a brand label is not a heading (matches the preview's span)
@@ -5241,6 +5299,151 @@ def render_price_highlight(
         *rows,
         "    </section>",
     ])
+
+
+def coupon_is_live(section: dict[str, Any], now: int | None = None) -> bool:
+    """Whether this coupon can still be redeemed. An absent expiry means it does not expire."""
+    expires_at = section.get("expires_at")
+    try:
+        expires_at = int(expires_at) if expires_at not in (None, "") else 0
+    except (TypeError, ValueError):
+        return True
+    if expires_at <= 0:
+        return True
+    return int(now if now is not None else time.time()) < expires_at
+
+
+def render_coupon(
+    section: dict[str, Any],
+    offer: dict[str, Any],
+    products_by_id: dict[str, dict[str, Any]] | None = None,
+    checkout_url: str = "",
+    now: int | None = None,
+) -> str:
+    """The campaign coupon: a ticket the visitor arrived for, and can click.
+
+    Layout follows the paper coupons it imitates: the PICTURE of what you get on the left, the VALUE large
+    on the right, and the business named above it so the ticket says whose it is. A coupon that does not
+    name its business is a voucher for nowhere -- it is the first thing a recipient checks.
+
+    The WHOLE ticket is the click target, not a button inside it. Someone who tapped a coupon in an email
+    expects to tap the same thing again, and a coupon with a small button beside it makes them hunt for the
+    part that works.
+
+    Smart by the offer's own shape rather than a setting the tenant can get wrong:
+      * a transacting offer -> the ticket carries the code INTO checkout, so the discount is already applied
+        when they arrive and they never retype it
+      * a lead offer (which by composition HAS no checkout) -> the ticket links to the destination named on
+        the section, which is what a bridge page does with its redirect anyway
+
+    Text values are DENORMALIZED onto the section when the tenant picks a coupon in the builder, not looked
+    up here: a published artifact has to be self-contained, and a renderer that queried the coupon table
+    would make every page render depend on it. The IMAGE falls back to the offer's own product picture, so
+    a tenant who picks a coupon and nothing else still gets a ticket that looks like something.
+    """
+    code = str(section.get("code") or "").strip()
+    if not code:
+        return ""
+
+    live = coupon_is_live(section, now)
+    value_text = str(section.get("value_text") or "").strip()
+    headline = str(section.get("headline") or "").strip()
+    terms = str(section.get("terms") or "").strip()
+    business = str(section.get("business_name") or "").strip() or resolve_business_name()
+    cta_label = str(section.get("cta_label") or ("Redeem this offer" if live else "This offer has ended")).strip()
+
+    # The tenant's own picture, then the thing being sold, then the platform mark. A coupon with an empty
+    # panel looks unfinished, and the mark is better than nothing there -- but it is the LAST resort, and a
+    # tenant who sets image_url or sells something with a photo never sees it.
+    image = str(section.get("image_url") or "").strip()
+    if not image:
+        for item in (offer or {}).get("items") or []:
+            product = (products_by_id or {}).get(str(item.get("product_id") or ""))
+            if product:
+                image = first_image(product)
+                if image:
+                    break
+    # A logo is not a photograph: cropping a square mark to fill a tall panel would cut its edges off, so
+    # it is contained and padded instead. Read from platform config rather than hardcoded -- the helper
+    # returns "" when unconfigured, which correctly falls back to the single-column layout.
+    is_logo = False
+    if not image:
+        image = str(default_favicon_url() or "").strip()
+        is_logo = bool(image)
+
+    transacts = not composition_key(offer or {}).startswith("lead_")
+    if not live:
+        href = ""
+    elif transacts:
+        href = coupon_checkout_href(checkout_url, code)
+    else:
+        href = str(section.get("destination_url") or "").strip()
+
+    expiry_line = ""
+    expires_at = section.get("expires_at")
+    if expires_at:
+        try:
+            stamp = datetime.fromtimestamp(int(expires_at), tz=timezone.utc).strftime("%b %-d, %Y")
+        except (TypeError, ValueError, OSError):
+            stamp = ""
+        if stamp:
+            expiry_line = f'        <p class="sl-coupon-expiry">{"Expires" if live else "Expired"} {escape(stamp)}</p>'
+
+    style = section_theme_vars(section)
+    style_attr = f' style="{escape(style)}"' if style else ""
+    themed = " sl-section-themed" if style else ""
+    section_id = escape(str(section.get("id", "coupon")))
+    state = "" if live else " sl-coupon-expired"
+    # No picture -> no empty panel. The ticket becomes a single column and the value still leads.
+    layout = "" if image else " sl-coupon-noimage"
+
+    media = ""
+    if image:
+        # A decorative logo carries no information the text does not, so it gets an EMPTY alt rather than a
+        # description a screen reader would read out before the offer itself.
+        alt = "" if is_logo else escape(headline or business or "Offer")
+        logo_class = " sl-coupon-media-logo" if is_logo else ""
+        media = (f'      <div class="sl-coupon-media{logo_class}">'
+                 f'<img src="{escape(image)}" alt="{alt}" loading="lazy" decoding="async"></div>')
+
+    body = [
+        media,
+        '      <div class="sl-coupon-body">',
+        f'        <p class="sl-coupon-brand">{escape(business)}</p>' if business else "",
+        f'        <p class="sl-coupon-headline">{render_headline_markup(headline)}</p>' if headline else "",
+        f'        <p class="sl-coupon-value">{escape(value_text)}</p>' if value_text else "",
+        '        <p class="sl-coupon-code-row"><span class="sl-coupon-code-label">Code</span>'
+        f'<span class="sl-coupon-code">{escape(code)}</span></p>',
+        expiry_line,
+        f'        <p class="sl-coupon-terms">{escape(terms)}</p>' if terms else "",
+        f'        <span class="sl-coupon-cta">{escape(cta_label)}</span>',
+        "      </div>",
+    ]
+    inner = "\n".join(line for line in body if line)
+
+    # An expired coupon still RENDERS -- an email campaign outlives its deadline and the visitor deserves to
+    # be told, not dropped on a page with a hole in it or sent to a checkout that refuses them.
+    if href:
+        opener = (f'    <a class="sl-coupon{layout}{state}{themed}" href="{escape(href)}"'
+                  f' data-section-id="{section_id}" data-section-type="coupon"{style_attr}>')
+        closer = "    </a>"
+    else:
+        opener = (f'    <div class="sl-coupon{layout}{state}{themed}"'
+                  f' data-section-id="{section_id}" data-section-type="coupon"{style_attr}>')
+        closer = "    </div>"
+    return "\n".join([opener, inner, closer])
+
+
+def coupon_checkout_href(checkout_url: str, code: str) -> str:
+    """Checkout with the promotion code already on it, so the discount is applied before the buyer looks.
+
+    Separate and tiny so the test for it reads as what it guarantees: the code always survives the trip.
+    """
+    checkout_url = str(checkout_url or "").strip()
+    if not checkout_url:
+        return ""
+    joiner = "&" if "?" in checkout_url else "?"
+    return f"{checkout_url}{joiner}coupon={quote(code)}"
 
 
 def render_author_bio(section: dict[str, Any]) -> str:

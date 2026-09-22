@@ -1780,6 +1780,10 @@ Resources:
       Policies:
         - DynamoDBReadPolicy:
             TableName: !Ref OffersTable
+        # A campaign coupon carried in from a coupon element is resolved from its CODE, because the
+        # tenant's own record is what says whether it is still usable. Read-only.
+        - DynamoDBReadPolicy:
+            TableName: !Ref CouponsTable
         - DynamoDBReadPolicy:
             TableName: !Ref ProductsTable
         - DynamoDBReadPolicy:
