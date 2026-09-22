@@ -292,6 +292,17 @@ def handler(
                 refresh_booking_credits(stripe_event, tenant_id=tenant_id, mode=mode, now_fn=now_fn)
             except Exception as exc:  # noqa: BLE001 - never fail the webhook over credits
                 print(f"[webhook] booking credits not refreshed: {type(exc).__name__}: {exc}")
+            # A renewal is another month of product to ship or another visit to schedule, so it becomes a
+            # real ORDER -- persist_invoice_event above only tracks invoices we created, which a Stripe
+            # cycle invoice never is, so every renewal used to land nowhere at all.
+            renewal_order = persist_subscription_renewal(
+                stripe_event, tenant_id=tenant_id, mode=mode,
+                orders_repo=orders_repo, notifications_repo=notifications_repo,
+                now_fn=now_fn, billing_config_loader=billing_config_loader,
+                receipt_mailer=receipt_mailer, email_context_loader=email_context_loader,
+            )
+            if renewal_order.get("status") == "stored":
+                persistence = {**(persistence or {}), "renewal_order": renewal_order}
         # A REPEATING TIP renews here, and this is the only moment the supporter hears from us about it.
         if tip_tokens_repo is None and os.environ.get("CARTS_TABLE"):
             tip_tokens_repo = tip_tokens_repository(mode=mode)
@@ -1527,6 +1538,237 @@ def order_line_items_from_stripe(line_items: list[dict[str, Any]] | None, bump_p
             "is_order_bump": bool(stripe_price_id) and stripe_price_id in bump_price_ids,
         })
     return items
+
+
+def persist_subscription_renewal(
+    stripe_event: dict[str, Any],
+    *,
+    tenant_id: str,
+    mode: str = "test",
+    orders_table=None,
+    orders_repo=None,
+    notifications_repo=None,
+    products_repo=None,
+    ledger_repo=None,
+    now_fn: Callable[[], int] = lambda: int(time.time()),
+    billing_config_loader: Callable[[], dict[str, Any]] | None = None,
+    receipt_mailer: Callable[..., Any] | None = None,
+    email_context_loader: Callable[[str], dict[str, str]] | None = None,
+) -> dict[str, Any]:
+    """Record a subscription RENEWAL as an order, with its notification, ledger entry and receipt.
+
+    `persist_invoice_event` deliberately tracks only invoices WE created (`metadata.invoice_id`), which is
+    right for standalone invoicing and silently dropped every renewal: Stripe creates the cycle invoice, so
+    it carries no such id. The money moved, the application fee was taken, and the app recorded nothing --
+    no order to fulfil, no ledger entry, no notification (found 2026-09-22 from a real renewal).
+
+    Scoped to `billing_reason == "subscription_cycle"`. The FIRST invoice of a subscription is
+    `subscription_create`, and that purchase is already an order via checkout.session.completed -- counting
+    it here too would double every new subscription.
+    """
+    invoice = _event_data_object(stripe_event)
+    if not invoice:
+        return {"status": "skipped", "reason": "missing_invoice"}
+    if str(invoice.get("billing_reason") or "") != "subscription_cycle":
+        return {"status": "skipped", "reason": "not_a_renewal"}
+    metadata = invoice_subscription_metadata(invoice)
+    # A repeating TIP is also a subscription, and it already has its own renewal path that emails the
+    # supporter. A tip is a donation, not something to fulfil, so it must not become an order as well.
+    if str(metadata.get("tip") or "").strip():
+        return {"status": "skipped", "reason": "tip_renewal"}
+
+    now = int(now_fn())
+    orders_table = orders_table or dynamodb_table(os.environ.get("ORDERS_TABLE", ""))
+    orders_repo = orders_repo or (orders_repository(mode=mode) if os.environ.get("ORDERS_TABLE") else None)
+    notifications_repo = notifications_repo or (notifications_repository() if os.environ.get("NOTIFICATIONS_TABLE") else None)
+    products_repo = products_repo or (products_repository(mode=mode) if os.environ.get("PRODUCTS_TABLE") else None)
+    ledger_repo = ledger_repo or (ledger_repository() if os.environ.get("LEDGER_TABLE") else None)
+
+    fees = fee_breakdown_from_invoice(invoice, metadata, billing_config_loader)
+    order_record = order_record_from_invoice(invoice, tenant_id, now, fees)
+    order_id = str(order_record.get("order_id") or "")
+    if not order_id:
+        return {"status": "skipped", "reason": "missing_invoice_id"}
+
+    # Same atomic claim as a checkout order: exactly one delivery writes it, so the receipt, notification
+    # and ledger entry each fire once however many times Stripe retries.
+    written: list[str] = []
+    first_delivery = True
+    if orders_table:
+        from botocore.exceptions import ClientError
+        try:
+            orders_table.put_item(
+                Item=dynamodb_safe_document(order_record),
+                ConditionExpression="attribute_not_exists(order_id)",
+            )
+            written.append("order")
+        except ClientError as exc:
+            if exc.response.get("Error", {}).get("Code") == "ConditionalCheckFailedException":
+                first_delivery = False
+            else:
+                raise
+    elif orders_repo:
+        try:
+            first_delivery = orders_repo.get(tenant_id, order_id) is None
+        except Exception:  # noqa: BLE001 - never block persistence on the dedup probe
+            first_delivery = True
+        if first_delivery:
+            orders_repo.put(order_record)
+            written.append("order")
+
+    if not first_delivery:
+        return {"status": "duplicate", "order_id": order_id, "written": written,
+                "receipt": {"status": "skipped", "reason": "duplicate_delivery"}}
+
+    notification = notification_record_from_renewal(order_record, tenant_id, now)
+    if notification and notifications_repo:
+        notifications_repo.put(notification)
+        written.append("notification")
+    if ledger_repo and record_sale_ledger_entry(order_record, ledger_repo, now):
+        written.append("ledger_entry")
+
+    receipt = send_order_receipt(
+        order_record, tenant_id,
+        mailer_send=receipt_mailer, context_loader=email_context_loader,
+        download_links=resolve_download_links(order_record, tenant_id, products_repo),
+    )
+    return {"status": "stored", "order_id": order_id, "written": written, "receipt": receipt}
+
+
+def fee_breakdown_from_invoice(
+    invoice: dict[str, Any],
+    metadata: dict[str, Any],
+    billing_config_loader: Callable[[], dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """The renewal's fee split. Priced as `recurring`, which is what it is."""
+    return calculate_price(
+        tenant_keyed_amount=int(invoice.get("amount_paid") or invoice.get("amount_due") or 0),
+        currency=invoice.get("currency") or "usd",
+        product_type=metadata.get("product_type") or "physical",
+        fee_handling="standard",
+        pricing_model="recurring",
+        tenant_plan=metadata.get("tenant_plan") or "basic",
+        billing_config=cached_billing_config(billing_config_loader),
+    )
+
+
+def notification_record_from_renewal(order_record: dict[str, Any], tenant_id: str, now: int) -> dict[str, Any]:
+    """The tenant's notification for a renewal. Says RENEWAL in as many words: the thing a tenant must not
+    have to work out is whether this is a new customer or an existing one billing again."""
+    items = order_record.get("line_items") or []
+    what = str((items[0] or {}).get("name") or "Subscription") if items else "Subscription"
+    amount = int(order_record.get("amount_total") or 0)
+    currency = str(order_record.get("currency") or "usd").upper()
+    email = str((order_record.get("customer") or {}).get("email") or "")
+    return {
+        "tenant_id": tenant_id,
+        "notification_id": f"notif_{order_record.get('order_id')}",
+        "document_type": "notification",
+        "type": "subscription_renewed",
+        "title": f"Subscription renewed — {what}",
+        "body": f"{email or 'A customer'} was billed {amount / 100:.2f} {currency} for {what}. "
+                f"This renewal needs fulfilling like any other order.",
+        "order_id": order_record.get("order_id"),
+        "read": False,
+        "created_at": now,
+        "updated_at": now,
+    }
+
+
+def invoice_subscription_metadata(invoice: dict[str, Any]) -> dict[str, Any]:
+    """The SUBSCRIPTION's metadata as seen from one of its invoices.
+
+    Stripe puts it in different places depending on API version, and a renewal invoice we did not create
+    carries none of its own -- so look in each place rather than trusting one.
+    """
+    details = invoice.get("subscription_details")
+    if isinstance(details, dict) and isinstance(details.get("metadata"), dict):
+        return details["metadata"]
+    lines = ((invoice.get("lines") or {}).get("data") or []) if isinstance(invoice.get("lines"), dict) else []
+    for line in lines:
+        if isinstance(line, dict) and isinstance(line.get("metadata"), dict) and line["metadata"]:
+            return line["metadata"]
+    return {}
+
+
+def order_line_items_from_invoice(invoice: dict[str, Any]) -> list[dict[str, Any]]:
+    """The renewal's line items, in the same shape a checkout order carries.
+
+    Built from the INVOICE's own lines rather than from subscription metadata, because subscriptions
+    created before renewals were recorded have no metadata at all -- and the lines are what has to be
+    fulfilled either way. An invoice line calls its total `amount`, where a session line has
+    `amount_total`/`amount_subtotal`; normalising here keeps every downstream reader (fulfilment, receipts,
+    shipping) on one shape.
+    """
+    currency = str(invoice.get("currency") or "usd")
+    lines = ((invoice.get("lines") or {}).get("data") or []) if isinstance(invoice.get("lines"), dict) else []
+    items = []
+    for line in lines:
+        if not isinstance(line, dict):
+            continue
+        price = line.get("price") if isinstance(line.get("price"), dict) else {}
+        amount = int(line.get("amount") or 0)
+        items.append({
+            "name": line.get("description") or "",
+            "amount_subtotal": amount,
+            "amount_total": amount,
+            "quantity": int(line.get("quantity") or 1),
+            "currency": str(line.get("currency") or currency),
+            "stripe_price_id": str(price.get("id") or ""),
+            "stripe_product_id": str(price.get("product") or ""),
+            "is_order_bump": False,
+        })
+    return items
+
+
+def order_record_from_invoice(invoice: dict[str, Any], tenant_id: str, now: int, fees: dict[str, Any]) -> dict[str, Any]:
+    """A subscription RENEWAL as an order.
+
+    A renewal is not a bookkeeping event, it is a thing the tenant has to do: another month of creatine to
+    ship, another massage to schedule. So it becomes a real order -- same table, same notification, same
+    receipt -- and not a separate "subscription payment" record the fulfilment screens would never show.
+
+    `order_id` is derived from the INVOICE id, which makes it idempotent for free: Stripe can deliver
+    invoice.paid more than once, and both deliveries compute the same id and race for one conditional put.
+    """
+    metadata = invoice_subscription_metadata(invoice)
+    subscription_id = str(invoice.get("subscription") or "")
+    invoice_id = str(invoice.get("id") or "")
+    amount = int(invoice.get("amount_paid") or invoice.get("amount_due") or 0)
+    email = str(invoice.get("customer_email") or "")
+    phone = str(invoice.get("customer_phone") or "")
+    return {
+        "tenant_id": tenant_id,
+        "order_id": f"order_{invoice_id}",
+        "schema_version": "2026-05-29",
+        "document_type": "order",
+        "session_id": "",
+        "invoice_id": invoice_id,
+        "subscription_id": subscription_id,
+        # Distinguishable from a first purchase without changing how anything reads an order: the fulfilment
+        # screens want every one of these, the revenue reports want them counted once, and a renewal that
+        # looked identical to a checkout would make "how many new customers" unanswerable.
+        "line_item_type": "subscription_cycle",
+        "billing_reason": str(invoice.get("billing_reason") or ""),
+        "status": "paid",
+        "amount_total": amount,
+        "currency": str(invoice.get("currency") or "usd"),
+        "payment_intent_id": str(invoice.get("payment_intent") or ""),
+        "mode": "live" if invoice.get("livemode") else "test",
+        "stripe_mode": "live" if invoice.get("livemode") else "test",
+        "customer": {
+            "name": str(invoice.get("customer_name") or ""),
+            "email": email,
+            "phone": phone,
+            "stripe_customer_id": str(invoice.get("customer") or ""),
+        },
+        "contact_keys": _order_contact_keys({"customer": {"email": email, "phone": phone}}),
+        "line_items": order_line_items_from_invoice(invoice),
+        "attribution": attribution_from_metadata(metadata),
+        "fees": fees,
+        "created_at": int(invoice.get("created") or now),
+        "updated_at": now,
+    }
 
 
 def order_record_from_session(session: dict[str, Any], tenant_id: str, now: int, fees: dict[str, Any], line_items: list[dict[str, Any]] | None = None) -> dict[str, Any]:

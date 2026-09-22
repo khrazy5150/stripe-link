@@ -245,6 +245,30 @@ Dev has no business holding a live key under any topology. Small, independent, d
 
 ## Security
 
+### ⭐ subscription renewals are recorded as orders — SHIPPED 2026-09-22
+
+Found from a real renewal: two daily subscriptions charged successfully in Stripe (invoices `-0002`) and the
+app recorded nothing — no order, no ledger entry, no notification, no email. Webhooks were fine and the
+events WERE processed; `persist_invoice_event` tracks only invoices we created (`metadata.invoice_id`),
+which is correct for standalone invoicing, and a Stripe cycle invoice has no such id.
+
+Recurring revenue was therefore invisible: the money moved and the application fee was taken, but nothing in
+the app knew. The ledger gap is the serious half — revenue reporting understated by exactly the recurring
+portion, growing every cycle.
+
+Renewals are now ORDERS, on the author's framing: "A subscription for Creatine means a new order of creatine
+that must be fulfilled." Same table, same notification, same receipt, so the fulfilment screens show them.
+Scoped to `billing_reason == "subscription_cycle"` (the first invoice is `subscription_create`, already an
+order via checkout), tips excluded (a donation with its own renewal email, nothing to fulfil), and the
+`order_id` derives from the invoice id so a redelivery claims the same row and cannot double-email.
+
+Built from the INVOICE's own lines rather than subscription metadata, so it works for subscriptions created
+before this existed. Checkout now also mirrors the session's metadata onto `subscription_data[metadata]` —
+without it a cycle invoice arrives anonymous and can be recorded but not attributed to the offer or page
+that sold it. That half is forward-looking only.
+
+**Not yet verified against a live renewal.** The next daily cycle is the test.
+
 ### ⭐⭐ HIGH — the raw CloudFront artifact URL is a public page; it should be an origin (agreed 2026-09-21)
 
 Plan: `plans/ARTIFACT_ACCESS_BOUNDARY.md`. Sibling of the commerce item below; agreed architecture, not built.

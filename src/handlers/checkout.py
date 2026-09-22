@@ -503,6 +503,20 @@ def build_checkout_payload(
     # The bumps' STRIPE price ids offered, so fulfillment can flag which completed line items were bumps
     # (what was actually purchased comes from the session's line_items). plans/SALES_FUNNELS.md P2.
     payload["metadata[order_bump_ids]"] = ",".join(stripe_price_id for stripe_price_id, _price_id in order_bumps)
+
+    # Mirror the session's identifying metadata onto the SUBSCRIPTION, so every future renewal invoice can
+    # say what it is for. A renewal is a fresh order the tenant must fulfil, and the cycle invoice Stripe
+    # generates carries only what the subscription carries -- without this it arrives anonymous, and the
+    # renewal can be recorded but not attributed to the offer or page that sold it.
+    #
+    # Only set for subscriptions, and only for keys that exist: Stripe rejects an empty metadata VALUE far
+    # less gracefully than a missing key. Tips set their own subscription metadata above and are unaffected.
+    if payload["mode"] == "subscription":
+        for key in ("tenant_id", "clientID", "client_id", "offer_id", "page_id",
+                    "product_id", "price_id", "product_name", "product_type", "tenant_plan"):
+            value = payload.get(f"metadata[{key}]")
+            if value:
+                payload.setdefault(f"subscription_data[metadata][{key}]", value)
     payload["metadata[post_checkout_entry]"] = "thank_you"
 
     # One-click post-purchase upsells charge OFF-SESSION against the buyer's saved card, so when this offer has
