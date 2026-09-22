@@ -140,8 +140,28 @@ customers notices some who used to buy a product and stopped. She sends each a c
 enough to win them back — possibly a loss leader — and needs a cap on how many times **that customer** can
 use it, or the giveaway is unbounded.
 
-**Stripe cannot cap a shared code per customer.** A promotion code has one `max_redemptions` counter and no
-idea who is holding it. That is why the field has never worked.
+### The distinction that makes this work: known customers, not anonymous ones
+
+**A targeted coupon is for a KNOWN customer. It is not a shared code.** That is the whole difference, and
+every other property follows from it:
+
+| | Shared coupon (the normal case) | Targeted coupon (C5) |
+|---|---|---|
+| Who may use it | anyone holding the code | one named customer, and nobody else |
+| Who they are to us | anonymous until they pay | known before the code is issued |
+| Per-customer cap | **impossible** — see below | natural: the code IS the customer |
+| Forwarded to a friend | works for the friend | worthless to them |
+
+**Stripe cannot cap a shared code per customer**, and the reason is exactly the anonymity: a promotion code
+has one `max_redemptions` counter and no idea who is holding it. Everyone presenting it is the same unknown
+buyer. There is nothing to count *per customer* because there is no customer yet. That is why the field has
+never worked and never could, and why disabling it was the honest fix rather than a deferral.
+
+**The cap is OPTIONAL** (author, 2026-09-22). A tenant need not set `max_redemptions` at all; a targeted
+coupon with no cap is still safe, because it is bound to one customer either way. The cap exists for the
+loss-leader case — where even that one customer using it repeatedly would cost real money — not as
+something every targeted coupon must carry. Do not make it required in the editor, and do not default it to
+a number: an unset cap means "as often as they like", which is a legitimate choice.
 
 **But Stripe does exactly this from the other direction:** a Promotion Code can be scoped to one customer
 with `customer: cus_…`, and `max_redemptions` then means "how many times THAT customer may use it". So the

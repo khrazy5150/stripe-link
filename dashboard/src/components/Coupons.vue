@@ -162,9 +162,9 @@
                 <span>Max Per Customer</span>
                 <input v-model.number="form.max_redemptions_per_customer" min="1" type="number" disabled />
                   <span class="field-note">
-                    Not available on a shared code — everyone holding it looks like the same
-                    anonymous buyer to Stripe. It needs a per-customer coupon, which is coming with
-                    targeted campaigns.
+                    Not available on a shared code — everyone holding it is the same anonymous buyer
+                    until they pay, so there is no customer to count against. It belongs to targeted
+                    coupons sent to known customers, which are coming with campaigns.
                   </span>
               </label>
             </div>
