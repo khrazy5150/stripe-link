@@ -394,7 +394,41 @@ def start_experiment(event, repository, pages, now_fn, mode="test", sites=None):
     # "stop, edit, restart" would be the way around the shape freeze above.
     experiment["stats"] = {"views_by_page": {}}
     saved = repository.put(experiment)
+
+    # Re-render the variants, and only AFTER the experiment is saved as running -- `identity_page_id` keys
+    # off a RUNNING experiment, so a re-render ordered before this line would resolve nothing and change
+    # nothing.
+    #
+    # A2 applies at publish time, but the order a tenant actually works in is build the variant, publish
+    # it, THEN start the test. So the artifact was rendered while the experiment did not yet exist and it
+    # baked its OWN identity: an interim canonical pointing at the raw artifact URL, and -- on a live
+    # custom domain -- noindex, because an unattached page is not on a custom domain. Served behind the
+    # tested page's URL that de-indexes the very page the test exists to improve. Found in QA on dev
+    # 2026-09-21, where test-mode noindex hid half of it.
+    _rerender_variants(tenant_id, experiment, pages, now)
     return json_response({"experiment": with_short_url(saved)})
+
+
+def _rerender_variants(tenant_id, experiment, pages_repo, now):
+    """Re-put each non-control variant page so the publish stream re-renders it with the tested page's
+    identity (plans/AB_TESTING.md A2).
+
+    Best-effort per page: a variant that cannot be re-rendered keeps its previous artifact, which is the
+    state it was already in. Failing the START over it would be worse -- the tenant would be blocked from
+    testing by a transient write, and the artifacts are still servable.
+    """
+    control_page_id = str(experiment.get("control_page_id") or "")
+    for variant in experiment.get("variants") or []:
+        page_id = str(variant.get("page_id") or "")
+        if not page_id or page_id == control_page_id:
+            continue
+        try:
+            page = pages_repo.get(tenant_id, page_id) if pages_repo else None
+            if page:
+                page["updated_at"] = int(now)
+                pages_repo.put(page)  # a MODIFY fires page_publish, which re-runs publish_page_document
+        except Exception:  # noqa: BLE001 - the artifact it already has is still servable
+            continue
 
 
 def set_status(event, repository, experiment_id, status, now_fn):

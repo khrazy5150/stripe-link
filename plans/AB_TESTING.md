@@ -292,6 +292,18 @@ disagrees with their analytics.
   **Still open:** the workflow itself. A tenant must duplicate a page, then know to detach the duplicate,
   before a test can start. A "test a variant of this page" action that duplicates and leaves it unattached
   would remove the step nobody guesses.
+- **A7 — starting a test must RE-RENDER its variants (found in QA, fixed 2026-09-21).** A2 applies at
+  publish time, and the order a tenant actually works in is: build the variant, publish it, *then* start
+  the test. So the artifact was rendered while the experiment did not yet exist, `identity_page_id` had
+  nothing to resolve, and the variant baked its OWN identity — an interim canonical pointing at the raw
+  artifact URL and, on a live custom domain, `noindex` (an unattached page is not on a custom domain).
+  Served behind the tested page's URL, that is the de-indexing trap this whole phase exists to prevent.
+  Caught on dev only because test-mode pages are noindex anyway, which hid half of it.
+  `start_experiment` now re-puts each non-control variant so the publish stream re-renders it — **after**
+  the experiment is saved as `running`, since `identity_page_id` keys off a running experiment and a
+  re-render ordered before that would resolve nothing. Best-effort per page: a variant that cannot be
+  re-put keeps the artifact it already had, which beats blocking the start over a transient write.
+  Needs Crud on PagesTable (was Read).
 - **A4 — prove it.** Two real pages, a real split, a real conversion. Nothing here has ever run.
   **Unblocked 2026-09-21:** the screen was live-mode only (`menu.js`, `environments: ["live"]`), which made
   proving it require real money. It is now offered in TEST mode too. Safe because isolation is structural —

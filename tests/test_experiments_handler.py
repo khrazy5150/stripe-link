@@ -366,6 +366,64 @@ class VariantsMayNotHaveTheirOwnUrlTests(ExperimentsFixture, unittest.TestCase):
         self.assertEqual(self._start()["statusCode"], 200)
 
 
+class StartingRerendersVariantsTests(ExperimentsFixture, unittest.TestCase):
+    """A2 applies at publish time, but tenants publish the variant BEFORE starting the test.
+
+    Found in QA on dev 2026-09-21: the variant's artifact carried an interim canonical pointing at the raw
+    artifact URL, because it was rendered while the experiment did not yet exist and nothing re-rendered
+    it. On a live custom domain the same ordering also bakes noindex into the page served behind the tested
+    URL.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.sites = FakeDocumentRepository("site_id")
+        self.pages.put({"tenant_id": "tenant_demo", "page_id": "page_control",
+                        "status": "published", "updated_at": 1})
+        self.pages.put({"tenant_id": "tenant_demo", "page_id": "page_b",
+                        "status": "published", "updated_at": 1})
+
+    def _start(self, pages=None):
+        return experiments_handler(
+            event("POST", tenant_id="tenant_demo", experiment_id="exp_1", action="start"),
+            None, repository=self.experiments, pages=self.pages if pages is None else pages,
+            sites=self.sites, now_fn=lambda: 1781240000,
+        )
+
+    def test_the_variant_is_re_put_so_the_publish_stream_re_renders_it(self):
+        self.create()
+        self._start()
+        self.assertEqual(self.pages.get("tenant_demo", "page_b")["updated_at"], 1781240000)
+
+    def test_the_control_is_left_alone(self):
+        # It already has the identity every variant is being given; re-rendering it is pure churn.
+        self.create()
+        self._start()
+        self.assertEqual(self.pages.get("tenant_demo", "page_control")["updated_at"], 1)
+
+    def test_it_happens_only_once_the_experiment_is_RUNNING(self):
+        # identity_page_id keys off a running experiment, so a re-render ordered before the save would
+        # resolve nothing and change nothing. Proven by the state the stream would observe.
+        self.create()
+        self._start()
+        self.assertEqual(self.experiments.get("tenant_demo", "exp_1")["status"], "running")
+
+    def test_a_variant_that_cannot_be_re_put_does_not_block_the_start(self):
+        class HalfBroken(FakeDocumentRepository):
+            def put(self, document):
+                if document.get("page_id") == "page_b":
+                    raise RuntimeError("pages table is unavailable")
+                return super().put(document)
+
+        broken = HalfBroken("page_id")
+        broken.put({"tenant_id": "tenant_demo", "page_id": "page_control", "status": "published"})
+        broken.documents[("tenant_demo", "page_b")] = {
+            "tenant_id": "tenant_demo", "page_id": "page_b", "status": "published"}
+        self.create()
+        self.assertEqual(self._start(pages=broken)["statusCode"], 200)
+        self.assertEqual(self.experiments.get("tenant_demo", "exp_1")["status"], "running")
+
+
 class PromotionMovesTheRouteTests(ExperimentsFixture, unittest.TestCase):
     """A5: the route is the durable identity; the page behind it is swappable."""
 

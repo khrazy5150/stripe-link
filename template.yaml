@@ -2756,7 +2756,10 @@ Resources:
             TableName: !Ref ExperimentsTable
         - DynamoDBCrudPolicy:
             TableName: !Ref RoutesTable
-        - DynamoDBReadPolicy:
+        # Starting a test re-puts each variant page so the publish stream re-renders it with the TESTED
+        # page's canonical and robots (A2). Without the write the artifact keeps the identity it was
+        # published with, which on a live custom domain is noindex -- served behind the tested URL.
+        - DynamoDBCrudPolicy:
             TableName: !Ref PagesTable
         # Starting a test checks that no variant has a public address of its own, which would compete in
         # search with the page being tested (Option A); completing one MOVES the tested slug to the winner
