@@ -95,6 +95,33 @@ class RecordShapeTests(unittest.TestCase):
         self.assertEqual(invoice_subscription_metadata(_invoice()), {})
 
 
+class IndexedAttributeTests(unittest.TestCase):
+    """No empty string may reach a GSI key.
+
+    `payment_intent_id` indexes PaymentIntentIndex on the orders table, and DynamoDB rejects an empty
+    string for an indexed attribute -- the whole PutItem fails. A subscription cycle invoice does not
+    always carry a payment_intent, and writing "" took down every renewal on prod (2026-09-22): the handler
+    500'd, the dedup row was never written, and Stripe retried the same failure forever.
+    """
+
+    INDEXED = ("payment_intent_id",)
+
+    def test_a_missing_payment_intent_is_omitted_not_empty(self):
+        record = order_record_from_invoice(_invoice(payment_intent=None), "t1", 100, {})
+        for key in self.INDEXED:
+            self.assertNotIn(key, record, f"{key} indexes a GSI and must be absent rather than empty")
+
+    def test_a_present_payment_intent_is_kept(self):
+        record = order_record_from_invoice(_invoice(), "t1", 100, {})
+        self.assertEqual(record["payment_intent_id"], "pi_1")
+
+    def test_no_indexed_attribute_is_ever_an_empty_string(self):
+        for invoice in (_invoice(payment_intent=None), _invoice(payment_intent=""), _invoice()):
+            record = order_record_from_invoice(invoice, "t1", 100, {})
+            for key in self.INDEXED:
+                self.assertNotEqual(record.get(key, None), "", f"{key} must never be an empty string")
+
+
 class PersistTests(unittest.TestCase):
     def _persist(self, invoice=None, **kw):
         self.orders, self.notifications, self.ledger = Repo(), Repo(), Repo()

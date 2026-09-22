@@ -1737,7 +1737,7 @@ def order_record_from_invoice(invoice: dict[str, Any], tenant_id: str, now: int,
     amount = int(invoice.get("amount_paid") or invoice.get("amount_due") or 0)
     email = str(invoice.get("customer_email") or "")
     phone = str(invoice.get("customer_phone") or "")
-    return {
+    record = {
         "tenant_id": tenant_id,
         "order_id": f"order_{invoice_id}",
         "schema_version": "2026-05-29",
@@ -1753,7 +1753,6 @@ def order_record_from_invoice(invoice: dict[str, Any], tenant_id: str, now: int,
         "status": "paid",
         "amount_total": amount,
         "currency": str(invoice.get("currency") or "usd"),
-        "payment_intent_id": str(invoice.get("payment_intent") or ""),
         "mode": "live" if invoice.get("livemode") else "test",
         "stripe_mode": "live" if invoice.get("livemode") else "test",
         "customer": {
@@ -1769,6 +1768,15 @@ def order_record_from_invoice(invoice: dict[str, Any], tenant_id: str, now: int,
         "created_at": int(invoice.get("created") or now),
         "updated_at": now,
     }
+    # payment_intent_id is a GSI KEY (PaymentIntentIndex), and DynamoDB refuses an empty string for one --
+    # the whole PutItem fails with ValidationException. A subscription cycle invoice does not always carry
+    # a payment_intent, so this must be OMITTED rather than written as "". Setting it blindly took down
+    # every renewal on prod (found 2026-09-22): the handler 500'd, the dedup row was never written, and
+    # Stripe retried the same failure forever.
+    payment_intent = str(invoice.get("payment_intent") or "").strip()
+    if payment_intent:
+        record["payment_intent_id"] = payment_intent
+    return record
 
 
 def order_record_from_session(session: dict[str, Any], tenant_id: str, now: int, fees: dict[str, Any], line_items: list[dict[str, Any]] | None = None) -> dict[str, Any]:
