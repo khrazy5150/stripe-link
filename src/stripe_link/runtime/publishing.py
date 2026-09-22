@@ -109,7 +109,11 @@ def identity_page_id(tenant_id: str, page_id: str, experiments_repository: Any |
         if not experiment:
             return page_id
         return str(experiment.get("control_page_id") or "") or page_id
-    except Exception:  # noqa: BLE001 - publishing matters more than experiment-aware SEO
+    except Exception as exc:  # noqa: BLE001 - publishing matters more than experiment-aware SEO
+        # Logged, not swallowed. This fallback is indistinguishable from "not a variant", so a broken
+        # lookup silently produces an artifact with the WRONG canonical -- and on a live custom domain,
+        # noindex on the page being tested. A missing grant or a bad read must be visible.
+        print(f"experiment identity lookup failed for {page_id}: {type(exc).__name__}: {exc}")
         return page_id
 
 
@@ -1102,9 +1106,21 @@ def publish_page_document(
     validate_page_document(page)
     tenant_id = str(page.get("tenant_id") or "")
     page_id = str(page.get("page_id") or "")
+    # A2: a variant of a running experiment borrows the TESTED page's identity, and that has to start HERE,
+    # with which Site we look in. A variant is required to be unattached while it is tested (Option A), so
+    # resolving the Site from the variant's own page_id finds nothing at all -- no Site, no slug, and the
+    # artifact falls back to its interim identity: a canonical pointing at the raw artifact URL and, on a
+    # live custom domain, noindex. Substituting only the slug lookups further down is not enough, because
+    # by then `site` is already None. Found in QA 2026-09-21, after the slug-level substitution alone
+    # silently changed nothing.
+    #
+    # The Site that owns the CONTROL is also the right one for everything else this function does with it:
+    # an inline funnel on the variant must attach to the Site the visitor is actually on, and the
+    # Organization graph and storefront chrome belong to the tested page's Site.
+    seo_identity_page_id = identity_page_id(tenant_id, page_id, experiments_repository)
     # The Site supplies the page's public identity (Organization for the entity graph). Optional: legacy pages
     # without a Site still publish, falling back to the interim identity (plans/SITE_OBJECT.md §2.2).
-    site = find_site_for_page(sites_repository, tenant_id, page_id)
+    site = find_site_for_page(sites_repository, tenant_id, seo_identity_page_id)
     # A catalog_grid (including a collection-embed) resolves its cards from the Site route map BEFORE offers
     # load, so the referenced offers get bundled by load_render_context (plans/SITE_OBJECT.md §2.5b Slice 2,
     # plans/SITE_COLLECTIONS.md P1). Collections referenced by the page are loaded here.
@@ -1213,9 +1229,8 @@ def publish_page_document(
     # gets index,follow; everything on platform infrastructure stays noindex (plans/SITE_OBJECT.md §2.2,
     # TP-08, SEO-02). Eligibility is recomputed on the account.updated webhook and stored on the Site.
     page_id = str(page.get("page_id") or "")
-    # A2: a variant borrows the tested page's identity. One substitution — page_type, slug, canonical,
-    # robots and home_url all flow from it.
-    seo_identity_page_id = identity_page_id(tenant_id, page_id, experiments_repository)
+    # `seo_identity_page_id` was resolved before the Site lookup above -- page_type, slug, canonical, robots
+    # and home_url all flow from it.
     page_type = site_page_type(site, seo_identity_page_id)
     # Canonical + indexing switch to the Site's verified custom domain for any page actually served there —
     # every page with a slug in the Site's route map, at its own slug (homepage at "/", funnel/collection

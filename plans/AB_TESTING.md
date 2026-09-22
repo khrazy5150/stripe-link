@@ -304,6 +304,15 @@ disagrees with their analytics.
   re-render ordered before that would resolve nothing. Best-effort per page: a variant that cannot be
   re-put keeps the artifact it already had, which beats blocking the start over a transient write.
   Needs Crud on PagesTable (was Read).
+  **A7b — and the substitution had to start at the SITE lookup (found in QA the same day).** Re-rendering
+  alone changed nothing, because `publish_page_document` resolved the Site from the VARIANT's page_id —
+  and a variant is required to be unattached (Option A), so it found no Site at all. Every substitution
+  further down then operated on `site = None` and the artifact fell back to its interim identity anyway.
+  `identity_page_id` now runs BEFORE `find_site_for_page`, which is also correct for everything else that
+  Site is used for: an inline funnel on the variant must attach where the visitor actually is, and the
+  Organization graph and chrome belong to the tested page's Site. The swallowed exception in
+  `identity_page_id` now logs, because "lookup broke" and "not a variant" were indistinguishable — which
+  is what made this take three passes to find.
 - **A8 — the view ping was looking in the wrong mode (found in QA, fixed 2026-09-21).** Every experiment
   read zero views however much traffic it got. `experiments_view` built its repo with
   `experiments_repository()` — no mode — while the experiment had been written mode-scoped. This table is
