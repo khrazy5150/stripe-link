@@ -1196,6 +1196,16 @@
                           </label>
                         </div>
                         <label class="offer-field">
+                          <span>Applies</span>
+                          <select v-model="newCoupon.duration">
+                            <option value="once">Once — a single purchase</option>
+                            <option value="forever">Every time — including every renewal</option>
+                          </select>
+                          <span class="field-note">
+                            On a subscription, “every time” discounts every renewal for as long as it runs.
+                          </span>
+                        </label>
+                        <label class="offer-field">
                           <span>Expires on</span>
                           <input v-model="newCoupon.expires_on" type="date" />
                         </label>
@@ -3707,7 +3717,12 @@ function openInlineSiteCreate() {
 // published page keeps the coupon it was published with even if the coupon is edited afterwards.
 const couponCreateFor = ref("");
 const couponError = ref("");
-const newCoupon = reactive({ code: "", discount_type: "percent", value: 10, expires_on: "" });
+// Every field buildCouponDocument reads WITHOUT a fallback has to be here. `duration` was missing on
+// the first pass and the API refused the coupon with "discount.duration must be a non-empty string"
+// -- the two places have to agree, and nothing but a test forces them to.
+const newCoupon = reactive({
+  code: "", discount_type: "percent", value: 10, duration: "once", expires_on: "",
+});
 
 // Lazily, like the page list: a tenant who never touches a coupon element never pays for the request.
 async function ensureCouponsLoaded() {

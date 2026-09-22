@@ -213,3 +213,43 @@ class BuilderEditorTests(unittest.TestCase):
 
     def test_coupons_load_lazily(self):
         self.assertIn("ensureCouponsLoaded", self.BUILDER)
+
+
+class InlineCouponFormCompletenessTests(unittest.TestCase):
+    """The builder's inline form must supply every field a coupon cannot be validated without.
+
+    Found in QA 2026-09-22: the form omitted `duration`, so `buildCouponDocument` produced
+    `discount.duration: undefined` and the API refused with "discount.duration must be a non-empty string".
+    The builder guards above are source-greps and could not see it — they check the wiring EXISTS, not that
+    the payload is complete.
+
+    The list is explicit rather than inferred. A first attempt derived "required" from the shape of the JS
+    and got it wrong (`Boolean(form.first_time_only)` reads like an unguarded call), and a test that is
+    clever and wrong is worse than one that is plain and right. These four are the fields
+    `validate_coupon_document` rejects a coupon for lacking and that only the form can supply — everything
+    else it reads either has a fallback in `buildCouponDocument` or is generated there.
+    """
+
+    import pathlib as _pathlib
+    import re as _re
+    ROOT = _pathlib.Path(__file__).resolve().parents[1]
+    BUILDER = (ROOT / "dashboard/src/components/LandingPages.vue").read_text(encoding="utf-8")
+
+    REQUIRED = ("code", "discount_type", "value", "duration")
+
+    def _inline_form_fields(self):
+        block = self.BUILDER.split("const newCoupon = reactive(", 1)[1].split("});", 1)[0]
+        return set(self._re.findall(r"(\w+):", block))
+
+    def test_the_form_supplies_every_required_field(self):
+        supplied = self._inline_form_fields()
+        missing = [field for field in self.REQUIRED if field not in supplied]
+        self.assertEqual(missing, [], f"the inline coupon form is missing: {missing}")
+
+    def test_duration_specifically(self):
+        # The one that actually broke, named so a regression says what it is rather than "a field".
+        self.assertIn("duration", self._inline_form_fields())
+
+    def test_the_tenant_chooses_the_duration_rather_than_inheriting_a_guess(self):
+        # "every renewal" vs "once" is a materially different promise on a subscription.
+        self.assertIn('v-model="newCoupon.duration"', self.BUILDER)
