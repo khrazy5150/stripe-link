@@ -55,15 +55,15 @@ def handler(
             gate = require_capability(event, "ab_testing", tenant_repo)
             if gate is not None:
                 return gate
-            return create_experiment(event, repository, routes, now_fn, id_fn, code_fn, mode=mode)
+            return create_experiment(event, repository, routes, now_fn, id_fn, code_fn, mode=mode, sites=sites)
         if method == "PUT" and experiment_id and not action:
-            return update_experiment(event, repository, experiment_id, now_fn)
+            return update_experiment(event, repository, experiment_id, now_fn, sites=sites, mode=mode)
         if method == "DELETE" and experiment_id and not action:
             return delete_experiment(event, repository, routes, experiment_id)
         if method == "POST" and experiment_id and action == "start":
             return start_experiment(event, repository, pages, now_fn, mode=mode, sites=sites)
         if method == "POST" and experiment_id and action == "pause":
-            return set_status(event, repository, experiment_id, "paused", now_fn)
+            return set_status(event, repository, experiment_id, "paused", now_fn, sites=sites, mode=mode)
         if method == "POST" and experiment_id and action == "complete":
             return complete_experiment(event, repository, experiment_id, now_fn, sites=sites, mode=mode)
     except RepositoryError as exc:
@@ -85,6 +85,23 @@ def with_short_url(experiment):
     return {**experiment, "short_url": short_url_for_code(experiment.get("short_code", ""))}
 
 
+def with_links(experiment, tenant_id, sites=None, mode="test"):
+    """An experiment as the dashboard should receive it, from EVERY endpoint that returns one.
+
+    `control_url` used to be added only by the list and get handlers, so every mutation response (pause,
+    start, complete, update) came back without it — and since the screen replaces its cached experiment
+    with the response, the address vanished until the next full reload. One enrichment, so a new endpoint
+    cannot reintroduce that by forgetting.
+
+    The address does NOT depend on the experiment's status: it is the control page's own public URL, which
+    keeps serving the control whether the test is running, paused or finished.
+    """
+    enriched = with_short_url(experiment)
+    sites = sites or (sites_repository(mode=mode) if os.environ.get("SITES_TABLE") else None)
+    enriched["control_url"] = control_url(tenant_id, experiment.get("control_page_id"), sites)
+    return enriched
+
+
 def _load(repository, tenant_id, experiment_id):
     experiment = repository.get(tenant_id, experiment_id)
     if not experiment:
@@ -100,7 +117,7 @@ def list_experiments(event, repository, sites=None, mode="test"):
     experiments.sort(key=lambda item: int(item.get("created_at") or 0), reverse=True)
     # The control's own URL is where a visitor enters the test -- there is no separate test link any more
     # (A1c), so without this the screen shows a running experiment and no way to go and look at it. Sites
-    # are read once for the whole listing rather than per experiment.
+    # are read once for the whole listing, and the URL cached per control page, rather than per experiment.
     sites = sites or (sites_repository(mode=mode) if os.environ.get("SITES_TABLE") else None)
     cache = {}
     for item in experiments:
@@ -127,12 +144,7 @@ def get_experiment(event, repository, experiment_id, orders, mode="test", now_fn
     comparisons = summarize(
         results, experiment.get("control_page_id"), days_elapsed=_days_elapsed(experiment, now_fn),
     )
-    enriched = with_short_url(experiment)
-    enriched["control_url"] = control_url(
-        tenant_id,
-        experiment.get("control_page_id"),
-        sites or (sites_repository(mode=mode) if os.environ.get("SITES_TABLE") else None),
-    )
+    enriched = with_links(experiment, tenant_id, sites, mode)
     return json_response({
         "experiment": enriched, "results": results, "comparisons": comparisons,
     })
@@ -260,7 +272,7 @@ def _variant_fingerprint(variants):
     ]
 
 
-def create_experiment(event, repository, routes, now_fn, id_fn, code_fn, mode="test"):
+def create_experiment(event, repository, routes, now_fn, id_fn, code_fn, mode="test", sites=None):
     tenant_id = tenant_id_from_event(event)
     if not tenant_id:
         return error_response("tenant_id is required.", code="missing_tenant")
@@ -308,7 +320,7 @@ def create_experiment(event, repository, routes, now_fn, id_fn, code_fn, mode="t
         if short_code:
             routes.delete(tenant_id, short_code)
         return error_response(str(exc), code="invalid_experiment")
-    return json_response({"experiment": with_short_url(saved)}, status_code=201)
+    return json_response({"experiment": with_links(saved, tenant_id, sites, mode)}, status_code=201)
 
 
 def _allocate_experiment_id(repository, id_fn):
@@ -339,7 +351,7 @@ def _allocate_experiment_route(routes, tenant_id, experiment_id, code_fn):
     return short_code
 
 
-def update_experiment(event, repository, experiment_id, now_fn):
+def update_experiment(event, repository, experiment_id, now_fn, sites=None, mode="test"):
     tenant_id = tenant_id_from_event(event)
     if not tenant_id:
         return error_response("tenant_id is required.", code="missing_tenant")
@@ -388,7 +400,7 @@ def update_experiment(event, repository, experiment_id, now_fn):
         saved = repository.put(experiment)
     except (DocumentValidationError, ValueError) as exc:
         return error_response(str(exc), code="invalid_experiment")
-    return json_response({"experiment": with_short_url(saved)})
+    return json_response({"experiment": with_links(saved, tenant_id, sites, mode)})
 
 
 def start_experiment(event, repository, pages, now_fn, mode="test", sites=None):
@@ -450,7 +462,7 @@ def start_experiment(event, repository, pages, now_fn, mode="test", sites=None):
     # tested page's URL that de-indexes the very page the test exists to improve. Found in QA on dev
     # 2026-09-21, where test-mode noindex hid half of it.
     _rerender_variants(tenant_id, experiment, pages, now)
-    return json_response({"experiment": with_short_url(saved)})
+    return json_response({"experiment": with_links(saved, tenant_id, sites, mode)})
 
 
 def _rerender_variants(tenant_id, experiment, pages_repo, now):
@@ -475,7 +487,7 @@ def _rerender_variants(tenant_id, experiment, pages_repo, now):
             continue
 
 
-def set_status(event, repository, experiment_id, status, now_fn):
+def set_status(event, repository, experiment_id, status, now_fn, sites=None, mode="test"):
     tenant_id = tenant_id_from_event(event)
     if not tenant_id:
         return error_response("tenant_id is required.", code="missing_tenant")
@@ -485,7 +497,7 @@ def set_status(event, repository, experiment_id, status, now_fn):
     experiment["status"] = status
     experiment["updated_at"] = int(now_fn())
     saved = repository.put(experiment)
-    return json_response({"experiment": with_short_url(saved)})
+    return json_response({"experiment": with_links(saved, tenant_id, sites, mode)})
 
 
 def complete_experiment(event, repository, experiment_id, now_fn, sites=None, mode="test"):
@@ -517,7 +529,7 @@ def complete_experiment(event, repository, experiment_id, now_fn, sites=None, mo
     # Durable, so the screen can say what actually happened instead of asserting it.
     experiment["promotion"] = promotion
     saved = repository.put(experiment)
-    return json_response({"experiment": with_short_url(saved)})
+    return json_response({"experiment": with_links(saved, tenant_id, sites, mode)})
 
 
 def _promote_winner(tenant_id, experiment, winner_page_id, sites, mode="test"):

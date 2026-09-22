@@ -476,6 +476,41 @@ class ControlUrlTests(ExperimentsFixture, unittest.TestCase):
         # A real answer, not a failure: the screen says the page has no address to test on.
         self.assertEqual(self._listed()["control_url"], "")
 
+    def test_EVERY_endpoint_returns_the_url_not_just_the_listing(self):
+        """The screen replaces its cached experiment with whatever a mutation returns, so an endpoint that
+        omits control_url makes the address vanish until a full page reload. Found in QA 2026-09-21:
+        pause/resume dropped it."""
+        self.sites.put({
+            "tenant_id": "tenant_demo", "site_id": "s1",
+            "hosting": {"platform_hostname": "shop-test.jbay.be"},
+            "pages": {"/offer": {"page_id": "page_control"}},
+        })
+        self.pages.put({"tenant_id": "tenant_demo", "page_id": "page_control", "status": "published"})
+        self.pages.put({"tenant_id": "tenant_demo", "page_id": "page_b", "status": "published"})
+
+        def body_of(response):
+            return json.loads(response["body"])["experiment"]
+
+        with unittest.mock.patch.dict(os.environ, {"PLATFORM_SERVING_ENABLED": "true"}):
+            expected = "https://shop-test.jbay.be/offer"
+            for action, kwargs in (
+                ("start", {"pages": self.pages}),
+                ("pause", {}),
+                ("start", {"pages": self.pages}),
+            ):
+                response = experiments_handler(
+                    event("POST", tenant_id="tenant_demo", experiment_id="exp_1", action=action),
+                    None, repository=self.experiments, sites=self.sites, now_fn=lambda: 1781240000,
+                    **kwargs,
+                )
+                self.assertEqual(body_of(response).get("control_url"), expected, action)
+
+            renamed = experiments_handler(
+                event("PUT", tenant_id="tenant_demo", experiment_id="exp_1", body={"name": "Renamed"}),
+                None, repository=self.experiments, sites=self.sites, now_fn=lambda: 1781250000,
+            )
+            self.assertEqual(body_of(renamed).get("control_url"), expected)
+
     def test_an_unreadable_sites_table_does_not_break_the_listing(self):
         class Exploding:
             def list_for_tenant(self, tenant_id):
