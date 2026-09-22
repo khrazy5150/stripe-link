@@ -11,7 +11,11 @@ disabled or used up afterwards. Checkout is the only place that can tell them.
 import time
 import unittest
 
-from handlers.checkout import CouponUnavailable, resolve_campaign_promotion_code
+from handlers.checkout import (
+    CouponUnavailable,
+    coupon_covers_offer,
+    resolve_campaign_promotion_code,
+)
 
 
 class Repo:
@@ -110,3 +114,36 @@ class HandlerResponseTests(unittest.TestCase):
         # Gone: it existed and does not any more, which is exactly what happened.
         block = self.ARM
         self.assertIn("410", block)
+
+
+class OfferEligibilityTests(unittest.TestCase):
+    """`applies_to_offer_ids` was stored and validated from the day the module was written, and read by
+    nothing — so a coupon scoped to one offer worked on every offer.
+
+    This is ELIGIBILITY (may this code be used here), NOT which products in a cart get discounted. Stripe's
+    applies_to.products is the mechanism for that, and it silently ignored both documented syntaxes when
+    tested against a live connected account on 2026-09-22 — accepted, then `applies_to: null` on create and
+    on retrieve. Product-level scoping is therefore left unbuilt rather than half-trusted.
+    """
+
+    def test_an_unscoped_coupon_covers_every_offer(self):
+        # What every coupon created so far carries, so this is the path that must not change.
+        self.assertTrue(coupon_covers_offer({"applies_to_offer_ids": []}, "offer_1"))
+        self.assertTrue(coupon_covers_offer({}, "offer_1"))
+
+    def test_a_scoped_coupon_covers_the_offer_it_names(self):
+        self.assertTrue(coupon_covers_offer({"applies_to_offer_ids": ["offer_1", "offer_2"]}, "offer_2"))
+
+    def test_a_scoped_coupon_does_not_cover_another_offer(self):
+        self.assertFalse(coupon_covers_offer({"applies_to_offer_ids": ["offer_1"]}, "offer_9"))
+
+    def test_checkout_refuses_rather_than_charging_full_price(self):
+        repo = Repo([_coupon(applies_to_offer_ids=["offer_other"])])
+        with self.assertRaises(CouponUnavailable):
+            resolve_campaign_promotion_code("MASSAGE20", "t1", "test", repo, offer_id="offer_1")
+
+    def test_it_applies_on_the_offer_it_was_scoped_to(self):
+        repo = Repo([_coupon(applies_to_offer_ids=["offer_1"])])
+        self.assertEqual(
+            resolve_campaign_promotion_code("MASSAGE20", "t1", "test", repo, offer_id="offer_1"),
+            "promo_live_1")

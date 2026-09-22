@@ -129,9 +129,36 @@ Recorded because silently dropping them would be worse than not offering them:
   a code was asked for and cannot be honoured it raises `CouponUnavailable`, and a browser gets the branded
   "this offer is no longer available — you can still buy at the regular price" page with a 410. Seven ways
   to be unhonourable are covered, every one of which previously fell through to full price.
-- **C4 — the unenforceable fields: PARTLY DONE 2026-09-22.** `max_redemptions_per_customer` is disabled in
-  the editor with the reason shown, rather than collected and ignored. `applies_to_offer_ids` is still
-  stored and unread — decide it next. The real answer to the per-customer cap is C5.
+- **C4 — the unenforceable fields: DONE 2026-09-22.** `max_redemptions_per_customer` is disabled in the
+  editor with the reason shown, rather than collected and ignored — the real answer to it is C5.
+  `applies_to_offer_ids` is now ENFORCED at checkout: a coupon scoped to offers is refused on any other
+  offer, the same way an expired one is. An empty list still means "any offer", which is what every coupon
+  created so far carries, so nothing existing changes behaviour.
+
+### Eligibility is not the same question as product scoping
+
+Two different questions that `applies_to` blurs, worth keeping apart:
+
+- **Eligibility** — *may this code be used on this offer at all?* App-side, because we know the offer.
+  This is what `applies_to_offer_ids` means and what C4 implements.
+- **Product scoping** — *which lines in a multi-product cart get the discount?* The grocery-store case: a
+  bundle where only some items qualify (author, 2026-09-22). Stripe's `Coupon.applies_to.products` is the
+  mechanism for this.
+
+**Do not reach for `applies_to.products` without re-testing it.** Probed against a live connected account
+on 2026-09-22 with `Stripe-Version: 2024-06-20`: both `applies_to[products][0]` and `applies_to[products][]`
+were **accepted without error and then ignored** — `applies_to: null` on the create response AND on a
+subsequent retrieve. Silently doing nothing is the worst available failure: the coupon would look scoped
+and discount everything.
+
+So product-level scoping is deliberately **not built**. The options, when it is wanted:
+
+1. Re-test `applies_to` on a newer API version or a differently-configured account; adopt only if it echoes
+   back what was sent.
+2. Compute it ourselves: sum the qualifying line items and express the discount as a per-session
+   `amount_off`. This works with no Stripe scoping at all, but it means a coupon object per checkout rather
+   than per tenant — which collides with the immutability model in C2, so it is a real design change and
+   not a patch.
 
 ## C5 — targeted coupons (the win-back case)
 

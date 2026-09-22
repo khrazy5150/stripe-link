@@ -52,7 +52,26 @@ class CouponUnavailable(RuntimeError):
     """The page promised a discount this checkout cannot apply."""
 
 
-def resolve_campaign_promotion_code(code, tenant_id, mode, coupons_repo=None):
+def coupon_covers_offer(coupon: dict, offer_id: str) -> bool:
+    """Whether this coupon may be used on this offer.
+
+    `applies_to_offer_ids` has been stored and validated since the module was written and read by NOTHING,
+    so a coupon scoped to one offer worked on every offer (found 2026-09-22). An empty list means "any
+    offer", which is what every coupon created so far carries.
+
+    This is ELIGIBILITY -- may this code be used here at all -- and not the same question as which PRODUCTS
+    within a cart get discounted. Stripe's `applies_to.products` is the mechanism for the latter, and it
+    silently ignored both documented syntaxes when tested against a live connected account on 2026-09-22:
+    accepted, then `applies_to: null` on create and on retrieve. Relying on it would mean believing a
+    scoping that is not happening, so product-level discounting is deliberately NOT attempted here.
+    """
+    scoped = coupon.get("applies_to_offer_ids") or []
+    if not scoped:
+        return True
+    return str(offer_id or "") in {str(item) for item in scoped}
+
+
+def resolve_campaign_promotion_code(code, tenant_id, mode, coupons_repo=None, offer_id=""):
     """The Stripe promotion-code id for a campaign coupon. "" when no coupon was asked for at all.
 
     Resolved from the CODE against the tenant's own record, because that record is what says whether the
@@ -84,6 +103,10 @@ def resolve_campaign_promotion_code(code, tenant_id, mode, coupons_repo=None):
             if str(coupon.get("code") or "").strip().upper() != code:
                 continue
             if not coupon_is_usable(coupon, now):
+                raise CouponUnavailable(code)
+            # Refused the same way as expired: the visitor is told the offer is not available here, rather
+            # than being charged full price by a coupon that silently did not apply.
+            if not coupon_covers_offer(coupon, offer_id):
                 raise CouponUnavailable(code)
             promo_id = str(coupon.get("stripe_promo_code_id") or "")
             if not promo_id:
@@ -429,7 +452,9 @@ def build_checkout_payload(
     # Stripe REFUSES `discounts` and `allow_promotion_codes` together, so a pre-applied coupon wins and the
     # manual field is dropped for that one checkout. That is the right way round: the buyer already has a
     # better code than anything they would type.
-    applied_promotion_code = resolve_campaign_promotion_code(coupon_code, tenant_id, mode, coupons_repo)
+    applied_promotion_code = resolve_campaign_promotion_code(
+        coupon_code, tenant_id, mode, coupons_repo, offer_id=str((offer or {}).get('offer_id') or ''),
+    )
     if applied_promotion_code:
         payload["discounts[0][promotion_code]"] = applied_promotion_code
     elif checkout.get("allow_promotion_codes") is True:
