@@ -43,6 +43,7 @@ export const useAbTestingStore = defineStore("abTesting", {
   state: () => ({
     experiments: [],
     pages: [],
+    sites: [],
     loading: false,
     loaded: false,
     saving: false,
@@ -59,6 +60,34 @@ export const useAbTestingStore = defineStore("abTesting", {
     pageName(state) {
       const byId = Object.fromEntries(state.pages.map((page) => [page.page_id, page]));
       return (pageId) => byId[pageId]?.name || pageId;
+    },
+    // page_id -> the slug it is served at, or "" when it is attached to no Site. Also the answer to "can
+    // this be a variant?" — a variant must have no public address of its own while it is being tested.
+    pageSlug(state) {
+      const byPage = {};
+      for (const site of state.sites || []) {
+        for (const [slug, entry] of Object.entries(site.pages || {})) {
+          if (entry && entry.page_id) byPage[entry.page_id] = slug;
+        }
+      }
+      return (pageId) => byPage[pageId] || "";
+    },
+    // What the picker shows. The name alone is ambiguous by construction; the address is what a tenant
+    // recognises, and the short id is the last resort for two unattached copies of the same page.
+    pageLabel(state) {
+      const byId = Object.fromEntries(state.pages.map((page) => [page.page_id, page]));
+      const byPage = {};
+      for (const site of state.sites || []) {
+        for (const [slug, entry] of Object.entries(site.pages || {})) {
+          if (entry && entry.page_id) byPage[entry.page_id] = slug;
+        }
+      }
+      return (pageId) => {
+        const name = byId[pageId]?.name || pageId;
+        const slug = byPage[pageId];
+        if (slug) return `${name} — ${slug}`;
+        return `${name} — not on a site (${String(pageId).slice(-6)})`;
+      };
     },
   },
 
@@ -78,12 +107,18 @@ export const useAbTestingStore = defineStore("abTesting", {
       this.loading = true;
       this.error = "";
       try {
-        const [experiments, pages] = await Promise.all([
+        const [experiments, pages, sites] = await Promise.all([
           apiRequest("/experiments"),
           apiRequest("/pages"),
+          // Sites, because WHERE a page is attached is the only thing that reliably tells two pages apart
+          // here. Duplicating a page is the normal way to make a variant, so identical names are the rule,
+          // and `route.slug` is no help either -- slug uniqueness is enforced when a page is attached to a
+          // Site, not on the page itself, so two duplicates genuinely carry the same one.
+          apiRequest("/sites").catch(() => ({ sites: [] })),
         ]);
         this.experiments = Array.isArray(experiments.experiments) ? experiments.experiments : [];
         this.pages = Array.isArray(pages.pages) ? pages.pages : [];
+        this.sites = Array.isArray(sites.sites) ? sites.sites : [];
         this.loaded = true;
         this.message = this.experiments.length
           ? `${this.experiments.length} experiment${this.experiments.length === 1 ? "" : "s"}.`

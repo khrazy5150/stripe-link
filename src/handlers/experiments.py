@@ -159,6 +159,16 @@ def normalize_variants(raw_variants, control_page_id):
     return variants
 
 
+def _page_name(pages_repo, tenant_id, page_id):
+    """A page's display name, falling back to its id. Best-effort: this is used to make an error message
+    legible, and a lookup failure must not replace a useful error with a different one."""
+    try:
+        page = pages_repo.get(tenant_id, page_id) if pages_repo else None
+    except Exception:  # noqa: BLE001
+        page = None
+    return str((page or {}).get("name") or page_id)
+
+
 def attached_variant_slugs(tenant_id, variants, control_page_id, sites_repo):
     """Where non-control variants are publicly routable: {page_id: slug}. Empty when none are.
 
@@ -361,11 +371,17 @@ def start_experiment(event, repository, pages, now_fn, mode="test", sites=None):
     sites = sites or (sites_repository(mode=mode) if os.environ.get("SITES_TABLE") else None)
     attached = attached_variant_slugs(tenant_id, variants, experiment.get("control_page_id"), sites)
     if attached:
-        where = ", ".join(sorted(attached.values()))
+        # Name the PAGE as well as the slug. A variant is usually a duplicate of the page being tested, so
+        # the two share a name AND a slug, and a message that says only "remove /foo" leaves the tenant
+        # guessing which of two identical-looking pages it means.
+        where = ", ".join(
+            f"“{_page_name(pages, tenant_id, page_id)}” at {slug}"
+            for page_id, slug in sorted(attached.items(), key=lambda item: item[1])
+        )
         return error_response(
             "A variant can't have a public address of its own while it's being tested — it would compete "
-            f"in search with the page you're testing. Remove {where} from the site's pages, then start the "
-            "test. The variant is still served during the test, behind the tested page's own URL.",
+            f"in search with the page you're testing. Detach {where} from its site, then start the test. "
+            "The variant is still served during the test, behind the tested page's own URL.",
             code="variant_attached",
         )
 

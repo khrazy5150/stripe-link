@@ -3,7 +3,10 @@
     <header class="page-header">
       <div>
         <h1>A/B Testing</h1>
-        <p>Split traffic across landing-page variants through one short URL and pick a winner from the results.</p>
+        <p>
+          Split traffic across versions of a page on its own URL, then pick a winner. Visitors never see a
+          different address and the winner takes over the one you tested.
+        </p>
       </div>
     </header>
 
@@ -107,7 +110,7 @@
                 <select v-model="form.control_page_id" required :disabled="shapeFrozen">
                   <option value="" disabled>Select a published page…</option>
                   <option v-for="page in store.publishedPages" :key="page.page_id" :value="page.page_id">
-                    {{ page.name || page.page_id }}
+                    {{ store.pageLabel(page.page_id) }}
                   </option>
                 </select>
               </label>
@@ -126,7 +129,10 @@
             <header class="offer-section-header">
               <div>
                 <h3>Variants</h3>
-                <p>Each variant is a published page that receives its share of traffic.</p>
+                <p>
+              Each variant is a published page that receives its share of traffic. A variant must not be on
+              a site of its own while it's tested — it's served behind the control's URL.
+            </p>
               </div>
               <button type="button" class="secondary-action" @click="addVariant" :disabled="shapeFrozen">+ Add variant</button>
             </header>
@@ -137,7 +143,7 @@
                 <select v-model="variant.page_id" required :disabled="shapeFrozen">
                   <option value="" disabled>Select a published page…</option>
                   <option v-for="page in store.publishedPages" :key="page.page_id" :value="page.page_id">
-                    {{ page.name || page.page_id }}
+                    {{ store.pageLabel(page.page_id) }}
                   </option>
                 </select>
               </label>
@@ -256,7 +262,7 @@
       @confirm="confirmRemoveExperiment"
     >
       <template v-if="pendingDelete">
-        Delete “{{ pendingDelete.name || pendingDelete.experiment_id }}”? This also removes its short URL.
+        Delete “{{ pendingDelete.name || pendingDelete.experiment_id }}”? Its results are deleted with it.
       </template>
     </ConfirmDialog>
   </section>

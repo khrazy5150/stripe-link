@@ -281,6 +281,17 @@ disagrees with their analytics.
   - **No infinite lift.** A control with a zero rate yields `lift: None` rather than a number.
   - **Elapsed time stops at completion**, so a result opened weeks later does not claim the test ran for
     weeks and dilute the rate it was actually collecting at.
+- **A6 — the picker had to name pages a tenant can tell apart (2026-09-21).** Found in QA. Duplicating a
+  page is the normal way to make a variant, so two identical names in the picker is the RULE, not an edge
+  case — and `route.slug` does not separate them either, because slug uniqueness is enforced when a page is
+  attached to a Site, not on the page itself, so duplicates genuinely share one. The picker now labels each
+  page with where it is served (`Name — /slug`, or `Name — not on a site (id)`), which disambiguates them
+  AND shows up-front which pages are eligible to be variants. Option A's refusal names the page as well as
+  the slug for the same reason. Retired the stale "one short URL" copy in the header and the delete dialog
+  while here (A1c removed that path).
+  **Still open:** the workflow itself. A tenant must duplicate a page, then know to detach the duplicate,
+  before a test can start. A "test a variant of this page" action that duplicates and leaves it unattached
+  would remove the step nobody guesses.
 - **A4 — prove it.** Two real pages, a real split, a real conversion. Nothing here has ever run.
   **Unblocked 2026-09-21:** the screen was live-mode only (`menu.js`, `environments: ["live"]`), which made
   proving it require real money. It is now offered in TEST mode too. Safe because isolation is structural —

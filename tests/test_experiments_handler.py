@@ -330,6 +330,22 @@ class VariantsMayNotHaveTheirOwnUrlTests(ExperimentsFixture, unittest.TestCase):
         self.assertIn("/offer-b", json.loads(response["body"])["message"])
         self.assertNotEqual(self.experiments.get("tenant_demo", "exp_1").get("status"), "running")
 
+    def test_the_refusal_names_the_page_not_only_the_slug(self):
+        # A variant is usually a duplicate of the tested page, so the two share a name AND a slug. Naming
+        # only the slug leaves the tenant guessing which of two identical-looking pages is meant.
+        self.pages.put({"tenant_id": "tenant_demo", "page_id": "page_b",
+                        "status": "published", "name": "Electric Scooter (v2)"})
+        self.create()
+        self._site_with({"/offer": {"page_id": "page_control"}, "/offer-b": {"page_id": "page_b"}})
+        message = json.loads(self._start()["body"])["message"]
+        self.assertIn("Electric Scooter (v2)", message)
+        self.assertIn("/offer-b", message)
+
+    def test_an_unnamed_page_falls_back_to_its_id(self):
+        self.create()
+        self._site_with({"/offer": {"page_id": "page_control"}, "/offer-b": {"page_id": "page_b"}})
+        self.assertIn("page_b", json.loads(self._start()["body"])["message"])
+
     def test_the_control_being_attached_is_normal_and_required(self):
         self.create()
         self._site_with({"/offer": {"page_id": "page_control"}})
