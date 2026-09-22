@@ -269,6 +269,31 @@ that sold it. That half is forward-looking only.
 
 **Not yet verified against a live renewal.** The next daily cycle is the test.
 
+### ⭐⭐ HIGH — the Coupons module records coupons but never creates them in Stripe (found 2026-09-22)
+
+Plan: `plans/COUPONS_COMPLETION.md`. Started long ago, parked while the pricing rework landed, and never
+recorded here — which is why it stayed invisible until the coupon element tried to use it.
+
+**Verified:** nothing in `src/` calls `POST /v1/coupons` or `POST /v1/promotion_codes`. The ids are
+synthesised in the browser (`stripe_coupon_id: ... || couponId`, `stripe_promo_code_id: ... || promo_<id>`)
+and `sync.status` is the literal string `"synced"`, written by the client — while the schema says
+*"Coupons are persisted only after Stripe sync succeeds."* The module was built to the shape of a
+Stripe-backed feature with the Stripe half left out; `allow_promotion_codes` has always been the only
+redemption path that works, and only because a code exists in Stripe that someone made by hand.
+
+**Blocks:** the coupon landing-page element (`plans/COUPON_ELEMENT.md`, on `main`, NOT deployed) pre-applies
+`discounts[0][promotion_code]`. With a placeholder id Stripe rejects the session, so a coupon page would
+fail checkout rather than merely lose its discount. Deploy that element only after C3, or make its
+pre-apply fail-safe first.
+
+**Cheapest it will ever be:** `jb-coupons-dev` and `jb-coupons-prod` both hold ZERO records, so there is no
+migration — every coupon ever created can be created under the finished design.
+
+**Two decisions already taken** (2026-09-22): a coupon is immutable until it expires, which is also Stripe's
+own constraint (`percent_off`/`amount_off`/`duration` cannot be changed after creation) — so value edits get
+refused rather than invented around; and when a page promised a discount that checkout cannot apply, checkout
+REFUSES with a clear message rather than silently charging full price.
+
 ### ⭐⭐ HIGH — the raw CloudFront artifact URL is a public page; it should be an origin (agreed 2026-09-21)
 
 Plan: `plans/ARTIFACT_ACCESS_BOUNDARY.md`. Sibling of the commerce item below; agreed architecture, not built.
