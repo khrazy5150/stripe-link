@@ -2749,6 +2749,12 @@ Resources:
       Handler: handlers.experiments.handler
       Description: Tenant A/B testing CRUD and lifecycle -- create experiments, edit variants/weights, start/pause/complete, and read per-variant results. Also writes the experiment's short-URL route.
       Policies:
+        # Transitive, not a direct read: deriving the control's public URL reuses site_serving_origin from
+        # runtime.publishing (choosing the host is a rule, not formatting), and that import graph reaches
+        # platform_config. APP_CONFIG_TABLE is set in Globals for every function, so a missing grant fails
+        # SILENTLY -- hence the guard in tests/test_app_config_grants.py, which caught this.
+        - DynamoDBReadPolicy:
+            TableName: !Ref AppConfigTable
         # Entitlement gate reads the tenant's denormalized entitlements to gate this feature on the plan.
         - DynamoDBReadPolicy:
             TableName: !Ref TenantProfilesTable
