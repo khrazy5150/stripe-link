@@ -245,6 +245,41 @@ Dev has no business holding a live key under any topology. Small, independent, d
 
 ## Security
 
+### ⭐⭐⭐ URGENT — Connect webhooks are being REJECTED; nothing Stripe sends is being recorded (found 2026-09-22)
+
+Found while investigating "subscription renewed in Stripe but nothing in the app". It is not a subscription
+bug: **every event our Connect endpoint subscribes to is undelivered.**
+
+**Evidence, all reproducible:**
+
+- Stripe's event list for the connected account shows `pending_webhooks=1` on exactly the types our endpoint
+  subscribes to — `checkout.session.completed`, `checkout.session.expired`, `customer.subscription.updated`,
+  `payment_intent.succeeded`, `invoice.paid`, `customer.updated`. Types no endpoint wants show `0`.
+- The Connect endpoint is `https://prod.juniorbay.com/webhook/stripe-preview` (connect=true, 21 events,
+  `invoice.paid` included). It routes correctly to `jb-stripe-link-stack-prod` → `jb-stripe-webhook-prod`.
+- The Lambda IS invoked and returns in 2–3 ms with no application logging. API Gateway shows 4XX and **zero
+  5XX** in the delivery window (10 4XX in 21:30–21:45 on Sep 21), so it is a 400, not the 500 that a missing
+  secret would give.
+- **Proven by probe:** a payload signed with the STORED `whsec_preview_test` returns **200**; the same
+  payload signed with a wrong secret returns **400 `invalid_signature`** — the shape Stripe is hitting. So
+  the endpoint, the handler and the stored secret are internally consistent; **Stripe is signing with a
+  different secret than the one we have stored.**
+
+**Most likely cause:** a Connect endpoint has ONE signing secret, but the code looks up per-mode keys
+(`whsec_preview_test` / `whsec_preview_live`) and those two hold DIFFERENT values in
+`stripe-cart/prod/platform/stripe`. At most one can match the single endpoint; test-mode events are the ones
+failing, so `whsec_preview_test` is the stale one.
+
+**Fix:** reveal the signing secret for that endpoint in the Stripe dashboard and write it to BOTH
+`whsec_preview_test` and `whsec_preview_live` (one endpoint, one secret). Then re-check `pending_webhooks`
+on a fresh event. Consider making the loader fall back to the other mode's key rather than 400, or asserting
+the two match at deploy time — a signature mismatch currently fails silently from the app's side: the
+handler logs nothing and the only symptom is data that never arrives.
+
+**Blast radius while it lasts:** orders, subscription renewals, refunds, disputes, booking-credit refills and
+every notification driven by a Stripe event are not being recorded. This also explains the A/B conversion
+zero, and is a bigger cause than the deployment-routing item below.
+
 ### ⭐⭐ HIGH — the raw CloudFront artifact URL is a public page; it should be an origin (agreed 2026-09-21)
 
 Plan: `plans/ARTIFACT_ACCESS_BOUNDARY.md`. Sibling of the commerce item below; agreed architecture, not built.
