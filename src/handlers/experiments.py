@@ -5,6 +5,7 @@ from stripe_link.common import error_response, json_response, normalize_stripe_m
 from handlers.routes import short_url_for_code
 from stripe_link.domain.experiments import SHORT_CODE_ENTRY_ENABLED, repoint_to_winner
 from stripe_link.domain.experiment_stats import summarize
+from stripe_link.runtime.publishing import site_page_slug, site_serving_origin
 from stripe_link.domain.documents import DocumentValidationError, validate_experiment, validate_route
 from stripe_link.entitlement_gate import require_capability
 from stripe_link.ids import generate_id
@@ -47,9 +48,9 @@ def handler(
     action = _action_from_event(event)
     try:
         if method == "GET" and not experiment_id:
-            return list_experiments(event, repository)
+            return list_experiments(event, repository, sites=sites, mode=mode)
         if method == "GET" and experiment_id:
-            return get_experiment(event, repository, experiment_id, orders, mode=mode, now_fn=now_fn)
+            return get_experiment(event, repository, experiment_id, orders, mode=mode, now_fn=now_fn, sites=sites)
         if method == "POST" and not experiment_id:
             gate = require_capability(event, "ab_testing", tenant_repo)
             if gate is not None:
@@ -91,16 +92,26 @@ def _load(repository, tenant_id, experiment_id):
     return experiment, None
 
 
-def list_experiments(event, repository):
+def list_experiments(event, repository, sites=None, mode="test"):
     tenant_id = tenant_id_from_event(event)
     if not tenant_id:
         return error_response("tenant_id is required.", code="missing_tenant")
     experiments = [with_short_url(item) for item in repository.list_for_tenant(tenant_id)]
     experiments.sort(key=lambda item: int(item.get("created_at") or 0), reverse=True)
+    # The control's own URL is where a visitor enters the test -- there is no separate test link any more
+    # (A1c), so without this the screen shows a running experiment and no way to go and look at it. Sites
+    # are read once for the whole listing rather than per experiment.
+    sites = sites or (sites_repository(mode=mode) if os.environ.get("SITES_TABLE") else None)
+    cache = {}
+    for item in experiments:
+        page_id = str(item.get("control_page_id") or "")
+        if page_id not in cache:
+            cache[page_id] = control_url(tenant_id, page_id, sites)
+        item["control_url"] = cache[page_id]
     return json_response({"experiments": experiments, "count": len(experiments)})
 
 
-def get_experiment(event, repository, experiment_id, orders, mode="test", now_fn=None):
+def get_experiment(event, repository, experiment_id, orders, mode="test", now_fn=None, sites=None):
     tenant_id = tenant_id_from_event(event)
     if not tenant_id:
         return error_response("tenant_id is required.", code="missing_tenant")
@@ -116,8 +127,14 @@ def get_experiment(event, repository, experiment_id, orders, mode="test", now_fn
     comparisons = summarize(
         results, experiment.get("control_page_id"), days_elapsed=_days_elapsed(experiment, now_fn),
     )
+    enriched = with_short_url(experiment)
+    enriched["control_url"] = control_url(
+        tenant_id,
+        experiment.get("control_page_id"),
+        sites or (sites_repository(mode=mode) if os.environ.get("SITES_TABLE") else None),
+    )
     return json_response({
-        "experiment": with_short_url(experiment), "results": results, "comparisons": comparisons,
+        "experiment": enriched, "results": results, "comparisons": comparisons,
     })
 
 
@@ -157,6 +174,33 @@ def normalize_variants(raw_variants, control_page_id):
             variant["key"] = f"variant_{next(letters)}"
         variants.append(variant)
     return variants
+
+
+def control_url(tenant_id, control_page_id, sites_repo):
+    """The address visitors actually enter the test on — the CONTROL's own public URL. "" when it has none.
+
+    Derived here rather than in the dashboard because choosing the host is a rule, not a formatting
+    concern: a verified custom domain wins, else the free platform host, else the page has no public
+    address at all (`site_serving_origin`). Duplicating that in Vue would drift the moment the rule changes.
+
+    "" is a real answer and the screen must handle it: a tested page that is attached to no Site, or whose
+    Site is not served anywhere yet, genuinely has no URL to copy.
+    """
+    if not sites_repo or not control_page_id:
+        return ""
+    try:
+        for site in sites_repo.list_for_tenant(tenant_id) or []:
+            slug = site_page_slug(site, control_page_id)
+            if not slug:
+                continue
+            origin = site_serving_origin(site, slug)
+            if not origin:
+                return ""
+            path = "" if slug in ("", "/") else slug.lstrip("/")
+            return f"{origin}/{path}"
+        return ""
+    except Exception:  # noqa: BLE001 - a missing link must not fail the listing
+        return ""
 
 
 def _page_name(pages_repo, tenant_id, page_id):

@@ -2,6 +2,7 @@ import json
 import pathlib
 import os
 import unittest
+import unittest.mock
 from unittest.mock import patch
 
 from handlers.experiments import handler as experiments_handler
@@ -422,6 +423,65 @@ class StartingRerendersVariantsTests(ExperimentsFixture, unittest.TestCase):
         self.create()
         self.assertEqual(self._start(pages=broken)["statusCode"], 200)
         self.assertEqual(self.experiments.get("tenant_demo", "exp_1")["status"], "running")
+
+
+class ControlUrlTests(ExperimentsFixture, unittest.TestCase):
+    """The control's own URL is where a visitor enters the test -- there is no separate test link (A1c),
+    so without it the screen shows a running experiment and no way to go and look at it.
+
+    Derived server-side because picking the host is a rule (verified custom domain, else platform host,
+    else nowhere), not formatting.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.sites = FakeDocumentRepository("site_id")
+        self.create()
+
+    def _listed(self):
+        body = json.loads(experiments_handler(
+            event("GET", tenant_id="tenant_demo"), None,
+            repository=self.experiments, sites=self.sites,
+        )["body"])
+        return body["experiments"][0]
+
+    def test_a_verified_custom_domain_wins(self):
+        self.sites.put({
+            "tenant_id": "tenant_demo", "site_id": "s1",
+            "hosting": {"custom_domain": "shop.example.com", "platform_hostname": "shop-test.jbay.be",
+                        "verification": {"verified": True}},
+            "pages": {"/offer": {"page_id": "page_control"}},
+        })
+        self.assertEqual(self._listed()["control_url"], "https://shop.example.com/offer")
+
+    def test_otherwise_the_platform_host(self):
+        self.sites.put({
+            "tenant_id": "tenant_demo", "site_id": "s1",
+            "hosting": {"platform_hostname": "shop-test.jbay.be"},
+            "pages": {"/offer": {"page_id": "page_control"}},
+        })
+        with unittest.mock.patch.dict(os.environ, {"PLATFORM_SERVING_ENABLED": "true"}):
+            self.assertEqual(self._listed()["control_url"], "https://shop-test.jbay.be/offer")
+
+    def test_the_homepage_slug_does_not_become_a_double_slash(self):
+        self.sites.put({
+            "tenant_id": "tenant_demo", "site_id": "s1",
+            "hosting": {"platform_hostname": "shop-test.jbay.be"},
+            "pages": {"/": {"page_id": "page_control"}},
+        })
+        with unittest.mock.patch.dict(os.environ, {"PLATFORM_SERVING_ENABLED": "true"}):
+            self.assertEqual(self._listed()["control_url"], "https://shop-test.jbay.be/")
+
+    def test_a_control_on_no_site_has_no_url(self):
+        # A real answer, not a failure: the screen says the page has no address to test on.
+        self.assertEqual(self._listed()["control_url"], "")
+
+    def test_an_unreadable_sites_table_does_not_break_the_listing(self):
+        class Exploding:
+            def list_for_tenant(self, tenant_id):
+                raise RuntimeError("sites table is unavailable")
+        self.sites = Exploding()
+        self.assertEqual(self._listed()["control_url"], "")
 
 
 class PromotionMovesTheRouteTests(ExperimentsFixture, unittest.TestCase):

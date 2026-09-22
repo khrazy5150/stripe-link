@@ -39,8 +39,9 @@
           <header>
             <div>
               <h3>{{ experiment.name || "Untitled experiment" }}</h3>
-              <!-- No short link: an experiment runs on the page's OWN url now, so there is no separate
-                   address to copy and nothing here that a tenant could share by mistake. -->
+              <!-- No short link: an experiment runs on the page's OWN url now (A1c). The address below is
+                   that page's url, not a test-only one -- which is the point, and is why it is safe to
+                   share. It is also the only way to go and look at a running test. -->
             </div>
             <span class="product-status" :class="experiment.status">{{ statusLabel(experiment.status) }}</span>
           </header>
@@ -49,6 +50,18 @@
             <div><dt>Control</dt><dd>{{ store.pageName(experiment.control_page_id) }}</dd></div>
             <div><dt>Variants</dt><dd>{{ (experiment.variants || []).length }}</dd></div>
             <div><dt>Weights</dt><dd>{{ weightsSummary(experiment) }}</dd></div>
+            <div>
+              <dt>Test URL</dt>
+              <dd v-if="experiment.control_url" class="ab-test-url">
+                <a :href="experiment.control_url" target="_blank" rel="noopener">{{ experiment.control_url }}</a>
+                <button type="button" class="secondary-action ab-copy" @click="copy(experiment.control_url)">
+                  {{ copied === experiment.control_url ? "Copied" : "Copy" }}
+                </button>
+              </dd>
+              <dd v-else class="ab-test-url-missing">
+                This page isn't published on a site yet, so it has no address to test on.
+              </dd>
+            </div>
           </dl>
 
           <div class="product-card-actions">
@@ -287,6 +300,16 @@ function blankForm() {
 const store = useAbTestingStore();
 store.load();
 
+const copied = ref("");
+// Same shape as the Sites screen's copy: a transient label rather than a toast, and silent when the
+// clipboard is unavailable (insecure context, denied permission) -- the address is selectable either way.
+async function copy(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+    copied.value = text;
+    setTimeout(() => { if (copied.value === text) copied.value = ""; }, 1500);
+  } catch { /* clipboard unavailable */ }
+}
 const showEditor = ref(false);
 // An experiment that has ever started is frozen server-side (control + variants), because its
 // counters were gathered against that exact shape. Mirrored here so the form does not offer an

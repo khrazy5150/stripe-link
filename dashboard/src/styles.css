@@ -6473,6 +6473,29 @@ button:disabled {
   color: var(--text-muted, #64748b);
 }
 
+.ab-test-url {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  /* The address is the useful thing on this card; let it break rather than widen the card. */
+  overflow-wrap: anywhere;
+}
+
+.ab-test-url a {
+  font-variant-numeric: tabular-nums;
+}
+
+.ab-copy {
+  padding: 0.2rem 0.9rem;
+  font-size: 1.1rem;
+  white-space: nowrap;
+}
+
+.ab-test-url-missing {
+  color: var(--text-muted, #64748b);
+}
+
 .ab-results-note {
   margin-top: 1rem;
   color: var(--text-muted, #64748b);
