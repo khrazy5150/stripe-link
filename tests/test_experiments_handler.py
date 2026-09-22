@@ -576,6 +576,29 @@ class PromotionMovesTheRouteTests(ExperimentsFixture, unittest.TestCase):
         stored = self.experiments.get("tenant_demo", "exp_1")
         self.assertEqual(stored["promotion"]["status"], "not_needed")
 
+    def test_the_EDGE_route_table_is_refreshed_too(self):
+        """The resolver never reads the Site document -- it reads denormalized index records. A promotion
+        that updates only the Site leaves the edge serving the LOSER while the tenant is told the winner is
+        live (found in QA 2026-09-22)."""
+        self.sites.put({
+            "tenant_id": "tenant_demo", "site_id": "site_1",
+            "hosting": {"type": "platform", "platform_hostname": "shop-test.jbay.be"},
+            "pages": {"/offer": {"page_id": "page_control", "page_type": "landing"}},
+        })
+        index = FakeDocumentRepository("domain")
+        experiments_handler(
+            event("POST", tenant_id="tenant_demo", experiment_id="exp_1", action="complete",
+                  body={"winner_page_id": "page_b"}),
+            None, repository=self.experiments, sites=self.sites, domains_index=index,
+            now_fn=lambda: 1781250000,
+        )
+        routed = {}
+        for record in index.documents.values():
+            for slug, entry in (record.get("routes") or {}).items():
+                routed[slug] = (entry or {}).get("page_id")
+        self.assertTrue(routed, "no index record was written at all")
+        self.assertEqual(routed.get("/offer"), "page_b")
+
     def test_the_outcome_is_recorded_on_the_experiment(self):
         self._complete("page_b")
         promotion = self.experiments.get("tenant_demo", "exp_1")["promotion"]

@@ -323,6 +323,17 @@ disagrees with their analytics.
   (absent ⇒ test, the fail-safe direction). No Worker change: it pings whatever URL it is handed.
   Worth remembering as a class: a mode-agnostic repo against a key-partitioned table fails SILENTLY as
   "no data", which reads exactly like "no traffic yet".
+- **A9 — promotion has to refresh the EDGE route table, not just the Site (found in QA, fixed 2026-09-22).**
+  Completing with the variant as winner moved the slug on the Site correctly — `promotion` recorded
+  `{status: moved}`, the Site map pointed at the winner, the loser was unrouted — and the URL kept serving
+  the CONTROL. The resolver never reads the Site document; it reads the denormalized `routes` map on the
+  domain-index record, and that still named the loser. Every other writer of a route map syncs those
+  records (`_put_site_index_records` on the ordinary save path); promotion wrote the Site directly and did
+  not.
+  Deliberately NOT best-effort here. On a save path a missed sync self-heals at the next attach; in
+  promotion it IS the operation, so a failure is reported rather than swallowed — the alternative is
+  telling a tenant their winner is live while every visitor still gets the loser. Needs Crud on
+  CustomDomainsTable.
 - **A4 — prove it.** Two real pages, a real split, a real conversion. Nothing here has ever run.
   **Unblocked 2026-09-21:** the screen was live-mode only (`menu.js`, `environments: ["live"]`), which made
   proving it require real money. It is now offered in TEST mode too. Safe because isolation is structural —

@@ -6,6 +6,11 @@ from handlers.routes import short_url_for_code
 from stripe_link.domain.experiments import SHORT_CODE_ENTRY_ENABLED, repoint_to_winner
 from stripe_link.domain.experiment_stats import summarize
 from stripe_link.runtime.publishing import site_page_slug, site_serving_origin
+from stripe_link.domain.custom_domains import (
+    creator_hosting_domain,
+    creator_serving_enabled,
+    site_index_records,
+)
 from stripe_link.domain.documents import DocumentValidationError, validate_experiment, validate_route
 from stripe_link.entitlement_gate import require_capability
 from stripe_link.ids import generate_id
@@ -13,6 +18,7 @@ from stripe_link.repositories.documents import (
     RepositoryError,
     experiments_repository,
     orders_repository,
+    custom_domains_index_repository,
     pages_repository,
     routes_repository,
     sites_repository,
@@ -33,6 +39,7 @@ def handler(
     orders=None,
     pages=None,
     sites=None,
+    domains_index=None,
     now_fn=lambda: int(time.time()),
     id_fn=lambda: f"exp_{generate_id()}",
     code_fn=None,
@@ -65,7 +72,10 @@ def handler(
         if method == "POST" and experiment_id and action == "pause":
             return set_status(event, repository, experiment_id, "paused", now_fn, sites=sites, mode=mode)
         if method == "POST" and experiment_id and action == "complete":
-            return complete_experiment(event, repository, experiment_id, now_fn, sites=sites, mode=mode)
+            return complete_experiment(
+                event, repository, experiment_id, now_fn, sites=sites, mode=mode,
+                domains_index=domains_index,
+            )
     except RepositoryError as exc:
         return error_response(str(exc), code="repository_error")
     return error_response(f"Unsupported method '{method}'.", status_code=405, code="method_not_allowed")
@@ -500,7 +510,7 @@ def set_status(event, repository, experiment_id, status, now_fn, sites=None, mod
     return json_response({"experiment": with_links(saved, tenant_id, sites, mode)})
 
 
-def complete_experiment(event, repository, experiment_id, now_fn, sites=None, mode="test"):
+def complete_experiment(event, repository, experiment_id, now_fn, sites=None, mode="test", domains_index=None):
     tenant_id = tenant_id_from_event(event)
     if not tenant_id:
         return error_response("tenant_id is required.", code="missing_tenant")
@@ -517,7 +527,9 @@ def complete_experiment(event, repository, experiment_id, now_fn, sites=None, mo
     # Promote BEFORE recording the result. Completing is what stops assignment, so if the route move fails
     # after it, the tested URL quietly reverts to the LOSER while the tenant is told the winner is live.
     # Refusing here leaves the experiment running and retryable, which is the recoverable order.
-    promotion, failure = _promote_winner(tenant_id, experiment, winner_page_id, sites, mode=mode)
+    promotion, failure = _promote_winner(
+        tenant_id, experiment, winner_page_id, sites, mode=mode, domains_index=domains_index,
+    )
     if failure:
         return failure
 
@@ -532,7 +544,21 @@ def complete_experiment(event, repository, experiment_id, now_fn, sites=None, mo
     return json_response({"experiment": with_links(saved, tenant_id, sites, mode)})
 
 
-def _promote_winner(tenant_id, experiment, winner_page_id, sites, mode="test"):
+def _sync_domain_index(site, domains_index):
+    """Refresh the denormalized edge-resolver records for a Site's route map.
+
+    The resolver never reads the Site document: it reads these records. A route change that does not reach
+    them is invisible to every visitor.
+    """
+    repo = domains_index or (custom_domains_index_repository() if os.environ.get("CUSTOM_DOMAINS_TABLE") else None)
+    if repo is None:
+        return
+    creator_domain = creator_hosting_domain() if creator_serving_enabled() else ""
+    for record in site_index_records(site, creator_domain):
+        repo.put(record)
+
+
+def _promote_winner(tenant_id, experiment, winner_page_id, sites, mode="test", domains_index=None):
     """Re-point the tested slug at the winner. Returns `(promotion, failure_response)`.
 
     `promotion.status` is one of:
@@ -554,7 +580,16 @@ def _promote_winner(tenant_id, experiment, winner_page_id, sites, mode="test"):
             if not slug:
                 continue
             site["pages"] = pages
-            sites.put(site)
+            saved = sites.put(site)
+            # The edge does NOT read the Site. It reads a denormalized route table in the domain index, and
+            # the Site save alone leaves that pointing at the loser -- so the winner never serves and the
+            # tenant is told it does (found in QA 2026-09-22). Every other writer of a route map syncs this;
+            # promotion has to as well.
+            #
+            # NOT best-effort, unlike `_put_site_index_records` on the ordinary save path: there, a missed
+            # sync self-heals on the next attach. Here it is the entire operation, so a failure has to be
+            # reported rather than swallowed.
+            _sync_domain_index(saved or site, domains_index)
             return {"status": "moved", "slug": slug}, None
         return {"status": "no_route", "slug": ""}, None
     except Exception:  # noqa: BLE001 - reported, never swallowed: the tenant is about to be told it is live

@@ -2772,6 +2772,10 @@ Resources:
         # (A5) -- the route is the durable identity and the page behind it is swappable. Hence Crud.
         - DynamoDBCrudPolicy:
             TableName: !Ref SitesTable
+        # Promotion must also refresh the DENORMALIZED route table the edge resolver actually reads.
+        # Updating the Site alone leaves the edge pointing at the loser, so the winner never serves.
+        - DynamoDBCrudPolicy:
+            TableName: !Ref CustomDomainsTable
         - DynamoDBReadPolicy:
             TableName: !Ref OrdersTable
       Events:
