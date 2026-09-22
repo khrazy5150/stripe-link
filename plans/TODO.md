@@ -182,6 +182,18 @@ Deferred, non-blocking follow-ups. Each item notes what, why it was deferred, an
 
 ### ⭐⭐ HIGH — webhook data lands in the wrong deployment; stamp origin on the session (found 2026-09-20)
 
+**Confirmed again in A/B QA, 2026-09-22 — and it now blocks a feature, not just reporting.** A test-mode
+purchase made from a DEV-published page (its baked CTA points at `dev.juniorbay.com/checkout`, so dev
+created the session) was delivered by Stripe to the PROD webhook and written to `jb-orders-prod`:
+`order_cs_test_a1LBHt…`, `status: paid`, `stripe_mode: test`,
+`attribution: {page_id: page_pJO5EZjc33m, …}`. Dev's webhook logged nothing at all in the surrounding two
+hours, and `jb-orders-dev` holds zero orders for the tenant.
+
+The A/B attribution chain itself is CORRECT — the order names the control page it was bought from. But A/B
+results read orders from their own deployment's table, so conversions and revenue read zero forever on dev
+however much real purchasing happens. A4 ("prove the chain with a real conversion") cannot be completed
+until this is fixed or a dev-side endpoint exists.
+
 **What happens today.** Stripe delivers connected-account events to the endpoints registered on the
 PLATFORM account, and dev + prod share one platform account (`sk_test`/`sk_live` are byte-identical in
 `stripe-cart/dev/platform/stripe` and `.../prod/...`). The same connected account is registered in both

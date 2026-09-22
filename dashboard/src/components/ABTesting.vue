@@ -203,7 +203,7 @@
           <table class="ab-results-table">
             <thead>
               <tr>
-                <th>Variant</th><th>Weight</th><th>Views</th><th>Conversions</th><th>Revenue</th><th>Rate</th><th>vs control</th>
+                <th>Variant</th><th>Weight</th><th>Views</th><th>Conversions</th><th>Revenue</th><th>Rate</th><th class="ab-vs-control">vs control</th>
               </tr>
             </thead>
             <tbody>
@@ -218,10 +218,10 @@
                 <td>{{ row.conversions }}</td>
                 <td>{{ formatCurrencyCents(row.revenue) }}</td>
                 <td>{{ formatConversionRate(row.conversion_rate) }}</td>
-                <td>
+                <td class="ab-vs-control">
                   <template v-if="row.key === 'control'">—</template>
                   <template v-else>
-                    <span class="ab-tag" :class="verdictClass(row.page_id)">{{ verdictLabel(row.page_id) }}</span>
+                    <span class="ab-tag ab-verdict" :class="verdictClass(row.page_id)">{{ verdictLabel(row.page_id) }}</span>
                     <span v-if="liftOf(row.page_id) !== null" class="ab-lift">{{ formatLift(liftOf(row.page_id)) }}</span>
                   </template>
                 </td>

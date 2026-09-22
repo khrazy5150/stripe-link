@@ -6409,6 +6409,8 @@ button:disabled {
   display: flex;
   flex-direction: column;
   gap: 1.5rem;
+  /* The winner picker is the last thing in the modal and sat flush against its bottom edge. */
+  padding-bottom: 0.5rem;
 }
 
 .ab-results-table {
@@ -6467,6 +6469,23 @@ button:disabled {
   color: var(--text-muted, #64748b);
 }
 
+/* The verdict pill sits alone in its cell, so .ab-tag's left margin (written for a pill that FOLLOWS a
+   page name) indents it wrongly. It also must not wrap: "not enough data yet" broke across two lines and
+   the rounded box stretched around them. */
+.ab-verdict {
+  margin-left: 0;
+  white-space: nowrap;
+  padding: 0.35rem 0.9rem;
+  line-height: 1.3;
+}
+
+/* Give the column enough room to hold the longest verdict plus a lift, so the pill is never the thing that
+   gets squeezed when a page name is long. */
+.ab-vs-control {
+  min-width: 19ch;
+  white-space: nowrap;
+}
+
 .ab-lift {
   margin-left: 0.5rem;
   font-variant-numeric: tabular-nums;
@@ -6510,6 +6529,7 @@ button:disabled {
   flex-wrap: wrap;
   border-top: 1px solid var(--line);
   padding-top: 1.25rem;
+  padding-bottom: 0.75rem;
 }
 
 /* Product Stripe sync + digital asset */
