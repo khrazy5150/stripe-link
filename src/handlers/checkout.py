@@ -48,35 +48,52 @@ STRIPE_CHECKOUT_SESSIONS_URL = "https://api.stripe.com/v1/checkout/sessions"
 LINK_CURRENCIES = {"usd", "eur", "gbp", "cad", "aud", "nzd"}
 
 
+class CouponUnavailable(RuntimeError):
+    """The page promised a discount this checkout cannot apply."""
+
+
 def resolve_campaign_promotion_code(code, tenant_id, mode, coupons_repo=None):
-    """The Stripe promotion-code id for a campaign coupon, or "" when it may not be applied.
+    """The Stripe promotion-code id for a campaign coupon. "" when no coupon was asked for at all.
 
-    Resolved from the CODE rather than trusting an id on the URL: the tenant's own coupon record is what
-    says whether it is still usable, and `coupon_is_usable` already encodes expiry, status and redemption
-    limits. A link that outlived its campaign therefore checks out at full price instead of erroring --
-    the page tells the visitor the offer ended; checkout must not be where they find out.
+    Resolved from the CODE against the tenant's own record, because that record is what says whether the
+    tenant still INTENDS to offer it -- `coupon_is_usable` encodes status, expiry and the redemption cap.
+    The id it stores is the real Stripe promotion code (plans/COUPONS_COMPLETION.md C1), so no second
+    lookup at Stripe is needed.
 
-    Never raises: a coupon that cannot be looked up must not stop someone buying.
+    Raises CouponUnavailable when a code WAS asked for and cannot be honoured. Deliberately not a silent
+    fall-through to full price: the visitor arrived from a ticket promising a specific price, and charging
+    them more without saying so is the worst of the available outcomes (decision, 2026-09-22). They can
+    still buy at full price from the ordinary page.
+
+    A published page cannot know a coupon was disabled after it was published -- its section carries only
+    the code and expiry copied at publish -- so this is the only place that can tell the visitor.
     """
     code = str(code or "").strip().upper()
-    if not code or not tenant_id:
+    if not code:
         return ""
+    if not tenant_id:
+        raise CouponUnavailable(code)
     try:
         from handlers.coupons import coupon_is_usable
 
         repo = coupons_repo or (coupons_repository(mode=mode) if os.environ.get("COUPONS_TABLE") else None)
         if repo is None:
-            return ""
+            raise CouponUnavailable(code)
         now = int(time.time())
         for coupon in repo.list_for_tenant(tenant_id) or []:
             if str(coupon.get("code") or "").strip().upper() != code:
                 continue
             if not coupon_is_usable(coupon, now):
-                return ""
-            return str(coupon.get("stripe_promo_code_id") or "")
-        return ""
-    except Exception:  # noqa: BLE001 - a discount that cannot be resolved must never block a purchase
-        return ""
+                raise CouponUnavailable(code)
+            promo_id = str(coupon.get("stripe_promo_code_id") or "")
+            if not promo_id:
+                raise CouponUnavailable(code)
+            return promo_id
+        raise CouponUnavailable(code)
+    except CouponUnavailable:
+        raise
+    except Exception as exc:  # noqa: BLE001 - an unreadable table must not charge a surprise full price
+        raise CouponUnavailable(code) from exc
 
 
 def handler(
@@ -243,6 +260,23 @@ def handler(
         return redirect_response(checkout_url)
     except tips.TipAmountError as exc:
         return error_response(str(exc), code="invalid_tip_amount")
+    except CouponUnavailable:
+        # The page promised a discount that can no longer be applied -- a coupon disabled or used up after
+        # the page was published, which a baked artifact cannot know. Refusing is the honest answer:
+        # charging the full price to someone who arrived from a ticket saying otherwise is worse.
+        if method == "GET":
+            return {
+                "statusCode": 410,
+                "headers": {"Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store"},
+                "body": render_error_page(
+                    410, "This offer is no longer available. The coupon has ended or been withdrawn — "
+                    "you can still buy at the regular price from the store.",
+                    title="Offer ended", badge="Coupon",
+                ),
+            }
+        return error_response(
+            "This coupon is no longer available.", status_code=410, code="coupon_unavailable",
+        )
     except BillingStatusError as exc:
         return error_response(str(exc), status_code=402, code="tenant_billing_hold")
     except PricingError as exc:

@@ -1446,6 +1446,10 @@ Resources:
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref CouponsTable
+        # Creating a coupon now creates it AT STRIPE first, which needs the tenant's key or their
+        # connected account id (plans/COUPONS_COMPLETION.md C1). Read-only.
+        - DynamoDBReadPolicy:
+            TableName: !Ref StripeKeysTable
       Events:
         CouponsList:
           Type: Api

@@ -111,6 +111,26 @@ Recorded because silently dropping them would be worse than not offering them:
 - **Code collisions** — a promotion code must be unique per account. Stripe returns a 400; surface it as
   "that code is already in use" rather than a raw Stripe message.
 
+## Status
+
+- **C1 — create in Stripe on save: DONE 2026-09-22.** `stripe_coupons.py` creates the Coupon then the
+  Promotion Code on the tenant's connected account, with an `Idempotency-Key` per object derived from the
+  `coupon_id` the client already allocates. The handler validates BEFORE calling Stripe (a coupon we would
+  refuse must not be created there first, leaving an orphan), stores the ids Stripe returned rather than
+  the browser's placeholders, and persists nothing when Stripe refuses — surfacing Stripe's own words,
+  because "Coupon code already exists" is actionable and "Stripe rejected the request" is not.
+  Needs a read grant on StripeKeysTable.
+- **C2 — lifecycle: DONE 2026-09-22.** Disabling deactivates the promotion code at Stripe before the record
+  changes, so the two cannot disagree — a record saying `inactive` while the code still works is the more
+  dangerous of the two disagreements. Editing a coupon's value, code or duration is refused with 409, and
+  the check compares the STORED document so it cannot be edited around by posting a different value.
+- **C3 — the element's checkout path: DONE 2026-09-22.** Because C1 stores the real Stripe id, checkout
+  needs no second lookup: it resolves the code against the tenant's record and applies the stored id. When
+  a code was asked for and cannot be honoured it raises `CouponUnavailable`, and a browser gets the branded
+  "this offer is no longer available — you can still buy at the regular price" page with a 410. Seven ways
+  to be unhonourable are covered, every one of which previously fell through to full price.
+- **C4 — the three unenforceable fields: NOT DONE.** Still collected, still unenforced. See below.
+
 ## Phases
 
 - **C1 — create in Stripe on save.** The server owns the Stripe call (not the browser, which must never hold
