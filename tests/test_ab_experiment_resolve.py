@@ -289,3 +289,62 @@ class VariantArtifactIdentityTests(unittest.TestCase):
             def list_for_tenant(self, tenant_id):
                 raise RuntimeError("experiments table is unavailable")
         self.assertEqual(self._identity("page_B", repo=Exploding()), "page_B")
+
+
+class ViewPingCarriesTheModeTests(unittest.TestCase):
+    """The experiments table is partitioned by KEY -- the mode is baked into the SK and GSI1PK -- so a
+    lookup in the wrong mode returns nothing rather than the wrong document. The edge has no session to
+    infer a mode from, so the resolver that builds the block is the only party that knows it.
+
+    Found in QA 2026-09-21: every view ping 404'd and every experiment read zero views.
+    """
+
+    def test_the_mode_is_on_the_url_the_edge_is_handed(self):
+        block = experiment_route_block(_experiment(), _url, api_base="https://api.test", mode="test")
+        self.assertEqual(block["view_url"], "https://api.test/experiments/exp_1/view?mode=test")
+
+    def test_live_says_live(self):
+        block = experiment_route_block(_experiment(), _url, api_base="https://api.test", mode="live")
+        self.assertTrue(block["view_url"].endswith("?mode=live"))
+
+    def test_no_mode_leaves_the_url_bare_rather_than_guessing(self):
+        # The endpoint defaults to test, which is the fail-safe direction; inventing a mode here would put
+        # a wrong one on the URL and hide that.
+        block = experiment_route_block(_experiment(), _url, api_base="https://api.test")
+        self.assertEqual(block["view_url"], "https://api.test/experiments/exp_1/view")
+
+    def test_no_api_base_still_means_no_view_url(self):
+        self.assertNotIn("view_url", experiment_route_block(_experiment(), _url, mode="test"))
+
+
+class ViewHandlerFindsTheExperimentInItsOwnModeTests(unittest.TestCase):
+    def test_a_test_mode_experiment_is_counted_when_the_ping_says_test(self):
+        import os
+        from unittest.mock import patch
+        from handlers.experiments_view import handler as view_handler
+
+        class Repo:
+            def __init__(self):
+                self.bumped = []
+                self.doc = {
+                    "tenant_id": "t1", "experiment_id": "exp_1", "status": "running",
+                    "control_page_id": "page_A",
+                    "variants": [{"page_id": "page_A", "weight": 50}, {"page_id": "page_B", "weight": 50}],
+                }
+
+            def find_by_id(self, experiment_id):
+                return self.doc
+
+            def increment_view(self, tenant_id, document_id, page_id, amount=1):
+                self.bumped.append((tenant_id, document_id, page_id))
+
+        repo = Repo()
+        with patch.dict(os.environ, {"EXPERIMENTS_TABLE": "x"}):
+            response = view_handler(
+                {"httpMethod": "POST", "queryStringParameters": {"mode": "test"},
+                 "pathParameters": {"experiment_id": "exp_1"},
+                 "body": json.dumps({"page_id": "page_B"})},
+                None, repository=repo,
+            )
+        self.assertEqual(response["statusCode"], 200)
+        self.assertEqual(repo.bumped, [("t1", "exp_1", "page_B")])

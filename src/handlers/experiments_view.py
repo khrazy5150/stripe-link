@@ -17,7 +17,7 @@ dilutes a conversion rate, it cannot read or destroy anything, and rate limiting
 import json
 import os
 
-from stripe_link.common import error_response, json_response, parse_json_body, path_params
+from stripe_link.common import error_response, json_response, parse_json_body, path_params, resolve_stripe_mode
 from stripe_link.repositories.documents import RepositoryError, experiments_repository
 
 
@@ -40,7 +40,14 @@ def handler(event, context, *, repository=None):
     if not page_id:
         return error_response("page_id is required.", code="missing_page")
 
-    repository = repository or (experiments_repository() if os.environ.get("EXPERIMENTS_TABLE") else None)
+    # Mode-scoped, like every other reader of this table. The table is partitioned by KEY -- the mode is
+    # baked into the SK and GSI1PK -- so a mode-agnostic repo does not read the wrong document, it reads
+    # nothing, and every ping 404s. The resolver puts `?mode=` on the view_url it hands the edge; absent,
+    # `resolve_stripe_mode` defaults to test, which is the fail-safe direction.
+    mode = resolve_stripe_mode(event, body)
+    repository = repository or (
+        experiments_repository(mode=mode) if os.environ.get("EXPERIMENTS_TABLE") else None
+    )
     if repository is None:
         return json_response({"counted": False, "reason": "experiments_table_unset"})
 

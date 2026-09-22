@@ -304,6 +304,16 @@ disagrees with their analytics.
   re-render ordered before that would resolve nothing. Best-effort per page: a variant that cannot be
   re-put keeps the artifact it already had, which beats blocking the start over a transient write.
   Needs Crud on PagesTable (was Read).
+- **A8 — the view ping was looking in the wrong mode (found in QA, fixed 2026-09-21).** Every experiment
+  read zero views however much traffic it got. `experiments_view` built its repo with
+  `experiments_repository()` — no mode — while the experiment had been written mode-scoped. This table is
+  partitioned by KEY (the mode is baked into the SK and GSI1PK), so the mismatch did not return the wrong
+  document, it returned NOTHING: every ping answered 404 and nothing was ever counted.
+  The edge has no session to infer a mode from, so the only party that knows it is the resolver that built
+  the block — `view_url` now carries `?mode=`, and the endpoint reads it with `resolve_stripe_mode`
+  (absent ⇒ test, the fail-safe direction). No Worker change: it pings whatever URL it is handed.
+  Worth remembering as a class: a mode-agnostic repo against a key-partitioned table fails SILENTLY as
+  "no data", which reads exactly like "no traffic yet".
 - **A4 — prove it.** Two real pages, a real split, a real conversion. Nothing here has ever run.
   **Unblocked 2026-09-21:** the screen was live-mode only (`menu.js`, `environments: ["live"]`), which made
   proving it require real money. It is now offered in TEST mode too. Safe because isolation is structural —

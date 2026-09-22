@@ -127,6 +127,7 @@ def experiment_route_block(
     experiment: dict[str, Any],
     artifact_url_for: Any,
     api_base: str = "",
+    mode: str = "",
 ) -> dict[str, Any]:
     """What the edge needs to assign a visitor, and nothing more.
 
@@ -168,6 +169,15 @@ def experiment_route_block(
     # A fully-formed URL, so the edge never has to know an API base, a mode, or how an id is shaped. It
     # pings what it was given. Omitted when there is no base configured, and the edge simply does not count
     # -- a missing metric must never stop a page being served.
+    #
+    # The mode is IN the URL because the experiments table is mode-partitioned by key: the mode is baked
+    # into the SK and GSI1PK, so a lookup made in the wrong mode does not return the wrong document, it
+    # returns nothing. The view endpoint is called by an edge worker with no session to infer a mode from,
+    # so the only party that knows it is the resolver that built this block. Without it every ping 404s and
+    # every experiment reads zero views (found in QA 2026-09-21).
     if api_base:
-        block["view_url"] = f"{api_base.rstrip('/')}/experiments/{experiment_id}/view"
+        view_url = f"{api_base.rstrip('/')}/experiments/{experiment_id}/view"
+        if mode:
+            view_url = f"{view_url}?mode={mode}"
+        block["view_url"] = view_url
     return block

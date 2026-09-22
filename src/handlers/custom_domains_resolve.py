@@ -123,6 +123,7 @@ def _experiment_for_page(tenant_id, page_id, mode, price_context, experiments_re
                 artifact_paths(tenant_id, variant_page_id, context=price_context, mode=mode)["published"],
             ),
             api_base=os.environ.get("PUBLIC_API_BASE_URL", ""),
+            mode=mode,
         ), serves_as_variant
     except Exception:  # noqa: BLE001 - serving the page matters more than running the experiment
         return {}, False
