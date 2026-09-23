@@ -2043,7 +2043,7 @@ a directory add is DISCOVERABILITY — finding a creator by name — which is wo
 - **Where:** App.vue user pill markup + `stripeKeys` store (already loads the connect card per mode; reuse, no new
   API). Mode-aware: shows the test account in Test, the live account in Live.
 - **SHIPPED 2026-08-28:** pill shows business name → email → acct id (truncated 22ch + full value in the tooltip:
-  "Connected Stripe (live): Keith Harris · keithdecosta@gmail.com · acct_…"), "No Stripe connected" when none.
+  "Connected Stripe (live): Acme Supply Co · owner@example.com · acct_…"), "No Stripe connected" when none.
   Falls back to `stripeKeys.modes[env]` so it names the account as soon as `/stripe/keys` returns.
   **Also fixed (same pass):** the onboarding wizard's step 3 asked to "Configure {other} environment"
   UNCONDITIONALLY — a legacy test-first-then-live leftover. It now checks `stripeKeys.modeConfigured(mode)` and
