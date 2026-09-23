@@ -30,6 +30,46 @@ PURE_ENTRY_POINTS = {
 }
 
 
+class StripeCredentialGrantTests(unittest.TestCase):
+    """A handler that resolves Stripe credentials needs BOTH grants, not just the keys table.
+
+    Found on dev 2026-09-22: CouponsFunction had DynamoDBReadPolicy on StripeKeysTable and still failed
+    with AccessDeniedException on GetSecretValue — because a CONNECT tenant's key is the platform secret in
+    Secrets Manager, and a non-Connect tenant's is KMS-wrapped. The table grant alone covers neither. The
+    browser saw only "Failed to fetch", because an unhandled 502 carries no CORS headers.
+    """
+
+    import pathlib as _pathlib
+    import re as _re
+    TEMPLATE = (_pathlib.Path(__file__).resolve().parents[1] / "template.yaml").read_text(encoding="utf-8")
+
+    def _block(self, function):
+        return self._re.search(
+            r"^  " + function + r":\n((?:    .*\n|\n)*)", self.TEMPLATE, self._re.M).group(1)
+
+    def test_every_caller_of_checkout_credentials_has_both_grants(self):
+        root = self._pathlib.Path(__file__).resolve().parents[1] / "src" / "handlers"
+        callers = sorted(
+            path.stem for path in root.glob("*.py")
+            if "checkout_credentials" in path.read_text(encoding="utf-8"))
+        self.assertTrue(callers, "the import walk found nothing — the check is broken, not the template")
+
+        by_handler = {}
+        for match in self._re.finditer(r"^  (\w+):\n((?:    .*\n|\n)*)", self.TEMPLATE, self._re.M):
+            handler = self._re.search(r"Handler: handlers\.(\w+)\.", match.group(2))
+            if handler:
+                by_handler.setdefault(handler.group(1), []).append(match.group(1))
+
+        for module in callers:
+            for function in by_handler.get(module, []):
+                with self.subTest(function=function, handler=module):
+                    block = self._block(function)
+                    self.assertIn("secretsmanager:GetSecretValue", block,
+                                  f"{function} resolves Stripe credentials but cannot read the platform secret")
+                    self.assertIn("kms:Decrypt", block,
+                                  f"{function} resolves Stripe credentials but cannot unwrap a tenant key")
+
+
 class TableGrantTests(unittest.TestCase):
     def setUp(self):
         self.template = (ROOT / "template.yaml").read_text(encoding="utf-8")

@@ -1450,6 +1450,20 @@ Resources:
         # connected account id (plans/COUPONS_COMPLETION.md C1). Read-only.
         - DynamoDBReadPolicy:
             TableName: !Ref StripeKeysTable
+        # Creating the coupon AT Stripe needs the key to call with. A Connect tenant uses the PLATFORM
+        # secret key (Secrets Manager); a tenant without Connect uses their own KMS-wrapped key — so both
+        # grants are needed, exactly as CheckoutFunction has them.
+        - Statement:
+            Effect: Allow
+            Action:
+              - kms:Decrypt
+              - kms:DescribeKey
+            Resource: !GetAtt StripeKeysEncryptionKey.Arn
+        - Statement:
+            Effect: Allow
+            Action:
+              - secretsmanager:GetSecretValue
+            Resource: "*"
       Events:
         CouponsList:
           Type: Api
