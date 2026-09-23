@@ -115,6 +115,21 @@ class IndexedAttributeTests(unittest.TestCase):
         record = order_record_from_invoice(_invoice(), "t1", 100, {})
         self.assertEqual(record["payment_intent_id"], "pi_1")
 
+    def test_created_at_is_a_STRING_like_every_other_order(self):
+        # created_at is the range key of CreatedAtIndex and the table declares it as S. An int is rejected
+        # with "Type mismatch for Index Key created_at Expected: S Actual: N". order_record_from_session
+        # stringifies it; this record was copied from a NEIGHBOURING one that does not.
+        record = order_record_from_invoice(_invoice(), "t1", 100, {})
+        self.assertIsInstance(record["created_at"], str)
+        self.assertEqual(record["created_at"], "1790000000")
+
+    def test_indexed_attributes_match_the_types_the_table_declares(self):
+        # Every GSI key on jb-orders is declared S. Anything else fails the whole PutItem.
+        record = order_record_from_invoice(_invoice(), "t1", 100, {})
+        for key in ("tenant_id", "order_id", "created_at", "payment_intent_id"):
+            if key in record:
+                self.assertIsInstance(record[key], str, f"{key} indexes a GSI declared as S")
+
     def test_no_indexed_attribute_is_ever_an_empty_string(self):
         for invoice in (_invoice(payment_intent=None), _invoice(payment_intent=""), _invoice()):
             record = order_record_from_invoice(invoice, "t1", 100, {})

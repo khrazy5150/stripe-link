@@ -1765,7 +1765,11 @@ def order_record_from_invoice(invoice: dict[str, Any], tenant_id: str, now: int,
         "line_items": order_line_items_from_invoice(invoice),
         "attribution": attribution_from_metadata(metadata),
         "fees": fees,
-        "created_at": int(invoice.get("created") or now),
+        # A STRING, matching order_record_from_session and the table's AttributeDefinitions: created_at is
+        # the range key of CreatedAtIndex and DynamoDB declares it as S. An int here is rejected outright
+        # with "Type mismatch for Index Key created_at Expected: S Actual: N" -- the second way this record
+        # took down every renewal on prod (2026-09-22), found only after fixing the first.
+        "created_at": str(int(invoice.get("created") or now)),
         "updated_at": now,
     }
     # payment_intent_id is a GSI KEY (PaymentIntentIndex), and DynamoDB refuses an empty string for one --
