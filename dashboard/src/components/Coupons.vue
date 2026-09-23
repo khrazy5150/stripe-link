@@ -336,13 +336,25 @@
             <div class="coupon-grant-table-wrap">
               <table class="coupon-grant-table">
                 <thead>
-                  <tr><th>Customer</th><th>Code</th><th>Used</th></tr>
+                  <tr><th>Customer</th><th>Code</th><th>Used</th><th></th></tr>
                 </thead>
                 <tbody>
-                  <tr v-for="grant in grants" :key="grant.grant_id">
+                  <tr v-for="grant in grants" :key="grant.grant_id" :class="{ 'is-revoked': grant.status !== 'active' }">
                     <td>{{ grant.name ? `${grant.name} <${grant.email}>` : grant.email }}</td>
                     <td class="font-mono">{{ grant.code }}</td>
                     <td>{{ Number(grant.redemption_count || 0) > 0 ? "Yes" : "No" }}</td>
+                    <td>
+                      <button
+                        type="button"
+                        class="secondary-action"
+                        :disabled="revoking === grant.grant_id"
+                        @click="toggleGrant(grant)"
+                      >
+                        {{ revoking === grant.grant_id
+                          ? "Saving..."
+                          : grant.status === "active" ? "Revoke" : "Restore" }}
+                      </button>
+                    </td>
                   </tr>
                 </tbody>
               </table>
@@ -406,6 +418,7 @@ const grants = ref([]);
 const grantsError = ref("");
 const grantsMessage = ref("");
 const issuing = ref(false);
+const revoking = ref("");
 const grantForm = ref({ recipients: "", landingUrl: "", maxRedemptions: "" });
 const recipientCount = computed(() => parseRecipients(grantForm.value.recipients).length);
 
@@ -452,6 +465,26 @@ async function issueGrants() {
     grantsError.value = error.message;
   } finally {
     issuing.value = false;
+  }
+}
+
+// Revoking one recipient does NOT end the campaign — every other code keeps working, which is the whole
+// difference between this and turning the coupon off.
+async function toggleGrant(grant) {
+  revoking.value = grant.grant_id;
+  grantsError.value = "";
+  try {
+    const next = grant.status === "active" ? "inactive" : "active";
+    const updated = await store.setGrantStatus(grantsCoupon.value.coupon_id, grant.code, next);
+    const index = grants.value.findIndex((row) => row.grant_id === grant.grant_id);
+    if (index >= 0) grants.value.splice(index, 1, updated);
+    grantsMessage.value = next === "inactive"
+      ? `${grant.email}'s code no longer works.`
+      : `${grant.email}'s code works again.`;
+  } catch (error) {
+    grantsError.value = error.message;
+  } finally {
+    revoking.value = "";
   }
 }
 

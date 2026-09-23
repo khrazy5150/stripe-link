@@ -1531,6 +1531,13 @@ Resources:
             RestApiId: !Ref RestApi
             Path: /coupons/{coupon_id}/grants
             Method: GET
+        # Revoke (or restore) ONE recipient's code without ending the campaign for everyone else.
+        CouponGrantsUpdate:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /coupons/{coupon_id}/grants
+            Method: PUT
         CouponGrantsOptions:
           Type: Api
           Properties:

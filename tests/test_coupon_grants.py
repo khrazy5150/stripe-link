@@ -256,6 +256,96 @@ class IssueGrantsTests(unittest.TestCase):
         self.assertIn("b@x.com,,K-2,,active,yes,", text)
 
 
+class RevokeOneGrantTests(unittest.TestCase):
+    """Cutting off ONE recipient, without ending the campaign for the other ninety-nine.
+
+    A grant's status is operational, not a promise — revoking one person's code breaks nothing promised to
+    anyone else, which is why this is allowed where editing a COUPON is refused.
+    """
+
+    def setUp(self):
+        self.coupons = FakeDocumentRepository("coupon_id")
+        self.grants = FakeDocumentRepository("grant_id")
+        self.coupon = load_fixture("coupon-demo.json")
+        self.coupons.put(self.coupon)
+        self.tenant_id = self.coupon["tenant_id"]
+        self.grant = grant_document(
+            tenant_id=self.tenant_id, coupon_id=self.coupon["coupon_id"], code="SAVE10-AB3D9X",
+            email="a@x.com", stripe_promo_code_id="promo_personal", stripe_customer_id="cus_1",
+            stripe_mode="test", now=1,
+        )
+        self.grants.put(self.grant)
+        self.opener = grant_opener()
+
+    def _put(self, body, opener=None):
+        event = {
+            "httpMethod": "PUT",
+            "resource": "/coupons/{coupon_id}/grants",
+            "pathParameters": {"coupon_id": self.coupon["coupon_id"]},
+            "body": json.dumps({"tenant_id": self.tenant_id, **body}),
+        }
+        with patch("handlers.coupons.checkout_credentials", return_value=("sk_test_x", "acct_test")):
+            return handler(event, None, repository=self.coupons, stripe_repo=FakeStripeKeys(),
+                           secret_cipher=object(), opener=opener or self.opener, grants_repo=self.grants)
+
+    def test_revoking_switches_the_code_off_at_stripe_too(self):
+        response = self._put({"code": "SAVE10-AB3D9X", "status": "inactive"})
+
+        self.assertEqual(response["statusCode"], 200)
+        self.assertEqual(self.grants.get(self.tenant_id, "SAVE10-AB3D9X")["status"], "inactive")
+        # A record saying "inactive" while the code still works at Stripe is the dangerous disagreement.
+        promo_calls = [body for url, body in self.opener.calls if "promotion_codes" in url]
+        self.assertTrue(promo_calls and "active=false" in promo_calls[0])
+
+    def test_a_revoked_grant_is_refused_at_checkout(self):
+        self._put({"code": "SAVE10-AB3D9X", "status": "inactive"})
+
+        with self.assertRaises(CouponUnavailable):
+            resolve_targeted_grant("SAVE10-AB3D9X", self.tenant_id, "test", self.grants, self.coupons)
+
+    def test_it_can_be_switched_back_on(self):
+        self._put({"code": "SAVE10-AB3D9X", "status": "inactive"})
+        self._put({"code": "SAVE10-AB3D9X", "status": "active"})
+
+        stored = self.grants.get(self.tenant_id, "SAVE10-AB3D9X")
+        self.assertEqual(stored["status"], "active")
+        self.assertNotIn("revoked_at", stored)
+
+    def test_the_campaign_and_every_other_code_are_untouched(self):
+        other = grant_document(
+            tenant_id=self.tenant_id, coupon_id=self.coupon["coupon_id"], code="SAVE10-ZZZ999",
+            email="b@x.com", stripe_promo_code_id="promo_other", stripe_customer_id="cus_2",
+            stripe_mode="test", now=1)
+        self.grants.put(other)
+
+        self._put({"code": "SAVE10-AB3D9X", "status": "inactive"})
+
+        self.assertEqual(self.grants.get(self.tenant_id, "SAVE10-ZZZ999")["status"], "active")
+        self.assertEqual(self.coupons.get(self.tenant_id, self.coupon["coupon_id"])["status"], "active")
+
+    def test_a_no_op_change_tells_stripe_nothing(self):
+        response = self._put({"code": "SAVE10-AB3D9X", "status": "active"})
+
+        self.assertEqual(response["statusCode"], 200)
+        self.assertEqual(self.opener.calls, [])
+
+    def test_a_code_belonging_to_another_coupon_is_not_found(self):
+        self.grants.put({**self.grant, "coupon_id": "coupon_other"})
+
+        self.assertEqual(self._put({"code": "SAVE10-AB3D9X", "status": "inactive"})["statusCode"], 404)
+
+    def test_a_bad_status_is_refused(self):
+        self.assertEqual(self._put({"code": "SAVE10-AB3D9X", "status": "deleted"})["statusCode"], 400)
+
+    def test_stripe_refusing_leaves_the_record_alone(self):
+        opener = grant_opener(fail_on="promotion_codes")
+
+        response = self._put({"code": "SAVE10-AB3D9X", "status": "inactive"}, opener=opener)
+
+        self.assertEqual(response["statusCode"], 400)
+        self.assertEqual(self.grants.get(self.tenant_id, "SAVE10-AB3D9X")["status"], "active")
+
+
 class ResolveGrantAtCheckoutTests(unittest.TestCase):
     def setUp(self):
         self.coupons = FakeDocumentRepository("coupon_id")

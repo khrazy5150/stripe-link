@@ -3012,6 +3012,12 @@ button:disabled {
   border-bottom: 0;
 }
 
+/* A revoked code stays listed — the tenant needs to see that it exists and is off, not lose it. */
+.coupon-grant-table tr.is-revoked td:not(:last-child) {
+  opacity: 0.5;
+  text-decoration: line-through;
+}
+
 .coupon-form {
   display: grid;
   gap: 1.8rem;

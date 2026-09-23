@@ -47,6 +47,9 @@ def handler(event, context, repository=None, stripe_repo=None, secret_cipher=Non
             return issue_grants(event, repository, coupon_id, grants_repo, stripe_repo, secret_cipher, opener)
         if method == "GET":
             return list_grants(event, coupon_id, grants_repo)
+        if method == "PUT":
+            return set_grant_status(event, repository, coupon_id, grants_repo, stripe_repo,
+                                    secret_cipher, opener)
         return error_response(f"Unsupported method '{method}'.", status_code=405, code="method_not_allowed")
     if method == "POST":
         return create_coupon(event, repository, stripe_repo, secret_cipher, opener, products_repo)
@@ -410,6 +413,77 @@ def issue_grants(event, repository, coupon_id: str, grants_repo=None, stripe_rep
         {"grants": issued, "skipped": skipped, "failures": failures, "remaining": remaining},
         status_code=201 if issued else 200,
     )
+
+
+def set_grant_status(event, repository, coupon_id: str, grants_repo=None, stripe_repo=None,
+                     secret_cipher=None, opener=None):
+    """Turn ONE recipient's code off, or back on (plans/COUPONS_COMPLETION.md C5).
+
+    A campaign can already be ended, but that takes every recipient's code with it. This is the smaller
+    instrument: the customer who charged back, or the address that turned out to be wrong, without
+    punishing the other ninety-nine.
+
+    Ordered like every other lifecycle change here: **Stripe first, store second.** A record saying
+    `inactive` while the code still works at Stripe is the more dangerous of the two disagreements -- it
+    is the one where a revoked recipient still gets the discount and the tenant believes otherwise.
+
+    The COUPON stays untouched. A grant's status is operational, not a promise: revoking one person's code
+    breaks no promise made to anyone else, which is why this is allowed where editing a coupon is not.
+    """
+    try:
+        body = parse_json_body(event)
+    except ValueError as exc:
+        return error_response(str(exc), code="invalid_grant")
+
+    tenant_id = str(body.get("tenant_id") or "").strip() or tenant_id_from_event(event)
+    if not tenant_id:
+        return error_response("tenant_id is required.", code="missing_tenant")
+    code = str(body.get("code") or body.get("grant_id") or "").strip().upper()
+    if not code:
+        return error_response("A grant code is required.", code="invalid_grant")
+    status = str(body.get("status") or "").strip().lower()
+    if status not in {"active", "inactive"}:
+        return error_response("Grant status must be 'active' or 'inactive'.", code="invalid_grant")
+
+    mode = resolve_stripe_mode(event, body)
+    grants_repo = grants_repo or coupon_grants_repository(mode=mode)
+    grant = grants_repo.get(tenant_id, code)
+    if not grant or str(grant.get("coupon_id") or "") != coupon_id:
+        return error_response("Code not found.", status_code=404, code="not_found")
+    if str(grant.get("status") or "") == status:
+        return json_response({"grant": grant})   # already there; not an error, and nothing to tell Stripe
+
+    promo_id = str(grant.get("stripe_promo_code_id") or "")
+    api_key, stripe_account = stripe_credentials_for(event, tenant_id, mode, stripe_repo, secret_cipher)
+    if not api_key or not promo_id:
+        return error_response(
+            f"Connect Stripe in {mode} mode to change a code — the code has to be switched off there too, "
+            "or it keeps working.",
+            status_code=400, code="stripe_not_configured",
+        )
+    try:
+        set_promotion_code_active(promo_id, status == "active",
+                                  api_key=api_key, stripe_account=stripe_account, opener=opener)
+    except StripeCouponError as exc:
+        return error_response(str(exc), status_code=400, code="stripe_coupon_failed")
+
+    now = int(time.time())
+    grant["status"] = status
+    grant["updated_at"] = now
+    if status == "inactive":
+        grant["revoked_at"] = now
+    else:
+        grant.pop("revoked_at", None)
+    try:
+        validate_coupon_grant_document(grant)
+        return json_response({"grant": grants_repo.put(grant)})
+    except (DocumentValidationError, ValueError, RepositoryError) as exc:
+        # Stripe already changed. Say so rather than reporting a clean failure: the code's real state and
+        # our record now disagree, and the tenant is the only one who can reconcile it.
+        return error_response(
+            f"{exc} (the code was already switched {'on' if status == 'active' else 'off'} at Stripe)",
+            code="invalid_grant",
+        )
 
 
 def redeem_url_for(landing_url: str, code: str) -> str:

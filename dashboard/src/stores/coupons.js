@@ -174,6 +174,16 @@ export const useCouponsStore = defineStore("coupons", {
       return { issued, skipped, failures };
     },
 
+    // Revoke (or restore) ONE recipient's code. The server switches it off at Stripe first, so our record
+    // and the code's real state cannot disagree in the direction that still lets a revoked buyer through.
+    async setGrantStatus(couponId, code, status) {
+      const body = await apiRequest(`/coupons/${encodeURIComponent(couponId)}/grants`, {
+        method: "PUT",
+        body: { code, status },
+      });
+      return body.grant;
+    },
+
     async exportGrantsCsv(couponId) {
       return apiRequest(`/coupons/${encodeURIComponent(couponId)}/grants`, {
         params: { format: "csv" },
