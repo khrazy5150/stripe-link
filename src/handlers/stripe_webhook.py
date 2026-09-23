@@ -38,7 +38,7 @@ from stripe_link.domain.tips import manage_token_doc
 from stripe_link.domain.reminders import plan_reminders
 from stripe_link.domain.review_invites import plan_invite
 from stripe_link.domain.refund_ledger import build_refund_entry, initial_payment_aggregates, set_refund_aggregates
-from stripe_link.mailer import send_email
+from stripe_link.mailer import send_email, tenant_email_identity
 from stripe_link.domain.coupon_grants import is_grant_code
 from stripe_link.domain.coupon_redemptions import amounts_from_session, redemption_document
 from stripe_link.repositories.documents import (
@@ -1490,13 +1490,26 @@ def resolve_download_links(order: dict[str, Any], tenant_id: str, products_repo)
 
 
 def load_tenant_email_context(tenant_id: str) -> dict[str, str]:
-    """Business name (TenantProfile) + support email (TenantConfig) for receipt branding."""
-    business_name = ""
-    support_email = ""
-    if os.environ.get("TENANT_PROFILES_TABLE"):
+    """What the receipt BODY says the business is called, and where a reply goes.
+
+    Resolved from the same place the envelope is (`tenant_email_identity`), because they were resolved
+    from different places and it showed: the first real renewal receipt (prod, 2026-09-23) arrived From
+    "Poliaxis Nutrition" — the mailer's choke point had done its job — with the subject "Your order
+    receipt" and no business name in the card. The body was still reading `TenantProfile.business_name`
+    and `platform_config.support.email`, which are empty on every tenant and in every environment. Fixing
+    the envelope and leaving the body on dead fields fixed the half a recipient sees in the sender line and
+    missed the half they read.
+
+    TenantProfile is kept as a fallback rather than deleted: it is where a business name WOULD live if one
+    were ever written there, and preferring it over an empty answer costs nothing.
+    """
+    identity = tenant_email_identity(tenant_id)
+    business_name = identity.get("business_name") or ""
+    support_email = identity.get("reply_to") or ""
+    if not business_name and os.environ.get("TENANT_PROFILES_TABLE"):
         profile = tenant_profiles_repository().get(tenant_id, tenant_id) or {}
         business_name = str(profile.get("business_name") or "").strip()
-    if os.environ.get("PLATFORM_CONFIG_TABLE"):
+    if not support_email and os.environ.get("PLATFORM_CONFIG_TABLE"):
         config = platform_config_repository().get(tenant_id) or {}
         support_email = str(((config.get("support") or {}).get("email")) or "").strip()
     return {"business_name": business_name, "support_email": support_email}

@@ -4,6 +4,7 @@ The webhook builds an order record on checkout.session.completed and hands it he
 render the buyer's receipt. Optional download_links are appended for digital products.
 """
 
+import re
 from html import escape
 from typing import Any
 
@@ -13,6 +14,25 @@ from stripe_link.domain.email_layout import ACCENT, button, paragraph, render_em
 def format_money(cents: Any, currency: str = "usd") -> str:
     amount = int(cents or 0) / 100
     return f"{str(currency or 'usd').upper()} {amount:,.2f}"
+
+
+def _first_line_name(order: dict[str, Any]) -> str:
+    """The first line item's description, and more lines named when there are more.
+
+    Stripe writes a renewal line as "1 x Creatine Gummies (at $32.91 / month)". The quantity and price are
+    already shown beside it on the receipt, so the leading "1 x " is noise here; the rest is the only name
+    the invoice carries.
+    """
+    lines = order.get("line_items") or []
+    if not lines:
+        return ""
+    name = str((lines[0] or {}).get("name") or "").strip()
+    name = re.sub(r"^\s*\d+\s*[x\u00d7]\s*", "", name)
+    name = re.sub(r"\s*\(at .*\)\s*$", "", name).strip()
+    if not name:
+        return ""
+    extra = len(lines) - 1
+    return f"{name} + {extra} more" if extra > 0 else name
 
 
 def receipt_content(
@@ -27,7 +47,14 @@ def receipt_content(
     customer = order.get("customer") or {}
     product = order.get("product") or {}
     customer_name = str(customer.get("name") or "there").strip() or "there"
-    product_name = str(product.get("name") or "Your order").strip()
+    # A SUBSCRIPTION RENEWAL has no `product` block — it is built from a Stripe invoice, whose lines are
+    # the only description there is — so a renewal receipt said "Item: Your order" while the real name sat
+    # in line_items[0] (first real renewal, prod 2026-09-23). Fall through to the lines before giving up.
+    product_name = (
+        str(product.get("name") or "").strip()
+        or _first_line_name(order)
+        or "Your order"
+    )
     currency = str(order.get("currency") or "usd")
     total = format_money(order.get("amount_total"), currency)
     order_id = str(order.get("order_id") or "")

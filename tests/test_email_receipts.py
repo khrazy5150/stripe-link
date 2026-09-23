@@ -171,3 +171,76 @@ class DuplicateDeliveryDedupTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RenewalReceiptTests(unittest.TestCase):
+    """A subscription renewal is built from a Stripe INVOICE, not a checkout session, so it has no
+    `product` block and no business name from the old context loader.
+
+    Both showed on the first real renewal (prod, 2026-09-23): the message arrived From "Poliaxis
+    Nutrition" — the envelope was right — with the subject "Your order receipt" and "Item: Your order".
+    """
+
+    RENEWAL = {
+        "order_id": "order_in_1UIwtt21lLbLd4Y5xO7Kr4E6",
+        "currency": "usd",
+        "amount_total": 3291,
+        "customer": {"name": "Keith Harris", "email": "k@example.com"},
+        "line_items": [{"name": "1 × Creatine Gummies (at $32.91 / month)", "amount_total": "3291"}],
+    }
+
+    @staticmethod
+    def _item_cell(html):
+        """The value rendered in the Item row, so a test asserts what a reader SEES."""
+        import re as _re
+
+        match = _re.search(r">Item</td>.*?>([^<]*)</td>", html, _re.S)
+        return match.group(1).strip() if match else ""
+
+    def test_the_item_is_named_from_the_invoice_line(self):
+        html = receipt_content(self.RENEWAL, business_name="Poliaxis Nutrition")["html"]
+
+        self.assertEqual(self._item_cell(html), "Creatine Gummies")
+
+    def test_the_quantity_and_price_noise_is_stripped(self):
+        # "1 x" and "(at $32.91 / month)" are already shown beside it; repeating them reads as a glitch.
+        html = receipt_content(self.RENEWAL)["html"]
+
+        self.assertNotIn("1 × Creatine", html)
+        self.assertNotIn("(at $32.91", html)
+
+    def test_more_lines_are_counted_rather_than_listed(self):
+        order = {**self.RENEWAL,
+                 "line_items": self.RENEWAL["line_items"] + [{"name": "1 × Shaker"}]}
+
+        self.assertEqual(self._item_cell(receipt_content(order)["html"]), "Creatine Gummies + 1 more")
+
+    def test_an_explicit_product_still_wins(self):
+        order = {**self.RENEWAL, "product": {"name": "Explicit Product"}}
+
+        self.assertEqual(self._item_cell(receipt_content(order)["html"]), "Explicit Product")
+
+    def test_nothing_to_name_still_says_something(self):
+        order = {"order_id": "o", "currency": "usd", "amount_total": 1}
+
+        self.assertEqual(self._item_cell(receipt_content(order)["html"]), "Your order")
+
+
+class ReceiptContextTests(unittest.TestCase):
+    """The body must resolve the business from the SAME place the envelope does."""
+
+    def test_the_context_loader_uses_the_shared_identity(self):
+        import handlers.stripe_webhook as webhook
+
+        with patch.object(webhook, "tenant_email_identity",
+                          return_value={"business_name": "Poliaxis Nutrition",
+                                        "reply_to": "owner@example.com"}):
+            context = webhook.load_tenant_email_context("t1")
+
+        self.assertEqual(context["business_name"], "Poliaxis Nutrition")
+        self.assertEqual(context["support_email"], "owner@example.com")
+
+    def test_a_named_business_reaches_the_subject(self):
+        content = receipt_content(RenewalReceiptTests.RENEWAL, business_name="Poliaxis Nutrition")
+
+        self.assertEqual(content["subject"], "Your receipt from Poliaxis Nutrition")
