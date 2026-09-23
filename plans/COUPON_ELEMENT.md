@@ -77,11 +77,12 @@ Recorded because each is a class, not a one-off:
 
 ## Not built
 
-- **Product scoping** — which lines in a bundle get discounted. See `plans/COUPONS_COMPLETION.md`; the
-  options are recorded and the decision is whether a coupon is an object the tenant owns or a rule they
-  write.
-- **A `cta_label` field in the element editor.** The default ("Click to redeem this offer") is all a tenant
-  gets unless it is set programmatically.
+- **Product scoping** — which lines in a bundle get discounted. See `plans/COUPONS_COMPLETION.md`. The
+  framing there was corrected on 2026-09-23: it is NOT "object vs rule" (the tenant's coupon is a durable
+  owned object either way) but **who evaluates the rule** — Stripe or us.
+- **A `cta_label` field in the element editor.** `cta_label` is on the section model
+  (`LandingPages.vue` element defaults) and read by the renderer (`html.py`, `render_coupon`), but no input
+  ever sets it — so "Click to redeem this offer" is all a tenant gets. Confirmed still true 2026-09-23.
 
 ## There is no second renderer
 

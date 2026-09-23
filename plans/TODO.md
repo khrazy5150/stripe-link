@@ -287,10 +287,36 @@ disabling deactivates the promotion code at Stripe before the record changes; ch
 and REFUSES with a 410 rather than silently charging full price; and `applies_to_offer_ids` is enforced
 instead of stored and ignored. `plans/COUPON_ELEMENT.md` shipped with it.
 
-**Still open:** C5 targeted coupons (blocked on campaign tooling) and product scoping — the three options
-are recorded in the plan, and the decision is whether a coupon is an object the tenant owns or a rule they
-write. Two grants were needed and are easy to miss on a new handler: StripeKeysTable, and
-secretsmanager+kms (a Connect tenant's key IS the platform secret).
+**Done (C5), not yet deployed:** targeted coupons — one personal code per named customer, each locked to
+that customer at Stripe so a forwarded code is worthless. It was NOT blocked on campaign tooling after all:
+the tenant already owns email software, so the platform mints the codes and exports a CSV they merge into
+Mailchimp or whatever they use. A personal code travels in the recipient's link (`?coupon=…`) because one
+published artifact serves everybody; the page accepts it only when it carries the campaign's own prefix.
+Redemptions are counted back onto the grant from `checkout.session.completed`, so a tenant can see who used
+theirs — the point of a win-back campaign.
+
+**Still open, in priority order:**
+
+1. ✅ **`redemption_count` read by the cap and written by nothing — FIXED 2026-09-23, not yet deployed.**
+   Fixed as **Option B slice 1** rather than as a patch: a durable `coupon_redemption` ledger row per
+   successful order, keyed on the checkout session so a replayed webhook collides instead of counting
+   twice, with atomic counter bumps after it. A redemption is now a successful ORDER, not an attempted
+   checkout — a distinction Stripe's own counter cannot express. The cap fires and the branded 410 works.
+   The evaluation half of Option B is still unbuilt and undecided.
+2. **`applies_to_offer_ids` is enforced at checkout but has no editor.** C4 made offer scoping real; the
+   Coupons form never had an offer picker, so the field is read and written by nothing — the mirror of the
+   bug C4 fixed. Harmless today (every stored coupon carries `[]` = any offer, verified in dev), but the
+   first tenant who needs a single-offer coupon cannot express it. Option B subsumes this.
+3. **A single recipient's grant cannot be revoked.** `status: "inactive"` is honoured at checkout and
+   written by nothing; the grants route is POST/GET/OPTIONS only. Cutting off one recipient means killing
+   the whole campaign. Must deactivate that grant's own promotion code at Stripe too.
+4. ✅ **Product scoping — Option A SHIPPED 2026-09-23, not yet deployed.** A's recorded blocker was a
+   misread probe: `applies_to.products` DOES scope a discount, Stripe simply never echoes it back, and the
+   original test read the echo instead of the discount. New `applies_to_product_ids` field + product
+   checklist in the editor; an unsynced product refuses the coupon rather than silently discounting the
+   whole cart. Verified live end to end (50% off a $100+$50 cart discounted 5000, not 7500).
+   **Option B's evaluation engine remains open** — A is its fixed-product-list special case, and B's
+   accounting half already shipped. Lesson recorded: never verify a Stripe field from its echo.
 
 **Cheapest it will ever be:** `jb-coupons-dev` and `jb-coupons-prod` both hold ZERO records, so there is no
 migration — every coupon ever created can be created under the finished design.
@@ -372,7 +398,7 @@ what real traffic on these paths looks like.
 `X-Robots-Tag` over the whole artifact namespace plus the Worker stripping the inherited header and setting
 its own from `route.noindex`. It does nothing about commerce, and this item does nothing about indexing.
 
-### ⭐⭐ HIGH — the API never verifies who is calling; tenant_id is taken from the request (found 2026-09-15)
+### ⭐⭐ HIGH — the API never verifies who is calling; tenant_id is taken from the request (found 2026-09-15, confirmed 2026-09-23)
 
 Noticed while smoke-testing a newly deployed endpoint on prod, NOT introduced by it. This is repo-wide and
 pre-existing.
@@ -380,7 +406,7 @@ pre-existing.
 **What was verified, concretely:**
 
 - `template.yaml` defines no `Auth:`, no `Authorizer`, no `DefaultAuthorizer`. The RestApi has none.
-- `tenant_id_from_event` (`stripe_link/common.py:109`) reads the tenant from, in order: the JSON body, `?
+- `tenant_id_from_event` (`stripe_link/common.py:128`) reads the tenant from, in order: the JSON body, `?
   tenant_id=`, `?tenantID=`, `X-Tenant-Id`, `X-Client-Id`. All client-supplied.
 - The `Authorization: Bearer` header the dashboard sends on every request (`api/client.js`) is named in the
   CORS allow-list and **read nowhere else in `src/`**. There is no JWKS fetch, no token decode, no signature
@@ -392,10 +418,32 @@ pre-existing.
 as that tenant. `require_capability` does not help — it reads the tenant's plan, it does not establish who is
 asking.
 
-**NOT verified, deliberately:** no cross-tenant write was attempted against prod. The reasoning above is from
-the code and from unauthenticated status codes only. Confirm with a deliberate test in dev before sizing the
-fix — it is possible something outside this repo (a WAF rule, a CloudFront function, an edge Worker) is
-checking the token, and that would change the answer.
+**The open question is now CLOSED (2026-09-23).** That "something outside this repo might be checking the
+token" was the one thing that could have made this a false alarm. It is not:
+
+- The dev API stage has **no WAF** — `get-stage` returns `webAclArn: null`, and `template.yaml` names no
+  `WebACL` anywhere.
+- `dev.juniorbay.com` is a **REGIONAL** API Gateway domain (`distributionDomainName: null`), so there is no
+  CloudFront distribution in front of it and therefore no CloudFront function to run a check in.
+- The same unauthenticated request answers identically on the execute-api URL and on `dev.juniorbay.com`,
+  which is the base the dashboard itself uses. Nothing sits between the browser and the Lambda.
+
+Also re-confirmed in code on 2026-09-23: the five `Authorization` hits in `src/handlers/` are all *outbound*
+(`Basic <key>` to Stripe) or CORS allow-lists. Nothing reads an inbound token. A cross-tenant WRITE still has
+not been attempted, and still should not be against prod — but the reason to doubt the finding is gone.
+
+**Two things that sharpen the blast radius:**
+
+- **Payment redirection is the worst case, not data exposure.** `/stripe/keys` accepts POST/PUT and
+  `save_keys` writes to whatever tenant_id the payload names (`handlers/stripe_keys.py:19`). Overwriting a
+  tenant's Stripe keys points their checkout at somebody else's Stripe account. That outranks the read paths.
+- **Customer PII is now on more endpoints.** `GET /coupons/{id}/grants` (shipped dev 2026-09-23) returns
+  recipient **email addresses** alongside their codes. `/customers` and `/leads` already did, so this is new
+  in extent rather than in kind — but each addition raises what one guessed tenant_id is worth. Verified
+  live: `GET /coupons/probe/grants?tenant_id=…` answers 200 with no credentials.
+
+**Deliberately not patched per-endpoint.** Locking down the grants route while 257 others stay open would
+look like a fix and not be one. The boundary has to be drawn once, at the API.
 
 **Why it matters more now than last week:** provisioning endpoints create real, externally-visible things. A
 tip jar provision writes four documents and claims a GLOBALLY UNIQUE platform subdomain that is never
