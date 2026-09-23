@@ -924,7 +924,11 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     # The whole ticket is the link, so it gets the pointer and the lift, and every child inherits its colour
     # rather than turning into blue underlined text.
     "    .sl-coupon{display:grid;grid-template-columns:minmax(10rem,34%) minmax(0,1fr);align-items:stretch;"
-    "max-width:56rem;margin:0 auto;text-decoration:none;color:var(--sl-coupon-text,var(--sl-text));"
+    # The ticket paints its OWN ground (white by default), so its ink must default to a dark one rather
+    # than inheriting --sl-text. On a dark preset --sl-text is near-white, which put white text on a
+    # white ticket and erased the value, the code and the headline -- everything except the accent-
+    # coloured lines, which is why it looked half-rendered rather than broken (found 2026-09-22).
+    "max-width:56rem;margin:0 auto;text-decoration:none;color:var(--sl-coupon-text,#16181d);"
     "background:var(--sl-coupon-bg,#fff);border:2px dashed color-mix(in srgb,var(--sl-coupon-accent,#e0402c) 55%,transparent);"
     "border-radius:1.4rem;overflow:hidden;box-shadow:0 1.2rem 3.2rem rgba(0,0,0,0.13);"
     "transition:transform .16s ease,box-shadow .16s ease}",
@@ -2404,7 +2408,8 @@ SECTION_REGISTRY: dict[str, dict[str, Any]] = {
     "rating": {"render": lambda c: render_rating(c.section), "version": 1},
     "client_marquee": {"render": lambda c: render_client_marquee(c.section), "version": 1},
     "price_highlight": {"render": lambda c: render_price_highlight(c.section, c.offer, c.products_by_id, c.services_by_id), "version": 1},
-    "coupon": {"render": lambda c: render_coupon(c.section, c.offer, c.products_by_id, c.checkout_url), "version": 1},
+    "coupon": {"render": lambda c: render_coupon(c.section, c.offer, c.products_by_id, c.checkout_url,
+                                                 page=c.page, resolved_offer=c.resolved_offer), "version": 1},
     "author_bio": {"render": lambda c: render_author_bio(c.section), "version": 1},
     "product_details": {"render": lambda c: render_product_details(c.offer, c.products_by_id, c.services_by_id), "version": 1},
     "product_carousel": {"render": lambda c: render_product_carousel(c.section, c.page, c.offers_by_id, c.products_by_id, c.services_by_id, c.checkout_url, c.api_base_url), "version": 1},
@@ -5319,6 +5324,8 @@ def render_coupon(
     products_by_id: dict[str, dict[str, Any]] | None = None,
     checkout_url: str = "",
     now: int | None = None,
+    page: dict[str, Any] | None = None,
+    resolved_offer: dict[str, Any] | None = None,
 ) -> str:
     """The campaign coupon: a ticket the visitor arrived for, and can click.
 
@@ -5375,7 +5382,7 @@ def render_coupon(
     if not live:
         href = ""
     elif transacts:
-        href = coupon_checkout_href(checkout_url, code)
+        href = coupon_checkout_href(checkout_url, code, page, offer, resolved_offer)
     else:
         href = str(section.get("destination_url") or "").strip()
 
@@ -5434,16 +5441,22 @@ def render_coupon(
     return "\n".join([opener, inner, closer])
 
 
-def coupon_checkout_href(checkout_url: str, code: str) -> str:
+def coupon_checkout_href(checkout_url: str, code: str, page=None, offer=None, resolved_offer=None) -> str:
     """Checkout with the promotion code already on it, so the discount is applied before the buyer looks.
 
-    Separate and tiny so the test for it reads as what it guarantees: the code always survives the trip.
+    Built through `checkout_context`, the same thing the Buy button uses, rather than by appending to the
+    base URL: that URL carries no tenant, offer or price, so a hand-made link reached checkout as
+    "clientID or tenant_id is required" (found 2026-09-22). One builder means the coupon link cannot drift
+    from the button beside it.
     """
     checkout_url = str(checkout_url or "").strip()
     if not checkout_url:
         return ""
-    joiner = "&" if "?" in checkout_url else "?"
-    return f"{checkout_url}{joiner}coupon={quote(code)}"
+    href = checkout_context(page or {}, offer or {}, resolved_offer or offer or {}, checkout_url).get("href") or ""
+    if not href or href == "#checkout":
+        return ""
+    joiner = "&" if "?" in href else "?"
+    return f"{href}{joiner}coupon={quote(code)}"
 
 
 def render_author_bio(section: dict[str, Any]) -> str:

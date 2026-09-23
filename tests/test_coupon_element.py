@@ -53,9 +53,32 @@ class SmartBehaviourTests(unittest.TestCase):
         html = render_coupon(_section(), _offer(), checkout_url=CHECKOUT)
         self.assertTrue(html.strip().startswith("<a "), "the coupon itself must be the click target")
 
-    def test_the_code_survives_a_url_that_already_has_a_query(self):
-        self.assertEqual(coupon_checkout_href("https://x/c?a=1", "SAVE 10"), "https://x/c?a=1&coupon=SAVE%2010")
-        self.assertEqual(coupon_checkout_href("https://x/c", "S10"), "https://x/c?coupon=S10")
+    def test_the_code_is_appended_and_url_encoded(self):
+        # The base url now goes through checkout_context first, which appends its own params -- so assert
+        # the CODE survives the trip rather than pinning the whole string.
+        href = coupon_checkout_href("https://x/c", "SAVE 10", {}, _offer(), _offer())
+        self.assertIn("coupon=SAVE%2010", href)
+        self.assertTrue(href.startswith("https://x/c?"))
+
+    def test_the_link_carries_the_TENANT_so_checkout_can_identify_it(self):
+        # Appending "?coupon=" to the bare base url produced a link with no tenant, offer or price, and
+        # checkout answered "clientID or tenant_id is required" (found 2026-09-22). The CTA's own builder
+        # is the only thing that knows what a checkout link needs.
+        page = {"page_id": "page_1", "tenant_id": "tenant_demo"}
+        offer = {"offer_id": "offer_1", "tenant_id": "tenant_demo",
+                 "items": [{"product_id": "p1", "price_id": "price_1", "quantity": 1}]}
+        href = coupon_checkout_href("https://x/c", "SAVE10", page, offer, offer)
+        self.assertIn("clientID=tenant_demo", href)
+        self.assertIn("offer=offer_1", href)
+        self.assertIn("page_id=page_1", href)
+        self.assertIn("coupon=SAVE10", href)
+
+    def test_the_rendered_ticket_links_the_same_way(self):
+        page = {"page_id": "page_1", "tenant_id": "tenant_demo"}
+        offer = {"offer_id": "offer_1", "tenant_id": "tenant_demo",
+                 "items": [{"product_id": "p1", "price_id": "price_1", "quantity": 1}]}
+        html = render_coupon(_section(), offer, {}, CHECKOUT, page=page, resolved_offer=offer)
+        self.assertIn("clientID=tenant_demo", html)
 
     def test_no_checkout_url_yields_no_link_rather_than_a_broken_one(self):
         html = render_coupon(_section(), _offer(), checkout_url="")
@@ -253,3 +276,27 @@ class InlineCouponFormCompletenessTests(unittest.TestCase):
     def test_the_tenant_chooses_the_duration_rather_than_inheriting_a_guess(self):
         # "every renewal" vs "once" is a materially different promise on a subscription.
         self.assertIn('v-model="newCoupon.duration"', self.BUILDER)
+
+
+class DarkPresetTests(unittest.TestCase):
+    """The ticket paints its own white ground, so it must not inherit the PAGE's ink.
+
+    Found 2026-09-22: on a dark preset `--sl-text` is near-white, and the ticket rendered white-on-white --
+    the value, code and headline vanished while the accent-coloured lines stayed, so it looked half-drawn
+    rather than broken.
+    """
+
+    import pathlib as _pathlib
+    CSS = (_pathlib.Path(__file__).resolve().parents[1]
+           / "src/stripe_link/runtime/html.py").read_text(encoding="utf-8")
+
+    def test_the_ink_does_not_fall_back_to_the_page_text_colour(self):
+        self.assertNotIn("--sl-coupon-text,var(--sl-text)", self.CSS)
+
+    def test_it_falls_back_to_a_dark_ink_that_suits_the_default_ground(self):
+        self.assertIn("color:var(--sl-coupon-text,#16181d)", self.CSS)
+
+    def test_the_ground_and_the_ink_are_both_defaulted(self):
+        # A token with no default is the other half of the same bug: whichever side is missing, the pair
+        # stops being self-consistent.
+        self.assertIn("var(--sl-coupon-bg,#fff)", self.CSS)
