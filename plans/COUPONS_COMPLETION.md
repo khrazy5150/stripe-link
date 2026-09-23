@@ -1,10 +1,10 @@
 # Coupons: make the module do what its schema already promises
 
-**Status: C1–C4 shipped dev + prod 2026-09-22. C5 shipped dev 2026-09-23, not on prod.**
+**Status: C1–C5 shipped dev + prod. C1–C4 2026-09-22; C5 and Options A+B 2026-09-23.**
 **Written 2026-09-22; status corrected 2026-09-23.**
 
-**Open:** `applies_to_offer_ids` has no editor, per-recipient grant revocation, and reclaiming the
-disposable coupons once delete-after-payment is tested. **A and B both shipped 2026-09-23** — A's recorded
+**Open:** `applies_to_offer_ids` has no editor, and reclaiming the disposable coupons once
+delete-after-payment is tested. **A and B both shipped 2026-09-23** — A's recorded
 blocker was a misread probe, and B's first rule is spend-threshold tiers.
 
 ## What is true today
@@ -140,7 +140,7 @@ Recorded because silently dropping them would be worse than not offering them:
   offer, the same way an expired one is. An empty list still means "any offer", which is what every coupon
   created so far carries, so nothing existing changes behaviour.
 
-### Option B, slice 1 — the redemption ledger: SHIPPED 2026-09-23 (dev pending)
+### Option B, slice 1 — the redemption ledger: SHIPPED dev + prod 2026-09-23
 
 **The bug it closed.** `coupon_is_usable` refused a coupon once `redemption_count >= max_redemptions`, and
 nothing anywhere incremented that field. So the cap never fired: a fully-redeemed coupon stayed in the
@@ -180,6 +180,41 @@ coupon_redemption
 evaluates a tenant's rule against a cart, and no disposable Stripe Coupon is created — checkout still
 hands Stripe the tenant's durable promotion code. Option B's evaluation engine remains undecided and
 unbuilt; this slice is what makes it affordable, and is worth having under Option A regardless.
+
+### Open — `applies_to_offer_ids` is enforced but cannot be authored (found 2026-09-23)
+
+C4 made offer scoping real: a coupon naming offers is refused on any other offer, the same way an expired
+one is. But the Coupons editor has **no offer picker** — `applies_to_offer_ids` appears in
+`defaultCouponForm` as `[]` and is copied back out of an existing coupon, and nothing in the form ever sets
+it. So the enforcement exists and the authoring does not.
+
+Harmless today, and verified so: the only coupon in `jb-coupons-dev` carries `applies_to_offer_ids: []`,
+which means "any offer". Every coupon ever created carries the same. But it is the mirror of the bug C4
+fixed — that field was stored and read by nothing; now it is read and *written* by nothing — and the first
+tenant who needs a coupon scoped to one offer cannot express it.
+
+Worth deciding alongside the A/B fork, since option B subsumes it: under B the qualification rule is ours
+to evaluate, and offer scope becomes one clause of a rule the tenant authors rather than a list bolted to
+the document.
+
+### Revoking ONE recipient's code — SHIPPED 2026-09-23
+
+`PUT /coupons/{coupon_id}/grants` with `{code, status}`, and a Revoke / Restore control beside each
+recipient in the campaign view.
+
+The gap it closed: `status: "inactive"` was honoured at checkout and written by nothing, so cutting off a
+single recipient meant ending the campaign for everyone. This is the smaller instrument — the customer who
+charged back, or the address that turned out to be wrong, without punishing the other ninety-nine.
+
+- **Stripe first, store second**, like every other lifecycle change here. A record saying `inactive` while
+  the code still works at Stripe is the more dangerous of the two disagreements: it is the one where a
+  revoked recipient still gets the discount and the tenant believes otherwise. If Stripe refuses, nothing
+  is written.
+- **A grant's status is operational, not a promise.** Revoking one person's code breaks nothing promised
+  to anyone else, which is why this is allowed where editing a COUPON is refused with a 409.
+- A no-op change (already in the requested state) tells Stripe nothing and returns the grant unchanged.
+- A revoked code stays listed and struck through rather than disappearing — the tenant needs to see that
+  it exists and is off.
 
 ### Open — `applies_to_offer_ids` is enforced but cannot be authored (found 2026-09-23)
 
@@ -320,7 +355,7 @@ products qualify.
 - **Ceiling:** every future rule has to be expressible in Stripe's vocabulary. "Cheapest item free",
   tiered thresholds, category rules and bundle logic are not.
 
-### Option A — SHIPPED 2026-09-23 (dev pending)
+### Option A — SHIPPED dev + prod 2026-09-23
 
 Adopted first, because A is a special case of B — "the qualifying set is a fixed product list" — so it buys
 real product scoping cheaply without foreclosing B. The tenant's coupon document is unchanged under either.
@@ -386,7 +421,7 @@ coupon, so the buyer sees a lower price with no "you saved $X" line and no coupo
 somebody a coupon, the visible discount is the point, so B1 is the default and B2 is the fallback for cases
 where the discount need not read as a discount.
 
-### Option B, slice 2 — the evaluation engine: SHIPPED 2026-09-23 (dev pending)
+### Option B, slice 2 — the evaluation engine: SHIPPED dev + prod 2026-09-23
 
 B1 as described above, with **spend-threshold tiers** as the first rule Stripe cannot express. Everything
 else a coupon does is still Stripe's to evaluate, and stays that way — B is for what A cannot say.

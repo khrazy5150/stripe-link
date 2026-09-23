@@ -6,18 +6,39 @@ Deferred, non-blocking follow-ups. Each item notes what, why it was deferred, an
 
 ### Wire the shipping providers (Shippo first)
 - **What:** the module supports four providers in its schema and its `<select>` -- shippo, easypost,
-  shipstation, easyship -- and **none of them is wired**. There is no provider code at all: not one HTTP
-  call to any of them. Design: **`plans/SHIPPING_PROVIDERS.md`** (written 2026-09-20).
-- **Built and good, do not rewrite:** `ShippingConfig.schema.json` is complete; `handlers/shipping.py` does
-  KMS key encryption, preserve-on-unchanged, drop-on-provider-change and redact-on-read -- better than the
-  legacy implementation; `Shipping.vue` is a full settings form.
-- **The blocking gap, and it is not in the shipping module:** `order_record_from_session` never reads
-  `shipping_details` off the Stripe session, so **no order in either environment has a destination
-  address** and no label can be bought for any of them. Checkout does collect one (US + CA, payment mode).
-- **Also missing:** `connection_status` can never say `connected` (nothing tests it, and there is no test
-  endpoint); no rates/labels/tracking routes; no shipment/label document, so no idempotency to stop a
-  double-click buying two labels; and no Stripe `shipping_options` anywhere, so shipping is silently free
-  on every order ever placed.
+  shipstation, easyship. Design: **`plans/SHIPPING_PROVIDERS.md`** (written 2026-09-20).
+- **Status re-verified against the code 2026-09-23.** Much of what this entry originally listed as missing
+  has since shipped, and several bullets below were stale and actively misleading.
+
+**BUILT (do not rewrite):**
+
+- `ShippingConfig.schema.json`; `handlers/shipping.py` with KMS key encryption, preserve-on-unchanged,
+  drop-on-provider-change, redact-on-read; `Shipping.vue` settings form.
+- **A real Shippo adapter** (`domain/shipping_providers.py`): `test_connection()` and `rates()` making
+  actual HTTP calls, plus a `MockProvider`. The original "none of them is wired, not one HTTP call"
+  is no longer true.
+- **`GET /shipping/test`**, so `connection_status` CAN say `connected` -- also no longer true as written.
+- **The destination address**, which was the blocking gap: `destination_address_from_session` reads it off
+  the Stripe session and `shipping_address` lands on the order record.
+- **Box catalog + packer** (`starter_boxes`, `tenant_boxes`, `domain/shipping_packing.py`), the
+  ship-from/return address, and `label_readiness()` -- which IS surfaced, on every `/shipping` response.
+- **Shipment document builders**: `shipment_id_for` (derived, so a double-click cannot buy two labels),
+  `build_shipment`, `mark_purchased`, `mark_failed`.
+
+**STILL MISSING -- and the first one is what a QA session will notice:**
+
+1. **Shipping is FREE on every order.** There is no `shipping_options`, `shipping_rate_data` or
+   `shipping_cost` anywhere in `src/` outside the ledger's vocabulary. A buyer is never charged for
+   postage, whatever the tenant has configured.
+2. **No label can be bought.** `ShippingProvider` exposes `test_connection` and `rates` only -- there is
+   no buy-label method on any provider, so the shipment builders have nothing to fulfil them.
+3. **No ShipmentsTable**, so a shipment document has nowhere to be stored.
+4. **No rates / labels / tracking routes.** The API has `/shipping` and `/shipping/test`, nothing else.
+5. **The packer is called by no handler** -- built in P1 as planned, not yet wired.
+6. No tracking webhooks, no milestone dedupe, no tracking emails.
+
+**So the beginner path stops at "configured and connection tested."** Everything downstream of that --
+rate, label, charge the buyer, track -- does not exist yet.
 - **Legacy:** `../stripe-cart` has real Shippo REST call shapes worth reading
   (`layers/shipping/python/shipping_providers.py`) but the code cannot be copied -- it is built on
   `requests` in a Lambda layer, and `src/requirements.txt` here is deliberately empty. Its own plan's
@@ -287,7 +308,7 @@ disabling deactivates the promotion code at Stripe before the record changes; ch
 and REFUSES with a 410 rather than silently charging full price; and `applies_to_offer_ids` is enforced
 instead of stored and ignored. `plans/COUPON_ELEMENT.md` shipped with it.
 
-**Done (C5), not yet deployed:** targeted coupons — one personal code per named customer, each locked to
+**Done (C5), shipped dev + prod 2026-09-23:** targeted coupons — one personal code per named customer, each locked to
 that customer at Stripe so a forwarded code is worthless. It was NOT blocked on campaign tooling after all:
 the tenant already owns email software, so the platform mints the codes and exports a CSV they merge into
 Mailchimp or whatever they use. A personal code travels in the recipient's link (`?coupon=…`) because one
@@ -297,7 +318,7 @@ theirs — the point of a win-back campaign.
 
 **Still open, in priority order:**
 
-1. ✅ **`redemption_count` read by the cap and written by nothing — FIXED 2026-09-23, not yet deployed.**
+1. ✅ **`redemption_count` read by the cap and written by nothing — FIXED + SHIPPED dev + prod 2026-09-23.**
    Fixed as **Option B slice 1** rather than as a patch: a durable `coupon_redemption` ledger row per
    successful order, keyed on the checkout session so a replayed webhook collides instead of counting
    twice, with atomic counter bumps after it. A redemption is now a successful ORDER, not an attempted
@@ -307,10 +328,11 @@ theirs — the point of a win-back campaign.
    Coupons form never had an offer picker, so the field is read and written by nothing — the mirror of the
    bug C4 fixed. Harmless today (every stored coupon carries `[]` = any offer, verified in dev), but the
    first tenant who needs a single-offer coupon cannot express it. Option B subsumes this.
-3. **A single recipient's grant cannot be revoked.** `status: "inactive"` is honoured at checkout and
-   written by nothing; the grants route is POST/GET/OPTIONS only. Cutting off one recipient means killing
-   the whole campaign. Must deactivate that grant's own promotion code at Stripe too.
-4. ✅ **Product scoping — Options A AND B SHIPPED 2026-09-23, not yet deployed.** A's recorded blocker
+3. ✅ **Revoking one recipient's code — SHIPPED 2026-09-23, not yet deployed.** `PUT .../grants` plus a
+   Revoke / Restore control per recipient. Stripe first, store second, so the record can never say
+   "revoked" while the code still works. A grant's status is operational, not a promise, which is why this
+   is allowed where editing a coupon is refused.
+4. ✅ **Product scoping — Options A AND B SHIPPED dev + prod 2026-09-23.** A's recorded blocker
    was a misread probe: `applies_to.products` DOES scope a discount, Stripe simply never echoes it back.
    A = `applies_to_product_ids` (Stripe evaluates). B = `discount.type: "tiered"` spend ladders, which we
    evaluate and hand Stripe as a one-checkout Coupon bounded by `max_redemptions: 1` + `redeem_by`.
