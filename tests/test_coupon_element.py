@@ -300,3 +300,63 @@ class DarkPresetTests(unittest.TestCase):
         # A token with no default is the other half of the same bug: whichever side is missing, the pair
         # stops being self-consistent.
         self.assertIn("var(--sl-coupon-bg,#fff)", self.CSS)
+
+
+class AppliedOnThePageTests(unittest.TestCase):
+    """Applying a coupon must not restate the price (author, 2026-09-22).
+
+    The card already carries a strike-through and a "Save X%" badge; a second recalculation invites "is
+    this before or after my code?". It is also the only version that stays true under restrictions the
+    browser cannot evaluate — Stripe's first_time_transaction is decided from the email typed AT checkout.
+    So the ticket confirms, and the discount lands at checkout the way a supermarket's electronic coupon
+    does.
+    """
+
+    import pathlib as _pathlib
+    HTML = (_pathlib.Path(__file__).resolve().parents[1]
+            / "src/stripe_link/runtime/html.py").read_text(encoding="utf-8")
+
+    def test_the_ticket_advertises_its_code_to_the_page(self):
+        html = render_coupon(_section(), _offer(), {}, CHECKOUT)
+        self.assertIn('data-coupon-code="MASSAGE20"', html)
+
+    def test_the_applied_panel_ships_in_the_markup_but_hidden(self):
+        # In the HTML rather than built in JS, so a crawler and a no-JS visitor see honest copy.
+        html = render_coupon(_section(), _offer(), {}, CHECKOUT)
+        self.assertIn("sl-coupon-applied", html)
+        self.assertIn("hidden", html)
+
+    def test_it_says_applied_and_where_the_discount_lands(self):
+        html = render_coupon(_section(), _offer(), {}, CHECKOUT)
+        self.assertIn("Coupon Applied", html)
+        self.assertIn("Your discount will appear at checkout", html)
+
+    def test_the_confirmation_is_green(self):
+        self.assertIn("background:#e7f7ed;color:#136c34", self.HTML)
+
+    def test_the_mark_is_an_inline_svg_not_a_fetched_asset(self):
+        # An inline SVG cannot fail to load and needs no CDN.
+        self.assertIn("COUPON_APPLIED_MARK", self.HTML)
+        self.assertIn("<svg class=\"sl-coupon-applied-mark\"", self.HTML)
+
+    def test_the_ticket_is_still_a_working_link_without_javascript(self):
+        # Progressive enhancement: the script intercepts the click; without it the ticket still checks out.
+        html = render_coupon(_section(), _offer(), {}, CHECKOUT)
+        self.assertIn("<a ", html)
+        self.assertIn("coupon=MASSAGE20", html)
+
+    def test_the_code_rides_with_whichever_card_the_buyer_picked(self):
+        # The bug this replaces: a link baked at publish from the offer's FIRST item sent every buyer on a
+        # tiered offer to tier one, whatever they had selected.
+        self.assertIn("if (window.__jbCoupon) params.set('coupon', window.__jbCoupon);", self.HTML)
+
+    def test_applying_refreshes_the_cta_so_the_new_href_is_used(self):
+        self.assertIn("window.__jbCoupon = coupon.dataset.couponCode", self.HTML)
+        block = self.HTML.split("const applyCoupon", 1)[1][:700]
+        self.assertIn("updateCta(", block)
+
+    def test_the_price_is_never_recalculated_on_the_page(self):
+        # The decision, asserted: nothing in the apply path touches an amount.
+        block = self.HTML.split("const applyCoupon", 1)[1][:700]
+        for forbidden in ("saleAmount", "regularAmount", "percent_off", "amount_off"):
+            self.assertNotIn(forbidden, block, "applying a coupon must not restate the price")

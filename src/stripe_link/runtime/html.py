@@ -962,6 +962,18 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     "    .sl-coupon-cta{margin-top:0.6rem;font-size:1.4rem;font-weight:800;color:var(--sl-coupon-accent,#e0402c)}",
     # Expired: still shown, visibly spent. Desaturated rather than hidden, because an email outlives its
     # deadline and "nothing here" reads as a broken page.
+    # Applied: green, because that is what "this worked" looks like everywhere else. Green is used ONLY
+    # for this state -- the ticket's own accent stays the tenant's, so the confirmation reads as a system
+    # response rather than as part of the artwork.
+    "    .sl-coupon-applied{display:flex;align-items:center;gap:0.65rem;margin-top:0.7rem;"
+    "padding:0.5rem 0.9rem;border-radius:0.6rem;background:#e7f7ed;color:#136c34;"
+    "border:1px solid #b6e3c6}",
+    "    .sl-coupon-applied-mark{flex:0 0 auto}",
+    "    .sl-coupon-applied-text{display:flex;flex-direction:column;font-size:1.3rem;font-weight:800;line-height:1.25}",
+    "    .sl-coupon-applied-text small{font-size:1.1rem;font-weight:600;opacity:0.85}",
+    # Once applied the ticket is a receipt, not an invitation: it stops inviting another click.
+    "    .sl-coupon.is-applied{cursor:default}",
+    "    .sl-coupon.is-applied .sl-coupon-cta{display:none}",
     "    .sl-coupon-expired{filter:grayscale(1);opacity:0.7;box-shadow:none}",
     "    @media (max-width:34rem){.sl-coupon{grid-template-columns:minmax(0,1fr)}"
     ".sl-coupon-media{border-right:0;border-bottom:2px dashed color-mix(in srgb,var(--sl-coupon-accent,#e0402c) 45%,transparent)}"
@@ -5306,6 +5318,16 @@ def render_price_highlight(
     ])
 
 
+# A perforated ticket, drawn rather than fetched: an inline SVG cannot fail to load, needs no CDN the
+# artifact CSP would block, and inherits currentColor so the applied state colours it in one place.
+COUPON_APPLIED_MARK = (
+    '<svg class="sl-coupon-applied-mark" viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" '
+    'fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'
+    '<path d="M3 9V7a1 1 0 0 1 1-1h16a1 1 0 0 1 1 1v2a2 2 0 0 0 0 4v2a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-2a2 2 0 0 0 0-4Z"/>'
+    '<path d="m9 12 2 2 4-4"/></svg>'
+)
+
+
 def coupon_is_live(section: dict[str, Any], now: int | None = None) -> bool:
     """Whether this coupon can still be redeemed. An absent expiry means it does not expire."""
     expires_at = section.get("expires_at")
@@ -5424,6 +5446,14 @@ def render_coupon(
         expiry_line,
         f'        <p class="sl-coupon-terms">{escape(terms)}</p>' if terms else "",
         f'        <span class="sl-coupon-cta">{escape(cta_label)}</span>',
+        # Rendered but hidden, and revealed by the page script when the visitor applies it. In the markup
+        # rather than built in JS so a crawler and a no-JS visitor still see honest, complete copy, and so
+        # the wording lives with the rest of the element instead of inside a string in the runtime.
+        '        <span class="sl-coupon-applied" hidden>',
+        f'          {COUPON_APPLIED_MARK}',
+        '          <span class="sl-coupon-applied-text">Coupon Applied'
+        '<small>Your discount will appear at checkout</small></span>',
+        "        </span>",
         "      </div>",
     ]
     inner = "\n".join(line for line in body if line)
@@ -5431,8 +5461,11 @@ def render_coupon(
     # An expired coupon still RENDERS -- an email campaign outlives its deadline and the visitor deserves to
     # be told, not dropped on a page with a hole in it or sent to a checkout that refuses them.
     if href:
+        # Still an anchor, and still pointing at a working checkout: the script intercepts the click and
+        # applies instead, so a visitor without JS gets the old behaviour rather than a dead ticket.
         opener = (f'    <a class="sl-coupon{layout}{state}{themed}" href="{escape(href)}"'
-                  f' data-section-id="{section_id}" data-section-type="coupon"{style_attr}>')
+                  f' data-section-id="{section_id}" data-section-type="coupon"'
+                  f' data-coupon-code="{escape(code)}"{style_attr}>')
         closer = "    </a>"
     else:
         opener = (f'    <div class="sl-coupon{layout}{state}{themed}"'
@@ -7874,10 +7907,34 @@ def render_page_interactions_script(page: dict[str, Any]) -> str:
         "        const current = pageUrl();",
         "        params.set('success_url', successUrl());",
         "        params.set('cancel_url', current);",
+        # A coupon the visitor applied on the page rides along with WHICHEVER card they picked. The ticket
+        # used to be a direct link built at publish from the offer's FIRST item, so on a tiered or
+        # multi-product offer it sent everyone to tier one regardless of their choice (found 2026-09-22).
+        "        if (window.__jbCoupon) params.set('coupon', window.__jbCoupon);",
         "        const separator = cta.dataset.checkoutBaseUrl.includes('?') ? '&' : '?';",
         "        return `${cta.dataset.checkoutBaseUrl}${separator}${params.toString()}`;",
         "      };",
         "      const currentAmount = (card) => card?.dataset.expired === 'true' ? card.dataset.regularAmount : card?.dataset.saleAmount;",
+        # Applying a coupon deliberately does NOT restate the price. The card already carries a
+        # strike-through and a "Save X%" badge, and a second recalculation invites the question "is this
+        # before or after my code?". It is also the only version that stays true under restrictions the
+        # browser cannot evaluate. The discount lands at checkout, the way an electronic coupon at a
+        # supermarket till does (author, 2026-09-22).
+        "      const coupon = document.querySelector('[data-section-type=\"coupon\"][data-coupon-code]');",
+        "      if (coupon) {",
+        "        const applyCoupon = (event) => {",
+        "          if (!cta || !cta.dataset.checkoutBaseUrl) return;   // no checkout here: let the link be",
+        "          if (event) event.preventDefault();",
+        "          window.__jbCoupon = coupon.dataset.couponCode || '';",
+        "          coupon.classList.add('is-applied');",
+        "          const live = coupon.querySelector('.sl-coupon-applied');",
+        "          if (live) live.hidden = false;",
+        # Re-point the CTA at the card the visitor already has selected, the same expression the script's
+        # own bootstrap uses -- a fresh href is what carries the code.
+        "          updateCta(document.querySelector('.sl-price-option.selected') || document.querySelector('.sl-price-option'));",
+        "        };",
+        "        coupon.addEventListener('click', applyCoupon);",
+        "      }",
         "      const updateCta = (card) => {",
         "        if (!cta || !card) return;",
         "        const amount = currentAmount(card);",
