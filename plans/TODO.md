@@ -269,7 +269,7 @@ that sold it. That half is forward-looking only.
 
 **Not yet verified against a live renewal.** The next daily cycle is the test.
 
-### ⭐⭐ HIGH — the Coupons module records coupons but never creates them in Stripe (found 2026-09-22)
+### ⭐⭐ the Coupons module never created anything in Stripe — FIXED, dev + prod 2026-09-22
 
 Plan: `plans/COUPONS_COMPLETION.md`. Started long ago, parked while the pricing rework landed, and never
 recorded here — which is why it stayed invisible until the coupon element tried to use it.
@@ -281,10 +281,16 @@ and `sync.status` is the literal string `"synced"`, written by the client — wh
 Stripe-backed feature with the Stripe half left out; `allow_promotion_codes` has always been the only
 redemption path that works, and only because a code exists in Stripe that someone made by hand.
 
-**Blocks:** the coupon landing-page element (`plans/COUPON_ELEMENT.md`, on `main`, NOT deployed) pre-applies
-`discounts[0][promotion_code]`. With a placeholder id Stripe rejects the session, so a coupon page would
-fail checkout rather than merely lose its discount. Deploy that element only after C3, or make its
-pre-apply fail-safe first.
+**Done (C1-C4), live on prod:** creation calls Stripe first and persists only on success, with an
+Idempotency-Key per object; value/code/duration edits are refused with 409 (Stripe freezes them too);
+disabling deactivates the promotion code at Stripe before the record changes; checkout applies the real id
+and REFUSES with a 410 rather than silently charging full price; and `applies_to_offer_ids` is enforced
+instead of stored and ignored. `plans/COUPON_ELEMENT.md` shipped with it.
+
+**Still open:** C5 targeted coupons (blocked on campaign tooling) and product scoping — the three options
+are recorded in the plan, and the decision is whether a coupon is an object the tenant owns or a rule they
+write. Two grants were needed and are easy to miss on a new handler: StripeKeysTable, and
+secretsmanager+kms (a Connect tenant's key IS the platform secret).
 
 **Cheapest it will ever be:** `jb-coupons-dev` and `jb-coupons-prod` both hold ZERO records, so there is no
 migration — every coupon ever created can be created under the finished design.
