@@ -13,14 +13,14 @@ from urllib.parse import quote
 
 from stripe_link.domain.cart import cart_token_doc, mark_recovery_sent, normalize_page_url, recoverable
 from stripe_link.domain.cart_recovery import recovery_email
-from stripe_link.mailer import EmailError, send_email
+from stripe_link.mailer import EmailError, send_email, tenant_email_identity
 from stripe_link.repositories.documents import cart_tokens_repository, carts_repository, sites_repository
 
 logger = logging.getLogger(__name__)
 
 
 def handler(event, context, *, carts_repo=None, cart_tokens_repo=None, sites_repo=None,
-            mailer_send=None, now_fn=None, token_factory=None):
+            mailer_send=None, now_fn=None, token_factory=None, profiles_repo=None):
     # Abandoned-cart recovery is a live-only sweep: never email real recovery nudges for test-mode carts
     # (plans/STRIPE_MODE_DECOUPLING.md). The mode-scoped scan returns only live carts.
     carts_repo = carts_repo or carts_repository(mode="live")
@@ -37,13 +37,18 @@ def handler(event, context, *, carts_repo=None, cart_tokens_repo=None, sites_rep
     carts = carts_repo.scan_type()
     sent = failed = 0
     org_by_tenant: dict[str, dict] = {}
+    identity_by_tenant: dict[str, dict] = {}
     for cart in carts:
         if not recoverable(cart, now, min_age_seconds=min_age, max_attempts=max_attempts):
             continue
         tenant_id = str(cart.get("tenant_id") or "")
         if tenant_id not in org_by_tenant:
             org_by_tenant[tenant_id] = _tenant_organization(sites_repo, tenant_id)
+            identity_by_tenant[tenant_id] = tenant_email_identity(tenant_id, profiles_repo)
         org = org_by_tenant.get(tenant_id, {})
+        # One identity for the body and the envelope alike (plans/EMAIL_TEMPLATE.md).
+        identity = identity_by_tenant.get(tenant_id, {})
+        business_name = identity.get("business_name") or str(org.get("name") or "")
         try:
             token = token_factory()
             cart_tokens_repo.put(cart_token_doc(
@@ -52,11 +57,14 @@ def handler(event, context, *, carts_repo=None, cart_tokens_repo=None, sites_rep
             ))
             recovery_url = _with_param(normalize_page_url(cart.get("page_url")), "ct", token)
             unsubscribe_url = f"{base_url}/cart/unsubscribe?tenant_id={quote(tenant_id)}&token={quote(token)}" if base_url else ""
-            content = recovery_email(cart, recovery_url=recovery_url, unsubscribe_url=unsubscribe_url, organization=org)
+            content = recovery_email(
+                cart, recovery_url=recovery_url, unsubscribe_url=unsubscribe_url,
+                organization={**org, "name": business_name}, reply_to=identity.get("reply_to", ""),
+            )
             mailer_send(
                 to=str(cart.get("email") or ""), subject=content["subject"],
-                html=content["html"], text=content["text"], from_name=str(org.get("name") or ""),
-                tenant_id=tenant_id,
+                html=content["html"], text=content["text"], from_name=business_name,
+                reply_to=identity.get("reply_to", ""), tenant_id=tenant_id,
             )
             carts_repo.put(mark_recovery_sent(cart, now))
             sent += 1

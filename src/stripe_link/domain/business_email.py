@@ -138,3 +138,44 @@ def sender_display_name(profile: Any) -> str:
         if name:
             return name
     return ""
+
+
+def reply_to_address(profile: Any) -> str:
+    """Where a customer's reply should land, or "" when the tenant has no reachable address at all.
+
+    Two sources, in this order, and the second is the one that actually fires today:
+
+    1. the VERIFIED business email — the address the tenant deliberately nominated for replies;
+    2. the SIGNUP email — the Cognito account address, proven at registration.
+
+    The signup email is a legitimate fallback rather than a hole in `verified_email`'s gate: that gate
+    exists because SES will mail from any Reply-To a tenant types, so the platform has to prove the address
+    belongs to them. A Cognito account email is proof of exactly that, obtained by a stronger flow.
+
+    Falling back matters because the alternative is what shipped: NO Reply-To, so a customer answering a
+    receipt writes to the platform's support box, which cannot help them and is not the merchant. Measured
+    2026-09-23: zero tenants in dev or prod had ever verified a business email, so gating on verification
+    alone left every customer reply undeliverable to the merchant.
+    """
+    profile = profile if isinstance(profile, dict) else {}
+    business = profile.get("business") if isinstance(profile.get("business"), dict) else {}
+    verified = verified_email(business)
+    if verified:
+        return verified
+    signup = str(profile.get("email") or "").strip()
+    return signup if looks_like_email(signup) else ""
+
+
+def email_identity(profile: Any) -> dict[str, str]:
+    """The tenant's sending identity: the name a customer sees, and the address their reply reaches.
+
+    ONE answer, so every message a tenant sends is from the same business with the same reply address.
+    Before this existed each emitter resolved its own: the review invite read `Site.organization.name`, the
+    receipt read `TenantProfile.business_name` (empty on every tenant that has ever existed), and most
+    emitters asked for neither -- so the same shop appeared as "Poliaxis Nutrition" on one message and as a
+    bare "support@juniorbay.net" on the next (reported 2026-09-23, both screenshots).
+    """
+    return {
+        "business_name": sender_display_name(profile),
+        "reply_to": reply_to_address(profile),
+    }

@@ -159,3 +159,34 @@ class GrantTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SignatureMarkTests(unittest.TestCase):
+    """The footer mark is the one image in a Junior Bay email, so it is the one that can rot silently.
+
+    It is NOT fetched here — a unit test that depends on the network fails for reasons that have nothing to
+    do with the code. What is pinned is the contract: which asset, at what declared size, with empty alt.
+    The asset itself was confirmed live on 2026-09-23 (200x200 PNG, HTTP 200).
+    """
+
+    def test_it_points_at_the_platform_icon(self):
+        from stripe_link.domain.platform_signature import SIGNATURE_LOGO_URL, signature_html
+
+        self.assertEqual(SIGNATURE_LOGO_URL, "https://images.juniorbay.com/icon/favicon.png")
+        self.assertIn(SIGNATURE_LOGO_URL, signature_html())
+
+    def test_it_declares_its_size_so_a_blocked_image_reserves_no_odd_space(self):
+        from stripe_link.domain.platform_signature import signature_html
+
+        html = signature_html()
+        self.assertIn('width="20"', html)
+        self.assertIn('height="20"', html)
+
+    def test_the_mark_is_decorative_so_the_LINE_carries_the_message(self):
+        # Most clients block images by default. A signature whose meaning lives in the image advertises
+        # nothing; empty alt keeps a blocked image from reading as "broken" to a screen reader too.
+        from stripe_link.domain.platform_signature import SIGNATURE_TEXT, signature_html
+
+        html = signature_html()
+        self.assertIn('alt=""', html)
+        self.assertIn(SIGNATURE_TEXT, html)

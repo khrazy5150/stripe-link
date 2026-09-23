@@ -8,6 +8,8 @@ from __future__ import annotations
 from html import escape
 from typing import Any
 
+from stripe_link.domain.email_layout import FONT_STACK, button, paragraph, render_email, rows_table
+
 
 def _money(cents: Any, currency: str) -> str:
     amount = int(cents or 0) / 100
@@ -21,9 +23,10 @@ def recovery_email(
     recovery_url: str,
     unsubscribe_url: str,
     organization: dict[str, Any] | None = None,
+    reply_to: str = "",
 ) -> dict[str, str]:
     """Build the {subject, html, text} for one abandoned-cart nudge."""
-    business = str((organization or {}).get("name") or "").strip() or "our shop"
+    business = str((organization or {}).get("name") or "").strip()
     lines = cart.get("line_items") or []
     count = int(cart.get("item_count") or sum(int(i.get("qty") or 1) for i in lines))
     currency = str(cart.get("currency") or "usd")
@@ -31,26 +34,30 @@ def recovery_email(
     plural = "s" if count != 1 else ""
     subject = f"You left {count} item{plural} in your cart"
 
-    rows = "".join(
-        f"<tr><td style=\"padding:6px 0;\">{escape(str(i.get('name') or 'Item'))}"
-        f" &times;{int(i.get('qty') or 1)}</td>"
-        f"<td style=\"padding:6px 0;text-align:right;\">{escape(_money(int(i.get('unit_amount') or 0) * int(i.get('qty') or 1), currency))}</td></tr>"
-        for i in lines
+    body = (
+        paragraph(f"You left {count} item{plural} in your cart"
+                  f"{f' at {business}' if business else ''}. It's saved and ready when you are.")
+        + rows_table(
+            [(f"{i.get('name') or 'Item'} \u00d7{int(i.get('qty') or 1)}",
+              _money(int(i.get("unit_amount") or 0) * int(i.get("qty") or 1), currency)) for i in lines],
+            total=("Total", total),
+        )
+        + button("Return to your cart", recovery_url)
     )
-    html = (
-        f"<div style=\"font-family:system-ui,Arial,sans-serif;max-width:520px;margin:0 auto;color:#111;\">"
-        f"<h2 style=\"font-size:20px;\">Still thinking it over?</h2>"
-        f"<p>You left {count} item{plural} in your cart at {escape(business)}. It's saved and ready when you are.</p>"
-        f"<table style=\"width:100%;border-collapse:collapse;font-size:15px;margin:12px 0;\">{rows}"
-        f"<tr><td style=\"padding:10px 0 0;font-weight:700;border-top:1px solid #ddd;\">Total</td>"
-        f"<td style=\"padding:10px 0 0;text-align:right;font-weight:700;border-top:1px solid #ddd;\">{escape(total)}</td></tr>"
-        f"</table>"
-        f"<p style=\"margin:20px 0;\"><a href=\"{escape(recovery_url)}\" "
-        f"style=\"background:#111;color:#fff;padding:12px 22px;border-radius:8px;text-decoration:none;display:inline-block;\">"
-        f"Return to your cart</a></p>"
-        f"<p style=\"font-size:12px;color:#888;margin-top:28px;\">"
-        f"Don't want these reminders? <a href=\"{escape(unsubscribe_url)}\" style=\"color:#888;\">Unsubscribe</a>.</p>"
-        f"</div>"
+    # The unsubscribe line is the ONE piece of chrome this email has that others do not: a marketing
+    # nudge must carry its own way out, and it belongs in the footer where a recipient looks for it.
+    unsubscribe = (
+        f'<p style="margin:0;font-family:{FONT_STACK};font-size:12px;line-height:1.5;color:#6b7280">'
+        f'Don\'t want these reminders? <a href="{escape(unsubscribe_url, quote=True)}" '
+        'style="color:#6b7280">Unsubscribe</a>.</p>'
+    ) if unsubscribe_url else ""
+    html = render_email(
+        business_name=business,
+        title="Still thinking it over?",
+        body=body,
+        preheader=f"{count} item{plural} — {total}",
+        reply_to=reply_to,
+        footer_html=unsubscribe,
     )
     item_text = "\n".join(
         f"  - {str(i.get('name') or 'Item')} x{int(i.get('qty') or 1)}: {_money(int(i.get('unit_amount') or 0) * int(i.get('qty') or 1), currency)}"

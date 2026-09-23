@@ -5,6 +5,8 @@ details. Kept pure so it is trivially testable; the handler resolves the recipie
 """
 
 from html import escape
+
+from stripe_link.domain.email_layout import button, paragraph, render_email, rows_table
 from typing import Any
 
 from stripe_link.domain.booking import appointment_service_name
@@ -62,8 +64,8 @@ def delegate_booking_email(
         lines += ["", f"Manage: {manage_url}"]
     text = "\n".join(lines)
 
-    rows = "".join(
-        f"<tr><td style=\"padding:2px 12px 2px 0;color:#6b7280\">{escape(label)}</td><td style=\"padding:2px 0\">{escape(value)}</td></tr>"
+    detail_rows = [
+        (label, value)
         for label, value in [
             ("Service", service_name),
             ("When", when),
@@ -72,19 +74,24 @@ def delegate_booking_email(
             ("Phone", str(customer.get("phone") or "")),
         ]
         if value
-    )
+    ]
     calendar_note = ""
     if change != "canceled" and calendar_written is True:
-        calendar_note = "<p style=\"color:#166534\">This appointment has been added to your calendar.</p>"
+        calendar_note = paragraph("This appointment has been added to your calendar.", muted=True)
     elif change != "canceled" and calendar_written is False:
-        calendar_note = "<p style=\"color:#b45309\">We could not add this to your calendar — connect your calendar in the dashboard so future bookings sync automatically.</p>"
-    manage_link = f"<p><a href=\"{escape(manage_url)}\">View / manage this appointment</a></p>" if manage_url else ""
+        calendar_note = paragraph(
+            "We could not add this to your calendar — connect your calendar in the dashboard so future "
+            "bookings sync automatically.", muted=True)
 
-    html = (
-        f"<div style=\"font-family:sans-serif;max-width:36rem\">"
-        f"<h2>{escape(verb)}</h2>"
-        f"<p>Hi {escape(fulfiller_name)}, here are the details:</p>"
-        f"<table style=\"border-collapse:collapse\">{rows}</table>"
-        f"{calendar_note}{manage_link}</div>"
+    html = render_email(
+        business_name=str(business_name or ""),
+        title=verb,
+        body=(
+            paragraph(f"Hi {fulfiller_name}, here are the details:")
+            + rows_table(detail_rows)
+            + calendar_note
+            + (button("View / manage this appointment", manage_url) if manage_url else "")
+        ),
+        preheader=verb,
     )
     return {"subject": subject, "html": html, "text": text}

@@ -47,7 +47,8 @@ from stripe_link.domain.request_throttle import (
 )
 from stripe_link.ids import generate_id
 from stripe_link.kms_secrets import KmsSecretCipher
-from stripe_link.mailer import send_email
+from stripe_link.domain.email_layout import button, paragraph, render_email
+from stripe_link.mailer import send_email, tenant_email_identity
 from stripe_link.repositories.documents import (
     RepositoryError,
     notifications_repository,
@@ -253,13 +254,24 @@ def _send_link(order, token, tenant_id, mailer_send):
         "From there you can stop future payments or ask for a refund. The link works for seven days.\n\n"
         "If you did not ask for this, you can ignore it — nothing has changed."
     )
+    identity = tenant_email_identity(tenant_id)
+    html = render_email(
+        business_name=identity.get("business_name") or (business if business != "the seller" else ""),
+        title=f"Your purchase from {business}",
+        body=(
+            paragraph("Here is the link to your purchase. From there you can stop future payments or "
+                      "ask for a refund.")
+            + button("Manage this purchase", url)
+            + paragraph("The link works for seven days. If you did not ask for this, you can ignore it "
+                        "— nothing has changed.", muted=True)
+        ),
+        preheader="Your secure link to manage this purchase.",
+        reply_to=identity.get("reply_to", ""),
+    )
     (mailer_send or send_email)(
         to=email,
         subject=f"Your purchase from {business}",
-        html=f"<p>Here is the link to your purchase from {business}.</p>"
-             f'<p><a href="{url}">Manage this purchase</a></p>'
-             "<p>From there you can stop future payments or ask for a refund. The link works for seven "
-             "days.</p><p>If you did not ask for this, you can ignore it — nothing has changed.</p>",
+        html=html,
         text=text,
         tenant_id=tenant_id,
     )

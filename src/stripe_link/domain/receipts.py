@@ -7,6 +7,8 @@ render the buyer's receipt. Optional download_links are appended for digital pro
 from html import escape
 from typing import Any
 
+from stripe_link.domain.email_layout import ACCENT, button, paragraph, render_email, rows_table
+
 
 def format_money(cents: Any, currency: str = "usd") -> str:
     amount = int(cents or 0) / 100
@@ -21,7 +23,7 @@ def receipt_content(
     download_links: list[dict[str, str]] | None = None,
     manage_url: str = "",
 ) -> dict[str, str]:
-    business = str(business_name or "").strip() or "Your order"
+    business = str(business_name or "").strip()
     customer = order.get("customer") or {}
     product = order.get("product") or {}
     customer_name = str(customer.get("name") or "there").strip() or "there"
@@ -31,13 +33,16 @@ def receipt_content(
     order_id = str(order.get("order_id") or "")
     links = download_links or []
 
-    subject = f"Your receipt from {business}" if business_name else "Your order receipt"
+    # The shop's name belongs in the SUBJECT, not only in the From line: an inbox list shows the subject
+    # at full width and truncates the sender. The fallback is the generic one, and seeing it in a real
+    # inbox is what exposed that no tenant had a business name on the field this used to read
+    # (reported 2026-09-23).
+    subject = f"Your receipt from {business}" if business else "Your order receipt"
 
-    # Plain text
     text_lines = [
         f"Hi {customer_name},",
         "",
-        f"Thanks for your purchase from {business}. Here is your receipt.",
+        f"Thanks for your purchase{f' from {business}' if business else ''}. Here is your receipt.",
         "",
         f"Order: {order_id}",
         f"Item: {product_name}",
@@ -51,49 +56,38 @@ def receipt_content(
     # creator, which is the behaviour that design deliberately rejected.
     if manage_url:
         text_lines += ["", f"Manage or cancel this recurring tip: {manage_url}"]
+    # Named explicitly as well as being the Reply-To: a customer whose client strips Reply-To, or who
+    # forwards the receipt to someone else, still has an address they can write to.
     if support_email:
         text_lines += ["", f"Questions? Reply to this email or contact {support_email}."]
-    text = "\n".join(text_lines)
 
-    # HTML
-    rows = [
-        _html_row("Order", order_id),
-        _html_row("Item", product_name),
-        _html_row("Total", total),
-    ]
     downloads_html = ""
     if links:
         items = "".join(
-            f'<li style="margin:0 0 8px"><a href="{escape(link.get("url", ""))}" '
-            f'style="color:#4f46b5;font-weight:600">{escape(link.get("label") or "Download")}</a></li>'
+            f'<li style="margin:0 0 8px"><a href="{escape(link.get("url", ""), quote=True)}" '
+            f'style="color:{ACCENT};font-weight:600">{escape(link.get("label") or "Download")}</a></li>'
             for link in links
         )
         downloads_html = (
-            '<h3 style="font-size:16px;margin:24px 0 8px">Your downloads</h3>'
-            f'<ul style="padding-left:18px;margin:0">{items}</ul>'
+            f'<h2 style="font-size:15px;margin:22px 0 8px;font-weight:700">Your downloads</h2>'
+            f'<ul style="padding-left:18px;margin:0 0 6px">{items}</ul>'
         )
-    manage_html = (
-        f'<p style="margin:24px 0 0"><a href="{escape(manage_url)}" '
-        f'style="color:#4f46b5;font-weight:600">Manage or cancel this recurring tip</a></p>'
-        if manage_url else ""
+
+    body = (
+        paragraph(f"Thanks for your purchase, {customer_name}.")
+        + rows_table([("Order", order_id), ("Item", product_name)], total=("Total", total))
+        + downloads_html
+        + (button("Manage or cancel this recurring tip", manage_url) if manage_url else "")
     )
-    support_html = (
-        f'<p style="color:#6b7280;font-size:13px;margin:24px 0 0">Questions? Reply to this email'
-        f'{f" or contact {escape(support_email)}" if support_email else ""}.</p>'
+    html = render_email(
+        business_name=business,
+        title=subject,
+        body=body,
+        preheader=f"{product_name} — {total}",
+        reply_to=support_email,
+        footer_note=f"You can also reach us at {support_email}." if support_email else "",
     )
-    html = (
-        '<div style="font-family:-apple-system,BlinkMacSystemFont,\'Segoe UI\',Roboto,sans-serif;'
-        'max-width:560px;margin:0 auto;color:#1f2937">'
-        f'<h1 style="font-size:22px;margin:0 0 4px">{escape(business)}</h1>'
-        f'<p style="color:#6b7280;margin:0 0 20px">Thanks for your purchase, {escape(customer_name)}.</p>'
-        '<table style="width:100%;border-collapse:collapse;font-size:14px">'
-        f'{"".join(rows)}</table>'
-        f'{downloads_html}'
-        f'{manage_html}'
-        f'{support_html}'
-        '</div>'
-    )
-    return {"subject": subject, "html": html, "text": text}
+    return {"subject": subject, "html": html, "text": "\n".join(text_lines)}
 
 
 def _html_row(label: str, value: str) -> str:

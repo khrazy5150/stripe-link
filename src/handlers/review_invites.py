@@ -10,13 +10,14 @@ import os
 import time
 
 from stripe_link.domain.review_invites import due_steps, invite_email, invite_sendable, mark_step_sent
-from stripe_link.mailer import EmailError, send_email
+from stripe_link.mailer import EmailError, send_email, tenant_email_identity
 from stripe_link.repositories.documents import review_invites_repository, sites_repository
 
 logger = logging.getLogger(__name__)
 
 
-def handler(event, context, *, invites_repo=None, sites_repo=None, mailer_send=None, now_fn=None):
+def handler(event, context, *, invites_repo=None, sites_repo=None, mailer_send=None, now_fn=None,
+            profiles_repo=None):
     invites_repo = invites_repo or review_invites_repository()
     if sites_repo is None and os.environ.get("SITES_TABLE"):
         sites_repo = sites_repository()
@@ -27,6 +28,7 @@ def handler(event, context, *, invites_repo=None, sites_repo=None, mailer_send=N
     invites = invites_repo.scan_type()
     sent = failed = 0
     org_by_tenant: dict[str, dict] = {}
+    identity_by_tenant: dict[str, dict] = {}
     for invite in invites:
         if not invite_sendable(invite):
             continue
@@ -36,15 +38,25 @@ def handler(event, context, *, invites_repo=None, sites_repo=None, mailer_send=N
         tenant_id = str(invite.get("tenant_id") or "")
         if tenant_id not in org_by_tenant:
             org_by_tenant[tenant_id] = _tenant_organization(sites_repo, tenant_id)
+            identity_by_tenant[tenant_id] = tenant_email_identity(tenant_id, profiles_repo)
         org = org_by_tenant.get(tenant_id, {})
+        # Resolved ONCE and used for both the body and the envelope. The two used to be read from
+        # different places, which is how a message could name one business in its From line and another
+        # (or none) in its content.
+        identity = identity_by_tenant.get(tenant_id, {})
+        business_name = identity.get("business_name") or str(org.get("name") or "")
         current = invite
         for step in due:
             try:
-                content = invite_email(current, base_url=base_url, organization=org)
+                content = invite_email(
+                    current, base_url=base_url, organization={**org, "name": business_name},
+                    reply_to=identity.get("reply_to", ""),
+                )
                 mailer_send(
                     to=(current.get("customer") or {}).get("email", ""),
                     subject=content["subject"], html=content["html"], text=content["text"],
-                    from_name=str(org.get("name") or ""), tenant_id=tenant_id,
+                    from_name=business_name, reply_to=identity.get("reply_to", ""),
+                    tenant_id=tenant_id,
                 )
                 current = mark_step_sent(current, step["day"], now)
                 sent += 1

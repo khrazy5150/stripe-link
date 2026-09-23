@@ -7,6 +7,8 @@ from decimal import Decimal
 from html import escape
 from typing import Any
 
+from stripe_link.domain.email_layout import button, paragraph, render_email, rows_table
+
 from stripe_link.domain.booking import service_lines
 
 CURRENCY_SYMBOLS = {"usd": "$", "eur": "€", "gbp": "£"}
@@ -142,19 +144,24 @@ def invoice_email_content(invoice: dict[str, Any], hosted_url: str, *, business_
         for i in invoice.get("line_items") or []
     )
     memo = str((invoice.get("presentation") or {}).get("memo") or "").strip()
-    memo_html = f"<p style='color:#6b7280'>{escape(memo)}</p>" if memo else ""
-    html = (
-        f"<div style='font-family:-apple-system,Segoe UI,Roboto,sans-serif;max-width:34rem;margin:auto;padding:1.5rem'>"
-        f"<h2 style='margin:0 0 .25rem'>Invoice from {escape(biz)}</h2>"
-        f"<p style='color:#6b7280;margin:.25rem 0 1.25rem'>Amount due: <strong>{total}</strong></p>"
-        f"{memo_html}"
-        f"<table style='width:100%;border-collapse:collapse;margin:1rem 0;border-top:1px solid #e5e7eb'>{rows}"
-        f"<tr><td style='padding:10px 0;border-top:1px solid #e5e7eb;font-weight:700'>Total</td>"
-        f"<td style='padding:10px 0;border-top:1px solid #e5e7eb;text-align:right;font-weight:700'>{total}</td></tr></table>"
-        f"<p style='margin:1.5rem 0'><a href='{escape(hosted_url)}' "
-        f"style='background:#4f46e5;color:#fff;padding:.8rem 1.4rem;border-radius:8px;text-decoration:none;font-weight:700'>Pay invoice</a></p>"
-        f"<p style='color:#9ca3af;font-size:.85rem'>Or paste this link into your browser:<br>{escape(hosted_url)}</p>"
-        f"</div>"
+    body = (
+        paragraph(f"Amount due: {total}")
+        + (paragraph(memo, muted=True) if memo else "")
+        + rows_table(
+            [(f"{i.get('description') or 'Item'} \u00d7 {max(1, int(i.get('quantity') or 1))}",
+              format_money(line_total(i), currency)) for i in invoice.get("line_items") or []],
+            total=("Total", total),
+        )
+        + button("Pay invoice", hosted_url)
+        + paragraph("Or paste this link into your browser: " + str(hosted_url), muted=True)
+    )
+    html = render_email(
+        business_name=business_name,
+        title=f"Invoice from {biz}",
+        body=body,
+        preheader=f"{total} due",
+        reply_to=support_email,
+        footer_note=f"You can also reach us at {support_email}." if support_email else "",
     )
     text = f"{biz} sent you an invoice for {total}.\nPay securely: {hosted_url}"
     return {"subject": f"Invoice from {biz} — {total} due", "html": html, "text": text}
