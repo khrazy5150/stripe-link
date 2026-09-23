@@ -1789,6 +1789,12 @@ Resources:
             TableName: !Ref StripeKeysTable
         - DynamoDBReadPolicy:
             TableName: !Ref TenantProfilesTable
+        # A cart can now carry a coupon, resolved from the tenant's own record the same way the
+        # single-offer path does it (plans/COUPONS_COMPLETION.md). Read-only.
+        - DynamoDBReadPolicy:
+            TableName: !Ref CouponsTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref CouponGrantsTable
         - S3ReadPolicy:
             BucketName: !Ref ConfigBucket
         - Statement:

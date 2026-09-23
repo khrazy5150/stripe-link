@@ -210,13 +210,27 @@ export function parseRecipients(text) {
 export function buildCouponDocument(form) {
   const now = Math.floor(Date.now() / 1000);
   const couponId = form.coupon_id || localId("coupon");
-  const discount = {
-    type: form.discount_type,
-    value: form.discount_type === "fixed" ? cents(form.value) : Number(form.value || 0),
-    duration: form.duration,
-  };
+  // A spend ladder carries no single `value` — the discount is a function of the cart, which is exactly
+  // why we evaluate it instead of Stripe (plans/COUPONS_COMPLETION.md, Option B). It is always "once":
+  // the Stripe Coupon that carries it exists for one checkout, so there is nothing for a later cycle to
+  // reuse, and the server refuses any other duration.
+  const discount = form.discount_type === "tiered"
+    ? {
+      type: "tiered",
+      duration: "once",
+      tiers: (form.tiers || [])
+        .filter((tier) => Number(tier.percent || 0) > 0)
+        .map((tier) => ({ min_subtotal: cents(tier.min_spend), percent: Number(tier.percent || 0) })),
+    }
+    : {
+      type: form.discount_type,
+      value: form.discount_type === "fixed" ? cents(form.value) : Number(form.value || 0),
+      duration: form.duration,
+    };
   if (form.discount_type === "fixed") discount.currency = String(form.currency || "usd").toLowerCase();
-  if (form.duration === "repeating") discount.duration_months = Math.max(1, Number(form.duration_months || 1));
+  if (form.discount_type !== "tiered" && form.duration === "repeating") {
+    discount.duration_months = Math.max(1, Number(form.duration_months || 1));
+  }
 
   return {
     schema_version: "2026-05-29",
@@ -228,8 +242,12 @@ export function buildCouponDocument(form) {
     // NOT invented here. The server creates the Coupon and Promotion Code at Stripe and stores the ids it
     // gets back; a browser cannot hold a secret key, and synthesising `coupon_<id>` / `promo_<id>` locally
     // is what let `sync.status: "synced"` claim a sync that never happened.
-    stripe_coupon_id: form.stripe_coupon_id || "",
-    stripe_promo_code_id: form.stripe_promo_code_id || "",
+    // Omitted entirely for a tiered rule: it has no durable Stripe objects, and an empty string would be
+    // a claim about ids that do not exist.
+    ...(form.discount_type === "tiered" ? {} : {
+      stripe_coupon_id: form.stripe_coupon_id || "",
+      stripe_promo_code_id: form.stripe_promo_code_id || "",
+    }),
     code: String(form.code || "").trim().toUpperCase(),
     name: form.name || String(form.code || "").trim().toUpperCase(),
     status: form.status || "active",

@@ -27,6 +27,9 @@ from stripe_link.domain.pricing import (
 )
 from stripe_link.domain import tips
 from stripe_link.domain.coupon_grants import is_grant_code
+from stripe_link.domain.coupon_rules import evaluate as evaluate_coupon_rule
+from stripe_link.domain.coupon_rules import is_platform_evaluated, lines_from_resolved
+from stripe_link.stripe_coupons import create_disposable_coupon
 from stripe_link.kms_secrets import KmsSecretCipher
 from stripe_link.runtime.error_pages import render_error_page
 from stripe_link.repositories.documents import (
@@ -116,6 +119,40 @@ def resolve_targeted_grant(code, tenant_id, mode, grants_repo=None, coupons_repo
     if not promo_id or not customer_id:
         raise CouponUnavailable(code)
     return promo_id, customer_id
+
+
+def resolve_platform_coupon(code, tenant_id, mode, coupons_repo=None, offer_id=""):
+    """The tenant's coupon document when WE evaluate it rather than Stripe (Option B), else None.
+
+    Tried before the Stripe-evaluated path because a platform coupon has no `stripe_promo_code_id` to
+    resolve -- the Stripe object does not exist until a cart gives the rule something to be worth.
+    """
+    code = str(code or "").strip().upper()
+    if not code or not tenant_id:
+        return None
+    try:
+        from handlers.coupons import coupon_is_usable
+
+        repo = coupons_repo or (coupons_repository(mode=mode) if os.environ.get("COUPONS_TABLE") else None)
+        if repo is None:
+            return None
+        for coupon in repo.list_for_tenant(tenant_id) or []:
+            if str(coupon.get("code") or "").strip().upper() != code:
+                continue
+            if not is_platform_evaluated(coupon):
+                return None   # Stripe's to evaluate; let the ordinary path answer
+            # Past this point the code IS ours, so every refusal is a refusal -- never a fall-through to
+            # full price, which is the failure this module exists to prevent.
+            if not coupon_is_usable(coupon, int(time.time())):
+                raise CouponUnavailable(code)
+            if not coupon_covers_offer(coupon, offer_id):
+                raise CouponUnavailable(code)
+            return coupon
+        return None
+    except CouponUnavailable:
+        raise
+    except Exception:  # noqa: BLE001 - an unreadable table falls through to the Stripe-evaluated path
+        return None
 
 
 def resolve_campaign_promotion_code(code, tenant_id, mode, coupons_repo=None, offer_id=""):
@@ -318,6 +355,7 @@ def handler(
             mode=mode,
             coupons_repo=coupons_repo,
             grants_repo=grants_repo,
+            discount_materializer=stripe_discount_materializer(api_key, stripe_account, opener),
         )
         stripe_response = create_checkout_session_with_bnpl_fallback(
             checkout_payload,
@@ -454,6 +492,63 @@ def order_bump_optional_items(offer, products_by_id, key_mode):
     return bumps
 
 
+# A disposable Coupon is inert once the session it was made for has gone. `redeem_by` bounds it anyway:
+# a Checkout Session expires within 24 hours, so a week is generous margin and still stops the object
+# living forever.
+DISPOSABLE_COUPON_TTL_SECONDS = 7 * 24 * 60 * 60
+
+
+def stripe_discount_materializer(api_key, stripe_account="", opener=None, now=None):
+    """A callable the payload builder can use to turn a computed amount into a Stripe object.
+
+    Passed IN rather than reached for, so `build_checkout_payload` keeps making payloads instead of making
+    network calls, and a test can watch what it would have created without a key.
+    """
+    if not api_key:
+        return None
+    expires_at = int(now or time.time()) + DISPOSABLE_COUPON_TTL_SECONDS
+
+    def materialize(*, amount_off, currency, code, tenant_id):
+        return create_disposable_coupon(
+            amount_off=amount_off, currency=currency, code=code, tenant_id=tenant_id,
+            expires_at=expires_at, api_key=api_key, stripe_account=stripe_account, opener=opener,
+        )
+
+    return materialize
+
+
+def materialize_platform_discount(coupon, resolved, coupon_code, tenant_id, materializer):
+    """Evaluate a platform rule against this cart and turn the result into something Stripe accepts.
+
+    Returns a disposable Stripe Coupon id, or "" when the rule is worth nothing here.
+
+    **A cart below every tier is NOT a refusal.** The tenant said "spend $100 to get 20%"; a buyer with $40
+    in the cart has simply not met terms they can read, and charging them full price is exactly what the
+    coupon promised. That is a different situation from a coupon that has been withdrawn or used up, where
+    the visitor arrived on the strength of a ticket that no longer means anything -- those still raise.
+    """
+    result = evaluate_coupon_rule(coupon, lines_from_resolved(resolved))
+    amount_off = int(result.get("amount_off") or 0)
+    if amount_off <= 0:
+        logger.info("checkout: coupon %s matched no tier (%s)", coupon_code, result.get("reason"))
+        return ""
+    if materializer is None:
+        # Nothing can create the Stripe object, so the discount cannot be applied -- and the buyer DID
+        # qualify. Refusing is the honest answer; charging full price here would be the silent failure.
+        raise CouponUnavailable(str(coupon_code or ""))
+    try:
+        return materializer(
+            amount_off=amount_off,
+            currency=str((resolved or {}).get("currency") or "usd").lower(),
+            code=str(coupon_code or "").strip().upper(),
+            tenant_id=tenant_id,
+        )
+    except CouponUnavailable:
+        raise
+    except Exception as exc:  # noqa: BLE001 - a qualifying buyer must not be quietly charged full price
+        raise CouponUnavailable(str(coupon_code or "")) from exc
+
+
 def build_checkout_payload(
     *,
     tenant_id,
@@ -470,6 +565,7 @@ def build_checkout_payload(
     mode="test",
     coupons_repo=None,
     grants_repo=None,
+    discount_materializer=None,
 ):
     checkout = offer.get("checkout") or {}
     # The session's mode follows the lines it actually carries, in BOTH directions.
@@ -510,17 +606,31 @@ def build_checkout_payload(
     applied_promotion_code, grant_customer_id = resolve_targeted_grant(
         coupon_code, tenant_id, mode, grants_repo, coupons_repo, offer_id=offer_id_for_coupon,
     )
+    # A rule Stripe has no vocabulary for -- a spend ladder, today (Option B). We work out what it is worth
+    # against THIS cart and hand Stripe the number as a one-checkout Coupon.
+    applied_coupon_id = ""
     if not applied_promotion_code:
-        applied_promotion_code = resolve_campaign_promotion_code(
+        platform_coupon = resolve_platform_coupon(
             coupon_code, tenant_id, mode, coupons_repo, offer_id=offer_id_for_coupon,
         )
+        if platform_coupon is not None:
+            applied_coupon_id = materialize_platform_discount(
+                platform_coupon, resolved, coupon_code, tenant_id, discount_materializer,
+            )
+        else:
+            applied_promotion_code = resolve_campaign_promotion_code(
+                coupon_code, tenant_id, mode, coupons_repo, offer_id=offer_id_for_coupon,
+            )
     if applied_promotion_code:
         payload["discounts[0][promotion_code]"] = applied_promotion_code
+    elif applied_coupon_id:
+        payload["discounts[0][coupon]"] = applied_coupon_id
+    elif checkout.get("allow_promotion_codes") is True:
+        payload["allow_promotion_codes"] = "true"
+    if applied_promotion_code or applied_coupon_id:
         # Carried so the webhook can mark WHICH code was used. Reading it back off the session means
         # expanding the discount object; the code itself is what the tenant's campaign view is keyed on.
         payload["metadata[coupon_code]"] = str(coupon_code or "").strip().upper()
-    elif checkout.get("allow_promotion_codes") is True:
-        payload["allow_promotion_codes"] = "true"
     if grant_customer_id:
         payload["customer"] = grant_customer_id
 

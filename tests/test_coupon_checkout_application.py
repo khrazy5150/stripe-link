@@ -94,8 +94,14 @@ class HandlerResponseTests(unittest.TestCase):
     CHECKOUT = (_pathlib.Path(__file__).resolve().parents[1]
                 / "src/handlers/checkout.py").read_text(encoding="utf-8")
 
-    # The LAST occurrence: the first is the resolver re-raising its own exception, not the handler's arm.
-    ARM = CHECKOUT.rsplit("except CouponUnavailable:", 1)[1][:900]
+    # The arm that RENDERS something, found by what it does rather than by where it sits. This used to
+    # take the last `except CouponUnavailable:` in the file, which silently stopped being the handler's
+    # arm the moment another one was added below it (Option B's materializer, 2026-09-23).
+    ARM = next(
+        block for block in
+        (segment[:900] for segment in CHECKOUT.split("except CouponUnavailable:")[1:])
+        if "render_error_page" in block
+    )
 
     def test_the_arm_lives_in_the_request_handler(self):
         self.assertIn("method ==", self.ARM)

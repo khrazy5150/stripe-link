@@ -111,12 +111,13 @@
             <div class="offer-three-column">
               <label class="offer-field">
                 <span>Discount Type</span>
-                <select v-model="form.discount_type">
+                <select v-model="form.discount_type" @change="onDiscountTypeChange">
                   <option value="percent">Percent</option>
                   <option value="fixed">Fixed Amount</option>
+                  <option value="tiered">Spend threshold</option>
                 </select>
               </label>
-              <label class="offer-field">
+              <label v-if="form.discount_type !== 'tiered'" class="offer-field">
                 <span>Value <strong>*</strong></span>
                 <input v-model.number="form.value" min="0" type="number" step="0.01" required />
               </label>
@@ -127,7 +128,37 @@
                 </select>
               </label>
             </div>
-            <div class="offer-three-column">
+
+            <div v-if="form.discount_type === 'tiered'" class="coupon-tier-editor">
+              <p class="field-note">
+                Spend more, save more. The customer gets the <strong>best</strong> tier their cart reaches
+                &mdash; not the first one. This discount is worked out when they check out, so it isn't
+                stored at Stripe and can't be issued as personal codes.
+              </p>
+              <div v-for="(tier, index) in form.tiers" :key="index" class="coupon-tier-row">
+                <label class="offer-field">
+                  <span>Spend at least</span>
+                  <input v-model.number="tier.min_spend" min="0" type="number" step="0.01"
+                         :disabled="Boolean(editingCoupon)" />
+                </label>
+                <label class="offer-field">
+                  <span>Get % off</span>
+                  <input v-model.number="tier.percent" min="1" max="100" type="number" step="1"
+                         :disabled="Boolean(editingCoupon)" />
+                </label>
+                <button
+                  v-if="!editingCoupon && form.tiers.length > 1"
+                  type="button"
+                  class="secondary-action"
+                  @click="form.tiers.splice(index, 1)"
+                >Remove</button>
+              </div>
+              <button v-if="!editingCoupon" type="button" class="secondary-action" @click="addTier">
+                + Add tier
+              </button>
+            </div>
+
+            <div v-if="form.discount_type !== 'tiered'" class="offer-three-column">
               <label class="offer-field">
                 <span>Duration</span>
                 <select v-model="form.duration">
@@ -461,6 +492,8 @@ function defaultCouponForm() {
     redemption_count: 0,
     applies_to_offer_ids: [],
     applies_to_product_ids: [],
+    // Spend-threshold ladder (Option B). Entered in whole currency, converted to minor units on save.
+    tiers: [{ min_spend: null, percent: null }],
     created_at: null,
   };
 }
@@ -483,6 +516,17 @@ function toggleScopeProduct(productId) {
   form.value.applies_to_product_ids = chosen.includes(productId)
     ? chosen.filter((id) => id !== productId)
     : [...chosen, productId];
+}
+
+function addTier() {
+  form.value.tiers.push({ min_spend: null, percent: null });
+}
+
+function onDiscountTypeChange() {
+  // A spend ladder is worked out per checkout, so it has no Stripe object for a later cycle to reuse —
+  // the server refuses anything but "once", and the form should not offer what the server refuses.
+  if (form.value.discount_type === "tiered") form.value.duration = "once";
+  if (form.value.discount_type === "tiered" && !form.value.tiers.length) addTier();
 }
 
 function openCreateModal() {
@@ -547,6 +591,12 @@ function formFromCoupon(coupon) {
     currency: discount.currency || "usd",
     duration: discount.duration || "once",
     duration_months: discount.duration_months || 1,
+    tiers: Array.isArray(discount.tiers) && discount.tiers.length
+      ? discount.tiers.map((tier) => ({
+        min_spend: Number(tier.min_subtotal || 0) / 100,
+        percent: Number(tier.percent || 0),
+      }))
+      : [{ min_spend: null, percent: null }],
     expires_on: dateInputValue(restrictions.expires_at),
     max_redemptions: restrictions.max_redemptions || "",
     max_redemptions_per_customer: restrictions.max_redemptions_per_customer || "",

@@ -1253,10 +1253,46 @@ def validate_coupon_redemption_document(document: dict[str, Any]) -> None:
     require_positive_int(document, "redeemed_at", "Redemption redeemed_at")
 
 
+def _is_platform_evaluated(document: dict[str, Any]) -> bool:
+    """Whether WE evaluate this coupon rather than Stripe (Option B). Mirrors
+    `stripe_link.domain.coupon_rules.is_platform_evaluated`, kept here so the document module stays
+    dependency-free -- the list of types is one line and the two are tested against each other."""
+    return str(((document or {}).get("discount") or {}).get("type") or "") in ("tiered",)
+
+
+def _validate_coupon_tiers(discount: dict[str, Any]) -> None:
+    """A spend-threshold ladder: "spend $100 get 20%, spend $250 get 30%" (Option B)."""
+    tiers = discount.get("tiers")
+    if not isinstance(tiers, list) or not tiers:
+        raise DocumentValidationError("Coupon discount.tiers must be a non-empty array for a tiered discount.")
+    seen_thresholds = set()
+    for index, tier in enumerate(tiers):
+        label = f"Coupon discount.tiers[{index}]"
+        require_object(tier, label)
+        optional_non_negative_int(tier, "min_subtotal", f"{label}.min_subtotal")
+        if tier.get("min_subtotal") is None:
+            raise DocumentValidationError(f"{label}.min_subtotal is required.")
+        percent = tier.get("percent")
+        if not isinstance(percent, (int, float, Decimal)) or isinstance(percent, bool):
+            raise DocumentValidationError(f"{label}.percent must be a number.")
+        if not (Decimal("0") < Decimal(str(percent)) <= Decimal("100")):
+            raise DocumentValidationError(f"{label}.percent must be greater than 0 and at most 100.")
+        threshold = int(tier.get("min_subtotal"))
+        if threshold in seen_thresholds:
+            # Two tiers at one threshold means the ladder has no defined answer at that amount.
+            raise DocumentValidationError(f"{label}.min_subtotal repeats an earlier tier's threshold.")
+        seen_thresholds.add(threshold)
+
+
 def validate_coupon_document(document: dict[str, Any]) -> None:
     require_document_fields(document, "coupon", "coupon_id")
-    require_string(document, "stripe_coupon_id", "Coupon stripe_coupon_id")
-    require_string(document, "stripe_promo_code_id", "Coupon stripe_promo_code_id")
+    # A PLATFORM-EVALUATED rule (Option B) has no durable Stripe objects to name: its discount depends on
+    # the cart, so the Stripe Coupon is created per checkout and thrown away. Requiring ids it cannot have
+    # would have forced a placeholder, and a placeholder id is how `sync.status` became a fiction the first
+    # time (plans/COUPONS_COMPLETION.md).
+    if not _is_platform_evaluated(document):
+        require_string(document, "stripe_coupon_id", "Coupon stripe_coupon_id")
+        require_string(document, "stripe_promo_code_id", "Coupon stripe_promo_code_id")
     code = require_string(document, "code", "Coupon code")
     if not re.match(r"^[A-Z0-9_-]+$", code):
         raise DocumentValidationError("Coupon code must contain only uppercase letters, numbers, underscores, or hyphens.")
@@ -1267,7 +1303,7 @@ def validate_coupon_document(document: dict[str, Any]) -> None:
         raise DocumentValidationError("Coupon canonical must be true.")
 
     discount = require_object(document.get("discount"), "Coupon discount")
-    discount_type = require_enum(discount, "type", {"percent", "fixed"}, "Coupon discount.type")
+    discount_type = require_enum(discount, "type", {"percent", "fixed", "tiered"}, "Coupon discount.type")
     optional_non_negative_number(discount, "value", "Coupon discount.value")
     if discount_type == "percent" and Decimal(str(discount.get("value", 0))) > 100:
         raise DocumentValidationError("Coupon percent discount.value cannot exceed 100.")
@@ -1275,9 +1311,15 @@ def validate_coupon_document(document: dict[str, Any]) -> None:
         currency = require_string(discount, "currency", "Coupon discount.currency")
         if len(currency) != 3 or currency != currency.lower():
             raise DocumentValidationError("Coupon discount.currency must be a lowercase 3-letter currency code.")
+    if discount_type == "tiered":
+        _validate_coupon_tiers(discount)
     require_enum(discount, "duration", {"once", "repeating", "forever"}, "Coupon discount.duration")
     if discount.get("duration") == "repeating":
         require_positive_int(discount, "duration_months", "Coupon discount.duration_months")
+    if discount_type == "tiered" and discount.get("duration") != "once":
+        # The Stripe Coupon that carries a tiered discount exists for ONE checkout, so "repeating" and
+        # "forever" have nothing to attach to -- there is no durable object for a later cycle to reuse.
+        raise DocumentValidationError("Coupon discount.duration must be 'once' for a tiered discount.")
 
     restrictions = require_object(document.get("restrictions"), "Coupon restrictions")
     optional_non_negative_int(restrictions, "expires_at", "Coupon restrictions.expires_at")

@@ -7,7 +7,12 @@ sets amounts. Returns the Stripe URL as JSON; the browser redirects to it.
 """
 from urllib.request import urlopen
 
-from handlers.checkout import build_checkout_payload, create_checkout_session_with_bnpl_fallback
+from handlers.checkout import (
+    CouponUnavailable,
+    build_checkout_payload,
+    create_checkout_session_with_bnpl_fallback,
+    stripe_discount_materializer,
+)
 from stripe_link.common import error_response, json_response, parse_json_body, resolve_stripe_mode
 from stripe_link.domain.billing_status import BillingStatusError, assert_billing_in_good_standing
 from stripe_link.domain.bnpl import checkout_payment_method_types
@@ -39,6 +44,8 @@ def handler(
     stripe_repo=None,
     tenant_repo=None,
     pages_repo=None,
+    coupons_repo=None,
+    grants_repo=None,
     secret_cipher=None,
     opener=None,
     billing_config_loader=None,
@@ -58,6 +65,10 @@ def handler(
     cart_id = str(body.get("cart_id") or "").strip()
     success_url = str(body.get("success_url") or "").strip()
     cancel_url = str(body.get("cancel_url") or "").strip()
+    # A cart could not take a coupon at ALL until now: this handler called build_checkout_payload without
+    # a coupon_code, so the parameter defaulted to "" and every cart paid full price however the buyer
+    # arrived (found 2026-09-23). A cart is exactly where a discount matters most.
+    coupon_code = str(body.get("coupon") or body.get("coupon_code") or "").strip()
     page_id = str(body.get("page_id") or "").strip()
     if not tenant_id or not cart_id:
         return error_response("tenant_id and cart_id are required.", code="invalid_cart")
@@ -134,6 +145,11 @@ def handler(
             success_url=success_url, cancel_url=cancel_url, page_id=page_id,
             fee_context=fee_context, apply_application_fee=bool(stripe_account),
             bnpl_payment_method_types=bnpl_types,
+            coupon_code=coupon_code,
+            mode=mode,
+            coupons_repo=coupons_repo,
+            grants_repo=grants_repo,
+            discount_materializer=stripe_discount_materializer(api_key, stripe_account, opener),
         )
         payload["metadata[cart_id]"] = cart_id  # tie the resulting order back to the cart (attribution)
 
@@ -144,6 +160,12 @@ def handler(
         if not checkout_url:
             return error_response("Stripe did not return a checkout URL.", status_code=502, code="checkout_error")
         return json_response({"url": checkout_url})
+    except CouponUnavailable:
+        # Same answer the single-offer path gives: refusing is honest, and charging full price to somebody
+        # who arrived with a code promising otherwise is the worse outcome.
+        return error_response(
+            "This coupon is no longer available.", status_code=410, code="coupon_unavailable",
+        )
     except CartError as exc:
         return error_response(str(exc), code="invalid_cart")
     except BillingStatusError as exc:

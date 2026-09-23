@@ -5,6 +5,7 @@ import time
 
 from stripe_link.common import csv_response, error_response, json_response, parse_json_body, path_params, query_params, resolve_stripe_mode, tenant_id_from_event
 from stripe_link.domain.coupon_grants import grant_code, grant_document, normalize_recipients
+from stripe_link.domain.coupon_rules import is_platform_evaluated
 from stripe_link.domain.documents import DocumentValidationError, validate_coupon_document, validate_coupon_grant_document
 from stripe_link.kms_secrets import KmsSecretCipher
 from stripe_link.repositories.documents import (
@@ -126,13 +127,31 @@ def create_coupon(event, repository, stripe_repo=None, secret_cipher=None, opene
     # orphaned. The Stripe ids do not exist yet, so stand them up as "pending" purely to satisfy the
     # validator -- they are overwritten with the real ones below and never reach storage. The CLIENT no
     # longer invents them, which is what made sync.status a fiction for so long.
-    document["stripe_coupon_id"] = "pending"
-    document["stripe_promo_code_id"] = "pending"
-    document["sync"] = {"status": "synced", "last_synced_at": int(time.time()), "error": None}
+    # A PLATFORM-EVALUATED rule (Option B) creates nothing at Stripe: its discount depends on the cart, so
+    # the Stripe Coupon is minted per checkout and there is no durable object to name here. Everything
+    # else still goes to Stripe first, exactly as C1 requires.
+    platform_evaluated = is_platform_evaluated(document)
+    now = int(time.time())
+    if not platform_evaluated:
+        document["stripe_coupon_id"] = "pending"
+        document["stripe_promo_code_id"] = "pending"
+    document["sync"] = {"status": "synced", "last_synced_at": now, "error": None}
     try:
         validate_coupon_document(document)
     except (DocumentValidationError, ValueError) as exc:
         return error_response(str(exc), code="invalid_coupon")
+
+    if platform_evaluated:
+        # Stored with no Stripe ids at all, rather than placeholder ones. An id that names nothing is how
+        # `sync.status: "synced"` became a fiction the first time this module was written.
+        document["stripe_mode"] = mode
+        document.setdefault("redemption_count", 0)
+        try:
+            validate_coupon_document(document)
+            saved = repository.put(document)
+            return json_response({"coupon": saved}, status_code=201)
+        except (DocumentValidationError, ValueError, RepositoryError) as exc:
+            return error_response(str(exc), code="invalid_coupon")
 
     api_key, stripe_account = stripe_credentials_for(event, tenant_id, mode, stripe_repo, secret_cipher)
     if not api_key:
@@ -177,6 +196,15 @@ def create_coupon(event, repository, stripe_repo=None, secret_cipher=None, opene
         return error_response(str(exc), code="invalid_coupon")
 
 
+def _tier_signature(discount: dict) -> list:
+    """A tiered ladder reduced to what a tenant promised: thresholds and their percentages, order-independent."""
+    return sorted(
+        (int(tier.get("min_subtotal") or 0), str(tier.get("percent") or ""))
+        for tier in (discount or {}).get("tiers") or []
+        if isinstance(tier, dict)
+    )
+
+
 def coupon_edit_conflict(existing: dict, incoming: dict) -> str:
     """Which frozen field an edit is trying to change, or "".
 
@@ -191,6 +219,11 @@ def coupon_edit_conflict(existing: dict, incoming: dict) -> str:
     for field in ("type", "value", "currency", "duration", "duration_months"):
         if str(was.get(field) or "") != str(now.get(field) or ""):
             return f"discount.{field}"
+    # A tiered ladder is the discount, so moving a threshold is the same broken promise as changing a
+    # percentage -- and there is no Stripe object freezing it for us, which makes checking it here the
+    # ONLY thing standing between a tenant and a rewritten promise.
+    if _tier_signature(was) != _tier_signature(now):
+        return "discount.tiers"
     # `applies_to` is frozen on the Stripe Coupon exactly like percent_off and duration, so changing which
     # products a discount covers is the same promise-breaking edit as changing its value.
     if list(existing.get("applies_to_product_ids") or []) != list(incoming.get("applies_to_product_ids") or []):
@@ -284,6 +317,14 @@ def issue_grants(event, repository, coupon_id: str, grants_repo=None, stripe_rep
         return error_response(
             "This coupon has ended, so there is nothing to send. Create a new coupon and issue codes from that one.",
             status_code=409, code="coupon_unusable",
+        )
+    if is_platform_evaluated(coupon):
+        # A targeted code is a Stripe Promotion Code pointing at a durable Stripe Coupon, and a rule we
+        # evaluate ourselves has neither -- its discount is not known until a cart exists.
+        return error_response(
+            "This coupon's discount is worked out at checkout, so it can't be issued as personal codes. "
+            "Use a percentage or fixed-amount coupon for a targeted campaign.",
+            status_code=409, code="coupon_not_targetable",
         )
     stripe_coupon_id = str(coupon.get("stripe_coupon_id") or "")
     if not stripe_coupon_id:

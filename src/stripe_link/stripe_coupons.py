@@ -239,3 +239,46 @@ def create_targeted_promotion_code(
     if not promo_id:
         raise StripeCouponError("Stripe did not return a promotion code id.")
     return promo_id
+
+
+def create_disposable_coupon(
+    *, amount_off: int, currency: str, api_key: str, stripe_account: str = "",
+    code: str = "", tenant_id: str = "", expires_at: int | None = None,
+    opener: Callable[..., Any] | None = None,
+) -> str:
+    """A Stripe Coupon for ONE checkout, carrying an amount we worked out ourselves (Option B).
+
+    This is the adapter between our pricing engine and Stripe's discount mechanism -- NOT the tenant's
+    coupon, which stays a durable, immutable rule in our own table. Stripe Checkout has no inline discount
+    (`discounts[0][amount_off]` is rejected outright: "Received unknown parameters"), so an object is the
+    only way to put a computed amount in front of a buyer AS a discount, with Stripe's own presentation.
+
+    **Deliberately not deleted after use.** Deleting it immediately was verified safe for an OPEN session
+    (the discount is materialized inline and survives), but "delete, then the buyer pays" was never tested,
+    and inventing that path on a money route is how a receipt loses its discount. Instead the object bounds
+    itself: `max_redemptions: 1` means it can never be reused, and `redeem_by` makes it inert. Sweeping old
+    ones is a chore; a discount that silently vanishes from a paid order is an incident.
+    """
+    amount_off = int(amount_off or 0)
+    if amount_off <= 0:
+        raise StripeCouponError("A disposable coupon needs a positive amount.")
+    payload: dict[str, Any] = {
+        "amount_off": str(amount_off),
+        "currency": str(currency or "usd").lower(),
+        "duration": "once",
+        # One checkout, one use. An id that escaped could not be spent a second time.
+        "max_redemptions": "1",
+        "name": f"{code} (applied at checkout)" if code else "Discount applied at checkout",
+    }
+    if expires_at:
+        payload["redeem_by"] = str(int(expires_at))
+    if code:
+        payload["metadata[jb_coupon_code]"] = code
+    if tenant_id:
+        payload["metadata[jb_tenant_id]"] = tenant_id
+    payload["metadata[jb_disposable]"] = "true"
+    created = _post(STRIPE_COUPONS_URL, payload, api_key=api_key, stripe_account=stripe_account, opener=opener)
+    coupon_id = str(created.get("id") or "")
+    if not coupon_id:
+        raise StripeCouponError("Stripe did not return a coupon id for the computed discount.")
+    return coupon_id

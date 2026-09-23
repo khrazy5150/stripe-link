@@ -2925,6 +2925,22 @@ button:disabled {
   width: min(100%, 96rem);
 }
 
+/* Spend-threshold ladder. Rows rather than a table: each tier is two numbers and a remove control, and a
+   table header would cost more room than it explains. */
+.coupon-tier-editor {
+  display: grid;
+  gap: 1rem;
+  justify-items: start;
+}
+
+.coupon-tier-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr auto;
+  align-items: end;
+  gap: 1.2rem;
+  width: 100%;
+}
+
 /* Product scope picker. A flat checkbox list rather than a multi-select: a tenant has to SEE which
    products are unsynced, and a <select multiple> cannot say why an option is disabled. */
 .coupon-scope-list {
