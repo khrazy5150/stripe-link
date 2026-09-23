@@ -803,6 +803,44 @@ select/radio must ship WITH that renderer -- an unconstrained choice field is a 
 disguise. Retires `open_form` + `form_id`, which with
 `social_redirect` takes the action vocabulary from seven to five, both by removal.
 
+### ⭐⭐ HIGH — the default favicon is a 30KB 200x200 PNG on EVERY published page (found 2026-09-23)
+
+Found while checking the footer mark on the new email template; the author immediately spotted the larger
+consequence: **the same asset is the default favicon for every published page**, so this is page weight on
+tenant landing pages, not an email detail.
+
+**Verified, 2026-09-23:**
+
+- `default_favicon_url()` (`platform_config.py:47`) returns `{public_asset_base_url}/icon/favicon.png`, and
+  `public_asset_base_url` is `https://images.juniorbay.com` in **both** dev and prod app_config. The email
+  signature's `SIGNATURE_LOGO_URL` is that same literal URL. One asset, both surfaces.
+- `curl` on it: **HTTP 200, `content-length: 30115`, a 200x200 PNG**.
+- It is rendered at `width="20"` in email and linked as `icon` / `shortcut icon` / `apple-touch-icon` on
+  every page (`render_favicon_tags`, `html.py:7305`) — one fetch, three tags.
+- **No `Cache-Control` header at all.** Response carries `content-type`, `content-length`, `last-modified`,
+  `etag`, and nothing else, so caching falls to browser heuristics rather than an explicit directive.
+- `last-modified: Thu, 07 May 2020` — the asset predates stripe-link entirely.
+
+**Why it matters more than 30KB sounds.** A favicon is fetched on first paint of every page, competing with
+the LCP image for connections. 30KB for something displayed at 32x32 is roughly 15x oversized; a 32x32 or
+40x40 PNG of the same mark is ~2KB. This lands squarely in the lane the font work already moved a real page
++18 PageSpeed points in — and unlike fonts, it is one file and one config value.
+
+**Why it is not fixed here.** `images.juniorbay.com` is served by the sibling `../sam/image-processing`
+repo, and this repo only holds the URL. The CDN ignores resize parameters (`?w=40` returns the identical
+30115 bytes) and no smaller variant is published, so the fix is to publish a properly sized asset there.
+
+**The work:**
+
+1. In `image-processing`: publish `icon/favicon-32.png` (~2KB) and keep the 200x200 for `apple-touch-icon`,
+   which genuinely wants ~180x180. Set an explicit long `Cache-Control` (a favicon is immutable in
+   practice; if it ever changes, change the filename).
+2. Here: `render_favicon_tags` emits the small file for `icon`/`shortcut icon` and the large one for
+   `apple-touch-icon` — today all three point at the same 30KB file.
+3. Email: point `SIGNATURE_LOGO_URL` at the 40x40 (2x of its 20x20 render).
+
+`tests/test_platform_signature.py` pins the current URL, so step 3 will fail loudly rather than drift.
+
 ### ⭐ HIGH — add the font service to published pages — SHIPPED dev+prod 2026-09-08 (plan plans/FONT_SERVICE.md §12)
 
 **DONE:** pages emit the stylesheet; presets carry pairings; per-page picker in Page Settings → Appearance;
