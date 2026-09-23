@@ -5383,7 +5383,12 @@ def render_coupon(
     headline = str(section.get("headline") or "").strip()
     terms = str(section.get("terms") or "").strip()
     business = str(section.get("business_name") or "").strip() or resolve_business_name()
-    cta_label = str(section.get("cta_label") or ("Redeem this offer" if live else "This offer has ended")).strip()
+    # "Click to redeem" rather than "Redeem": the ticket no longer navigates, it applies in place, and a
+    # label that names the gesture is what tells a visitor the whole coupon is the control (author,
+    # 2026-09-22). A tenant's own cta_label still wins.
+    cta_label = str(
+        section.get("cta_label") or ("Click to redeem this offer" if live else "This offer has ended")
+    ).strip()
 
     # The tenant's own picture, then the thing being sold, then the platform mark. A coupon with an empty
     # panel looks unfinished, and the mark is better than nothing there -- but it is the LAST resort, and a

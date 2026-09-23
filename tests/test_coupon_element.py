@@ -326,6 +326,22 @@ class AppliedOnThePageTests(unittest.TestCase):
         self.assertIn("sl-coupon-applied", html)
         self.assertIn("hidden", html)
 
+    def test_the_label_names_the_gesture(self):
+        # The ticket applies in place rather than navigating, so the label has to say the whole coupon is
+        # the control -- "Redeem this offer" reads like a description of what it is.
+        html = render_coupon(_section(), _offer(), {}, CHECKOUT)
+        self.assertIn("Click to redeem this offer", html)
+
+    def test_a_tenants_own_label_still_wins(self):
+        html = render_coupon(_section(cta_label="Grab it"), _offer(), {}, CHECKOUT)
+        self.assertIn("Grab it", html)
+        self.assertNotIn("Click to redeem", html)
+
+    def test_an_expired_ticket_does_not_invite_a_click(self):
+        html = render_coupon(_section(expires_at=PAST), _offer(), {}, CHECKOUT)
+        self.assertIn("This offer has ended", html)
+        self.assertNotIn("Click to redeem", html)
+
     def test_the_panel_is_actually_hidden_until_it_is_applied(self):
         # `hidden` is only display:none in the UA stylesheet, so giving the panel a display of its own
         # outranks the attribute and it showed before anyone clicked. Any element with a display must
