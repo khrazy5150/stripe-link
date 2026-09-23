@@ -388,3 +388,31 @@ class AppliedOnThePageTests(unittest.TestCase):
         block = self.HTML.split("const applyCoupon", 1)[1][:700]
         for forbidden in ("saleAmount", "regularAmount", "percent_off", "amount_off"):
             self.assertNotIn(forbidden, block, "applying a coupon must not restate the price")
+
+
+class PersonalCodeTests(unittest.TestCase):
+    """A targeted code arrives in the LINK, because one artifact is published for everybody
+    (plans/COUPONS_COMPLETION.md C5)."""
+
+    def test_the_ticket_declares_the_prefix_a_personal_code_must_carry(self):
+        html = render_coupon(_section(), _offer(), checkout_url=CHECKOUT)
+        self.assertIn('data-coupon-grant-prefix="MASSAGE20"', html)
+
+    def test_the_prefix_is_the_one_the_issuer_mints_with(self):
+        from stripe_link.domain.coupon_grants import grant_code, grant_prefix
+
+        html = render_coupon(_section(code="Save 10%"), _offer(), checkout_url=CHECKOUT)
+
+        self.assertIn(f'data-coupon-grant-prefix="{grant_prefix("Save 10%")}"', html)
+        self.assertTrue(grant_code("Save 10%").startswith(grant_prefix("Save 10%") + "-"))
+
+    def test_the_page_script_swaps_in_a_personal_code_from_the_query_string(self):
+        from stripe_link.runtime.html import render_page_interactions_script
+
+        script = render_page_interactions_script({"sections": [
+            {"type": "offer_price_selector"}, {"type": "checkout_cta"}, {"type": "coupon"},
+        ]})
+
+        self.assertIn("couponGrantPrefix", script)
+        self.assertIn("personal.startsWith(grantPrefix + '-')", script)
+        self.assertIn("coupon.dataset.couponCode = personal", script)

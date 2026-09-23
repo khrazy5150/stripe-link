@@ -202,7 +202,7 @@ export function clearAuthSession() {
   localStorage.removeItem(TENANT_ID_STORAGE_KEY);
 }
 
-export async function apiRequest(path, { method = "GET", body, params = {}, mode } = {}) {
+export async function apiRequest(path, { method = "GET", body, params = {}, mode, raw = false } = {}) {
   // Backend base is hostname-derived (release channel). `mode` (test/live) is a DATA filter sent as ?mode=;
   // pass an explicit `mode` to target the OTHER Stripe mode on the same backend (cross-mode copy).
   const base = getApiBase();
@@ -224,6 +224,9 @@ export async function apiRequest(path, { method = "GET", body, params = {}, mode
   });
 
   const text = await response.text();
+  // `raw` is for endpoints that answer with a file rather than JSON (the coupon-codes CSV). The error
+  // path still parses, because a failure comes back as JSON whatever the happy path returns.
+  if (raw && response.ok) return text;
   const payload = text ? JSON.parse(text) : {};
   if (!response.ok) {
     throw new Error(payload.message || payload.error || `Request failed with ${response.status}`);

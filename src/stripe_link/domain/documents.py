@@ -1207,6 +1207,52 @@ def validate_offer_document(document: dict[str, Any]) -> None:
         validate_semantic_model(document["semantic_model"])
 
 
+def validate_coupon_grant_document(document: dict[str, Any]) -> None:
+    """One recipient's own code for a campaign coupon (plans/COUPONS_COMPLETION.md C5).
+
+    The grant is a SEPARATE record from the coupon, and deliberately so: checkout resolves a code by
+    reading the coupon table, so making every recipient a coupon document would add their number to every
+    checkout of every page, forever. `grant_id` IS the code, so a lookup is a direct read.
+    """
+    require_document_fields(document, "coupon_grant", "grant_id")
+    require_string(document, "coupon_id", "Grant coupon_id")
+    require_string(document, "stripe_promo_code_id", "Grant stripe_promo_code_id")
+    require_string(document, "stripe_customer_id", "Grant stripe_customer_id")
+    code = require_string(document, "code", "Grant code")
+    if not re.match(r"^[A-Z0-9_-]+$", code):
+        raise DocumentValidationError("Grant code must contain only uppercase letters, numbers, underscores, or hyphens.")
+    if str(document.get("grant_id") or "") != code:
+        raise DocumentValidationError("Grant grant_id must equal its code — the code is how checkout finds it.")
+    require_string(document, "email", "Grant email")
+    require_enum(document, "stripe_mode", {"test", "live"}, "Grant stripe_mode")
+    require_enum(document, "status", {"active", "inactive"}, "Grant status")
+    # Optional by design: a targeted code is bound to one customer whether or not it is capped.
+    if document.get("max_redemptions") is not None:
+        require_positive_int(document, "max_redemptions", "Grant max_redemptions")
+
+
+def validate_coupon_redemption_document(document: dict[str, Any]) -> None:
+    """One durable redemption of a coupon (plans/COUPONS_COMPLETION.md — Option B slice 1).
+
+    `redemption_id` is derived from the checkout session, so it carries the idempotency: two copies of one
+    Stripe event produce the same id and the second is refused by the database, not by a guess about
+    delivery.
+    """
+    require_document_fields(document, "coupon_redemption", "redemption_id")
+    require_string(document, "coupon_id", "Redemption coupon_id")
+    require_string(document, "code", "Redemption code")
+    session_id = require_string(document, "checkout_session_id", "Redemption checkout_session_id")
+    if str(document.get("redemption_id") or "") != f"redemption_{session_id}":
+        raise DocumentValidationError(
+            "Redemption redemption_id must be derived from its checkout_session_id — that is what makes a "
+            "replayed webhook collide instead of counting twice."
+        )
+    require_enum(document, "stripe_mode", {"test", "live"}, "Redemption stripe_mode")
+    optional_non_negative_int(document, "discount_amount", "Redemption discount_amount")
+    optional_non_negative_int(document, "qualifying_amount", "Redemption qualifying_amount")
+    require_positive_int(document, "redeemed_at", "Redemption redeemed_at")
+
+
 def validate_coupon_document(document: dict[str, Any]) -> None:
     require_document_fields(document, "coupon", "coupon_id")
     require_string(document, "stripe_coupon_id", "Coupon stripe_coupon_id")
@@ -1251,6 +1297,17 @@ def validate_coupon_document(document: dict[str, Any]) -> None:
         raise DocumentValidationError("Coupon applies_to_offer_ids must be an array.")
     if any(not isinstance(offer_id, str) or not offer_id.strip() for offer_id in applies_to_offer_ids):
         raise DocumentValidationError("Coupon applies_to_offer_ids must contain only non-empty strings.")
+
+    # ELIGIBILITY (above) is "may this code be used on this offer at all". SCOPE (here) is "which products
+    # in the cart it discounts" -- a different question, and the one Stripe's `applies_to.products`
+    # answers. Optional and absent by default: an empty list means the whole cart, which is what every
+    # coupon created before 2026-09-23 carries. See plans/COUPONS_COMPLETION.md, Option A.
+    applies_to_product_ids = document.get("applies_to_product_ids")
+    if applies_to_product_ids is not None:
+        if not isinstance(applies_to_product_ids, list):
+            raise DocumentValidationError("Coupon applies_to_product_ids must be an array.")
+        if any(not isinstance(item, str) or not item.strip() for item in applies_to_product_ids):
+            raise DocumentValidationError("Coupon applies_to_product_ids must contain only non-empty strings.")
     optional_non_negative_int(document, "redemption_count", "Coupon redemption_count")
 
     sync = require_object(document.get("sync"), "Coupon sync")

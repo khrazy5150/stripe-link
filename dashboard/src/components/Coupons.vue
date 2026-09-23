@@ -63,6 +63,7 @@
           </dl>
           <div class="product-card-actions">
             <button type="button" class="secondary-action" @click="openEditModal(coupon)">Edit</button>
+            <button type="button" class="secondary-action" @click="openGrantsModal(coupon)">Send to customers</button>
             <button type="button" class="secondary-action" @click="selectedCoupon = coupon">Details</button>
           </div>
         </article>
@@ -145,6 +146,57 @@
           <section class="offer-form-section">
             <header class="offer-section-header">
               <div>
+                <h3>What it discounts</h3>
+                <p v-if="editingCoupon">
+                  Fixed when the coupon was created — like the discount itself.
+                </p>
+                <p v-else>
+                  By default this discounts everything in the cart. Pick products to discount only those,
+                  and leave the rest at full price.
+                  <strong>This can't be changed later</strong>, so a bundle whose qualifying items change
+                  needs a new coupon.
+                </p>
+              </div>
+              <button
+                v-if="!editingCoupon"
+                type="button"
+                class="secondary-action"
+                :disabled="productsStore.loading"
+                @click="loadProductsForScope"
+              >
+                {{ productsStore.loading ? "Loading..." : "Load Products" }}
+              </button>
+            </header>
+
+            <p v-if="!form.applies_to_product_ids.length" class="field-note">
+              Discounts the whole cart.
+            </p>
+            <div v-if="scopeProducts.length" class="coupon-scope-list">
+              <label
+                v-for="product in scopeProducts"
+                :key="product.product_id"
+                class="coupon-scope-row"
+                :class="{ 'is-unavailable': !product.stripe_product_id }"
+              >
+                <input
+                  type="checkbox"
+                  :value="product.product_id"
+                  :checked="form.applies_to_product_ids.includes(product.product_id)"
+                  :disabled="Boolean(editingCoupon) || !product.stripe_product_id"
+                  @change="toggleScopeProduct(product.product_id)"
+                />
+                <span>{{ product.name || product.product_id }}</span>
+                <small v-if="!product.stripe_product_id">
+                  Not synced to Stripe yet — open and save the product first.
+                </small>
+              </label>
+            </div>
+            <p v-else-if="productsStore.loaded" class="field-note">No products to choose from.</p>
+          </section>
+
+          <section class="offer-form-section">
+            <header class="offer-section-header">
+              <div>
                 <h3>Restrictions</h3>
                 <p>Expired and fully redeemed coupons are hidden from offer selection.</p>
               </div>
@@ -163,8 +215,9 @@
                 <input v-model.number="form.max_redemptions_per_customer" min="1" type="number" disabled />
                   <span class="field-note">
                     Not available on a shared code — everyone holding it is the same anonymous buyer
-                    until they pay, so there is no customer to count against. It belongs to targeted
-                    coupons sent to known customers, which are coming with campaigns.
+                    until they pay, so there is no customer to count against. Use
+                    <strong>Send to customers</strong> on a saved coupon: each named customer gets their
+                    own code, and the limit applies to them.
                   </span>
               </label>
             </div>
@@ -196,6 +249,90 @@
       </section>
     </div>
 
+    <div v-if="grantsCoupon" class="modal-backdrop" @click.self="closeGrantsModal">
+      <section class="modal-card coupon-modal" role="dialog" aria-modal="true" aria-labelledby="couponGrantsTitle">
+        <header class="modal-card-header">
+          <h2 id="couponGrantsTitle">Send “{{ grantsCoupon.name || grantsCoupon.code }}” to customers</h2>
+          <button type="button" class="modal-close" aria-label="Close" @click="closeGrantsModal">×</button>
+        </header>
+
+        <div class="coupon-form">
+          <div v-if="grantsError" class="keys-status-banner error">{{ grantsError }}</div>
+          <div v-else-if="grantsMessage" class="keys-status-banner">{{ grantsMessage }}</div>
+
+          <section class="offer-form-section">
+            <header class="offer-section-header">
+              <div>
+                <h3>Who gets a code</h3>
+                <p>
+                  Each customer gets their <strong>own</strong> code, locked to them at Stripe — a code
+                  forwarded to a friend is worthless to the friend. Paste one email per line; a name
+                  beside it is used for your mail merge.
+                </p>
+              </div>
+            </header>
+            <label class="offer-field">
+              <span>Customers</span>
+              <textarea
+                v-model="grantForm.recipients"
+                rows="6"
+                placeholder="ada@example.com&#10;Bo Diddley <bo@example.com>"
+              ></textarea>
+              <small>{{ recipientCount }} address{{ recipientCount === 1 ? "" : "es" }} recognised.</small>
+            </label>
+            <div class="offer-two-column">
+              <label class="offer-field">
+                <span>Landing page URL</span>
+                <input v-model.trim="grantForm.landingUrl" type="url" placeholder="https://shop.example.com/sale" />
+                <small>The published page holding this coupon. Each code is added to this link.</small>
+              </label>
+              <label class="offer-field">
+                <span>Uses per customer</span>
+                <input v-model.number="grantForm.maxRedemptions" min="1" type="number" placeholder="unlimited" />
+                <small>Optional. Leave empty to let them use it as often as they like.</small>
+              </label>
+            </div>
+          </section>
+
+          <section v-if="grants.length" class="offer-form-section">
+            <header class="offer-section-header">
+              <div>
+                <h3>Codes issued</h3>
+                <p>Export the CSV and merge <code>redeem_url</code> into your email.</p>
+              </div>
+              <button type="button" class="secondary-action" @click="downloadGrantsCsv">Export CSV</button>
+            </header>
+            <div class="coupon-grant-table-wrap">
+              <table class="coupon-grant-table">
+                <thead>
+                  <tr><th>Customer</th><th>Code</th><th>Used</th></tr>
+                </thead>
+                <tbody>
+                  <tr v-for="grant in grants" :key="grant.grant_id">
+                    <td>{{ grant.name ? `${grant.name} <${grant.email}>` : grant.email }}</td>
+                    <td class="font-mono">{{ grant.code }}</td>
+                    <td>{{ Number(grant.redemption_count || 0) > 0 ? "Yes" : "No" }}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          <footer class="modal-footer">
+            <button class="secondary-action" type="button" @click="closeGrantsModal">Close</button>
+            <button
+              class="primary-action"
+              type="button"
+              :disabled="issuing || !recipientCount"
+              @click="issueGrants"
+            >
+              {{ issuing ? "Issuing..." : `Issue ${recipientCount || ""} code${recipientCount === 1 ? "" : "s"}` }}
+            </button>
+          </footer>
+        </div>
+      </section>
+    </div>
+
     <div v-if="selectedCoupon" class="modal-backdrop" @click.self="selectedCoupon = null">
       <section class="modal-card product-details-modal" role="dialog" aria-modal="true" aria-labelledby="couponDetailsTitle">
         <header class="modal-card-header">
@@ -220,15 +357,87 @@
 </template>
 
 <script setup>
-import { ref } from "vue";
-import { couponIsUsable, formatCouponDiscount, useCouponsStore } from "../stores/coupons";
+import { computed, ref } from "vue";
+import { couponIsUsable, formatCouponDiscount, parseRecipients, useCouponsStore } from "../stores/coupons";
+import { useProductsStore } from "../stores/products";
 
 const store = useCouponsStore();
+const productsStore = useProductsStore();
 const showCouponModal = ref(false);
 const editingCoupon = ref(null);
 const selectedCoupon = ref(null);
 const formError = ref("");
 const form = ref(defaultCouponForm());
+
+// Targeted codes: one per named customer (plans/COUPONS_COMPLETION.md C5).
+const grantsCoupon = ref(null);
+const grants = ref([]);
+const grantsError = ref("");
+const grantsMessage = ref("");
+const issuing = ref(false);
+const grantForm = ref({ recipients: "", landingUrl: "", maxRedemptions: "" });
+const recipientCount = computed(() => parseRecipients(grantForm.value.recipients).length);
+
+async function openGrantsModal(coupon) {
+  grantsCoupon.value = coupon;
+  grants.value = [];
+  grantsError.value = "";
+  grantsMessage.value = "";
+  grantForm.value = { recipients: "", landingUrl: "", maxRedemptions: "" };
+  try {
+    grants.value = await store.loadGrants(coupon.coupon_id);
+  } catch (error) {
+    grantsError.value = error.message;
+  }
+}
+
+function closeGrantsModal() {
+  grantsCoupon.value = null;
+}
+
+async function issueGrants() {
+  issuing.value = true;
+  grantsError.value = "";
+  grantsMessage.value = "";
+  try {
+    const result = await store.issueGrants(grantsCoupon.value.coupon_id, {
+      recipients: parseRecipients(grantForm.value.recipients),
+      landingUrl: grantForm.value.landingUrl,
+      maxRedemptions: grantForm.value.maxRedemptions,
+      onProgress: ({ issued, remaining }) => {
+        grantsMessage.value = `${issued} issued, ${remaining} to go...`;
+      },
+    });
+    grants.value = await store.loadGrants(grantsCoupon.value.coupon_id);
+    grantForm.value.recipients = "";
+    const parts = [`${result.issued.length} new code${result.issued.length === 1 ? "" : "s"}`];
+    if (result.skipped.length) parts.push(`${result.skipped.length} already had one`);
+    if (result.failures.length) parts.push(`${result.failures.length} failed`);
+    grantsMessage.value = `${parts.join(", ")}. Export the CSV to send them.`;
+    if (result.failures.length) {
+      grantsError.value = result.failures.map((failure) => `${failure.email}: ${failure.error}`).join(" · ");
+    }
+  } catch (error) {
+    grantsError.value = error.message;
+  } finally {
+    issuing.value = false;
+  }
+}
+
+async function downloadGrantsCsv() {
+  grantsError.value = "";
+  try {
+    const text = await store.exportGrantsCsv(grantsCoupon.value.coupon_id);
+    const url = URL.createObjectURL(new Blob([text], { type: "text/csv;charset=utf-8" }));
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `${grantsCoupon.value.code || grantsCoupon.value.coupon_id}-codes.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
+  } catch (error) {
+    grantsError.value = error.message;
+  }
+}
 
 function defaultCouponForm() {
   return {
@@ -251,8 +460,29 @@ function defaultCouponForm() {
     minimum_amount_currency: "usd",
     redemption_count: 0,
     applies_to_offer_ids: [],
+    applies_to_product_ids: [],
     created_at: null,
   };
+}
+
+// Product scope (Option A). The catalogue is loaded on demand rather than with the screen: most coupons
+// discount everything, and the Products index is the biggest payload the dashboard fetches.
+const scopeProducts = computed(() => {
+  const chosen = new Set(form.value.applies_to_product_ids || []);
+  return (productsStore.products || []).filter(
+    (product) => product.status !== "archived" || chosen.has(product.product_id),
+  );
+});
+
+async function loadProductsForScope() {
+  if (!productsStore.loaded) await productsStore.load();
+}
+
+function toggleScopeProduct(productId) {
+  const chosen = form.value.applies_to_product_ids || [];
+  form.value.applies_to_product_ids = chosen.includes(productId)
+    ? chosen.filter((id) => id !== productId)
+    : [...chosen, productId];
 }
 
 function openCreateModal() {
@@ -267,6 +497,8 @@ function openEditModal(coupon) {
   form.value = formFromCoupon(coupon);
   formError.value = "";
   showCouponModal.value = true;
+  // A scoped coupon has to be able to SHOW what it covers, even though it cannot be changed.
+  if (form.value.applies_to_product_ids.length) loadProductsForScope();
 }
 
 function closeCouponModal() {
@@ -323,6 +555,7 @@ function formFromCoupon(coupon) {
     minimum_amount_currency: restrictions.minimum_amount_currency || "usd",
     redemption_count: coupon.redemption_count || 0,
     applies_to_offer_ids: Array.isArray(coupon.applies_to_offer_ids) ? [...coupon.applies_to_offer_ids] : [],
+    applies_to_product_ids: Array.isArray(coupon.applies_to_product_ids) ? [...coupon.applies_to_product_ids] : [],
     created_at: coupon.created_at || null,
   };
 }

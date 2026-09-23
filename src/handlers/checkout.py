@@ -26,9 +26,11 @@ from stripe_link.domain.pricing import (
     resolve_offer,
 )
 from stripe_link.domain import tips
+from stripe_link.domain.coupon_grants import is_grant_code
 from stripe_link.kms_secrets import KmsSecretCipher
 from stripe_link.runtime.error_pages import render_error_page
 from stripe_link.repositories.documents import (
+    coupon_grants_repository,
     coupons_repository,
     offers_repository,
     pages_repository,
@@ -69,6 +71,51 @@ def coupon_covers_offer(coupon: dict, offer_id: str) -> bool:
     if not scoped:
         return True
     return str(offer_id or "") in {str(item) for item in scoped}
+
+
+def resolve_targeted_grant(code, tenant_id, mode, grants_repo=None, coupons_repo=None, offer_id=""):
+    """A recipient's own code, as `(promotion_code_id, stripe_customer_id)`. `("", "")` when the code is not
+    a grant at all, which is the ordinary shared-coupon case and must fall through untouched.
+
+    The customer id comes back because it is REQUIRED, not informational: the promotion code is scoped to
+    that customer at Stripe (which is what makes it non-transferable), so a session that does not name them
+    is refused the discount. Checkout has no other way to know who is on the other end -- the visitor has
+    typed nothing yet.
+
+    The grant lives or dies with its coupon. A tenant who turns a campaign off has turned off every code
+    they sent, and the recipient is told the offer ended rather than being quietly charged full price.
+    """
+    code = str(code or "").strip().upper()
+    if not code or not tenant_id or not is_grant_code(code):
+        return "", ""
+    try:
+        repo = grants_repo or (coupon_grants_repository(mode=mode) if os.environ.get("COUPON_GRANTS_TABLE") else None)
+        if repo is None:
+            return "", ""
+        grant = repo.get(tenant_id, code)
+    except Exception:  # noqa: BLE001 - an unreadable grants table falls back to the shared-coupon path
+        return "", ""
+    if not grant:
+        return "", ""
+    if str(grant.get("status") or "") != "active":
+        raise CouponUnavailable(code)
+
+    from handlers.coupons import coupon_is_usable
+
+    try:
+        coupons = coupons_repo or (coupons_repository(mode=mode) if os.environ.get("COUPONS_TABLE") else None)
+        coupon = coupons.get(tenant_id, str(grant.get("coupon_id") or "")) if coupons else None
+    except Exception as exc:  # noqa: BLE001 - never charge a surprise full price on a read failure
+        raise CouponUnavailable(code) from exc
+    if not coupon or not coupon_is_usable(coupon, int(time.time())):
+        raise CouponUnavailable(code)
+    if not coupon_covers_offer(coupon, offer_id):
+        raise CouponUnavailable(code)
+    promo_id = str(grant.get("stripe_promo_code_id") or "")
+    customer_id = str(grant.get("stripe_customer_id") or "")
+    if not promo_id or not customer_id:
+        raise CouponUnavailable(code)
+    return promo_id, customer_id
 
 
 def resolve_campaign_promotion_code(code, tenant_id, mode, coupons_repo=None, offer_id=""):
@@ -129,6 +176,7 @@ def handler(
     stripe_repo=None,
     tenant_repo=None,
     coupons_repo=None,
+    grants_repo=None,
     pages_repo=None,
     secret_cipher=None,
     opener=None,
@@ -269,6 +317,7 @@ def handler(
             coupon_code=str(params.get("coupon") or ""),
             mode=mode,
             coupons_repo=coupons_repo,
+            grants_repo=grants_repo,
         )
         stripe_response = create_checkout_session_with_bnpl_fallback(
             checkout_payload,
@@ -420,6 +469,7 @@ def build_checkout_payload(
     coupon_code="",
     mode="test",
     coupons_repo=None,
+    grants_repo=None,
 ):
     checkout = offer.get("checkout") or {}
     # The session's mode follows the lines it actually carries, in BOTH directions.
@@ -452,13 +502,27 @@ def build_checkout_payload(
     # Stripe REFUSES `discounts` and `allow_promotion_codes` together, so a pre-applied coupon wins and the
     # manual field is dropped for that one checkout. That is the right way round: the buyer already has a
     # better code than anything they would type.
-    applied_promotion_code = resolve_campaign_promotion_code(
-        coupon_code, tenant_id, mode, coupons_repo, offer_id=str((offer or {}).get('offer_id') or ''),
+    #
+    # A TARGETED code is tried first, and by a direct read: it is one recipient's own code, so it is not in
+    # the tenant's shared list and the shared lookup would refuse it. It also drags its customer along --
+    # see `resolve_targeted_grant`.
+    offer_id_for_coupon = str((offer or {}).get('offer_id') or '')
+    applied_promotion_code, grant_customer_id = resolve_targeted_grant(
+        coupon_code, tenant_id, mode, grants_repo, coupons_repo, offer_id=offer_id_for_coupon,
     )
+    if not applied_promotion_code:
+        applied_promotion_code = resolve_campaign_promotion_code(
+            coupon_code, tenant_id, mode, coupons_repo, offer_id=offer_id_for_coupon,
+        )
     if applied_promotion_code:
         payload["discounts[0][promotion_code]"] = applied_promotion_code
+        # Carried so the webhook can mark WHICH code was used. Reading it back off the session means
+        # expanding the discount object; the code itself is what the tenant's campaign view is keyed on.
+        payload["metadata[coupon_code]"] = str(coupon_code or "").strip().upper()
     elif checkout.get("allow_promotion_codes") is True:
         payload["allow_promotion_codes"] = "true"
+    if grant_customer_id:
+        payload["customer"] = grant_customer_id
 
     collect_shipping = False
     first_product_id = ""
@@ -634,7 +698,10 @@ def build_checkout_payload(
     # (otherwise the upsell page has no customer to charge). Subscription mode already creates a customer +
     # saves the PM; only payment mode needs these flags (plans/OFFER_MODEL_REDESIGN.md §6).
     if payload.get("mode") == "payment" and stage_opportunities(offer, STAGE_POST_PURCHASE):
-        payload["customer_creation"] = "always"
+        # Stripe REFUSES customer_creation alongside an explicit customer, and a targeted coupon supplies
+        # one. Nothing is lost: the customer already exists, which is the whole point of the flag.
+        if not payload.get("customer"):
+            payload["customer_creation"] = "always"
         # Save the PM for the one-click upsell, but SCOPE it to card/link. A top-level
         # payment_intent_data[setup_future_usage] is REJECTED by BNPL methods (Klarna/Afterpay/Zip) —
         # "setup_future_usage is unsupported for payment method afterpay_clearpay" — which 400s the whole

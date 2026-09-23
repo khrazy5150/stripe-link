@@ -12,6 +12,7 @@ from urllib.parse import quote, urlencode, urlparse
 from stripe_link.platform_config import default_favicon_url
 from stripe_link.domain.bargain import FROM_PREFIX, derived_bargain
 from stripe_link.domain.business_types import BUSINESS_TYPES, resolve_entity_type
+from stripe_link.domain.coupon_grants import grant_prefix
 from stripe_link.domain.composition import (
     compose_page, composition_key, default_cta_label, element_channel, shows_breadcrumb)
 from stripe_link.domain.connect_sync import site_seo_enabled
@@ -5474,7 +5475,8 @@ def render_coupon(
         # applies instead, so a visitor without JS gets the old behaviour rather than a dead ticket.
         opener = (f'    <a class="sl-coupon{layout}{state}{themed}" href="{escape(href)}"'
                   f' data-section-id="{section_id}" data-section-type="coupon"'
-                  f' data-coupon-code="{escape(code)}"{style_attr}>')
+                  f' data-coupon-code="{escape(code)}"'
+                  f' data-coupon-grant-prefix="{escape(grant_prefix(code))}"{style_attr}>')
         closer = "    </a>"
     else:
         opener = (f'    <div class="sl-coupon{layout}{state}{themed}"'
@@ -7931,6 +7933,18 @@ def render_page_interactions_script(page: dict[str, Any]) -> str:
         # supermarket till does (author, 2026-09-22).
         "      const coupon = document.querySelector('[data-section-type=\"coupon\"][data-coupon-code]');",
         "      if (coupon) {",
+        # A TARGETED code cannot be baked into the page: one artifact is published for everyone, so the
+        # code minted for a single recipient reaches them in their OWN link (COUPONS_COMPLETION.md C5).
+        # It is accepted only when it belongs to the campaign shown here, so a stray ?coupon= on somebody
+        # else's link changes nothing -- and the server still decides whether it is honoured at all.
+        "        const grantPrefix = (coupon.dataset.couponGrantPrefix || '').toUpperCase();",
+        "        const personal = (new URLSearchParams(location.search).get('coupon') || '').toUpperCase();",
+        "        if (grantPrefix && /^[A-Z0-9_-]{4,200}$/.test(personal)"
+        " && personal.startsWith(grantPrefix + '-')) {",
+        "          coupon.dataset.couponCode = personal;",
+        "          const shownCode = coupon.querySelector('.sl-coupon-code');",
+        "          if (shownCode) shownCode.textContent = personal;",
+        "        }",
         "        const applyCoupon = (event) => {",
         "          if (!cta || !cta.dataset.checkoutBaseUrl) return;   // no checkout here: let the link be",
         "          if (event) event.preventDefault();",

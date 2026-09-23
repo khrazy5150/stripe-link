@@ -2925,6 +2925,77 @@ button:disabled {
   width: min(100%, 96rem);
 }
 
+/* Product scope picker. A flat checkbox list rather than a multi-select: a tenant has to SEE which
+   products are unsynced, and a <select multiple> cannot say why an option is disabled. */
+.coupon-scope-list {
+  display: grid;
+  gap: 0.2rem;
+  max-height: 24rem;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 0.8rem;
+  padding: 0.6rem;
+}
+
+.coupon-scope-row {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  gap: 0.8rem;
+  padding: 0.5rem 0.7rem;
+  border-radius: 0.6rem;
+}
+
+.coupon-scope-row:hover {
+  background: color-mix(in srgb, var(--border) 35%, transparent);
+}
+
+.coupon-scope-row small {
+  grid-column: 2;
+  color: var(--text-muted);
+}
+
+.coupon-scope-row.is-unavailable {
+  opacity: 0.6;
+}
+
+/* The issued-codes list. Scrolls in its own box so a 200-recipient campaign does not make the modal
+   itself scroll sideways. */
+.coupon-grant-table-wrap {
+  max-height: 28rem;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 0.8rem;
+}
+
+.coupon-grant-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 1.3rem;
+}
+
+.coupon-grant-table th,
+.coupon-grant-table td {
+  padding: 0.8rem 1.2rem;
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+}
+
+.coupon-grant-table th {
+  position: sticky;
+  top: 0;
+  background: var(--surface);
+  color: var(--text-muted);
+  font-size: 1.15rem;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.coupon-grant-table tr:last-child td {
+  border-bottom: 0;
+}
+
 .coupon-form {
   display: grid;
   gap: 1.8rem;

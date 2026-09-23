@@ -274,6 +274,56 @@ class DynamoDocumentRepository:
             return None
         return self._strip_keys(items[0])
 
+    def put_if_absent(self, document: dict[str, Any]) -> bool:
+        """`put`, but only if this document does not already exist. True when it was written.
+
+        The idempotency primitive for events that arrive more than once. Stripe retries a webhook until it
+        gets a 2xx and can deliver the same event twice on its own, so anything that COUNTS has to refuse
+        the second copy at the database rather than trust the delivery.
+        """
+        tenant_id = str(document.get("tenant_id") or "").strip()
+        document_id = str(document.get(self.id_field) or "").strip()
+        if not tenant_id:
+            raise RepositoryError("Document tenant_id is required.")
+        if not document_id:
+            raise RepositoryError(f"Document {self.id_field} is required.")
+
+        if self.mode is not None:
+            document = {**document, "stripe_mode": self.mode}
+        item = {
+            **document,
+            **self._key(tenant_id, document_id),
+            "GSI1PK": self._gsi1pk(document_id),
+            "GSI1SK": f"TENANT#{tenant_id}",
+        }
+        try:
+            self.table.put_item(
+                Item=dynamo_safe(item),
+                ConditionExpression="attribute_not_exists(PK) AND attribute_not_exists(SK)",
+            )
+        except Exception as exc:  # noqa: BLE001 - boto raises a client error class we do not import here
+            if type(exc).__name__ == "ConditionalCheckFailedException" or "ConditionalCheckFailed" in str(exc):
+                return False
+            raise
+        return True
+
+    def increment_counter(self, tenant_id: str, document_id: str, field: str, amount: int = 1) -> int | None:
+        """Atomically add to a top-level numeric field and return its new value.
+
+        A read-modify-write `put` loses increments whenever two orders land at once, which for a coupon's
+        redemption cap means letting a 501st buyer through a limit of 500.
+        """
+        response = self.table.update_item(
+            Key=self._key(tenant_id, document_id),
+            UpdateExpression="ADD #field :amount",
+            ExpressionAttributeNames={"#field": field},
+            ExpressionAttributeValues={":amount": amount},
+            ReturnValues="UPDATED_NEW",
+        )
+        updated = (response or {}).get("Attributes") or {}
+        value = updated.get(field)
+        return int(value) if value is not None else None
+
     def increment_view(self, tenant_id: str, document_id: str, page_id: str, amount: int = 1) -> None:
         """Atomically bump stats.views_by_page[page_id] by amount.
 
@@ -321,6 +371,33 @@ def coupons_repository(table: Any | None = None, *, mode: str | None = None) -> 
         os.environ.get("COUPONS_TABLE", ""),
         document_type="coupon",
         id_field="coupon_id",
+        table=table,
+        mode=mode,
+    )
+
+
+def coupon_grants_repository(table: Any | None = None, *, mode: str | None = None) -> DynamoDocumentRepository:
+    """Per-recipient codes for a targeted coupon. `grant_id` is the CODE, so checkout reads one item by key
+    instead of scanning a tenant's coupons (plans/COUPONS_COMPLETION.md C5)."""
+    return DynamoDocumentRepository(
+        os.environ.get("COUPON_GRANTS_TABLE", ""),
+        document_type="coupon_grant",
+        id_field="grant_id",
+        table=table,
+        mode=mode,
+    )
+
+
+def coupon_redemptions_repository(table: Any | None = None, *, mode: str | None = None) -> DynamoDocumentRepository:
+    """One durable row per coupon actually redeemed (plans/COUPONS_COMPLETION.md, Option B slice 1).
+
+    A LEDGER, not a counter. `redemption_id` is derived from the checkout session, so a replayed webhook
+    writes the same id and is refused by `put_if_absent` instead of counting twice.
+    """
+    return DynamoDocumentRepository(
+        os.environ.get("COUPON_REDEMPTIONS_TABLE", ""),
+        document_type="coupon_redemption",
+        id_field="redemption_id",
         table=table,
         mode=mode,
     )

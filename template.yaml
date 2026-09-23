@@ -248,6 +248,8 @@ Globals:
         PRODUCTS_TABLE: !Ref ProductsTable
         OFFERS_TABLE: !Ref OffersTable
         COUPONS_TABLE: !Ref CouponsTable
+        COUPON_GRANTS_TABLE: !Ref CouponGrantsTable
+        COUPON_REDEMPTIONS_TABLE: !Ref CouponRedemptionsTable
         PAGES_TABLE: !Ref PagesTable
         SITES_TABLE: !Ref SitesTable
         # Registrable domain for tenant free-tier Sites (Zone B, always noindex). Read from config, never
@@ -1446,10 +1448,16 @@ Resources:
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref CouponsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref CouponGrantsTable
         # Creating a coupon now creates it AT STRIPE first, which needs the tenant's key or their
         # connected account id (plans/COUPONS_COMPLETION.md C1). Read-only.
         - DynamoDBReadPolicy:
             TableName: !Ref StripeKeysTable
+        # A product-scoped coupon names STRIPE product ids, which are read off our own product documents
+        # (plans/COUPONS_COMPLETION.md, Option A). Read-only.
+        - DynamoDBReadPolicy:
+            TableName: !Ref ProductsTable
         # Creating the coupon AT Stripe needs the key to call with. A Connect tenant uses the PLATFORM
         # secret key (Secrets Manager); a tenant without Connect uses their own KMS-wrapped key — so both
         # grants are needed, exactly as CheckoutFunction has them.
@@ -1500,6 +1508,26 @@ Resources:
           Properties:
             RestApiId: !Ref RestApi
             Path: /coupons/{coupon_id}
+            Method: OPTIONS
+        # Targeted coupons: one personal code per recipient, exported as CSV for the tenant's own email
+        # software (plans/COUPONS_COMPLETION.md C5).
+        CouponGrantsIssue:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /coupons/{coupon_id}/grants
+            Method: POST
+        CouponGrantsList:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /coupons/{coupon_id}/grants
+            Method: GET
+        CouponGrantsOptions:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /coupons/{coupon_id}/grants
             Method: OPTIONS
 
   # Public, unauthenticated: it is called by an anonymous visitor from a published page. Always answers
@@ -1802,6 +1830,8 @@ Resources:
         # tenant's own record is what says whether it is still usable. Read-only.
         - DynamoDBReadPolicy:
             TableName: !Ref CouponsTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref CouponGrantsTable
         - DynamoDBReadPolicy:
             TableName: !Ref ProductsTable
         - DynamoDBReadPolicy:
@@ -2428,6 +2458,15 @@ Resources:
             TableName: !Ref CartsTable
         - DynamoDBCrudPolicy:
             TableName: !Ref ServicesTable
+        # A paid session carrying a coupon writes a durable redemption row and bumps the counters it
+        # feeds -- the tenant's cap is enforced from OUR number, not Stripe's (COUPONS_COMPLETION.md,
+        # Option B slice 1). Crud on the coupons table because the counter is an atomic update on it.
+        - DynamoDBCrudPolicy:
+            TableName: !Ref CouponGrantsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref CouponRedemptionsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref CouponsTable
         - DynamoDBReadPolicy:
             TableName: !Ref CalendarConnectionsTable
         - Statement:
@@ -4210,6 +4249,35 @@ Resources:
     Type: AWS::DynamoDB::Table
     Properties:
       TableName: !Sub "${ProjectPrefix}-coupons-${Environment}"
+      BillingMode: PAY_PER_REQUEST
+      SSESpecification:
+        SSEEnabled: true
+      AttributeDefinitions: *DocumentAttributeDefinitions
+      KeySchema: *DocumentKeySchema
+      GlobalSecondaryIndexes: *DocumentGlobalSecondaryIndexes
+
+  # One row per targeted grant: a promotion code minted for a single known customer.
+  # Separate from CouponsTable because grants are high-cardinality per coupon and are
+  # queried by code at checkout. See plans/COUPONS_COMPLETION.md C5.
+  CouponGrantsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "${ProjectPrefix}-coupon-grants-${Environment}"
+      BillingMode: PAY_PER_REQUEST
+      SSESpecification:
+        SSEEnabled: true
+      AttributeDefinitions: *DocumentAttributeDefinitions
+      KeySchema: *DocumentKeySchema
+      GlobalSecondaryIndexes: *DocumentGlobalSecondaryIndexes
+
+  # The coupon redemption LEDGER, not a counter (plans/COUPONS_COMPLETION.md, Option B slice 1). One row
+  # per coupon actually redeemed, keyed on the checkout session so a replayed webhook cannot count twice.
+  # Durable because under Option B the Stripe Coupon is disposable, so Stripe's own `times_redeemed` can
+  # never enforce a tenant's cap -- ours is the authoritative number.
+  CouponRedemptionsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "${ProjectPrefix}-coupon-redemptions-${Environment}"
       BillingMode: PAY_PER_REQUEST
       SSESpecification:
         SSEEnabled: true

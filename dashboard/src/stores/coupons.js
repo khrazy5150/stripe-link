@@ -137,6 +137,50 @@ export const useCouponsStore = defineStore("coupons", {
       }
     },
 
+    // --- Targeted coupons -------------------------------------------------------------------------
+    // One personal code per recipient, each locked to that customer at Stripe, exported as a CSV the
+    // tenant merges into whatever email tool they already use (plans/COUPONS_COMPLETION.md C5).
+
+    async loadGrants(couponId) {
+      const body = await apiRequest(`/coupons/${encodeURIComponent(couponId)}/grants`);
+      return Array.isArray(body.grants) ? body.grants : [];
+    },
+
+    // The server issues in batches because API Gateway hangs up at 29 seconds and every recipient costs
+    // Stripe round-trips. It says who is left; this keeps going until nobody is.
+    async issueGrants(couponId, { recipients, landingUrl = "", maxRedemptions = null, onProgress } = {}) {
+      const issued = [];
+      const skipped = [];
+      const failures = [];
+      let pending = recipients;
+      while (pending.length) {
+        const body = await apiRequest(`/coupons/${encodeURIComponent(couponId)}/grants`, {
+          method: "POST",
+          body: {
+            recipients: pending,
+            landing_url: landingUrl,
+            ...(maxRedemptions ? { max_redemptions: Number(maxRedemptions) } : {}),
+          },
+        });
+        issued.push(...(body.grants || []));
+        skipped.push(...(body.skipped || []));
+        failures.push(...(body.failures || []));
+        const remaining = body.remaining || [];
+        // Nothing moved: stop rather than loop forever on an audience the server will not take.
+        if (remaining.length >= pending.length) break;
+        pending = remaining;
+        if (onProgress) onProgress({ issued: issued.length, remaining: pending.length });
+      }
+      return { issued, skipped, failures };
+    },
+
+    async exportGrantsCsv(couponId) {
+      return apiRequest(`/coupons/${encodeURIComponent(couponId)}/grants`, {
+        params: { format: "csv" },
+        raw: true,
+      });
+    },
+
     upsertCoupon(coupon) {
       const index = this.coupons.findIndex((item) => item.coupon_id === coupon.coupon_id);
       if (index >= 0) this.coupons.splice(index, 1, coupon);
@@ -144,6 +188,24 @@ export const useCouponsStore = defineStore("coupons", {
     },
   },
 });
+
+export function parseRecipients(text) {
+  // Whatever a tenant pastes: one address per line, a "Name <email>" list copied out of a mail client, or
+  // two columns out of a spreadsheet. The server de-duplicates and rejects the rest, so this only has to
+  // find the address and the name sitting next to it.
+  return String(text || "")
+    .split(/[\n,;]+/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const angled = line.match(/^(.*?)\s*<([^>]+)>$/);
+      if (angled) return { email: angled[2].trim(), name: angled[1].trim().replace(/^"|"$/g, "") };
+      const spaced = line.match(/^(.*\S)\s+(\S+@\S+)$/);
+      if (spaced) return { email: spaced[2], name: spaced[1] };
+      return { email: line, name: "" };
+    })
+    .filter((row) => row.email.includes("@"));
+}
 
 export function buildCouponDocument(form) {
   const now = Math.floor(Date.now() / 1000);
@@ -181,6 +243,10 @@ export function buildCouponDocument(form) {
       minimum_amount_currency: form.minimum_amount ? String(form.minimum_amount_currency || "usd").toLowerCase() : null,
     },
     applies_to_offer_ids: Array.isArray(form.applies_to_offer_ids) ? form.applies_to_offer_ids : [],
+    // Which PRODUCTS the discount covers — a different question from which offers the code may be used on
+    // (plans/COUPONS_COMPLETION.md, Option A). Empty means the whole cart. Our product ids; the server
+    // translates them to Stripe's and refuses if any is unsynced.
+    applies_to_product_ids: Array.isArray(form.applies_to_product_ids) ? form.applies_to_product_ids : [],
     redemption_count: Number(form.redemption_count || 0),
     // Set by the SERVER after Stripe confirms, not asserted here.
     sync: form.sync || { status: "synced", last_synced_at: now, error: null },

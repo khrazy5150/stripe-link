@@ -26,7 +26,7 @@ from stripe_link.domain.booking import (
 from stripe_link.domain.booking_credits import (
     EntitlementError, build_entitlement, entitlement_id_for, refill,
 )
-from stripe_link.domain.documents import validate_appointment
+from stripe_link.domain.documents import DocumentValidationError, validate_appointment, validate_coupon_redemption_document
 from stripe_link.domain.downloads import digital_download_links
 from stripe_link.domain.fees import cached_billing_config, calculate_price
 from stripe_link.delegation import apply_delegation
@@ -39,12 +39,17 @@ from stripe_link.domain.reminders import plan_reminders
 from stripe_link.domain.review_invites import plan_invite
 from stripe_link.domain.refund_ledger import build_refund_entry, initial_payment_aggregates, set_refund_aggregates
 from stripe_link.mailer import send_email
+from stripe_link.domain.coupon_grants import is_grant_code
+from stripe_link.domain.coupon_redemptions import amounts_from_session, redemption_document
 from stripe_link.repositories.documents import (
     RepositoryError,
     appointments_repository,
     booking_credits_repository,
     calendar_connections_repository,
     carts_repository,
+    coupon_grants_repository,
+    coupon_redemptions_repository,
+    coupons_repository,
     customers_repository,
     dynamodb_safe_document,
     fulfillers_repository,
@@ -160,6 +165,9 @@ def handler(
     user_profiles_repo=None,
     sites_repo=None,
     tip_tokens_repo=None,
+    grants_repo=None,
+    coupons_repo=None,
+    redemptions_repo=None,
     webhook_secret_loader: Callable[[str, str], str | None] = get_platform_webhook_secret,
     now_fn: Callable[[], int] = lambda: int(time.time()),
     billing_config_loader: Callable[[], dict[str, Any]] | None = None,
@@ -278,6 +286,17 @@ def handler(
                     order_id=str((persistence or {}).get("order_id") or ""),
                     invoices_repo=invoices_repo, notifications_repo=notifications_repo, now_fn=now_fn,
                 )
+        # Which recipient of a targeted campaign actually used their code. Best-effort and last: a
+        # tenant's campaign view is worth nothing if counting a redemption can cost them the order.
+        try:
+            record_coupon_redemption(
+                str(session_metadata.get("coupon_code") or ""),
+                tenant_id=tenant_id, mode=mode, session=session,
+                coupons_repo=coupons_repo, grants_repo=grants_repo, redemptions_repo=redemptions_repo,
+                now_fn=now_fn,
+            )
+        except Exception as exc:  # noqa: BLE001 - never fail the webhook over a campaign statistic
+            print(f"[webhook] coupon redemption not recorded: {type(exc).__name__}: {exc}")
     elif event_type and event_type.startswith("invoice.") and tenant_id:
         persistence = persist_invoice_event(
             stripe_event, tenant_id=tenant_id, event_type=event_type, mode=mode,
@@ -448,6 +467,125 @@ def mark_source_cart_converted(session, tenant_id, carts_repo, now) -> bool:
         return True
     except Exception:  # noqa: BLE001 - cart bookkeeping must never fail the payment webhook
         return False
+
+
+def resolve_redeemed_coupon(code: str, *, tenant_id: str, mode: str, coupons_repo=None, grants_repo=None):
+    """`(coupon, grant)` for a code that was just used. Either may be None.
+
+    A GRANT code resolves through its grant to the campaign coupon it points at; a shared code resolves
+    directly. Both end at the same coupon document, which is the thing carrying the tenant's cap.
+    """
+    code = str(code or "").strip().upper()
+    if not code or not tenant_id:
+        return None, None
+
+    grant = None
+    if is_grant_code(code):
+        repo = grants_repo or (coupon_grants_repository(mode=mode) if os.environ.get("COUPON_GRANTS_TABLE") else None)
+        grant = repo.get(tenant_id, code) if repo else None
+
+    coupons = coupons_repo or (coupons_repository(mode=mode) if os.environ.get("COUPONS_TABLE") else None)
+    if coupons is None:
+        return None, grant
+    if grant:
+        return coupons.get(tenant_id, str(grant.get("coupon_id") or "")), grant
+    for coupon in coupons.list_for_tenant(tenant_id) or []:
+        if str(coupon.get("code") or "").strip().upper() == code:
+            return coupon, None
+    return None, None
+
+
+def record_coupon_redemption(code: str, *, tenant_id: str, mode: str = "test", session=None,
+                             coupons_repo=None, grants_repo=None, redemptions_repo=None,
+                             now_fn: Callable[[], int] = lambda: int(time.time())) -> bool:
+    """Record a coupon redemption as a durable event, then bump the counters it feeds.
+
+    This is slice 1 of Option B (plans/COUPONS_COMPLETION.md). The counter it maintains,
+    `coupon.redemption_count`, was read by `coupon_is_usable` and written by NOTHING -- so a tenant's
+    `max_redemptions` never fired, a used-up coupon kept rendering a live ticket, and the buyer met a raw
+    Stripe 500 instead of the branded "this offer has ended" page.
+
+    Writing the counter alone would have been the wrong fix. Under Option B the Stripe Coupon is disposable
+    and lives for one checkout, so Stripe's `times_redeemed` cannot enforce a tenant's cap at all: OUR
+    number has to be the authoritative one, and a number you cannot audit is not worth being authoritative.
+    Hence a ledger row first, counter second.
+
+    **A redemption is a successful ORDER, not an attempted checkout.** This runs on
+    `checkout.session.completed`, so an abandoned checkout costs the tenant nothing off their cap -- a
+    distinction Stripe's own counter cannot express.
+
+    Idempotent by construction: the redemption id is derived from the checkout session, so a replayed
+    webhook loses the conditional write and the counters are left alone.
+    """
+    code = str(code or "").strip().upper()
+    if not code or not tenant_id:
+        return False
+
+    session = session or {}
+    session_id = str(session.get("id") or "").strip()
+    if not session_id:
+        # Without a session there is no idempotency key, and counting something twice is worse than not
+        # counting it: a tenant's cap would close early and refuse buyers they meant to serve.
+        return False
+
+    coupon, grant = resolve_redeemed_coupon(
+        code, tenant_id=tenant_id, mode=mode, coupons_repo=coupons_repo, grants_repo=grants_repo)
+    if not coupon and not grant:
+        return False
+
+    now = int(now_fn())
+    discount_amount, qualifying_amount, currency = amounts_from_session(session)
+    customer_details = session.get("customer_details") or {}
+    document = redemption_document(
+        tenant_id=tenant_id,
+        coupon_id=str((coupon or {}).get("coupon_id") or (grant or {}).get("coupon_id") or ""),
+        code=code,
+        checkout_session_id=session_id,
+        stripe_mode=mode,
+        now=now,
+        discount_amount=discount_amount,
+        qualifying_amount=qualifying_amount,
+        currency=currency,
+        payment_intent_id=str(session.get("payment_intent") or ""),
+        customer_email=str(customer_details.get("email") or ""),
+        grant_id=str((grant or {}).get("grant_id") or ""),
+    )
+    try:
+        validate_coupon_redemption_document(document)
+    except DocumentValidationError as exc:
+        print(f"[webhook] coupon redemption rejected: {exc}")
+        return False
+
+    repo = redemptions_repo or (
+        coupon_redemptions_repository(mode=mode) if os.environ.get("COUPON_REDEMPTIONS_TABLE") else None)
+    if repo is None:
+        return False
+    if not repo.put_if_absent(document):
+        # Already counted. Stripe retries until it gets a 2xx and can deliver an event twice on its own.
+        return False
+
+    # Counters AFTER the ledger row, and only when it was genuinely new. Atomic, because two orders landing
+    # together on a read-modify-write is exactly how a cap of 500 lets a 501st buyer through.
+    if coupon:
+        _bump_redemption_counter(
+            coupons_repo or (coupons_repository(mode=mode) if os.environ.get("COUPONS_TABLE") else None),
+            tenant_id, str(coupon.get("coupon_id") or ""))
+    if grant:
+        _bump_redemption_counter(
+            grants_repo or (coupon_grants_repository(mode=mode) if os.environ.get("COUPON_GRANTS_TABLE") else None),
+            tenant_id, str(grant.get("grant_id") or ""))
+    return True
+
+
+def _bump_redemption_counter(repo, tenant_id: str, document_id: str) -> None:
+    """Best-effort atomic +1. The ledger row is already written, so a failed counter is a stale cache and
+    not a lost redemption -- recoverable by counting the ledger, which is the point of keeping one."""
+    if repo is None or not document_id:
+        return
+    try:
+        repo.increment_counter(tenant_id, document_id, "redemption_count")
+    except Exception as exc:  # noqa: BLE001 - the durable record already landed
+        print(f"[webhook] redemption counter not bumped for {document_id}: {type(exc).__name__}: {exc}")
 
 
 def persist_checkout_session_completed(

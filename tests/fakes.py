@@ -12,6 +12,22 @@ class FakeDocumentRepository:
         document = self.documents.get((tenant_id, document_id))
         return dict(document) if document else None
 
+    def put_if_absent(self, document):
+        """Mirrors the real conditional put: False when the key already exists, and nothing written."""
+        key = (document["tenant_id"], document[self.id_field])
+        if key in self.documents:
+            return False
+        self.documents[key] = dict(document)
+        return True
+
+    def increment_counter(self, tenant_id, document_id, field, amount=1):
+        key = (tenant_id, document_id)
+        if key not in self.documents:
+            return None
+        value = int(self.documents[key].get(field) or 0) + amount
+        self.documents[key][field] = value
+        return value
+
     def delete(self, tenant_id, document_id):
         document = self.documents.pop((tenant_id, document_id), None)
         return dict(document) if document else None

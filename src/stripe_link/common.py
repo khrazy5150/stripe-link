@@ -77,6 +77,25 @@ def json_response(body: dict[str, Any], status_code: int = 200) -> dict[str, Any
     }
 
 
+def csv_response(body: str, *, filename: str, status_code: int = 200) -> dict[str, Any]:
+    """A downloadable spreadsheet, with the same CORS headers as every JSON answer.
+
+    The dashboard fetches this like any other endpoint and saves the text as a file, so the browser never
+    navigates away from the app -- which also means the request still carries the tenant headers.
+    """
+    return {
+        "statusCode": status_code,
+        "headers": {
+            "Content-Type": "text/csv; charset=utf-8",
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Headers": "Content-Type,Authorization,X-Tenant-Id,X-Client-Id,X-Environment,X-Stripe-Mode",
+            "Access-Control-Allow-Methods": "OPTIONS,GET,POST,PUT,PATCH,DELETE",
+        },
+        "body": body,
+    }
+
+
 def parse_json_body(event: dict[str, Any]) -> dict[str, Any]:
     raw_body = (event or {}).get("body") or "{}"
     try:

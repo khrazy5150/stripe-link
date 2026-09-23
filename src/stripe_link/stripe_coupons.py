@@ -22,6 +22,7 @@ logger = logging.getLogger(__name__)
 
 STRIPE_COUPONS_URL = "https://api.stripe.com/v1/coupons"
 STRIPE_PROMOTION_CODES_URL = "https://api.stripe.com/v1/promotion_codes"
+STRIPE_CUSTOMERS_URL = "https://api.stripe.com/v1/customers"
 
 
 class StripeCouponError(RuntimeError):
@@ -63,11 +64,17 @@ def _post(url: str, payload: dict[str, Any], *, api_key: str, stripe_account: st
         raise StripeCouponError(detail or f"Stripe rejected the request ({exc.code}).") from exc
 
 
-def coupon_payload(discount: dict[str, Any], restrictions: dict[str, Any], name: str = "") -> dict[str, Any]:
+def coupon_payload(discount: dict[str, Any], restrictions: dict[str, Any], name: str = "",
+                   applies_to_product_ids: "list[str] | tuple[str, ...]" = ()) -> dict[str, Any]:
     """Our discount, as Stripe's Coupon fields.
 
     `max_redemptions` and `redeem_by` belong on the COUPON (a cap on the discount itself) rather than on the
     promotion code, so the cap holds however many codes ever point at it.
+
+    `applies_to_product_ids` are STRIPE product ids, and scope the discount to those line items
+    (plans/COUPONS_COMPLETION.md, Option A). **Stripe never echoes this field back** -- `applies_to` reads
+    `null` on create and on retrieve whether or not a scope was set -- so it is verified by the DISCOUNT it
+    produces, never by the response. Reading the echo is what made this look broken for a day.
     """
     payload: dict[str, Any] = {"duration": str(discount.get("duration") or "once")}
     if name:
@@ -83,6 +90,8 @@ def coupon_payload(discount: dict[str, Any], restrictions: dict[str, Any], name:
         payload["max_redemptions"] = str(int(restrictions["max_redemptions"]))
     if restrictions.get("expires_at"):
         payload["redeem_by"] = str(int(restrictions["expires_at"]))
+    for index, product_id in enumerate(applies_to_product_ids or ()):
+        payload[f"applies_to[products][{index}]"] = str(product_id)
     return payload
 
 
@@ -108,6 +117,7 @@ def promotion_code_payload(coupon_id: str, code: str, restrictions: dict[str, An
 def create_coupon_in_stripe(
     *, coupon_id: str, code: str, name: str, discount: dict[str, Any], restrictions: dict[str, Any],
     api_key: str, stripe_account: str = "", opener: Callable[..., Any] | None = None,
+    applies_to_product_ids: "list[str] | tuple[str, ...]" = (),
 ) -> tuple[str, str]:
     """Create both objects and return `(stripe_coupon_id, stripe_promo_code_id)`.
 
@@ -118,7 +128,7 @@ def create_coupon_in_stripe(
     inert without a code pointing at it, and deleting on a failure path is how the wrong one gets deleted.
     """
     created = _post(
-        STRIPE_COUPONS_URL, coupon_payload(discount, restrictions, name),
+        STRIPE_COUPONS_URL, coupon_payload(discount, restrictions, name, applies_to_product_ids),
         api_key=api_key, stripe_account=stripe_account,
         idempotency_key=f"{coupon_id}:coupon", opener=opener,
     )
@@ -151,3 +161,81 @@ def set_promotion_code_active(
         {"active": "true" if active else "false"},
         api_key=api_key, stripe_account=stripe_account, opener=opener,
     )
+
+
+def _get(url: str, params: dict[str, Any], *, api_key: str, stripe_account: str = "",
+         opener: Callable[..., Any] | None = None) -> dict[str, Any]:
+    opener = opener or urlopen
+    headers = {
+        "Authorization": f"Basic {b64encode((api_key + ':').encode('utf-8')).decode('ascii')}",
+        "Stripe-Version": "2024-06-20",
+    }
+    if stripe_account:
+        headers["Stripe-Account"] = stripe_account
+    request = Request(f"{url}?{urlencode(params)}", headers=headers, method="GET")
+    try:
+        with opener(request, timeout=20) as response:
+            return json.loads(response.read().decode("utf-8"))
+    except HTTPError as exc:
+        detail = ""
+        try:
+            detail = json.loads(exc.read().decode("utf-8")).get("error", {}).get("message") or ""
+        except Exception:  # noqa: BLE001
+            pass
+        raise StripeCouponError(detail or f"Stripe rejected the request ({exc.code}).") from exc
+
+
+def find_or_create_customer(
+    email: str, *, api_key: str, stripe_account: str = "", opener: Callable[..., Any] | None = None,
+) -> str:
+    """The Stripe Customer id for an email, creating one if Stripe has never seen it.
+
+    Email is the identity we actually hold. A guest checkout creates NO Stripe Customer -- `session.customer`
+    comes back null -- so past buyers are known to us by email and to Stripe by nothing (verified against
+    real orders, 2026-09-22). A targeted code has to be scoped to a Customer, so this is where one gets made.
+
+    Matching on email is Stripe's own lookup and can return several; the FIRST is taken, which is what the
+    dashboard shows and what a subsequent charge would attach to.
+    """
+    email = str(email or "").strip().lower()
+    if not email:
+        raise StripeCouponError("An email is required to issue a targeted coupon.")
+    found = _get(STRIPE_CUSTOMERS_URL, {"email": email, "limit": 1},
+                 api_key=api_key, stripe_account=stripe_account, opener=opener)
+    existing = (found.get("data") or [None])[0]
+    if existing and existing.get("id"):
+        return str(existing["id"])
+    created = _post(STRIPE_CUSTOMERS_URL, {"email": email},
+                    api_key=api_key, stripe_account=stripe_account, opener=opener)
+    customer_id = str(created.get("id") or "")
+    if not customer_id:
+        raise StripeCouponError("Stripe did not return a customer id.")
+    return customer_id
+
+
+def create_targeted_promotion_code(
+    *, stripe_coupon_id: str, code: str, customer_id: str, max_redemptions: int | None = None,
+    expires_at: int | None = None, api_key: str, stripe_account: str = "",
+    opener: Callable[..., Any] | None = None,
+) -> str:
+    """A promotion code only ONE customer can use, pointing at the campaign's shared Coupon.
+
+    `customer` is what makes it non-transferable: a recipient who forwards it gives away nothing, which is
+    strictly stronger than a per-customer counter on a shared code -- and Stripe cannot do the latter at
+    all, because everyone holding a shared code is the same anonymous buyer until they pay.
+
+    `max_redemptions` here means "how many times THAT customer may use it", and is OPTIONAL: a targeted
+    coupon with no cap is still bound to one person. It exists for the loss-leader case, not as something
+    every grant must carry (author, 2026-09-22).
+    """
+    payload: dict[str, Any] = {"coupon": stripe_coupon_id, "code": code, "customer": customer_id}
+    if max_redemptions:
+        payload["max_redemptions"] = str(int(max_redemptions))
+    if expires_at:
+        payload["expires_at"] = str(int(expires_at))
+    created = _post(STRIPE_PROMOTION_CODES_URL, payload, api_key=api_key, stripe_account=stripe_account,
+                    idempotency_key=f"grant:{code}", opener=opener)
+    promo_id = str(created.get("id") or "")
+    if not promo_id:
+        raise StripeCouponError("Stripe did not return a promotion code id.")
+    return promo_id
