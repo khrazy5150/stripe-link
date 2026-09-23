@@ -310,13 +310,15 @@ theirs — the point of a win-back campaign.
 3. **A single recipient's grant cannot be revoked.** `status: "inactive"` is honoured at checkout and
    written by nothing; the grants route is POST/GET/OPTIONS only. Cutting off one recipient means killing
    the whole campaign. Must deactivate that grant's own promotion code at Stripe too.
-4. ✅ **Product scoping — Option A SHIPPED 2026-09-23, not yet deployed.** A's recorded blocker was a
-   misread probe: `applies_to.products` DOES scope a discount, Stripe simply never echoes it back, and the
-   original test read the echo instead of the discount. New `applies_to_product_ids` field + product
-   checklist in the editor; an unsynced product refuses the coupon rather than silently discounting the
-   whole cart. Verified live end to end (50% off a $100+$50 cart discounted 5000, not 7500).
-   **Option B's evaluation engine remains open** — A is its fixed-product-list special case, and B's
-   accounting half already shipped. Lesson recorded: never verify a Stripe field from its echo.
+4. ✅ **Product scoping — Options A AND B SHIPPED 2026-09-23, not yet deployed.** A's recorded blocker
+   was a misread probe: `applies_to.products` DOES scope a discount, Stripe simply never echoes it back.
+   A = `applies_to_product_ids` (Stripe evaluates). B = `discount.type: "tiered"` spend ladders, which we
+   evaluate and hand Stripe as a one-checkout Coupon bounded by `max_redemptions: 1` + `redeem_by`.
+   Verified live to the cent. Carts can also take a coupon now — `cart_checkout.py` never passed one, so
+   every cart paid full price however the buyer arrived. Lesson recorded: never verify a Stripe field from
+   its echo.
+5. **Reclaim the disposable coupons.** They are deliberately not deleted, because delete-then-pay was
+   never tested. Test it, then delete on creation and drop the `redeem_by` crutch.
 
 **Cheapest it will ever be:** `jb-coupons-dev` and `jb-coupons-prod` both hold ZERO records, so there is no
 migration — every coupon ever created can be created under the finished design.

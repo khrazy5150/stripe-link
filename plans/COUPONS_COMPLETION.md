@@ -3,9 +3,9 @@
 **Status: C1–C4 shipped dev + prod 2026-09-22. C5 shipped dev 2026-09-23, not on prod.**
 **Written 2026-09-22; status corrected 2026-09-23.**
 
-**Open:** Option B's evaluation engine (its accounting half, the redemption ledger, is built),
-`applies_to_offer_ids` having no editor, and per-recipient grant revocation. **Option A shipped
-2026-09-23** — its recorded blocker was a misread probe.
+**Open:** `applies_to_offer_ids` has no editor, per-recipient grant revocation, and reclaiming the
+disposable coupons once delete-after-payment is tested. **A and B both shipped 2026-09-23** — A's recorded
+blocker was a misread probe, and B's first rule is spend-threshold tiers.
 
 ## What is true today
 
@@ -385,6 +385,56 @@ coupon, so the buyer sees a lower price with no "you saved $X" line and no coupo
 **B1 exists precisely to preserve that presentation.** For a campaign whose entire purpose was to send
 somebody a coupon, the visible discount is the point, so B1 is the default and B2 is the fallback for cases
 where the discount need not read as a discount.
+
+### Option B, slice 2 — the evaluation engine: SHIPPED 2026-09-23 (dev pending)
+
+B1 as described above, with **spend-threshold tiers** as the first rule Stripe cannot express. Everything
+else a coupon does is still Stripe's to evaluate, and stays that way — B is for what A cannot say.
+
+```
+tenant Coupon    SPEND20 · 20% over $100 · 30% over $250     durable, immutable, ours
+      |
+      |  evaluate against THIS cart
+      v
+Discount         $82.50                                       computed
+      |
+      v
+Stripe Coupon    amount_off 8250 · once · max_redemptions 1   disposable, one checkout
+```
+
+- **`discount.type: "tiered"`** with a `tiers[]` ladder. The BEST tier the cart reaches wins, not the first
+  listed — the tenant wrote a ladder and a ladder is climbed. Order in the document is irrelevant.
+- **A tiered coupon creates NOTHING at Stripe on save**, and stores no Stripe ids at all rather than
+  placeholder ones: an id naming nothing is how `sync.status` became a fiction the first time. It is also
+  the one coupon type that does not require a connected Stripe account to create.
+- **`applies_to_product_ids` narrows what counts toward the threshold**, so "spend $100 on coffee" is
+  expressible, not just "spend $100".
+- **A cart below every tier is NOT a refusal.** The tenant said "spend $100 to get 20%"; a buyer with $40
+  has not met terms they can read, and full price is exactly what the coupon promised. That is a different
+  situation from a withdrawn or used-up coupon, where the visitor arrived on a ticket that no longer means
+  anything — those still raise `CouponUnavailable`. A qualifying buyer whose discount cannot be
+  materialized also raises, because charging them full price WOULD be the silent failure.
+- **The disposable Coupon is deliberately NOT deleted.** Deleting immediately was verified safe for an
+  *open* session, but "delete, then the buyer pays" was never tested, and inventing that path on a money
+  route is how a receipt loses its discount. Instead it bounds itself: `max_redemptions: 1` means it can
+  never be reused, and `redeem_by` (7 days, against a 24-hour session) makes it inert. Sweeping old ones is
+  a chore; a discount vanishing from a paid order is an incident. **Open:** test the delete-after-payment
+  path deliberately, then reclaim the tidiness.
+- **Immutable like every other coupon.** Moving a threshold is refused with the same 409 as changing a
+  percentage — and here the check in `coupon_edit_conflict` is the ONLY thing enforcing it, because there
+  is no Stripe object freezing the ladder on our behalf.
+- **Verified live, through this code:** a $150 cart evaluated to 3000 and Stripe charged $120.00; a $275
+  cart evaluated to 8250 and Stripe charged $192.50; a $40 cart reached no tier and created no Stripe
+  object at all. Our arithmetic and Stripe's agree to the cent.
+
+**What a tiered coupon cannot do:** be issued as targeted personal codes (a grant is a Promotion Code
+pointing at a durable Coupon, and there is neither), and be typed into Stripe's own promotion-code field —
+the code is ours, not Stripe's, so it must arrive through the page. Both are refused explicitly rather than
+failing obscurely.
+
+**Also shipped alongside:** a cart can take a coupon at all. `cart_checkout.py` called
+`build_checkout_payload` without a `coupon_code`, so every cart paid full price however the buyer arrived
+(found 2026-09-23) — and a cart is exactly where a spend ladder matters.
 
 ### Option C — discount the line items directly, as the whole feature
 
