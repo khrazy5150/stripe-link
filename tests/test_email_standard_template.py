@@ -237,3 +237,62 @@ class EveryEmailUsesTheShellTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SenderIdentityGrantTests(unittest.TestCase):
+    """Every function that can send TENANT mail must be able to read the owner's profile.
+
+    This test exists because the failure is silent by design. `tenant_email_identity` swallows every
+    exception — branding must never be the reason a receipt fails to send — so a missing IAM grant does
+    not raise, it just quietly produces mail with no business name and no Reply-To. Which is the exact
+    bug the whole template was written to fix.
+
+    Found 2026-09-23: after the identity work, six of the seven mailing functions had no UserProfilesTable
+    grant, and only the webhook would have branded anything.
+    """
+
+    import pathlib as _pathlib
+    import re as _re
+
+    ROOT = _pathlib.Path(__file__).resolve().parents[1]
+    TEMPLATE = (ROOT / "template.yaml").read_text(encoding="utf-8")
+
+    # Functions whose mail is PLATFORM-authored: they pass explicit from_name/reply_to and no tenant_id,
+    # so they never look a tenant up and must not be granted a table they do not read.
+    PLATFORM_SENDERS = {"SupportContactFunction", "UserProfileFunction"}
+
+    def _function_blocks(self):
+        pattern = (r"\n  ([A-Za-z0-9]+):\n    Type: AWS::Serverless::Function\n"
+                   r"(.*?)(?=\n  [A-Za-z0-9]+:\n    Type:|\Z)")
+        return self._re.findall(pattern, self.TEMPLATE, self._re.S)
+
+    def _mailing_modules(self):
+        handlers = self.ROOT / "src" / "handlers"
+        modules = set()
+        for path in handlers.glob("*.py"):
+            text = path.read_text(encoding="utf-8")
+            if "send_email" in text or "stripe_link.delegation" in text:
+                modules.add(path.stem)
+        return modules
+
+    def test_every_tenant_mailing_function_can_read_the_owner_profile(self):
+        mailing = self._mailing_modules()
+        missing = []
+        for name, body in self._function_blocks():
+            handler = self._re.search(r"Handler: handlers\.([A-Za-z0-9_]+)\.", body)
+            if not handler or handler.group(1) not in mailing:
+                continue
+            if name in self.PLATFORM_SENDERS:
+                continue
+            if "UserProfilesTable" not in body:
+                missing.append(f"{name} (handlers.{handler.group(1)}) sends tenant mail but cannot read "
+                               "UserProfilesTable — its mail will silently have no sender identity")
+        self.assertEqual(missing, [], "\n".join(missing))
+
+    def test_the_identity_lookup_really_is_silent_which_is_why_the_test_above_exists(self):
+        class Exploding:
+            def get(self, *_):
+                raise RuntimeError("AccessDeniedException")
+
+        self.assertEqual(mailer.tenant_email_identity("t1", Exploding()),
+                         {"business_name": "", "reply_to": ""})

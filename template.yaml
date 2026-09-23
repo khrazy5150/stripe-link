@@ -1032,6 +1032,10 @@ Resources:
       Handler: handlers.downloads.upload_url_handler
       Description: Tenant -- mint a presigned S3 PUT URL for a digital-product file in the media bucket.
       Policies:
+        # Every tenant-authored email resolves the sender's name and reply address from the OWNER's
+        # user profile, at the mailer's single choke point (plans/EMAIL_TEMPLATE.md). Read-only.
+        - DynamoDBReadPolicy:
+            TableName: !Ref UserProfilesTable
         - S3CrudPolicy:
             BucketName: !Ref MediaBucket
       Events:
@@ -1102,6 +1106,10 @@ Resources:
       Handler: handlers.downloads.serve_handler
       Description: Public -- verify the paid order owns the product, then 302 to a short-lived presigned download URL.
       Policies:
+        # Every tenant-authored email resolves the sender's name and reply address from the OWNER's
+        # user profile, at the mailer's single choke point (plans/EMAIL_TEMPLATE.md). Read-only.
+        - DynamoDBReadPolicy:
+            TableName: !Ref UserProfilesTable
         - DynamoDBReadPolicy:
             TableName: !Ref OrdersTable
         - DynamoDBReadPolicy:
@@ -1895,6 +1903,10 @@ Resources:
       Handler: handlers.purchase_manage.handler
       Description: Customer self-service for one purchase - cancel future payments or request a refund.
       Policies:
+        # Every tenant-authored email resolves the sender's name and reply address from the OWNER's
+        # user profile, at the mailer's single choke point (plans/EMAIL_TEMPLATE.md). Read-only.
+        - DynamoDBReadPolicy:
+            TableName: !Ref UserProfilesTable
         - DynamoDBReadPolicy:
             TableName: !Ref OrdersTable
         # Tokens share CartsTable; refund_requests AND their notification share NotificationsTable.
@@ -3321,6 +3333,10 @@ Resources:
       Handler: handlers.invoices.handler
       Description: Service and custom invoice API (create, list, and finalize+send via Stripe Invoicing).
       Policies:
+        # Every tenant-authored email resolves the sender's name and reply address from the OWNER's
+        # user profile, at the mailer's single choke point (plans/EMAIL_TEMPLATE.md). Read-only.
+        - DynamoDBReadPolicy:
+            TableName: !Ref UserProfilesTable
         - DynamoDBCrudPolicy:
             TableName: !Ref InvoicesTable
         - DynamoDBReadPolicy:
@@ -3550,6 +3566,10 @@ Resources:
       Handler: handlers.booking.handler
       Description: Public booking API (availability, reserve, checkout; manage in a later Phase B step).
       Policies:
+        # Every tenant-authored email resolves the sender's name and reply address from the OWNER's
+        # user profile, at the mailer's single choke point (plans/EMAIL_TEMPLATE.md). Read-only.
+        - DynamoDBReadPolicy:
+            TableName: !Ref UserProfilesTable
         - DynamoDBCrudPolicy:
             TableName: !Ref ServicesTable
         - DynamoDBCrudPolicy:
@@ -3664,6 +3684,10 @@ Resources:
       Description: Scheduled sweep that emails abandoned-cart recovery nudges.
       Timeout: 120
       Policies:
+        # Every tenant-authored email resolves the sender's name and reply address from the OWNER's
+        # user profile, at the mailer's single choke point (plans/EMAIL_TEMPLATE.md). Read-only.
+        - DynamoDBReadPolicy:
+            TableName: !Ref UserProfilesTable
         # Sending mail reads the tenant's tier: free tenants carry the Junior Bay sign-off,
         # premium has paid it away (domain/platform_signature.py).
         - DynamoDBReadPolicy:
@@ -3694,6 +3718,10 @@ Resources:
       Description: Scheduled sweep that sends due post-purchase review invitation emails.
       Timeout: 120
       Policies:
+        # Every tenant-authored email resolves the sender's name and reply address from the OWNER's
+        # user profile, at the mailer's single choke point (plans/EMAIL_TEMPLATE.md). Read-only.
+        - DynamoDBReadPolicy:
+            TableName: !Ref UserProfilesTable
         # Sending mail reads the tenant's tier: free tenants carry the Junior Bay sign-off,
         # premium has paid it away (domain/platform_signature.py).
         - DynamoDBReadPolicy:
