@@ -326,6 +326,18 @@ class AppliedOnThePageTests(unittest.TestCase):
         self.assertIn("sl-coupon-applied", html)
         self.assertIn("hidden", html)
 
+    def test_the_panel_is_actually_hidden_until_it_is_applied(self):
+        # `hidden` is only display:none in the UA stylesheet, so giving the panel a display of its own
+        # outranks the attribute and it showed before anyone clicked. Any element with a display must
+        # restate [hidden], or the attribute silently stops working.
+        self.assertIn(".sl-coupon-applied[hidden]{display:none}", self.HTML)
+
+    def test_applying_twice_changes_nothing(self):
+        # Idempotent by construction: one code, set to the same value, one class, one reveal.
+        block = self.HTML.split("const applyCoupon", 1)[1][:700]
+        self.assertIn("classList.add('is-applied')", block)
+        self.assertNotIn("classList.toggle", block)
+
     def test_it_says_applied_and_where_the_discount_lands(self):
         html = render_coupon(_section(), _offer(), {}, CHECKOUT)
         self.assertIn("Coupon Applied", html)

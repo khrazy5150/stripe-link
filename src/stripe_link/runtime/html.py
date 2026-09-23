@@ -968,6 +968,10 @@ UNIVERSAL_BUNDLE_TEMPLATE_STYLES = [
     "    .sl-coupon-applied{display:flex;align-items:center;gap:0.65rem;margin-top:0.7rem;"
     "padding:0.5rem 0.9rem;border-radius:0.6rem;background:#e7f7ed;color:#136c34;"
     "border:1px solid #b6e3c6}",
+    # `hidden` is only display:none in the UA stylesheet, so the display:flex above OUTRANKS it and the
+    # panel showed before anyone clicked (found 2026-09-22). Any element given a display must restate the
+    # attribute, or the attribute silently stops working.
+    "    .sl-coupon-applied[hidden]{display:none}",
     "    .sl-coupon-applied-mark{flex:0 0 auto}",
     "    .sl-coupon-applied-text{display:flex;flex-direction:column;font-size:1.3rem;font-weight:800;line-height:1.25}",
     "    .sl-coupon-applied-text small{font-size:1.1rem;font-weight:600;opacity:0.85}",
