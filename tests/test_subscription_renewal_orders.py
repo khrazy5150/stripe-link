@@ -13,6 +13,8 @@ fulfilment screens would never show.
 import unittest
 
 from handlers.stripe_webhook import (
+    catalog_names_by_stripe_id,
+    invoice_subscription_id,
     invoice_subscription_metadata,
     order_line_items_from_invoice,
     order_record_from_invoice,
@@ -135,6 +137,213 @@ class IndexedAttributeTests(unittest.TestCase):
             record = order_record_from_invoice(invoice, "t1", 100, {})
             for key in self.INDEXED:
                 self.assertNotEqual(record.get(key, None), "", f"{key} must never be an empty string")
+
+
+# The shape Stripe ACTUALLY sends, copied from a stored prod webhook payload (jb-webhook-events-prod,
+# invoice.paid, api_version 2026-05-27.preview, read 2026-09-24). The `_invoice()` fixture above is the
+# LEGACY shape, and every test built on it passed while prod stored an empty subscription_id, empty price
+# and product ids, and no metadata on every single renewal. A fixture invented from older docs cannot fail
+# the way the real payload does, so this one is transcribed rather than written.
+CURRENT_API_INVOICE = {
+    "id": "in_1UJJLa21lLbLd4Y5geENXTnZ", "object": "invoice", "billing_reason": "subscription_cycle",
+    "currency": "usd", "amount_paid": 19792, "livemode": False, "created": 1790000000,
+    "customer": "cus_1", "customer_email": "buyer@example.com",
+    # No top-level "subscription" and no top-level "subscription_details" -- both moved under `parent`.
+    "parent": {
+        "type": "subscription_details",
+        "quote_details": None,
+        "subscription_details": {"metadata": {}, "subscription": "sub_1UHrRK21lLbLd4Y5hMpk5nxs"},
+    },
+    "lines": {"data": [{
+        "id": "il_1", "object": "line_item", "description": "1 \u00d7 $197.92 (at $197.92 / day)",
+        "amount": 19792, "quantity": 1, "currency": "usd", "metadata": {},
+        # No "price" key -- replaced by "pricing".
+        "pricing": {"type": "price_details", "unit_amount_decimal": "19792",
+                    "price_details": {"price": "price_1UHrQi21lLbLd4Y5fp9SRfD6",
+                                      "product": "prod_VISJfB0giFLk8W"}},
+        "parent": {"type": "subscription_item_details",
+                   "subscription_item_details": {"subscription": "sub_1UHrRK21lLbLd4Y5hMpk5nxs",
+                                                 "subscription_item": "si_VISM6KIpWheNhE",
+                                                 "proration": False}},
+    }]},
+}
+
+
+def _current(**over):
+    invoice = {k: v for k, v in CURRENT_API_INVOICE.items()}
+    invoice.update(over)
+    return invoice
+
+
+def _with_subscription_metadata(metadata):
+    parent = {**CURRENT_API_INVOICE["parent"],
+              "subscription_details": {**CURRENT_API_INVOICE["parent"]["subscription_details"],
+                                       "metadata": metadata}}
+    return _current(parent=parent)
+
+
+class CurrentStripeApiShapeTests(unittest.TestCase):
+    """Read the payload this account's API version actually sends.
+
+    Every field below was present all along and simply read from the place an older API version kept it, so
+    nothing raised -- the renewal was stored, just hollow. That is the failure mode to guard: not an error,
+    an empty string where an id belongs.
+    """
+
+    def test_the_subscription_id_is_found_under_parent(self):
+        self.assertEqual(invoice_subscription_id(_current()), "sub_1UHrRK21lLbLd4Y5hMpk5nxs")
+
+    def test_the_legacy_top_level_subscription_still_works(self):
+        # Older stored events and any account on an older version must keep working.
+        self.assertEqual(invoice_subscription_id(_invoice()), "sub_1")
+
+    def test_a_renewal_order_records_which_subscription_it_came_from(self):
+        record = order_record_from_invoice(_current(), "t1", 100, {})
+
+        self.assertEqual(record["subscription_id"], "sub_1UHrRK21lLbLd4Y5hMpk5nxs")
+
+    def test_the_subscriptions_metadata_is_found_under_parent(self):
+        # The silo stamp rides here. Looking only at the old location returned {} for every renewal.
+        invoice = _with_subscription_metadata({"silo": "sandbox", "offer_id": "offer_x"})
+
+        self.assertEqual(invoice_subscription_metadata(invoice)["silo"], "sandbox")
+
+    def test_a_silo_stamped_subscription_produces_a_stamped_renewal_order(self):
+        record = order_record_from_invoice(_with_subscription_metadata({"silo": "sandbox"}), "t1", 100, {})
+
+        self.assertEqual(record["metadata"]["silo"], "sandbox")
+
+    def test_the_price_and_product_ids_are_found_under_pricing(self):
+        [line] = order_line_items_from_invoice(_current())
+
+        self.assertEqual(line["stripe_price_id"], "price_1UHrQi21lLbLd4Y5fp9SRfD6")
+        self.assertEqual(line["stripe_product_id"], "prod_VISJfB0giFLk8W")
+
+    def test_the_legacy_price_object_still_works(self):
+        [line] = order_line_items_from_invoice(_invoice())
+
+        self.assertEqual(line["stripe_price_id"], "price_1")
+        self.assertEqual(line["stripe_product_id"], "prod_1")
+
+
+class RenewalLineNameTests(unittest.TestCase):
+    """What the receipt calls the thing.
+
+    A renewal invoice carries no name of ours, only Stripe's generated `description` -- and when Stripe has
+    no name for the product either, that description is the AMOUNT: a real receipt read
+    "1 x $197.92 (at $197.92 / day)" (prod, 2026-09-24). Our own catalogue name is the better answer, and it
+    only became reachable once the product id was read from the right place.
+    """
+
+    def test_our_own_product_name_wins_over_stripes_description(self):
+        [line] = order_line_items_from_invoice(_current(), {"prod_VISJfB0giFLk8W": "Creatine Gummies"})
+
+        self.assertEqual(line["name"], "Creatine Gummies")
+
+    def test_a_price_id_resolves_it_too(self):
+        # A product synced before stripe_product_id was stored can still be found by its price.
+        [line] = order_line_items_from_invoice(_current(), {"price_1UHrQi21lLbLd4Y5fp9SRfD6": "Creatine Gummies"})
+
+        self.assertEqual(line["name"], "Creatine Gummies")
+
+    def test_the_name_it_was_SOLD_as_beats_stripes_description(self):
+        """Our checkout writes product_name onto subscription_data.metadata, so the subscription remembers
+        what it was sold as even when the product is not in the catalogue this backend can read. Verified on
+        the real subscription created 2026-09-23: metadata carries product_name '120 minute massage'."""
+        invoice = _with_subscription_metadata({"silo": "sandbox", "product_name": "120 minute massage"})
+
+        record = order_record_from_invoice(invoice, "t1", 100, {})
+
+        self.assertEqual(record["line_items"][0]["name"], "120 minute massage")
+
+    def test_the_catalogue_still_outranks_it(self):
+        # A renamed product should show its CURRENT name, not the one it carried at the time of sale.
+        invoice = _with_subscription_metadata({"product_name": "Old name"})
+
+        [line] = order_line_items_from_invoice(invoice, {"prod_VISJfB0giFLk8W": "New name"},
+                                               invoice_subscription_metadata(invoice))
+
+        self.assertEqual(line["name"], "New name")
+
+    def test_a_multi_line_invoice_does_not_label_every_line_the_same(self):
+        """product_name describes the SUBSCRIPTION, so with more than one line there is nothing to say which
+        line it names. Stripe's per-line description is the better answer there."""
+        invoice = _with_subscription_metadata({"product_name": "120 minute massage"})
+        line = invoice["lines"]["data"][0]
+        invoice = _current(parent=invoice["parent"],
+                           lines={"data": [line, {**line, "description": "Add-on", "amount": 500}]})
+
+        names = [item["name"] for item in order_line_items_from_invoice(
+            invoice, {}, invoice_subscription_metadata(invoice))]
+
+        self.assertEqual(names[1], "Add-on")
+        self.assertNotEqual(names[0], names[1])
+
+    def test_a_product_we_do_not_have_keeps_stripes_description(self):
+        """Honest rather than blank: it is the only name that exists. The $197.92 product is in neither
+        catalogue, so this line cannot be improved -- only the ones we DO know about."""
+        [line] = order_line_items_from_invoice(_current(), {})
+
+        self.assertEqual(line["name"], CURRENT_API_INVOICE["lines"]["data"][0]["description"])
+        self.assertIn("$197.92", line["name"])  # the amount standing in for a name: the symptom
+
+    def test_the_index_maps_both_ids_to_the_name(self):
+        class Repo:
+            @staticmethod
+            def list_for_tenant(tenant_id):
+                return [{"name": "Creatine Gummies", "stripe_product_id": "prod_A",
+                         "prices": [{"stripe_price_id": "price_A"}, {"stripe_price_id": ""}]},
+                        {"name": "", "stripe_product_id": "prod_NAMELESS"}]
+
+        index = catalog_names_by_stripe_id(Repo(), "t1")
+
+        self.assertEqual(index["prod_A"], "Creatine Gummies")
+        self.assertEqual(index["price_A"], "Creatine Gummies")
+        self.assertNotIn("", index)
+        self.assertNotIn("prod_NAMELESS", index)  # a nameless product is not an improvement on anything
+
+    def test_a_products_table_that_will_not_read_costs_the_order_nothing(self):
+        class Exploding:
+            @staticmethod
+            def list_for_tenant(tenant_id):
+                raise RuntimeError("AccessDeniedException")
+
+        self.assertEqual(catalog_names_by_stripe_id(Exploding(), "t1"), {})
+
+    def test_no_repository_at_all_is_fine(self):
+        self.assertEqual(catalog_names_by_stripe_id(None, "t1"), {})
+
+
+class RenewalCarriesTheSiloTests(unittest.TestCase):
+    """A renewal belongs to the silo that SOLD the subscription, not the one processing the webhook.
+
+    S1b stamps `silo` onto subscription_data.metadata at checkout for exactly this reason. This builder
+    read that metadata for attribution and dropped the rest, so every renewal order landed unstamped
+    (observed on prod, 2026-09-24) -- and the stamp cannot be recovered afterwards, because one webhook
+    endpoint serves both silos and the processing side says nothing about where the sale was made.
+    """
+
+    @staticmethod
+    def _invoice(metadata):
+        return {**_invoice(), "subscription_details": {"metadata": metadata}}
+
+    def test_the_subscriptions_silo_travels_onto_the_renewal_order(self):
+        record = order_record_from_invoice(self._invoice({"silo": "sandbox"}), "t1", 100, {})
+
+        self.assertEqual(record["metadata"]["silo"], "sandbox")
+
+    def test_a_subscription_sold_before_stamping_is_not_given_a_guessed_one(self):
+        # Both directions of guess are wrong, so an unstamped renewal stays unstamped and stays visible.
+        record = order_record_from_invoice(_invoice(), "t1", 100, {})
+
+        self.assertEqual(record["metadata"], {})
+        self.assertNotIn("silo", record["metadata"])
+
+    def test_the_rest_of_the_subscriptions_metadata_comes_too(self):
+        # It is what a checkout order carries, and fulfilment reads the same fields from both.
+        record = order_record_from_invoice(self._invoice({"offer_id": "offer_x", "silo": "production"}), "t1", 100, {})
+
+        self.assertEqual(record["metadata"]["offer_id"], "offer_x")
 
 
 class PersistTests(unittest.TestCase):

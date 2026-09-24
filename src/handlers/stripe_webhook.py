@@ -1736,7 +1736,8 @@ def persist_subscription_renewal(
     ledger_repo = ledger_repo or (ledger_repository() if os.environ.get("LEDGER_TABLE") else None)
 
     fees = fee_breakdown_from_invoice(invoice, metadata, billing_config_loader)
-    order_record = order_record_from_invoice(invoice, tenant_id, now, fees)
+    order_record = order_record_from_invoice(
+        invoice, tenant_id, now, fees, catalog_names_by_stripe_id(products_repo, tenant_id))
     order_id = str(order_record.get("order_id") or "")
     if not order_id:
         return {"status": "skipped", "reason": "missing_invoice_id"}
@@ -1832,6 +1833,16 @@ def invoice_subscription_metadata(invoice: dict[str, Any]) -> dict[str, Any]:
     Stripe puts it in different places depending on API version, and a renewal invoice we did not create
     carries none of its own -- so look in each place rather than trusting one.
     """
+    # The account is on 2026-05-27.preview, which moved subscription_details UNDER `parent` (verified from
+    # a stored webhook payload, 2026-09-24). Looking only at the old top-level key returned {} for every
+    # renewal -- so a subscription's silo stamp, which S1b writes to subscription_data.metadata precisely so
+    # renewals inherit it, was never found. Check the current place first, then the legacy ones.
+    parent = invoice.get("parent")
+    if isinstance(parent, dict):
+        parent_details = parent.get("subscription_details")
+        if isinstance(parent_details, dict) and isinstance(parent_details.get("metadata"), dict):
+            if parent_details["metadata"]:
+                return parent_details["metadata"]
     details = invoice.get("subscription_details")
     if isinstance(details, dict) and isinstance(details.get("metadata"), dict):
         return details["metadata"]
@@ -1842,7 +1853,51 @@ def invoice_subscription_metadata(invoice: dict[str, Any]) -> dict[str, Any]:
     return {}
 
 
-def order_line_items_from_invoice(invoice: dict[str, Any]) -> list[dict[str, Any]]:
+def invoice_subscription_id(invoice: dict[str, Any]) -> str:
+    """The subscription this invoice bills, across API versions.
+
+    `invoice.subscription` is gone on 2026-05-27.preview, so every renewal order was stored with an empty
+    `subscription_id` -- nothing could tie a renewal back to the subscription that produced it.
+    """
+    direct = str(invoice.get("subscription") or "").strip()
+    if direct:
+        return direct
+    parent = invoice.get("parent")
+    if isinstance(parent, dict):
+        details = parent.get("subscription_details")
+        if isinstance(details, dict):
+            return str(details.get("subscription") or "").strip()
+    return ""
+
+
+def catalog_names_by_stripe_id(products_repo, tenant_id: str) -> dict[str, str]:
+    """stripe product/price id -> the tenant's OWN product name. Best effort; {} is a fine answer.
+
+    A renewal invoice has no product name of ours on it, only Stripe's generated `description`. When Stripe
+    cannot name the product either it falls back to the amount, which is how a receipt came to read
+    "1 x $197.92 (at $197.92 / day)" (prod, 2026-09-24).
+    """
+    index: dict[str, str] = {}
+    if not products_repo or not tenant_id:
+        return index
+    try:
+        products = products_repo.list_for_tenant(tenant_id) or []
+    except Exception:  # noqa: BLE001 - a nicer line name must never cost the order its write
+        return index
+    for product in products:
+        name = str((product or {}).get("name") or "").strip()
+        if not name:
+            continue
+        for key in (str(product.get("stripe_product_id") or "").strip(),
+                    *[str((price or {}).get("stripe_price_id") or "").strip()
+                      for price in (product.get("prices") or [])]):
+            if key:
+                index[key] = name
+    return index
+
+
+def order_line_items_from_invoice(invoice: dict[str, Any], names: dict[str, str] | None = None,
+                                  metadata: dict[str, Any] | None = None) -> list[dict[str, Any]]:
     """The renewal's line items, in the same shape a checkout order carries.
 
     Built from the INVOICE's own lines rather than from subscription metadata, because subscriptions
@@ -1858,21 +1913,35 @@ def order_line_items_from_invoice(invoice: dict[str, Any]) -> list[dict[str, Any
         if not isinstance(line, dict):
             continue
         price = line.get("price") if isinstance(line.get("price"), dict) else {}
+        # 2026-05-27.preview replaced `line.price` with `line.pricing.price_details`, so both ids came back
+        # empty on every renewal -- which broke more than the receipt line: download links and fulfilment
+        # resolve a product through them too.
+        pricing = line.get("pricing") if isinstance(line.get("pricing"), dict) else {}
+        price_details = pricing.get("price_details") if isinstance(pricing.get("price_details"), dict) else {}
+        price_id = str(price.get("id") or price_details.get("price") or "")
+        product_id = str(price.get("product") or price_details.get("product") or "")
         amount = int(line.get("amount") or 0)
+        # Best name first. Our catalogue knows the current name; the subscription's own metadata carries the
+        # name as it was SOLD (our checkout writes product_name there, verified on a live subscription); and
+        # Stripe's description is the last resort, because it restates the amount when Stripe has no name
+        # either -- which is how a receipt came to read "1 x $197.92 (at $197.92 / day)".
+        catalog_name = (names or {}).get(product_id) or (names or {}).get(price_id) or ""
+        sold_as = str((metadata or {}).get("product_name") or "").strip() if len(lines) == 1 else ""
         items.append({
-            "name": line.get("description") or "",
+            "name": catalog_name or sold_as or line.get("description") or "",
             "amount_subtotal": amount,
             "amount_total": amount,
             "quantity": int(line.get("quantity") or 1),
             "currency": str(line.get("currency") or currency),
-            "stripe_price_id": str(price.get("id") or ""),
-            "stripe_product_id": str(price.get("product") or ""),
+            "stripe_price_id": price_id,
+            "stripe_product_id": product_id,
             "is_order_bump": False,
         })
     return items
 
 
-def order_record_from_invoice(invoice: dict[str, Any], tenant_id: str, now: int, fees: dict[str, Any]) -> dict[str, Any]:
+def order_record_from_invoice(invoice: dict[str, Any], tenant_id: str, now: int, fees: dict[str, Any],
+                              names: dict[str, str] | None = None) -> dict[str, Any]:
     """A subscription RENEWAL as an order.
 
     A renewal is not a bookkeeping event, it is a thing the tenant has to do: another month of creatine to
@@ -1883,7 +1952,7 @@ def order_record_from_invoice(invoice: dict[str, Any], tenant_id: str, now: int,
     invoice.paid more than once, and both deliveries compute the same id and race for one conditional put.
     """
     metadata = invoice_subscription_metadata(invoice)
-    subscription_id = str(invoice.get("subscription") or "")
+    subscription_id = invoice_subscription_id(invoice)
     invoice_id = str(invoice.get("id") or "")
     amount = int(invoice.get("amount_paid") or invoice.get("amount_due") or 0)
     email = str(invoice.get("customer_email") or "")
@@ -1913,8 +1982,15 @@ def order_record_from_invoice(invoice: dict[str, Any], tenant_id: str, now: int,
             "stripe_customer_id": str(invoice.get("customer") or ""),
         },
         "contact_keys": _order_contact_keys({"customer": {"email": email, "phone": phone}}),
-        "line_items": order_line_items_from_invoice(invoice),
+        "line_items": order_line_items_from_invoice(invoice, names, metadata),
         "attribution": attribution_from_metadata(metadata),
+        # The SUBSCRIPTION's metadata, carried onto the order exactly as a checkout order carries the
+        # session's. Without it a renewal lands unstamped: S1b puts `silo` on subscription_data.metadata
+        # precisely so the renewals a subscription generates can be attributed to the silo that SOLD it,
+        # and this builder read that metadata for attribution while dropping the rest. The silo travels
+        # with the subscription rather than being re-derived here -- a renewal is processed by whichever
+        # silo owns the webhook, which says nothing about where the sale was made.
+        "metadata": metadata,
         "fees": fees,
         # A STRING, matching order_record_from_session and the table's AttributeDefinitions: created_at is
         # the range key of CreatedAtIndex and DynamoDB declares it as S. An int here is rejected outright
@@ -1943,7 +2019,7 @@ def order_record_from_session(session: dict[str, Any], tenant_id: str, now: int,
     bump_price_ids = {pid for pid in str(metadata.get("order_bump_ids") or "").split(",") if pid}
     resolved_line_items = order_line_items_from_stripe(line_items, bump_price_ids, session.get("currency") or "usd")
     shipping_address = destination_address_from_session(session)
-    return {
+    record = {
         "tenant_id": tenant_id,
         "order_id": f"order_{session_id}",
         "schema_version": "2026-05-29",
@@ -1953,7 +2029,6 @@ def order_record_from_session(session: dict[str, Any], tenant_id: str, now: int,
         "status": "paid" if session.get("payment_status") == "paid" else session.get("payment_status", "completed"),
         "amount_total": int(session.get("amount_total") or 0),
         "currency": session.get("currency") or "usd",
-        "payment_intent_id": session.get("payment_intent", ""),
         # `mode` is the legacy order field (read by refunds/downloads); `stripe_mode` is the standardized field
         # the orders repository filters on (orders are written raw, bypassing the repo's stamping) — keep both.
         "mode": "live" if session.get("livemode") else "test",
@@ -1993,6 +2068,17 @@ def order_record_from_session(session: dict[str, Any], tenant_id: str, now: int,
         "created_at": str(created),
         "updated_at": now,
     }
+    # payment_intent_id is the hash key of PaymentIntentIndex, so DynamoDB refuses it as NULL or "" and
+    # fails the WHOLE PutItem. A SUBSCRIPTION session carries `"payment_intent": null` -- the key is
+    # present, so `.get("payment_intent", "")` returns None, not the default -- which took down every
+    # subscription purchase on prod (2026-09-20, 09-22, 09-23, Stripe retrying each one to no avail): no
+    # order, and therefore no notification, no ledger entry and no receipt, because all three come after
+    # this write. Omit it, exactly as `order_record_from_invoice` does for a renewal. Every reader already
+    # goes through `str(order.get("payment_intent_id") or "")`, so an absent key costs them nothing.
+    payment_intent = str(session.get("payment_intent") or "").strip()
+    if payment_intent:
+        record["payment_intent_id"] = payment_intent
+    return record
 
 
 def invoice_record_from_session(session: dict[str, Any], tenant_id: str, now: int, fees: dict[str, Any]) -> dict[str, Any]:
