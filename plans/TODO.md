@@ -5,6 +5,19 @@ Deferred, non-blocking follow-ups. Each item notes what, why it was deferred, an
 ## Shipping
 
 ### Wire the shipping providers (Shippo first)
+
+> **⭐ 2026-09-24 — the item/box inversion is DESIGNED, not built.** See `plans/SHIPPING_PROVIDERS.md`,
+> "The item/box inversion". The product stores a BOX where it should store the ITEM, and the consequence is
+> now measured: **0 of 4 prod and 1 of 11 dev shippable products have item dimensions**, so `pack()`'s
+> multi-item branch never runs and *every bundle quotes one parcel per item today*. A second bug found with
+> it: one weight field means "packed, box included", and the shared-box path sums it per item then adds the
+> shared box — **~15% over on three items**, growing with count.
+>
+> Agreed model: item dimensions + weight are the facts and they compose; the box is derived by the packer
+> from the tenant's catalog; a declared box survives only as an exception for what dimensions cannot
+> predict. Dimensions stay **optional to create a product** — a tenant who walks to the post office stays
+> first-class — gated by `label_readiness`, never by validation. The wizard asks for item dimensions
+> (measurable at creation); the edit form holds box sizing (learned from real orders).
 - **What:** the module supports four providers in its schema and its `<select>` -- shippo, easypost,
   shipstation, easyship. Design: **`plans/SHIPPING_PROVIDERS.md`** (written 2026-09-20).
 - **Status re-verified against the code 2026-09-23.** Much of what this entry originally listed as missing
