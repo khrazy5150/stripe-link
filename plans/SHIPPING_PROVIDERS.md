@@ -227,6 +227,17 @@ from different places would need several parcels by definition; defer until a pr
 
 ### P2 — rates and label purchase from an order (the beginner's whole reason to be here)
 
+**Designed in full in `plans/ORDER_FULFILMENT.md` (2026-09-24).** That document supersedes the sketch
+below, which understated the work: it said "a Buy label action on Orders.vue" without noticing that
+`Orders.vue` renders CARDS and contains none of the facts a fulfilment decision needs, that a rate has to
+be CHOSEN before it can be bought, or that buying twenty labels cannot happen inside one request.
+
+Decisions taken there: one label per order (no consolidating orders into a parcel); a saved rate policy
+picks the rate with a per-row override; domestic US first, with Canada — already reachable from checkout —
+refused at the row rather than at the moment money is spent.
+
+The original skeleton, still accurate as far as it goes:
+
 - `POST /shipping/rates` (order → parcel → rates) and `POST /shipping/labels` (rate → transaction).
 - Parcel resolution comes from `pack()` in P1 — never re-derived here.
 - Persist carrier, service, tracking number, tracking URL, label URL, cost, provider transaction id, and
