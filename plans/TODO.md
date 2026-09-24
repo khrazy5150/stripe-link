@@ -201,6 +201,40 @@ rate, label, charge the buyer, track -- does not exist yet.
 
 ## Data isolation
 
+### ✅ FIXED dev + prod 2026-09-23 — test-mode activity was reading as real, in two places
+
+Reported as *"a dev subscription is showing up as a real transaction in prod."* It was, twice, and the
+second one was sending email.
+
+One prod endpoint serves both Stripe modes by design, so a tenant's TEST activity writes to the PROD
+tables and **every reader of every shared table** has to enforce the isolation. Two did not:
+
+- **Notifications** — 9 unstamped rows in `jb-notifications-prod`, all from test orders, all showing as
+  "New sale" in the production bell. Fixed by stamping `mode` at the repository (five call sites build
+  these; asking each to remember is how it happened) and filtering the attribute on read, with an
+  unstamped row reading as **test**. Live view: 9 → 0.
+- **Review invites** — 4 invites in `jb-reviews-prod`, every one minted from a `cs_test_` session, 3 still
+  active, read by a `rate(15 minutes)` sweep that **emails a real customer**. One had already gone out —
+  it is the "How was your Electric Scooter?" message that started the email work. Fixed by
+  mode-partitioning the key and making the sweep `mode="live"` only, exactly like the abandoned-cart sweep
+  which had settled the same question first. Sweep visibility: 4 → 0, nothing deleted.
+
+**The two mechanisms are opposite on purpose** — notifications needed their existing rows to stay readable
+as test, invites needed theirs to become invisible. The rule is: decide what should happen to the rows
+that already exist, then pick the mechanism that produces it.
+
+**Also established:** prod has never processed a real transaction — every order, ledger entry, invoice,
+session and customer there is test. Cleaning that data up was DECLINED: it is the only evidence the fixes
+work, and deleting it that morning would have left nothing to audit and the review-invite leak still
+running.
+
+**A misdiagnosis worth remembering:** orders stamp `stripe_mode`; ledger and notifications stamp `mode`.
+Scanning for `stripe_mode` reported every ledger row as unstamped and the ledger was briefly blamed. It
+was correct all along. Audit both spellings; prefer `mode` for anything new.
+
+**Still open:** the guard tests are per-repository, so a NEW shared table gets no protection. Full audit,
+the checklist for adding a table, and the reasoning are in `plans/STRIPE_MODE_DECOUPLING.md` **P7**.
+
 ### ⭐⭐ HIGH — webhook data lands in the wrong deployment; stamp origin on the session (found 2026-09-20)
 
 **Confirmed again in A/B QA, 2026-09-22 — and it now blocks a feature, not just reporting.** A test-mode

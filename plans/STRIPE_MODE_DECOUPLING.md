@@ -5,7 +5,10 @@ Foundational re-architecture, done **pre-launch**. Built on feature branch `stri
 `main` — the "(branch)" labels in the phase log below are **historical**). **The prod cutover was executed and
 verified 2026-08-02** (commit `774aaa3`): a Stripe-**test** purchase completed on the **prod** backend
 (`app.juniorbay.com`), and both Stripe webhook endpoints were repointed at prod with per-mode signing secrets.
-Test-mode data now lives on the prod tables (`OFFER#test#…`, `PAGE#test#…`). Nothing left to do here.
+Test-mode data now lives on the prod tables (`OFFER#test#…`, `PAGE#test#…`).
+
+**The migration is done; the CONSEQUENCE is not.** "Nothing left to do here" stood until 2026-09-23, when the
+risk this plan had already written down came true twice in one afternoon — see **P7** at the end.
 - **P0 DONE** (committed to `main`): `resolve_stripe_mode`/`normalize_stripe_mode` request helper + inert dashboard
   `stripeMode`/`hostnameReleaseChannel` scaffolding. No behavior change (default mode = test/live per fail-safe).
 - **P0.5 DONE** (branch): stripe-keys → one per-deployment table keyed (tenant_id, mode); tenant-profiles dual-write
@@ -287,6 +290,91 @@ re-onboard blocker) and **prod callback → TEST app** (test-onboard on prod). P
 - **Breadth of P2:** many handlers touch tenant entities; risk is missing a read path that then leaks cross-mode
   data. Mitigate with a shared mode-filter helper + tests per entity.
 - **Supersedes recent work:** the mode-follows-environment dashboard fix is folded/rewritten here.
+
+## P7 — the read paths that were missed (2026-09-23)
+
+This plan's own Risks section said it:
+
+> **Breadth of P2:** many handlers touch tenant entities; risk is missing a read path that then leaks
+> cross-mode data. Mitigate with a shared mode-filter helper + tests per entity.
+
+There was no shared helper and no per-entity tests, and two read paths were missed. Both were found the
+same afternoon, from a single report: *"a dev subscription is showing up as a real transaction in prod."*
+
+### What the decoupling actually obliges
+
+One prod endpoint serves both Stripe modes, so **a tenant's TEST activity writes to the PROD tables.** That
+is the design working. It means the isolation cannot live in the infrastructure any more — it has to be
+enforced by **every reader of every shared table**, forever, including tables that do not exist yet. A new
+table is isolated only because someone remembered.
+
+### The two that were missed
+
+| | what leaked | consequence | mechanism used to fix |
+|---|---|---|---|
+| **notifications** | 9 unstamped rows in `jb-notifications-prod`, all from test orders | "New sale" in the production bell, indistinguishable from money | **attribute filter** |
+| **review invites** | 4 invites in `jb-reviews-prod`, every one from a `cs_test_` session, 3 still active | a `rate(15 minutes)` sweep **emailing a real customer** about a product they never bought — one already delivered | **key partition** |
+
+**The two mechanisms are deliberately opposite, and the reason is worth keeping.**
+
+- Notifications needed their existing rows to stay *readable as test*. Key-partitioning would have moved
+  the sort key and made all nine unreachable in **both** modes. So: stamp `mode` on write, filter the
+  attribute on read, and treat an unstamped row as **test** — under-reporting activity is recoverable,
+  showing test money as real is not.
+- Review invites needed the opposite: the four existing ones had to become **invisible to the sweep**,
+  because the sweep sends email. Key-partitioning does exactly that, with no data deleted and nothing
+  emailed again. It also matches the abandoned-cart sweep, which had already settled this question:
+  read `mode="live"` only, because a test purchase must never cause a real person to be contacted.
+
+**So the rule is not "always partition" or "always filter". It is: decide what should happen to the rows
+that already exist, and pick the mechanism that produces it.**
+
+### The audit (every prod table, 2026-09-23)
+
+Isolated and correct: orders, ledger, invoices, checkout sessions, customers, carts, pages, products,
+offers, sites, routes, stripe-keys, custom-domains.
+
+Deliberately mode-agnostic, verified not leaks:
+
+- **leads** — documented in `handlers/leads.py` as CRM records; the offer/product context they capture is
+  read in the request's mode.
+- **purchase throttle** (in the carts table) — abuse control, keyed by contact hash.
+- **page views** — the rows are TTL'd `VISITOR#<hash>` dedup keys; the actual counts live on mode-scoped
+  page and experiment documents.
+
+Also worth recording: **prod has never processed a real transaction.** Every order, ledger entry, invoice,
+checkout session and customer in prod is test. That is why cleaning up the test data was declined — it is
+the only evidence the fixes work, and deleting it this morning would have left nothing to audit and the
+review-invite leak still running.
+
+### The field names disagree, and it cost a misdiagnosis
+
+`orders` stamp **`stripe_mode`**. `ledger` and `notifications` stamp **`mode`**. Scanning production for
+`stripe_mode` therefore reported every ledger row as unstamped, and the ledger was briefly and wrongly
+blamed. It is correct and always was.
+
+Left as-is rather than renamed — a rename touches stored documents on a money path for cosmetic gain —
+but **anyone auditing must check both spellings**, and anyone adding a table should prefer `mode` (two of
+three, and what `LedgerRepository`/`ModeScopedNotificationsRepository` already read).
+
+### Before adding any table that both modes write to
+
+1. Does its repository take a `mode`?
+2. Does every **reader** pass one? (Both bugs were callers not passing a mode the repository already
+   accepted — `ledger_repository` had taken one for weeks.)
+3. Does an **unstamped** row read as test?
+4. If anything **sends** from it — email, SMS, a webhook out — is that sweep `mode="live"` only?
+5. Is there a guard test that scans the handlers, rather than a list someone maintains?
+
+### The guard tests, and what they do not cover
+
+`tests/test_notification_mode_isolation.py` scans every handler for an unscoped
+`notifications_repository()` or `review_invites_repository()`, derived from the source. Both were proven to
+bite by removing a `mode=` and watching them fail by name.
+
+**They are per-repository.** A new shared table gets no protection from them. Generalising the check —
+"every repository whose table is written in both modes must be constructed with a mode" — needs a way to
+know which tables those are, and is not built.
 
 ## Relationship to other plans
 
