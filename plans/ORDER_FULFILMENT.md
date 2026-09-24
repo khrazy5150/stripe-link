@@ -186,12 +186,100 @@ and send the buyer the shipping notification. The label PDF opens for printing.
 
 ---
 
-## Manual fulfilment stays
+## The manual path is a first-class path, not a fallback
 
-The legacy **Mark as Fulfilled** button — which emailed the customer and set `fulfilled` — must survive
-alongside Buy label. A tenant who walks parcels to the post office is a first-class tenant; that is the
-standing rule, and removing the manual path would break it. **Mark as shipped** takes an optional tracking
-number and carrier, so a tenant who bought postage elsewhere still gives the buyer tracking.
+A tenant who walks parcels to the post office is a first-class tenant — the standing rule — so **Mark as
+shipped** is not a degraded Buy label. It is the whole flow for tenants who will never connect a provider,
+and it must produce the same outcome for the buyer: an email, at that moment, with a working tracking link.
+
+### What the tenant does
+
+Clicking **Mark as shipped** opens a small form, not a confirm dialog, because there are facts to capture:
+
+- **Carrier** — required when a tracking number is given, because it is what turns a number into a link.
+- **Service** — optional free-ish text with the carrier's common services offered (USPS Ground Advantage,
+  Priority Mail, UPS Ground…). It does not change the URL; it changes what the buyer is TOLD, and it is
+  what records that a parcel went First-Class rather than Priority.
+- **Tracking number** — **optional**, and this is the important part (see below).
+- **Ship date** — defaults to today.
+
+On save: the shipment records the carrier, service, number and a derived `tracking_url`; the order is
+marked fulfilled; the buyer is emailed.
+
+### Not every parcel has a tracking number, and the form must not pretend otherwise
+
+This is the trap in "enter the tracking number so it can be emailed". **USPS First-Class Mail** — letters,
+flats, postcards — carries **no tracking at all** unless extra services were bought. USPS *parcel* service
+(First-Class Package Service, renamed **Ground Advantage** in 2023, though tenants still say "first class")
+does include it. A tenant who posted a padded envelope at letter rate has no number to type, and a form
+that demands one leaves them unable to mark their own order shipped.
+
+So:
+
+- The tracking number is **optional**. Marking shipped without one is a legitimate, complete action.
+- When the chosen service is one we know carries no tracking, say so **in the form** — *"USPS First-Class
+  Mail does not include tracking. Leave the number blank; the buyer will be told it is on its way."*
+- The email adapts rather than degrading: with a number it carries the link; without one it says the parcel
+  is on its way and, when the service simply has no tracking, says that plainly. It must never promise a
+  link that will never arrive — an email that says "track your parcel" with nothing to track generates
+  exactly the support message the email was meant to prevent.
+
+This is the standing rule about notices — a notice needs an action, and "wait for a tracking number that
+does not exist" is not one.
+
+### Turning a number into a link
+
+When a **provider** sells the label it hands us the URL: Shippo returns `tracking_url_provider`, and the
+legacy adapter read it from every provider it supported. Only the direct-USPS path ever built a URL by
+hand. So the carrier→URL table is needed **for the manual path and nowhere else**, which keeps it small:
+
+| carrier | pattern |
+|---|---|
+| USPS | `https://tools.usps.com/go/TrackConfirmAction?tLabels={n}` |
+| UPS | `https://www.ups.com/track?tracknum={n}` |
+| FedEx | `https://www.fedex.com/fedextrack/?trknbr={n}` |
+| DHL Express | `https://www.dhl.com/en/express/tracking.html?AWB={n}` |
+
+Note that USPS uses **one URL for every service** — First-Class, Priority and Ground Advantage all track at
+the same place. The service is recorded for the buyer's benefit and for the tenant's own records, not
+because it changes the link.
+
+Three requirements on that table:
+
+1. **It is data, not code.** Carrier tracking URLs change; a tenant must not wait for a deploy when one
+   does. Seed it in the repo, let it be overridden without a release, the same way the fee table already is.
+2. **"Other carrier" takes a pasted URL.** Regional carriers, freight, a courier, a friend with a van. The
+   tenant pastes the tracking link and the email uses it verbatim. This is what stops the feature being
+   permanently incomplete for want of an entry in a table.
+3. **Offer carrier auto-detect, never rely on it.** `1Z…` is UPS, 20–22 digits is USPS, 12 or 15 digits is
+   FedEx. Prefill the carrier from the number and let the tenant correct it. A prefill that is usually
+   right saves a click; a detection that is silently wrong sends the buyer to the wrong carrier's website.
+
+### The email, and how it differs from the label-purchase path
+
+Same builder, same mailer, same branding as §P3 in `plans/SHIPPING_PROVIDERS.md` — `shipment_tracking_content`
+in `domain/receipts.py`, from the tenant's business name with their support address as reply-to. One
+implementation for both paths; the only difference is where the facts came from.
+
+**But the failure behaviour must differ, and this is easy to get wrong.** §P3 says a tracking email must
+never break what triggered it, because on the purchase path a label is already bought and paid for by the
+time we send. On the **manual** path nothing irreversible has happened, and the tenant clicked the button
+*in order to* notify the buyer. Swallowing an SES failure there means the tenant believes their customer
+was told, and the customer hears nothing.
+
+- **Purchase path:** send best-effort, never fail the purchase. Unchanged.
+- **Manual path:** the mark-as-shipped still succeeds (the parcel did ship; that fact is not contingent on
+  email), but the tenant is **told** the notification failed and offered **Resend**. Record `notified_at`
+  so the row can show "buyer notified 14:32" versus "not notified".
+
+### Correcting a mistake
+
+Tracking numbers get typed wrong. Editing one on an already-shipped order must be possible, and doing so
+offers to re-notify rather than silently emailing again — a buyer who receives two tracking emails with
+different numbers is worse off than one who receives a correction they were told about.
+
+An order already fulfilled by a purchased label does not offer Mark as shipped; it has a tracking number
+already, and a second notification would contradict the first.
 
 ---
 
@@ -218,9 +306,13 @@ number and carrier, so a tenant who bought postage elsewhere still gives the buy
 
 - **F1 — the table.** Replace the cards. Ledger columns, sorting, the status filter, Details preserved. No
   shipping anything. Immediately better for every tenant, and independently shippable.
-- **F2 — the gates.** Per-order readiness from the server, selection checkboxes, the three gate messages,
-  **+ Add package info** deep links, the tenant banner. Still buys nothing. At the end of F2 the tenant can
-  see exactly what stands between them and a label, which is most of the value.
+- **F2 — the gates, and manual fulfilment.** Per-order readiness from the server, selection checkboxes,
+  the three gate messages, **+ Add package info** deep links, the tenant banner. **Plus the whole manual
+  path**: Mark as shipped, the carrier table, the tracking email, resend and correction. Still buys
+  nothing, and connects to no provider — so at the end of F2 a tenant who never touches Shippo has a
+  complete, working fulfilment flow, and every other tenant can see exactly what stands between them and a
+  label. This is the phase with the most value per unit of work, and it is why manual comes before rates
+  rather than after buying.
 - **F3 — rates.** The rate policy on the Shipping screen, rate-on-select, the row's chosen rate with its
   justification, the ▾ override. Still buys nothing — `MockProvider` walks the whole flow.
 - **F4 — buying.** `POST /shipping/labels`, idempotent, one order. Client-driven bulk with per-row
@@ -249,3 +341,12 @@ Voiding, refunds and adjustment reconciliation stay where §PA put them — afte
   tenant-wide. Needs the promise to exist on the offer first.
 - **Partial fulfilment.** An order with two items where one is in stock. The schema assumes one shipment
   per order; multi-parcel is listed above as out of scope, but partial *fulfilment* may arrive sooner.
+- **Does the carrier table ship seeded or empty?** Seeded with the four above is assumed. The list of USPS
+  service names in particular should be **verified against current USPS products** before it is seeded —
+  First-Class Package Service became Ground Advantage in 2023 and the retail names have moved more than
+  once. Getting a URL wrong is recoverable; getting the "this service has no tracking" advice wrong tells a
+  tenant to leave out a number they actually had.
+- **Should a manual shipment be trackable by us?** A tenant-entered USPS number could be registered with
+  the provider's tracking API to drive delivery notifications (§P3), even though we did not sell the label.
+  It would unify the two paths for the buyer. It also costs a provider call per parcel and may require an
+  account we cannot assume — decide when §P3 is built, not now.
