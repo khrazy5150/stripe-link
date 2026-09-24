@@ -50,6 +50,79 @@ Collected so they are not lost. None of these is a commitment, and several may b
 - **The dev-only Delete Test Data action** (`handlers/admin_delete_test_data.py`) already exists and is
   gated `IsNonProd`. If an admin site appears, decide whether it moves there.
 
+## 4. Swapping the Junior Bay PLATFORM Stripe account — RUNBOOK
+
+Recorded 2026-09-23. **This is a runbook, not a feature.** It was deliberately NOT built as an admin
+action: see "why no button" below.
+
+### Why it will happen
+
+The platform account is moving regardless of the current trouble — the author is changing the legal entity
+from a corporation to an LLC, and a Stripe account cannot change entity. The administrative dissolution
+and the unrecoverable bank account change the TIMING, not the decision. (Confirmed 2026-09-23: no money is
+stranded in that account.)
+
+### What is bound to the platform account, and what is not
+
+| bound to the PLATFORM account | survives a swap |
+|---|---|
+| Connect authorisations — every tenant's `acct_…` | tenants' own Stripe accounts and logins |
+| the Connect `client_id` (`ca_…`) | connected-account objects: Customers, Products, Prices |
+| platform secret keys (`sk_test`/`sk_live`) | everything in our own DynamoDB tables |
+| webhook endpoints + signing secrets | |
+| platform-billing subscriptions (the tenant SaaS plan) | |
+
+**Connected accounts do NOT transfer.** `acct_X` authorised to `ca_OLD` has no relationship with `ca_NEW`.
+Every tenant must complete Connect OAuth again. No feature can avoid this; it is Stripe's model.
+
+### Why it is cheap right now, and will not be
+
+Measured 2026-09-23:
+
+- **1** distinct connected account exists (the author's own), across both silos.
+- **0** production tenants on a paid plan — both are `billing_status: trial`.
+- 2 platform-billing subscriptions exist, both in **sandbox** only.
+
+And a hard constraint: `get_platform_webhook_secret` resolves exactly **ONE** signing secret per
+`(kind, mode)` (`stripe_platform_secrets.py:108`). There is no dual-secret window, so during the cutover
+events signed by the other platform fail verification. With one tenant and no live traffic that window
+costs nothing. Post-launch it is an outage, and closing it is real work — see
+`plans/PLATFORM_ACCOUNT_CONFIG.md`.
+
+### The runbook
+
+Order matters. Repointing webhooks before the keys are in place loses events; swapping keys before the
+endpoints exist means Stripe has nowhere to deliver.
+
+0. **Record the baseline.** `./deploy/verify-platform-account.sh` — save the output. It names the account
+   you are leaving (2026-09-23: `acct_1GdJkFEcxlWjis9i` «Junior Bay Corporation», both silos).
+1. **Create the new Stripe account** under the new entity. Enable Connect.
+2. **Collect the new identity**: `ca_…` test + live, `sk_test`, `sk_live`.
+3. **Register webhook endpoints on the NEW account**, pointing at the SAME URLs
+   (`/webhook/stripe`, `/webhook/stripe-preview`, `/webhook/platform-billing`). Capture each signing
+   secret.
+4. **Write keys + signing secrets into each silo's secret** — `stripe-cart/<silo>/platform/stripe`. This
+   is the cutover instant; the verification gap opens here.
+5. **Update the Connect client ids** — `StripeClientIdTest` / `StripeClientIdLive` — and redeploy each
+   silo. **Do not skip this.** If the client id still names the old platform, tenants reconnect to the
+   account you are leaving and everything LOOKS like it worked.
+6. **Verify.** `./deploy/verify-platform-account.sh` must report the NEW account id and the NEW client ids
+   in every silo. The script asks Stripe who the key belongs to rather than comparing bytes, which is the
+   only check that can answer "which account".
+7. **Re-authorise every tenant** through Connect. Today: one.
+8. **Prove it end to end** — one test-mode purchase, confirm the order, the receipt and the webhook.
+9. **Retire the old account** once payouts and reporting are settled.
+
+### Why no button
+
+Every step above is a one-time operation that can be completed by hand faster than an admin feature could
+be built and reviewed — and step 7 would still be "now ask every merchant to reconnect", which is the only
+expensive part. Building automation for it would be paying for a tool to do a job already finished.
+
+**What IS worth building** is in `plans/PLATFORM_ACCOUNT_CONFIG.md`: making platform identity changeable
+without a stack deploy, and closing the dual-secret gap. Those stay useful afterwards; a swap button does
+not.
+
 ## 3. Open questions, before any of it is built
 
 - **Who is an admin, and how is that proven?** stripe-cart had `checkPlatformAdminStatus`. This repo has no

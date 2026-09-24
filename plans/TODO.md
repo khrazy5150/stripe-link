@@ -199,6 +199,39 @@ rate, label, charge the buyer, track -- does not exist yet.
 - **Highest blast radius yet:** the Worker serves every published page for every tenant and does NOT deploy
   with deploy.sh.
 
+## Platform
+
+### ⭐ HIGH — swap the Junior Bay platform Stripe account while it is still free (recorded 2026-09-23)
+
+Runbook: **`plans/ADMIN_SITE.md` §4**. Supporting design: **`plans/PLATFORM_ACCOUNT_CONFIG.md`**.
+Tool: `./deploy/verify-platform-account.sh` (built).
+
+The platform account is moving regardless — the entity is changing from a corporation to an LLC and a
+Stripe account cannot change entity. The administrative dissolution and the unrecoverable bank account
+change the timing, not the decision. No money is stranded.
+
+**Why HIGH is about timing, not severity.** Nothing is broken today. But the cost of this migration is
+measured in tenants who must re-authorise Connect, and right now that number is **1** — the author's own
+account. Production has **zero** tenants on a paid plan. Connected accounts do not transfer between
+platforms, so post-launch this becomes a coordinated re-onboarding of every merchant with payments failing
+for anyone slow to act.
+
+**It is deliberately NOT an admin feature.** Every step can be done by hand faster than a button could be
+built and reviewed, and the expensive step — "now ask every merchant to reconnect" — is not automatable.
+
+**Two things ARE worth building, and outlive the swap:**
+
+- **Platform identity as configuration.** Keys live in Secrets Manager (a write); the Connect `client_id`
+  lives in CloudFormation parameters (**a deploy**). The half needing a deploy is the half that decides
+  which platform a tenant's OAuth authorises against — and a stale client id sends tenants to reconnect to
+  the account you are leaving while every screen reports success.
+- **A dual-secret window.** `get_platform_webhook_secret` resolves exactly ONE signing secret per
+  (kind, mode), so a swap has an unavoidable verification gap. Free today; an outage on the money path
+  once the platform carries live traffic.
+
+Baseline recorded 2026-09-23: both silos → `acct_1GdJkFEcxlWjis9i` «Junior Bay Corporation», one shared
+Connect client-id pair.
+
 ## Data isolation
 
 ### ⭐⭐ HIGH — the webhook checks which silo an event belongs to, then bypasses the check (found 2026-09-23)
