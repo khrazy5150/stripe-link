@@ -213,15 +213,101 @@ all — 0 invocations in 24 hours against production's ~77 (measured 2026-09-23)
 stating: **the entire webhook path can only be exercised in production.** Every verification during the
 2026-09-23 session ran against production data because there was no alternative.
 
+## DECIDED (author, 2026-09-23)
+
+| question | decision |
+|---|---|
+| Stripe platform accounts | **ONE, shared by all silos.** Not one per silo. |
+| silo roster | **sandbox + production now**; staging designed-for, not deployed |
+| tenant ↔ silo | **a tenant MAY exist in several silos at once** |
+| the silo anchor | **the Stripe Customer**, buyer-scoped, deduped by email |
+| a Customer for every buyer | **yes** — accepted cost, see below |
+| erase the data | **not yet.** Plan first. |
+
+Source of the anchor idea: `plans/PRELIMINARY_SILO_ARCHITECTURE.md`.
+
+### The principle behind the one-platform decision
+
+Author, 2026-09-23:
+
+> *The idea is to present a seamless tenant experience, NOT to create a perfect silo environment. If I'm
+> running my business on staging and testing new features, I don't want to lose the ability to grant
+> refunds when I switch to production. That's the sole purpose of the single Junior Bay platform account.
+> We don't want tenant friction when switching between silos.*
+
+This draws a line that is easy to blur, and everything below depends on it:
+
+- **Initiating an action is NEVER silo-gated.** A refund, a cancellation, a subscription change — the
+  tenant has ONE Stripe relationship, and any silo they are standing in may act on it. Do not build a
+  guard that refuses because "that charge was created in another silo."
+- **Recording an event lands in the silo that owns the data.** Only one silo holds the order; that is
+  where the refund gets recorded. Other silos see the event and correctly do nothing.
+
+The silo boundary is for OUR data. It is not a boundary in the tenant's business.
+
+## How each event resolves — and how much is already built
+
+| event class | resolves by | status |
+|---|---|---|
+| `checkout.session.completed` | `metadata[silo]`, which we stamp because we create the session | **to build** |
+| `invoice.*` (automatic renewals) | the **Customer anchor** — subscriptions always have one; metadata is unavailable because Stripe created it | **to build** (traversal helper already exists) |
+| `charge.refunded`, `charge.dispute.created` | **"do I hold the order?"** — `find_by_payment_intent` on this silo's own table | **already correct** |
+| `account.updated` | not silo-specific — the connected account is the tenant's, globally. Every silo that knows the tenant should process it | **already correct** (gated on `tenant_document`) |
+
+Two of the four need nothing. `reconcile_charge_refunded` already resolves the order by payment intent and
+returns `order_not_found` when it does not hold it — which is exactly the discriminator, arrived at for
+ordinary reasons. `invoice_subscription_metadata` already traverses invoice → subscription metadata,
+written 2026-09-23 with the comment *"a renewal invoice we did not create carries none of its own"* — the
+anchor strategy, already in production.
+
+**So the work is smaller than the diagnosis suggests.** What is missing is the silo stamp and the Customer
+mapping, not a new routing engine.
+
+### The cost we are choosing to pay
+
+Every checkout must create a Stripe Customer, because the anchor cannot work on sessions that have none —
+and today **4 of 5 production checkout-session orders have no `stripe_customer_id`** (`customer_creation:
+always` is only set when the offer has a post-purchase upsell). The merchant's Stripe dashboard gains a
+Customer per buyer.
+
+`stripe_coupons.find_or_create_customer(email)` — built 2026-09-23 for targeted coupons — already does
+create-or-reuse deduped by email. Pointing checkout at it keeps a repeat guest buyer as ONE Customer
+rather than one per purchase, which is what makes this cost tolerable.
+
 ## Phases
 
-- **S1 — the membership guard.** Precondition for everything else. Small, and it closes a latent defect
-  that exists regardless of whether another silo is ever added.
-- **S2 — a sandbox webhook**, pointed at a Stripe account owned by the platform team. Closes the
-  can-only-test-in-production gap.
-- **S3 — a staging silo**, if and when the early-access tier is wanted. A stack, its tables, its hostname,
-  its endpoint. `plans/STRIPE_MODE_DECOUPLING.md` already anticipated this: *"A future
-  `staging.juniorbay.com` is the isolation tier, not a shared-DB."*
+Ordered so that each phase is verifiable on its own and nothing is deployed that depends on a later one.
+
+- **S0 — name the silo.** A `SILO` value in config (`sandbox` / `production`), distinct from `ENVIRONMENT`
+  and from `stripe_mode`. One constant, one template parameter. Nothing behaves differently yet. This is
+  the modeling step whose absence caused everything else.
+- **S1 — stamp what we create.** `metadata[silo]` on every Checkout Session, and on
+  `subscription_data[metadata]` so renewals inherit it. Write-only: nothing reads it yet, so it cannot
+  break anything, and it starts accumulating evidence immediately.
+- **S2 — a Customer for every buyer.** Point checkout at `find_or_create_customer(email)` so every session
+  names a Customer. Record `(tenant_id, silo, stripe_customer_id)` in a mapping table as it happens.
+  Still nothing routes on it.
+- **S3 — resolve, then enforce.** The webhook resolves a silo per event: stamp first, Customer anchor
+  second, "do I hold the order?" third. **Log disagreements for a period before acting on them** — a
+  stamp that says production against an anchor that says sandbox is an invariant violation and worth
+  seeing before it becomes a refusal.
+- **S4 — refuse.** Once the logs are quiet, an event resolving to another silo is acknowledged to Stripe,
+  logged, and not persisted.
+- **S5 — a sandbox webhook.** Only safe after S4. Closes the gap where the whole webhook path can only be
+  exercised in production.
+- **S6 — a staging silo**, if the early-access tier is wanted. A stack, its tables, its hostname, its
+  endpoint. `plans/STRIPE_MODE_DECOUPLING.md` anticipated it: *"A future `staging.juniorbay.com` is the
+  isolation tier, not a shared-DB."*
+
+### Migration
+
+**No wipe yet** (author, 2026-09-23). Recorded so the option is not lost: there are no real tenants, every
+production order is test, and a clean slate would remove the need to backfill `metadata[silo]` and the
+Customer mapping onto existing records. If the wipe happens it should be a STEP of this plan — after S0/S1
+are written and before S3 reads anything — not a separate act.
+
+Without a wipe, S3 needs a rule for records that predate the stamp. The same rule as everywhere else in
+this codebase: **unstamped means test/sandbox**, never production.
 
 ## Relationship to other plans
 

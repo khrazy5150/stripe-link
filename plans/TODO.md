@@ -234,11 +234,23 @@ went away. The symptom was treated; the hole was not.
    (`acct_1TA08M21lLbLd4Y5`, verified). Both silos answer "yes, mine." Membership is necessary and not
    sufficient, because the account is not what distinguishes silos.
 
-**The discriminator has to be stamped on the event** — `metadata[silo]` at session creation, which is
-precisely what the 2026-09-20 entry below proposed. **Unresolved and blocking:** what a silo does with an
-event it did NOT originate (a tenant's test invoice created in Stripe's own dashboard carries no stamp —
-that is how the 2026-09-23 renewals arrived). Three options are recorded in `plans/SILO_MODEL.md`; the
-honest one needs a home-silo on the tenant record.
+**DESIGN DECIDED 2026-09-23 — see `plans/SILO_MODEL.md`, phases S0–S6.** One shared Stripe platform
+account (deliberately: a tenant's Stripe relationship must not fracture when they switch silos), the
+Stripe **Customer as the silo anchor** (buyer-scoped, deduped by email), and `metadata[silo]` stamped on
+everything we create as corroborating evidence rather than the sole routing mechanism.
+
+**Smaller than the diagnosis suggests — two of the four event classes are already correct.**
+`reconcile_charge_refunded` resolves the order via `find_by_payment_intent` and returns `order_not_found`
+when this silo does not hold it, which IS the discriminator. `account.updated` is not silo-specific at all
+— the connected account is the tenant's globally — and is already gated on `tenant_document`. What is
+missing is the stamp and the Customer mapping, not a routing engine.
+
+**The cost being accepted:** every checkout must create a Stripe Customer (today 4 of 5 production
+checkout-session orders have none), so a merchant's Stripe dashboard gains a Customer per buyer.
+`find_or_create_customer(email)` keeps a repeat guest buyer as one Customer rather than one per purchase.
+
+**Not wiped.** No real tenants and every production order is test, so a clean slate remains available and
+would remove the backfill — but only as a STEP of the plan, between S1 and S3.
 
 **Resolved while planning:** a tenant CAN exist with no `stripe_keys` (non-transactional pages, lead
 capture, a link hub) — but such a tenant produces no Stripe events, because a transaction needs a
