@@ -230,6 +230,16 @@ process live transactions or it verifies nothing before release, and staging's t
 property is **membership** — if an event names a connected account that is not a tenant of this silo,
 acknowledge it to Stripe, log loudly, and persist nothing.
 
+**Resolved while planning:** a tenant CAN exist with no `stripe_keys` (non-transactional pages, lead
+capture, a link hub) — but such a tenant produces no Stripe events, because a transaction needs a
+connected account and that is what writes the row. So the guard is strict: reject, not retry. The one
+ordering race, `account.updated` during onboarding, is already gated on `tenant_document`.
+
+**But membership must be per ACCOUNT, not per (account, Stripe-mode).** `find_by_connect_account_id`
+filters on both, and OAuth writes one row per connected mode — so a tenant who connects LIVE only (the
+planned live-first onboarding) and then makes a test transaction in Stripe's own dashboard would be
+rejected as foreign by a naive guard. Ask membership on the account; use the mode only to pick credentials.
+
 **Also record the vocabulary collision**, which derailed a whole session: the author's "mode" is the
 code's `ENVIRONMENT` (sandbox/production/staging); the author's "environment" is the code's `stripe_mode`
 (test/live). `plans/SILO_MODEL.md` opens with the table.

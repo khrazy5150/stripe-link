@@ -96,9 +96,40 @@ that guard when the conflation went away. The symptom was treated; the hole was 
 - Persist nothing — no order, no ledger entry, no notification, no email.
 - Keep the metadata fallback **only** for events that carry no `account` at all (platform-account events).
 
-Open question for implementation: whether a brand-new tenant can produce an event before their
-`stripe_keys` row exists. If so the guard needs a grace path, and the answer decides whether "not found"
-means *reject* or *retry*.
+### Resolved (author, 2026-09-23): can a tenant exist before their `stripe_keys` row?
+
+**Yes — and it does not matter.** A tenant can use the product with no Stripe at all: non-transactional
+pages, lead capture, a link hub. They are a full tenant of the software. But **they cannot produce a
+Stripe event**, because a Stripe transaction requires a connected account, and a connected account is
+exactly what writes the row.
+
+So "an event names an account we do not know" has no legitimate new-tenant explanation. The guard can be
+strict: **reject, not retry.** No grace path.
+
+The one ordering race — `account.updated` firing during onboarding, before the OAuth callback writes the
+row — is **already handled**: `stripe_webhook.py:335` gates that branch on `tenant_document`, so an
+unknown account is ignored rather than acted on.
+
+### But membership is a property of the ACCOUNT, not the (account, Stripe-mode) pair
+
+`find_by_connect_account_id(account_id, mode)` filters on **both** the account id and the mode
+(`documents.py:624`), and the OAuth callback writes **one row per connected mode**
+(`stripe_connect.py:255`). A tenant who connects in only one Stripe mode therefore has no row in the
+other.
+
+**This matters for live-first onboarding**, which is already planned: a merchant connects LIVE and may
+never connect test. If they then create a test invoice in Stripe's own dashboard — exactly what happened
+on 2026-09-23 — the event arrives with `livemode: false`, the lookup asks for a `mode=test` row that does
+not exist, and a **strict membership guard would reject a real tenant's event as foreign.**
+
+Not firing today: the only connected account in dev or prod has rows for both modes (verified
+2026-09-23). It becomes live the first time a tenant connects one mode only.
+
+**So the guard must ask membership per ACCOUNT, in any mode**, and use the event's mode only to choose
+which keys to work with. Two different questions that the current signature conflates:
+
+- *is this account a tenant of this silo?* — account only
+- *which credentials do I use for this event?* — account **and** mode
 
 ## Webhook topology, and why one endpoint per silo
 
