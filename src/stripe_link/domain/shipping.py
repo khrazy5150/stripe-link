@@ -291,6 +291,55 @@ def return_address(config: dict[str, Any] | None) -> dict[str, Any]:
     return dict(ship_from) if isinstance(ship_from, dict) else {}
 
 
+def product_readiness(products: list[dict[str, Any]] | None) -> list[str]:
+    """What is still missing on the PRODUCTS before an order can be packed properly. Empty means ready.
+
+    The companion to `label_readiness`, and it exists for the same reason: item dimensions are OPTIONAL to
+    create a product — a tenant who walks their parcels to the post office is a first-class tenant and the
+    shipping module must never become compulsory by the back door — but they are NECESSARY to pack an
+    order into one box. That is a readiness question, not a validation one, and answering it by refusing
+    the save is how a tenant ends up unable to list a product until they have found a tape measure.
+
+    It is worth surfacing rather than leaving silent: measured 2026-09-24, 0 of 4 production and 1 of 11
+    sandbox shippable products carried item dimensions, so the packer's multi-item branch had never run
+    and every bundle quoted one parcel per item. Nothing announced that.
+    """
+    unmeasured = []
+    unweighed = []
+    for product in products or []:
+        fulfillment = (product or {}).get("fulfillment") or {}
+        if fulfillment.get("requires_shipping") is False:
+            continue
+        own = fulfillment.get("item_dimensions") or {}
+        name = str(product.get("name") or product.get("product_id") or "a product")
+        if not all(own.get(field) for field in ("length_in", "width_in", "height_in")):
+            unmeasured.append(name)
+        elif not own.get("weight_lb"):
+            # Dimensions without a bare weight still pack; the weight falls back to the packed figure,
+            # which over-estimates. Worth mentioning, not worth blocking on.
+            unweighed.append(name)
+
+    missing = []
+    if unmeasured:
+        one = len(unmeasured) == 1
+        missing.append(
+            f"{_and_more(unmeasured)} {'has' if one else 'have'} no size of {'its' if one else 'their'} "
+            f"own — orders containing {'it' if one else 'them'} ship one parcel per item, which costs more.")
+    if unweighed:
+        one = len(unweighed) == 1
+        missing.append(
+            f"{_and_more(unweighed)} {'is' if one else 'are'} measured but not weighed — shared-box "
+            "postage is over-estimated until you add a weight.")
+    return missing
+
+
+def _and_more(names: list[str], shown: int = 3) -> str:
+    """Name a few, count the rest. A readiness line listing forty products is not actionable."""
+    if len(names) <= shown:
+        return ", ".join(names)
+    return f"{', '.join(names[:shown])} and {len(names) - shown} more"
+
+
 def label_readiness(config: dict[str, Any] | None) -> list[str]:
     """What is still missing before this tenant can buy a label. Empty means ready.
 

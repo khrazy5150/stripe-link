@@ -31,41 +31,78 @@
       <button type="button" class="secondary-action" @click="addColor">+ New Color</button>
     </div>
 
-    <h3>Package Dimensions</h3>
-    <p class="field-hint">The box this ships in on its own, and what it weighs packed. Used as-is when
-      someone buys just this.</p>
-    <div class="modal-dimensions-grid">
-      <label>Length (inches)<input v-model.number="form.length_in" type="number" min="0" step="0.1" /></label>
-      <label>Width (inches)<input v-model.number="form.width_in" type="number" min="0" step="0.1" /></label>
-      <label>Height (inches)<input v-model.number="form.height_in" type="number" min="0" step="0.1" /></label>
-      <label>Weight (pounds)<input v-model.number="form.weight_lb" type="number" min="0" step="0.1" /></label>
-    </div>
-
-    <h3>Item Size <span class="field-optional">optional</span></h3>
-    <p class="field-hint">The product's own size, out of its box. Only needed if it might be bought
-      alongside something else — then it can share a box instead of shipping in its own, which is usually
-      cheaper. Leave blank and multi-item orders just ship separately.</p>
+    <h3>Size &amp; Weight <span class="field-optional">optional</span></h3>
+    <p class="field-hint">
+      The product itself, out of any packaging. Needed to buy shipping labels — with it we pick the
+      cheapest box that fits the whole order, so two things bought together share one parcel instead of
+      shipping separately. You can skip it and take parcels to the post office yourself.
+    </p>
     <div class="modal-dimensions-grid">
       <label>Length (inches)<input v-model.number="form.item_length_in" type="number" min="0" step="0.1" placeholder="—" /></label>
       <label>Width (inches)<input v-model.number="form.item_width_in" type="number" min="0" step="0.1" placeholder="—" /></label>
       <label>Height (inches)<input v-model.number="form.item_height_in" type="number" min="0" step="0.1" placeholder="—" /></label>
+      <label>Weight (pounds)<input v-model.number="form.item_weight_lb" type="number" min="0" step="0.1" placeholder="—" /></label>
     </div>
+    <label class="switch-row variant-toggle">
+      <input v-model="form.compressible" type="checkbox" />
+      <span>
+        <strong>This item squashes</strong>
+        <small>A pouch, bag or soft goods — it can go in a padded mailer thicker than the mailer lies
+          flat. Leave off for anything rigid: a jar forced into an envelope is refused at the counter.</small>
+      </span>
+    </label>
+
+    <!-- The BOX is deliberately absent from the wizard. Which box an order actually needs is learned from
+         real orders, not known the day a product is created, and asking at creation invites a guess that
+         then hardens into the number the packer trusts (plans/SHIPPING_PROVIDERS.md). -->
+    <template v-if="surface === 'edit'">
+      <h3>Shipping Box <span class="field-optional">optional</span></h3>
+      <p class="field-hint">
+        Normally we work the box out from the sizes above and what else is in the order. Set this only when
+        that would be wrong — something fragile needing extra padding, an awkward shape, or anything you
+        ship in the manufacturer's packaging.
+      </p>
+      <label class="switch-row variant-toggle">
+        <input v-model="form.ships_alone" type="checkbox" />
+        <span>
+          <strong>Always ships in its own box</strong>
+          <small>Never shares a parcel, even when bought with something else.</small>
+        </span>
+      </label>
+      <div class="modal-dimensions-grid">
+        <label>Length (inches)<input v-model.number="form.length_in" type="number" min="0" step="0.1" /></label>
+        <label>Width (inches)<input v-model.number="form.width_in" type="number" min="0" step="0.1" /></label>
+        <label>Height (inches)<input v-model.number="form.height_in" type="number" min="0" step="0.1" /></label>
+        <label>Packed weight (pounds)<input v-model.number="form.weight_lb" type="number" min="0" step="0.1" /></label>
+      </div>
+      <p class="field-hint">Packed weight is the whole thing as it ships — box included.</p>
+    </template>
   </div>
 </template>
 
 <script setup>
 /**
- * Size and colour variants, and the box the thing ships in.
+ * Size and colour variants, and how the thing ships.
  *
  * Shown only for PHYSICAL products, which is the caller's decision rather than this component's: the wizard
  * puts it on the Details step and the edit form keeps it near the bottom, but both gate it on the same type.
+ *
+ * **The two surfaces differ by WHEN the knowledge exists**, not by how much room there is. The item's own
+ * size and weight are measurable the moment the product is in front of you, so the wizard asks. Which BOX
+ * an order needs is learned from real orders, so it lives in the edit form — asking at creation invites a
+ * guess that then hardens into the number the packer trusts. The old form had this exactly inverted: it
+ * asked the discovered question up front and made the measurable one optional, which is why 0 of 4
+ * production products had item dimensions and the packer's multi-item path had never run.
  *
  * Turning a toggle on with no rows would show an empty list and read as broken, so each `ensure` seeds the
  * first row; removing the last row turns the toggle back off, so the two can never disagree.
  */
 import { defaultColorVariant, defaultSizeVariant } from "../../utils/productVariants";
 
-const props = defineProps({ form: { type: Object, required: true } });
+const props = defineProps({
+  form: { type: Object, required: true },
+  surface: { type: String, default: "edit" },
+});
 
 function ensureSize() {
   if (props.form.size_enabled && !props.form.sizes.length) addSize();

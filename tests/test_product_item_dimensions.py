@@ -133,11 +133,35 @@ class FormTests(unittest.TestCase):
     PAGE = (DASH / "components/Products.vue").read_text(encoding="utf-8")
 
     def test_the_two_sections_are_distinguishable(self):
-        """Both are three numbers in inches. Unlabelled, a tenant cannot tell which is which — and the
-        wrong one silently oversizes every parcel."""
-        self.assertIn("Package Dimensions", self.FIELD)
-        self.assertIn("Item Size", self.FIELD)
-        self.assertIn("The product's own size, out of its box", self.FIELD)
+        """Both are numbers in inches. Unlabelled, a tenant cannot tell which is which — and the wrong one
+        silently oversizes every parcel.
+
+        RELABELLED 2026-09-24. "Package Dimensions" led, which is what made the box look like the primary
+        fact; it is now "Shipping Box" and sits behind the item's own size.
+        """
+        self.assertIn("Size &amp; Weight", self.FIELD)
+        self.assertIn("Shipping Box", self.FIELD)
+        self.assertIn("The product itself, out of any packaging", self.FIELD)
+
+    def test_the_wizard_asks_for_the_item_and_NOT_the_box(self):
+        """Split by WHEN the knowledge exists. The item is measurable with the product in front of you;
+        which box an order needs is learned from real orders, and asking at creation invites a guess that
+        then hardens into the number the packer trusts."""
+        self.assertIn("""surface === 'edit'""", self.FIELD)
+        self.assertIn('surface="wizard"', self.PAGE)
+        self.assertIn('surface="edit"', self.PAGE)
+
+    def test_the_item_block_asks_for_a_weight_of_its_own(self):
+        """Without it the packer sums the PACKED weight per item and then adds the shared box, billing the
+        cardboard once per item — about 15% over on three."""
+        self.assertIn("form.item_weight_lb", self.FIELD)
+        self.assertIn("item_weight_lb", self.STORE)
+
+    def test_compressible_and_ships_alone_default_OFF(self):
+        """Rigid is the safe assumption — a jar mis-flagged as soft is refused at the counter after the
+        label is paid for — and a declared box that is not opted into must not swallow the order."""
+        self.assertIn("compressible: false", self.PAGE)
+        self.assertIn("ships_alone: false", self.PAGE)
 
     def test_item_size_is_marked_optional(self):
         self.assertIn("field-optional", self.FIELD)

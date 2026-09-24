@@ -102,7 +102,14 @@ function itemDimensions(form, isShippable) {
   if (!isShippable) return null;
   const sides = [form.item_length_in, form.item_width_in, form.item_height_in].map((value) => Number(value));
   if (!sides.every((value) => Number.isFinite(value) && value > 0)) return null;
-  return { length_in: sides[0], width_in: sides[1], height_in: sides[2] };
+  const dimensions = { length_in: sides[0], width_in: sides[1], height_in: sides[2] };
+  // The BARE weight, kept separate from fulfillment.weight_lb (what it weighs packed in its own box).
+  // Summing the packed weight when several items share one carton billed the cardboard once per item.
+  // Written only when given: absent means the packer falls back to the packed weight, which
+  // over-estimates — the safe direction, since a carrier re-bills an under-weight parcel.
+  const bare = Number(form.item_weight_lb);
+  if (Number.isFinite(bare) && bare > 0) dimensions.weight_lb = bare;
+  return dimensions;
 }
 
 export function defaultProductPrice(product) {
@@ -476,6 +483,10 @@ export async function buildProductDocument(form) {
       // entered all three: a partial item size packs into a box chosen from nonsense, and there is no
       // sensible default for "how big is this thing" the way there is for "what box do you use".
       item_dimensions: itemDimensions(form, isPhysical && !isLeadGen),
+      // A pouch squashes into a padded mailer; a jar of the same size does not. And a declared box is an
+      // EXCEPTION the tenant opts into, not something inferred from the box fields being filled in.
+      compressible: isPhysical && !isLeadGen ? Boolean(form.compressible) : false,
+      ships_alone: isPhysical && !isLeadGen ? Boolean(form.ships_alone) : false,
     },
     sync: {
       status: "pending",

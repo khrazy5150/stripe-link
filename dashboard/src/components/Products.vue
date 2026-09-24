@@ -239,7 +239,7 @@
               <!-- Only for something that ships. A digital download has no box and no size chart, and
                    showing the fields anyway is what made the old single form feel like a tax form. -->
               <section v-if="form.product_type === 'physical'" class="wizard-subsection">
-                <ProductVariantsField :form="form" />
+                <ProductVariantsField :form="form" surface="wizard" />
               </section>
             </template>
 
@@ -461,7 +461,7 @@
           </section>
 
           <section v-if="form.product_intent === 'transaction' && form.product_type === 'physical'" class="modal-form-section">
-            <ProductVariantsField :form="form" />
+            <ProductVariantsField :form="form" surface="edit" />
           </section>
 
           <footer class="product-modal-footer">
@@ -886,6 +886,12 @@ function defaultProductForm() {
     item_length_in: null,
     item_width_in: null,
     item_height_in: null,
+    item_weight_lb: null,
+    // Both default OFF. Rigid is the safe assumption — a jar mis-flagged as soft is refused at the
+    // counter after the label is paid for — and a declared box that is not opted into must not swallow
+    // the rest of the order.
+    compressible: false,
+    ships_alone: false,
     lead_capture: { ...defaultLeadAction },
   };
 }
@@ -996,6 +1002,9 @@ function productFormFromDocument(product) {
     item_length_in: itemDimensions.length_in ?? null,
     item_width_in: itemDimensions.width_in ?? null,
     item_height_in: itemDimensions.height_in ?? null,
+    item_weight_lb: itemDimensions.weight_lb ?? null,
+    compressible: Boolean(fulfillment.compressible),
+    ships_alone: Boolean(fulfillment.ships_alone),
     lead_capture: leadCapture,
   };
 }

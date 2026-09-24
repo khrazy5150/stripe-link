@@ -681,10 +681,34 @@ its own, takes the fallback, and ships exactly as it did yesterday.
 | measured, compressible | Padded mailer | 9 x 6 x 1.85 | **0.95 lb** |
 | measured, `ships_alone` | its declared box | 10 x 8 x 4 | 1.00 lb |
 
-**Still to build:** both UI surfaces (wizard: item dimensions + weight + compressible; edit form: box
-sizing and `ships_alone`), the box-catalog editor gaining `kind`/`template`, and the product-level
-readiness line. Nothing in the product catalogue sets the new fields yet, so every stored product is on
-the "legacy" row above.
+### BUILT 2026-09-24 — the two surfaces, and product readiness
+
+`ProductVariantsField` is shared by the wizard and the edit form, which is why they showed identical
+fields. It now takes a `surface` prop:
+
+- **Wizard** — the item's own length, width, height, **weight**, and *"This item squashes"*. All optional.
+  No box anywhere.
+- **Edit form** — everything above, plus **Shipping Box**: *"Always ships in its own box"* and the
+  dimensions, introduced as the exception it is (*"Set this only when that would be wrong — something
+  fragile needing extra padding, an awkward shape, or anything you ship in the manufacturer's
+  packaging"*).
+
+The relabel matters as much as the split: **"Package Dimensions" used to lead**, which is what made the
+box look like the primary fact. It is now "Shipping Box", and it sits after the item's own size.
+
+**`product_readiness(products)`** is the companion to `label_readiness`, and exists for the same stated
+reason: dimensions are optional to CREATE and necessary to PACK, which is a readiness question, not a
+validation one. It names a few products and counts the rest, separates *unmeasured* (ships one parcel per
+item) from *measured but unweighed* (postage over-estimated), skips anything that is not a parcel, and
+reads correctly for one product as well as for forty.
+
+Five tests changed because they pinned the old labels and the old contract. Rewritten with the reason in
+each docstring rather than deleted.
+
+**Still to build:** the box-catalog editor gaining `kind` / `template` — the packer and schema support
+them, but a tenant cannot yet mark their own mailer as a soft pack, so only the seeded
+`Padded mailer (9x6x1)` benefits. And wiring `product_readiness` into a surface: the Shipping screen is
+the natural home, and `ShippingFunction` has no grant on `ProductsTable` today.
 
 ### What has to change
 
