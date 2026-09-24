@@ -107,3 +107,53 @@ class ReachesThePackerTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class BoxKindTests(unittest.TestCase):
+    """A padded mailer is not a one-inch carton.
+
+    The catalog has listed one since it was written, and until 2026-09-24 the packer treated it as a rigid
+    box — so an 8x5x2 pouch failed it on `2 > 1` and climbed to a carton, overcharging every order with
+    one in it.
+    """
+
+    import pathlib as _pathlib
+    ROOT = _pathlib.Path(__file__).resolve().parents[1]
+    SCREEN = (ROOT / "dashboard/src/components/Shipping.vue").read_text(encoding="utf-8")
+
+    def test_the_seeded_mailer_declares_itself_a_soft_pack(self):
+        from stripe_link.domain.shipping import starter_boxes
+
+        mailer = next(box for box in starter_boxes() if "mailer" in box["name"].lower())
+        self.assertEqual(mailer["kind"], "soft_pack")
+
+    def test_every_seeded_carton_is_still_a_box(self):
+        from stripe_link.domain.shipping import starter_boxes
+
+        cartons = [box for box in starter_boxes() if "mailer" not in box["name"].lower()]
+        self.assertTrue(cartons)
+        self.assertEqual({box.get("kind", "box") for box in cartons}, {"box"})
+
+    def test_kind_survives_a_round_trip_through_the_field_list(self):
+        from stripe_link.domain.shipping import BOX_FIELDS
+
+        self.assertIn("kind", BOX_FIELDS)
+        self.assertIn("template", BOX_FIELDS)
+
+    def test_the_editor_offers_the_choice_in_the_tenants_words(self):
+        # "soft_pack" is our word. A tenant recognises an envelope.
+        self.assertIn('v-model="box.kind"', self.SCREEN)
+        self.assertIn("Padded envelope or mailer", self.SCREEN)
+
+    def test_a_new_box_defaults_to_rigid(self):
+        """The safe direction: a mailer mistakenly treated as a carton just oversizes a parcel, while a
+        carton treated as a mailer sends something the carrier refuses."""
+        self.assertIn('kind: "box"', self.SCREEN)
+
+    def test_the_carrier_template_is_NOT_a_free_text_field(self):
+        """The schema records why: carrier packaging is fetched from the provider as parcel templates,
+        because hand-copied carrier dimensions go stale the moment a size is retired. Asking a tenant to
+        type "USPS_FlatRateEnvelope" would contradict that — the packer and adapter already pass one
+        through when a box carries it."""
+        self.assertNotIn('v-model="box.template"', self.SCREEN)
+        self.assertNotIn("v-model.trim=\"box.template\"", self.SCREEN)

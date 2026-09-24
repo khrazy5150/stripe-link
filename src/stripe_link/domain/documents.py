@@ -2609,6 +2609,15 @@ def validate_shipping_config(document: dict[str, Any]) -> None:
                 except (TypeError, ValueError):
                     raise DocumentValidationError(
                         f"Shipping box '{name}' {field} must be a positive number.") from None
+            # Rigid carton or soft pack. Refused rather than coerced when unrecognised: the two behave
+            # differently at pack time -- a soft pack lets a compressible item exceed its thickness -- so a
+            # typo silently choosing the wrong one would mis-size parcels with nothing to show for it.
+            # Absent is fine and means a box, which is the safe assumption.
+            kind = box.get("kind")
+            if kind is not None and str(kind) not in ("box", "soft_pack"):
+                raise DocumentValidationError(
+                    f"Shipping box '{name}' kind must be 'box' or 'soft_pack'.")
+            optional_string(box, "template", f"Shipping box '{name}' template")
             # Absent max_weight means no stated limit, which is the common case for a tenant's own carton.
             if box.get("max_weight") is not None:
                 try:

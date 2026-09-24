@@ -705,10 +705,35 @@ reads correctly for one product as well as for forty.
 Five tests changed because they pinned the old labels and the old contract. Rewritten with the reason in
 each docstring rather than deleted.
 
-**Still to build:** the box-catalog editor gaining `kind` / `template` — the packer and schema support
-them, but a tenant cannot yet mark their own mailer as a soft pack, so only the seeded
-`Padded mailer (9x6x1)` benefits. And wiring `product_readiness` into a surface: the Shipping screen is
-the natural home, and `ShippingFunction` has no grant on `ProductsTable` today.
+### BUILT 2026-09-24 — the catalog editor
+
+A **Type** selector on each box: *Box* or *Padded envelope or mailer*. `soft_pack` is our word; a tenant
+recognises an envelope. Choosing a mailer reveals what it means in practice — *"Height is how thick it
+lies flat. An envelope stretches, so products marked 'this item squashes' can go in one thicker than
+that — up to about three times. Anything rigid still has to fit the measurements above."*
+
+New boxes default to **rigid**, which is the safe direction: a mailer mistakenly treated as a carton
+merely oversizes a parcel, while a carton treated as a mailer sends something the carrier refuses. A box
+saved before `kind` existed reads as a box for the same reason, and the validator refuses an unrecognised
+value rather than coercing it — the two behave differently at pack time, so a typo would mis-size parcels
+with nothing to show for it.
+
+**`template` is deliberately NOT a field here.** The ShippingConfig schema already records why: carrier
+packaging is fetched from the provider as parcel templates, *"because hand-copied carrier dimensions go
+stale the moment a size is retired"*. The packer and adapter pass a template through when a box carries
+one; asking a tenant to type `USPS_FlatRateEnvelope` would contradict a decision already made. It waits on
+the provider fetch, and a test pins that it stays out of the form.
+
+A tenant's own mailer now behaves like one:
+
+| the same box | chosen | parcel | weight |
+|---|---|---|---|
+| marked as a mailer | My bubble mailers | 9 x 6 x 1.85 | **0.95 lb** |
+| left as a box | My cartons | 12 x 10 x 6 | 1.25 lb |
+
+**Still to build:** wiring `product_readiness` into a surface. The Shipping screen is the natural home,
+and `ShippingFunction` has no grant on `ProductsTable` today — a template change plus a handler read, not
+only a component.
 
 ### What has to change
 

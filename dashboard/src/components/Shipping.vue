@@ -123,10 +123,19 @@
             <div><h4>{{ box.name || "Untitled box" }}</h4></div>
             <button class="secondary-action compact" type="button" @click="removeBox(index)">Remove</button>
           </header>
-          <label class="offer-field">
-            <span>Name</span>
-            <input v-model.trim="box.name" type="text" placeholder="e.g. Medium box" />
-          </label>
+          <div class="offer-two-column">
+            <label class="offer-field">
+              <span>Name</span>
+              <input v-model.trim="box.name" type="text" placeholder="e.g. Medium box" />
+            </label>
+            <label class="offer-field">
+              <span>Type</span>
+              <select v-model="box.kind">
+                <option value="box">Box</option>
+                <option value="soft_pack">Padded envelope or mailer</option>
+              </select>
+            </label>
+          </div>
           <div class="modal-dimensions-grid">
             <label>Length (in)<input v-model.number="box.length" type="number" min="0" step="0.1" /></label>
             <label>Width (in)<input v-model.number="box.width" type="number" min="0" step="0.1" /></label>
@@ -137,6 +146,11 @@
           <small class="field-hint">
             Inside measurements. Box weight counts — the carrier bills the cardboard too. Max weight is
             optional; leave it blank unless the box has a stated limit.
+          </small>
+          <small v-if="box.kind === 'soft_pack'" class="field-hint">
+            Height is how thick it lies flat. An envelope stretches, so products marked
+            <strong>“this item squashes”</strong> can go in one thicker than that — up to about three
+            times. Anything rigid still has to fit the measurements above.
           </small>
         </div>
         <button class="secondary-action" type="button" @click="addBox">+ Add box</button>
@@ -275,15 +289,22 @@ function defaultForm() {
 // is not staring at an empty table -- NOT carrier packaging, which is fetched from the provider as parcel
 // templates because hand-copied carrier dimensions go stale the moment a size is retired.
 const STARTER_BOXES = [
-  { name: "Small box (6x4x4)", length: 6, width: 4, height: 4, empty_weight: 0.15, max_weight: "" },
-  { name: "Medium box (10x8x6)", length: 10, width: 8, height: 6, empty_weight: 0.35, max_weight: "" },
-  { name: "Large box (14x11x8)", length: 14, width: 11, height: 8, empty_weight: 0.6, max_weight: "" },
-  { name: "Extra large box (18x14x12)", length: 18, width: 14, height: 12, empty_weight: 1.0, max_weight: "" },
-  { name: "Padded mailer (9x6x1)", length: 9, width: 6, height: 1, empty_weight: 0.05, max_weight: "" },
+  { name: "Small box (6x4x4)", kind: "box", length: 6, width: 4, height: 4, empty_weight: 0.15, max_weight: "" },
+  { name: "Medium box (10x8x6)", kind: "box", length: 10, width: 8, height: 6, empty_weight: 0.35, max_weight: "" },
+  { name: "Large box (14x11x8)", kind: "box", length: 14, width: 11, height: 8, empty_weight: 0.6, max_weight: "" },
+  { name: "Extra large box (18x14x12)", kind: "box", length: 18, width: 14, height: 12, empty_weight: 1.0, max_weight: "" },
+  { name: "Padded mailer (9x6x1)", kind: "soft_pack", length: 9, width: 6, height: 1, empty_weight: 0.05, max_weight: "" },
 ];
 
 function emptyBox() {
-  return { name: "", length: "", width: "", height: "", empty_weight: "", max_weight: "" };
+  // `kind` defaults to a box because rigid is the safe assumption: a mailer mistakenly treated as a
+  // carton just oversizes a parcel, while a carton treated as a mailer sends an item the carrier refuses.
+  //
+  // `template` -- a carrier's own packaging identifier -- is deliberately NOT edited here. The schema
+  // records why: carrier packaging is fetched from the provider as parcel templates, because hand-copied
+  // carrier dimensions go stale the moment a size is retired. The packer and the adapter already pass one
+  // through when a box carries it; asking a tenant to type "USPS_FlatRateEnvelope" would contradict that.
+  return { name: "", kind: "box", length: "", width: "", height: "", empty_weight: "", max_weight: "" };
 }
 
 function addBox() {
