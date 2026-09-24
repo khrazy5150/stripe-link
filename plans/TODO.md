@@ -201,6 +201,39 @@ rate, label, charge the buyer, track -- does not exist yet.
 
 ## Data isolation
 
+### ⭐⭐ HIGH — the webhook checks which silo an event belongs to, then bypasses the check (found 2026-09-23)
+
+Plan: **`plans/SILO_MODEL.md`**. Not built.
+
+`stripe_webhook.py:221` resolves the tenant by looking the connected account up in THIS deployment's
+`stripe_keys` — which IS the silo-membership check — and then throws it away:
+
+```python
+tenant_id = str((tenant_document or {}).get("tenant_id") or "").strip() or _metadata_tenant_id(stripe_event)
+```
+
+When the account is not a tenant here, it falls back to the `tenant_id` in the **event's own metadata**,
+which our checkout stamps on every session. So a production tenant's LIVE payment arriving at a sandbox
+endpoint would be processed: a real order in sandbox's tables, a real receipt to a real customer, real
+money in sandbox's ledger.
+
+**Latent only because sandbox has no endpoint today** (0 Stripe invocations in 24h vs production's ~77).
+It activates the moment a second silo gets one — which is the direction the platform is going.
+
+**Same root cause as [[project_webhook_mode_guard]]**, which was patched with a `livemode`-vs-`ENVIRONMENT`
+guard that worked by accident of the old conflation. Decoupling P3 removed that guard when the conflation
+went away. The symptom was treated; the hole was not.
+
+**The guard is NOT "non-production refuses live money."** That was proposed and is wrong (author,
+2026-09-23): a silo is a complete independent SaaS differentiated only by its audience, so sandbox must
+process live transactions or it verifies nothing before release, and staging's tenants are real. The
+property is **membership** — if an event names a connected account that is not a tenant of this silo,
+acknowledge it to Stripe, log loudly, and persist nothing.
+
+**Also record the vocabulary collision**, which derailed a whole session: the author's "mode" is the
+code's `ENVIRONMENT` (sandbox/production/staging); the author's "environment" is the code's `stripe_mode`
+(test/live). `plans/SILO_MODEL.md` opens with the table.
+
 ### ✅ FIXED dev + prod 2026-09-23 — test-mode activity was reading as real, in two places
 
 Reported as *"a dev subscription is showing up as a real transaction in prod."* It was, twice, and the

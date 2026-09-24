@@ -423,6 +423,10 @@ enumeration rather than a fourth round of inspection.
 
 ## Relationship to other plans
 
+- **`plans/SILO_MODEL.md`** owns the OTHER axis — what a deployment is, and which events belong to it.
+  Read its vocabulary table before this document: the author's "mode" is this plan's `ENVIRONMENT`, and
+  the author's "environment" is this plan's `stripe_mode`. The two words are used in opposite senses, and
+  that has already cost a working session and produced bugs.
 - **Prerequisite for the clean onboarding streamline** (live-first + opt-in Stripe-test sandbox) — that flow assumes
   test runs on prod, which only exists after this.
 - Independent of but complementary to `plans/SAAS_BILLING_PAYWALL.md` (billing mode is a third, separate axis —
