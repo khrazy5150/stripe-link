@@ -302,6 +302,120 @@ already, and a second notification would contradict the first.
 
 ---
 
+## Returns — the reverse leg, and why the refund waits
+
+**The rule (author, 2026-09-24): if a product requires a physical return, no Stripe refund is issued until
+the product is received.**
+
+### Most of this is already built — do not rebuild it
+
+- `RefundRequest` exists with states `new · manual_review · approved · rejected · refunded · closed`, and
+  already carries `policy_snapshot`, `risk_level`, `handling` and `decision_reason`.
+- `handlers/refunds.py` already approves, rejects and executes the Stripe refund.
+- A refund request already raises a tenant notification (`refund_request`, severity warning, deep-linked).
+- The buyer already has a link-based route — `/purchase/manage`, reached from the page footer beside the
+  refund policy — and there are deliberately **no buyer accounts**, so the return flow is an opaque-token
+  link like abandoned-cart recovery and tip cancellation. Do not invent a login for this.
+- `refund_policy` already exists on offer and product, already states a return window in days, and already
+  feeds `hasMerchantReturnPolicy` in the Product JSON-LD.
+
+**What is missing is the leg between `approved` and `refunded`.** Today approval leads straight to money
+going back. The return inserts itself there, and nothing before or after it needs redesigning.
+
+### The states
+
+```
+new ─► manual_review ─► approved ──────────────────────────────► refunded
+                            │                                       ▲
+                            │  return required                      │
+                            ▼                                       │
+                    return_pending ─► return_in_transit ─► return_received
+                            │                                       │
+                            │ expired / never shipped               │ inspection fails
+                            ▼                                       ▼
+                          closed                          rejected · partial refund
+```
+
+`approved` keeps its current meaning — *the claim is valid* — and stops implying *the money is going back
+now*. That separation is the whole change.
+
+### The cost of this rule, which must be stated plainly
+
+Holding a refund pending receipt is the right default for physical goods and it is **not free**. Three
+clocks start when a buyer asks for their money back, and the rule makes all three tighter:
+
+1. **The dispute clock.** A buyer who waits three weeks for a refund files a chargeback. The tenant then
+   loses the dispute fee *and* may lose the goods. Withholding a refund does not remove risk, it **trades
+   refund risk for dispute risk** — and a dispute costs more than the refund would have. This is the real
+   argument for the keep-it threshold below, and for telling the buyer clearly what is happening and when.
+2. **The refund window.** A refund cannot be issued indefinitely. Card refunds have a practical limit, and
+   **BNPL methods have their own, and shorter** — Klarna, Afterpay, Affirm and Zip are all live on prod
+   since 2026-07-31, so this is not hypothetical. **Verify the current window per payment method against
+   Stripe's documentation before building**, and record the deadline on the request so a return that
+   cannot be refunded is caught while there is still time to act rather than at the moment it fails.
+3. **The buyer's patience.** Which is what the emails are for.
+
+The return therefore has an **expiry**: a label issued and never used closes the request after N days
+(policy, default 14 or the return window, whichever is shorter) with an email before it happens, not after.
+
+### Who decides a return is required
+
+Not a global setting. **Per product**, on the same `refund_policy` that already exists:
+
+- `return_required` — the goods must come back before money goes out. Meaningless for digital and service
+  products; the flag must be unavailable there rather than ignored, so a tenant cannot set a trap for
+  themselves.
+- `returnable` — some things cannot come back at all (perishable, hygiene, custom-made). A non-returnable
+  item refunds without a return or is refused outright, per the tenant's policy; it must never sit in
+  `return_pending` waiting for a parcel that is not allowed to be sent.
+- `keep_it_below` — **when return postage exceeds what the item is worth, asking for it back loses money.**
+  Below this value, approve and refund without a return. Standard industry practice, and the cheapest
+  defence against the dispute clock above.
+
+**All three are snapshotted into `policy_snapshot` at request time** — the field already exists for exactly
+this reason. A tenant editing their policy must not retroactively change the terms of a return already in
+flight; the buyer agreed to the policy as it was.
+
+### The return label
+
+Reverse of F4 and built on the same primitive: same `pack()`, same rates, same purchase — with `from` and
+`to` swapped. What differs:
+
+- **A return label is usually pay-on-scan.** Carriers commonly charge only when the label is actually
+  used, which is what makes issuing one cheap and makes the expiry above safe. **Verify this with Shippo
+  per carrier before relying on it** — if a carrier charges at creation, issuing labels for returns that
+  never ship is a slow leak.
+- **Who pays** is policy: tenant absorbs, or it is deducted from the refund. Whichever it is, the buyer
+  must be told **before** they accept the label, not discovered in the refunded amount.
+- **A manual path is required here too**, for the same reason as everywhere else: a tenant with no provider
+  gives the buyer an address and an RMA number, and marks the parcel received by hand. The refund gate is
+  the feature; the label is a convenience on top of it.
+
+### Received is a decision, not an event
+
+`return_received` must be a deliberate act by the tenant, not a carrier scan. A delivery scan says a box
+arrived; it does not say the right item was in it, or what condition it was in.
+
+- A tracking scan **advances the request to `return_in_transit`** and notifies the tenant, so they are not
+  refreshing a screen.
+- **Marking received is the tenant's** — and it is where the refund amount can still change. An item back
+  damaged, used, or not the item sent is a partial refund or a rejection. So the amount is **decided at
+  receipt, not fixed at approval**, and the reason is recorded on the request, because this is the step a
+  buyer is most likely to dispute.
+- Restocking fees and non-refundable outbound shipping both land here, and both must appear in the buyer's
+  email as line items rather than as an unexplained shortfall.
+
+### What the buyer sees
+
+Through `/purchase/manage`, using the existing token link. Each transition emails them, because a return is
+the part of commerce where silence is most expensive:
+
+- **Approved, return required** — what to send back, by when, the label or the address, who pays postage,
+  and what they will get back.
+- **We have it** — received, and the refund is on its way.
+- **Refunded** — the amount, and every deduction itemised.
+- **Expiring** — before the window closes, not after.
+
 ## Phases
 
 - **F1 — the table.** Replace the cards. Ledger columns, sorting, the status filter, Details preserved. No
@@ -317,6 +431,13 @@ already, and a second notification would contradict the first.
   justification, the ▾ override. Still buys nothing — `MockProvider` walks the whole flow.
 - **F4 — buying.** `POST /shipping/labels`, idempotent, one order. Client-driven bulk with per-row
   progress. Spend confirmation, the adjustment disclosure, auto-fulfil, the label PDF.
+- **R1 — the refund gate.** `return_required`, `returnable` and `keep_it_below` on the refund policy,
+  snapshotted at request time; the new states; the tenant marking received; the refund released only then.
+  **No labels** — the manual path (address + RMA) proves the whole gate, and it is the part that protects
+  the tenant's money.
+- **R2 — return labels.** Reverse of F4 on the same primitive. Who-pays policy, buyer acceptance, expiry.
+- **R3 — return tracking.** Scans advance `return_in_transit` and notify; folds into §P3's tracking work
+  rather than duplicating it.
 
 Voiding, refunds and adjustment reconciliation stay where §PA put them — after F4, as their own slice.
 
@@ -346,6 +467,15 @@ Voiding, refunds and adjustment reconciliation stay where §PA put them — afte
   First-Class Package Service became Ground Advantage in 2023 and the retail names have moved more than
   once. Getting a URL wrong is recoverable; getting the "this service has no tracking" advice wrong tells a
   tenant to leave out a number they actually had.
+- **The refund window per payment method.** Named as a risk above and unverified. It decides whether a
+  return can safely be held at all for a BNPL order, and the answer may be that some methods must refund on
+  approval regardless of the return. **Verify before R1.**
+- **Does a return label get bought on issue, or on scan?** The expiry design assumes pay-on-scan. If a
+  carrier charges at creation, R2 needs a different default (issue on request, not on approval).
+- **Who arbitrates a disputed inspection?** The tenant decides what a returned item is worth, and the buyer
+  has only the chargeback to disagree with. Whether the platform takes any position on this is a policy
+  question, not an engineering one, and it should be answered before R1 ships rather than after the first
+  complaint.
 - **Should a manual shipment be trackable by us?** A tenant-entered USPS number could be registered with
   the provider's tracking API to drive delivery notifications (§P3), even though we did not sell the label.
   It would unify the two paths for the buyer. It also costs a provider call per parcel and may require an

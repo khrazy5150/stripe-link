@@ -37,10 +37,14 @@ All three are fixed (2026-09-24) and pinned against a payload transcribed from `
 `plans/ORDER_FULFILMENT.md`. The Orders screen renders cards and carries none of the facts needed to ship
 anything; it becomes a conventional fulfilment table with per-order readiness gates, a saved rate policy,
 and bulk label purchase. Four phases (F1 table → F2 gates + **the whole manual path** → F3 rates → F4
-buying), each shippable on its own. F2 deliberately gives a tenant who never connects a provider a complete
-fulfilment flow — Mark as shipped, carrier, tracking number, and the buyer's email — because the tracking
+buying, then R1 refund gate → R2 return labels → R3 return tracking), each shippable on its own. F2
+deliberately gives a tenant who never connects a provider a complete fulfilment flow — Mark as shipped, carrier, tracking number, and the buyer's email — because the tracking
 number is optional (USPS First-Class Mail has none) and the email must never promise a link that will not
-arrive. Supersedes the P2 sketch in `plans/SHIPPING_PROVIDERS.md`.
+arrive. R1 adds the author's rule that a product requiring physical return releases no Stripe refund until
+it is received — inserted between the existing `approved` and `refunded` states rather than rebuilding the
+refund machinery, which already exists. **Verify the per-payment-method refund window before R1**: BNPL is
+live on prod and its window is shorter than a card's, so some methods may have to refund on approval
+regardless. Supersedes the P2 sketch in `plans/SHIPPING_PROVIDERS.md`.
 
 ### Wire the shipping providers (Shippo first)
 
