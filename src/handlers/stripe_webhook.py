@@ -858,7 +858,7 @@ def refresh_booking_credits(
     effect on the next cycle rather than never.
     """
     invoice = _event_data_object(stripe_event)
-    subscription_id = str(invoice.get("subscription") or "")
+    subscription_id = invoice_subscription_id(invoice)
     if not subscription_id:
         return {"status": "skipped", "reason": "not_a_subscription_invoice"}
     credits_repo = credits_repo or (booking_credits_repository(mode=mode) if os.environ.get("BOOKING_CREDITS_TABLE") else None)
@@ -1420,7 +1420,7 @@ def notify_tip_renewal(
             tenant_id, tip_tokens_repo,
             customer_id=str(invoice.get("customer") or ""),
             email=email,
-            subscription_id=str(invoice.get("subscription") or ""),
+            subscription_id=invoice_subscription_id(invoice),
             live=bool(invoice.get("livemode")),
             now=now,
         )

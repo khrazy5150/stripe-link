@@ -10,6 +10,7 @@ creatine that must be fulfilled. A subscription for massage therapy is also an o
 service." So renewals go in the orders table like any other order, not into a separate record that the
 fulfilment screens would never show.
 """
+import pathlib
 import unittest
 
 from handlers.stripe_webhook import (
@@ -20,6 +21,8 @@ from handlers.stripe_webhook import (
     order_record_from_invoice,
     persist_subscription_renewal,
 )
+
+ROOT = pathlib.Path(__file__).resolve().parents[1]
 
 
 def _invoice(**over):
@@ -224,6 +227,30 @@ class CurrentStripeApiShapeTests(unittest.TestCase):
 
         self.assertEqual(line["stripe_price_id"], "price_1")
         self.assertEqual(line["stripe_product_id"], "prod_1")
+
+
+class EveryInvoiceReaderUsesTheHelperTests(unittest.TestCase):
+    """The same field, read in three places, so it must be read one way.
+
+    `order_record_from_invoice` was not the only reader of `invoice.subscription`: refresh_booking_credits
+    (which tops a service subscription's booking credits back up on each renewal) and notify_tip_renewal
+    both took it straight from the vanished top-level key. Fixing only the one that was noticed is how this
+    class of bug shipped twice already.
+    """
+
+    def test_no_handler_reads_the_vanished_top_level_invoice_field(self):
+        source = (ROOT / "src" / "handlers" / "stripe_webhook.py").read_text(encoding="utf-8")
+        offenders = [line.strip() for line in source.splitlines()
+                     if 'invoice.get("subscription")' in line and "def invoice_subscription_id" not in line]
+        # The helper itself legitimately reads it as the legacy fallback.
+        offenders = [line for line in offenders if not line.startswith("direct = ")]
+        self.assertEqual(offenders, [], "read it through invoice_subscription_id() instead")
+
+    def test_the_helper_prefers_the_current_shape_and_falls_back(self):
+        self.assertEqual(invoice_subscription_id({"parent": {"subscription_details": {"subscription": "sub_NEW"}}}),
+                         "sub_NEW")
+        self.assertEqual(invoice_subscription_id({"subscription": "sub_OLD"}), "sub_OLD")
+        self.assertEqual(invoice_subscription_id({}), "")
 
 
 class RenewalLineNameTests(unittest.TestCase):
