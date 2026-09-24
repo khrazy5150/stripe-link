@@ -127,14 +127,20 @@ def _units(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return out
 
 
-def _parcel(dimensions, weight, *, distance_unit, mass_unit, box="", packed_from=(), strategy=""):
+def _parcel(dimensions, weight, *, distance_unit, mass_unit, box="", packed_from=(), strategy="",
+            template=""):
     length, width, height = dimensions
-    return {
+    parcel = {
         "length": round(float(length), 2), "width": round(float(width), 2), "height": round(float(height), 2),
         "weight": round(max(float(weight), 0.01), 2),
         "distance_unit": distance_unit, "mass_unit": mass_unit,
         "box": box, "packed_from": list(packed_from), "strategy": strategy,
     }
+    # Carried from the chosen box to the provider. Omitted rather than emptied, so a parcel dict without
+    # carrier packaging looks exactly as it always has.
+    if template:
+        parcel["template"] = str(template)
+    return parcel
 
 
 def _per_item(units, *, distance_unit, mass_unit) -> list[dict[str, Any]]:
@@ -191,8 +197,17 @@ def pack(
     if not units:
         return parcels
 
-    # 1. One thing left, and the tenant said what it ships in.
-    if len(units) == 1:
+    # 1. One thing left, the tenant said what it ships in, and there is nothing better to go on.
+    #
+    #    The "nothing better" clause is the inversion (plans/SHIPPING_PROVIDERS.md). A declared box used
+    #    to win outright for a lone item, which made the box the primary fact and left the catalog
+    #    unreachable for most orders -- a pouch with a 10x8x4 declared on it shipped in a carton even
+    #    when the tenant stocked a mailer it fits. Now the box is DERIVED whenever the item's own size is
+    #    known, and the declared one is what we fall back on when it is not.
+    #
+    #    That is also why the migration is quiet: every product stored before item dimensions existed has
+    #    no size of its own, takes this branch, and ships exactly as it did yesterday.
+    if len(units) == 1 and not _dims(units[0]):
         declared = _dims(units[0].get("package"))
         if declared:
             return parcels + [
@@ -244,7 +259,7 @@ def pack(
             weight = total_weight + float(box.get("empty_weight") or 0)
             return parcels + [
                 _parcel(box_dims, weight, distance_unit=distance_unit, mass_unit=mass_unit,
-                        box=str(box.get("name") or ""),
+                        box=str(box.get("name") or ""), template=str(box.get("template") or ""),
                         packed_from=[unit.get("product_id", "") for unit in units], strategy="packed")]
 
     # 3. Nothing fit, no catalog, or no item dimensions.

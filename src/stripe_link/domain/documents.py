@@ -812,6 +812,19 @@ def validate_product_document(document: dict[str, Any]) -> None:
             except (TypeError, ValueError):
                 raise DocumentValidationError(
                     f"Product fulfillment.item_dimensions.{field} must be a positive number.") from None
+        # What it weighs BARE, distinct from fulfillment.weight_lb (the weight shipped in its own box).
+        # Summing the packed weight when several items share one box billed the packaging once per item.
+        # Zero is allowed here where the dimensions above refuse it: a genuinely weightless item is
+        # implausible but harmless, while a zero-sized one packs into anything.
+        optional_non_negative_number(
+            item_dimensions, "weight_lb", "Product fulfillment.item_dimensions.weight_lb")
+
+    # A pouch squashes into a padded mailer; a jar of identical dimensions does not. Both default FALSE,
+    # and the default is the point: rigid is safe (a mis-flagged rigid item is refused at the counter
+    # after the label is paid for), and a declared box that is not opted in must not swallow the rest of
+    # the order. See plans/SHIPPING_PROVIDERS.md, "The item/box inversion".
+    optional_bool(fulfillment, "compressible", "Product fulfillment.compressible")
+    optional_bool(fulfillment, "ships_alone", "Product fulfillment.ships_alone")
 
     refund_policy = document.get("refund_policy")
     if refund_policy is not None:

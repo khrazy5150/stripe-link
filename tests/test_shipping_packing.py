@@ -44,21 +44,53 @@ class FitTests(unittest.TestCase):
 
 
 class SingleItemTests(unittest.TestCase):
-    def test_a_declared_package_is_never_second_guessed(self):
-        """A seller who knows everything goes in a 10x8x4 keeps saying so."""
-        parcel = pack([{**JAR, "package": {"length": 10, "width": 8, "height": 4, "weight": 1.4}}], BOXES)[0]
+    """CHANGED 2026-09-24 by the item/box inversion.
+
+    A declared box used to win outright for a lone item. That made the BOX the primary fact and left the
+    catalog unreachable for most orders — a pouch with a 10x8x4 declared on it shipped in a carton even
+    when the tenant stocked a mailer it fits. The box is now DERIVED whenever the item's own size is
+    known, and the declared one is the fallback for when it is not.
+
+    A tenant who genuinely knows their operation is not overridden; that intent moved to `ships_alone`,
+    below, where it is stated rather than inferred from the presence of a box.
+    """
+
+    DECLARED = {"length": 10, "width": 8, "height": 4, "weight": 1.4}
+
+    def test_a_known_item_size_now_beats_a_declared_box(self):
+        parcel = pack([{**JAR, "package": self.DECLARED}], BOXES)[0]
+
+        self.assertEqual(parcel["strategy"], "packed")
+        self.assertNotEqual((parcel["length"], parcel["width"], parcel["height"]), (10.0, 8.0, 4.0))
+
+    def test_ships_alone_is_how_a_seller_says_so_now(self):
+        """A seller who knows everything goes in a 10x8x4 still keeps saying so — explicitly."""
+        parcel = pack([{**JAR, "ships_alone": True, "package": self.DECLARED}], BOXES)[0]
+
         self.assertEqual(parcel["strategy"], "declared")
         self.assertEqual((parcel["length"], parcel["width"], parcel["height"]), (10.0, 8.0, 4.0))
 
     def test_the_declared_weight_is_the_shipped_weight_not_an_addition(self):
         # The form asks for the package's weight -- the thing as shipped, box included. Adding the item's
         # weight on top would bill the contents twice.
-        parcel = pack([{**JAR, "package": {"length": 10, "width": 8, "height": 4, "weight": 1.4}}], BOXES)[0]
+        parcel = pack([{**JAR, "ships_alone": True, "package": self.DECLARED}], BOXES)[0]
+
         self.assertEqual(parcel["weight"], 1.4)
 
     def test_a_declared_package_with_no_weight_falls_back_to_the_item(self):
-        parcel = pack([{**JAR, "package": {"length": 10, "width": 8, "height": 4}}], BOXES)[0]
+        parcel = pack([{**JAR, "ships_alone": True,
+                        "package": {"length": 10, "width": 8, "height": 4}}], BOXES)[0]
+
         self.assertEqual(parcel["weight"], 1.0)
+
+    def test_a_product_with_NO_size_of_its_own_still_uses_its_declared_box(self):
+        """The migration promise: every product stored before item dimensions existed has no size of its
+        own, takes this branch, and ships exactly as it did yesterday."""
+        no_size = {"product_id": "legacy", "quantity": 1, "weight": 1.4, "package": self.DECLARED}
+        parcel = pack([no_size], BOXES)[0]
+
+        self.assertEqual(parcel["strategy"], "declared")
+        self.assertEqual((parcel["length"], parcel["width"], parcel["height"]), (10.0, 8.0, 4.0))
 
     def test_with_no_declared_package_a_box_is_chosen(self):
         parcel = pack([JAR], BOXES)[0]
@@ -305,3 +337,19 @@ class ShipsAloneTests(unittest.TestCase):
         parcels = pack([POUCH, {**JAR, "item_weight": 1.0}], [MAILER, *BOXES])
 
         self.assertNotEqual(parcels[0]["box"], "bubble mailer")
+
+
+class CarrierTemplateTests(unittest.TestCase):
+    """A carrier's own packaging must reach the provider, or its flat rates are never quoted."""
+
+    FLAT_RATE = {"name": "USPS flat-rate envelope", "kind": "soft_pack", "template": "USPS_FlatRateEnvelope",
+                 "length": 12.5, "width": 9.5, "height": 1, "empty_weight": 0.05}
+
+    def test_the_chosen_box_carries_its_template_onto_the_parcel(self):
+        parcel = pack([POUCH], [self.FLAT_RATE])[0]
+
+        self.assertEqual(parcel["template"], "USPS_FlatRateEnvelope")
+
+    def test_a_box_without_one_produces_a_parcel_without_the_key(self):
+        # Omitted rather than emptied: a parcel dict looks exactly as it always has.
+        self.assertNotIn("template", pack([JAR], BOXES)[0])

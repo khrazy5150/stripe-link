@@ -83,11 +83,33 @@ class PackablesTests(unittest.TestCase):
         items = packable_items([{"product_id": "ebook", "quantity": 1}], self.PRODUCTS)
         self.assertEqual(items, [])
 
-    def test_one_item_still_honours_the_declared_box(self):
-        """The seller knows their own operation and is not second-guessed."""
+    def test_one_item_with_a_known_size_is_now_PACKED_not_boxed_as_declared(self):
+        """CHANGED 2026-09-24 by the item/box inversion.
+
+        This used to assert that a declared box is never second-guessed for a lone item. That made the
+        BOX the primary fact and left the catalog unreachable for most orders. A tenant who genuinely
+        knows their operation now says so with `ships_alone` rather than having it inferred from the
+        presence of a box — see the test below.
+        """
         parcels = pack(packable_items([{"product_id": "jar", "quantity": 1}], self.PRODUCTS), BOXES)
+
+        self.assertEqual(parcels[0]["strategy"], "packed")
+
+    def test_a_ships_alone_product_still_uses_its_declared_box(self):
+        products = {**self.PRODUCTS}
+        products["jar"] = {**products["jar"],
+                           "fulfillment": {**products["jar"]["fulfillment"], "ships_alone": True}}
+        parcels = pack(packable_items([{"product_id": "jar", "quantity": 1}], products), BOXES)
+
         self.assertEqual(parcels[0]["strategy"], "declared")
         self.assertEqual((parcels[0]["length"], parcels[0]["width"], parcels[0]["height"]), (10.0, 8.0, 4.0))
+
+    def test_an_UNMEASURED_product_still_ships_exactly_as_it_did(self):
+        """The migration promise, pinned: a product stored before item dimensions existed has no size of
+        its own, falls back to its declared box, and nothing about its parcel changes."""
+        parcels = pack(packable_items([{"product_id": "unmeasured", "quantity": 1}], self.PRODUCTS), BOXES)
+
+        self.assertEqual(parcels[0]["strategy"], "declared")
 
     def test_several_items_pack_into_one_box_now_that_sizes_exist(self):
         parcels = pack(packable_items([{"product_id": "jar", "quantity": 3}], self.PRODUCTS), BOXES)

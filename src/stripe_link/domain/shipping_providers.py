@@ -148,7 +148,7 @@ def _shippo_address(address: dict[str, Any]) -> dict[str, Any]:
 
 
 def _shippo_parcel(parcel: dict[str, Any]) -> dict[str, Any]:
-    return {
+    payload = {
         "length": str(parcel.get("length", "")),
         "width": str(parcel.get("width", "")),
         "height": str(parcel.get("height", "")),
@@ -156,6 +156,14 @@ def _shippo_parcel(parcel: dict[str, Any]) -> dict[str, Any]:
         "weight": str(parcel.get("weight", "")),
         "mass_unit": parcel.get("mass_unit", "lb"),
     }
+    # A carrier's own packaging, when the box the packer chose declares one. Flat-rate envelopes are
+    # frequently the cheapest option for a soft pack, and sending dimensions alone means the carrier
+    # prices it as a custom parcel and those rates are never quoted at all
+    # (plans/SHIPPING_PROVIDERS.md, "Not everything ships in a box").
+    template = str(parcel.get("template") or "").strip()
+    if template:
+        payload["template"] = template
+    return payload
 
 
 def _shippo_rate(rate: dict[str, Any]) -> dict[str, Any]:

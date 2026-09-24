@@ -202,6 +202,22 @@
             "kg"
           ],
           "default": "lb"
+        },
+        "kind": {
+          "description": "Rigid carton or soft pack. A padded mailer's stated height is its FLAT measurement; stuffed, it bulges, so a soft pack checks its two largest dimensions strictly and treats thickness as capacity for items that squash. Pricing one as the other is why an 8x5x2 pouch used to climb to a carton. Default box -- rigid is the safe assumption.",
+          "type": "string",
+          "enum": [
+            "box",
+            "soft_pack"
+          ],
+          "default": "box"
+        },
+        "template": {
+          "description": "A carrier's own packaging identifier (USPS flat-rate envelopes and the like), passed straight through to the provider. Flat-rate packaging is frequently the cheapest option for a soft pack, and omitting it means those rates are never quoted at all. Absent means a custom parcel, which is what every box has been until now.",
+          "type": [
+            "string",
+            "null"
+          ]
         }
       }
     },

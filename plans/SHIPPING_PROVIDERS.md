@@ -650,10 +650,41 @@ Measured on the case that started this — a Beta-Alanine pouch, 8x5x2, 0.9 lb b
 | before (rigid rules) | medium box | 12 x 10 x 6 | 1.25 lb |
 | after (compressible) | bubble mailer | 9 x 6 x 1.85 | 0.95 lb |
 
-**Still to build:** the schema fields these read (`item_dimensions.weight_lb`, `compressible`,
-`ships_alone`, catalog `kind` + carrier `template`), the provider adapter passing `template`, both UI
-surfaces, and the product-level readiness line. Until then the new paths are reachable only by callers
-that set the flags themselves — nothing in the product catalogue does yet.
+### BUILT 2026-09-24 — the schema and the adapter
+
+- **`fulfillment.item_dimensions.weight_lb`** — the BARE weight. **`fulfillment.compressible`** and
+  **`fulfillment.ships_alone`**, both defaulting false: rigid is the safe assumption, and a declared box
+  that is not opted into must not swallow the rest of the order.
+- **Catalog `kind` (`box` / `soft_pack`) and `template`.** The starter `Padded mailer (9x6x1)` now
+  declares itself a soft pack — it has been in the catalog since it was written and behaving as a
+  one-inch carton.
+- **`_shippo_parcel` passes `template` through** when the chosen box declares one, omitting the key
+  otherwise so a custom parcel looks exactly as it always has.
+
+**A behaviour change fell out of it, and it is the point of the inversion.** A declared box used to win
+outright for a lone item, which made the BOX the primary fact and left the catalog unreachable for most
+orders — an 8x5x2 pouch with a 10x8x4 declared on it shipped in a carton even where the tenant stocked a
+mailer it fits. The box is now DERIVED whenever the item's own size is known; the declared one is the
+fallback for when it is not, and `ships_alone` is how a tenant states the override rather than having it
+inferred from the mere presence of a box.
+
+Three tests changed to say so. They encoded the old model ("a declared package is never second-guessed"),
+and were rewritten rather than deleted so the change is legible in the diff.
+
+**The migration promise, pinned by test:** a product stored before item dimensions existed has no size of
+its own, takes the fallback, and ships exactly as it did yesterday.
+
+| product | box chosen | parcel | weight |
+|---|---|---|---|
+| legacy (no item dimensions) | its declared box | 10 x 8 x 4 | 1.00 lb |
+| measured, rigid | Medium box | 10 x 8 x 6 | 1.25 lb |
+| measured, compressible | Padded mailer | 9 x 6 x 1.85 | **0.95 lb** |
+| measured, `ships_alone` | its declared box | 10 x 8 x 4 | 1.00 lb |
+
+**Still to build:** both UI surfaces (wizard: item dimensions + weight + compressible; edit form: box
+sizing and `ships_alone`), the box-catalog editor gaining `kind`/`template`, and the product-level
+readiness line. Nothing in the product catalogue sets the new fields yet, so every stored product is on
+the "legacy" row above.
 
 ### What has to change
 

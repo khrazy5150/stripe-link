@@ -211,3 +211,21 @@ class ConnectionTestEndpointTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ParcelTemplateTests(unittest.TestCase):
+    """Carrier packaging reaches Shippo, or its flat rates are never quoted."""
+
+    def test_a_template_is_passed_through(self):
+        from stripe_link.domain.shipping_providers import _shippo_parcel
+
+        payload = _shippo_parcel({"length": 12.5, "width": 9.5, "height": 1, "weight": 0.9,
+                                  "template": "USPS_FlatRateEnvelope"})
+
+        self.assertEqual(payload["template"], "USPS_FlatRateEnvelope")
+
+    def test_without_one_the_payload_is_unchanged(self):
+        # A custom parcel is what every box has been until now; the key must not appear empty.
+        from stripe_link.domain.shipping_providers import _shippo_parcel
+
+        self.assertNotIn("template", _shippo_parcel({"length": 9, "width": 6, "height": 3, "weight": 1.0}))

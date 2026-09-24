@@ -208,10 +208,14 @@ STARTER_BOXES = (
     {"name": "Medium box (10x8x6)", "length": 10, "width": 8, "height": 6, "empty_weight": 0.35},
     {"name": "Large box (14x11x8)", "length": 14, "width": 11, "height": 8, "empty_weight": 0.6},
     {"name": "Extra large box (18x14x12)", "length": 18, "width": 14, "height": 12, "empty_weight": 1.0},
-    {"name": "Padded mailer (9x6x1)", "length": 9, "width": 6, "height": 1, "empty_weight": 0.05},
+    {"name": "Padded mailer (9x6x1)", "length": 9, "width": 6, "height": 1, "empty_weight": 0.05,
+     "kind": "soft_pack"},
 )
 
-BOX_FIELDS = ("name", "length", "width", "height", "distance_unit", "empty_weight", "max_weight", "mass_unit")
+# `kind` and `template` are what make a padded mailer behave like one rather than like a one-inch
+# carton (plans/SHIPPING_PROVIDERS.md, "Not everything ships in a box").
+BOX_FIELDS = ("name", "length", "width", "height", "distance_unit", "empty_weight", "max_weight",
+              "mass_unit", "kind", "template")
 
 
 def starter_boxes() -> list[dict[str, Any]]:

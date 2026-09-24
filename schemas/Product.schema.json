@@ -443,9 +443,31 @@
                     "null"
                   ],
                   "exclusiveMinimum": 0
+                },
+                "weight_lb": {
+                  "description": "What the product weighs BARE, out of its packaging. Distinct from fulfillment.weight_lb, which is the weight shipped in its own box. Summing the packed weight when several items share one box billed the packaging once per item -- about 15% over on three items.",
+                  "type": [
+                    "number",
+                    "null"
+                  ],
+                  "minimum": 0
                 }
               }
             }
+          ]
+        },
+        "compressible": {
+          "description": "Whether this item squashes. A foil pouch goes into a padded mailer thicker than the mailer's flat measurement; a rigid jar of identical dimensions does not. Two items the same size pack completely differently depending on which they are, and only the tenant knows. Default false -- rigid is the safe assumption, because letting a rigid item into an envelope fails at the counter after the label is paid for.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "ships_alone": {
+          "description": "Whether this item always ships in its own box, whatever else is in the order. The escape hatch for what dimensions cannot predict: something fragile needing void fill far beyond its size, a rolled poster, an item in manufacturer packaging. Default false -- otherwise a declared box would swallow the rest of the order, which is what the packer used to do.",
+          "type": [
+            "boolean",
+            "null"
           ]
         }
       }
